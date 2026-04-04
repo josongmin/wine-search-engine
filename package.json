@@ -1,0 +1,46 @@
+{
+  "name": "wine-search-engine",
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/interface/http/server.ts",
+    "build": "tsc --project tsconfig.build.json",
+    "start": "node dist/interface/http/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.config.ts src/__tests__/",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "tsc --noEmit",
+    "eval": "tsx scripts/run-eval.ts",
+    "ingest": "tsx src/interface/cli/ingest.command.ts",
+    "kill-switch": "tsx src/interface/cli/kill-switch.command.ts",
+    "migrate": "node --experimental-vm-modules scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "^10.2.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.57.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.2.0",
+    "nanoid": "^5.1.0",
+    "pg": "^8.13.0",
+    "pino": "^9.6.0",
+    "redis": "^5.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "eslint": "^9.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.58.0",
+    "vitest": "^3.0.0"
+  }
+}

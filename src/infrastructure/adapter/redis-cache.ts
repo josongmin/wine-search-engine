@@ -1,0 +1,37 @@
+import type { RedisClient } from '../db/redis-client.js';
+
+export class RedisCache {
+  constructor(
+    private readonly client: RedisClient,
+    private readonly defaultTtlSeconds: number,
+  ) {}
+
+  async get<T>(key: string): Promise<T | null> {
+    const raw = await this.client.get(key);
+    if (raw == null) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
+    const ttl = ttlSeconds ?? this.defaultTtlSeconds;
+    const serialized = JSON.stringify(value);
+    await this.client.set(key, serialized, { EX: ttl });
+  }
+
+  async del(key: string): Promise<void> {
+    await this.client.del(key);
+  }
+
+  async invalidatePattern(pattern: string): Promise<void> {
+    for await (const key of this.client.scanIterator({
+      MATCH: pattern,
+      COUNT: 100,
+    })) {
+      await this.client.del(key);
+    }
+  }
+}

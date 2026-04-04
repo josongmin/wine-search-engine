@@ -1,0 +1,97 @@
+schema wine_entity {
+  document wine_entity {
+    field entity_id type string {
+      indexing: summary | attribute
+    }
+    field entity_type type string {
+      indexing: summary | attribute
+    }
+    field canonical_label type string {
+      indexing: summary | attribute | index
+    }
+    field aliases_identity_safe type array<string> {
+      indexing: summary | attribute | index
+    }
+    field aliases_noisy_recall type array<string> {
+      indexing: summary | attribute | index
+    }
+    field producer type string {
+      indexing: summary | attribute | index
+    }
+    field region type string {
+      indexing: summary | attribute
+    }
+    field grapes type array<string> {
+      indexing: summary | attribute
+    }
+    field search_text_ko type string {
+      indexing: summary | index
+      language: ko
+    }
+    field search_text_en type string {
+      indexing: summary | index
+      language: en
+    }
+    field semantic_summary type string {
+      indexing: summary
+    }
+    field body type float {
+      indexing: summary | attribute
+    }
+    field sweetness type float {
+      indexing: summary | attribute
+    }
+    field style type string {
+      indexing: summary | attribute
+    }
+    field price_band type string {
+      indexing: summary | attribute
+    }
+    field pairing type array<string> {
+      indexing: summary | attribute
+    }
+    field occasion type array<string> {
+      indexing: summary | attribute
+    }
+    field availability type bool {
+      indexing: summary | attribute
+    }
+    field popularity_score type float {
+      indexing: summary | attribute
+    }
+    field embedding type tensor<float>(x[1024]) {
+      indexing: summary | attribute
+      attribute {
+        distance-metric: angular
+      }
+    }
+  }
+
+  fieldset default {
+    fields: canonical_label, aliases_identity_safe, search_text_ko, search_text_en, producer
+  }
+
+  rank-profile bm25 inherits default {
+    first-phase {
+      expression: bm25(canonical_label) + bm25(search_text_ko) + bm25(search_text_en)
+    }
+  }
+
+  rank-profile semantic inherits default {
+    inputs {
+      query(query_embedding) tensor<float>(x[1024])
+    }
+    first-phase {
+      expression: closeness(field, embedding)
+    }
+  }
+
+  rank-profile hybrid inherits default {
+    inputs {
+      query(query_embedding) tensor<float>(x[1024])
+    }
+    first-phase {
+      expression: 0.5 * bm25(canonical_label) + 0.5 * closeness(field, embedding)
+    }
+  }
+}

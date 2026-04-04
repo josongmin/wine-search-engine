@@ -1,0 +1,75 @@
+import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
+
+/**
+ * Breakdown of individual scoring components for a ranked candidate.
+ *
+ * Each component corresponds to a signal defined in RFC-000 section 6.
+ * The values are numeric scores typically in [0, 1] except where noted.
+ *
+ * IMPORTANT: These component scores map to {@link EvidenceItem}s but
+ * must NEVER claim exact percentage attribution (RFC-000 section 9.3).
+ */
+export interface ComponentScores {
+  /** Data integrity and consistency of the entity record. */
+  readonly entityIntegrity: number;
+
+  /**
+   * Similarity to the anchor entity. Present only for anchored/mixed queries.
+   * Combines attribute distance and embedding similarity.
+   */
+  readonly anchorSimilarity?: number | undefined;
+
+  /** Semantic relevance from dense retrieval, normalized to [0, 1]. */
+  readonly semantic: number;
+
+  /**
+   * Gate flag: whether all hard constraints are satisfied.
+   * If false, the candidate is filtered out (score = -Infinity).
+   */
+  readonly hardConstraintPass: boolean;
+
+  /** Weighted satisfaction of soft constraints, in [0, 1]. */
+  readonly softConstraint: number;
+
+  /** Structured attribute alignment with query plan attributes. */
+  readonly attributeAlignment: number;
+
+  /** Alignment with user taste preferences, in [0, 1]. */
+  readonly preferenceAlignment: number;
+
+  /** Popularity signal derived from engagement data, tie-breaker level. */
+  readonly popularity: number;
+
+  /** Availability signal; penalizes unavailable items. */
+  readonly availability: number;
+
+  /** Penalty for uncertainty/ambiguity; subtracted from final score. */
+  readonly uncertaintyPenalty: number;
+}
+
+/**
+ * A single ranked result produced by the ranking pipeline.
+ *
+ * The {@link finalScore} is a ranking signal — it is NOT a calibrated
+ * decision confidence C. Calibration is the responsibility of the
+ * Decision Layer (RFC-007).
+ */
+export interface RankedResult {
+  /** The entity this result refers to. */
+  readonly entityId: EntityId;
+
+  /**
+   * Aggregated ranking score. NOT calibrated confidence C.
+   * Used only for ordering candidates within a single query.
+   */
+  readonly finalScore: number;
+
+  /** 1-based rank position in the result list. */
+  readonly rank: number;
+
+  /** Breakdown of individual scoring components. */
+  readonly componentScores: ComponentScores;
+
+  /** Evidence trail explaining why this candidate received its score. */
+  readonly evidenceItems: readonly EvidenceItem[];
+}

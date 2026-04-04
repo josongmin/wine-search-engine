@@ -1,0 +1,42 @@
+---
+description: Wine Search Engine — stack, layout, quality gates, commands
+alwaysApply: true
+---
+
+# Wine Search Engine
+
+## Stack
+
+- **Runtime**: Node.js ≥ 22, ESM (`"type": "module"`).
+- **Language**: TypeScript (strict, `exactOptionalPropertyTypes`, path aliases `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config`).
+- **HTTP**: Fastify 5, Zod, Pino.
+- **Data**: PostgreSQL (`pg`), Redis (official `redis` package — not `ioredis`).
+- **Tests**: Vitest; unit tests under `src/**/__tests__`, `test/unit/`.
+- **Design docs**: `docs/RFC-*.md` — follow when changing behavior.
+
+## Commands (run from repo root)
+
+- `npm run dev` — dev server (watch).
+- `npm run build` — production compile (`tsconfig.build.json`, excludes tests).
+- `npm run start` — run compiled server.
+- `npm run lint` / `npm run lint:fix` — ESLint (flat config + `typescript-eslint` type-aware rules).
+- `npm run typecheck` — `tsc --noEmit` (includes tests).
+- `npm run test` — Vitest.
+
+## Conventions
+
+- Prefer **small, focused diffs**; match existing style and imports.
+- **No** drive-by refactors or unrelated file churn.
+- After substantive TS changes: run `npm run lint` and `npm run typecheck` (and `npm run test` when behavior changes).
+- **Redis**: use `getRedisClient()` from `src/infrastructure/db/redis-client.js` (async); client is `redis` / `ReturnType<typeof createClient>`.
+- **Optional props** (`exactOptionalPropertyTypes`): do not assign `undefined` to optional keys — omit the property or build objects with conditional spreads.
+
+## Where things live
+
+- `src/domain/` — domain logic and ports.
+- `src/application/` — use cases.
+- `src/infrastructure/` — adapters (PG, Vespa, Redis, etc.).
+- `src/interface/` — HTTP, CLI.
+- `src/config/` — env and DI container.
+
+Longer context for humans and Claude Code: root **`CLAUDE.md`**.

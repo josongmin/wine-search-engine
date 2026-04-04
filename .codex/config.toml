@@ -1,0 +1,16 @@
+# Wine Search Engine — project-scoped Codex CLI / IDE defaults.
+# Precedence: CLI flags > profile > this file > ~/.codex/config.toml
+# Trust this repo in Codex so project config loads.
+#
+# Architecture & commands: see ../CLAUDE.md (repo root).
+
+model = "gpt-5.4"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+web_search = "cached"
+model_reasoning_effort = "high"
+personality = "pragmatic"
+
+[features]
+shell_snapshot = true
+multi_agent = true

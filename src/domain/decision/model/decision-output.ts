@@ -1,0 +1,62 @@
+import type {
+  DecisionStatus,
+  NextAction,
+  EvidenceItem,
+  DecisionSnapshot,
+  SignalSet,
+} from '../../shared/types/index.js';
+import type { EntityId } from '../../shared/types/index.js';
+import type { ResolvedCandidate } from '../../resolver/model/resolved-candidate.js';
+import type { DecisionTrace } from './decision-trace.js';
+
+/**
+ * The binding output of the Decision domain — the FINAL AUTHORITY on
+ * every resolution decision in the Wine Intelligence Engine, per RFC-007.
+ *
+ * No downstream component may override `decisionStatus` or `nextAction`.
+ * This is the internal decision representation; the Response domain maps
+ * it to the external-facing API surface.
+ */
+export interface DecisionOutput {
+  /** Resolution outcome. */
+  readonly decisionStatus: DecisionStatus;
+
+  /** Prescribed next action for the pipeline. */
+  readonly nextAction: NextAction;
+
+  /**
+   * Calibrated decision confidence in [0, 1].
+   * This is the *only* confidence value surfaced to external consumers.
+   */
+  readonly decisionConfidence: number;
+
+  /** Semantic label — always `'calibrated_decision_confidence'`. */
+  readonly confidenceSemantics: 'calibrated_decision_confidence';
+
+  /** The selected entity, present only when status is 'resolved'. */
+  readonly selectedEntity?: {
+    readonly entityId: EntityId;
+    readonly canonicalLabel?: string;
+  };
+
+  /** Primary entity chosen by the decision layer (absent when status is `failed`). */
+  readonly chosenEntityId?: EntityId | undefined;
+
+  /** Candidate list for downstream consumption (e.g. clarification UI). */
+  readonly candidates?: readonly ResolvedCandidate[];
+
+  /** Full signal set that was evaluated to produce this decision. */
+  readonly signalSet: SignalSet;
+
+  /** Evidence items explaining why this decision was reached. */
+  readonly evidenceItems: readonly EvidenceItem[];
+
+  /** A unique reference for tracing this decision through the pipeline. */
+  readonly decisionTraceRef: string;
+
+  /** Snapshot of system versions active at decision time. */
+  readonly decisionSnapshot: DecisionSnapshot;
+
+  /** Full diagnostic trace of how the decision was reached (RFC-007). */
+  readonly decisionTrace: DecisionTrace;
+}
