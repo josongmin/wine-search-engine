@@ -4,6 +4,7 @@ import type {
   EvidenceItem,
   DecisionSnapshot,
 } from '../../shared/types/index.js';
+import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
 
 /**
  * The result of evaluating a single case through the search pipeline,
@@ -57,6 +58,9 @@ export interface EvalResult {
    * evidence).  Absent or `false` means no violation was detected.
    */
   readonly isAdmissionViolation?: boolean;
+
+  /** Score components from the top result, for LTR training. */
+  readonly topResultScoreComponents?: LTRScoreComponents;
 
   /** End-to-end latency in milliseconds for this case. */
   readonly latencyMs: number;

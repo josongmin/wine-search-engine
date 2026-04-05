@@ -56,6 +56,13 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       const predictedEntityId = topResult?.entity.entityId;
       const evidenceItems = topResult?.evidenceItems ?? [];
 
+      const topResultScoreComponents = topResult ? {
+        semantic: topResult.match.scoreComponents.semantic,
+        popularity: topResult.match.scoreComponents.popularity,
+        attributeAlignment: topResult.match.scoreComponents.attribute,
+        preferenceAlignment: topResult.match.scoreComponents.preferenceAlignment,
+      } : undefined;
+
       const output: SearchPipelineOutput = {
         predictedStatus,
         decisionConfidence: decision.decisionConfidence,
@@ -63,6 +70,7 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
         latencyMs,
         decisionSnapshot: decision.decisionSnapshot,
         ...(predictedEntityId !== undefined ? { predictedEntityId } : {}),
+        ...(topResultScoreComponents !== undefined ? { topResultScoreComponents } : {}),
       };
       return output;
     } catch (error) {

@@ -199,6 +199,7 @@ export class HybridUseCase {
             semantic: r.componentScores.semantic,
             attribute: r.componentScores.attributeAlignment,
             popularity: r.componentScores.popularity,
+            preferenceAlignment: r.componentScores.preferenceAlignment,
           },
         },
         constraints: {

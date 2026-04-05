@@ -56,6 +56,7 @@ const MatchDetailSchema = z.object({
     semantic: z.number(),
     attribute: z.number(),
     popularity: z.number(),
+    preferenceAlignment: z.number(),
   }),
 });
 

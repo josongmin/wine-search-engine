@@ -274,7 +274,7 @@ function buildResultItems(entityIds: Array<ReturnType<typeof createEntityId>>): 
       relevanceScore: 0.9 - i * 0.1,
       match: {
         matchType: 'exact' as const,
-        scoreComponents: { lexical: 0.8, semantic: 0.7, attribute: 0.6, popularity: 0.5 },
+        scoreComponents: { lexical: 0.8, semantic: 0.7, attribute: 0.6, popularity: 0.5, preferenceAlignment: 0.5 },
       },
       constraints: { matched: [], unmet: [], inferred: [] },
       uncertainty: {
@@ -660,7 +660,7 @@ describe('Search Pipeline Integration', () => {
         {
           entity: { entityId: ENTITY_OPUS_ONE, canonicalLabel: 'Opus One 2018', type: 'wine' },
           relevanceScore: 0.9,
-          match: { matchType: 'exact', scoreComponents: { lexical: 0.9, semantic: 0.8, attribute: 0.7, popularity: 0.5 } },
+          match: { matchType: 'exact', scoreComponents: { lexical: 0.9, semantic: 0.8, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
           constraints: { matched: [], unmet: [], inferred: [] },
           uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
           evidenceItems: [], // intentionally empty

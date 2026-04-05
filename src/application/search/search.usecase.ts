@@ -356,36 +356,15 @@ export class SearchUseCase {
     const ltrModel = this.deps.ltrModels?.get(queryClass);
     if (ltrModel && rankedResults.length > 0) {
       // Convert ranked results to rankable documents for LTR
-      // Map ComponentScores → RankingFeatures for LTR inference.
-      // Some RankingFeatures have no corresponding ComponentScore signal;
-      // those are set to 0.0 (no signal) to avoid train-serve skew.
-      //
-      // Real signals (direct semantic match):
-      //   semanticScore      ← ComponentScores.semantic
-      //   popularityScore    ← ComponentScores.popularity
-      //   attributeMatchScore← ComponentScores.attributeAlignment
-      //
-      // Proxy signals (closest available approximation):
-      //   classMatchScore    ← ComponentScores.preferenceAlignment (taste/class fit)
-      //
-      // No-data sentinels (0.0 — no signal available):
-      //   bm25Score          — no lexical BM25 retrieval in current pipeline
-      //   recencyScore       — no vintage/recency signal in ComponentScores
-      //   diversityScore     — no diversity metric computed at candidate level
-      //   multilingualScore  — no cross-lingual score in ComponentScores
       const rankableDocuments = rankedResults.map((doc, idx) => ({
         entityId: doc.entityId,
         retrievalScore: doc.finalScore,
-        features: {
-          bm25Score: 0.0, // No lexical BM25 signal available
-          semanticScore: doc.componentScores.semantic,
-          popularityScore: doc.componentScores.popularity,
-          recencyScore: 0.0, // No recency signal available
-          classMatchScore: doc.componentScores.preferenceAlignment,
-          attributeMatchScore: doc.componentScores.attributeAlignment,
-          diversityScore: 0.0, // No diversity signal available
-          multilingualScore: 0.0, // No multilingual signal available
-        },
+        features: extractLTRFeatures({
+          semantic: doc.componentScores.semantic,
+          popularity: doc.componentScores.popularity,
+          attributeAlignment: doc.componentScores.attributeAlignment,
+          preferenceAlignment: doc.componentScores.preferenceAlignment,
+        }),
         originalRank: idx + 1,
       }));
 
@@ -696,6 +675,7 @@ export class SearchUseCase {
             semantic: r.componentScores.semantic,
             attribute: r.componentScores.attributeAlignment,
             popularity: r.componentScores.popularity,
+            preferenceAlignment: r.componentScores.preferenceAlignment,
           },
         },
         constraints: {

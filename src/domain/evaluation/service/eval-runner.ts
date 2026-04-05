@@ -1,4 +1,5 @@
 import type { DecisionStatus, EntityId, EvidenceItem, DecisionSnapshot } from '../../shared/types/index.js';
+import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
 import type { EvalCase } from '../model/eval-case.js';
 import type { EvalResult } from '../model/eval-result.js';
 import type { EvalMetrics, SliceMetrics } from '../model/eval-metrics.js';
@@ -40,6 +41,9 @@ export interface SearchPipelineOutput {
    * emitted a resolved response that breached an AdmissionGate invariant.
    */
   readonly admissionViolationDetected?: boolean;
+
+  /** Score components from the top-ranked result, for LTR training. */
+  readonly topResultScoreComponents?: LTRScoreComponents;
 }
 
 /**
@@ -251,6 +255,9 @@ export class EvalRunner {
       evidenceItems: output.evidenceItems,
       ...(output.admissionViolationDetected === true
         ? { isAdmissionViolation: true }
+        : {}),
+      ...(output.topResultScoreComponents !== undefined
+        ? { topResultScoreComponents: output.topResultScoreComponents }
         : {}),
       latencyMs: output.latencyMs,
       decisionSnapshot: output.decisionSnapshot,

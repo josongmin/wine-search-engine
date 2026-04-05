@@ -8,34 +8,29 @@ import type { EvalResult } from '../../evaluation/model/eval-result.js';
 import type { EvalCase } from '../../evaluation/model/eval-case.js';
 import type { RankingFeatures, LambdaMARTExample, QueryClassWeights } from './lambdamart-ranker.js';
 import { trainLambdaMARTModel } from './lambdamart-ranker.js';
+import { extractLTRFeatures } from './ltr-feature-extractor.js';
 
 /**
  * Extracts ranking features from evaluation result.
  *
- * IMPORTANT: Feature semantics MUST match the inference-time mapping in
- * search.usecase.ts to avoid train-serve skew. If inference sets a feature
- * to 0.0 (no signal), training must also set it to 0.0.
+ * When real ComponentScores are stored from the eval pipeline, uses the
+ * shared extractLTRFeatures() — the SAME function used at inference time,
+ * making train-serve skew structurally impossible.
  *
- * Inference mapping (search.usecase.ts):
- *   bm25Score          = 0.0                              (no lexical BM25)
- *   semanticScore      = ComponentScores.semantic
- *   popularityScore    = ComponentScores.popularity
- *   recencyScore       = 0.0                              (no recency signal)
- *   classMatchScore    = ComponentScores.preferenceAlignment
- *   attributeMatchScore= ComponentScores.attributeAlignment
- *   diversityScore     = 0.0                              (no diversity signal)
- *   multilingualScore  = 0.0                              (no multilingual signal)
- *
- * Training proxies (from EvalResult):
- *   semanticScore      ← decisionConfidence (best proxy for retrieval quality)
- *   popularityScore    ← 0.5 (neutral — no popularity signal in eval data)
- *   classMatchScore    ← outcomeSignal (proxy for preference alignment)
- *   attributeMatchScore← utility normalized to [0, 1]
+ * Falls back to proxy signals for legacy eval results without stored
+ * ComponentScores.
  */
 function extractFeaturesFromResult(result: EvalResult, _evalCase: EvalCase): RankingFeatures {
-  const utility = (result.utilityScore + 1.5) / 2.5; // normalize [-1.5, +1.0] → [0, 1]
+  // When real ComponentScores are stored from the eval pipeline, use them directly.
+  // This is the SAME extractLTRFeatures() function used at inference time,
+  // making train-serve skew structurally impossible.
+  if (result.topResultScoreComponents !== undefined) {
+    return extractLTRFeatures(result.topResultScoreComponents);
+  }
 
-  // Outcome-based quality signal: proxy for preference / class alignment
+  // Fallback for legacy eval results without stored ComponentScores.
+  // Uses proxy signals from eval outcomes — has inherent train-serve gap.
+  const utility = (result.utilityScore + 1.5) / 2.5;
   let outcomeSignal = 0.3;
   if (result.isCorrectResolve) outcomeSignal = 1.0;
   else if (result.isSafeAbstain) outcomeSignal = 0.6;
@@ -43,14 +38,14 @@ function extractFeaturesFromResult(result: EvalResult, _evalCase: EvalCase): Ran
   else if (result.isWrongResolve) outcomeSignal = 0.0;
 
   return {
-    bm25Score: 0.0,                          // No BM25 signal — matches inference
-    semanticScore: result.decisionConfidence, // Best proxy for retrieval quality
-    popularityScore: 0.5,                     // Neutral — no popularity in eval data
-    recencyScore: 0.0,                        // No recency signal — matches inference
-    classMatchScore: outcomeSignal,           // Proxy for preference alignment
-    attributeMatchScore: utility,             // Utility normalized to [0, 1]
-    diversityScore: 0.0,                      // No diversity signal — matches inference
-    multilingualScore: 0.0,                   // No multilingual signal — matches inference
+    bm25Score: 0.0,
+    semanticScore: result.decisionConfidence,
+    popularityScore: 0.5,
+    recencyScore: 0.0,
+    classMatchScore: outcomeSignal,
+    attributeMatchScore: utility,
+    diversityScore: 0.0,
+    multilingualScore: 0.0,
   };
 }
 

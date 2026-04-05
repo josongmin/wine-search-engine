@@ -58,6 +58,7 @@ describe('WineToolExecutor', () => {
             semantic: 0.9,
             attribute: 0.85,
             popularity: 0.7,
+            preferenceAlignment: 0.5,
           },
         },
         constraints: {
