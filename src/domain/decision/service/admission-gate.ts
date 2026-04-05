@@ -146,11 +146,10 @@ export class AdmissionGate {
       // (RFC-011 §11).  When evidenceItems is absent (entity-only route or
       // pre-ranking paths), the coarse anchorEvidencePresent flag above suffices.
       if (input.evidenceItems !== undefined) {
+        // Only 'anchor_similarity' is produced by EvidenceMapper in production.
+        // 'anchor_match' and 'anchor_preserved' were dead code paths — removed.
         const hasAnchorSignal = input.evidenceItems.some(
-          (item) =>
-            item.type === 'anchor_similarity' ||
-            item.type === 'anchor_match' ||
-            item.type === 'anchor_preserved',
+          (item) => item.type === 'anchor_similarity',
         );
         if (!hasAnchorSignal) {
           return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);

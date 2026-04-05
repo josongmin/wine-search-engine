@@ -23,10 +23,13 @@ import type { SearchUseCase } from '../../src/application/search/search.usecase.
 
 /**
  * Main evaluation pipeline.
+ *
+ * @param searchUseCase - The wired SearchUseCase (from container).
+ * @param databaseUrl - Postgres connection string.
  */
 async function runEvaluationAndTraining(
   searchUseCase: SearchUseCase,
-  databaseUrl: string = process.env.DATABASE_URL || 'postgresql://localhost/wine-search',
+  databaseUrl: string = process.env.DATABASE_URL ?? 'postgresql://localhost/wine-search',
 ): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl });
 
@@ -143,8 +146,21 @@ async function runEvaluationAndTraining(
 }
 
 // Entry point (for CLI use)
+// Usage: npx tsx scripts/eval/run-eval-and-train-ltr.ts
+// Requires: PG_HOST, PG_PORT, PG_DATABASE, PG_USER, PG_PASSWORD env vars
 if (import.meta.url === `file://${process.argv[1]}`) {
-  runEvaluationAndTraining().catch((err) => {
+  (async () => {
+    // Bootstrap the DI container to get a wired SearchUseCase
+    const { config } = await import('../../src/config/env.js');
+    const { createContainer } = await import('../../src/config/container.js');
+    const { getPgPool } = await import('../../src/infrastructure/db/pg-pool.js');
+
+    const pool = getPgPool();
+    const container = await createContainer(config, pool);
+
+    await runEvaluationAndTraining(container.searchUseCase);
+    await pool.end();
+  })().catch((err: unknown) => {
     console.error('❌ Pipeline failed:', err);
     process.exit(1);
   });

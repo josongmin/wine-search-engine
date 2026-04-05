@@ -13,4 +13,4 @@ export type {
   AnchorResolverPort,
   SimilarRetrievalPort,
   CandidateAttributePort,
-} from './service/mixed-solver.js';
+} from './port/mixed-query.port.js';

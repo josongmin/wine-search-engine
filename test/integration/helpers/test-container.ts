@@ -26,13 +26,22 @@ import { MixedSolver } from '../../../src/domain/mixed/service/mixed-solver.js';
 import { AnchorProfiler } from '../../../src/domain/mixed/service/anchor-profiler.js';
 import { SimilarityScorer } from '../../../src/domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../../../src/domain/mixed/service/constraint-overlay.js';
+import { DrinkingWindowPredictor } from '../../../src/infrastructure/ml/drinking-window-predictor.js';
+import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/drinking-window.usecase.js';
 import { SearchUseCase } from '../../../src/application/search/search.usecase.js';
+import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
+import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
 import { ReplayUseCase } from '../../../src/application/search/replay.usecase.js';
 import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
+import { WineToolExecutor } from '../../../src/interface/claude-tools/tool-executor.js';
+import { AdaptiveToolExecutor } from '../../../src/interface/claude-tools/adaptive-tool-executor.js';
+import { RedisWatchlistPublisher } from '../../../src/infrastructure/watchlist/redis-watchlist-publisher.js';
+import { RedisWatchlistSubscriber } from '../../../src/infrastructure/watchlist/redis-watchlist-subscriber.js';
+import { WebhookDelivery } from '../../../src/infrastructure/watchlist/webhook-delivery.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -105,6 +114,8 @@ export function createTestContainer(): TestContainerParts {
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();
   const querySanitizer = new QuerySanitizer();
+  const drinkingWindowPredictor = new DrinkingWindowPredictor();
+  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const anchorProfiler = new AnchorProfiler();
   const similarityScorer = new SimilarityScorer();
   const constraintOverlay = new ConstraintOverlay();
@@ -139,6 +150,9 @@ export function createTestContainer(): TestContainerParts {
     snapshotVersions,
   });
 
+  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
+  const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
+
   const replayUseCase = new ReplayUseCase({ searchUseCase });
   const interpretUseCase = new InterpretUseCase({ queryPlanner });
   const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver });
@@ -149,6 +163,16 @@ export function createTestContainer(): TestContainerParts {
     decisionEngine,
     responseBuilder,
   });
+
+  const wineToolExecutor = new WineToolExecutor({
+    searchUseCase,
+    decomposedSearchUseCase,
+    drinkingWindowUseCase,
+  });
+  const adaptiveToolExecutor = new AdaptiveToolExecutor(wineToolExecutor);
+  const watchlistPublisher = new RedisWatchlistPublisher();
+  const watchlistSubscriber = new RedisWatchlistSubscriber();
+  const webhookDelivery = new WebhookDelivery('dummy-secret-min-16-chars!!!');
 
   const container: Container = {
     queryPlanner,
@@ -163,6 +187,16 @@ export function createTestContainer(): TestContainerParts {
     interpretUseCase,
     resolveUseCase,
     hybridUseCase,
+    decomposedSearchUseCase,
+    drinkingWindowUseCase,
+    batchSearchUseCase,
+    drinkingWindowPredictor,
+    wineToolExecutor,
+    adaptiveToolExecutor,
+    watchlistPublisher,
+    watchlistSubscriber,
+    webhookDelivery,
+    evalRunner: null,
   };
 
   return {

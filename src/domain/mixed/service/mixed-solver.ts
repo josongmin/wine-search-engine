@@ -4,71 +4,20 @@ import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
 import type { Ranker } from '../../ranking/service/ranker.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
+import type {
+  AnchorResolverPort,
+  SimilarRetrievalPort,
+  CandidateAttributePort,
+} from '../port/mixed-query.port.js';
 import type { MixedQueryResult } from '../model/mixed-query-result.js';
-import type { AnchorProfiler, AnchorEntityData } from './anchor-profiler.js';
-import type { SimilarityScorer, SimilarityCandidate } from './similarity-scorer.js';
+import type { AnchorProfiler } from './anchor-profiler.js';
+import type { SimilarityScorer } from './similarity-scorer.js';
 import type { ConstraintOverlay } from './constraint-overlay.js';
-
-/**
- * Port for resolving an anchor entity from an entity ID.
- *
- * Infrastructure adapters implement this to look up entity data
- * from the entity store or enrichment service.
- */
-export interface AnchorResolverPort {
-  /**
-   * Resolves an entity ID to its full attribute data.
-   *
-   * @param entityId - The entity to resolve.
-   * @returns Entity data for anchor profiling, or undefined if not found.
-   */
-  resolve(entityId: EntityId): Promise<AnchorEntityData | undefined>;
-}
-
-/**
- * Port for retrieving candidates similar to an anchor entity.
- *
- * Infrastructure adapters implement this using nearest-neighbor search
- * or pre-computed similarity indices.
- */
-export interface SimilarRetrievalPort {
-  /**
-   * Retrieves candidates similar to the given anchor profile.
-   *
-   * @param anchorProfile - The anchor entity profile.
-   * @param limit - Maximum number of candidates to retrieve.
-   * @returns Hybrid candidates ordered by retrieval-stage similarity.
-   */
-  retrieveSimilar(
-    anchorProfile: AnchorProfile,
-    limit: number,
-  ): Promise<readonly HybridCandidate[]>;
-}
-
-/**
- * Port for retrieving candidate attribute data for constraint evaluation.
- */
-export interface CandidateAttributePort {
-  /**
-   * Loads attribute data for a set of candidate entities.
-   *
-   * @param entityIds - The entities to load attributes for.
-   * @returns Map from entity ID to attribute key-value pairs.
-   */
-  loadAttributes(
-    entityIds: readonly EntityId[],
-  ): Promise<ReadonlyMap<EntityId, Readonly<Record<string, unknown>>>>;
-
-  /**
-   * Loads similarity-relevant attributes for a candidate entity.
-   *
-   * @param entityId - The entity to load.
-   * @returns Similarity candidate data, or undefined if not found.
-   */
-  loadSimilarityCandidate(
-    entityId: EntityId,
-  ): Promise<SimilarityCandidate | undefined>;
-}
+export type {
+  AnchorResolverPort,
+  SimilarRetrievalPort,
+  CandidateAttributePort,
+} from '../port/mixed-query.port.js';
 
 /**
  * Default number of similar candidates to retrieve from the index.

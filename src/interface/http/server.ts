@@ -14,6 +14,7 @@ import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import { registerHealthRoutes } from './routes/health.route.js';
+import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 
@@ -131,6 +132,7 @@ export async function createServer(
 
   // Register routes
   registerHealthRoutes(app);
+  registerClaudeToolsRoute(app, container);
   registerSearchRoute(app, container);
   registerBatchSearchRoute(app, container);
   registerReplayRoute(app, container);
@@ -139,13 +141,17 @@ export async function createServer(
   registerHybridRoute(app, container);
   registerWatchlistRoute(app, container);
 
-  // Epic 3: Optional evaluation run at startup
+  // Epic 3: Optional evaluation run at startup (fire-and-forget)
   // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)
+  // MUST NOT block server readiness — eval can take minutes on large gold sets.
   if (process.env.EVAL_RUN_AT_STARTUP === 'true') {
     if (container.evalRunner) {
-      app.addHook('onReady', async () => {
-        console.warn('[Server] Running evaluation on startup per EVAL_RUN_AT_STARTUP...');
-        await runEvaluation(container.evalRunner!, { verbose: true });
+      const evalRunnerRef = container.evalRunner;
+      app.addHook('onReady', () => {
+        console.warn('[Server] Scheduling background evaluation per EVAL_RUN_AT_STARTUP...');
+        void runEvaluation(evalRunnerRef, { verbose: true }).catch((err: unknown) => {
+          console.error('[Server] Background evaluation failed:', err instanceof Error ? err.message : String(err));
+        });
       });
     } else {
       console.warn('[Server] EVAL_RUN_AT_STARTUP=true but Postgres pool unavailable; skipping evaluation');

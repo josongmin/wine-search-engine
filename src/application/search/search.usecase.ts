@@ -385,7 +385,7 @@ export class SearchUseCase {
 
       // Re-sort by LTR score
       rankedResults = [...rankedResults].sort(
-        (a: RankedResult, b: RankedResult) => (b.finalScore ?? 0) - (a.finalScore ?? 0),
+        (a: RankedResult, b: RankedResult) => b.finalScore - a.finalScore,
       );
     }
 

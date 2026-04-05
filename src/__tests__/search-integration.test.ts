@@ -547,11 +547,11 @@ describe('Search Pipeline Integration', () => {
         },
         evidenceItems: [
           {
-            type: 'anchor_match',
-            source: 'alias_index',
+            type: 'anchor_similarity',
+            source: 'ranking_signal_computer',
             contribution: '+0.80',
             strength: 'high' as const,
-            provenance: 'Matched anchor in identity graph.',
+            provenance: 'Similarity to anchor entity based on attributes and embedding',
           },
         ],
         ...(resolverResult.conformalSetSize !== undefined

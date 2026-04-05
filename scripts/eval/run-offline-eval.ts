@@ -228,21 +228,32 @@ async function executeSearch(query: string, timeoutMs: number): Promise<SearchRe
       };
     }
 
-    const data = (await response.json()) as {
-      engine_decision?: { decision_status?: string; decision_confidence?: number };
-      results?: { entity?: { entity_id?: string }; relevance_score?: number }[];
-    };
+    // Parse response — robust to both camelCase (internal/direct) and
+    // snake_case (HTTP API with preSerialization hook) field naming.
+    // Root cause: if the snake-case hook is misconfigured or the eval script
+    // is pointed at a different endpoint, entity_id silently becomes '' for
+    // every hit, collapsing Recall@100 to near-zero.
+    const raw = (await response.json()) as Record<string, unknown>;
 
-    const ranked: RankedHit[] = (data.results ?? []).map((r) => ({
-      entity_id: r.entity?.entity_id ?? '',
-      score: r.relevance_score ?? 0,
-    }));
+    // Accept both engine_decision (snake) and engineDecision (camel)
+    const engineDecision = (raw['engine_decision'] ?? raw['engineDecision'] ?? {}) as Record<string, unknown>;
+    const rawResults = (raw['results'] ?? []) as Record<string, unknown>[];
+
+    const ranked: RankedHit[] = rawResults.map((r) => {
+      const entity = (r['entity'] ?? {}) as Record<string, unknown>;
+      // Accept both entity_id (snake) and entityId (camel)
+      const entityId = (entity['entity_id'] ?? entity['entityId'] ?? '') as string;
+      const score = (r['relevance_score'] ?? r['relevanceScore'] ?? 0) as number;
+      return { entity_id: String(entityId), score };
+    });
+
+    const decisionStatus = (engineDecision['decision_status'] ?? engineDecision['decisionStatus'] ?? 'failed') as string;
+    const decisionConfidence = (engineDecision['decision_confidence'] ?? engineDecision['decisionConfidence'] ?? 0) as number;
 
     const decision: DecisionOutcome = {
-      decision_status:
-        (data.engine_decision?.decision_status as 'resolved' | 'ambiguous' | 'failed') ?? 'failed',
+      decision_status: decisionStatus as 'resolved' | 'ambiguous' | 'failed',
       top_entity_id: ranked[0]?.entity_id ?? null,
-      decision_confidence: data.engine_decision?.decision_confidence ?? 0,
+      decision_confidence: decisionConfidence,
     };
 
     return { ranked, decision };

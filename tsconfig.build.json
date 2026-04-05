@@ -3,7 +3,8 @@
   "compilerOptions": {
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "incremental": false
+    "incremental": false,
+    "rootDir": "src"
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "test", "**/__tests__/**", "**/*.test.ts", "**/lambdamart-ranker.ts", "**/ltr-ranker.ts", "**/ltr-training-service.ts"]

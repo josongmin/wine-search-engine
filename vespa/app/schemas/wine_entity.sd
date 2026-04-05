@@ -564,93 +564,18 @@ schema wine_entity {
   }
 
   # ---------------------------------------------------------------------------
-  # Stemming & Synonym Rules (Task 5: Schema Structuring)
+  # Synonym Rules — NOT supported in Vespa 8.x .sd schema syntax.
   #
-  # These rules enhance grape variety, region, and producer matching:
-  #  - Grape synonyms: Pinot (Noir/Grigio/Blanc), Cabernet (Sauvignon/Franc)
-  #  - Producer synonyms: Château = Domaine = Castle (varies by region)
-  #  - Region aliases: Bordeaux, Burgundy, Loire, etc.
+  # The `search { synonym ... }` block was invalid Vespa SDL and would break
+  # `vespa deploy`. Synonym expansion must be handled either:
+  #   (a) Application-level: ETL expands aliases into aliases_noisy_recall
+  #   (b) Query rewriting: Vespa searcher component (Java/XML config)
+  #   (c) Already handled: generate-aliases.ts produces grape/region/producer
+  #       variants in the alias arrays fed to BM25 fields.
+  #
+  # Grape family (pinot, cabernet), region aliases (bordeaux, tuscany),
+  # and producer honorifics (château, domaine, bodega) are already expanded
+  # in scripts/etl/generate-aliases.ts → aliasesNoisyRecall.
   # ---------------------------------------------------------------------------
-
-  search {
-    # Grape variety stemming and synonyms
-    synonym pinot-family {
-      way: "both"
-      term: "pinot noir"
-      term: "pinot grigio"
-      term: "pinot gris"
-      term: "pinot blanc"
-      term: "pinot"
-    }
-
-    synonym cabernet-family {
-      way: "both"
-      term: "cabernet sauvignon"
-      term: "cabernet franc"
-      term: "cabernet"
-    }
-
-    synonym merlot-family {
-      way: "both"
-      term: "merlot"
-    }
-
-    synonym tempranillo-family {
-      way: "both"
-      term: "tempranillo"
-      term: "tinta del toro"
-    }
-
-    # Producer name standardization (Château = Domaine = Castle concept)
-    # Note: Vespa 8.x synonyms are simple term lists; for complex logic,
-    # use application-level processing in ETL.
-
-    synonym producer-honorific {
-      way: "both"
-      term: "château"
-      term: "domaine"
-      term: "bodega"
-      term: "cantina"
-      term: "azienda"
-      term: "estate"
-    }
-
-    # Region aliases for hierarchical matching
-    synonym france-regions {
-      way: "both"
-      term: "bordeaux"
-      term: "burgundy"
-      term: "loire valley"
-      term: "alsace"
-      term: "rhone"
-      term: "provence"
-      term: "champagne"
-    }
-
-    synonym italy-regions {
-      way: "both"
-      term: "tuscany"
-      term: "piedmont"
-      term: "veneto"
-      term: "umbria"
-      term: "sicily"
-    }
-
-    synonym spain-regions {
-      way: "both"
-      term: "rioja"
-      term: "ribera del duero"
-      term: "priorat"
-      term: "penedes"
-    }
-
-    synonym usa-regions {
-      way: "both"
-      term: "napa valley"
-      term: "sonoma"
-      term: "paso robles"
-      term: "santa barbara"
-    }
-  }
 
 }

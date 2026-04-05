@@ -50,28 +50,20 @@ export function deepKeysToSnake(value: unknown): unknown {
     return value;
   }
 
-  // Arrays: transform in-place to avoid allocation
+  // Arrays: create new array to avoid mutating cached/referenced response data
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      value[i] = deepKeysToSnake(value[i]);
-    }
-    return value;
+    return value.map(deepKeysToSnake);
   }
 
-  // Plain objects: only create result if keys need transformation
+  // Plain objects: create new object with transformed keys
   if (type === 'object') {
     const obj = value as Record<string, unknown>;
     const result: Record<string, unknown> = {};
-    let hasChanges = false;
 
-    for (const k in obj) {
-      const transformed = camelToSnake(k);
-      if (transformed !== k) hasChanges = true;
-      result[transformed] = deepKeysToSnake(obj[k]);
+    for (const k of Object.keys(obj)) {
+      result[camelToSnake(k)] = deepKeysToSnake(obj[k]);
     }
 
-    // If no key transformations occurred, still return transformed values
-    // (they may have changed during recursion)
     return result;
   }
 

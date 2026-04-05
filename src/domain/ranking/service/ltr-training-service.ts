@@ -11,31 +11,38 @@ import { trainLambdaMARTModel } from './lambdamart-ranker.js';
 
 /**
  * Extracts ranking features from evaluation result.
+ *
+ * Since EvalResult doesn't contain raw retrieval-level signals, we derive
+ * proxy features from the available decision-level data:
+ * - decisionConfidence → proxy for bm25/semantic match quality
+ * - utilityScore → proxy for overall match quality
+ * - latencyMs → inverse proxy for retrieval efficiency
+ * - outcome flags → proxy for class/attribute alignment
+ *
+ * These proxies ensure LambdaMART learns a consistent signal (high confidence
+ * + correct resolve → high feature values) instead of pure noise.
  */
 function extractFeaturesFromResult(result: EvalResult, evalCase: EvalCase): RankingFeatures {
-  let bm25 = 0.5;
-  let semantic = 0.5;
-  let classMatch = 0.5;
+  const conf = result.decisionConfidence; // [0, 1]
+  const utility = (result.utilityScore + 1.5) / 2.5; // normalize [-1.5, +1.0] → [0, 1]
+  const latencyFactor = Math.max(0, 1 - result.latencyMs / 5000); // faster = better, cap at 5s
 
-  if (result.isCorrectResolve) {
-    bm25 = 0.8 + Math.random() * 0.2;
-    semantic = 0.7 + Math.random() * 0.2;
-    classMatch = 0.85 + Math.random() * 0.15;
-  } else if (result.isWrongResolve) {
-    bm25 = 0.2 + Math.random() * 0.2;
-    semantic = 0.1 + Math.random() * 0.2;
-    classMatch = 0.1 + Math.random() * 0.2;
-  }
+  // Outcome-based quality signal: 1.0 for correct, 0.5 for safe abstain, 0.0 for wrong
+  let outcomeSignal = 0.3;
+  if (result.isCorrectResolve) outcomeSignal = 1.0;
+  else if (result.isSafeAbstain) outcomeSignal = 0.6;
+  else if (result.isAvoidableAbstain) outcomeSignal = 0.2;
+  else if (result.isWrongResolve) outcomeSignal = 0.0;
 
   return {
-    bm25Score: bm25,
-    semanticScore: semantic,
-    popularityScore: 0.5 + Math.random() * 0.3,
-    recencyScore: 0.6 + Math.random() * 0.2,
-    classMatchScore: classMatch,
-    attributeMatchScore: 0.5 + Math.random() * 0.3,
-    diversityScore: 0.4 + Math.random() * 0.2,
-    multilingualScore: evalCase.sliceTags.includes('lang:ko') ? 0.5 : 0.3,
+    bm25Score: conf * 0.7 + outcomeSignal * 0.3,
+    semanticScore: conf * 0.6 + utility * 0.4,
+    popularityScore: latencyFactor * 0.5 + outcomeSignal * 0.5,
+    recencyScore: latencyFactor,
+    classMatchScore: outcomeSignal,
+    attributeMatchScore: conf * 0.5 + outcomeSignal * 0.5,
+    diversityScore: result.evidenceItems.length > 0 ? 0.7 : 0.3,
+    multilingualScore: evalCase.sliceTags.includes('lang:ko') ? 0.6 : 0.4,
   };
 }
 
@@ -72,24 +79,28 @@ export function buildTrainingExamples(
     const features = extractFeaturesFromResult(result, evalCase);
     const label = outcomeToLabel(result, evalCase);
 
-    for (let i = 0; i < 3; i++) {
-      const otherLabel = Math.max(0, label - 1);
-      if (otherLabel < label) {
+    // Generate pairwise comparisons with degraded negatives at varying levels.
+    // Use deterministic degradation factors (not random) to create consistent
+    // training signal: label 3 vs 2, 3 vs 1, 3 vs 0, etc.
+    const degradationFactors = [0.7, 0.4, 0.1] as const;
+    for (const factor of degradationFactors) {
+      const degradedLabel = Math.max(0, Math.round(label * factor)) as 0 | 1 | 2 | 3;
+      if (degradedLabel < label) {
         examples.push({
           query: evalCase.query,
           queryClass: evalCase.queryClass,
           label1: label as 0 | 1 | 2 | 3,
           features1: features,
-          label2: otherLabel as 0 | 1 | 2 | 3,
+          label2: degradedLabel,
           features2: {
-            bm25Score: features.bm25Score * (0.5 + Math.random() * 0.3),
-            semanticScore: features.semanticScore * (0.6 + Math.random() * 0.3),
-            popularityScore: Math.random() * 0.5,
-            recencyScore: Math.random() * 0.5,
-            classMatchScore: features.classMatchScore * (0.5 + Math.random() * 0.3),
-            attributeMatchScore: features.attributeMatchScore * (0.5 + Math.random() * 0.3),
-            diversityScore: Math.random() * 0.7,
-            multilingualScore: features.multilingualScore * (0.5 + Math.random() * 0.3),
+            bm25Score: features.bm25Score * factor,
+            semanticScore: features.semanticScore * factor,
+            popularityScore: features.popularityScore * factor,
+            recencyScore: features.recencyScore * factor,
+            classMatchScore: features.classMatchScore * factor,
+            attributeMatchScore: features.attributeMatchScore * factor,
+            diversityScore: features.diversityScore * factor,
+            multilingualScore: features.multilingualScore * factor,
           },
         });
       }

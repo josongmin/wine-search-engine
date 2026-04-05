@@ -8,7 +8,6 @@
 import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
-import type { QueryClass } from '../../domain/shared/types/index.js';
 
 /**
  * Row shape in ltr_model_registry table.
@@ -26,18 +25,22 @@ interface LtrModelRow {
 
 /**
  * Port for storing and retrieving trained LTR models.
+ *
+ * Uses `string` for queryClass (not the branded QueryClass union) because
+ * trainAllModels() returns Map<string, ...> and QueryClassWeights.queryClass
+ * is typed as `string`.
  */
 export interface LtrModelRegistryPort {
   /**
    * Saves a trained model for a query class.
    * Overwrites any existing model for that class.
    */
-  saveModel(queryClass: QueryClass, weights: QueryClassWeights): Promise<void>;
+  saveModel(queryClass: string, weights: QueryClassWeights): Promise<void>;
 
   /**
    * Retrieves the latest trained model for a query class.
    */
-  getModel(queryClass: QueryClass): Promise<QueryClassWeights | null>;
+  getModel(queryClass: string): Promise<QueryClassWeights | null>;
 
   /**
    * Retrieves all trained models.
@@ -62,7 +65,7 @@ export interface LtrModelRegistryPort {
 export class PgLtrModelRegistry implements LtrModelRegistryPort {
   constructor(private readonly pool: Pool) {}
 
-  async saveModel(queryClass: QueryClass, weights: QueryClassWeights): Promise<void> {
+  async saveModel(queryClass: string, weights: QueryClassWeights): Promise<void> {
     const registryId = nanoid();
     await this.pool.query(
       `INSERT INTO ltr_model_registry (
@@ -90,7 +93,7 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     );
   }
 
-  async getModel(queryClass: QueryClass): Promise<QueryClassWeights | null> {
+  async getModel(queryClass: string): Promise<QueryClassWeights | null> {
     const result = await this.pool.query<LtrModelRow>(
       `SELECT * FROM ltr_model_registry
        WHERE query_class = $1

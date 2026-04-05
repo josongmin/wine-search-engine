@@ -125,7 +125,12 @@ export function trainLambdaMARTModel(
     }
 
     const weightSum = weights.reduce((a, b) => a + b, 0);
-    const normalizedWeights = weights.map((w) => w / weightSum);
+    // Guard: if all weights collapsed to zero (e.g., regularization drove them
+    // all to 0), fall back to uniform weights to avoid NaN propagation.
+    const normalizedWeights =
+      weightSum === 0
+        ? weights.map(() => 1 / weights.length)
+        : weights.map((w) => w / weightSum);
 
     const validationNdcg = computeValidationNdcg(classExamples, normalizedWeights, bias);
 

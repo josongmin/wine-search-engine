@@ -42,7 +42,7 @@ import type { EvalResultStore, EvalResultFilter } from '../../../src/domain/eval
 import type { EvalResult } from '../../../src/domain/evaluation/model/eval-result.js';
 import type { ExistingAliasChecker } from '../../../src/domain/learning/service/alias-proposer.js';
 import type { AdversarialGuardPort } from '../../../src/domain/learning/service/promotion-gate.js';
-import { createEntityId } from '../../../src/domain/shared/types/index.js';
+import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InMemoryAmbiguityDictionary
@@ -673,6 +673,24 @@ export class InMemoryFeedbackStore implements FeedbackStore {
     };
   }
 
+  async pruneExpiredFeedback(
+    olderThan: Date,
+    signalTypes?: readonly FeedbackType[],
+  ): Promise<number> {
+    const before = this.signals.length;
+    const typeFilter = signalTypes ? new Set(signalTypes) : null;
+    this.signals.splice(
+      0,
+      this.signals.length,
+      ...this.signals.filter((signal) => {
+        const older = signal.timestamp < olderThan;
+        const typeAllowed = typeFilter ? typeFilter.has(signal.type) : true;
+        return !(older && typeAllowed);
+      }),
+    );
+    return before - this.signals.length;
+  }
+
   getAll(): readonly FeedbackSignal[] {
     return this.signals.slice();
   }
@@ -784,10 +802,6 @@ export class InMemoryEvalResultStore implements EvalResultStore {
 
   async getResults(filter?: EvalResultFilter): Promise<readonly EvalResult[]> {
     let result = this.results.slice();
-    if (filter?.since) {
-      const since = filter.since;
-      result = result.filter((r) => r.decisionSnapshot.policy_rule_version !== '');
-    }
     if (filter?.snapshotId) {
       const sid = filter.snapshotId;
       result = result.filter((r) => r.decisionSnapshot.threshold_profile_id === sid);

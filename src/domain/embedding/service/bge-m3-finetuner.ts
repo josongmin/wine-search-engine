@@ -189,7 +189,7 @@ export namespace BGEM3Finetuner {
    */
   function computeValidationMetrics(
     triplets: readonly EmbeddingTriplet[],
-    epoch: number,
+    _epoch: number,
     avgLoss: number,
   ): ValidationMetrics {
     const margin = 0.3; // triplet margin
