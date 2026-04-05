@@ -205,17 +205,22 @@ describe('LLMInjectionJudge', () => {
 
       const result = await judge.judge('find wine');
 
-      expect(result).toBe(true); // Fail closed
+      expect(result).toBe(true); // Fail closed (no text content = treat as injection)
     });
 
-    it('fails closed (true) on API error', async () => {
+    it('fails open (false) on API error — rely on Layer 1 (static patterns) + Layer 3 (rate limiting)', async () => {
+      // RFC: API error handling per security-injection-defense.md §3.2
+      // fail closed (blocking all queries) would disable service entirely.
+      // Instead: fail OPEN + rely on Layer 1 (static pattern detection) and
+      // Layer 3 (rate limiting / abuse detection) for defense.
+      // Layer 2 (LLM judge) is optional enhancement; its absence should not block queries.
       (mockAnthropicClient.messages.create as any).mockRejectedValueOnce(
         new Error('API connection error'),
       );
 
       const result = await judge.judge('find wine');
 
-      expect(result).toBe(true); // Fail closed for safety
+      expect(result).toBe(false); // Fail OPEN: allow query, rely on other layers
     });
   });
 

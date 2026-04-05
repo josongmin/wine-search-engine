@@ -138,7 +138,9 @@ Classify this query:`;
 
       const textBlock = response.content.find((block) => block.type === 'text');
       if (!textBlock) {
-        throw new Error('No text content in Claude response');
+        // Fail closed: no text content = malformed response = treat as injection
+        console.error('[LLMInjectionJudge] No text content in Claude response');
+        return true;
       }
       const textContent = textBlock as { type: 'text'; text: string };
 
@@ -157,9 +159,9 @@ Classify this query:`;
         return true;
       }
     } catch (err) {
-      // API error: log for visibility but fail OPEN (allow query through)
-      // Reason: false negatives (injections passing) are worse than false positives
-      // in production; we have Layer 1 (static patterns) + Layer 3 (rate limiting)
+      // API error only: fail OPEN (allow query through)
+      // Reason: Layer 1 (static patterns) + Layer 3 (rate limiting) provide defense
+      // Service unavailability is worse than allowing a few injection attempts
       console.warn('[LLMInjectionJudge] Claude API error (failing open):', err instanceof Error ? err.message : String(err));
       return false;
     }

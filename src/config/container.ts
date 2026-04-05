@@ -74,6 +74,10 @@ import { AdaptiveToolExecutor } from '../interface/claude-tools/adaptive-tool-ex
 import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { WebhookDelivery } from '../infrastructure/watchlist/webhook-delivery.js';
+import { EvalRunner } from '../domain/evaluation/service/eval-runner.js';
+import { PgGoldSetStore } from '../infrastructure/adapter/pg-gold-set-store.js';
+import { PgEvalResultStore } from '../infrastructure/adapter/pg-eval-result-store.js';
+import { SearchPipelineEvaluator } from '../infrastructure/adapter/search-pipeline-evaluator.js';
 
 /**
  * The DI container — holds all wired domain services and use cases.
@@ -109,6 +113,9 @@ export interface Container {
   readonly watchlistPublisher: InstanceType<typeof RedisWatchlistPublisher>;
   readonly watchlistSubscriber: InstanceType<typeof RedisWatchlistSubscriber>;
   readonly webhookDelivery: InstanceType<typeof WebhookDelivery>;
+
+  // Epic 3: Evaluation infrastructure
+  readonly evalRunner: EvalRunner;
 }
 
 // ────────────────────────────────────────────────────────────────

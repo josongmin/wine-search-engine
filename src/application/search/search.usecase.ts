@@ -357,14 +357,14 @@ export class SearchUseCase {
         entityId: doc.entity?.entityId ?? '',
         retrievalScore: doc.finalScore ?? 0,
         features: {
-          bm25Score: doc.componentScores?.lexicalScore ?? 0.5,
-          semanticScore: doc.componentScores?.semanticScore ?? 0.5,
-          popularityScore: doc.componentScores?.popularityScore ?? 0.5,
-          recencyScore: doc.componentScores?.recencyScore ?? 0.5,
-          classMatchScore: doc.componentScores?.classMatchScore ?? 0.5,
-          attributeMatchScore: doc.componentScores?.attributeMatchScore ?? 0.5,
-          diversityScore: doc.componentScores?.diversityScore ?? 0.5,
-          multilingualScore: doc.componentScores?.multilingualScore ?? 0.5,
+          bm25Score: doc.componentScores?.lexical ?? 0.5,
+          semanticScore: doc.componentScores?.semantic ?? 0.5,
+          popularityScore: doc.componentScores?.popularity ?? 0.5,
+          recencyScore: 0.5,
+          classMatchScore: 0.5,
+          attributeMatchScore: doc.componentScores?.attributeAlignment ?? 0.5,
+          diversityScore: 0.5,
+          multilingualScore: 0.5,
         },
         originalRank: idx + 1,
       }));
@@ -373,14 +373,16 @@ export class SearchUseCase {
 
       // Map back to RankedResult with updated finalScore
       rankedResults = rankedResults.map((orig) => {
-        const reranked = rerankedDocs.find((r) => r.entityId === (orig.entity?.entityId ?? ''));
+        const reranked = rerankedDocs.find((r) => r.entityId === orig.entityId);
         return reranked
-          ? { ...orig, finalScore: reranked.ltrScore, finalRank: reranked.finalRank }
+          ? { ...orig, finalScore: reranked.ltrScore, rank: reranked.finalRank }
           : orig;
       });
 
       // Re-sort by LTR score
-      rankedResults = rankedResults.sort((a, b) => (b.finalScore ?? 0) - (a.finalScore ?? 0));
+      rankedResults = [...rankedResults].sort(
+        (a: RankedResult, b: RankedResult) => (b.finalScore ?? 0) - (a.finalScore ?? 0),
+      );
     }
 
     // Build a synthetic resolve result for the hybrid path.
