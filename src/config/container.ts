@@ -296,6 +296,12 @@ export function createContainer(_config: Config, pool?: Pool): Container {
   // Note: predictor.load() must be called at app startup with model directory
 
   // ── Use cases ─────────────────────────────────────────────────────────────
+  // CIRCULAR DEPENDENCY RESOLUTION:
+  // - SearchUseCase needs DecomposedSearchUseCase for decomposition routing
+  // - DecomposedSearchUseCase needs SearchUseCase for parallel sub-query execution
+  // Solution: Create searchUseCase first (with decomposedSearch omitted),
+  // then create decomposedSearchUseCase referencing searchUseCase.
+  // Route handler must call decomposedSearchUseCase directly for "A vs B" queries.
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
@@ -308,7 +314,6 @@ export function createContainer(_config: Config, pool?: Pool): Container {
   });
 
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
   const replayUseCase = new ReplayUseCase({

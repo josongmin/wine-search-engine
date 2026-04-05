@@ -68,11 +68,6 @@ const REGION_KEYWORDS: readonly RegExp[] = [
   /\b(?:지역|지방|아펠라시옹|지역명)\b/,
 ] as const;
 
-/** Style/sensory-only keywords (body, sweetness, tannin without wine-specific terms). */
-const STYLE_KEYWORDS: readonly RegExp[] = [
-  /\b(?:light|full[\s-]?body|dry|sweet|tannic|fruity|oaky)\b/i,
-  /\b(?:라이트|풀바디|드라이|스위트|타닌|과일|오크)\b/,
-] as const;
 
 /**
  * Context passed to the planner alongside the raw query.

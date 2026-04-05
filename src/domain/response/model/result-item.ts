@@ -128,4 +128,18 @@ export interface ResultItem {
 
   /** Drinking window prediction (when wine is best to drink). Populated when available. */
   readonly drinkingWindow?: DrinkingWindowBlock | undefined;
+
+  /**
+   * Human-readable reasons why this result matched the query,
+   * derived from high-strength evidence items with positive contribution (Epic 9).
+   * Omitted if no such evidence is present.
+   */
+  readonly matchReasons?: readonly string[] | undefined;
+
+  /**
+   * Constraint fields that were not satisfied by this result (Epic 9).
+   * Derived from ConstraintEvaluation.unmet.
+   * Omitted if all constraints were met.
+   */
+  readonly violatedConstraints?: readonly string[] | undefined;
 }

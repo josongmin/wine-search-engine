@@ -43,11 +43,6 @@ export class DecomposedSearchUseCase {
       ),
     ]);
 
-    // Ensure both results are SearchResponseV1 (not ComparisonSearchResponse)
-    if (resultA.queryType === 'comparison' || resultB.queryType === 'comparison') {
-      throw new Error('Nested comparison queries not supported');
-    }
-
     // Build comparison entities from SearchResponseV1 results
     const entityA: ComparisonEntity = {
       subQuery: subQueries[0],

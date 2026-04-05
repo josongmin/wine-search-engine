@@ -417,7 +417,7 @@ export class SignalComputer {
    * @returns Coverage score in [0, 1]. 1 = all target values represented.
    */
   computeSetCoverage(
-    candidates: HybridCandidate[],
+    _candidates: HybridCandidate[],
     targetSet: Set<string>,
   ): number {
     if (targetSet.size === 0) {

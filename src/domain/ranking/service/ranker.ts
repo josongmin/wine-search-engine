@@ -58,6 +58,8 @@ interface ScoredEntry {
   readonly grapePrimary?: string;
   readonly componentScores: ComponentScores;
   readonly finalScore: number;
+  readonly drinkingWindowStart?: number | undefined;
+  readonly drinkingWindowEnd?: number | undefined;
 }
 
 /** Optional 5th argument: rerankTopK number, or full options (including blend scale). */
@@ -158,6 +160,8 @@ export class Ranker {
         ...(candidate.grapePrimary !== undefined
           ? { grapePrimary: candidate.grapePrimary }
           : {}),
+        ...(candidate.drinkingWindowStart !== undefined ? { drinkingWindowStart: candidate.drinkingWindowStart } : {}),
+        ...(candidate.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: candidate.drinkingWindowEnd } : {}),
         componentScores,
         finalScore,
       });
@@ -201,6 +205,8 @@ export class Ranker {
         rank: index + 1,
         componentScores: entry.componentScores,
         evidenceItems,
+        ...(entry.drinkingWindowStart !== undefined ? { drinkingWindowStart: entry.drinkingWindowStart } : {}),
+        ...(entry.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: entry.drinkingWindowEnd } : {}),
       };
     });
 

@@ -337,7 +337,7 @@ function computeModeMetrics(
   const decisions = results.map((r) => r.decision);
   const truths = results.map((r) => r.truth);
 
-  const metrics: ModeMetrics = {
+  const baseMetrics = {
     retrieval_mode: mode,
     query_count: results.length,
     ndcg_at_10: ndcgValues.reduce((a, b) => a + b, 0) / ndcgValues.length,
@@ -349,7 +349,9 @@ function computeModeMetrics(
       decisions.length,
   };
 
-  // Add mode-specific metrics
+  // Build mode-specific metrics conditionally
+  const metrics: ModeMetrics = { ...baseMetrics };
+
   if (mode === 'producer_browse' || mode === 'region_browse') {
     const diversityScores = results.map((r) => setDiversityScore(r.ranked));
     metrics.diversity_score = diversityScores.reduce((a, b) => a + b, 0) / diversityScores.length;
@@ -529,7 +531,7 @@ async function run(): Promise<void> {
   }
 
   // Epic 11: Mode-specific slices
-  const byMode: Record<RetrievalMode, ModeMetrics> = {};
+  const byModeEntries: [RetrievalMode, ModeMetrics][] = [];
   const modeGroups = new Map<RetrievalMode, typeof allResults>();
   for (const r of allResults) {
     const mode = r.query.retrieval_mode ?? 'entity_lookup';
@@ -543,12 +545,13 @@ async function run(): Promise<void> {
   for (const mode of ALL_RETRIEVAL_MODES) {
     const group = modeGroups.get(mode);
     if (group && group.length > 0) {
-      byMode[mode] = computeModeMetrics(group, mode);
+      byModeEntries.push([mode, computeModeMetrics(group, mode)]);
     }
   }
+  const byMode = Object.fromEntries(byModeEntries) as Record<RetrievalMode, ModeMetrics>;
 
   // Epic 11: Entity target type slices
-  const byTargetType: Record<EntityTargetType, EntityTypeMetrics> = {};
+  const byTargetTypeEntries: [EntityTargetType, EntityTypeMetrics][] = [];
   const typeGroups = new Map<EntityTargetType, typeof allResults>();
   for (const r of allResults) {
     const targetType = inferEntityTargetType(r.query.scenario);
@@ -560,8 +563,9 @@ async function run(): Promise<void> {
     }
   }
   for (const [targetType, group] of typeGroups) {
-    byTargetType[targetType] = computeEntityTypeMetrics(group, targetType);
+    byTargetTypeEntries.push([targetType, computeEntityTypeMetrics(group, targetType)]);
   }
+  const byTargetType = Object.fromEntries(byTargetTypeEntries) as Record<EntityTargetType, EntityTypeMetrics>;
 
   const evalResult: EvalResult = {
     dataset_tier: args.tier,
@@ -578,12 +582,15 @@ async function run(): Promise<void> {
     ece: ece(decisions, truths),
     by_scenario: byScenario,
     by_language: byLanguage,
-    by_mode: Object.keys(byMode).length > 0 ? byMode : undefined,
-    by_target_type: Object.keys(byTargetType).length > 0 ? byTargetType : undefined,
   };
 
-  // Write results
-  await fs.writeFile(args.output, JSON.stringify(evalResult, null, 2) + '\n', 'utf8');
+  // Add optional Epic 11 fields if present
+  if (Object.keys(byMode).length > 0) {
+    evalResult.by_mode = byMode;
+  }
+  if (Object.keys(byTargetType).length > 0) {
+    evalResult.by_target_type = byTargetType;
+  }
 
   // Print summary
   console.log('\n=== EVAL RESULTS ===');
@@ -687,13 +694,48 @@ async function run(): Promise<void> {
     }
 
     // Add gate verdict to result
-    evalResult.release_gate_verdict = {
+    const verdict: { passed: boolean; failures: readonly string[] } = {
       passed: gateViolations.length === 0,
       failures: gateViolations,
     };
+    evalResult.release_gate_verdict = verdict;
   }
 
+  // Write results (after gate verdict is added if applicable)
+  await fs.writeFile(args.output, JSON.stringify(evalResult, null, 2) + '\n', 'utf8');
+
   console.log(`\n  Results written to: ${args.output}`);
+
+  // Epic 6: Run embedding validation if available
+  console.log('\n=== EMBEDDING VALIDATION (Epic 6) ===');
+  try {
+    const validateEmbeddingPath = new URL('../ltr/validate-embedding.ts', import.meta.url).pathname;
+    const fs_exists = await import('node:fs/promises').then((m) =>
+      m.access(validateEmbeddingPath).then(() => true).catch(() => false)
+    );
+
+    if (fs_exists) {
+      console.log('📊 Running embedding validation...');
+      const { exec } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execAsync = promisify(exec);
+
+      try {
+        const sampleSize = Math.min(100, evalQueries.length);
+        const { stdout } = await execAsync(
+          `npx tsx scripts/ltr/validate-embedding.ts --sample ${sampleSize} --tier ${args.tier}`,
+          { cwd: process.cwd(), timeout: 300_000 },
+        );
+        console.log(stdout);
+      } catch (execError) {
+        const msg = execError instanceof Error ? execError.message : String(execError);
+        console.warn(`⚠️  Embedding validation failed: ${msg}`);
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`⚠️  Could not run embedding validation: ${msg}`);
+  }
 }
 
 function decisionUtilityScore(

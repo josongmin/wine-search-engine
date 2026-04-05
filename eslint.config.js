@@ -8,6 +8,7 @@ export default tseslint.config(
       'node_modules/**',
       'coverage/**',
       'eslint.config.js',
+      '.claude/**',
     ],
   },
   eslint.configs.recommended,

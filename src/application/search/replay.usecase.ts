@@ -131,14 +131,6 @@ export class ReplayUseCase {
 
     const response = await this.deps.searchUseCase.execute(searchRequest, requestId);
 
-    // Comparison queries cannot be replayed (not deterministic across decompositions)
-    if (response.queryType === 'comparison') {
-      throw new DomainError(
-        'COMPARISON_NOT_REPLAYABLE',
-        'Comparison queries ("A vs B") cannot be replayed; they are not deterministic.',
-      );
-    }
-
     // Step 5: Determinism gate (RFC-009 §8 / RFC-015)
     // If the caller supplied an expected_response_hash, validate it against
     // the hash embedded in the freshly-produced response. A mismatch indicates

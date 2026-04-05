@@ -157,6 +157,7 @@ export class HybridUseCase {
 
     return this.deps.responseBuilder.build({
       decisionOutput,
+      queryPlan: plan,
       results,
       requestId,
       queryTimeMs,
@@ -168,33 +169,51 @@ export class HybridUseCase {
    * Maps ranked results to response-level ResultItems.
    */
   private mapRankedToResultItems(rankedResults: readonly RankedResult[]): readonly ResultItem[] {
-    return rankedResults.map((r) => ({
-      entity: {
-        entityId: r.entityId,
-        canonicalLabel: r.canonicalLabel,
-        type: 'wine',
-      },
-      relevanceScore: r.finalScore,
-      match: {
-        matchType: 'hybrid' as const,
-        scoreComponents: {
-          lexical: 0,
-          semantic: r.componentScores.semantic,
-          attribute: r.componentScores.attributeAlignment,
-          popularity: r.componentScores.popularity,
+    const currentYear = new Date().getFullYear();
+
+    return rankedResults.map((r) => {
+      // Build drinking window block if data is available
+      const drinkingWindow =
+        r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
+          ? {
+              drinkingWindowStart: r.drinkingWindowStart,
+              drinkingWindowEnd: r.drinkingWindowEnd,
+              currentlyDrinkable:
+                currentYear >= r.drinkingWindowStart &&
+                currentYear <= r.drinkingWindowEnd,
+              confidence: 'high' as const,
+            }
+          : undefined;
+
+      return {
+        entity: {
+          entityId: r.entityId,
+          canonicalLabel: r.canonicalLabel,
+          type: 'wine',
         },
-      },
-      constraints: {
-        matched: [],
-        unmet: [],
-        inferred: [],
-      },
-      uncertainty: {
-        uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
-        missingInfo: [],
-        approximationUsed: false,
-      },
-      evidenceItems: r.evidenceItems,
-    }));
+        relevanceScore: r.finalScore,
+        match: {
+          matchType: 'hybrid' as const,
+          scoreComponents: {
+            lexical: 0,
+            semantic: r.componentScores.semantic,
+            attribute: r.componentScores.attributeAlignment,
+            popularity: r.componentScores.popularity,
+          },
+        },
+        constraints: {
+          matched: [],
+          unmet: [],
+          inferred: [],
+        },
+        uncertainty: {
+          uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
+          missingInfo: [],
+          approximationUsed: false,
+        },
+        evidenceItems: r.evidenceItems,
+        ...(drinkingWindow !== undefined ? { drinkingWindow } : {}),
+      };
+    });
   }
 }

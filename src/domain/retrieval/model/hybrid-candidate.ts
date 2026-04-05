@@ -27,6 +27,12 @@ export interface HybridCandidate {
   /** Primary grape from index summary (cross-encoder passage). */
   readonly grapePrimary?: string | undefined;
 
+  /** First year the wine enters its optimal drinking window (Epic 15). Optional. */
+  readonly drinkingWindowStart?: number | undefined;
+
+  /** Last year the wine is in its optimal drinking window (Epic 15). Optional. */
+  readonly drinkingWindowEnd?: number | undefined;
+
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
 

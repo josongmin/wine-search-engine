@@ -457,12 +457,12 @@ export interface ModeMetrics {
   readonly decision_utility: number;
 
   // Mode-specific optional metrics (added when mode-specific data available)
-  readonly diversity_score?: number;
-  readonly anchor_preservation_score?: number;
-  readonly producer_variety?: number;
-  readonly set_coverage?: number;
-  readonly seed_exclusion_rate?: number;
-  readonly attribute_coverage?: number;
+  diversity_score?: number;
+  anchor_preservation_score?: number;
+  producer_variety?: number;
+  set_coverage?: number;
+  seed_exclusion_rate?: number;
+  attribute_coverage?: number;
 }
 
 /**
@@ -545,13 +545,13 @@ export interface EvalResult {
   readonly by_language: Record<string, ScenarioSlice>;
 
   // Epic 11: Mode-specific slices
-  readonly by_mode?: Record<RetrievalMode, ModeMetrics>;
+  by_mode?: Record<RetrievalMode, ModeMetrics>;
 
   // Epic 11: Entity target type slices
-  readonly by_target_type?: Record<EntityTargetType, EntityTypeMetrics>;
+  by_target_type?: Record<EntityTargetType, EntityTypeMetrics>;
 
   // Epic 11: Release gate verdict
-  readonly release_gate_verdict?: {
+  release_gate_verdict?: {
     readonly passed: boolean;
     readonly failures: readonly string[];
   };

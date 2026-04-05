@@ -31,9 +31,9 @@ export class BrowseRetriever {
    * @returns Ordered list of candidates from the specified producer, diversity-aware.
    */
   async browseProducer(
-    producerName: string,
-    constraints: ConstraintBundle,
-    limit: number,
+    _producerName: string,
+    _constraints: ConstraintBundle,
+    _limit: number,
   ): Promise<readonly HybridCandidate[]> {
     // Placeholder: real implementation will:
     // 1. Query index for all wines from this producer.
@@ -64,9 +64,9 @@ export class BrowseRetriever {
    * @returns Ordered list of wines from region, producer-diverse and prestige-ranked.
    */
   async browseRegion(
-    regionName: string,
-    constraints: ConstraintBundle,
-    limit: number,
+    _regionName: string,
+    _constraints: ConstraintBundle,
+    _limit: number,
   ): Promise<readonly HybridCandidate[]> {
     // Placeholder: real implementation will:
     // 1. Query index for all wines from this region.

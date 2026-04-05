@@ -19,6 +19,8 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { CounterfactualReject } from '../../domain/response/model/counterfactual.js';
+import type { DecomposedSearchUseCase } from './decomposed-search.usecase.js';
+import type { DrinkingWindowUseCase } from '../drinking-window/drinking-window.usecase.js';
 
 /**
  * Incoming search request shape.
@@ -67,6 +69,10 @@ export interface SearchUseCaseDeps {
   readonly decisionEngine: DecisionEngine;
   readonly responseBuilder: ResponseBuilder;
   readonly mixedSolver: MixedSolver;
+  /** Decomposed search handler for "A vs B" queries (Epic 14). */
+  readonly decomposedSearch?: DecomposedSearchUseCase | undefined;
+  /** Drinking window predictor for wine aging insights (Epic 15). */
+  readonly drinkingWindow?: DrinkingWindowUseCase | undefined;
   /** Version strings for RFC-015 snapshot population. */
   readonly snapshotVersions?: SnapshotVersions | undefined;
 }
@@ -169,6 +175,7 @@ export class SearchUseCase {
     const counterfactuals = this.buildCounterfactuals(resolveResult, rankedResults);
 
     const response = this.deps.responseBuilder.build({
+      queryPlan: plan,
       decisionOutput,
       results,
       counterfactuals: counterfactuals.length > 0 ? counterfactuals : undefined,
@@ -433,33 +440,51 @@ export class SearchUseCase {
    * Maps ranked results to response-level ResultItems.
    */
   private mapRankedToResultItems(rankedResults: readonly RankedResult[]): readonly ResultItem[] {
-    return rankedResults.map((r) => ({
-      entity: {
-        entityId: r.entityId,
-        canonicalLabel: r.canonicalLabel,
-        type: 'wine',
-      },
-      relevanceScore: r.finalScore,
-      match: {
-        matchType: 'hybrid' as const,
-        scoreComponents: {
-          lexical: 0,
-          semantic: r.componentScores.semantic,
-          attribute: r.componentScores.attributeAlignment,
-          popularity: r.componentScores.popularity,
+    const currentYear = new Date().getFullYear();
+
+    return rankedResults.map((r) => {
+      // Build drinking window block if data is available
+      const drinkingWindow =
+        r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
+          ? {
+              drinkingWindowStart: r.drinkingWindowStart,
+              drinkingWindowEnd: r.drinkingWindowEnd,
+              currentlyDrinkable:
+                currentYear >= r.drinkingWindowStart &&
+                currentYear <= r.drinkingWindowEnd,
+              confidence: 'high' as const,
+            }
+          : undefined;
+
+      return {
+        entity: {
+          entityId: r.entityId,
+          canonicalLabel: r.canonicalLabel,
+          type: 'wine',
         },
-      },
-      constraints: {
-        matched: [],
-        unmet: [],
-        inferred: [],
-      },
-      uncertainty: {
-        uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
-        missingInfo: [],
-        approximationUsed: false,
-      },
-      evidenceItems: r.evidenceItems,
-    }));
+        relevanceScore: r.finalScore,
+        match: {
+          matchType: 'hybrid' as const,
+          scoreComponents: {
+            lexical: 0,
+            semantic: r.componentScores.semantic,
+            attribute: r.componentScores.attributeAlignment,
+            popularity: r.componentScores.popularity,
+          },
+        },
+        constraints: {
+          matched: [],
+          unmet: [],
+          inferred: [],
+        },
+        uncertainty: {
+          uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
+          missingInfo: [],
+          approximationUsed: false,
+        },
+        evidenceItems: r.evidenceItems,
+        ...(drinkingWindow !== undefined ? { drinkingWindow } : {}),
+      };
+    });
   }
 }

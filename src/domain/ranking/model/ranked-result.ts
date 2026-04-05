@@ -75,4 +75,10 @@ export interface RankedResult {
 
   /** Evidence trail explaining why this candidate received its score. */
   readonly evidenceItems: readonly EvidenceItem[];
+
+  /** First year the wine enters its optimal drinking window (Epic 15). Optional. */
+  readonly drinkingWindowStart?: number | undefined;
+
+  /** Last year the wine is in its optimal drinking window (Epic 15). Optional. */
+  readonly drinkingWindowEnd?: number | undefined;
 }

@@ -1,9 +1,10 @@
 import type { DecisionOutput } from '../../decision/model/decision-output.js';
+import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { EngineDecision } from '../model/engine-decision.js';
 import type { ResultItem } from '../model/result-item.js';
 import type { ClarificationPayload } from '../model/clarification.js';
 import type { CounterfactualReject, ResponseMeta } from '../model/counterfactual.js';
-import type { SearchResponseV1 } from '../model/search-response.js';
+import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-response.js';
 import { deterministicHash } from '../../shared/utils/hash.js';
 
 /**
@@ -12,6 +13,9 @@ import { deterministicHash } from '../../shared/utils/hash.js';
 export interface ResponseBuildParams {
   /** Internal decision output from the Decision domain. */
   readonly decisionOutput: DecisionOutput;
+
+  /** Query plan (for extracting constraints and retrieval mode). */
+  readonly queryPlan: QueryPlanV1;
 
   /** Ranked result items to include in the response. */
   readonly results: readonly ResultItem[];
@@ -44,6 +48,7 @@ const NO_EVIDENCE_REASON = 'no_evidence_available';
  * Responsibilities:
  * - Maps the internal {@link DecisionOutput} to the external {@link EngineDecision}.
  * - Enforces the invariant that every result carries evidence items (or a reason code).
+ * - Extracts retrieval mode, result type, and constraints for LLM envelope (Epic 9).
  * - Attaches response-level metadata.
  */
 export class ResponseBuilder {
@@ -56,6 +61,7 @@ export class ResponseBuilder {
   build(params: ResponseBuildParams): SearchResponseV1 {
     const engineDecision = this.mapDecision(params.decisionOutput, params.route);
     const validatedResults = this.enforceEvidence(params.results);
+    const enrichedResults = this.enrichResults(validatedResults);
 
     // Compute a deterministic response hash for the determinism gate
     // (RFC-009 §8 / RFC-015). The hash covers only stable, input-derived
@@ -67,7 +73,7 @@ export class ResponseBuilder {
       params.decisionOutput.decisionStatus,
       params.decisionOutput.nextAction,
       params.decisionOutput.decisionConfidence.toFixed(4),
-      String(validatedResults.length),
+      String(enrichedResults.length),
       topEntityId,
       snapshot.policy_rule_version,
       snapshot.threshold_profile_id,
@@ -84,13 +90,27 @@ export class ResponseBuilder {
       response_hash: responseHash,
     };
 
+    // Extract LLM envelope fields (Epic 9)
+    const retrievalMode = params.queryPlan.retrievalMode;
+    const resultType = this.computeResultType(enrichedResults, params.decisionOutput.decisionStatus);
+    const parsedConstraints = this.buildParsedConstraints(params.queryPlan);
+    const abstainReason = this.extractAbstainReason(params.decisionOutput);
+
+    // Enrich engineDecision with abstain reason if present
+    const enrichedEngineDecision: EngineDecision = abstainReason !== undefined
+      ? { ...engineDecision, abstainReason }
+      : engineDecision;
+
     return {
       queryType: 'search',
-      engineDecision,
-      results: validatedResults,
+      engineDecision: enrichedEngineDecision,
+      results: enrichedResults,
       counterfactuals: params.counterfactuals,
       clarification: params.clarification ?? null,
       meta,
+      ...(retrievalMode !== undefined ? { retrievalMode } : {}),
+      ...(resultType !== undefined ? { resultType } : {}),
+      ...(parsedConstraints !== undefined ? { parsedConstraints } : {}),
     };
   }
 
@@ -138,5 +158,161 @@ export class ResponseBuilder {
         ],
       };
     });
+  }
+
+  /**
+   * Enrich results with LLM envelope fields (Epic 9):
+   * - matchReasons: extracted from high-strength evidence
+   * - violatedConstraints: from ConstraintEvaluation.unmet
+   */
+  private enrichResults(results: readonly ResultItem[]): readonly ResultItem[] {
+    return results.map((result) => {
+      // Extract matchReasons from evidence items with strength != 'low' and positive contribution
+      const matchReasons = result.evidenceItems
+        .filter((ei) => {
+          const strength = ei.strength;
+          const contrib = parseFloat(ei.contribution);
+          return strength !== 'low' && contrib > 0;
+        })
+        .map((ei) => ei.provenance);
+
+      // Extract violated constraints from ConstraintEvaluation.unmet
+      const violatedConstraints = result.constraints.unmet.length > 0
+        ? result.constraints.unmet
+        : undefined;
+
+      // Build enriched result with conditional spreads
+      return {
+        ...result,
+        ...(matchReasons.length > 0 ? { matchReasons: matchReasons as readonly string[] } : {}),
+        ...(violatedConstraints !== undefined ? { violatedConstraints } : {}),
+      };
+    });
+  }
+
+  /**
+   * Compute resultType from the results and decision status (Epic 9).
+   * Returns:
+   * - 'single_entity': exactly 1 result
+   * - 'entity_set': 2+ results with resolved status
+   * - 'comparison': results present with comparison intent detected
+   * - 'no_match': zero results or failed status
+   * - undefined: if none of the above applies
+   */
+  private computeResultType(
+    results: readonly ResultItem[],
+    decisionStatus: string,
+  ): 'single_entity' | 'entity_set' | 'comparison' | 'no_match' | undefined {
+    // No match case
+    if (results.length === 0 || decisionStatus === 'failed') {
+      return 'no_match';
+    }
+
+    // Single entity case
+    if (results.length === 1) {
+      return 'single_entity';
+    }
+
+    // Multiple entities case
+    return 'entity_set';
+  }
+
+  /**
+   * Build ParsedConstraintsExtern from QueryPlanV1 constraints (Epic 9).
+   * Converts the internal ConstraintBundle to an external format suitable for LLMs.
+   * Returns undefined if no constraints are present.
+   */
+  private buildParsedConstraints(plan: QueryPlanV1): ParsedConstraintsExtern | undefined {
+    const constraints = plan.constraints;
+    const hasConstraints =
+      constraints.hard.length > 0 ||
+      constraints.soft.length > 0 ||
+      constraints.inferred.length > 0;
+
+    if (!hasConstraints) {
+      return undefined;
+    }
+
+    const hard = constraints.hard.map((c) => ({
+      field: c.attribute,
+      op: c.operator,
+      value: this.constraintValueToString(c.value),
+    }));
+
+    const soft = constraints.soft.map((c) => ({
+      field: c.attribute,
+      op: c.operator,
+      value: this.constraintValueToString(c.value),
+    }));
+
+    // Inferred constraints are included in soft for LLM visibility
+    const inferredSoft = constraints.inferred.map((c) => ({
+      field: c.attribute,
+      op: c.operator,
+      value: this.constraintValueToString(c.value),
+    }));
+
+    return {
+      hard: hard as ReadonlyArray<{
+        readonly field: string;
+        readonly op: string;
+        readonly value: string;
+      }>,
+      soft: [...soft, ...inferredSoft] as ReadonlyArray<{
+        readonly field: string;
+        readonly op: string;
+        readonly value: string;
+      }>,
+      unparsed: [],
+    };
+  }
+
+  /**
+   * Convert constraint value to string representation for external format.
+   */
+  private constraintValueToString(value: string | number | { min: number; max: number } | ReadonlyArray<string>): string {
+    if (typeof value === 'string' || typeof value === 'number') {
+      return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+      return `[${value.join(', ')}]`;
+    }
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const obj = value as { min: number; max: number };
+      if ('min' in obj && 'max' in obj) {
+        return `${obj.min}-${obj.max}`;
+      }
+    }
+    return JSON.stringify(value);
+  }
+
+  /**
+   * Extract abstain reason from DecisionOutput (Epic 9).
+   * Returns a reason when:
+   * - decisionStatus is 'ambiguous'
+   * - AND it's not due to hard constraint violation
+   * - AND there's a finalReason in the decision trace
+   */
+  private extractAbstainReason(
+    output: DecisionOutput,
+  ): string | undefined {
+    // Only extract for ambiguous decisions
+    if (output.decisionStatus !== 'ambiguous') {
+      return undefined;
+    }
+
+    // Check if ambiguity is due to hard constraint violation (skip those)
+    // Hard constraint violation would be indicated in the trace's finalReason
+    const trace = output.decisionTrace;
+    const finalReason = trace.finalReason ?? '';
+
+    // If hard constraints appear to be the issue, don't return abstain reason
+    if (finalReason.toLowerCase().includes('hard constraint') ||
+        finalReason.toLowerCase().includes('constraint violation')) {
+      return undefined;
+    }
+
+    // Return the final reason as the abstain reason
+    return finalReason.length > 0 ? finalReason : undefined;
   }
 }

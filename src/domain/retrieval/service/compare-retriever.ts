@@ -56,9 +56,9 @@ export class CompareRetriever {
    * @throws {Error} If anchor lacks sufficient attribute data for comparison.
    */
   async compareToAnchor(
-    anchor: HybridCandidate,
-    constraints: ConstraintBundle,
-    limit: number,
+    _anchor: HybridCandidate,
+    _constraints: ConstraintBundle,
+    _limit: number,
   ): Promise<readonly ComparisonCandidate[]> {
     // Placeholder: real implementation will:
     // 1. Extract anchor attributes (body, tannin, region, price, style, grapes).

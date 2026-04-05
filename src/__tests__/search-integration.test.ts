@@ -359,6 +359,7 @@ describe('Search Pipeline Integration', () => {
       expect(decisionOutput.chosenEntityId).toBe(ENTITY_OPUS_ONE);
 
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: buildResultItems([ENTITY_OPUS_ONE]),
         requestId: nanoid(),
@@ -412,6 +413,7 @@ describe('Search Pipeline Integration', () => {
 
       const topEntityIds = fusedCandidates.slice(0, 3).map((c) => c.entityId);
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: buildResultItems(topEntityIds),
         requestId: nanoid(),
@@ -456,6 +458,7 @@ describe('Search Pipeline Integration', () => {
 
       const clarificationCandidates = [ENTITY_MARGAUX, createEntityId('chateau-margaux-2016')];
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: [],
         clarification: {
@@ -529,6 +532,7 @@ describe('Search Pipeline Integration', () => {
 
       const similarWines = [ENTITY_RIDGE, ENTITY_HARLAN, ENTITY_SCREAMING_EAGLE];
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: buildResultItems(similarWines),
         requestId: nanoid(),
@@ -561,6 +565,7 @@ describe('Search Pipeline Integration', () => {
 
       const requestId = 'test-req-' + nanoid();
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: [],
         requestId,
@@ -588,6 +593,7 @@ describe('Search Pipeline Integration', () => {
       );
 
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: [],
         requestId: nanoid(),
@@ -628,6 +634,7 @@ describe('Search Pipeline Integration', () => {
       ];
 
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: resultsWithMissingEvidence,
         requestId: nanoid(),
@@ -657,6 +664,7 @@ describe('Search Pipeline Integration', () => {
       );
 
       const response = responseBuilder.build({
+        queryPlan: plan,
         decisionOutput,
         results: [],
         requestId: nanoid(),

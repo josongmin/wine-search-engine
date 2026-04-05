@@ -16,10 +16,9 @@
  */
 
 import 'dotenv/config';
-import fs from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { EmbeddingServicePort } from '../src/domain/retrieval/port/embedding-service.port.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -46,24 +45,12 @@ interface Triplet {
   hard_negative: string;
 }
 
-interface TripletCandidate {
-  entity_id: string;
-  type: 'positive' | 'hard_negative';
-  score?: number; // For ranking hard negatives
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INPUT_FILE = 'data/golden-queries-bronze.jsonl';
 const OUTPUT_FILE = 'data/triplets-train.jsonl';
-
-// Wine document database for attribute similarity (mock corpus)
-// In production, would load from PostgreSQL/Vespa
-const WINE_DATABASE: Record<string, Record<string, unknown>> = {
-  // Populated from seed data during generation
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
