@@ -119,6 +119,143 @@ export class Transliterator {
   ]);
 
   /**
+   * Spanish to Korean transliteration rules.
+   * Ordered longest-first for greedy matching.
+   */
+  private static readonly ES_KO_RULES: ReadonlyMap<string, string> = new Map([
+    // Wine estate / region names (exceptions-first, then patterns)
+    ['rioja', '리오하'],
+    ['ribera', '리베라'],
+    ['rueda', '루에다'],
+    ['penedes', '페네데스'],
+    ['priorat', '프리오라트'],
+    ['cava', '카바'],
+    ['jerez', '헤레스'],
+    ['málaga', '말라가'],
+    ['malaga', '말라가'],
+    ['galicia', '갈리시아'],
+    ['toro', '토로'],
+    ['jumilla', '후미야'],
+    ['bierzo', '비에르소'],
+    ['duero', '두에로'],
+    // Multi-char patterns
+    ['ll', '이'],
+    ['ñ', '냐'],
+    ['ch', '츠'],
+    ['rr', '르'],
+    ['gu', '구'],
+    ['qu', '크'],
+    ['ue', '웨'],
+    ['ie', '예'],
+    ['cion', '시온'],
+    ['tion', '시온'],
+    ['ez', '에스'],
+    ['ia', '이아'],
+    ['io', '이오'],
+    // Single characters
+    ['a', '아'],
+    ['b', '브'],
+    ['c', '크'],
+    ['d', '드'],
+    ['e', '에'],
+    ['é', '에'],
+    ['f', '프'],
+    ['g', '그'],
+    ['h', ''],
+    ['i', '이'],
+    ['j', '흐'],
+    ['k', '크'],
+    ['l', '르'],
+    ['m', '므'],
+    ['n', '느'],
+    ['o', '오'],
+    ['ó', '오'],
+    ['p', '프'],
+    ['q', '크'],
+    ['r', '르'],
+    ['s', '스'],
+    ['t', '트'],
+    ['u', '우'],
+    ['ú', '우'],
+    ['v', '브'],
+    ['w', '우'],
+    ['x', '흐스'],
+    ['y', '이'],
+    ['z', '스'],
+  ]);
+
+  /**
+   * English to Korean transliteration rules for wine domain terms.
+   * Primarily exception-based; fallback to FR rules for phonemes.
+   */
+  private static readonly EN_KO_RULES: ReadonlyMap<string, string> = new Map([
+    // Common English wine terms / regions
+    ['napa', '나파'],
+    ['sonoma', '소노마'],
+    ['valley', '밸리'],
+    ['creek', '크릭'],
+    ['estate', '이스테이트'],
+    ['winery', '와이너리'],
+    ['cellar', '셀러'],
+    ['ridge', '릿지'],
+    ['stag', '스태그'],
+    ['opus', '오퍼스'],
+    ['harvest', '하베스트'],
+    ['vintage', '빈티지'],
+    ['reserve', '리저브'],
+    ['barrel', '배럴'],
+    ['vineyard', '빈야드'],
+    ['hills', '힐스'],
+    ['acres', '에이커스'],
+    // Multi-char English patterns
+    ['th', '스'],
+    ['wh', '우'],
+    ['ph', '프'],
+    ['gh', ''],
+    ['sh', '시'],
+    ['ch', '츠'],
+    ['ck', '크'],
+    ['ng', '이'],
+    ['tion', '션'],
+    ['tion', '션'],
+    ['igh', '아이'],
+    ['ou', '아우'],
+    ['ow', '아우'],
+    ['oo', '우'],
+    ['ee', '이'],
+    ['ea', '이'],
+    ['ai', '에이'],
+    ['ay', '에이'],
+    // Single characters
+    ['a', '아'],
+    ['b', '브'],
+    ['c', '크'],
+    ['d', '드'],
+    ['e', '에'],
+    ['f', '프'],
+    ['g', '그'],
+    ['h', ''],
+    ['i', '이'],
+    ['j', '주'],
+    ['k', '크'],
+    ['l', '르'],
+    ['m', '므'],
+    ['n', '느'],
+    ['o', '오'],
+    ['p', '프'],
+    ['q', '크'],
+    ['r', '르'],
+    ['s', '스'],
+    ['t', '트'],
+    ['u', '우'],
+    ['v', '브'],
+    ['w', '우'],
+    ['x', '크스'],
+    ['y', '이'],
+    ['z', '즈'],
+  ]);
+
+  /**
    * Italian to Korean transliteration rules.
    */
   private static readonly IT_KO_RULES: ReadonlyMap<string, string> = new Map([
@@ -218,15 +355,75 @@ export class Transliterator {
     ['ornellaia', '오르넬라이아'],
     ['antinori', '안티노리'],
     ['gaja', '가야'],
-    // New World
+    // New World — USA
     ['screaming eagle', '스크리밍 이글'],
+    ['harlan estate', '할란 이스테이트'],
+    ['ridge monte bello', '릿지 몬테 벨로'],
+    ['stag\'s leap wine cellars', '스탁스 립 와인 셀러스'],
+    ['caymus', '케이머스'],
+    ['duckhorn', '덕혼'],
+    ['silver oak', '실버 오크'],
+    ['jordan', '조던'],
+    ['beringer', '베린저'],
+    // New World — Australia/NZ
     ['penfolds', '펜폴즈'],
     ['grange', '그랜지'],
-    // Spanish
-    ['rioja', '리오하'],
-    ['tempranillo', '템프라니요'],
+    ['henschke', '헨시키'],
+    ['cloudy bay', '클라우디 베이'],
+    ['villa maria', '빌라 마리아'],
+    ['leeuwin estate', '르윈 이스테이트'],
+    // New World — Argentina
+    ['catena zapata', '카테나 자파타'],
+    ['achaval ferrer', '아차발 페레르'],
+    ['zuccardi', '수카르디'],
+    ['clos de los siete', '클로 드 로스 시에테'],
+    // New World — Chile
+    ['concha y toro', '콘차 이 토로'],
+    ['almaviva', '알마비바'],
+    ['don melchor', '돈 멜초르'],
+    ['clos apalta', '클로스 아팔타'],
+    // South Africa
+    ['kanonkop', '카논코프'],
+    ['meerlust', '메르루스트'],
+    // Spanish estates
     ['vega sicilia', '베가 시실리아'],
+    ['tempranillo', '템프라니요'],
+    ['rioja', '리오하'],
     ['ribera del duero', '리베라 델 두에로'],
+    ['alvaro palacios', '알바로 팔라시오스'],
+    ['torres', '토레스'],
+    ['pingus', '핑구스'],
+    // German
+    ['mosel', '모젤'],
+    ['rheingau', '라인가우'],
+    ['riesling', '리슬링'],
+    ['spätlese', '슈페트레제'],
+    ['auslese', '아우스레제'],
+    ['trockenbeerenauslese', '트로켄베렌아우스레제'],
+    ['egon müller', '에곤 뮬러'],
+    ['jj prüm', '요한 요제프 프룸'],
+    // Austrian
+    ['grüner veltliner', '그뤼너 펠트리너'],
+    ['blaufränkisch', '블라우프랜키시'],
+    // Champagne houses (supplement)
+    ['gosset', '고쎄'],
+    ['pol roger', '폴 로저'],
+    ['deutz', '도츠'],
+    ['drappier', '드라피에'],
+    // Burgundy producers
+    ['domaine de la romanée-conti', '도멘 드 라 로마네 콩티'],
+    ['romanée-conti', '로마네 콩티'],
+    ['romanee-conti', '로마네 콩티'],
+    ['leroy', '르루아'],
+    ['armand rousseau', '아르망 루소'],
+    ['drc', '디알시'],
+    ['leflaive', '르플레브'],
+    ['ramonet', '라모네'],
+    // Rhône producers
+    ['guigal', '기갈'],
+    ['chapoutier', '샤푸티에'],
+    ['jaboulet', '자불레'],
+    ['chave', '샤브'],
   ]);
 
   /**
@@ -350,9 +547,11 @@ export class Transliterator {
     switch (lang) {
       case 'it':
         return Transliterator.IT_KO_RULES;
-      case 'fr':
       case 'es':
+        return Transliterator.ES_KO_RULES;
       case 'en':
+        return Transliterator.EN_KO_RULES;
+      case 'fr':
       default:
         return Transliterator.FR_KO_RULES;
     }

@@ -11,7 +11,7 @@ export const SearchContextSchema = z.object({
 
 export const SessionContextSchema = z.object({
   sessionId: z.string().min(1),
-  previousEntities: z.array(z.string()),
+  previousEntities: z.array(z.string().max(256)).max(50),
 }).strict();
 
 export const QueryBudgetSchema = z.object({
@@ -27,7 +27,7 @@ export const SearchOptionsSchema = z.object({
 }).strict();
 
 export const SearchRequestSchema = z.object({
-  query: z.string().min(1, 'query must be a non-empty string'),
+  query: z.string().min(1, 'query must be a non-empty string').max(2000),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),
@@ -51,7 +51,7 @@ export const DecisionSnapshotSchema = z.object({
 }).strict();
 
 export const ReplayRequestSchema = z.object({
-  query: z.string().min(1, 'query must be a non-empty string'),
+  query: z.string().min(1, 'query must be a non-empty string').max(2000),
   decision_snapshot: DecisionSnapshotSchema,
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
@@ -66,7 +66,7 @@ export type ReplayRequestBody = z.infer<typeof ReplayRequestSchema>;
 // ────────────────────────────────────────────────────────────────
 
 export const InterpretRequestSchema = z.object({
-  query: z.string().min(1, 'query must be a non-empty string'),
+  query: z.string().min(1, 'query must be a non-empty string').max(2000),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),
@@ -79,7 +79,7 @@ export type InterpretRequestBody = z.infer<typeof InterpretRequestSchema>;
 // ────────────────────────────────────────────────────────────────
 
 export const ResolveRequestSchema = z.object({
-  query: z.string().min(1, 'query must be a non-empty string'),
+  query: z.string().min(1, 'query must be a non-empty string').max(2000),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
 }).strict();
@@ -91,7 +91,7 @@ export type ResolveRequestBody = z.infer<typeof ResolveRequestSchema>;
 // ────────────────────────────────────────────────────────────────
 
 export const HybridRequestSchema = z.object({
-  query: z.string().min(1, 'query must be a non-empty string'),
+  query: z.string().min(1, 'query must be a non-empty string').max(2000),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),

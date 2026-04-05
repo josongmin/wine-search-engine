@@ -22,3 +22,17 @@ services:
       interval: 3s
       timeout: 3s
       retries: 5
+
+  vespa:
+    image: vespaengine/vespa:8
+    ports:
+      - "18080:8080"   # query/feed API (test port, avoids conflict with prod 8080)
+      - "19071:19071"  # config server
+    tmpfs:
+      - /opt/vespa/var
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:19071/state/v1/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 90s

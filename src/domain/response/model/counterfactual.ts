@@ -45,4 +45,14 @@ export interface ResponseMeta {
 
   /** Optional debug reference strings for pipeline tracing. */
   readonly debugRefs?: readonly string[] | undefined;
+
+  /**
+   * Deterministic 16-hex-char SHA-256 hash of key response fields
+   * (decision_status, next_action, confidence, top entity, snapshot versions).
+   *
+   * Used by the determinism gate (RFC-009 §8 / RFC-015) to validate that
+   * a replay with the same DecisionSnapshot produces an equivalent decision.
+   * Consumers may compare this value across replay runs to detect drift.
+   */
+  readonly response_hash?: string | undefined;
 }

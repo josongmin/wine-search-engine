@@ -1,6 +1,8 @@
 import { config } from './config/env.js';
 import { createContainer } from './config/container.js';
 import { createServer } from './interface/http/server.js';
+import { closePgPool } from './infrastructure/db/pg-pool.js';
+import { closeRedisClient } from './infrastructure/db/redis-client.js';
 
 /**
  * Wine Intelligence Engine — main entry point.
@@ -33,6 +35,9 @@ async function main(): Promise<void> {
     server.log.info(`Received ${signal}, shutting down gracefully...`);
     try {
       await server.close();
+      // Close infrastructure connections
+      await closePgPool();
+      await closeRedisClient();
       server.log.info('Server closed successfully.');
       process.exit(0);
     } catch (err) {

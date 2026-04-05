@@ -7,16 +7,18 @@ import type { Ranker } from '../../domain/ranking/service/ranker.js';
 import type { DecisionEngine } from '../../domain/decision/service/decision-engine.js';
 import type { ResponseBuilder } from '../../domain/response/service/response-builder.js';
 import type { MixedSolver } from '../../domain/mixed/service/mixed-solver.js';
-import type { DecisionInput } from '../../domain/decision/model/decision-input.js';
-import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import type { DecisionInput, EvidenceSummary } from '../../domain/decision/model/decision-input.js';
+import type { DecisionSnapshot, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
+import { computeConformalSetSize } from '../../domain/resolver/service/resolver.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CounterfactualReject } from '../../domain/response/model/counterfactual.js';
 
 /**
  * Incoming search request shape.
@@ -132,28 +134,30 @@ export class SearchUseCase {
         const mixedResult = await this.deps.mixedSolver.solve(plan);
         rankedResults = mixedResult.rankedResults;
         // Build a synthetic resolve result for the mixed path
+        const mixedDecisionC = mixedResult.anchor.anchorConfidence;
         resolveResult = {
           status: rankedResults.length > 0 ? 'resolved' : 'failed',
           candidates: [],
-          decisionConfidenceC: mixedResult.anchor.anchorConfidence,
+          decisionConfidenceC: mixedDecisionC,
           decisionTrace: {
             queryClass: plan.queryClass,
-            top1CalibratedScore: mixedResult.anchor.anchorConfidence,
+            top1CalibratedScore: mixedDecisionC,
             top2CalibratedScore: 0,
-            calibratedGap: mixedResult.anchor.anchorConfidence,
-            decisionConfidenceC: mixedResult.anchor.anchorConfidence,
+            calibratedGap: mixedDecisionC,
+            decisionConfidenceC: mixedDecisionC,
             ambiguityDetected: false,
             ambiguityTypes: [],
             appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
             outcomeReasonCodes: ['MIXED_ROUTE'],
           },
+          conformalSetSize: computeConformalSetSize(mixedDecisionC, 0.1, rankedResults.length),
         };
         break;
       }
     }
 
-    // Step 4: Build DecisionInput
-    const decisionInput = this.buildDecisionInput(plan, resolveResult);
+    // Step 4: Build DecisionInput (wire ranking signals + evidence per RFC-007)
+    const decisionInput = this.buildDecisionInput(plan, resolveResult, rankedResults);
 
     // Step 5: Build snapshot & run DecisionEngine
     const snapshot = this.buildSnapshot(plan);
@@ -162,10 +166,12 @@ export class SearchUseCase {
     // Step 6: Build response
     const queryTimeMs = Date.now() - startTime;
     const results = this.mapRankedToResultItems(rankedResults);
+    const counterfactuals = this.buildCounterfactuals(resolveResult, rankedResults);
 
     const response = this.deps.responseBuilder.build({
       decisionOutput,
       results,
+      counterfactuals: counterfactuals.length > 0 ? counterfactuals : undefined,
       requestId,
       queryTimeMs,
       route: effectiveRoute,
@@ -255,23 +261,71 @@ export class SearchUseCase {
         appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['HYBRID_ROUTE'],
       },
+      conformalSetSize: computeConformalSetSize(hybridConfidence, 0.1, rankedResults.length),
     };
 
     return { resolveResult, rankedResults };
   }
 
   /**
-   * Assembles DecisionInput from plan and resolver result.
+   * Assembles DecisionInput from plan, resolver result, and optional ranking
+   * results.  Wires ranking signals, evidence summary, and evidence items into
+   * the decision input so the Decision Engine can use them (RFC-007 §4).
+   *
+   * When rankedResults are present the top candidate's component scores are
+   * mapped to a SignalSet, and its pre-computed evidence items are forwarded.
+   * identityEvidencePresent is true whenever there is at least one ranked
+   * result or the resolver found a top entity.
    */
   private buildDecisionInput(
     plan: QueryPlanV1,
     resolverResult: EntityResolveResult,
+    rankedResults?: readonly RankedResult[],
   ): DecisionInput {
+    const topResult = rankedResults?.[0];
+
+    // Build ranking signals from the top ranked candidate (RFC-007).
+    const rankingSignals: SignalSet | undefined =
+      topResult !== undefined
+        ? {
+            entity_integrity_score: topResult.componentScores.entityIntegrity,
+            hard_constraint_pass: topResult.componentScores.hardConstraintPass ? 1 : 0,
+            soft_constraint_score: topResult.componentScores.softConstraint,
+            semantic_relevance_score: topResult.componentScores.semantic,
+            preference_alignment_score: topResult.componentScores.preferenceAlignment,
+            popularity_score: topResult.componentScores.popularity,
+            availability_score: topResult.componentScores.availability,
+            uncertainty_penalty: topResult.componentScores.uncertaintyPenalty,
+          }
+        : undefined;
+
+    // Identity evidence is present when the ranking pipeline returned results
+    // or when the resolver found a top entity (entity-route without ranking).
+    const identityEvidencePresent =
+      (rankedResults !== undefined && rankedResults.length > 0) ||
+      resolverResult.topEntity !== undefined;
+
+    const evidenceSummary: EvidenceSummary = {
+      identityEvidencePresent,
+      ...(topResult !== undefined
+        ? {
+            constraintEvidencePresent: topResult.componentScores.hardConstraintPass,
+            evidenceRefCount: topResult.evidenceItems.length,
+          }
+        : {}),
+    };
+
     return {
       queryPlan: plan,
       resolverResult,
       policy: plan.policy,
       uncertainty: plan.uncertainty,
+      ...(rankingSignals !== undefined ? { rankingSignals } : {}),
+      evidenceSummary,
+      ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
+      ...(resolverResult.conformalSetSize !== undefined
+        ? { conformalSetSize: resolverResult.conformalSetSize }
+        : {}),
     };
   }
 
@@ -279,16 +333,94 @@ export class SearchUseCase {
    * Builds a DecisionSnapshot from the current plan state.
    * Populates model_versions and index_versions from injected snapshotVersions
    * per RFC-015, which requires actual version strings (not empty objects).
+   *
+   * If snapshotVersions were not injected, or if both version maps are empty,
+   * the snapshot includes a nondeterminism_notes string to signal that version
+   * tracking is incomplete and reproducibility cannot be guaranteed.
    */
   private buildSnapshot(plan: QueryPlanV1): DecisionSnapshot {
+    const versions = this.deps.snapshotVersions;
+    const modelVersions = versions?.modelVersions ?? {};
+    const indexVersions = versions?.indexVersions ?? {};
+
+    const versionsAbsent = versions === undefined;
+    const bothEmpty =
+      Object.keys(modelVersions).length === 0 && Object.keys(indexVersions).length === 0;
+
+    const hasInconsistency = versionsAbsent || bothEmpty;
+    const nondeterminismNote = versionsAbsent
+      ? 'snapshotVersions not injected; model_versions and index_versions are empty — snapshot reproducibility cannot be guaranteed'
+      : bothEmpty
+        ? 'snapshotVersions injected but both modelVersions and indexVersions are empty — snapshot reproducibility cannot be guaranteed'
+        : undefined;
+
     return {
-      model_versions: this.deps.snapshotVersions?.modelVersions ?? {},
-      index_versions: this.deps.snapshotVersions?.indexVersions ?? {},
+      model_versions: modelVersions,
+      index_versions: indexVersions,
       policy_rule_version: plan.policyRuleVersion,
       threshold_profile_id: plan.thresholdProfileId,
       planner_version: plan.plannerVersion,
       feature_flags: {},
+      ...(hasInconsistency && nondeterminismNote !== undefined
+        ? { nondeterminism_notes: nondeterminismNote }
+        : {}),
     };
+  }
+
+  /**
+   * Builds counterfactual rejection records per RFC-008 §5.
+   *
+   * Surfaces two classes of rejected candidates:
+   *   1. Resolver candidates ranked below the top entity (entity route) —
+   *      shows why each alternative was not selected.
+   *   2. Ranked results beyond the top-5 window (hybrid route) —
+   *      shows lower-scoring candidates that were considered but not returned.
+   *
+   * This gives API consumers full transparency about what the engine evaluated
+   * and why it was not chosen, enabling audit and debugging.
+   */
+  private buildCounterfactuals(
+    resolverResult: EntityResolveResult,
+    rankedResults: readonly RankedResult[],
+    topResultWindow: number = 5,
+  ): readonly CounterfactualReject[] {
+    const counterfactuals: CounterfactualReject[] = [];
+    const topEntityId = resolverResult.topEntity?.entityId;
+
+    // Class 1: Resolver candidates that scored below the top entity
+    if (resolverResult.candidates.length > 1) {
+      for (const candidate of resolverResult.candidates) {
+        if (candidate.entityId === topEntityId) continue;
+        counterfactuals.push({
+          entityId: candidate.entityId,
+          canonicalLabel: candidate.canonicalLabel,
+          rejectedReason:
+            `Calibrated score ${candidate.calibratedScore.toFixed(3)} below top candidate` +
+            (topEntityId !== undefined
+              ? ` (rank ${candidate.rank} of ${resolverResult.candidates.length})`
+              : ''),
+          ...(candidate.evidenceRefs[0] !== undefined
+            ? { evidenceRef: candidate.evidenceRefs[0] }
+            : {}),
+        });
+      }
+    }
+
+    // Class 2: Ranked results beyond the top-N window
+    if (rankedResults.length > topResultWindow) {
+      for (const result of rankedResults.slice(topResultWindow)) {
+        counterfactuals.push({
+          entityId: result.entityId,
+          canonicalLabel: result.canonicalLabel,
+          rejectedReason:
+            `Lower ranking (rank ${result.rank}/${rankedResults.length}); ` +
+            `final_score=${result.finalScore.toFixed(3)}, ` +
+            `hard_constraint_pass=${String(result.componentScores.hardConstraintPass)}`,
+        });
+      }
+    }
+
+    return counterfactuals;
   }
 
   /**
@@ -298,7 +430,7 @@ export class SearchUseCase {
     return rankedResults.map((r) => ({
       entity: {
         entityId: r.entityId,
-        canonicalLabel: '',
+        canonicalLabel: r.canonicalLabel,
         type: 'wine',
       },
       relevanceScore: r.finalScore,

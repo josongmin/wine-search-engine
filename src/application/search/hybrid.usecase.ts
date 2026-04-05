@@ -9,9 +9,11 @@ import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
+import { computeConformalSetSize } from '../../domain/resolver/service/resolver.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
+import type { SnapshotVersions } from './search.usecase.js';
 
 /**
  * Hybrid search request shape.
@@ -46,6 +48,7 @@ export interface HybridUseCaseDeps {
   readonly ranker: Ranker;
   readonly decisionEngine: DecisionEngine;
   readonly responseBuilder: ResponseBuilder;
+  readonly snapshotVersions?: SnapshotVersions | undefined;
 }
 
 /**
@@ -106,21 +109,26 @@ export class HybridUseCase {
     const rankedResults = await this.deps.ranker.rank(rankingInput);
 
     // Build a synthetic resolve result for the hybrid path
+    const top1Score = rankedResults[0]?.finalScore ?? 0;
+    const top2Score = rankedResults[1]?.finalScore ?? 0;
+    const hybridDecisionC = Math.max(0, Math.min(1, top1Score));
+    const hybridGap = Math.max(0, Math.min(1, top1Score - top2Score));
     const resolveResult: EntityResolveResult = {
       status: rankedResults.length > 0 ? 'resolved' : 'failed',
       candidates: [],
-      decisionConfidenceC: rankedResults.length > 0 ? 0.5 : 0,
+      decisionConfidenceC: hybridDecisionC,
       decisionTrace: {
         queryClass: plan.queryClass,
-        top1CalibratedScore: 0,
-        top2CalibratedScore: 0,
-        calibratedGap: 0,
-        decisionConfidenceC: rankedResults.length > 0 ? 0.5 : 0,
+        top1CalibratedScore: hybridDecisionC,
+        top2CalibratedScore: Math.max(0, Math.min(1, top2Score)),
+        calibratedGap: hybridGap,
+        decisionConfidenceC: hybridDecisionC,
         ambiguityDetected: false,
         ambiguityTypes: [],
         appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['HYBRID_ONLY_ROUTE'],
       },
+      conformalSetSize: computeConformalSetSize(hybridDecisionC, 0.1, rankedResults.length),
     };
 
     // Build decision input
@@ -133,8 +141,8 @@ export class HybridUseCase {
 
     // Build snapshot and decide
     const snapshot: DecisionSnapshot = {
-      model_versions: {},
-      index_versions: {},
+      model_versions: this.deps.snapshotVersions?.modelVersions ?? {},
+      index_versions: this.deps.snapshotVersions?.indexVersions ?? {},
       policy_rule_version: plan.policyRuleVersion,
       threshold_profile_id: plan.thresholdProfileId,
       planner_version: plan.plannerVersion,
@@ -163,7 +171,7 @@ export class HybridUseCase {
     return rankedResults.map((r) => ({
       entity: {
         entityId: r.entityId,
-        canonicalLabel: '',
+        canonicalLabel: r.canonicalLabel,
         type: 'wine',
       },
       relevanceScore: r.finalScore,

@@ -22,6 +22,7 @@ const RERANK_THRESHOLD = 5;
  */
 interface ScoredEntry {
   readonly entityId: EntityId;
+  readonly canonicalLabel: string;
   readonly componentScores: ComponentScores;
   readonly finalScore: number;
 }
@@ -103,6 +104,7 @@ export class Ranker {
 
       scored.push({
         entityId: candidate.entityId,
+        canonicalLabel: candidate.canonicalLabel ?? '',
         componentScores,
         finalScore,
       });
@@ -136,6 +138,7 @@ export class Ranker {
 
       return {
         entityId: entry.entityId,
+        canonicalLabel: entry.canonicalLabel,
         finalScore: entry.finalScore,
         rank: index + 1,
         componentScores: entry.componentScores,

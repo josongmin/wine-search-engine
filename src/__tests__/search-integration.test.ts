@@ -22,11 +22,15 @@ import type { SearchIndexPort, SparseHit, DenseHit } from '../domain/retrieval/p
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { RetrievalDocument } from '../domain/retrieval/model/retrieval-document.js';
 import type { EntityResolveResult } from '../domain/resolver/model/resolve-result.js';
+import { computeConformalSetSize } from '../domain/resolver/service/resolver.js';
 import type { DecisionInput } from '../domain/decision/model/decision-input.js';
 import type { DecisionSnapshot } from '../domain/shared/types/index.js';
 import type { ResultItem } from '../domain/response/model/result-item.js';
 import { createEntityId } from '../domain/shared/types/index.js';
 import { nanoid } from 'nanoid';
+import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
+import type { MappingTablePort } from '../domain/attribute/port/mapping-table.port.js';
+import type { NLMapping } from '../domain/attribute/model/nl-mapping.js';
 
 // ── Wine entity fixtures ─────────────────────────────────────────────────────
 
@@ -74,6 +78,19 @@ class StubAmbiguityDictionary implements AmbiguityDictionary {
       return { types: ['polysemous_name'], severity: 'medium' };
     }
     return null;
+  }
+}
+
+/** Stub MappingTablePort: returns null (NLMapper falls back to built-ins). */
+class StubMappingTable implements MappingTablePort {
+  async findMapping(_phrase: string, _version?: string): Promise<NLMapping | null> {
+    return null;
+  }
+  async findMappingsByAttribute(_attribute: string): Promise<readonly NLMapping[]> {
+    return [];
+  }
+  async getCurrentVersion(): Promise<string> {
+    return 'v1.0';
   }
 }
 
@@ -233,6 +250,7 @@ function buildResolverResult(
       appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
       outcomeReasonCodes: [],
     },
+    conformalSetSize: computeConformalSetSize(C, 0.1, 1),
   };
 }
 
@@ -281,7 +299,8 @@ function buildContainer() {
 
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
-  const planner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder);
+  const nlMapper = new NLMapper(new StubMappingTable());
+  const planner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper);
   const fusionService = new FusionService();
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();

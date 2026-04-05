@@ -58,4 +58,16 @@ export interface FeedbackStore {
    * @returns Aggregated click, purchase, and session-success counts.
    */
   getAggregatedStats(entityId: EntityId): Promise<AggregatedFeedbackStats>;
+
+  /**
+   * Deletes all feedback signals older than the given cutoff date (RFC-010 §8).
+   *
+   * Used by the {@link FeedbackTTLEnforcer} to enforce per-type data retention
+   * policies. Infrastructure adapters should execute this as a single bulk
+   * delete against the backing store.
+   *
+   * @param olderThan - Delete signals with `timestamp < olderThan`.
+   * @returns The number of signals deleted.
+   */
+  pruneExpiredFeedback(olderThan: Date): Promise<number>;
 }

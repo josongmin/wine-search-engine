@@ -42,4 +42,14 @@ export interface EntityResolveResult {
 
   /** Full diagnostic trace of how the resolver reached its conclusion. */
   readonly decisionTrace: ResolverDecisionTrace;
+
+  /**
+   * Conformal prediction set size derived from the calibrated confidence C
+   * and significance level alpha.
+   *
+   * - 1: C >= (1 - alpha)     — tight single-candidate prediction set
+   * - 2: C >= (1 - 2*alpha)   — two-candidate prediction set
+   * - K: abstain              — full candidate set (K = number of candidates)
+   */
+  readonly conformalSetSize: number;
 }

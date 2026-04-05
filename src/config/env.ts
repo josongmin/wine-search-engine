@@ -33,6 +33,9 @@ const envSchema = z.object({
   // Reranker Service
   RERANKER_SERVICE_URL: z.string().url().default('http://localhost:8082'),
 
+  // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
+  LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
+
   // Kill Switches
   KILL_SWITCH_ALIAS_OVERLAY: z
     .enum(['true', 'false'])

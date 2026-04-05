@@ -215,7 +215,7 @@ describe('SearchResponseV1 Schema Contract', () => {
     expect(meta['version']).toBe('1.0.0');
   });
 
-  it('every result has at least one evidenceItem', async () => {
+  it('every result has at least one evidenceItem with real (non-synthetic) evidence', async () => {
     const { statusCode, json } = await searchPost({
       query: '풀바디 레드 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
@@ -224,10 +224,18 @@ describe('SearchResponseV1 Schema Contract', () => {
     expect(statusCode).toBe(200);
     const body = json as Record<string, unknown>;
     const results = body['results'] as unknown[];
+    expect(results.length).toBeGreaterThan(0);
     for (const result of results) {
       const r = result as Record<string, unknown>;
       const evidenceItems = r['evidenceItems'] as unknown[];
       expect(evidenceItems.length).toBeGreaterThan(0);
+
+      // Filter out synthetic fallback evidence (type === 'no_evidence_available')
+      const realEvidence = evidenceItems.filter(
+        (e) => (e as Record<string, unknown>)['type'] !== 'no_evidence_available'
+      );
+      // At least some REAL evidence must exist
+      expect(realEvidence.length).toBeGreaterThan(0);
     }
   });
 
@@ -345,6 +353,8 @@ describe('Error Response Schema Contract (RFC-014 §5)', () => {
     const error = body['error'] as Record<string, unknown>;
     expect(error['code']).toBe('SNAPSHOT_MISMATCH');
     expect(error['request_id']).toBeTruthy();
+    // SNAPSHOT_MISMATCH errors must not be retryable (fail-closed per RFC-014 §4.3)
+    expect(error['retryable']).toBe(false);
   });
 });
 

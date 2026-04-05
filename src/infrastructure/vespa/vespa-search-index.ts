@@ -65,6 +65,10 @@ function extractMatchedFields(fields: Record<string, unknown>): readonly string[
       'aliases_identity_safe',
       'aliases_noisy_recall',
       'producer',
+      'appellation',
+      'grape_primary',
+      'flavor_profiles',
+      'classification',
     ];
     for (const name of fieldNames) {
       const bm25Key = `bm25(${name})`;
@@ -123,19 +127,29 @@ export class VespaSearchIndex implements SearchIndexPort {
    * @param queries - One or more query strings.
    * @param filters - Optional filter tokens (see {@link buildSparseFilters}).
    * @param limit - Maximum hits to return (default: 100).
+   * @param rankProfile - Vespa rank profile to use (default: `'hybrid'`).
    * @returns Sparse hits sorted by descending BM25 score.
    */
   async sparseSearch(
     queries: readonly string[],
     filters?: readonly string[],
     limit?: number,
+    rankProfile: string = 'hybrid',
   ): Promise<readonly SparseHit[]> {
     const hits = limit ?? DEFAULT_SPARSE_LIMIT;
     const filterClause = buildSparseFilters(filters ?? []);
 
-    // Build one userInput + weakAnd clause per query, combined with OR.
+    // Per-query clause:
+    //   userInput(@queryN)          — general multi-term match via WAND
+    //   canonical_label contains phrase(@queryN)   — exact phrase for full wine names
+    //   aliases_identity_safe contains phrase(@queryN) — exact phrase for identity aliases
+    // The OR of phrase operators ensures "Château Margaux 2015" is found even
+    // when the tokeniser would split the query differently than WAND expects.
     const queryClauses = queries.map(
-      (_, i) => `(userInput(@query${i}) OR weakAnd(canonical_label contains phrase(@query${i}), search_text_ko contains phrase(@query${i}), search_text_en contains phrase(@query${i})))`,
+      (_, i) =>
+        `(userInput(@query${i})` +
+        ` OR canonical_label contains phrase(@query${i})` +
+        ` OR aliases_identity_safe contains phrase(@query${i}))`,
     );
 
     const queryUnion =
@@ -151,7 +165,7 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     // Build query parameters — one @queryN binding per query string.
     const queryParams: Record<string, unknown> = {
-      'ranking.profile': 'bm25',
+      'ranking.profile': rankProfile,
       'presentation.summary': 'default',
       'metrics.ignore': 'true',
     };
@@ -184,25 +198,34 @@ export class VespaSearchIndex implements SearchIndexPort {
    * @param embedding - The query embedding vector (must match schema dimension).
    * @param filters - Optional filter tokens (see {@link buildDenseFilters}).
    * @param limit - Maximum hits to return (default: 100).
+   * @param rankProfile - Vespa rank profile to use (default: `'hybrid'`).
    * @returns Dense hits sorted by descending closeness (similarity).
    */
   async denseSearch(
     embedding: readonly number[],
     filters?: readonly string[],
     limit?: number,
+    rankProfile: string = 'hybrid',
   ): Promise<readonly DenseHit[]> {
     const targetHits = limit ?? DEFAULT_DENSE_LIMIT;
     const filterClause = buildDenseFilters(filters ?? []);
 
+    // hnsw.exploreAdditionalHits raises ef_search beyond targetHits so that
+    // the HNSW graph explores more neighbours at query time, improving ANN
+    // recall at the cost of a small latency increase.
+    // Setting it to min(targetHits, 100) doubles exploration budget while
+    // capping it at 100 to avoid tail latency spikes on large corpora.
+    const exploreAdditional = Math.min(targetHits, 100);
     const yql =
       `select * from ${SCHEMA} where ` +
-      `({targetHits: ${targetHits}}nearestNeighbor(embedding, query_embedding))` +
+      `({targetHits: ${targetHits}, hnsw.exploreAdditionalHits: ${exploreAdditional}}` +
+      `nearestNeighbor(embedding, query_embedding))` +
       ` AND availability = true` +
       filterClause +
       ` limit ${targetHits}`;
 
     const response = await this.client.query(yql, {
-      'ranking.profile': 'semantic',
+      'ranking.profile': rankProfile,
       'input.query(query_embedding)': embedding,
     });
 

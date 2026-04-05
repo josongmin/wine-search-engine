@@ -6,6 +6,8 @@ import type { DecisionInput } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
 import type { DecisionTrace } from '../model/decision-trace.js';
 import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
+import { AdmissionGate } from './admission-gate.js';
+import type { FailureReason } from '../model/failure-reason.js';
 
 /**
  * Internal intermediate state used during decision processing.
@@ -44,9 +46,11 @@ interface DecisionState {
  */
 export class DecisionEngine {
   private readonly evidenceGate: EvidenceGate;
+  private readonly admissionGate: AdmissionGate;
 
   constructor(private readonly thresholdStore: ThresholdStore) {
     this.evidenceGate = new EvidenceGate();
+    this.admissionGate = new AdmissionGate();
   }
 
   /**
@@ -74,6 +78,33 @@ export class DecisionEngine {
 
     // ── Step 4: Policy overlay ─────────────────────────────────────
     const finalState = this.applyPolicyOverlay(input, afterEvidence, rulesApplied);
+
+    // ── Step 5: AdmissionGate (RFC-016) ────────────────────────────
+    // The gate is the final closure before a resolved status is emitted.
+    // Non-resolved decisions bypass the gate so that clarification/failure
+    // outcomes are never blocked.
+    if (finalState.status === 'resolved') {
+      const admissionResult = this.admissionGate.check(input, snapshot);
+      if (!admissionResult.admitted) {
+        rulesApplied.push('ADMISSION_GATE_REJECTED');
+        rulesApplied.push(admissionResult.reason);
+        const rejectedState: DecisionState = {
+          status: 'failed',
+          nextAction: 'fail',
+          rulesApplied: [...rulesApplied],
+          finalReason: `Admission gate rejected the resolved decision: ${admissionResult.reason}.`,
+        };
+        return this.buildOutput(
+          input,
+          rejectedState,
+          thresholds,
+          snapshot,
+          rulesApplied,
+          admissionResult.reason,
+          admissionResult.traceRef,
+        );
+      }
+    }
 
     return this.buildOutput(input, finalState, thresholds, snapshot, rulesApplied);
   }
@@ -184,8 +215,11 @@ export class DecisionEngine {
       };
     }
 
-    // Gate 2: Ambiguous conditions
-    if (conformalSetSize >= 2 || A || !gapMeetsThreshold) {
+    // Gate 2: Ambiguous conditions — only when there is at least some signal
+    // (C > 0). When C = 0 the system has no evidence for any candidate
+    // (completely unknown entity), so clarification cannot help; fall through
+    // to the failed gate below instead.
+    if ((conformalSetSize >= 2 || A || !gapMeetsThreshold) && C > 0) {
       rulesApplied.push('NUMERIC_GATE_AMBIGUOUS');
       const reasons: string[] = [];
       if (conformalSetSize >= 2) {
@@ -347,6 +381,11 @@ export class DecisionEngine {
 
   /**
    * Assembles the final {@link DecisionOutput} with a complete {@link DecisionTrace}.
+   *
+   * @param failureReason - When the AdmissionGate rejected the decision, the
+   *   machine-readable reason.  Absent on admitted (or non-resolved) decisions.
+   * @param admissionTraceRef - The admission trace reference emitted by the gate
+   *   on rejection.  Absent on admitted (or non-resolved) decisions.
    */
   private buildOutput(
     input: DecisionInput,
@@ -354,6 +393,8 @@ export class DecisionEngine {
     thresholds: ThresholdEntry,
     snapshot: DecisionSnapshot,
     rulesApplied: readonly string[],
+    failureReason?: FailureReason,
+    admissionTraceRef?: string,
   ): DecisionOutput {
     const resolverTrace = input.resolverResult.decisionTrace;
     const topCandidate = input.resolverResult.topEntity;
@@ -418,10 +459,12 @@ export class DecisionEngine {
         : {}),
       candidates: input.resolverResult.candidates,
       signalSet,
-      evidenceItems: [],
+      evidenceItems: input.evidenceItems ?? [],
       decisionTraceRef: `trace:${input.queryPlan.queryClass}:${String(Date.now())}`,
       decisionSnapshot: snapshot,
       decisionTrace: trace,
+      ...(failureReason !== undefined ? { failureReason } : {}),
+      ...(admissionTraceRef !== undefined ? { admissionTraceRef } : {}),
     };
   }
 }

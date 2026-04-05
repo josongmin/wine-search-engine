@@ -5,3 +5,4 @@ export {
   type EvidenceSummary,
 } from './decision-input.js';
 export { type DecisionTrace } from './decision-trace.js';
+export { type FailureReason } from './failure-reason.js';

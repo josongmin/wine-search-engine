@@ -4,6 +4,7 @@ import type { ResultItem } from '../model/result-item.js';
 import type { ClarificationPayload } from '../model/clarification.js';
 import type { CounterfactualReject, ResponseMeta } from '../model/counterfactual.js';
 import type { SearchResponseV1 } from '../model/search-response.js';
+import { deterministicHash } from '../../shared/utils/hash.js';
 
 /**
  * Parameters required by {@link ResponseBuilder.build}.
@@ -56,13 +57,31 @@ export class ResponseBuilder {
     const engineDecision = this.mapDecision(params.decisionOutput, params.route);
     const validatedResults = this.enforceEvidence(params.results);
 
+    // Compute a deterministic response hash for the determinism gate
+    // (RFC-009 §8 / RFC-015). The hash covers only stable, input-derived
+    // fields — not timestamps, request IDs, or latency — so that two replay
+    // executions with the same snapshot and query produce the same hash.
+    const snapshot = params.decisionOutput.decisionSnapshot;
+    const topEntityId = params.decisionOutput.selectedEntity?.entityId ?? '';
+    const responseHash = deterministicHash(
+      params.decisionOutput.decisionStatus,
+      params.decisionOutput.nextAction,
+      params.decisionOutput.decisionConfidence.toFixed(4),
+      String(validatedResults.length),
+      topEntityId,
+      snapshot.policy_rule_version,
+      snapshot.threshold_profile_id,
+      snapshot.planner_version,
+    );
+
     const meta: ResponseMeta = {
       requestId: params.requestId,
       queryTimeMs: params.queryTimeMs,
       route: params.route,
       version: params.version ?? '1.0.0',
       engine_schema_version: 'search_response_v1',
-      decisionSnapshot: params.decisionOutput.decisionSnapshot,
+      decisionSnapshot: snapshot,
+      response_hash: responseHash,
     };
 
     return {

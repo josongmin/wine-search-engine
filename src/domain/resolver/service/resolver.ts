@@ -41,6 +41,41 @@ export interface ResolverInput {
 }
 
 /**
+ * Default significance level (alpha) for conformal prediction.
+ * At alpha = 0.1 the prediction set has at least 90 % marginal coverage.
+ */
+const DEFAULT_ALPHA = 0.1;
+
+/**
+ * Computes the conformal prediction set size for a single query.
+ *
+ * The prediction set contracts or expands based on how confidently C exceeds
+ * the significance thresholds derived from alpha:
+ *
+ * - Returns **1** when C >= (1 - alpha)       — top candidate is sufficient.
+ * - Returns **2** when C >= (1 - 2 * alpha)   — two candidates are needed.
+ * - Returns **K** otherwise                   — abstain; return all candidates.
+ *
+ * @param calibratedScore - Calibrated decision confidence C in [0, 1].
+ * @param alpha - Significance level (must be in (0, 0.5]).
+ * @param k - Total number of candidates (fallback set size on abstain).
+ * @returns The conformal prediction set size.
+ */
+export function computeConformalSetSize(
+  calibratedScore: number,
+  alpha: number,
+  k: number,
+): number {
+  if (calibratedScore >= 1 - alpha) {
+    return 1;
+  }
+  if (calibratedScore >= 1 - 2 * alpha) {
+    return 2;
+  }
+  return k;
+}
+
+/**
  * The core entity resolver — Track A of the Wine Intelligence Engine,
  * per RFC-006.
  *
@@ -133,6 +168,12 @@ export class Resolver {
       reasonCodes,
     );
 
+    const conformalSetSize = computeConformalSetSize(
+      calibrated.decisionConfidenceC,
+      DEFAULT_ALPHA,
+      resolvedCandidates.length,
+    );
+
     const result: EntityResolveResult = {
       status,
       recommendedNextAction: nextAction,
@@ -157,6 +198,7 @@ export class Resolver {
           }
         : {}),
       decisionTrace: trace,
+      conformalSetSize,
     };
 
     return result;

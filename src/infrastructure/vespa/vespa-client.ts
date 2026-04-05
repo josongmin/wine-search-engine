@@ -82,6 +82,29 @@ export class VespaClient {
   ) {}
 
   // -------------------------------------------------------------------------
+  // Internal helpers
+  // -------------------------------------------------------------------------
+
+  /**
+   * Wraps `fetch` with an AbortController-based timeout.
+   * The request is aborted and an error thrown if it takes longer than
+   * `timeoutMs` milliseconds.
+   */
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const id = setTimeout(() => { controller.abort(); }, timeoutMs);
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Query API
   // -------------------------------------------------------------------------
 
@@ -100,11 +123,15 @@ export class VespaClient {
     const url = `${this.baseUrl}/search/`;
     const body: Record<string, unknown> = { yql, ...params };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      30_000,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
@@ -144,11 +171,15 @@ export class VespaClient {
     url: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
-    const response = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: payload }),
-    });
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: payload }),
+      },
+      15_000,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
@@ -190,11 +221,15 @@ export class VespaClient {
     for (const [key, value] of Object.entries(fields)) {
       assignFields[key] = { assign: value };
     }
-    const response = await fetch(url, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: assignFields }),
-    });
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: assignFields }),
+      },
+      15_000,
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
@@ -212,7 +247,7 @@ export class VespaClient {
    */
   async delete(docId: string): Promise<void> {
     const url = this.docUrl(this.appName, docId);
-    const response = await fetch(url, { method: 'DELETE' });
+    const response = await this.fetchWithTimeout(url, { method: 'DELETE' }, 10_000);
 
     // 404 is acceptable — the document simply did not exist.
     if (!response.ok && response.status !== 404) {
@@ -232,7 +267,7 @@ export class VespaClient {
    */
   async get(docId: string): Promise<Record<string, unknown> | null> {
     const url = this.docUrl(this.appName, docId);
-    const response = await fetch(url);
+    const response = await this.fetchWithTimeout(url, {}, 10_000);
 
     if (response.status === 404) return null;
 

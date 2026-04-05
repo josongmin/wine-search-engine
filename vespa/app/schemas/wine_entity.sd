@@ -1,97 +1,479 @@
 schema wine_entity {
   document wine_entity {
+
+    # -------------------------------------------------------------------------
+    # Core identity fields
+    # -------------------------------------------------------------------------
+
     field entity_id type string {
       indexing: summary | attribute
     }
+
     field entity_type type string {
       indexing: summary | attribute
     }
+
     field canonical_label type string {
       indexing: summary | attribute | index
+      index: enable-bm25
     }
+
     field aliases_identity_safe type array<string> {
       indexing: summary | attribute | index
+      index: enable-bm25
     }
+
     field aliases_noisy_recall type array<string> {
       indexing: summary | attribute | index
+      index: enable-bm25
     }
+
     field producer type string {
       indexing: summary | attribute | index
+      index: enable-bm25
     }
+
     field region type string {
       indexing: summary | attribute
     }
+
     field grapes type array<string> {
       indexing: summary | attribute
     }
-    field search_text_ko type string {
-      indexing: summary | index
-      language: ko
-    }
+
+    # -------------------------------------------------------------------------
+    # Full-text search fields
+    # -------------------------------------------------------------------------
+
+    # English text: standard tokeniser with BM25 + stemming
     field search_text_en type string {
       indexing: summary | index
+      index: enable-bm25
       language: en
     }
+
+    # Korean text: character bi-gram indexing for robust CJK recall.
+    # bi-gram over character pairs gives far better recall than whitespace
+    # tokenisation for Korean, where morpheme boundaries are unmarked.
+    field search_text_ko type string {
+      indexing: summary | index
+      index {
+        gram: true
+        gram-size: 2
+        enable-bm25
+      }
+      language: ko
+    }
+
     field semantic_summary type string {
       indexing: summary
     }
+
+    # -------------------------------------------------------------------------
+    # Wine taste / style attributes
+    # -------------------------------------------------------------------------
+
     field body type float {
       indexing: summary | attribute
     }
+
     field sweetness type float {
       indexing: summary | attribute
     }
+
     field style type string {
       indexing: summary | attribute
     }
+
     field price_band type string {
       indexing: summary | attribute
     }
+
     field pairing type array<string> {
       indexing: summary | attribute
     }
+
     field occasion type array<string> {
       indexing: summary | attribute
     }
+
     field availability type bool {
       indexing: summary | attribute
     }
+
     field popularity_score type float {
       indexing: summary | attribute
     }
-    field embedding type tensor<float>(x[1024]) {
+
+    # -------------------------------------------------------------------------
+    # Wine-domain attribute fields
+    # -------------------------------------------------------------------------
+
+    field vintage_year type int {
       indexing: summary | attribute
+    }
+
+    field acidity type float {
+      indexing: summary | attribute
+    }
+
+    field tannin type float {
+      indexing: summary | attribute
+    }
+
+    field finish_length type float {
+      indexing: summary | attribute
+    }
+
+    field wine_type type string {
+      indexing: summary | attribute
+    }
+
+    field grape_primary type string {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    field country type string {
+      indexing: summary | attribute
+    }
+
+    field appellation type string {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    field producer_prestige type float {
+      indexing: summary | attribute
+    }
+
+    field critic_score_normalized type float {
+      indexing: summary | attribute
+    }
+
+    field price_usd type float {
+      indexing: summary | attribute
+    }
+
+    # -------------------------------------------------------------------------
+    # SOTA++ taxonomy fields
+    # -------------------------------------------------------------------------
+
+    # Flavor descriptor vocabulary — BM25-indexed for queries like
+    # "wines with blackcurrant and cedar notes".
+    field flavor_profiles type array<string> {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    # Official classification tier (e.g. "Premier Grand Cru Classé",
+    # "Grand Cru", "Barolo DOCG", "DOCa Rioja Gran Reserva").
+    field classification type string {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    field alcohol_pct type float {
+      indexing: summary | attribute
+    }
+
+    field drinking_window_start type int {
+      indexing: summary | attribute
+    }
+
+    field drinking_window_end type int {
+      indexing: summary | attribute
+    }
+
+    field oak_treatment type string {
+      indexing: summary | attribute
+    }
+
+    field certifications type array<string> {
+      indexing: summary | attribute
+    }
+
+    field soil_type type string {
+      indexing: summary | attribute
+    }
+
+    field producer_type type string {
+      indexing: summary | attribute
+    }
+
+    # -------------------------------------------------------------------------
+    # Dense embedding — 128-dim float tensor, HNSW ANN retrieval.
+    #
+    # HNSW parameters (BGE-M3 / BEIR validated):
+    #   max-links-per-node: 32   — M=32, optimal recall/latency trade-off
+    #   neighbors-to-explore-at-insert: 400 — ef_construction, high-quality graph
+    #
+    # distance-metric: angular — equivalent to cosine similarity after L2-norm.
+    # closeness(field, embedding) returns values in [0,1] (1 = identical).
+    # -------------------------------------------------------------------------
+
+    field embedding type tensor<float>(x[128]) {
+      indexing: summary | attribute | index
       attribute {
         distance-metric: angular
       }
+      index {
+        hnsw {
+          max-links-per-node: 32
+          neighbors-to-explore-at-insert: 400
+        }
+      }
     }
-  }
+
+  }  # end document wine_entity
+
+  # ---------------------------------------------------------------------------
+  # Field sets
+  # ---------------------------------------------------------------------------
 
   fieldset default {
-    fields: canonical_label, aliases_identity_safe, search_text_ko, search_text_en, producer
+    fields: canonical_label, aliases_identity_safe, aliases_noisy_recall,
+            search_text_ko, search_text_en, producer, appellation, grape_primary,
+            flavor_profiles, classification
   }
 
-  rank-profile bm25 inherits default {
+  # ---------------------------------------------------------------------------
+  # Summary classes
+  # ---------------------------------------------------------------------------
+
+  document-summary minimal {
+    summary entity_id {}
+    summary canonical_label {}
+    summary producer {}
+    summary wine_type {}
+    summary vintage_year {}
+  }
+
+  document-summary full {
+    summary entity_id {}
+    summary entity_type {}
+    summary canonical_label {}
+    summary aliases_identity_safe {}
+    summary aliases_noisy_recall {}
+    summary producer {}
+    summary region {}
+    summary grapes {}
+    summary search_text_en {}
+    summary search_text_ko {}
+    summary semantic_summary {}
+    summary body {}
+    summary sweetness {}
+    summary style {}
+    summary price_band {}
+    summary pairing {}
+    summary occasion {}
+    summary availability {}
+    summary popularity_score {}
+    summary vintage_year {}
+    summary acidity {}
+    summary tannin {}
+    summary finish_length {}
+    summary wine_type {}
+    summary grape_primary {}
+    summary country {}
+    summary appellation {}
+    summary producer_prestige {}
+    summary critic_score_normalized {}
+    summary price_usd {}
+    summary flavor_profiles {}
+    summary classification {}
+    summary alcohol_pct {}
+    summary drinking_window_start {}
+    summary drinking_window_end {}
+    summary oak_treatment {}
+    summary certifications {}
+    summary soil_type {}
+    summary producer_type {}
+  }
+
+  # ---------------------------------------------------------------------------
+  # Rank profiles
+  #
+  # Design principles:
+  #   1. bm25_wine() function defined once in `lexical`, inherited downstream.
+  #   2. bm25_normalized() defined in `hybrid`:
+  #        Laplace normalization  x / (x + K)  maps [0,∞) → [0,1)
+  #        K=25 calibrated so peak wine BM25 scores (~20–25) map to ~0.5
+  #        This puts BM25 and closeness() on the same [0,1] scale, making
+  #        weight coefficients in the hybrid expression meaningful.
+  #   3. `wine_aware` inherits `hybrid`, adds second-phase reranking.
+  #   4. `semantic` inherits `default` only — no BM25 needed.
+  # ---------------------------------------------------------------------------
+
+  # --- lexical: pure BM25, exact entity name / label lookup -----------------
+  rank-profile lexical inherits default {
+
+    # Weighted BM25 sum across all text + taxonomy fields.
+    # Weights reflect field priority for wine entity search:
+    #   canonical_label ×4  — exact wine name match is most valuable
+    #   aliases_safe    ×3  — high-confidence identity aliases
+    #   aliases_noisy   ×2  — broad recall aliases
+    #   flavor_profiles ×1.8 — key for "find wines tasting like X" queries
+    #   producer        ×1.5 — producer/appellation are second-tier identity
+    #   appellation     ×1.5
+    #   classification  ×1.3 — "Grand Cru wines" queries
+    #   grape_primary   ×1.2
+    #   search_text_*   ×1.0 — full text fields
+    function bm25_wine() {
+      expression {
+        bm25(canonical_label) * 4
+        + bm25(aliases_identity_safe) * 3
+        + bm25(aliases_noisy_recall) * 2
+        + bm25(flavor_profiles) * 1.8
+        + bm25(producer) * 1.5
+        + bm25(appellation) * 1.5
+        + bm25(classification) * 1.3
+        + bm25(grape_primary) * 1.2
+        + bm25(search_text_en)
+        + bm25(search_text_ko)
+      }
+    }
+
     first-phase {
-      expression: bm25(canonical_label) + bm25(search_text_ko) + bm25(search_text_en)
+      expression: bm25_wine
+    }
+
+    match-features {
+      bm25(canonical_label)
+      bm25(aliases_identity_safe)
+      bm25(aliases_noisy_recall)
+      bm25(search_text_en)
+      bm25(search_text_ko)
+      bm25(producer)
+      bm25(appellation)
+      bm25(grape_primary)
+      bm25(flavor_profiles)
+      bm25(classification)
     }
   }
 
+  # --- semantic: pure ANN, style / description queries ---------------------
   rank-profile semantic inherits default {
     inputs {
-      query(query_embedding) tensor<float>(x[1024])
+      query(query_embedding) tensor<float>(x[128])
     }
     first-phase {
       expression: closeness(field, embedding)
     }
   }
 
-  rank-profile hybrid inherits default {
+  # --- hybrid: normalized BM25 + ANN + popularity -------------------------
+  #
+  # CRITICAL: bm25_normalized maps raw BM25 to [0,1) so that the weight
+  # coefficients (0.65 / 0.25 / 0.10) are meaningful — without normalization,
+  # a BM25 sum of 20 would contribute 13.0 vs ANN's max 0.25, making the
+  # "hybrid" profile effectively pure BM25.
+  #
+  # Laplace K=25 means:
+  #   bm25_wine=0   → 0.000  (no text match, ANN carries the score)
+  #   bm25_wine=5   → 0.167
+  #   bm25_wine=12  → 0.324
+  #   bm25_wine=25  → 0.500
+  #   bm25_wine=50  → 0.667
+  #   bm25_wine=100 → 0.800
+  rank-profile hybrid inherits lexical {
     inputs {
-      query(query_embedding) tensor<float>(x[1024])
+      query(query_embedding) tensor<float>(x[128])
     }
+
+    function bm25_normalized() {
+      expression: bm25_wine / (bm25_wine + 25)
+    }
+
     first-phase {
-      expression: 0.5 * bm25(canonical_label) + 0.5 * closeness(field, embedding)
+      expression {
+        0.65 * bm25_normalized
+        + 0.25 * closeness(field, embedding)
+        + 0.10 * attribute(popularity_score)
+      }
+    }
+
+    match-features {
+      bm25(canonical_label)
+      bm25(aliases_identity_safe)
+      bm25(aliases_noisy_recall)
+      bm25(search_text_en)
+      bm25(search_text_ko)
+      bm25(producer)
+      bm25(appellation)
+      bm25(grape_primary)
+      bm25(flavor_profiles)
+      bm25(classification)
+      closeness(field, embedding)
     }
   }
+
+  # --- wine_aware: full domain signals + two-phase reranking ---------------
+  #
+  # Phase 1 (all candidates): normalized hybrid score + popularity
+  # Phase 2 (top-20 rerank): +availability +critic_score +vintage_freshness
+  #                           +drinking_window_proximity bonus
+  #
+  # Weights in phase 2 are intentionally small relative to phase 1 to avoid
+  # over-boosting unavailable or niche wines that happen to have high scores.
+  rank-profile wine_aware inherits hybrid {
+    inputs {
+      query(query_embedding) tensor<float>(x[128])
+      query(current_year) double: 2024
+    }
+
+    first-phase {
+      expression {
+        0.55 * bm25_normalized
+        + 0.30 * closeness(field, embedding)
+        + 0.15 * attribute(popularity_score)
+      }
+    }
+
+    second-phase {
+      rerank-count: 20
+      expression {
+        firstPhase
+        + 0.05 * if(attribute(availability), 1.0, 0.0)
+        + 0.05 * attribute(critic_score_normalized)
+        + 0.03 * if(
+            attribute(vintage_year) > 0,
+            max(0.0, 1.0 - (2024.0 - attribute(vintage_year)) / 30.0),
+            0.0
+          )
+        + 0.02 * if(
+            attribute(drinking_window_start) > 0,
+            if(
+              attribute(drinking_window_end) > 0,
+              if(
+                query(current_year) >= attribute(drinking_window_start),
+                if(
+                  query(current_year) <= attribute(drinking_window_end),
+                  1.0,
+                  0.0
+                ),
+                0.0
+              ),
+              0.0
+            ),
+            0.0
+          )
+      }
+    }
+
+    match-features {
+      bm25(canonical_label)
+      bm25(aliases_identity_safe)
+      bm25(aliases_noisy_recall)
+      bm25(search_text_en)
+      bm25(search_text_ko)
+      bm25(producer)
+      bm25(appellation)
+      bm25(grape_primary)
+      bm25(flavor_profiles)
+      bm25(classification)
+      closeness(field, embedding)
+    }
+  }
+
 }

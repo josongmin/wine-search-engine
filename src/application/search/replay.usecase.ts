@@ -1,7 +1,7 @@
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
-import type { SearchUseCase, SearchRequest } from './search.usecase.js';
+import type { SearchUseCase, SearchRequest, SnapshotVersions } from './search.usecase.js';
 
 /**
  * Error thrown when a replay snapshot does not match the current runtime snapshot.
@@ -18,6 +18,28 @@ export class SnapshotMismatchError extends DomainError {
     this.name = 'SnapshotMismatchError';
     this.expected = expected;
     this.actual = actual;
+  }
+}
+
+/**
+ * Error thrown when a replay response hash does not match the expected hash.
+ *
+ * This indicates that the engine produced a different decision for the same
+ * query + snapshot — a determinism violation per RFC-009 §8 / RFC-015.
+ */
+export class DeterminismViolationError extends DomainError {
+  public readonly expectedHash: string;
+  public readonly actualHash: string;
+
+  constructor(expectedHash: string, actualHash: string) {
+    super(
+      'DETERMINISM_VIOLATION',
+      `Replay response hash mismatch: expected=${expectedHash}, actual=${actualHash}. ` +
+        'The engine produced a different decision for the same query and snapshot (RFC-009 §8).',
+    );
+    this.name = 'DeterminismViolationError';
+    this.expectedHash = expectedHash;
+    this.actualHash = actualHash;
   }
 }
 
@@ -45,6 +67,18 @@ export interface ReplayRequest {
     readonly explain: boolean;
     readonly clarification: boolean;
   } | undefined;
+
+  /**
+   * Optional expected response hash for determinism validation (RFC-009 §8).
+   *
+   * When present, the replay use case compares this value against the
+   * `response_hash` field in the freshly-produced response.  A mismatch
+   * means the engine reached a different decision than it did originally —
+   * a determinism violation that is surfaced as a {@link DeterminismViolationError}.
+   *
+   * Omit this field to perform a snapshot-only replay without hash validation.
+   */
+  readonly expected_response_hash?: string | undefined;
 }
 
 /**
@@ -53,7 +87,7 @@ export interface ReplayRequest {
 export interface ReplayUseCaseDeps {
   readonly searchUseCase: SearchUseCase;
   /** Version strings for RFC-015 snapshot population. */
-  readonly snapshotVersions?: import('./search.usecase.js').SnapshotVersions | undefined;
+  readonly snapshotVersions?: SnapshotVersions | undefined;
 }
 
 /**
@@ -95,7 +129,23 @@ export class ReplayUseCase {
       options: request.options,
     };
 
-    return this.deps.searchUseCase.execute(searchRequest, requestId);
+    const response = await this.deps.searchUseCase.execute(searchRequest, requestId);
+
+    // Step 5: Determinism gate (RFC-009 §8 / RFC-015)
+    // If the caller supplied an expected_response_hash, validate it against
+    // the hash embedded in the freshly-produced response. A mismatch indicates
+    // the engine reached a different decision — a determinism violation.
+    if (request.expected_response_hash !== undefined) {
+      const actualHash = response.meta.response_hash;
+      if (actualHash === undefined || actualHash !== request.expected_response_hash) {
+        throw new DeterminismViolationError(
+          request.expected_response_hash,
+          actualHash ?? '(missing)',
+        );
+      }
+    }
+
+    return response;
   }
 
   /**

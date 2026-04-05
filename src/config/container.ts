@@ -35,6 +35,9 @@ import type { ThresholdProfileV1 } from '../domain/query/model/threshold-profile
 import type { EntityId, QueryClass } from '../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../domain/retrieval/model/retrieval-document.js';
 import type { AliasMatcher, AliasMatchResult } from '../domain/query/service/anchor-extractor.js';
+import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
+import type { MappingTablePort } from '../domain/attribute/port/mapping-table.port.js';
+import type { NLMapping } from '../domain/attribute/model/nl-mapping.js';
 import type {
   AnchorResolverPort,
   SimilarRetrievalPort,
@@ -136,10 +139,10 @@ class StubSearchIndex implements SearchIndexPort {
 /** Stub EmbeddingServicePort: returns zero vectors. */
 class StubEmbeddingService implements EmbeddingServicePort {
   async embed(_text: string): Promise<readonly number[]> {
-    return new Array<number>(768).fill(0);
+    return new Array<number>(128).fill(0);
   }
   async embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
-    return texts.map(() => new Array<number>(768).fill(0));
+    return texts.map(() => new Array<number>(128).fill(0));
   }
 }
 
@@ -178,6 +181,19 @@ class StubCandidateAttributes implements CandidateAttributePort {
 class StubAliasMatcher implements AliasMatcher {
   async findMatches(_normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
     return [];
+  }
+}
+
+/** Stub MappingTablePort: returns null (no custom mappings; NLMapper falls back to built-ins). */
+class StubMappingTable implements MappingTablePort {
+  async findMapping(_phrase: string, _version?: string): Promise<NLMapping | null> {
+    return null;
+  }
+  async findMappingsByAttribute(_attribute: string): Promise<readonly NLMapping[]> {
+    return [];
+  }
+  async getCurrentVersion(): Promise<string> {
+    return 'v1.0';
   }
 }
 
@@ -232,7 +248,9 @@ export function createContainer(_config: Config, pool?: Pool): Container {
   const aliasMatcher = new StubAliasMatcher();
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
-  const queryPlanner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder);
+  const mappingTable = new StubMappingTable();
+  const nlMapper = new NLMapper(mappingTable);
+  const queryPlanner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper);
 
   // Domain services — entity resolution
   const blocker = new Blocker(blockingPort);
@@ -324,6 +342,7 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     ranker,
     decisionEngine,
     responseBuilder,
+    snapshotVersions,
   });
 
   return {

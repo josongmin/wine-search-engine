@@ -23,6 +23,7 @@ export type {
 export type {
   LineageRecord,
   LineageDecision,
+  LineageSourceType,
 } from './model/lineage-record.js';
 
 // Ports

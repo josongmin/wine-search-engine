@@ -1,4 +1,4 @@
-import type { SignalSet } from '../../shared/types/index.js';
+import type { SignalSet, EvidenceItem } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
@@ -76,4 +76,14 @@ export interface DecisionInput {
    * the candidate set to a single entity.
    */
   readonly conformalSetSize?: number;
+
+  /**
+   * Pre-computed evidence items for the top candidate, populated by the
+   * ranking stage (RFC-007 §4). The DecisionEngine includes these verbatim
+   * in its output so the full evidence trail reaches API consumers.
+   *
+   * When absent (e.g. entity-only route with no ranking), the output
+   * evidenceItems will be empty.
+   */
+  readonly evidenceItems?: readonly EvidenceItem[] | undefined;
 }

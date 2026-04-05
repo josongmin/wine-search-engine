@@ -8,6 +8,7 @@ import type {
 import type { EntityId } from '../../shared/types/index.js';
 import type { ResolvedCandidate } from '../../resolver/model/resolved-candidate.js';
 import type { DecisionTrace } from './decision-trace.js';
+import type { FailureReason } from './failure-reason.js';
 
 /**
  * The binding output of the Decision domain — the FINAL AUTHORITY on
@@ -59,4 +60,16 @@ export interface DecisionOutput {
 
   /** Full diagnostic trace of how the decision was reached (RFC-007). */
   readonly decisionTrace: DecisionTrace;
+
+  /**
+   * When admission is denied by the {@link AdmissionGate} (RFC-016), this
+   * field carries the machine-readable reason.  Absent on admitted decisions.
+   */
+  readonly failureReason?: FailureReason;
+
+  /**
+   * Trace reference emitted by the {@link AdmissionGate} when admission is
+   * denied (RFC-016).  Absent on admitted decisions.
+   */
+  readonly admissionTraceRef?: string;
 }

@@ -13,13 +13,19 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.config.ts src/__tests__/",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:e2e:vespa": "bash scripts/run-vespa-e2e.sh",
+    "test:e2e:vespa:setup": "bash scripts/setup-vespa-test.sh",
+    "test:e2e:vespa:teardown": "bash scripts/teardown-vespa-test.sh",
+    "test:e2e:vespa:only": "VESPA_URL=http://localhost:18080 vitest --config vitest.e2e.vespa.config.ts",
+    "test:all": "npm run test && npm run test:e2e && npm run test:e2e:vespa:only",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc --noEmit",
     "eval": "tsx scripts/run-eval.ts",
     "ingest": "tsx src/interface/cli/ingest.command.ts",
     "kill-switch": "tsx src/interface/cli/kill-switch.command.ts",
-    "migrate": "node --experimental-vm-modules scripts/migrate.ts"
+    "migrate": "node --experimental-vm-modules scripts/migrate.ts",
+    "vivino:bronze": "tsx tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.2.0",

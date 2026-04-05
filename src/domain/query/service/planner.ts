@@ -13,6 +13,7 @@ import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { PolicyCompiler } from './policy-compiler.js';
 import { normalizeUnicode } from '../../shared/utils/unicode-normalize.js';
+import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -80,6 +81,7 @@ export class Planner {
     private readonly ambiguityDict: AmbiguityDictionary,
     private readonly anchorExtractor: AnchorExtractor,
     private readonly expansionBuilder: ExpansionBuilder,
+    private readonly nlMapper: NLMapper,
   ) {}
 
   /**
@@ -121,7 +123,7 @@ export class Planner {
     );
 
     // 6. Parse constraints.
-    const constraints = this.parseConstraints(normalizedQuery);
+    const constraints = await this.parseConstraints(normalizedQuery);
 
     // 7. Build expansions.
     const expansions = this.expansionBuilder.build(
@@ -147,10 +149,21 @@ export class Planner {
 
     const budget = context?.budget ?? DEFAULT_QUERY_BUDGET;
 
+    // Derive secondary intents from the 2nd+ anchor candidates.
+    const secondaryIntents =
+      anchors.length >= 2
+        ? anchors.slice(1).map((a): QueryIntent =>
+            a.confidence >= EXACT_ANCHOR_CONFIDENCE
+              ? 'entity_exact'
+              : 'entity_fuzzy',
+          )
+        : undefined;
+
     return {
       rawQuery: query,
       normalizedQuery,
       intent,
+      ...(secondaryIntents !== undefined && { secondaryIntents }),
       route,
       queryClass,
       anchors,
@@ -161,7 +174,7 @@ export class Planner {
       plannerVersion: PLANNER_VERSION,
       policyRuleVersion: POLICY_RULE_VERSION,
       thresholdProfileId: DEFAULT_THRESHOLD_PROFILE.id,
-      sessionContext: context?.session,
+      ...(context?.session !== undefined && { sessionContext: context.session }),
       queryBudget: budget,
     };
   }
@@ -305,6 +318,13 @@ export class Planner {
     intent: QueryIntent,
     anchors: readonly AnchorCandidate[],
   ): Promise<QueryClass> {
+    // Check whether the full normalized query is itself a known ambiguous form.
+    const fullQueryAmbiguous =
+      await this.ambiguityDict.isKnownAmbiguous(normalizedQuery);
+    if (fullQueryAmbiguous) {
+      return 'ambiguous_short_form';
+    }
+
     // Check for known ambiguous terms.
     for (const anchor of anchors) {
       const isAmbiguous = await this.ambiguityDict.isKnownAmbiguous(
@@ -347,18 +367,205 @@ export class Planner {
   }
 
   /**
-   * Parses constraints from the normalized query.
+   * Attributes whose constraints are treated as soft (preference-level).
    *
-   * This is a placeholder implementation. A full constraint parser would
-   * use NLP or rule-based extraction to identify hard/soft/inferred constraints.
-   * For now, returns an empty bundle to satisfy the type contract.
+   * NL-phrase-derived wine sensory attributes (body, sweetness, acidity, tannin,
+   * style) are soft because they express user preferences from natural language.
+   * Hard constraints are reserved for explicit API-level mandatory filters.
+   * price_band and occasion are also soft — they guide ranking rather than
+   * absolutely excluding candidates.
    */
-  private parseConstraints(_normalizedQuery: string): ConstraintBundle {
-    return {
-      hard: [],
-      soft: [],
-      inferred: [],
-    };
+  private static readonly SOFT_ATTRIBUTES = new Set([
+    'body', 'sweetness', 'acidity', 'tannin', 'style',
+    'price_band', 'occasion',
+  ]);
+
+  /**
+   * Maximum n-gram size (in whitespace-delimited tokens) to probe against
+   * the NL mapping table. Covers all known multi-word phrases.
+   */
+  private static readonly MAX_NGRAM_TOKENS = 3;
+
+  /**
+   * Parses constraints from the normalized query by scanning for known
+   * natural-language phrases via the NLMapper.
+   *
+   * Generates token n-grams (up to {@link MAX_NGRAM_TOKENS} tokens) from the
+   * query and probes each against the mapping table. Matched constraints are
+   * classified as hard (body, sweetness, etc.) or soft (price_band, occasion).
+   */
+  private async parseConstraints(
+    normalizedQuery: string,
+  ): Promise<ConstraintBundle> {
+    const tokens = normalizedQuery.split(/\s+/);
+    const candidatePhrases: string[] = [];
+
+    for (
+      let i = 0;
+      i < tokens.length;
+      i++
+    ) {
+      const maxEnd = Math.min(
+        tokens.length,
+        i + Planner.MAX_NGRAM_TOKENS,
+      );
+      for (let j = i + 1; j <= maxEnd; j++) {
+        candidatePhrases.push(tokens.slice(i, j).join(' '));
+      }
+    }
+
+    const matched = await this.nlMapper.mapConstraints(candidatePhrases);
+
+    const hard: ConstraintBundle['hard'][number][] = [];
+    const soft: ConstraintBundle['soft'][number][] = [];
+
+    for (const constraint of matched) {
+      if (Planner.SOFT_ATTRIBUTES.has(constraint.attribute)) {
+        soft.push(constraint);
+      } else {
+        hard.push(constraint);
+      }
+    }
+
+    // RFC-005: When NLMapper returns nothing (e.g. noOpMappingTable in test
+    // or cold-start configs), fall back to rule-based extraction so that
+    // wine_type, country, and sensory constraints are never silently dropped.
+    if (hard.length === 0 && soft.length === 0) {
+      return this.extractRuleBasedConstraints(normalizedQuery);
+    }
+
+    return { hard, soft, inferred: [] };
+  }
+
+  /**
+   * Rule-based constraint extractor: pattern-matches the normalized query
+   * directly without a mapping table.
+   *
+   * Covers the most common wine-domain constraints:
+   *   - wine_type  (hard)  — red / white / rosé / sparkling / natural / dessert
+   *   - country    (hard)  — France / Italy / Spain / USA / etc.
+   *   - price_band (soft)  — "under $50", "만원 이하"
+   *   - body       (soft)  — full-body / light-body
+   *   - sweetness  (soft)  — dry / sweet
+   *
+   * Operates as a fallback only; NLMapper takes precedence when available.
+   */
+  private extractRuleBasedConstraints(normalizedQuery: string): ConstraintBundle {
+    const hard: ConstraintBundle['hard'][number][] = [];
+    const soft: ConstraintBundle['soft'][number][] = [];
+    const q = normalizedQuery;
+
+    // ── Wine type (hard) ───────────────────────────────────────────────────
+    const wineTypeRules: [RegExp, string][] = [
+      [/\b(?:red|rouge|레드|적포도주)\b/i, 'red'],
+      [/\b(?:white|blanc|화이트|백포도주)\b/i, 'white'],
+      [/\bros[eé]|로제\b/i, 'rosé'],
+      [/\b(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)\b/i, 'sparkling'],
+      [/\b(?:natural wine|내추럴 와인|내추럴)\b/i, 'natural'],
+      [/\b(?:dessert wine|디저트 와인|sauternes|icewine)\b/i, 'dessert'],
+      [/\b(?:fortified|주정강화|port|sherry|madeira|marsala)\b/i, 'fortified'],
+      [/\b(?:orange wine|오렌지 와인|amber wine)\b/i, 'orange'],
+    ];
+    for (const [pattern, value] of wineTypeRules) {
+      if (pattern.test(q)) {
+        hard.push({
+          attribute: 'wine_type',
+          operator: '=',
+          value,
+          source_phrase: value,
+          confidence: 0.9,
+        });
+        break; // Only one wine_type per query
+      }
+    }
+
+    // ── Country (hard) ─────────────────────────────────────────────────────
+    const countryRules: [RegExp, string][] = [
+      [/\b(?:french|france|프랑스)\b/i, 'France'],
+      [/\b(?:italian|italy|이탈리아)\b/i, 'Italy'],
+      [/\b(?:spanish|spain|스페인)\b/i, 'Spain'],
+      [/\b(?:american|usa|us wine|california|napa|sonoma|oregon|미국)\b/i, 'USA'],
+      [/\b(?:australian|australia|호주)\b/i, 'Australia'],
+      [/\b(?:argentinian|argentina|아르헨티나)\b/i, 'Argentina'],
+      [/\b(?:chilean|chile|칠레)\b/i, 'Chile'],
+      [/\b(?:german|germany|독일)\b/i, 'Germany'],
+      [/\b(?:portuguese|portugal|포르투갈)\b/i, 'Portugal'],
+      [/\b(?:new zealand|뉴질랜드)\b/i, 'New Zealand'],
+      [/\b(?:south african?|south africa|남아공)\b/i, 'South Africa'],
+      [/\b(?:austrian|austria|오스트리아)\b/i, 'Austria'],
+    ];
+    for (const [pattern, value] of countryRules) {
+      if (pattern.test(q)) {
+        hard.push({
+          attribute: 'country',
+          operator: '=',
+          value,
+          source_phrase: value,
+          confidence: 0.85,
+        });
+        break; // Only one country per query
+      }
+    }
+
+    // ── Price band (soft) ──────────────────────────────────────────────────
+    const priceUnder =
+      /\bunder\s+\$?(\d+)\b/i.exec(q) ??
+      /\b(\d+)\s*(?:달러|dollar)\s*이하\b/i.exec(q) ??
+      /\b(\d+)만원\s*이하?\b/i.exec(q);
+    if (priceUnder?.[1] !== undefined) {
+      const priceValue = parseInt(priceUnder[1], 10);
+      // 만원 unit in Korean (1만원 ≈ $7)
+      const usd = /만원/.test(q) ? priceValue * 7 : priceValue;
+      const band =
+        usd <= 20 ? 'budget' : usd <= 50 ? 'mid' : usd <= 100 ? 'premium' : 'luxury';
+      soft.push({
+        attribute: 'price_band',
+        operator: '=',
+        value: band,
+        source_phrase: priceUnder[0],
+        confidence: 0.8,
+      });
+    }
+
+    // ── Body (soft) ────────────────────────────────────────────────────────
+    if (/\b(?:full[\s-]?body|풀바디|bold|heavy|묵직)\b/i.test(q)) {
+      soft.push({
+        attribute: 'body',
+        operator: '=',
+        value: 'full',
+        source_phrase: 'full-body',
+        confidence: 0.75,
+      });
+    } else if (/\b(?:light[\s-]?body|라이트바디|light wine|가벼운|가볍)\b/i.test(q)) {
+      soft.push({
+        attribute: 'body',
+        operator: '=',
+        value: 'light',
+        source_phrase: 'light-body',
+        confidence: 0.75,
+      });
+    }
+
+    // ── Sweetness (soft) ───────────────────────────────────────────────────
+    if (/\b(?:dry wine|드라이|brut|extra[\s-]?brut)\b/i.test(q)) {
+      soft.push({
+        attribute: 'sweetness',
+        operator: '=',
+        value: 'dry',
+        source_phrase: 'dry',
+        confidence: 0.8,
+      });
+    } else if (/\b(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)\b/i.test(q)) {
+      soft.push({
+        attribute: 'sweetness',
+        operator: '=',
+        value: 'sweet',
+        source_phrase: 'sweet',
+        confidence: 0.8,
+      });
+    }
+
+    return { hard, soft, inferred: [] };
   }
 
   /**
@@ -394,6 +601,21 @@ export class Planner {
     // Detect ambiguity from anchors and dictionary.
     const ambiguityTypes: string[] = [];
     let ambiguitySeverity: QueryUncertainty['ambiguitySeverity'] = 'low';
+
+    // Check whether the full normalized query is a known ambiguous form.
+    const fullQueryInfo =
+      await this.ambiguityDict.getAmbiguityInfo(normalizedQuery);
+    if (fullQueryInfo !== null) {
+      ambiguityTypes.push(...fullQueryInfo.types);
+      // Escalate severity: high always wins; medium wins unless already high.
+      const currentSeverity: string = ambiguitySeverity;
+      if (
+        fullQueryInfo.severity === 'high' ||
+        (fullQueryInfo.severity === 'medium' && currentSeverity !== 'high')
+      ) {
+        ambiguitySeverity = fullQueryInfo.severity;
+      }
+    }
 
     for (const anchor of anchors) {
       // Multiple candidate entities -> ambiguous.

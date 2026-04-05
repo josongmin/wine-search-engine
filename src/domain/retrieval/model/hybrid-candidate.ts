@@ -12,6 +12,9 @@ export interface HybridCandidate {
   /** Entity identifier for this candidate. */
   readonly entityId: EntityId;
 
+  /** Canonical display label (e.g. "Opus One 2018"). Propagated from RetrievalDocument. */
+  readonly canonicalLabel?: string | undefined;
+
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
 

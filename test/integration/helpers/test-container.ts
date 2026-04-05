@@ -6,6 +6,8 @@
 import { Planner } from '../../../src/domain/query/service/planner.js';
 import { AnchorExtractor } from '../../../src/domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../../../src/domain/query/service/expansion-builder.js';
+import { NLMapper } from '../../../src/domain/attribute/service/nl-mapper.js';
+import type { MappingTablePort } from '../../../src/domain/attribute/port/mapping-table.port.js';
 import { Resolver } from '../../../src/domain/resolver/service/resolver.js';
 import { Blocker } from '../../../src/domain/resolver/service/blocker.js';
 import { CandidateScorer } from '../../../src/domain/resolver/service/candidate-scorer.js';
@@ -29,6 +31,7 @@ import { InterpretUseCase } from '../../../src/application/search/interpret.usec
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import type { Container } from '../../../src/config/container.js';
+import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -72,7 +75,13 @@ export function createTestContainer(): TestContainerParts {
   // Domain services — query planning
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
-  const queryPlanner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder);
+  const noOpMappingTable: MappingTablePort = {
+    findMapping: async () => null,
+    findMappingsByAttribute: async () => [],
+    getCurrentVersion: async () => 'v1',
+  };
+  const nlMapper = new NLMapper(noOpMappingTable);
+  const queryPlanner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper);
 
   // Domain services — entity resolution
   const blocker = new Blocker(blockingAdapter);
@@ -108,6 +117,13 @@ export function createTestContainer(): TestContainerParts {
     ranker,
   );
 
+  // RFC-015 snapshot version info for test containers.
+  // Provides stable, meaningful version strings so snapshots are not empty.
+  const snapshotVersions: SnapshotVersions = {
+    modelVersions: { embedding: 'text-embedding-3-small-v1' },
+    indexVersions: { wine_content: 'wine_content_v1' },
+  };
+
   // Use cases
   const searchUseCase = new SearchUseCase({
     queryPlanner,
@@ -117,6 +133,7 @@ export function createTestContainer(): TestContainerParts {
     decisionEngine,
     responseBuilder,
     mixedSolver,
+    snapshotVersions,
   });
 
   const replayUseCase = new ReplayUseCase({ searchUseCase });

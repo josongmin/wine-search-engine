@@ -170,9 +170,14 @@ describe('POST /v1/search — error paths', () => {
     const body = res.json() as Record<string, unknown>;
     expect(body).toHaveProperty('error');
     const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBeTruthy();
-    expect(error['message']).toBeTruthy();
-    expect(error['request_id']).toBeTruthy();
+    // RFC-014 error contract: all 5 fields required
+    expect(typeof error['code']).toBe('string');
+    expect(/^[A-Z_]+$/.test(error['code'] as string)).toBe(true);
+    expect(typeof error['message']).toBe('string');
+    expect((error['message'] as string).length).toBeGreaterThan(0);
+    expect(typeof error['request_id']).toBe('string');
+    expect('failure_reason' in error).toBe(true);
+    expect(typeof error['retryable']).toBe('boolean');
   });
 
   it('empty string query returns 400', async () => {
@@ -180,7 +185,14 @@ describe('POST /v1/search — error paths', () => {
 
     expect(res.statusCode).toBe(400);
     const body = res.json() as Record<string, unknown>;
-    expect((body['error'] as Record<string, unknown>)['code']).toBeTruthy();
+    const error = body['error'] as Record<string, unknown>;
+    expect(typeof error['code']).toBe('string');
+    expect(/^[A-Z_]+$/.test(error['code'] as string)).toBe(true);
+    expect(typeof error['message']).toBe('string');
+    expect((error['message'] as string).length).toBeGreaterThan(0);
+    expect(typeof error['request_id']).toBe('string');
+    expect('failure_reason' in error).toBe(true);
+    expect(typeof error['retryable']).toBe('boolean');
   });
 
   it('invalid mode option returns 400', async () => {
@@ -327,6 +339,8 @@ describe('POST /v1/search/replay', () => {
     const error = body['error'] as Record<string, unknown>;
     expect(error['code']).toBe('SNAPSHOT_MISMATCH');
     expect(error['request_id']).toBeTruthy();
+    // SNAPSHOT_MISMATCH must not be retryable (fail-closed per RFC-014 §4.3)
+    expect(error['retryable']).toBe(false);
   });
 
   it('missing decision_snapshot field returns 400', async () => {
@@ -339,8 +353,13 @@ describe('POST /v1/search/replay', () => {
     const body = res.json() as Record<string, unknown>;
     expect(body).toHaveProperty('error');
     const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBeTruthy();
-    expect(error['request_id']).toBeTruthy();
+    expect(typeof error['code']).toBe('string');
+    expect(/^[A-Z_]+$/.test(error['code'] as string)).toBe(true);
+    expect(typeof error['message']).toBe('string');
+    expect((error['message'] as string).length).toBeGreaterThan(0);
+    expect(typeof error['request_id']).toBe('string');
+    expect('failure_reason' in error).toBe(true);
+    expect(typeof error['retryable']).toBe('boolean');
   });
 
   it('snapshot with extra feature_flags fields is handled', async () => {

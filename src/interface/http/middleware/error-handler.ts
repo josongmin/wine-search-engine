@@ -63,6 +63,30 @@ export function errorHandler(
 ): void {
   const requestId = request.requestId ?? 'unknown';
 
+  // Rate limit — 429 Too Many Requests (RFC-014 §13)
+  // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the
+  // limit is exceeded (without a custom errorResponseBuilder).
+  const fastifyError = error as { statusCode?: number; message?: string };
+  if (fastifyError.statusCode === 429) {
+    const message = fastifyError.message ?? 'Rate limit exceeded.';
+    // Extract the "retry in X" portion from the default message to satisfy the
+    // "Retry after" assertion in the tests.
+    const retryPart = message.replace('Rate limit exceeded, retry in', 'Retry after');
+
+    request.log.warn({ requestId }, 'rate_limit_exceeded');
+
+    const body = buildErrorResponse(
+      requestId,
+      'RATE_LIMIT_EXCEEDED',
+      retryPart,
+      null,
+      true,
+    );
+
+    void reply.status(429).send(body);
+    return;
+  }
+
   // ZodError — request validation failure
   if (error instanceof ZodError) {
     const issues = error.issues

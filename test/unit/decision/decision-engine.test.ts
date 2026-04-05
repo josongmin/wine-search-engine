@@ -25,11 +25,12 @@ class StubThresholdStore implements ThresholdStore {
 // ── Snapshot factory ──────────────────────────────────────────────────────────
 function makeSnapshot(): DecisionSnapshot {
   return {
-    plannerVersion: '1.0.0',
-    resolverVersion: '1.0.0',
-    rankingVersion: '1.0.0',
-    thresholdProfileId: 'default-v1',
-    capturedAt: new Date(),
+    model_versions: { embedding: 'bge-m3-v1' },
+    index_versions: { wine_content: '2026-04-01' },
+    policy_rule_version: '1.0.0',
+    threshold_profile_id: 'default-v1',
+    planner_version: '1.0.0',
+    feature_flags: {},
   };
 }
 
@@ -71,6 +72,7 @@ function makeResolverResult(overrides?: {
       appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
       outcomeReasonCodes: [],
     },
+    conformalSetSize: C >= 0.9 ? 1 : C >= 0.8 ? 2 : 5,
   };
 }
 

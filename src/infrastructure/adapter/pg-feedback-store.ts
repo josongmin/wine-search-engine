@@ -84,6 +84,19 @@ export class PgFeedbackStore implements FeedbackStore {
     return result.rows.map(rowToSignal);
   }
 
+  async pruneExpiredFeedback(olderThan: Date): Promise<number> {
+    const result = await this.pool.query<{ count: string }>(
+      `WITH deleted AS (
+         DELETE FROM feedback_signals
+         WHERE created_at < $1
+         RETURNING 1
+       )
+       SELECT COUNT(*) AS count FROM deleted`,
+      [olderThan],
+    );
+    return parseInt(result.rows[0]?.count ?? '0', 10);
+  }
+
   async getAggregatedStats(entityId: EntityId): Promise<AggregatedFeedbackStats> {
     const result = await this.pool.query<{
       clicks: string;

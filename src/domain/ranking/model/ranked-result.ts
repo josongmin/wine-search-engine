@@ -58,6 +58,9 @@ export interface RankedResult {
   /** The entity this result refers to. */
   readonly entityId: EntityId;
 
+  /** Canonical display label (e.g. "Opus One 2018"). */
+  readonly canonicalLabel: string;
+
   /**
    * Aggregated ranking score. NOT calibrated confidence C.
    * Used only for ordering candidates within a single query.

@@ -1,0 +1,121 @@
+import type { DecisionSnapshot } from '../../shared/types/index.js';
+import type { DecisionInput } from '../model/decision-input.js';
+import type { FailureReason } from '../model/failure-reason.js';
+
+/**
+ * Result of the AdmissionGate closure check (RFC-016).
+ *
+ * The gate is applied immediately before a resolved status is emitted.
+ * - `{ admitted: true }` — the decision may proceed.
+ * - `{ admitted: false, reason, traceRef }` — the decision is rejected with
+ *   a machine-readable reason and a trace reference for audit trails.
+ */
+export type AdmissionResult =
+  | { readonly admitted: true }
+  | {
+      readonly admitted: false;
+      readonly reason: FailureReason;
+      readonly traceRef: string;
+    };
+
+/**
+ * THE FINAL CLOSURE — the AdmissionGate, per RFC-016.
+ *
+ * The AdmissionGate is the last invariant check before a resolved status is
+ * emitted to downstream consumers. It guards against three classes of
+ * violations that prior pipeline stages cannot prevent in isolation:
+ *
+ * (a) **Identity-signature consistency** — the resolved entity's identity
+ *     references must be present and internally consistent with the snapshot
+ *     that was active at decision time.
+ *
+ * (b) **Evidence sufficiency** — the evidence trail must meet the minimum
+ *     evidence-reference count required for a binding resolution.
+ *
+ * (c) **Hard-constraint compliance** — every hard constraint from the query
+ *     plan must be represented in the evidence trail (constraint evidence
+ *     must be present when hard constraints exist).
+ *
+ * Only resolved decisions are subject to all three checks.  Non-resolved
+ * decisions pass through immediately so that the gate never blocks
+ * clarification or failure outcomes.
+ */
+export class AdmissionGate {
+  /**
+   * Evaluates admission for a resolved decision.
+   *
+   * @param input - The full decision input, providing identity references,
+   *   evidence summary, and hard constraints.
+   * @param snapshot - The system-version snapshot active at decision time,
+   *   used for identity-signature consistency checks.
+   * @returns An {@link AdmissionResult} indicating whether the decision is
+   *   admitted or rejected with a specific {@link FailureReason}.
+   */
+  check(input: DecisionInput, snapshot: DecisionSnapshot): AdmissionResult {
+    // ── (a) Identity-signature consistency ──────────────────────────────────
+    //
+    // The resolved top entity must be present and its entityId must be a
+    // non-empty string.  An absent topEntity while the engine believes the
+    // decision is resolved is an internal inconsistency.
+    const topEntity = input.resolverResult.topEntity;
+    if (topEntity === undefined) {
+      return this.reject('IDENTITY_REFERENCE_MISSING', input, snapshot);
+    }
+
+    if (!topEntity.entityId || String(topEntity.entityId).trim() === '') {
+      return this.reject('IDENTITY_REFERENCE_MISSING', input, snapshot);
+    }
+
+    // Snapshot seal: the snapshot's threshold_profile_id must match the
+    // thresholdProfileId recorded in the query plan.  A mismatch means the
+    // decision was evaluated against a different configuration than the one
+    // currently active — a snapshot consistency violation.
+    if (snapshot.threshold_profile_id !== input.queryPlan.thresholdProfileId) {
+      return this.reject('SNAPSHOT_MISMATCH', input, snapshot);
+    }
+
+    // Policy-rule seal: if the snapshot carries a policy_rule_version it must
+    // be consistent with the plan's policyRuleVersion.
+    if (snapshot.policy_rule_version !== input.queryPlan.policyRuleVersion) {
+      return this.reject('IDENTITY_SEAL_VIOLATION', input, snapshot);
+    }
+
+    // ── (b) Evidence sufficiency ─────────────────────────────────────────────
+    //
+    // A resolved decision must be backed by identity evidence.  The boolean
+    // `identityEvidencePresent` is the canonical signal set by the EvidenceGate
+    // earlier in the pipeline.  If the summary is absent or the flag is false,
+    // the decision lacks substantiation.
+    if (!input.evidenceSummary?.identityEvidencePresent) {
+      return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
+    }
+
+    // ── (c) Hard-constraint compliance ───────────────────────────────────────
+    //
+    // When hard constraints are present in the query plan, constraint evidence
+    // must have been gathered.  Absence of constraint evidence while hard
+    // constraints exist means the entity was admitted without verifying
+    // compliance with mandatory filters.
+    const hasHardConstraints = input.queryPlan.constraints.hard.length > 0;
+    if (hasHardConstraints && input.evidenceSummary?.constraintEvidencePresent !== true) {
+      return this.reject('HARD_CONSTRAINT_VIOLATION', input, snapshot);
+    }
+
+    return { admitted: true };
+  }
+
+  /**
+   * Builds a rejected {@link AdmissionResult} with a stable trace reference.
+   *
+   * The trace reference encodes the query class and rejection timestamp so
+   * that the rejection event can be correlated with pipeline logs.
+   */
+  private reject(
+    reason: FailureReason,
+    input: DecisionInput,
+    snapshot: DecisionSnapshot,
+  ): AdmissionResult {
+    const traceRef = `admission:${input.queryPlan.queryClass}:${snapshot.threshold_profile_id}:${String(Date.now())}`;
+    return { admitted: false, reason, traceRef };
+  }
+}

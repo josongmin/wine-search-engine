@@ -1,6 +1,8 @@
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
-import rateLimit, { type errorResponseBuilderContext } from '@fastify/rate-limit';
+import Fastify, { type FastifyInstance } from 'fastify';
+import rateLimit from '@fastify/rate-limit';
+import { type Span, SpanStatusCode } from '@opentelemetry/api';
 import type { Container } from '../../config/container.js';
+import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { registerSearchRoute } from './routes/search.route.js';
@@ -9,6 +11,12 @@ import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import { registerHealthRoutes } from './routes/health.route.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    otelSpan?: Span;
+  }
+}
 
 /**
  * Options for creating the Fastify server.
@@ -45,31 +53,51 @@ export async function createServer(
   // Register middleware
   registerRequestContext(app);
 
+  // Add OpenTelemetry root span per request.
+  // The span is started in onRequest (after request-context assigns requestId)
+  // and closed in onResponse so it covers the full request lifecycle.
+  app.addHook('onRequest', async (request) => {
+    const spanName = `${request.method} ${request.url}`;
+    const span = getTracer().startSpan(spanName, {
+      attributes: {
+        'http.method': request.method,
+        'http.url': request.url,
+        'request.id': request.requestId,
+      },
+    });
+    request.otelSpan = span;
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const { otelSpan } = request;
+    if (otelSpan !== undefined) {
+      otelSpan.setAttribute('http.status_code', reply.statusCode);
+      if (reply.statusCode >= 500) {
+        otelSpan.setStatus({ code: SpanStatusCode.ERROR });
+      }
+      otelSpan.end();
+    }
+  });
+
   // Register rate limiting — RFC-014 §13
+  // errorResponseBuilder is intentionally omitted: in @fastify/rate-limit v10 it replaces the
+  // thrown error object, stripping statusCode and causing setErrorHandler to see an unknown
+  // object and fall back to 500. The 429 branch is handled in the global error handler instead.
   await app.register(rateLimit, {
     max: 100,
     timeWindow: '1 minute',
-    errorResponseBuilder: (req: FastifyRequest, context: errorResponseBuilderContext) => ({
-      error: {
-        request_id: req.requestId ?? 'unknown',
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: `Rate limit exceeded. Retry after ${context.after}`,
-        failure_reason: null,
-        retryable: true,
-      },
-    }),
   });
 
   // Enforce Content-Type: application/json on all POST requests.
-  // Fastify already rejects non-JSON bodies by default for routes with JSON
-  // schemas, but POST routes here use Zod and parse request.body manually,
-  // so we add an explicit gate to return 415 before the body is parsed.
-  app.addHook('preValidation', async (request, reply) => {
+  // Must run in preParsing (before the body parser) so that missing or
+  // wrong Content-Type headers never reach the JSON parser and cause a 500.
+  // RFC 2046: media types are case-insensitive, so we lowercase before checking.
+  app.addHook('preParsing', async (request, reply) => {
     if (request.method === 'POST') {
-      const ct = request.headers['content-type'] ?? '';
+      const ct = (request.headers['content-type'] ?? '').toLowerCase();
       if (!ct.includes('application/json')) {
         const requestId = request.requestId ?? 'unknown';
-        void reply.status(415).send({
+        await reply.status(415).send({
           error: {
             request_id: requestId,
             code: 'UNSUPPORTED_MEDIA_TYPE',
@@ -79,6 +107,7 @@ export async function createServer(
             retryable: false,
           },
         });
+        return;
       }
     }
   });
