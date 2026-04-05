@@ -236,6 +236,48 @@ schema wine_entity {
     }
 
     # -------------------------------------------------------------------------
+    # Task 5: Schema Structuring Enhancements
+    # -------------------------------------------------------------------------
+
+    # Grape variety hierarchy matching — enables "Pinot" to match Pinot Noir/Grigio/Blanc
+    # Using separate field for hierarchical matching with ngram analyzer
+    field grape_family type string {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    # Structured grape variety hierarchy - array of family + variety pairs
+    field grape_hierarchy type array<string> {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    # Region hierarchy — enables hierarchical matching
+    # Format: "Country / Region / Sub-region / District"
+    field region_hierarchy type array<string> {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    # Producer aliases — standardized producer name mappings
+    # E.g. "Château XYZ", "Domaine XYZ", "Castle XYZ"
+    field producer_aliases type array<string> {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    # Explicit price band numeric field for range queries
+    field price_band_numeric type int {
+      indexing: summary | attribute
+    }
+
+    # Flavor profile categories — explicit enum instead of free text
+    # Encoded as pipe-separated: "body:0.6|acidity:0.7|tannin:0.8|sweetness:0.2"
+    field flavor_profile_structured type string {
+      indexing: summary | attribute
+    }
+
+    # -------------------------------------------------------------------------
     # Dense embedding — 128-dim float tensor, HNSW ANN retrieval.
     #
     # HNSW parameters (BGE-M3 / BEIR validated):
@@ -328,6 +370,12 @@ schema wine_entity {
     summary certifications {}
     summary soil_type {}
     summary producer_type {}
+    summary grape_family {}
+    summary grape_hierarchy {}
+    summary region_hierarchy {}
+    summary producer_aliases {}
+    summary price_band_numeric {}
+    summary flavor_profile_structured {}
   }
 
   # ---------------------------------------------------------------------------
@@ -512,6 +560,96 @@ schema wine_entity {
       bm25(flavor_profiles)
       bm25(classification)
       closeness(field, embedding)
+    }
+  }
+
+  # ---------------------------------------------------------------------------
+  # Stemming & Synonym Rules (Task 5: Schema Structuring)
+  #
+  # These rules enhance grape variety, region, and producer matching:
+  #  - Grape synonyms: Pinot (Noir/Grigio/Blanc), Cabernet (Sauvignon/Franc)
+  #  - Producer synonyms: Château = Domaine = Castle (varies by region)
+  #  - Region aliases: Bordeaux, Burgundy, Loire, etc.
+  # ---------------------------------------------------------------------------
+
+  search {
+    # Grape variety stemming and synonyms
+    synonym pinot-family {
+      way: "both"
+      term: "pinot noir"
+      term: "pinot grigio"
+      term: "pinot gris"
+      term: "pinot blanc"
+      term: "pinot"
+    }
+
+    synonym cabernet-family {
+      way: "both"
+      term: "cabernet sauvignon"
+      term: "cabernet franc"
+      term: "cabernet"
+    }
+
+    synonym merlot-family {
+      way: "both"
+      term: "merlot"
+    }
+
+    synonym tempranillo-family {
+      way: "both"
+      term: "tempranillo"
+      term: "tinta del toro"
+    }
+
+    # Producer name standardization (Château = Domaine = Castle concept)
+    # Note: Vespa 8.x synonyms are simple term lists; for complex logic,
+    # use application-level processing in ETL.
+
+    synonym producer-honorific {
+      way: "both"
+      term: "château"
+      term: "domaine"
+      term: "bodega"
+      term: "cantina"
+      term: "azienda"
+      term: "estate"
+    }
+
+    # Region aliases for hierarchical matching
+    synonym france-regions {
+      way: "both"
+      term: "bordeaux"
+      term: "burgundy"
+      term: "loire valley"
+      term: "alsace"
+      term: "rhone"
+      term: "provence"
+      term: "champagne"
+    }
+
+    synonym italy-regions {
+      way: "both"
+      term: "tuscany"
+      term: "piedmont"
+      term: "veneto"
+      term: "umbria"
+      term: "sicily"
+    }
+
+    synonym spain-regions {
+      way: "both"
+      term: "rioja"
+      term: "ribera del duero"
+      term: "priorat"
+      term: "penedes"
+    }
+
+    synonym usa-regions {
+      way: "both"
+      term: "napa valley"
+      term: "sonoma"
+      term: "paso robles"
+      term: "santa barbara"
     }
   }
 

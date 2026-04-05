@@ -1,0 +1,7 @@
+{
+  "totalTriplets": 460,
+  "timestamp": "2026-04-05T20:12:31.737Z",
+  "golden_queries_count": 115,
+  "wine_documents_count": 7039,
+  "hard_negatives_extracted": 230
+}

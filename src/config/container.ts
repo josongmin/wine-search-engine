@@ -78,6 +78,7 @@ import { EvalRunner } from '../domain/evaluation/service/eval-runner.js';
 import { PgGoldSetStore } from '../infrastructure/adapter/pg-gold-set-store.js';
 import { PgEvalResultStore } from '../infrastructure/adapter/pg-eval-result-store.js';
 import { SearchPipelineEvaluator } from '../infrastructure/adapter/search-pipeline-evaluator.js';
+import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
 
 /**
  * The DI container — holds all wired domain services and use cases.
@@ -114,8 +115,8 @@ export interface Container {
   readonly watchlistSubscriber: InstanceType<typeof RedisWatchlistSubscriber>;
   readonly webhookDelivery: InstanceType<typeof WebhookDelivery>;
 
-  // Epic 3: Evaluation infrastructure
-  readonly evalRunner: EvalRunner;
+  // Epic 3: Evaluation infrastructure (optional - requires Postgres)
+  readonly evalRunner: EvalRunner | null;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -375,7 +376,22 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
   // Create independent use cases first (no dependencies on SearchUseCase)
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
-  // Create SearchUseCase with Epic 15 drinkingWindow + Wave 4 unified cache service
+  // ── Epic 4: LTR model loading ───────────────────────────────────────────────
+  let ltrModels: ReadonlyMap<string, import('../domain/ranking/index.js').QueryClassWeights> | undefined;
+  if (pool) {
+    try {
+      const ltrRegistry = new PgLtrModelRegistry(pool);
+      ltrModels = await ltrRegistry.getAllModels();
+      if (ltrModels.size > 0) {
+        console.warn(`[Container] Loaded ${ltrModels.size} LTR models from registry`);
+      }
+    } catch (err) {
+      console.warn('[Container] Failed to load LTR models; continuing without:', err);
+      // Continue without LTR models — base ranking still works
+    }
+  }
+
+  // Create SearchUseCase with Epic 15 drinkingWindow + Wave 4 unified cache service + Epic 4 LTR models
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
@@ -389,6 +405,7 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     injectionJudge,
     drinkingWindow: drinkingWindowUseCase, // ← Epic 15: Inject drinking window
     cacheService, // ← Wave 4, Phase 3: Unified cache service (query + embedding + version checking)
+    ltrModels, // ← Epic 4: LambdaMART models for LTR reranking
   });
 
   // Dependent use cases created after SearchUseCase
@@ -441,6 +458,21 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     console.warn('[Container] WEBHOOK_SECRET not configured; watchlist webhooks disabled');
   }
 
+  // ── Epic 3: Evaluation infrastructure ───────────────────────────────────────
+  // Create evaluation pipeline only if pool is available (requires Postgres)
+  // In development/testing without Postgres, evaluation is skipped gracefully
+  let evalRunner: EvalRunner | null = null;
+  if (pool) {
+    const goldSetStore = new PgGoldSetStore(pool);
+    const evalResultStore = new PgEvalResultStore(pool);
+    const searchPipelinePort = new SearchPipelineEvaluator(searchUseCase);
+
+    evalRunner = new EvalRunner(goldSetStore, evalResultStore, searchPipelinePort);
+    console.warn('[Container] Evaluation infrastructure initialized');
+  } else {
+    console.warn('[Container] Evaluation infrastructure skipped (Postgres pool not available)');
+  }
+
   return {
     queryPlanner,
     entityResolver,
@@ -463,5 +495,6 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     watchlistPublisher,
     watchlistSubscriber,
     webhookDelivery,
+    evalRunner,
   };
 }

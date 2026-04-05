@@ -26,7 +26,8 @@
     "ingest": "tsx src/interface/cli/ingest.command.ts",
     "kill-switch": "tsx src/interface/cli/kill-switch.command.ts",
     "migrate": "node --experimental-vm-modules scripts/migrate.ts",
-    "vivino:bronze": "tsx tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts"
+    "vivino:bronze": "tsx tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts",
+    "finetuning:prepare": "tsx scripts/fine-tune/prepare-finetuning-data.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.82.0",

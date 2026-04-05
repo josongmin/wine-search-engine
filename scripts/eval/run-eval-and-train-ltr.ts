@@ -17,8 +17,9 @@ import { EvalRunner } from '../../src/domain/evaluation/service/eval-runner.js';
 import { PgGoldSetStore } from '../../src/infrastructure/adapter/pg-gold-set-store.js';
 import { PgEvalResultStore } from '../../src/infrastructure/adapter/pg-eval-result-store.js';
 import { SearchPipelineEvaluator } from '../../src/infrastructure/adapter/search-pipeline-evaluator.js';
-import { LTRTrainingService, createModelRegistry } from '../../src/domain/ranking/index.js';
-import type { SearchUseCase } from '../../src/domain/search/search.usecase.js';
+import { buildTrainingExamples, trainAllModels } from '../../src/domain/ranking/index.js';
+import { PgLtrModelRegistry } from '../../src/infrastructure/adapter/pg-ltr-model-registry.js';
+import type { SearchUseCase } from '../../src/application/search/search.usecase.js';
 
 /**
  * Main evaluation pipeline.
@@ -93,43 +94,37 @@ async function runEvaluationAndTraining(
       }
     }
 
-    // Step 3: Build training examples
+    // Step 3: Build training examples from evaluation results
     console.log('\n🧠 Step 3: Building LambdaMART training examples...');
-    // For now, use a synthetic approach: create examples from evaluation results
-    // In production, this would extract ranking features from the actual retrieval pipeline
+    const results = await evalResultStore.getResults();
+    const examples = buildTrainingExamples(results, cases);
+    console.log(`   ✓ Built ${examples.length} training examples`);
 
-    // Step 4: Train LambdaMART models
+    // Step 4: Train LambdaMART models per query class
     console.log('\n🎓 Step 4: Training LambdaMART models...');
-    // Create synthetic training examples for demo
-    const examples = LTRTrainingService.buildTrainingExamples([], cases);
-
     if (examples.length > 0) {
-      const models = LTRTrainingService.trainAllModels(examples);
-      const modelRegistry = createModelRegistry(models);
+      const models = trainAllModels(examples);
 
-      console.log(`   ✓ Trained models for ${models.size} query classes`);
-      console.log(`     Mean NDCG@5: ${modelRegistry.trainingMetrics.meanNdcg5.toFixed(3)}`);
-      console.log(`     Min NDCG@5: ${modelRegistry.trainingMetrics.minNdcg5.toFixed(3)}`);
-      console.log(`     Max NDCG@5: ${modelRegistry.trainingMetrics.maxNdcg5.toFixed(3)}`);
-      console.log(`     Total Training Examples: ${modelRegistry.trainingMetrics.totalExamples}`);
+      if (models.size > 0) {
+        console.log(`   ✓ Trained models for ${models.size} query classes`);
 
-      // Store model metadata
-      console.log('\n💾 Step 5: Storing model registry...');
-      await pool.query(
-        `INSERT INTO ltr_model_registry (
-          model_id, version, trained_at, training_metrics
-        ) VALUES ($1, $2, $3, $4)
-        ON CONFLICT (model_id) DO UPDATE SET
-          trained_at = $3,
-          training_metrics = $4`,
-        [
-          modelRegistry.modelId,
-          modelRegistry.version,
-          modelRegistry.trainedAt,
-          JSON.stringify(modelRegistry.trainingMetrics),
-        ],
-      );
-      console.log(`   ✓ Stored model registry: ${modelRegistry.modelId}`);
+        // Step 5: Store trained models in registry
+        console.log('\n💾 Step 5: Persisting trained models to database...');
+        const modelRegistry = new PgLtrModelRegistry(pool);
+
+        let storedCount = 0;
+        for (const [queryClass, weights] of models.entries()) {
+          await modelRegistry.saveModel(queryClass, weights);
+          storedCount++;
+          console.log(
+            `   ✓ Stored model for ${queryClass} (NDCG@5: ${weights.ndcg5ValidationScore.toFixed(3)})`,
+          );
+        }
+
+        console.log(`   ✓ Persisted ${storedCount} models to ltr_model_registry`);
+      } else {
+        console.log('   ⚠️  No models trained (insufficient examples per class)');
+      }
     } else {
       console.log('   ⚠️  No training examples generated (eval results needed)');
     }

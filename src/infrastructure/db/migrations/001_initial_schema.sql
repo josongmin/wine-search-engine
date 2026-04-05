@@ -176,3 +176,18 @@ CREATE TABLE IF NOT EXISTS eval_results (
 );
 CREATE INDEX IF NOT EXISTS idx_eval_results_case ON eval_results(case_id);
 CREATE INDEX IF NOT EXISTS idx_eval_results_created ON eval_results(created_at);
+
+-- ltr_model_registry table: persists trained LambdaMART models per query class
+-- Epic 4: Learning-to-rank model persistence
+CREATE TABLE IF NOT EXISTS ltr_model_registry (
+  registry_id TEXT PRIMARY KEY,
+  query_class TEXT NOT NULL UNIQUE,
+  weights FLOAT8[] NOT NULL,
+  bias FLOAT NOT NULL,
+  training_example_count INT NOT NULL,
+  ndcg5_validation_score FLOAT NOT NULL,
+  trained_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ltr_model_query_class ON ltr_model_registry(query_class);
+CREATE INDEX IF NOT EXISTS idx_ltr_model_trained_at ON ltr_model_registry(trained_at DESC);

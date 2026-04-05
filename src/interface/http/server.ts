@@ -15,6 +15,7 @@ import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import { registerHealthRoutes } from './routes/health.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
+import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -137,6 +138,19 @@ export async function createServer(
   registerResolveRoute(app, container);
   registerHybridRoute(app, container);
   registerWatchlistRoute(app, container);
+
+  // Epic 3: Optional evaluation run at startup
+  // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)
+  if (process.env.EVAL_RUN_AT_STARTUP === 'true') {
+    if (container.evalRunner) {
+      app.addHook('onReady', async () => {
+        console.warn('[Server] Running evaluation on startup per EVAL_RUN_AT_STARTUP...');
+        await runEvaluation(container.evalRunner!, { verbose: true });
+      });
+    } else {
+      console.warn('[Server] EVAL_RUN_AT_STARTUP=true but Postgres pool unavailable; skipping evaluation');
+    }
+  }
 
   return app;
 }

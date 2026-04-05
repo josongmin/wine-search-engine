@@ -83,6 +83,8 @@ export interface SearchUseCaseDeps {
   readonly injectionJudge?: LLMInjectionJudge | undefined;
   /** Unified cache service for query/embedding/result caching (Wave 4, Phase 3). Optional. */
   readonly cacheService?: CacheService | undefined;
+  /** Epic 4: Per-query-class LambdaMART models for LTR reranking. Optional. */
+  readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
 }
 
 /**
@@ -350,21 +352,23 @@ export class SearchUseCase {
 
     // Epic 4: Apply LTR reranking if model available for this query class
     const queryClass = plan.queryClass;
-    const ltrModel = (this.deps as any).ltrModels?.get?.(queryClass) as QueryClassWeights | undefined;
+    const ltrModel = this.deps.ltrModels?.get(queryClass);
     if (ltrModel && rankedResults.length > 0) {
       // Convert ranked results to rankable documents for LTR
+      // Map available ComponentScores fields to RankingFeatures
       const rankableDocuments = rankedResults.map((doc, idx) => ({
-        entityId: doc.entity?.entityId ?? '',
-        retrievalScore: doc.finalScore ?? 0,
+        entityId: doc.entityId,
+        retrievalScore: doc.finalScore,
         features: {
-          bm25Score: doc.componentScores?.lexical ?? 0.5,
-          semanticScore: doc.componentScores?.semantic ?? 0.5,
-          popularityScore: doc.componentScores?.popularity ?? 0.5,
-          recencyScore: 0.5,
-          classMatchScore: 0.5,
-          attributeMatchScore: doc.componentScores?.attributeAlignment ?? 0.5,
-          diversityScore: 0.5,
-          multilingualScore: 0.5,
+          // Map ComponentScores fields to RankingFeatures
+          bm25Score: Math.max(0, 1 - doc.componentScores.uncertaintyPenalty), // Inverse of uncertainty
+          semanticScore: doc.componentScores.semantic,
+          popularityScore: doc.componentScores.popularity,
+          recencyScore: doc.componentScores.availability, // Proxy: availability as recency signal
+          classMatchScore: doc.componentScores.attributeAlignment,
+          attributeMatchScore: doc.componentScores.attributeAlignment,
+          diversityScore: doc.componentScores.entityIntegrity, // Proxy: integrity as diversity
+          multilingualScore: doc.componentScores.softConstraint, // Proxy: soft constraint satisfaction
         },
         originalRank: idx + 1,
       }));
