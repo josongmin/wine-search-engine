@@ -69,7 +69,7 @@ export namespace LambdaMARTRanker {
     if (classExamples.length === 0) {
       return {
         queryClass,
-        weights: [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125],
+        weights: [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125] as readonly number[],
         bias: 0.5,
         trainingExampleCount: 0,
         ndcg5ValidationScore: 0,
@@ -77,7 +77,8 @@ export namespace LambdaMARTRanker {
       };
     }
 
-    const weights = [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125];
+    // Mutable copy for training
+    const weights: number[] = [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125];
     let bias = 0.5;
 
     const numIterations = Math.min(100, classExamples.length * 10);
@@ -109,7 +110,7 @@ export namespace LambdaMARTRanker {
         const lambda = labelDiff * (1 / (1 + Math.exp(scoreDiff)));
 
         for (let j = 0; j < 8; j++) {
-          const fname = featureNames[j];
+          const fname = featureNames[j] as keyof RankingFeatures;
           const featureDiff =
             (example.features1[fname] ?? 0) - (example.features2[fname] ?? 0);
           gradients[j] += lambda * featureDiff;
@@ -182,19 +183,15 @@ export namespace LambdaMARTRanker {
   ): number {
     let totalNdcg = 0;
     let queryCount = 0;
-    const queryExamples: Record<string, LambdaMARTExample[]> = {};
+    const queryExamples: Map<string, LambdaMARTExample[]> = new Map();
 
     for (const ex of examples) {
-      if (!queryExamples[ex.query]) {
-        queryExamples[ex.query] = [];
-      }
-      queryExamples[ex.query].push(ex);
+      const queryList = queryExamples.get(ex.query) ?? [];
+      queryList.push(ex);
+      queryExamples.set(ex.query, queryList);
     }
 
-    for (const queryStr of Object.keys(queryExamples)) {
-      const exs = queryExamples[queryStr];
-      if (!exs) continue;
-
+    for (const [, exs] of queryExamples) {
       const scored = exs.flatMap((ex) => [
         { label: ex.label1, score: scoreFeatures(ex.features1, weights, bias) },
         { label: ex.label2, score: scoreFeatures(ex.features2, weights, bias) },
@@ -204,9 +201,12 @@ export namespace LambdaMARTRanker {
 
       let dcg = 0;
       for (let i = 0; i < ranked.length; i++) {
-        const gain = Math.pow(2, ranked[i].label) - 1;
-        const discount = 1 / Math.log2(i + 2);
-        dcg += gain * discount;
+        const item = ranked[i];
+        if (item) {
+          const gain = Math.pow(2, item.label) - 1;
+          const discount = 1 / Math.log2(i + 2);
+          dcg += gain * discount;
+        }
       }
 
       const idcg = Array(Math.min(5, exs.length))

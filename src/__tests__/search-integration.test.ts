@@ -228,9 +228,9 @@ function buildResolverResult(
   gap: number,
   ambiguous: boolean = false,
 ): EntityResolveResult {
-  // Use actual DEFAULT_THRESHOLD_PROFILE values for short_entity
+  // Wave 3: Use dynamic gap threshold for short_entity (0.03, not 0.10)
   const resolveThreshold = 0.60;
-  const gapThreshold = 0.10;
+  const gapThreshold = 0.03; // Dynamic threshold for short_entity
   return {
     status: C >= resolveThreshold && gap >= gapThreshold && !ambiguous ? 'resolved' : 'ambiguous',
     topEntity: {

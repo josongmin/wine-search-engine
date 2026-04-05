@@ -3,6 +3,9 @@ import { config } from './src/config/env.js';
 
 async function test() {
   console.log('Starting container...');
+  console.log('Env ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY || '(not set)');
+  console.log('Config anthropic.apiKey:', config.anthropic.apiKey || '(undefined)');
+  console.log('Config killswitch injectionJudge:', config.killSwitch.injectionJudge);
   const container = await createContainer(config);
   console.log('Container created');
 

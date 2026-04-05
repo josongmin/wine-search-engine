@@ -77,10 +77,14 @@ export class DecisionEngine {
     const thresholds = await this.loadThresholds(input);
     const rulesApplied: string[] = [];
 
+    // Compute dynamic gap threshold (RFC-009 §5.3)
+    const C = input.resolverResult.decisionTrace.decisionConfidenceC;
+    const dynamicGapThreshold = computeDynamicGapThreshold(input.queryPlan.queryClass, C);
+
     // ── Step 1: Policy pre-processing (RFC-007 §6.3) ───────────────
     const policyResult = this.applyPolicyPreprocessing(input, rulesApplied);
     if (policyResult !== null) {
-      return this.buildOutput(input, policyResult, thresholds, snapshot, rulesApplied);
+      return this.buildOutput(input, policyResult, thresholds, snapshot, rulesApplied, undefined, undefined, dynamicGapThreshold);
     }
 
     // ── Step 2: Numeric gate (RFC-007 §6.2) ────────────────────────
@@ -115,11 +119,12 @@ export class DecisionEngine {
           rulesApplied,
           admissionResult.reason,
           admissionResult.traceRef,
+          dynamicGapThreshold,
         );
       }
     }
 
-    return this.buildOutput(input, finalState, thresholds, snapshot, rulesApplied);
+    return this.buildOutput(input, finalState, thresholds, snapshot, rulesApplied, undefined, undefined, dynamicGapThreshold);
   }
 
   /**
@@ -406,6 +411,8 @@ export class DecisionEngine {
    *   machine-readable reason.  Absent on admitted (or non-resolved) decisions.
    * @param admissionTraceRef - The admission trace reference emitted by the gate
    *   on rejection.  Absent on admitted (or non-resolved) decisions.
+   * @param dynamicGapThreshold - The dynamic gap threshold computed for the query class.
+   *   Used in trace instead of static profile value.
    */
   private buildOutput(
     input: DecisionInput,
@@ -415,6 +422,7 @@ export class DecisionEngine {
     rulesApplied: readonly string[],
     failureReason?: FailureReason,
     admissionTraceRef?: string,
+    dynamicGapThreshold?: number,
   ): DecisionOutput {
     const resolverTrace = input.resolverResult.decisionTrace;
     const topCandidate = input.resolverResult.topEntity;
@@ -438,7 +446,7 @@ export class DecisionEngine {
       },
       thresholds: {
         resolveThreshold: thresholds.resolveTau,
-        gapThreshold: thresholds.gapTau,
+        gapThreshold: dynamicGapThreshold ?? thresholds.gapTau,
       },
       versions: {
         plannerVersion: input.queryPlan.plannerVersion,
