@@ -49,20 +49,13 @@ schema wine_entity {
     field search_text_en type string {
       indexing: summary | index
       index: enable-bm25
-      language: en
     }
 
-    # Korean text: character bi-gram indexing for robust CJK recall.
-    # bi-gram over character pairs gives far better recall than whitespace
-    # tokenisation for Korean, where morpheme boundaries are unmarked.
+    # Korean text — same BM25 index as EN (Vespa 8. x in this repo rejects `gram:` in `index {}`;
+    # reintroduce field-specific n-gram via `match`/linguistics profile when aligned with docs).
     field search_text_ko type string {
       indexing: summary | index
-      index {
-        gram: true
-        gram-size: 2
-        enable-bm25
-      }
-      language: ko
+      index: enable-bm25
     }
 
     field semantic_summary type string {
@@ -232,9 +225,7 @@ schema wine_entity {
   # ---------------------------------------------------------------------------
 
   fieldset default {
-    fields: canonical_label, aliases_identity_safe, aliases_noisy_recall,
-            search_text_ko, search_text_en, producer, appellation, grape_primary,
-            flavor_profiles, classification
+    fields: canonical_label, aliases_identity_safe, aliases_noisy_recall, search_text_ko, search_text_en, producer, appellation, grape_primary, flavor_profiles, classification
   }
 
   # ---------------------------------------------------------------------------

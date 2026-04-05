@@ -338,6 +338,13 @@ export function excessAurc(
  * Measures how well decision_confidence matches actual correctness probability.
  * Target: ≤ 0.05.
  */
+/**
+ * Expected Calibration Error with equal-width binning.
+ *
+ * Only includes resolved decisions (abstentions are excluded —
+ * ECE measures calibration of the resolve/not-resolve decision,
+ * not the abstain decision which has its own metrics).
+ */
 export function ece(
   outcomes: readonly DecisionOutcome[],
   truths: readonly GroundTruth[],
@@ -352,9 +359,13 @@ export function ece(
   }));
 
   for (let i = 0; i < outcomes.length; i++) {
-    const conf = outcomes[i]!.decision_confidence;
-    const category = classifyDecision(outcomes[i]!, truths[i]!);
-    const correct = category === 'correct_resolve' || category === 'safe_abstain' ? 1 : 0;
+    const outcome = outcomes[i]!;
+    // ECE only for resolved decisions — abstain/failed are excluded
+    if (outcome.decision_status !== 'resolved') continue;
+
+    const conf = outcome.decision_confidence;
+    const category = classifyDecision(outcome, truths[i]!);
+    const correct = category === 'correct_resolve' ? 1 : 0;
 
     const binIdx = Math.min(Math.floor(conf * bins), bins - 1);
     const bucket = buckets[binIdx]!;
@@ -363,12 +374,15 @@ export function ece(
     bucket.count++;
   }
 
+  const resolvedCount = buckets.reduce((s, b) => s + b.count, 0);
+  if (resolvedCount === 0) return 0;
+
   let totalEce = 0;
   for (const bucket of buckets) {
     if (bucket.count === 0) continue;
     const avgConf = bucket.totalConf / bucket.count;
     const avgAcc = bucket.totalCorrect / bucket.count;
-    totalEce += (bucket.count / outcomes.length) * Math.abs(avgConf - avgAcc);
+    totalEce += (bucket.count / resolvedCount) * Math.abs(avgConf - avgAcc);
   }
 
   return totalEce;

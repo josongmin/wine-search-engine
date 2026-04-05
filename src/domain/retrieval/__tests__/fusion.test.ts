@@ -183,6 +183,63 @@ describe('FusionService', () => {
     });
   });
 
+  describe('hit summary merge', () => {
+    it('prefers sparse canonicalLabel over dense', () => {
+      const sparse: SparseHit[] = [
+        {
+          ...makeSparse('wine-a', 1),
+          summary: { canonicalLabel: 'From sparse' },
+        },
+      ];
+      const dense: DenseHit[] = [
+        {
+          ...makeDense('wine-a', 1),
+          summary: { canonicalLabel: 'From dense' },
+        },
+      ];
+
+      const candidates = fusion.fuse(sparse, dense);
+      expect(candidates[0]?.canonicalLabel).toBe('From sparse');
+    });
+
+    it('fills producer from dense when sparse summary omits it', () => {
+      const sparse: SparseHit[] = [
+        {
+          ...makeSparse('wine-a', 1),
+          summary: { canonicalLabel: 'Wine' },
+        },
+      ];
+      const dense: DenseHit[] = [
+        {
+          ...makeDense('wine-a', 1),
+          summary: { producer: 'Château X' },
+        },
+      ];
+
+      const candidates = fusion.fuse(sparse, dense);
+      expect(candidates[0]?.producer).toBe('Château X');
+      expect(candidates[0]?.canonicalLabel).toBe('Wine');
+    });
+
+    it('prefers sparse grapePrimary over dense', () => {
+      const sparse: SparseHit[] = [
+        {
+          ...makeSparse('wine-a', 1),
+          summary: { grapePrimary: 'Pinot Noir' },
+        },
+      ];
+      const dense: DenseHit[] = [
+        {
+          ...makeDense('wine-a', 1),
+          summary: { grapePrimary: 'Merlot' },
+        },
+      ];
+
+      const candidates = fusion.fuse(sparse, dense);
+      expect(candidates[0]?.grapePrimary).toBe('Pinot Noir');
+    });
+  });
+
   describe('RRF formula correctness', () => {
     it('fusion score for rank 1 in both = 2 * (1/(60+1))', () => {
       const sparse = [makeSparse('wine-a', 1)];

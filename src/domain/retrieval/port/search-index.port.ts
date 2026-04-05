@@ -2,6 +2,18 @@ import type { EntityId } from '../../shared/types/index.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
 
 /**
+ * Summary fields from an index hit, used for cross-encoder passages and display.
+ * Populated when the backend returns document summaries alongside scores.
+ */
+export interface RetrievalHitSummary {
+  readonly canonicalLabel?: string;
+  readonly producer?: string;
+  readonly region?: string;
+  readonly searchTextEn?: string;
+  readonly grapePrimary?: string;
+}
+
+/**
  * A single hit from the sparse (BM25 / lexical) retrieval pass.
  */
 export interface SparseHit {
@@ -16,6 +28,9 @@ export interface SparseHit {
 
   /** Index fields that contributed to the match. */
   readonly matchedFields: readonly string[];
+
+  /** Optional document summary for reranking / UX. */
+  readonly summary?: RetrievalHitSummary;
 }
 
 /**
@@ -33,6 +48,9 @@ export interface DenseHit {
 
   /** Cosine or dot-product similarity in [0, 1]. */
   readonly similarity: number;
+
+  /** Optional document summary for reranking / UX. */
+  readonly summary?: RetrievalHitSummary;
 }
 
 /**

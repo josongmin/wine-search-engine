@@ -17,6 +17,7 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, ProposedAlias } from './types.js';
+import { parseNdjson } from './ndjson.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -68,51 +69,78 @@ function buildUserPrompt(records: readonly EnrichedSilverRecord[]): string {
   return `Generate Korean transliterations for these wines:\n${items.join('\n')}\n\nFor each wine, output a JSON array of arrays: [[wine1_alias1, wine1_alias2, wine1_alias3], [wine2_alias1, ...]]`;
 }
 
+const MAX_RETRIES = 5;
+
 async function callClaude(
   prompt: string,
 ): Promise<string[][]> {
   const apiKey = process.env['ANTHROPIC_API_KEY'];
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
 
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 4096,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 4096,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
 
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Claude API error [${response.status}]: ${text.slice(0, 200)}`);
+    if (response.status === 429) {
+      const wait = Math.min(60_000, 2_000 * Math.pow(2, attempt));
+      console.warn(`  Rate limited (429), waiting ${(wait / 1000).toFixed(0)}s before retry ${attempt + 1}/${MAX_RETRIES}`);
+      await new Promise((r) => setTimeout(r, wait));
+      continue;
+    }
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      throw new Error(`Claude API error [${response.status}]: ${errText.slice(0, 200)}`);
+    }
+
+    const data = (await response.json()) as {
+      content: { type: string; text: string }[];
+    };
+    const text = data.content[0]?.text ?? '[]';
+
+    // Find the outermost JSON array by bracket balancing.
+    let depth = 0;
+    let start = -1;
+    let end = -1;
+    for (let ci = 0; ci < text.length; ci++) {
+      if (text[ci] === '[') {
+        if (depth === 0) start = ci;
+        depth++;
+      } else if (text[ci] === ']') {
+        depth--;
+        if (depth === 0 && start >= 0) {
+          end = ci + 1;
+          break;
+        }
+      }
+    }
+
+    if (start < 0 || end < 0) return [];
+
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end));
+      if (!Array.isArray(parsed)) return [];
+      return parsed as string[][];
+    } catch {
+      console.warn('  Warning: failed to parse LLM JSON response, skipping batch');
+      return [];
+    }
   }
 
-  const data = (await response.json()) as {
-    content: { type: string; text: string }[];
-  };
-  const text = data.content[0]?.text ?? '[]';
-
-  // Extract JSON from response (may have markdown wrapping).
-  // Use non-greedy match to avoid spanning across multiple arrays.
-  const jsonMatch = text.match(/\[[\s\S]*?\]/);
-  if (!jsonMatch) return [];
-
-  try {
-    const parsed: unknown = JSON.parse(jsonMatch[0]);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as string[][];
-  } catch {
-    // LLM returned malformed JSON — skip this batch gracefully.
-    console.warn('  Warning: failed to parse LLM JSON response, skipping batch');
-    return [];
-  }
+  console.warn('  Max retries reached, skipping batch');
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -176,11 +204,7 @@ async function run(): Promise<void> {
 
   console.log(`Reading enriched Silver from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');
-  let records: EnrichedSilverRecord[] = content
-    .trim()
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as EnrichedSilverRecord);
+  let records = parseNdjson<EnrichedSilverRecord>(content, args.input).records;
 
   if (args.limit > 0) records = records.slice(0, args.limit);
   console.log(`  Records: ${records.length}`);
@@ -224,8 +248,8 @@ async function run(): Promise<void> {
       console.log(`  Progress: ${bi + 1}/${batches.length} batches`);
     }
 
-    // Rate limit: 100ms between batches
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Inter-batch delay: 1.5s to stay under 10K output tokens/min rate limit.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
   console.log(`  Total Korean aliases generated: ${totalGenerated}`);

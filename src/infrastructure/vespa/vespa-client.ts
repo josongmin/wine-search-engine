@@ -196,13 +196,16 @@ export class VespaClient {
   /**
    * Inserts or replaces a document in the index.
    *
+   * Vespa `/document/v1` uses **POST** for full-document writes and **PUT** for partial
+   * updates (`assign` / etc.). See document-v1 API guide.
+   *
    * @param docId - The document identifier (used as the docid path segment).
    * @param fields - The document fields to store.
    * @throws {Error} On non-2xx HTTP status.
    */
   async put(docId: string, fields: Record<string, unknown>): Promise<void> {
     const url = this.docUrl(this.appName, docId);
-    await this.sendDocumentRequest('PUT', url, fields);
+    await this.sendDocumentRequest('POST', url, fields);
   }
 
   /**

@@ -16,6 +16,7 @@
  */
 
 import fs from 'node:fs/promises';
+import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
 
 // ---------------------------------------------------------------------------
@@ -33,11 +34,7 @@ const GATE_PATH = 'data/splits/gate.jsonl';
 async function loadQueries(path: string): Promise<GoldenQuery[]> {
   try {
     const content = await fs.readFile(path, 'utf8');
-    return content
-      .trim()
-      .split('\n')
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as GoldenQuery);
+    return parseNdjson<GoldenQuery>(content, path).records;
   } catch {
     return [];
   }

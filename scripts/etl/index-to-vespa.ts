@@ -19,7 +19,6 @@ import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
-import { HttpEmbeddingService } from '../../src/infrastructure/vespa/embedding-service.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createEntityId } from '../../src/domain/shared/types/entity-id.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
@@ -29,14 +28,60 @@ import type { RetrievalDocument } from '../../src/domain/retrieval/model/retriev
 // ---------------------------------------------------------------------------
 
 const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
-const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:18080';
+const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
 const BATCH_SIZE = 50;
 
-const USE_REAL_EMBEDDINGS =
-  process.env['EMBEDDING_SERVICE_URL'] !== undefined &&
-  process.env['EMBEDDING_SERVICE_URL'] !== '';
+function embeddingServiceUrl(): string | undefined {
+  const u = process.env['EMBEDDING_SERVICE_URL']?.trim();
+  return u && u.length > 0 ? u : undefined;
+}
+
+function isNumberArray(v: unknown): v is number[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'number');
+}
+
+/**
+ * OpenAI-compatible embeddings API — inlined so this script never imports
+ * {@link ../../src/infrastructure/vespa/embedding-service.js} (which pulls full `config` / Zod).
+ */
+async function embedBatchHttp(
+  texts: readonly string[],
+): Promise<readonly (readonly number[])[]> {
+  const base = embeddingServiceUrl();
+  if (!base) {
+    throw new Error('embedBatchHttp: no EMBEDDING_SERVICE_URL');
+  }
+  const model = process.env['EMBEDDING_MODEL'] ?? 'bge-m3';
+  const response = await fetch(`${base.replace(/\/$/, '')}/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, input: [...texts] }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Embedding HTTP ${response.status}: ${text}`);
+  }
+  const data: unknown = await response.json();
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !Array.isArray((data as { data?: unknown }).data)
+  ) {
+    throw new Error('Embedding: unexpected JSON shape');
+  }
+  const items = (data as { data: unknown[] }).data;
+  const parsed: Array<{ index: number; embedding: readonly number[] }> = [];
+  for (const item of items) {
+    if (typeof item !== 'object' || item === null) continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o['index'] !== 'number' || !isNumberArray(o['embedding'])) continue;
+    parsed.push({ index: o['index'], embedding: o['embedding'] });
+  }
+  parsed.sort((a, b) => a.index - b.index);
+  return parsed.map((p) => p.embedding);
+}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -190,27 +235,35 @@ async function run(): Promise<void> {
   // Vespa client
   const vespa = new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE);
 
-  // Embedding service (real or deterministic)
-  let embedService: HttpEmbeddingService | null = null;
-  if (USE_REAL_EMBEDDINGS) {
-    embedService = new HttpEmbeddingService();
-    console.log('  Using real BGE-M3 embeddings');
+  const embedUrl = embeddingServiceUrl();
+  if (embedUrl) {
+    console.log('  Will try HTTP embeddings at EMBEDDING_SERVICE_URL; on failure → deterministic');
   } else {
-    console.log('  Using deterministic fallback embeddings (no EMBEDDING_SERVICE_URL)');
+    console.log('  Using deterministic fallback embeddings (EMBEDDING_SERVICE_URL unset)');
   }
 
   const chunks = chunkArray(records, BATCH_SIZE);
   let indexed = 0;
   let failures = 0;
+  let httpEmbedFailed = false;
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const chunk = chunks[ci]!;
 
     // Generate embeddings
     let embeddings: readonly (readonly number[])[];
-    if (embedService) {
-      const texts = chunk.map(buildEmbedText);
-      embeddings = await embedService.embedBatch(texts);
+    if (embedUrl && !httpEmbedFailed) {
+      try {
+        const texts = chunk.map(buildEmbedText);
+        embeddings = await embedBatchHttp(texts);
+      } catch (e) {
+        httpEmbedFailed = true;
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`  Embedding HTTP failed (${msg}) — switching to deterministic for remaining batches`);
+        embeddings = chunk.map((r) =>
+          deterministicEmbedding(r.body, r.sweetness, r.acidity, r.tannin),
+        );
+      }
     } else {
       embeddings = chunk.map((r) =>
         deterministicEmbedding(r.body, r.sweetness, r.acidity, r.tannin),
@@ -222,7 +275,8 @@ async function run(): Promise<void> {
       const embedding = embeddings[i] ?? deterministicEmbedding(rec.body, rec.sweetness, rec.acidity, rec.tannin);
       const retrievalDoc = silverToRetrievalDoc(rec, embedding);
       return {
-        id: `id:${NAMESPACE}:${DOC_TYPE}::${retrievalDoc.entityId}`,
+        // Document v1 path: /document/v1/{namespace}/{type}/docid/{userKey} — user key only (see vespa-search-index.bulkUpsert).
+        id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),
       };
     });

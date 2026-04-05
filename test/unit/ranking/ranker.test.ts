@@ -271,6 +271,44 @@ describe('Ranker', () => {
       expect(spy).toHaveBeenCalledOnce();
     });
 
+    it('reranker receives rich passage when candidate has producer/region/searchTextEn/grapePrimary', async () => {
+      const rich: HybridCandidate = {
+        ...makeCandidate('wine-rich'),
+        canonicalLabel: 'Brunello 2013',
+        producer: 'Poggio Salvi',
+        region: 'Montalcino',
+        searchTextEn: 'Structured red with cherry notes.',
+        grapePrimary: 'Sangiovese',
+      };
+      const filler = Array.from({ length: 5 }, (_, i) => makeCandidate(`wine-fill-${i}`));
+      const candidates = [rich, ...filler];
+
+      const rerankResults: RerankResult[] = candidates.map((c, i) => ({
+        entityId: c.entityId,
+        score: 0.9 - i * 0.05,
+        rank: i + 1,
+      }));
+
+      const { port, spy } = makeReranker(rerankResults);
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregator(0.85),
+        makeEvidenceMapper(),
+        port,
+      );
+
+      await ranker.rank(makeInput(candidates));
+
+      expect(spy).toHaveBeenCalledOnce();
+      const rerankCandidates = spy.mock.calls[0]![1] as readonly RerankCandidate[];
+      const topText = rerankCandidates[0]?.text ?? '';
+      expect(topText).toContain('Brunello 2013');
+      expect(topText).toContain('Poggio Salvi');
+      expect(topText).toContain('Montalcino');
+      expect(topText).toContain('cherry');
+      expect(topText).toContain('Sangiovese');
+    });
+
     it('reranker provided + 4 candidates (≤ RERANK_THRESHOLD) → reranker.rerank() NOT called', async () => {
       const candidates = Array.from({ length: 4 }, (_, i) => makeCandidate(`wine-00${i}`));
 
@@ -306,7 +344,7 @@ describe('Ranker', () => {
   });
 
   describe('score blending', () => {
-    it('originalScore=0.8, rerankerScore=0.6 → blended with semantic_preference weight (0.75): 0.75*0.6 + 0.25*0.8 = 0.65', async () => {
+    it('originalScore=0.8, rerankerScore=0.6 → min-max norm + semantic_preference blend (w=0.18)', async () => {
       // Need > 5 viable candidates to trigger reranking
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
 
@@ -334,9 +372,9 @@ describe('Ranker', () => {
       // Find result for first candidate
       const firstResult = results.find((r) => r.entityId === firstEntityId);
       expect(firstResult).toBeDefined();
-      // semantic_preference blend weight = 0.75
-      // blended = 0.75 * 0.6 + 0.25 * 0.8 = 0.45 + 0.20 = 0.65
-      expect(firstResult!.finalScore).toBeCloseTo(0.65, 10);
+      // Rerank scores [0.6, 0.1, …] → norm(first)=1.0; w=0.18 (default blend scale 1)
+      // blended = 0.18 * 1.0 + 0.82 * 0.8 = 0.836
+      expect(firstResult!.finalScore).toBeCloseTo(0.836, 10);
     });
   });
 

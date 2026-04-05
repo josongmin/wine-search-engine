@@ -36,23 +36,30 @@ export interface ThresholdProfileV1 {
 }
 
 /**
- * Default threshold profile with conservative values.
+ * Default threshold profile — tuned to balance resolve coverage vs wrong-top-1.
  *
- * Higher thresholds for ambiguous / comparison queries where incorrect
- * resolution is costly; lower thresholds for pure-constraint and
- * semantic-preference queries where approximate results are acceptable.
+ * Previous profile (v1.0.0) was too conservative: combined with conformal
+ * alpha=0.1, it caused 96% avoidable abstention. After relaxing alpha to 0.3
+ * (conformal gate at C ≥ 0.7), the T_resolve values below become the actual
+ * bottleneck.
+ *
+ * Principle (RFC-009): wrong resolve is -1.5 utility, avoidable abstain is -0.3.
+ * A threshold is too high if it causes 5+ avoidable abstains per wrong resolve
+ * it prevents (breakeven: 1.5 / 0.3 = 5).
+ *
+ * These values should be tuned on the gate eval set via AURC (RFC-009 §5.3).
  */
 export const DEFAULT_THRESHOLD_PROFILE: ThresholdProfileV1 = {
-  id: 'default-v1',
-  version: '1.0.0',
+  id: 'default-v2',
+  version: '2.0.0',
   perQueryClass: {
-    short_entity: { resolveTau: 0.75, gapTau: 0.15 },
-    ambiguous_short_form: { resolveTau: 0.90, gapTau: 0.25 },
-    anchored_similarity: { resolveTau: 0.70, gapTau: 0.10 },
-    pure_constraint: { resolveTau: 0.65, gapTau: 0.10 },
-    semantic_preference: { resolveTau: 0.60, gapTau: 0.08 },
-    comparison_query: { resolveTau: 0.80, gapTau: 0.20 },
-    unknown: { resolveTau: 0.85, gapTau: 0.20 },
+    short_entity: { resolveTau: 0.60, gapTau: 0.10 },
+    ambiguous_short_form: { resolveTau: 0.75, gapTau: 0.20 },
+    anchored_similarity: { resolveTau: 0.55, gapTau: 0.08 },
+    pure_constraint: { resolveTau: 0.50, gapTau: 0.08 },
+    semantic_preference: { resolveTau: 0.45, gapTau: 0.05 },
+    comparison_query: { resolveTau: 0.65, gapTau: 0.15 },
+    unknown: { resolveTau: 0.65, gapTau: 0.15 },
   },
-  ambiguityPenaltyDefault: 0.15,
+  ambiguityPenaltyDefault: 0.10,
 } as const;

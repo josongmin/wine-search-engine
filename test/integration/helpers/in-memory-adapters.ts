@@ -14,6 +14,7 @@ import type {
   SearchIndexPort,
   SparseHit,
   DenseHit,
+  RetrievalHitSummary,
 } from '../../../src/domain/retrieval/port/search-index.port.js';
 import type { EmbeddingServicePort } from '../../../src/domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../../../src/domain/query/port/threshold-store.port.js';
@@ -113,6 +114,25 @@ export class InMemoryCalibrationStore implements CalibrationStore {
 // InMemorySearchIndex
 // ─────────────────────────────────────────────────────────────────────────────
 
+function hitSummaryFromDoc(doc: RetrievalDocument): RetrievalHitSummary {
+  const searchSlice =
+    doc.searchTextEn.trim().length > 800
+      ? doc.searchTextEn.trim().slice(0, 800)
+      : doc.searchTextEn.trim();
+  const grapeFromArray = doc.grapes[0]?.trim();
+  const grape =
+    grapeFromArray !== undefined && grapeFromArray.length > 0
+      ? grapeFromArray
+      : undefined;
+  return {
+    canonicalLabel: doc.canonicalLabel,
+    ...(doc.producer.trim().length > 0 ? { producer: doc.producer.trim() } : {}),
+    ...(doc.region.trim().length > 0 ? { region: doc.region.trim() } : {}),
+    ...(searchSlice.length > 0 ? { searchTextEn: searchSlice } : {}),
+    ...(grape !== undefined ? { grapePrimary: grape } : {}),
+  };
+}
+
 /**
  * Stores RetrievalDocuments and returns configurable hits.
  * sparseSearch matches by canonicalLabel / aliases text.
@@ -158,6 +178,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
           score,
           rank: 0, // will be assigned after sort
           matchedFields: ['searchText'],
+          summary: hitSummaryFromDoc(doc),
         });
       }
     }
@@ -182,6 +203,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
       score: doc.popularityScore,
       rank: i + 1,
       similarity: doc.popularityScore,
+      summary: hitSummaryFromDoc(doc),
     }));
   }
 

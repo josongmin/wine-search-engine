@@ -15,6 +15,18 @@ export interface HybridCandidate {
   /** Canonical display label (e.g. "Opus One 2018"). Propagated from RetrievalDocument. */
   readonly canonicalLabel?: string | undefined;
 
+  /** Producer name from index summary (rerank / evidence). */
+  readonly producer?: string | undefined;
+
+  /** Region from index summary (rerank / evidence). */
+  readonly region?: string | undefined;
+
+  /** English search text snippet from index (cross-encoder passage). */
+  readonly searchTextEn?: string | undefined;
+
+  /** Primary grape from index summary (cross-encoder passage). */
+  readonly grapePrimary?: string | undefined;
+
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
 

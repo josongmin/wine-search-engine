@@ -12,6 +12,9 @@ const envSchema = z.object({
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
     .default('info'),
 
+  /** Per-IP request cap (RFC-014 §13). Set high for local offline eval; use 0 to disable. */
+  HTTP_RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(100),
+
   // PostgreSQL
   PG_HOST: z.string().min(1).default('localhost'),
   PG_PORT: z.coerce.number().int().positive().default(5432),
@@ -32,6 +35,8 @@ const envSchema = z.object({
 
   // Reranker Service
   RERANKER_SERVICE_URL: z.string().url().default('http://localhost:8082'),
+  /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
+  RERANK_BLEND_SCALE: z.coerce.number().min(0).max(1).default(0.7),
 
   // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
   LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
@@ -67,6 +72,11 @@ export const config = {
   port: parsed.PORT,
   logLevel: parsed.LOG_LEVEL,
 
+  /** HTTP rate limiting (Fastify @fastify/rate-limit). */
+  httpRateLimit: {
+    max: parsed.HTTP_RATE_LIMIT_MAX,
+  },
+
   /** PostgreSQL connection settings. */
   pg: {
     host: parsed.PG_HOST,
@@ -96,6 +106,7 @@ export const config = {
   /** Reranker service settings. */
   reranker: {
     url: parsed.RERANKER_SERVICE_URL,
+    blendScale: parsed.RERANK_BLEND_SCALE,
   },
 
   /** Learned matcher service settings (optional). */

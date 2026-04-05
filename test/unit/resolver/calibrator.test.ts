@@ -14,15 +14,12 @@ import type { QueryClass } from '../../../src/domain/shared/types/index.js';
  */
 function makeStubStore(storedParams: CalibrationParams | null): CalibrationStore {
   return {
-    // Unused parameters intentionally omitted: interface satisfaction only
-    /* eslint-disable @typescript-eslint/no-unused-vars */
     getCalibrationParams(_queryClass: QueryClass): Promise<CalibrationParams | null> {
       return Promise.resolve(storedParams);
     },
     save(_queryClass: QueryClass, _params: CalibrationParams): Promise<void> {
       return Promise.resolve();
     },
-    /* eslint-enable @typescript-eslint/no-unused-vars */
   };
 }
 

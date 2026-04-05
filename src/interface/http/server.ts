@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { type Span, SpanStatusCode } from '@opentelemetry/api';
+import { config } from '../../config/env.js';
 import type { Container } from '../../config/container.js';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerRequestContext } from './middleware/request-context.js';
@@ -84,10 +85,12 @@ export async function createServer(
   // errorResponseBuilder is intentionally omitted: in @fastify/rate-limit v10 it replaces the
   // thrown error object, stripping statusCode and causing setErrorHandler to see an unknown
   // object and fall back to 500. The 429 branch is handled in the global error handler instead.
-  await app.register(rateLimit, {
-    max: 100,
-    timeWindow: '1 minute',
-  });
+  if (config.httpRateLimit.max > 0) {
+    await app.register(rateLimit, {
+      max: config.httpRateLimit.max,
+      timeWindow: '1 minute',
+    });
+  }
 
   // Enforce Content-Type: application/json on all POST requests.
   // Must run in preParsing (before the body parser) so that missing or

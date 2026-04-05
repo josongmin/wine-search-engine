@@ -1,8 +1,64 @@
 import type { EntityId } from '../../shared/types/index.js';
 import { rrfFuse } from '../../shared/utils/rrf.js';
-import type { SparseHit, DenseHit } from '../port/search-index.port.js';
+import type {
+  SparseHit,
+  DenseHit,
+  RetrievalHitSummary,
+} from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
+
+/**
+ * Merges per-pass hit summaries. Priority: sparse > dense > anchor (first non-empty wins).
+ */
+function mergeRetrievalSummaries(
+  sparse?: RetrievalHitSummary,
+  dense?: RetrievalHitSummary,
+  anchor?: RetrievalHitSummary,
+): {
+  readonly canonicalLabel?: string;
+  readonly producer?: string;
+  readonly region?: string;
+  readonly searchTextEn?: string;
+  readonly grapePrimary?: string;
+} {
+  const canonicalLabel =
+    sparse?.canonicalLabel ?? dense?.canonicalLabel ?? anchor?.canonicalLabel;
+  const producer = sparse?.producer ?? dense?.producer ?? anchor?.producer;
+  const region = sparse?.region ?? dense?.region ?? anchor?.region;
+  const searchTextEn =
+    sparse?.searchTextEn ?? dense?.searchTextEn ?? anchor?.searchTextEn;
+  const grapePrimary =
+    sparse?.grapePrimary ?? dense?.grapePrimary ?? anchor?.grapePrimary;
+
+  return {
+    ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
+    ...(producer !== undefined ? { producer } : {}),
+    ...(region !== undefined ? { region } : {}),
+    ...(searchTextEn !== undefined ? { searchTextEn } : {}),
+    ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+  };
+}
+
+function summaryFromSparseHits(
+  hits: readonly SparseHit[],
+  entityId: string,
+): RetrievalHitSummary | undefined {
+  for (const h of hits) {
+    if (h.entityId === entityId) return h.summary;
+  }
+  return undefined;
+}
+
+function summaryFromDenseHits(
+  hits: readonly DenseHit[],
+  entityId: string,
+): RetrievalHitSummary | undefined {
+  for (const h of hits) {
+    if (h.entityId === entityId) return h.summary;
+  }
+  return undefined;
+}
 
 /**
  * Fuses results from sparse, dense, and anchor retrieval passes using
@@ -88,6 +144,14 @@ export class FusionService {
         candidateSources,
       };
 
+      const merged = mergeRetrievalSummaries(
+        summaryFromSparseHits(sparseHits, entityId),
+        summaryFromDenseHits(denseHits, entityId),
+        anchorHits !== undefined
+          ? summaryFromDenseHits(anchorHits, entityId)
+          : undefined,
+      );
+
       candidates.push({
         entityId: entityId as EntityId,
         sparseRank,
@@ -96,6 +160,7 @@ export class FusionService {
         retrievalFusionScore: fusionScore,
         matchedConstraints: [],
         retrievalTrace: trace,
+        ...merged,
       });
     }
 

@@ -401,18 +401,34 @@ async function run(): Promise<void> {
     const result = await pool.query<BronzeRow>(query, [SOURCE_ID]);
     console.log(`  Bronze rows fetched: ${result.rows.length}`);
 
-    // Transform
+    // Transform with drop reason tracking
     const preSilver: PreSilver[] = [];
-    let skipped = 0;
+    const dropReasons: Record<string, number> = {};
     for (const row of result.rows) {
+      const producer = row.producer?.trim() ?? row.payload?.winery?.name?.trim() ?? '';
+      if (!row.external_id) {
+        dropReasons['missing_external_id'] = (dropReasons['missing_external_id'] ?? 0) + 1;
+        continue;
+      }
+      if (!producer) {
+        dropReasons['missing_producer'] = (dropReasons['missing_producer'] ?? 0) + 1;
+        continue;
+      }
       const rec = transformRow(row);
       if (rec) {
         preSilver.push(rec);
       } else {
-        skipped++;
+        dropReasons['transform_failed'] = (dropReasons['transform_failed'] ?? 0) + 1;
       }
     }
-    console.log(`  Transformed: ${preSilver.length}  (skipped: ${skipped})`);
+    const totalDropped = Object.values(dropReasons).reduce((a, b) => a + b, 0);
+    console.log(`  Transformed: ${preSilver.length}  (dropped: ${totalDropped})`);
+    if (totalDropped > 0) {
+      console.log('  Drop reasons:');
+      for (const [reason, count] of Object.entries(dropReasons)) {
+        console.log(`    ${reason}: ${count}`);
+      }
+    }
 
     // Dedup
     const deduped = dedup(preSilver);

@@ -13,15 +13,20 @@ import type { QueryClass } from '../../shared/types/index.js';
  * LTR feature and these class-based weights are no longer needed — the model
  * will learn the optimal weighting from data.  Until then, this table provides
  * a principled, data-driven substitute for the previous hardcoded 0.6.
+ *
+ * Conservative blend weights for an un-fine-tuned cross-encoder: the generic
+ * BGE reranker should only nudge rankings until LTR learns `f24_rerank_score`.
  */
 const RERANK_BLEND_BY_CLASS: Readonly<Record<QueryClass, number>> = {
-  semantic_preference: 0.75,  // reranker maximally useful; semantic similarity dominates
-  pure_constraint: 0.70,      // constraint-aware passage scoring effective
-  comparison_query: 0.65,     // cross-encoder good for comparing entity passages
-  ambiguous_short_form: 0.65, // reranker aids disambiguation between confusables
-  anchored_similarity: 0.60,  // anchor context helps cross-encoder
-  short_entity: 0.40,         // BM25 + entity_integrity dominant; reranker is auxiliary
-  unknown: 0.50,              // neutral: insufficient signal to weight either way
+  // Generic BGE reranker + wine passages: keep weights low so lexical+dense scores
+  // dominate unless LTR (Epic 4) learns a stronger rerank feature weight.
+  semantic_preference: 0.18,
+  pure_constraint: 0.12,
+  comparison_query: 0.14,
+  ambiguous_short_form: 0.12,
+  anchored_similarity: 0.12,
+  short_entity: 0.05,
+  unknown: 0.1,
 };
 
 /**
@@ -34,5 +39,16 @@ const RERANK_BLEND_BY_CLASS: Readonly<Record<QueryClass, number>> = {
  * @returns Blend weight in [0, 1] for the reranker score component.
  */
 export function rerankBlendWeight(queryClass: QueryClass): number {
-  return RERANK_BLEND_BY_CLASS[queryClass] ?? 0.55;
+  return RERANK_BLEND_BY_CLASS[queryClass] ?? 0.1;
+}
+
+/**
+ * Multiplies the class weight by a global scale (ops tuning). Clamps product to [0, 1].
+ */
+export function effectiveRerankBlendWeight(
+  queryClass: QueryClass,
+  globalScale: number,
+): number {
+  const s = Number.isFinite(globalScale) ? Math.min(1, Math.max(0, globalScale)) : 1;
+  return Math.min(1, rerankBlendWeight(queryClass) * s);
 }

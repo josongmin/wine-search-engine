@@ -12,6 +12,7 @@ import type {
   SearchIndexPort,
   SparseHit,
   DenseHit,
+  RetrievalHitSummary,
 } from '../../domain/retrieval/port/search-index.port.js';
 import { type VespaClient } from './vespa-client.js';
 import type { VespaHit } from './vespa-client.js';
@@ -100,6 +101,42 @@ function normaliseSimilarity(score: number): number {
   return Math.max(0, Math.min(1, score));
 }
 
+const RERANK_SUMMARY_SEARCH_TEXT_MAX = 800;
+
+function trimNonEmpty(v: unknown): string | undefined {
+  if (!isString(v)) return undefined;
+  const t = v.trim();
+  return t.length > 0 ? t : undefined;
+}
+
+/**
+ * Pulls summary fields from a Vespa hit for hybrid reranking passages.
+ */
+function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary | undefined {
+  const canonicalLabel = trimNonEmpty(fields['canonical_label']);
+  const producer = trimNonEmpty(fields['producer']);
+  const region = trimNonEmpty(fields['region']);
+  let searchTextEn = trimNonEmpty(fields['search_text_en']);
+  if (
+    searchTextEn !== undefined &&
+    searchTextEn.length > RERANK_SUMMARY_SEARCH_TEXT_MAX
+  ) {
+    searchTextEn = searchTextEn.slice(0, RERANK_SUMMARY_SEARCH_TEXT_MAX);
+  }
+
+  const grapePrimary = trimNonEmpty(fields['grape_primary']);
+
+  const summary: RetrievalHitSummary = {
+    ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
+    ...(producer !== undefined ? { producer } : {}),
+    ...(region !== undefined ? { region } : {}),
+    ...(searchTextEn !== undefined ? { searchTextEn } : {}),
+    ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+  };
+
+  return Object.keys(summary).length > 0 ? summary : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // VespaSearchIndex
 // ---------------------------------------------------------------------------
@@ -167,7 +204,6 @@ export class VespaSearchIndex implements SearchIndexPort {
     const queryParams: Record<string, unknown> = {
       'ranking.profile': rankProfile,
       'presentation.summary': 'default',
-      'metrics.ignore': 'true',
     };
     for (let i = 0; i < queries.length; i++) {
       queryParams[`query${i}`] = queries[i];
@@ -178,11 +214,13 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     return children.map((hit, index) => {
       const entityId = this.extractEntityId(hit);
+      const summary = extractHitSummary(hit.fields);
       return {
         entityId,
         score: hit.relevance,
         rank: index + 1,
         matchedFields: extractMatchedFields(hit.fields),
+        ...(summary !== undefined ? { summary } : {}),
       } satisfies SparseHit;
     });
   }
@@ -226,6 +264,7 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     const response = await this.client.query(yql, {
       'ranking.profile': rankProfile,
+      'presentation.summary': 'default',
       'input.query(query_embedding)': embedding,
     });
 
@@ -233,11 +272,13 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     return children.map((hit, index) => {
       const entityId = this.extractEntityId(hit);
+      const summary = extractHitSummary(hit.fields);
       return {
         entityId,
         score: hit.relevance,
         rank: index + 1,
         similarity: normaliseSimilarity(hit.relevance),
+        ...(summary !== undefined ? { summary } : {}),
       } satisfies DenseHit;
     });
   }

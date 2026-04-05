@@ -15,6 +15,7 @@
  */
 
 import fs from 'node:fs/promises';
+import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
 
 // ---------------------------------------------------------------------------
@@ -152,11 +153,7 @@ async function run(): Promise<void> {
 
   console.log(`Reading golden queries from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');
-  const queries: GoldenQuery[] = content
-    .trim()
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as GoldenQuery);
+  const { records: queries } = parseNdjson<GoldenQuery>(content, args.input);
   console.log(`  Total queries: ${queries.length}`);
 
   // Build clusters

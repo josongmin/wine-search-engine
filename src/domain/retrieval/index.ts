@@ -9,6 +9,7 @@ export {
   type SearchIndexPort,
   type SparseHit,
   type DenseHit,
+  type RetrievalHitSummary,
 } from './port/search-index.port.js';
 export { type EmbeddingServicePort } from './port/embedding-service.port.js';
 

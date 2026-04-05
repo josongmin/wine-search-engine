@@ -3,7 +3,7 @@ import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import { resolveWeights } from '../model/scoring-weights.js';
-import { rerankBlendWeight } from './rerank-blend.js';
+import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
@@ -13,16 +13,32 @@ import { type EvidenceMapper } from './evidence-mapper.js';
  */
 const DEFAULT_RERANK_TOP_K = 20;
 
+/** Max characters sent to the cross-encoder (latency + model context). */
+const RERANK_PASSAGE_MAX_CHARS = 1200;
+
 /**
  * Builds a wine-aware passage text for cross-encoder reranking (RFC-017 §5.2).
- *
- * Currently uses canonicalLabel only. When HybridCandidate is enriched with
- * producer/region/searchTextEn (Epic 8), this function should concatenate
- * all available wine metadata for richer cross-encoder input.
  */
 function buildWineText(entry: ScoredEntry): string {
-  // Phase 1: canonicalLabel only (HybridCandidate has no wine-specific fields yet)
-  return entry.canonicalLabel || String(entry.entityId);
+  const parts: string[] = [];
+  const label = entry.canonicalLabel.trim();
+  if (label.length > 0) parts.push(label);
+  const prod = entry.producer?.trim();
+  if (prod !== undefined && prod.length > 0) parts.push(prod);
+  const reg = entry.region?.trim();
+  if (reg !== undefined && reg.length > 0) parts.push(reg);
+  const en = entry.searchTextEn?.trim();
+  if (en !== undefined && en.length > 0) parts.push(en);
+  const grape = entry.grapePrimary?.trim();
+  if (grape !== undefined && grape.length > 0) parts.push(grape);
+
+  if (parts.length === 0) return String(entry.entityId);
+
+  let passage = parts.join('. ');
+  if (passage.length > RERANK_PASSAGE_MAX_CHARS) {
+    passage = passage.slice(0, RERANK_PASSAGE_MAX_CHARS);
+  }
+  return passage;
 }
 
 /**
@@ -36,9 +52,19 @@ const RERANK_THRESHOLD = 5;
 interface ScoredEntry {
   readonly entityId: EntityId;
   readonly canonicalLabel: string;
+  readonly producer?: string;
+  readonly region?: string;
+  readonly searchTextEn?: string;
+  readonly grapePrimary?: string;
   readonly componentScores: ComponentScores;
   readonly finalScore: number;
 }
+
+/** Optional 5th argument: rerankTopK number, or full options (including blend scale). */
+export type RankerOptions = {
+  readonly rerankTopK?: number;
+  readonly rerankBlendScale?: number;
+};
 
 /**
  * Main ranking orchestrator (RFC-013).
@@ -63,26 +89,32 @@ export class Ranker {
   private readonly evidenceMapper: EvidenceMapper;
   private readonly reranker: RerankerPort | undefined;
   private readonly rerankTopK: number;
+  private readonly rerankBlendScale: number;
 
   /**
    * @param signalComputer - Computes individual signal scores.
    * @param scoreAggregator - Aggregates signals into final scores.
    * @param evidenceMapper - Maps component scores to evidence items.
    * @param reranker - Optional pluggable cross-encoder reranker.
-   * @param rerankTopK - Number of top candidates to rerank (default: 20).
+   * @param optionsOrTopK - Legacy: number = rerankTopK. Prefer `{ rerankTopK, rerankBlendScale }`.
    */
   constructor(
     signalComputer: SignalComputer,
     scoreAggregator: ScoreAggregator,
     evidenceMapper: EvidenceMapper,
     reranker?: RerankerPort,
-    rerankTopK?: number,
+    optionsOrTopK?: number | RankerOptions,
   ) {
     this.signalComputer = signalComputer;
     this.scoreAggregator = scoreAggregator;
     this.evidenceMapper = evidenceMapper;
     this.reranker = reranker;
-    this.rerankTopK = rerankTopK ?? DEFAULT_RERANK_TOP_K;
+    const opts: RankerOptions =
+      typeof optionsOrTopK === 'number'
+        ? { rerankTopK: optionsOrTopK }
+        : (optionsOrTopK ?? {});
+    this.rerankTopK = opts.rerankTopK ?? DEFAULT_RERANK_TOP_K;
+    this.rerankBlendScale = opts.rerankBlendScale ?? 1;
   }
 
   /**
@@ -118,6 +150,14 @@ export class Ranker {
       scored.push({
         entityId: candidate.entityId,
         canonicalLabel: candidate.canonicalLabel ?? '',
+        ...(candidate.producer !== undefined ? { producer: candidate.producer } : {}),
+        ...(candidate.region !== undefined ? { region: candidate.region } : {}),
+        ...(candidate.searchTextEn !== undefined
+          ? { searchTextEn: candidate.searchTextEn }
+          : {}),
+        ...(candidate.grapePrimary !== undefined
+          ? { grapePrimary: candidate.grapePrimary }
+          : {}),
         componentScores,
         finalScore,
       });
@@ -137,11 +177,15 @@ export class Ranker {
       this.reranker !== undefined &&
       viable.length > RERANK_THRESHOLD
     ) {
-      finalOrder = await this.applyReranking(
-        queryPlan.normalizedQuery,
-        viable,
-        queryPlan.queryClass,
-      );
+      try {
+        finalOrder = await this.applyReranking(
+          queryPlan.normalizedQuery,
+          viable,
+          queryPlan.queryClass,
+        );
+      } catch {
+        finalOrder = viable;
+      }
     }
 
     // Step 7 & 8: Map to RankedResult with evidence items and assign ranks
@@ -180,9 +224,6 @@ export class Ranker {
     const rest = viable.slice(this.rerankTopK);
 
     // Build wine-aware passage text for the cross-encoder (RFC-017 §5.2).
-    // Currently HybridCandidate only carries canonicalLabel. When the entity
-    // index surface (Epic 8) adds producer/region/searchTextEn to candidates,
-    // buildWineText() should incorporate those fields for richer passages.
     const rerankCandidates: RerankCandidate[] = topK.map((entry) => ({
       entityId: entry.entityId,
       text: buildWineText(entry),
@@ -202,6 +243,23 @@ export class Ranker {
       topK.map((entry) => [String(entry.entityId), entry]),
     );
 
+    // Normalise reranker scores to [0, 1] before blending.
+    // Cross-encoder logits (e.g. BGE-reranker) are typically in [-10, +15];
+    // a sigmoid squashes them to a comparable [0, 1] range, and min-max
+    // within the batch preserves the relative ordering while ensuring scale
+    // compatibility with the original aggregated score (also [0, 1]).
+    const rawScores = rerankResults.map((r) => r.score);
+    const minRaw = Math.min(...rawScores);
+    const maxRaw = Math.max(...rawScores);
+    const rawRange = maxRaw - minRaw;
+
+    function normalizeRerankScore(raw: number): number {
+      if (rawRange < 1e-8) return 0.5; // all scores equal → neutral
+      // Min-max within batch: maps to [0, 1] preserving relative order.
+      // Sigmoid compression is unnecessary when min-max already bounds the range.
+      return (raw - minRaw) / rawRange;
+    }
+
     // Reorder top-K by rerank score, blending with original score
     const rerankedTopK: ScoredEntry[] = [];
 
@@ -210,9 +268,10 @@ export class Ranker {
       if (original === undefined) {
         continue;
       }
-      // Blend: query-class-aware weight (RFC-017 §5.3 adaptive blend)
-      const w = rerankBlendWeight(queryClass);
-      const blendedScore = w * r.score + (1 - w) * original.finalScore;
+      // Blend: query-class weight × optional global scale (RFC-017 §5.3)
+      const w = effectiveRerankBlendWeight(queryClass, this.rerankBlendScale);
+      const normScore = normalizeRerankScore(r.score);
+      const blendedScore = w * normScore + (1 - w) * original.finalScore;
       rerankedTopK.push({
         ...original,
         finalScore: blendedScore,

@@ -16,6 +16,7 @@
 
 import 'dotenv/config';
 import fs from 'node:fs/promises';
+import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
 import {
   ndcg,
@@ -86,14 +87,52 @@ function parseArgs(argv: string[]): Args {
 // Search execution (calls the running engine)
 // ---------------------------------------------------------------------------
 
+function evalSearchTimeoutMs(): number {
+  const raw = process.env['EVAL_SEARCH_TIMEOUT_MS'];
+  const n = raw === undefined ? NaN : Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1000) return 60_000;
+  return n;
+}
+
+function evalSearchConcurrency(): number {
+  const raw = process.env['EVAL_SEARCH_CONCURRENCY'];
+  const n = raw === undefined ? NaN : Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return 12;
+  return Math.min(64, n);
+}
+
+async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  let completed = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]!, i);
+      completed += 1;
+      onProgress?.(completed, items.length);
+    }
+  }
+
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
 interface SearchResult {
   readonly ranked: RankedHit[];
   readonly decision: DecisionOutcome;
 }
 
-async function executeSearch(
-  query: string,
-): Promise<SearchResult> {
+async function executeSearch(query: string, timeoutMs: number): Promise<SearchResult> {
   // Call the running search API
   const apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
 
@@ -102,7 +141,7 @@ async function executeSearch(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
@@ -207,11 +246,7 @@ async function run(): Promise<void> {
 
   console.log(`Loading golden queries from ${args.input} (tier: ${args.tier}) …`);
   const content = await fs.readFile(args.input, 'utf8');
-  const allQueries: GoldenQuery[] = content
-    .trim()
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as GoldenQuery);
+  const { records: allQueries } = parseNdjson<GoldenQuery>(content, args.input);
 
   // Filter by tier
   const queries = allQueries.filter((q) => q.annotation_tier === args.tier);
@@ -222,20 +257,30 @@ async function run(): Promise<void> {
   }
   const evalQueries = queries.length > 0 ? queries : allQueries;
 
-  // Execute searches
-  console.log(`\nExecuting ${evalQueries.length} searches …`);
-  const allResults: { query: GoldenQuery; ranked: RankedHit[]; decision: DecisionOutcome; truth: GroundTruth }[] = [];
+  const timeoutMs = evalSearchTimeoutMs();
+  const concurrency = evalSearchConcurrency();
+  console.log(
+    `\nExecuting ${evalQueries.length} searches (concurrency=${concurrency}, timeoutMs=${timeoutMs}) …`,
+  );
 
-  for (let i = 0; i < evalQueries.length; i++) {
-    const q = evalQueries[i]!;
-    const { ranked, decision } = await executeSearch(q.query);
-    const truth = queryToGroundTruth(q);
-    allResults.push({ query: q, ranked, decision, truth });
-
-    if ((i + 1) % 50 === 0 || i === evalQueries.length - 1) {
-      console.log(`  Progress: ${i + 1}/${evalQueries.length}`);
-    }
-  }
+  let lastLogged = 0;
+  const allResults = await mapPool(
+    evalQueries,
+    concurrency,
+    async (q) => {
+      const { ranked, decision } = await executeSearch(q.query, timeoutMs);
+      const truth = queryToGroundTruth(q);
+      return { query: q, ranked, decision, truth };
+    },
+    (done, total) => {
+      if (done % 50 === 0 || done === total) {
+        if (done !== lastLogged) {
+          lastLogged = done;
+          console.log(`  Progress: ${done}/${total}`);
+        }
+      }
+    },
+  );
 
   // Compute global metrics
   console.log('\nComputing metrics …');
@@ -325,11 +370,37 @@ async function run(): Promise<void> {
     console.log('\n=== RELEASE GATE ===');
     const violations: string[] = [];
 
+    // Global metric gates
     if (evalResult.wrong_top1_rate > RELEASE_GATES.wrong_top1_rate_max) {
       violations.push(`wrong_top1_rate ${evalResult.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.wrong_top1_rate_max}`);
     }
     if (evalResult.recall_at_100 < RELEASE_GATES.recall_at_100_min) {
       violations.push(`recall_at_100 ${evalResult.recall_at_100.toFixed(4)} < ${RELEASE_GATES.recall_at_100_min}`);
+    }
+    if (evalResult.ece > 0.10) {
+      violations.push(`ece ${evalResult.ece.toFixed(4)} > 0.10 (calibration degraded)`);
+    }
+
+    // Scenario-specific gates
+    const entitySlices = ['A', 'B', 'H'];
+    for (const s of entitySlices) {
+      const slice = evalResult.by_scenario[s];
+      if (slice && slice.wrong_top1_rate > RELEASE_GATES.entity_resolve_wrong_top1_max) {
+        violations.push(`scenario ${s} wrong_top1_rate ${slice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.entity_resolve_wrong_top1_max}`);
+      }
+    }
+
+    const setSlices = ['E', 'F', 'G'];
+    for (const s of setSlices) {
+      const slice = evalResult.by_scenario[s];
+      if (slice && slice.ndcg_at_10 < RELEASE_GATES.set_retrieval_recall_at_10_min) {
+        violations.push(`scenario ${s} ndcg_at_10 ${slice.ndcg_at_10.toFixed(4)} < ${RELEASE_GATES.set_retrieval_recall_at_10_min}`);
+      }
+    }
+
+    const noMatchSlice = evalResult.by_scenario['no_match'];
+    if (noMatchSlice && noMatchSlice.wrong_top1_rate > RELEASE_GATES.no_match_false_resolve_max) {
+      violations.push(`no_match false_resolve ${noMatchSlice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.no_match_false_resolve_max}`);
     }
 
     if (violations.length === 0) {

@@ -251,7 +251,9 @@ export function createContainer(_config: Config, pool?: Pool): Container {
   const signalComputer = new SignalComputer();
   const scoreAggregator = new ScoreAggregator();
   const evidenceMapper = new EvidenceMapper();
-  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper, reranker);
+  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper, reranker, {
+    rerankBlendScale: _config.reranker.blendScale,
+  });
 
   // ── Domain services — decision, response, mixed ───────────────────────────
   const decisionEngine = new DecisionEngine(thresholdStore);

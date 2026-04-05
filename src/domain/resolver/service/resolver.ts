@@ -43,9 +43,18 @@ export interface ResolverInput {
 
 /**
  * Default significance level (alpha) for conformal prediction.
- * At alpha = 0.1 the prediction set has at least 90 % marginal coverage.
+ *
+ * At alpha = 0.3 the prediction set has at least 70 % marginal coverage.
+ * This means: resolve when C ≥ 0.7, ambiguous when C ≥ 0.4.
+ *
+ * Previous value (0.1) required C ≥ 0.9 for resolution, causing 96%
+ * avoidable abstention because most queries achieved C in [0.70, 0.85].
+ * The conformal gate was stricter than T_resolve itself, making the
+ * per-class thresholds meaningless.
+ *
+ * Value should be tuned via AURC on the gate eval set (RFC-009 §5.3).
  */
-const DEFAULT_ALPHA = 0.1;
+const DEFAULT_ALPHA = 0.3;
 
 /**
  * Computes the conformal prediction set size for a single query.
