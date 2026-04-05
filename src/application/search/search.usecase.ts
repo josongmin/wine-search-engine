@@ -1,12 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { PlannerContext } from '../../domain/query/service/planner.js';
-import type { Planner } from '../../domain/query/service/planner.js';
-import type { Resolver, ResolverInput } from '../../domain/resolver/service/resolver.js';
-import type { CandidatePoolService } from '../../domain/retrieval/service/candidate-pool.js';
-import type { Ranker } from '../../domain/ranking/service/ranker.js';
-import type { DecisionEngine } from '../../domain/decision/service/decision-engine.js';
-import type { ResponseBuilder } from '../../domain/response/service/response-builder.js';
-import type { MixedSolver } from '../../domain/mixed/service/mixed-solver.js';
+import type { ResolverInput } from '../../domain/resolver/service/resolver.js';
 import type { DecisionInput, EvidenceSummary } from '../../domain/decision/model/decision-input.js';
 import type { DecisionSnapshot, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -19,38 +13,26 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { CounterfactualReject } from '../../domain/response/model/counterfactual.js';
-import type { DrinkingWindowUseCase } from '../drinking-window/drinking-window.usecase.js';
+import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
-import type { LLMInjectionJudge } from '../../domain/security/service/llm-injection-judge.js';
-import type { CacheService } from '../../domain/performance/index.js';
+import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import { LTRRanker } from '../../domain/ranking/service/ltr-ranker.js';
 import { extractLTRFeatures } from '../../domain/ranking/service/ltr-feature-extractor.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
+import { QueryEntrySecurityGate } from './query-entry-security.js';
+import type { SearchRequest } from './search-request.dto.js';
+import type {
+  CandidatePoolPort,
+  DecisionEnginePort,
+  EntityResolverPort,
+  MixedSolverPort,
+  QueryPlannerPort,
+  RankingPort,
+  ResponseBuilderPort,
+} from './port/search-pipeline-deps.port.js';
 
-/**
- * Incoming search request shape.
- */
-export interface SearchRequest {
-  readonly query: string;
-  readonly context?: {
-    readonly locale: string;
-    readonly currency: string;
-  } | undefined;
-  readonly sessionContext?: {
-    readonly sessionId: string;
-    readonly previousEntities: string[];
-  } | undefined;
-  readonly queryBudget?: {
-    readonly maxLatencyMs: number;
-    readonly maxCandidates: number;
-    readonly rerankLimit: number;
-  } | undefined;
-  readonly options?: {
-    readonly mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
-    readonly explain: boolean;
-    readonly clarification: boolean;
-  } | undefined;
-}
+export type { SearchRequest } from './search-request.dto.js';
 
 /**
  * Version info injected into the SearchUseCase for snapshot population.
@@ -67,23 +49,23 @@ export interface SnapshotVersions {
  * Dependencies injected into the SearchUseCase.
  */
 export interface SearchUseCaseDeps {
-  readonly queryPlanner: Planner;
-  readonly entityResolver: Resolver;
-  readonly candidatePool: CandidatePoolService;
-  readonly ranker: Ranker;
-  readonly decisionEngine: DecisionEngine;
-  readonly responseBuilder: ResponseBuilder;
-  readonly mixedSolver: MixedSolver;
+  readonly queryPlanner: QueryPlannerPort;
+  readonly entityResolver: EntityResolverPort;
+  readonly candidatePool: CandidatePoolPort;
+  readonly ranker: RankingPort;
+  readonly decisionEngine: DecisionEnginePort;
+  readonly responseBuilder: ResponseBuilderPort;
+  readonly mixedSolver: MixedSolverPort;
   /** Drinking window predictor for wine aging insights (Epic 15). */
-  readonly drinkingWindow?: DrinkingWindowUseCase | undefined;
+  readonly drinkingWindow?: DrinkingWindowUseCasePort | undefined;
   /** Version strings for RFC-015 snapshot population. */
   readonly snapshotVersions?: SnapshotVersions | undefined;
   /** Layer 1: Static pattern-based injection sanitizer (Epic 16.1). Required. */
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). Optional. */
-  readonly injectionJudge?: LLMInjectionJudge | undefined;
+  readonly injectionJudge?: InjectionJudgePort | undefined;
   /** Unified cache service for query/embedding/result caching (Wave 4, Phase 3). Optional. */
-  readonly cacheService?: CacheService | undefined;
+  readonly cacheService?: SearchResponseCachePort | undefined;
   /** Epic 4: Per-query-class LambdaMART models for LTR reranking. Optional. */
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
 }
@@ -130,28 +112,19 @@ export class SearchUseCase {
     requestId: string,
   ): Promise<SearchResponseV1> {
     const startTime = Date.now();
-
-    // Step 0: Layer 1 injection defense (static patterns)
-    const sanitizationResult = this.deps.querySanitizer.sanitize(request.query);
-    if (!sanitizationResult.safe) {
-      return this.buildInjectionRejection(requestId, startTime, 'LAYER_1_BLOCKED', sanitizationResult.reason);
+    const securityGate = new QueryEntrySecurityGate({
+      querySanitizer: this.deps.querySanitizer,
+      injectionJudge: this.deps.injectionJudge,
+    });
+    const securityResult = await securityGate.getSafeQueryOrSearchRejection(
+      request.query,
+      requestId,
+      startTime,
+    );
+    if ('rejection' in securityResult) {
+      return securityResult.rejection;
     }
-
-    const sanitizedQuery = sanitizationResult.sanitizedQuery;
-
-    // Step 0b: Layer 2 injection defense (LLM judge) for borderline cases
-    // Only invoked if sanitizer passed and judge is available
-    if (this.deps.injectionJudge !== undefined) {
-      try {
-        const isInjection = await this.deps.injectionJudge.judge(sanitizedQuery);
-        if (isInjection) {
-          return this.buildInjectionRejection(requestId, startTime, 'LAYER_2_BLOCKED', 'LLM_JUDGE_REJECTION');
-        }
-      } catch (err) {
-        // LLM judge failure — log and continue (fail open for availability)
-        console.error('[SearchUseCase] LLM judge error:', err);
-      }
-    }
+    const sanitizedQuery = securityResult.sanitizedQuery;
 
     // Step 1: Plan the query
     const plannerContext: PlannerContext = {
@@ -695,68 +668,5 @@ export class SearchUseCase {
         ? { ...baseItem, drinkingWindow }
         : baseItem;
     });
-  }
-
-  /**
-   * Builds a SearchResponseV1 that rejects the query as a prompt injection attack.
-   *
-   * Returns HTTP 400 (Bad Request) with:
-   * - decisionStatus: 'failed'
-   * - failure_reason: 'POLICY_BLOCKED'
-   * - nextAction: 'reject'
-   * - No results (empty array)
-   * - No evidence items
-   *
-   * Error message is intentionally generic to avoid pattern leakage to attackers.
-   *
-   * @param requestId - Caller-supplied request ID for correlation
-   * @param startTime - Timestamp when query processing began
-   * @param layer - Which layer blocked the query ('LAYER_1_BLOCKED' or 'LAYER_2_BLOCKED')
-   * @param reason - Specific injection reason code from QuerySanitizer or LLMInjectionJudge
-   * @returns SearchResponseV1 with failed status and policy rejection
-   */
-  private buildInjectionRejection(
-    requestId: string,
-    startTime: number,
-    layer: 'LAYER_1_BLOCKED' | 'LAYER_2_BLOCKED',
-    reason: string,
-  ): SearchResponseV1 {
-    const queryTimeMs = Date.now() - startTime;
-
-    // Build a minimal decision snapshot (no version tracking for rejections)
-    const snapshot = {
-      model_versions: {},
-      index_versions: {},
-      policy_rule_version: '1',
-      threshold_profile_id: 'default',
-      planner_version: 'security_gate',
-      feature_flags: {},
-    } as const;
-
-    // Build response with failed status and POLICY_BLOCKED reason
-    return {
-      queryType: 'search' as const,
-      engineDecision: {
-        decisionStatus: 'failed' as const,
-        nextAction: 'fail' as const,
-        route: 'security_gate',
-        decisionConfidence: 0,
-        confidenceSemantics: 'calibrated_decision_confidence' as const,
-        decisionTraceRef: `injection_reject_${layer}_${Date.now()}`,
-        decisionSnapshot: snapshot,
-        failure_reason: 'POLICY_BLOCKED',
-      },
-      results: [],
-      meta: {
-        requestId,
-        queryTimeMs,
-        route: 'security_gate',
-        version: '1.0.0',
-        engine_schema_version: 'search_response_v1',
-        decisionSnapshot: snapshot,
-        response_hash: 'security_rejection',
-        debugRefs: [`injection_defense:${layer}:${reason}`],
-      },
-    };
   }
 }

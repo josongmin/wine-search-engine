@@ -9,11 +9,12 @@ import type {
   DrinkingWindowInput,
   DrinkingWindowPredictorPort,
 } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
+import type { DrinkingWindowUseCasePort } from './port/drinking-window-usecase.port.js';
 
 /**
  * Request to check drinking window for a wine.
  */
-export class DrinkingWindowUseCase {
+export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
   constructor(private readonly predictor: DrinkingWindowPredictorPort) {}
 
   /**

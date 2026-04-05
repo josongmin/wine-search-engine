@@ -43,6 +43,10 @@ interface ClaudeToolCallResponse {
   readonly request_id: string;
 }
 
+function getRequestId(request: FastifyRequest): string {
+  return request.requestId ?? request.id;
+}
+
 /**
  * Register /v1/claude-tools endpoint.
  *
@@ -62,7 +66,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
     try {
       const parsed = ClaudeToolCallRequestSchema.parse(request.body);
 
-      const requestId = parsed.request_id ?? request.id;
+      const requestId = parsed.request_id ?? getRequestId(request);
 
       // Execute tool with adaptive fallback
       const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
@@ -87,7 +91,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
       void reply.status(400).send({
         error: 'TOOL_EXECUTION_FAILED',
         message,
-        request_id: request.id,
+        request_id: getRequestId(request),
       });
     }
   });
@@ -100,7 +104,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
   app.get('/v1/claude-tools', async (request: FastifyRequest, reply: FastifyReply) => {
     void reply.status(200).send({
       tools: WINE_SEARCH_TOOLS,
-      request_id: request.id,
+      request_id: getRequestId(request),
     });
   });
 }

@@ -19,20 +19,21 @@ declare module 'fastify' {
  * 4. Logs request start/end with latency
  */
 export function registerRequestContext(app: FastifyInstance): void {
-  app.addHook('onRequest', async (request, reply) => {
+  app.addHook('onRequest', (request, reply, done) => {
     const requestId = nanoid();
     request.requestId = requestId;
     request.startTime = Date.now();
 
-    void reply.header('X-Request-Id', requestId);
+    reply.header('X-Request-Id', requestId);
 
     request.log.info(
       { requestId, method: request.method, url: request.url },
       'request_start',
     );
+    done();
   });
 
-  app.addHook('onResponse', async (request, reply) => {
+  app.addHook('onResponse', (request, reply, done) => {
     const latencyMs = Date.now() - request.startTime;
 
     request.log.info(
@@ -45,5 +46,6 @@ export function registerRequestContext(app: FastifyInstance): void {
       },
       'request_end',
     );
+    done();
   });
 }

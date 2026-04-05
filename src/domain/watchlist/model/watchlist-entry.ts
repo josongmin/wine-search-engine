@@ -51,3 +51,15 @@ export interface WatchlistChangeEvent {
   readonly data: Record<string, unknown>; // Structured event payload
   readonly occurredAt: string; // ISO 8601 timestamp
 }
+
+/**
+ * Immutable audit log for webhook delivery attempts.
+ */
+export interface WatchlistDeliveryLogEntry {
+  readonly id: string; // UUID
+  readonly watchlistId: string;
+  readonly attempt: number;
+  readonly statusCode: number | null;
+  readonly errorMessage: string | null;
+  readonly deliveredAt: Date;
+}

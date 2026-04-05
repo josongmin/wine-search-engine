@@ -65,8 +65,8 @@ function getMeta(body: unknown): Record<string, unknown> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Group 1: Alternate Spellings (pre-registered aliases)
-// NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests
-// pre-registered aliases, not fuzzy matching.
+// NOTE: InMemoryAliasMatcher now supports compact normalization in addition to
+// exact/substring matching. This still primarily tests alias-driven lookup.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Group 1: Alternate Spellings (pre-registered aliases)', () => {
@@ -168,6 +168,23 @@ describe('Group 1: Alternate Spellings (pre-registered aliases)', () => {
     expect(res.statusCode).toBe(200);
     // Lowercase 'grange' normalizes to match registered 'Grange' — must not fail
     expect(getDecisionStatus(res.body)).not.toBe('failed');
+  });
+
+  it("'opusone' (compact noisy form) → entity mode non-failed; hybrid top-3 has opus-one-2018", async () => {
+    const res = await post('/v1/search', {
+      query: 'opusone',
+      options: { mode: 'entity', explain: false, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(getDecisionStatus(res.body)).not.toBe('failed');
+
+    const hybridRes = await post('/v1/search', {
+      query: 'opusone',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
+    expect(hybridRes.statusCode).toBe(200);
+    expect(getTopK(hybridRes.body, 3)).toContain('opus-one-2018');
   });
 });
 

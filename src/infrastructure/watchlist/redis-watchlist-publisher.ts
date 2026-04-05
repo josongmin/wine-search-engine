@@ -8,11 +8,15 @@
 import { getRedisClient, type RedisClient } from '../db/redis-client.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 
+export interface WatchlistPublisherPort {
+  publishUpdate(entityId: string, event: WatchlistChangeEvent): Promise<void>;
+}
+
 /**
  * Publishes watchlist change events to Redis pub/sub.
  * Events are published to channel "watchlist:{entityId}" for routing to subscribers.
  */
-export class RedisWatchlistPublisher {
+export class RedisWatchlistPublisher implements WatchlistPublisherPort {
   private client: RedisClient | null = null;
 
   /**

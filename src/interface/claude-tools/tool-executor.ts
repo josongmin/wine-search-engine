@@ -6,12 +6,15 @@
  */
 
 import { z } from 'zod';
-import type { SearchUseCase, SearchRequest } from '../../application/search/search.usecase.js';
-import type { DecomposedSearchUseCase } from '../../application/search/decomposed-search.usecase.js';
-import type { DrinkingWindowUseCase } from '../../application/drinking-window/drinking-window.usecase.js';
+import type { SearchRequest } from '../../application/search/search-request.dto.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
+import type {
+  SearchUseCaseContract,
+  DecomposedSearchUseCaseContract,
+} from '../../config/container-search-contracts.js';
+import type { DrinkingWindowUseCaseContract } from '../../config/container-contracts.js';
 
 /**
  * Zod schema for search_wines tool input.
@@ -73,11 +76,11 @@ export type WineToolInput =
  */
 export interface WineToolExecutorDeps {
   /** Main search use case for wine queries */
-  readonly searchUseCase: SearchUseCase;
+  readonly searchUseCase: SearchUseCaseContract;
   /** Decomposed search for comparison queries */
-  readonly decomposedSearchUseCase: DecomposedSearchUseCase;
+  readonly decomposedSearchUseCase: DecomposedSearchUseCaseContract;
   /** Drinking window predictor */
-  readonly drinkingWindowUseCase: DrinkingWindowUseCase;
+  readonly drinkingWindowUseCase: DrinkingWindowUseCaseContract;
 }
 
 /**

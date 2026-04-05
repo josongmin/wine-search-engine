@@ -1,42 +1,47 @@
+import type { SearchExecutorPort } from '../../../application/search/port/search-executor.port.js';
 import type {
-  SearchUseCaseContract,
-  DecomposedSearchUseCaseContract,
-  BatchSearchUseCaseContract,
-  ReplayUseCaseContract,
-  InterpretUseCaseContract,
-  ResolveUseCaseContract,
-  HybridUseCaseContract,
-  AdaptiveToolExecutorContract,
-} from '../../../config/container-contracts.js';
-import type { EvalRunner } from '../../../domain/evaluation/service/eval-runner.js';
+  BatchSearchUseCasePort,
+  DecomposedSearchUseCasePort,
+  HybridUseCasePort,
+  InterpretUseCasePort,
+  ReplayUseCasePort,
+  ResolveUseCasePort,
+} from '../../../application/search/port/search-route-usecases.port.js';
+import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
+import type { AdaptiveToolExecutorContract } from '../../../config/container-tool-contracts.js';
+import type { WatchlistServiceContract } from '../../../config/container-watchlist-contracts.js';
 
 export interface SearchRouteDeps {
-  readonly searchUseCase: SearchUseCaseContract;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCaseContract;
+  readonly searchUseCase: SearchExecutorPort;
+  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
 }
 
 export interface BatchSearchRouteDeps {
-  readonly batchSearchUseCase: BatchSearchUseCaseContract;
+  readonly batchSearchUseCase: BatchSearchUseCasePort;
 }
 
 export interface ReplayRouteDeps {
-  readonly replayUseCase: ReplayUseCaseContract;
+  readonly replayUseCase: ReplayUseCasePort;
 }
 
 export interface InterpretRouteDeps {
-  readonly interpretUseCase: InterpretUseCaseContract;
+  readonly interpretUseCase: InterpretUseCasePort;
 }
 
 export interface ResolveRouteDeps {
-  readonly resolveUseCase: ResolveUseCaseContract;
+  readonly resolveUseCase: ResolveUseCasePort;
 }
 
 export interface HybridRouteDeps {
-  readonly hybridUseCase: HybridUseCaseContract;
+  readonly hybridUseCase: HybridUseCasePort;
 }
 
 export interface ClaudeToolsRouteDeps {
   readonly adaptiveToolExecutor: AdaptiveToolExecutorContract;
+}
+
+export interface WatchlistRouteDeps {
+  readonly watchlistService: WatchlistServiceContract;
 }
 
 export interface HttpServerDeps
@@ -46,6 +51,7 @@ export interface HttpServerDeps
     InterpretRouteDeps,
     ResolveRouteDeps,
     HybridRouteDeps,
-    ClaudeToolsRouteDeps {
-  readonly evalRunner: EvalRunner | null;
+    ClaudeToolsRouteDeps,
+    WatchlistRouteDeps {
+  readonly evalRunner: EvalRunnerContract | null;
 }

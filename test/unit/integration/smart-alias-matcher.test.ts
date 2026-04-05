@@ -67,6 +67,28 @@ describe('SmartAliasMatcher — SOTA++ Enhancements', () => {
       expect(results[0]!.matchConfidence).toBeLessThan(0.95);
       expect(results[0]!.matchConfidence).toBeGreaterThanOrEqual(0.80);
     });
+
+    it('should match compact noisy input without spaces', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Opus One', entityId, 0.95);
+
+      const results = await matcher.findMatches('opusone');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.matchConfidence).toBeGreaterThan(0.85);
+    });
+
+    it('should match punctuation-heavy alias via compact normalization', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Moët & Chandon Brut Impérial', entityId, 0.96);
+
+      const results = await matcher.findMatches('moetchandonbrutimperial');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.matchConfidence).toBeGreaterThan(0.85);
+    });
   });
 
   describe('Smart alias generation from indexed documents', () => {

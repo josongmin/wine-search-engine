@@ -1,6 +1,11 @@
 import type { FastifyInstance } from 'fastify';
-import { InterpretRequestSchema } from '../schemas/search.schema.js';
 import type { InterpretRouteDeps } from './route-deps.js';
+import {
+  parseContractBody,
+  sendRouteContractResponse,
+} from './contract-response.js';
+import { InterpretRouteContract } from './route-contracts.js';
+import { toInterpretRequest } from './search-request-mappers.js';
 
 /**
  * POST /v1/search/interpret — returns QueryPlanV1 only (no execution).
@@ -10,15 +15,11 @@ export function registerInterpretRoute(
   deps: InterpretRouteDeps,
 ): void {
   app.post('/v1/search/interpret', async (request, reply) => {
-    const parsed = InterpretRequestSchema.parse(request.body);
+    const parsed = parseContractBody(request, InterpretRouteContract);
+    const interpretRequest = toInterpretRequest(parsed);
 
-    const plan = await deps.interpretUseCase.execute({
-      query: parsed.query,
-      context: parsed.context,
-      sessionContext: parsed.sessionContext,
-      queryBudget: parsed.queryBudget,
-    });
+    const plan = await deps.interpretUseCase.execute(interpretRequest);
 
-    void reply.status(200).send(plan);
+    sendRouteContractResponse(request, reply, InterpretRouteContract, 200, plan);
   });
 }

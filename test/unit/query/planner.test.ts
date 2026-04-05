@@ -62,6 +62,16 @@ function makePlanner(
 // ── Query normalization ────────────────────────────────────────────────────────
 
 describe('Planner – query normalization', () => {
+  it('surfaces multi-view query normalization for debug visibility', async () => {
+    const planner = makePlanner();
+    const plan = await planner.plan('Opus-One 18');
+
+    expect(plan.normalizedQueryViews).toBeDefined();
+    expect(plan.normalizedQueryViews?.lookupVariants).toEqual(
+      expect.arrayContaining(['opusone18', 'opus one 2018']),
+    );
+  });
+
   it('lowercases "OPUS ONE"', async () => {
     const planner = makePlanner();
     const plan = await planner.plan('OPUS ONE');

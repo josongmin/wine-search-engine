@@ -9,6 +9,7 @@ import type { ExpansionBundle } from './constraint-bundle.js';
 import type { SessionContext } from './session-context.js';
 import type { QueryBudget } from './query-budget.js';
 import type { QueryTargetType } from './query-target-type.js';
+import type { NormalizedQueryViews } from './query-views.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -26,6 +27,14 @@ export interface QueryPlanV1 {
 
   /** Lowercased, whitespace-collapsed, accent-stripped query. */
   readonly normalizedQuery: string;
+
+  /**
+   * Multi-view normalization snapshot used for noisy entity lookup.
+   *
+   * This is surfaced for debugging and provenance only; downstream logic
+   * should continue to rely on normalizedQuery for deterministic behavior.
+   */
+  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
 
   /** Primary intent classification for this query. */
   readonly intent: QueryIntent;

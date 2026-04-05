@@ -111,6 +111,7 @@ export function createTestContainer(): TestContainerParts {
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();
   const querySanitizer = new QuerySanitizer();
+  const injectionJudge = { judge: async () => false };
   const drinkingWindowPredictor = new DrinkingWindowPredictor();
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const anchorProfiler = new AnchorProfiler();
@@ -144,6 +145,7 @@ export function createTestContainer(): TestContainerParts {
     responseBuilder,
     mixedSolver,
     querySanitizer,
+    injectionJudge,
     snapshotVersions,
   });
 
@@ -151,14 +153,16 @@ export function createTestContainer(): TestContainerParts {
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
   const replayUseCase = new ReplayUseCase({ searchUseCase });
-  const interpretUseCase = new InterpretUseCase({ queryPlanner });
-  const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver });
+  const interpretUseCase = new InterpretUseCase({ queryPlanner, querySanitizer, injectionJudge });
+  const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver, querySanitizer, injectionJudge });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
     ranker,
     decisionEngine,
     responseBuilder,
+    querySanitizer,
+    injectionJudge,
   });
 
   const wineToolExecutor = new WineToolExecutor({

@@ -1,22 +1,14 @@
-import type { Resolver, ResolverInput } from '../../domain/resolver/service/resolver.js';
-import type { Planner, PlannerContext } from '../../domain/query/service/planner.js';
+import type { ResolverInput } from '../../domain/resolver/service/resolver.js';
+import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
+import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
+import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type { EntityResolverPort, QueryPlannerPort } from './port/search-pipeline-deps.port.js';
+import type { ResolveRequest } from './resolve-request.dto.js';
+import { QueryEntrySecurityGate } from './query-entry-security.js';
 
-/**
- * Entity resolve request shape.
- */
-export interface ResolveRequest {
-  readonly query: string;
-  readonly context?: {
-    readonly locale: string;
-    readonly currency: string;
-  } | undefined;
-  readonly sessionContext?: {
-    readonly sessionId: string;
-    readonly previousEntities: string[];
-  } | undefined;
-}
+export type { ResolveRequest } from './resolve-request.dto.js';
 
 /**
  * Entity resolve response shape.
@@ -32,8 +24,12 @@ export interface ResolveResponse {
  * Dependencies injected into the ResolveUseCase.
  */
 export interface ResolveUseCaseDeps {
-  readonly queryPlanner: Planner;
-  readonly entityResolver: Resolver;
+  readonly queryPlanner: QueryPlannerPort;
+  readonly entityResolver: EntityResolverPort;
+  /** Shared public query entry guard: Layer 1 sanitizer is required. */
+  readonly querySanitizer: QuerySanitizer;
+  /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
+  readonly injectionJudge?: InjectionJudgePort | undefined;
 }
 
 /**
@@ -45,6 +41,12 @@ export class ResolveUseCase {
   constructor(private readonly deps: ResolveUseCaseDeps) {}
 
   async execute(request: ResolveRequest): Promise<ResolveResponse> {
+    const securityGate = new QueryEntrySecurityGate({
+      querySanitizer: this.deps.querySanitizer,
+      injectionJudge: this.deps.injectionJudge,
+    });
+    const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
+
     // Plan the query to extract anchors and context
     const plannerContext: PlannerContext = {
       locale: request.context?.locale,
@@ -56,7 +58,7 @@ export class ResolveUseCase {
         : undefined,
     };
 
-    const plan = await this.deps.queryPlanner.plan(request.query, plannerContext);
+    const plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
 
     // Build resolver input
     const resolverInput: ResolverInput = {
@@ -73,7 +75,9 @@ export class ResolveUseCase {
     const result = await this.deps.entityResolver.resolve(resolverInput);
 
     // Build trace ref
-    const traceRef = `resolve:${plan.queryClass}:${String(Date.now())}`;
+    const traceRef = request.requestId !== undefined
+      ? `resolve:${request.requestId}:${plan.queryClass}`
+      : `resolve:${plan.queryClass}`;
 
     return {
       status: result.status,

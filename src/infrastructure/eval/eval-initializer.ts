@@ -6,7 +6,7 @@
  */
 
 import type { QueryClass } from '../../domain/shared/types/index.js';
-import type { EvalRunner } from '../../domain/evaluation/service/eval-runner.js';
+import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 
 /**
  * Options for running evaluation.
@@ -33,7 +33,7 @@ export interface EvalRunnerOptions {
  * @returns Success status and summary.
  */
 export async function runEvaluation(
-  evalRunner: EvalRunner,
+  evalRunner: EvalRunnerContract,
   options?: EvalRunnerOptions,
 ): Promise<{
   readonly success: boolean;

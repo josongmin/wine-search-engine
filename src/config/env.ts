@@ -1,5 +1,5 @@
+import dotenv from 'dotenv';
 import { z } from 'zod';
-import 'dotenv/config';
 
 /**
  * Schema for all environment variables required by the Wine Intelligence Engine.
@@ -15,12 +15,21 @@ const envSchema = z.object({
   /** Per-IP request cap (RFC-014 §13). Set high for local offline eval; use 0 to disable. */
   HTTP_RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(100),
 
+  /** Comma-separated list of allowed CORS origins. Defaults to '*' in development. */
+  CORS_ALLOWED_ORIGINS: z.string().default(''),
+
+  /** Run evaluation on startup (fire-and-forget). */
+  EVAL_RUN_AT_STARTUP: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+
   // PostgreSQL
   PG_HOST: z.string().min(1).default('localhost'),
   PG_PORT: z.coerce.number().int().positive().default(5432),
   PG_DATABASE: z.string().min(1).default('wine_engine'),
   PG_USER: z.string().min(1).default('wine'),
-  PG_PASSWORD: z.string().min(1),
+  PG_PASSWORD: z.string().default(''),
 
   // Redis
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
@@ -80,85 +89,107 @@ const envSchema = z.object({
 
 type EnvVars = z.infer<typeof envSchema>;
 
+function buildConfig(parsed: EnvVars) {
+  return {
+    nodeEnv: parsed.NODE_ENV,
+    port: parsed.PORT,
+    logLevel: parsed.LOG_LEVEL,
+
+    /** HTTP rate limiting (Fastify @fastify/rate-limit). */
+    httpRateLimit: {
+      max: parsed.HTTP_RATE_LIMIT_MAX,
+    },
+
+    /** CORS allowed origins. Empty string means allow all in dev, none in production. */
+    corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS,
+
+    /** Optional startup evaluation. */
+    eval: {
+      runAtStartup: parsed.EVAL_RUN_AT_STARTUP,
+    },
+
+    /** PostgreSQL connection settings. */
+    pg: {
+      host: parsed.PG_HOST,
+      port: parsed.PG_PORT,
+      database: parsed.PG_DATABASE,
+      user: parsed.PG_USER,
+      password: parsed.PG_PASSWORD,
+    },
+
+    /** Redis connection settings. */
+    redis: {
+      url: parsed.REDIS_URL,
+    },
+
+    /** Vespa search backend settings. */
+    vespa: {
+      url: parsed.VESPA_URL,
+      contentCluster: parsed.VESPA_CONTENT_CLUSTER,
+    },
+
+    /** Embedding service settings. */
+    embedding: {
+      url: parsed.EMBEDDING_SERVICE_URL,
+      model: parsed.EMBEDDING_MODEL,
+    },
+
+    /** Reranker service settings. */
+    reranker: {
+      url: parsed.RERANKER_SERVICE_URL,
+      blendScale: parsed.RERANK_BLEND_SCALE,
+    },
+
+    /** Learned matcher service settings (optional). */
+    learnedMatcher: {
+      url: parsed.LEARNED_MATCHER_SERVICE_URL,
+    },
+
+    /** Anthropic API settings (optional, for LLM-based security features). */
+    anthropic: {
+      apiKey: parsed.ANTHROPIC_API_KEY,
+    },
+
+    /** Watchlist webhook settings (Epic 17.1). */
+    watchlist: {
+      webhookSecret: parsed.WEBHOOK_SECRET,
+    },
+
+    /** Confidence refusal settings (Epic 17.3: Hallucination Verify). */
+    confidenceRefusal: {
+      threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
+    },
+
+    /** Kill switches for feature flags / circuit breakers. */
+    killSwitch: {
+      aliasOverlay: parsed.KILL_SWITCH_ALIAS_OVERLAY,
+      learning: parsed.KILL_SWITCH_LEARNING,
+      denseRetrieval: parsed.KILL_SWITCH_DENSE_RETRIEVAL,
+      injectionJudge: parsed.KILL_SWITCH_INJECTION_JUDGE,
+      queryCache: parsed.KILL_SWITCH_QUERY_CACHE,
+    },
+  } as const;
+}
+
+export type Config = ReturnType<typeof buildConfig>;
+
+export function parseEnv(env: NodeJS.ProcessEnv = process.env): Config {
+  return buildConfig(envSchema.parse(env));
+}
+
+export function loadConfig(options?: {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly loadDotenv?: boolean;
+}): Config {
+  if (options?.loadDotenv ?? true) {
+    dotenv.config();
+  }
+
+  return parseEnv(options?.env ?? process.env);
+}
+
 /**
  * Parsed and validated environment variables.
  * Throws a descriptive error at startup if any required variable is missing or malformed.
  */
-const parsed: EnvVars = envSchema.parse(process.env);
-
-/**
- * Application configuration object with typed, nested sections.
- */
-export const config = {
-  nodeEnv: parsed.NODE_ENV,
-  port: parsed.PORT,
-  logLevel: parsed.LOG_LEVEL,
-
-  /** HTTP rate limiting (Fastify @fastify/rate-limit). */
-  httpRateLimit: {
-    max: parsed.HTTP_RATE_LIMIT_MAX,
-  },
-
-  /** PostgreSQL connection settings. */
-  pg: {
-    host: parsed.PG_HOST,
-    port: parsed.PG_PORT,
-    database: parsed.PG_DATABASE,
-    user: parsed.PG_USER,
-    password: parsed.PG_PASSWORD,
-  },
-
-  /** Redis connection settings. */
-  redis: {
-    url: parsed.REDIS_URL,
-  },
-
-  /** Vespa search backend settings. */
-  vespa: {
-    url: parsed.VESPA_URL,
-    contentCluster: parsed.VESPA_CONTENT_CLUSTER,
-  },
-
-  /** Embedding service settings. */
-  embedding: {
-    url: parsed.EMBEDDING_SERVICE_URL,
-    model: parsed.EMBEDDING_MODEL,
-  },
-
-  /** Reranker service settings. */
-  reranker: {
-    url: parsed.RERANKER_SERVICE_URL,
-    blendScale: parsed.RERANK_BLEND_SCALE,
-  },
-
-  /** Learned matcher service settings (optional). */
-  learnedMatcher: {
-    url: parsed.LEARNED_MATCHER_SERVICE_URL,
-  },
-
-  /** Anthropic API settings (optional, for LLM-based security features). */
-  anthropic: {
-    apiKey: parsed.ANTHROPIC_API_KEY,
-  },
-
-  /** Watchlist webhook settings (Epic 17.1). */
-  watchlist: {
-    webhookSecret: parsed.WEBHOOK_SECRET,
-  },
-
-  /** Confidence refusal settings (Epic 17.3: Hallucination Verify). */
-  confidenceRefusal: {
-    threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
-  },
-
-  /** Kill switches for feature flags / circuit breakers. */
-  killSwitch: {
-    aliasOverlay: parsed.KILL_SWITCH_ALIAS_OVERLAY,
-    learning: parsed.KILL_SWITCH_LEARNING,
-    denseRetrieval: parsed.KILL_SWITCH_DENSE_RETRIEVAL,
-    injectionJudge: parsed.KILL_SWITCH_INJECTION_JUDGE,
-    queryCache: parsed.KILL_SWITCH_QUERY_CACHE,
-  },
-} as const;
-
-export type Config = typeof config;
+export const config = loadConfig();

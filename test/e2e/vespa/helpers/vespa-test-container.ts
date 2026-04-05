@@ -27,6 +27,7 @@ import { ScoreAggregator } from '../../../../src/domain/ranking/service/score-ag
 import { EvidenceMapper } from '../../../../src/domain/ranking/service/evidence-mapper.js';
 import { DecisionEngine } from '../../../../src/domain/decision/service/decision-engine.js';
 import { ResponseBuilder } from '../../../../src/domain/response/service/response-builder.js';
+import { QuerySanitizer } from '../../../../src/domain/security/service/query-sanitizer.js';
 import { MixedSolver } from '../../../../src/domain/mixed/service/mixed-solver.js';
 import { AnchorProfiler } from '../../../../src/domain/mixed/service/anchor-profiler.js';
 import { SimilarityScorer } from '../../../../src/domain/mixed/service/similarity-scorer.js';
@@ -115,6 +116,8 @@ export function createVespaTestContainer(): VespaTestContainerParts {
   const anchorResolver = new InMemoryAnchorResolver();
   const similarRetrieval = new InMemorySimilarRetrieval();
   const candidateAttributes = new InMemoryCandidateAttributes();
+  const querySanitizer = new QuerySanitizer();
+  const injectionJudge = { judge: async () => false };
 
   // Domain services — query planning
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
@@ -191,11 +194,13 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     responseBuilder,
     mixedSolver,
     snapshotVersions,
+    querySanitizer,
+    injectionJudge,
   });
 
   const replayUseCase = new ReplayUseCase({ searchUseCase });
-  const interpretUseCase = new InterpretUseCase({ queryPlanner });
-  const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver });
+  const interpretUseCase = new InterpretUseCase({ queryPlanner, querySanitizer, injectionJudge });
+  const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver, querySanitizer, injectionJudge });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -203,6 +208,8 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     decisionEngine,
     responseBuilder,
     snapshotVersions,
+    querySanitizer,
+    injectionJudge,
   });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);

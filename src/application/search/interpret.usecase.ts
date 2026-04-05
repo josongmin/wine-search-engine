@@ -1,32 +1,23 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
-import type { PlannerContext, Planner } from '../../domain/query/service/planner.js';
+import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
+import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
+import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
+import type { InterpretRequest } from './interpret-request.dto.js';
+import { QueryEntrySecurityGate } from './query-entry-security.js';
 
-/**
- * Interpret request — just the query plus optional context.
- */
-export interface InterpretRequest {
-  readonly query: string;
-  readonly context?: {
-    readonly locale: string;
-    readonly currency: string;
-  } | undefined;
-  readonly sessionContext?: {
-    readonly sessionId: string;
-    readonly previousEntities: string[];
-  } | undefined;
-  readonly queryBudget?: {
-    readonly maxLatencyMs: number;
-    readonly maxCandidates: number;
-    readonly rerankLimit: number;
-  } | undefined;
-}
+export type { InterpretRequest } from './interpret-request.dto.js';
 
 /**
  * Dependencies injected into the InterpretUseCase.
  */
 export interface InterpretUseCaseDeps {
-  readonly queryPlanner: Planner;
+  readonly queryPlanner: QueryPlannerPort;
+  /** Shared public query entry guard: Layer 1 sanitizer is required. */
+  readonly querySanitizer: QuerySanitizer;
+  /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
+  readonly injectionJudge?: InjectionJudgePort | undefined;
 }
 
 /**
@@ -39,6 +30,12 @@ export class InterpretUseCase {
   constructor(private readonly deps: InterpretUseCaseDeps) {}
 
   async execute(request: InterpretRequest): Promise<QueryPlanV1> {
+    const securityGate = new QueryEntrySecurityGate({
+      querySanitizer: this.deps.querySanitizer,
+      injectionJudge: this.deps.injectionJudge,
+    });
+    const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
+
     const plannerContext: PlannerContext = {
       locale: request.context?.locale,
       session: request.sessionContext
@@ -56,6 +53,6 @@ export class InterpretUseCase {
         : undefined,
     };
 
-    return this.deps.queryPlanner.plan(request.query, plannerContext);
+    return this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
   }
 }

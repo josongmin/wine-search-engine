@@ -12,6 +12,7 @@ import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { QueryCachePort } from '../port/query-cache.port.js';
 import type { EmbeddingCachePort } from '../port/embedding-cache.port.js';
+import type { SearchResponseCachePort } from '../port/search-response-cache.port.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 
@@ -59,7 +60,7 @@ export interface CacheResult<T> {
  * - Error recovery and observability
  * - Circuit breaking for backend failures
  */
-export class CacheService {
+export class CacheService implements SearchResponseCachePort {
   private readonly queryCacheKeyBuilder: QueryCacheKeyBuilder;
   private readonly embeddingCacheKeyBuilder: EmbeddingCacheKeyBuilder;
   private readonly eligibilityAnalyzer: CacheEligibilityAnalyzer;

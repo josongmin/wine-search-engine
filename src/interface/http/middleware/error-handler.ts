@@ -1,8 +1,10 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
+import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked.js';
 import { SnapshotMismatchError } from '../../../application/search/replay.usecase.js';
-import type { ErrorResponseBody } from '../schemas/search.schema.js';
+import { sendPolicyBlockedResponse } from '../errors/policy-blocked.js';
+import type { ErrorResponseBody } from '../schemas/search-response.schema.js';
 
 /**
  * Maps DomainError codes to HTTP status codes.
@@ -13,6 +15,7 @@ const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
   BLOCKING_MISS: 500,
   SNAPSHOT_MISMATCH: 409,
   MISSING_SNAPSHOT: 400,
+  [POLICY_BLOCKED_CODE]: 403,
 };
 
 /**
@@ -128,10 +131,15 @@ export function errorHandler(
     const status = DOMAIN_ERROR_STATUS_MAP[error.code] ?? 500;
     const retryable = isDomainErrorRetryable(error.code);
 
-    request.log.error(
+    request.log[error.code === POLICY_BLOCKED_CODE ? 'warn' : 'error'](
       { requestId, code: error.code, message: error.message },
       'domain_error',
     );
+
+    if (error.code === POLICY_BLOCKED_CODE) {
+      sendPolicyBlockedResponse(request, reply, requestId);
+      return;
+    }
 
     const body = buildErrorResponse(
       requestId,

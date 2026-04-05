@@ -11,7 +11,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHmac } from 'crypto';
-import { nanoid } from 'nanoid';
+import { randomUUID } from 'node:crypto';
 import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber, type WatchlistEventHandler } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { WebhookDelivery, type WebhookPayload } from '../infrastructure/watchlist/webhook-delivery.js';
@@ -90,8 +90,8 @@ describe('Watchlist Integration', () => {
   describe('Webhook Payload Structure', () => {
     it('should construct valid webhook payload', async () => {
       const entry: WatchlistEntry = {
-        id: '550e8400-e29b-41d4-a716-446655440000',
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-opus-one-2018',
         triggerConditions: [
           {
@@ -140,7 +140,7 @@ describe('Watchlist Integration', () => {
 
   describe('HMAC Signature Verification', () => {
     it('should compute correct HMAC signature', async () => {
-      const watchlistId = 'test-watchlist-id';
+      const watchlistId = randomUUID();
       const payload: WebhookPayload = {
         watchlist_id: watchlistId,
         entity_id: 'wine-123',
@@ -151,7 +151,7 @@ describe('Watchlist Integration', () => {
 
       const entry: WatchlistEntry = {
         id: watchlistId,
-        userId: 'user-123',
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [],
         callbackUrl: 'https://example.com/webhook',
@@ -187,8 +187,8 @@ describe('Watchlist Integration', () => {
 
     it('should include signature in X-Wine-Watchlist-Signature header', async () => {
       const entry: WatchlistEntry = {
-        id: nanoid(),
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [],
         callbackUrl: 'https://example.com/webhook',
@@ -224,8 +224,8 @@ describe('Watchlist Integration', () => {
       { timeout: 40000 },
       async () => {
       const entry: WatchlistEntry = {
-        id: nanoid(),
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [],
         callbackUrl: 'https://example.com/webhook',
@@ -262,8 +262,8 @@ describe('Watchlist Integration', () => {
       { timeout: 10000 },
       async () => {
       const entry: WatchlistEntry = {
-        id: nanoid(),
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [],
         callbackUrl: 'https://example.com/webhook',
@@ -322,8 +322,8 @@ describe('Watchlist Integration', () => {
 
     it('should support multiple conditions per entry', () => {
       const entry: WatchlistEntry = {
-        id: nanoid(),
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [
           { type: 'price_drop', threshold: 10, baselinePrice: 150 },
@@ -343,8 +343,8 @@ describe('Watchlist Integration', () => {
 
     it('should support null expiration (no expiry)', () => {
       const entry: WatchlistEntry = {
-        id: nanoid(),
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [{ type: 'new_vintage', minVintage: 2025 }],
         callbackUrl: 'https://example.com/webhook',
@@ -358,8 +358,8 @@ describe('Watchlist Integration', () => {
     it('should support future expiration date', () => {
       const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
       const entry: WatchlistEntry = {
-        id: nanoid(),
-        userId: 'user-123',
+        id: randomUUID(),
+        userId: randomUUID(),
         entityId: 'wine-123',
         triggerConditions: [{ type: 'new_vintage', minVintage: 2025 }],
         callbackUrl: 'https://example.com/webhook',

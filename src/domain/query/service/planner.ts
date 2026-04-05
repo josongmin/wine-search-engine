@@ -14,8 +14,8 @@ import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
 import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { PolicyCompiler } from './policy-compiler.js';
-import { normalizeUnicode } from '../../shared/utils/unicode-normalize.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
+import { QueryNormalizer } from './query-normalizer.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -93,6 +93,7 @@ export interface PlannerContext {
  */
 export class Planner {
   private readonly policyCompiler = new PolicyCompiler();
+  private readonly queryNormalizer = new QueryNormalizer();
 
   constructor(
     private readonly ambiguityDict: AmbiguityDictionary,
@@ -122,10 +123,11 @@ export class Planner {
    */
   async plan(query: string, context?: PlannerContext): Promise<QueryPlanV1> {
     // 1. Normalize.
-    const normalizedQuery = this.normalizeQuery(query);
+    const queryViews = this.queryNormalizer.normalize(query);
+    const normalizedQuery = queryViews.accentless;
 
     // 2. Extract anchors.
-    const anchors = await this.anchorExtractor.extract(normalizedQuery);
+    const anchors = await this.anchorExtractor.extract(normalizedQuery, queryViews);
 
     // 3. Detect intent.
     const intent = this.detectIntent(normalizedQuery, anchors);
@@ -207,6 +209,7 @@ export class Planner {
     return {
       rawQuery: query,
       normalizedQuery,
+      normalizedQueryViews: queryViews,
       intent,
       ...(secondaryIntents !== undefined && { secondaryIntents }),
       route,
@@ -225,34 +228,6 @@ export class Planner {
       queryBudget: budget,
       ...(targetEntityType !== undefined && { targetEntityType }),
     };
-  }
-
-  /**
-   * Normalizes a query string: strips accents from Latin characters only
-   * (preserving Korean and other non-Latin scripts), lowercases, and
-   * collapses contiguous whitespace.
-   *
-   * Uses NFC normalization to preserve Korean syllable blocks. NFD is applied
-   * only to extract Latin combining marks before recomposing to NFC, so
-   * Korean Jamo are never left in decomposed form.
-   */
-  private normalizeQuery(query: string): string {
-    // 1. Apply homoglyph normalization and whitespace collapse via shared util
-    //    (NFC-safe: preserves Korean syllables).
-    let result = normalizeUnicode(query);
-
-    // 2. Strip accents only from Latin-range characters (U+0000–U+024F).
-    //    We decompose to NFD, remove combining marks that follow a Latin base,
-    //    then recompose to NFC so Korean blocks are never split apart.
-    result = result
-      .normalize('NFD')
-      .replace(/(?<=[A-Za-z\u00C0-\u024F])[\u0300-\u036f]+/g, '')
-      .normalize('NFC');
-
-    // 3. Lowercase and final whitespace collapse.
-    result = result.toLowerCase().replace(/\s+/g, ' ').trim();
-
-    return result;
   }
 
   /**

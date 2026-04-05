@@ -1,7 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { type Span, SpanStatusCode } from '@opentelemetry/api';
-import { config } from '../../config/env.js';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -12,11 +11,15 @@ import { registerReplayRoute } from './routes/replay.route.js';
 import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
-import { registerHealthRoutes } from './routes/health.route.js';
+import {
+  registerHealthRoutes,
+  type HealthRouteOptions,
+} from './routes/health.route.js';
 import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
+import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -29,6 +32,67 @@ declare module 'fastify' {
  */
 export interface ServerOptions {
   readonly logLevel?: string;
+  readonly nodeEnv?: 'development' | 'production' | 'test';
+  readonly rateLimitMax?: number;
+  readonly corsAllowedOrigins?: string;
+  readonly runEvalAtStartup?: boolean;
+  readonly health?: HealthRouteOptions;
+  readonly enableCors?: boolean;
+  readonly enableTelemetry?: boolean;
+}
+
+function registerCorsSupport(
+  app: FastifyInstance,
+  options: {
+    readonly nodeEnv: 'development' | 'production' | 'test';
+    readonly allowedOrigins: string;
+  },
+): void {
+  app.options('*', async (_request, reply) => {
+    return reply.status(204).send();
+  });
+
+  app.addHook('preHandler', (request, reply, done) => {
+    const origin = request.headers.origin ?? '';
+    if (options.nodeEnv !== 'production') {
+      reply.header('Access-Control-Allow-Origin', origin || '*');
+    } else if (options.allowedOrigins.length > 0) {
+      const originList = options.allowedOrigins.split(',').map((o) => o.trim());
+      if (originList.includes(origin)) {
+        reply.header('Access-Control-Allow-Origin', origin);
+      }
+    }
+    reply.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    reply.header('Access-Control-Max-Age', '86400');
+    done();
+  });
+}
+
+function registerTelemetryHooks(app: FastifyInstance): void {
+  app.addHook('onRequest', (request) => {
+    const spanName = `${request.method} ${request.url}`;
+    const span = getTracer().startSpan(spanName, {
+      attributes: {
+        'http.method': request.method,
+        'http.url': request.url,
+        'request.id': request.requestId,
+      },
+    });
+    request.otelSpan = span;
+  });
+
+  app.addHook('onSend', (request, reply, payload, done) => {
+    const { otelSpan } = request;
+    if (otelSpan !== undefined) {
+      otelSpan.setAttribute('http.status_code', reply.statusCode);
+      if (reply.statusCode >= 500) {
+        otelSpan.setStatus({ code: SpanStatusCode.ERROR });
+      }
+      otelSpan.end();
+    }
+    done(null, payload);
+  });
 }
 
 /**
@@ -56,42 +120,29 @@ export async function createServer(
     },
   });
 
+  // CORS headers (G-46).
+  // In development: allow all origins. In production: restrict to CORS_ALLOWED_ORIGINS env var.
+  // Uses a manual hook instead of @fastify/cors to avoid an extra dependency.
+  const nodeEnv = options?.nodeEnv ?? 'development';
+  const allowedOrigins = options?.corsAllowedOrigins ?? '';
+  if (options?.enableCors ?? true) {
+    registerCorsSupport(app, { nodeEnv, allowedOrigins });
+  }
+
   // Register middleware
   registerRequestContext(app);
 
-  // Add OpenTelemetry root span per request.
-  // The span is started in onRequest (after request-context assigns requestId)
-  // and closed in onResponse so it covers the full request lifecycle.
-  app.addHook('onRequest', (request) => {
-    const spanName = `${request.method} ${request.url}`;
-    const span = getTracer().startSpan(spanName, {
-      attributes: {
-        'http.method': request.method,
-        'http.url': request.url,
-        'request.id': request.requestId,
-      },
-    });
-    request.otelSpan = span;
-  });
-
-  app.addHook('onResponse', async (request, reply) => {
-    const { otelSpan } = request;
-    if (otelSpan !== undefined) {
-      otelSpan.setAttribute('http.status_code', reply.statusCode);
-      if (reply.statusCode >= 500) {
-        otelSpan.setStatus({ code: SpanStatusCode.ERROR });
-      }
-      otelSpan.end();
-    }
-  });
+  if (options?.enableTelemetry ?? nodeEnv !== 'test') {
+    registerTelemetryHooks(app);
+  }
 
   // Register rate limiting — RFC-014 §13
   // errorResponseBuilder is intentionally omitted: in @fastify/rate-limit v10 it replaces the
   // thrown error object, stripping statusCode and causing setErrorHandler to see an unknown
   // object and fall back to 500. The 429 branch is handled in the global error handler instead.
-  if (config.httpRateLimit.max > 0) {
+  if ((options?.rateLimitMax ?? 100) > 0) {
     await app.register(rateLimit, {
-      max: config.httpRateLimit.max,
+      max: options?.rateLimitMax ?? 100,
       timeWindow: '1 minute',
     });
   }
@@ -131,7 +182,7 @@ export async function createServer(
   app.setErrorHandler(errorHandler);
 
   // Register routes
-  registerHealthRoutes(app);
+  registerHealthRoutes(app, options?.health);
   registerClaudeToolsRoute(app, deps);
   registerSearchRoute(app, deps);
   registerBatchSearchRoute(app, deps);
@@ -139,14 +190,14 @@ export async function createServer(
   registerInterpretRoute(app, deps);
   registerResolveRoute(app, deps);
   registerHybridRoute(app, deps);
-  registerWatchlistRoute(app);
+  registerWatchlistRoute(app, deps);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)
   // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)
   // MUST NOT block server readiness — eval can take minutes on large gold sets.
-  if (process.env.EVAL_RUN_AT_STARTUP === 'true') {
+  if (options?.runEvalAtStartup === true) {
     if (deps.evalRunner) {
-      const evalRunnerRef = deps.evalRunner;
+      const evalRunnerRef: EvalRunnerContract = deps.evalRunner;
       app.addHook('onReady', () => {
         const evalStart = Date.now();
         console.warn('[Server] Starting background evaluation per EVAL_RUN_AT_STARTUP...');

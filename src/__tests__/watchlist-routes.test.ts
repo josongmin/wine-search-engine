@@ -5,15 +5,24 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { registerWatchlistRoute, clearWatchlistStores, getWatchlistEntry } from '../interface/http/routes/watchlist.route.js';
+import { randomUUID } from 'node:crypto';
+import { registerWatchlistRoute } from '../interface/http/routes/watchlist.route.js';
 import { deepKeysToSnake } from '../interface/http/middleware/snake-case-hook.js';
+import { InMemoryWatchlistStore } from '../infrastructure/watchlist/in-memory-watchlist-store.js';
+import { WatchlistService } from '../application/watchlist/watchlist.service.js';
 
 describe('Watchlist Routes', () => {
   let app: FastifyInstance;
+  let watchlistService: WatchlistService;
 
   beforeEach(async () => {
     app = Fastify();
-    clearWatchlistStores();
+    const store = new InMemoryWatchlistStore();
+    watchlistService = new WatchlistService({
+      watchlistRepository: store,
+      deliveryLogRepository: store,
+      idGenerator: randomUUID,
+    });
 
     // Register snake_case serialization
     app.addHook('preSerialization', async (_request, _reply, payload: unknown) => {
@@ -21,12 +30,11 @@ describe('Watchlist Routes', () => {
     });
 
     // Register watchlist route
-    registerWatchlistRoute(app);
+    registerWatchlistRoute(app, { watchlistService });
   });
 
   afterEach(async () => {
     await app.close();
-    clearWatchlistStores();
   });
 
   describe('POST /v1/watchlist', () => {
@@ -50,7 +58,9 @@ describe('Watchlist Routes', () => {
 
       expect(response.statusCode).toBe(201);
       const body = JSON.parse(response.body);
-      expect(body.watchlist_id).toMatch(/^[\w-]+$/); // nanoid format
+      expect(body.watchlist_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
     });
 
     it('should create entry with multiple triggers', async () => {
@@ -80,7 +90,7 @@ describe('Watchlist Routes', () => {
       const watchlistId = body.watchlist_id;
 
       // Verify entry was stored
-      const stored = getWatchlistEntry(watchlistId);
+      const stored = await watchlistService.getById(watchlistId);
       expect(stored).toBeDefined();
       expect(stored?.triggerConditions).toHaveLength(2);
     });
@@ -106,8 +116,29 @@ describe('Watchlist Routes', () => {
 
       expect(response.statusCode).toBe(201);
       const body = JSON.parse(response.body);
-      const stored = getWatchlistEntry(body.watchlist_id);
+      const stored = await watchlistService.getById(body.watchlist_id);
       expect(stored?.expiresAt).toBeDefined();
+    });
+
+    it('should reject expiry in the past', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/v1/watchlist',
+        payload: {
+          user_id: '550e8400-e29b-41d4-a716-446655440001',
+          entity_id: 'wine-test',
+          trigger_conditions: [
+            {
+              type: 'new_vintage',
+              minVintage: 2025,
+            },
+          ],
+          callback_url: 'https://example.com/webhook',
+          expires_at: '2020-01-01T00:00:00.000Z',
+        },
+      });
+
+      expect(response.statusCode).toBe(400);
     });
 
     it('should reject invalid user_id (not UUID)', async () => {
@@ -198,15 +229,27 @@ describe('Watchlist Routes', () => {
 
       expect(getResponse.statusCode).toBe(200);
       const body = JSON.parse(getResponse.body);
-      expect(body.id).toBe(watchlistId);
+      expect(body.watchlist_id).toBe(watchlistId);
       expect(body.entity_id).toBe('wine-test');
       expect(body.user_id).toBe('550e8400-e29b-41d4-a716-446655440001');
     });
 
-    it('should return 404 for non-existent entry', async () => {
+    it('should reject malformed watchlist id with 400', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: '/v1/watchlist/nonexistent-id',
+        url: '/v1/watchlist/not-a-uuid',
+      });
+
+      expect(response.statusCode).toBe(400);
+      const body = JSON.parse(response.body);
+      expect(body.error.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('should return 404 for non-existent entry', async () => {
+      const missingId = randomUUID();
+      const response = await app.inject({
+        method: 'GET',
+        url: `/v1/watchlist/${missingId}`,
       });
 
       expect(response.statusCode).toBe(404);
@@ -280,12 +323,22 @@ describe('Watchlist Routes', () => {
     });
 
     it('should return 404 for non-existent entry', async () => {
+      const missingId = randomUUID();
       const response = await app.inject({
         method: 'DELETE',
-        url: '/v1/watchlist/nonexistent-id',
+        url: `/v1/watchlist/${missingId}`,
       });
 
       expect(response.statusCode).toBe(404);
+    });
+
+    it('should reject malformed watchlist id with 400', async () => {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: '/v1/watchlist/not-a-uuid',
+      });
+
+      expect(response.statusCode).toBe(400);
     });
   });
 
@@ -322,12 +375,22 @@ describe('Watchlist Routes', () => {
     });
 
     it('should return 404 for non-existent entry', async () => {
+      const missingId = randomUUID();
       const response = await app.inject({
         method: 'GET',
-        url: '/v1/watchlist/nonexistent-id/deliveries',
+        url: `/v1/watchlist/${missingId}/deliveries`,
       });
 
       expect(response.statusCode).toBe(404);
+    });
+
+    it('should reject malformed watchlist id with 400', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/v1/watchlist/not-a-uuid/deliveries',
+      });
+
+      expect(response.statusCode).toBe(400);
     });
   });
 });

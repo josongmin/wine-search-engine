@@ -33,3 +33,6 @@ export type { LTRModelRegistry } from './service/ltr-training-service.js';
 
 export { LTRRanker } from './service/ltr-ranker.js';
 export type { RankableDocument, RankedDocument } from './service/ltr-ranker.js';
+
+export { extractLTRFeatures } from './service/ltr-feature-extractor.js';
+export type { LTRScoreComponents } from './service/ltr-feature-extractor.js';

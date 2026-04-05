@@ -18,6 +18,22 @@ export interface AnchorCandidate {
   readonly candidateEntityIds: readonly EntityId[];
 
   /**
+   * Query lookup variants that produced this anchor candidate.
+   *
+   * This is provenance for noisy lookup debugging only. It records which
+   * normalized query views matched this anchor during extraction.
+   */
+  readonly lookupVariants?: readonly string[] | undefined;
+
+  /**
+   * Lookup strategies that produced this anchor candidate.
+   *
+   * Examples: exact, compact_exact, fuzzy_char_ngram, transliterated.
+   * This is provenance only and should not drive deterministic planner logic.
+   */
+  readonly lookupStrategies?: readonly string[] | undefined;
+
+  /**
    * Anchor confidence in [0, 1].
    * This is NOT a calibrated decision confidence C.
    */

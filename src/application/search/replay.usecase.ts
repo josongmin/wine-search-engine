@@ -1,7 +1,12 @@
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
-import type { SearchUseCase, SearchRequest, SnapshotVersions } from './search.usecase.js';
+import type { SnapshotVersions } from './search.usecase.js';
+import type { ReplayRequest } from './replay-request.dto.js';
+import type { SearchRequest } from './search-request.dto.js';
+import type { SearchExecutorPort } from './port/search-executor.port.js';
+
+export type { ReplayRequest } from './replay-request.dto.js';
 
 /**
  * Error thrown when a replay snapshot does not match the current runtime snapshot.
@@ -44,48 +49,10 @@ export class DeterminismViolationError extends DomainError {
 }
 
 /**
- * Replay request: the search request plus a required decision snapshot.
- */
-export interface ReplayRequest {
-  readonly query: string;
-  readonly decision_snapshot: DecisionSnapshot;
-  readonly context?: {
-    readonly locale: string;
-    readonly currency: string;
-  } | undefined;
-  readonly sessionContext?: {
-    readonly sessionId: string;
-    readonly previousEntities: string[];
-  } | undefined;
-  readonly queryBudget?: {
-    readonly maxLatencyMs: number;
-    readonly maxCandidates: number;
-    readonly rerankLimit: number;
-  } | undefined;
-  readonly options?: {
-    readonly mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
-    readonly explain: boolean;
-    readonly clarification: boolean;
-  } | undefined;
-
-  /**
-   * Optional expected response hash for determinism validation (RFC-009 §8).
-   *
-   * When present, the replay use case compares this value against the
-   * `response_hash` field in the freshly-produced response.  A mismatch
-   * means the engine reached a different decision than it did originally —
-   * a determinism violation that is surfaced as a {@link DeterminismViolationError}.
-   *
-   * Omit this field to perform a snapshot-only replay without hash validation.
-   */
-  readonly expected_response_hash?: string | undefined;
-}
-
-/**
  * Dependencies injected into the ReplayUseCase.
  */
 export interface ReplayUseCaseDeps {
-  readonly searchUseCase: SearchUseCase;
+  readonly searchUseCase: SearchExecutorPort;
   /** Version strings for RFC-015 snapshot population. */
   readonly snapshotVersions?: SnapshotVersions | undefined;
 }

@@ -5,11 +5,12 @@
  * parallel entity resolution + merging results.
  */
 
-import type { SearchUseCase, SearchRequest } from './search.usecase.js';
+import type { SearchRequest } from './search-request.dto.js';
 import type { ComparisonSearchResponse, ComparisonEntity } from '../../domain/response/model/comparison-response.js';
+import type { SearchExecutorPort } from './port/search-executor.port.js';
 
 export class DecomposedSearchUseCase {
-  constructor(private readonly searchUseCase: SearchUseCase) {}
+  constructor(private readonly searchUseCase: SearchExecutorPort) {}
 
   /**
    * Executes parallel search for two sub-queries from a decomposed comparison.

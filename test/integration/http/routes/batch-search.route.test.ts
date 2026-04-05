@@ -19,6 +19,48 @@ import { errorHandler } from '../../../../src/interface/http/middleware/error-ha
  * - Request body parsing
  * - Error response structure
  */
+
+function makeSearchResponse(overrides: Partial<SearchResponseV1> = {}): SearchResponseV1 {
+  return {
+    queryType: 'search',
+    engineDecision: {
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      route: 'hybrid',
+      decisionConfidence: 0.95,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      decisionTraceRef: 'trace-1',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1',
+        threshold_profile_id: 'default',
+        planner_version: '1',
+        feature_flags: {},
+      },
+    },
+    results: [],
+    clarification: null,
+    meta: {
+      requestId: 'req-1',
+      queryTimeMs: 100,
+      route: 'hybrid',
+      version: '1.0.0',
+      engine_schema_version: 'search_response_v1',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1',
+        threshold_profile_id: 'default',
+        planner_version: '1',
+        feature_flags: {},
+      },
+      response_hash: 'abc123',
+    },
+    ...overrides,
+  };
+}
+
 describe('POST /v1/batch-search', () => {
   let app: FastifyInstance;
   let mockBatchSearchUseCase: BatchSearchUseCase;
@@ -43,12 +85,7 @@ describe('POST /v1/batch-search', () => {
 
   describe('HTTP 207 Multi-Status', () => {
     it('should return 207 when all requests succeed', async () => {
-      const mockResponse: SearchResponseV1 = {
-        queryType: 'search',
-        engineDecision: { status: 'resolved', confidence: 0.95 } as any,
-        results: [],
-        meta: { requestId: 'req1', queryTimeMs: 100 } as any,
-      };
+      const mockResponse = makeSearchResponse();
 
       const batchResponse: BatchSearchResponse = {
         batch_id: 'batch-123',
@@ -102,7 +139,7 @@ describe('POST /v1/batch-search', () => {
           {
             id: '1',
             status: 'succeeded',
-            response: {} as SearchResponseV1,
+            response: makeSearchResponse(),
           },
           {
             id: '2',
@@ -197,7 +234,7 @@ describe('POST /v1/batch-search', () => {
           {
             id: '1',
             status: 'succeeded',
-            response: {} as SearchResponseV1,
+            response: makeSearchResponse(),
           },
         ],
         processing_time_ms: 100,
@@ -287,7 +324,7 @@ describe('POST /v1/batch-search', () => {
       expect(response.statusCode).toBe(400);
     });
 
-    it('should reject query exceeding max length (2000)', async () => {
+    it('should reject query exceeding max length (500)', async () => {
       const response = await app.inject({
         method: 'POST',
         url: '/v1/batch-search',
@@ -295,7 +332,7 @@ describe('POST /v1/batch-search', () => {
           requests: [
             {
               id: '1',
-              query: 'x'.repeat(2001),
+              query: 'x'.repeat(501),
             },
           ],
         },
@@ -361,10 +398,11 @@ describe('POST /v1/batch-search', () => {
             id: '1',
             status: 'succeeded',
             response: {
-              queryType: 'search',
-              engineDecision: { status: 'resolved' } as any,
-              results: [],
-              meta: { requestId: 'req1', queryTimeMs: 50 } as any,
+              ...makeSearchResponse(),
+              meta: {
+                ...makeSearchResponse().meta,
+                queryTimeMs: 50,
+              },
             },
           },
         ],
@@ -448,7 +486,7 @@ describe('POST /v1/batch-search', () => {
           {
             id: '1',
             status: 'succeeded',
-            response: {} as SearchResponseV1,
+            response: makeSearchResponse(),
           },
         ],
         processing_time_ms: 50,
@@ -486,7 +524,7 @@ describe('POST /v1/batch-search', () => {
           {
             id: '1',
             status: 'succeeded',
-            response: {} as SearchResponseV1,
+            response: makeSearchResponse(),
           },
         ],
         processing_time_ms: 50,
@@ -525,7 +563,7 @@ describe('POST /v1/batch-search', () => {
           {
             id: '1',
             status: 'succeeded',
-            response: {} as SearchResponseV1,
+            response: makeSearchResponse(),
           },
         ],
         processing_time_ms: 100,

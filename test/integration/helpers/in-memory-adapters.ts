@@ -43,6 +43,7 @@ import type { EvalResult } from '../../../src/domain/evaluation/model/eval-resul
 import type { ExistingAliasChecker } from '../../../src/domain/learning/service/alias-proposer.js';
 import type { AdversarialGuardPort } from '../../../src/domain/learning/service/promotion-gate.js';
 import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
+import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InMemoryAmbiguityDictionary
@@ -327,8 +328,10 @@ export class InMemoryAliasMatcher implements AliasMatcher {
   }
 
   async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+    const views = buildNormalizedQueryViews(normalizedQuery);
+
     // Stage 1: Exact match from pre-registered aliases
-    const exact = this.aliases.get(normalizedQuery);
+    const exact = this.aliases.get(views.strict);
     if (exact && exact.length > 0) {
       const grouped = new Map<string, { entityIds: EntityId[]; confidence: number }>();
       for (const entry of exact) {
@@ -344,21 +347,44 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       }
       return Array.from(grouped.entries()).map(([surfaceForm, { entityIds, confidence }]) => ({
         surfaceForm,
-        normalizedForm: normalizedQuery,
+        normalizedForm: views.strict,
         entityIds,
         matchConfidence: confidence,
       }));
+    }
+
+    // Stage 1.5: compact normalization match for 붙여쓰기/구두점 noise
+    const compactResults: AliasMatchResult[] = [];
+    for (const [normalized, entries] of this.aliases) {
+      if (this.compact(normalized) !== views.compact) {
+        continue;
+      }
+
+      const entityIds = entries.map((entry) => entry.entityId);
+      const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+      compactResults.push({
+        surfaceForm: entries[0]?.surfaceForm ?? normalized,
+        normalizedForm: normalized,
+        entityIds,
+        matchConfidence: maxConfidence * 0.93,
+      });
+    }
+    if (compactResults.length > 0) {
+      compactResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+      return compactResults;
     }
 
     // Stage 2: Substring/token match in pre-registered aliases
     // Match when: alias is a substring of query OR query tokens are prefix of alias tokens
     const substringResults: AliasMatchResult[] = [];
     for (const [normalized, entries] of this.aliases) {
-      const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
-      const aliasTokens = normalized.split(/\s+/).filter(Boolean);
+      const queryTokens = views.punctuationStripped.split(/\s+/).filter(Boolean);
+      const aliasTokens = this.punctuationStripped(normalized).split(/\s+/).filter(Boolean);
 
       // Case 1: Query contains the alias as substring
-      const isSubstringMatch = normalizedQuery.includes(normalized);
+      const isSubstringMatch =
+        views.strict.includes(normalized) ||
+        views.punctuationStripped.includes(this.punctuationStripped(normalized));
 
       // Case 2: Query tokens are prefix of alias tokens (e.g., "david arthur" matches "david arthur cabernet sauvignon")
       const isTokenPrefixMatch = queryTokens.length > 0 &&
@@ -382,7 +408,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     }
 
     // Stage 3: Smart alias generation from indexed documents
-    const smartMatches = this.generateSmartAliases(normalizedQuery);
+    const smartMatches = this.generateSmartAliases(views.punctuationStripped);
     if (smartMatches.length > 0) {
       return smartMatches;
     }
@@ -567,12 +593,15 @@ export class InMemoryAliasMatcher implements AliasMatcher {
   }
 
   private normalize(input: string): string {
-    return input
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
+    return buildNormalizedQueryViews(input).strict;
+  }
+
+  private punctuationStripped(input: string): string {
+    return buildNormalizedQueryViews(input).punctuationStripped;
+  }
+
+  private compact(input: string): string {
+    return buildNormalizedQueryViews(input).compact;
   }
 }
 

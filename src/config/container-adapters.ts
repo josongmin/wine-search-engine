@@ -13,7 +13,10 @@ import { HttpCrossEncoderReranker } from '../infrastructure/vespa/reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
 import { VespaSimilarRetrieval } from '../infrastructure/vespa/vespa-similar-retrieval.js';
 import { VespaCandidateAttributes } from '../infrastructure/vespa/vespa-candidate-attributes.js';
+import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
+import { WatchlistAwareSearchIndex } from '../infrastructure/watchlist/watchlist-aware-search-index.js';
 import type { Config } from './env.js';
+import type { RuntimeHandles } from './runtime-handles.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
@@ -54,12 +57,32 @@ export interface CoreAdapterServices {
   readonly learnedMatcher?: LearnedMatcherPort | undefined;
 }
 
+function resolvePool(runtime?: Pool | RuntimeHandles): Pool | undefined {
+  if (runtime === undefined) {
+    return undefined;
+  }
+
+  if ('totalCount' in runtime) {
+    return runtime as Pool;
+  }
+
+  return runtime.pool;
+}
+
 export function buildCoreAdapterServices(
   config: Config,
-  pool?: Pool,
+  runtime?: Pool | RuntimeHandles,
 ): CoreAdapterServices {
+  const pool = resolvePool(runtime);
+
   const vespaClient = new VespaClient(config.vespa.url, 'wine', 'wine_entity');
-  const searchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
+  const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
+  const searchIndex: SearchIndexPort = config.watchlist.webhookSecret
+    ? new WatchlistAwareSearchIndex({
+        inner: baseSearchIndex,
+        publisher: new RedisWatchlistPublisher(),
+      })
+    : baseSearchIndex;
 
   return {
     searchIndex,

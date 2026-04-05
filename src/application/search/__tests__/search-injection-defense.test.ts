@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SearchUseCase, type SearchRequest, type SearchUseCaseDeps } from '../search.usecase.js';
 import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer.js';
-import type { LLMInjectionJudge } from '../../../domain/security/service/llm-injection-judge.js';
+import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
 
 /**
  * Integration tests for SearchUseCase with injection defense (Layer 1 & 2).
@@ -16,7 +16,7 @@ import type { LLMInjectionJudge } from '../../../domain/security/service/llm-inj
 describe('SearchUseCase with Injection Defense', () => {
   let useCase: SearchUseCase;
   let mockDeps: Partial<SearchUseCaseDeps>;
-  let mockInjectionJudge: Partial<LLMInjectionJudge>;
+  let mockInjectionJudge: Partial<InjectionJudgePort>;
 
   beforeEach(() => {
     const sanitizer = new QuerySanitizer();
@@ -27,7 +27,7 @@ describe('SearchUseCase with Injection Defense', () => {
     // Create minimal mocks for required deps
     mockDeps = {
       querySanitizer: sanitizer,
-      injectionJudge: mockInjectionJudge as LLMInjectionJudge | undefined,
+      injectionJudge: mockInjectionJudge as InjectionJudgePort | undefined,
       queryPlanner: {
         plan: vi.fn(),
       } as any,

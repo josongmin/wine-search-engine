@@ -6,87 +6,133 @@
 
 import { z } from 'zod';
 
-// ────────────────────────────────────────────────────────────────
-// Trigger condition schemas
-// ────────────────────────────────────────────────────────────────
+const WatchlistIdSchema = z.string().uuid();
+const HttpsUrlSchema = z.string().url().max(2048).refine(
+  (value) => value.startsWith('https://'),
+  'callback_url must use https',
+);
+const FutureDateTimeSchema = z.string().datetime().refine(
+  (value) => new Date(value).getTime() > Date.now(),
+  'expires_at must be in the future',
+);
 
-const NewVintageTriggerSchema = z.object({
-  type: z.literal('new_vintage'),
-  minVintage: z.number().int().positive(),
-}).strict();
+const NewVintageTriggerRequestSchema = z.union([
+  z.object({
+    type: z.literal('new_vintage'),
+    min_vintage: z.number().int().positive(),
+  }).strict().transform((value) => ({
+    type: value.type,
+    minVintage: value.min_vintage,
+  })),
+  z.object({
+    type: z.literal('new_vintage'),
+    minVintage: z.number().int().positive(),
+  }).strict(),
+]);
 
-const PriceDropTriggerSchema = z.object({
-  type: z.literal('price_drop'),
-  threshold: z.number().min(0).max(100), // percentage
-  baselinePrice: z.number().positive(),
-}).strict();
+const PriceDropTriggerRequestSchema = z.union([
+  z.object({
+    type: z.literal('price_drop'),
+    threshold: z.number().min(0).max(100),
+    baseline_price: z.number().positive(),
+  }).strict().transform((value) => ({
+    type: value.type,
+    threshold: value.threshold,
+    baselinePrice: value.baseline_price,
+  })),
+  z.object({
+    type: z.literal('price_drop'),
+    threshold: z.number().min(0).max(100),
+    baselinePrice: z.number().positive(),
+  }).strict(),
+]);
 
-const StockAvailableTriggerSchema = z.object({
-  type: z.literal('stock_available'),
-  minQty: z.number().int().positive(),
-}).strict();
+const StockAvailableTriggerRequestSchema = z.union([
+  z.object({
+    type: z.literal('stock_available'),
+    min_qty: z.number().int().positive(),
+  }).strict().transform((value) => ({
+    type: value.type,
+    minQty: value.min_qty,
+  })),
+  z.object({
+    type: z.literal('stock_available'),
+    minQty: z.number().int().positive(),
+  }).strict(),
+]);
 
-const CriticScoreAboveTriggerSchema = z.object({
+const CriticScoreAboveTriggerRequestSchema = z.object({
   type: z.literal('critic_score_above'),
   threshold: z.number().min(0).max(100),
 }).strict();
 
-export const WatchlistTriggerSchema = z.discriminatedUnion('type', [
-  NewVintageTriggerSchema,
-  PriceDropTriggerSchema,
-  StockAvailableTriggerSchema,
-  CriticScoreAboveTriggerSchema,
+export const WatchlistTriggerSchema = z.union([
+  NewVintageTriggerRequestSchema,
+  PriceDropTriggerRequestSchema,
+  StockAvailableTriggerRequestSchema,
+  CriticScoreAboveTriggerRequestSchema,
+]);
+
+export const WatchlistTriggerResponseSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('new_vintage'),
+    min_vintage: z.number().int().positive(),
+  }).strict(),
+  z.object({
+    type: z.literal('price_drop'),
+    threshold: z.number().min(0).max(100),
+    baseline_price: z.number().positive(),
+  }).strict(),
+  z.object({
+    type: z.literal('stock_available'),
+    min_qty: z.number().int().positive(),
+  }).strict(),
+  z.object({
+    type: z.literal('critic_score_above'),
+    threshold: z.number().min(0).max(100),
+  }).strict(),
 ]);
 
 export type WatchlistTrigger = z.infer<typeof WatchlistTriggerSchema>;
+export type WatchlistTriggerResponse = z.infer<typeof WatchlistTriggerResponseSchema>;
 
-// ────────────────────────────────────────────────────────────────
-// Create watchlist entry request
-// ────────────────────────────────────────────────────────────────
+export const WatchlistIdParamsSchema = z.object({
+  id: WatchlistIdSchema,
+}).strict();
+
+export type WatchlistIdParams = z.infer<typeof WatchlistIdParamsSchema>;
 
 export const CreateWatchlistRequestSchema = z.object({
-  user_id: z.string().uuid(),
+  user_id: WatchlistIdSchema,
   entity_id: z.string().min(1).max(256),
   trigger_conditions: z.array(WatchlistTriggerSchema).min(1).max(10),
-  callback_url: z.string().url().max(2048),
-  expires_at: z.string().datetime().optional(), // ISO 8601
+  callback_url: HttpsUrlSchema,
+  expires_at: FutureDateTimeSchema.optional(),
 }).strict();
 
 export type CreateWatchlistRequest = z.infer<typeof CreateWatchlistRequestSchema>;
 
-// ────────────────────────────────────────────────────────────────
-// Create watchlist entry response
-// ────────────────────────────────────────────────────────────────
-
 export const CreateWatchlistResponseSchema = z.object({
-  watchlist_id: z.string().uuid(),
-});
+  watchlist_id: WatchlistIdSchema,
+}).strict();
 
 export type CreateWatchlistResponse = z.infer<typeof CreateWatchlistResponseSchema>;
 
-// ────────────────────────────────────────────────────────────────
-// Get watchlist entry by ID response
-// ────────────────────────────────────────────────────────────────
-
 export const GetWatchlistResponseSchema = z.object({
-  id: z.string().uuid(),
-  user_id: z.string().uuid(),
+  watchlist_id: WatchlistIdSchema,
+  user_id: WatchlistIdSchema,
   entity_id: z.string().min(1),
-  trigger_conditions: z.array(WatchlistTriggerSchema),
-  callback_url: z.string().url(),
+  trigger_conditions: z.array(WatchlistTriggerResponseSchema),
+  callback_url: HttpsUrlSchema,
   created_at: z.string().datetime(),
   expires_at: z.string().datetime().nullable(),
 }).strict();
 
 export type GetWatchlistResponse = z.infer<typeof GetWatchlistResponseSchema>;
 
-// ────────────────────────────────────────────────────────────────
-// Delivery log entry
-// ────────────────────────────────────────────────────────────────
-
 export const DeliveryLogEntrySchema = z.object({
-  id: z.string().uuid(),
-  watchlist_id: z.string().uuid(),
+  id: WatchlistIdSchema,
+  watchlist_id: WatchlistIdSchema,
   attempt: z.number().int().min(1).max(3),
   status_code: z.number().int().min(0).nullable(),
   error_message: z.string().nullable(),
@@ -95,10 +141,6 @@ export const DeliveryLogEntrySchema = z.object({
 
 export type DeliveryLogEntry = z.infer<typeof DeliveryLogEntrySchema>;
 
-// ────────────────────────────────────────────────────────────────
-// List deliveries response
-// ────────────────────────────────────────────────────────────────
-
 export const ListDeliveriesResponseSchema = z.object({
   deliveries: z.array(DeliveryLogEntrySchema),
   total: z.number().int().nonnegative(),
@@ -106,16 +148,12 @@ export const ListDeliveriesResponseSchema = z.object({
 
 export type ListDeliveriesResponse = z.infer<typeof ListDeliveriesResponseSchema>;
 
-// ────────────────────────────────────────────────────────────────
-// Error response (shared)
-// ────────────────────────────────────────────────────────────────
-
 export const WatchlistErrorResponseSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
     request_id: z.string().optional(),
-  }),
+  }).strict(),
 }).strict();
 
 export type WatchlistErrorResponse = z.infer<typeof WatchlistErrorResponseSchema>;

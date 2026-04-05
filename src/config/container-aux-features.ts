@@ -5,7 +5,7 @@ import { EvalRunner } from '../domain/evaluation/service/eval-runner.js';
 import { PgGoldSetStore } from '../infrastructure/adapter/pg-gold-set-store.js';
 import { PgEvalResultStore } from '../infrastructure/adapter/pg-eval-result-store.js';
 import { SearchPipelineEvaluator } from '../infrastructure/adapter/search-pipeline-evaluator.js';
-import type { AdaptiveToolExecutorContract } from './container-contracts.js';
+import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { UseCaseContainerServices } from './container-usecases.js';
 
 export function buildAdaptiveToolExecutor(

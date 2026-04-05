@@ -1,7 +1,13 @@
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
-import type { SearchUseCase } from './search.usecase.js';
-import type { SearchRequest } from './search.usecase.js';
+import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
+import type {
+  SearchQueryBudget,
+  SearchRequest,
+  SearchRequestContext,
+  SearchSessionContext,
+} from './search-request.dto.js';
+import type { SearchExecutorPort } from './port/search-executor.port.js';
 
 /**
  * Batch search request item: a single request within the batch.
@@ -16,11 +22,11 @@ export interface BatchSearchRequestItem {
   /** Optional retrieval mode override. */
   readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
   /** Optional context for this request. */
-  readonly context?: SearchRequest['context'] | undefined;
+  readonly context?: SearchRequestContext | undefined;
   /** Optional session context for this request. */
-  readonly sessionContext?: SearchRequest['sessionContext'] | undefined;
+  readonly sessionContext?: SearchSessionContext | undefined;
   /** Optional query budget for this request. */
-  readonly queryBudget?: SearchRequest['queryBudget'] | undefined;
+  readonly queryBudget?: SearchQueryBudget | undefined;
 }
 
 /**
@@ -97,8 +103,8 @@ export interface BatchSearchResponse {
  * Features:
  * - Validates batch size (max 20 requests)
  * - Enforces timeout range (5000–30000 ms)
- * - Executes requests in parallel (Promise.all)
- * - Supports fail_fast mode with AbortController
+ * - Executes requests in parallel (Promise.all) or sequentially for fail_fast
+ * - Supports fail_fast mode without starting later work after first failure
  * - Maps domain errors to BatchErrorCode
  * - Provides idempotent execution with batch_id
  * - Generates sub-request IDs: `${batchId}-${item.id}`
@@ -123,7 +129,7 @@ export class BatchSearchUseCase {
   /** Minimum timeout per request (milliseconds). */
   private static readonly MIN_TIMEOUT_MS = 1000;
 
-  constructor(private readonly searchUseCase: SearchUseCase) {}
+  constructor(private readonly searchUseCase: SearchExecutorPort) {}
 
   /**
    * Execute a batch of search requests.
@@ -221,10 +227,10 @@ export class BatchSearchUseCase {
   }
 
   /**
-   * Execute requests in parallel; abort remaining on first error.
+   * Execute requests sequentially; stop starting later work on first failure.
    *
-   * Uses an AbortController to stop creating new promises once one fails.
-   * In-flight promises continue but new ones are not started.
+   * Remaining requests are surfaced as aborted failures so the transport
+   * contract preserves batch cardinality.
    *
    * @param requests - Array of batch search request items.
    * @param batchId - Batch identifier for sub-request ID generation.
@@ -236,34 +242,25 @@ export class BatchSearchUseCase {
     batchId: string,
     timeoutMs: number,
   ): Promise<readonly BatchSearchResultItem[]> {
-    const controller = new AbortController();
     const results: BatchSearchResultItem[] = [];
-
-    // Create promises with abort awareness
-    const promises = requests.map(async (req) => {
-      if (controller.signal.aborted) {
-        return {
-          id: req.id,
-          status: 'failed' as const,
-          error: {
-            code: 'INTERNAL_ERROR' as const,
-            message: 'Batch execution aborted due to earlier failure',
-          },
-        };
-      }
-
+    for (const [index, req] of requests.entries()) {
       const result = await this.executeSingle(req, batchId, timeoutMs);
+      results.push(result);
 
-      // Abort remaining requests on first failure
       if (result.status === 'failed') {
-        controller.abort();
+        for (const remainingReq of requests.slice(index + 1)) {
+          results.push({
+            id: remainingReq.id,
+            status: 'failed',
+            error: {
+              code: 'INTERNAL_ERROR',
+              message: 'Batch execution aborted due to earlier failure',
+            },
+          });
+        }
+        break;
       }
-
-      return result;
-    });
-
-    const batchResults = await Promise.all(promises);
-    results.push(...batchResults);
+    }
 
     return results;
   }
@@ -309,6 +306,21 @@ export class BatchSearchUseCase {
         this.createTimeoutPromise(timeoutMs),
       ]);
 
+      // G-15: Search responses can legitimately complete with a failed decision
+      // (for example no match). Only treat explicit policy/admission blocks as
+      // batch item failures; otherwise preserve the successful transport response.
+      const reason = response.engineDecision.failure_reason;
+      if (reason === POLICY_BLOCKED_CODE || reason === 'AMBIGUITY_BLOCKED') {
+        return {
+          id: req.id,
+          status: 'failed',
+          error: {
+            code: POLICY_BLOCKED_CODE,
+            message: reason,
+          },
+        };
+      }
+
       return {
         id: req.id,
         status: 'succeeded',
@@ -347,9 +359,9 @@ export class BatchSearchUseCase {
 
     if (err instanceof DomainError) {
       const code = err.code;
-      if (code === 'POLICY_BLOCKED' || code === 'AMBIGUITY_BLOCKED') {
+      if (code === POLICY_BLOCKED_CODE || code === 'AMBIGUITY_BLOCKED') {
         return {
-          code: 'POLICY_BLOCKED',
+          code: POLICY_BLOCKED_CODE,
           message: err.message || 'Request blocked by policy',
         };
       }
@@ -357,9 +369,9 @@ export class BatchSearchUseCase {
     if (err instanceof Error && 'code' in err) {
       const withCode = err as Error & { readonly code?: unknown };
       const code = typeof withCode.code === 'string' ? withCode.code : undefined;
-      if (code === 'POLICY_BLOCKED' || code === 'AMBIGUITY_BLOCKED') {
+      if (code === POLICY_BLOCKED_CODE || code === 'AMBIGUITY_BLOCKED') {
         return {
-          code: 'POLICY_BLOCKED',
+          code: POLICY_BLOCKED_CODE,
           message: err.message || 'Request blocked by policy',
         };
       }

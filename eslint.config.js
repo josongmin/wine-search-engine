@@ -9,6 +9,7 @@ export default tseslint.config(
       'coverage/**',
       'eslint.config.js',
       '.claude/**',
+      'test-search-direct.ts',
     ],
   },
   eslint.configs.recommended,

@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
-import { BatchSearchRequestSchema } from '../schemas/batch-search.schema.js';
 import type { BatchSearchRouteDeps } from './route-deps.js';
+import {
+  parseContractBody,
+  sendRouteContractResponse,
+} from './contract-response.js';
+import { BatchSearchRouteContract } from './route-contracts.js';
 
 /**
  * POST /v1/batch-search — batch search endpoint.
@@ -63,7 +67,7 @@ export function registerBatchSearchRoute(
   deps: BatchSearchRouteDeps,
 ): void {
   app.post('/v1/batch-search', async (request, reply) => {
-    const parsed = BatchSearchRequestSchema.parse(request.body);
+    const parsed = parseContractBody(request, BatchSearchRouteContract);
 
     const response = await deps.batchSearchUseCase.execute(
       parsed.requests,
@@ -77,6 +81,6 @@ export function registerBatchSearchRoute(
     // - Batch structure was valid (not 400)
     // - Individual requests may have succeeded or failed (not 200/500)
     // - Client must inspect response.results[].status to determine outcome
-    void reply.status(207).send(response);
+    sendRouteContractResponse(request, reply, BatchSearchRouteContract, 207, response);
   });
 }

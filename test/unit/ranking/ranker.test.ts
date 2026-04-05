@@ -263,7 +263,7 @@ describe('Ranker', () => {
         makeSignalComputer(makeComponentScores()),
         makeScoreAggregator(0.5),
         makeEvidenceMapper(),
-        port,
+        { reranker: port },
       );
 
       await ranker.rank(makeInput(candidates));
@@ -294,7 +294,7 @@ describe('Ranker', () => {
         makeSignalComputer(makeComponentScores()),
         makeScoreAggregator(0.85),
         makeEvidenceMapper(),
-        port,
+        { reranker: port },
       );
 
       await ranker.rank(makeInput(candidates));
@@ -317,7 +317,7 @@ describe('Ranker', () => {
         makeSignalComputer(makeComponentScores()),
         makeScoreAggregator(0.5),
         makeEvidenceMapper(),
-        port,
+        { reranker: port },
       );
 
       await ranker.rank(makeInput(candidates));
@@ -364,7 +364,7 @@ describe('Ranker', () => {
         makeSignalComputer(makeComponentScores()),
         makeScoreAggregatorSequence(aggregatorScores),
         makeEvidenceMapper(),
-        port,
+        { reranker: port },
       );
 
       const results = await ranker.rank(makeInput(candidates));
@@ -402,8 +402,7 @@ describe('Ranker', () => {
         makeSignalComputer(makeComponentScores()),
         makeScoreAggregatorSequence(aggregatorScores),
         makeEvidenceMapper(),
-        reranker,
-        3, // rerankTopK = 3
+        { reranker, rerankTopK: 3 },
       );
 
       const results = await ranker.rank(makeInput(candidates));
@@ -440,7 +439,7 @@ describe('Ranker', () => {
         makeSignalComputer(makeComponentScores()),
         makeScoreAggregatorSequence(aggregatorScores),
         makeEvidenceMapper(),
-        reranker,
+        { reranker },
       );
 
       const results = await ranker.rank(makeInput(candidates));

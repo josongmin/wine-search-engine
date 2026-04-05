@@ -1,0 +1,30 @@
+{"benchmark_id":"neb-001","query":"Opus Oen 2018","expected_entity_id":"opus-one-2018","category":"typo","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-002","query":"Chateau Margxaux 2015","expected_entity_id":"chateau-margaux-2015","category":"typo","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-003","query":"Sasiccaia 2018","expected_entity_id":"sassicaia-2018","category":"typo","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-004","query":"Chateau Margaux","expected_entity_id":"chateau-margaux-2015","category":"accent_stripped","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-005","query":"Moet Brut","expected_entity_id":"moet-brut","category":"accent_stripped","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-006","query":"Yquem 2015","expected_entity_id":"sauternes-2015","category":"accent_stripped","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-007","query":"오 푸 스 원","expected_entity_id":"opus-one-2018","category":"whitespace_collapse_split","language":"ko","difficulty":"medium"}
+{"benchmark_id":"neb-008","query":"Moet   Brut","expected_entity_id":"moet-brut","category":"whitespace_collapse_split","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-009","query":"Barolo   Giacomo   Conterno","expected_entity_id":"barolo-giacomo","category":"whitespace_collapse_split","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-010","query":"opus 18","expected_entity_id":"opus-one-2018","category":"abbreviation","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-011","query":"yquem 15","expected_entity_id":"sauternes-2015","category":"abbreviation","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-012","query":"grange 17","expected_entity_id":"penfolds-grange-2017","category":"abbreviation","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-013","query":"오푸스원","expected_entity_id":"opus-one-2018","category":"transliteration","language":"ko","difficulty":"easy"}
+{"benchmark_id":"neb-014","query":"샤토 마고","expected_entity_id":"chateau-margaux-2015","category":"transliteration","language":"ko","difficulty":"easy"}
+{"benchmark_id":"neb-015","query":"모에 샹동","expected_entity_id":"moet-brut","category":"transliteration","language":"ko","difficulty":"easy"}
+{"benchmark_id":"neb-016","query":"Opus One","expected_entity_id":"opus-one-2018","category":"producer_label_partial","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-017","query":"Chateau Margaux","expected_entity_id":"chateau-margaux-2015","category":"producer_label_partial","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-018","query":"Barolo Giacomo","expected_entity_id":"barolo-giacomo","category":"producer_label_partial","language":"en","difficulty":"medium"}
+{"benchmark_id":"neb-019","query":"Opus One 18","expected_entity_id":"opus-one-2018","category":"vintage_partial","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-020","query":"Sassicaia 18","expected_entity_id":"sassicaia-2018","category":"vintage_partial","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-021","query":"Masi Amarone 15","expected_entity_id":"masi-amarone","category":"vintage_partial","language":"en","difficulty":"easy"}
+{"benchmark_id":"neb-022","query":"오푸스원 2018 Napa Valley","expected_entity_id":"opus-one-2018","category":"mixed_language","language":"mixed","difficulty":"medium"}
+{"benchmark_id":"neb-023","query":"샤또 Margaux 2015","expected_entity_id":"chateau-margaux-2015","category":"mixed_language","language":"mixed","difficulty":"medium"}
+{"benchmark_id":"neb-024","query":"모엣 chandon brut","expected_entity_id":"moet-brut","category":"mixed_language","language":"mixed","difficulty":"medium"}
+{"benchmark_id":"neb-025","query":"opus","expected_entity_id":"opus-one-2018","category":"noisy_short_form","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-026","query":"margaux","expected_entity_id":"chateau-margaux-2015","category":"noisy_short_form","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-027","query":"yquem","expected_entity_id":"sauternes-2015","category":"noisy_short_form","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-028","query":"opuss one","expected_entity_id":"opus-one-2018","category":"adversarial_near_miss","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-029","query":"sasicaia","expected_entity_id":"sassicaia-2018","category":"adversarial_near_miss","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-030","query":"penfolds grang","expected_entity_id":"penfolds-grange-2017","category":"adversarial_near_miss","language":"en","difficulty":"hard"}

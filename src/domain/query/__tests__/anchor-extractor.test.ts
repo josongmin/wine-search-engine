@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AnchorExtractor, type AliasMatcher, type AliasMatchResult } from '../service/anchor-extractor.js';
+import { QueryNormalizer } from '../service/query-normalizer.js';
 import { createEntityId } from '../../shared/types/index.js';
 
 // ── Stub AliasMatcher ─────────────────────────────────────────────────────────
@@ -43,6 +44,8 @@ function makeMatchResult(
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe('AnchorExtractor', () => {
+  const normalizer = new QueryNormalizer();
+
   describe('Korean query extraction', () => {
     it('"오푸스원 같은 10만원 와인" → anchor: "오푸스원", marker: "같은"', async () => {
       const aliasMatcher = new StubAliasMatcher(
@@ -184,12 +187,60 @@ describe('AnchorExtractor', () => {
       const entityId = createEntityId('entity-opus-one');
       const aliasMatcher: AliasMatcher = {
         async findMatches(_query: string): Promise<readonly AliasMatchResult[]> {
-          return [{ surfaceForm: '오푸스원', normalizedForm: '오푸스원', entityIds: [entityId], matchConfidence: 0.9 }];
+          return [{
+            surfaceForm: '오푸스원',
+            normalizedForm: '오푸스원',
+            entityIds: [entityId],
+            matchConfidence: 0.9,
+          }];
         },
       };
       const extractor = new AnchorExtractor(aliasMatcher);
       const anchors = await extractor.extract('오푸스원');
       expect(anchors[0]?.candidateEntityIds).toContain(entityId);
+    });
+  });
+
+  describe('multi-view noisy lookup', () => {
+    it('recovers aliases from transliterated and compact views', async () => {
+      const aliasMatcher: AliasMatcher = {
+        async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+          if (normalizedQuery === 'opusone18') {
+            return [
+              makeMatchResult('Opus One 18', ['entity-opus-one-2018'], 0.91),
+            ];
+          }
+
+          if (normalizedQuery === 'moet chandon') {
+            return [
+              makeMatchResult('Moet Chandon', ['entity-moet-chandon'], 0.93),
+            ];
+          }
+
+          return [];
+        },
+      };
+
+      const extractor = new AnchorExtractor(aliasMatcher);
+      const compactAnchors = await extractor.extract(
+        'Opus-One 18',
+        normalizer.normalize('Opus-One 18'),
+      );
+      expect(compactAnchors).toHaveLength(1);
+      expect(compactAnchors[0]?.surfaceForm).toBe('Opus One 18');
+      expect(compactAnchors[0]?.lookupVariants).toEqual(
+        expect.arrayContaining(['opusone18']),
+      );
+
+      const transliteratedAnchors = await extractor.extract(
+        '모엣샹동',
+        normalizer.normalize('모엣샹동'),
+      );
+      expect(transliteratedAnchors).toHaveLength(1);
+      expect(transliteratedAnchors[0]?.surfaceForm).toBe('Moet Chandon');
+      expect(transliteratedAnchors[0]?.lookupVariants).toEqual(
+        expect.arrayContaining(['moet chandon']),
+      );
     });
   });
 });

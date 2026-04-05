@@ -5,13 +5,13 @@
  * enabling RFC-009 evaluation pipeline integration.
  */
 
-import type { SearchUseCase } from '../../application/search/search.usecase.js';
 import type {
   SearchPipelinePort,
   SearchPipelineOutput,
 } from '../../domain/evaluation/service/eval-runner.js';
 import type { QueryClass, DecisionStatus } from '../../domain/shared/types/index.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
+import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
 
 /**
  * Adapter that exposes SearchUseCase as a SearchPipelinePort for evaluation.
@@ -23,7 +23,7 @@ import type { SearchResponseV1 } from '../../domain/response/model/search-respon
  * 4. Detect admission gate violations
  */
 export class SearchPipelineEvaluator implements SearchPipelinePort {
-  constructor(private readonly searchUseCase: SearchUseCase) {}
+  constructor(private readonly searchUseCase: SearchUseCaseContract) {}
 
   /**
    * Executes a single query through the search pipeline and returns

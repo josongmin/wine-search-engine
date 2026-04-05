@@ -6,17 +6,29 @@ import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
 import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
+import type {
+  DrinkingWindowUseCaseContract,
+} from './container-contracts.js';
+import type {
+  BatchSearchUseCaseContract,
+  DecomposedSearchUseCaseContract,
+  HybridUseCaseContract,
+  InterpretUseCaseContract,
+  ReplayUseCaseContract,
+  ResolveUseCaseContract,
+  SearchUseCaseContract,
+} from './container-search-contracts.js';
 import type { CoreContainerServices } from './container-core.js';
 
 export interface UseCaseContainerServices {
-  readonly searchUseCase: SearchUseCase;
-  readonly replayUseCase: ReplayUseCase;
-  readonly interpretUseCase: InterpretUseCase;
-  readonly resolveUseCase: ResolveUseCase;
-  readonly hybridUseCase: HybridUseCase;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCase;
-  readonly drinkingWindowUseCase: DrinkingWindowUseCase;
-  readonly batchSearchUseCase: BatchSearchUseCase;
+  readonly searchUseCase: SearchUseCaseContract;
+  readonly replayUseCase: ReplayUseCaseContract;
+  readonly interpretUseCase: InterpretUseCaseContract;
+  readonly resolveUseCase: ResolveUseCaseContract;
+  readonly hybridUseCase: HybridUseCaseContract;
+  readonly decomposedSearchUseCase: DecomposedSearchUseCaseContract;
+  readonly drinkingWindowUseCase: DrinkingWindowUseCaseContract;
+  readonly batchSearchUseCase: BatchSearchUseCaseContract;
 }
 
 export function buildUseCaseContainerServices(
@@ -48,10 +60,12 @@ export function buildUseCaseContainerServices(
     }),
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,
+      querySanitizer: core.querySanitizer,
     }),
     resolveUseCase: new ResolveUseCase({
       queryPlanner: core.queryPlanner,
       entityResolver: core.entityResolver,
+      querySanitizer: core.querySanitizer,
     }),
     hybridUseCase: new HybridUseCase({
       queryPlanner: core.queryPlanner,
@@ -60,6 +74,7 @@ export function buildUseCaseContainerServices(
       decisionEngine: core.decisionEngine,
       responseBuilder: core.responseBuilder,
       snapshotVersions: core.snapshotVersions,
+      querySanitizer: core.querySanitizer,
     }),
     decomposedSearchUseCase,
     drinkingWindowUseCase,

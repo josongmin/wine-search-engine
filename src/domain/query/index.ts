@@ -1,4 +1,4 @@
-// ── Models ──────────────────────────────────────────────────────────────────
+// Models
 export { QUERY_INTENTS, type QueryIntent } from './model/query-intent.js';
 export { QUERY_ROUTES, type QueryRoute } from './model/query-route.js';
 export { type AnchorCandidate } from './model/anchor-candidate.js';
@@ -17,13 +17,14 @@ export {
   type ThresholdEntry,
   DEFAULT_THRESHOLD_PROFILE,
 } from './model/threshold-profile.js';
+export { type NormalizedQueryViews } from './model/query-views.js';
 export { type QueryPlanV1 } from './model/query-plan.js';
 
-// ── Ports ───────────────────────────────────────────────────────────────────
+// Ports
 export { type ThresholdStore } from './port/threshold-store.port.js';
 export { type AmbiguityDictionary } from './port/ambiguity-dictionary.port.js';
 
-// ── Services ────────────────────────────────────────────────────────────────
+// Services
 export {
   AnchorExtractor,
   type AliasMatcher,
@@ -31,6 +32,11 @@ export {
 } from './service/anchor-extractor.js';
 export { ExpansionBuilder } from './service/expansion-builder.js';
 export { PolicyCompiler } from './service/policy-compiler.js';
+export {
+  QueryNormalizer,
+  buildNormalizedQueryViews,
+  normalizeQueryStrict,
+} from './service/query-normalizer.js';
 export {
   ReformulationDetector,
   type ReformulationType,

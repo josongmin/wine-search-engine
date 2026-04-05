@@ -1,8 +1,4 @@
-import type { Planner, PlannerContext } from '../../domain/query/service/planner.js';
-import type { CandidatePoolService } from '../../domain/retrieval/service/candidate-pool.js';
-import type { Ranker } from '../../domain/ranking/service/ranker.js';
-import type { DecisionEngine } from '../../domain/decision/service/decision-engine.js';
-import type { ResponseBuilder } from '../../domain/response/service/response-builder.js';
+import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { DecisionInput } from '../../domain/decision/model/decision-input.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
@@ -14,41 +10,34 @@ import type { ResultItem } from '../../domain/response/model/result-item.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { SnapshotVersions } from './search.usecase.js';
+import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
+import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type {
+  CandidatePoolPort,
+  DecisionEnginePort,
+  QueryPlannerPort,
+  RankingPort,
+  ResponseBuilderPort,
+} from './port/search-pipeline-deps.port.js';
+import type { HybridSearchRequest } from './hybrid-request.dto.js';
+import { QueryEntrySecurityGate } from './query-entry-security.js';
 
-/**
- * Hybrid search request shape.
- */
-export interface HybridSearchRequest {
-  readonly query: string;
-  readonly context?: {
-    readonly locale: string;
-    readonly currency: string;
-  } | undefined;
-  readonly sessionContext?: {
-    readonly sessionId: string;
-    readonly previousEntities: string[];
-  } | undefined;
-  readonly queryBudget?: {
-    readonly maxLatencyMs: number;
-    readonly maxCandidates: number;
-    readonly rerankLimit: number;
-  } | undefined;
-  readonly options?: {
-    readonly explain: boolean;
-    readonly clarification: boolean;
-  } | undefined;
-}
+export type { HybridSearchRequest } from './hybrid-request.dto.js';
 
 /**
  * Dependencies injected into the HybridUseCase.
  */
 export interface HybridUseCaseDeps {
-  readonly queryPlanner: Planner;
-  readonly candidatePool: CandidatePoolService;
-  readonly ranker: Ranker;
-  readonly decisionEngine: DecisionEngine;
-  readonly responseBuilder: ResponseBuilder;
+  readonly queryPlanner: QueryPlannerPort;
+  readonly candidatePool: CandidatePoolPort;
+  readonly ranker: RankingPort;
+  readonly decisionEngine: DecisionEnginePort;
+  readonly responseBuilder: ResponseBuilderPort;
   readonly snapshotVersions?: SnapshotVersions | undefined;
+  /** Shared public query entry guard: Layer 1 sanitizer is required. */
+  readonly querySanitizer: QuerySanitizer;
+  /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
+  readonly injectionJudge?: InjectionJudgePort | undefined;
 }
 
 /**
@@ -65,6 +54,21 @@ export class HybridUseCase {
     requestId: string,
   ): Promise<SearchResponseV1> {
     const startTime = Date.now();
+    let effectiveQuery = request.query;
+
+    const securityGate = new QueryEntrySecurityGate({
+      querySanitizer: this.deps.querySanitizer,
+      injectionJudge: this.deps.injectionJudge,
+    });
+    const securityResult = await securityGate.getSafeQueryOrSearchRejection(
+      request.query,
+      requestId,
+      startTime,
+    );
+    if ('rejection' in securityResult) {
+      return securityResult.rejection;
+    }
+    effectiveQuery = securityResult.sanitizedQuery;
 
     // Plan the query
     const plannerContext: PlannerContext = {
@@ -84,7 +88,7 @@ export class HybridUseCase {
         : undefined,
     };
 
-    const plan = await this.deps.queryPlanner.plan(request.query, plannerContext);
+    const plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
 
     // Build retrieval input (force hybrid route)
     const retrievalInput: HybridRetrievalInput = {
@@ -164,7 +168,6 @@ export class HybridUseCase {
       route: 'hybrid',
     });
   }
-
   /**
    * Maps ranked results to response-level ResultItems.
    */

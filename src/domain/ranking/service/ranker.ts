@@ -2,12 +2,13 @@ import type { EntityId, QueryClass } from '../../shared/types/index.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
+import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import { resolveWeights } from '../model/scoring-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
-import { WineAttributeEncoders } from '../../../infrastructure/ml/label-encoder.js';
+import { WineAttributeEncoders } from './wine-attribute-encoder.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -74,10 +75,11 @@ interface ScoredEntry {
   readonly countryEnc?: number | undefined;
 }
 
-/** Optional 5th argument: rerankTopK number, or full options (including blend scale). */
 export type RankerOptions = {
   readonly rerankTopK?: number;
   readonly rerankBlendScale?: number;
+  readonly attributeEncoder?: WineAttributeEncoderPort;
+  readonly reranker?: RerankerPort;
 };
 
 /**
@@ -102,6 +104,7 @@ export class Ranker {
   private readonly scoreAggregator: ScoreAggregator;
   private readonly evidenceMapper: EvidenceMapper;
   private readonly reranker: RerankerPort | undefined;
+  private readonly attributeEncoder: WineAttributeEncoderPort;
   private readonly rerankTopK: number;
   private readonly rerankBlendScale: number;
 
@@ -109,26 +112,21 @@ export class Ranker {
    * @param signalComputer - Computes individual signal scores.
    * @param scoreAggregator - Aggregates signals into final scores.
    * @param evidenceMapper - Maps component scores to evidence items.
-   * @param reranker - Optional pluggable cross-encoder reranker.
-   * @param optionsOrTopK - Legacy: number = rerankTopK. Prefer `{ rerankTopK, rerankBlendScale }`.
+   * @param options - Optional ranking capabilities and tuning knobs.
    */
   constructor(
     signalComputer: SignalComputer,
     scoreAggregator: ScoreAggregator,
     evidenceMapper: EvidenceMapper,
-    reranker?: RerankerPort,
-    optionsOrTopK?: number | RankerOptions,
+    options: RankerOptions = {},
   ) {
     this.signalComputer = signalComputer;
     this.scoreAggregator = scoreAggregator;
     this.evidenceMapper = evidenceMapper;
-    this.reranker = reranker;
-    const opts: RankerOptions =
-      typeof optionsOrTopK === 'number'
-        ? { rerankTopK: optionsOrTopK }
-        : (optionsOrTopK ?? {});
-    this.rerankTopK = opts.rerankTopK ?? DEFAULT_RERANK_TOP_K;
-    this.rerankBlendScale = opts.rerankBlendScale ?? 1;
+    this.reranker = options.reranker;
+    this.attributeEncoder = options.attributeEncoder ?? WineAttributeEncoders;
+    this.rerankTopK = options.rerankTopK ?? DEFAULT_RERANK_TOP_K;
+    this.rerankBlendScale = options.rerankBlendScale ?? 1;
   }
 
   /**
@@ -185,13 +183,13 @@ export class Ranker {
           : {}),
         // Encode categorical attributes
         ...(candidate.grapePrimary !== undefined
-          ? { grapePrimaryEnc: WineAttributeEncoders.encodeGrape(candidate.grapePrimary) }
+          ? { grapePrimaryEnc: this.attributeEncoder.encodeGrape(candidate.grapePrimary) }
           : {}),
         ...(candidate.appellation !== undefined
-          ? { regionEnc: WineAttributeEncoders.encodeRegion(candidate.appellation) }
+          ? { regionEnc: this.attributeEncoder.encodeRegion(candidate.appellation) }
           : {}),
         ...(candidate.country !== undefined
-          ? { countryEnc: WineAttributeEncoders.encodeCountry(candidate.country) }
+          ? { countryEnc: this.attributeEncoder.encodeCountry(candidate.country) }
           : {}),
         componentScores,
         finalScore,

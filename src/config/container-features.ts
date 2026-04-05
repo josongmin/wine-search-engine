@@ -1,18 +1,17 @@
-import type { Pool } from 'pg';
-import type { EvalRunner } from '../domain/evaluation/service/eval-runner.js';
-import type { Config } from './env.js';
 import type { CoreContainerServices } from './container-core.js';
+import type { DrinkingWindowUseCaseContract } from './container-contracts.js';
+import type { EvalRunnerContract } from './container-eval-contracts.js';
+import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
+import type { RuntimeHandles } from './runtime-handles.js';
 import type {
-  AdaptiveToolExecutorContract,
-  BatchSearchUseCaseContract,
-  DecomposedSearchUseCaseContract,
-  DrinkingWindowUseCaseContract,
-  HybridUseCaseContract,
-  InterpretUseCaseContract,
-  ReplayUseCaseContract,
-  ResolveUseCaseContract,
   SearchUseCaseContract,
-} from './container-contracts.js';
+  ReplayUseCaseContract,
+  InterpretUseCaseContract,
+  ResolveUseCaseContract,
+  HybridUseCaseContract,
+  DecomposedSearchUseCaseContract,
+  BatchSearchUseCaseContract,
+} from './container-search-contracts.js';
 import { buildAdaptiveToolExecutor, buildEvalRunner } from './container-aux-features.js';
 import { buildUseCaseContainerServices } from './container-usecases.js';
 
@@ -26,17 +25,16 @@ export interface FeatureContainerServices {
   readonly drinkingWindowUseCase: DrinkingWindowUseCaseContract;
   readonly batchSearchUseCase: BatchSearchUseCaseContract;
   readonly adaptiveToolExecutor: AdaptiveToolExecutorContract;
-  readonly evalRunner: EvalRunner | null;
+  readonly evalRunner: EvalRunnerContract | null;
 }
 
 export function buildFeatureContainerServices(
-  _config: Config,
   core: CoreContainerServices,
-  pool?: Pool,
+  runtime: RuntimeHandles = {},
 ): FeatureContainerServices {
   const useCases = buildUseCaseContainerServices(core);
   const adaptiveToolExecutor = buildAdaptiveToolExecutor(useCases);
-  const evalRunner = buildEvalRunner(pool, useCases.searchUseCase);
+  const evalRunner = buildEvalRunner(runtime.pool, useCases.searchUseCase);
 
   return {
     ...useCases,

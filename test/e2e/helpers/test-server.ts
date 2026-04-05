@@ -40,7 +40,10 @@ export async function createTestServer(): Promise<TestServer> {
   parts.ambiguityDict.setAmbiguous('마고', ['region', 'entity'], 'medium');
 
   // createServer is now async (registers rate-limit plugin etc.)
-  const app = await createServer(parts.container, { logLevel: 'silent' });
+  const app = await createServer(parts.container, {
+    logLevel: 'silent',
+    nodeEnv: 'test',
+  });
 
   // Initialize Fastify (registers routes, plugins, etc.)
   await app.ready();

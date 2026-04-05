@@ -1,5 +1,6 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
+import type { NormalizedQueryViews } from '../model/query-views.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -63,13 +64,18 @@ export class AnchorExtractor {
    * @param normalizedQuery - Lowercased, accent-stripped query string.
    * @returns Anchor candidates ordered by confidence descending.
    */
-  async extract(normalizedQuery: string): Promise<readonly AnchorCandidate[]> {
-    const aliasMatches = await this.aliasMatcher.findMatches(normalizedQuery);
+  async extract(
+    normalizedQuery: string,
+    queryViews?: NormalizedQueryViews,
+  ): Promise<readonly AnchorCandidate[]> {
+    const lookupQueries = queryViews?.lookupVariants ?? [normalizedQuery];
+    const aliasMatches = await this.lookupAliasMatches(lookupQueries);
 
     const candidates: AnchorCandidate[] = aliasMatches.map((match) => ({
       surfaceForm: match.surfaceForm,
       normalizedForm: match.normalizedForm,
       candidateEntityIds: match.entityIds,
+      lookupVariants: match.lookupVariants,
       confidence: match.matchConfidence,
       source: 'alias' as const,
     }));
@@ -78,6 +84,59 @@ export class AnchorExtractor {
     candidates.sort((a, b) => b.confidence - a.confidence);
 
     return candidates;
+  }
+
+  private async lookupAliasMatches(
+    lookupQueries: readonly string[],
+  ): Promise<readonly (AliasMatchResult & { readonly lookupVariants: readonly string[] })[]> {
+    const merged = new Map<
+      string,
+      {
+        readonly match: AliasMatchResult;
+        readonly confidence: number;
+        readonly priority: number;
+        readonly lookupVariants: Set<string>;
+      }
+    >();
+
+    for (const [priority, lookupQuery] of lookupQueries.entries()) {
+      if (lookupQuery.trim().length === 0) {
+        continue;
+      }
+
+      const aliasMatches = await this.aliasMatcher.findMatches(lookupQuery);
+      for (const match of aliasMatches) {
+        const key = `${match.surfaceForm}\u0000${match.normalizedForm}\u0000${match.entityIds.map(String).join(',')}`;
+        const existing = merged.get(key);
+
+        if (
+          existing === undefined ||
+          match.matchConfidence > existing.confidence ||
+          (match.matchConfidence === existing.confidence && priority < existing.priority)
+        ) {
+          merged.set(key, {
+            match,
+            confidence: match.matchConfidence,
+            priority,
+            lookupVariants: existing?.lookupVariants ?? new Set<string>(),
+          });
+        }
+
+        merged.get(key)?.lookupVariants.add(lookupQuery);
+      }
+    }
+
+    return [...merged.values()]
+      .sort((left, right) => {
+        if (right.confidence !== left.confidence) {
+          return right.confidence - left.confidence;
+        }
+        return left.priority - right.priority;
+      })
+      .map(({ match, lookupVariants }) => ({
+        ...match,
+        lookupVariants: [...lookupVariants],
+      }));
   }
 
   /**

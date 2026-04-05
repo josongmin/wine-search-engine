@@ -7,6 +7,46 @@ import {
 import type { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 
+function makeSearchResponse(): SearchResponseV1 {
+  return {
+    queryType: 'search',
+    engineDecision: {
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+      route: 'hybrid',
+      decisionConfidence: 0.95,
+      confidenceSemantics: 'calibrated_decision_confidence',
+      decisionTraceRef: 'trace-1',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1',
+        threshold_profile_id: 'default',
+        planner_version: '1',
+        feature_flags: {},
+      },
+    },
+    results: [],
+    clarification: null,
+    meta: {
+      requestId: 'req-1',
+      queryTimeMs: 100,
+      route: 'hybrid',
+      version: '1.0.0',
+      engine_schema_version: 'search_response_v1',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1',
+        threshold_profile_id: 'default',
+        planner_version: '1',
+        feature_flags: {},
+      },
+      response_hash: 'hash',
+    },
+  };
+}
+
 /**
  * Unit tests for BatchSearchUseCase.
  *
@@ -57,7 +97,7 @@ describe('BatchSearchUseCase', () => {
       );
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       const response = await useCase.execute(requests);
@@ -108,7 +148,7 @@ describe('BatchSearchUseCase', () => {
       ];
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       await useCase.execute(requests);
@@ -124,7 +164,7 @@ describe('BatchSearchUseCase', () => {
       const options: BatchSearchOptions = { timeout_ms: 10000 };
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       const response = await useCase.execute(requests, options);
@@ -140,7 +180,7 @@ describe('BatchSearchUseCase', () => {
       const options: BatchSearchOptions = { timeout_ms: 500 };
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       const response = await useCase.execute(requests, options);
@@ -157,7 +197,7 @@ describe('BatchSearchUseCase', () => {
       const options: BatchSearchOptions = { timeout_ms: 60000 };
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       const response = await useCase.execute(requests, options);
@@ -174,7 +214,7 @@ describe('BatchSearchUseCase', () => {
         { id: '3', query: 'Query 3' },
       ];
 
-      const mockResponse = {} as SearchResponseV1;
+      const mockResponse = makeSearchResponse();
 
       vi.mocked(mockSearchUseCase.execute)
         .mockResolvedValueOnce(mockResponse)
@@ -196,7 +236,7 @@ describe('BatchSearchUseCase', () => {
         { id: '2', query: 'Query 2' },
       ];
 
-      const mockResponse = {} as SearchResponseV1;
+      const mockResponse = makeSearchResponse();
 
       const policyError = new (class extends Error {
         override name = 'DomainError';
@@ -228,7 +268,7 @@ describe('BatchSearchUseCase', () => {
         { id: '3', query: 'Query 3' },
       ];
 
-      const mockResponse = {} as SearchResponseV1;
+      const mockResponse = makeSearchResponse();
 
       vi.mocked(mockSearchUseCase.execute)
         .mockResolvedValueOnce(mockResponse)
@@ -237,9 +277,18 @@ describe('BatchSearchUseCase', () => {
 
       const response = await useCase.execute(requests, { fail_fast: true });
 
-      // At least one failed, and remaining should be aborted
-      expect(response.failed).toBeGreaterThanOrEqual(1);
-      expect(response.results.some((r) => r.status === 'failed')).toBe(true);
+      expect(response.total).toBe(3);
+      expect(response.succeeded).toBe(1);
+      expect(response.failed).toBe(2);
+      expect(mockSearchUseCase.execute).toHaveBeenCalledTimes(2);
+      expect(response.results[2]).toMatchObject({
+        id: '3',
+        status: 'failed',
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Batch execution aborted due to earlier failure',
+        },
+      });
     });
   });
 
@@ -345,7 +394,7 @@ describe('BatchSearchUseCase', () => {
       const batchId = 'batch-123';
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       await useCase.execute(requests, undefined, batchId);
@@ -365,7 +414,7 @@ describe('BatchSearchUseCase', () => {
       const batchId = 'my-batch-123';
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       const response = await useCase.execute(requests, undefined, batchId);
@@ -379,7 +428,7 @@ describe('BatchSearchUseCase', () => {
       ];
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       const response = await useCase.execute(requests);
@@ -399,7 +448,7 @@ describe('BatchSearchUseCase', () => {
         }),
       );
 
-      const mockResponse = {} as SearchResponseV1;
+      const mockResponse = makeSearchResponse();
 
       vi.mocked(mockSearchUseCase.execute)
         .mockResolvedValueOnce(mockResponse)
@@ -427,7 +476,7 @@ describe('BatchSearchUseCase', () => {
         () =>
           new Promise((resolve) => {
             setTimeout(() => {
-              resolve({} as SearchResponseV1);
+              resolve(makeSearchResponse());
             }, 50);
           }),
       );
@@ -445,18 +494,7 @@ describe('BatchSearchUseCase', () => {
         { id: '1', query: 'Test' },
       ];
 
-      const mockResponse: SearchResponseV1 = {
-        queryType: 'search',
-        engineDecision: {
-          status: 'resolved',
-          confidence: 0.95,
-        } as any,
-        results: [],
-        meta: {
-          requestId: 'batch-test-1',
-          queryTimeMs: 100,
-        } as any,
-      };
+      const mockResponse: SearchResponseV1 = makeSearchResponse();
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockResponse);
 
@@ -488,7 +526,7 @@ describe('BatchSearchUseCase', () => {
       ];
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        {} as SearchResponseV1,
+        makeSearchResponse(),
       );
 
       await useCase.execute(requests);

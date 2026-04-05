@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { HybridRequestSchema } from '../schemas/search.schema.js';
+import {
+  parseContractBody,
+  sendRouteContractResponse,
+} from './contract-response.js';
 import type { HybridRouteDeps } from './route-deps.js';
+import { throwIfPolicyBlockedSearchResponse } from '../errors/policy-blocked.js';
+import { HybridRouteContract } from './route-contracts.js';
+import { toHybridSearchRequest } from './search-request-mappers.js';
 
 /**
  * POST /v1/search/hybrid — force hybrid search route.
@@ -10,19 +16,13 @@ export function registerHybridRoute(
   deps: HybridRouteDeps,
 ): void {
   app.post('/v1/search/hybrid', async (request, reply) => {
-    const parsed = HybridRequestSchema.parse(request.body);
+    const parsed = parseContractBody(request, HybridRouteContract);
+    const hybridRequest = toHybridSearchRequest(parsed);
 
-    const response = await deps.hybridUseCase.execute(
-      {
-        query: parsed.query,
-        context: parsed.context,
-        sessionContext: parsed.sessionContext,
-        queryBudget: parsed.queryBudget,
-        options: parsed.options,
-      },
-      request.requestId,
-    );
+    const response = await deps.hybridUseCase.execute(hybridRequest, request.requestId);
 
-    void reply.status(200).send(response);
+    throwIfPolicyBlockedSearchResponse(response);
+
+    sendRouteContractResponse(request, reply, HybridRouteContract, 200, response);
   });
 }

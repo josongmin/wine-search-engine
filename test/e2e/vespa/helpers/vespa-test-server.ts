@@ -33,7 +33,10 @@ export interface VespaTestServer {
 export async function createVespaTestServer(): Promise<VespaTestServer> {
   const parts = createVespaTestContainer();
 
-  const app = await createServer(parts.container, { logLevel: 'silent' });
+  const app = await createServer(parts.container, {
+    logLevel: 'silent',
+    nodeEnv: 'test',
+  });
   await app.ready();
 
   return { app, parts };

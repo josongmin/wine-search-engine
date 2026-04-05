@@ -5,7 +5,7 @@
  * and HMAC-SHA256 signature verification.
  */
 
-import { createHmac } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 
 /**
@@ -29,6 +29,16 @@ export interface DeliveryLog {
   readonly statusCode: number | null; // null if connection failed
   readonly errorMessage: string | null;
   readonly deliveredAt: Date;
+}
+
+export interface WebhookDeliveryObserver {
+  onAttempt?(log: DeliveryLog): Promise<void> | void;
+}
+
+interface WebhookAttemptResult {
+  readonly statusCode: number | null;
+  readonly errorMessage: string | null;
+  readonly succeeded: boolean;
 }
 
 /**
@@ -56,7 +66,11 @@ export class WebhookDelivery {
    * @param event - The change event to deliver.
    * @returns true if delivery succeeded, false after 3 failed attempts.
    */
-  async deliver(entry: WatchlistEntry, event: WatchlistChangeEvent): Promise<boolean> {
+  async deliver(
+    entry: WatchlistEntry,
+    event: WatchlistChangeEvent,
+    observer?: WebhookDeliveryObserver,
+  ): Promise<boolean> {
     const payload: WebhookPayload = {
       watchlist_id: entry.id,
       entity_id: entry.entityId,
@@ -69,18 +83,37 @@ export class WebhookDelivery {
     const backoffs = [1000, 5000, 30000]; // 1s, 5s, 30s in milliseconds
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const attemptNumber = attempt + 1;
       try {
-        const success = await this.sendRequest(
+        const result = await this.sendRequest(
           entry.callbackUrl,
           entry.id,
           payload,
         );
-        if (success) {
+        await observer?.onAttempt?.({
+          id: randomUUID(),
+          watchlistId: entry.id,
+          attempt: attemptNumber,
+          statusCode: result.statusCode,
+          errorMessage: result.errorMessage,
+          deliveredAt: new Date(),
+        });
+
+        if (result.succeeded) {
           return true;
         }
       } catch (err: unknown) {
         // Network error or other exception; will retry
-        console.error(`Webhook delivery attempt ${attempt + 1} failed for ${entry.id}:`, err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        await observer?.onAttempt?.({
+          id: randomUUID(),
+          watchlistId: entry.id,
+          attempt: attemptNumber,
+          statusCode: null,
+          errorMessage,
+          deliveredAt: new Date(),
+        });
+        console.error(`Webhook delivery attempt ${attemptNumber} failed for ${entry.id}:`, err);
       }
 
       // Wait before retry (except after last attempt)
@@ -103,7 +136,7 @@ export class WebhookDelivery {
     url: string,
     watchlistId: string,
     payload: WebhookPayload,
-  ): Promise<boolean> {
+  ): Promise<WebhookAttemptResult> {
     const body = JSON.stringify(payload);
     const signature = this.computeSignature(watchlistId, body);
 
@@ -124,7 +157,13 @@ export class WebhookDelivery {
       });
 
       const statusCode = response.status;
-      return statusCode >= 200 && statusCode < 300;
+      return {
+        statusCode,
+        errorMessage: statusCode >= 200 && statusCode < 300
+          ? null
+          : `Webhook returned HTTP ${statusCode}`,
+        succeeded: statusCode >= 200 && statusCode < 300,
+      };
     } finally {
       clearTimeout(timeoutId);
     }

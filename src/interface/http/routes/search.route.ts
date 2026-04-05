@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-import { SearchRequestSchema } from '../schemas/search.schema.js';
 import { detectDecomposition, isValidDecomposition } from '../../../domain/query/service/decomposition-detector.js';
 import type { SearchRouteDeps } from './route-deps.js';
+import { throwIfPolicyBlockedSearchResponse } from '../errors/policy-blocked.js';
+import {
+  parseContractBody,
+  sendRouteContractResponse,
+} from './contract-response.js';
+import { SearchRouteContract } from './route-contracts.js';
+import { toSearchRequest } from './search-request-mappers.js';
 
 /**
  * POST /v1/search — main search endpoint.
@@ -12,35 +18,31 @@ export function registerSearchRoute(
   deps: SearchRouteDeps,
 ): void {
   app.post('/v1/search', async (request, reply) => {
-    const parsed = SearchRequestSchema.parse(request.body);
+    const parsed = parseContractBody(request, SearchRouteContract);
     const startTime = Date.now();
+    const searchRequest = toSearchRequest(parsed);
 
     // Epic 14: Check for decomposable "A vs B" queries before routing to SearchUseCase
-    const decompositionResult = detectDecomposition(parsed.query);
+    const decompositionResult = detectDecomposition(searchRequest.query);
     if (isValidDecomposition(decompositionResult)) {
       const response = await deps.decomposedSearchUseCase.execute(
         decompositionResult.subQueries,
         decompositionResult.comparisonIntent,
-        parsed.query,
+        searchRequest.query,
         request.requestId,
         startTime,
       );
-      void reply.status(200).send(response);
+      sendRouteContractResponse(request, reply, SearchRouteContract, 200, response);
       return;
     }
 
     // Regular search
-    const response = await deps.searchUseCase.execute(
-      {
-        query: parsed.query,
-        context: parsed.context,
-        sessionContext: parsed.sessionContext,
-        queryBudget: parsed.queryBudget,
-        options: parsed.options,
-      },
-      request.requestId,
-    );
+    const response = await deps.searchUseCase.execute(searchRequest, request.requestId);
 
-    void reply.status(200).send(response);
+    // Lift policy-blocked search responses into the shared HTTP error path so
+    // all public query endpoints use the same 403 transport semantics.
+    throwIfPolicyBlockedSearchResponse(response);
+
+    sendRouteContractResponse(request, reply, SearchRouteContract, 200, response);
   });
 }

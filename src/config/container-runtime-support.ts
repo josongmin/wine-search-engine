@@ -1,19 +1,36 @@
-import type { Pool } from 'pg';
 import type { Config } from './env.js';
+import type { RuntimeHandles } from './runtime-handles.js';
 import { QuerySanitizer } from '../domain/security/service/query-sanitizer.js';
 import { LLMInjectionJudge } from '../domain/security/service/llm-injection-judge.js';
+import type { InjectionJudgePort } from '../domain/security/port/injection-judge.port.js';
+import type { JudgmentCachePort } from '../domain/security/port/judgment-cache.port.js';
+import { AnthropicLLMInjectionClassifier } from '../infrastructure/adapter/anthropic-llm-injection-classifier.js';
 import { CacheService } from '../domain/performance/index.js';
 import type { QueryClassWeights } from '../domain/ranking/index.js';
-import { getRedisClient } from '../infrastructure/db/redis-client.js';
+import type { RedisClient } from '../infrastructure/db/redis-client.js';
 import { RedisQueryCache } from '../infrastructure/cache/redis-query-cache.js';
 import { RedisEmbeddingCache } from '../infrastructure/cache/redis-embedding-cache.js';
 import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorContract } from './container-contracts.js';
 
+class RedisJudgmentCacheAdapter implements JudgmentCachePort {
+  constructor(
+    private readonly redis: RedisClient,
+  ) {}
+
+  async get(key: string): Promise<string | null> {
+    return this.redis.get(key);
+  }
+
+  async setEx(key: string, ttlSeconds: number, value: string): Promise<void> {
+    await this.redis.setEx(key, ttlSeconds, value);
+  }
+}
+
 export interface RuntimeSupportServices {
   readonly querySanitizer: QuerySanitizer;
-  readonly injectionJudge?: LLMInjectionJudge | undefined;
+  readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly cacheService?: CacheService | undefined;
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   readonly drinkingWindowPredictor: DrinkingWindowPredictorContract;
@@ -21,23 +38,26 @@ export interface RuntimeSupportServices {
 
 export async function buildRuntimeSupportServices(
   config: Config,
-  pool?: Pool,
+  runtime: RuntimeHandles = {},
 ): Promise<RuntimeSupportServices> {
   const querySanitizer = new QuerySanitizer();
+  const { pool, redisClient } = runtime;
 
-  let injectionJudge: LLMInjectionJudge | undefined;
+  let injectionJudge: InjectionJudgePort | undefined;
   if (config.anthropic.apiKey && !config.killSwitch.injectionJudge) {
-    try {
-      injectionJudge = new LLMInjectionJudge(config.anthropic.apiKey, await getRedisClient());
-    } catch (err) {
-      console.error('[Container] Failed to initialize LLMInjectionJudge:', err);
+    if (redisClient) {
+      injectionJudge = new LLMInjectionJudge(
+        new AnthropicLLMInjectionClassifier(config.anthropic.apiKey),
+        new RedisJudgmentCacheAdapter(redisClient),
+      );
+    } else {
+      console.warn('[Container] Redis unavailable; skipping LLMInjectionJudge initialization');
     }
   }
 
   let cacheService: CacheService | undefined;
   if (!config.killSwitch.queryCache) {
-    try {
-      const redisClient = await getRedisClient();
+    if (redisClient) {
       cacheService = new CacheService(
         new RedisQueryCache(redisClient),
         new RedisEmbeddingCache(redisClient),
@@ -45,8 +65,8 @@ export async function buildRuntimeSupportServices(
         60000,
       );
       console.warn('[Container] Cache infrastructure initialized');
-    } catch (err) {
-      console.warn('[Container] Failed to initialize caches; continuing without:', err);
+    } else {
+      console.warn('[Container] Redis unavailable; continuing without cache infrastructure');
     }
   }
 
