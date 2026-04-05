@@ -1,7 +1,7 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
-import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
+import { DEFAULT_THRESHOLD_PROFILE, computeDynamicGapThreshold } from '../../query/model/threshold-profile.js';
 import type { DecisionInput } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
 import type { DecisionTrace } from '../model/decision-trace.js';
@@ -198,6 +198,11 @@ export class DecisionEngine {
    * Uses ONLY calibrated decision confidence C and calibrated gap (delta).
    * Raw scores and ranking scores are NEVER used for threshold comparison.
    *
+   * Gap threshold is DYNAMIC (RFC-009 §5.3 AURC):
+   * - Computed per query class via computeDynamicGapThreshold()
+   * - Overrides the static fallback value in the profile
+   * - Enables semantic_preference to resolve with 1.5% gap instead of 5%
+   *
    * Decision logic:
    * - C >= T_resolve(Q) AND delta >= T_gap(Q) AND NOT A → RESOLVED + return_result
    * - conformal_set_size >= 2 OR A OR delta < T_gap(Q) → AMBIGUOUS + clarify
@@ -215,7 +220,9 @@ export class DecisionEngine {
     const conformalSetSize = input.conformalSetSize ?? 1;
 
     const cMeetsThreshold = C >= thresholds.resolveTau;
-    const gapMeetsThreshold = delta >= thresholds.gapTau;
+    // Use dynamic gap threshold based on query class (RFC-009 §5.3)
+    const dynamicGapThreshold = computeDynamicGapThreshold(input.queryPlan.queryClass, C);
+    const gapMeetsThreshold = delta >= dynamicGapThreshold;
 
     // Gate 1: Full resolution (conformal set size blocks resolution per §6.2)
     if (cMeetsThreshold && gapMeetsThreshold && !A && conformalSetSize < 2) {
@@ -224,7 +231,7 @@ export class DecisionEngine {
         status: 'resolved',
         nextAction: 'return_result',
         rulesApplied: [...rulesApplied],
-        finalReason: `Calibrated C=${C.toFixed(4)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(4)} >= T_gap=${thresholds.gapTau}, no ambiguity.`,
+        finalReason: `Calibrated C=${C.toFixed(4)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(4)} >= T_gap=${dynamicGapThreshold.toFixed(4)}, no ambiguity.`,
       };
     }
 
@@ -244,7 +251,7 @@ export class DecisionEngine {
         rulesApplied.push('AMBIGUITY_DETECTED');
       }
       if (!gapMeetsThreshold) {
-        reasons.push(`gap=${delta.toFixed(4)} < T_gap=${thresholds.gapTau}`);
+        reasons.push(`gap=${delta.toFixed(4)} < T_gap=${dynamicGapThreshold.toFixed(4)}`);
         rulesApplied.push('GAP_BELOW_THRESHOLD');
       }
       return {

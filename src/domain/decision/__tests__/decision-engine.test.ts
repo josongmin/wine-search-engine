@@ -194,8 +194,10 @@ describe('DecisionEngine', () => {
     });
 
     it('ambiguous when gap < T_gap even though C passes', async () => {
+      // Wave 3: short_entity now has dynamic gap_tau=0.03 (was 0.10)
+      // To test gap failure, use gap < 0.03
       const input = makeInput({
-        resolverResult: makeResolverResult(0.85, 0.05, false),
+        resolverResult: makeResolverResult(0.85, 0.01, false),
         evidenceSummary: { identityEvidencePresent: true },
       });
       const output = await engine.decide(input, TEST_SNAPSHOT);

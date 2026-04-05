@@ -187,9 +187,10 @@ describe('DecisionEngine', () => {
   });
 
   it('C >= T_resolve but gap < T_gap → ambiguous (insufficient separation)', async () => {
-    // short_entity: resolveTau=0.60, gapTau=0.10
+    // Wave 3: short_entity: resolveTau=0.60, dynamic gapTau=0.03
+    // To test gap failure, use gap < 0.03
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.65, gap: 0.05, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.65, gap: 0.01, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
@@ -286,9 +287,10 @@ describe('DecisionEngine', () => {
   it('DecisionTrace contains threshold values used', async () => {
     const input = makeDecisionInput();
     const output = await engine.decide(input, snapshot);
-    // short_entity from DEFAULT_THRESHOLD_PROFILE v2.0.0
+    // short_entity from DEFAULT_THRESHOLD_PROFILE v2.1.0 with dynamic gap
     expect(output.decisionTrace.thresholds.resolveThreshold).toBe(0.60);
-    expect(output.decisionTrace.thresholds.gapThreshold).toBe(0.10);
+    // Wave 3: dynamic gap threshold for short_entity is 0.03 (was 0.10)
+    expect(output.decisionTrace.thresholds.gapThreshold).toBe(0.03);
   });
 
   it('resolved output includes selectedEntity and chosenEntityId', async () => {

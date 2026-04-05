@@ -18,6 +18,15 @@ export { EvidenceMapper } from './service/evidence-mapper.js';
 export { Ranker } from './service/ranker.js';
 
 // ── LambdaMART Learning-to-Rank (Epic 4) ─────────────────────────────────────
-// TODO: Reinstate after LTR implementation is complete
-// export { LambdaMARTRanker } from './service/lambdamart-ranker.js';
-// export { LTRRanker } from './service/ltr-ranker.js';
+export { LambdaMARTRanker } from './service/lambdamart-ranker.js';
+export type {
+  RankingFeatures,
+  LambdaMARTExample,
+  QueryClassWeights,
+} from './service/lambdamart-ranker.js';
+
+export { buildTrainingExamples, trainAllModels, createModelRegistry } from './service/ltr-training-service.js';
+export type { LTRModelRegistry } from './service/ltr-training-service.js';
+
+export { LTRRanker } from './service/ltr-ranker.js';
+export type { RankableDocument, RankedDocument } from './service/ltr-ranker.js';
