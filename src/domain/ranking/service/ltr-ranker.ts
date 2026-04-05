@@ -6,7 +6,7 @@
 
 import type { QueryClass } from '../../shared/types/index.js';
 import type { RankingFeatures, QueryClassWeights } from './lambdamart-ranker.js';
-import { LambdaMARTRanker } from './lambdamart-ranker.js';
+import { scoreDocument } from './lambdamart-ranker.js';
 
 /**
  * A searchable document to be ranked.
@@ -48,7 +48,7 @@ export namespace LTRRanker {
 
     const scored = documents.map((doc) => ({
       ...doc,
-      ltrScore: LambdaMARTRanker.scoreDocument(doc.features, model),
+      ltrScore: scoreDocument(doc.features, model!),
     }));
 
     const sorted = [...scored].sort((a, b) => {

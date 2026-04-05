@@ -137,83 +137,82 @@ export function trainLambdaMARTModel(
       ndcg5ValidationScore: validationNdcg,
       trainedAt: new Date(),
     };
+}
+
+/**
+ * Scores a document's ranking using learned weights.
+ */
+export function scoreDocument(
+  features: RankingFeatures,
+  weights: QueryClassWeights,
+): number {
+  return scoreFeatures(features, weights.weights, weights.bias);
+}
+
+function scoreFeatures(
+  features: RankingFeatures,
+  weights: readonly number[],
+  bias: number,
+): number {
+  const featureValues = [
+    features.bm25Score,
+    features.semanticScore,
+    features.popularityScore,
+    features.recencyScore,
+    features.classMatchScore,
+    features.attributeMatchScore,
+    features.diversityScore,
+    features.multilingualScore,
+  ];
+
+  let score = bias;
+  for (let i = 0; i < 8; i++) {
+    score += (featureValues[i] ?? 0) * (weights[i] ?? 0);
+  }
+  return Math.max(0, Math.min(1, score));
+}
+
+function computeValidationNdcg(
+  examples: readonly LambdaMARTExample[],
+  weights: readonly number[],
+  bias: number,
+): number {
+  let totalNdcg = 0;
+  let queryCount = 0;
+  const queryExamples: Map<string, LambdaMARTExample[]> = new Map();
+
+  for (const ex of examples) {
+    const queryList = queryExamples.get(ex.query) ?? [];
+    queryList.push(ex);
+    queryExamples.set(ex.query, queryList);
   }
 
-  /**
-   * Scores a document's ranking using learned weights.
-   */
-  export function scoreDocument(
-    features: RankingFeatures,
-    weights: QueryClassWeights,
-  ): number {
-    return scoreFeatures(features, weights.weights, weights.bias);
-  }
+  for (const [, exs] of queryExamples) {
+    const scored = exs.flatMap((ex) => [
+      { label: ex.label1, score: scoreFeatures(ex.features1, weights, bias) },
+      { label: ex.label2, score: scoreFeatures(ex.features2, weights, bias) },
+    ]);
 
-  function scoreFeatures(
-    features: RankingFeatures,
-    weights: readonly number[],
-    bias: number,
-  ): number {
-    const featureValues = [
-      features.bm25Score,
-      features.semanticScore,
-      features.popularityScore,
-      features.recencyScore,
-      features.classMatchScore,
-      features.attributeMatchScore,
-      features.diversityScore,
-      features.multilingualScore,
-    ];
+    const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 5);
 
-    let score = bias;
-    for (let i = 0; i < 8; i++) {
-      score += (featureValues[i] ?? 0) * (weights[i] ?? 0);
-    }
-    return Math.max(0, Math.min(1, score));
-  }
-
-  function computeValidationNdcg(
-    examples: readonly LambdaMARTExample[],
-    weights: readonly number[],
-    bias: number,
-  ): number {
-    let totalNdcg = 0;
-    let queryCount = 0;
-    const queryExamples: Map<string, LambdaMARTExample[]> = new Map();
-
-    for (const ex of examples) {
-      const queryList = queryExamples.get(ex.query) ?? [];
-      queryList.push(ex);
-      queryExamples.set(ex.query, queryList);
-    }
-
-    for (const [, exs] of queryExamples) {
-      const scored = exs.flatMap((ex) => [
-        { label: ex.label1, score: scoreFeatures(ex.features1, weights, bias) },
-        { label: ex.label2, score: scoreFeatures(ex.features2, weights, bias) },
-      ]);
-
-      const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 5);
-
-      let dcg = 0;
-      for (let i = 0; i < ranked.length; i++) {
-        const item = ranked[i];
-        if (item) {
-          const gain = Math.pow(2, item.label) - 1;
-          const discount = 1 / Math.log2(i + 2);
-          dcg += gain * discount;
-        }
+    let dcg = 0;
+    for (let i = 0; i < ranked.length; i++) {
+      const item = ranked[i];
+      if (item) {
+        const gain = Math.pow(2, item.label) - 1;
+        const discount = 1 / Math.log2(i + 2);
+        dcg += gain * discount;
       }
-
-      const idcg = Array(Math.min(5, exs.length))
-        .fill(3)
-        .reduce((sum, _, i) => sum + (Math.pow(2, 3) - 1) / Math.log2(i + 2), 0);
-
-      const queryNdcg = idcg > 0 ? dcg / idcg : 0;
-      totalNdcg += queryNdcg;
-      queryCount++;
     }
 
-    return queryCount > 0 ? totalNdcg / queryCount : 0;
+    const idcg = Array(Math.min(5, exs.length))
+      .fill(3)
+      .reduce((sum, _, i) => sum + (Math.pow(2, 3) - 1) / Math.log2(i + 2), 0);
+
+    const queryNdcg = idcg > 0 ? dcg / idcg : 0;
+    totalNdcg += queryNdcg;
+    queryCount++;
   }
+
+  return queryCount > 0 ? totalNdcg / queryCount : 0;
 }

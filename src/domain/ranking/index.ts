@@ -18,7 +18,10 @@ export { EvidenceMapper } from './service/evidence-mapper.js';
 export { Ranker } from './service/ranker.js';
 
 // ── LambdaMART Learning-to-Rank (Epic 4) ─────────────────────────────────────
-export { LambdaMARTRanker } from './service/lambdamart-ranker.js';
+export {
+  trainLambdaMARTModel,
+  scoreDocument,
+} from './service/lambdamart-ranker.js';
 export type {
   RankingFeatures,
   LambdaMARTExample,

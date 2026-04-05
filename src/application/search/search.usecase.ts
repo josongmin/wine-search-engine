@@ -358,14 +358,17 @@ export class SearchUseCase {
 
     // RFC-016: Build topEntity from top-ranked result for AdmissionGate (identity sealing)
     const topResult = rankedResults[0];
-    const topEntity = topResult ? {
-      entityId: topResult.entityId,
-      canonicalLabel: topResult.canonicalLabel,
-    } : undefined;
+    const topEntity = topResult
+      ? {
+          entityId: topResult.entityId,
+          canonicalLabel: topResult.canonicalLabel,
+          calibratedScore: Math.max(0, Math.min(1, topResult.finalScore)),
+        }
+      : undefined;
 
     const resolveResult: EntityResolveResult = {
       status: rankedResults.length > 0 ? 'resolved' : 'failed',
-      topEntity,
+      ...(topEntity !== undefined ? { topEntity } : {}),
       candidates: [],
       decisionConfidenceC: hybridConfidence,
       decisionTrace: {

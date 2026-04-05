@@ -19,7 +19,7 @@
 function camelToSnake(key: string): string {
   let result = '';
   for (let i = 0; i < key.length; i++) {
-    const ch = key[i];
+    const ch = key.charAt(i);
     if (ch >= 'A' && ch <= 'Z') {
       if (i > 0) result += '_';
       result += ch.toLowerCase();

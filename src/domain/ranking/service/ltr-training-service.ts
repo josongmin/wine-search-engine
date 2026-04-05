@@ -7,7 +7,7 @@
 import type { EvalResult } from '../../evaluation/model/eval-result.js';
 import type { EvalCase } from '../../evaluation/model/eval-case.js';
 import type { RankingFeatures, LambdaMARTExample, QueryClassWeights } from './lambdamart-ranker.js';
-import { LambdaMARTRanker } from './lambdamart-ranker.js';
+import { trainLambdaMARTModel } from './lambdamart-ranker.js';
 
 /**
  * Extracts ranking features from evaluation result.
@@ -113,7 +113,7 @@ export function trainAllModels(
 
   for (const queryClass of queryClasses) {
     const classExamples = examples.filter((ex) => ex.queryClass === queryClass);
-    const weights = LambdaMARTRanker.train(classExamples, queryClass);
+    const weights = trainLambdaMARTModel(classExamples, queryClass);
 
     models.set(queryClass, weights);
 
