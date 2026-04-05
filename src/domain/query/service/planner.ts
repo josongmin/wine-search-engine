@@ -481,6 +481,8 @@ export class Planner {
       case 'semantic_discovery':
       case 'pairing_search':
         return 'semantic_preference';
+      default:
+        return 'unknown';
     }
   }
 
