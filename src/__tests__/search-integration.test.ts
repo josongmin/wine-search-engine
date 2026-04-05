@@ -22,7 +22,7 @@ import type { SearchIndexPort, SparseHit, DenseHit } from '../domain/retrieval/p
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { RetrievalDocument } from '../domain/retrieval/model/retrieval-document.js';
 import type { EntityResolveResult } from '../domain/resolver/model/resolve-result.js';
-import { computeConformalSetSize } from '../domain/resolver/service/resolver.js';
+import { computeConformalSetSize, DEFAULT_ALPHA } from '../domain/resolver/service/resolver.js';
 import type { DecisionInput } from '../domain/decision/model/decision-input.js';
 import type { DecisionSnapshot } from '../domain/shared/types/index.js';
 import type { ResultItem } from '../domain/response/model/result-item.js';
@@ -223,8 +223,11 @@ function buildResolverResult(
   gap: number,
   ambiguous: boolean = false,
 ): EntityResolveResult {
+  // Use actual DEFAULT_THRESHOLD_PROFILE values for short_entity
+  const resolveThreshold = 0.60;
+  const gapThreshold = 0.10;
   return {
-    status: C >= 0.75 && gap >= 0.15 && !ambiguous ? 'resolved' : 'ambiguous',
+    status: C >= resolveThreshold && gap >= gapThreshold && !ambiguous ? 'resolved' : 'ambiguous',
     topEntity: {
       entityId: topEntityId,
       canonicalLabel: label,
@@ -247,10 +250,10 @@ function buildResolverResult(
       decisionConfidenceC: C,
       ambiguityDetected: ambiguous,
       ambiguityTypes: ambiguous ? ['multiple_candidates'] : [],
-      appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
+      appliedThresholds: { resolveThreshold, gapThreshold },
       outcomeReasonCodes: [],
     },
-    conformalSetSize: computeConformalSetSize(C, 0.1, 1),
+    conformalSetSize: computeConformalSetSize(C, DEFAULT_ALPHA, 1),
   };
 }
 
@@ -352,6 +355,9 @@ describe('Search Pipeline Integration', () => {
           // Anchor evidence required because plan.anchors.length > 0
           anchorEvidencePresent: true,
         },
+        ...(resolverResult.conformalSetSize !== undefined
+          ? { conformalSetSize: resolverResult.conformalSetSize }
+          : {}),
       };
 
       const decisionOutput = await decisionEngine.decide(decisionInput, TEST_SNAPSHOT);
@@ -523,6 +529,9 @@ describe('Search Pipeline Integration', () => {
           identityEvidencePresent: true,
           anchorEvidencePresent: true,
         },
+        ...(resolverResult.conformalSetSize !== undefined
+          ? { conformalSetSize: resolverResult.conformalSetSize }
+          : {}),
       };
 
       const decisionOutput = await decisionEngine.decide(decisionInput, TEST_SNAPSHOT);

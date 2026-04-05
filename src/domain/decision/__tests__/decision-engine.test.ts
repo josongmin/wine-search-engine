@@ -540,11 +540,11 @@ describe('DecisionEngine', () => {
   });
 
   describe('query class thresholds', () => {
-    it('ambiguous_short_form class uses higher T_resolve=0.90', async () => {
-      // C=0.85 passes short_entity (T=0.75) but fails ambiguous_short_form (T=0.90)
+    it('ambiguous_short_form class uses higher T_resolve=0.75', async () => {
+      // C=0.70 passes short_entity (T=0.60) but fails ambiguous_short_form (T=0.75)
       const input: DecisionInput = {
         queryPlan: makeQueryPlan('ambiguous_short_form'),
-        resolverResult: makeResolverResult(0.85, 0.30, false),
+        resolverResult: makeResolverResult(0.70, 0.20, false),
         policy: {
           requireExact: false,
           allowApproximate: true,

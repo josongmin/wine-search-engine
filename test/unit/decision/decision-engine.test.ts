@@ -177,9 +177,9 @@ describe('DecisionEngine', () => {
   });
 
   it('T_fail <= C < T_resolve with conformal set size >= 2 → ambiguous', async () => {
-    // C below resolveTau=0.75 but conformal set indicates ambiguity
+    // C below resolveTau=0.60 but conformal set indicates ambiguity
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.60, gap: 0.05, ambiguityDetected: true }),
+      resolverResult: makeResolverResult({ C: 0.55, gap: 0.05, ambiguityDetected: true }),
       conformalSetSize: 2,
     });
     const output = await engine.decide(input, snapshot);
@@ -187,9 +187,9 @@ describe('DecisionEngine', () => {
   });
 
   it('C >= T_resolve but gap < T_gap → ambiguous (insufficient separation)', async () => {
-    // short_entity: resolveTau=0.75, gapTau=0.15
+    // short_entity: resolveTau=0.60, gapTau=0.10
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.80, gap: 0.05, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.65, gap: 0.05, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
@@ -263,9 +263,9 @@ describe('DecisionEngine', () => {
 
   it('nextAction=fail when failed (Gate 3 with fallbackMode=fail)', async () => {
     // Gate 3: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2 → fallbackMode='fail'
-    // C=0.71 >= 0.7 gives conformalSetSize=1
+    // short_entity: resolveTau=0.60, gapTau=0.10
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.71, gap: 0.20, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.55, gap: 0.12, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
