@@ -284,6 +284,7 @@ export class InMemoryThresholdStore implements ThresholdStore {
 
 /**
  * Stores alias→entityId mappings, supports exact and normalized lookups.
+ * Enhanced with smart alias generation from indexed documents.
  */
 export class InMemoryAliasMatcher implements AliasMatcher {
   // normalized form → list of (entityId, surfaceForm, confidence)
@@ -291,6 +292,9 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     string,
     Array<{ entityId: EntityId; surfaceForm: string; confidence: number }>
   >();
+
+  // entityId → document for smart alias generation
+  private readonly documents = new Map<EntityId, RetrievalDocument>();
 
   /**
    * Register an alias mapping.
@@ -305,11 +309,27 @@ export class InMemoryAliasMatcher implements AliasMatcher {
     this.aliases.set(normalized, existing);
   }
 
+  /**
+   * Index a document for smart alias generation.
+   * Called when documents are added to the search index.
+   * @param doc - The retrieval document to index
+   */
+  indexDocument(doc: RetrievalDocument): void {
+    this.documents.set(doc.entityId, doc);
+  }
+
+  /**
+   * Extract all documents currently indexed.
+   * Used for testing and introspection.
+   */
+  getIndexedDocuments(): readonly RetrievalDocument[] {
+    return Array.from(this.documents.values());
+  }
+
   async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
-    // Exact match
+    // Stage 1: Exact match from pre-registered aliases
     const exact = this.aliases.get(normalizedQuery);
     if (exact && exact.length > 0) {
-      // Group by surfaceForm
       const grouped = new Map<string, { entityIds: EntityId[]; confidence: number }>();
       for (const entry of exact) {
         const existing = grouped.get(entry.surfaceForm);
@@ -330,22 +350,220 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       }));
     }
 
-    // Substring fallback — find aliases whose normalized form is contained in the query
-    const results: AliasMatchResult[] = [];
+    // Stage 2: Substring/token match in pre-registered aliases
+    // Match when: alias is a substring of query OR query tokens are prefix of alias tokens
+    const substringResults: AliasMatchResult[] = [];
     for (const [normalized, entries] of this.aliases) {
-      if (normalizedQuery.includes(normalized)) {
+      const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+      const aliasTokens = normalized.split(/\s+/).filter(Boolean);
+
+      // Case 1: Query contains the alias as substring
+      const isSubstringMatch = normalizedQuery.includes(normalized);
+
+      // Case 2: Query tokens are prefix of alias tokens (e.g., "david arthur" matches "david arthur cabernet sauvignon")
+      const isTokenPrefixMatch = queryTokens.length > 0 &&
+        queryTokens.length <= aliasTokens.length &&
+        queryTokens.every((qt, i) => aliasTokens[i] === qt);
+
+      if (isSubstringMatch || isTokenPrefixMatch) {
         const entityIds = entries.map((e) => e.entityId);
         const maxConfidence = Math.max(...entries.map((e) => e.confidence));
-        results.push({
+        substringResults.push({
           surfaceForm: entries[0]?.surfaceForm ?? normalized,
           normalizedForm: normalized,
           entityIds,
-          matchConfidence: maxConfidence * 0.85, // penalty for substring match
+          matchConfidence: maxConfidence * 0.85,
         });
       }
     }
-    results.sort((a, b) => b.matchConfidence - a.matchConfidence);
-    return results;
+    if (substringResults.length > 0) {
+      substringResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+      return substringResults;
+    }
+
+    // Stage 3: Smart alias generation from indexed documents
+    const smartMatches = this.generateSmartAliases(normalizedQuery);
+    if (smartMatches.length > 0) {
+      return smartMatches;
+    }
+
+    return [];
+  }
+
+  /**
+   * Generates aliases on-the-fly from indexed documents by extracting:
+   * - Producer name
+   * - Wine type
+   * - Vintage year
+   * - Region keywords
+   *
+   * Matches multi-term queries like "David Arthur Cabernet 2014" by finding
+   * documents where producer, wine type, and vintage all appear.
+   *
+   * @param normalizedQuery - The normalized query string
+   * @returns Matched alias results with confidence scores
+   */
+  private generateSmartAliases(normalizedQuery: string): AliasMatchResult[] {
+    const queryTerms = normalizedQuery.split(/\s+/).filter((t) => t.length > 0);
+    if (queryTerms.length === 0) {
+      return [];
+    }
+
+    // Extract potential vintage year from query
+    const vintageMatch = /\b(19|20)\d{2}\b/.exec(normalizedQuery);
+    const potentialVintage = vintageMatch ? parseInt(vintageMatch[0], 10) : undefined;
+
+    const matches: Map<EntityId, { doc: RetrievalDocument; matchedTerms: Set<string>; score: number }> = new Map();
+
+    for (const doc of this.documents.values()) {
+      const docProducer = doc.producer.toLowerCase();
+      const docWineType = doc.wineType?.toLowerCase() ?? '';
+      const docRegion = doc.region.toLowerCase();
+      const docCanonical = doc.canonicalLabel.toLowerCase();
+      const docSearchText = (doc.searchTextEn + ' ' + doc.searchTextKo).toLowerCase();
+      const docVintage = doc.vintageYear;
+
+      const matchedTerms = new Set<string>();
+      let score = 0;
+      let productorMatch = false;
+
+      // Match each query term against document attributes
+      for (const term of queryTerms) {
+        const termLower = term.toLowerCase();
+
+        // Producer exact or substring match (highest confidence)
+        if (docProducer.includes(termLower)) {
+          matchedTerms.add(term);
+          score += 0.4;
+          productorMatch = true;
+          continue;
+        }
+
+        // Wine type match (e.g., "Cabernet", "Pinot", "red")
+        if (
+          docWineType === termLower ||
+          docWineType.includes(termLower) ||
+          this.isGrapeVariety(termLower, doc.grapePrimary ?? '')
+        ) {
+          matchedTerms.add(term);
+          score += 0.25;
+          continue;
+        }
+
+        // Region keyword match
+        if (docRegion.includes(termLower)) {
+          matchedTerms.add(term);
+          score += 0.2;
+          continue;
+        }
+
+        // Canonical label match (but not if already matched via producer)
+        if (docCanonical.includes(termLower) && !productorMatch) {
+          matchedTerms.add(term);
+          score += 0.25;
+          continue;
+        }
+
+        // Full-text search match (lowest confidence)
+        if (docSearchText.includes(termLower) && !matchedTerms.has(term)) {
+          matchedTerms.add(term);
+          score += 0.1;
+        }
+      }
+
+      // Bonus: vintage year match
+      if (potentialVintage !== undefined && docVintage === potentialVintage) {
+        score += 0.15;
+        matchedTerms.add(potentialVintage.toString());
+      }
+
+      // Only consider matches with sufficient term coverage
+      // Require at least 50% of query terms matched OR 2+ matched
+      const minMatches = Math.max(2, Math.ceil(queryTerms.length * 0.5));
+      const hasEnoughMatches = matchedTerms.size >= minMatches;
+
+      if (hasEnoughMatches && score > 0.35) {
+        // Normalize score to [0, 0.8] for smart matches (lower than pre-registered aliases)
+        const normalizedScore = Math.min(0.8, score);
+        matches.set(doc.entityId, {
+          doc,
+          matchedTerms,
+          score: normalizedScore,
+        });
+      }
+    }
+
+    // Sort by score descending and convert to AliasMatchResult
+    const sorted = Array.from(matches.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10); // Limit to top 10
+
+    return sorted.map((match) => ({
+      surfaceForm: this.extractSmartAliasForm(match.doc),
+      normalizedForm: normalizedQuery,
+      entityIds: [match.doc.entityId],
+      matchConfidence: match.score,
+    }));
+  }
+
+  /**
+   * Determines the best surface form for a smart-matched document.
+   * Prefers: canonicalLabel > producer + wineType > producer alone
+   */
+  private extractSmartAliasForm(doc: RetrievalDocument): string {
+    // Prefer the full canonical label if it's reasonably short
+    if (doc.canonicalLabel.length <= 100) {
+      return doc.canonicalLabel;
+    }
+
+    // Fall back to producer + primary grape
+    if (doc.grapePrimary && doc.grapePrimary.length > 0) {
+      return `${doc.producer} ${doc.grapePrimary}`;
+    }
+
+    // Finally, just producer
+    return doc.producer;
+  }
+
+  /**
+   * Checks if a term is a known grape variety by substring match.
+   * Common grapes: Cabernet, Merlot, Pinot, Chardonnay, Sauvignon, Riesling, etc.
+   */
+  private isGrapeVariety(term: string, grapePrimary: string): boolean {
+    const commonGrapes = [
+      'cabernet',
+      'merlot',
+      'pinot',
+      'chardonnay',
+      'sauvignon',
+      'riesling',
+      'syrah',
+      'grenache',
+      'nebbiolo',
+      'sangiovese',
+      'tempranillo',
+      'gamay',
+      'barbera',
+      'zinfandel',
+      'petit verdot',
+      'mourvedre',
+      'carmenere',
+    ];
+
+    const termLower = term.toLowerCase();
+    const grapeLower = grapePrimary.toLowerCase();
+
+    // Direct match in common grapes
+    if (commonGrapes.some((g) => g.includes(termLower) || termLower.includes(g))) {
+      return true;
+    }
+
+    // Match against the actual grape primary
+    if (grapeLower.includes(termLower) || termLower.includes(grapeLower)) {
+      return true;
+    }
+
+    return false;
   }
 
   private normalize(input: string): string {

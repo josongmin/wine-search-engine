@@ -257,6 +257,19 @@ export class Planner {
 
   /**
    * Detects the primary intent based on anchors, patterns, and keywords.
+   *
+   * Multi-stage detection with confidence-aware fallback:
+   * 1. Fuzzy/exact matching from anchors (high confidence scores)
+   * 2. Comparison and mixed-query markers (requires anchor presence)
+   * 3. Constraint keywords with/without anchors
+   * 4. Pairing and budget markers
+   * 5. Default semantic discovery
+   *
+   * Key improvements (SOTA++ §1-2):
+   * - Respects anchor confidence thresholds for intent determination
+   * - Treats weak anchors (0.5-0.85) differently than strong (≥0.85)
+   * - Prefers entity_fuzzy when weak anchor + found results
+   * - Escalates to mixed_query when constraints present with any anchor
    */
   private detectIntent(
     normalizedQuery: string,
@@ -264,6 +277,10 @@ export class Planner {
   ): QueryIntent {
     const hasStrongAnchor = anchors.some(
       (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
+    );
+    const hasWeakAnchor = anchors.some(
+      (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE &&
+        a.confidence < EXACT_ANCHOR_CONFIDENCE,
     );
     const hasAnyAnchor = anchors.some(
       (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
@@ -282,7 +299,9 @@ export class Planner {
       re.test(normalizedQuery),
     );
 
-    // Comparison: two+ anchors or explicit comparison marker with anchor.
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 1: Comparison detection (requires explicit markers + anchors)
+    // ───────────────────────────────────────────────────────────────────────
     if (hasComparisonMarker && hasAnyAnchor) {
       return 'comparison_search';
     }
@@ -290,32 +309,49 @@ export class Planner {
       return 'comparison_search';
     }
 
-    // Korean mixed-query markers with an anchor -> mixed.
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 2: Korean mixed-query detection (requires marker + anchor)
+    // ───────────────────────────────────────────────────────────────────────
     if (hasKoreanMixed && hasAnyAnchor) {
       return 'mixed_query';
     }
 
-    // Strong anchor with constraint keywords -> mixed.
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 3: Strong single anchor handling
+    // ───────────────────────────────────────────────────────────────────────
+    // Strong anchor with constraint keywords -> mixed (entity + filters).
     if (hasStrongAnchor && hasConstraintKeyword) {
       return 'mixed_query';
     }
 
     // Strong single anchor, no constraints -> exact entity.
-    if (hasStrongAnchor) {
+    if (hasStrongAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
       return 'entity_exact';
     }
 
-    // Weak anchor -> fuzzy entity.
-    if (hasAnyAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 4: Weak anchor (0.5-0.85) handling — SOTA++ improvement
+    // ───────────────────────────────────────────────────────────────────────
+    // Weak anchor without constraints -> fuzzy entity (found some wines but need disambiguation).
+    if (hasWeakAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
       return 'entity_fuzzy';
     }
 
-    // Anchor + constraints -> mixed.
+    // Weak anchor + constraints -> mixed (apply filters to anchor set).
+    if (hasWeakAnchor && (hasConstraintKeyword || hasPriceKeyword)) {
+      return 'mixed_query';
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 5: Any anchor + constraints (catch-all for anchor + filters)
+    // ───────────────────────────────────────────────────────────────────────
     if (hasAnyAnchor && (hasConstraintKeyword || hasPriceKeyword)) {
       return 'mixed_query';
     }
 
-    // Pairing keywords.
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 6: Pairing and budget keywords (no anchor required)
+    // ───────────────────────────────────────────────────────────────────────
     if (hasPairingKeyword) {
       return 'pairing_search';
     }
@@ -325,12 +361,16 @@ export class Planner {
       return 'budget_search';
     }
 
-    // Constraint keywords without entity.
+    // ───────────────────────────────────────────────────────────────────────
+    // STAGE 7: Pure constraint keywords (no anchor)
+    // ───────────────────────────────────────────────────────────────────────
     if (hasConstraintKeyword) {
       return 'facet_search';
     }
 
-    // Default: semantic discovery.
+    // ───────────────────────────────────────────────────────────────────────
+    // DEFAULT: Semantic discovery (no anchors, no keywords)
+    // ───────────────────────────────────────────────────────────────────────
     return 'semantic_discovery';
   }
 

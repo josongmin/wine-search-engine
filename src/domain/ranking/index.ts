@@ -16,3 +16,8 @@ export { SignalComputer } from './service/signal-computer.js';
 export { ScoreAggregator } from './service/score-aggregator.js';
 export { EvidenceMapper } from './service/evidence-mapper.js';
 export { Ranker } from './service/ranker.js';
+
+// ── LambdaMART Learning-to-Rank (Epic 4) ─────────────────────────────────────
+// TODO: Reinstate after LTR implementation is complete
+// export { LambdaMARTRanker } from './service/lambdamart-ranker.js';
+// export { LTRRanker } from './service/ltr-ranker.js';
