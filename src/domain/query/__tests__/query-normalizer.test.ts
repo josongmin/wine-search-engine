@@ -33,6 +33,30 @@ describe('QueryNormalizer', () => {
     expect(views.lookupVariants).toContain('moet chandon');
   });
 
+  it('adds phonetic compact for latin-script noisy lookup', () => {
+    const views = normalizer.normalize('Moët & Chandon');
+
+    expect(views.compact).toBe('moetchandon');
+    expect(views.phoneticCompact).toBe('mtchndn');
+  });
+
+  it('normalizes phonetic digraph and french-ending noise into a stable compact key', () => {
+    const shandon = normalizer.normalize('Moet Shandon');
+    const chandon = normalizer.normalize('Moet Chandon');
+    const margo = normalizer.normalize('Margo');
+    const margaux = normalizer.normalize('Margaux');
+
+    expect(shandon.phoneticCompact).toBe(chandon.phoneticCompact);
+    expect(margo.phoneticCompact).toBe(margaux.phoneticCompact);
+  });
+
+  it('supports additional Korean transliteration variants', () => {
+    const views = normalizer.normalize('샤토 마고');
+
+    expect(views.transliterated).toBe('chateau margaux');
+    expect(views.lookupVariants).toContain('chateaumargaux');
+  });
+
   it('keeps price-like tokens intact while stripping vintages', () => {
     const views = normalizer.normalize('10만원 이하 오푸스원 19');
 
@@ -41,4 +65,3 @@ describe('QueryNormalizer', () => {
     expect(views.vintageStripped).toBe('10만원 이하 오푸스원');
   });
 });
-

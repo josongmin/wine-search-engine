@@ -1,6 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
-import { type Span, SpanStatusCode } from '@opentelemetry/api';
+import { type Span, SpanStatusCode, type Tracer } from '@opentelemetry/api';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -39,6 +39,7 @@ export interface ServerOptions {
   readonly health?: HealthRouteOptions;
   readonly enableCors?: boolean;
   readonly enableTelemetry?: boolean;
+  readonly tracer?: Tracer;
 }
 
 function registerCorsSupport(
@@ -69,10 +70,10 @@ function registerCorsSupport(
   });
 }
 
-function registerTelemetryHooks(app: FastifyInstance): void {
-  app.addHook('onRequest', (request) => {
+function registerTelemetryHooks(app: FastifyInstance, tracer: Tracer): void {
+  app.addHook('onRequest', (request, _reply, done) => {
     const spanName = `${request.method} ${request.url}`;
-    const span = getTracer().startSpan(spanName, {
+    const span = tracer.startSpan(spanName, {
       attributes: {
         'http.method': request.method,
         'http.url': request.url,
@@ -80,9 +81,10 @@ function registerTelemetryHooks(app: FastifyInstance): void {
       },
     });
     request.otelSpan = span;
+    done();
   });
 
-  app.addHook('onSend', (request, reply, payload, done) => {
+  app.addHook('onResponse', (request, reply, done) => {
     const { otelSpan } = request;
     if (otelSpan !== undefined) {
       otelSpan.setAttribute('http.status_code', reply.statusCode);
@@ -91,7 +93,7 @@ function registerTelemetryHooks(app: FastifyInstance): void {
       }
       otelSpan.end();
     }
-    done(null, payload);
+    done();
   });
 }
 
@@ -132,8 +134,8 @@ export async function createServer(
   // Register middleware
   registerRequestContext(app);
 
-  if (options?.enableTelemetry ?? nodeEnv !== 'test') {
-    registerTelemetryHooks(app);
+  if (options?.enableTelemetry ?? true) {
+    registerTelemetryHooks(app, options?.tracer ?? getTracer());
   }
 
   // Register rate limiting — RFC-014 §13

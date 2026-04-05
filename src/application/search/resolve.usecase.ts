@@ -1,24 +1,15 @@
 import type { ResolverInput } from '../../domain/resolver/service/resolver.js';
 import type { PlannerContext } from '../../domain/query/service/planner.js';
-import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
 import type { EntityResolverPort, QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
+import type { ResolveResponse } from './resolve-response.dto.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
 
 export type { ResolveRequest } from './resolve-request.dto.js';
-
-/**
- * Entity resolve response shape.
- */
-export interface ResolveResponse {
-  readonly status: string;
-  readonly candidates: EntityResolveResult['candidates'];
-  readonly topEntity: EntityResolveResult['topEntity'];
-  readonly decision_trace_ref: string;
-}
+export type { ResolveResponse } from './resolve-response.dto.js';
 
 /**
  * Dependencies injected into the ResolveUseCase.
@@ -64,6 +55,9 @@ export class ResolveUseCase {
     const resolverInput: ResolverInput = {
       rawQuery: plan.rawQuery,
       normalizedQuery: plan.normalizedQuery,
+      ...(plan.normalizedQueryViews !== undefined
+        ? { normalizedQueryViews: plan.normalizedQueryViews }
+        : {}),
       queryClass: plan.queryClass,
       policy: plan.policy,
       anchorCandidates: plan.anchors,

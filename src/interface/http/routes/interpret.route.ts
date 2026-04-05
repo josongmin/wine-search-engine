@@ -4,6 +4,7 @@ import {
   parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
 import { InterpretRouteContract } from './route-contracts.js';
 import { toInterpretRequest } from './search-request-mappers.js';
 
@@ -14,12 +15,17 @@ export function registerInterpretRoute(
   app: FastifyInstance,
   deps: InterpretRouteDeps,
 ): void {
-  app.post('/v1/search/interpret', async (request, reply) => {
-    const parsed = parseContractBody(request, InterpretRouteContract);
-    const interpretRequest = toInterpretRequest(parsed);
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/search/interpret',
+    contract: InterpretRouteContract,
+    handler: async (request, reply) => {
+      const parsed = parseContractBody(request, InterpretRouteContract);
+      const interpretRequest = toInterpretRequest(parsed);
 
-    const plan = await deps.interpretUseCase.execute(interpretRequest);
+      const plan = await deps.interpretUseCase.execute(interpretRequest);
 
-    sendRouteContractResponse(request, reply, InterpretRouteContract, 200, plan);
+      sendRouteContractResponse(request, reply, InterpretRouteContract, 200, plan);
+    },
   });
 }

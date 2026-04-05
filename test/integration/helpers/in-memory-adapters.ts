@@ -350,6 +350,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         normalizedForm: views.strict,
         entityIds,
         matchConfidence: confidence,
+        lookupStrategy: 'exact',
       }));
     }
 
@@ -367,11 +368,64 @@ export class InMemoryAliasMatcher implements AliasMatcher {
         normalizedForm: normalized,
         entityIds,
         matchConfidence: maxConfidence * 0.93,
+        lookupStrategy: 'compact_exact',
       });
     }
     if (compactResults.length > 0) {
       compactResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
       return compactResults;
+    }
+
+    // Stage 1.75: transliterated exact normalization match for Korean/Latin mixed queries
+    if (views.transliterated !== undefined) {
+      const transliteratedResults: AliasMatchResult[] = [];
+      for (const [normalized, entries] of this.aliases) {
+        if (
+          normalized !== views.transliterated &&
+          this.compact(normalized) !== this.compact(views.transliterated)
+        ) {
+          continue;
+        }
+
+        const entityIds = entries.map((entry) => entry.entityId);
+        const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+        transliteratedResults.push({
+          surfaceForm: entries[0]?.surfaceForm ?? normalized,
+          normalizedForm: normalized,
+          entityIds,
+          matchConfidence: maxConfidence * 0.91,
+          lookupStrategy: 'transliterated_exact',
+        });
+      }
+      if (transliteratedResults.length > 0) {
+        transliteratedResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+        return transliteratedResults;
+      }
+    }
+
+    // Stage 1.9: phonetic compact match for consonant-skeleton / digraph noise
+    if (views.phoneticCompact !== undefined) {
+      const phoneticResults: AliasMatchResult[] = [];
+      for (const [normalized, entries] of this.aliases) {
+        const aliasViews = buildNormalizedQueryViews(normalized);
+        if (aliasViews.phoneticCompact !== views.phoneticCompact) {
+          continue;
+        }
+
+        const entityIds = entries.map((entry) => entry.entityId);
+        const maxConfidence = Math.max(...entries.map((entry) => entry.confidence));
+        phoneticResults.push({
+          surfaceForm: entries[0]?.surfaceForm ?? normalized,
+          normalizedForm: normalized,
+          entityIds,
+          matchConfidence: maxConfidence * 0.88,
+          lookupStrategy: 'phonetic_exact',
+        });
+      }
+      if (phoneticResults.length > 0) {
+        phoneticResults.sort((a, b) => b.matchConfidence - a.matchConfidence);
+        return phoneticResults;
+      }
     }
 
     // Stage 2: Substring/token match in pre-registered aliases
@@ -399,6 +453,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
           normalizedForm: normalized,
           entityIds,
           matchConfidence: maxConfidence * 0.85,
+          lookupStrategy: 'substring',
         });
       }
     }
@@ -529,6 +584,7 @@ export class InMemoryAliasMatcher implements AliasMatcher {
       normalizedForm: normalizedQuery,
       entityIds: [match.doc.entityId],
       matchConfidence: match.score,
+      lookupStrategy: 'smart_document',
     }));
   }
 

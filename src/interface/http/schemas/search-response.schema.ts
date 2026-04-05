@@ -1,8 +1,6 @@
 import { z } from 'zod';
 import {
   DecisionSnapshotSchema,
-  QueryBudgetSchema,
-  SessionContextSchema,
 } from './search-shared.schema.js';
 
 export const ErrorResponseSchema = z.object({
@@ -27,26 +25,26 @@ export const EvidenceItemSchema = z.object({
 }).strict();
 
 export const EntitySummarySchema = z.object({
-  entityId: z.string().min(1),
-  canonicalLabel: z.string().min(1),
+  entity_id: z.string().min(1),
+  canonical_label: z.string().min(1),
   type: z.string().min(1),
   producer: z.string().min(1).optional(),
   region: z.string().min(1).optional(),
   vintage: z.number().int().optional(),
   grapes: z.array(z.string().min(1)).optional(),
-  priceRange: z.string().min(1).optional(),
+  price_range: z.string().min(1).optional(),
 }).strict();
 
 export const MatchDetailSchema = z.object({
-  matchType: z.enum(['exact', 'alias_exact', 'alias_fuzzy', 'semantic', 'hybrid']),
-  anchorUsed: z.boolean().optional(),
-  matchedAlias: z.string().min(1).optional(),
-  scoreComponents: z.object({
+  match_type: z.enum(['exact', 'alias_exact', 'alias_fuzzy', 'semantic', 'hybrid']),
+  anchor_used: z.boolean().optional(),
+  matched_alias: z.string().min(1).optional(),
+  score_components: z.object({
     lexical: z.number(),
     semantic: z.number(),
     attribute: z.number(),
     popularity: z.number(),
-    preferenceAlignment: z.number(),
+    preference_alignment: z.number(),
   }).strict(),
 }).strict();
 
@@ -57,63 +55,63 @@ export const ConstraintEvaluationSchema = z.object({
 }).strict();
 
 export const UncertaintyBlockSchema = z.object({
-  uncertaintyConfidence: z.number(),
-  missingInfo: z.array(z.string()),
-  approximationUsed: z.boolean(),
-  ambiguityFlags: z.array(z.string()).optional(),
+  uncertainty_confidence: z.number(),
+  missing_info: z.array(z.string()),
+  approximation_used: z.boolean(),
+  ambiguity_flags: z.array(z.string()).optional(),
 }).strict();
 
 export const DrinkingWindowSchema = z.object({
-  drinkingWindowStart: z.number().int(),
-  drinkingWindowEnd: z.number().int(),
-  currentlyDrinkable: z.boolean(),
+  drinking_window_start: z.number().int(),
+  drinking_window_end: z.number().int(),
+  currently_drinkable: z.boolean(),
   confidence: z.enum(['high', 'medium', 'low']),
-  modelVersion: z.string().min(1).optional(),
+  model_version: z.string().min(1).optional(),
 }).strict();
 
 export const ResultItemSchema = z.object({
   entity: EntitySummarySchema,
-  relevanceScore: z.number(),
+  relevance_score: z.number(),
   match: MatchDetailSchema,
   constraints: ConstraintEvaluationSchema,
   uncertainty: UncertaintyBlockSchema,
-  evidenceItems: z.array(EvidenceItemSchema).min(1),
-  humanReadableEvidenceSummary: z.string().min(1).optional(),
-  drinkingWindow: DrinkingWindowSchema.optional(),
-  matchReasons: z.array(z.string()).optional(),
-  violatedConstraints: z.array(z.string()).optional(),
+  evidence_items: z.array(EvidenceItemSchema).min(1),
+  human_readable_evidence_summary: z.string().min(1).optional(),
+  drinking_window: DrinkingWindowSchema.optional(),
+  match_reasons: z.array(z.string()).optional(),
+  violated_constraints: z.array(z.string()).optional(),
 }).strict();
 
 export const ClarificationCandidateSchema = z.object({
-  entityId: z.string().min(1),
+  entity_id: z.string().min(1),
   label: z.string().min(1),
-  distinguishingFeatures: z.array(z.string()),
+  distinguishing_features: z.array(z.string()),
 }).strict();
 
 export const ClarificationPayloadSchema = z.object({
   reason: z.string().min(1),
   candidates: z.array(ClarificationCandidateSchema),
-  suggestionType: z.enum(['disambiguation', 'missing_info']),
+  suggestion_type: z.enum(['disambiguation', 'missing_info']),
 }).strict();
 
 export const CounterfactualRejectSchema = z.object({
-  entityId: z.string().min(1),
-  canonicalLabel: z.string().min(1).optional(),
-  rejectedReason: z.string().min(1),
-  evidenceRef: z.string().min(1).optional(),
+  entity_id: z.string().min(1),
+  canonical_label: z.string().min(1).optional(),
+  rejected_reason: z.string().min(1),
+  evidence_ref: z.string().min(1).optional(),
 }).strict();
 
 export const EngineDecisionSchema = z.object({
-  decisionStatus: z.enum(['resolved', 'ambiguous', 'failed']),
-  nextAction: z.enum(['return_result', 'clarify', 'hybrid_search', 'fail']),
+  decision_status: z.enum(['resolved', 'ambiguous', 'failed']),
+  next_action: z.enum(['return_result', 'clarify', 'hybrid_search', 'fail']),
   route: z.string().min(1),
-  decisionConfidence: z.number().min(0).max(1),
-  confidenceSemantics: z.literal('calibrated_decision_confidence'),
-  decisionTraceRef: z.string().min(1),
-  decisionSnapshot: DecisionSnapshotSchema,
+  decision_confidence: z.number().min(0).max(1),
+  confidence_semantics: z.literal('calibrated_decision_confidence'),
+  decision_trace_ref: z.string().min(1),
+  decision_snapshot: DecisionSnapshotSchema,
   failure_reason: z.string().optional(),
   admission_trace_ref: z.string().optional(),
-  abstainReason: z.string().optional(),
+  abstain_reason: z.string().optional(),
 }).strict();
 
 export const ParsedConstraintsExternSchema = z.object({
@@ -131,24 +129,24 @@ export const ParsedConstraintsExternSchema = z.object({
 }).strict();
 
 export const SearchResponseMetaSchema = z.object({
-  requestId: z.string().min(1).optional(),
-  queryTimeMs: z.number().min(0),
+  request_id: z.string().min(1).optional(),
+  query_time_ms: z.number().min(0),
   route: z.string().min(1),
   version: z.string().min(1),
   engine_schema_version: z.literal('search_response_v1'),
-  decisionSnapshot: DecisionSnapshotSchema.optional(),
-  debugRefs: z.array(z.string()).optional(),
+  decision_snapshot: DecisionSnapshotSchema.optional(),
+  debug_refs: z.array(z.string()).optional(),
   response_hash: z.string().min(1).optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({
-  queryType: z.literal('search'),
-  engineDecision: EngineDecisionSchema,
+  query_type: z.literal('search'),
+  engine_decision: EngineDecisionSchema,
   results: z.array(ResultItemSchema),
   counterfactuals: z.array(CounterfactualRejectSchema).optional(),
   clarification: ClarificationPayloadSchema.nullable().optional(),
   meta: SearchResponseMetaSchema,
-  retrievalMode: z.enum([
+  retrieval_mode: z.enum([
     'entity_lookup',
     'attribute_search',
     'similar_items',
@@ -160,7 +158,7 @@ export const SearchResponseSchema = z.object({
     'recommendation',
     'no_match_detection',
   ]).optional(),
-  resultType: z.enum([
+  result_type: z.enum([
     'single_entity',
     'entity_set',
     'comparison',
@@ -170,27 +168,27 @@ export const SearchResponseSchema = z.object({
     'style_set',
     'wine_set',
   ]).optional(),
-  parsedConstraints: ParsedConstraintsExternSchema.optional(),
+  parsed_constraints: ParsedConstraintsExternSchema.optional(),
 }).strict();
 
 export type SearchResponseBody = z.infer<typeof SearchResponseSchema>;
 
 export const ComparisonEntitySchema = z.object({
-  subQuery: z.string().min(1),
-  topResult: ResultItemSchema.nullable(),
-  resultCount: z.number().int().nonnegative(),
-  resolutionStatus: z.enum(['resolved', 'ambiguous', 'failed']),
-  allResults: z.array(ResultItemSchema),
+  sub_query: z.string().min(1),
+  top_result: ResultItemSchema.nullable(),
+  result_count: z.number().int().nonnegative(),
+  resolution_status: z.enum(['resolved', 'ambiguous', 'failed']),
+  all_results: z.array(ResultItemSchema),
 }).strict();
 
 export const ComparisonSearchResponseSchema = z.object({
-  queryType: z.literal('comparison'),
-  originalQuery: z.string().min(1),
-  comparisonIntent: z.enum(['compare', 'recommend_one', 'list_both']),
+  query_type: z.literal('comparison'),
+  original_query: z.string().min(1),
+  comparison_intent: z.enum(['compare', 'recommend_one', 'list_both']),
   entities: z.tuple([ComparisonEntitySchema, ComparisonEntitySchema]),
-  overallStatus: z.enum(['resolved', 'ambiguous', 'failed']),
-  requestId: z.string().min(1),
-  executionTimeMs: z.number().min(0),
+  overall_status: z.enum(['resolved', 'ambiguous', 'failed']),
+  request_id: z.string().min(1),
+  execution_time_ms: z.number().min(0),
 }).strict();
 
 export type ComparisonSearchResponseBody = z.infer<typeof ComparisonSearchResponseSchema>;
@@ -199,24 +197,36 @@ const NormalizedQueryViewsSchema = z.object({
   raw: z.string().min(1),
   strict: z.string().min(1),
   accentless: z.string().min(1),
-  collapsedWhitespace: z.string().min(1),
-  punctuationStripped: z.string().min(1),
+  collapsed_whitespace: z.string().min(1),
+  punctuation_stripped: z.string().min(1),
   compact: z.string().min(1),
-  vintageCanonicalized: z.string().min(1),
-  vintageStripped: z.string().min(1),
+  phonetic_compact: z.string().min(1).optional(),
+  vintage_canonicalized: z.string().min(1),
+  vintage_stripped: z.string().min(1),
   transliterated: z.string().min(1).optional(),
-  lookupVariants: z.array(z.string().min(1)),
+  lookup_variants: z.array(z.string().min(1)),
+}).strict();
+
+const SessionContextTransportSchema = z.object({
+  session_id: z.string().min(1),
+  previous_entities: z.array(z.string().max(256)).max(50),
+}).strict();
+
+const QueryBudgetTransportSchema = z.object({
+  max_latency_ms: z.number().int().positive(),
+  max_candidates: z.number().int().positive(),
+  rerank_limit: z.number().int().positive(),
 }).strict();
 
 export const InterpretResponseSchema = z.object({
-  rawQuery: z.string().min(1),
-  normalizedQuery: z.string().min(1),
-  normalizedQueryViews: NormalizedQueryViewsSchema.optional(),
+  raw_query: z.string().min(1),
+  normalized_query: z.string().min(1),
+  normalized_query_views: NormalizedQueryViewsSchema.optional(),
   intent: z.string().min(1),
-  secondaryIntents: z.array(z.string().min(1)).optional(),
+  secondary_intents: z.array(z.string().min(1)).optional(),
   route: z.enum(['entity', 'hybrid', 'mixed']),
-  retrievalMode: z.string().min(1),
-  queryClass: z.string().min(1),
+  retrieval_mode: z.string().min(1),
+  query_class: z.string().min(1),
   anchors: z.array(z.unknown()),
   constraints: z.object({
     hard: z.array(z.unknown()),
@@ -229,40 +239,40 @@ export const InterpretResponseSchema = z.object({
   }).strict(),
   policy: z.record(z.unknown()),
   uncertainty: z.record(z.unknown()),
-  plannerVersion: z.string().min(1),
-  policyRuleVersion: z.string().min(1),
-  thresholdProfileId: z.string().min(1),
+  planner_version: z.string().min(1),
+  policy_rule_version: z.string().min(1),
+  threshold_profile_id: z.string().min(1),
   admission_context: z.object({
     requires_identity_seal: z.boolean(),
     requires_constraint_evidence: z.boolean(),
     requires_anchor_evidence: z.boolean(),
   }).strict().optional(),
-  sessionContext: SessionContextSchema.optional(),
-  queryBudget: QueryBudgetSchema.optional(),
-  targetEntityType: z.string().min(1).optional(),
+  session_context: SessionContextTransportSchema.optional(),
+  query_budget: QueryBudgetTransportSchema.optional(),
+  target_entity_type: z.string().min(1).optional(),
 }).strict();
 
 export type InterpretResponseBody = z.infer<typeof InterpretResponseSchema>;
 
 export const ResolveCandidateSchema = z.object({
-  entityId: z.string().min(1),
-  canonicalLabel: z.string().min(1),
+  entity_id: z.string().min(1),
+  canonical_label: z.string().min(1),
   rank: z.number().int().positive(),
-  calibratedScore: z.number().min(0).max(1),
-  matchReasons: z.array(z.string()).optional(),
+  calibrated_score: z.number().min(0).max(1),
+  match_reasons: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
 }).passthrough();
 
 export const ResolveTopEntitySchema = z.object({
-  entityId: z.string().min(1),
-  canonicalLabel: z.string().min(1),
-  calibratedScore: z.number().min(0).max(1),
+  entity_id: z.string().min(1),
+  canonical_label: z.string().min(1),
+  calibrated_score: z.number().min(0).max(1),
 }).strict();
 
 export const ResolveResponseSchema = z.object({
   status: z.enum(['resolved', 'ambiguous', 'failed']),
   candidates: z.array(ResolveCandidateSchema),
-  topEntity: ResolveTopEntitySchema.optional(),
+  top_entity: ResolveTopEntitySchema.optional(),
   decision_trace_ref: z.string().min(1),
 }).strict();
 

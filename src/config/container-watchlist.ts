@@ -3,28 +3,32 @@ import { InMemoryWatchlistStore } from '../infrastructure/watchlist/in-memory-wa
 import { RedisWatchlistSubscriber } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { WatchlistDeliveryRuntime } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import { WebhookDelivery } from '../infrastructure/watchlist/webhook-delivery.js';
+import type { WatchlistServicePort } from '../application/watchlist/watchlist.service.js';
+import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { Config } from './env.js';
-import type {
-  WatchlistRuntimeContract,
-  WatchlistServiceContract,
-} from './container-contracts.js';
+import { getWatchlistWebhookSecret, isWatchlistEnabled } from './watchlist.js';
+import type { RuntimeHandles } from './runtime-handles.js';
 
 export interface WatchlistContainerServices {
-  readonly watchlistService: WatchlistServiceContract;
-  readonly watchlistRuntime: WatchlistRuntimeContract | null;
+  readonly watchlistService: WatchlistServicePort;
+  readonly watchlistRuntime: WatchlistRuntimePort | null;
 }
 
-export function buildWatchlistContainerServices(config: Config): WatchlistContainerServices {
+export function buildWatchlistContainerServices(
+  config: Config,
+  runtime: RuntimeHandles = {},
+): WatchlistContainerServices {
   const store = new InMemoryWatchlistStore();
-  const watchlistService: WatchlistServiceContract = new WatchlistService({
+  const watchlistService: WatchlistServicePort = new WatchlistService({
     watchlistRepository: store,
     deliveryLogRepository: store,
   });
-  const watchlistRuntime: WatchlistRuntimeContract | null = config.watchlist.webhookSecret
+  const watchlistRuntime: WatchlistRuntimePort | null = isWatchlistEnabled(config)
     ? new WatchlistDeliveryRuntime({
         watchlistService,
-        subscriber: new RedisWatchlistSubscriber(),
-        webhookDelivery: new WebhookDelivery(config.watchlist.webhookSecret),
+        subscriber: runtime.createWatchlistSubscriber?.()
+          ?? new RedisWatchlistSubscriber(config.redis),
+        webhookDelivery: new WebhookDelivery(getWatchlistWebhookSecret(config)),
       })
     : null;
 

@@ -13,10 +13,10 @@ class MockPool {
 
   constructor(private readonly responses: readonly AliasRow[][]) {}
 
-  async query<T extends AliasRow>(sql: string, params: readonly unknown[]): Promise<{ rows: T[] }> {
+  async query(sql: string, params: readonly unknown[]): Promise<{ rows: AliasRow[] }> {
     this.queries.push({ sql, params });
     const next = this.responses[this.queries.length - 1] ?? [];
-    return { rows: next as T[] };
+    return { rows: [...next] };
   }
 }
 
@@ -39,6 +39,48 @@ describe('PgAliasMatcher', () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.normalizedForm).toBe('opus one');
     expect(results[0]?.entityIds).toEqual(['entity-opus-one']);
+    expect(results[0]?.lookupStrategy).toContain('compact_exact');
+    expect(pool.queries).toHaveLength(1);
+  });
+
+  it('labels transliterated exact matches when Korean input collapses onto a latin alias', async () => {
+    const pool = new MockPool([
+      [
+        {
+          entity_id: 'entity-chateau-margaux',
+          surface_form: 'Chateau Margaux',
+          normalized_value: 'chateau margaux',
+          confidence: 0.95,
+        },
+      ],
+    ]);
+    const matcher = new PgAliasMatcher(pool as never);
+
+    const results = await matcher.findMatches('샤토 마고');
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.entityIds).toEqual(['entity-chateau-margaux']);
+    expect(results[0]?.lookupStrategy).toContain('transliterated_exact');
+  });
+
+  it('labels phonetic exact matches when consonant skeletons align', async () => {
+    const pool = new MockPool([
+      [
+        {
+          entity_id: 'entity-romanee-conti',
+          surface_form: 'Romanee Conti',
+          normalized_value: 'romanee conti',
+          confidence: 0.9,
+        },
+      ],
+    ]);
+    const matcher = new PgAliasMatcher(pool as never);
+
+    const results = await matcher.findMatches('romane conti');
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.entityIds).toEqual(['entity-romanee-conti']);
+    expect(results[0]?.lookupStrategy).toContain('phonetic_exact');
     expect(pool.queries).toHaveLength(1);
   });
 

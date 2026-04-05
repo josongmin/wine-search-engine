@@ -3,8 +3,8 @@ import {
   parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
 import type { HybridRouteDeps } from './route-deps.js';
-import { throwIfPolicyBlockedSearchResponse } from '../errors/policy-blocked.js';
 import { HybridRouteContract } from './route-contracts.js';
 import { toHybridSearchRequest } from './search-request-mappers.js';
 
@@ -15,14 +15,17 @@ export function registerHybridRoute(
   app: FastifyInstance,
   deps: HybridRouteDeps,
 ): void {
-  app.post('/v1/search/hybrid', async (request, reply) => {
-    const parsed = parseContractBody(request, HybridRouteContract);
-    const hybridRequest = toHybridSearchRequest(parsed);
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/search/hybrid',
+    contract: HybridRouteContract,
+    handler: async (request, reply) => {
+      const parsed = parseContractBody(request, HybridRouteContract);
+      const hybridRequest = toHybridSearchRequest(parsed);
 
-    const response = await deps.hybridUseCase.execute(hybridRequest, request.requestId);
+      const response = await deps.hybridUseCase.execute(hybridRequest, request.requestId);
 
-    throwIfPolicyBlockedSearchResponse(response);
-
-    sendRouteContractResponse(request, reply, HybridRouteContract, 200, response);
+      sendRouteContractResponse(request, reply, HybridRouteContract, 200, response);
+    },
   });
 }

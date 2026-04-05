@@ -13,7 +13,7 @@ describe('noisy entity benchmark eval', () => {
   it('loads the benchmark artifact with the expected category coverage', async () => {
     const cases = await loadNoisyEntityBenchmark('data/noisy-entity-benchmark.jsonl');
 
-    expect(cases).toHaveLength(30);
+    expect(cases).toHaveLength(33);
 
     const categoryCounts = new Map<string, number>();
     const languageCounts = new Map<string, number>();
@@ -26,7 +26,7 @@ describe('noisy entity benchmark eval', () => {
       expect(categoryCounts.get(category)).toBe(3);
     }
 
-    expect(languageCounts.get('en')).toBe(23);
+    expect(languageCounts.get('en')).toBe(26);
     expect(languageCounts.get('ko')).toBe(4);
     expect(languageCounts.get('mixed')).toBe(3);
   });
@@ -95,10 +95,17 @@ describe('noisy entity benchmark eval', () => {
 
     const report = scoreNoisyEntityBenchmark(cases, predictions);
 
-    expect(report.query_count).toBe(30);
+    expect(report.query_count).toBe(33);
     expect(report.recall_at_1).toBe(1);
     expect(report.recall_at_3).toBe(1);
     expect(report.mrr).toBe(1);
+    expect(report.provenance_checked_count).toBe(6);
+    expect(report.provenance_match_rate).toBe(1);
+    expect(report.provenance_misses).toHaveLength(0);
+    expect(report.resolution_checked_count).toBe(3);
+    expect(report.resolution_match_rate).toBe(1);
+    expect(report.false_exact_rate).toBe(0);
+    expect(report.resolution_misses).toHaveLength(0);
     expect(report.misses).toHaveLength(0);
   });
 
@@ -123,6 +130,49 @@ describe('noisy entity benchmark eval', () => {
     ];
 
     expect(() => validateNoisyEntityBenchmark(duplicateCases)).toThrow(/Duplicate benchmark_id/);
+  });
+
+  it('requires provenance expectations for transliteration and phonetic benchmark rows', () => {
+    const invalidCases: NoisyEntityBenchmarkCase[] = [
+      {
+        benchmark_id: 'case-1',
+        query: '오푸스원',
+        expected_entity_id: 'opus-one-2018',
+        category: 'transliteration',
+        language: 'ko',
+        difficulty: 'easy',
+      },
+      {
+        benchmark_id: 'case-2',
+        query: 'romane conti',
+        expected_entity_id: 'romanee-conti-2015',
+        category: 'phonetic',
+        language: 'en',
+        difficulty: 'hard',
+        expected_provenance_stage: 'phonetic',
+      },
+    ];
+
+    expect(() => validateNoisyEntityBenchmark(invalidCases)).toThrow(
+      /requires expected_provenance_stage/,
+    );
+  });
+
+  it('requires ambiguous resolution expectations for short noisy queries', () => {
+    const invalidCases: NoisyEntityBenchmarkCase[] = [
+      {
+        benchmark_id: 'case-1',
+        query: 'opus',
+        expected_entity_id: 'opus-one-2018',
+        category: 'noisy_short_form',
+        language: 'en',
+        difficulty: 'hard',
+      },
+    ];
+
+    expect(() => validateNoisyEntityBenchmark(invalidCases)).toThrow(
+      /requires expected_resolution/,
+    );
   });
 
   it('extracts ranked entity ids from the current search response shape', () => {

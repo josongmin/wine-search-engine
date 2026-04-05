@@ -124,6 +124,18 @@
 
 ---
 
+## 2026-04-06 — 6차: 문서↔코드 재대조 (Epic 9 · eval · v0.3)
+
+| 검증 | 명령 / 근거 | 결과 |
+|------|-------------|------|
+| `npm run eval` | `package.json` `"eval"` → `scripts/eval/run-offline-eval.ts`; `test -f` | **파일 존재** — 과거 `run-eval.ts` 가정 **폐기**; [`GAPS`](./GAPS.md) **G-04** 해소 |
+| Epic 9 본문 표 | `rg` `retrievalMode|matchReasons|abstainReason` in `search-response.ts`, `result-item.ts`, `response-builder.ts` | 플랜 `epic-9-llm-envelope.md` 표는 여전히 ❌ — **문서 드리프트**; **`missingInformation`만** 타입 갭 (`G-41`) |
+| v0.3 Epic 18 Track A | `test -f data/noisy-entity-benchmark.jsonl`; `test -f scripts/eval/run-noisy-entity-eval.ts` | **존재** — 벤치·러너 **부분 충족** |
+| v0.3 Epic 18 Track B | `test -f src/domain/query/service/query-normalizer.ts` | **존재** — 실행 계획 문서의 “신규”와 **불일치** → 문서 갱신 권장 |
+| SSOT | [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) | **§apr-6-v0.3**·Epic 9 드리프트 표·재현 블록 갱신 |
+
+---
+
 ## 이전 항목 (요약만 유지)
 
 - 2026-04-06 이전 초기 감사: [`BACKLOG.md`](./BACKLOG.md) 본문.

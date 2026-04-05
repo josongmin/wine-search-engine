@@ -10,11 +10,25 @@ interface AliasRow {
   confidence: number;
 }
 
+type FuzzyLookupStrategy =
+  | 'fuzzy_char_ngram'
+  | 'transliterated_fuzzy'
+  | 'phonetic_fuzzy';
+
 const MIN_FUZZY_QUERY_LENGTH = 5;
 const MAX_FUZZY_CANDIDATES = 200;
 const COMPACT_FUZZY_DISTANCE_RATIO = 0.25;
 const MIN_CHAR_NGRAM_OVERLAP = 0.45;
 const MIN_BIGRAM_OVERLAP = 0.6;
+const LATIN_VOWEL_RE = /[aeiouy]/g;
+const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
+  [/sch/g, 'ch'],
+  [/sh/g, 'ch'],
+  [/ph/g, 'f'],
+  [/eaux/g, 'o'],
+  [/eau/g, 'o'],
+  [/aux/g, 'o'],
+] as const;
 
 function charNgrams(value: string, size: number = 3): readonly string[] {
   if (value.length === 0) {
@@ -52,13 +66,31 @@ function compactForLookup(value: string): string {
   return value.replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-function bestFuzzySimilarity(
-  queryVariants: readonly string[],
-  candidateCompact: string,
-): number | null {
-  let best: number | null = null;
+function phoneticCompactForLookup(value: string): string {
+  let normalized = compactForLookup(value).toLowerCase();
+  for (const [pattern, replacement] of PHONETIC_NORMALIZATION_RULES) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+  return normalized.replace(LATIN_VOWEL_RE, '');
+}
 
-  for (const queryCompact of queryVariants) {
+interface QueryVariantCandidate {
+  readonly value: string;
+  readonly strategy: FuzzyLookupStrategy;
+}
+
+interface FuzzyAliasRow extends AliasRow {
+  readonly lookupStrategy: FuzzyLookupStrategy;
+}
+
+function bestFuzzySimilarity(
+  queryVariants: readonly QueryVariantCandidate[],
+  candidateCompact: string,
+): { similarity: number; strategy: FuzzyLookupStrategy } | null {
+  let best: { similarity: number; strategy: FuzzyLookupStrategy } | null = null;
+
+  for (const queryVariant of queryVariants) {
+    const queryCompact = queryVariant.value;
     const maxLen = Math.max(queryCompact.length, candidateCompact.length);
     const maxDistance = Math.max(1, Math.floor(maxLen * COMPACT_FUZZY_DISTANCE_RATIO));
     const distance = editDistance(queryCompact, candidateCompact);
@@ -75,8 +107,8 @@ function bestFuzzySimilarity(
 
     const editSimilarity = 1 - distance / maxLen;
     const similarity = Math.max(editSimilarity, trigramOverlap, bigramOverlap);
-    if (best === null || similarity > best) {
-      best = similarity;
+    if (best === null || similarity > best.similarity) {
+      best = { similarity, strategy: queryVariant.strategy };
     }
   }
 
@@ -118,24 +150,31 @@ function editDistance(a: string, b: string): number {
   return distance;
 }
 
-function groupRows(rows: readonly AliasRow[]): readonly AliasMatchResult[] {
+function groupRows<TRow extends AliasRow>(
+  rows: readonly TRow[],
+  lookupStrategy: string | ((row: TRow) => string) = 'exact',
+): readonly AliasMatchResult[] {
   const byNorm = new Map<
     string,
-    { surfaceForm: string; entityIds: Set<string>; confidence: number }
+    { surfaceForm: string; entityIds: Set<string>; confidence: number; strategies: Set<string> }
   >();
 
   for (const row of rows) {
     const existing = byNorm.get(row.normalized_value);
+    const strategyForRow =
+      typeof lookupStrategy === 'function' ? lookupStrategy(row) : lookupStrategy;
     if (existing == null) {
       byNorm.set(row.normalized_value, {
         surfaceForm: row.surface_form,
         entityIds: new Set([row.entity_id]),
         confidence: row.confidence,
+        strategies: new Set([strategyForRow]),
       });
       continue;
     }
 
     existing.entityIds.add(row.entity_id);
+    existing.strategies.add(strategyForRow);
     if (row.confidence > existing.confidence) {
       existing.confidence = row.confidence;
     }
@@ -148,6 +187,7 @@ function groupRows(rows: readonly AliasRow[]): readonly AliasMatchResult[] {
       normalizedForm: norm,
       entityIds: Array.from(data.entityIds).map(createEntityId),
       matchConfidence: data.confidence,
+      lookupStrategy: Array.from(data.strategies).sort().join('+'),
     });
   }
 
@@ -175,6 +215,8 @@ export class PgAliasMatcher implements AliasMatcher {
     const words = views.punctuationStripped.split(/\s+/).filter(Boolean);
     const tokens = new Set<string>();
     const compactTokens = new Set<string>();
+    const transliteratedTokens = new Set<string>();
+    const phoneticTokens = new Set<string>();
 
     for (const value of views.lookupVariants) {
       if (value.length > 0) {
@@ -186,6 +228,13 @@ export class PgAliasMatcher implements AliasMatcher {
     }
     if (views.compact.length > 0) {
       compactTokens.add(views.compact);
+    }
+    if (views.transliterated !== undefined && views.transliterated.length > 0) {
+      transliteratedTokens.add(views.transliterated);
+      transliteratedTokens.add(compactForLookup(views.transliterated));
+    }
+    if (views.phoneticCompact !== undefined && views.phoneticCompact.length > 0) {
+      phoneticTokens.add(views.phoneticCompact);
     }
     for (const w of words) {
       if (w.length >= 2) {
@@ -205,6 +254,8 @@ export class PgAliasMatcher implements AliasMatcher {
 
     const tokenList = Array.from(tokens);
     const compactList = Array.from(compactTokens).filter((token) => token.length > 0);
+    const transliteratedList = Array.from(transliteratedTokens).filter((token) => token.length > 0);
+    const phoneticList = Array.from(phoneticTokens).filter((token) => token.length > 0);
 
     const result = await this.pool.query<AliasRow>(
       `SELECT entity_id, surface_form, normalized_value, confidence
@@ -212,21 +263,84 @@ export class PgAliasMatcher implements AliasMatcher {
        WHERE (
          normalized_value = ANY($1)
          OR regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g') = ANY($2)
+         OR lower(regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g')) = ANY($3)
+         OR regexp_replace(
+              lower(
+                regexp_replace(
+                  regexp_replace(
+                    regexp_replace(
+                      regexp_replace(
+                        regexp_replace(
+                          regexp_replace(
+                            regexp_replace(normalized_value, '[^[:alnum:]]', '', 'g'),
+                            'sch', 'ch', 'g'
+                          ),
+                          'sh', 'ch', 'g'
+                        ),
+                        'ph', 'f', 'g'
+                      ),
+                      'eaux', 'o', 'g'
+                    ),
+                    'eau', 'o', 'g'
+                  ),
+                  'aux', 'o', 'g'
+                )
+              ),
+              '[aeiouy]', '', 'g'
+            ) = ANY($4)
        ) AND is_suppressed = FALSE
        ORDER BY confidence DESC`,
-      [tokenList, compactList],
+      [tokenList, compactList, transliteratedList, phoneticList],
     );
 
     if (result.rows.length > 0) {
-      return groupRows(result.rows);
+      const transliteratedSet = new Set(transliteratedList);
+      const phoneticSet = new Set(phoneticList);
+      const exactSet = new Set(tokenList);
+      const compactSet = new Set(compactList);
+      return groupRows(result.rows, (row) => {
+        const normalizedValue = row.normalized_value.toLowerCase();
+        const compactValue = compactForLookup(normalizedValue);
+        const phoneticValue = phoneticCompactForLookup(normalizedValue);
+        if (
+          transliteratedSet.has(normalizedValue) ||
+          transliteratedSet.has(compactValue)
+        ) {
+          return 'transliterated_exact';
+        }
+        if (compactSet.has(compactValue)) {
+          return 'compact_exact';
+        }
+        if (exactSet.has(normalizedValue)) {
+          return 'exact';
+        }
+        if (phoneticSet.has(phoneticValue)) {
+          return 'phonetic_exact';
+        }
+        return 'lexical_exact';
+      });
     }
 
     const fuzzyVariants = Array.from(
-      new Set(
-        views.lookupVariants
-          .map((value) => compactForLookup(value))
-          .filter((value) => value.length >= MIN_FUZZY_QUERY_LENGTH),
-      ),
+      new Map<string, QueryVariantCandidate>(
+        views.lookupVariants.flatMap((value) => {
+          const compactValue = compactForLookup(value);
+          if (compactValue.length < MIN_FUZZY_QUERY_LENGTH) {
+            return [];
+          }
+
+          const strategy: FuzzyLookupStrategy =
+            views.phoneticCompact !== undefined && compactValue === views.phoneticCompact
+              ? 'phonetic_fuzzy'
+              : views.transliterated !== undefined &&
+                  (value === views.transliterated ||
+                    compactValue === compactForLookup(views.transliterated))
+                ? 'transliterated_fuzzy'
+                : 'fuzzy_char_ngram';
+
+          return [[compactValue, { value: compactValue, strategy }] as const];
+        }),
+      ).values(),
     );
 
     if (fuzzyVariants.length === 0) {
@@ -234,7 +348,7 @@ export class PgAliasMatcher implements AliasMatcher {
     }
 
     const fuzzyGrams = Array.from(
-      new Set(fuzzyVariants.flatMap((value) => charNgrams(value))),
+      new Set(fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
     );
 
     const fuzzyCandidates = await this.pool.query<AliasRow>(
@@ -252,25 +366,26 @@ export class PgAliasMatcher implements AliasMatcher {
       [fuzzyGrams],
     );
 
-    const fuzzyRows = fuzzyCandidates.rows
+    const fuzzyRows: FuzzyAliasRow[] = fuzzyCandidates.rows
       .map((row) => {
         const candidateCompact = compactForLookup(row.normalized_value);
         if (candidateCompact.length === 0) {
           return null;
         }
 
-        const similarity = bestFuzzySimilarity(fuzzyVariants, candidateCompact);
-        if (similarity === null) {
+        const fuzzyMatch = bestFuzzySimilarity(fuzzyVariants, candidateCompact);
+        if (fuzzyMatch === null) {
           return null;
         }
 
         return {
           ...row,
-          confidence: row.confidence * similarity,
+          confidence: row.confidence * fuzzyMatch.similarity,
+          lookupStrategy: fuzzyMatch.strategy,
         };
       })
-      .filter((row): row is AliasRow => row !== null);
+      .filter((row): row is FuzzyAliasRow => row !== null);
 
-    return groupRows(fuzzyRows);
+    return groupRows<FuzzyAliasRow>(fuzzyRows, (row) => row.lookupStrategy);
   }
 }

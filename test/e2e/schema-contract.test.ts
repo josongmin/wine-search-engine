@@ -93,9 +93,9 @@ describe('SearchResponseV1 Schema Contract', () => {
 
     expect(statusCode).toBe(200);
     const body = json as Record<string, unknown>;
-    expect(body['engineDecision']).toBeDefined();
-    const decision = body['engineDecision'] as Record<string, unknown>;
-    expect(decision['decisionStatus']).toMatch(/^(resolved|ambiguous|failed)$/);
+    expect(body['engine_decision']).toBeDefined();
+    const decision = body['engine_decision'] as Record<string, unknown>;
+    expect(decision['decision_status']).toMatch(/^(resolved|ambiguous|failed)$/);
   });
 
   it('meta.requestId is truthy in all successful responses', async () => {
@@ -104,8 +104,8 @@ describe('SearchResponseV1 Schema Contract', () => {
     expect(statusCode).toBe(200);
     const body = json as Record<string, unknown>;
     const meta = body['meta'] as Record<string, unknown>;
-    expect(meta['requestId']).toBeTruthy();
-    expect(typeof meta['requestId']).toBe('string');
+    expect(meta['request_id']).toBeTruthy();
+    expect(typeof meta['request_id']).toBe('string');
   });
 
   it('meta.engineSchemaVersion is present and set correctly', async () => {
@@ -130,7 +130,7 @@ describe('SearchResponseV1 Schema Contract', () => {
     expect(results.length).toBeGreaterThan(0);
     for (const result of results) {
       const r = result as Record<string, unknown>;
-      const evidenceItems = r['evidenceItems'] as unknown[];
+      const evidenceItems = r['evidence_items'] as unknown[];
       expect(evidenceItems.length).toBeGreaterThan(0);
 
       // Filter out synthetic fallback evidence (type === 'no_evidence_available')
@@ -147,8 +147,8 @@ describe('SearchResponseV1 Schema Contract', () => {
 
     expect(statusCode).toBe(200);
     const body = json as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
-    const snapshot = decision['decisionSnapshot'] as Record<string, unknown>;
+    const decision = body['engine_decision'] as Record<string, unknown>;
+    const snapshot = decision['decision_snapshot'] as Record<string, unknown>;
 
     expect(snapshot).toHaveProperty('model_versions');
     expect(snapshot).toHaveProperty('index_versions');
@@ -163,8 +163,8 @@ describe('SearchResponseV1 Schema Contract', () => {
 
     expect(statusCode).toBe(200);
     const body = json as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
-    expect(decision['confidenceSemantics']).toBe('calibrated_decision_confidence');
+    const decision = body['engine_decision'] as Record<string, unknown>;
+    expect(decision['confidence_semantics']).toBe('calibrated_decision_confidence');
   });
 });
 

@@ -7,7 +7,7 @@ export {
   type AmbiguityType,
   type AmbiguityState,
 } from './model/ambiguity-state.js';
-export type { ResolverDecisionTrace } from './model/decision-trace.js';
+export type { ResolverDecisionTrace, ResolverQueryProvenance } from './model/decision-trace.js';
 export type {
   ResolvedCandidate,
   ResolverCandidate,

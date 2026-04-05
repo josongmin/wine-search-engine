@@ -1,6 +1,7 @@
 import type { DecisionStatus, NextAction, QueryClass } from '../../shared/types/index.js';
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
+import type { NormalizedQueryViews } from '../../query/model/query-views.js';
 import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
@@ -24,6 +25,9 @@ export interface ResolverInput {
 
   /** Lowercased, accent-stripped, whitespace-collapsed form. */
   readonly normalizedQuery: string;
+
+  /** Multi-view query normalization snapshot for noisy lookup debugging. */
+  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
 
   /** Query class label used to select thresholds. */
   readonly queryClass: QueryClass;
@@ -55,6 +59,27 @@ export interface ResolverInput {
  * Value should be tuned via AURC on the gate eval set (RFC-009 §5.3).
  */
 export const DEFAULT_ALPHA = 0.3;
+
+const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
+  exact: 0.06,
+  lexical_exact: 0.05,
+  compact_exact: 0.04,
+  transliterated_exact: 0.05,
+  phonetic_exact: 0.045,
+  fuzzy_char_ngram: 0.025,
+  transliterated_fuzzy: 0.03,
+  phonetic_fuzzy: 0.03,
+  substring: -0.015,
+  smart_document: -0.02,
+} as const;
+
+type LookupStrategy = keyof typeof LOOKUP_STRATEGY_SCORE_WEIGHTS;
+
+interface LookupStrategyAdjustment {
+  readonly entityId: string;
+  readonly strategies: readonly string[];
+  readonly rawScoreDelta: number;
+}
 
 /**
  * Computes the conformal prediction set size for a single query.
@@ -139,12 +164,14 @@ export class Resolver {
       candidate,
       rawScore: this.candidateScorer.score(candidate),
     }));
+    const lookupStrategyAdjustments = this.collectLookupStrategyAdjustments(input);
+    const adjustedScored = this.applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
 
     // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2)
     const blendedScored =
-      this.learnedMatcher !== undefined && scored.length > 0
-        ? await this.applyLearnedMatcherBlend(input.rawQuery, candidates, scored)
-        : scored;
+      this.learnedMatcher !== undefined && adjustedScored.length > 0
+        ? await this.applyLearnedMatcherBlend(input.rawQuery, candidates, adjustedScored)
+        : adjustedScored;
 
     // Step 3: Sort by raw score descending
     blendedScored.sort((a, b) => b.rawScore - a.rawScore);
@@ -168,6 +195,7 @@ export class Resolver {
     // Step 6: Apply decision boundary
     const thresholds = this.getThresholds(input.queryClass);
     const { status, nextAction, reasonCodes } = this.applyDecisionBoundary(
+      input,
       calibrated,
       ambiguityState,
       thresholds,
@@ -178,11 +206,13 @@ export class Resolver {
     const topCandidate = resolvedCandidates[0];
 
     const trace = this.buildTrace(
+      input,
       input.queryClass,
       calibrated,
       ambiguityState,
       thresholds,
       reasonCodes,
+      lookupStrategyAdjustments,
     );
 
     const conformalSetSize = computeConformalSetSize(
@@ -227,6 +257,7 @@ export class Resolver {
    * - Otherwise => ambiguous or failed
    */
   private applyDecisionBoundary(
+    input: ResolverInput,
     calibrated: CalibratedResolutionScore,
     ambiguity: AmbiguityState,
     thresholds: ThresholdEntry,
@@ -255,6 +286,11 @@ export class Resolver {
       }
     }
 
+    if (this.shouldConservativelyClarifyNoisyShortForm(input, ambiguity)) {
+      reasonCodes.push('NOISY_SHORT_FORM_REQUIRE_CLARIFICATION');
+      return { status: 'ambiguous', nextAction: 'clarify', reasonCodes };
+    }
+
     // Decision boundary: all three conditions must hold for resolution
     if (cMeetsThreshold && gapMeetsThreshold && !isAmbiguous) {
       reasonCodes.push('RESOLVED_ALL_GATES_PASSED');
@@ -275,6 +311,28 @@ export class Resolver {
 
     reasonCodes.push('NO_VIABLE_CANDIDATES');
     return { status: 'failed', nextAction: 'fail', reasonCodes };
+  }
+
+  private shouldConservativelyClarifyNoisyShortForm(
+    input: ResolverInput,
+    ambiguity: AmbiguityState,
+  ): boolean {
+    if (input.queryClass !== 'short_entity' && input.queryClass !== 'ambiguous_short_form') {
+      return false;
+    }
+
+    const strategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const hasNoisyLookup =
+      strategies.includes('compact_exact') ||
+      strategies.includes('fuzzy_char_ngram') ||
+      strategies.includes('transliterated_fuzzy') ||
+      strategies.includes('substring');
+
+    if (!hasNoisyLookup) {
+      return false;
+    }
+
+    return ambiguity.detected || input.anchorCandidates.length !== 1;
   }
 
   /**
@@ -344,12 +402,37 @@ export class Resolver {
    * Builds a complete resolver decision trace for auditability.
    */
   private buildTrace(
+    input: ResolverInput,
     queryClass: QueryClass,
     calibrated: CalibratedResolutionScore,
     ambiguity: AmbiguityState,
     thresholds: ThresholdEntry,
     reasonCodes: readonly string[],
+    lookupStrategyAdjustments: readonly LookupStrategyAdjustment[],
   ): ResolverDecisionTrace {
+    const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
+    const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const queryProvenance =
+      input.normalizedQueryViews !== undefined ||
+      anchorLookupVariants.length > 0 ||
+      anchorLookupStrategies.length > 0 ||
+      lookupStrategyAdjustments.length > 0
+        ? {
+            ...(input.normalizedQueryViews !== undefined
+              ? { normalizedQueryViews: input.normalizedQueryViews }
+              : {}),
+            ...(anchorLookupVariants.length > 0
+              ? { anchorLookupVariants }
+              : {}),
+            ...(anchorLookupStrategies.length > 0
+              ? { anchorLookupStrategies }
+              : {}),
+            ...(lookupStrategyAdjustments.length > 0
+              ? { lookupStrategyAdjustments }
+              : {}),
+          }
+        : undefined;
+
     return {
       queryClass,
       top1CalibratedScore: calibrated.top1CalibratedScore,
@@ -363,6 +446,127 @@ export class Resolver {
         gapThreshold: thresholds.gapTau,
       },
       outcomeReasonCodes: reasonCodes,
+      ...(queryProvenance !== undefined ? { queryProvenance } : {}),
     };
+  }
+
+  private collectAnchorLookupVariants(anchors: readonly AnchorCandidate[]): readonly string[] {
+    const variants = new Set<string>();
+    for (const anchor of anchors) {
+      for (const variant of anchor.lookupVariants ?? []) {
+        if (variant.length > 0) {
+          variants.add(variant);
+        }
+      }
+    }
+
+    return [...variants].sort();
+  }
+
+  private collectAnchorLookupStrategies(anchors: readonly AnchorCandidate[]): readonly string[] {
+    const strategies = new Set<string>();
+    for (const anchor of anchors) {
+      for (const strategy of anchor.lookupStrategies ?? []) {
+        if (strategy.length > 0) {
+          strategies.add(strategy);
+        }
+      }
+    }
+
+    return [...strategies].sort();
+  }
+
+  private collectLookupStrategyAdjustments(
+    input: ResolverInput,
+  ): readonly LookupStrategyAdjustment[] {
+    const byEntity = new Map<string, Set<string>>();
+
+    for (const anchor of input.anchorCandidates) {
+      const strategies = anchor.lookupStrategies ?? [];
+      if (strategies.length === 0) {
+        continue;
+      }
+
+      for (const entityId of anchor.candidateEntityIds) {
+        const key = String(entityId);
+        const existing = byEntity.get(key) ?? new Set<string>();
+        for (const strategy of strategies) {
+          if (strategy.length > 0) {
+            existing.add(strategy);
+          }
+        }
+        byEntity.set(key, existing);
+      }
+    }
+
+    return [...byEntity.entries()]
+      .map(([entityId, strategies]) => {
+        const strategyList = [...strategies].sort();
+        const rawScoreDelta = this.computeLookupStrategyAdjustment(
+          strategyList,
+          input.queryClass,
+        );
+        return {
+          entityId,
+          strategies: strategyList,
+          rawScoreDelta,
+        };
+      })
+      .filter((entry) => entry.rawScoreDelta !== 0);
+  }
+
+  private applyLookupStrategyAdjustments(
+    scored: readonly { candidate: ResolverCandidate; rawScore: number }[],
+    adjustments: readonly LookupStrategyAdjustment[],
+  ): Array<{ candidate: ResolverCandidate; rawScore: number }> {
+    if (adjustments.length === 0) {
+      return [...scored];
+    }
+
+    const deltaByEntity = new Map(
+      adjustments.map((entry) => [entry.entityId, entry.rawScoreDelta]),
+    );
+
+    return scored.map((entry) => ({
+      candidate: entry.candidate,
+      rawScore: entry.rawScore + (deltaByEntity.get(String(entry.candidate.entityId)) ?? 0),
+    }));
+  }
+
+  private computeLookupStrategyAdjustment(
+    strategies: readonly string[],
+    queryClass: QueryClass,
+  ): number {
+    let delta = 0;
+    for (const strategy of strategies) {
+      if (this.isLookupStrategy(strategy)) {
+        delta += LOOKUP_STRATEGY_SCORE_WEIGHTS[strategy];
+      }
+    }
+
+    if (delta === 0) {
+      return 0;
+    }
+
+    const isShortForm =
+      queryClass === 'short_entity' || queryClass === 'ambiguous_short_form';
+    const hasOnlyNoisySupport = strategies.every(
+      (strategy) =>
+        strategy !== 'exact' &&
+        strategy !== 'lexical_exact' &&
+        strategy !== 'compact_exact' &&
+        strategy !== 'transliterated_exact' &&
+        strategy !== 'phonetic_exact',
+    );
+
+    if (isShortForm && hasOnlyNoisySupport && delta > 0) {
+      return Math.min(delta, 0.01);
+    }
+
+    return Number(delta.toFixed(4));
+  }
+
+  private isLookupStrategy(strategy: string): strategy is LookupStrategy {
+    return strategy in LOOKUP_STRATEGY_SCORE_WEIGHTS;
   }
 }

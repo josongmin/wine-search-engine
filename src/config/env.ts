@@ -54,6 +54,10 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
 
   // Watchlist webhook signing secret (Epic 17.1)
+  WATCHLIST_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .optional(),
   WEBHOOK_SECRET: z.string().min(16).optional(),
 
   // Kill Switches
@@ -90,6 +94,12 @@ const envSchema = z.object({
 type EnvVars = z.infer<typeof envSchema>;
 
 function buildConfig(parsed: EnvVars) {
+  const watchlistEnabled = parsed.WATCHLIST_ENABLED ?? parsed.WEBHOOK_SECRET !== undefined;
+
+  if (watchlistEnabled && parsed.WEBHOOK_SECRET === undefined) {
+    throw new Error('WATCHLIST_ENABLED requires WEBHOOK_SECRET to be set');
+  }
+
   return {
     nodeEnv: parsed.NODE_ENV,
     port: parsed.PORT,
@@ -152,6 +162,7 @@ function buildConfig(parsed: EnvVars) {
 
     /** Watchlist webhook settings (Epic 17.1). */
     watchlist: {
+      enabled: watchlistEnabled,
       webhookSecret: parsed.WEBHOOK_SECRET,
     },
 

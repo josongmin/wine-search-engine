@@ -1,101 +1,24 @@
-import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import type {
-  SearchQueryBudget,
-  SearchRequest,
-  SearchRequestContext,
-  SearchSessionContext,
-} from './search-request.dto.js';
+  BatchErrorCode,
+  BatchSearchOptions,
+  BatchSearchRequestItem,
+  BatchSearchResponse,
+  BatchSearchResultItem,
+} from './batch-search.dto.js';
+import type { SearchRequest } from './search-request.dto.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
 
-/**
- * Batch search request item: a single request within the batch.
- */
-export interface BatchSearchRequestItem {
-  /** Client-provided request identifier, unique within the batch. */
-  readonly id: string;
-  /** Search query string. */
-  readonly query: string;
-  /** Optional result limit; defaults to 5. */
-  readonly limit?: number | undefined;
-  /** Optional retrieval mode override. */
-  readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
-  /** Optional context for this request. */
-  readonly context?: SearchRequestContext | undefined;
-  /** Optional session context for this request. */
-  readonly sessionContext?: SearchSessionContext | undefined;
-  /** Optional query budget for this request. */
-  readonly queryBudget?: SearchQueryBudget | undefined;
-}
-
-/**
- * Options for batch execution.
- */
-export interface BatchSearchOptions {
-  /** Stop execution on the first error (default: false). */
-  readonly fail_fast?: boolean | undefined;
-  /** Timeout per request in milliseconds (default: 5000, max: 30000). */
-  readonly timeout_ms?: number | undefined;
-}
-
-/**
- * Machine-readable error codes for batch search errors.
- */
-export type BatchErrorCode =
-  | 'POLICY_BLOCKED'
-  | 'QUERY_PARSE_ERROR'
-  | 'RETRIEVAL_TIMEOUT'
-  | 'INTERNAL_ERROR';
-
-/**
- * Error object for failed requests.
- */
-export interface BatchSearchError {
-  readonly code: BatchErrorCode;
-  readonly message: string;
-}
-
-/**
- * Successful result item: request executed and returned a response.
- */
-export interface BatchSearchResultSuccess {
-  readonly id: string;
-  readonly status: 'succeeded';
-  readonly response: SearchResponseV1;
-}
-
-/**
- * Failed result item: request execution failed.
- */
-export interface BatchSearchResultFailure {
-  readonly id: string;
-  readonly status: 'failed';
-  readonly error: BatchSearchError;
-}
-
-/**
- * Result item: either success or failure.
- */
-export type BatchSearchResultItem = BatchSearchResultSuccess | BatchSearchResultFailure;
-
-/**
- * Batch search response: the complete result of a batch operation.
- */
-export interface BatchSearchResponse {
-  /** Unique batch identifier, generated or provided by caller. */
-  readonly batch_id: string;
-  /** Total number of requests in the batch. */
-  readonly total: number;
-  /** Number of requests that succeeded. */
-  readonly succeeded: number;
-  /** Number of requests that failed. */
-  readonly failed: number;
-  /** Individual request results. */
-  readonly results: readonly BatchSearchResultItem[];
-  /** Total wall-clock time for batch execution (milliseconds). */
-  readonly processing_time_ms: number;
-}
+export type {
+  BatchErrorCode,
+  BatchSearchOptions,
+  BatchSearchRequestItem,
+  BatchSearchResponse,
+  BatchSearchResultFailure,
+  BatchSearchResultItem,
+  BatchSearchResultSuccess,
+} from './batch-search.dto.js';
 
 /**
  * BatchSearchUseCase: orchestrates parallel or fail-fast batch search execution.

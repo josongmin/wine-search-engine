@@ -11,6 +11,8 @@ export interface AliasMatchResult {
   readonly entityIds: readonly EntityId[];
   /** Match confidence in [0, 1]. This is an alias-match confidence, NOT a calibrated C. */
   readonly matchConfidence: number;
+  /** Strategy label for noisy lookup provenance. */
+  readonly lookupStrategy?: string | undefined;
 }
 
 /**
@@ -76,6 +78,9 @@ export class AnchorExtractor {
       normalizedForm: match.normalizedForm,
       candidateEntityIds: match.entityIds,
       lookupVariants: match.lookupVariants,
+      ...(match.lookupStrategy !== undefined
+        ? { lookupStrategies: match.lookupStrategy.split('+') }
+        : {}),
       confidence: match.matchConfidence,
       source: 'alias' as const,
     }));
@@ -96,6 +101,7 @@ export class AnchorExtractor {
         readonly confidence: number;
         readonly priority: number;
         readonly lookupVariants: Set<string>;
+        readonly lookupStrategies: Set<string>;
       }
     >();
 
@@ -119,10 +125,14 @@ export class AnchorExtractor {
             confidence: match.matchConfidence,
             priority,
             lookupVariants: existing?.lookupVariants ?? new Set<string>(),
+            lookupStrategies: existing?.lookupStrategies ?? new Set<string>(),
           });
         }
 
         merged.get(key)?.lookupVariants.add(lookupQuery);
+        if (match.lookupStrategy !== undefined) {
+          merged.get(key)?.lookupStrategies.add(match.lookupStrategy);
+        }
       }
     }
 
@@ -133,9 +143,12 @@ export class AnchorExtractor {
         }
         return left.priority - right.priority;
       })
-      .map(({ match, lookupVariants }) => ({
+      .map(({ match, lookupVariants, lookupStrategies }) => ({
         ...match,
         lookupVariants: [...lookupVariants],
+        ...(lookupStrategies.size > 0
+          ? { lookupStrategy: [...lookupStrategies].sort().join('+') }
+          : {}),
       }));
   }
 

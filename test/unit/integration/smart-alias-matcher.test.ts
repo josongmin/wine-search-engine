@@ -89,6 +89,29 @@ describe('SmartAliasMatcher — SOTA++ Enhancements', () => {
       expect(results[0]!.entityIds).toContain(entityId);
       expect(results[0]!.matchConfidence).toBeGreaterThan(0.85);
     });
+
+    it('should match Korean transliteration directly against latin alias values', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Chateau Margaux', entityId, 0.95);
+
+      const results = await matcher.findMatches('샤토 마고');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.lookupStrategy).toContain('transliterated_exact');
+    });
+
+    it('should match phonetic near-miss aliases via phonetic compact exactness', async () => {
+      const matcher = new InMemoryAliasMatcher();
+      const entityId = createEntityId();
+      matcher.addAlias('Romanee Conti', entityId, 0.94);
+
+      const results = await matcher.findMatches('romane conti');
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0]!.entityIds).toContain(entityId);
+      expect(results[0]!.lookupStrategy).toContain('phonetic_exact');
+      expect(results[0]!.matchConfidence).toBeGreaterThan(0.8);
+    });
   });
 
   describe('Smart alias generation from indexed documents', () => {

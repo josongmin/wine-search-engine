@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DomainError } from '../../../../src/domain/shared/error/domain-error.js';
+import { PolicyBlockedError } from '../../../../src/domain/shared/error/policy-blocked.js';
 import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
 import { registerRequestContext } from '../../../../src/interface/http/middleware/request-context.js';
 import { registerHybridRoute } from '../../../../src/interface/http/routes/hybrid.route.js';
@@ -14,47 +15,6 @@ import type {
   SearchRouteDeps,
 } from '../../../../src/interface/http/routes/route-deps.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
-
-function buildPolicyBlockedResponse(): SearchResponseV1 {
-  return {
-    queryType: 'search',
-    engineDecision: {
-      decisionStatus: 'failed',
-      nextAction: 'fail',
-      route: 'security_gate',
-      decisionConfidence: 0,
-      confidenceSemantics: 'calibrated_decision_confidence',
-      decisionTraceRef: 'trace-1',
-      decisionSnapshot: {
-        model_versions: {},
-        index_versions: {},
-        policy_rule_version: '1.0.0',
-        threshold_profile_id: 'default',
-        planner_version: 'security_gate',
-        feature_flags: {},
-      },
-      failure_reason: 'POLICY_BLOCKED',
-    },
-    results: [],
-    meta: {
-      requestId: 'req-1',
-      queryTimeMs: 1,
-      route: 'security_gate',
-      version: '1.0.0',
-      engine_schema_version: 'search_response_v1',
-      decisionSnapshot: {
-        model_versions: {},
-        index_versions: {},
-        policy_rule_version: '1.0.0',
-        threshold_profile_id: 'default',
-        planner_version: 'security_gate',
-        feature_flags: {},
-      },
-      response_hash: 'hash',
-      debugRefs: ['injection_defense:LAYER_1_BLOCKED:SYSTEM_PROMPT_INJECTION'],
-    },
-  };
-}
 
 function buildNonPolicyFailureResponse(): SearchResponseV1 {
   return {
@@ -121,7 +81,7 @@ describe('public query route security semantics', () => {
   it('/v1/search returns 403 with RFC-014 policy error body for policy blocks', async () => {
     const deps: SearchRouteDeps = {
       searchUseCase: {
-        execute: vi.fn().mockResolvedValue(buildPolicyBlockedResponse()),
+        execute: vi.fn().mockRejectedValue(new PolicyBlockedError()),
       },
       decomposedSearchUseCase: {
         execute: vi.fn(),
@@ -158,7 +118,7 @@ describe('public query route security semantics', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      engineDecision: {
+      engine_decision: {
         failure_reason: 'NO_RESULTS',
       },
     });
@@ -167,7 +127,7 @@ describe('public query route security semantics', () => {
   it('/v1/search/hybrid returns 403 with the same policy error body for policy blocks', async () => {
     const deps: HybridRouteDeps = {
       hybridUseCase: {
-        execute: vi.fn().mockResolvedValue(buildPolicyBlockedResponse()),
+        execute: vi.fn().mockRejectedValue(new PolicyBlockedError()),
       },
     };
 

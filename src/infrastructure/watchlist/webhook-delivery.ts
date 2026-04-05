@@ -35,6 +35,14 @@ export interface WebhookDeliveryObserver {
   onAttempt?(log: DeliveryLog): Promise<void> | void;
 }
 
+export interface WatchlistDeliveryPort {
+  deliver(
+    entry: WatchlistEntry,
+    event: WatchlistChangeEvent,
+    observer?: WebhookDeliveryObserver,
+  ): Promise<boolean>;
+}
+
 interface WebhookAttemptResult {
   readonly statusCode: number | null;
   readonly errorMessage: string | null;
@@ -45,7 +53,7 @@ interface WebhookAttemptResult {
  * Delivers watchlist events via HTTP webhook with exponential backoff retry.
  * Computes HMAC-SHA256 signature using webhook secret from config.
  */
-export class WebhookDelivery {
+export class WebhookDelivery implements WatchlistDeliveryPort {
   private readonly secret: string;
 
   /**

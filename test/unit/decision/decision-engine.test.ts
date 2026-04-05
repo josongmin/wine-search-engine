@@ -71,6 +71,20 @@ function makeResolverResult(overrides?: {
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0.60, gapThreshold: 0.10 },
       outcomeReasonCodes: [],
+      queryProvenance: {
+        normalizedQueryViews: {
+          raw: 'Opus-One 18',
+          strict: 'opus-one 18',
+          accentless: 'opus-one 18',
+          collapsedWhitespace: 'opus-one 18',
+          punctuationStripped: 'opus one 18',
+          compact: 'opusone18',
+          vintageCanonicalized: 'opus one 2018',
+          vintageStripped: 'opus one',
+          lookupVariants: ['opus-one 18', 'opus one 18', 'opusone18'],
+        },
+        anchorLookupVariants: ['opusone18', 'opus one 2018'],
+      },
     },
     conformalSetSize: 1,
   };
@@ -291,6 +305,16 @@ describe('DecisionEngine', () => {
     expect(output.decisionTrace.thresholds.resolveThreshold).toBe(0.60);
     // Wave 3: dynamic gap threshold for short_entity is 0.03 (was 0.10)
     expect(output.decisionTrace.thresholds.gapThreshold).toBe(0.03);
+  });
+
+  it('DecisionTrace preserves query provenance from the resolver trace', async () => {
+    const input = makeDecisionInput();
+    const output = await engine.decide(input, snapshot);
+
+    expect(output.decisionTrace.queryProvenance).toBeDefined();
+    expect(output.decisionTrace.queryProvenance?.anchorLookupVariants).toEqual(
+      expect.arrayContaining(['opusone18', 'opus one 2018']),
+    );
   });
 
   it('resolved output includes selectedEntity and chosenEntityId', async () => {

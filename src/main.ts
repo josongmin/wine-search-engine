@@ -1,10 +1,17 @@
 import { loadConfig } from './config/env.js';
 import { createContainer } from './config/container.js';
-import type { RuntimeHandles } from './config/runtime-handles.js';
+import { buildHealthRouteOptions } from './config/readiness.js';
+import { expectsRedisAtStartup, isWatchlistEnabled } from './config/watchlist.js';
+import {
+  createManagedRuntimeHandles,
+  type RuntimeHandles,
+} from './config/runtime-handles.js';
 import { createServer } from './interface/http/server.js';
-import type { HealthRouteOptions, ReadinessStatus } from './interface/http/routes/health.route.js';
-import { getOptionalPgPool, closePgPool } from './infrastructure/db/pg-pool.js';
-import { closeRedisClient, connectRedisClient } from './infrastructure/db/redis-client.js';
+import { createPgPool, shouldUsePgPool } from './infrastructure/db/pg-pool.js';
+import { connectRedisClient } from './infrastructure/db/redis-client.js';
+import { getTracer, initTelemetry } from './infrastructure/telemetry/tracer.js';
+import { RedisWatchlistPublisher } from './infrastructure/watchlist/redis-watchlist-publisher.js';
+import { RedisWatchlistSubscriber } from './infrastructure/watchlist/redis-watchlist-subscriber.js';
 
 /**
  * Wine Intelligence Engine — main entry point.
@@ -17,56 +24,36 @@ import { closeRedisClient, connectRedisClient } from './infrastructure/db/redis-
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  const telemetrySdk = initTelemetry();
 
   // Step 1 & 2: Create container with loaded config and PG pool
   // Pool is required for production: PG adapters, evaluation, LTR model loading
-  const pool = getOptionalPgPool(config.pg);
-  const expectsRedisAtStartup = !config.killSwitch.queryCache
-    || (config.anthropic.apiKey !== undefined && !config.killSwitch.injectionJudge)
-    || config.watchlist.webhookSecret !== undefined;
+  const pool = shouldUsePgPool(config.pg) ? createPgPool(config.pg) : undefined;
   let redisClient: RuntimeHandles['redisClient'] | null = null;
-  if (expectsRedisAtStartup) {
+  if (expectsRedisAtStartup(config)) {
     try {
       redisClient = (await connectRedisClient(config.redis)) ?? null;
     } catch (err) {
+      if (isWatchlistEnabled(config)) {
+        throw new Error(
+          `Watchlist delivery requires Redis at startup: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       console.warn('[Main] Redis unavailable during startup; continuing without Redis-backed features:', err);
     }
   }
-  const container = await createContainer(config, {
+  const runtimeHandles: RuntimeHandles = {
     ...(pool ? { pool } : {}),
     ...(redisClient ? { redisClient } : {}),
-  });
-  const healthOptions: HealthRouteOptions = {
-    readiness: {
-      ...(pool
-        ? {
-            postgres: {
-              required: true,
-              check: async (): Promise<ReadinessStatus> => {
-                await pool.query('SELECT 1');
-                return 'up';
-              },
-            },
-          }
-        : {}),
-      ...(expectsRedisAtStartup
-        ? {
-            redis: {
-              check: async (): Promise<ReadinessStatus> => {
-                if (redisClient === undefined || redisClient === null) {
-                  return 'down';
-                }
-                if (!redisClient.isOpen) {
-                  return 'down';
-                }
-                await redisClient.ping();
-                return 'up';
-              },
-            },
-          }
-        : {}),
-    },
+    createWatchlistPublisher: () =>
+      new RedisWatchlistPublisher({
+        ...(redisClient ? { client: redisClient } : { redisConfig: config.redis }),
+      }),
+    createWatchlistSubscriber: () => new RedisWatchlistSubscriber(config.redis),
   };
+  const managedRuntime = createManagedRuntimeHandles(runtimeHandles, { telemetrySdk });
+  const container = await createContainer(config, managedRuntime);
+  const healthOptions = buildHealthRouteOptions(config, managedRuntime, container.watchlistRuntime);
 
   // Step 3: Create server (async: registers plugins including rate-limiting)
   const server = await createServer(container, {
@@ -76,32 +63,49 @@ async function main(): Promise<void> {
     corsAllowedOrigins: config.corsAllowedOrigins,
     runEvalAtStartup: config.eval.runAtStartup,
     health: healthOptions,
+    tracer: getTracer(),
   });
 
-  if (container.watchlistRuntime !== null) {
-    await container.watchlistRuntime.start();
-    server.log.info('Watchlist delivery runtime started');
+  let shuttingDown = false;
+  let startedWatchlistRuntime = false;
+
+  try {
+    if (container.watchlistRuntime !== null) {
+      await container.watchlistRuntime.start();
+      startedWatchlistRuntime = true;
+      server.log.info('Watchlist delivery runtime started');
+    }
+
+    // Step 4: Start listening
+    const address = await server.listen({
+      port: config.port,
+      host: '0.0.0.0',
+    });
+
+    server.log.info(`Wine Intelligence Engine listening on ${address}`);
+  } catch (err) {
+    if (startedWatchlistRuntime && container.watchlistRuntime?.isRunning() === true) {
+      await container.watchlistRuntime.stop();
+    }
+    await server.close();
+    await managedRuntime.close();
+    throw err;
   }
-
-  // Step 4: Start listening
-  const address = await server.listen({
-    port: config.port,
-    host: '0.0.0.0',
-  });
-
-  server.log.info(`Wine Intelligence Engine listening on ${address}`);
 
   // Step 5: Graceful shutdown
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      server.log.warn(`Received ${signal} during shutdown; ignoring duplicate signal.`);
+      return;
+    }
+    shuttingDown = true;
     server.log.info(`Received ${signal}, shutting down gracefully...`);
     try {
-      if (container.watchlistRuntime?.isRunning() === true) {
+      if (startedWatchlistRuntime && container.watchlistRuntime?.isRunning() === true) {
         await container.watchlistRuntime.stop();
       }
       await server.close();
-      // Close infrastructure connections
-      await closePgPool();
-      await closeRedisClient(redisClient ?? null);
+      await managedRuntime.close();
       server.log.info('Server closed successfully.');
       process.exit(0);
     } catch (err) {

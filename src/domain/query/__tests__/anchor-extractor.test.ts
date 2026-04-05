@@ -207,13 +207,19 @@ describe('AnchorExtractor', () => {
         async findMatches(normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
           if (normalizedQuery === 'opusone18') {
             return [
-              makeMatchResult('Opus One 18', ['entity-opus-one-2018'], 0.91),
+              {
+                ...makeMatchResult('Opus One 18', ['entity-opus-one-2018'], 0.91),
+                lookupStrategy: 'compact_exact',
+              },
             ];
           }
 
           if (normalizedQuery === 'moet chandon') {
             return [
-              makeMatchResult('Moet Chandon', ['entity-moet-chandon'], 0.93),
+              {
+                ...makeMatchResult('Moet Chandon', ['entity-moet-chandon'], 0.93),
+                lookupStrategy: 'transliterated_fuzzy',
+              },
             ];
           }
 
@@ -231,6 +237,9 @@ describe('AnchorExtractor', () => {
       expect(compactAnchors[0]?.lookupVariants).toEqual(
         expect.arrayContaining(['opusone18']),
       );
+      expect(compactAnchors[0]?.lookupStrategies).toEqual(
+        expect.arrayContaining(['compact_exact']),
+      );
 
       const transliteratedAnchors = await extractor.extract(
         '모엣샹동',
@@ -240,6 +249,9 @@ describe('AnchorExtractor', () => {
       expect(transliteratedAnchors[0]?.surfaceForm).toBe('Moet Chandon');
       expect(transliteratedAnchors[0]?.lookupVariants).toEqual(
         expect.arrayContaining(['moet chandon']),
+      );
+      expect(transliteratedAnchors[0]?.lookupStrategies).toEqual(
+        expect.arrayContaining(['transliterated_fuzzy']),
       );
     });
   });

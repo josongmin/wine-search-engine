@@ -12,7 +12,7 @@ import { RedisQueryCache } from '../infrastructure/cache/redis-query-cache.js';
 import { RedisEmbeddingCache } from '../infrastructure/cache/redis-embedding-cache.js';
 import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
-import type { DrinkingWindowPredictorContract } from './container-contracts.js';
+import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 
 class RedisJudgmentCacheAdapter implements JudgmentCachePort {
   constructor(
@@ -33,7 +33,7 @@ export interface RuntimeSupportServices {
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly cacheService?: CacheService | undefined;
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
-  readonly drinkingWindowPredictor: DrinkingWindowPredictorContract;
+  readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
 }
 
 export async function buildRuntimeSupportServices(

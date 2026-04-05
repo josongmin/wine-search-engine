@@ -7,7 +7,11 @@
 
 import { createClient } from 'redis';
 import { config } from '../../config/env.js';
-import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
+import {
+  parseWatchlistChangeEvent,
+  type WatchlistChangeEvent,
+} from '../../domain/watchlist/model/watchlist-entry.js';
+import type { RedisConfig } from '../db/redis-client.js';
 
 /**
  * Handler signature for watchlist change notifications.
@@ -18,13 +22,23 @@ export type WatchlistEventHandler = (
   event: WatchlistChangeEvent,
 ) => Promise<void>;
 
+export interface WatchlistSubscriberPort {
+  start(handler: WatchlistEventHandler): Promise<void>;
+  stop(): Promise<void>;
+  isRunning(): boolean;
+}
+
 /**
  * Subscribes to watchlist event channels using pattern matching.
  * Maintains a DEDICATED subscriber connection for Redis pub/sub.
  */
-export class RedisWatchlistSubscriber {
+export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
   private subscriber: ReturnType<typeof createClient> | null = null;
   private running: boolean = false;
+
+  constructor(
+    private readonly redisConfig: RedisConfig = config.redis,
+  ) {}
 
   /**
    * Starts the subscriber, listening for events on "watchlist:*" pattern.
@@ -40,7 +54,7 @@ export class RedisWatchlistSubscriber {
     }
 
     // Create a dedicated subscriber connection
-    this.subscriber = createClient({ url: config.redis.url });
+    this.subscriber = createClient({ url: this.redisConfig.url });
     this.subscriber.on('error', (err: Error) => {
       console.error('Redis Subscriber Error', err);
     });
@@ -81,7 +95,11 @@ export class RedisWatchlistSubscriber {
     handler: WatchlistEventHandler,
   ): Promise<void> {
     try {
-      const event = JSON.parse(payload) as WatchlistChangeEvent;
+      const parsedPayload = JSON.parse(payload) as unknown;
+      const event = parseWatchlistChangeEvent(parsedPayload);
+      if (event === null) {
+        throw new Error('Invalid watchlist event payload');
+      }
       await handler(entityId, event);
     } catch (err: unknown) {
       // Prevent handler errors from propagating

@@ -36,6 +36,7 @@ function makeResolverResult(
   C: number,
   gap: number,
   ambiguityDetected: boolean = false,
+  queryProvenance?: EntityResolveResult['decisionTrace']['queryProvenance'],
 ): EntityResolveResult {
   const topEntityId = createEntityId('entity-opus-one');
   return {
@@ -64,6 +65,7 @@ function makeResolverResult(
       ambiguityTypes: [],
       appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
       outcomeReasonCodes: [],
+      ...(queryProvenance !== undefined ? { queryProvenance } : {}),
     },
     conformalSetSize: computeConformalSetSize(C, 0.1, 1),
   };
@@ -214,6 +216,28 @@ describe('DecisionEngine', () => {
       expect(output.decisionStatus).toBe('ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('CONFORMAL_SET_AMBIGUOUS');
     });
+
+    it('clarifies short noisy queries that only resolved via fuzzy lookup strategies', async () => {
+      const input = makeInput({
+        queryPlan: {
+          ...makeQueryPlan('short_entity'),
+          rawQuery: 'romane conti',
+          normalizedQuery: 'romane conti',
+        },
+        resolverResult: makeResolverResult(0.85, 0.20, false, {
+          anchorLookupStrategies: ['fuzzy_char_ngram'],
+          anchorLookupVariants: ['romane conti'],
+        }),
+        evidenceSummary: { identityEvidencePresent: true },
+      });
+
+      const output = await engine.decide(input, TEST_SNAPSHOT);
+
+      expect(output.decisionStatus).toBe('ambiguous');
+      expect(output.nextAction).toBe('clarify');
+      expect(output.decisionTrace.rulesApplied).toContain('NOISY_SHORT_QUERY_GUARD');
+      expect(output.decisionTrace.rulesApplied).toContain('NOISY_LOOKUP_STRATEGY_DETECTED');
+    });
   });
 
   describe('failed status', () => {
@@ -264,6 +288,30 @@ describe('DecisionEngine', () => {
       const output = await engine.decide(input, TEST_SNAPSHOT);
       expect(output.decisionStatus).toBe('failed');
       expect(output.decisionTrace.rulesApplied).toContain('AMBIGUITY_BLOCK_RESOLVE');
+    });
+  });
+
+  describe('noisy short-query guard', () => {
+    it('does not block very high-confidence noisy short lookups', async () => {
+      const input = makeInput({
+        queryPlan: {
+          ...makeQueryPlan('short_entity'),
+          rawQuery: 'romane conti',
+          normalizedQuery: 'romane conti',
+        },
+        resolverResult: makeResolverResult(0.93, 0.20, false, {
+          anchorLookupStrategies: ['transliterated_fuzzy'],
+          anchorLookupVariants: ['romanee conti'],
+        }),
+        evidenceSummary: { identityEvidencePresent: true },
+      });
+
+      const output = await engine.decide(input, TEST_SNAPSHOT);
+
+      expect(output.decisionStatus).toBe('resolved');
+      expect(output.decisionTrace.rulesApplied).toContain(
+        'NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE',
+      );
     });
   });
 

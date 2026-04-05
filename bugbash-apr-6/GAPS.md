@@ -1,6 +1,6 @@
 # 빠른 색인 (빵꾸·보완점)
 
-**플랜·에픽 ↔ 코드 갭 (SSOT):** [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) (v0.1 `00-overview` + 에픽별 + v0.2 Epic 12–17)  
+**플랜·에픽 ↔ 코드 갭 (SSOT):** [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) (v0.1·v0.2 + v0.3 Epic 18 요약)  
 **상세 SSOT:** [`TASKS.md`](./TASKS.md) · [`BACKLOG.md`](./BACKLOG.md)  
 **검증 로그:** [`AUDIT-LOG.md`](./AUDIT-LOG.md)  
 **병렬 재현 표 (`M-xx` ↔ 이 표 `G-xx`):** [`FINDINGS-MATRIX.md`](./FINDINGS-MATRIX.md)
@@ -16,7 +16,7 @@
 | **G-01** | Planner JSDoc이 “constraints placeholder”라고 하나 **실제로는** NLMapper+룰 파싱 | `TASKS` §A · `BACKLOG` §12 |
 | **G-02** | `determineRetrievalMode`가 `producer_browse` / `region_browse` / `no_match_detection` **미반환** — 골든 `retrieval_mode`·`MODE_RELEASE_GATES`와 축 불일치 | `TASKS` §I · `BACKLOG` P0-2 · `AUDIT-LOG` |
 | **G-03** | 오프라인 eval: 시나리오 A–H ↔ `ENTITY_TARGET_TYPE_MAP`이 Epic 2 문서 의미와 다름 (E/F/G/H) | `BACKLOG` P0-1 |
-| **G-04** | **`npm run eval`** → `scripts/run-eval.ts` **파일 없음** | `BACKLOG` §31 · `package.json` `"eval"` |
+| **G-04** | ~~`npm run eval` → `run-eval.ts` 없음~~ → **해소:** `"eval": "tsx scripts/eval/run-offline-eval.ts"` **파일 존재** — 잔여는 **`G-21`/`G-22`** (`verify-splits`) | `package.json` · [`AUDIT-LOG`](./AUDIT-LOG.md) **2026-04-06 6차** |
 | **G-05** | HTTP `query.max(2000)` vs `QuerySanitizer` **500자** — 계약 불일치 | `BACKLOG` §24 |
 | **G-06** | **CI `lint`** 전체 `eslint .` — 로컬 200+ 에러면 **main/develop PR도 동일 실패** | `BACKLOG` §14 · `AUDIT-LOG` |
 | **G-07** | 루트 `test-search-direct.ts`가 ESLint `project` 밖 → 파싱 에러 유발 | `BACKLOG` §13 |
@@ -74,7 +74,7 @@
 | **G-46** | **`@fastify/cors` 등 미사용** — 브라우저에서 API 도메인 **직접 호출 시** preflight/CORS 이슈 가능 (역프록시 뒤면 무관) | `BACKLOG` §39 · `rg cors src` → 0 |
 | **G-47** | **`HTTP_RATE_LIMIT_MAX=0`** 이면 **전역 rate limit 미등록** — RFC-014 §13 완화·오해 소지 | `BACKLOG` §40 · `env.ts` 15–16 · `server.ts` 92–96 |
 | **G-48** | **OpenAPI/Swagger** 스키마 없음 — 클라이언트 생성·계약 테스트 수동 | `BACKLOG` §41 · `rg openapi\\|swagger src` → 0 |
-| **G-55** | `docs/plans` **Epic 1·2·6·9** 등 Deliverables가 `- [ ]`만 남아 **체크리스트 미갱신** — 스크립트·타입은 이미 존재하는 경우가 많음 (기능 빵꾸와 혼동 주의) | `PLANS-GAP-AUDIT` **§5차 패스** |
+| **G-55** | `docs/plans` **Epic 1·2·6** 등 Deliverables `- [ ]`·**Epic 9 본문 표(여전히 ❌)** — 스크립트·타입·envelope 필드는 **이미 있는 경우가 많음** (기능 빵꾸와 혼동 주의; Epic 9는 **`missingInformation`만 진짜 갭**) | `PLANS-GAP-AUDIT` **§6차** |
 | **G-56** | Epic 14 플랜의 **`retrieval_mode_source` / `api_override`** 메타 — **응답·스키마에 없음** (`rg retrieval_mode_source src` → 0) | `G-12`와 연관 · `PLANS-GAP-AUDIT` Epic 14 |
 | **G-57** | optional infra 설계와 달리 PG가 사실상 필수 부트스트랩 경로 | `BACKLOG` §45 · `TASKS` §O |
 | **G-58** | `createServer`가 global `config`와 `process.env`를 직접 읽음 | `BACKLOG` §46 · `TASKS` §O |
@@ -88,7 +88,7 @@
 
 ---
 
-**최종 갱신:** 2026-04-06 — **G-55·G-56** (`docs/plans` 체크리스트 드리프트 · Epic 14 `retrieval_mode_source`). Epic 15 **G-42→G-45**. **G-46–G-48**. `BACKLOG` §39–§41과 동기화. **G-57–G-59**(부트스트랩/runtime config/HTTP contract).
+**최종 갱신:** 2026-04-06 — **6차:** `npm run eval` **`G-04` 해소**; Epic 9 표·v0.3 Epic 18 Track A/B [`PLANS-GAP-AUDIT`](./PLANS-GAP-AUDIT.md) 갱신; 9차 중복 ID **G-53–G-56 → G-60–G-63** 정리. (이전: G-55·G-56·G-45·G-46–G-48·G-57–G-59.)
 ---
 
 ## 8차 추가
@@ -106,7 +106,7 @@
 
 | ID | 한 줄 | 근거 |
 |----|--------|------|
-| **G-53** | watchlist response/error schema 대부분이 런타임에서 미사용 | `BACKLOG` §45 · `TASKS` §O |
-| **G-54** | `createServer()`가 전역 `config` singleton에 직접 의존 | `BACKLOG` §46 · `TASKS` §O |
-| **G-55** | `main.ts`는 optional pool 설계와 달리 항상 PG pool을 강제 생성 | `BACKLOG` §47 · `TASKS` §O |
-| **G-56** | `/ready`가 실제 dependency 상태와 무관하게 항상 `ready: true` | `BACKLOG` §48 · `TASKS` §O |
+| **G-60** | watchlist response/error schema 대부분이 런타임에서 미사용 | `BACKLOG` §45 · `TASKS` §O |
+| **G-61** | `createServer()`가 전역 `config` singleton에 직접 의존 | `BACKLOG` §46 · `TASKS` §O |
+| **G-62** | `main.ts`는 optional pool 설계와 달리 항상 PG pool을 강제 생성 | `BACKLOG` §47 · `TASKS` §O |
+| **G-63** | `/ready`가 실제 dependency 상태와 무관하게 항상 `ready: true` | `BACKLOG` §48 · `TASKS` §O |

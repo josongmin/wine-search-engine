@@ -8,10 +8,7 @@ export interface ReadinessCheck {
 }
 
 export interface HealthRouteOptions {
-  readonly readiness?: {
-    readonly postgres?: ReadinessCheck;
-    readonly redis?: ReadinessCheck;
-  };
+  readonly readiness?: Readonly<Record<string, ReadinessCheck>>;
 }
 
 /**
@@ -29,17 +26,13 @@ interface HealthResponse {
 interface ReadyResponse {
   readonly ready: boolean;
   readonly timestamp: string;
-  readonly checks: {
-    readonly postgres: {
-      readonly status: ReadinessStatus;
-      readonly required: boolean;
-    };
-    readonly redis: {
-      readonly status: ReadinessStatus;
-      readonly required: boolean;
-    };
-  };
+  readonly checks: Readonly<Record<string, {
+    readonly status: ReadinessStatus;
+    readonly required: boolean;
+  }>>;
 }
+
+const DEFAULT_READINESS_CHECKS = ['postgres', 'redis'] as const;
 
 async function resolveStatus(readinessCheck?: ReadinessCheck): Promise<ReadinessStatus> {
   if (readinessCheck === undefined) {
@@ -75,26 +68,31 @@ export function registerHealthRoutes(
   });
 
   app.get('/ready', async (_request, reply) => {
-    const postgres = await resolveStatus(options?.readiness?.postgres);
-    const redis = await resolveStatus(options?.readiness?.redis);
-    const postgresRequired = options?.readiness?.postgres?.required ?? false;
-    const redisRequired = options?.readiness?.redis?.required ?? false;
-    const ready = (!postgresRequired || postgres !== 'down')
-      && (!redisRequired || redis !== 'down');
+    const readinessChecks = options?.readiness ?? {};
+    const checkNames = Array.from(
+      new Set<string>([
+        ...DEFAULT_READINESS_CHECKS,
+        ...Object.keys(readinessChecks),
+      ]),
+    );
+    const checks = Object.fromEntries(
+      await Promise.all(
+        checkNames.map(async (checkName) => {
+          const readinessCheck = readinessChecks[checkName];
+          const status = await resolveStatus(readinessCheck);
+          return [checkName, {
+            status,
+            required: readinessCheck?.required ?? false,
+          }];
+        }),
+      ),
+    ) as ReadyResponse['checks'];
+    const ready = Object.values(checks).every((check) => !check.required || check.status !== 'down');
 
     const body: ReadyResponse = {
       ready,
       timestamp: new Date().toISOString(),
-      checks: {
-        postgres: {
-          status: postgres,
-          required: postgresRequired,
-        },
-        redis: {
-          status: redis,
-          required: redisRequired,
-        },
-      },
+      checks,
     };
 
     reply.status(ready ? 200 : 503);

@@ -17,6 +17,7 @@ import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watch
 import { WatchlistAwareSearchIndex } from '../infrastructure/watchlist/watchlist-aware-search-index.js';
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
+import { isWatchlistEnabled } from './watchlist.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
@@ -69,18 +70,36 @@ function resolvePool(runtime?: Pool | RuntimeHandles): Pool | undefined {
   return runtime.pool;
 }
 
+function resolveRuntimeHandles(runtime?: Pool | RuntimeHandles): RuntimeHandles {
+  if (runtime === undefined) {
+    return {};
+  }
+
+  if ('totalCount' in runtime) {
+    return { pool: runtime as Pool };
+  }
+
+  return runtime;
+}
+
 export function buildCoreAdapterServices(
   config: Config,
   runtime?: Pool | RuntimeHandles,
 ): CoreAdapterServices {
-  const pool = resolvePool(runtime);
+  const runtimeHandles = resolveRuntimeHandles(runtime);
+  const pool = resolvePool(runtimeHandles);
 
   const vespaClient = new VespaClient(config.vespa.url, 'wine', 'wine_entity');
   const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
-  const searchIndex: SearchIndexPort = config.watchlist.webhookSecret
+  const searchIndex: SearchIndexPort = isWatchlistEnabled(config)
     ? new WatchlistAwareSearchIndex({
         inner: baseSearchIndex,
-        publisher: new RedisWatchlistPublisher(),
+        publisher: runtimeHandles.createWatchlistPublisher?.()
+          ?? new RedisWatchlistPublisher({
+            ...(runtimeHandles.redisClient
+              ? { client: runtimeHandles.redisClient }
+              : { redisConfig: config.redis }),
+          }),
       })
     : baseSearchIndex;
 

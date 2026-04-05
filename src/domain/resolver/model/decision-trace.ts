@@ -1,3 +1,26 @@
+import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+
+/**
+ * Query-side provenance attached to resolver traces for noisy lookup debugging.
+ */
+export interface ResolverQueryProvenance {
+  /** Multi-view normalization snapshot used during lookup. */
+  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
+
+  /** Lookup variants that contributed to anchor extraction. */
+  readonly anchorLookupVariants?: readonly string[] | undefined;
+
+  /** Lookup strategies that contributed to anchor extraction. */
+  readonly anchorLookupStrategies?: readonly string[] | undefined;
+
+  /** Per-entity raw score adjustments derived from lookup strategies. */
+  readonly lookupStrategyAdjustments?: readonly {
+    readonly entityId: string;
+    readonly strategies: readonly string[];
+    readonly rawScoreDelta: number;
+  }[] | undefined;
+}
+
 /**
  * A diagnostic trace capturing every input and threshold that shaped
  * the resolver's outcome, per RFC-006 §8.
@@ -35,4 +58,7 @@ export interface ResolverDecisionTrace {
 
   /** Machine-readable codes explaining why the resolver reached its outcome. */
   readonly outcomeReasonCodes: readonly string[];
+
+  /** Query-side provenance useful for noisy lookup debugging. */
+  readonly queryProvenance?: ResolverQueryProvenance | undefined;
 }

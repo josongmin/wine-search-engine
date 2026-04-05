@@ -1,6 +1,6 @@
 # bugbash-apr-6
 
-`docs/plans/apr-5-v0.1`·`apr-5-v0.2` 및 실제 코드·CI·`package.json`을 대조한 **빵꾸(갭)·보완점** 기록소입니다.
+`docs/plans/apr-5-v0.1`·`apr-5-v0.2`·`apr-6-v0.3`(Epic 18) 및 실제 코드·CI·`package.json`을 대조한 **빵꾸(갭)·보완점** 기록소입니다.
 
 ## SSOT (어디를 보나)
 
@@ -9,7 +9,7 @@
 | **한 줄 색인** | [`GAPS.md`](./GAPS.md) | `G-xx` ID ↔ 한 줄 요약 ↔ `BACKLOG`/`TASKS` 조항 |
 | **병렬 매트릭스 (파일·명령)** | [`FINDINGS-MATRIX.md`](./FINDINGS-MATRIX.md) | **`M-xx`** 행 — 코드·CI·스키마 대조 **SSOT** |
 | **영역 색인** | [`AUDIT-SNAPSHOT.md`](./AUDIT-SNAPSHOT.md) | A–E 영역 ↔ `M-xx` ID만 묶기 (표 본문은 매트릭스) |
-| **플랜 전체 매트릭스** | [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) | v0.1+v0.2 대비 표 + **`[ ]` vs 코드 드리프트** 절 + 재현 `rg` |
+| **플랜 전체 매트릭스** | [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) | v0.1+v0.2+v0.3(Epic 18) 표 + **`[ ]` vs 코드 드리프트** 절 + 재현 `rg` |
 | **상세·재현 커맨드** | [`TASKS.md`](./TASKS.md) | 심화 A–F, §G–§I, §K, §L, **§M**(injection), **§N**(CORS·rate·OpenAPI), **§P**(watchlist/runtime) |
 | **v0.1 플랜 대비 본문** | [`BACKLOG.md`](./BACKLOG.md) | P0–P2, §12–**55**, 제안 작업 순서 |
 | **실행·테스트 로그** | [`AUDIT-LOG.md`](./AUDIT-LOG.md) | 날짜별 `npm run`·`rg` 근거 |
@@ -27,9 +27,9 @@
 아래를 한 번에 돌려 빈틈 후보를 수집할 수 있다.
 
 ```bash
-# 깨진 npm 스크립트
+# npm eval 스크립트 (과거 run-eval.ts 가정은 폐기)
 cat package.json | jq '.scripts.eval'
-test -f scripts/run-eval.ts && echo "run-eval exists" || echo "MISSING run-eval.ts"
+test -f scripts/eval/run-offline-eval.ts && echo "run-offline-eval.ts ok" || echo "MISSING run-offline-eval.ts"
 
 # 플랜 대비 미구현 심볼
 rg -l "ConstraintSAT|AbstainPolicy|constraint-sat|abstain-policy" src || true
@@ -68,7 +68,7 @@ rg HTTP_RATE_LIMIT src/config/env.ts
 | `TASKS` | `BACKLOG` | 주제 |
 |---------|-----------|------|
 | §H 표 | §34–37 | watchlist ID/Redis/DB, `drinking_window_now` NL, `EVAL_RUN_AT_STARTUP` |
-| §K 표 | §31–33 | `npm run eval` 깨짐, pairing 미배선, `WineAttributeEncoders` 이중 정의 |
+| §K 표 | §31–33 | ~~`npm run eval` 깨짐~~ → **`run-offline-eval.ts` OK** (`G-04` 해소); pairing 미배선, `WineAttributeEncoders` 이중 정의 |
 | §G (24–30) | §24–30 | 쿼리 길이, `missingInformation`, Vespa LTR, 비교 테이블, entropy, injection fail-open 등 |
 | §M (7차) | §38 · **G-40** | Epic 16: `Hybrid`/`Interpret`/`Resolve`에 `QuerySanitizer` 없음 — **injection 우회** |
 | §N (8차) | §39–41 · **G-46–G-48** | CORS 없음 · `HTTP_RATE_LIMIT_MAX=0` 시 rate limit off · OpenAPI 없음 |
@@ -76,4 +76,4 @@ rg HTTP_RATE_LIMIT src/config/env.ts
 
 ---
 
-**최종 갱신:** 2026-04-06 — `M-01`…`M-40` · §38–§41 · **G-40**·**G-46–G-48** · **G-55·G-56** (`docs/plans` 체크리스트 드리프트 · Epic 14 `retrieval_mode_source`) · Epic 15 **G-45** · [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) **§5차 패스**.
+**최종 갱신:** 2026-04-06 — **6차:** Epic 9·eval·v0.3 Epic 18 [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) · **G-04** 해소 · 9차 ID **G-60–G-63** 정리. (이전: `M-01`…`M-40` · **G-55·G-56** · Epic 15 **G-45** 등.)

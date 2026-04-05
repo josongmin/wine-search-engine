@@ -7,9 +7,9 @@ import type {
   ReplayUseCasePort,
   ResolveUseCasePort,
 } from '../../../application/search/port/search-route-usecases.port.js';
+import type { WatchlistServicePort } from '../../../application/watchlist/watchlist.service.js';
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from '../../../config/container-tool-contracts.js';
-import type { WatchlistServiceContract } from '../../../config/container-watchlist-contracts.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
@@ -41,7 +41,7 @@ export interface ClaudeToolsRouteDeps {
 }
 
 export interface WatchlistRouteDeps {
-  readonly watchlistService: WatchlistServiceContract;
+  readonly watchlistService: WatchlistServicePort;
 }
 
 export interface HttpServerDeps

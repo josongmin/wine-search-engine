@@ -1,3 +1,19 @@
+import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+
+/**
+ * Query-side provenance preserved in decision traces for noisy lookup debugging.
+ */
+export interface DecisionQueryProvenance {
+  /** Multi-view normalization snapshot used during lookup. */
+  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
+
+  /** Lookup variants that contributed to anchor extraction. */
+  readonly anchorLookupVariants?: readonly string[] | undefined;
+
+  /** Lookup strategies that contributed to anchor extraction. */
+  readonly anchorLookupStrategies?: readonly string[] | undefined;
+}
+
 /**
  * A complete diagnostic trace of a decision, per RFC-007 §9.
  *
@@ -53,4 +69,7 @@ export interface DecisionTrace {
 
   /** Human-readable explanation of why this decision was reached. */
   readonly finalReason: string;
+
+  /** Query-side provenance carried forward from the resolver stage. */
+  readonly queryProvenance?: DecisionQueryProvenance | undefined;
 }

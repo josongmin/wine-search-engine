@@ -4,6 +4,7 @@ import {
   parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
 import { ReplayRouteContract } from './route-contracts.js';
 import { toReplayRequest } from './search-request-mappers.js';
 
@@ -16,11 +17,16 @@ export function registerReplayRoute(
   app: FastifyInstance,
   deps: ReplayRouteDeps,
 ): void {
-  app.post('/v1/search/replay', async (request, reply) => {
-    const parsed = parseContractBody(request, ReplayRouteContract);
-    const replayRequest = toReplayRequest(parsed);
-    const response = await deps.replayUseCase.execute(replayRequest, request.requestId);
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/search/replay',
+    contract: ReplayRouteContract,
+    handler: async (request, reply) => {
+      const parsed = parseContractBody(request, ReplayRouteContract);
+      const replayRequest = toReplayRequest(parsed);
+      const response = await deps.replayUseCase.execute(replayRequest, request.requestId);
 
-    sendRouteContractResponse(request, reply, ReplayRouteContract, 200, response);
+      sendRouteContractResponse(request, reply, ReplayRouteContract, 200, response);
+    },
   });
 }

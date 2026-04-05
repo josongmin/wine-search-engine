@@ -46,10 +46,90 @@ export interface WatchlistEntry {
  * An immutable change event describing what occurred on an entity.
  * Published to Redis channel for subscriber handlers.
  */
-export interface WatchlistChangeEvent {
-  readonly type: string; // e.g., "vintage_released", "price_updated", "stock_changed"
-  readonly data: Record<string, unknown>; // Structured event payload
+interface WatchlistEventBase {
   readonly occurredAt: string; // ISO 8601 timestamp
+}
+
+export interface VintageReleasedEvent extends WatchlistEventBase {
+  readonly type: 'vintage_released';
+  readonly data: {
+    readonly vintage: number;
+    readonly canonicalLabel: string;
+  };
+}
+
+export interface PriceUpdatedEvent extends WatchlistEventBase {
+  readonly type: 'price_updated';
+  readonly data: {
+    readonly oldPrice: number;
+    readonly newPrice: number;
+    readonly percentageDrop: number;
+  };
+}
+
+export interface StockChangedEvent extends WatchlistEventBase {
+  readonly type: 'stock_changed';
+  readonly data: {
+    readonly stock: number;
+    readonly available: boolean;
+  };
+}
+
+export interface CriticScoreUpdatedEvent extends WatchlistEventBase {
+  readonly type: 'critic_score_updated';
+  readonly data: {
+    readonly score: number;
+    readonly previousScore: number | null;
+  };
+}
+
+export type WatchlistChangeEvent =
+  | VintageReleasedEvent
+  | PriceUpdatedEvent
+  | StockChangedEvent
+  | CriticScoreUpdatedEvent;
+
+export function parseWatchlistChangeEvent(input: unknown): WatchlistChangeEvent | null {
+  if (!isRecord(input) || !isIsoTimestamp(input.occurredAt)) {
+    return null;
+  }
+
+  switch (input.type) {
+    case 'vintage_released':
+      return isVintageReleasedEventData(input.data)
+        ? {
+            type: input.type,
+            data: input.data,
+            occurredAt: input.occurredAt,
+          }
+        : null;
+    case 'price_updated':
+      return isPriceUpdatedEventData(input.data)
+        ? {
+            type: input.type,
+            data: input.data,
+            occurredAt: input.occurredAt,
+          }
+        : null;
+    case 'stock_changed':
+      return isStockChangedEventData(input.data)
+        ? {
+            type: input.type,
+            data: input.data,
+            occurredAt: input.occurredAt,
+          }
+        : null;
+    case 'critic_score_updated':
+      return isCriticScoreUpdatedEventData(input.data)
+        ? {
+            type: input.type,
+            data: input.data,
+            occurredAt: input.occurredAt,
+          }
+        : null;
+    default:
+      return null;
+  }
 }
 
 /**
@@ -62,4 +142,49 @@ export interface WatchlistDeliveryLogEntry {
   readonly statusCode: number | null;
   readonly errorMessage: string | null;
   readonly deliveredAt: Date;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value));
+}
+
+function isVintageReleasedEventData(
+  value: unknown,
+): value is VintageReleasedEvent['data'] {
+  return isRecord(value)
+    && isFiniteNumber(value.vintage)
+    && typeof value.canonicalLabel === 'string';
+}
+
+function isPriceUpdatedEventData(
+  value: unknown,
+): value is PriceUpdatedEvent['data'] {
+  return isRecord(value)
+    && isFiniteNumber(value.oldPrice)
+    && isFiniteNumber(value.newPrice)
+    && isFiniteNumber(value.percentageDrop);
+}
+
+function isStockChangedEventData(
+  value: unknown,
+): value is StockChangedEvent['data'] {
+  return isRecord(value)
+    && isFiniteNumber(value.stock)
+    && typeof value.available === 'boolean';
+}
+
+function isCriticScoreUpdatedEventData(
+  value: unknown,
+): value is CriticScoreUpdatedEvent['data'] {
+  return isRecord(value)
+    && isFiniteNumber(value.score)
+    && (value.previousScore === null || isFiniteNumber(value.previousScore));
 }

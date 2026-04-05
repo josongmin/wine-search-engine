@@ -1,7 +1,7 @@
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
-import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 import type { WatchlistPublisherPort } from './redis-watchlist-publisher.js';
+import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 
 interface WatchlistAwareSearchIndexDeps {
   readonly inner: SearchIndexPort;

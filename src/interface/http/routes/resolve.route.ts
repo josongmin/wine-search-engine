@@ -4,6 +4,7 @@ import {
   parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
 import { ResolveRouteContract } from './route-contracts.js';
 import { toResolveRequest } from './search-request-mappers.js';
 
@@ -14,12 +15,17 @@ export function registerResolveRoute(
   app: FastifyInstance,
   deps: ResolveRouteDeps,
 ): void {
-  app.post('/v1/entity/resolve', async (request, reply) => {
-    const parsed = parseContractBody(request, ResolveRouteContract);
-    const resolveRequest = toResolveRequest(parsed, request.requestId);
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/entity/resolve',
+    contract: ResolveRouteContract,
+    handler: async (request, reply) => {
+      const parsed = parseContractBody(request, ResolveRouteContract);
+      const resolveRequest = toResolveRequest(parsed, request.requestId);
 
-    const result = await deps.resolveUseCase.execute(resolveRequest);
+      const result = await deps.resolveUseCase.execute(resolveRequest);
 
-    sendRouteContractResponse(request, reply, ResolveRouteContract, 200, result);
+      sendRouteContractResponse(request, reply, ResolveRouteContract, 200, result);
+    },
   });
 }

@@ -7,28 +7,28 @@ import { DecomposedSearchUseCase } from '../application/search/decomposed-search
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
 import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
 import type {
-  DrinkingWindowUseCaseContract,
-} from './container-contracts.js';
+  DrinkingWindowUseCasePort,
+} from '../application/drinking-window/port/drinking-window-usecase.port.js';
+import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
-  BatchSearchUseCaseContract,
-  DecomposedSearchUseCaseContract,
-  HybridUseCaseContract,
-  InterpretUseCaseContract,
-  ReplayUseCaseContract,
-  ResolveUseCaseContract,
-  SearchUseCaseContract,
-} from './container-search-contracts.js';
+  BatchSearchUseCasePort,
+  DecomposedSearchUseCasePort,
+  HybridUseCasePort,
+  InterpretUseCasePort,
+  ReplayUseCasePort,
+  ResolveUseCasePort,
+} from '../application/search/port/search-route-usecases.port.js';
 import type { CoreContainerServices } from './container-core.js';
 
 export interface UseCaseContainerServices {
-  readonly searchUseCase: SearchUseCaseContract;
-  readonly replayUseCase: ReplayUseCaseContract;
-  readonly interpretUseCase: InterpretUseCaseContract;
-  readonly resolveUseCase: ResolveUseCaseContract;
-  readonly hybridUseCase: HybridUseCaseContract;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCaseContract;
-  readonly drinkingWindowUseCase: DrinkingWindowUseCaseContract;
-  readonly batchSearchUseCase: BatchSearchUseCaseContract;
+  readonly searchUseCase: SearchExecutorPort;
+  readonly replayUseCase: ReplayUseCasePort;
+  readonly interpretUseCase: InterpretUseCasePort;
+  readonly resolveUseCase: ResolveUseCasePort;
+  readonly hybridUseCase: HybridUseCasePort;
+  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
+  readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
+  readonly batchSearchUseCase: BatchSearchUseCasePort;
 }
 
 export function buildUseCaseContainerServices(

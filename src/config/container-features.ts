@@ -1,29 +1,31 @@
 import type { CoreContainerServices } from './container-core.js';
-import type { DrinkingWindowUseCaseContract } from './container-contracts.js';
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import type {
-  SearchUseCaseContract,
-  ReplayUseCaseContract,
-  InterpretUseCaseContract,
-  ResolveUseCaseContract,
-  HybridUseCaseContract,
-  DecomposedSearchUseCaseContract,
-  BatchSearchUseCaseContract,
-} from './container-search-contracts.js';
+  DrinkingWindowUseCasePort,
+} from '../application/drinking-window/port/drinking-window-usecase.port.js';
+import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
+import type {
+  BatchSearchUseCasePort,
+  DecomposedSearchUseCasePort,
+  HybridUseCasePort,
+  InterpretUseCasePort,
+  ReplayUseCasePort,
+  ResolveUseCasePort,
+} from '../application/search/port/search-route-usecases.port.js';
 import { buildAdaptiveToolExecutor, buildEvalRunner } from './container-aux-features.js';
 import { buildUseCaseContainerServices } from './container-usecases.js';
 
 export interface FeatureContainerServices {
-  readonly searchUseCase: SearchUseCaseContract;
-  readonly replayUseCase: ReplayUseCaseContract;
-  readonly interpretUseCase: InterpretUseCaseContract;
-  readonly resolveUseCase: ResolveUseCaseContract;
-  readonly hybridUseCase: HybridUseCaseContract;
-  readonly decomposedSearchUseCase: DecomposedSearchUseCaseContract;
-  readonly drinkingWindowUseCase: DrinkingWindowUseCaseContract;
-  readonly batchSearchUseCase: BatchSearchUseCaseContract;
+  readonly searchUseCase: SearchExecutorPort;
+  readonly replayUseCase: ReplayUseCasePort;
+  readonly interpretUseCase: InterpretUseCasePort;
+  readonly resolveUseCase: ResolveUseCasePort;
+  readonly hybridUseCase: HybridUseCasePort;
+  readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
+  readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
+  readonly batchSearchUseCase: BatchSearchUseCasePort;
   readonly adaptiveToolExecutor: AdaptiveToolExecutorContract;
   readonly evalRunner: EvalRunnerContract | null;
 }

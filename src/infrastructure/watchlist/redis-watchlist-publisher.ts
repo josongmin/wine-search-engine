@@ -5,11 +5,20 @@
  * Uses the shared Redis client from redis-client.ts.
  */
 
-import { getRedisClient, type RedisClient } from '../db/redis-client.js';
+import {
+  getRedisClient,
+  type RedisClient,
+  type RedisConfig,
+} from '../db/redis-client.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 
 export interface WatchlistPublisherPort {
   publishUpdate(entityId: string, event: WatchlistChangeEvent): Promise<void>;
+}
+
+interface RedisWatchlistPublisherOptions {
+  readonly client?: RedisClient;
+  readonly redisConfig?: RedisConfig;
 }
 
 /**
@@ -18,6 +27,12 @@ export interface WatchlistPublisherPort {
  */
 export class RedisWatchlistPublisher implements WatchlistPublisherPort {
   private client: RedisClient | null = null;
+  private readonly redisConfig: RedisConfig | undefined;
+
+  constructor(options?: RedisWatchlistPublisherOptions) {
+    this.client = options?.client ?? null;
+    this.redisConfig = options?.redisConfig;
+  }
 
   /**
    * Publishes an entity change event to a watchlist channel.
@@ -40,7 +55,7 @@ export class RedisWatchlistPublisher implements WatchlistPublisherPort {
    */
   private async ensureClient(): Promise<RedisClient> {
     if (!this.client) {
-      this.client = await getRedisClient();
+      this.client = await getRedisClient(this.redisConfig);
     }
     return this.client;
   }

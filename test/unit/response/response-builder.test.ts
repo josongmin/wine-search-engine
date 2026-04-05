@@ -138,6 +138,42 @@ describe('ResponseBuilder', () => {
     });
   });
 
+  describe('meta.debugRefs', () => {
+    it('surfaces query provenance as compact debug refs when present', () => {
+      const response = builder.build(
+        makeBaseParams({
+          decisionOutput: makeDecisionOutput({
+            decisionTrace: {
+              ...makeDecisionOutput().decisionTrace,
+              queryProvenance: {
+                normalizedQueryViews: {
+                  raw: 'Opus-One 18',
+                  strict: 'opus-one 18',
+                  accentless: 'opus-one 18',
+                  collapsedWhitespace: 'opus-one 18',
+                  punctuationStripped: 'opus one 18',
+                  compact: 'opusone18',
+                  vintageCanonicalized: 'opus one 2018',
+                  vintageStripped: 'opus one',
+                  lookupVariants: ['opusone18', 'opus one 2018'],
+                },
+                anchorLookupVariants: ['opusone18', 'opus one 2018'],
+              },
+            },
+          }),
+        }),
+      );
+
+      expect(response.meta.debugRefs).toEqual(
+        expect.arrayContaining([
+          'query_provenance:present',
+          'query_provenance:normalized_views',
+          'query_provenance:anchor_lookup_variants',
+        ]),
+      );
+    });
+  });
+
   describe('evidence enforcement', () => {
     it('result with non-empty evidenceItems → returned unchanged (no synthetic item added)', () => {
       const existingEvidence = makeEvidenceItem();

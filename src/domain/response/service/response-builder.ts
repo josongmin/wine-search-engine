@@ -69,6 +69,7 @@ export class ResponseBuilder {
     // executions with the same snapshot and query produce the same hash.
     const snapshot = params.decisionOutput.decisionSnapshot;
     const topEntityId = params.decisionOutput.selectedEntity?.entityId ?? '';
+    const debugRefs = this.buildDebugRefs(params.decisionOutput);
     const responseHash = deterministicHash(
       params.decisionOutput.decisionStatus,
       params.decisionOutput.nextAction,
@@ -87,6 +88,7 @@ export class ResponseBuilder {
       version: params.version ?? '1.0.0',
       engine_schema_version: 'search_response_v1',
       decisionSnapshot: snapshot,
+      ...(debugRefs !== undefined ? { debugRefs } : {}),
       response_hash: responseHash,
     };
 
@@ -309,5 +311,25 @@ export class ResponseBuilder {
 
     // Return the final reason as the abstain reason
     return finalReason.length > 0 ? finalReason : undefined;
+  }
+
+  /**
+   * Build compact debug refs when noisy lookup provenance is present.
+   */
+  private buildDebugRefs(output: DecisionOutput): readonly string[] | undefined {
+    const provenance = output.decisionTrace.queryProvenance;
+    if (provenance === undefined) {
+      return undefined;
+    }
+
+    const refs: string[] = ['query_provenance:present'];
+    if (provenance.normalizedQueryViews !== undefined) {
+      refs.push('query_provenance:normalized_views');
+    }
+    if ((provenance.anchorLookupVariants ?? []).length > 0) {
+      refs.push('query_provenance:anchor_lookup_variants');
+    }
+
+    return refs;
   }
 }

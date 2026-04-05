@@ -10,9 +10,9 @@
 {"benchmark_id":"neb-010","query":"opus 18","expected_entity_id":"opus-one-2018","category":"abbreviation","language":"en","difficulty":"medium"}
 {"benchmark_id":"neb-011","query":"yquem 15","expected_entity_id":"sauternes-2015","category":"abbreviation","language":"en","difficulty":"medium"}
 {"benchmark_id":"neb-012","query":"grange 17","expected_entity_id":"penfolds-grange-2017","category":"abbreviation","language":"en","difficulty":"medium"}
-{"benchmark_id":"neb-013","query":"오푸스원","expected_entity_id":"opus-one-2018","category":"transliteration","language":"ko","difficulty":"easy"}
-{"benchmark_id":"neb-014","query":"샤토 마고","expected_entity_id":"chateau-margaux-2015","category":"transliteration","language":"ko","difficulty":"easy"}
-{"benchmark_id":"neb-015","query":"모에 샹동","expected_entity_id":"moet-brut","category":"transliteration","language":"ko","difficulty":"easy"}
+{"benchmark_id":"neb-013","query":"오푸스원","expected_entity_id":"opus-one-2018","category":"transliteration","language":"ko","difficulty":"easy","expected_provenance_stage":"transliteration","expected_provenance_source":"rule:transliteration_ko_v1"}
+{"benchmark_id":"neb-014","query":"샤토 마고","expected_entity_id":"chateau-margaux-2015","category":"transliteration","language":"ko","difficulty":"easy","expected_provenance_stage":"transliteration","expected_provenance_source":"rule:transliteration_ko_v1"}
+{"benchmark_id":"neb-015","query":"모에 샹동","expected_entity_id":"moet-brut","category":"transliteration","language":"ko","difficulty":"easy","expected_provenance_stage":"transliteration","expected_provenance_source":"rule:transliteration_ko_v1"}
 {"benchmark_id":"neb-016","query":"Opus One","expected_entity_id":"opus-one-2018","category":"producer_label_partial","language":"en","difficulty":"easy"}
 {"benchmark_id":"neb-017","query":"Chateau Margaux","expected_entity_id":"chateau-margaux-2015","category":"producer_label_partial","language":"en","difficulty":"easy"}
 {"benchmark_id":"neb-018","query":"Barolo Giacomo","expected_entity_id":"barolo-giacomo","category":"producer_label_partial","language":"en","difficulty":"medium"}
@@ -22,9 +22,12 @@
 {"benchmark_id":"neb-022","query":"오푸스원 2018 Napa Valley","expected_entity_id":"opus-one-2018","category":"mixed_language","language":"mixed","difficulty":"medium"}
 {"benchmark_id":"neb-023","query":"샤또 Margaux 2015","expected_entity_id":"chateau-margaux-2015","category":"mixed_language","language":"mixed","difficulty":"medium"}
 {"benchmark_id":"neb-024","query":"모엣 chandon brut","expected_entity_id":"moet-brut","category":"mixed_language","language":"mixed","difficulty":"medium"}
-{"benchmark_id":"neb-025","query":"opus","expected_entity_id":"opus-one-2018","category":"noisy_short_form","language":"en","difficulty":"hard"}
-{"benchmark_id":"neb-026","query":"margaux","expected_entity_id":"chateau-margaux-2015","category":"noisy_short_form","language":"en","difficulty":"hard"}
-{"benchmark_id":"neb-027","query":"yquem","expected_entity_id":"sauternes-2015","category":"noisy_short_form","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-025","query":"opus","expected_entity_id":"opus-one-2018","category":"noisy_short_form","language":"en","difficulty":"hard","expected_resolution":"ambiguous"}
+{"benchmark_id":"neb-026","query":"margaux","expected_entity_id":"chateau-margaux-2015","category":"noisy_short_form","language":"en","difficulty":"hard","expected_resolution":"ambiguous"}
+{"benchmark_id":"neb-027","query":"yquem","expected_entity_id":"sauternes-2015","category":"noisy_short_form","language":"en","difficulty":"hard","expected_resolution":"ambiguous"}
 {"benchmark_id":"neb-028","query":"opuss one","expected_entity_id":"opus-one-2018","category":"adversarial_near_miss","language":"en","difficulty":"hard"}
 {"benchmark_id":"neb-029","query":"sasicaia","expected_entity_id":"sassicaia-2018","category":"adversarial_near_miss","language":"en","difficulty":"hard"}
 {"benchmark_id":"neb-030","query":"penfolds grang","expected_entity_id":"penfolds-grange-2017","category":"adversarial_near_miss","language":"en","difficulty":"hard"}
+{"benchmark_id":"neb-031","query":"romane conti","expected_entity_id":"romanee-conti-2015","category":"phonetic","language":"en","difficulty":"hard","expected_provenance_stage":"phonetic","expected_provenance_source":"rule:phonetic_french_v1"}
+{"benchmark_id":"neb-032","query":"moet shandon","expected_entity_id":"moet-brut","category":"phonetic","language":"en","difficulty":"medium","expected_provenance_stage":"phonetic","expected_provenance_source":"rule:phonetic_champagne_v1"}
+{"benchmark_id":"neb-033","query":"margo","expected_entity_id":"chateau-margaux-2015","category":"phonetic","language":"en","difficulty":"hard","expected_provenance_stage":"phonetic","expected_provenance_source":"rule:phonetic_bordeaux_v1"}

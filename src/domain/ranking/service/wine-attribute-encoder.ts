@@ -1,4 +1,10 @@
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
+import {
+  COUNTRY_VOCABULARY,
+  GRAPE_VOCABULARY,
+  REGION_VOCABULARY,
+  WINE_ATTRIBUTE_OOV_CODE,
+} from '../model/wine-attribute-vocabulary.js';
 
 /**
  * Label encoder for categorical wine attributes.
@@ -6,7 +12,7 @@ import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.po
  */
 export class LabelEncoder {
   private readonly mapping: Map<string, number>;
-  private readonly oovCode: number = 999;
+  private readonly oovCode: number = WINE_ATTRIBUTE_OOV_CODE;
 
   constructor(labels: readonly string[]) {
     this.mapping = new Map();
@@ -27,63 +33,11 @@ export class LabelEncoder {
   }
 }
 
-const grapeEnc = new LabelEncoder([
-  'Cabernet Sauvignon',
-  'Pinot Noir',
-  'Shiraz',
-  'Merlot',
-  'Chardonnay',
-  'Sauvignon Blanc',
-  'Riesling',
-  'Cabernet Franc',
-  'Syrah',
-  'Grenache',
-  'Nebbiolo',
-  'Tempranillo',
-  'Zinfandel',
-]);
+const grapeEnc = new LabelEncoder(GRAPE_VOCABULARY);
 
-const regionEnc = new LabelEncoder([
-  'Napa Valley',
-  'Bordeaux',
-  'Burgundy',
-  'Rhone Valley',
-  'Tuscany',
-  'Rioja',
-  'Barossa Valley',
-  'Willamette Valley',
-  'Paso Robles',
-  'Sonoma County',
-  'Santa Barbara County',
-  'Monterey County',
-  'Central Coast',
-  'Santa Lucia Highlands',
-  'Happy Canyon of Santa Barbara',
-  'Etna',
-  'Gevrey-Chambertin',
-  'Châteauneuf-du-Pape',
-  'Leyda Valley',
-  'Aconcagua',
-]);
+const regionEnc = new LabelEncoder(REGION_VOCABULARY);
 
-const countryEnc = new LabelEncoder([
-  'United States',
-  'France',
-  'Italy',
-  'Spain',
-  'Chile',
-  'South Africa',
-  'Australia',
-  'Argentina',
-  'Germany',
-  'Portugal',
-  'New Zealand',
-  'Austria',
-  'Greece',
-  'Hungary',
-  'United Kingdom',
-  'Canada',
-]);
+const countryEnc = new LabelEncoder(COUNTRY_VOCABULARY);
 
 export const WineAttributeEncoders: WineAttributeEncoderPort = {
   encodeGrape(grape: string | null | undefined): number {
@@ -96,12 +50,12 @@ export const WineAttributeEncoders: WineAttributeEncoderPort = {
     for (const part of parts) {
       if (part.length > 0) {
         const code = regionEnc.encode(part);
-        if (code !== 999) {
+        if (code !== WINE_ATTRIBUTE_OOV_CODE) {
           return code;
         }
       }
     }
-    return 999;
+    return WINE_ATTRIBUTE_OOV_CODE;
   },
 
   encodeCountry(country: string | null | undefined): number {

@@ -44,9 +44,11 @@ export function peekPgPool(): Pool | null {
   return pool;
 }
 
-export async function closePgPool(): Promise<void> {
-  if (pool) {
-    await pool.end();
+export async function closePgPool(targetPool: Pool | null = pool): Promise<void> {
+  if (targetPool) {
+    await targetPool.end();
+  }
+  if (targetPool === pool) {
     pool = null;
   }
 }

@@ -28,11 +28,26 @@ export const NOISY_ENTITY_CATEGORIES = [
   'whitespace_collapse_split',
   'abbreviation',
   'transliteration',
+  'phonetic',
   'producer_label_partial',
   'vintage_partial',
   'mixed_language',
   'noisy_short_form',
   'adversarial_near_miss',
+] as const;
+
+export const NOISY_ENTITY_PROVENANCE_STAGES = [
+  'exact',
+  'lexical',
+  'phonetic',
+  'transliteration',
+  'semantic',
+] as const;
+
+export const NOISY_ENTITY_DECISION_STATUSES = [
+  'resolved',
+  'ambiguous',
+  'failed',
 ] as const;
 
 const NoisyEntityBenchmarkCaseSchema = z.object({
@@ -42,16 +57,38 @@ const NoisyEntityBenchmarkCaseSchema = z.object({
   category: z.enum(NOISY_ENTITY_CATEGORIES),
   language: z.enum(['en', 'ko', 'mixed']),
   difficulty: z.enum(['easy', 'medium', 'hard']),
+  expected_resolution: z.enum(NOISY_ENTITY_DECISION_STATUSES).optional(),
+  expected_provenance_stage: z.enum(NOISY_ENTITY_PROVENANCE_STAGES).optional(),
+  expected_provenance_source: z.string().min(1).optional(),
   notes: z.string().optional(),
+});
+
+const RankedEntitySchema = z.object({
+  entity_id: z.string().min(1),
+  provenance_stage: z.enum(NOISY_ENTITY_PROVENANCE_STAGES).optional(),
+  provenance_source: z.string().min(1).optional(),
 });
 
 const NoisyEntityPredictionSchema = z.object({
   benchmark_id: z.string().min(1),
-  ranked_entity_ids: z.array(z.string().min(1)),
-});
+  ranked_entity_ids: z.array(z.string().min(1)).optional(),
+  ranked_entities: z.array(RankedEntitySchema).optional(),
+  decision_status: z.enum(NOISY_ENTITY_DECISION_STATUSES).optional(),
+}).refine(
+  (value) => value.ranked_entity_ids !== undefined || value.ranked_entities !== undefined,
+  { message: 'ranked_entity_ids or ranked_entities is required' },
+);
 
 export type NoisyEntityBenchmarkCase = z.infer<typeof NoisyEntityBenchmarkCaseSchema>;
+export type RankedEntity = z.infer<typeof RankedEntitySchema>;
 export type NoisyEntityPrediction = z.infer<typeof NoisyEntityPredictionSchema>;
+export type NoisyEntityDecisionStatus = z.infer<typeof NoisyEntityPredictionSchema.shape.decision_status>;
+type RankedEntityLike = string | RankedEntity;
+
+interface RankedPrediction {
+  readonly rankedEntities: readonly RankedEntity[];
+  readonly decisionStatus?: NoisyEntityDecisionStatus;
+}
 
 export interface NoisyEntitySliceMetrics {
   readonly query_count: number;
@@ -76,6 +113,25 @@ export interface NoisyEntityBenchmarkReport {
     readonly language: string;
     readonly top_entity_id: string | null;
     readonly top_3: readonly string[];
+  }[];
+  readonly provenance_checked_count: number;
+  readonly provenance_match_rate: number | null;
+  readonly provenance_misses: readonly {
+    readonly benchmark_id: string;
+    readonly query: string;
+    readonly expected_stage: string;
+    readonly actual_stage: string | null;
+    readonly expected_source: string | null;
+    readonly actual_source: string | null;
+  }[];
+  readonly resolution_checked_count: number;
+  readonly resolution_match_rate: number | null;
+  readonly false_exact_rate: number | null;
+  readonly resolution_misses: readonly {
+    readonly benchmark_id: string;
+    readonly query: string;
+    readonly expected_resolution: string;
+    readonly actual_resolution: string | null;
   }[];
   readonly source: 'live-api' | 'predictions';
   readonly evaluated_at: string;
@@ -167,6 +223,23 @@ export function validateNoisyEntityBenchmark(cases: readonly NoisyEntityBenchmar
     }
     seenIds.add(item.benchmark_id);
     categoryCounts.set(item.category, (categoryCounts.get(item.category) ?? 0) + 1);
+
+    if ((item.category === 'transliteration' || item.category === 'phonetic') &&
+      item.expected_provenance_stage === undefined) {
+      throw new Error(
+        `Benchmark row ${item.benchmark_id} in category ${item.category} requires expected_provenance_stage`,
+      );
+    }
+    if (item.expected_provenance_source !== undefined && item.expected_provenance_stage === undefined) {
+      throw new Error(
+        `Benchmark row ${item.benchmark_id} declares expected_provenance_source without expected_provenance_stage`,
+      );
+    }
+    if (item.category === 'noisy_short_form' && item.expected_resolution === undefined) {
+      throw new Error(
+        `Benchmark row ${item.benchmark_id} in category noisy_short_form requires expected_resolution`,
+      );
+    }
   }
 
   const missingCategories = NOISY_ENTITY_CATEGORIES.filter(
@@ -208,22 +281,49 @@ function average(values: readonly number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function normalizeRankedEntities(raw: readonly RankedEntityLike[] | undefined): readonly RankedEntity[] {
+  if (raw === undefined) return [];
+  return raw.map((item) => (typeof item === 'string' ? { entity_id: item } : item));
+}
+
+function normalizeRankedPrediction(
+  raw: readonly RankedEntityLike[] | RankedPrediction | undefined,
+): RankedPrediction {
+  if (raw === undefined) {
+    return { rankedEntities: [] };
+  }
+  if (Array.isArray(raw)) {
+    return { rankedEntities: normalizeRankedEntities(raw) };
+  }
+  return {
+    rankedEntities: raw.rankedEntities,
+    decisionStatus: raw.decisionStatus,
+  };
+}
+
 function scoreRows(
   rows: readonly NoisyEntityBenchmarkCase[],
-  rankedByBenchmarkId: ReadonlyMap<string, readonly string[]>,
+  rankedByBenchmarkId: ReadonlyMap<string, readonly RankedEntityLike[] | RankedPrediction>,
 ): NoisyEntityBenchmarkReport {
   const scored = rows.map((row) => {
-    const rankedEntityIds = rankedByBenchmarkId.get(row.benchmark_id) ?? [];
+    const prediction = normalizeRankedPrediction(rankedByBenchmarkId.get(row.benchmark_id));
+    const rankedEntities = prediction.rankedEntities;
+    const rankedEntityIds = rankedEntities.map((item) => item.entity_id);
     const rank = rankedEntityIds.indexOf(row.expected_entity_id);
-    const topEntityId = rankedEntityIds[0] ?? null;
+    const topEntity = rankedEntities[0] ?? null;
+    const predictedResolution = prediction.decisionStatus ?? (rankedEntityIds.length > 0 ? 'resolved' : 'failed');
 
     return {
       row,
       rankedEntityIds,
+      rankedEntities,
       recallAt1: recallAtK(rankedEntityIds, row.expected_entity_id, 1),
       recallAt3: recallAtK(rankedEntityIds, row.expected_entity_id, 3),
       reciprocalRank: reciprocalRank(rankedEntityIds, row.expected_entity_id),
-      topEntityId,
+      topEntityId: topEntity?.entity_id ?? null,
+      topProvenanceStage: topEntity?.provenance_stage ?? null,
+      topProvenanceSource: topEntity?.provenance_source ?? null,
+      predictedResolution,
       top3: rankedEntityIds.slice(0, 3),
       foundRank: rank >= 0 ? rank + 1 : null,
     };
@@ -279,6 +379,42 @@ function scoreRows(
       top_3: item.top3,
     }));
 
+  const provenanceRelevant = scored.filter((item) => item.row.expected_provenance_stage !== undefined);
+  const provenanceMatches = provenanceRelevant.filter((item) => {
+    return item.topProvenanceStage === item.row.expected_provenance_stage
+      && (
+        item.row.expected_provenance_source === undefined ||
+        item.topProvenanceSource === item.row.expected_provenance_source
+      );
+  });
+  const provenanceMisses = provenanceRelevant
+    .filter((item) => !provenanceMatches.includes(item))
+    .slice(0, 25)
+    .map((item) => ({
+      benchmark_id: item.row.benchmark_id,
+      query: item.row.query,
+      expected_stage: item.row.expected_provenance_stage!,
+      actual_stage: item.topProvenanceStage,
+      expected_source: item.row.expected_provenance_source ?? null,
+      actual_source: item.topProvenanceSource,
+    }));
+
+  const resolutionRelevant = scored.filter((item) => item.row.expected_resolution !== undefined);
+  const resolutionMatches = resolutionRelevant.filter(
+    (item) => item.row.expected_resolution === item.predictedResolution,
+  );
+  const ambiguousExpected = resolutionRelevant.filter((item) => item.row.expected_resolution === 'ambiguous');
+  const falseExactMatches = ambiguousExpected.filter((item) => item.predictedResolution === 'resolved');
+  const resolutionMisses = resolutionRelevant
+    .filter((item) => item.row.expected_resolution !== item.predictedResolution)
+    .slice(0, 25)
+    .map((item) => ({
+      benchmark_id: item.row.benchmark_id,
+      query: item.row.query,
+      expected_resolution: item.row.expected_resolution!,
+      actual_resolution: item.predictedResolution,
+    }));
+
   return {
     benchmark: 'noisy-entity-benchmark',
     query_count: scored.length,
@@ -288,6 +424,13 @@ function scoreRows(
     by_category: byCategory,
     by_language: byLanguage,
     misses,
+    provenance_checked_count: provenanceRelevant.length,
+    provenance_match_rate: provenanceRelevant.length === 0 ? null : provenanceMatches.length / provenanceRelevant.length,
+    provenance_misses: provenanceMisses,
+    resolution_checked_count: resolutionRelevant.length,
+    resolution_match_rate: resolutionRelevant.length === 0 ? null : resolutionMatches.length / resolutionRelevant.length,
+    false_exact_rate: ambiguousExpected.length === 0 ? null : falseExactMatches.length / ambiguousExpected.length,
+    resolution_misses: resolutionMisses,
     source: 'predictions',
     evaluated_at: new Date().toISOString(),
   };
@@ -304,6 +447,33 @@ export function extractRankedEntityIds(responseBody: unknown): readonly string[]
       return typeof entityId === 'string' ? entityId : '';
     })
     .filter((entityId) => entityId.length > 0);
+}
+
+export function extractRankedEntities(responseBody: unknown): readonly RankedEntity[] {
+  const body = responseBody as Record<string, unknown>;
+  const results = Array.isArray(body['results']) ? (body['results'] as Record<string, unknown>[]) : [];
+
+  return results
+    .map((result) => {
+      const entity = (result['entity'] ?? {}) as Record<string, unknown>;
+      const entityId = entity['entity_id'] ?? entity['entityId'] ?? result['entity_id'] ?? result['entityId'];
+      if (typeof entityId !== 'string' || entityId.length === 0) return null;
+
+      const provenance = (result['provenance'] ?? entity['provenance']) as Record<string, unknown> | undefined;
+      const provenanceStage = provenance?.['stage'];
+      const provenanceSource = provenance?.['source'];
+
+      return {
+        entity_id: entityId,
+        ...(typeof provenanceStage === 'string' && NOISY_ENTITY_PROVENANCE_STAGES.includes(provenanceStage as never)
+          ? { provenance_stage: provenanceStage as RankedEntity['provenance_stage'] }
+          : {}),
+        ...(typeof provenanceSource === 'string' && provenanceSource.length > 0
+          ? { provenance_source: provenanceSource }
+          : {}),
+      } satisfies RankedEntity;
+    })
+    .filter((item): item is RankedEntity => item !== null);
 }
 
 async function mapPool<T, R>(
@@ -334,7 +504,7 @@ async function fetchLiveRankings(
   mode: CliArgs['mode'],
   timeoutMs: number,
   concurrency: number,
-): Promise<Map<string, readonly string[]>> {
+): Promise<Map<string, RankedPrediction>> {
   const mappings = await mapPool(
     cases,
     concurrency,
@@ -355,11 +525,11 @@ async function fetchLiveRankings(
       });
 
       if (!response.ok) {
-        return [benchmarkCase.benchmark_id, [] as const] as const;
+        return [benchmarkCase.benchmark_id, { rankedEntities: [] }] as const;
       }
 
       const body = (await response.json()) as unknown;
-      return [benchmarkCase.benchmark_id, extractRankedEntityIds(body)] as const;
+      return [benchmarkCase.benchmark_id, { rankedEntities: extractRankedEntities(body) }] as const;
     },
   );
 
@@ -369,10 +539,16 @@ async function fetchLiveRankings(
 export async function loadNoisyEntityPredictions(
   path = DEFAULT_SMOKE_PREDICTIONS,
   benchmarkIds?: ReadonlySet<string>,
-): Promise<Map<string, readonly string[]>> {
+): Promise<Map<string, RankedPrediction>> {
   const records = await readValidatedJsonl(path, NoisyEntityPredictionSchema);
   validateNoisyEntityPredictions(records, benchmarkIds);
-  return new Map(records.map((record) => [record.benchmark_id, record.ranked_entity_ids] as const));
+  return new Map(records.map((record) => {
+    const rankedEntities = record.ranked_entities ?? record.ranked_entity_ids?.map((entity_id) => ({ entity_id }));
+    return [record.benchmark_id, {
+      rankedEntities: rankedEntities ?? [],
+      decisionStatus: record.decision_status,
+    }] as const;
+  }));
 }
 
 export async function loadNoisyEntityBenchmark(path = DEFAULT_INPUT): Promise<NoisyEntityBenchmarkCase[]> {
@@ -383,7 +559,7 @@ export async function loadNoisyEntityBenchmark(path = DEFAULT_INPUT): Promise<No
 
 export function scoreNoisyEntityBenchmark(
   cases: readonly NoisyEntityBenchmarkCase[],
-  rankedByBenchmarkId: ReadonlyMap<string, readonly string[]>,
+  rankedByBenchmarkId: ReadonlyMap<string, readonly RankedEntityLike[] | RankedPrediction>,
 ): NoisyEntityBenchmarkReport {
   return scoreRows(cases, rankedByBenchmarkId);
 }
@@ -410,6 +586,11 @@ async function run(): Promise<void> {
   console.log(`  recall@1:    ${finalReport.recall_at_1.toFixed(4)}`);
   console.log(`  recall@3:    ${finalReport.recall_at_3.toFixed(4)}`);
   console.log(`  mrr:         ${finalReport.mrr.toFixed(4)}`);
+  if (finalReport.provenance_checked_count > 0) {
+    console.log(
+      `  provenance:  ${finalReport.provenance_checked_count} checked, match=${(finalReport.provenance_match_rate ?? 0).toFixed(4)}`,
+    );
+  }
   console.log(`  output:      ${args.output}`);
   console.log(`  source:      ${finalReport.source}`);
 

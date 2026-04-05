@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { HttpRouteContract } from './route-contracts.js';
+import { deepKeysToSnake } from '../middleware/snake-case-hook.js';
 
 function formatIssues(error: z.ZodError): string {
   return error.issues
@@ -72,5 +73,5 @@ export function sendRouteContractResponse(
     return;
   }
 
-  sendContractResponse(request, reply, statusCode, schema, payload);
+  sendContractResponse(request, reply, statusCode, schema, deepKeysToSnake(payload));
 }

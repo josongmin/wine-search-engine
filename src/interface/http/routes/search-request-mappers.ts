@@ -1,38 +1,77 @@
+import { z } from 'zod';
 import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
 import type { ReplayRequest } from '../../../application/search/replay-request.dto.js';
-import type { SearchRequest } from '../../../application/search/search-request.dto.js';
 import type {
-  HybridRequestBody,
-  InterpretRequestBody,
-  ReplayRequestBody,
-  ResolveRequestBody,
-  SearchRequestBody,
-} from '../schemas/search-request.schema.js';
-import type { HybridSearchRequest } from '../../../application/search/hybrid-request.dto.js';
+  SearchOptions,
+  SearchRequest,
+} from '../../../application/search/search-request.dto.js';
+import type {
+  HybridSearchOptions,
+  HybridSearchRequest,
+} from '../../../application/search/hybrid-request.dto.js';
 import type { InterpretRequest } from '../../../application/search/interpret-request.dto.js';
 import type { ResolveRequest } from '../../../application/search/resolve-request.dto.js';
+import {
+  HybridRequestSchema,
+  InterpretRequestSchema,
+  ReplayRequestSchema,
+  ResolveRequestSchema,
+  SearchRequestSchema,
+} from '../schemas/search-request.schema.js';
 
-export function toSearchRequest(body: SearchRequestBody): SearchRequest {
+function normalizeSearchOptions(
+  options: z.output<typeof SearchRequestSchema>['options']
+    | z.output<typeof ReplayRequestSchema>['options'],
+): SearchOptions | undefined {
+  if (options === undefined) {
+    return undefined;
+  }
+
+  return {
+    mode: options.mode ?? 'auto',
+    explain: options.explain ?? false,
+    clarification: options.clarification ?? true,
+  };
+}
+
+function normalizeHybridOptions(
+  options: z.output<typeof HybridRequestSchema>['options'],
+): HybridSearchOptions | undefined {
+  if (options === undefined) {
+    return undefined;
+  }
+
+  return {
+    explain: options.explain ?? false,
+    clarification: options.clarification ?? true,
+  };
+}
+
+export function toSearchRequest(body: z.output<typeof SearchRequestSchema>): SearchRequest {
+  const options = normalizeSearchOptions(body.options);
   return {
     query: body.query,
     ...(body.context !== undefined ? { context: body.context } : {}),
     ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
     ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
-    ...(body.options !== undefined ? { options: body.options } : {}),
+    ...(options !== undefined ? { options } : {}),
   };
 }
 
-export function toHybridSearchRequest(body: HybridRequestBody): HybridSearchRequest {
+export function toHybridSearchRequest(
+  body: z.output<typeof HybridRequestSchema>,
+): HybridSearchRequest {
+  const options = normalizeHybridOptions(body.options);
   return {
     query: body.query,
     ...(body.context !== undefined ? { context: body.context } : {}),
     ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
     ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
-    ...(body.options !== undefined ? { options: body.options } : {}),
+    ...(options !== undefined ? { options } : {}),
   };
 }
 
-export function toInterpretRequest(body: InterpretRequestBody): InterpretRequest {
+export function toInterpretRequest(body: z.output<typeof InterpretRequestSchema>): InterpretRequest {
   return {
     query: body.query,
     ...(body.context !== undefined ? { context: body.context } : {}),
@@ -42,7 +81,7 @@ export function toInterpretRequest(body: InterpretRequestBody): InterpretRequest
 }
 
 export function toResolveRequest(
-  body: ResolveRequestBody,
+  body: z.output<typeof ResolveRequestSchema>,
   requestId: string,
 ): ResolveRequest {
   return {
@@ -53,7 +92,8 @@ export function toResolveRequest(
   };
 }
 
-export function toReplayRequest(body: ReplayRequestBody): ReplayRequest {
+export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): ReplayRequest {
+  const options = normalizeSearchOptions(body.options);
   const snapshot: DecisionSnapshot = {
     model_versions: body.decision_snapshot.model_versions,
     index_versions: body.decision_snapshot.index_versions,
@@ -72,6 +112,6 @@ export function toReplayRequest(body: ReplayRequestBody): ReplayRequest {
     ...(body.context !== undefined ? { context: body.context } : {}),
     ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
     ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
-    ...(body.options !== undefined ? { options: body.options } : {}),
+    ...(options !== undefined ? { options } : {}),
   };
 }

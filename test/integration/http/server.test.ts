@@ -125,6 +125,45 @@ describe('HTTP server route registration', () => {
     }
   });
 
+  it('includes dynamically registered readiness checks in the response body', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      health: {
+        readiness: {
+          vespa: {
+            required: true,
+            check: async () => 'up',
+          },
+          reranker: {
+            check: async () => 'down',
+          },
+        },
+      },
+    });
+
+    try {
+      await app.ready();
+      const res = await app.inject({
+        method: 'GET',
+        url: '/ready',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        ready: true,
+        checks: {
+          postgres: { status: 'skipped', required: false },
+          redis: { status: 'skipped', required: false },
+          vespa: { status: 'up', required: true },
+          reranker: { status: 'down', required: false },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('responds to health checks with default hooks enabled in test env', async () => {
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',

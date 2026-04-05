@@ -116,15 +116,7 @@ export class SearchUseCase {
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
     });
-    const securityResult = await securityGate.getSafeQueryOrSearchRejection(
-      request.query,
-      requestId,
-      startTime,
-    );
-    if ('rejection' in securityResult) {
-      return securityResult.rejection;
-    }
-    const sanitizedQuery = securityResult.sanitizedQuery;
+    const sanitizedQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
     // Step 1: Plan the query
     const plannerContext: PlannerContext = {
@@ -288,6 +280,9 @@ export class SearchUseCase {
     const resolverInput: ResolverInput = {
       rawQuery: plan.rawQuery,
       normalizedQuery: plan.normalizedQuery,
+      ...(plan.normalizedQueryViews !== undefined
+        ? { normalizedQueryViews: plan.normalizedQueryViews }
+        : {}),
       queryClass: plan.queryClass,
       policy: plan.policy,
       anchorCandidates: plan.anchors,

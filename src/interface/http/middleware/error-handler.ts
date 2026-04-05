@@ -3,8 +3,12 @@ import { ZodError } from 'zod';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked.js';
 import { SnapshotMismatchError } from '../../../application/search/replay.usecase.js';
+import {
+  buildSearchErrorResponse,
+  getErrorRequestId,
+  sendSearchErrorResponse,
+} from '../errors/error-response.js';
 import { sendPolicyBlockedResponse } from '../errors/policy-blocked.js';
-import type { ErrorResponseBody } from '../schemas/search-response.schema.js';
 
 /**
  * Maps DomainError codes to HTTP status codes.
@@ -28,27 +32,6 @@ function isDomainErrorRetryable(code: string): boolean {
 }
 
 /**
- * Builds the RFC-014 error contract response body.
- */
-function buildErrorResponse(
-  requestId: string,
-  code: string,
-  message: string,
-  failureReason: string | null,
-  retryable: boolean,
-): ErrorResponseBody {
-  return {
-    error: {
-      request_id: requestId,
-      code,
-      message,
-      failure_reason: failureReason,
-      retryable,
-    },
-  };
-}
-
-/**
  * Global error handler for the Fastify server.
  *
  * Handles:
@@ -64,7 +47,7 @@ export function errorHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
-  const requestId = request.requestId;
+  const requestId = getErrorRequestId(request);
 
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
   // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the
@@ -78,7 +61,7 @@ export function errorHandler(
 
     request.log.warn({ requestId }, 'rate_limit_exceeded');
 
-    const body = buildErrorResponse(
+    const body = buildSearchErrorResponse(
       requestId,
       'RATE_LIMIT_EXCEEDED',
       retryPart,
@@ -86,7 +69,7 @@ export function errorHandler(
       true,
     );
 
-    void reply.status(429).send(body);
+    sendSearchErrorResponse(request, reply, 429, body);
     return;
   }
 
@@ -98,7 +81,7 @@ export function errorHandler(
 
     request.log.warn({ requestId, issues }, 'validation_error');
 
-    const body = buildErrorResponse(
+    const body = buildSearchErrorResponse(
       requestId,
       'VALIDATION_ERROR',
       `Request validation failed: ${issues}`,
@@ -106,7 +89,7 @@ export function errorHandler(
       false,
     );
 
-    void reply.status(400).send(body);
+    sendSearchErrorResponse(request, reply, 400, body);
     return;
   }
 
@@ -114,7 +97,7 @@ export function errorHandler(
   if (error instanceof SnapshotMismatchError) {
     request.log.warn({ requestId, code: error.code }, 'snapshot_mismatch');
 
-    const body = buildErrorResponse(
+    const body = buildSearchErrorResponse(
       requestId,
       error.code,
       error.message,
@@ -122,7 +105,7 @@ export function errorHandler(
       false,
     );
 
-    void reply.status(409).send(body);
+    sendSearchErrorResponse(request, reply, 409, body);
     return;
   }
 
@@ -141,7 +124,7 @@ export function errorHandler(
       return;
     }
 
-    const body = buildErrorResponse(
+    const body = buildSearchErrorResponse(
       requestId,
       error.code,
       error.message,
@@ -149,7 +132,7 @@ export function errorHandler(
       retryable,
     );
 
-    void reply.status(status).send(body);
+    sendSearchErrorResponse(request, reply, status, body);
     return;
   }
 
@@ -159,7 +142,7 @@ export function errorHandler(
     'unhandled_error',
   );
 
-  const body = buildErrorResponse(
+  const body = buildSearchErrorResponse(
     requestId,
     'INTERNAL_ERROR',
     'An unexpected error occurred.',
@@ -167,5 +150,5 @@ export function errorHandler(
     false,
   );
 
-  void reply.status(500).send(body);
+  sendSearchErrorResponse(request, reply, 500, body);
 }

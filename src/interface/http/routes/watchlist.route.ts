@@ -10,19 +10,17 @@
 import { type FastifyInstance } from 'fastify';
 import type {
   WatchlistDeliveryLogEntry,
-  WatchlistTrigger,
 } from '../../../domain/watchlist/model/watchlist-entry.js';
+import { toWatchlistTriggerResponse } from '../../../domain/watchlist/service/watchlist-policy.js';
 import {
-  CreateWatchlistRequestSchema,
   CreateWatchlistResponseSchema,
   GetWatchlistResponseSchema,
   ListDeliveriesResponseSchema,
   WatchlistErrorResponseSchema,
-  WatchlistIdParamsSchema,
-  type WatchlistTriggerResponse,
 } from '../schemas/watchlist.schema.js';
 import type { WatchlistRouteDeps } from './route-deps.js';
-import { sendContractResponse, sendRouteContractResponse } from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
+import { sendRouteContractResponse } from './contract-response.js';
 import {
   WatchlistCreateRouteContract,
   WatchlistDeleteRouteContract,
@@ -44,32 +42,6 @@ function createErrorResponse(requestId: string, code: string, message: string) {
   });
 }
 
-function toTriggerResponse(trigger: WatchlistTrigger): WatchlistTriggerResponse {
-  switch (trigger.type) {
-    case 'new_vintage':
-      return {
-        type: trigger.type,
-        min_vintage: trigger.minVintage,
-      };
-    case 'price_drop':
-      return {
-        type: trigger.type,
-        threshold: trigger.threshold,
-        baseline_price: trigger.baselinePrice,
-      };
-    case 'stock_available':
-      return {
-        type: trigger.type,
-        min_qty: trigger.minQty,
-      };
-    case 'critic_score_above':
-      return {
-        type: trigger.type,
-        threshold: trigger.threshold,
-      };
-  }
-}
-
 /**
  * Registers watchlist routes on the Fastify instance.
  */
@@ -77,124 +49,138 @@ export function registerWatchlistRoute(
   app: FastifyInstance,
   deps: WatchlistRouteDeps,
 ): void {
-  app.post('/v1/watchlist', async (request, reply) => {
-    const parsed = WatchlistCreateRouteContract.body.safeParse(request.body);
-    if (!parsed.success) {
-      sendContractResponse(
-        request,
-        reply,
-        400,
-        WatchlistErrorResponseSchema,
-        createErrorResponse(
-          getRequestId(request),
-          'VALIDATION_ERROR',
-          'Invalid watchlist request',
-        ),
-      );
-      return;
-    }
-
-    try {
-      const entry = await deps.watchlistService.create({
-        userId: parsed.data.user_id,
-        entityId: parsed.data.entity_id,
-        triggerConditions: parsed.data.trigger_conditions,
-        callbackUrl: parsed.data.callback_url,
-        expiresAt: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null,
-      });
-
-      const response = CreateWatchlistResponseSchema.parse({
-        watchlist_id: entry.id,
-      });
-
-      sendRouteContractResponse(request, reply, WatchlistCreateRouteContract, 201, response);
-    } catch (err: unknown) {
-      request.log.error({ err }, 'create_watchlist_failed');
-      sendContractResponse(
-        request,
-        reply,
-        500,
-        WatchlistErrorResponseSchema,
-        createErrorResponse(
-          getRequestId(request),
-          'INTERNAL_ERROR',
-          'Failed to create watchlist',
-        ),
-      );
-    }
-  });
-
-  app.get('/v1/watchlist/:id', async (request, reply) => {
-    const parsed = WatchlistGetRouteContract.params.safeParse(request.params);
-    if (!parsed.success) {
-      sendContractResponse(
-        request,
-        reply,
-        400,
-        WatchlistErrorResponseSchema,
-        createErrorResponse(
-          getRequestId(request),
-          'VALIDATION_ERROR',
-          'Invalid watchlist id',
-        ),
-      );
-      return;
-    }
-
-    try {
-      const { id } = parsed.data;
-      const entry = await deps.watchlistService.getById(id);
-
-      if (entry === null) {
-        sendContractResponse(
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/watchlist',
+    contract: WatchlistCreateRouteContract,
+    handler: async (request, reply) => {
+      const parsed = WatchlistCreateRouteContract.body.safeParse(request.body);
+      if (!parsed.success) {
+        sendRouteContractResponse(
           request,
           reply,
-          404,
-          WatchlistErrorResponseSchema,
+          WatchlistCreateRouteContract,
+          400,
           createErrorResponse(
             getRequestId(request),
-            'NOT_FOUND',
-            `Watchlist entry ${id} not found`,
+            'VALIDATION_ERROR',
+            'Invalid watchlist request',
           ),
         );
         return;
       }
 
-      const response = GetWatchlistResponseSchema.parse({
-        watchlist_id: entry.id,
-        user_id: entry.userId,
-        entity_id: entry.entityId,
-        trigger_conditions: entry.triggerConditions.map(toTriggerResponse),
-        callback_url: entry.callbackUrl,
-        created_at: entry.createdAt.toISOString(),
-        expires_at: entry.expiresAt ? entry.expiresAt.toISOString() : null,
-      });
+      try {
+        const entry = await deps.watchlistService.create({
+          userId: parsed.data.user_id,
+          entityId: parsed.data.entity_id,
+          triggerConditions: parsed.data.trigger_conditions,
+          callbackUrl: parsed.data.callback_url,
+          expiresAt: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null,
+        });
 
-      sendRouteContractResponse(request, reply, WatchlistGetRouteContract, 200, response);
-    } catch (err: unknown) {
-      request.log.error({ err }, 'get_watchlist_failed');
-      sendContractResponse(
-        request,
-        reply,
-        500,
-        WatchlistErrorResponseSchema,
-        createErrorResponse(
-          getRequestId(request),
-          'INTERNAL_ERROR',
-          'Failed to retrieve watchlist',
-        ),
-      );
-    }
+        const response = CreateWatchlistResponseSchema.parse({
+          watchlist_id: entry.id,
+        });
+
+        sendRouteContractResponse(request, reply, WatchlistCreateRouteContract, 201, response);
+      } catch (err: unknown) {
+        request.log.error({ err }, 'create_watchlist_failed');
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistCreateRouteContract,
+          500,
+          createErrorResponse(
+            getRequestId(request),
+            'INTERNAL_ERROR',
+            'Failed to create watchlist',
+          ),
+        );
+      }
+    },
   });
 
-  app.delete('/v1/watchlist/:id', async (request, reply) => {
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/v1/watchlist/:id',
+    contract: WatchlistGetRouteContract,
+    handler: async (request, reply) => {
+      const parsed = WatchlistGetRouteContract.params.safeParse(request.params);
+      if (!parsed.success) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistGetRouteContract,
+          400,
+          createErrorResponse(
+            getRequestId(request),
+            'VALIDATION_ERROR',
+            'Invalid watchlist id',
+          ),
+        );
+        return;
+      }
+
+      try {
+        const { id } = parsed.data;
+        const entry = await deps.watchlistService.getById(id);
+
+        if (entry === null) {
+          sendRouteContractResponse(
+            request,
+            reply,
+            WatchlistGetRouteContract,
+            404,
+            createErrorResponse(
+              getRequestId(request),
+              'NOT_FOUND',
+              `Watchlist entry ${id} not found`,
+            ),
+          );
+          return;
+        }
+
+        const response = GetWatchlistResponseSchema.parse({
+          watchlist_id: entry.id,
+          user_id: entry.userId,
+          entity_id: entry.entityId,
+          trigger_conditions: entry.triggerConditions.map(toWatchlistTriggerResponse),
+          callback_url: entry.callbackUrl,
+          created_at: entry.createdAt.toISOString(),
+          expires_at: entry.expiresAt ? entry.expiresAt.toISOString() : null,
+        });
+
+        sendRouteContractResponse(request, reply, WatchlistGetRouteContract, 200, response);
+      } catch (err: unknown) {
+        request.log.error({ err }, 'get_watchlist_failed');
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistGetRouteContract,
+          500,
+          createErrorResponse(
+            getRequestId(request),
+            'INTERNAL_ERROR',
+            'Failed to retrieve watchlist',
+          ),
+        );
+      }
+    },
+  });
+
+  registerContractRoute(app, {
+    method: 'DELETE',
+    url: '/v1/watchlist/:id',
+    contract: WatchlistDeleteRouteContract,
+    handler: async (request, reply) => {
     const parsed = WatchlistDeleteRouteContract.params.safeParse(request.params);
     if (!parsed.success) {
-      sendContractResponse(
+      sendRouteContractResponse(
         request,
         reply,
+        WatchlistDeleteRouteContract,
         400,
-        WatchlistErrorResponseSchema,
         createErrorResponse(
           getRequestId(request),
           'VALIDATION_ERROR',
@@ -209,11 +195,11 @@ export function registerWatchlistRoute(
       const deleted = await deps.watchlistService.delete(id);
 
       if (!deleted) {
-        sendContractResponse(
+        sendRouteContractResponse(
           request,
           reply,
+          WatchlistDeleteRouteContract,
           404,
-          WatchlistErrorResponseSchema,
           createErrorResponse(
             getRequestId(request),
             'NOT_FOUND',
@@ -226,11 +212,11 @@ export function registerWatchlistRoute(
       sendRouteContractResponse(request, reply, WatchlistDeleteRouteContract, 204);
     } catch (err: unknown) {
       request.log.error({ err }, 'delete_watchlist_failed');
-      sendContractResponse(
+      sendRouteContractResponse(
         request,
         reply,
+        WatchlistDeleteRouteContract,
         500,
-        WatchlistErrorResponseSchema,
         createErrorResponse(
           getRequestId(request),
           'INTERNAL_ERROR',
@@ -238,16 +224,21 @@ export function registerWatchlistRoute(
         ),
       );
     }
+    },
   });
 
-  app.get('/v1/watchlist/:id/deliveries', async (request, reply) => {
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/v1/watchlist/:id/deliveries',
+    contract: WatchlistDeliveriesRouteContract,
+    handler: async (request, reply) => {
     const parsed = WatchlistDeliveriesRouteContract.params.safeParse(request.params);
     if (!parsed.success) {
-      sendContractResponse(
+      sendRouteContractResponse(
         request,
         reply,
+        WatchlistDeliveriesRouteContract,
         400,
-        WatchlistErrorResponseSchema,
         createErrorResponse(
           getRequestId(request),
           'VALIDATION_ERROR',
@@ -262,11 +253,11 @@ export function registerWatchlistRoute(
       const deliveries = await deps.watchlistService.listDeliveries(id);
 
       if (deliveries === null) {
-        sendContractResponse(
+        sendRouteContractResponse(
           request,
           reply,
+          WatchlistDeliveriesRouteContract,
           404,
-          WatchlistErrorResponseSchema,
           createErrorResponse(
             getRequestId(request),
             'NOT_FOUND',
@@ -291,11 +282,11 @@ export function registerWatchlistRoute(
       sendRouteContractResponse(request, reply, WatchlistDeliveriesRouteContract, 200, response);
     } catch (err: unknown) {
       request.log.error({ err }, 'list_watchlist_deliveries_failed');
-      sendContractResponse(
+      sendRouteContractResponse(
         request,
         reply,
+        WatchlistDeliveriesRouteContract,
         500,
-        WatchlistErrorResponseSchema,
         createErrorResponse(
           getRequestId(request),
           'INTERNAL_ERROR',
@@ -303,5 +294,6 @@ export function registerWatchlistRoute(
         ),
       );
     }
+    },
   });
 }

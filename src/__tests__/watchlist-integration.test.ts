@@ -47,7 +47,11 @@ describe('Watchlist Integration', () => {
       const entityId = 'wine-test-123';
       const event: WatchlistChangeEvent = {
         type: 'price_updated',
-        data: { newPrice: 100 },
+        data: {
+          oldPrice: 120,
+          newPrice: 100,
+          percentageDrop: 16.6667,
+        },
         occurredAt: '2025-04-06T10:00:00Z',
       };
 
@@ -145,7 +149,11 @@ describe('Watchlist Integration', () => {
         watchlist_id: watchlistId,
         entity_id: 'wine-123',
         event_type: 'price_updated',
-        event_data: { newPrice: 100 },
+        event_data: {
+          oldPrice: 120,
+          newPrice: 100,
+          percentageDrop: 16.6667,
+        },
         triggered_at: '2025-04-06T10:00:00Z',
       };
 
@@ -161,7 +169,11 @@ describe('Watchlist Integration', () => {
 
       const event: WatchlistChangeEvent = {
         type: 'price_updated',
-        data: { newPrice: 100 },
+        data: {
+          oldPrice: 120,
+          newPrice: 100,
+          percentageDrop: 16.6667,
+        },
         occurredAt: '2025-04-06T10:00:00Z',
       };
 
@@ -197,8 +209,11 @@ describe('Watchlist Integration', () => {
       };
 
       const event: WatchlistChangeEvent = {
-        type: 'test_event',
-        data: {},
+        type: 'stock_changed',
+        data: {
+          stock: 1,
+          available: true,
+        },
         occurredAt: new Date().toISOString(),
       };
 
@@ -234,8 +249,11 @@ describe('Watchlist Integration', () => {
       };
 
       const event: WatchlistChangeEvent = {
-        type: 'test_event',
-        data: {},
+        type: 'stock_changed',
+        data: {
+          stock: 1,
+          available: true,
+        },
         occurredAt: new Date().toISOString(),
       };
 
@@ -272,8 +290,11 @@ describe('Watchlist Integration', () => {
       };
 
       const event: WatchlistChangeEvent = {
-        type: 'test_event',
-        data: {},
+        type: 'stock_changed',
+        data: {
+          stock: 1,
+          available: true,
+        },
         occurredAt: new Date().toISOString(),
       };
 

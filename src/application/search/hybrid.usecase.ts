@@ -54,21 +54,12 @@ export class HybridUseCase {
     requestId: string,
   ): Promise<SearchResponseV1> {
     const startTime = Date.now();
-    let effectiveQuery = request.query;
 
     const securityGate = new QueryEntrySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
     });
-    const securityResult = await securityGate.getSafeQueryOrSearchRejection(
-      request.query,
-      requestId,
-      startTime,
-    );
-    if ('rejection' in securityResult) {
-      return securityResult.rejection;
-    }
-    effectiveQuery = securityResult.sanitizedQuery;
+    const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
     // Plan the query
     const plannerContext: PlannerContext = {

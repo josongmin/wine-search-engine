@@ -22,6 +22,14 @@ interface DecisionState {
   finalReason: string;
 }
 
+const NOISY_SHORT_QUERY_STRATEGIES = new Set([
+  'fuzzy_char_ngram',
+  'transliterated_fuzzy',
+]);
+const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
+const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
+const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
+
 /**
  * THE FINAL AUTHORITY — the Decision Engine, per RFC-007.
  *
@@ -94,7 +102,15 @@ export class DecisionEngine {
     const afterEvidence = this.applyEvidenceObligation(input, numericState, rulesApplied);
 
     // ── Step 4: Policy overlay ─────────────────────────────────────
-    const finalState = this.applyPolicyOverlay(input, afterEvidence, rulesApplied);
+    const afterPolicy = this.applyPolicyOverlay(input, afterEvidence, rulesApplied);
+
+    // ── Step 4.5: Noisy short-query guard ───────────────────────────
+    const finalState = this.applyNoisyShortQueryGuard(
+      input,
+      afterPolicy,
+      rulesApplied,
+      dynamicGapThreshold,
+    );
 
     // ── Step 5: AdmissionGate (RFC-016) ────────────────────────────
     // The gate is the final closure before a resolved status is emitted.
@@ -391,6 +407,54 @@ export class DecisionEngine {
     return state;
   }
 
+  private applyNoisyShortQueryGuard(
+    input: DecisionInput,
+    state: DecisionState,
+    rulesApplied: string[],
+    dynamicGapThreshold: number,
+  ): DecisionState {
+    if (state.status !== 'resolved') {
+      return state;
+    }
+
+    const queryClass = input.queryPlan.queryClass;
+    if (queryClass !== 'short_entity' && queryClass !== 'ambiguous_short_form') {
+      return state;
+    }
+
+    const normalizedCompact = input.queryPlan.normalizedQuery.replace(/[^\p{L}\p{N}]+/gu, '');
+    if (normalizedCompact.length === 0 || normalizedCompact.length > NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH) {
+      return state;
+    }
+
+    const strategies = input.resolverResult.decisionTrace.queryProvenance?.anchorLookupStrategies ?? [];
+    const hasNoisyLookupStrategy = strategies.some((strategy) => NOISY_SHORT_QUERY_STRATEGIES.has(strategy));
+    if (!hasNoisyLookupStrategy) {
+      return state;
+    }
+
+    const resolverTrace = input.resolverResult.decisionTrace;
+    const requiredGap = Math.max(dynamicGapThreshold, NOISY_SHORT_QUERY_GAP_FLOOR);
+    if (
+      resolverTrace.decisionConfidenceC >= NOISY_SHORT_QUERY_CONFIDENCE_FLOOR &&
+      resolverTrace.calibratedGap >= requiredGap
+    ) {
+      rulesApplied.push('NOISY_SHORT_QUERY_GUARD_BYPASSED_HIGH_CONFIDENCE');
+      return state;
+    }
+
+    rulesApplied.push('NOISY_SHORT_QUERY_GUARD');
+    rulesApplied.push('NOISY_LOOKUP_STRATEGY_DETECTED');
+    return {
+      status: 'ambiguous',
+      nextAction: 'clarify',
+      rulesApplied: [...rulesApplied],
+      finalReason:
+        `Short query used noisy lookup strategy (${strategies.join(', ')}) without enough margin ` +
+        `(C=${resolverTrace.decisionConfidenceC.toFixed(4)}, gap=${resolverTrace.calibratedGap.toFixed(4)}).`,
+    };
+  }
+
   /**
    * Loads threshold entry for the query class from the threshold store,
    * falling back to the default profile, and applies dynamic gap threshold
@@ -475,6 +539,11 @@ export class DecisionEngine {
       },
       rulesApplied,
       finalReason: state.finalReason,
+      ...(input.resolverResult.decisionTrace.queryProvenance !== undefined
+        ? {
+            queryProvenance: input.resolverResult.decisionTrace.queryProvenance,
+          }
+        : {}),
     };
 
     // Build the signal set, using ranking signals if available or a zero-filled default.

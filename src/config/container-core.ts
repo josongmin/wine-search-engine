@@ -5,9 +5,9 @@ import { Ranker } from '../domain/ranking/service/ranker.js';
 import { DecisionEngine } from '../domain/decision/service/decision-engine.js';
 import { ResponseBuilder } from '../domain/response/service/response-builder.js';
 import { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
+import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
-import type { DrinkingWindowPredictorContract } from './container-contracts.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { buildCoreAdapterServices } from './container-adapters.js';
 import {
@@ -38,7 +38,7 @@ export interface CoreContainerServices {
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
   readonly cacheService?: RuntimeSupportServices['cacheService'];
   readonly ltrModels?: RuntimeSupportServices['ltrModels'];
-  readonly drinkingWindowPredictor: DrinkingWindowPredictorContract;
+  readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
 }
 
 export async function buildCoreContainerServices(

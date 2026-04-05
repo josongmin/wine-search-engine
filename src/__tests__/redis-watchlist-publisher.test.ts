@@ -23,6 +23,7 @@ describe('RedisWatchlistPublisher', () => {
         data: {
           newPrice: 135,
           oldPrice: 150,
+          percentageDrop: 10,
         },
         occurredAt: '2025-04-06T10:00:00Z',
       };
@@ -39,8 +40,11 @@ describe('RedisWatchlistPublisher', () => {
     it('should construct correct channel name', async () => {
       const entityId = 'test-entity';
       const event: WatchlistChangeEvent = {
-        type: 'test_event',
-        data: {},
+        type: 'stock_changed',
+        data: {
+          stock: 1,
+          available: true,
+        },
         occurredAt: new Date().toISOString(),
       };
 
@@ -52,14 +56,14 @@ describe('RedisWatchlistPublisher', () => {
     it('should serialize event as JSON', async () => {
       const event: WatchlistChangeEvent = {
         type: 'stock_changed',
-        data: { qty: 100 },
+        data: { stock: 100, available: true },
         occurredAt: '2025-04-06T10:00:00Z',
       };
 
       // Verify event is serializable
       const json = JSON.stringify(event);
       expect(json).toContain('stock_changed');
-      expect(json).toContain('qty');
+      expect(json).toContain('stock');
     });
   });
 });

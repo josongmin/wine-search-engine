@@ -1,10 +1,23 @@
 import type { FastifyInstance } from 'fastify';
 import type { BatchSearchRouteDeps } from './route-deps.js';
 import {
-  parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
 import { BatchSearchRouteContract } from './route-contracts.js';
+import { ErrorResponseSchema } from '../schemas/search-response.schema.js';
+
+function createValidationErrorResponse(requestId: string, message: string) {
+  return ErrorResponseSchema.parse({
+    error: {
+      request_id: requestId,
+      code: 'VALIDATION_ERROR',
+      message,
+      failure_reason: null,
+      retryable: false,
+    },
+  });
+}
 
 /**
  * POST /v1/batch-search — batch search endpoint.
@@ -66,21 +79,36 @@ export function registerBatchSearchRoute(
   app: FastifyInstance,
   deps: BatchSearchRouteDeps,
 ): void {
-  app.post('/v1/batch-search', async (request, reply) => {
-    const parsed = parseContractBody(request, BatchSearchRouteContract);
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/batch-search',
+    contract: BatchSearchRouteContract,
+    handler: async (request, reply) => {
+      const parsed = BatchSearchRouteContract.body.safeParse(request.body);
+      if (!parsed.success) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          BatchSearchRouteContract,
+          400,
+          createValidationErrorResponse(request.requestId, 'Invalid batch search request'),
+        );
+        return;
+      }
 
-    const response = await deps.batchSearchUseCase.execute(
-      parsed.requests,
-      parsed.options,
-      parsed.batch_id,
-    );
+      const response = await deps.batchSearchUseCase.execute(
+        parsed.data.requests,
+        parsed.data.options,
+        parsed.data.batch_id,
+      );
 
-    // Always return 207 Multi-Status (RFC 7231 §6.3.7)
-    // HTTP 207 allows a single response body to convey information about
-    // multiple status values. Used here to indicate that:
-    // - Batch structure was valid (not 400)
-    // - Individual requests may have succeeded or failed (not 200/500)
-    // - Client must inspect response.results[].status to determine outcome
-    sendRouteContractResponse(request, reply, BatchSearchRouteContract, 207, response);
+      // Always return 207 Multi-Status (RFC 7231 §6.3.7)
+      // HTTP 207 allows a single response body to convey information about
+      // multiple status values. Used here to indicate that:
+      // - Batch structure was valid (not 400)
+      // - Individual requests may have succeeded or failed (not 200/500)
+      // - Client must inspect response.results[].status to determine outcome
+      sendRouteContractResponse(request, reply, BatchSearchRouteContract, 207, response);
+    },
   });
 }

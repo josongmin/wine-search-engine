@@ -1,0 +1,110 @@
+import type { Config } from './env.js';
+import type { RuntimeHandles } from './runtime-handles.js';
+import {
+  expectsRedisAtStartup,
+  isWatchlistEnabled,
+} from './watchlist.js';
+import { probeJsonPostEndpoint } from './readiness-probes.js';
+import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
+import type {
+  HealthRouteOptions,
+  ReadinessStatus,
+} from '../interface/http/routes/health.route.js';
+
+async function probePostgres(
+  pool: NonNullable<RuntimeHandles['pool']>,
+): Promise<ReadinessStatus> {
+  try {
+    await pool.query('SELECT 1');
+    return 'up';
+  } catch {
+    return 'down';
+  }
+}
+
+async function probeRedis(
+  redisClient: RuntimeHandles['redisClient'] | null | undefined,
+): Promise<ReadinessStatus> {
+  if (redisClient == null || !redisClient.isOpen) {
+    return 'down';
+  }
+
+  try {
+    await redisClient.ping();
+    return 'up';
+  } catch {
+    return 'down';
+  }
+}
+
+export function buildHealthRouteOptions(
+  config: Config,
+  runtime: RuntimeHandles,
+  watchlistRuntime?: WatchlistRuntimePort | null,
+): HealthRouteOptions {
+  const expectsRedis = expectsRedisAtStartup(config);
+  const watchlistEnabled = isWatchlistEnabled(config);
+
+  return {
+    readiness: {
+      ...(runtime.pool
+        ? {
+            postgres: {
+              required: true,
+              check: async (): Promise<ReadinessStatus> => {
+                const pool = runtime.pool;
+                if (pool === undefined) {
+                  return 'down';
+                }
+                return probePostgres(pool);
+              },
+            },
+          }
+        : {}),
+      ...(expectsRedis
+        ? {
+            redis: {
+              required: watchlistEnabled,
+              check: async (): Promise<ReadinessStatus> => probeRedis(runtime.redisClient),
+            },
+          }
+        : {}),
+      ...(watchlistEnabled
+        ? {
+            watchlist_runtime: {
+              required: true,
+              check: async (): Promise<ReadinessStatus> =>
+                watchlistRuntime?.isRunning() === true ? 'up' : 'down',
+            },
+          }
+        : {}),
+      vespa: {
+        required: true,
+        check: async (): Promise<ReadinessStatus> =>
+          probeJsonPostEndpoint(`${config.vespa.url}/search/`, {
+            yql: 'select * from sources * where true limit 0;',
+          }),
+      },
+      ...(!config.killSwitch.denseRetrieval
+        ? {
+            embedding: {
+              required: true,
+              check: async (): Promise<ReadinessStatus> =>
+                probeJsonPostEndpoint(`${config.embedding.url}/embeddings`, {
+                  model: config.embedding.model,
+                  input: '__healthcheck__',
+                }),
+            },
+          }
+        : {}),
+      reranker: {
+        required: false,
+        check: async (): Promise<ReadinessStatus> =>
+          probeJsonPostEndpoint(`${config.reranker.url}/rerank`, {
+            query: '__healthcheck__',
+            texts: ['__healthcheck__'],
+          }),
+      },
+    },
+  };
+}

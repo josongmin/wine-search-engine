@@ -1,9 +1,9 @@
 # `docs/plans/*` 대비 구현 갭 감사
 
 **기준 시점:** 저장소 정적 대조 (코드·스크립트 존재, 주요 심볼 `rg`).  
-**범위:** `docs/plans/apr-5-v0.1/*`, `docs/plans/apr-5-v0.2/*`  
+**범위:** `docs/plans/apr-5-v0.1/*`, `docs/plans/apr-5-v0.2/*`, **`docs/plans/apr-6-v0.3/*` (Epic 18 요약)**  
 **용도:** 플랜 문서와 실제 구현의 빵꾸를 한곳에 모음. 상세 근거·행 번호는 [`BACKLOG.md`](./BACKLOG.md)·[`TASKS.md`](./TASKS.md)·[`GAPS.md`](./GAPS.md)와 교차 참고.  
-**최종 갱신:** 2026-04-06 (5차: `docs/plans/**/*.md` **전수** — Deliverables `[ ]`·완료 기준 vs 저장소 `Glob`/`rg` 재확인)
+**최종 갱신:** 2026-04-06 (6차: **`npm run eval`·Epic 9 본문 표·v0.3 Epic 18 Track A/B** 재대조)
 
 ---
 
@@ -15,7 +15,7 @@
 |----------------|------|-----------|
 | 10K ETL | 1 | 스크립트·스키마 있음; 품질·10K는 운영 데이터로 재확인 |
 | Golden 500 | 2 | `bronze`+`splits`; 파일명·`ENTITY_TARGET_TYPE_MAP` → `G-03`, `G-32` |
-| Eval | 3 | `npm run eval` 깨짐; `verify-splits` CI 없음 → `G-04`, `G-21`, `G-22` |
+| Eval | 3 | `npm run eval` → `scripts/eval/run-offline-eval.ts` **존재** (과거 `run-eval.ts` 가정 **해소**); `verify-splits`·eval 연동·CI **없음** → `G-21`, `G-22` |
 | LTR | 4 | TS LTR vs 문서 Python/Vespa → `G-19` |
 | Reranker | 5 | 서비스 있음; README 없음 → `G-33` |
 | Embedding FT | 6 | 스크립트 있음; 커밋 모델 없음 → `BACKLOG` §11 |
@@ -39,7 +39,7 @@
 | 6 Fine-tune | py triplets·distill·reindex | `scripts/ltr/*.py` 등 | 커밋된 `models/*` 없음 → §11 |
 | 7 RetrievalMode | 10 모드·플래너 | 타입·가중치·골든 태그 | **`producer_browse`/`region_browse`/`no_match_detection` 미선택** → §2, TASKS §I |
 | 8 Entity surface | QueryTarget·grouper | 추론·`ResultGrouper` 구현 | **응답 파이프라인 미연결** → §4 |
-| 9 LLM envelope | 필드 확장 | 대부분 구현 | `missingInformation` 없음 → §25; **`epic-9-llm-envelope.md` 작업 목록이 `[ ]`로 남음 — 구현과 문서 드리프트** (타입·`response-builder`는 이미 확장됨) |
+| 9 LLM envelope | 필드 확장 | **`retrievalMode` / `resultType` / `parsedConstraints` / `matchReasons` / `violatedConstraints` / `abstainReason` 구현** | `missingInformation` 없음 → §25·`G-41`; **`epic-9-llm-envelope.md` 본문 표·작업 `[ ]`는 문서 드리프트** (표가 여전히 ❌로 표기) |
 | 10 Browse/Compare | 전용 리트리버 | **스텁** | §3 |
 | 11 Mode eval | mode slice·게이트 | `metrics`에 통합 | 별도 `mode-metrics.ts` 없음 → §7 |
 
@@ -105,6 +105,18 @@
 
 ---
 
+## apr-6-v0.3 — Epic 18 (Robust Entity Lookup)
+
+플랜: `docs/plans/apr-6-v0.3/00-overview.md`, `epic-18-robust-entity-lookup.md`, `epic-18-execution-plan.md`.
+
+| 트랙 / 플랜 키워드 | 코드 대조 (2026-04-06) | 갭 |
+|--------------------|------------------------|-----|
+| **Track A** — `noisy-entity-benchmark.jsonl`, `run-noisy-entity-eval.ts` | `data/noisy-entity-benchmark.jsonl` **존재**; `scripts/eval/run-noisy-entity-eval.ts` **존재**; `package.json`에 `eval:noisy` / `eval:noisy:smoke` 등 | **부분 충족** — 벤치·러너 스켈레톤은 있음. North Star 수치(Recall@3≥0.92 등)·feedback flywheel·alias mining은 **플랜 대비 미완 또는 별도 검증 필요** |
+| **Track B** — `NormalizedQueryViews`, `query-normalizer.ts` | `src/domain/query/model/query-views.ts`, `query-normalizer.ts`, `buildNormalizedQueryViews`가 **resolver·alias matcher·planner 경로에 존재** | 실행 계획의 “신규 구현” 체크와 어긋남 → **문서를 구현 상태에 맞게 갱신** 권장 (기능 빵꾸로 보이기 쉬움) |
+| **Track C–G** — 편집거리 funnel, phonetic, learned entity matcher, 운영 루프 | BK-tree/Soundex·`ConstraintSAT` 등은 **v0.2 Epic 13과 동일하게 미구현/부분** | Epic 18은 Epic 13·14·16과 **같은 기술 부채 축**을 공유; 독립 완료는 **추가 구현** 필요 |
+
+---
+
 ## 재현 커맨드 (플랜 대비 빠른 체크)
 
 ```bash
@@ -120,8 +132,9 @@ rg "retrieval_mode|retrievalMode" src/interface/http/schemas/search.schema.ts
 # v0.1 Epic 4 문서상 스크립트
 ls scripts/ltr/feature-schema.ts 2>/dev/null || echo "없음"
 
-# npm script eval
-test -f scripts/run-eval.ts && echo ok || echo "run-eval.ts 없음 — npm run eval 깨짐"
+# npm script eval (현재는 run-offline-eval.ts)
+grep '"eval"' package.json
+test -f scripts/eval/run-offline-eval.ts && echo "run-offline-eval.ts ok" || echo "missing run-offline-eval.ts"
 
 # Epic 15 플랜 스크립트 존재 여부
 ls scripts/etl/collect-drinking-windows.ts 2>/dev/null || echo "collect-drinking-windows.ts 없음"
@@ -137,7 +150,7 @@ ls scripts/etl/drinking-window-backfill.ts 2>/dev/null && echo "backfill 스크�
 
 | 플랜 | 문서 상태 | 코드/저장소 실제 | 조치 |
 |------|-----------|------------------|------|
-| **Epic 9** `epic-9-llm-envelope.md` | “이미 존재하는 것” 표에 `retrievalMode`/`resultType`/`parsedConstraints` 등 ❌, 작업 항목 전부 `[ ]` | `SearchResponseV1`에 `retrievalMode?`, `resultType?`, `parsedConstraints?` 등 **존재** (`search-response.ts`) | 플랜 표·체크리스트를 **구현에 맞게 갱신**하거나, 아직 미완인 항목만 `[ ]`로 남길 것 |
+| **Epic 9** `epic-9-llm-envelope.md` | 본문 표에 `retrievalMode`/`resultType`/`parsedConstraints`/`matchReasons`/`violatedConstraints` ❌, 작업 항목 전부 `[ ]` | `SearchResponseV1`·`ResultItem`·`EngineDecision`에 위 필드 **대부분 구현** (`search-response.ts`, `result-item.ts`, `response-builder.ts`); `abstainReason` **존재** | 플랜 표·작업 목록을 **구현에 맞게 갱신** — **남은 진짜 갭은 `missingInformation`뿐** |
 | **Epic 9** 동일 | `missingInformation` ❌ | 타입에 **여전히 없음** → 진짜 갭 | [`GAPS.md`](./GAPS.md) **G-41** · `BACKLOG` §25 |
 | **Epic 6** `epic-6-embedding-finetune.md` | Deliverables `- [ ] scripts/ltr/finetune_embedding.py` 등 | `scripts/ltr/finetune_embedding.py`, `distill_cross_encoder.py` **존재**; 추가로 `scripts/embedding/finetune-bge-m3.ts` 존재 | Deliverables 체크·경로를 **현재 트리에 맞게** 수정; 커밋 모델 `models/*` 없음은 §11과 동일 |
 | **Epic 15** `epic-15-drinking-window.md` | `collect-drinking-windows.ts`, `scripts/ml/drinking-window-features.ts` | 해당 경로 **없음**; `drinking-window-backfill.ts` 등 **대체 스크립트** 존재 | 플랜의 파일명을 실제로 바꾸거나 “대체: …” 주석 |
@@ -173,6 +186,7 @@ ls scripts/etl/drinking-window-backfill.ts 2>/dev/null && echo "backfill 있음"
 | `epic-4-ltr.md` | Python·Vespa GBDT 경로 `[ ]` | TS LTR·`run-eval-and-train-ltr.ts` 등 **다른 구현** → **`G-19`** · §5·§26 |
 | `epic-5-cross-encoder.md` | `services/reranker/README.md` | **`services/reranker/README.md` 없음** (`Glob` 0) — **`G-33`** 유지; `main.py`·`Dockerfile`·`compose` reranker **있음** |
 | `epic-6-embedding-finetune.md` | py/ts Deliverables `[ ]` | `finetune_embedding.py`·`distill_cross_encoder.py`·`scripts/embedding/finetune-bge-m3.ts` **존재** → 문서 체크박스 갱신 권장; 커밋 `models/*` 없음 → §11 |
+| `epic-9-llm-envelope.md` | 작업 `[ ]`·“이미 존재” 표 | **`retrievalMode`·`resultType`·`parsedConstraints`·`matchReasons`·`violatedConstraints`·`abstainReason`는 코드에 있음** — 플랜 **표가 구식**; **`missingInformation`만 미구현** (`G-41`) |
 | `epic-7` … `epic-11` | (본문 표 상단 매트릭스와 동일) | §2·§3·§4·§7·§25 등과 정렬 — 변경 없음 |
 
 ### v0.2

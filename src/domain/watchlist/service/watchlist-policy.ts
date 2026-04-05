@@ -1,0 +1,145 @@
+import type {
+  CriticScoreUpdatedEvent,
+  PriceUpdatedEvent,
+  StockChangedEvent,
+  VintageReleasedEvent,
+  WatchlistChangeEvent,
+  WatchlistEntry,
+  WatchlistTrigger,
+} from '../model/watchlist-entry.js';
+
+export type WatchlistTriggerResponse =
+  | {
+      readonly type: 'new_vintage';
+      readonly min_vintage: number;
+    }
+  | {
+      readonly type: 'price_drop';
+      readonly threshold: number;
+      readonly baseline_price: number;
+    }
+  | {
+      readonly type: 'stock_available';
+      readonly min_qty: number;
+    }
+  | {
+      readonly type: 'critic_score_above';
+      readonly threshold: number;
+    };
+
+export type WatchlistChangeEventType =
+  | 'vintage_released'
+  | 'price_updated'
+  | 'stock_changed'
+  | 'critic_score_updated';
+
+export type TypedWatchlistChangeEvent = WatchlistChangeEvent;
+
+export function toWatchlistTriggerResponse(
+  trigger: WatchlistTrigger,
+): WatchlistTriggerResponse {
+  switch (trigger.type) {
+    case 'new_vintage':
+      return {
+        type: trigger.type,
+        min_vintage: trigger.minVintage,
+      };
+    case 'price_drop':
+      return {
+        type: trigger.type,
+        threshold: trigger.threshold,
+        baseline_price: trigger.baselinePrice,
+      };
+    case 'stock_available':
+      return {
+        type: trigger.type,
+        min_qty: trigger.minQty,
+      };
+    case 'critic_score_above':
+      return {
+        type: trigger.type,
+        threshold: trigger.threshold,
+      };
+  }
+}
+
+export function isWatchlistEntryActive(
+  entry: WatchlistEntry,
+  now: Date,
+): boolean {
+  return entry.expiresAt === null || entry.expiresAt.getTime() > now.getTime();
+}
+
+export function matchesWatchlistTrigger(
+  trigger: WatchlistTrigger,
+  event: WatchlistChangeEvent,
+): boolean {
+  switch (trigger.type) {
+    case 'new_vintage':
+      return matchesNewVintage(trigger.minVintage, event);
+    case 'price_drop':
+      return matchesPriceDrop(trigger.threshold, trigger.baselinePrice, event);
+    case 'stock_available':
+      return matchesStockAvailable(trigger.minQty, event);
+    case 'critic_score_above':
+      return matchesCriticScore(trigger.threshold, event);
+  }
+}
+
+export function shouldDeliverWatchlistEvent(
+  entry: WatchlistEntry,
+  event: WatchlistChangeEvent,
+  now: Date,
+): boolean {
+  return isWatchlistEntryActive(entry, now)
+    && entry.triggerConditions.some((trigger) => matchesWatchlistTrigger(trigger, event));
+}
+
+function matchesNewVintage(minVintage: number, event: WatchlistChangeEvent): boolean {
+  if (event.type !== 'vintage_released') {
+    return false;
+  }
+
+  const typedEvent: VintageReleasedEvent = event;
+  return typedEvent.data.vintage >= minVintage;
+}
+
+function matchesPriceDrop(
+  threshold: number,
+  baselinePrice: number,
+  event: WatchlistChangeEvent,
+): boolean {
+  if (event.type !== 'price_updated') {
+    return false;
+  }
+
+  const typedEvent: PriceUpdatedEvent = event;
+  if (typedEvent.data.percentageDrop >= threshold) {
+    return true;
+  }
+
+  const referencePrice = typedEvent.data.oldPrice ?? baselinePrice;
+  if (referencePrice <= 0 || typedEvent.data.newPrice >= referencePrice) {
+    return false;
+  }
+
+  return ((referencePrice - typedEvent.data.newPrice) / referencePrice) * 100 >= threshold;
+}
+
+function matchesStockAvailable(minQty: number, event: WatchlistChangeEvent): boolean {
+  if (event.type !== 'stock_changed') {
+    return false;
+  }
+
+  const typedEvent: StockChangedEvent = event;
+  return typedEvent.data.stock >= minQty;
+}
+
+function matchesCriticScore(threshold: number, event: WatchlistChangeEvent): boolean {
+  if (event.type !== 'critic_score_updated') {
+    return false;
+  }
+
+  const typedEvent: CriticScoreUpdatedEvent = event;
+  return typedEvent.data.score >= threshold;
+}
