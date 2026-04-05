@@ -14,8 +14,8 @@ export interface ResponseBuildParams {
   /** Internal decision output from the Decision domain. */
   readonly decisionOutput: DecisionOutput;
 
-  /** Query plan (for extracting constraints and retrieval mode). */
-  readonly queryPlan: QueryPlanV1;
+  /** Query plan (for extracting constraints and retrieval mode). Optional for backward compat. */
+  readonly queryPlan?: QueryPlanV1 | undefined;
 
   /** Ranked result items to include in the response. */
   readonly results: readonly ResultItem[];
@@ -91,9 +91,9 @@ export class ResponseBuilder {
     };
 
     // Extract LLM envelope fields (Epic 9)
-    const retrievalMode = params.queryPlan.retrievalMode;
+    const retrievalMode = params.queryPlan?.retrievalMode;
     const resultType = this.computeResultType(enrichedResults, params.decisionOutput.decisionStatus);
-    const parsedConstraints = this.buildParsedConstraints(params.queryPlan);
+    const parsedConstraints = params.queryPlan ? this.buildParsedConstraints(params.queryPlan) : undefined;
     const abstainReason = this.extractAbstainReason(params.decisionOutput);
 
     // Enrich engineDecision with abstain reason if present

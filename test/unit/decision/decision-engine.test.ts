@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { DecisionEngine } from '../../../src/domain/decision/service/decision-engine.js';
-import { EvidenceGate } from '../../../src/domain/decision/service/evidence-gate.js';
+import { EvidenceGate, computeConformalSetSize, DEFAULT_ALPHA } from '../../../src/domain/resolver/service/resolver.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../../src/domain/query/model/threshold-profile.js';
 import type { ThresholdStore } from '../../../src/domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../../src/domain/query/model/threshold-profile.js';
@@ -69,10 +69,10 @@ function makeResolverResult(overrides?: {
       decisionConfidenceC: C,
       ambiguityDetected,
       ambiguityTypes: [],
-      appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
+      appliedThresholds: { resolveThreshold: 0.60, gapThreshold: 0.10 },
       outcomeReasonCodes: [],
     },
-    conformalSetSize: C >= 0.9 ? 1 : C >= 0.8 ? 2 : 5,
+    conformalSetSize: 1,
   };
 }
 
@@ -130,9 +130,10 @@ function makeQueryPlan(overrides?: {
 
 // ── Base DecisionInput factory ────────────────────────────────────────────────
 function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
+  const resolverResult = overrides?.resolverResult ?? makeResolverResult();
   return {
     queryPlan: makeQueryPlan(),
-    resolverResult: makeResolverResult(),
+    resolverResult,
     policy: makePolicy(),
     uncertainty: makeUncertainty(),
     evidenceSummary: {
@@ -140,6 +141,9 @@ function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
       constraintEvidencePresent: true,
       anchorEvidencePresent: false,
     },
+    ...(resolverResult.conformalSetSize !== undefined
+      ? { conformalSetSize: resolverResult.conformalSetSize }
+      : {}),
     ...overrides,
   };
 }
@@ -162,10 +166,10 @@ describe('DecisionEngine', () => {
 
   it('C < T_fail (well below resolve threshold) → failed', async () => {
     // Gate 3 requires: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2
-    // short_entity: resolveTau=0.75, gapTau=0.15
-    // C=0.6 < 0.75, gap=0.20 >= 0.15, no ambiguity → Gate 3 with fallbackMode='fail'
+    // short_entity from DEFAULT_THRESHOLD_PROFILE: resolveTau=0.60, gapTau=0.10
+    // C=0.55 < 0.60, gap=0.12 >= 0.10, no ambiguity, conformal=1 → Gate 3 with fallbackMode='fail'
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.60, gap: 0.20, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.55, gap: 0.12, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -247,10 +251,10 @@ describe('DecisionEngine', () => {
 
   it('nextAction=hybrid_search when C < resolveTau, gap >= gapTau, no ambiguity, fallbackMode=hybrid', async () => {
     // Gate 3 path: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2
-    // short_entity: resolveTau=0.75, gapTau=0.15
-    // C=0.6 < 0.75, gap=0.20 >= 0.15, no ambiguity → Gate 3 → hybrid_search
+    // short_entity: resolveTau=0.60, gapTau=0.10
+    // C=0.55 < 0.60, gap=0.12 >= 0.10, no ambiguity → Gate 3 → hybrid_search
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.60, gap: 0.20, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.55, gap: 0.12, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'hybrid', allowApproximate: true }),
     });
     const output = await engine.decide(input, snapshot);
@@ -258,9 +262,10 @@ describe('DecisionEngine', () => {
   });
 
   it('nextAction=fail when failed (Gate 3 with fallbackMode=fail)', async () => {
-    // Gate 3: C < resolveTau AND gap >= gapTau AND no ambiguity → fallbackMode='fail'
+    // Gate 3: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2 → fallbackMode='fail'
+    // C=0.71 >= 0.7 gives conformalSetSize=1
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.60, gap: 0.20, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.71, gap: 0.20, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -281,9 +286,9 @@ describe('DecisionEngine', () => {
   it('DecisionTrace contains threshold values used', async () => {
     const input = makeDecisionInput();
     const output = await engine.decide(input, snapshot);
-    // short_entity defaults
-    expect(output.decisionTrace.thresholds.resolveThreshold).toBe(0.75);
-    expect(output.decisionTrace.thresholds.gapThreshold).toBe(0.15);
+    // short_entity from DEFAULT_THRESHOLD_PROFILE v2.0.0
+    expect(output.decisionTrace.thresholds.resolveThreshold).toBe(0.60);
+    expect(output.decisionTrace.thresholds.gapThreshold).toBe(0.10);
   });
 
   it('resolved output includes selectedEntity and chosenEntityId', async () => {
