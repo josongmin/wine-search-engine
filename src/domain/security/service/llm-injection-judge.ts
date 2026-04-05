@@ -146,9 +146,12 @@ Classify this query:`;
 
       // Parse JSON response
       try {
-        const parsed: { is_injection?: unknown } = JSON.parse(textContent.text) as {
-          is_injection?: unknown;
-        };
+        const raw = textContent.text;
+        if (typeof raw !== 'string') {
+          throw new Error('Claude text block was not a string');
+        }
+        const parsedUnknown: unknown = JSON.parse(raw);
+        const parsed = parsedUnknown as { is_injection?: unknown };
         return parsed.is_injection === true;
       } catch {
         console.error('[LLMInjectionJudge] Failed to parse Claude response:', textContent.text);

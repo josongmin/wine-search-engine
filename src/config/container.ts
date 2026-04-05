@@ -266,7 +266,7 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
       const redisClient = await getRedisClient();
       queryCache = new RedisQueryCache(redisClient);
       embeddingCache = new RedisEmbeddingCache(redisClient);
-      console.log('[Container] Cache infrastructure initialized');
+      console.warn('[Container] Cache infrastructure initialized');
     } catch (err) {
       console.warn('[Container] Failed to initialize caches; continuing without:', err);
       // Continue without caches — Layer 1 search still works

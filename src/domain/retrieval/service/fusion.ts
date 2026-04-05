@@ -10,6 +10,7 @@ import type { RetrievalTrace } from '../model/retrieval-trace.js';
 
 /**
  * Merges per-pass hit summaries. Priority: sparse > dense > anchor (first non-empty wins).
+ * Includes wine attributes for Epic 15.
  */
 function mergeRetrievalSummaries(
   sparse?: RetrievalHitSummary,
@@ -21,6 +22,14 @@ function mergeRetrievalSummaries(
   readonly region?: string;
   readonly searchTextEn?: string;
   readonly grapePrimary?: string;
+  readonly vintageYear?: number;
+  readonly body?: number;
+  readonly tannin?: number;
+  readonly acidity?: number;
+  readonly sweetness?: number;
+  readonly criticScoreNormalized?: number;
+  readonly country?: string;
+  readonly appellation?: string;
 } {
   const canonicalLabel =
     sparse?.canonicalLabel ?? dense?.canonicalLabel ?? anchor?.canonicalLabel;
@@ -31,12 +40,32 @@ function mergeRetrievalSummaries(
   const grapePrimary =
     sparse?.grapePrimary ?? dense?.grapePrimary ?? anchor?.grapePrimary;
 
+  // Epic 15: Wine attributes (for dynamic prediction)
+  const vintageYear =
+    sparse?.vintageYear ?? dense?.vintageYear ?? anchor?.vintageYear;
+  const body = sparse?.body ?? dense?.body ?? anchor?.body;
+  const tannin = sparse?.tannin ?? dense?.tannin ?? anchor?.tannin;
+  const acidity = sparse?.acidity ?? dense?.acidity ?? anchor?.acidity;
+  const sweetness = sparse?.sweetness ?? dense?.sweetness ?? anchor?.sweetness;
+  const criticScoreNormalized =
+    sparse?.criticScoreNormalized ?? dense?.criticScoreNormalized ?? anchor?.criticScoreNormalized;
+  const country = sparse?.country ?? dense?.country ?? anchor?.country;
+  const appellation = sparse?.appellation ?? dense?.appellation ?? anchor?.appellation;
+
   return {
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
     ...(producer !== undefined ? { producer } : {}),
     ...(region !== undefined ? { region } : {}),
     ...(searchTextEn !== undefined ? { searchTextEn } : {}),
     ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+    ...(vintageYear !== undefined ? { vintageYear } : {}),
+    ...(body !== undefined ? { body } : {}),
+    ...(tannin !== undefined ? { tannin } : {}),
+    ...(acidity !== undefined ? { acidity } : {}),
+    ...(sweetness !== undefined ? { sweetness } : {}),
+    ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(country !== undefined ? { country } : {}),
+    ...(appellation !== undefined ? { appellation } : {}),
   };
 }
 

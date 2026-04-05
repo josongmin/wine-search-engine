@@ -110,7 +110,8 @@ function trimNonEmpty(v: unknown): string | undefined {
 }
 
 /**
- * Pulls summary fields from a Vespa hit for hybrid reranking passages.
+ * Pulls summary fields from a Vespa hit for hybrid reranking passages
+ * and wine attribute enrichment (Epic 15).
  */
 function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary | undefined {
   const canonicalLabel = trimNonEmpty(fields['canonical_label']);
@@ -126,12 +127,32 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
 
   const grapePrimary = trimNonEmpty(fields['grape_primary']);
 
+  // Epic 15: Wine attributes
+  const vintageYear = typeof fields['vintage_year'] === 'number' ? fields['vintage_year'] : undefined;
+  const body = typeof fields['body'] === 'number' ? fields['body'] : undefined;
+  const tannin = typeof fields['tannin'] === 'number' ? fields['tannin'] : undefined;
+  const acidity = typeof fields['acidity'] === 'number' ? fields['acidity'] : undefined;
+  const sweetness = typeof fields['sweetness'] === 'number' ? fields['sweetness'] : undefined;
+  const criticScoreNormalized = typeof fields['critic_score_normalized'] === 'number'
+    ? fields['critic_score_normalized']
+    : undefined;
+  const country = trimNonEmpty(fields['country']);
+  const appellation = trimNonEmpty(fields['appellation']);
+
   const summary: RetrievalHitSummary = {
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
     ...(producer !== undefined ? { producer } : {}),
     ...(region !== undefined ? { region } : {}),
     ...(searchTextEn !== undefined ? { searchTextEn } : {}),
     ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+    ...(vintageYear !== undefined ? { vintageYear } : {}),
+    ...(body !== undefined ? { body } : {}),
+    ...(tannin !== undefined ? { tannin } : {}),
+    ...(acidity !== undefined ? { acidity } : {}),
+    ...(sweetness !== undefined ? { sweetness } : {}),
+    ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(country !== undefined ? { country } : {}),
+    ...(appellation !== undefined ? { appellation } : {}),
   };
 
   return Object.keys(summary).length > 0 ? summary : undefined;

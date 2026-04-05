@@ -4,6 +4,8 @@ import type { RetrievalDocument } from '../model/retrieval-document.js';
 /**
  * Summary fields from an index hit, used for cross-encoder passages and display.
  * Populated when the backend returns document summaries alongside scores.
+ *
+ * Includes wine attributes for Epic 15 (drinking window prediction).
  */
 export interface RetrievalHitSummary {
   readonly canonicalLabel?: string;
@@ -11,6 +13,16 @@ export interface RetrievalHitSummary {
   readonly region?: string;
   readonly searchTextEn?: string;
   readonly grapePrimary?: string;
+
+  // Epic 15: Wine attributes for dynamic prediction
+  readonly vintageYear?: number | undefined;
+  readonly body?: number | undefined;
+  readonly tannin?: number | undefined;
+  readonly acidity?: number | undefined;
+  readonly sweetness?: number | undefined;
+  readonly criticScoreNormalized?: number | undefined;
+  readonly country?: string | undefined;
+  readonly appellation?: string | undefined;
 }
 
 /**

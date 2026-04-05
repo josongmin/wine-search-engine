@@ -49,7 +49,7 @@ const COMPARISON_PATTERNS: ReadonlyArray<RegExp> = [
 export function detectDecomposition(query: string): DecompositionOutcome {
   for (const pattern of COMPARISON_PATTERNS) {
     const match = pattern.exec(query);
-    if (match?.[1] && match?.[2]) {
+    if (match !== null && match[1] !== undefined && match[2] !== undefined) {
       const subQuery1 = match[1].trim();
       const subQuery2 = match[2].trim();
 

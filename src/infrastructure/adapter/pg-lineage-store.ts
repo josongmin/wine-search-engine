@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { LineageStore } from '../../domain/ingestion/port/lineage-store.port.js';
-import type { LineageRecord, LineageDecision, LineageSourceType } from '../../domain/ingestion/model/lineage-record.js';
+import type { LineageRecord } from '../../domain/ingestion/model/lineage-record.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 
 /**
@@ -22,27 +22,24 @@ interface LineageRow {
 function rowToRecord(row: LineageRow): LineageRecord {
   // Full domain record is stored inside field_changes as the canonical payload
   const payload = row.field_changes as LineageRecord;
-  const VALID_SOURCE_TYPES = new Set<string>([
-    'ingestion_pipeline', 'manual_review', 'api_import', 'batch_correction',
-  ]);
-  const sourceType: LineageSourceType = VALID_SOURCE_TYPES.has(row.source_type)
-    ? (row.source_type as LineageSourceType)
-    : 'ingestion_pipeline';
 
   return {
     sourceRecordId: payload.sourceRecordId,
-    sourceType: payload.sourceType ?? sourceType,
+    sourceType: payload.sourceType,
     candidateId: payload.candidateId,
     matchedEntityId: payload.matchedEntityId,
     previousEntityIds: payload.previousEntityIds,
     normalizationRulesApplied: payload.normalizationRulesApplied,
     extractionVersion: payload.extractionVersion,
     matchingVersion: payload.matchingVersion,
-    decision: payload.decision ?? (row.action as LineageDecision),
+    decision: payload.decision,
     decisionReason: payload.decisionReason,
     operator: payload.operator,
     abuseFlag: payload.abuseFlag,
-    timestamp: payload.timestamp != null ? new Date(payload.timestamp as unknown as string) : row.created_at,
+    timestamp:
+      payload.timestamp instanceof Date
+        ? payload.timestamp
+        : new Date(payload.timestamp as unknown as string),
   };
 }
 

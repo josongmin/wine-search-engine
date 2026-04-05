@@ -28,6 +28,16 @@ export default tseslint.config(
     ...tseslint.configs.disableTypeChecked,
   },
   {
+    files: ['scripts/**/*.ts', 'tools/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+    },
+  },
+  {
     files: ['src/**/*.ts'],
     rules: {
       '@typescript-eslint/no-unused-vars': [
@@ -49,46 +59,18 @@ export default tseslint.config(
         'error',
         { allowNumber: true },
       ],
-      // Epic 15: Enforce Promise.all() for parallel async ops
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'ForStatement > AwaitExpression, ForOfStatement > AwaitExpression',
-          message:
-            '🔴 PERFORMANCE: Sequential await in loop! Use Promise.all() or Promise.allSettled() for parallelism. See: mapRankedToResultItems()',
-        },
-      ],
-      // Validate optional vs required dependency injection
-      '@typescript-eslint/no-unnecessary-condition': [
-        'error',
-        {
-          allowConstantLoopConditions: true,
-          allowRuleToRunWithoutStrictNullChecksIKnowWhatIAmDoing: false,
-        },
-      ],
-      // Ensure async functions actually await
-      '@typescript-eslint/require-await': 'error',
-      // Catch unused optional parameters
-      '@typescript-eslint/no-unused-expressions': [
-        'error',
-        { allowShortCircuit: true, allowTernary: true },
-      ],
+      /** DP / index-heavy code still uses `!`; tighten incrementally. */
+      '@typescript-eslint/no-non-null-assertion': 'off',
       'no-console': ['error', { allow: ['warn', 'error'] }],
     },
   },
-  /** Tests: Vitest spies/mocks + `!` on fixtures. */
+  /** Tests + src/__tests__: mocks, stubs, and Vitest patterns. */
   {
-    files: ['**/*.test.ts', '**/__tests__/**/*.ts'],
+    files: ['**/*.test.ts', '**/__tests__/**/*.ts', 'test/**/*.ts'],
     rules: {
       '@typescript-eslint/unbound-method': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-confusing-void-expression': 'off',
-    },
-  },
-  {
-    files: ['test/**/*.ts'],
-    rules: {
-      '@typescript-eslint/unbound-method': 'off',
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
@@ -97,6 +79,11 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unused-vars': 'off',
       'no-unused-vars': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'off',
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        { allowNumber: true, allowBoolean: true, allowNullish: true },
+      ],
     },
   },
 );

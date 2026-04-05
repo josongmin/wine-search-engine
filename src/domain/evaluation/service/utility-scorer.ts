@@ -87,26 +87,23 @@ export class UtilityScorer {
       };
     }
 
-    // Ambiguous cases
-    if (predictedStatus === 'ambiguous') {
-      if (evalCase.expectedStatus === 'ambiguous') {
-        return {
-          utilityScore: UTILITY_WEIGHTS.SAFE_ABSTAIN,
-          isCorrectResolve: false,
-          isWrongResolve: false,
-          isSafeAbstain: true,
-          isAvoidableAbstain: false,
-        };
-      }
-      // Expected had a clear answer but engine abstained
+    // Ambiguous cases (exhaustive: failed + resolved handled above)
+    if (evalCase.expectedStatus === 'ambiguous') {
       return {
-        utilityScore: UTILITY_WEIGHTS.AVOIDABLE_ABSTAIN,
+        utilityScore: UTILITY_WEIGHTS.SAFE_ABSTAIN,
         isCorrectResolve: false,
         isWrongResolve: false,
-        isSafeAbstain: false,
-        isAvoidableAbstain: true,
+        isSafeAbstain: true,
+        isAvoidableAbstain: false,
       };
     }
+    return {
+      utilityScore: UTILITY_WEIGHTS.AVOIDABLE_ABSTAIN,
+      isCorrectResolve: false,
+      isWrongResolve: false,
+      isSafeAbstain: false,
+      isAvoidableAbstain: true,
+    };
 
     // Unreachable for valid DecisionStatus, but handle gracefully
     return {

@@ -54,6 +54,6 @@ export class PgSnapshotStore implements SnapshotStore {
     if ('snapshotId' in data && 'snapshot' in data) {
       return data.snapshot;
     }
-    return data as DecisionSnapshot;
+    return data;
   }
 }

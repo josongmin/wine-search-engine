@@ -7,6 +7,7 @@ import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
+import { WineAttributeEncoders } from '../../../infrastructure/ml/label-encoder.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -60,6 +61,17 @@ interface ScoredEntry {
   readonly finalScore: number;
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
+
+  // Wine attributes for Epic 15 dynamic prediction
+  readonly vintageYear?: number | undefined;
+  readonly body?: number | undefined;
+  readonly tannin?: number | undefined;
+  readonly acidity?: number | undefined;
+  readonly sweetness?: number | undefined;
+  readonly criticScoreNormalized?: number | undefined;
+  readonly grapePrimaryEnc?: number | undefined;
+  readonly regionEnc?: number | undefined;
+  readonly countryEnc?: number | undefined;
 }
 
 /** Optional 5th argument: rerankTopK number, or full options (including blend scale). */
@@ -162,6 +174,25 @@ export class Ranker {
           : {}),
         ...(candidate.drinkingWindowStart !== undefined ? { drinkingWindowStart: candidate.drinkingWindowStart } : {}),
         ...(candidate.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: candidate.drinkingWindowEnd } : {}),
+        // Epic 15: Wine attributes with label encoding
+        ...(candidate.vintageYear !== undefined ? { vintageYear: candidate.vintageYear } : {}),
+        ...(candidate.body !== undefined ? { body: candidate.body } : {}),
+        ...(candidate.tannin !== undefined ? { tannin: candidate.tannin } : {}),
+        ...(candidate.acidity !== undefined ? { acidity: candidate.acidity } : {}),
+        ...(candidate.sweetness !== undefined ? { sweetness: candidate.sweetness } : {}),
+        ...(candidate.criticScoreNormalized !== undefined
+          ? { criticScoreNormalized: candidate.criticScoreNormalized }
+          : {}),
+        // Encode categorical attributes
+        ...(candidate.grapePrimary !== undefined
+          ? { grapePrimaryEnc: WineAttributeEncoders.encodeGrape(candidate.grapePrimary) }
+          : {}),
+        ...(candidate.appellation !== undefined
+          ? { regionEnc: WineAttributeEncoders.encodeRegion(candidate.appellation) }
+          : {}),
+        ...(candidate.country !== undefined
+          ? { countryEnc: WineAttributeEncoders.encodeCountry(candidate.country) }
+          : {}),
         componentScores,
         finalScore,
       });
@@ -207,6 +238,18 @@ export class Ranker {
         evidenceItems,
         ...(entry.drinkingWindowStart !== undefined ? { drinkingWindowStart: entry.drinkingWindowStart } : {}),
         ...(entry.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: entry.drinkingWindowEnd } : {}),
+        // Epic 15: Wine attributes for dynamic prediction
+        ...(entry.vintageYear !== undefined ? { vintage: entry.vintageYear } : {}),
+        ...(entry.body !== undefined ? { body: entry.body } : {}),
+        ...(entry.tannin !== undefined ? { tannin: entry.tannin } : {}),
+        ...(entry.acidity !== undefined ? { acidity: entry.acidity } : {}),
+        ...(entry.sweetness !== undefined ? { sweetness: entry.sweetness } : {}),
+        ...(entry.criticScoreNormalized !== undefined
+          ? { avgCriticProxyScore: Math.round(80 + entry.criticScoreNormalized * 20) }
+          : {}),
+        ...(entry.grapePrimaryEnc !== undefined ? { grapePrimaryEnc: entry.grapePrimaryEnc } : {}),
+        ...(entry.regionEnc !== undefined ? { regionEnc: entry.regionEnc } : {}),
+        ...(entry.countryEnc !== undefined ? { countryEnc: entry.countryEnc } : {}),
       };
     });
 

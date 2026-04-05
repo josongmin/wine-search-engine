@@ -277,13 +277,7 @@ export class ResponseBuilder {
     if (Array.isArray(value)) {
       return `[${value.join(', ')}]`;
     }
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      const obj = value as { min: number; max: number };
-      if ('min' in obj && 'max' in obj) {
-        return `${obj.min}-${obj.max}`;
-      }
-    }
-    return JSON.stringify(value);
+    return `${value.min}-${value.max}`;
   }
 
   /**
@@ -304,7 +298,7 @@ export class ResponseBuilder {
     // Check if ambiguity is due to hard constraint violation (skip those)
     // Hard constraint violation would be indicated in the trace's finalReason
     const trace = output.decisionTrace;
-    const finalReason = trace.finalReason ?? '';
+    const finalReason = trace.finalReason;
 
     // If hard constraints appear to be the issue, don't return abstain reason
     if (finalReason.toLowerCase().includes('hard constraint') ||

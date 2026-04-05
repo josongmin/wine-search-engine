@@ -213,5 +213,5 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
  * Returns the weight profile for a given retrieval mode.
  */
 export function getModeWeights(mode: RetrievalMode): ModeWeightProfile {
-  return MODE_WEIGHT_PROFILES[mode] ?? DEFAULT_WEIGHTS;
+  return MODE_WEIGHT_PROFILES[mode];
 }

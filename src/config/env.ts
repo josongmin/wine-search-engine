@@ -44,6 +44,9 @@ const envSchema = z.object({
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
 
+  // Watchlist webhook signing secret (Epic 17.1)
+  WEBHOOK_SECRET: z.string().min(16).optional(),
+
   // Kill Switches
   KILL_SWITCH_ALIAS_OVERLAY: z
     .enum(['true', 'false'])
@@ -130,6 +133,11 @@ export const config = {
   /** Anthropic API settings (optional, for LLM-based security features). */
   anthropic: {
     apiKey: parsed.ANTHROPIC_API_KEY,
+  },
+
+  /** Watchlist webhook settings (Epic 17.1). */
+  watchlist: {
+    webhookSecret: parsed.WEBHOOK_SECRET,
   },
 
   /** Kill switches for feature flags / circuit breakers. */
