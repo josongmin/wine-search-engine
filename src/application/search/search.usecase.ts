@@ -356,8 +356,16 @@ export class SearchUseCase {
     const hybridConfidence = Math.max(0, Math.min(1, top1Score));
     const hybridGap = Math.max(0, Math.min(1, top1Score - top2Score));
 
+    // RFC-016: Build topEntity from top-ranked result for AdmissionGate (identity sealing)
+    const topResult = rankedResults[0];
+    const topEntity = topResult ? {
+      entityId: topResult.entityId,
+      canonicalLabel: topResult.canonicalLabel,
+    } : undefined;
+
     const resolveResult: EntityResolveResult = {
       status: rankedResults.length > 0 ? 'resolved' : 'failed',
+      topEntity,
       candidates: [],
       decisionConfidenceC: hybridConfidence,
       decisionTrace: {

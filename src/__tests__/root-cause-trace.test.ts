@@ -302,8 +302,16 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     const hybridConfidence = Math.max(0, Math.min(1, top1Score));
     const hybridGap = Math.max(0, Math.min(1, top1Score - top2Score));
 
+    // RFC-016: Include topEntity from top-ranked result for AdmissionGate
+    const topResult = rankedResults[0];
+    const topEntity = topResult ? {
+      entityId: topResult.entityId,
+      canonicalLabel: topResult.canonicalLabel,
+    } : undefined;
+
     const resolveResult = {
       status: rankedResults.length > 0 ? 'resolved' as const : 'failed' as const,
+      topEntity,
       candidates: [],
       decisionConfidenceC: hybridConfidence,
       decisionTrace: {
@@ -329,8 +337,8 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     console.log(`  Calibrated Gap: ${resolveResult.decisionTrace.calibratedGap.toFixed(4)}`);
     console.log(`  Ambiguity Detected: ${resolveResult.decisionTrace.ambiguityDetected}`);
 
-    // Build decision input
-    const topResult = rankedResults[0];
+    // Build decision input (topResult already defined above)
+    // const topResult = rankedResults[0];
     const rankingSignals = topResult
       ? {
           entity_integrity_score: topResult.componentScores.entityIntegrity,
