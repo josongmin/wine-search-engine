@@ -523,15 +523,20 @@ export class Transliterator {
       let matched = false;
       for (const key of sortedKeys) {
         if (word.startsWith(key, i)) {
-          result += rules.get(key)!;
-          i += key.length;
-          matched = true;
-          break;
+          const repl = rules.get(key);
+          if (repl !== undefined) {
+            result += repl;
+            i += key.length;
+            matched = true;
+            break;
+          }
         }
       }
       if (!matched) {
         // Pass through characters not in the rule table (e.g. digits, Korean)
-        result += word[i];
+        const ch = word[i];
+        if (ch === undefined) break;
+        result += ch;
         i++;
       }
     }

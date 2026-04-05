@@ -16,7 +16,7 @@ export class RedisCache {
     }
   }
 
-  async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
+  async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
     const ttl = ttlSeconds ?? this.defaultTtlSeconds;
     const serialized = JSON.stringify(value);
     await this.client.set(key, serialized, { EX: ttl });

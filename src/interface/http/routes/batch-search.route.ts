@@ -65,11 +65,8 @@ export function registerBatchSearchRoute(
   app.post('/v1/batch-search', async (request, reply) => {
     const parsed = BatchSearchRequestSchema.parse(request.body);
 
-    // Execute batch search
-    // Note: Zod ensures that requests[].id and requests[].query are required,
-    // so the type cast is safe here despite Zod's looser inference.
     const response = await container.batchSearchUseCase.execute(
-      parsed.requests as any,
+      parsed.requests,
       parsed.options,
       parsed.batch_id,
     );

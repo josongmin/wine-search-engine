@@ -61,7 +61,7 @@ export function errorHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
-  const requestId = request.requestId ?? 'unknown';
+  const requestId = request.requestId;
 
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
   // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the

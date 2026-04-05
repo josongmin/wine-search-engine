@@ -1,4 +1,5 @@
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type { SearchUseCase } from './search.usecase.js';
 import type { SearchRequest } from './search.usecase.js';
 
@@ -344,13 +345,13 @@ export class BatchSearchUseCase {
       };
     }
 
-    // Domain error with specific code
-    if (err instanceof Error && err.name === 'DomainError') {
-      const code = (err as any).code as string | undefined;
+    // Domain error with specific code or any error with code property
+    if (err instanceof DomainError || (err instanceof Error && 'code' in err)) {
+      const code = (err as any).code;
       if (code === 'POLICY_BLOCKED' || code === 'AMBIGUITY_BLOCKED') {
         return {
           code: 'POLICY_BLOCKED',
-          message: err.message || 'Request blocked by policy',
+          message: (err as Error).message || 'Request blocked by policy',
         };
       }
     }

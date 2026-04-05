@@ -104,14 +104,6 @@ export class ReplayUseCase {
     request: ReplayRequest,
     requestId: string,
   ): Promise<SearchResponseV1> {
-    // Step 1: Validate decision_snapshot is provided
-    if (!request.decision_snapshot) {
-      throw new DomainError(
-        'MISSING_SNAPSHOT',
-        'decision_snapshot is required for replay requests.',
-      );
-    }
-
     // Step 2: Build current runtime snapshot for comparison
     const currentSnapshot = this.buildCurrentSnapshot();
 
@@ -196,8 +188,9 @@ export class ReplayUseCase {
     const bKeys = Object.keys(b).sort();
     if (aKeys.length !== bKeys.length) return false;
     for (let i = 0; i < aKeys.length; i++) {
-      const ak = aKeys[i]!;
-      const bk = bKeys[i]!;
+      const ak = aKeys[i];
+      const bk = bKeys[i];
+      if (ak === undefined || bk === undefined) return false;
       if (ak !== bk) return false;
       if (a[ak] !== b[bk]) return false;
     }

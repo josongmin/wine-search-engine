@@ -122,11 +122,17 @@ export class RedisQueryCache implements QueryCachePort {
       // Approximate size from Redis INFO (production would use more accurate measurement)
       let usedMemory = 0;
       try {
-        const info = await this.redis.info('memory');
-        const infoStr = typeof info === 'string' ? info : Array.isArray(info) ? info.join('\n') : String(info);
+        const infoRaw: unknown = await this.redis.info('memory');
+        const infoStr =
+          typeof infoRaw === 'string'
+            ? infoRaw
+            : Array.isArray(infoRaw)
+              ? infoRaw.join('\n')
+              : String(infoRaw);
         const match = infoStr.match(/used_memory:(\d+)/);
-        if (match && match[1]) {
-          usedMemory = parseInt(match[1], 10);
+        const mem = match?.[1];
+        if (mem !== undefined) {
+          usedMemory = parseInt(mem, 10);
         }
       } catch {
         // INFO unavailable, use 0

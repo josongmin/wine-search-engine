@@ -21,6 +21,7 @@ import { ScoreAggregator } from '../../../src/domain/ranking/service/score-aggre
 import { EvidenceMapper } from '../../../src/domain/ranking/service/evidence-mapper.js';
 import { DecisionEngine } from '../../../src/domain/decision/service/decision-engine.js';
 import { ResponseBuilder } from '../../../src/domain/response/service/response-builder.js';
+import { QuerySanitizer } from '../../../src/domain/security/service/query-sanitizer.js';
 import { MixedSolver } from '../../../src/domain/mixed/service/mixed-solver.js';
 import { AnchorProfiler } from '../../../src/domain/mixed/service/anchor-profiler.js';
 import { SimilarityScorer } from '../../../src/domain/mixed/service/similarity-scorer.js';
@@ -100,9 +101,10 @@ export function createTestContainer(): TestContainerParts {
   const evidenceMapper = new EvidenceMapper();
   const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper);
 
-  // Domain services — decision, response, mixed
+  // Domain services — decision, response, mixed, security
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();
+  const querySanitizer = new QuerySanitizer();
   const anchorProfiler = new AnchorProfiler();
   const similarityScorer = new SimilarityScorer();
   const constraintOverlay = new ConstraintOverlay();
@@ -133,6 +135,7 @@ export function createTestContainer(): TestContainerParts {
     decisionEngine,
     responseBuilder,
     mixedSolver,
+    querySanitizer,
     snapshotVersions,
   });
 

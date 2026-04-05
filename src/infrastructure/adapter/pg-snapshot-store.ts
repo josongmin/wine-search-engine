@@ -50,8 +50,8 @@ export class PgSnapshotStore implements SnapshotStore {
     if (row == null) return null;
 
     const data = row.snapshot_data as SnapshotEnvelope | DecisionSnapshot;
-    // Handle both envelope format and raw snapshot format
-    if ('snapshot' in data && data.snapshot != null) {
+    // Envelope rows store { snapshotId, snapshot }; legacy rows are raw DecisionSnapshot.
+    if ('snapshotId' in data && 'snapshot' in data) {
       return data.snapshot;
     }
     return data as DecisionSnapshot;

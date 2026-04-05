@@ -30,12 +30,12 @@ function rowToRecord(row: LineageRow): LineageRecord {
     : 'ingestion_pipeline';
 
   return {
-    sourceRecordId: payload.sourceRecordId ?? row.source_record_id,
+    sourceRecordId: payload.sourceRecordId,
     sourceType: payload.sourceType ?? sourceType,
     candidateId: payload.candidateId,
     matchedEntityId: payload.matchedEntityId,
     previousEntityIds: payload.previousEntityIds,
-    normalizationRulesApplied: payload.normalizationRulesApplied ?? [],
+    normalizationRulesApplied: payload.normalizationRulesApplied,
     extractionVersion: payload.extractionVersion,
     matchingVersion: payload.matchingVersion,
     decision: payload.decision ?? (row.action as LineageDecision),

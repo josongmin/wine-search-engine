@@ -212,7 +212,7 @@ export class DecisionEngine {
         status: 'resolved',
         nextAction: 'return_result',
         rulesApplied: [...rulesApplied],
-        finalReason: `Calibrated C=${String(C.toFixed(4))} >= T_resolve=${String(thresholds.resolveTau)}, gap=${String(delta.toFixed(4))} >= T_gap=${String(thresholds.gapTau)}, no ambiguity.`,
+        finalReason: `Calibrated C=${C.toFixed(4)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(4)} >= T_gap=${thresholds.gapTau}, no ambiguity.`,
       };
     }
 
@@ -224,7 +224,7 @@ export class DecisionEngine {
       rulesApplied.push('NUMERIC_GATE_AMBIGUOUS');
       const reasons: string[] = [];
       if (conformalSetSize >= 2) {
-        reasons.push(`conformal_set_size=${String(conformalSetSize)}`);
+        reasons.push(`conformal_set_size=${conformalSetSize}`);
         rulesApplied.push('CONFORMAL_SET_AMBIGUOUS');
       }
       if (A) {
@@ -232,7 +232,7 @@ export class DecisionEngine {
         rulesApplied.push('AMBIGUITY_DETECTED');
       }
       if (!gapMeetsThreshold) {
-        reasons.push(`gap=${String(delta.toFixed(4))} < T_gap=${String(thresholds.gapTau)}`);
+        reasons.push(`gap=${delta.toFixed(4)} < T_gap=${thresholds.gapTau}`);
         rulesApplied.push('GAP_BELOW_THRESHOLD');
       }
       return {
@@ -252,7 +252,7 @@ export class DecisionEngine {
         status: 'ambiguous',
         nextAction: 'hybrid_search',
         rulesApplied: [...rulesApplied],
-        finalReason: `Low confidence C=${String(C.toFixed(4))} < T_resolve=${String(thresholds.resolveTau)}; falling back to hybrid search.`,
+        finalReason: `Low confidence C=${C.toFixed(4)} < T_resolve=${thresholds.resolveTau}; falling back to hybrid search.`,
       };
     }
 
@@ -262,7 +262,7 @@ export class DecisionEngine {
         status: 'ambiguous',
         nextAction: 'clarify',
         rulesApplied: [...rulesApplied],
-        finalReason: `Low confidence C=${String(C.toFixed(4))} < T_resolve=${String(thresholds.resolveTau)}; requesting clarification.`,
+        finalReason: `Low confidence C=${C.toFixed(4)} < T_resolve=${thresholds.resolveTau}; requesting clarification.`,
       };
     }
 
@@ -272,7 +272,7 @@ export class DecisionEngine {
       status: 'failed',
       nextAction: 'fail',
       rulesApplied: [...rulesApplied],
-      finalReason: `Low confidence C=${String(C.toFixed(4))} < T_resolve=${String(thresholds.resolveTau)}; no viable path.`,
+      finalReason: `Low confidence C=${C.toFixed(4)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
     };
   }
 

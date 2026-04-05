@@ -92,13 +92,14 @@ export class CandidatePoolService {
     let denseHits: readonly DenseHit[] = [];
     if (phaseSet.has('dense') && input.semanticQueries.length > 0) {
       // Build embeddings from cache + embedding service
-      const embeddings: (readonly number[] | null)[] = new Array(input.semanticQueries.length).fill(null);
+      const embeddings: (readonly number[] | null)[] = [];
       const uncachedIndices: number[] = [];
 
       // Check cache for each semantic query
       for (let i = 0; i < input.semanticQueries.length; i++) {
         const query = input.semanticQueries[i];
         if (!query) {
+          embeddings.push(null);
           continue;
         }
         const cacheKey = this.embeddingCacheKeyBuilder.build(
@@ -109,8 +110,9 @@ export class CandidatePoolService {
 
         const cached = await this.embeddingCache?.get(cacheKey);
         if (cached) {
-          embeddings[i] = cached;
+          embeddings.push(cached);
         } else {
+          embeddings.push(null);
           uncachedIndices.push(i);
         }
       }
@@ -125,8 +127,8 @@ export class CandidatePoolService {
         // Store new embeddings in cache
         for (const [j, idx] of uncachedIndices.entries()) {
           const embedding = newEmbeddings[j];
-          embeddings[idx] = embedding;
           if (embedding) {
+            embeddings[idx] = embedding;
             const query = input.semanticQueries[idx];
             if (query) {
               const cacheKey = this.embeddingCacheKeyBuilder.build(

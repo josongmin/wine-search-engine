@@ -89,7 +89,7 @@ export class LLMInjectionJudge {
     const isInjection = await this.queryLLM(query);
 
     // Store result in Redis (non-blocking)
-    this.storeCacheAsync(cacheKey, isInjection).catch((err) => {
+    this.storeCacheAsync(cacheKey, isInjection).catch((err: unknown) => {
       console.warn('[LLMInjectionJudge] Redis store error:', err);
       // Swallow error — cache failure should not break the main flow
     });
@@ -137,14 +137,18 @@ Classify this query:`;
       });
 
       // Extract text from response
-      const textContent = response.content.find((block) => block.type === 'text');
-      if (!textContent || textContent.type !== 'text') {
+      const textContent = response.content.find(
+        (block): block is { type: 'text'; text: string } => block.type === 'text',
+      );
+      if (textContent === undefined) {
         throw new Error('No text content in Claude response');
       }
 
       // Parse JSON response
       try {
-        const parsed = JSON.parse(textContent.text) as { is_injection?: boolean | unknown };
+        const parsed: { is_injection?: unknown } = JSON.parse(textContent.text) as {
+          is_injection?: unknown;
+        };
         return parsed.is_injection === true;
       } catch {
         console.error('[LLMInjectionJudge] Failed to parse Claude response:', textContent.text);

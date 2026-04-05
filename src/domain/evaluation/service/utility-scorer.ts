@@ -89,8 +89,7 @@ export class UtilityScorer {
 
     // Ambiguous cases
     if (predictedStatus === 'ambiguous') {
-      const expectedWasAmbiguous = evalCase.expectedStatus === 'ambiguous';
-      if (expectedWasAmbiguous) {
+      if (evalCase.expectedStatus === 'ambiguous') {
         return {
           utilityScore: UTILITY_WEIGHTS.SAFE_ABSTAIN,
           isCorrectResolve: false,
