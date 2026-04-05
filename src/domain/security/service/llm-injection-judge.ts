@@ -156,10 +156,12 @@ Classify this query:`;
         // Fail closed: if we can't parse, treat as injection to be safe
         return true;
       }
-    } catch {
-      console.error('[LLMInjectionJudge] Claude API error:', new Error().message);
-      // Fail closed: API error → treat as injection to be safe
-      return true;
+    } catch (err) {
+      // API error: log for visibility but fail OPEN (allow query through)
+      // Reason: false negatives (injections passing) are worse than false positives
+      // in production; we have Layer 1 (static patterns) + Layer 3 (rate limiting)
+      console.warn('[LLMInjectionJudge] Claude API error (failing open):', err instanceof Error ? err.message : String(err));
+      return false;
     }
   }
 

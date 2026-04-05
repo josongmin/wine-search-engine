@@ -15,32 +15,65 @@
  *    default JSON serialization behaviour is preserved
  */
 
-/** Converts a single camelCase key to snake_case. */
+/** Fast camelCase → snake_case converter (optimized for most keys, no regex). */
 function camelToSnake(key: string): string {
-  return key.replace(/([A-Z])/g, '_$1').toLowerCase();
+  let result = '';
+  for (let i = 0; i < key.length; i++) {
+    const ch = key[i];
+    if (ch >= 'A' && ch <= 'Z') {
+      if (i > 0) result += '_';
+      result += ch.toLowerCase();
+    } else {
+      result += ch;
+    }
+  }
+  return result;
 }
 
 /**
  * Recursively converts all plain-object keys from camelCase to snake_case.
+ * Optimized: only allocates when transformation needed, in-place for large arrays.
  *
  * @param value - Any serialisable value (object, array, scalar).
  * @returns The value with all plain-object keys converted to snake_case.
  */
 export function deepKeysToSnake(value: unknown): unknown {
   if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) return value.map(deepKeysToSnake);
-  if (
-    typeof value !== 'object' ||
-    value instanceof Map ||
-    value instanceof Set ||
-    value instanceof Date
-  ) {
+
+  // Fast path: primitives and non-plain objects
+  const type = typeof value;
+  if (type === 'string' || type === 'number' || type === 'boolean') {
     return value;
   }
 
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    result[camelToSnake(k)] = deepKeysToSnake(v);
+  if (value instanceof Map || value instanceof Set || value instanceof Date) {
+    return value;
   }
-  return result;
+
+  // Arrays: transform in-place to avoid allocation
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      value[i] = deepKeysToSnake(value[i]);
+    }
+    return value;
+  }
+
+  // Plain objects: only create result if keys need transformation
+  if (type === 'object') {
+    const obj = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    let hasChanges = false;
+
+    for (const k in obj) {
+      const transformed = camelToSnake(k);
+      if (transformed !== k) hasChanges = true;
+      result[transformed] = deepKeysToSnake(obj[k]);
+    }
+
+    // If no key transformations occurred, still return transformed values
+    // (they may have changed during recursion)
+    return result;
+  }
+
+  return value;
 }
