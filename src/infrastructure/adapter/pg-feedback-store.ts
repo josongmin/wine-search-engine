@@ -84,15 +84,18 @@ export class PgFeedbackStore implements FeedbackStore {
     return result.rows.map(rowToSignal);
   }
 
-  async pruneExpiredFeedback(olderThan: Date): Promise<number> {
+  async pruneExpiredFeedback(olderThan: Date, signalTypes?: readonly FeedbackType[]): Promise<number> {
+    const hasTypes = signalTypes !== undefined && signalTypes.length > 0;
+    const typeClause = hasTypes ? `AND signal_type = ANY($2::text[])` : '';
+    const params: unknown[] = hasTypes ? [olderThan, signalTypes] : [olderThan];
     const result = await this.pool.query<{ count: string }>(
       `WITH deleted AS (
          DELETE FROM feedback_signals
-         WHERE created_at < $1
+         WHERE created_at < $1 ${typeClause}
          RETURNING 1
        )
        SELECT COUNT(*) AS count FROM deleted`,
-      [olderThan],
+      params,
     );
     return parseInt(result.rows[0]?.count ?? '0', 10);
   }

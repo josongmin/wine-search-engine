@@ -233,6 +233,7 @@ function toNormalizedConstraint(mapping: NLMapping): NormalizedConstraint {
     value: constraintValue,
     source_phrase: mapping.phrase,
     confidence: mapping.mappingConfidence,
+    mapping_version: mapping.mappingVersion,
   };
 }
 

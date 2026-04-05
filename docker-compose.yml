@@ -52,6 +52,19 @@ services:
       retries: 10
       start_period: 60s
 
+  reranker:
+    build: ./services/reranker
+    ports: ["8081:8081"]
+    environment:
+      - MODEL_NAME=BAAI/bge-reranker-v2-m3
+      - DEVICE=cpu
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
 volumes:
   pg_data:
   redis_data:

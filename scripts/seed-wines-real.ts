@@ -11,6 +11,7 @@
 
 import { VespaClient } from '../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../src/infrastructure/vespa/vespa-search-index.js';
+import { HttpEmbeddingService } from '../src/infrastructure/vespa/embedding-service.js';
 import { createEntityId } from '../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../src/domain/retrieval/model/retrieval-document.js';
 
@@ -21,6 +22,12 @@ import type { RetrievalDocument } from '../src/domain/retrieval/model/retrieval-
 const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:18080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
+
+// Use real embeddings when EMBEDDING_SERVICE_URL is set; fall back to
+// the deterministic formula when running without a live embedding service.
+const USE_REAL_EMBEDDINGS =
+  process.env['EMBEDDING_SERVICE_URL'] !== undefined &&
+  process.env['EMBEDDING_SERVICE_URL'] !== '';
 
 // ---------------------------------------------------------------------------
 // Deterministic embedding from sensory profile
@@ -3075,11 +3082,38 @@ async function main(): Promise<void> {
   const client = new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE);
   const index = new VespaSearchIndex(client);
 
-  console.log(`Seeding ${WINES.length} wines to Vespa at ${VESPA_URL}...`);
+  let wines: readonly RetrievalDocument[] = WINES;
+
+  // Enrich with real embeddings when an embedding service is available.
+  if (USE_REAL_EMBEDDINGS) {
+    console.log('Generating real embeddings via HTTP embedding service...');
+    const embeddingService = new HttpEmbeddingService();
+
+    const semanticSummaries = WINES.map((w) => w.semanticSummary);
+    const batchSize = 32;
+    const allEmbeddings: (readonly number[])[] = [];
+
+    for (let offset = 0; offset < semanticSummaries.length; offset += batchSize) {
+      const batch = semanticSummaries.slice(offset, offset + batchSize);
+      const batchEmbeddings = await embeddingService.embedBatch(batch);
+      allEmbeddings.push(...batchEmbeddings);
+      console.log(
+        `  Embedded ${Math.min(offset + batchSize, semanticSummaries.length)} / ${semanticSummaries.length}`,
+      );
+    }
+
+    wines = WINES.map((w, i) => ({
+      ...w,
+      embedding: allEmbeddings[i] ?? w.embedding,
+    }));
+    console.log('Embedding generation complete.');
+  }
+
+  console.log(`Seeding ${wines.length} wines to Vespa at ${VESPA_URL}...`);
 
   try {
-    await index.bulkUpsert(WINES);
-    console.log(`Fed ${WINES.length} wines successfully.`);
+    await index.bulkUpsert(wines);
+    console.log(`Fed ${wines.length} wines successfully.`);
   } catch (err) {
     console.error('Bulk upsert failed:', err);
     process.exit(1);

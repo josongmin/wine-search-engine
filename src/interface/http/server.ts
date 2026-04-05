@@ -5,6 +5,7 @@ import type { Container } from '../../config/container.js';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
+import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import { registerSearchRoute } from './routes/search.route.js';
 import { registerReplayRoute } from './routes/replay.route.js';
 import { registerInterpretRoute } from './routes/interpret.route.js';
@@ -110,6 +111,13 @@ export async function createServer(
         return;
       }
     }
+  });
+
+  // Convert all response body keys from camelCase to snake_case (RFC-014 §4.2).
+  // Applied once at the serialization boundary so domain objects can use
+  // TypeScript-idiomatic camelCase while external consumers receive snake_case.
+  app.addHook('preSerialization', async (_request, _reply, payload) => {
+    return deepKeysToSnake(payload);
   });
 
   // Register global error handler

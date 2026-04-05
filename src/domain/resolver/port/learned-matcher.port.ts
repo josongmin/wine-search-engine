@@ -16,6 +16,16 @@ export interface LearnedMatcherOutput {
 
   /** Semantic version of the model. */
   readonly modelVersion: string;
+
+  /**
+   * Per-feature signal vector produced by the learned model (RFC-006 §5.2).
+   *
+   * Enables signal-level tracing and attribution of learned model decisions.
+   * Each element corresponds to a feature in the model's input space.
+   * Absent when the model does not expose a decomposed signal vector
+   * (e.g. black-box endpoints or older model versions).
+   */
+  readonly matchSignalVector?: readonly number[] | undefined;
 }
 
 /**

@@ -61,6 +61,19 @@ export interface QueryPlanV1 {
   /** ID of the threshold profile referenced by this plan. */
   readonly thresholdProfileId: string;
 
+  /**
+   * Surfaces what evidence/sealing the Admission Gate requires for this query
+   * (RFC-005 §3.1, RFC-016 §2). Populated by the Planner; consumed by AdmissionGate.
+   */
+  readonly admission_context?: {
+    /** True for entity_exact / entity_fuzzy / comparison / mixed routes. */
+    readonly requires_identity_seal: boolean;
+    /** True when hard constraints are present (constraint evidence required). */
+    readonly requires_constraint_evidence: boolean;
+    /** True for mixed-query route with anchors (anchor evidence required). */
+    readonly requires_anchor_evidence: boolean;
+  } | undefined;
+
   /** Optional session context for multi-turn queries. */
   readonly sessionContext?: SessionContext | undefined;
 

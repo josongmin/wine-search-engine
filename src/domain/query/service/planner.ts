@@ -18,6 +18,9 @@ import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
 
+/** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
+const RULE_BASED_MAPPING_VERSION = 'rule-based-v1.0';
+
 /** Current policy rule version. */
 const POLICY_RULE_VERSION = '1.0.0';
 
@@ -159,6 +162,18 @@ export class Planner {
           )
         : undefined;
 
+    // RFC-005 §3.1, RFC-016 §2: surface what evidence/sealing the Admission
+    // Gate needs for this query so it can close the resolved boundary correctly.
+    const admission_context = {
+      requires_identity_seal:
+        intent === 'entity_exact' ||
+        intent === 'entity_fuzzy' ||
+        intent === 'comparison_search' ||
+        intent === 'mixed_query',
+      requires_constraint_evidence: constraints.hard.length > 0,
+      requires_anchor_evidence: route === 'mixed' && anchors.length > 0,
+    };
+
     return {
       rawQuery: query,
       normalizedQuery,
@@ -174,6 +189,7 @@ export class Planner {
       plannerVersion: PLANNER_VERSION,
       policyRuleVersion: POLICY_RULE_VERSION,
       thresholdProfileId: DEFAULT_THRESHOLD_PROFILE.id,
+      admission_context,
       ...(context?.session !== undefined && { sessionContext: context.session }),
       queryBudget: budget,
     };
@@ -474,6 +490,7 @@ export class Planner {
           value,
           source_phrase: value,
           confidence: 0.9,
+          mapping_version: RULE_BASED_MAPPING_VERSION,
         });
         break; // Only one wine_type per query
       }
@@ -502,6 +519,7 @@ export class Planner {
           value,
           source_phrase: value,
           confidence: 0.85,
+          mapping_version: RULE_BASED_MAPPING_VERSION,
         });
         break; // Only one country per query
       }
@@ -524,6 +542,7 @@ export class Planner {
         value: band,
         source_phrase: priceUnder[0],
         confidence: 0.8,
+        mapping_version: RULE_BASED_MAPPING_VERSION,
       });
     }
 
@@ -535,6 +554,7 @@ export class Planner {
         value: 'full',
         source_phrase: 'full-body',
         confidence: 0.75,
+        mapping_version: RULE_BASED_MAPPING_VERSION,
       });
     } else if (/\b(?:light[\s-]?body|라이트바디|light wine|가벼운|가볍)\b/i.test(q)) {
       soft.push({
@@ -543,6 +563,7 @@ export class Planner {
         value: 'light',
         source_phrase: 'light-body',
         confidence: 0.75,
+        mapping_version: RULE_BASED_MAPPING_VERSION,
       });
     }
 
@@ -554,6 +575,7 @@ export class Planner {
         value: 'dry',
         source_phrase: 'dry',
         confidence: 0.8,
+        mapping_version: RULE_BASED_MAPPING_VERSION,
       });
     } else if (/\b(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)\b/i.test(q)) {
       soft.push({
@@ -562,6 +584,7 @@ export class Planner {
         value: 'sweet',
         source_phrase: 'sweet',
         confidence: 0.8,
+        mapping_version: RULE_BASED_MAPPING_VERSION,
       });
     }
 

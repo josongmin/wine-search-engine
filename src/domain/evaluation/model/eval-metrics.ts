@@ -55,6 +55,14 @@ export interface EvalMetrics {
    */
   readonly evidenceComprehensiveness: number;
 
+  /**
+   * Fraction of resolved decisions that violated an RFC-016 admission
+   * invariant (RFC-009 §4.7).  Target: 0.0 — any non-zero value is a
+   * release blocker because it means a resolved response bypassed the
+   * AdmissionGate or its invariants were not fully enforced.
+   */
+  readonly admissionViolationRate: number;
+
   /** Median (p50) end-to-end latency in milliseconds. */
   readonly p50LatencyMs: number;
 

@@ -21,6 +21,7 @@
 15. **RFC-013** — Ranking signals (SignalSet; authority 아님)  
 16. **RFC-014** — Search API·external contract (RFC-008 매핑)
 17. **RFC-015** — Determinism, Replay, operational controls (스냅샷·임계 버전·증거 게이트·kill switch)
+18. **RFC-017** — IR Quality Flywheel: Vivino ETL·Golden Query Set·LTR·Cross-Encoder (RFC-002·009·010·012·013 실행 계획)
 
 ## 문서 목록 (파일명)
 
@@ -43,6 +44,7 @@
 | 014 | `RFC-014.md` | Search API contract |
 | 015 | `RFC-015.md` | Determinism, Replay, kill switch, drift |
 | 016 | `RFC-016.md` | Admission Gate, `FailureReason`, identity·snapshot·evidence closure |
+| 017 | `RFC-017.md` | IR Quality Flywheel: Vivino ETL·Golden Query Set·LTR·Cross-Encoder |
 
 ## 개념·용어 정렬 (논리 연결)
 
@@ -131,3 +133,17 @@ Query API (RFC-014)
 - **`EntityRef` 없이 `resolved` 노출** → RFC-001 §1.5, RFC-016 §3 위반 — projection 문자열로 identity 대체
 
 이 인덱스는 네비게이션용이다. 수치·수식의 단일 출처는 항상 **RFC-000**이다.
+
+---
+
+## v0.2 실행 계획 (docs/plans/apr-5-v0.2/)
+
+| 파일 | 내용 | Phase |
+|------|------|-------|
+| `00-overview.md` | 15개 갭 → 6개 Epic 매핑, 의존성 그래프 | — |
+| `epic-12-data-enrichment.md` | Critic proxy (LLM), Organic/Wikidata, Food pairing | 4 |
+| `epic-13-query-intelligence.md` | ConstraintSAT, Entropy abstain, BK-tree+Soundex | 4 |
+| `epic-14-decomposition-api.md` | LLM query decomp ("A vs B"), `retrieval_mode` override | 5 |
+| `epic-15-drinking-window.md` | LightGBM drink_from/drink_to regression + ONNX serving | 5 |
+| `epic-16-security-batch.md` | Prompt injection (LLM-as-judge), `/v1/batch-search` 207 | 5 |
+| `epic-17-agentic-async.md` | Claude tool-use, Redis watchlist webhook, confidence refusal | 6 |

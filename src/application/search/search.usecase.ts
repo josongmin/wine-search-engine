@@ -305,6 +305,11 @@ export class SearchUseCase {
       (rankedResults !== undefined && rankedResults.length > 0) ||
       resolverResult.topEntity !== undefined;
 
+    // Anchor evidence is present when the plan is a mixed-query route that
+    // found a resolved anchor entity (RFC-016 §5).
+    const anchorEvidencePresent =
+      plan.route === 'mixed' && resolverResult.topEntity !== undefined;
+
     const evidenceSummary: EvidenceSummary = {
       identityEvidencePresent,
       ...(topResult !== undefined
@@ -313,6 +318,7 @@ export class SearchUseCase {
             evidenceRefCount: topResult.evidenceItems.length,
           }
         : {}),
+      ...(anchorEvidencePresent ? { anchorEvidencePresent } : {}),
     };
 
     return {

@@ -98,6 +98,11 @@ export const config = {
     url: parsed.RERANKER_SERVICE_URL,
   },
 
+  /** Learned matcher service settings (optional). */
+  learnedMatcher: {
+    url: parsed.LEARNED_MATCHER_SERVICE_URL,
+  },
+
   /** Kill switches for feature flags / circuit breakers. */
   killSwitch: {
     aliasOverlay: parsed.KILL_SWITCH_ALIAS_OVERLAY,

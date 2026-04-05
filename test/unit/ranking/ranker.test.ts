@@ -46,7 +46,7 @@ function makeQueryPlan(): QueryPlanV1 {
     normalizedQuery: 'test wine',
     intent: 'entity_exact',
     route: 'hybrid',
-    queryClass: 'semantic_search',
+    queryClass: 'semantic_preference',
     anchors: [],
     constraints: { hard: [], soft: [], inferred: [] },
     expansions: { lexical: [], semantic: [] },
@@ -306,7 +306,7 @@ describe('Ranker', () => {
   });
 
   describe('score blending', () => {
-    it('originalScore=0.8, rerankerScore=0.6 → blended = 0.6*0.6 + 0.4*0.8 = 0.68', async () => {
+    it('originalScore=0.8, rerankerScore=0.6 → blended with semantic_preference weight (0.75): 0.75*0.6 + 0.25*0.8 = 0.65', async () => {
       // Need > 5 viable candidates to trigger reranking
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
 
@@ -334,8 +334,9 @@ describe('Ranker', () => {
       // Find result for first candidate
       const firstResult = results.find((r) => r.entityId === firstEntityId);
       expect(firstResult).toBeDefined();
-      // blended = 0.6 * 0.6 + 0.4 * 0.8 = 0.36 + 0.32 = 0.68
-      expect(firstResult!.finalScore).toBeCloseTo(0.68, 10);
+      // semantic_preference blend weight = 0.75
+      // blended = 0.75 * 0.6 + 0.25 * 0.8 = 0.45 + 0.20 = 0.65
+      expect(firstResult!.finalScore).toBeCloseTo(0.65, 10);
     });
   });
 

@@ -1,5 +1,5 @@
 import type { EntityId, QueryClass } from '../../shared/types/index.js';
-import type { FeedbackSignal } from '../model/feedback-signal.js';
+import type { FeedbackSignal, FeedbackType } from '../model/feedback-signal.js';
 
 /**
  * Filter criteria for retrieving feedback signals.
@@ -60,14 +60,16 @@ export interface FeedbackStore {
   getAggregatedStats(entityId: EntityId): Promise<AggregatedFeedbackStats>;
 
   /**
-   * Deletes all feedback signals older than the given cutoff date (RFC-010 §8).
+   * Deletes feedback signals older than the given cutoff date (RFC-010 §8).
    *
    * Used by the {@link FeedbackTTLEnforcer} to enforce per-type data retention
-   * policies. Infrastructure adapters should execute this as a single bulk
-   * delete against the backing store.
+   * policies. When `signalTypes` is provided only signals of those types are
+   * considered; when omitted all signal types are eligible for deletion.
+   * Infrastructure adapters should execute this as a single bulk delete.
    *
    * @param olderThan - Delete signals with `timestamp < olderThan`.
+   * @param signalTypes - Optional allowlist of signal types to prune.
    * @returns The number of signals deleted.
    */
-  pruneExpiredFeedback(olderThan: Date): Promise<number>;
+  pruneExpiredFeedback(olderThan: Date, signalTypes?: readonly FeedbackType[]): Promise<number>;
 }

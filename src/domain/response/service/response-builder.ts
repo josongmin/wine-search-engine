@@ -105,6 +105,12 @@ export class ResponseBuilder {
       confidenceSemantics: output.confidenceSemantics,
       decisionTraceRef: output.decisionTraceRef,
       decisionSnapshot: output.decisionSnapshot,
+      ...(output.failureReason !== undefined
+        ? { failure_reason: output.failureReason }
+        : {}),
+      ...(output.admissionTraceRef !== undefined
+        ? { admission_trace_ref: output.admissionTraceRef }
+        : {}),
     };
   }
 

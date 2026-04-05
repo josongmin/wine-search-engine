@@ -16,6 +16,8 @@ interface MatchApiResult {
   readonly match_probability: number;
   readonly model_id: string;
   readonly model_version: string;
+  /** Optional decomposed feature vector from the model (RFC-006 §5.2). */
+  readonly match_signal_vector?: readonly number[] | undefined;
 }
 
 interface MatchApiResponse {
@@ -29,11 +31,16 @@ interface MatchApiResponse {
 function isMatchApiResult(v: unknown): v is MatchApiResult {
   if (typeof v !== 'object' || v === null) return false;
   const obj = v as Record<string, unknown>;
+  const vectorOk =
+    obj['match_signal_vector'] === undefined ||
+    (Array.isArray(obj['match_signal_vector']) &&
+      (obj['match_signal_vector'] as unknown[]).every((x) => typeof x === 'number'));
   return (
     typeof obj['entity_id'] === 'string' &&
     typeof obj['match_probability'] === 'number' &&
     typeof obj['model_id'] === 'string' &&
-    typeof obj['model_version'] === 'string'
+    typeof obj['model_version'] === 'string' &&
+    vectorOk
   );
 }
 
@@ -100,6 +107,9 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
         matchProbability: result.match_probability,
         modelId: result.model_id,
         modelVersion: result.model_version,
+        ...(result.match_signal_vector !== undefined
+          ? { matchSignalVector: result.match_signal_vector }
+          : {}),
       });
     }
     return outputs;

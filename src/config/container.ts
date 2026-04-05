@@ -2,6 +2,18 @@ import type { Pool } from 'pg';
 import type { Config } from './env.js';
 import { PgBlockingAdapter } from '../infrastructure/adapter/pg-blocking-adapter.js';
 import { PgCalibrationStore } from '../infrastructure/adapter/pg-calibration-store.js';
+import { PgAmbiguityDictionary } from '../infrastructure/adapter/pg-ambiguity-dictionary.js';
+import { PgThresholdStore } from '../infrastructure/adapter/pg-threshold-store.js';
+import { PgAliasMatcher } from '../infrastructure/adapter/pg-alias-matcher.js';
+import { FileMappingTableAdapter } from '../infrastructure/adapter/file-mapping-table.js';
+import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learned-matcher.js';
+import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
+import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
+import { HttpEmbeddingService } from '../infrastructure/vespa/embedding-service.js';
+import { HttpCrossEncoderReranker } from '../infrastructure/vespa/reranker.js';
+import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
+import { VespaSimilarRetrieval } from '../infrastructure/vespa/vespa-similar-retrieval.js';
+import { VespaCandidateAttributes } from '../infrastructure/vespa/vespa-candidate-attributes.js';
 import { Planner } from '../domain/query/service/planner.js';
 import { AnchorExtractor } from '../domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../domain/query/service/expansion-builder.js';
@@ -27,28 +39,25 @@ import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore, CalibrationParams } from '../domain/resolver/port/calibration-store.port.js';
-import type { SearchIndexPort, SparseHit, DenseHit } from '../domain/retrieval/port/search-index.port.js';
+import type { SearchIndexPort } from '../domain/retrieval/port/search-index.port.js';
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../domain/query/port/threshold-store.port.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../domain/query/model/threshold-profile.js';
 import type { ThresholdProfileV1 } from '../domain/query/model/threshold-profile.js';
 import type { EntityId, QueryClass } from '../domain/shared/types/index.js';
-import type { RetrievalDocument } from '../domain/retrieval/model/retrieval-document.js';
 import type { AliasMatcher, AliasMatchResult } from '../domain/query/service/anchor-extractor.js';
 import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import type { MappingTablePort } from '../domain/attribute/port/mapping-table.port.js';
-import type { NLMapping } from '../domain/attribute/model/nl-mapping.js';
 import type {
   AnchorResolverPort,
   SimilarRetrievalPort,
   CandidateAttributePort,
 } from '../domain/mixed/service/mixed-solver.js';
-import { AnchorProfiler, type AnchorEntityData } from '../domain/mixed/service/anchor-profiler.js';
-import { SimilarityScorer, type SimilarityCandidate } from '../domain/mixed/service/similarity-scorer.js';
+import { AnchorProfiler } from '../domain/mixed/service/anchor-profiler.js';
+import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
-import type { AnchorProfile } from '../domain/mixed/model/anchor-profile.js';
-import type { HybridCandidate } from '../domain/retrieval/model/hybrid-candidate.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
+import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher.port.js';
 
 /**
  * The DI container — holds all wired domain services and use cases.
@@ -72,21 +81,9 @@ export interface Container {
 }
 
 // ────────────────────────────────────────────────────────────────
-// Stub / noop adapters for infrastructure ports
-// These will be replaced by real implementations in the adapter layer.
+// Minimal stub adapters — used only when real infrastructure is
+// unavailable (e.g. integration tests without a live database).
 // ────────────────────────────────────────────────────────────────
-
-/** Stub AmbiguityDictionary: reports nothing as ambiguous. */
-class StubAmbiguityDictionary implements AmbiguityDictionary {
-  async isKnownAmbiguous(_term: string): Promise<boolean> {
-    return false;
-  }
-  async getAmbiguityInfo(
-    _term: string,
-  ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
-    return null;
-  }
-}
 
 /** Stub BlockingPort: returns no candidates. */
 class StubBlockingPort implements BlockingPort {
@@ -109,33 +106,6 @@ class StubCalibrationStore implements CalibrationStore {
   }
 }
 
-/** Stub SearchIndexPort: returns empty results. */
-class StubSearchIndex implements SearchIndexPort {
-  async sparseSearch(
-    _queries: readonly string[],
-    _filters?: readonly string[],
-    _limit?: number,
-  ): Promise<readonly SparseHit[]> {
-    return [];
-  }
-  async denseSearch(
-    _embedding: readonly number[],
-    _filters?: readonly string[],
-    _limit?: number,
-  ): Promise<readonly DenseHit[]> {
-    return [];
-  }
-  async getDocument(_entityId: EntityId): Promise<RetrievalDocument | null> {
-    return null;
-  }
-  async upsertDocument(_doc: RetrievalDocument): Promise<void> {
-    // noop
-  }
-  async bulkUpsert(_docs: readonly RetrievalDocument[]): Promise<void> {
-    // noop
-  }
-}
-
 /** Stub EmbeddingServicePort: returns zero vectors. */
 class StubEmbeddingService implements EmbeddingServicePort {
   async embed(_text: string): Promise<readonly number[]> {
@@ -146,34 +116,15 @@ class StubEmbeddingService implements EmbeddingServicePort {
   }
 }
 
-/** Stub AnchorResolverPort: returns undefined. */
-class StubAnchorResolver implements AnchorResolverPort {
-  async resolve(_entityId: EntityId): Promise<AnchorEntityData | undefined> {
-    return undefined;
+/** Stub AmbiguityDictionary: reports nothing as ambiguous. */
+class StubAmbiguityDictionary implements AmbiguityDictionary {
+  async isKnownAmbiguous(_term: string): Promise<boolean> {
+    return false;
   }
-}
-
-/** Stub SimilarRetrievalPort: returns empty results. */
-class StubSimilarRetrieval implements SimilarRetrievalPort {
-  async retrieveSimilar(
-    _anchorProfile: AnchorProfile,
-    _limit: number,
-  ): Promise<readonly HybridCandidate[]> {
-    return [];
-  }
-}
-
-/** Stub CandidateAttributePort: returns empty maps. */
-class StubCandidateAttributes implements CandidateAttributePort {
-  async loadAttributes(
-    _entityIds: readonly EntityId[],
-  ): Promise<ReadonlyMap<EntityId, Readonly<Record<string, unknown>>>> {
-    return new Map();
-  }
-  async loadSimilarityCandidate(
-    _entityId: EntityId,
-  ): Promise<SimilarityCandidate | undefined> {
-    return undefined;
+  async getAmbiguityInfo(
+    _term: string,
+  ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
+    return null;
   }
 }
 
@@ -181,19 +132,6 @@ class StubCandidateAttributes implements CandidateAttributePort {
 class StubAliasMatcher implements AliasMatcher {
   async findMatches(_normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
     return [];
-  }
-}
-
-/** Stub MappingTablePort: returns null (no custom mappings; NLMapper falls back to built-ins). */
-class StubMappingTable implements MappingTablePort {
-  async findMapping(_phrase: string, _version?: string): Promise<NLMapping | null> {
-    return null;
-  }
-  async findMappingsByAttribute(_attribute: string): Promise<readonly NLMapping[]> {
-    return [];
-  }
-  async getCurrentVersion(): Promise<string> {
-    return 'v1.0';
   }
 }
 
@@ -213,23 +151,40 @@ class StubThresholdStore implements ThresholdStore {
 /**
  * Creates and wires the full DI container.
  *
- * When a `pool` is provided, real Postgres adapters are used for the
- * blocking and calibration ports (PgBlockingAdapter, PgCalibrationStore).
- * Without a pool the container falls back to stub/noop implementations so
- * the application can still start without a database (e.g. in CI or during
- * integration testing of the query-planning layer).
+ * Real infrastructure adapters are used wherever the runtime supports them:
+ * - Vespa search index (always, using VESPA_URL)
+ * - HTTP embedding service (unless KILL_SWITCH_DENSE_RETRIEVAL=true)
+ * - HTTP cross-encoder reranker (always)
+ * - Vespa-backed mixed-query adapters (always)
+ * - PostgreSQL-backed adapters when `pool` is provided
+ * - File-backed NL mapping table (always, falls back gracefully if file absent)
+ * - HTTP learned matcher when LEARNED_MATCHER_SERVICE_URL is set
  *
- * IMPORTANT: StubBlockingPort always returns [] — entity resolution will
- * produce 0 candidates and decisionConfidence=0 whenever the real
- * PgBlockingAdapter is not wired.  Always provide a pool in production.
+ * Stub fallbacks ensure the application starts cleanly without external
+ * services (e.g. in CI or local development without a Vespa/Postgres stack).
  *
- * @param _config - Application configuration (currently unused; reserved for
- *                  future per-environment adapter setup).
+ * @param _config - Application configuration.
  * @param pool    - Optional Postgres pool.  Provide in production.
  * @returns The fully wired container.
  */
 export function createContainer(_config: Config, pool?: Pool): Container {
-  // Wire real Postgres adapters when a pool is available; fall back to stubs.
+  // ── Vespa ──────────────────────────────────────────────────────────────────
+  const vespaClient = new VespaClient(
+    _config.vespa.url,
+    'wine',
+    'wine_entity',
+  );
+  const searchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
+
+  // ── Embedding (kill-switch guarded) ───────────────────────────────────────
+  const embeddingService: EmbeddingServicePort = _config.killSwitch.denseRetrieval
+    ? new StubEmbeddingService()
+    : new HttpEmbeddingService();
+
+  // ── Cross-encoder reranker ─────────────────────────────────────────────────
+  const reranker = new HttpCrossEncoderReranker();
+
+  // ── Postgres-backed adapters (real when pool is present) ──────────────────
   const blockingPort: BlockingPort = pool
     ? new PgBlockingAdapter(pool)
     : new StubBlockingPort();
@@ -238,21 +193,40 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     ? new PgCalibrationStore(pool)
     : new StubCalibrationStore();
 
-  // Infrastructure port stubs (no real implementation yet)
-  const ambiguityDict = new StubAmbiguityDictionary();
-  const searchIndex = new StubSearchIndex();
-  const embeddingService = new StubEmbeddingService();
-  const thresholdStore = new StubThresholdStore();
+  const ambiguityDict: AmbiguityDictionary = pool
+    ? new PgAmbiguityDictionary(pool)
+    : new StubAmbiguityDictionary();
 
-  // Domain services — query planning
-  const aliasMatcher = new StubAliasMatcher();
+  const thresholdStore: ThresholdStore = pool
+    ? new PgThresholdStore(pool)
+    : new StubThresholdStore();
+
+  // Alias overlay is disabled when KILL_SWITCH_ALIAS_OVERLAY=true (RFC-015 §7).
+  const aliasMatcher: AliasMatcher = !_config.killSwitch.aliasOverlay && pool
+    ? new PgAliasMatcher(pool)
+    : new StubAliasMatcher();
+
+  // ── File-backed mapping table (graceful fallback if data file absent) ──────
+  const mappingTable: MappingTablePort = new FileMappingTableAdapter();
+
+  // ── Vespa-backed mixed-query adapters ─────────────────────────────────────
+  const anchorResolver: AnchorResolverPort = new VespaAnchorResolver(searchIndex);
+  const similarRetrieval: SimilarRetrievalPort = new VespaSimilarRetrieval(searchIndex);
+  const candidateAttributes: CandidateAttributePort = new VespaCandidateAttributes(searchIndex);
+
+  // ── Optional learned matcher (RFC-006 §5.2) ───────────────────────────────
+  const learnedMatcher: LearnedMatcherPort | undefined =
+    _config.learnedMatcher.url !== undefined
+      ? new HttpLearnedMatcherAdapter(_config.learnedMatcher.url)
+      : undefined;
+
+  // ── Domain services — query planning ──────────────────────────────────────
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
-  const mappingTable = new StubMappingTable();
   const nlMapper = new NLMapper(mappingTable);
   const queryPlanner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper);
 
-  // Domain services — entity resolution
+  // ── Domain services — entity resolution ───────────────────────────────────
   const blocker = new Blocker(blockingPort);
   const candidateScorer = new CandidateScorer();
   const ambiguityClassifier = new AmbiguityClassifier();
@@ -262,9 +236,10 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     candidateScorer,
     ambiguityClassifier,
     calibrator,
+    learnedMatcher,
   );
 
-  // Domain services — retrieval
+  // ── Domain services — retrieval ───────────────────────────────────────────
   const fusionService = new FusionService();
   const candidatePool = new CandidatePoolService(
     searchIndex,
@@ -272,20 +247,17 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     fusionService,
   );
 
-  // Domain services — ranking
+  // ── Domain services — ranking ─────────────────────────────────────────────
   const signalComputer = new SignalComputer();
   const scoreAggregator = new ScoreAggregator();
   const evidenceMapper = new EvidenceMapper();
-  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper);
+  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper, reranker);
 
-  // Domain services — decision, response, mixed
+  // ── Domain services — decision, response, mixed ───────────────────────────
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();
 
-  const anchorResolver = new StubAnchorResolver();
   const anchorProfiler = new AnchorProfiler();
-  const similarRetrieval = new StubSimilarRetrieval();
-  const candidateAttributes = new StubCandidateAttributes();
   const similarityScorer = new SimilarityScorer();
   const constraintOverlay = new ConstraintOverlay();
 
@@ -299,8 +271,7 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     ranker,
   );
 
-  // Build RFC-015 snapshot version info from config.
-  // These populate model_versions and index_versions in every DecisionSnapshot.
+  // ── RFC-015 snapshot version info ─────────────────────────────────────────
   const snapshotVersions: SnapshotVersions = {
     modelVersions: {
       embedding: _config.embedding.model,
@@ -310,7 +281,7 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     },
   };
 
-  // Use cases
+  // ── Use cases ─────────────────────────────────────────────────────────────
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
@@ -360,11 +331,3 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     hybridUseCase,
   };
 }
-
-/**
- * Creates a stub Ranker that returns empty results.
- *
- * The Ranker constructor requires SignalComputer, ScoreAggregator, and
- * EvidenceMapper which are internal to the ranking domain and may not
- * exist yet. We use a duck-typed proxy until those services are available.
- */

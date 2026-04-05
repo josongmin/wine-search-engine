@@ -21,6 +21,13 @@ export interface NormalizedConstraint {
 
   /** Confidence score in [0, 1] that this constraint was correctly extracted. */
   readonly confidence: number;
+
+  /**
+   * Version of the mapping table that produced this constraint (RFC-004, RFC-005).
+   * Enables deterministic replay: same phrase + same version → same constraint.
+   * Absent for constraints derived from sources without explicit versioning.
+   */
+  readonly mapping_version?: string | undefined;
 }
 
 /**

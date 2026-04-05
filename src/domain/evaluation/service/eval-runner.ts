@@ -33,6 +33,13 @@ export interface SearchPipelineOutput {
 
   /** System snapshot at decision time. */
   readonly decisionSnapshot: DecisionSnapshot;
+
+  /**
+   * Whether an RFC-016 admission invariant violation was detected for this
+   * case (RFC-009 §4.7).  Infrastructure adapters set this when the engine
+   * emitted a resolved response that breached an AdmissionGate invariant.
+   */
+  readonly admissionViolationDetected?: boolean;
 }
 
 /**
@@ -67,6 +74,18 @@ export interface ReleaseGates {
 
   /** Maximum tolerated E-AURC. */
   readonly maxEAURC: number;
+
+  /**
+   * Maximum tolerated admission violation rate (RFC-016 invariant breaches).
+   * Target: 0 — any non-zero value is a release blocker.
+   */
+  readonly maxAdmissionViolationRate: number;
+
+  /** Minimum required evidence sufficiency (RFC-009 §8.1). Target: ≥ 0.85. */
+  readonly minEvidenceSufficiency: number;
+
+  /** Minimum required evidence comprehensiveness (RFC-009 §8.1). Target: ≥ 0.70. */
+  readonly minEvidenceComprehensiveness: number;
 }
 
 /** Default release gates, per RFC-009 §11. */
@@ -75,6 +94,9 @@ const DEFAULT_RELEASE_GATES: ReleaseGates = {
   maxWrongResolveRate: 0.02,
   maxECE: 0.05,
   maxEAURC: 0.1,
+  maxAdmissionViolationRate: 0,
+  minEvidenceSufficiency: 0.85,
+  minEvidenceComprehensiveness: 0.70,
 };
 
 /**
@@ -227,6 +249,9 @@ export class EvalRunner {
       isSafeAbstain: classification.isSafeAbstain,
       isAvoidableAbstain: classification.isAvoidableAbstain,
       evidenceItems: output.evidenceItems,
+      ...(output.admissionViolationDetected === true
+        ? { isAdmissionViolation: true }
+        : {}),
       latencyMs: output.latencyMs,
       decisionSnapshot: output.decisionSnapshot,
     };
@@ -262,6 +287,25 @@ export class EvalRunner {
         passed: metrics.eAurc <= this.releaseGates.maxEAURC,
         actual: metrics.eAurc,
         threshold: this.releaseGates.maxEAURC,
+      },
+      {
+        name: 'maxAdmissionViolationRate',
+        passed: metrics.admissionViolationRate <= this.releaseGates.maxAdmissionViolationRate,
+        actual: metrics.admissionViolationRate,
+        threshold: this.releaseGates.maxAdmissionViolationRate,
+      },
+      {
+        name: 'minEvidenceSufficiency',
+        passed: metrics.evidenceSufficiency >= this.releaseGates.minEvidenceSufficiency,
+        actual: metrics.evidenceSufficiency,
+        threshold: this.releaseGates.minEvidenceSufficiency,
+      },
+      {
+        name: 'minEvidenceComprehensiveness',
+        passed:
+          metrics.evidenceComprehensiveness >= this.releaseGates.minEvidenceComprehensiveness,
+        actual: metrics.evidenceComprehensiveness,
+        threshold: this.releaseGates.minEvidenceComprehensiveness,
       },
     ];
 

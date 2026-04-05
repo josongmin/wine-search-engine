@@ -13,6 +13,7 @@ import type { Blocker } from './blocker.js';
 import type { CandidateScorer } from './candidate-scorer.js';
 import type { AmbiguityClassifier } from './ambiguity-classifier.js';
 import type { Calibrator } from './calibrator.js';
+import type { LearnedMatcherPort } from '../port/learned-matcher.port.js';
 
 /**
  * Input required to run the entity resolution pipeline.
@@ -97,6 +98,7 @@ export class Resolver {
     private readonly candidateScorer: CandidateScorer,
     private readonly ambiguityClassifier: AmbiguityClassifier,
     private readonly calibrator: Calibrator,
+    private readonly learnedMatcher?: LearnedMatcherPort,
   ) {}
 
   /**
@@ -129,12 +131,18 @@ export class Resolver {
       rawScore: this.candidateScorer.score(candidate),
     }));
 
+    // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2)
+    const blendedScored =
+      this.learnedMatcher !== undefined && scored.length > 0
+        ? await this.applyLearnedMatcherBlend(input.rawQuery, candidates, scored)
+        : scored;
+
     // Step 3: Sort by raw score descending
-    scored.sort((a, b) => b.rawScore - a.rawScore);
+    blendedScored.sort((a, b) => b.rawScore - a.rawScore);
 
     // Step 4: Calibrate top scores
-    const top1RawScore = scored[0]?.rawScore ?? 0;
-    const top2RawScore = scored[1]?.rawScore ?? 0;
+    const top1RawScore = blendedScored[0]?.rawScore ?? 0;
+    const top2RawScore = blendedScored[1]?.rawScore ?? 0;
 
     const calibrated = await this.calibrator.calibrate(
       { top1: top1RawScore, top2: top2RawScore },
@@ -142,7 +150,7 @@ export class Resolver {
     );
 
     // Step 5: Classify ambiguity
-    const sortedCandidates = scored.map((s) => s.candidate);
+    const sortedCandidates = blendedScored.map((s) => s.candidate);
     const ambiguityState = this.ambiguityClassifier.classify(
       sortedCandidates,
       input.queryClass,
@@ -157,7 +165,7 @@ export class Resolver {
     );
 
     // Step 7: Build result
-    const resolvedCandidates = this.buildResolvedCandidates(scored, calibrated);
+    const resolvedCandidates = this.buildResolvedCandidates(blendedScored, calibrated);
     const topCandidate = resolvedCandidates[0];
 
     const trace = this.buildTrace(
@@ -297,6 +305,29 @@ export class Resolver {
         rank: index + 1,
         evidenceRefs: entry.candidate.aliasMatches.map((m) => m.aliasValue),
       };
+    });
+  }
+
+  /**
+   * Blends learned match probabilities (RFC-006 §5.2) into raw scores.
+   *
+   * Weighting: 60 % heuristic raw score + 40 % model match probability.
+   * Candidates without a learned score retain their original raw score.
+   */
+  private async applyLearnedMatcherBlend(
+    query: string,
+    candidates: readonly ResolverCandidate[],
+    scored: Array<{ candidate: ResolverCandidate; rawScore: number }>,
+  ): Promise<Array<{ candidate: ResolverCandidate; rawScore: number }>> {
+    const outputs = await this.learnedMatcher!.match(query, candidates);
+    const probMap = new Map(
+      outputs.map((o) => [String(o.entityId), o.matchProbability]),
+    );
+
+    return scored.map((entry) => {
+      const prob = probMap.get(String(entry.candidate.entityId));
+      if (prob === undefined) return entry;
+      return { candidate: entry.candidate, rawScore: 0.6 * entry.rawScore + 0.4 * prob };
     });
   }
 

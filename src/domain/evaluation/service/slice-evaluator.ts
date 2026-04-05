@@ -165,6 +165,7 @@ export class SliceEvaluator {
     const ece = this.calibrationEvaluator.computeECE(results);
     const evidenceAudit = this.evidenceAuditor.audit(results);
 
+    const admissionViolations = results.filter((r) => r.isAdmissionViolation === true).length;
     const latencies = results.map((r) => r.latencyMs).sort((a, b) => a - b);
 
     return {
@@ -182,6 +183,7 @@ export class SliceEvaluator {
       evidenceCompletenessRate: evidenceAudit.completenessRate,
       evidenceSufficiency: evidenceAudit.sufficiency,
       evidenceComprehensiveness: evidenceAudit.comprehensiveness,
+      admissionViolationRate: admissionViolations / count,
       p50LatencyMs: this.percentile(latencies, 0.5),
       p95LatencyMs: this.percentile(latencies, 0.95),
     };
@@ -257,6 +259,7 @@ export class SliceEvaluator {
       evidenceCompletenessRate: 0,
       evidenceSufficiency: 0,
       evidenceComprehensiveness: 0,
+      admissionViolationRate: 0,
       p50LatencyMs: 0,
       p95LatencyMs: 0,
     };

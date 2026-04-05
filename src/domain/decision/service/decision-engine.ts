@@ -8,6 +8,7 @@ import type { DecisionTrace } from '../model/decision-trace.js';
 import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
 import { AdmissionGate } from './admission-gate.js';
 import type { FailureReason } from '../model/failure-reason.js';
+import { identityHash } from '../../shared/utils/hash.js';
 
 /**
  * Internal intermediate state used during decision processing.
@@ -453,6 +454,12 @@ export class DecisionEngine {
             selectedEntity: {
               entityId: topCandidate.entityId,
               canonicalLabel: topCandidate.canonicalLabel,
+              identity_signature: identityHash(
+                String(topCandidate.entityId),
+                snapshot.threshold_profile_id,
+                snapshot.planner_version,
+              ),
+              snapshot_ref: `${snapshot.threshold_profile_id}:${snapshot.planner_version}:${snapshot.policy_rule_version}`,
             },
             chosenEntityId: topCandidate.entityId,
           }

@@ -1,4 +1,5 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
+import type { FailureReason } from '../../decision/model/failure-reason.js';
 
 /**
  * The external-facing decision record included in every {@link SearchResponseV1}.
@@ -31,4 +32,17 @@ export interface EngineDecision {
 
   /** Snapshot of system versions active at decision time. */
   readonly decisionSnapshot: DecisionSnapshot;
+
+  /**
+   * Machine-readable failure reason when admission was denied (RFC-016 §6, §8).
+   * Present only when `decisionStatus` is `failed` or `ambiguous` due to
+   * an admission-gate rejection.
+   */
+  readonly failure_reason?: FailureReason | undefined;
+
+  /**
+   * Trace reference emitted by the AdmissionGate on rejection (RFC-016 §8).
+   * Correlates this decision with pipeline logs for auditability.
+   */
+  readonly admission_trace_ref?: string | undefined;
 }

@@ -47,6 +47,17 @@ export interface EvalResult {
   /** Evidence items produced by the engine for this decision. */
   readonly evidenceItems: readonly EvidenceItem[];
 
+  /**
+   * Whether this case triggered an RFC-016 admission invariant violation
+   * (RFC-009 §4.7).
+   *
+   * Set by infrastructure adapters when the engine emitted a `resolved`
+   * response but the AdmissionGate's invariants were detectably breached
+   * (e.g. missing identity_signature, snapshot mismatch, absent required
+   * evidence).  Absent or `false` means no violation was detected.
+   */
+  readonly isAdmissionViolation?: boolean;
+
   /** End-to-end latency in milliseconds for this case. */
   readonly latencyMs: number;
 

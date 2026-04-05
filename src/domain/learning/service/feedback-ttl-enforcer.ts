@@ -20,6 +20,7 @@
  * layer; this service ensures at minimum the strictest policy is applied.
  */
 
+import type { FeedbackType } from '../model/feedback-signal.js';
 import type { FeedbackStore } from '../port/feedback-store.port.js';
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,16 @@ const SHORT_SIGNAL_TTL_DAYS = 90;
 
 /** Retention period for high-value long signals (purchase, session_success). */
 const LONG_SIGNAL_TTL_DAYS = 180;
+
+/** Signal types subject to the 90-day retention policy. */
+const SHORT_SIGNAL_TYPES: readonly FeedbackType[] = [
+  'click',
+  'explicit_feedback',
+  'clarification_resolution',
+];
+
+/** Signal types subject to the 180-day retention policy. */
+const LONG_SIGNAL_TYPES: readonly FeedbackType[] = ['purchase', 'session_success'];
 
 /**
  * Result of a TTL enforcement run.
@@ -46,9 +57,8 @@ export interface TTLEnforcementResult {
   readonly longSignalCutoff: Date;
 
   /**
-   * Total number of signals deleted.
-   * The backing store uses the strictest (short) cutoff for the bulk delete;
-   * long-TTL signals are not affected unless they are older than 90 days.
+   * Total number of signals deleted across both short-signal and long-signal
+   * prune passes.
    */
   readonly deletedCount: number;
 }
@@ -66,9 +76,9 @@ export class FeedbackTTLEnforcer {
   /**
    * Runs one TTL enforcement cycle.
    *
-   * Computes cutoff dates for short and long signals and invokes
-   * `pruneExpiredFeedback` with the strictest (shortest) TTL so that no
-   * signal survives beyond its maximum retention period.
+   * Issues two targeted prune passes against the store — one for short signals
+   * (90-day TTL) and one for long signals (180-day TTL) — so that each signal
+   * class is deleted precisely at its own retention boundary.
    *
    * @param referenceDate - Anchor date for cutoff computation (defaults to
    *   `new Date()` — i.e. "now"). Useful for deterministic testing.
@@ -80,20 +90,24 @@ export class FeedbackTTLEnforcer {
     const shortSignalCutoff = subtractDays(now, SHORT_SIGNAL_TTL_DAYS);
     const longSignalCutoff = subtractDays(now, LONG_SIGNAL_TTL_DAYS);
 
-    // Apply the strictest TTL (shortest period = earliest cutoff).
-    // All signals older than shortSignalCutoff are deleted regardless of type.
-    // Long-signal types (purchase, session_success) created after
-    // shortSignalCutoff but before longSignalCutoff are preserved — a
-    // per-type pruning strategy requires infrastructure-level support.
-    const deletedCount = await this.feedbackStore.pruneExpiredFeedback(
+    // Prune short signals (click, explicit_feedback, clarification_resolution)
+    // older than 90 days.
+    const shortDeleted = await this.feedbackStore.pruneExpiredFeedback(
       shortSignalCutoff,
+      SHORT_SIGNAL_TYPES,
+    );
+
+    // Prune long signals (purchase, session_success) older than 180 days.
+    const longDeleted = await this.feedbackStore.pruneExpiredFeedback(
+      longSignalCutoff,
+      LONG_SIGNAL_TYPES,
     );
 
     return {
       runAt: now.toISOString(),
       shortSignalCutoff,
       longSignalCutoff,
-      deletedCount,
+      deletedCount: shortDeleted + longDeleted,
     };
   }
 

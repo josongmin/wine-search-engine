@@ -38,6 +38,17 @@ export interface DecisionOutput {
   readonly selectedEntity?: {
     readonly entityId: EntityId;
     readonly canonicalLabel?: string;
+    /**
+     * Cryptographic identity seal (RFC-016 §3 EntityRef).
+     * Hash of entity ID + active snapshot fields — prevents reconstruction
+     * from projection fields alone.
+     */
+    readonly identity_signature: string;
+    /**
+     * Stable reference to the snapshot under which this entity was resolved.
+     * Used for audit trails and replay correlation.
+     */
+    readonly snapshot_ref: string;
   };
 
   /** Primary entity chosen by the decision layer (absent when status is `failed`). */

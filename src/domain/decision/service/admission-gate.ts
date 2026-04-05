@@ -80,6 +80,13 @@ export class AdmissionGate {
       return this.reject('IDENTITY_SEAL_VIOLATION', input, snapshot);
     }
 
+    // Planner-version seal (RFC-016 §4): snapshot.planner_version must match
+    // the version recorded in the query plan.  A mismatch means the decision
+    // was evaluated against a different planner configuration.
+    if (snapshot.planner_version !== input.queryPlan.plannerVersion) {
+      return this.reject('SNAPSHOT_MISMATCH', input, snapshot);
+    }
+
     // ── (b) Evidence sufficiency ─────────────────────────────────────────────
     //
     // A resolved decision must be backed by identity evidence.  The boolean
@@ -99,6 +106,37 @@ export class AdmissionGate {
     const hasHardConstraints = input.queryPlan.constraints.hard.length > 0;
     if (hasHardConstraints && input.evidenceSummary?.constraintEvidencePresent !== true) {
       return this.reject('HARD_CONSTRAINT_VIOLATION', input, snapshot);
+    }
+
+    // ── (d) Anchor evidence (RFC-016 §5, RFC-011 §11) ────────────────────────
+    //
+    // When admission_context signals that anchor evidence is required (mixed
+    // route with anchors):
+    //   1. The coarse `anchorEvidencePresent` flag must be true.
+    //   2. The evidence_items trail must contain at least one item whose
+    //      `type` is an anchor signal ('anchor_similarity', 'anchor_match',
+    //      or 'anchor_preserved') — the boolean flag alone is not sufficient;
+    //      the trail must be substantiated (RFC-011 §11).
+    if (input.queryPlan.admission_context?.requires_anchor_evidence === true) {
+      if (input.evidenceSummary?.anchorEvidencePresent !== true) {
+        return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
+      }
+
+      // When the full evidence trail is available (populated by the ranking
+      // stage), verify that at least one item is an anchor-type signal
+      // (RFC-011 §11).  When evidenceItems is absent (entity-only route or
+      // pre-ranking paths), the coarse anchorEvidencePresent flag above suffices.
+      if (input.evidenceItems !== undefined) {
+        const hasAnchorSignal = input.evidenceItems.some(
+          (item) =>
+            item.type === 'anchor_similarity' ||
+            item.type === 'anchor_match' ||
+            item.type === 'anchor_preserved',
+        );
+        if (!hasAnchorSignal) {
+          return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
+        }
+      }
     }
 
     return { admitted: true };

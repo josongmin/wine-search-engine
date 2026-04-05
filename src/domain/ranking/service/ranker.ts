@@ -1,8 +1,9 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { EntityId, QueryClass } from '../../shared/types/index.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import { resolveWeights } from '../model/scoring-weights.js';
+import { rerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
@@ -11,6 +12,18 @@ import { type EvidenceMapper } from './evidence-mapper.js';
  * Default number of top candidates to submit for cross-encoder reranking.
  */
 const DEFAULT_RERANK_TOP_K = 20;
+
+/**
+ * Builds a wine-aware passage text for cross-encoder reranking (RFC-017 §5.2).
+ *
+ * Currently uses canonicalLabel only. When HybridCandidate is enriched with
+ * producer/region/searchTextEn (Epic 8), this function should concatenate
+ * all available wine metadata for richer cross-encoder input.
+ */
+function buildWineText(entry: ScoredEntry): string {
+  // Phase 1: canonicalLabel only (HybridCandidate has no wine-specific fields yet)
+  return entry.canonicalLabel || String(entry.entityId);
+}
 
 /**
  * Minimum candidate count to justify the cost of cross-encoder reranking.
@@ -127,6 +140,7 @@ export class Ranker {
       finalOrder = await this.applyReranking(
         queryPlan.normalizedQuery,
         viable,
+        queryPlan.queryClass,
       );
     }
 
@@ -153,21 +167,25 @@ export class Ranker {
    * Applies cross-encoder reranking to the top-K candidates.
    *
    * Candidates beyond top-K retain their original order appended after
-   * the reranked set. The final score is a blend of the cross-encoder
-   * score and the original aggregated score.
+   * the reranked set.  The final score blends the cross-encoder score with
+   * the original aggregated score using a query-class-aware weight
+   * (RFC-017 §5.3) rather than a hardcoded ratio.
    */
   private async applyReranking(
     query: string,
     viable: readonly ScoredEntry[],
+    queryClass: QueryClass,
   ): Promise<readonly ScoredEntry[]> {
     const topK = viable.slice(0, this.rerankTopK);
     const rest = viable.slice(this.rerankTopK);
 
-    // Build rerank candidates — use entityId as text placeholder.
-    // In production, infrastructure would enrich with entity descriptions.
+    // Build wine-aware passage text for the cross-encoder (RFC-017 §5.2).
+    // Currently HybridCandidate only carries canonicalLabel. When the entity
+    // index surface (Epic 8) adds producer/region/searchTextEn to candidates,
+    // buildWineText() should incorporate those fields for richer passages.
     const rerankCandidates: RerankCandidate[] = topK.map((entry) => ({
       entityId: entry.entityId,
-      text: String(entry.entityId),
+      text: buildWineText(entry),
     }));
 
     const rerankResults = await this.reranker!.rerank(
@@ -192,8 +210,9 @@ export class Ranker {
       if (original === undefined) {
         continue;
       }
-      // Blend: 60% rerank score + 40% original score
-      const blendedScore = 0.6 * r.score + 0.4 * original.finalScore;
+      // Blend: query-class-aware weight (RFC-017 §5.3 adaptive blend)
+      const w = rerankBlendWeight(queryClass);
+      const blendedScore = w * r.score + (1 - w) * original.finalScore;
       rerankedTopK.push({
         ...original,
         finalScore: blendedScore,
