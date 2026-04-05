@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Constraint Filter Query Profile (RFC-017 §8.3) -->
+<!-- Used for queries with explicit hard constraints (price, vintage, etc.) -->
+<!-- Characteristics: Filter-driven, tight latency budget, lexical dominance -->
+<query-profile id="constraint_filter" inherits="default">
+
+  <!-- Aggressive Timeout: Constraints reduce candidate pool quickly -->
+  <field name="timeout">100</field>
+
+  <!-- Result Window: Conservative for filtered queries -->
+  <field name="hits">50</field>
+
+  <!-- HNSW: Approximate with early exploration -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">true</field>
+  <field name="hnsw.maxHitsPerNode">100</field>
+
+  <!-- Ranking Weights: Lexical + attribute focus -->
+  <!-- Constraints already filter; ranking focuses on match quality -->
+  <field name="ranking.features.query(weight_lexical)">0.40</field>
+  <field name="ranking.features.query(weight_semantic)">0.15</field>
+  <field name="ranking.features.query(weight_attribute)">0.30</field>
+  <field name="ranking.features.query(weight_popularity)">0.15</field>
+
+  <!-- Rank Profile: constraint-aware -->
+  <field name="ranking.profile">constraint_filter</field>
+
+  <!-- No diversity penalty (constraints already provide filtering) -->
+  <field name="ranking.features.query(diversity_penalty)">0.0</field>
+
+</query-profile>

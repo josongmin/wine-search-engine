@@ -3,9 +3,9 @@ import {
   BatchSearchUseCase,
   type BatchSearchRequestItem,
   type BatchSearchOptions,
-} from './batch-search.usecase.js';
-import type { SearchUseCase } from './search.usecase.js';
-import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
+} from '../../../../src/application/search/batch-search.usecase.js';
+import type { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
+import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 
 /**
  * Unit tests for BatchSearchUseCase.
@@ -198,16 +198,17 @@ describe('BatchSearchUseCase', () => {
 
       const mockResponse = {} as SearchResponseV1;
 
+      const policyError = new (class extends Error {
+        override name = 'DomainError';
+        code = 'POLICY_BLOCKED';
+        constructor() {
+          super('Query blocked by policy');
+        }
+      })();
+
       vi.mocked(mockSearchUseCase.execute)
         .mockResolvedValueOnce(mockResponse)
-        .mockRejectedValueOnce(
-          new (class DomainError extends Error {
-            code = 'POLICY_BLOCKED';
-            constructor() {
-              super('Query blocked by policy');
-            }
-          })(),
-        );
+        .mockRejectedValueOnce(policyError);
 
       const response = await useCase.execute(requests, { fail_fast: false });
 
@@ -349,8 +350,8 @@ describe('BatchSearchUseCase', () => {
 
       await useCase.execute(requests, undefined, batchId);
 
-      const [, requestId] = vi.mocked(mockSearchUseCase.execute).mock
-        .calls[0];
+      const callArgs = vi.mocked(mockSearchUseCase.execute).mock.calls[0];
+      const requestId = callArgs?.[1];
       expect(requestId).toBe('batch-123-query1');
     });
   });

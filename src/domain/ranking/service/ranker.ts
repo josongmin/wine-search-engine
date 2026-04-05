@@ -235,7 +235,11 @@ export class Ranker {
       text: buildWineText(entry),
     }));
 
-    const rerankResults = await this.reranker!.rerank(
+    const reranker = this.reranker;
+    if (reranker === undefined) {
+      throw new Error('applyReranking requires reranker');
+    }
+    const rerankResults = await reranker.rerank(
       query,
       rerankCandidates,
       this.rerankTopK,

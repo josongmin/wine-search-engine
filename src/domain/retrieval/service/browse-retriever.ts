@@ -30,7 +30,7 @@ export class BrowseRetriever {
    * @param limit - Maximum wines to return (e.g. 12-20 for UI browse).
    * @returns Ordered list of candidates from the specified producer, diversity-aware.
    */
-  async browseProducer(
+  browseProducer(
     _producerName: string,
     _constraints: ConstraintBundle,
     _limit: number,
@@ -47,7 +47,7 @@ export class BrowseRetriever {
 
     // For now, return empty to allow compilation.
     // This will be filled in during full implementation with SearchIndexPort calls.
-    return [];
+    return Promise.resolve([]);
   }
 
   /**
@@ -63,7 +63,7 @@ export class BrowseRetriever {
    * @param limit - Maximum wines to return (e.g. 20-30 for regional browse).
    * @returns Ordered list of wines from region, producer-diverse and prestige-ranked.
    */
-  async browseRegion(
+  browseRegion(
     _regionName: string,
     _constraints: ConstraintBundle,
     _limit: number,
@@ -79,6 +79,6 @@ export class BrowseRetriever {
     // 8. Enrich with retrievalTrace indicating region_browse mode.
 
     // For now, return empty.
-    return [];
+    return Promise.resolve([]);
   }
 }

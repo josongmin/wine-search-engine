@@ -1,0 +1,5 @@
+# Semgrep scan exclusions (see npm script `semgrep` for CLI --exclude as well)
+node_modules/
+dist/
+coverage/
+.claude/

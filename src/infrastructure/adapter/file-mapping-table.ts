@@ -40,22 +40,22 @@ export class FileMappingTableAdapter implements MappingTablePort {
     }
   }
 
-  async findMapping(phrase: string, version?: string): Promise<NLMapping | null> {
+  findMapping(phrase: string, version?: string): Promise<NLMapping | null> {
     const lower = phrase.toLowerCase();
-    return (
+    return Promise.resolve(
       this.mappings.find(
         (m) =>
           m.phrase.toLowerCase() === lower &&
           (version == null || m.mappingVersion === version),
-      ) ?? null
+      ) ?? null,
     );
   }
 
-  async findMappingsByAttribute(attribute: string): Promise<readonly NLMapping[]> {
-    return this.mappings.filter((m) => m.mappedAttribute === attribute);
+  findMappingsByAttribute(attribute: string): Promise<readonly NLMapping[]> {
+    return Promise.resolve(this.mappings.filter((m) => m.mappedAttribute === attribute));
   }
 
-  async getCurrentVersion(): Promise<string> {
-    return this.version;
+  getCurrentVersion(): Promise<string> {
+    return Promise.resolve(this.version);
   }
 }

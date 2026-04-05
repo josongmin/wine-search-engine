@@ -22,6 +22,12 @@ import type { CounterfactualReject } from '../../domain/response/model/counterfa
 import type { DrinkingWindowUseCase } from '../drinking-window/drinking-window.usecase.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { LLMInjectionJudge } from '../../domain/security/service/llm-injection-judge.js';
+import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';
+import type { CacheEligibilityAnalyzer } from '../../domain/performance/service/cache-eligibility.js';
+import {
+  QueryCacheKeyBuilder,
+  type QueryCacheKey,
+} from '../../domain/performance/model/cache-key.js';
 
 /**
  * Incoming search request shape.
@@ -78,6 +84,10 @@ export interface SearchUseCaseDeps {
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). Optional. */
   readonly injectionJudge?: LLMInjectionJudge | undefined;
+  /** Query cache for full response memoization (Wave 4, Phase 3). Optional. */
+  readonly queryCache?: QueryCachePort | undefined;
+  /** Cache eligibility analyzer for per-mode cacheability (Wave 4, Phase 3). Optional. */
+  readonly cacheEligibility?: CacheEligibilityAnalyzer | undefined;
 }
 
 /**
@@ -94,6 +104,19 @@ export interface SearchUseCaseDeps {
  */
 export class SearchUseCase {
   constructor(private readonly deps: SearchUseCaseDeps) {}
+
+  private buildQueryCacheKey(plan: QueryPlanV1, request: SearchRequest): QueryCacheKey {
+    const cacheKeyBuilder = new QueryCacheKeyBuilder();
+    const expansionTerms = [...plan.expansions.lexical, ...plan.expansions.semantic];
+    return cacheKeyBuilder.build(
+      plan.normalizedQuery,
+      plan.retrievalMode,
+      plan.constraints.hard.map((c) => [c.attribute, c.operator, String(c.value)] as const),
+      expansionTerms,
+      request.sessionContext?.sessionId,
+      request.context?.locale,
+    );
+  }
 
   async execute(
     request: SearchRequest,
@@ -142,6 +165,29 @@ export class SearchUseCase {
     };
 
     const plan = await this.deps.queryPlanner.plan(sanitizedQuery, plannerContext);
+
+    // Step 1b: Query cache check (Wave 4, Phase 3)
+    // Cache hit avoids resolution, retrieval, ranking, decision engine
+    // Check after planning so we have the actual retrievalMode from the plan
+    if (this.deps.queryCache && this.deps.cacheEligibility) {
+      const eligibility = this.deps.cacheEligibility.analyze(plan);
+      if (eligibility.isCacheable) {
+        const cacheKey = this.buildQueryCacheKey(plan, request);
+
+        const cachedResponse = await this.deps.queryCache.get(cacheKey);
+        if (cachedResponse) {
+          // Cache hit: update requestId and latency only
+          return {
+            ...cachedResponse,
+            meta: {
+              ...cachedResponse.meta,
+              requestId,
+              queryTimeMs: Date.now() - startTime,
+            },
+          };
+        }
+      }
+    }
 
     // Step 2: Determine effective route
     const effectiveRoute = this.resolveRoute(plan, request.options?.mode);
@@ -208,6 +254,21 @@ export class SearchUseCase {
       queryTimeMs,
       route: effectiveRoute,
     });
+
+    // Step 7: Cache response (Wave 4, Phase 3)
+    // Cache is populated after successful response building for eligible modes
+    if (this.deps.queryCache && this.deps.cacheEligibility) {
+      const eligibility = this.deps.cacheEligibility.analyze(plan);
+      if (eligibility.isCacheable) {
+        const cacheKey = this.buildQueryCacheKey(plan, request);
+        try {
+          await this.deps.queryCache.set(cacheKey, response, eligibility.ttlSeconds);
+        } catch (err) {
+          // Cache set failure is non-fatal; log and continue
+          console.error('[SearchUseCase] Failed to cache response:', err);
+        }
+      }
+    }
 
     return response;
   }
@@ -361,9 +422,7 @@ export class SearchUseCase {
       ...(rankingSignals !== undefined ? { rankingSignals } : {}),
       evidenceSummary,
       ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
-      ...(resolverResult.conformalSetSize !== undefined
-        ? { conformalSetSize: resolverResult.conformalSetSize }
-        : {}),
+      conformalSetSize: resolverResult.conformalSetSize,
     };
   }
 
@@ -472,19 +531,54 @@ export class SearchUseCase {
     rankedResults: readonly RankedResult[],
   ): Promise<readonly ResultItem[]> {
     const currentYear = new Date().getFullYear();
-    const items: ResultItem[] = [];
 
-    for (const r of rankedResults) {
-      // Determine drinking window
-      let drinkingWindow: typeof undefined | {
-        readonly drinkingWindowStart: number;
-        readonly drinkingWindowEnd: number;
-        readonly currentlyDrinkable: boolean;
-        readonly confidence: 'high' | 'medium' | 'low';
-        readonly modelVersion?: string | undefined;
-      };
+    // Type guard: check wine attributes for prediction
+    const needsPrediction = (r: RankedResult): boolean =>
+      r.drinkingWindowStart === undefined && // Not cached
+      r.vintage !== undefined &&
+      r.body !== undefined &&
+      r.tannin !== undefined &&
+      r.acidity !== undefined &&
+      r.sweetness !== undefined &&
+      r.grapePrimaryEnc !== undefined &&
+      r.regionEnc !== undefined &&
+      r.countryEnc !== undefined;
 
-      // Option 1: Use cached values from Vespa (if available)
+    // Filter & collect results needing prediction
+    const resultsPendingPrediction = rankedResults.filter(
+      (r) => this.deps.drinkingWindow !== undefined && needsPrediction(r),
+    );
+
+    // 🔥 PARALLEL: Promise.all() for all predictions (not sequential loop)
+    const predictions = await Promise.allSettled(
+      resultsPendingPrediction.map((r) =>
+        this.deps.drinkingWindow!.check({
+          vintage: r.vintage!,
+          grapePrimaryEnc: r.grapePrimaryEnc!,
+          regionEnc: r.regionEnc!,
+          countryEnc: r.countryEnc!,
+          body: r.body!,
+          tannin: r.tannin!,
+          acidity: r.acidity!,
+          sweetness: r.sweetness!,
+          avgCriticProxyScore: r.avgCriticProxyScore ?? 80,
+        }),
+      ),
+    );
+
+    // Map results back for O(1) lookup
+    const predictionMap = new Map<string, any>();
+    resultsPendingPrediction.forEach((r, idx) => {
+      if (predictions[idx]?.status === 'fulfilled') {
+        predictionMap.set(r.entityId, predictions[idx].value);
+      }
+    });
+
+    // Build items with drinking windows (single pass)
+    return rankedResults.map((r) => {
+      let drinkingWindow: typeof undefined | any;
+
+      // Priority 1: Cached from Vespa
       if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined) {
         drinkingWindow = {
           drinkingWindowStart: r.drinkingWindowStart,
@@ -494,30 +588,12 @@ export class SearchUseCase {
           confidence: 'high' as const,
         };
       }
-      // Option 2: Predict dynamically from wine attributes (Epic 15)
-      else if (
-        this.deps.drinkingWindow !== undefined &&
-        r.vintage !== undefined &&
-        r.body !== undefined &&
-        r.tannin !== undefined &&
-        r.acidity !== undefined &&
-        r.sweetness !== undefined &&
-        r.grapePrimaryEnc !== undefined &&
-        r.regionEnc !== undefined &&
-        r.countryEnc !== undefined
-      ) {
-        const prediction = await this.deps.drinkingWindow.check({
-          vintage: r.vintage,
-          grapePrimaryEnc: r.grapePrimaryEnc,
-          regionEnc: r.regionEnc,
-          countryEnc: r.countryEnc,
-          body: r.body,
-          tannin: r.tannin,
-          acidity: r.acidity,
-          sweetness: r.sweetness,
-          avgCriticProxyScore: r.avgCriticProxyScore ?? 0,
-        });
-        drinkingWindow = prediction;
+      // Priority 2: Dynamically predicted (from Promise.all())
+      else {
+        const predicted = predictionMap.get(r.entityId);
+        if (predicted) {
+          drinkingWindow = predicted;
+        }
       }
 
       const baseItem: ResultItem = {
@@ -549,15 +625,10 @@ export class SearchUseCase {
         evidenceItems: r.evidenceItems,
       };
 
-      // Enrich with drinking window if available (exactOptionalPropertyTypes)
-      items.push(
-        drinkingWindow !== undefined
-          ? { ...baseItem, drinkingWindow }
-          : baseItem,
-      );
-    }
-
-    return items;
+      return drinkingWindow !== undefined
+        ? { ...baseItem, drinkingWindow }
+        : baseItem;
+    });
   }
 
   /**
@@ -601,7 +672,7 @@ export class SearchUseCase {
       queryType: 'search' as const,
       engineDecision: {
         decisionStatus: 'failed' as const,
-        nextAction: 'reject' as const,
+        nextAction: 'fail' as const,
         route: 'security_gate',
         decisionConfidence: 0,
         confidenceSemantics: 'calibrated_decision_confidence' as const,

@@ -20,6 +20,7 @@
     "test:all": "npm run test && npm run test:e2e && npm run test:e2e:vespa:only",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "semgrep": "semgrep scan --metrics=off --config=semgrep/wine-rules.yml --config=p/ci --config=p/typescript --config=p/nodejs --config=p/secrets --error --exclude='**/node_modules/**' --exclude='**/dist/**' --exclude='**/.claude/**' src",
     "typecheck": "tsc --noEmit",
     "eval": "tsx scripts/run-eval.ts",
     "ingest": "tsx src/interface/cli/ingest.command.ts",
@@ -28,6 +29,7 @@
     "vivino:bronze": "tsx tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.82.0",
     "@fastify/rate-limit": "^10.2.0",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/sdk-node": "^0.57.0",

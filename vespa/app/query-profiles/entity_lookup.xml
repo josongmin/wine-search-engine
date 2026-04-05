@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Entity Lookup Query Profile (RFC-017 §8.3) -->
+<!-- Used for exact entity resolution queries - demands precision & speed -->
+<!-- Characteristics: Single target entity, exact match intent, low ambiguity -->
+<query-profile id="entity_lookup" inherits="default">
+
+  <!-- Aggressive Timeout: Exact matches must resolve quickly -->
+  <!-- P99 < 50ms for user experience -->
+  <field name="timeout">50</field>
+
+  <!-- Result Window: Tighter for lookup (top-5 sufficient) -->
+  <field name="hits">50</field>
+
+  <!-- HNSW: Full precision search (no approximation) -->
+  <!-- Lookup requires 100% recall for the correct entity -->
+  <field name="approximate">false</field>
+  <field name="hnsw.exploreEarly">false</field>
+
+  <!-- Ranking Weights: Heavily favor lexical (exact match dominates) -->
+  <!-- Entity lookup relies on name/alias exact matching -->
+  <field name="ranking.features.query(weight_lexical)">0.75</field>
+  <field name="ranking.features.query(weight_semantic)">0.10</field>
+  <field name="ranking.features.query(weight_attribute)">0.10</field>
+  <field name="ranking.features.query(weight_popularity)">0.05</field>
+
+  <!-- Rank Profile: lexical-focused -->
+  <field name="ranking.profile">entity_lookup</field>
+
+  <!-- Disable approximation features for maximum precision -->
+  <field name="presentation.bolding">false</field>
+
+</query-profile>

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Region Browse Query Profile (RFC-017 §8.3) -->
+<!-- Used for browsing wines by region/appellation -->
+<!-- Characteristics: Similar to producer_browse but with region-specific faceting -->
+<query-profile id="region_browse" inherits="default">
+
+  <!-- Timeout: Similar to producer browsing (~200ms) -->
+  <field name="timeout">200</field>
+
+  <!-- Result Window: Larger for faceted navigation -->
+  <field name="hits">120</field>
+
+  <!-- HNSW: Approximate search allowed (prioritizes speed) -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">true</field>
+  <field name="hnsw.maxHitsPerNode">150</field>
+
+  <!-- Ranking Weights: Balance lexical + region attributes -->
+  <!-- Region attributes (appellation, subregion) are important -->
+  <field name="ranking.features.query(weight_lexical)">0.35</field>
+  <field name="ranking.features.query(weight_semantic)">0.15</field>
+  <field name="ranking.features.query(weight_attribute)">0.35</field>
+  <field name="ranking.features.query(weight_popularity)">0.15</field>
+
+  <!-- Rank Profile: region-aware grouping -->
+  <field name="ranking.profile">region_browse</field>
+
+  <!-- Diversity bonus for region faceting -->
+  <field name="ranking.features.query(diversity_penalty)">0.08</field>
+
+</query-profile>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Default Query Profile - Base Configuration -->
+<!-- Used as parent for all mode-specific profiles -->
+<query-profile id="default">
+
+  <!-- Ranking Configuration -->
+  <field name="ranking.profile">hybrid</field>
+  <field name="ranking.features.query(current_year)">2026</field>
+  <field name="ranking.features.query(query_embedding)"></field>
+
+  <!-- Result Window Configuration -->
+  <field name="hits">100</field>
+  <field name="offset">0</field>
+
+  <!-- Query Timeout (milliseconds) -->
+  <field name="timeout">500</field>
+
+  <!-- HNSW Approximate Search Configuration -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">true</field>
+  <field name="hnsw.maxHitsPerNode">100</field>
+
+  <!-- Presentation & Summaries -->
+  <field name="presentation.bolding">false</field>
+  <field name="presentation.format">json</field>
+
+  <!-- Tracing & Debugging (disabled in production) -->
+  <field name="trace.level">0</field>
+
+  <!-- Query Rewrite Rules -->
+  <field name="queryModel.type">all</field>
+
+  <!-- Default Ranking Weights (overridden by mode-specific profiles) -->
+  <field name="ranking.features.query(weight_lexical)">0.4</field>
+  <field name="ranking.features.query(weight_semantic)">0.3</field>
+  <field name="ranking.features.query(weight_attribute)">0.2</field>
+  <field name="ranking.features.query(weight_popularity)">0.1</field>
+
+</query-profile>

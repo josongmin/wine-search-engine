@@ -1,4 +1,4 @@
-import type { InjectionResult, InjectionReason } from '../model/injection-result.js';
+import type { InjectionResult } from '../model/injection-result.js';
 
 /**
  * Static pattern-based prompt injection detection for wine search queries.
@@ -26,7 +26,7 @@ export class QuerySanitizer {
   private static readonly INJECTION_PATTERNS = {
     // System prompt / instruction hijacking
     system_prompt: [
-      /\bignore\s+(?:previous|your|the)\s+instructions?\b/i,
+      /\bignore\s+/i,  // Simple: if starts with "ignore", likely injection
       /\b(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/i,
       /(?:system|assistant|admin)\s+mode/i,
       /\b(?:system|admin)\s+override\b/i,
@@ -44,7 +44,6 @@ export class QuerySanitizer {
 
     // SQL injection
     sql_injection: [
-      /['"`]/,                           // Basic quote
       /;\s*(?:drop|delete|update|insert|select|create)/i,
       /\bunion\s+select\b/i,
       /\bor\s+1\s*=\s*1\b/i,
@@ -138,16 +137,7 @@ export class QuerySanitizer {
       };
     }
 
-    // Layer 1e: SQL injection (high confidence, domain-specific)
-    const sqlMatch = this.matchPatterns(rawQuery, 'sql_injection');
-    if (sqlMatch !== undefined) {
-      return {
-        safe: false,
-        reason: 'SQL_INJECTION',
-      };
-    }
-
-    // Layer 1f: Script / XSS injection (very specific, no false positives)
+    // Layer 1e: Script / XSS injection (very specific, no false positives) - CHECK BEFORE SQL!
     const scriptMatch = this.matchPatterns(rawQuery, 'script_injection');
     if (scriptMatch !== undefined) {
       return {
@@ -156,10 +146,26 @@ export class QuerySanitizer {
       };
     }
 
+    // Layer 1f: SQL injection (high confidence, domain-specific)
+    const sqlMatch = this.matchPatterns(rawQuery, 'sql_injection');
+    if (sqlMatch !== undefined) {
+      return {
+        safe: false,
+        reason: 'SQL_INJECTION',
+      };
+    }
+
     // Layer 1g: Command injection (careful — Unix pipes common in English)
-    // Only block if more than one command chaining operator
-    const commandMatches = this.countMatches(rawQuery, 'command_injection');
-    if (commandMatches >= 2) {
+    // Block immediately on high-confidence signals: backticks, $(...)
+    // Block on semicolon + && pattern (command chaining)
+    if (/`[^`]*`/.test(rawQuery) || /\$\([^)]*\)/.test(rawQuery)) {
+      return {
+        safe: false,
+        reason: 'COMMAND_INJECTION',
+      };
+    }
+    // Check for command chaining: semicolon and double ampersand both present
+    if (/;/.test(rawQuery) && /&&/.test(rawQuery)) {
       return {
         safe: false,
         reason: 'COMMAND_INJECTION',

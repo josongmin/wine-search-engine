@@ -62,6 +62,12 @@ import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher.port.js';
+import { QuerySanitizer } from '../domain/security/service/query-sanitizer.js';
+import { LLMInjectionJudge } from '../domain/security/service/llm-injection-judge.js';
+import { getRedisClient } from '../infrastructure/db/redis-client.js';
+import { RedisQueryCache } from '../infrastructure/cache/redis-query-cache.js';
+import { RedisEmbeddingCache } from '../infrastructure/cache/redis-embedding-cache.js';
+import { CacheEligibilityAnalyzer } from '../domain/performance/service/cache-eligibility.js';
 
 /**
  * The DI container — holds all wired domain services and use cases.
@@ -97,64 +103,64 @@ export interface Container {
 
 /** Stub BlockingPort: returns no candidates. */
 class StubBlockingPort implements BlockingPort {
-  async block(
+  block(
     _query: string,
     _normalizedQuery: string,
     _limit?: number,
   ): Promise<readonly EntityId[]> {
-    return [];
+    return Promise.resolve([]);
   }
 }
 
 /** Stub CalibrationStore: returns null (no trained params). */
 class StubCalibrationStore implements CalibrationStore {
-  async getCalibrationParams(_queryClass: QueryClass): Promise<CalibrationParams | null> {
-    return null;
+  getCalibrationParams(_queryClass: QueryClass): Promise<CalibrationParams | null> {
+    return Promise.resolve(null);
   }
-  async save(_queryClass: QueryClass, _params: CalibrationParams): Promise<void> {
-    // noop
+  save(_queryClass: QueryClass, _params: CalibrationParams): Promise<void> {
+    return Promise.resolve();
   }
 }
 
 /** Stub EmbeddingServicePort: returns zero vectors. */
 class StubEmbeddingService implements EmbeddingServicePort {
-  async embed(_text: string): Promise<readonly number[]> {
-    return new Array<number>(128).fill(0);
+  embed(_text: string): Promise<readonly number[]> {
+    return Promise.resolve(new Array<number>(128).fill(0));
   }
-  async embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
-    return texts.map(() => new Array<number>(128).fill(0));
+  embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
+    return Promise.resolve(texts.map(() => new Array<number>(128).fill(0)));
   }
 }
 
 /** Stub AmbiguityDictionary: reports nothing as ambiguous. */
 class StubAmbiguityDictionary implements AmbiguityDictionary {
-  async isKnownAmbiguous(_term: string): Promise<boolean> {
-    return false;
+  isKnownAmbiguous(_term: string): Promise<boolean> {
+    return Promise.resolve(false);
   }
-  async getAmbiguityInfo(
+  getAmbiguityInfo(
     _term: string,
   ): Promise<{ types: string[]; severity: 'low' | 'medium' | 'high' } | null> {
-    return null;
+    return Promise.resolve(null);
   }
 }
 
 /** Stub AliasMatcher: returns no matches. */
 class StubAliasMatcher implements AliasMatcher {
-  async findMatches(_normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
-    return [];
+  findMatches(_normalizedQuery: string): Promise<readonly AliasMatchResult[]> {
+    return Promise.resolve([]);
   }
 }
 
 /** Stub ThresholdStore: returns the default profile. */
 class StubThresholdStore implements ThresholdStore {
-  async getProfile(_id: string): Promise<ThresholdProfileV1 | null> {
-    return DEFAULT_THRESHOLD_PROFILE;
+  getProfile(_id: string): Promise<ThresholdProfileV1 | null> {
+    return Promise.resolve(DEFAULT_THRESHOLD_PROFILE);
   }
-  async getDefault(): Promise<ThresholdProfileV1> {
-    return DEFAULT_THRESHOLD_PROFILE;
+  getDefault(): Promise<ThresholdProfileV1> {
+    return Promise.resolve(DEFAULT_THRESHOLD_PROFILE);
   }
-  async save(_profile: ThresholdProfileV1): Promise<void> {
-    // noop
+  save(_profile: ThresholdProfileV1): Promise<void> {
+    return Promise.resolve();
   }
 }
 
@@ -177,7 +183,7 @@ class StubThresholdStore implements ThresholdStore {
  * @param pool    - Optional Postgres pool.  Provide in production.
  * @returns The fully wired container.
  */
-export function createContainer(_config: Config, pool?: Pool): Container {
+export async function createContainer(_config: Config, pool?: Pool): Promise<Container> {
   // ── Vespa ──────────────────────────────────────────────────────────────────
   const vespaClient = new VespaClient(
     _config.vespa.url,
@@ -249,12 +255,31 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     learnedMatcher,
   );
 
+  // ── Cache infrastructure (Wave 4, Phase 3) ───────────────────────────────
+  let queryCache: InstanceType<typeof RedisQueryCache> | undefined;
+  let embeddingCache: InstanceType<typeof RedisEmbeddingCache> | undefined;
+  const cacheEligibility = new CacheEligibilityAnalyzer();
+
+  // Initialize Redis-backed caches if Redis is available
+  if (!_config.killSwitch.queryCache) {
+    try {
+      const redisClient = await getRedisClient();
+      queryCache = new RedisQueryCache(redisClient);
+      embeddingCache = new RedisEmbeddingCache(redisClient);
+      console.log('[Container] Cache infrastructure initialized');
+    } catch (err) {
+      console.warn('[Container] Failed to initialize caches; continuing without:', err);
+      // Continue without caches — Layer 1 search still works
+    }
+  }
+
   // ── Domain services — retrieval ───────────────────────────────────────────
   const fusionService = new FusionService();
   const candidatePool = new CandidatePoolService(
     searchIndex,
     embeddingService,
     fusionService,
+    embeddingCache,
   );
 
   // ── Domain services — ranking ─────────────────────────────────────────────
@@ -297,13 +322,26 @@ export function createContainer(_config: Config, pool?: Pool): Container {
   const drinkingWindowPredictor = new DrinkingWindowPredictor();
   // Note: predictor.load() must be called at app startup with model directory
 
+  // ── Security: Prompt injection defense (Epic 16.1) ────────────────────────
+  const querySanitizer = new QuerySanitizer();
+
+  // LLM-based injection judge (optional, depends on ANTHROPIC_API_KEY)
+  let injectionJudge: LLMInjectionJudge | undefined;
+  if (_config.anthropic.apiKey && !_config.killSwitch.injectionJudge) {
+    try {
+      const redisClient = await getRedisClient();
+      injectionJudge = new LLMInjectionJudge(_config.anthropic.apiKey, redisClient);
+    } catch (err) {
+      console.error('[Container] Failed to initialize LLMInjectionJudge:', err);
+      // Continue without judge — Layer 1 (static patterns) still active
+    }
+  }
+
   // ── Use cases ─────────────────────────────────────────────────────────────
-  // CIRCULAR DEPENDENCY RESOLUTION:
-  // - SearchUseCase needs DecomposedSearchUseCase for decomposition routing
-  // - DecomposedSearchUseCase needs SearchUseCase for parallel sub-query execution
-  // Solution: Create searchUseCase first (with decomposedSearch omitted),
-  // then create decomposedSearchUseCase referencing searchUseCase.
-  // Route handler must call decomposedSearchUseCase directly for "A vs B" queries.
+  // Create independent use cases first (no dependencies on SearchUseCase)
+  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
+
+  // Create SearchUseCase with Epic 15 drinkingWindow + Wave 4 caches injected
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
@@ -313,10 +351,15 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     responseBuilder,
     mixedSolver,
     snapshotVersions,
+    querySanitizer,
+    injectionJudge,
+    drinkingWindow: drinkingWindowUseCase, // ← Epic 15: Inject drinking window
+    queryCache, // ← Wave 4, Phase 3: Query cache (optional)
+    cacheEligibility, // ← Wave 4, Phase 3: Cache eligibility analyzer
   });
 
+  // Dependent use cases created after SearchUseCase
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
   const replayUseCase = new ReplayUseCase({

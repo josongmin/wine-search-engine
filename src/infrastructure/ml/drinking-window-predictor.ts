@@ -60,7 +60,7 @@ export class DrinkingWindowPredictor {
    * Loads ONNX models from disk.
    * In production: const { InferenceSession } = await import('onnxruntime-node');
    */
-  async load(modelDir: string): Promise<void> {
+  load(modelDir: string): Promise<void> {
     try {
       // TODO: Uncomment when onnxruntime-node is available
       // const { InferenceSession } = await import('onnxruntime-node');
@@ -69,7 +69,7 @@ export class DrinkingWindowPredictor {
       console.warn(
         `[DrinkingWindowPredictor] Loading models from ${modelDir} (stub mode)`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       const errorMsg =
         error instanceof Error ? error.message : String(error);
       throw new Error(
@@ -77,6 +77,7 @@ export class DrinkingWindowPredictor {
       );
     }
     this.initialized = true;
+    return Promise.resolve();
   }
 
   /**

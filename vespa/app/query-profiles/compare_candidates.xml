@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Compare Candidates Query Profile (RFC-017 §8.3) -->
+<!-- Used for comparing multiple wine candidates (e.g., "compare these wines") -->
+<!-- Characteristics: Multiple-item matching, semantic focus, balanced exploration -->
+<query-profile id="compare_candidates" inherits="default">
+
+  <!-- Timeout: Comparison can take longer for quality -->
+  <field name="timeout">300</field>
+
+  <!-- Result Window: Return broader set for comparison context -->
+  <field name="hits">150</field>
+
+  <!-- HNSW: Approximate with exploration (find related items) -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">false</field>
+  <field name="hnsw.maxHitsPerNode">180</field>
+
+  <!-- Ranking Weights: Semantic + attribute balance for comparison -->
+  <!-- Both taste profile and attributes relevant for comparison -->
+  <field name="ranking.features.query(weight_lexical)">0.15</field>
+  <field name="ranking.features.query(weight_semantic)">0.45</field>
+  <field name="ranking.features.query(weight_attribute)">0.25</field>
+  <field name="ranking.features.query(weight_popularity)">0.15</field>
+
+  <!-- Rank Profile: comparison-optimized -->
+  <field name="ranking.profile">compare_candidates</field>
+
+  <!-- Anchor embeddings for multiple items being compared -->
+  <field name="ranking.features.query(anchor_embeddings)"></field>
+
+  <!-- Moderate diversity for comparison context -->
+  <field name="ranking.features.query(diversity_penalty)">0.10</field>
+
+</query-profile>

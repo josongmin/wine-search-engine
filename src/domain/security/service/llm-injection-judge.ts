@@ -144,15 +144,15 @@ Classify this query:`;
 
       // Parse JSON response
       try {
-        const parsed = JSON.parse(textContent.text) as { is_injection?: boolean };
+        const parsed = JSON.parse(textContent.text) as { is_injection?: boolean | unknown };
         return parsed.is_injection === true;
-      } catch (jsonErr) {
+      } catch {
         console.error('[LLMInjectionJudge] Failed to parse Claude response:', textContent.text);
         // Fail closed: if we can't parse, treat as injection to be safe
         return true;
       }
-    } catch (err) {
-      console.error('[LLMInjectionJudge] Claude API error:', err);
+    } catch {
+      console.error('[LLMInjectionJudge] Claude API error:', new Error().message);
       // Fail closed: API error → treat as injection to be safe
       return true;
     }

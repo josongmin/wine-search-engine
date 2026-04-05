@@ -7,6 +7,8 @@ import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { ConstraintFilter } from './constraint-filter.js';
+import type { EmbeddingCachePort } from '../../performance/port/embedding-cache.port.js';
+import { EmbeddingCacheKeyBuilder } from '../../performance/model/cache-key.js';
 
 function formatConstraintValue(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
@@ -20,7 +22,7 @@ function formatConstraintValue(value: unknown): string {
  *
  * Pipeline steps:
  * 1. Execute sparse search with lexical queries + hard constraint filters.
- * 2. Embed semantic queries and execute dense search.
+ * 2. Embed semantic queries and execute dense search (with embedding cache).
  * 3. If an anchor profile is present, embed anchor and run neighbourhood search.
  * 4. Fuse all passes via RRF.
  * 5. Apply hard constraint filter on fused candidates.
@@ -30,15 +32,18 @@ export class CandidatePoolService {
   private readonly profileService: RetrievalProfileService;
   private readonly cascadeRouter: CascadeRouter;
   private readonly constraintFilter: ConstraintFilter;
+  private readonly embeddingCacheKeyBuilder: EmbeddingCacheKeyBuilder;
 
   constructor(
     private readonly searchIndex: SearchIndexPort,
     private readonly embeddingService: EmbeddingServicePort,
     private readonly fusionService: FusionService,
+    private readonly embeddingCache?: EmbeddingCachePort | undefined,
   ) {
     this.profileService = new RetrievalProfileService();
     this.cascadeRouter = new CascadeRouter();
     this.constraintFilter = new ConstraintFilter();
+    this.embeddingCacheKeyBuilder = new EmbeddingCacheKeyBuilder();
   }
 
   /**
@@ -83,12 +88,62 @@ export class CandidatePoolService {
         )
       : [];
 
-    // Step 2: Dense search
+    // Step 2: Dense search (with embedding cache)
     let denseHits: readonly DenseHit[] = [];
     if (phaseSet.has('dense') && input.semanticQueries.length > 0) {
-      const embeddings = await this.embeddingService.embedBatch(
-        input.semanticQueries as string[],
-      );
+      // Build embeddings from cache + embedding service
+      const embeddings: (readonly number[] | null)[] = new Array(input.semanticQueries.length).fill(null);
+      const uncachedIndices: number[] = [];
+
+      // Check cache for each semantic query
+      for (let i = 0; i < input.semanticQueries.length; i++) {
+        const query = input.semanticQueries[i];
+        if (!query) {
+          continue;
+        }
+        const cacheKey = this.embeddingCacheKeyBuilder.build(
+          query,
+          'bge-m3', // placeholder model ID (should be configurable)
+          'Search: ',
+        );
+
+        const cached = await this.embeddingCache?.get(cacheKey);
+        if (cached) {
+          embeddings[i] = cached;
+        } else {
+          uncachedIndices.push(i);
+        }
+      }
+
+      // Embed only uncached queries
+      if (uncachedIndices.length > 0) {
+        const queriesToEmbed = uncachedIndices.map(i => input.semanticQueries[i]);
+        const newEmbeddings = await this.embeddingService.embedBatch(
+          queriesToEmbed as string[],
+        );
+
+        // Store new embeddings in cache
+        for (const [j, idx] of uncachedIndices.entries()) {
+          const embedding = newEmbeddings[j];
+          embeddings[idx] = embedding;
+          if (embedding) {
+            const query = input.semanticQueries[idx];
+            if (query) {
+              const cacheKey = this.embeddingCacheKeyBuilder.build(
+                query,
+                'bge-m3',
+                'Search: ',
+              );
+              try {
+                await this.embeddingCache?.set(cacheKey, embedding, 7200);
+              } catch (err) {
+                // Cache set failure is non-fatal
+                console.error('[CandidatePoolService] Failed to cache embedding:', err);
+              }
+            }
+          }
+        }
+      }
 
       // Use the first embedding for the primary dense search.
       // Future enhancement: multi-vector search across all embeddings.

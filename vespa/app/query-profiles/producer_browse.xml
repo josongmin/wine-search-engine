@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Producer Browse Query Profile (RFC-017 §8.3) -->
+<!-- Used for browsing wines by producer/winery -->
+<!-- Characteristics: Multi-result facet browsing, stable entity set, higher tolerance for latency -->
+<query-profile id="producer_browse" inherits="default">
+
+  <!-- Higher Timeout: Browsing is interactive, can tolerate ~200ms -->
+  <!-- User expects rich set of results, willing to wait slightly longer -->
+  <field name="timeout">200</field>
+
+  <!-- Result Window: Larger for browsing (top-100 for faceted nav) -->
+  <field name="hits">100</field>
+
+  <!-- HNSW: Approximate search allowed (speed over perfect precision) -->
+  <!-- Browsing prioritizes diversity over absolute relevance -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">true</field>
+  <field name="hnsw.maxHitsPerNode">150</field>
+
+  <!-- Ranking Weights: Balance lexical + semantic + attribute -->
+  <!-- Producer-specific attributes (appellation, style) matter for browsing -->
+  <field name="ranking.features.query(weight_lexical)">0.40</field>
+  <field name="ranking.features.query(weight_semantic)">0.20</field>
+  <field name="ranking.features.query(weight_attribute)">0.25</field>
+  <field name="ranking.features.query(weight_popularity)">0.15</field>
+
+  <!-- Rank Profile: producer-aware (group by winery) -->
+  <field name="ranking.profile">producer_browse</field>
+
+  <!-- Enable diversity bonus to avoid clustering around single entity -->
+  <field name="ranking.features.query(diversity_penalty)">0.05</field>
+
+</query-profile>

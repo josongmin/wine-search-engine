@@ -15,7 +15,7 @@ import { closeRedisClient } from './infrastructure/db/redis-client.js';
  */
 async function main(): Promise<void> {
   // Step 1 & 2: Create container with loaded config
-  const container = createContainer(config);
+  const container = await createContainer(config);
 
   // Step 3: Create server (async: registers plugins including rate-limiting)
   const server = await createServer(container, {
@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error('Fatal error during startup:', err);
   process.exit(1);
 });

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Attribute Search Query Profile (RFC-017 §8.3) -->
+<!-- Used for filtering by wine attributes (price, style, grape, etc.) -->
+<!-- Characteristics: Attribute-heavy with hard constraints, lower latency acceptable -->
+<query-profile id="attribute_search" inherits="default">
+
+  <!-- Timeout: Attribute filtering can use tight budget -->
+  <field name="timeout">150</field>
+
+  <!-- Result Window: Moderate for attribute browsing -->
+  <field name="hits">80</field>
+
+  <!-- HNSW: Approximate search allowed -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">true</field>
+  <field name="hnsw.maxHitsPerNode">120</field>
+
+  <!-- Ranking Weights: Heavy attribute focus (filters drive matching) -->
+  <!-- Lexical less important since attributes are explicit -->
+  <field name="ranking.features.query(weight_lexical)">0.15</field>
+  <field name="ranking.features.query(weight_semantic)">0.15</field>
+  <field name="ranking.features.query(weight_attribute)">0.55</field>
+  <field name="ranking.features.query(weight_popularity)">0.15</field>
+
+  <!-- Rank Profile: attribute-aware -->
+  <field name="ranking.profile">attribute_search</field>
+
+  <!-- No diversity penalty for attribute search (filters already provide focus) -->
+  <field name="ranking.features.query(diversity_penalty)">0.0</field>
+
+</query-profile>

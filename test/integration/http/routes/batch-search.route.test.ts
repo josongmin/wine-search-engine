@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import type { Container } from '../../../config/container.js';
-import { registerBatchSearchRoute } from './batch-search.route.js';
-import type { BatchSearchResponse } from '../../../application/search/batch-search.usecase.js';
-import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
-import type { BatchSearchUseCase } from '../../../application/search/batch-search.usecase.js';
+import type { Container } from '../../../../src/config/container.js';
+import { registerBatchSearchRoute } from '../../../../src/interface/http/routes/batch-search.route.js';
+import type { BatchSearchResponse } from '../../../../src/application/search/batch-search.usecase.js';
+import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
+import type { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
+import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
 
 /**
  * Integration tests for the batch search HTTP route.
@@ -33,6 +34,9 @@ describe('POST /v1/batch-search', () => {
     mockContainer = {
       batchSearchUseCase: mockBatchSearchUseCase,
     } as unknown as Container;
+
+    // Register error handler to properly handle Zod validation errors
+    app.setErrorHandler(errorHandler);
 
     registerBatchSearchRoute(app, mockContainer);
   });
@@ -433,9 +437,11 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(mockContainer.batchSearchUseCase?.execute).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.any(Object),
+      expect(mockBatchSearchUseCase.execute).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ id: '1', query: 'Test' }),
+        ]),
+        undefined,
         'my-batch-123',
       );
     });
@@ -468,9 +474,11 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(mockContainer.batchSearchUseCase?.execute).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.any(Object),
+      expect(mockBatchSearchUseCase.execute).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ id: '1', query: 'Test' }),
+        ]),
+        undefined,
         undefined,
       );
     });
@@ -509,8 +517,10 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(mockContainer.batchSearchUseCase?.execute).toHaveBeenCalledWith(
-        expect.any(Array),
+      expect(mockBatchSearchUseCase.execute).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ id: '1', query: 'Test' }),
+        ]),
         expect.objectContaining({
           fail_fast: true,
           timeout_ms: 10000,

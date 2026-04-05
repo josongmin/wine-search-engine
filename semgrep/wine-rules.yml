@@ -1,0 +1,65 @@
+# Project-specific Semgrep rules (wine-search-engine).
+# Run via: npm run semgrep
+
+rules:
+  - id: wine-no-ioredis
+    languages: [typescript, javascript]
+    message: >-
+      Use the official `redis` package and `getRedisClient()` from
+      `src/infrastructure/db/redis-client.ts`, not `ioredis`.
+    severity: ERROR
+    metadata:
+      category: best-practice
+      technology: [redis, nodejs]
+    pattern-either:
+      - pattern: import $X from 'ioredis'
+      - pattern: import $X from "ioredis"
+      - pattern: import $X from 'ioredis/$Y'
+      - pattern: import $X from "ioredis/$Y"
+      - pattern: require('ioredis')
+      - pattern: require("ioredis")
+
+  - id: wine-tls-reject-unauthorized-false
+    languages: [typescript, javascript]
+    message: >-
+      `rejectUnauthorized: false` disables TLS certificate verification; avoid except for tightly scoped local/dev use.
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: 'CWE-295: Improper Certificate Validation'
+    pattern: |
+      rejectUnauthorized: false
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-no-direct-eval
+    languages: [typescript, javascript]
+    message: >-
+      Avoid `eval`; it is unsafe for untrusted input and hinders static analysis.
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: 'CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code'
+    pattern: eval(...)
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-no-new-function-from-string
+    languages: [typescript, javascript]
+    message: >-
+      `new Function(...)` from runtime strings is equivalent to eval-style behavior; prefer static functions.
+    severity: WARNING
+    metadata:
+      category: security
+    pattern-either:
+      - pattern: new Function($X)
+      - pattern: new Function($X, $Y)
+      - pattern: new Function($X, $Y, $Z)
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"

@@ -147,7 +147,7 @@ describe('ReplayUseCase', () => {
       const useCase = makeReplayUseCase(inner);
       const requestId = 'my-special-request-id';
       await useCase.execute(makeRequest(), requestId);
-      // eslint-disable-next-line @typescript-eslint/unbound-method
+       
       expect(inner.execute).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'Opus One 2018' }),
         requestId,

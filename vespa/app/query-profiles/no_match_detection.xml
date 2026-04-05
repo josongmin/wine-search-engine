@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- No Match Detection Query Profile (RFC-017 §8.3) -->
+<!-- Used when query doesn't match any known entities (fallback broadening) -->
+<!-- Characteristics: Relaxed constraints, broader search, lower precision -->
+<query-profile id="no_match_detection" inherits="default">
+
+  <!-- Timeout: Can be longer for broad fallback search -->
+  <field name="timeout">250</field>
+
+  <!-- Result Window: Larger to capture semantic alternatives -->
+  <field name="hits">200</field>
+
+  <!-- HNSW: Approximate with exploration (maximize recall) -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">false</field>
+  <field name="hnsw.maxHitsPerNode">200</field>
+
+  <!-- Ranking Weights: Semantic + popularity focus (find best alternatives) -->
+  <!-- Lexical match not available; rely on semantic + popularity -->
+  <field name="ranking.features.query(weight_lexical)">0.10</field>
+  <field name="ranking.features.query(weight_semantic)">0.55</field>
+  <field name="ranking.features.query(weight_attribute)">0.15</field>
+  <field name="ranking.features.query(weight_popularity)">0.20</field>
+
+  <!-- Rank Profile: fallback-aware (no exact entity match) -->
+  <field name="ranking.profile">no_match_detection</field>
+
+  <!-- Use relaxed diversity for fallback (all candidates welcome) -->
+  <field name="ranking.features.query(diversity_penalty)">0.0</field>
+
+  <!-- Fallback flag: indicate to ranking that this is a No Match scenario -->
+  <field name="ranking.features.query(is_fallback_search)">1</field>
+
+</query-profile>

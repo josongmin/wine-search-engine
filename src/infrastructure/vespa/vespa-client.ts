@@ -218,7 +218,7 @@ export class VespaClient {
   async update(docId: string, fields: Record<string, unknown>): Promise<void> {
     // Vespa partial update uses PUT with "update" path or POST with field updates.
     // We use the Document v1 UPDATE endpoint (PUT to the same URL with assign actions).
-    const url = `${this.docUrl(this.appName, docId)}`;
+    const url = this.docUrl(this.appName, docId);
     // Build assign update map
     const assignFields: Record<string, Record<string, unknown>> = {};
     for (const [key, value] of Object.entries(fields)) {

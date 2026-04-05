@@ -55,7 +55,7 @@ export class CompareRetriever {
    * @returns Comparison candidates sorted by attribute alignment with anchor.
    * @throws {Error} If anchor lacks sufficient attribute data for comparison.
    */
-  async compareToAnchor(
+  compareToAnchor(
     _anchor: HybridCandidate,
     _constraints: ConstraintBundle,
     _limit: number,
@@ -76,6 +76,6 @@ export class CompareRetriever {
     // 9. Populate attributes record with all comparison-relevant data.
 
     // For now, return empty.
-    return [];
+    return Promise.resolve([]);
   }
 }

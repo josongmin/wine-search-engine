@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Similar Items Query Profile (RFC-017 §8.3) -->
+<!-- Used for finding similar wines (e.g., "wines like this") -->
+<!-- Characteristics: Semantic similarity focus, item-to-item matching -->
+<query-profile id="similar_items" inherits="default">
+
+  <!-- Timeout: Can be longer for similarity computations -->
+  <field name="timeout">350</field>
+
+  <!-- Result Window: Return more candidates for similarity -->
+  <field name="hits">200</field>
+
+  <!-- HNSW: Approximate with full exploration (maximize semantic recall) -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">false</field>
+  <field name="hnsw.maxHitsPerNode">250</field>
+
+  <!-- Ranking Weights: Heavy semantic focus for similarity -->
+  <!-- Similar items rely primarily on embedding-based matching -->
+  <field name="ranking.features.query(weight_lexical)">0.05</field>
+  <field name="ranking.features.query(weight_semantic)">0.65</field>
+  <field name="ranking.features.query(weight_attribute)">0.15</field>
+  <field name="ranking.features.query(weight_popularity)">0.15</field>
+
+  <!-- Rank Profile: similarity-optimized -->
+  <field name="ranking.profile">similar_items</field>
+
+  <!-- Anchor embedding for item-to-item search -->
+  <field name="ranking.features.query(anchor_embedding)"></field>
+
+  <!-- Diversity penalty to avoid clustering -->
+  <field name="ranking.features.query(diversity_penalty)">0.12</field>
+
+</query-profile>

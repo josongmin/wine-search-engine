@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Entity Resolution Query Profile (RFC-017 §8.3) -->
+<!-- Used for pure entity resolution without ranking (resolver-only route) -->
+<!-- Characteristics: Lexical matching focus, lightweight computation -->
+<query-profile id="entity_resolution" inherits="default">
+
+  <!-- Timeout: Entity resolution should be fast -->
+  <field name="timeout">75</field>
+
+  <!-- Result Window: Small for entity resolution -->
+  <field name="hits">10</field>
+
+  <!-- HNSW: No approximation (pure entity matching) -->
+  <field name="approximate">false</field>
+  <field name="hnsw.exploreEarly">false</field>
+
+  <!-- Ranking Weights: Lexical dominates (exact name matching) -->
+  <!-- Semantic and attribute less important for pure entity resolution -->
+  <field name="ranking.features.query(weight_lexical)">0.80</field>
+  <field name="ranking.features.query(weight_semantic)">0.05</field>
+  <field name="ranking.features.query(weight_attribute)">0.10</field>
+  <field name="ranking.features.query(weight_popularity)">0.05</field>
+
+  <!-- Rank Profile: entity-focused -->
+  <field name="ranking.profile">entity_resolution</field>
+
+  <!-- No diversity for pure entity resolution -->
+  <field name="ranking.features.query(diversity_penalty)">0.0</field>
+
+</query-profile>

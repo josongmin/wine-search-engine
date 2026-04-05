@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- Recommendation Query Profile (RFC-017 §8.3) -->
+<!-- Used for personalized wine recommendations -->
+<!-- Characteristics: User-preference-driven, semantic diversity, slower acceptable -->
+<query-profile id="recommendation" inherits="default">
+
+  <!-- Higher Timeout: Recommendation can compute longer for quality results -->
+  <!-- P99 ~300ms acceptable for recommendation quality -->
+  <field name="timeout">300</field>
+
+  <!-- Result Window: Recommendations benefit from larger pool -->
+  <field name="hits">200</field>
+
+  <!-- HNSW: Approximate with exploration (semantic similarity dominates) -->
+  <!-- Recommendation relies heavily on embedding-based similarity -->
+  <field name="approximate">true</field>
+  <field name="hnsw.exploreEarly">false</field>
+  <field name="hnsw.maxHitsPerNode">200</field>
+
+  <!-- Ranking Weights: Heavy semantic focus for personalization -->
+  <!-- User preference embeddings matched against wine embeddings -->
+  <field name="ranking.features.query(weight_lexical)">0.10</field>
+  <field name="ranking.features.query(weight_semantic)">0.50</field>
+  <field name="ranking.features.query(weight_attribute)">0.20</field>
+  <field name="ranking.features.query(weight_popularity)">0.20</field>
+
+  <!-- Rank Profile: recommendation-specific (preference-aware) -->
+  <field name="ranking.profile">recommendation</field>
+
+  <!-- Preference alignment: Match user taste profile -->
+  <field name="ranking.features.query(preference_embedding)"></field>
+  <field name="ranking.features.query(weight_preference)">0.30</field>
+
+  <!-- Diversity: Avoid repeating same producer/region -->
+  <field name="ranking.features.query(diversity_penalty)">0.10</field>
+
+</query-profile>

@@ -59,7 +59,7 @@ export async function createServer(
   // Add OpenTelemetry root span per request.
   // The span is started in onRequest (after request-context assigns requestId)
   // and closed in onResponse so it covers the full request lifecycle.
-  app.addHook('onRequest', async (request) => {
+  app.addHook('onRequest', (request) => {
     const spanName = `${request.method} ${request.url}`;
     const span = getTracer().startSpan(spanName, {
       attributes: {
@@ -101,7 +101,7 @@ export async function createServer(
     if (request.method === 'POST') {
       const ct = (request.headers['content-type'] ?? '').toLowerCase();
       if (!ct.includes('application/json')) {
-        const requestId = request.requestId ?? 'unknown';
+        const requestId = request.requestId;
         await reply.status(415).send({
           error: {
             request_id: requestId,

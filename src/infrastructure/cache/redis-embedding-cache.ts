@@ -43,7 +43,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       }
 
       await this.redis.incr(this.statsKeyHits);
-      const embedding = JSON.parse(cached as string) as readonly number[];
+      const embedding = JSON.parse(cached) as readonly number[];
       return embedding;
     } catch (error) {
       console.error('[EmbeddingCache] Deserialization error:', error);
@@ -92,8 +92,8 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       // Get hit/miss counters
       const hitsStr = await this.redis.get(this.statsKeyHits);
       const missesStr = await this.redis.get(this.statsKeyMisses);
-      const hits = hitsStr ? parseInt(hitsStr as string, 10) : 0;
-      const misses = missesStr ? parseInt(missesStr as string, 10) : 0;
+      const hits = hitsStr ? parseInt(hitsStr, 10) : 0;
+      const misses = missesStr ? parseInt(missesStr, 10) : 0;
 
       // Count entries and compute size
       let entriesCount = 0;

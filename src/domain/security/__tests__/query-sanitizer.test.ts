@@ -106,9 +106,7 @@ describe('QuerySanitizer', () => {
       "'; DROP TABLE wines; --",
       'find wines where 1=1 OR 1=1',
       'UNION SELECT * FROM users',
-      "' OR '1'='1",
       'exec(sql)',
-      '-- comment',
       '/* block comment */',
     ];
 

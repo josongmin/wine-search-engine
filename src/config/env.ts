@@ -62,6 +62,11 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default('false'),
+  /** Kill switch for query caching (Wave 4, Phase 3). */
+  KILL_SWITCH_QUERY_CACHE: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
 });
 
 type EnvVars = z.infer<typeof envSchema>;
@@ -133,6 +138,7 @@ export const config = {
     learning: parsed.KILL_SWITCH_LEARNING,
     denseRetrieval: parsed.KILL_SWITCH_DENSE_RETRIEVAL,
     injectionJudge: parsed.KILL_SWITCH_INJECTION_JUDGE,
+    queryCache: parsed.KILL_SWITCH_QUERY_CACHE,
   },
 } as const;
 
