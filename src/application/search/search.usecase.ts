@@ -23,6 +23,8 @@ import type { DrinkingWindowUseCase } from '../drinking-window/drinking-window.u
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { LLMInjectionJudge } from '../../domain/security/service/llm-injection-judge.js';
 import type { CacheService } from '../../domain/performance/index.js';
+import { LTRRanker } from '../../domain/ranking/service/ltr-ranker.js';
+import type { QueryClassWeights } from '../../domain/ranking/index.js';
 
 /**
  * Incoming search request shape.
@@ -344,7 +346,42 @@ export class SearchUseCase {
       constraints: plan.constraints,
     };
 
-    const rankedResults = await this.deps.ranker.rank(rankingInput);
+    let rankedResults = await this.deps.ranker.rank(rankingInput);
+
+    // Epic 4: Apply LTR reranking if model available for this query class
+    const queryClass = plan.queryClass;
+    const ltrModel = (this.deps as any).ltrModels?.get?.(queryClass) as QueryClassWeights | undefined;
+    if (ltrModel && rankedResults.length > 0) {
+      // Convert ranked results to rankable documents for LTR
+      const rankableDocuments = rankedResults.map((doc, idx) => ({
+        entityId: doc.entity?.entityId ?? '',
+        retrievalScore: doc.finalScore ?? 0,
+        features: {
+          bm25Score: doc.componentScores?.lexicalScore ?? 0.5,
+          semanticScore: doc.componentScores?.semanticScore ?? 0.5,
+          popularityScore: doc.componentScores?.popularityScore ?? 0.5,
+          recencyScore: doc.componentScores?.recencyScore ?? 0.5,
+          classMatchScore: doc.componentScores?.classMatchScore ?? 0.5,
+          attributeMatchScore: doc.componentScores?.attributeMatchScore ?? 0.5,
+          diversityScore: doc.componentScores?.diversityScore ?? 0.5,
+          multilingualScore: doc.componentScores?.multilingualScore ?? 0.5,
+        },
+        originalRank: idx + 1,
+      }));
+
+      const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
+
+      // Map back to RankedResult with updated finalScore
+      rankedResults = rankedResults.map((orig) => {
+        const reranked = rerankedDocs.find((r) => r.entityId === (orig.entity?.entityId ?? ''));
+        return reranked
+          ? { ...orig, finalScore: reranked.ltrScore, finalRank: reranked.finalRank }
+          : orig;
+      });
+
+      // Re-sort by LTR score
+      rankedResults = rankedResults.sort((a, b) => (b.finalScore ?? 0) - (a.finalScore ?? 0));
+    }
 
     // Build a synthetic resolve result for the hybrid path.
     // Use the top-ranked result's finalScore as the raw decision confidence,
