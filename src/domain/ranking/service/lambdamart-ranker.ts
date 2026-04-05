@@ -98,7 +98,7 @@ export namespace LambdaMARTRanker {
       const shuffled = [...classExamples].sort(() => Math.random() - 0.5);
       const batch = shuffled.slice(0, batchSize);
 
-      const gradients = Array(8).fill(0);
+      const gradients: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
       let biasMeanDelta = 0;
 
       for (const example of batch) {
@@ -113,15 +113,15 @@ export namespace LambdaMARTRanker {
           const fname = featureNames[j] as keyof RankingFeatures;
           const featureDiff =
             (example.features1[fname] ?? 0) - (example.features2[fname] ?? 0);
-          gradients[j] += lambda * featureDiff;
+          gradients[j] = (gradients[j] ?? 0) + lambda * featureDiff;
         }
         biasMeanDelta += lambda;
       }
 
       for (let j = 0; j < 8; j++) {
-        const gradient = gradients[j] / batch.length;
-        weights[j] = weights[j] + learningRate * gradient - regularization * weights[j];
-        weights[j] = Math.max(-1, Math.min(1, weights[j]));
+        const gradient = (gradients[j] ?? 0) / batch.length;
+        weights[j] = (weights[j] ?? 0) + learningRate * gradient - regularization * (weights[j] ?? 0);
+        weights[j] = Math.max(-1, Math.min(1, weights[j] ?? 0));
       }
 
       bias = bias + learningRate * (biasMeanDelta / batch.length);

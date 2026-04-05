@@ -360,6 +360,15 @@ describe('Search Pipeline Integration', () => {
           // Anchor evidence required because plan.anchors.length > 0
           anchorEvidencePresent: true,
         },
+        evidenceItems: [
+          {
+            type: 'alias_match',
+            source: 'alias_index',
+            contribution: '+0.80',
+            strength: 'high' as const,
+            provenance: 'Matched alias in identity graph.',
+          },
+        ],
         ...(resolverResult.conformalSetSize !== undefined
           ? { conformalSetSize: resolverResult.conformalSetSize }
           : {}),
