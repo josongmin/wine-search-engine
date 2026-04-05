@@ -45,4 +45,11 @@ export interface EngineDecision {
    * Correlates this decision with pipeline logs for auditability.
    */
   readonly admission_trace_ref?: string | undefined;
+
+  /**
+   * Reason for abstention when decisionStatus is 'ambiguous' but not due to
+   * hard constraint violation (Epic 9). Omitted if decision was not ambiguous
+   * or if ambiguity was hard-constraint-related.
+   */
+  readonly abstainReason?: string | undefined;
 }

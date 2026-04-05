@@ -125,6 +125,9 @@ export class MixedSolver {
   /**
    * Executes the full mixed query pipeline.
    *
+   * For similar_items mode: treats anchor as pseudo-query, excludes seed entity,
+   * applies producer diversity (max 2 wines per producer), boosts tannin/body matches.
+   *
    * @param queryPlan - The query plan containing anchors, constraints, and class.
    * @returns The mixed query result with ranked wines and diagnostics.
    * @throws {Error} If the anchor entity cannot be resolved.
@@ -159,10 +162,18 @@ export class MixedSolver {
     );
 
     // Step 3: Retrieve candidates similar to anchor
-    const candidates = await this.similarRetrieval.retrieveSimilar(
+    let candidates = await this.similarRetrieval.retrieveSimilar(
       anchorProfile,
       this.retrievalLimit,
     );
+
+    // Step 3a: For similar_items mode (mixed route), apply set-specific constraints
+    if (queryPlan.retrievalMode === 'similar_items') {
+      candidates = this.applySetConstraintsForSimilarItems(
+        candidates,
+        anchorEntityId,
+      );
+    }
 
     // Step 4: Build the retrieval-layer anchor profile for the ranking pipeline
     const retrievalAnchorProfile = {

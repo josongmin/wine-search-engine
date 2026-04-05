@@ -85,6 +85,7 @@ export class ResponseBuilder {
     };
 
     return {
+      queryType: 'search',
       engineDecision,
       results: validatedResults,
       counterfactuals: params.counterfactuals,

@@ -7,6 +7,7 @@ import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { QueryUncertainty } from '../model/query-uncertainty.js';
 import type { SessionContext } from '../model/session-context.js';
 import type { QueryBudget } from '../model/query-budget.js';
+import type { QueryTargetType } from '../model/query-target-type.js';
 import { DEFAULT_QUERY_BUDGET } from '../model/query-budget.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
 import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
@@ -54,6 +55,23 @@ const CONSTRAINT_KEYWORDS: readonly RegExp[] = [
   /\b(?:지역|품종|빈티지|연도)\b/,
   /\b(?:dry|sweet|tannic|fruity|oaky|light|full[\s-]?body)\b/i,
   /\b(?:드라이|스위트|타닌|과일|오크|라이트|풀바디)\b/,
+] as const;
+
+/** Vintage year pattern to detect explicit vintage specification. */
+const VINTAGE_YEAR_PATTERN = /\b(19|20)\d{2}\b/;
+
+/** Region/location keywords for geographic entity detection. */
+const REGION_KEYWORDS: readonly RegExp[] = [
+  /\b(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)\b/i,
+  /\b(?:valley|region|appellation|aoc|doc|doca|côtes|côte)\b/i,
+  /\b(?:나파|샤블리|보르도|투지|롱글로|토스카나)\b/,
+  /\b(?:지역|지방|아펠라시옹|지역명)\b/,
+] as const;
+
+/** Style/sensory-only keywords (body, sweetness, tannin without wine-specific terms). */
+const STYLE_KEYWORDS: readonly RegExp[] = [
+  /\b(?:light|full[\s-]?body|dry|sweet|tannic|fruity|oaky)\b/i,
+  /\b(?:라이트|풀바디|드라이|스위트|타닌|과일|오크)\b/,
 ] as const;
 
 /**
@@ -161,6 +179,14 @@ export class Planner {
 
     const budget = context?.budget ?? DEFAULT_QUERY_BUDGET;
 
+    // 10. Infer target entity type for result grouping (Epic 8).
+    const targetEntityType = this.inferTargetEntityType(
+      normalizedQuery,
+      anchors,
+      constraints,
+      intent,
+    );
+
     // Derive secondary intents from the 2nd+ anchor candidates.
     const secondaryIntents =
       anchors.length >= 2
@@ -202,6 +228,7 @@ export class Planner {
       admission_context,
       ...(context?.session !== undefined && { sessionContext: context.session }),
       queryBudget: budget,
+      ...(targetEntityType !== undefined && { targetEntityType }),
     };
   }
 

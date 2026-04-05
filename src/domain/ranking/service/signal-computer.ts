@@ -350,6 +350,133 @@ export class SignalComputer {
       uncertaintyPenalty: this.computeUncertaintyPenalty(candidate, queryPlan),
     };
   }
+
+  /**
+   * Epic 10: Computes set diversity signal for browse/comparison queries.
+   *
+   * Measures how distinct a candidate is from other candidates in the set
+   * along a specified attribute dimension (e.g. vintage, producer, price band).
+   *
+   * Used by BrowseRetriever and CompareRetriever to ensure results don't
+   * cluster (e.g. don't return three wines from the same producer in a row).
+   *
+   * @param candidates - The candidate set to evaluate diversity within.
+   * @param focusAttribute - The attribute to measure diversity on (e.g. "vintage", "producer").
+   * @returns Diversity penalty in [0, 1]. 0 = unique, 1 = duplicate in set.
+   */
+  computeSetDiversity(
+    candidates: HybridCandidate[],
+    focusAttribute: string,
+  ): number {
+    if (candidates.length < 2) {
+      return 0; // Single item or empty → no diversity penalty
+    }
+
+    // Count how many prior candidates share the same focus attribute value
+    // This is a simplified heuristic; real implementation would use attribute enrichment.
+    // For now, we estimate diversity from producer/region fields if available.
+
+    let duplicateCount = 0;
+    if (focusAttribute === 'producer') {
+      const producerMap = new Map<string | undefined, number>();
+      for (const c of candidates) {
+        const key = c.producer;
+        const count = (producerMap.get(key) ?? 0) + 1;
+        producerMap.set(key, count);
+        if (count > 1) {
+          duplicateCount++;
+        }
+      }
+    } else if (focusAttribute === 'region') {
+      const regionMap = new Map<string | undefined, number>();
+      for (const c of candidates) {
+        const key = c.region;
+        const count = (regionMap.get(key) ?? 0) + 1;
+        regionMap.set(key, count);
+        if (count > 1) {
+          duplicateCount++;
+        }
+      }
+    }
+
+    // Return penalty as ratio of duplicates to total candidates
+    return clamp01(duplicateCount / candidates.length);
+  }
+
+  /**
+   * Epic 10: Computes set coverage signal for browse/comparison queries.
+   *
+   * Measures what fraction of a target set of attribute values (e.g. price bands,
+   * producer names, grape varieties) are represented in the candidate result set.
+   *
+   * Used to ensure browse results span the full spectrum of what's available
+   * (e.g. include wines from budget, mid, premium price bands).
+   *
+   * @param candidates - The candidate set to evaluate coverage of.
+   * @param targetSet - The desired attribute values to cover (e.g. price bands).
+   * @returns Coverage score in [0, 1]. 1 = all target values represented.
+   */
+  computeSetCoverage(
+    candidates: HybridCandidate[],
+    targetSet: Set<string>,
+  ): number {
+    if (targetSet.size === 0) {
+      return 1.0; // No target → perfect coverage trivially
+    }
+
+    // For now, return neutral score. Real implementation would:
+    // 1. Extract attribute values from candidates.
+    // 2. Check intersection with targetSet.
+    // 3. Return intersection size / targetSet size.
+
+    return 0.5;
+  }
+
+  /**
+   * Epic 10: Computes anchor preservation signal for similar_items mode.
+   *
+   * Measures how well a candidate preserves core anchor characteristics
+   * (body, tannin, region, grapes) while offering novelty.
+   *
+   * Used in similar_items mode to keep results anchored to the original wine
+   * while still providing diverse alternatives.
+   *
+   * @param anchor - The reference/anchor wine.
+   * @param candidate - The candidate to evaluate.
+   * @returns Preservation score in [0, 1]. 1 = perfectly preserves anchor.
+   */
+  computeAnchorPreservation(
+    anchor: HybridCandidate,
+    candidate: HybridCandidate,
+  ): number {
+    // If no anchor, return neutral
+    if (anchor.canonicalLabel === undefined || candidate.canonicalLabel === undefined) {
+      return 0.5;
+    }
+
+    // Simple heuristic: wines that share region and similar body/tannin profile
+    // preserve the anchor well. Real implementation would use embedding distance
+    // and attribute alignment.
+
+    let preservationScore = 0.5;
+
+    // Bonus if same region
+    if (anchor.region && anchor.region === candidate.region) {
+      preservationScore += 0.2;
+    }
+
+    // Bonus if same grape (would require attribute enrichment)
+    if (anchor.grapePrimary && anchor.grapePrimary === candidate.grapePrimary) {
+      preservationScore += 0.15;
+    }
+
+    // Bonus for high retrieval fusion score (embedding similarity proxy)
+    if (candidate.retrievalFusionScore > 0.05) {
+      preservationScore += 0.15;
+    }
+
+    return clamp01(preservationScore);
+  }
 }
 
 /**

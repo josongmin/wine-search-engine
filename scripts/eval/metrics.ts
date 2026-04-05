@@ -425,6 +425,98 @@ export function setCoverage(
 }
 
 // ---------------------------------------------------------------------------
+// Mode-specific metrics (Epic 11)
+// ---------------------------------------------------------------------------
+
+/** Supported retrieval modes for mode-specific evaluation. */
+export type RetrievalMode =
+  | 'entity_lookup'
+  | 'entity_resolution'
+  | 'attribute_search'
+  | 'constraint_filter'
+  | 'producer_browse'
+  | 'region_browse'
+  | 'compare_candidates'
+  | 'recommendation'
+  | 'similar_items'
+  | 'no_match_detection';
+
+/**
+ * Per-mode metrics slice — specializes ScenarioSlice for retrieval modes.
+ * Includes mode-specific metrics (diversity, coverage, etc).
+ */
+export interface ModeMetrics {
+  readonly retrieval_mode: RetrievalMode;
+  readonly query_count: number;
+
+  // Standard IR metrics
+  readonly ndcg_at_10: number;
+  readonly mrr_at_10: number;
+  readonly recall_at_10: number;
+  readonly wrong_top1_rate: number;
+  readonly decision_utility: number;
+
+  // Mode-specific optional metrics (added when mode-specific data available)
+  readonly diversity_score?: number;
+  readonly anchor_preservation_score?: number;
+  readonly producer_variety?: number;
+  readonly set_coverage?: number;
+  readonly seed_exclusion_rate?: number;
+  readonly attribute_coverage?: number;
+}
+
+/**
+ * Per-entity-type metrics — confusion matrix for entity resolution.
+ * Tracks whether the engine resolved to the correct entity type.
+ */
+export interface EntityTypeMetrics {
+  readonly target_type: EntityTargetType;
+  readonly query_count: number;
+  readonly correct_type_rate: number;
+  readonly confusion_matrix: Record<EntityTargetType, number>;
+}
+
+export type EntityTargetType = 'wine' | 'producer' | 'region' | 'unknown';
+
+/**
+ * Intra-set diversity score for set retrieval modes (producer_browse, region_browse).
+ * Higher = more diverse results.
+ *
+ * Currently placeholder; in production would measure producer variety,
+ * price spread, grape variety, etc.
+ */
+export function setDiversityScore(candidates: readonly RankedHit[]): number {
+  // Placeholder: uniform distribution heuristic
+  // In practice, would need entity metadata (producer, region, grape, etc.)
+  return candidates.length <= 1 ? 0 : 0.5;
+}
+
+/**
+ * Anchor preservation score for similar_items mode.
+ * Measures whether anchor entity or similar items are in top results.
+ *
+ * Currently placeholder; would require anchor entity in query context.
+ */
+export function anchorPreservationScore(
+  _anchor: string,
+  _results: readonly RankedHit[],
+): number {
+  // Placeholder: would compare results against known similar items
+  return 0.5;
+}
+
+/**
+ * Producer variety in result set (for browse modes).
+ * Returns fraction of distinct producers in top K results.
+ *
+ * Placeholder: requires producer metadata in results.
+ */
+export function producerVariety(_results: readonly RankedHit[]): number {
+  // Placeholder: in practice would extract producer from entity_id or metadata
+  return 0.5;
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate result type
 // ---------------------------------------------------------------------------
 
@@ -451,6 +543,18 @@ export interface EvalResult {
   // Scenario slices
   readonly by_scenario: Record<string, ScenarioSlice>;
   readonly by_language: Record<string, ScenarioSlice>;
+
+  // Epic 11: Mode-specific slices
+  readonly by_mode?: Record<RetrievalMode, ModeMetrics>;
+
+  // Epic 11: Entity target type slices
+  readonly by_target_type?: Record<EntityTargetType, EntityTypeMetrics>;
+
+  // Epic 11: Release gate verdict
+  readonly release_gate_verdict?: {
+    readonly passed: boolean;
+    readonly failures: readonly string[];
+  };
 }
 
 export interface ScenarioSlice {

@@ -225,6 +225,24 @@ export interface LeakageKeys {
   readonly alias_cluster_id: string;
 }
 
+/**
+ * Retrieval mode — represents the retrieval strategy for a query.
+ * Used for Epic 11 (Eval Extension - Mode Slicing).
+ *
+ * See: src/domain/query/model/retrieval-mode.ts for full definitions.
+ */
+export type RetrievalMode =
+  | 'entity_lookup'
+  | 'entity_resolution'
+  | 'attribute_search'
+  | 'constraint_filter'
+  | 'producer_browse'
+  | 'region_browse'
+  | 'compare_candidates'
+  | 'recommendation'
+  | 'similar_items'
+  | 'no_match_detection';
+
 export interface GoldenQuery {
   readonly qid: string;
   readonly query: string;
@@ -249,4 +267,7 @@ export interface GoldenQuery {
   readonly annotated_by: readonly string[];
   readonly release_gate_eligible: boolean;
   readonly created_at: string;
+
+  /** Optional retrieval mode (inferred from query class). Epic 11. */
+  readonly retrieval_mode?: RetrievalMode;
 }

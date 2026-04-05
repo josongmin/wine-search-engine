@@ -12,6 +12,9 @@ import type { ClarificationPayload } from './clarification.js';
  * this structure and never re-derive engine decisions.
  */
 export interface SearchResponseV1 {
+  /** Discriminator: 'search' (vs 'comparison' for ComparisonSearchResponse). */
+  readonly queryType: 'search';
+
   /** The engine's resolution decision for this query. */
   readonly engineDecision: EngineDecision;
 

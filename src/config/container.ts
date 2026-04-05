@@ -36,6 +36,9 @@ import { ReplayUseCase } from '../application/search/replay.usecase.js';
 import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
+import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
+import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
+import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore, CalibrationParams } from '../domain/resolver/port/calibration-store.port.js';
@@ -78,6 +81,11 @@ export interface Container {
   readonly interpretUseCase: InterpretUseCase;
   readonly resolveUseCase: ResolveUseCase;
   readonly hybridUseCase: HybridUseCase;
+  readonly decomposedSearchUseCase: DecomposedSearchUseCase;
+  readonly drinkingWindowUseCase: DrinkingWindowUseCase;
+
+  // ML infrastructure
+  readonly drinkingWindowPredictor: DrinkingWindowPredictor;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -283,6 +291,10 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     },
   };
 
+  // ── ML infrastructure (Epic 15: Drinking Window) ─────────────────────────
+  const drinkingWindowPredictor = new DrinkingWindowPredictor();
+  // Note: predictor.load() must be called at app startup with model directory
+
   // ── Use cases ─────────────────────────────────────────────────────────────
   const searchUseCase = new SearchUseCase({
     queryPlanner,
@@ -294,6 +306,10 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     mixedSolver,
     snapshotVersions,
   });
+
+  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
+
+  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
   const replayUseCase = new ReplayUseCase({
     searchUseCase,
@@ -331,5 +347,8 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     interpretUseCase,
     resolveUseCase,
     hybridUseCase,
+    decomposedSearchUseCase,
+    drinkingWindowUseCase,
+    drinkingWindowPredictor,
   };
 }
