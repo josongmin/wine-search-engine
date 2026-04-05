@@ -76,6 +76,38 @@ export interface RankedResult {
   /** Evidence trail explaining why this candidate received its score. */
   readonly evidenceItems: readonly EvidenceItem[];
 
+  // ─────────────────────────────────────────────────────────────────
+  // Epic 15: Wine attributes for drinking window prediction
+  // (Populated from Vespa documents during ranking pipeline)
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Vintage year (e.g. 2018). */
+  readonly vintage?: number | undefined;
+
+  /** Wine body intensity (1–5 ordinal scale). */
+  readonly body?: number | undefined;
+
+  /** Tannin structure (1–5 ordinal scale). */
+  readonly tannin?: number | undefined;
+
+  /** Acidity level (1–5 ordinal scale). */
+  readonly acidity?: number | undefined;
+
+  /** Sweetness (1–5 ordinal scale). */
+  readonly sweetness?: number | undefined;
+
+  /** Critic proxy score (80–100 or 0 if absent). */
+  readonly avgCriticProxyScore?: number | undefined;
+
+  /** Label-encoded primary grape variety (0–N, OOV→999). */
+  readonly grapePrimaryEnc?: number | undefined;
+
+  /** Label-encoded region/appellation. */
+  readonly regionEnc?: number | undefined;
+
+  /** Label-encoded country. */
+  readonly countryEnc?: number | undefined;
+
   /** First year the wine enters its optimal drinking window (Epic 15). Optional. */
   readonly drinkingWindowStart?: number | undefined;
 
