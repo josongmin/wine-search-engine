@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ReplayRequestSchema } from '../schemas/search.schema.js';
-import type { Container } from '../../../config/container.js';
 import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
+import type { ReplayRouteDeps } from './route-deps.js';
 
 /**
  * POST /v1/search/replay — replay search with pinned decision snapshot.
@@ -10,7 +10,7 @@ import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
  */
 export function registerReplayRoute(
   app: FastifyInstance,
-  container: Container,
+  deps: ReplayRouteDeps,
 ): void {
   app.post('/v1/search/replay', async (request, reply) => {
     const parsed = ReplayRequestSchema.parse(request.body);
@@ -28,7 +28,7 @@ export function registerReplayRoute(
         : {}),
     };
 
-    const response = await container.replayUseCase.execute(
+    const response = await deps.replayUseCase.execute(
       {
         query: parsed.query,
         decision_snapshot: snapshot,

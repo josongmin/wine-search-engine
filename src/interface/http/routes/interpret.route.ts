@@ -1,18 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { InterpretRequestSchema } from '../schemas/search.schema.js';
-import type { Container } from '../../../config/container.js';
+import type { InterpretRouteDeps } from './route-deps.js';
 
 /**
  * POST /v1/search/interpret — returns QueryPlanV1 only (no execution).
  */
 export function registerInterpretRoute(
   app: FastifyInstance,
-  container: Container,
+  deps: InterpretRouteDeps,
 ): void {
   app.post('/v1/search/interpret', async (request, reply) => {
     const parsed = InterpretRequestSchema.parse(request.body);
 
-    const plan = await container.interpretUseCase.execute({
+    const plan = await deps.interpretUseCase.execute({
       query: parsed.query,
       context: parsed.context,
       sessionContext: parsed.sessionContext,

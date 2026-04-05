@@ -60,6 +60,7 @@ export interface MatchDetail {
     readonly semantic: number;
     readonly attribute: number;
     readonly popularity: number;
+    readonly preferenceAlignment: number;
   };
 }
 

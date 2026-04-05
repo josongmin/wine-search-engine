@@ -32,7 +32,8 @@ function camelToSnake(key: string): string {
 
 /**
  * Recursively converts all plain-object keys from camelCase to snake_case.
- * Optimized: only allocates when transformation needed, in-place for large arrays.
+ * Always returns new objects/arrays — never mutates the input (important for
+ * cached or referenced response data that may be read after serialization).
  *
  * @param value - Any serialisable value (object, array, scalar).
  * @returns The value with all plain-object keys converted to snake_case.

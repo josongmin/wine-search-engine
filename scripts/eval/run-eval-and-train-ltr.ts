@@ -25,15 +25,13 @@ import type { SearchUseCase } from '../../src/application/search/search.usecase.
  * Main evaluation pipeline.
  *
  * @param searchUseCase - The wired SearchUseCase (from container).
- * @param databaseUrl - Postgres connection string.
+ * @param pool - Postgres pool instance (caller manages lifecycle).
  */
 async function runEvaluationAndTraining(
   searchUseCase: SearchUseCase,
-  databaseUrl: string = process.env.DATABASE_URL ?? 'postgresql://localhost/wine-search',
+  pool: Pool,
 ): Promise<void> {
-  const pool = new Pool({ connectionString: databaseUrl });
-
-  try {
+  {
     console.log('🚀 Starting Evaluation + LTR Training Pipeline\n');
     console.log('='.repeat(60));
 
@@ -140,8 +138,6 @@ async function runEvaluationAndTraining(
     console.log(`   • Evaluation Status: ${evalReport.releaseGateResult.passed ? '✅ PASSED' : '❌ FAILED'}`);
     console.log(`   • Query Classes: ${classDistribution.size}`);
     console.log('');
-  } finally {
-    await pool.end();
   }
 }
 
@@ -158,7 +154,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const pool = getPgPool();
     const container = await createContainer(config, pool);
 
-    await runEvaluationAndTraining(container.searchUseCase);
+    await runEvaluationAndTraining(container.searchUseCase, pool);
     await pool.end();
   })().catch((err: unknown) => {
     console.error('❌ Pipeline failed:', err);

@@ -24,6 +24,7 @@ import type { QuerySanitizer } from '../../domain/security/service/query-sanitiz
 import type { LLMInjectionJudge } from '../../domain/security/service/llm-injection-judge.js';
 import type { CacheService } from '../../domain/performance/index.js';
 import { LTRRanker } from '../../domain/ranking/service/ltr-ranker.js';
+import { extractLTRFeatures } from '../../domain/ranking/service/ltr-feature-extractor.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 
 /**
@@ -355,38 +356,51 @@ export class SearchUseCase {
     const ltrModel = this.deps.ltrModels?.get(queryClass);
     if (ltrModel && rankedResults.length > 0) {
       // Convert ranked results to rankable documents for LTR
-      // Map available ComponentScores fields to RankingFeatures
+      // Map ComponentScores → RankingFeatures for LTR inference.
+      // Some RankingFeatures have no corresponding ComponentScore signal;
+      // those are set to 0.0 (no signal) to avoid train-serve skew.
+      //
+      // Real signals (direct semantic match):
+      //   semanticScore      ← ComponentScores.semantic
+      //   popularityScore    ← ComponentScores.popularity
+      //   attributeMatchScore← ComponentScores.attributeAlignment
+      //
+      // Proxy signals (closest available approximation):
+      //   classMatchScore    ← ComponentScores.preferenceAlignment (taste/class fit)
+      //
+      // No-data sentinels (0.0 — no signal available):
+      //   bm25Score          — no lexical BM25 retrieval in current pipeline
+      //   recencyScore       — no vintage/recency signal in ComponentScores
+      //   diversityScore     — no diversity metric computed at candidate level
+      //   multilingualScore  — no cross-lingual score in ComponentScores
       const rankableDocuments = rankedResults.map((doc, idx) => ({
         entityId: doc.entityId,
         retrievalScore: doc.finalScore,
         features: {
-          // Map ComponentScores fields to RankingFeatures
-          bm25Score: Math.max(0, 1 - doc.componentScores.uncertaintyPenalty), // Inverse of uncertainty
+          bm25Score: 0.0, // No lexical BM25 signal available
           semanticScore: doc.componentScores.semantic,
           popularityScore: doc.componentScores.popularity,
-          recencyScore: doc.componentScores.availability, // Proxy: availability as recency signal
-          classMatchScore: doc.componentScores.attributeAlignment,
+          recencyScore: 0.0, // No recency signal available
+          classMatchScore: doc.componentScores.preferenceAlignment,
           attributeMatchScore: doc.componentScores.attributeAlignment,
-          diversityScore: doc.componentScores.entityIntegrity, // Proxy: integrity as diversity
-          multilingualScore: doc.componentScores.softConstraint, // Proxy: soft constraint satisfaction
+          diversityScore: 0.0, // No diversity signal available
+          multilingualScore: 0.0, // No multilingual signal available
         },
         originalRank: idx + 1,
       }));
 
       const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
 
-      // Map back to RankedResult with updated finalScore
-      rankedResults = rankedResults.map((orig) => {
-        const reranked = rerankedDocs.find((r) => r.entityId === orig.entityId);
-        return reranked
-          ? { ...orig, finalScore: reranked.ltrScore, rank: reranked.finalRank }
-          : orig;
-      });
-
-      // Re-sort by LTR score
-      rankedResults = [...rankedResults].sort(
-        (a: RankedResult, b: RankedResult) => b.finalScore - a.finalScore,
-      );
+      // Map back to RankedResult preserving reranked order (already sorted
+      // by ltrScore desc, then retrievalScore desc inside LTRRanker.rerank)
+      const origMap = new Map(rankedResults.map((r) => [r.entityId as string, r]));
+      rankedResults = rerankedDocs
+        .map((reranked) => {
+          const orig = origMap.get(reranked.entityId);
+          if (!orig) return undefined;
+          return { ...orig, finalScore: reranked.ltrScore, rank: reranked.finalRank };
+        })
+        .filter((r): r is RankedResult => r !== undefined);
     }
 
     // Build a synthetic resolve result for the hybrid path.

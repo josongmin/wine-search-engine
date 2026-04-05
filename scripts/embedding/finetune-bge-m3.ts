@@ -19,7 +19,7 @@
 
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
-import { BGEM3Finetuner } from '../../src/domain/embedding/index.js';
+import { finetune, createWineTriplets } from '../../src/domain/embedding/index.js';
 
 /**
  * Loads wine-domain data for fine-tuning.
@@ -109,8 +109,8 @@ async function finetuneBGEM3(): Promise<void> {
 
     // Step 2: Create training triplets
     console.log('\n🔗 Step 2: Creating training triplets...');
-    const trainTriplets = BGEM3Finetuner.createWineTriplets(trainQueries, documents);
-    const validationTriplets = BGEM3Finetuner.createWineTriplets(validationQueries, documents);
+    const trainTriplets = createWineTriplets(trainQueries, documents);
+    const validationTriplets = createWineTriplets(validationQueries, documents);
 
     console.log(`   Training triplets: ${trainTriplets.length}`);
     console.log(`   Validation triplets: ${validationTriplets.length}`);
@@ -129,7 +129,7 @@ async function finetuneBGEM3(): Promise<void> {
 
     // Step 3: Fine-tune BGE-M3
     console.log('\n🧠 Step 3: Fine-tuning BGE-M3...\n');
-    const checkpoint = await BGEM3Finetuner.finetune(
+    const checkpoint = await finetune(
       trainTriplets,
       {
         learningRate: 1e-5,
@@ -146,7 +146,8 @@ async function finetuneBGEM3(): Promise<void> {
 
     // Step 4: Save checkpoint
     console.log('\n💾 Step 4: Saving checkpoint...');
-    const checkpointPath = `./checkpoints/bge-m3-wine-v1`;
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const checkpointPath = `./checkpoints/bge-m3-wine-${timestamp}`;
     const checkpointDir = `${checkpointPath}/checkpoint`;
     await fs.mkdir(checkpointDir, { recursive: true });
 

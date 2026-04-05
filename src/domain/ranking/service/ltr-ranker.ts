@@ -48,7 +48,7 @@ export namespace LTRRanker {
 
     const scored = documents.map((doc) => ({
       ...doc,
-      ltrScore: scoreDocument(doc.features, model!),
+      ltrScore: scoreDocument(doc.features, model),
     }));
 
     const sorted = [...scored].sort((a, b) => {

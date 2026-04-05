@@ -1,18 +1,18 @@
 import type { FastifyInstance } from 'fastify';
 import { HybridRequestSchema } from '../schemas/search.schema.js';
-import type { Container } from '../../../config/container.js';
+import type { HybridRouteDeps } from './route-deps.js';
 
 /**
  * POST /v1/search/hybrid — force hybrid search route.
  */
 export function registerHybridRoute(
   app: FastifyInstance,
-  container: Container,
+  deps: HybridRouteDeps,
 ): void {
   app.post('/v1/search/hybrid', async (request, reply) => {
     const parsed = HybridRequestSchema.parse(request.body);
 
-    const response = await container.hybridUseCase.execute(
+    const response = await deps.hybridUseCase.execute(
       {
         query: parsed.query,
         context: parsed.context,

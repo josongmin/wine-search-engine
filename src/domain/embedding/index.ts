@@ -4,7 +4,7 @@
  * BGE-M3 embedding service with fine-tuning support (Epic 6).
  */
 
-export { BGEM3Finetuner, DEFAULT_FINETUNING_CONFIG } from './service/bge-m3-finetuner.js';
+export { finetune, createWineTriplets, DEFAULT_FINETUNING_CONFIG } from './service/bge-m3-finetuner.js';
 export type {
   EmbeddingTriplet,
   EmbeddingModelCheckpoint,

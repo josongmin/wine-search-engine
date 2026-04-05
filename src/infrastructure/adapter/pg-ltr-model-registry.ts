@@ -2,7 +2,7 @@
  * PostgreSQL adapter for LTR model registry persistence.
  *
  * Epic 4: LambdaMART learning-to-rank training pipeline
- * Stores trained per-query-class models and their metadata.
+ * Stores trained per-query-class models with versioning and rollback support.
  */
 
 import { nanoid } from 'nanoid';
@@ -15,6 +15,8 @@ import type { QueryClassWeights } from '../../domain/ranking/index.js';
 interface LtrModelRow {
   registry_id: string;
   query_class: string;
+  model_version: number;
+  is_active: boolean;
   weights: number[];
   bias: number;
   training_example_count: number;
@@ -33,19 +35,25 @@ interface LtrModelRow {
 export interface LtrModelRegistryPort {
   /**
    * Saves a trained model for a query class.
-   * Overwrites any existing model for that class.
+   * Inserts a new version and marks it as active (deactivating prior versions).
    */
   saveModel(queryClass: string, weights: QueryClassWeights): Promise<void>;
 
   /**
-   * Retrieves the latest trained model for a query class.
+   * Retrieves the active trained model for a query class.
    */
   getModel(queryClass: string): Promise<QueryClassWeights | null>;
 
   /**
-   * Retrieves all trained models.
+   * Retrieves all active trained models.
    */
   getAllModels(): Promise<ReadonlyMap<string, QueryClassWeights>>;
+
+  /**
+   * Rolls back to the previous model version for a query class.
+   * Returns true if rollback succeeded, false if no previous version exists.
+   */
+  rollbackModel(queryClass: string): Promise<boolean>;
 
   /**
    * Deletes all models (for testing/retraining).
@@ -54,50 +62,69 @@ export interface LtrModelRegistryPort {
 }
 
 /**
- * PostgreSQL-backed LTR model registry.
+ * PostgreSQL-backed LTR model registry with versioning.
  *
  * Stores trained LambdaMART models for each query class with:
  * - Feature weights (normalized, length 8)
  * - Bias term
  * - Training metadata (example count, validation NDCG@5)
- * - Timestamp for versioning
+ * - Version tracking and rollback capability
  */
 export class PgLtrModelRegistry implements LtrModelRegistryPort {
   constructor(private readonly pool: Pool) {}
 
   async saveModel(queryClass: string, weights: QueryClassWeights): Promise<void> {
-    const registryId = nanoid();
-    await this.pool.query(
-      `INSERT INTO ltr_model_registry (
-        registry_id, query_class, weights, bias,
-        training_example_count, ndcg5_validation_score, trained_at, created_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (query_class) DO UPDATE SET
-        registry_id = EXCLUDED.registry_id,
-        weights = EXCLUDED.weights,
-        bias = EXCLUDED.bias,
-        training_example_count = EXCLUDED.training_example_count,
-        ndcg5_validation_score = EXCLUDED.ndcg5_validation_score,
-        trained_at = EXCLUDED.trained_at,
-        created_at = EXCLUDED.created_at`,
-      [
-        registryId,
-        queryClass,
-        weights.weights as number[],
-        weights.bias,
-        weights.trainingExampleCount,
-        weights.ndcg5ValidationScore,
-        weights.trainedAt,
-        new Date(),
-      ],
-    );
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Deactivate current active model for this query class
+      await client.query(
+        `UPDATE ltr_model_registry SET is_active = FALSE
+         WHERE query_class = $1 AND is_active = TRUE`,
+        [queryClass],
+      );
+
+      // Determine next version number
+      const versionResult = await client.query<{ next_version: number }>(
+        `SELECT COALESCE(MAX(model_version), 0) + 1 AS next_version
+         FROM ltr_model_registry WHERE query_class = $1`,
+        [queryClass],
+      );
+      const nextVersion = versionResult.rows[0]?.next_version ?? 1;
+
+      // Insert new active version
+      const registryId = nanoid();
+      await client.query(
+        `INSERT INTO ltr_model_registry (
+          registry_id, query_class, model_version, is_active,
+          weights, bias, training_example_count, ndcg5_validation_score, trained_at
+        ) VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8)`,
+        [
+          registryId,
+          queryClass,
+          nextVersion,
+          weights.weights as number[],
+          weights.bias,
+          weights.trainingExampleCount,
+          weights.ndcg5ValidationScore,
+          weights.trainedAt,
+        ],
+      );
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async getModel(queryClass: string): Promise<QueryClassWeights | null> {
     const result = await this.pool.query<LtrModelRow>(
       `SELECT * FROM ltr_model_registry
-       WHERE query_class = $1
-       ORDER BY created_at DESC
+       WHERE query_class = $1 AND is_active = TRUE
        LIMIT 1`,
       [queryClass],
     );
@@ -117,8 +144,7 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
 
   async getAllModels(): Promise<ReadonlyMap<string, QueryClassWeights>> {
     const result = await this.pool.query<LtrModelRow>(
-      `SELECT DISTINCT ON (query_class) * FROM ltr_model_registry
-       ORDER BY query_class, created_at DESC`,
+      `SELECT * FROM ltr_model_registry WHERE is_active = TRUE`,
     );
 
     const models = new Map<string, QueryClassWeights>();
@@ -134,6 +160,50 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     }
 
     return models;
+  }
+
+  async rollbackModel(queryClass: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Find the current active version
+      const activeResult = await client.query<{ model_version: number }>(
+        `SELECT model_version FROM ltr_model_registry
+         WHERE query_class = $1 AND is_active = TRUE
+         LIMIT 1`,
+        [queryClass],
+      );
+
+      const activeVersion = activeResult.rows[0]?.model_version;
+      if (activeVersion == null || activeVersion <= 1) {
+        // No previous version to roll back to
+        await client.query('ROLLBACK');
+        return false;
+      }
+
+      // Deactivate current active version
+      await client.query(
+        `UPDATE ltr_model_registry SET is_active = FALSE
+         WHERE query_class = $1 AND model_version = $2`,
+        [queryClass, activeVersion],
+      );
+
+      // Activate the previous version
+      await client.query(
+        `UPDATE ltr_model_registry SET is_active = TRUE
+         WHERE query_class = $1 AND model_version = $2`,
+        [queryClass, activeVersion - 1],
+      );
+
+      await client.query('COMMIT');
+      return true;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async clearAllModels(): Promise<void> {

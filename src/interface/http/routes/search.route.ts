@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { SearchRequestSchema } from '../schemas/search.schema.js';
-import type { Container } from '../../../config/container.js';
 import { detectDecomposition, isValidDecomposition } from '../../../domain/query/service/decomposition-detector.js';
+import type { SearchRouteDeps } from './route-deps.js';
 
 /**
  * POST /v1/search — main search endpoint.
@@ -9,7 +9,7 @@ import { detectDecomposition, isValidDecomposition } from '../../../domain/query
  */
 export function registerSearchRoute(
   app: FastifyInstance,
-  container: Container,
+  deps: SearchRouteDeps,
 ): void {
   app.post('/v1/search', async (request, reply) => {
     const parsed = SearchRequestSchema.parse(request.body);
@@ -18,7 +18,7 @@ export function registerSearchRoute(
     // Epic 14: Check for decomposable "A vs B" queries before routing to SearchUseCase
     const decompositionResult = detectDecomposition(parsed.query);
     if (isValidDecomposition(decompositionResult)) {
-      const response = await container.decomposedSearchUseCase.execute(
+      const response = await deps.decomposedSearchUseCase.execute(
         decompositionResult.subQueries,
         decompositionResult.comparisonIntent,
         parsed.query,
@@ -30,7 +30,7 @@ export function registerSearchRoute(
     }
 
     // Regular search
-    const response = await container.searchUseCase.execute(
+    const response = await deps.searchUseCase.execute(
       {
         query: parsed.query,
         context: parsed.context,

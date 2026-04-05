@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import type { Container } from '../../../../src/config/container.js';
 import { registerClaudeToolsRoute } from '../../../../src/interface/http/routes/claude-tools.route.js';
+import type { ClaudeToolsRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
 
 describe('Claude tools HTTP route', () => {
   let app: FastifyInstance | undefined;
@@ -12,13 +12,13 @@ describe('Claude tools HTTP route', () => {
     app = Fastify();
     executeWithFallback.mockReset();
 
-    const container = {
+    const deps: ClaudeToolsRouteDeps = {
       adaptiveToolExecutor: {
         executeWithFallback,
       },
-    } as unknown as Container;
+    };
 
-    registerClaudeToolsRoute(app, container);
+    registerClaudeToolsRoute(app, deps);
     await app.ready();
   });
 

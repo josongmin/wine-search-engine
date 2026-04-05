@@ -12,22 +12,30 @@ import { trainLambdaMARTModel } from './lambdamart-ranker.js';
 /**
  * Extracts ranking features from evaluation result.
  *
- * Since EvalResult doesn't contain raw retrieval-level signals, we derive
- * proxy features from the available decision-level data:
- * - decisionConfidence → proxy for bm25/semantic match quality
- * - utilityScore → proxy for overall match quality
- * - latencyMs → inverse proxy for retrieval efficiency
- * - outcome flags → proxy for class/attribute alignment
+ * IMPORTANT: Feature semantics MUST match the inference-time mapping in
+ * search.usecase.ts to avoid train-serve skew. If inference sets a feature
+ * to 0.0 (no signal), training must also set it to 0.0.
  *
- * These proxies ensure LambdaMART learns a consistent signal (high confidence
- * + correct resolve → high feature values) instead of pure noise.
+ * Inference mapping (search.usecase.ts):
+ *   bm25Score          = 0.0                              (no lexical BM25)
+ *   semanticScore      = ComponentScores.semantic
+ *   popularityScore    = ComponentScores.popularity
+ *   recencyScore       = 0.0                              (no recency signal)
+ *   classMatchScore    = ComponentScores.preferenceAlignment
+ *   attributeMatchScore= ComponentScores.attributeAlignment
+ *   diversityScore     = 0.0                              (no diversity signal)
+ *   multilingualScore  = 0.0                              (no multilingual signal)
+ *
+ * Training proxies (from EvalResult):
+ *   semanticScore      ← decisionConfidence (best proxy for retrieval quality)
+ *   popularityScore    ← 0.5 (neutral — no popularity signal in eval data)
+ *   classMatchScore    ← outcomeSignal (proxy for preference alignment)
+ *   attributeMatchScore← utility normalized to [0, 1]
  */
-function extractFeaturesFromResult(result: EvalResult, evalCase: EvalCase): RankingFeatures {
-  const conf = result.decisionConfidence; // [0, 1]
+function extractFeaturesFromResult(result: EvalResult, _evalCase: EvalCase): RankingFeatures {
   const utility = (result.utilityScore + 1.5) / 2.5; // normalize [-1.5, +1.0] → [0, 1]
-  const latencyFactor = Math.max(0, 1 - result.latencyMs / 5000); // faster = better, cap at 5s
 
-  // Outcome-based quality signal: 1.0 for correct, 0.5 for safe abstain, 0.0 for wrong
+  // Outcome-based quality signal: proxy for preference / class alignment
   let outcomeSignal = 0.3;
   if (result.isCorrectResolve) outcomeSignal = 1.0;
   else if (result.isSafeAbstain) outcomeSignal = 0.6;
@@ -35,14 +43,14 @@ function extractFeaturesFromResult(result: EvalResult, evalCase: EvalCase): Rank
   else if (result.isWrongResolve) outcomeSignal = 0.0;
 
   return {
-    bm25Score: conf * 0.7 + outcomeSignal * 0.3,
-    semanticScore: conf * 0.6 + utility * 0.4,
-    popularityScore: latencyFactor * 0.5 + outcomeSignal * 0.5,
-    recencyScore: latencyFactor,
-    classMatchScore: outcomeSignal,
-    attributeMatchScore: conf * 0.5 + outcomeSignal * 0.5,
-    diversityScore: result.evidenceItems.length > 0 ? 0.7 : 0.3,
-    multilingualScore: evalCase.sliceTags.includes('lang:ko') ? 0.6 : 0.4,
+    bm25Score: 0.0,                          // No BM25 signal — matches inference
+    semanticScore: result.decisionConfidence, // Best proxy for retrieval quality
+    popularityScore: 0.5,                     // Neutral — no popularity in eval data
+    recencyScore: 0.0,                        // No recency signal — matches inference
+    classMatchScore: outcomeSignal,           // Proxy for preference alignment
+    attributeMatchScore: utility,             // Utility normalized to [0, 1]
+    diversityScore: 0.0,                      // No diversity signal — matches inference
+    multilingualScore: 0.0,                   // No multilingual signal — matches inference
   };
 }
 
@@ -89,7 +97,7 @@ export function buildTrainingExamples(
         examples.push({
           query: evalCase.query,
           queryClass: evalCase.queryClass,
-          label1: label as 0 | 1 | 2 | 3,
+          label1: label,
           features1: features,
           label2: degradedLabel,
           features2: {

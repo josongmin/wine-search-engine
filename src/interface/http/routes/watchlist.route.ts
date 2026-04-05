@@ -10,7 +10,6 @@
 import { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { nanoid } from 'nanoid';
-import type { Container } from '../../../config/container.js';
 import {
   CreateWatchlistRequestSchema,
   ListDeliveriesResponseSchema,
@@ -40,10 +39,8 @@ const deliveryLogStore = new Map<string, Array<{
  * Registers watchlist routes on the Fastify instance.
  *
  * @param app - Fastify app instance.
- * @param _container - DI container (reserved for use case wiring).
  */
-export function registerWatchlistRoute(app: FastifyInstance, _container: Container): void {
-  void _container;
+export function registerWatchlistRoute(app: FastifyInstance): void {
   /**
    * POST /v1/watchlist — Create a new watchlist entry.
    * Returns 201 with { watchlist_id }.

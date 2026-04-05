@@ -153,6 +153,22 @@ function buildEmbedText(rec: EnrichedSilverRecord): string {
     .join('. ');
 }
 
+/** Regex matching any Hangul syllable or Jamo character. */
+const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
+
+/**
+ * Build Korean search text from the canonical label + any Korean aliases
+ * found in the alias bundle (added by generate-korean-aliases.ts).
+ * Returns empty string when no Korean aliases exist for this record.
+ */
+function buildSearchTextKo(rec: EnrichedSilverRecord): string {
+  const koAliases = rec.aliases.noisyRecallProjection.filter((a) =>
+    HANGUL_RE.test(a),
+  );
+  if (koAliases.length === 0) return '';
+  return [rec.canonicalLabel, ...koAliases].join(' ');
+}
+
 function silverToRetrievalDoc(
   rec: EnrichedSilverRecord,
   embedding: readonly number[],
@@ -166,7 +182,7 @@ function silverToRetrievalDoc(
     producer: rec.producer,
     region: rec.region,
     grapes: rec.grapes,
-    searchTextKo: '', // populated by Korean alias step later
+    searchTextKo: buildSearchTextKo(rec),
     searchTextEn: rec.searchTextEn,
     semanticSummary: buildEmbedText(rec),
     body: rec.body,

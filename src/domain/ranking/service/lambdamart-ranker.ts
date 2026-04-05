@@ -6,6 +6,11 @@
  *
  * RFC-009: SOTA++ learning-to-rank for production ranking optimization
  *
+ * Numerical stability notes:
+ * - stableSigmoid() avoids exp() overflow for large positive inputs
+ * - Weight normalization guards against near-zero collapse
+ * - scoreFeatures guards against NaN propagation from non-finite inputs
+ *
  * Algorithm:
  * - Builds gradient-based objective from pairwise comparisons (LambdaMART loss)
  * - Learns per-query-class feature weights
@@ -16,6 +21,20 @@
 /**
  * Ranking features extracted from retrieval results.
  */
+/**
+ * Numerically stable sigmoid that avoids exp() overflow.
+ * For x >= 0 we compute exp(-x) (always <= 1, no overflow).
+ * For x <  0 we compute exp(x)  (always <= 1, no overflow).
+ */
+function stableSigmoid(x: number): number {
+  if (x >= 0) {
+    const ez = Math.exp(-x);
+    return 1 / (1 + ez);
+  }
+  const ez = Math.exp(x);
+  return ez / (1 + ez);
+}
+
 export interface RankingFeatures {
   readonly bm25Score: number;
   readonly semanticScore: number;
@@ -103,7 +122,7 @@ export function trainLambdaMARTModel(
 
         const labelDiff = example.label1 - example.label2;
         const scoreDiff = score1 - score2;
-        const lambda = labelDiff * (1 / (1 + Math.exp(scoreDiff)));
+        const lambda = labelDiff * stableSigmoid(-scoreDiff);
 
         for (let j = 0; j < 8; j++) {
           const fname = featureNames[j] as keyof RankingFeatures;
@@ -124,13 +143,15 @@ export function trainLambdaMARTModel(
       bias = Math.max(-1, Math.min(2, bias));
     }
 
-    const weightSum = weights.reduce((a, b) => a + b, 0);
-    // Guard: if all weights collapsed to zero (e.g., regularization drove them
-    // all to 0), fall back to uniform weights to avoid NaN propagation.
+    const absWeights = weights.map((w) => Math.abs(w));
+    const weightSum = absWeights.reduce((a, b) => a + b, 0);
+    // Guard: if all weights collapsed to near-zero (e.g., regularization drove
+    // them all toward 0), fall back to uniform weights to avoid extreme values
+    // that lose discriminative power after clamping.
     const normalizedWeights =
-      weightSum === 0
-        ? weights.map(() => 1 / weights.length)
-        : weights.map((w) => w / weightSum);
+      weightSum > 1e-8
+        ? weights.map((w) => w / weightSum)
+        : weights.map(() => 1 / weights.length);
 
     const validationNdcg = computeValidationNdcg(classExamples, normalizedWeights, bias);
 
@@ -172,9 +193,13 @@ function scoreFeatures(
 
   let score = bias;
   for (let i = 0; i < 8; i++) {
-    score += (featureValues[i] ?? 0) * (weights[i] ?? 0);
+    const fv = featureValues[i] ?? 0;
+    const wv = weights[i] ?? 0;
+    // Guard against NaN propagation from non-finite inputs
+    if (!Number.isFinite(fv) || !Number.isFinite(wv)) continue;
+    score += fv * wv;
   }
-  return Math.max(0, Math.min(1, score));
+  return Math.max(0, Math.min(1, Number.isFinite(score) ? score : 0));
 }
 
 function computeValidationNdcg(

@@ -21,8 +21,8 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import type { Container } from '../../../config/container.js';
 import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
+import type { ClaudeToolsRouteDeps } from './route-deps.js';
 
 /**
  * Schema for tool call request.
@@ -50,9 +50,9 @@ interface ClaudeToolCallResponse {
  * Returns structured responses with tool results.
  *
  * @param app - Fastify instance
- * @param container - DI container with tool executors
+ * @param deps - Narrow route dependencies with tool executors
  */
-export function registerClaudeToolsRoute(app: FastifyInstance, container: Container): void {
+export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeToolsRouteDeps): void {
   /**
    * POST /v1/claude-tools
    *
@@ -65,7 +65,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, container: Contai
       const requestId = parsed.request_id ?? request.id;
 
       // Execute tool with adaptive fallback
-      const executionResult = await container.adaptiveToolExecutor.executeWithFallback(
+      const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
         parsed.tool_name,
         parsed.tool_input,
         requestId,

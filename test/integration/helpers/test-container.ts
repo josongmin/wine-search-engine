@@ -37,11 +37,8 @@ import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
-import { WineToolExecutor } from '../../../src/interface/claude-tools/tool-executor.js';
 import { AdaptiveToolExecutor } from '../../../src/interface/claude-tools/adaptive-tool-executor.js';
-import { RedisWatchlistPublisher } from '../../../src/infrastructure/watchlist/redis-watchlist-publisher.js';
-import { RedisWatchlistSubscriber } from '../../../src/infrastructure/watchlist/redis-watchlist-subscriber.js';
-import { WebhookDelivery } from '../../../src/infrastructure/watchlist/webhook-delivery.js';
+import { WineToolExecutor } from '../../../src/interface/claude-tools/tool-executor.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -170,10 +167,6 @@ export function createTestContainer(): TestContainerParts {
     drinkingWindowUseCase,
   });
   const adaptiveToolExecutor = new AdaptiveToolExecutor(wineToolExecutor);
-  const watchlistPublisher = new RedisWatchlistPublisher();
-  const watchlistSubscriber = new RedisWatchlistSubscriber();
-  const webhookDelivery = new WebhookDelivery('dummy-secret-min-16-chars!!!');
-
   const container: Container = {
     queryPlanner,
     entityResolver,
@@ -190,12 +183,7 @@ export function createTestContainer(): TestContainerParts {
     decomposedSearchUseCase,
     drinkingWindowUseCase,
     batchSearchUseCase,
-    drinkingWindowPredictor,
-    wineToolExecutor,
     adaptiveToolExecutor,
-    watchlistPublisher,
-    watchlistSubscriber,
-    webhookDelivery,
     evalRunner: null,
   };
 

@@ -213,26 +213,42 @@ export class SliceEvaluator {
   }
 
   /**
+   * Minimum contribution value for an anchor to be considered "preserved."
+   * Matches the HIGH_THRESHOLD used in EvidenceMapper for strength classification.
+   */
+  private static readonly ANCHOR_PRESERVATION_THRESHOLD = 0.3;
+
+  /**
    * Computes the anchor preservation rate from evidence items.
-   * Looks for 'anchor_preserved' evidence types.
+   * Looks for 'anchor_similarity' evidence types (the sole anchor evidence
+   * type produced by EvidenceMapper in production).
+   *
+   * "Has anchor evidence" = result contains any evidence item with type
+   * `anchor_similarity`.  "Is preserved" = the contribution value of that
+   * evidence item is >= ANCHOR_PRESERVATION_THRESHOLD.  This distinguishes
+   * "anchor was found but with low similarity" from "anchor was strongly
+   * preserved."
    */
   private computeAnchorPreservationRate(results: readonly EvalResult[]): number {
     const resolved = results.filter((r) => r.predictedStatus === 'resolved');
     if (resolved.length === 0) return 0;
 
-    const hasAnchorEvidence = resolved.some((r) =>
-      r.evidenceItems.some(
-        (e) => e.type === 'anchor_preserved' || e.type === 'anchor_missing',
-      ),
+    const withAnchor = resolved.filter((r) =>
+      r.evidenceItems.some((e) => e.type === 'anchor_similarity'),
     );
 
-    if (!hasAnchorEvidence) return 1.0;
+    if (withAnchor.length === 0) return 1.0;
 
-    const preserved = resolved.filter((r) =>
-      r.evidenceItems.some((e) => e.type === 'anchor_preserved'),
+    const preserved = withAnchor.filter((r) =>
+      r.evidenceItems.some((e) => {
+        if (e.type !== 'anchor_similarity') return false;
+        const parsed = parseFloat(e.contribution);
+        if (Number.isNaN(parsed)) return false;
+        return parsed >= SliceEvaluator.ANCHOR_PRESERVATION_THRESHOLD;
+      }),
     ).length;
 
-    return preserved / resolved.length;
+    return preserved / withAnchor.length;
   }
 
   /** Computes a percentile from a sorted array. */

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { BatchSearchRequestSchema } from '../schemas/batch-search.schema.js';
-import type { Container } from '../../../config/container.js';
+import type { BatchSearchRouteDeps } from './route-deps.js';
 
 /**
  * POST /v1/batch-search — batch search endpoint.
@@ -60,12 +60,12 @@ import type { Container } from '../../../config/container.js';
  */
 export function registerBatchSearchRoute(
   app: FastifyInstance,
-  container: Container,
+  deps: BatchSearchRouteDeps,
 ): void {
   app.post('/v1/batch-search', async (request, reply) => {
     const parsed = BatchSearchRequestSchema.parse(request.body);
 
-    const response = await container.batchSearchUseCase.execute(
+    const response = await deps.batchSearchUseCase.execute(
       parsed.requests,
       parsed.options,
       parsed.batch_id,

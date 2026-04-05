@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import type { Container } from '../../../../src/config/container.js';
 import { registerBatchSearchRoute } from '../../../../src/interface/http/routes/batch-search.route.js';
+import type { BatchSearchRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
 import type { BatchSearchResponse } from '../../../../src/application/search/batch-search.usecase.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 import type { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
@@ -22,7 +22,7 @@ import { errorHandler } from '../../../../src/interface/http/middleware/error-ha
 describe('POST /v1/batch-search', () => {
   let app: FastifyInstance;
   let mockBatchSearchUseCase: BatchSearchUseCase;
-  let mockContainer: Container;
+  let mockDeps: BatchSearchRouteDeps;
 
   beforeEach(async () => {
     app = Fastify();
@@ -31,14 +31,14 @@ describe('POST /v1/batch-search', () => {
       execute: vi.fn(),
     } as unknown as BatchSearchUseCase;
 
-    mockContainer = {
+    mockDeps = {
       batchSearchUseCase: mockBatchSearchUseCase,
-    } as unknown as Container;
+    };
 
     // Register error handler to properly handle Zod validation errors
     app.setErrorHandler(errorHandler);
 
-    registerBatchSearchRoute(app, mockContainer);
+    registerBatchSearchRoute(app, mockDeps);
   });
 
   describe('HTTP 207 Multi-Status', () => {
@@ -78,6 +78,18 @@ describe('POST /v1/batch-search', () => {
       });
 
       expect(response.statusCode).toBe(207);
+
+      const body = response.json();
+      expect(body.batch_id).toBe('batch-123');
+      expect(body.total).toBe(1);
+      expect(body.succeeded).toBe(1);
+      expect(body.failed).toBe(0);
+      expect(body.results).toHaveLength(1);
+      expect(body.results[0]).toMatchObject({
+        id: '1',
+        status: 'succeeded',
+      });
+      expect(body.results[0].response).toBeDefined();
     });
 
     it('should return 207 when requests partially fail', async () => {
@@ -157,6 +169,20 @@ describe('POST /v1/batch-search', () => {
       });
 
       expect(response.statusCode).toBe(207);
+
+      const body = response.json();
+      expect(body.total).toBe(1);
+      expect(body.succeeded).toBe(0);
+      expect(body.failed).toBe(1);
+      expect(body.results).toHaveLength(1);
+      expect(body.results[0]).toMatchObject({
+        id: '1',
+        status: 'failed',
+        error: {
+          code: 'INTERNAL_ERROR',
+          message: 'Internal server error',
+        },
+      });
     });
   });
 
@@ -202,6 +228,10 @@ describe('POST /v1/batch-search', () => {
       });
 
       expect(response.statusCode).toBe(207);
+
+      const body = response.json();
+      expect(body.results).toHaveLength(1);
+      expect(body.results[0].status).toBe('succeeded');
     });
 
     it('should reject empty requests array', async () => {

@@ -2,7 +2,6 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { type Span, SpanStatusCode } from '@opentelemetry/api';
 import { config } from '../../config/env.js';
-import type { Container } from '../../config/container.js';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -16,6 +15,7 @@ import { registerHybridRoute } from './routes/hybrid.route.js';
 import { registerHealthRoutes } from './routes/health.route.js';
 import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
+import type { HttpServerDeps } from './routes/route-deps.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 
 declare module 'fastify' {
@@ -42,12 +42,12 @@ export interface ServerOptions {
  * - Registers all API routes
  * - Configures graceful shutdown
  *
- * @param container - The DI container with all wired dependencies.
+ * @param deps - The wired HTTP dependencies.
  * @param options - Optional server configuration.
  * @returns The configured Fastify instance (not yet listening).
  */
 export async function createServer(
-  container: Container,
+  deps: HttpServerDeps,
   options?: ServerOptions,
 ): Promise<FastifyInstance> {
   const app = Fastify({
@@ -132,29 +132,38 @@ export async function createServer(
 
   // Register routes
   registerHealthRoutes(app);
-  registerClaudeToolsRoute(app, container);
-  registerSearchRoute(app, container);
-  registerBatchSearchRoute(app, container);
-  registerReplayRoute(app, container);
-  registerInterpretRoute(app, container);
-  registerResolveRoute(app, container);
-  registerHybridRoute(app, container);
-  registerWatchlistRoute(app, container);
+  registerClaudeToolsRoute(app, deps);
+  registerSearchRoute(app, deps);
+  registerBatchSearchRoute(app, deps);
+  registerReplayRoute(app, deps);
+  registerInterpretRoute(app, deps);
+  registerResolveRoute(app, deps);
+  registerHybridRoute(app, deps);
+  registerWatchlistRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)
   // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)
   // MUST NOT block server readiness — eval can take minutes on large gold sets.
   if (process.env.EVAL_RUN_AT_STARTUP === 'true') {
-    if (container.evalRunner) {
-      const evalRunnerRef = container.evalRunner;
+    if (deps.evalRunner) {
+      const evalRunnerRef = deps.evalRunner;
       app.addHook('onReady', () => {
-        console.warn('[Server] Scheduling background evaluation per EVAL_RUN_AT_STARTUP...');
-        void runEvaluation(evalRunnerRef, { verbose: true }).catch((err: unknown) => {
-          console.error('[Server] Background evaluation failed:', err instanceof Error ? err.message : String(err));
-        });
+        const evalStart = Date.now();
+        console.warn('[Server] Starting background evaluation per EVAL_RUN_AT_STARTUP...');
+        void runEvaluation(evalRunnerRef, { verbose: true }).then(
+          (result) => {
+            const durationMs = Date.now() - evalStart;
+            console.warn(`[Server] Background evaluation completed in ${durationMs}ms: ${result.message}`);
+          },
+          (err: unknown) => {
+            const durationMs = Date.now() - evalStart;
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[Server] Background evaluation FAILED after ${durationMs}ms: ${msg}`);
+          },
+        );
       });
     } else {
-      console.warn('[Server] EVAL_RUN_AT_STARTUP=true but Postgres pool unavailable; skipping evaluation');
+      console.warn('[Server] EVAL_RUN_AT_STARTUP=true but evalRunner not available; skipping');
     }
   }
 

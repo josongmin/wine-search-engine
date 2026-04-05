@@ -51,23 +51,27 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
 
       // Extract decision and entity from response
       const decision = response.engineDecision;
-      const predictedStatus = decision.decisionStatus as DecisionStatus;
-      const predictedEntityId = response.results?.[0]?.entity?.entityId;
+      const predictedStatus = decision.decisionStatus;
+      const topResult = response.results[0];
+      const predictedEntityId = topResult?.entity.entityId;
+      const evidenceItems = topResult?.evidenceItems ?? [];
 
       const output: SearchPipelineOutput = {
         predictedStatus,
         decisionConfidence: decision.decisionConfidence,
-        evidenceItems: [], // Populated if decision engine supports evidence trails
+        evidenceItems,
         latencyMs,
         decisionSnapshot: decision.decisionSnapshot,
         ...(predictedEntityId !== undefined ? { predictedEntityId } : {}),
       };
       return output;
-    } catch (_error) {
+    } catch (error) {
       // On exception, treat as failed decision with error latency
       const latencyMs = Date.now() - startMs;
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[SearchPipelineEvaluator] Query failed (${latencyMs}ms): ${message}`);
       return {
-        predictedStatus: 'failed',
+        predictedStatus: 'failed' as DecisionStatus,
         decisionConfidence: 0,
         evidenceItems: [],
         latencyMs,

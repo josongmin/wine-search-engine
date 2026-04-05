@@ -32,12 +32,17 @@ import { AnchorProfiler } from '../../../../src/domain/mixed/service/anchor-prof
 import { SimilarityScorer } from '../../../../src/domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../../../../src/domain/mixed/service/constraint-overlay.js';
 import { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
+import { DecomposedSearchUseCase } from '../../../../src/application/search/decomposed-search.usecase.js';
+import { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
+import { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
 import { ReplayUseCase } from '../../../../src/application/search/replay.usecase.js';
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
 import type { Container } from '../../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../../src/application/search/search.usecase.js';
+import { WineToolExecutor } from '../../../../src/interface/claude-tools/tool-executor.js';
+import { AdaptiveToolExecutor } from '../../../../src/interface/claude-tools/adaptive-tool-executor.js';
 
 import { VespaClient } from '../../../../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../../../../src/infrastructure/vespa/vespa-search-index.js';
@@ -199,6 +204,24 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     responseBuilder,
     snapshotVersions,
   });
+  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
+  const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
+  const drinkingWindowUseCase = new DrinkingWindowUseCase({
+    predict: () => ({
+      drinkingWindowStart: 2020,
+      drinkingWindowEnd: 2030,
+      peakYear: 2025,
+      confidence: 'medium',
+      modelVersion: 'vespa-test',
+    }),
+  });
+  const adaptiveToolExecutor = new AdaptiveToolExecutor(
+    new WineToolExecutor({
+      searchUseCase,
+      decomposedSearchUseCase,
+      drinkingWindowUseCase,
+    }),
+  );
 
   const container: Container = {
     queryPlanner,
@@ -213,6 +236,11 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     interpretUseCase,
     resolveUseCase,
     hybridUseCase,
+    decomposedSearchUseCase,
+    drinkingWindowUseCase,
+    batchSearchUseCase,
+    adaptiveToolExecutor,
+    evalRunner: null,
   };
 
   return {

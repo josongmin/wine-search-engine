@@ -7,10 +7,6 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerWatchlistRoute, clearWatchlistStores, getWatchlistEntry } from '../interface/http/routes/watchlist.route.js';
 import { deepKeysToSnake } from '../interface/http/middleware/snake-case-hook.js';
-import type { Container } from '../config/container.js';
-
-/** Routes ignore container today; empty object satisfies the parameter type for tests. */
-const stubContainer = {} as Container;
 
 describe('Watchlist Routes', () => {
   let app: FastifyInstance;
@@ -25,7 +21,7 @@ describe('Watchlist Routes', () => {
     });
 
     // Register watchlist route
-    registerWatchlistRoute(app, stubContainer);
+    registerWatchlistRoute(app);
   });
 
   afterEach(async () => {

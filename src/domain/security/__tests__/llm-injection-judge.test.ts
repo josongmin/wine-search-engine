@@ -115,6 +115,58 @@ describe('LLMInjectionJudge', () => {
       // Verify LLM was called (meaning we executed the full flow)
       expect(mockAnthropicClient.getCallCount()).toBe(1);
     });
+
+    it('returns cached result on cache HIT without calling Claude API', async () => {
+      // Pre-populate the Redis cache with a known judgment
+      const query = 'cached wine query';
+      const prefix = query.slice(0, 32);
+      const encoded = Buffer.from(prefix).toString('base64url');
+      const cacheKey = `injection_judge:${encoded}`;
+      mockRedisClient.cache.set(cacheKey, JSON.stringify({ is_injection: true }));
+
+      const result = await judge.judge(query);
+
+      expect(result).toBe(true);
+      // Claude API should NOT have been called — result came from cache
+      expect(mockAnthropicClient.getCallCount()).toBe(0);
+    });
+
+    it('falls through to LLM query when Redis GET throws an error', async () => {
+      // Make redis.get throw on the next call
+      (mockRedisClient.get as any).mockRejectedValueOnce(new Error('Redis connection lost'));
+
+      mockAnthropicClient.queueResponse(false);
+
+      const result = await judge.judge('wine query with redis failure');
+
+      expect(result).toBe(false);
+      // Claude API IS called because Redis error caused fallthrough
+      expect(mockAnthropicClient.getCallCount()).toBe(1);
+    });
+
+    it('produces identical cache keys for queries sharing the same first 32 characters', async () => {
+      // Two queries that share the first 32 chars but differ after
+      const sharedPrefix = 'abcdefghijklmnopqrstuvwxyz012345'; // exactly 32 chars
+      const queryA = `${sharedPrefix}AAAA`;
+      const queryB = `${sharedPrefix}BBBB`;
+
+      // First call: cache miss → LLM called
+      mockAnthropicClient.queueResponse(false);
+      const resultA = await judge.judge(queryA);
+
+      expect(resultA).toBe(false);
+      expect(mockAnthropicClient.getCallCount()).toBe(1);
+
+      // Flush microtask queue so fire-and-forget storeCacheAsync resolves
+      await new Promise((resolve) => process.nextTick(resolve));
+
+      // Second call: cache HIT from first query (same 32-char prefix) → LLM NOT called
+      const resultB = await judge.judge(queryB);
+
+      expect(resultB).toBe(false);
+      // Call count stays at 1 — second query was served from cache
+      expect(mockAnthropicClient.getCallCount()).toBe(1);
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────

@@ -393,8 +393,8 @@ function exportToJsonl(
 async function main(): Promise<void> {
   console.warn('🚀 Fine-tuning Data Preparation (Task 6)\n');
 
-  const dataDir = '/Users/songmin/wine-search-engine/data';
-  const outputDir = '/Users/songmin/wine-search-engine/data/fine-tune-dataset';
+  const dataDir = path.resolve(process.cwd(), 'data');
+  const outputDir = path.resolve(dataDir, 'fine-tune-dataset');
 
   try {
     // Load data
