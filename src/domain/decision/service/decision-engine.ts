@@ -393,7 +393,17 @@ export class DecisionEngine {
 
   /**
    * Loads threshold entry for the query class from the threshold store,
-   * falling back to the default profile.
+   * falling back to the default profile, and applies dynamic gap threshold
+   * calculation per RFC-009 §5.3 (AURC-tuned thresholds).
+   *
+   * The dynamic gap threshold is computed based on:
+   * - Query class (e.g., semantic_preference vs. short_entity)
+   * - Calibrated decision confidence C
+   *
+   * This allows query-specific disambiguation strategies:
+   * - semantic_preference: 1-1.5% gap (fuzzy matching OK)
+   * - short_entity: 3% gap (moderate disambiguation)
+   * - entity_exact variants: 5-10% gap (strict)
    */
   private async loadThresholds(input: DecisionInput): Promise<ThresholdEntry> {
     const profileId = input.queryPlan.thresholdProfileId;
@@ -401,7 +411,17 @@ export class DecisionEngine {
     const effectiveProfile = profile ?? DEFAULT_THRESHOLD_PROFILE;
 
     const queryClass = input.queryPlan.queryClass;
-    return effectiveProfile.perQueryClass[queryClass];
+    const baseThreshold = effectiveProfile.perQueryClass[queryClass];
+
+    // Compute dynamic gap threshold (Wave 3 enhancement, RFC-009 §5.3)
+    const confidence = input.resolverResult.decisionTrace.decisionConfidenceC;
+    const dynamicGapTau = computeDynamicGapThreshold(queryClass, confidence);
+
+    // Return threshold entry with dynamic gap override
+    return {
+      resolveTau: baseThreshold.resolveTau,
+      gapTau: dynamicGapTau,
+    };
   }
 
   /**
