@@ -41,6 +41,9 @@ const envSchema = z.object({
   // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
   LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
 
+  // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
+  ANTHROPIC_API_KEY: z.string().optional(),
+
   // Kill Switches
   KILL_SWITCH_ALIAS_OVERLAY: z
     .enum(['true', 'false'])
@@ -51,6 +54,11 @@ const envSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
   KILL_SWITCH_DENSE_RETRIEVAL: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+  /** Kill switch for LLM-based injection judge (Layer 2). Use only in emergencies. */
+  KILL_SWITCH_INJECTION_JUDGE: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default('false'),
@@ -114,11 +122,17 @@ export const config = {
     url: parsed.LEARNED_MATCHER_SERVICE_URL,
   },
 
+  /** Anthropic API settings (optional, for LLM-based security features). */
+  anthropic: {
+    apiKey: parsed.ANTHROPIC_API_KEY,
+  },
+
   /** Kill switches for feature flags / circuit breakers. */
   killSwitch: {
     aliasOverlay: parsed.KILL_SWITCH_ALIAS_OVERLAY,
     learning: parsed.KILL_SWITCH_LEARNING,
     denseRetrieval: parsed.KILL_SWITCH_DENSE_RETRIEVAL,
+    injectionJudge: parsed.KILL_SWITCH_INJECTION_JUDGE,
   },
 } as const;
 

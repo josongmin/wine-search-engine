@@ -2,12 +2,12 @@
  * Redis-backed Query Cache Implementation.
  *
  * Stores complete SearchResponseV1 objects with deterministic TTL.
- * Uses Redis for distributed caching, with automatic JSON serialization.
+ * Uses node-redis for distributed caching, with automatic JSON serialization.
  *
  * Implements QueryCachePort from domain (dependency inversion).
  */
 
-import type { Redis } from 'ioredis';
+import type { RedisClient } from '../db/redis-client.js';
 import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js';
@@ -18,19 +18,18 @@ import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js'
  * Serialization strategy:
  * - Key: Deterministic Redis key from QueryCacheKey (e.g., "query:entity_lookup:abc123:def456")
  * - Value: JSON-serialized SearchResponseV1 (ReadOnly types don't affect JSON)
- * - TTL: Set via Redis EXPIRE command (per RFC-018)
+ * - TTL: Set via Redis EX option (per RFC-018)
  *
  * Statistics:
  * - Track hits/misses via counter keys (query:stats:hits, query:stats:misses)
  * - Auto-compute hit rate as: hits / (hits + misses)
- * - Size tracked via INFO MEMORY (approximate, includes Redis overhead)
  */
 export class RedisQueryCache implements QueryCachePort {
-  private readonly redis: Redis;
+  private readonly redis: RedisClient;
   private readonly statsKeyHits = 'query:cache:stats:hits';
   private readonly statsKeyMisses = 'query:cache:stats:misses';
 
-  constructor(redis: Redis) {
+  constructor(redis: RedisClient) {
     this.redis = redis;
   }
 
@@ -50,7 +49,6 @@ export class RedisQueryCache implements QueryCachePort {
       return response;
     } catch (error) {
       // On deserialization error, treat as miss (don't throw)
-      // Log error for observability (in production, use OpenTelemetry)
       console.error('[QueryCache] Deserialization error:', error);
       await this.redis.incr(this.statsKeyMisses);
       return undefined;
@@ -63,19 +61,10 @@ export class RedisQueryCache implements QueryCachePort {
     ttlSeconds: number,
   ): Promise<void> {
     try {
-      // Serialize with replacer to handle readonly types
       const serialized = JSON.stringify(response);
-
-      // Set with EX (expire in seconds)
-      await this.redis.set(
-        cacheKey.redisKey,
-        serialized,
-        'EX',
-        ttlSeconds,
-      );
+      await this.redis.set(cacheKey.redisKey, serialized, { EX: ttlSeconds });
     } catch (error) {
       // On serialization/write error, log and continue
-      // Cache misses are acceptable; don't propagate errors upward
       console.error('[QueryCache] Write error:', error);
     }
   }
@@ -90,26 +79,14 @@ export class RedisQueryCache implements QueryCachePort {
 
   async deletePattern(pattern: string): Promise<number> {
     try {
-      // Use SCAN for non-blocking pattern deletion (vs KEYS which blocks)
       let count = 0;
-      let cursor = '0';
-
-      do {
-        const [newCursor, keys] = await this.redis.scan(
-          cursor,
-          'MATCH',
-          pattern,
-          'COUNT',
-          '100', // Batch size: balance between latency and memory
-        );
-        cursor = newCursor;
-
-        if (keys.length > 0) {
-          await this.redis.del(...keys);
-          count += keys.length;
-        }
-      } while (cursor !== '0');
-
+      for await (const key of this.redis.scanIterator({
+        MATCH: pattern,
+        COUNT: 100,
+      })) {
+        await this.redis.del(key);
+        count++;
+      }
       return count;
     } catch (error) {
       console.error('[QueryCache] Delete pattern error:', error);
@@ -132,23 +109,28 @@ export class RedisQueryCache implements QueryCachePort {
 
       // Count entries with pattern scan (query:* keys, excluding stats)
       let entriesCount = 0;
-      let cursor = '0';
+      for await (const key of this.redis.scanIterator({
+        MATCH: 'query:*',
+        COUNT: 100,
+      })) {
+        const keyStr = String(key);
+        if (!keyStr.startsWith('query:cache:stats')) {
+          entriesCount++;
+        }
+      }
 
-      do {
-        const [newCursor, keys] = await this.redis.scan(
-          cursor,
-          'MATCH',
-          'query:*',
-          'COUNT',
-          '100',
-        );
-        cursor = newCursor;
-        entriesCount += keys.filter((k) => !k.startsWith('query:cache:stats')).length;
-      } while (cursor !== '0');
-
-      // Approximate size from Redis INFO (in production, use more accurate measurement)
-      const info = await this.redis.info('memory');
-      const usedMemory = this._extractMemoryFromInfo(info);
+      // Approximate size from Redis INFO (production would use more accurate measurement)
+      let usedMemory = 0;
+      try {
+        const info = await this.redis.info('memory');
+        const infoStr = typeof info === 'string' ? info : Array.isArray(info) ? info.join('\n') : String(info);
+        const match = infoStr.match(/used_memory:(\d+)/);
+        if (match && match[1]) {
+          usedMemory = parseInt(match[1], 10);
+        }
+      } catch {
+        // INFO unavailable, use 0
+      }
 
       return {
         hits,
@@ -164,32 +146,9 @@ export class RedisQueryCache implements QueryCachePort {
 
   async clear(): Promise<number> {
     try {
-      // Delete all query cache entries (pattern-based deletion is safer than FLUSHDB)
       return await this.deletePattern('query:*');
     } catch (error) {
       console.error('[QueryCache] Clear error:', error);
-      return 0;
-    }
-  }
-
-  /**
-   * Extract used_memory bytes from Redis INFO memory output.
-   *
-   * INFO memory format:
-   * ```
-   * # Memory
-   * used_memory:1234567
-   * ...
-   * ```
-   *
-   * @param info - Raw INFO memory output
-   * @returns Used memory in bytes (0 on parse error)
-   */
-  private _extractMemoryFromInfo(info: string): number {
-    try {
-      const match = info.match(/used_memory:(\d+)/);
-      return match ? parseInt(match[1], 10) : 0;
-    } catch {
       return 0;
     }
   }

@@ -8,6 +8,7 @@ import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import { registerSearchRoute } from './routes/search.route.js';
+import { registerBatchSearchRoute } from './routes/batch-search.route.js';
 import { registerReplayRoute } from './routes/replay.route.js';
 import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
@@ -129,6 +130,7 @@ export async function createServer(
   // Register routes
   registerHealthRoutes(app);
   registerSearchRoute(app, container);
+  registerBatchSearchRoute(app, container);
   registerReplayRoute(app, container);
   registerInterpretRoute(app, container);
   registerResolveRoute(app, container);

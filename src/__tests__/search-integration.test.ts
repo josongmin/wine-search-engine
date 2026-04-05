@@ -32,6 +32,11 @@ import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import type { MappingTablePort } from '../domain/attribute/port/mapping-table.port.js';
 import type { NLMapping } from '../domain/attribute/model/nl-mapping.js';
 
+// Wave 3 imports
+import { detectDecomposition, isValidDecomposition } from '../domain/query/service/decomposition-detector.js';
+import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
+import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
+
 // ── Wine entity fixtures ─────────────────────────────────────────────────────
 
 const ENTITY_OPUS_ONE = createEntityId('opus-one-2018');
@@ -714,6 +719,88 @@ describe('Search Pipeline Integration', () => {
       for (const entity of WINE_ENTITIES) {
         expect(resultIds).toContain(entity.id);
       }
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Wave 3: Decomposition (Epic 14) + Drinking Window (Epic 15)
+  // ─────────────────────────────────────────────────────────────────
+
+  describe('Wave 3: Decomposition Detection (Epic 14)', () => {
+    it('detects "A vs B" comparison pattern', () => {
+      const result = detectDecomposition('Opus One vs Screaming Eagle');
+      expect(isValidDecomposition(result)).toBe(true);
+      if (result.decomposed) {
+        expect(result.subQueries).toEqual(['Opus One', 'Screaming Eagle']);
+        expect(result.comparisonIntent).toBe('compare');
+      }
+    });
+
+    it('detects "which is better" intent', () => {
+      const result = detectDecomposition('Margaux or Harlan, which is better?');
+      expect(isValidDecomposition(result)).toBe(true);
+      if (result.decomposed) {
+        expect(result.comparisonIntent).toBe('recommend_one');
+      }
+    });
+
+    it('ignores non-comparison queries', () => {
+      const result = detectDecomposition('Best Napa Valley Cabernet under $100');
+      expect(result.decomposed).toBe(false);
+    });
+  });
+
+  describe('Wave 3: Drinking Window Enrichment (Epic 15)', () => {
+    it('creates drinking window block from wine attributes', async () => {
+      const predictor = new DrinkingWindowPredictor();
+      await predictor.load('/tmp'); // Stub load (no actual model)
+
+      const useCase = new DrinkingWindowUseCase(predictor);
+
+      const prediction = await useCase.check({
+        vintage: 2015,
+        grapePrimaryEnc: 42, // Cabernet Sauvignon
+        regionEnc: 10,       // Napa Valley
+        countryEnc: 1,       // USA
+        body: 4,
+        tannin: 4,
+        acidity: 3,
+        sweetness: 1,
+        avgCriticProxyScore: 95,
+      });
+
+      expect(prediction.drinkingWindowStart).toBeGreaterThanOrEqual(2015);
+      expect(prediction.drinkingWindowEnd).toBeGreaterThan(
+        prediction.drinkingWindowStart,
+      );
+      expect(prediction.confidence).toBe('high');
+      expect(prediction.modelVersion).toContain('v1.0');
+    });
+
+    it('marks wine as currently drinkable if in window', async () => {
+      const predictor = new DrinkingWindowPredictor();
+      await predictor.load('/tmp');
+
+      const useCase = new DrinkingWindowUseCase(predictor);
+
+      // 2018 vintage mature wine (should be drinkable now in 2026)
+      const prediction = await useCase.check({
+        vintage: 2018,
+        grapePrimaryEnc: 42,
+        regionEnc: 10,
+        countryEnc: 1,
+        body: 4,
+        tannin: 4,
+        acidity: 3,
+        sweetness: 1,
+        avgCriticProxyScore: 92,
+      });
+
+      const currentYear = new Date().getFullYear();
+      const isInWindow = currentYear >= prediction.drinkingWindowStart &&
+        currentYear <= prediction.drinkingWindowEnd;
+
+      expect(prediction.currentlyDrinkable).toBe(isInWindow);
     });
   });
 });

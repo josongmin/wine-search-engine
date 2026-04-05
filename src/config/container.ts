@@ -38,6 +38,7 @@ import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
+import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
@@ -83,6 +84,7 @@ export interface Container {
   readonly hybridUseCase: HybridUseCase;
   readonly decomposedSearchUseCase: DecomposedSearchUseCase;
   readonly drinkingWindowUseCase: DrinkingWindowUseCase;
+  readonly batchSearchUseCase: BatchSearchUseCase;
 
   // ML infrastructure
   readonly drinkingWindowPredictor: DrinkingWindowPredictor;
@@ -315,6 +317,7 @@ export function createContainer(_config: Config, pool?: Pool): Container {
 
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
+  const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
   const replayUseCase = new ReplayUseCase({
     searchUseCase,
@@ -354,6 +357,7 @@ export function createContainer(_config: Config, pool?: Pool): Container {
     hybridUseCase,
     decomposedSearchUseCase,
     drinkingWindowUseCase,
+    batchSearchUseCase,
     drinkingWindowPredictor,
   };
 }

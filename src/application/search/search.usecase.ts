@@ -19,8 +19,9 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { CounterfactualReject } from '../../domain/response/model/counterfactual.js';
-import type { DecomposedSearchUseCase } from './decomposed-search.usecase.js';
 import type { DrinkingWindowUseCase } from '../drinking-window/drinking-window.usecase.js';
+import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
+import type { LLMInjectionJudge } from '../../domain/security/service/llm-injection-judge.js';
 
 /**
  * Incoming search request shape.
@@ -69,12 +70,14 @@ export interface SearchUseCaseDeps {
   readonly decisionEngine: DecisionEngine;
   readonly responseBuilder: ResponseBuilder;
   readonly mixedSolver: MixedSolver;
-  /** Decomposed search handler for "A vs B" queries (Epic 14). */
-  readonly decomposedSearch?: DecomposedSearchUseCase | undefined;
   /** Drinking window predictor for wine aging insights (Epic 15). */
   readonly drinkingWindow?: DrinkingWindowUseCase | undefined;
   /** Version strings for RFC-015 snapshot population. */
   readonly snapshotVersions?: SnapshotVersions | undefined;
+  /** Layer 1: Static pattern-based injection sanitizer (Epic 16.1). Required. */
+  readonly querySanitizer: QuerySanitizer;
+  /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). Optional. */
+  readonly injectionJudge?: LLMInjectionJudge | undefined;
 }
 
 /**
@@ -98,6 +101,28 @@ export class SearchUseCase {
   ): Promise<SearchResponseV1> {
     const startTime = Date.now();
 
+    // Step 0: Layer 1 injection defense (static patterns)
+    const sanitizationResult = this.deps.querySanitizer.sanitize(request.query);
+    if (!sanitizationResult.safe) {
+      return this.buildInjectionRejection(requestId, startTime, 'LAYER_1_BLOCKED', sanitizationResult.reason);
+    }
+
+    const sanitizedQuery = sanitizationResult.sanitizedQuery;
+
+    // Step 0b: Layer 2 injection defense (LLM judge) for borderline cases
+    // Only invoked if sanitizer passed and judge is available
+    if (this.deps.injectionJudge !== undefined) {
+      try {
+        const isInjection = await this.deps.injectionJudge.judge(sanitizedQuery);
+        if (isInjection) {
+          return this.buildInjectionRejection(requestId, startTime, 'LAYER_2_BLOCKED', 'LLM_JUDGE_REJECTION');
+        }
+      } catch (err) {
+        // LLM judge failure — log and continue (fail open for availability)
+        console.error('[SearchUseCase] LLM judge error:', err);
+      }
+    }
+
     // Step 1: Plan the query
     const plannerContext: PlannerContext = {
       locale: request.context?.locale,
@@ -116,7 +141,7 @@ export class SearchUseCase {
         : undefined,
     };
 
-    const plan = await this.deps.queryPlanner.plan(request.query, plannerContext);
+    const plan = await this.deps.queryPlanner.plan(sanitizedQuery, plannerContext);
 
     // Step 2: Determine effective route
     const effectiveRoute = this.resolveRoute(plan, request.options?.mode);
@@ -171,7 +196,7 @@ export class SearchUseCase {
 
     // Step 6: Build response
     const queryTimeMs = Date.now() - startTime;
-    const results = this.mapRankedToResultItems(rankedResults);
+    const results = await this.mapRankedToResultItems(rankedResults);
     const counterfactuals = this.buildCounterfactuals(resolveResult, rankedResults);
 
     const response = this.deps.responseBuilder.build({
@@ -437,26 +462,65 @@ export class SearchUseCase {
   }
 
   /**
-   * Maps ranked results to response-level ResultItems.
+   * Maps ranked results to response-level ResultItems with drinking window enrichment (Epic 15).
+   *
+   * Drinking window is populated from:
+   * 1. Cached drinkingWindowStart/End (if available from Vespa)
+   * 2. Dynamic prediction via DrinkingWindowUseCase.check() (if wine attributes available)
    */
-  private mapRankedToResultItems(rankedResults: readonly RankedResult[]): readonly ResultItem[] {
+  private async mapRankedToResultItems(
+    rankedResults: readonly RankedResult[],
+  ): Promise<readonly ResultItem[]> {
     const currentYear = new Date().getFullYear();
+    const items: ResultItem[] = [];
 
-    return rankedResults.map((r) => {
-      // Build drinking window block if data is available
-      const drinkingWindow =
-        r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
-          ? {
-              drinkingWindowStart: r.drinkingWindowStart,
-              drinkingWindowEnd: r.drinkingWindowEnd,
-              currentlyDrinkable:
-                currentYear >= r.drinkingWindowStart &&
-                currentYear <= r.drinkingWindowEnd,
-              confidence: 'high' as const,
-            }
-          : undefined;
+    for (const r of rankedResults) {
+      // Determine drinking window
+      let drinkingWindow: typeof undefined | {
+        readonly drinkingWindowStart: number;
+        readonly drinkingWindowEnd: number;
+        readonly currentlyDrinkable: boolean;
+        readonly confidence: 'high' | 'medium' | 'low';
+        readonly modelVersion?: string | undefined;
+      };
 
-      return {
+      // Option 1: Use cached values from Vespa (if available)
+      if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined) {
+        drinkingWindow = {
+          drinkingWindowStart: r.drinkingWindowStart,
+          drinkingWindowEnd: r.drinkingWindowEnd,
+          currentlyDrinkable:
+            currentYear >= r.drinkingWindowStart && currentYear <= r.drinkingWindowEnd,
+          confidence: 'high' as const,
+        };
+      }
+      // Option 2: Predict dynamically from wine attributes (Epic 15)
+      else if (
+        this.deps.drinkingWindow !== undefined &&
+        r.vintage !== undefined &&
+        r.body !== undefined &&
+        r.tannin !== undefined &&
+        r.acidity !== undefined &&
+        r.sweetness !== undefined &&
+        r.grapePrimaryEnc !== undefined &&
+        r.regionEnc !== undefined &&
+        r.countryEnc !== undefined
+      ) {
+        const prediction = await this.deps.drinkingWindow.check({
+          vintage: r.vintage,
+          grapePrimaryEnc: r.grapePrimaryEnc,
+          regionEnc: r.regionEnc,
+          countryEnc: r.countryEnc,
+          body: r.body,
+          tannin: r.tannin,
+          acidity: r.acidity,
+          sweetness: r.sweetness,
+          avgCriticProxyScore: r.avgCriticProxyScore ?? 0,
+        });
+        drinkingWindow = prediction;
+      }
+
+      const baseItem: ResultItem = {
         entity: {
           entityId: r.entityId,
           canonicalLabel: r.canonicalLabel,
@@ -483,8 +547,79 @@ export class SearchUseCase {
           approximationUsed: false,
         },
         evidenceItems: r.evidenceItems,
-        ...(drinkingWindow !== undefined ? { drinkingWindow } : {}),
       };
-    });
+
+      // Enrich with drinking window if available (exactOptionalPropertyTypes)
+      items.push(
+        drinkingWindow !== undefined
+          ? { ...baseItem, drinkingWindow }
+          : baseItem,
+      );
+    }
+
+    return items;
+  }
+
+  /**
+   * Builds a SearchResponseV1 that rejects the query as a prompt injection attack.
+   *
+   * Returns HTTP 400 (Bad Request) with:
+   * - decisionStatus: 'failed'
+   * - failure_reason: 'POLICY_BLOCKED'
+   * - nextAction: 'reject'
+   * - No results (empty array)
+   * - No evidence items
+   *
+   * Error message is intentionally generic to avoid pattern leakage to attackers.
+   *
+   * @param requestId - Caller-supplied request ID for correlation
+   * @param startTime - Timestamp when query processing began
+   * @param layer - Which layer blocked the query ('LAYER_1_BLOCKED' or 'LAYER_2_BLOCKED')
+   * @param reason - Specific injection reason code from QuerySanitizer or LLMInjectionJudge
+   * @returns SearchResponseV1 with failed status and policy rejection
+   */
+  private buildInjectionRejection(
+    requestId: string,
+    startTime: number,
+    layer: 'LAYER_1_BLOCKED' | 'LAYER_2_BLOCKED',
+    reason: string,
+  ): SearchResponseV1 {
+    const queryTimeMs = Date.now() - startTime;
+
+    // Build a minimal decision snapshot (no version tracking for rejections)
+    const snapshot = {
+      model_versions: {},
+      index_versions: {},
+      policy_rule_version: '1',
+      threshold_profile_id: 'default',
+      planner_version: 'security_gate',
+      feature_flags: {},
+    } as const;
+
+    // Build response with failed status and POLICY_BLOCKED reason
+    return {
+      queryType: 'search' as const,
+      engineDecision: {
+        decisionStatus: 'failed' as const,
+        nextAction: 'reject' as const,
+        route: 'security_gate',
+        decisionConfidence: 0,
+        confidenceSemantics: 'calibrated_decision_confidence' as const,
+        decisionTraceRef: `injection_reject_${layer}_${Date.now()}`,
+        decisionSnapshot: snapshot,
+        failure_reason: 'POLICY_BLOCKED',
+      },
+      results: [],
+      meta: {
+        requestId,
+        queryTimeMs,
+        route: 'security_gate',
+        version: '1.0.0',
+        engine_schema_version: 'search_response_v1',
+        decisionSnapshot: snapshot,
+        response_hash: 'security_rejection',
+        debugRefs: [`injection_defense:${layer}:${reason}`],
+      },
+    };
   }
 }
