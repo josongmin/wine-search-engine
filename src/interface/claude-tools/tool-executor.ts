@@ -212,7 +212,7 @@ export class WineToolExecutor {
    * @param requestId - Parent request ID
    * @returns DrinkingWindowBlock (or error if entity not found)
    */
-  private async executeDrinkingWindow(
+  private executeDrinkingWindow(
     input: unknown,
     requestId: string,
   ): Promise<DrinkingWindowBlock | { error: string }> {
@@ -221,11 +221,13 @@ export class WineToolExecutor {
 
     // In a full implementation, fetch entity from search index using entity_id
     // For now, return a placeholder error indicating this requires entity context
-    console.log(`[WineToolExecutor] check_drinking_window: entity_id=${validated.entity_id}, target_year=${targetYear}, requestId=${requestId}`);
+    console.warn(
+      `[WineToolExecutor] check_drinking_window: entity_id=${validated.entity_id}, target_year=${targetYear}, requestId=${requestId}`,
+    );
 
-    return {
+    return Promise.resolve({
       error: `Entity lookup for ${validated.entity_id} not yet implemented in tool executor. Use search_wines to get entity_id from results first.`,
-    };
+    });
   }
 
   /**

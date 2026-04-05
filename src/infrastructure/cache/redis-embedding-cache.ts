@@ -106,7 +106,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
         if (!keyStr.startsWith('embedding:cache:stats')) {
           entriesCount++;
           try {
-            const size = await this.redis.strlen(keyStr);
+            const size = await this.redis.strLen(keyStr);
             if (typeof size === 'number') {
               cursorSize += size;
             }

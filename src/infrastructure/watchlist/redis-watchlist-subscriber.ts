@@ -81,7 +81,7 @@ export class RedisWatchlistSubscriber {
     handler: WatchlistEventHandler,
   ): Promise<void> {
     try {
-      const event: WatchlistChangeEvent = JSON.parse(payload);
+      const event = JSON.parse(payload) as WatchlistChangeEvent;
       await handler(entityId, event);
     } catch (err: unknown) {
       // Prevent handler errors from propagating

@@ -14,6 +14,7 @@ import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import { registerHealthRoutes } from './routes/health.route.js';
+import { registerWatchlistRoute } from './routes/watchlist.route.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -135,6 +136,7 @@ export async function createServer(
   registerInterpretRoute(app, container);
   registerResolveRoute(app, container);
   registerHybridRoute(app, container);
+  registerWatchlistRoute(app, container);
 
   return app;
 }

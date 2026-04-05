@@ -85,7 +85,10 @@ export class WebhookDelivery {
 
       // Wait before retry (except after last attempt)
       if (attempt < maxAttempts - 1) {
-        await this.sleep(backoffs[attempt]);
+        const backoff = backoffs[attempt];
+        if (backoff !== undefined) {
+          await this.sleep(backoff);
+        }
       }
     }
 
@@ -105,7 +108,9 @@ export class WebhookDelivery {
     const signature = this.computeSignature(watchlistId, body);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 5000); // 5s timeout
 
     try {
       const response = await fetch(url, {
@@ -118,7 +123,8 @@ export class WebhookDelivery {
         signal: controller.signal,
       });
 
-      return response.status >= 200 && response.status < 300;
+      const statusCode = response.status;
+      return statusCode >= 200 && statusCode < 300;
     } finally {
       clearTimeout(timeoutId);
     }

@@ -31,3 +31,8 @@ export {
   CacheEligibilityAnalyzer,
   type CacheEligibilityResult,
 } from './service/cache-eligibility.js';
+
+export {
+  CacheService,
+  type CacheResult,
+} from './service/cache-service.js';

@@ -30,7 +30,6 @@ import {
   excessAurc,
   ece,
   setDiversityScore,
-  anchorPreservationScore,
   producerVariety,
   type RankedHit,
   type DecisionOutcome,

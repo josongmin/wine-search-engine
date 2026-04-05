@@ -197,23 +197,6 @@ export class QuerySanitizer {
   }
 
   /**
-   * Counts how many patterns from a category matched the query.
-   */
-  private countMatches(
-    query: string,
-    category: keyof typeof QuerySanitizer.INJECTION_PATTERNS,
-  ): number {
-    const patterns = QuerySanitizer.INJECTION_PATTERNS[category];
-    let count = 0;
-    for (const pattern of patterns) {
-      if (pattern.test(query)) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  /**
    * Normalizes whitespace: trim and collapse multiple spaces.
    * Non-destructive — does not remove semantic content.
    */

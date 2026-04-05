@@ -345,13 +345,22 @@ export class BatchSearchUseCase {
       };
     }
 
-    // Domain error with specific code or any error with code property
-    if (err instanceof DomainError || (err instanceof Error && 'code' in err)) {
-      const code = (err as any).code;
+    if (err instanceof DomainError) {
+      const code = err.code;
       if (code === 'POLICY_BLOCKED' || code === 'AMBIGUITY_BLOCKED') {
         return {
           code: 'POLICY_BLOCKED',
-          message: (err as Error).message || 'Request blocked by policy',
+          message: err.message || 'Request blocked by policy',
+        };
+      }
+    }
+    if (err instanceof Error && 'code' in err) {
+      const withCode = err as Error & { readonly code?: unknown };
+      const code = typeof withCode.code === 'string' ? withCode.code : undefined;
+      if (code === 'POLICY_BLOCKED' || code === 'AMBIGUITY_BLOCKED') {
+        return {
+          code: 'POLICY_BLOCKED',
+          message: err.message || 'Request blocked by policy',
         };
       }
     }

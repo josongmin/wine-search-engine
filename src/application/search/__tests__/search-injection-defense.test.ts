@@ -234,7 +234,7 @@ describe('SearchUseCase with Injection Defense', () => {
         const request: SearchRequest = { query };
 
         try {
-          await useCase.execute(request, 'test-legit-' + Math.random());
+          await useCase.execute(request, `test-legit-${String(Math.random())}`);
         } catch {
           // Expected to fail later when executing (mocks are incomplete)
           // What matters is that injection defense passed

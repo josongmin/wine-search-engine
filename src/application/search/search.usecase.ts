@@ -12,7 +12,7 @@ import type { DecisionSnapshot, SignalSet } from '../../domain/shared/types/inde
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
-import type { ResultItem } from '../../domain/response/model/result-item.js';
+import type { DrinkingWindowBlock, ResultItem } from '../../domain/response/model/result-item.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
@@ -22,12 +22,7 @@ import type { CounterfactualReject } from '../../domain/response/model/counterfa
 import type { DrinkingWindowUseCase } from '../drinking-window/drinking-window.usecase.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { LLMInjectionJudge } from '../../domain/security/service/llm-injection-judge.js';
-import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';
-import type { CacheEligibilityAnalyzer } from '../../domain/performance/service/cache-eligibility.js';
-import {
-  QueryCacheKeyBuilder,
-  type QueryCacheKey,
-} from '../../domain/performance/model/cache-key.js';
+import type { CacheService } from '../../domain/performance/index.js';
 
 /**
  * Incoming search request shape.
@@ -84,10 +79,8 @@ export interface SearchUseCaseDeps {
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). Optional. */
   readonly injectionJudge?: LLMInjectionJudge | undefined;
-  /** Query cache for full response memoization (Wave 4, Phase 3). Optional. */
-  readonly queryCache?: QueryCachePort | undefined;
-  /** Cache eligibility analyzer for per-mode cacheability (Wave 4, Phase 3). Optional. */
-  readonly cacheEligibility?: CacheEligibilityAnalyzer | undefined;
+  /** Unified cache service for query/embedding/result caching (Wave 4, Phase 3). Optional. */
+  readonly cacheService?: CacheService | undefined;
 }
 
 /**
@@ -105,18 +98,27 @@ export interface SearchUseCaseDeps {
 export class SearchUseCase {
   constructor(private readonly deps: SearchUseCaseDeps) {}
 
-  private buildQueryCacheKey(plan: QueryPlanV1, request: SearchRequest): QueryCacheKey {
-    const cacheKeyBuilder = new QueryCacheKeyBuilder();
-    const expansionTerms = [...plan.expansions.lexical, ...plan.expansions.semantic];
-    return cacheKeyBuilder.build(
-      plan.normalizedQuery,
-      plan.retrievalMode,
-      plan.constraints.hard.map((c) => [c.attribute, c.operator, String(c.value)] as const),
-      expansionTerms,
-      request.sessionContext?.sessionId,
-      request.context?.locale,
-    );
-  }
+  // DISABLED: Caching infrastructure is incomplete; skip for now (Wave 4 backlog)
+  // private buildQueryCacheKey(plan: QueryPlanV1, request: SearchRequest): QueryCacheKey {
+  //   const cacheKeyBuilder = new QueryCacheKeyBuilder();
+  //   const expansionTerms = [...plan.expansions.lexical, ...plan.expansions.semantic];
+  //   const constraintTuples = plan.constraints.hard.map((c) => {
+  //     const v = c.value;
+  //     const valueStr =
+  //       typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+  //         ? String(v)
+  //         : JSON.stringify(v);
+  //     return [c.attribute, c.operator, valueStr] as const;
+  //   });
+  //   return cacheKeyBuilder.build(
+  //     plan.normalizedQuery,
+  //     plan.retrievalMode,
+  //     constraintTuples,
+  //     expansionTerms,
+  //     request.sessionContext?.sessionId,
+  //     request.context?.locale,
+  //   );
+  // }
 
   async execute(
     request: SearchRequest,
@@ -168,24 +170,32 @@ export class SearchUseCase {
 
     // Step 1b: Query cache check (Wave 4, Phase 3)
     // Cache hit avoids resolution, retrieval, ranking, decision engine
-    // Check after planning so we have the actual retrievalMode from the plan
-    if (this.deps.queryCache && this.deps.cacheEligibility) {
-      const eligibility = this.deps.cacheEligibility.analyze(plan);
-      if (eligibility.isCacheable) {
-        const cacheKey = this.buildQueryCacheKey(plan, request);
+    // RFC-015: Validates snapshot version freshness
+    if (this.deps.cacheService) {
+      // Normalize sessionContext: omit previousEntities to match CacheService interface
+      const cacheSessionContext = request.sessionContext
+        ? { sessionId: request.sessionContext.sessionId }
+        : undefined;
 
-        const cachedResponse = await this.deps.queryCache.get(cacheKey);
-        if (cachedResponse) {
-          // Cache hit: update requestId and latency only
-          return {
-            ...cachedResponse,
-            meta: {
-              ...cachedResponse.meta,
-              requestId,
-              queryTimeMs: Date.now() - startTime,
-            },
-          };
-        }
+      const cacheResult = await this.deps.cacheService.getSearchResponse(
+        plan,
+        {
+          ...(cacheSessionContext !== undefined ? { sessionContext: cacheSessionContext } : {}),
+          ...(request.context !== undefined ? { context: { locale: request.context.locale } } : {}),
+        },
+        this.buildSnapshot(plan), // Current snapshot for version checking
+      );
+
+      if (cacheResult.hit && cacheResult.data) {
+        // Cache hit: update requestId and latency only
+        return {
+          ...cacheResult.data,
+          meta: {
+            ...cacheResult.data.meta,
+            requestId,
+            queryTimeMs: Date.now() - startTime,
+          },
+        };
       }
     }
 
@@ -257,16 +267,23 @@ export class SearchUseCase {
 
     // Step 7: Cache response (Wave 4, Phase 3)
     // Cache is populated after successful response building for eligible modes
-    if (this.deps.queryCache && this.deps.cacheEligibility) {
-      const eligibility = this.deps.cacheEligibility.analyze(plan);
-      if (eligibility.isCacheable) {
-        const cacheKey = this.buildQueryCacheKey(plan, request);
-        try {
-          await this.deps.queryCache.set(cacheKey, response, eligibility.ttlSeconds);
-        } catch (err) {
-          // Cache set failure is non-fatal; log and continue
-          console.error('[SearchUseCase] Failed to cache response:', err);
-        }
+    if (this.deps.cacheService) {
+      // Normalize sessionContext: omit previousEntities to match CacheService interface
+      const cacheSessionContext = request.sessionContext
+        ? { sessionId: request.sessionContext.sessionId }
+        : undefined;
+
+      const cached = await this.deps.cacheService.setSearchResponse(
+        plan,
+        {
+          ...(cacheSessionContext !== undefined ? { sessionContext: cacheSessionContext } : {}),
+          ...(request.context !== undefined ? { context: { locale: request.context.locale } } : {}),
+        },
+        response,
+      );
+      if (!cached) {
+        // Log cache miss (circuit breaker, ineligible, etc.)
+        // This is non-fatal; response still returned
       }
     }
 
@@ -567,16 +584,17 @@ export class SearchUseCase {
     );
 
     // Map results back for O(1) lookup
-    const predictionMap = new Map<string, any>();
+    const predictionMap = new Map<string, DrinkingWindowBlock>();
     resultsPendingPrediction.forEach((r, idx) => {
-      if (predictions[idx]?.status === 'fulfilled') {
-        predictionMap.set(r.entityId, predictions[idx].value);
+      const settled = predictions[idx];
+      if (settled?.status === 'fulfilled') {
+        predictionMap.set(r.entityId, settled.value);
       }
     });
 
     // Build items with drinking windows (single pass)
     return rankedResults.map((r) => {
-      let drinkingWindow: typeof undefined | any;
+      let drinkingWindow: DrinkingWindowBlock | undefined;
 
       // Priority 1: Cached from Vespa
       if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined) {

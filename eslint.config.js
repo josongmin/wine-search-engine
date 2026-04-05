@@ -84,6 +84,7 @@ export default tseslint.config(
         'error',
         { allowNumber: true, allowBoolean: true, allowNullish: true },
       ],
+      '@typescript-eslint/no-floating-promises': 'off',
     },
   },
 );

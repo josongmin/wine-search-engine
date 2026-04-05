@@ -122,7 +122,7 @@ export class AdmissionGate {
     // constraints exist means the entity was admitted without verifying
     // compliance with mandatory filters.
     const hasHardConstraints = input.queryPlan.constraints.hard.length > 0;
-    if (hasHardConstraints && input.evidenceSummary?.constraintEvidencePresent !== true) {
+    if (hasHardConstraints && input.evidenceSummary.constraintEvidencePresent !== true) {
       return this.reject('HARD_CONSTRAINT_VIOLATION', input, snapshot);
     }
 
@@ -137,7 +137,7 @@ export class AdmissionGate {
     //      the trail must be substantiated (RFC-011 §11).
     const admissionContext = input.queryPlan.admission_context;
     if (admissionContext?.requires_anchor_evidence === true) {
-      if (input.evidenceSummary?.anchorEvidencePresent !== true) {
+      if (input.evidenceSummary.anchorEvidencePresent !== true) {
         return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
       }
 

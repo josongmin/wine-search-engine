@@ -136,21 +136,19 @@ Classify this query:`;
         ],
       });
 
-      // Extract text from response
-      const textContent = response.content.find(
-        (block): block is { type: 'text'; text: string } => block.type === 'text',
-      );
-      if (textContent === undefined) {
+      const textBlock = response.content.find((block) => block.type === 'text');
+      if (!textBlock) {
         throw new Error('No text content in Claude response');
       }
+      const textContent = textBlock as { type: 'text'; text: string };
 
       // Parse JSON response
       try {
-        const raw = textContent.text;
+        const raw: unknown = textContent.text;
         if (typeof raw !== 'string') {
           throw new Error('Claude text block was not a string');
         }
-        const parsedUnknown: unknown = JSON.parse(raw);
+        const parsedUnknown: unknown = JSON.parse(raw) as unknown;
         const parsed = parsedUnknown as { is_injection?: unknown };
         return parsed.is_injection === true;
       } catch {

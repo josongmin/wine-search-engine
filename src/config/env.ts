@@ -70,6 +70,12 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default('false'),
+
+  /** Confidence refusal threshold for hallucination prevention (Epic 17.3).
+   * When set (in range [0, 1]), enables confidence-based refusal in AdmissionGate.
+   * Default: unset (confidence check disabled, backward compatible).
+   * Recommended: 0.45 (AURC-calibrated operating point). */
+  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().min(0).max(1).optional(),
 });
 
 type EnvVars = z.infer<typeof envSchema>;
@@ -138,6 +144,11 @@ export const config = {
   /** Watchlist webhook settings (Epic 17.1). */
   watchlist: {
     webhookSecret: parsed.WEBHOOK_SECRET,
+  },
+
+  /** Confidence refusal settings (Epic 17.3: Hallucination Verify). */
+  confidenceRefusal: {
+    threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
   },
 
   /** Kill switches for feature flags / circuit breakers. */

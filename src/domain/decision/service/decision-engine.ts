@@ -9,6 +9,7 @@ import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
 import { AdmissionGate } from './admission-gate.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import { identityHash } from '../../shared/utils/hash.js';
+import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
 
 /**
  * Internal intermediate state used during decision processing.
@@ -49,9 +50,20 @@ export class DecisionEngine {
   private readonly evidenceGate: EvidenceGate;
   private readonly admissionGate: AdmissionGate;
 
-  constructor(private readonly thresholdStore: ThresholdStore) {
+  /**
+   * Creates a new DecisionEngine.
+   *
+   * @param thresholdStore - Store for threshold profiles used in numeric gates.
+   * @param confidenceRefusalPolicy - Optional confidence refusal policy (Epic 17.3).
+   *   If provided, enables confidence-based refusal in the AdmissionGate.
+   *   If absent, confidence check is skipped (backward compatible).
+   */
+  constructor(
+    private readonly thresholdStore: ThresholdStore,
+    confidenceRefusalPolicy?: ConfidenceRefusalPolicy,
+  ) {
     this.evidenceGate = new EvidenceGate();
-    this.admissionGate = new AdmissionGate();
+    this.admissionGate = new AdmissionGate(confidenceRefusalPolicy);
   }
 
   /**

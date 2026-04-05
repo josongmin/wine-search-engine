@@ -30,6 +30,7 @@ import { ScoreAggregator } from '../domain/ranking/service/score-aggregator.js';
 import { EvidenceMapper } from '../domain/ranking/service/evidence-mapper.js';
 import { DecisionEngine } from '../domain/decision/service/decision-engine.js';
 import { ResponseBuilder } from '../domain/response/service/response-builder.js';
+import { ConfidenceRefusalPolicy } from '../domain/decision/service/confidence-refusal.js';
 import { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
 import { SearchUseCase } from '../application/search/search.usecase.js';
 import { ReplayUseCase } from '../application/search/replay.usecase.js';
@@ -67,7 +68,12 @@ import { LLMInjectionJudge } from '../domain/security/service/llm-injection-judg
 import { getRedisClient } from '../infrastructure/db/redis-client.js';
 import { RedisQueryCache } from '../infrastructure/cache/redis-query-cache.js';
 import { RedisEmbeddingCache } from '../infrastructure/cache/redis-embedding-cache.js';
-import { CacheEligibilityAnalyzer } from '../domain/performance/service/cache-eligibility.js';
+import { CacheService } from '../domain/performance/index.js';
+import { WineToolExecutor } from '../interface/claude-tools/tool-executor.js';
+import { AdaptiveToolExecutor } from '../interface/claude-tools/adaptive-tool-executor.js';
+import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
+import { RedisWatchlistSubscriber } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
+import { WebhookDelivery } from '../infrastructure/watchlist/webhook-delivery.js';
 
 /**
  * The DI container — holds all wired domain services and use cases.
@@ -94,6 +100,15 @@ export interface Container {
 
   // ML infrastructure
   readonly drinkingWindowPredictor: DrinkingWindowPredictor;
+
+  // Epic 17.2: Claude tool integration
+  readonly wineToolExecutor: WineToolExecutor;
+  readonly adaptiveToolExecutor: AdaptiveToolExecutor;
+
+  // Epic 17.1: Watchlist infrastructure
+  readonly watchlistPublisher: InstanceType<typeof RedisWatchlistPublisher>;
+  readonly watchlistSubscriber: InstanceType<typeof RedisWatchlistSubscriber>;
+  readonly webhookDelivery: InstanceType<typeof WebhookDelivery>;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -256,16 +271,21 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
   );
 
   // ── Cache infrastructure (Wave 4, Phase 3) ───────────────────────────────
-  let queryCache: InstanceType<typeof RedisQueryCache> | undefined;
-  let embeddingCache: InstanceType<typeof RedisEmbeddingCache> | undefined;
-  const cacheEligibility = new CacheEligibilityAnalyzer();
+  let cacheService: CacheService | undefined;
 
-  // Initialize Redis-backed caches if Redis is available
+  // Initialize unified cache service with Redis backends if available
   if (!_config.killSwitch.queryCache) {
     try {
       const redisClient = await getRedisClient();
-      queryCache = new RedisQueryCache(redisClient);
-      embeddingCache = new RedisEmbeddingCache(redisClient);
+      const queryCache = new RedisQueryCache(redisClient);
+      const embeddingCache = new RedisEmbeddingCache(redisClient);
+
+      cacheService = new CacheService(
+        queryCache,
+        embeddingCache,
+        5, // circuit breaker threshold (errors before opening)
+        60000, // circuit breaker reset time (ms)
+      );
       console.warn('[Container] Cache infrastructure initialized');
     } catch (err) {
       console.warn('[Container] Failed to initialize caches; continuing without:', err);
@@ -279,7 +299,8 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     searchIndex,
     embeddingService,
     fusionService,
-    embeddingCache,
+    cacheService,
+    _config.embedding.model, // Embedding model ID from config (not hardcoded)
   );
 
   // ── Domain services — ranking ─────────────────────────────────────────────
@@ -291,7 +312,13 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
   });
 
   // ── Domain services — decision, response, mixed ───────────────────────────
-  const decisionEngine = new DecisionEngine(thresholdStore);
+  // Confidence refusal policy (Epic 17.3): optional, only if env var is set
+  let confidenceRefusalPolicy: ConfidenceRefusalPolicy | undefined;
+  if (_config.confidenceRefusal.threshold !== undefined) {
+    confidenceRefusalPolicy = new ConfidenceRefusalPolicy(_config.confidenceRefusal.threshold);
+  }
+
+  const decisionEngine = new DecisionEngine(thresholdStore, confidenceRefusalPolicy);
   const responseBuilder = new ResponseBuilder();
 
   const anchorProfiler = new AnchorProfiler();
@@ -341,7 +368,7 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
   // Create independent use cases first (no dependencies on SearchUseCase)
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
-  // Create SearchUseCase with Epic 15 drinkingWindow + Wave 4 caches injected
+  // Create SearchUseCase with Epic 15 drinkingWindow + Wave 4 unified cache service
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
@@ -354,8 +381,7 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     querySanitizer,
     injectionJudge,
     drinkingWindow: drinkingWindowUseCase, // ← Epic 15: Inject drinking window
-    queryCache, // ← Wave 4, Phase 3: Query cache (optional)
-    cacheEligibility, // ← Wave 4, Phase 3: Cache eligibility analyzer
+    cacheService, // ← Wave 4, Phase 3: Unified cache service (query + embedding + version checking)
   });
 
   // Dependent use cases created after SearchUseCase
@@ -385,6 +411,29 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     snapshotVersions,
   });
 
+  // ── Epic 17.2: Claude tool integration ──────────────────────────────────────
+  const wineToolExecutor = new WineToolExecutor({
+    searchUseCase,
+    decomposedSearchUseCase,
+    drinkingWindowUseCase,
+  });
+
+  const adaptiveToolExecutor = new AdaptiveToolExecutor(wineToolExecutor);
+
+  // ── Epic 17.1: Watchlist infrastructure ─────────────────────────────────────
+  const watchlistPublisher = new RedisWatchlistPublisher();
+  const watchlistSubscriber = new RedisWatchlistSubscriber();
+
+  // Webhook delivery requires WEBHOOK_SECRET; gracefully skip if not configured
+  let webhookDelivery: WebhookDelivery;
+  if (_config.watchlist.webhookSecret) {
+    webhookDelivery = new WebhookDelivery(_config.watchlist.webhookSecret);
+  } else {
+    // Create with dummy secret (will fail if used); production requires WEBHOOK_SECRET
+    webhookDelivery = new WebhookDelivery('dummy-secret-min-16-chars!!!');
+    console.warn('[Container] WEBHOOK_SECRET not configured; watchlist webhooks disabled');
+  }
+
   return {
     queryPlanner,
     entityResolver,
@@ -402,5 +451,10 @@ export async function createContainer(_config: Config, pool?: Pool): Promise<Con
     drinkingWindowUseCase,
     batchSearchUseCase,
     drinkingWindowPredictor,
+    wineToolExecutor,
+    adaptiveToolExecutor,
+    watchlistPublisher,
+    watchlistSubscriber,
+    webhookDelivery,
   };
 }

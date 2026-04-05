@@ -56,9 +56,6 @@ export interface HybridCandidate {
   /** Critic score normalized from 0-100 to raw value (80–100 or 0 if absent). */
   readonly criticScoreNormalized?: number | undefined;
 
-  /** Primary grape variety (e.g. "Cabernet Sauvignon"). */
-  readonly grapePrimary?: string | undefined;
-
   /** Country of origin (e.g. "France"). */
   readonly country?: string | undefined;
 

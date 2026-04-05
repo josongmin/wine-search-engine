@@ -11,7 +11,7 @@
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
-import { WineToolExecutor, type WineToolExecutorDeps, type SearchToolInput } from './tool-executor.js';
+import { type WineToolExecutor } from './tool-executor.js';
 
 /**
  * Result from executeWithFallback, includes fallback tracking.
@@ -121,11 +121,12 @@ export class AdaptiveToolExecutor {
   ): boolean {
     // Check if it's a SearchResponseV1
     if ('queryType' in result && result.queryType === 'search') {
-      const searchResult = result as SearchResponseV1;
+      const searchResult: SearchResponseV1 = result;
+      const status = searchResult.engineDecision.decisionStatus;
       return (
         searchResult.results.length === 0 ||
-        searchResult.engineDecision?.decisionStatus === 'failed' ||
-        searchResult.engineDecision?.decisionStatus === 'ambiguous'
+        status === 'failed' ||
+        status === 'ambiguous'
       );
     }
 

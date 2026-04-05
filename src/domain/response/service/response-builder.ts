@@ -277,7 +277,8 @@ export class ResponseBuilder {
     if (Array.isArray(value)) {
       return `[${value.join(', ')}]`;
     }
-    return `${value.min}-${value.max}`;
+    const range = value as { min: number; max: number };
+    return `${range.min}-${range.max}`;
   }
 
   /**
