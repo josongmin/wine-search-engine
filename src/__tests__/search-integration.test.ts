@@ -542,14 +542,16 @@ describe('Search Pipeline Integration', () => {
         evidenceSummary: {
           identityEvidencePresent: true,
           anchorEvidencePresent: true,
+          constraintEvidencePresent: true,
+          evidenceRefCount: 1,
         },
         evidenceItems: [
           {
-            type: 'alias_match',
+            type: 'anchor_match',
             source: 'alias_index',
             contribution: '+0.80',
             strength: 'high' as const,
-            provenance: 'Matched alias in identity graph.',
+            provenance: 'Matched anchor in identity graph.',
           },
         ],
         ...(resolverResult.conformalSetSize !== undefined
