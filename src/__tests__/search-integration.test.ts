@@ -209,7 +209,7 @@ const TEST_SNAPSHOT: DecisionSnapshot = {
   model_versions: { embedding: 'bge-m3-v1' },
   index_versions: { wine_content: '2026-04-01' },
   policy_rule_version: '1.0.0',
-  threshold_profile_id: 'default-v1',
+  threshold_profile_id: 'default-v2',
   planner_version: '1.0.0',
   feature_flags: {},
 };
