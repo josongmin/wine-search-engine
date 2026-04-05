@@ -177,16 +177,24 @@ export class VespaSearchIndex implements SearchIndexPort {
     const filterClause = buildSparseFilters(filters ?? []);
 
     // Per-query clause:
-    //   userInput(@queryN)          — general multi-term match via WAND
-    //   canonical_label contains phrase(@queryN)   — exact phrase for full wine names
-    //   aliases_identity_safe contains phrase(@queryN) — exact phrase for identity aliases
-    // The OR of phrase operators ensures "Château Margaux 2015" is found even
-    // when the tokeniser would split the query differently than WAND expects.
+    //   userInput(@queryN)                             — general multi-term match via WAND
+    //   canonical_label contains phrase(@queryN)        — exact phrase for full wine names
+    //   aliases_identity_safe contains phrase(@queryN)  — exact phrase for identity aliases
+    //   search_text_ko contains phrase(@queryN)         — Korean tasting notes / descriptions
+    //   search_text_en contains phrase(@queryN)         — English tasting notes / doc2query
+    //   producer contains phrase(@queryN)               — producer name exact match
+    //
+    // The OR of phrase operators ensures Korean queries like "샤토 마고" and
+    // semantic queries matching doc2query text are found even when the WAND
+    // tokeniser splits differently.
     const queryClauses = queries.map(
       (_, i) =>
         `(userInput(@query${i})` +
         ` OR canonical_label contains phrase(@query${i})` +
-        ` OR aliases_identity_safe contains phrase(@query${i}))`,
+        ` OR aliases_identity_safe contains phrase(@query${i})` +
+        ` OR search_text_ko contains phrase(@query${i})` +
+        ` OR search_text_en contains phrase(@query${i})` +
+        ` OR producer contains phrase(@query${i}))`,
     );
 
     const queryUnion =

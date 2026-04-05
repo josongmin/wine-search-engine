@@ -1,6 +1,18 @@
 import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
 
 /**
+ * Drinking window prediction block (Epic 15).
+ * Indicates when a wine is best to drink.
+ */
+export interface DrinkingWindowBlock {
+  readonly drinkingWindowStart: number;   // Year when wine becomes drinkable
+  readonly drinkingWindowEnd: number;     // Year when wine is past peak
+  readonly currentlyDrinkable: boolean;   // true if current year is within window
+  readonly confidence: 'high' | 'medium' | 'low';
+  readonly modelVersion?: string | undefined;
+}
+
+/**
  * Compact summary of a wine entity returned in search results.
  */
 export interface EntitySummary {
@@ -113,4 +125,7 @@ export interface ResultItem {
 
   /** Optional human-readable summary of the evidence for display. */
   readonly humanReadableEvidenceSummary?: string | undefined;
+
+  /** Drinking window prediction (when wine is best to drink). Populated when available. */
+  readonly drinkingWindow?: DrinkingWindowBlock | undefined;
 }
