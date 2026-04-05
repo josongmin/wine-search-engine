@@ -52,13 +52,9 @@ export interface QueryClassWeights {
 }
 
 /**
- * LambdaMART ranker: learns optimal ranking from evaluation results.
+ * Trains a LambdaMART model for a specific query class.
  */
-export namespace LambdaMARTRanker {
-  /**
-   * Trains a LambdaMART model for a specific query class.
-   */
-  export function train(
+export function trainLambdaMARTModel(
     examples: readonly LambdaMARTExample[],
     queryClass: string,
     learningRate: number = 0.01,

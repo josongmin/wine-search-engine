@@ -56,6 +56,12 @@ export function computeDynamicGapThreshold(
     return 0.03;
   }
 
+  // Entity exact: highest precision required, widest gap (10%)
+  // Ensures only truly dominant candidates resolve when explicit exact match is required
+  if (queryClass === 'entity_exact') {
+    return 0.10;
+  }
+
   // Ambiguous short form: wider gap (8%)
   if (queryClass === 'ambiguous_short_form') {
     return 0.08;
