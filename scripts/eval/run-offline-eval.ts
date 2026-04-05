@@ -602,19 +602,19 @@ async function run(): Promise<void> {
   }
 
   // Release gate check (only for gate tier)
+  const gateViolations: string[] = [];
   if (args.tier === 'gate') {
     console.log('\n=== RELEASE GATE ===');
-    const violations: string[] = [];
 
     // Global metric gates
     if (evalResult.wrong_top1_rate > RELEASE_GATES.wrong_top1_rate_max) {
-      violations.push(`wrong_top1_rate ${evalResult.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.wrong_top1_rate_max}`);
+      gateViolations.push(`wrong_top1_rate ${evalResult.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.wrong_top1_rate_max}`);
     }
     if (evalResult.recall_at_100 < RELEASE_GATES.recall_at_100_min) {
-      violations.push(`recall_at_100 ${evalResult.recall_at_100.toFixed(4)} < ${RELEASE_GATES.recall_at_100_min}`);
+      gateViolations.push(`recall_at_100 ${evalResult.recall_at_100.toFixed(4)} < ${RELEASE_GATES.recall_at_100_min}`);
     }
     if (evalResult.ece > 0.10) {
-      violations.push(`ece ${evalResult.ece.toFixed(4)} > 0.10 (calibration degraded)`);
+      gateViolations.push(`ece ${evalResult.ece.toFixed(4)} > 0.10 (calibration degraded)`);
     }
 
     // Scenario-specific gates
@@ -622,7 +622,7 @@ async function run(): Promise<void> {
     for (const s of entitySlices) {
       const slice = evalResult.by_scenario[s];
       if (slice && slice.wrong_top1_rate > RELEASE_GATES.entity_resolve_wrong_top1_max) {
-        violations.push(`scenario ${s} wrong_top1_rate ${slice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.entity_resolve_wrong_top1_max}`);
+        gateViolations.push(`scenario ${s} wrong_top1_rate ${slice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.entity_resolve_wrong_top1_max}`);
       }
     }
 
@@ -630,23 +630,67 @@ async function run(): Promise<void> {
     for (const s of setSlices) {
       const slice = evalResult.by_scenario[s];
       if (slice && slice.ndcg_at_10 < RELEASE_GATES.set_retrieval_recall_at_10_min) {
-        violations.push(`scenario ${s} ndcg_at_10 ${slice.ndcg_at_10.toFixed(4)} < ${RELEASE_GATES.set_retrieval_recall_at_10_min}`);
+        gateViolations.push(`scenario ${s} ndcg_at_10 ${slice.ndcg_at_10.toFixed(4)} < ${RELEASE_GATES.set_retrieval_recall_at_10_min}`);
       }
     }
 
     const noMatchSlice = evalResult.by_scenario['no_match'];
     if (noMatchSlice && noMatchSlice.wrong_top1_rate > RELEASE_GATES.no_match_false_resolve_max) {
-      violations.push(`no_match false_resolve ${noMatchSlice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.no_match_false_resolve_max}`);
+      gateViolations.push(`no_match false_resolve ${noMatchSlice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.no_match_false_resolve_max}`);
     }
 
-    if (violations.length === 0) {
+    // Epic 11: Mode-specific release gates (advisory, non-blocking in phase 1)
+    if (evalResult.by_mode) {
+      for (const [mode, metrics] of Object.entries(evalResult.by_mode)) {
+        const gates = (MODE_RELEASE_GATES as Record<string, Record<string, number>>)[mode];
+        if (!gates) continue;
+
+        // Advisory gates: log but don't block
+        const modeViolations: string[] = [];
+        if (gates.wrong_top1_rate_max !== undefined && metrics.wrong_top1_rate > gates.wrong_top1_rate_max) {
+          modeViolations.push(`${mode} wrong_top1_rate ${metrics.wrong_top1_rate.toFixed(4)} > ${gates.wrong_top1_rate_max}`);
+        }
+        if (gates.ndcg_at_10_min !== undefined && metrics.ndcg_at_10 < gates.ndcg_at_10_min) {
+          modeViolations.push(`${mode} ndcg_at_10 ${metrics.ndcg_at_10.toFixed(4)} < ${gates.ndcg_at_10_min}`);
+        }
+        if (gates.recall_at_10_min !== undefined && metrics.recall_at_10 < gates.recall_at_10_min) {
+          modeViolations.push(`${mode} recall_at_10 ${metrics.recall_at_10.toFixed(4)} < ${gates.recall_at_10_min}`);
+        }
+        if (modeViolations.length > 0) {
+          console.log(`  [ADVISORY] Mode ${mode}:`);
+          for (const v of modeViolations) {
+            console.log(`    - ${v}`);
+          }
+        }
+      }
+    }
+
+    // Epic 11: Entity target type gates (advisory)
+    if (evalResult.by_target_type) {
+      const entityTypeGate = 0.10; // max confusion rate
+      for (const [targetType, metrics] of Object.entries(evalResult.by_target_type)) {
+        const confusionRate = 1 - metrics.correct_type_rate;
+        if (confusionRate > entityTypeGate) {
+          console.log(`  [ADVISORY] Entity type ${targetType} confusion_rate ${confusionRate.toFixed(4)} > ${entityTypeGate}`);
+        }
+      }
+    }
+
+    // Final verdict
+    if (gateViolations.length === 0) {
       console.log('  ✅ RELEASE GATE PASSED');
     } else {
       console.log('  ❌ RELEASE GATE FAILED:');
-      for (const v of violations) {
+      for (const v of gateViolations) {
         console.log(`    - ${v}`);
       }
     }
+
+    // Add gate verdict to result
+    evalResult.release_gate_verdict = {
+      passed: gateViolations.length === 0,
+      failures: gateViolations,
+    };
   }
 
   console.log(`\n  Results written to: ${args.output}`);

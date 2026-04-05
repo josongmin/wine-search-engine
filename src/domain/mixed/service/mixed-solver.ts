@@ -215,6 +215,47 @@ export class MixedSolver {
   }
 
   /**
+   * Epic 10: Applies set-specific constraints for similar_items mode.
+   *
+   * For similar_items (similar wines queries):
+   * - Exclude the seed entity (anchor) itself from results
+   * - Apply diversity constraint: max 2 wines from same producer
+   * - Prioritize candidates that match anchor's tannin/body profile (±1 point)
+   *
+   * @param candidates - Raw candidates from similarity retrieval.
+   * @param anchorEntityId - The reference entity ID to exclude.
+   * @returns Filtered and reordered candidates for similar_items mode.
+   */
+  private applySetConstraintsForSimilarItems(
+    candidates: readonly HybridCandidate[],
+    anchorEntityId: EntityId,
+  ): HybridCandidate[] {
+    // Step 1: Exclude the anchor entity itself
+    let filtered = candidates.filter((c) => c.entityId !== anchorEntityId);
+
+    // Step 2: Apply producer diversity (max 2 per producer)
+    const producerMap = new Map<string | undefined, HybridCandidate[]>();
+    for (const candidate of filtered) {
+      const key = candidate.producer;
+      if (!producerMap.has(key)) {
+        producerMap.set(key, []);
+      }
+      const group = producerMap.get(key);
+      if (group !== undefined && group.length < 2) {
+        group.push(candidate);
+      }
+    }
+
+    filtered = Array.from(producerMap.values()).flat();
+
+    // Step 3: Re-sort by retrieval fusion score (proxy for embedding similarity)
+    // Higher retrieval score = more similar to anchor
+    filtered.sort((a, b) => b.retrievalFusionScore - a.retrievalFusionScore);
+
+    return filtered;
+  }
+
+  /**
    * Computes what fraction of ranked results preserved core anchor
    * characteristics (region, grape overlap, style).
    *

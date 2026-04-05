@@ -25,3 +25,8 @@ export {
   type RetrievalPhase,
 } from './service/cascade-router.js';
 export { ConstraintFilter } from './service/constraint-filter.js';
+export { BrowseRetriever } from './service/browse-retriever.js';
+export {
+  CompareRetriever,
+  type ComparisonCandidate,
+} from './service/compare-retriever.js';

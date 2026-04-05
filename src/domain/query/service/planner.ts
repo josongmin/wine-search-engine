@@ -815,4 +815,70 @@ export class Planner {
       constraintConfidence,
     };
   }
+
+  /**
+   * Infers the target entity type that the query targets (Epic 8).
+   *
+   * Inference rules (in priority order):
+   * 1. If intent is 'facet_search' or 'semantic_discovery' with only style constraints → 'style'
+   * 2. If anchor present and explicit vintage year in query → 'wine'
+   * 3. If anchor present and no vintage, no wine-specific terms → likely 'producer'
+   * 4. If region keywords present → 'region'
+   * 5. Otherwise → 'unknown' (let retrieval strategy decide)
+   *
+   * Returns undefined to signal "no clear target type detected" (applies default strategy).
+   */
+  private inferTargetEntityType(
+    normalizedQuery: string,
+    anchors: readonly AnchorCandidate[],
+    constraints: ConstraintBundle,
+    intent: QueryIntent,
+  ): QueryTargetType | undefined {
+    // Check for style-only constraints (no hard constraints about wine type or vintage).
+    const hasOnlyStyleConstraints =
+      constraints.hard.length === 0 &&
+      constraints.soft.every((c) =>
+        ['body', 'sweetness', 'acidity', 'tannin', 'style'].includes(c.attribute),
+      );
+
+    // If semantic discovery or facet search with only style constraints → 'style'
+    if (
+      (intent === 'semantic_discovery' || intent === 'facet_search') &&
+      hasOnlyStyleConstraints &&
+      anchors.length === 0
+    ) {
+      return 'style';
+    }
+
+    // Check for explicit vintage year in query (e.g., "Margaux 2015").
+    const hasVintageYear = VINTAGE_YEAR_PATTERN.test(normalizedQuery);
+
+    // If anchor and vintage year present → wine
+    if (anchors.length > 0 && hasVintageYear) {
+      return 'wine';
+    }
+
+    // Check for region keywords.
+    const hasRegionKeyword = REGION_KEYWORDS.some((re) =>
+      re.test(normalizedQuery),
+    );
+    if (hasRegionKeyword) {
+      return 'region';
+    }
+
+    // If anchor but no vintage, no wine-specific terms → likely producer.
+    // This covers queries like "안티노리" (Antinori) where we want producer set, not wine set.
+    if (anchors.length > 0 && !hasVintageYear) {
+      // Check for explicit wine type constraint (which would indicate wine query).
+      const hasWineTypeConstraint = constraints.hard.some(
+        (c) => c.attribute === 'wine_type',
+      );
+      if (!hasWineTypeConstraint) {
+        return 'producer';
+      }
+    }
+
+    // No clear signal detected.
+    return undefined;
+  }
 }
