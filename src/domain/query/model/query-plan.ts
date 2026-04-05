@@ -1,6 +1,7 @@
 import type { QueryClass, ConstraintBundle } from '../../shared/types/index.js';
 import type { QueryIntent } from './query-intent.js';
 import type { QueryRoute } from './query-route.js';
+import type { RetrievalMode } from './retrieval-mode.js';
 import type { AnchorCandidate } from './anchor-candidate.js';
 import type { QueryPolicy } from './query-policy.js';
 import type { QueryUncertainty } from './query-uncertainty.js';
@@ -33,6 +34,9 @@ export interface QueryPlanV1 {
 
   /** Routing target for downstream execution. */
   readonly route: QueryRoute;
+
+  /** Retrieval mode: fine-grained strategy beyond route (RFC-017 §8.3). */
+  readonly retrievalMode: RetrievalMode;
 
   /** Query class label used to select thresholds from the threshold profile. */
   readonly queryClass: QueryClass;

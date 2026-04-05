@@ -107,10 +107,13 @@ export class FusionService {
       }
     }
 
-    // Build rankings array for RRF
-    const rankings: ReadonlyArray<ReadonlyMap<string, number>> = anchorHits
-      ? [sparseRankMap, denseRankMap, anchorRankMap]
-      : [sparseRankMap, denseRankMap];
+    // Build rankings array for RRF — only include non-empty rankings.
+    // Fusing with an empty ranking (dense off) adds no information and
+    // dilutes the sparse signal (divides by more rankings with no benefit).
+    const rankings: ReadonlyMap<string, number>[] = [];
+    if (sparseRankMap.size > 0) rankings.push(sparseRankMap);
+    if (denseRankMap.size > 0) rankings.push(denseRankMap);
+    if (anchorHits && anchorRankMap.size > 0) rankings.push(anchorRankMap);
 
     const fusedScores = rrfFuse(rankings, effectiveK);
 

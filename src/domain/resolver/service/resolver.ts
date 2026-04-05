@@ -54,7 +54,7 @@ export interface ResolverInput {
  *
  * Value should be tuned via AURC on the gate eval set (RFC-009 §5.3).
  */
-const DEFAULT_ALPHA = 0.3;
+export const DEFAULT_ALPHA = 0.3;
 
 /**
  * Computes the conformal prediction set size for a single query.

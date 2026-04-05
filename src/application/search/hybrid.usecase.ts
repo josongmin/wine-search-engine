@@ -9,7 +9,7 @@ import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import { computeConformalSetSize } from '../../domain/resolver/service/resolver.js';
+import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
@@ -128,7 +128,7 @@ export class HybridUseCase {
         appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['HYBRID_ONLY_ROUTE'],
       },
-      conformalSetSize: computeConformalSetSize(hybridDecisionC, 0.1, rankedResults.length),
+      conformalSetSize: computeConformalSetSize(hybridDecisionC, DEFAULT_ALPHA, rankedResults.length),
     };
 
     // Build decision input

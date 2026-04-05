@@ -14,7 +14,7 @@ import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieva
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import { computeConformalSetSize } from '../../domain/resolver/service/resolver.js';
+import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
@@ -150,7 +150,7 @@ export class SearchUseCase {
             appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
             outcomeReasonCodes: ['MIXED_ROUTE'],
           },
-          conformalSetSize: computeConformalSetSize(mixedDecisionC, 0.1, rankedResults.length),
+          conformalSetSize: computeConformalSetSize(mixedDecisionC, DEFAULT_ALPHA, rankedResults.length),
         };
         break;
       }
@@ -261,7 +261,7 @@ export class SearchUseCase {
         appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['HYBRID_ROUTE'],
       },
-      conformalSetSize: computeConformalSetSize(hybridConfidence, 0.1, rankedResults.length),
+      conformalSetSize: computeConformalSetSize(hybridConfidence, DEFAULT_ALPHA, rankedResults.length),
     };
 
     return { resolveResult, rankedResults };

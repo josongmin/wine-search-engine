@@ -2,6 +2,7 @@ import type { QueryClass, ConstraintBundle } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
+import type { RetrievalMode } from '../model/retrieval-mode.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { QueryUncertainty } from '../model/query-uncertainty.js';
 import type { SessionContext } from '../model/session-context.js';
@@ -32,9 +33,9 @@ const EXACT_ANCHOR_CONFIDENCE = 0.85;
 
 /** Price-related keywords for budget search detection. */
 const PRICE_KEYWORDS: readonly RegExp[] = [
-  /\b\d+\s*(?:원|만원|dollar|usd|\$|€|£)\b/i,
-  /\b(?:under|below|cheaper|budget|affordable|저렴|싼|가성비)\b/i,
-  /\b(?:만원\s*(?:이하|미만|대))\b/,
+  /\d+\s*(?:원|만원|dollar|usd|\$|€|£)/i,
+  /\b(?:under|below|cheaper|budget|affordable)\b|(?:저렴|싼|가성비)/i,
+  /만원\s*(?:이하|미만|대)/,
 ] as const;
 
 /** Pairing-related keywords. */
@@ -95,11 +96,12 @@ export class Planner {
    * 2. Extract anchors.
    * 3. Detect intent.
    * 4. Determine route.
-   * 5. Determine query class.
-   * 6. Parse constraints (placeholder -- returns empty bundle).
-   * 7. Build expansions.
-   * 8. Compute uncertainty.
-   * 9. Compile policy.
+   * 5. Determine retrieval mode (RFC-017 §8.3).
+   * 6. Determine query class.
+   * 7. Parse constraints (placeholder -- returns empty bundle).
+   * 8. Build expansions.
+   * 9. Compute uncertainty.
+   * 10. Compile policy.
    *
    * @param query - The raw user query string.
    * @param context - Optional planner context (locale, session, budget).
@@ -118,7 +120,14 @@ export class Planner {
     // 4. Determine route.
     const route = this.determineRoute(intent, anchors);
 
-    // 5. Determine query class.
+    // 5. Determine retrieval mode.
+    const retrievalMode = this.determineRetrievalMode(
+      intent,
+      anchors,
+      normalizedQuery,
+    );
+
+    // 6. Determine query class.
     const queryClass = await this.determineQueryClass(
       normalizedQuery,
       intent,
@@ -180,6 +189,7 @@ export class Planner {
       intent,
       ...(secondaryIntents !== undefined && { secondaryIntents }),
       route,
+      retrievalMode,
       queryClass,
       anchors,
       constraints,
@@ -324,6 +334,76 @@ export class Planner {
       case 'budget_search':
         return 'hybrid';
     }
+  }
+
+  /**
+   * Determines the fine-grained retrieval mode based on intent, anchors, and query surface.
+   * RFC-017 §8.3: maps intent + context to a specific retrieval strategy.
+   *
+   * Mode selection logic (from Epic 7):
+   *  - entity_exact → entity_lookup
+   *  - entity_fuzzy + multiple_candidates → entity_resolution
+   *  - comparison_search → compare_candidates
+   *  - mixed_query + anchor → similar_items
+   *  - pairing_search → recommendation
+   *  - facet_search/budget_search (no anchor) → constraint_filter
+   *  - semantic_discovery/generic anchor search → attribute_search
+   */
+  private determineRetrievalMode(
+    intent: QueryIntent,
+    anchors: readonly AnchorCandidate[],
+    _normalizedQuery: string,
+  ): RetrievalMode {
+    const hasStrongAnchor = anchors.some(
+      (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
+    );
+    const hasAnyAnchor = anchors.some(
+      (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
+    );
+    const hasMultipleCandidates = anchors.some(
+      (a) => a.candidateEntityIds.length > 1,
+    );
+
+    // Comparison search: multiple anchors or explicit comparison intent
+    if (intent === 'comparison_search') {
+      return 'compare_candidates';
+    }
+
+    // Ambiguous entity: single anchor with multiple candidate entities
+    if (intent === 'entity_fuzzy' && hasMultipleCandidates) {
+      return 'entity_resolution';
+    }
+
+    // Strong single entity lookup (exact match)
+    if (intent === 'entity_exact' && hasStrongAnchor) {
+      return 'entity_lookup';
+    }
+
+    // Similar items: mixed query with an anchor
+    if (intent === 'mixed_query' && hasAnyAnchor) {
+      return 'similar_items';
+    }
+
+    // Pairing-based recommendation
+    if (intent === 'pairing_search') {
+      return 'recommendation';
+    }
+
+    // Pure constraint filtering (no entity involved)
+    if (
+      (intent === 'facet_search' || intent === 'budget_search') &&
+      !hasAnyAnchor
+    ) {
+      return 'constraint_filter';
+    }
+
+    // Semantic discovery and generic searches
+    if (intent === 'semantic_discovery') {
+      return 'attribute_search';
+    }
+
+    // Default: attribute search (hybrid vector + constraints)
+    return 'attribute_search';
   }
 
   /**
@@ -526,10 +606,11 @@ export class Planner {
     }
 
     // ── Price band (soft) ──────────────────────────────────────────────────
+    // Korean \b word boundary doesn't work with Hangul. Use (?:^|\s|\d) anchors instead.
     const priceUnder =
       /\bunder\s+\$?(\d+)\b/i.exec(q) ??
-      /\b(\d+)\s*(?:달러|dollar)\s*이하\b/i.exec(q) ??
-      /\b(\d+)만원\s*이하?\b/i.exec(q);
+      /(\d+)\s*(?:달러|dollar)\s*이하/i.exec(q) ??
+      /(\d+)\s*만원\s*(?:이하|미만|대)/i.exec(q);
     if (priceUnder?.[1] !== undefined) {
       const priceValue = parseInt(priceUnder[1], 10);
       // 만원 unit in Korean (1만원 ≈ $7)

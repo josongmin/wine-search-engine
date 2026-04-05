@@ -75,6 +75,7 @@ function makeQueryPlan(queryClass: QueryPlanV1['queryClass'] = 'short_entity'): 
     normalizedQuery: '오푸스원',
     intent: 'entity_exact',
     route: 'entity',
+    retrievalMode: 'entity_lookup',
     queryClass,
     anchors: [],
     constraints: { hard: [], soft: [], inferred: [] },

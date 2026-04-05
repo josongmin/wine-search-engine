@@ -149,6 +149,47 @@ schema wine_entity {
     }
 
     # -------------------------------------------------------------------------
+    # SOTA++ enrichment fields (Epic 12: Data Enrichment)
+    # -------------------------------------------------------------------------
+
+    # Synthetic critic score proxy (LLM-generated from tasting notes)
+    # Range: 80-100 (Robert Parker / Wine Spectator scale)
+    field critic_proxy_score type float {
+      indexing: summary | attribute
+    }
+
+    # Tier classification for critic proxy
+    field critic_proxy_tier type string {
+      indexing: summary | attribute
+    }
+
+    # Confidence in the synthetic proxy score
+    field critic_proxy_confidence type string {
+      indexing: summary | attribute
+    }
+
+    # Organic certification flag (from Wikidata or tasting notes inference)
+    field organic type bool {
+      indexing: summary | attribute
+    }
+
+    # Biodynamic certification flag
+    field biodynamic type bool {
+      indexing: summary | attribute
+    }
+
+    # Source of certification data
+    field certification_source type string {
+      indexing: summary | attribute
+    }
+
+    # Standardized food pairing tags
+    field pairing_tags type array<string> {
+      indexing: summary | attribute | index
+      index: enable-bm25
+    }
+
+    # -------------------------------------------------------------------------
     # SOTA++ taxonomy fields
     # -------------------------------------------------------------------------
 
@@ -271,6 +312,13 @@ schema wine_entity {
     summary producer_prestige {}
     summary critic_score_normalized {}
     summary price_usd {}
+    summary critic_proxy_score {}
+    summary critic_proxy_tier {}
+    summary critic_proxy_confidence {}
+    summary organic {}
+    summary biodynamic {}
+    summary certification_source {}
+    summary pairing_tags {}
     summary flavor_profiles {}
     summary classification {}
     summary alcohol_pct {}
