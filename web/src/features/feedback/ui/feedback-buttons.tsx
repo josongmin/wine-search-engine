@@ -2,7 +2,7 @@
 
 import { ThumbsUp, ThumbsDown } from 'lucide-react';
 import { IconButton } from '@/shared/ui';
-import { useFeedback } from '@/features/feedback';
+import { useFeedback } from '../model/use-feedback';
 
 interface FeedbackButtonsProps {
   query: string;

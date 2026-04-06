@@ -2,7 +2,6 @@
 
 import { useRouter } from 'next/navigation';
 import { MapPin, Palette } from 'lucide-react';
-import { Card, CardContent } from '@/shared/ui';
 import { searchUrl } from '@/shared/lib';
 
 const REGIONS = [

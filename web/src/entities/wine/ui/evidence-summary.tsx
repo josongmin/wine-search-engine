@@ -37,7 +37,7 @@ export function EvidenceSummary({ items, max = 3 }: EvidenceSummaryProps) {
         ))}
       </ul>
       {remaining > 0 && (
-        <p className="text-[10px] text-neutral-400">+{remaining} more</p>
+        <p className="text-xs text-neutral-400">+{remaining} more</p>
       )}
     </div>
   );

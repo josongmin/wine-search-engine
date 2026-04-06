@@ -2,7 +2,7 @@
 
 import { Trash2, Bell } from 'lucide-react';
 import { Card, CardContent, IconButton, Badge } from '@/shared/ui';
-import { useWatchlist, useWatchlistDelete } from '@/features/watchlist';
+import { useWatchlist, useWatchlistDelete } from '../model/use-watchlist';
 
 export function WatchlistList() {
   const { data, isLoading, error } = useWatchlist();

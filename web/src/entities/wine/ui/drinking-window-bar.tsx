@@ -55,7 +55,7 @@ export function DrinkingWindowBar({ window: dw }: DrinkingWindowBarProps) {
           style={{ left: `${nowPos}%` }}
         />
       </div>
-      <div className="flex justify-between text-[10px] text-neutral-400">
+      <div className="flex justify-between text-xs text-neutral-400">
         <span>{rangeStart}</span>
         {dw.peak_year && <span className="text-emerald-600">peak {dw.peak_year}</span>}
         <span>{rangeEnd}</span>

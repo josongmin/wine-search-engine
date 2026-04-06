@@ -2,7 +2,7 @@
 
 import { Heart } from 'lucide-react';
 import { Button } from '@/shared/ui';
-import { useWatchlistCreate } from '@/features/watchlist';
+import { useWatchlistCreate } from '../model/use-watchlist';
 
 interface WatchlistButtonProps {
   entityId: string;
