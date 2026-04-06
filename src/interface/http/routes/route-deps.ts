@@ -10,6 +10,7 @@ import type {
 import type { WatchlistServicePort } from '../../../application/watchlist/watchlist.service.js';
 import type { EvalRunnerContract } from '../../../config/container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from '../../../config/container-tool-contracts.js';
+import type { FeedbackStore } from '../../../domain/learning/port/feedback-store.port.js';
 
 export interface SearchRouteDeps {
   readonly searchUseCase: SearchExecutorPort;
@@ -44,6 +45,13 @@ export interface WatchlistRouteDeps {
   readonly watchlistService: WatchlistServicePort;
 }
 
+export interface FeedbackRouteDeps {
+  /** Null when Postgres is not configured or feedback persistence is unavailable. */
+  readonly feedbackStore: FeedbackStore | null;
+  /** False when `KILL_SWITCH_LEARNING` is on or no feedback store exists. */
+  readonly feedbackIngestEnabled: boolean;
+}
+
 export interface HttpServerDeps
   extends SearchRouteDeps,
     BatchSearchRouteDeps,
@@ -52,6 +60,7 @@ export interface HttpServerDeps
     ResolveRouteDeps,
     HybridRouteDeps,
     ClaudeToolsRouteDeps,
-    WatchlistRouteDeps {
+    WatchlistRouteDeps,
+    FeedbackRouteDeps {
   readonly evalRunner: EvalRunnerContract | null;
 }

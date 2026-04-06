@@ -19,6 +19,7 @@ import type {
   ResolveUseCasePort,
 } from '../application/search/port/search-route-usecases.port.js';
 import type { CoreContainerServices } from './container-core.js';
+import type { Config } from './env.js';
 
 export interface UseCaseContainerServices {
   readonly searchUseCase: SearchExecutorPort;
@@ -33,6 +34,7 @@ export interface UseCaseContainerServices {
 
 export function buildUseCaseContainerServices(
   core: CoreContainerServices,
+  config: Config,
 ): UseCaseContainerServices {
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
 
@@ -43,6 +45,7 @@ export function buildUseCaseContainerServices(
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
     entityResolver: core.entityResolver,
+    entityLookup: core.entityLookup,
     candidatePool: core.candidatePool,
     browseRetriever: core.browseRetriever,
     compareRetriever: core.compareRetriever,
@@ -53,6 +56,7 @@ export function buildUseCaseContainerServices(
     snapshotVersions: core.snapshotVersions,
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
+    judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
     drinkingWindow: drinkingWindowUseCase,
     cacheService: core.cacheService,
     ltrModels: core.ltrModels,
@@ -83,6 +87,7 @@ export function buildUseCaseContainerServices(
     resolveUseCase: new ResolveUseCase({
       queryPlanner: core.queryPlanner,
       entityResolver: core.entityResolver,
+      entityLookup: core.entityLookup,
       querySanitizer: core.querySanitizer,
     }),
     hybridUseCase: new HybridUseCase({

@@ -46,7 +46,7 @@ export async function evaluateQueryEntrySecurity(
 
   const sanitizedQuery = sanitizationResult.sanitizedQuery;
   const judge = deps.injectionJudge;
-  const judgeFailureMode = deps.judgeFailureMode ?? 'fail_open';
+  const judgeFailureMode = deps.judgeFailureMode ?? 'fail_closed';
   if (judge !== undefined) {
     try {
       const isInjection = await judge.judge(sanitizedQuery);

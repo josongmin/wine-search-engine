@@ -14,7 +14,13 @@ import type { Blocker } from './blocker.js';
 import type { CandidateScorer } from './candidate-scorer.js';
 import type { AmbiguityClassifier } from './ambiguity-classifier.js';
 import type { Calibrator } from './calibrator.js';
-import type { LearnedMatcherPort } from '../port/learned-matcher.port.js';
+import type {
+  LearnedMatcherContext,
+  LearnedMatcherOutput,
+  LearnedMatcherPort,
+} from '../port/learned-matcher.port.js';
+import { computeMatcherFeatures } from './learned-matcher-features.js';
+import type { MatcherFeatureVector } from './learned-matcher-features.js';
 
 /**
  * Input required to run the entity resolution pipeline.
@@ -168,10 +174,22 @@ export class Resolver {
     const adjustedScored = this.applyLookupStrategyAdjustments(scored, lookupStrategyAdjustments);
 
     // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2)
-    const blendedScored =
-      this.learnedMatcher !== undefined && adjustedScored.length > 0
-        ? await this.applyLearnedMatcherBlend(input.rawQuery, candidates, adjustedScored)
-        : adjustedScored;
+    let blendedScored = adjustedScored;
+    let learnedMatcherOutputs: readonly LearnedMatcherOutput[] | undefined;
+    if (this.learnedMatcher !== undefined && adjustedScored.length > 0) {
+      try {
+        const blended = await this.applyLearnedMatcherBlend(
+          input.rawQuery,
+          input,
+          candidates,
+          adjustedScored,
+        );
+        blendedScored = blended.scored;
+        learnedMatcherOutputs = blended.learnedOutputs;
+      } catch {
+        blendedScored = adjustedScored;
+      }
+    }
 
     // Step 3: Sort by raw score descending
     blendedScored.sort((a, b) => b.rawScore - a.rawScore);
@@ -213,6 +231,7 @@ export class Resolver {
       thresholds,
       reasonCodes,
       lookupStrategyAdjustments,
+      learnedMatcherOutputs,
     );
 
     const conformalSetSize = computeConformalSetSize(
@@ -383,19 +402,77 @@ export class Resolver {
    */
   private async applyLearnedMatcherBlend(
     query: string,
+    input: ResolverInput,
     candidates: readonly ResolverCandidate[],
     scored: Array<{ candidate: ResolverCandidate; rawScore: number }>,
-  ): Promise<Array<{ candidate: ResolverCandidate; rawScore: number }>> {
-    const outputs = await this.learnedMatcher!.match(query, candidates);
+  ): Promise<{
+    scored: Array<{ candidate: ResolverCandidate; rawScore: number }>;
+    learnedOutputs: readonly LearnedMatcherOutput[];
+  }> {
+    const learnedOutputs = await this.learnedMatcher!.match(
+      query,
+      candidates,
+      this.buildLearnedMatcherContext(input, candidates),
+    );
     const probMap = new Map(
-      outputs.map((o) => [String(o.entityId), o.matchProbability]),
+      learnedOutputs.map((o) => [String(o.entityId), o.matchProbability]),
     );
 
-    return scored.map((entry) => {
+    const next = scored.map((entry) => {
       const prob = probMap.get(String(entry.candidate.entityId));
       if (prob === undefined) return entry;
       return { candidate: entry.candidate, rawScore: 0.6 * entry.rawScore + 0.4 * prob };
     });
+    return { scored: next, learnedOutputs };
+  }
+
+  private buildLearnedMatcherContext(
+    input: ResolverInput,
+    candidates?: readonly ResolverCandidate[],
+  ): LearnedMatcherContext | undefined {
+    const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
+    const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+
+    // Compute per-candidate feature vectors for the learned matcher (Step 18.5)
+    const candidateFeatures = new Map<string, MatcherFeatureVector>();
+    if (candidates !== undefined) {
+      const topN = candidates.slice(0, 10);
+      for (const candidate of topN) {
+        const vintage =
+          candidate.attributeHints?.['vintage'] !== undefined
+            ? Number(candidate.attributeHints['vintage'])
+            : undefined;
+        const features = computeMatcherFeatures(
+          input.normalizedQuery,
+          candidate.canonicalLabel,
+          vintage,
+        );
+        candidateFeatures.set(String(candidate.entityId), {
+          ...features,
+          provenanceStage:
+            (anchorLookupStrategies.length > 0 ? anchorLookupStrategies[0] : undefined) ?? 'unknown',
+        });
+      }
+    }
+
+    if (
+      input.normalizedQueryViews === undefined &&
+      anchorLookupVariants.length === 0 &&
+      anchorLookupStrategies.length === 0 &&
+      candidateFeatures.size === 0
+    ) {
+      return undefined;
+    }
+
+    return {
+      queryClass: input.queryClass,
+      ...(input.normalizedQueryViews !== undefined
+        ? { normalizedQueryViews: input.normalizedQueryViews }
+        : {}),
+      ...(anchorLookupVariants.length > 0 ? { anchorLookupVariants } : {}),
+      ...(anchorLookupStrategies.length > 0 ? { anchorLookupStrategies } : {}),
+      ...(candidateFeatures.size > 0 ? { candidateFeatures } : {}),
+    };
   }
 
   /**
@@ -409,6 +486,7 @@ export class Resolver {
     thresholds: ThresholdEntry,
     reasonCodes: readonly string[],
     lookupStrategyAdjustments: readonly LookupStrategyAdjustment[],
+    learnedOutputs?: readonly LearnedMatcherOutput[],
   ): ResolverDecisionTrace {
     const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
     const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
@@ -433,6 +511,19 @@ export class Resolver {
           }
         : undefined;
 
+    const learnedMatcherTrace =
+      learnedOutputs !== undefined && learnedOutputs.length > 0
+        ? {
+            modelId: learnedOutputs[0]!.modelId,
+            modelVersion: learnedOutputs[0]!.modelVersion,
+            candidates: learnedOutputs.map((o) => ({
+              entityId: String(o.entityId),
+              matchProbability: o.matchProbability,
+              ...(o.matchSignalVector !== undefined ? { matchSignalVector: o.matchSignalVector } : {}),
+            })),
+          }
+        : undefined;
+
     return {
       queryClass,
       top1CalibratedScore: calibrated.top1CalibratedScore,
@@ -447,6 +538,7 @@ export class Resolver {
       },
       outcomeReasonCodes: reasonCodes,
       ...(queryProvenance !== undefined ? { queryProvenance } : {}),
+      ...(learnedMatcherTrace !== undefined ? { learnedMatcherTrace } : {}),
     };
   }
 

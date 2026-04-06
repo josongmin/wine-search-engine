@@ -15,6 +15,7 @@ import { VespaSearchIndex } from '../../../src/infrastructure/vespa/vespa-search
 import { createEntityId, type EntityId } from '../../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
 import { InMemoryEmbeddingService } from '../../integration/helpers/in-memory-adapters.js';
+import { HAS_REACHABLE_VESPA } from './helpers/vespa-availability.js';
 
 // ---------------------------------------------------------------------------
 // Environment gate
@@ -72,7 +73,7 @@ async function waitForIndexing(ms = 500): Promise<void> {
 // Suite
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!VESPA_URL)('Vespa Real E2E — Infrastructure Pipeline', () => {
+describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa Real E2E — Infrastructure Pipeline', () => {
   let client: VespaClient;
   let index: VespaSearchIndex;
   let embeddingService: InMemoryEmbeddingService;

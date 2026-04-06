@@ -127,8 +127,10 @@ taste.flavor[].group, taste.flavor[].stats.count
 
 ## 완료 기준
 
-- [ ] Vespa wine_entity count ≥ 8000 (dedup 후)
-- [ ] Silver quality gate 통과
+- [ ] Vespa `wine_entity` count는 **Bronze 스냅샷 크기**에 맞춤: 현재 커넥터 기준 dedup 후 **≥7000** (게이트는 `scripts/etl/validate-silver.ts`의 `GATES.minRecords`). 스냅샷이 커지면 **≥8000**·10K를 목표로 `minRecords`를 상향.
+- [ ] Silver quality gate 통과 (`validate-silver.ts` — blockers 없음)
 - [ ] tastingNotesCoverage ≥ 0.30
 - [ ] alias mean count ≥ 3 per entity
 - [ ] popularity_score 분포 확인 (상수 0.3이 아닌 실제 분포)
+
+**게이트 단일 출처:** 레코드 하한·커버리지는 코드 상수 `GATES`가 기준이며, 문서 수치와 어긋나면 스크립트를 먼저 갱신한다.

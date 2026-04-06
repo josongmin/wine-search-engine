@@ -773,8 +773,6 @@ describe('Search Pipeline Integration', () => {
   describe('Wave 3: Drinking Window Enrichment (Epic 15)', () => {
     it('creates drinking window block from wine attributes', async () => {
       const predictor = new DrinkingWindowPredictor();
-      await predictor.load('/tmp'); // Stub load (no actual model)
-
       const useCase = new DrinkingWindowUseCase(predictor);
 
       const prediction = await useCase.check({
@@ -793,14 +791,13 @@ describe('Search Pipeline Integration', () => {
       expect(prediction.drinkingWindowEnd).toBeGreaterThan(
         prediction.drinkingWindowStart,
       );
-      expect(prediction.confidence).toBe('high');
-      expect(prediction.modelVersion).toContain('v1.0');
+      // Heuristic fallback (no ONNX) caps confidence at medium.
+      expect(prediction.confidence).toBe('medium');
+      expect(prediction.modelVersion).toContain('heuristic');
     });
 
     it('marks wine as currently drinkable if in window', async () => {
       const predictor = new DrinkingWindowPredictor();
-      await predictor.load('/tmp');
-
       const useCase = new DrinkingWindowUseCase(predictor);
 
       // 2018 vintage mature wine (should be drinkable now in 2026)

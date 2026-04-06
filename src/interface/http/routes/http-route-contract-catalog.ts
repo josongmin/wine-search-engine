@@ -14,6 +14,7 @@ import {
   WatchlistDeleteRouteContract,
   WatchlistDeliveriesRouteContract,
   WatchlistGetRouteContract,
+  FeedbackSubmitRouteContract,
 } from './route-contracts.js';
 import type { HttpRouteContractManifest, RegisteredHttpRouteContract } from './register-contract-route.js';
 
@@ -38,6 +39,7 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'GET', url: '/v1/watchlist/:id', contract: WatchlistGetRouteContract },
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
+  { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
 ] as const;
 
 function compareContracts(

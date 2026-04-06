@@ -2,6 +2,7 @@ import type { CoreContainerServices } from './container-core.js';
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { RuntimeHandles } from './runtime-handles.js';
+import type { Config } from './env.js';
 import type {
   DrinkingWindowUseCasePort,
 } from '../application/drinking-window/port/drinking-window-usecase.port.js';
@@ -31,10 +32,11 @@ export interface FeatureContainerServices {
 }
 
 export function buildFeatureContainerServices(
+  config: Config,
   core: CoreContainerServices,
   runtime: RuntimeHandles = {},
 ): FeatureContainerServices {
-  const useCases = buildUseCaseContainerServices(core);
+  const useCases = buildUseCaseContainerServices(core, config);
   const adaptiveToolExecutor = buildAdaptiveToolExecutor(useCases);
   const evalRunner = buildEvalRunner(runtime.pool, useCases.searchUseCase);
 

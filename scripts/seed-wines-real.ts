@@ -23,11 +23,19 @@ const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:18080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
 
+// Allow test lanes to force deterministic embeddings even when dotenv loads a
+// local embedding service URL from .env.
+const realEmbeddingsOverride = process.env['USE_REAL_EMBEDDINGS'];
+
 // Use real embeddings when EMBEDDING_SERVICE_URL is set; fall back to
 // the deterministic formula when running without a live embedding service.
 const USE_REAL_EMBEDDINGS =
-  process.env['EMBEDDING_SERVICE_URL'] !== undefined &&
-  process.env['EMBEDDING_SERVICE_URL'] !== '';
+  realEmbeddingsOverride === 'true'
+    ? true
+    : realEmbeddingsOverride === 'false'
+      ? false
+      : process.env['EMBEDDING_SERVICE_URL'] !== undefined &&
+        process.env['EMBEDDING_SERVICE_URL'] !== '';
 
 // ---------------------------------------------------------------------------
 // Deterministic embedding from sensory profile

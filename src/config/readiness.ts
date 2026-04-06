@@ -6,6 +6,7 @@ import {
 } from './watchlist.js';
 import { probeJsonPostEndpoint } from './readiness-probes.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
+import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type {
   HealthRouteOptions,
   ReadinessStatus,
@@ -41,6 +42,7 @@ export function buildHealthRouteOptions(
   config: Config,
   runtime: RuntimeHandles,
   watchlistRuntime?: WatchlistRuntimePort | null,
+  drinkingWindowPredictor?: DrinkingWindowPredictorPort,
 ): HealthRouteOptions {
   const expectsRedis = expectsRedisAtStartup(config);
   const watchlistEnabled = isWatchlistEnabled(config);
@@ -95,6 +97,29 @@ export function buildHealthRouteOptions(
                   model: config.embedding.model,
                   input: '__healthcheck__',
                 }),
+            },
+          }
+        : {}),
+      ...(config.learnedMatcher.url !== undefined
+        ? {
+            learned_matcher: {
+              required: false,
+              check: async (): Promise<ReadinessStatus> =>
+                probeJsonPostEndpoint(`${config.learnedMatcher.url}/match`, {
+                  query: '__healthcheck__',
+                  candidates: [],
+                }),
+            },
+          }
+        : {}),
+      ...(drinkingWindowPredictor !== undefined
+        ? {
+            drinking_window_model: {
+              required: false,
+              check: (): Promise<ReadinessStatus> =>
+                Promise.resolve(
+                  drinkingWindowPredictor.modelVersion.startsWith('heuristic') ? 'down' : 'up',
+                ),
             },
           }
         : {}),

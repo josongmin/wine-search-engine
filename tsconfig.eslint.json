@@ -10,8 +10,7 @@
     "tools/**/*.ts",
     "scripts/**/*.ts",
     "vitest.config.ts",
-    "vitest.e2e.config.ts",
-    "vitest.e2e.vespa.config.ts"
+    "vitest.*.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

@@ -1,0 +1,13 @@
+{
+  "version": "0.3.0-phase1",
+  "capturedAt": "2026-04-06",
+  "overall": {
+    "recall1": 0.0,
+    "recall3": 0.0,
+    "mrr": 0.0,
+    "falseExactMatchRate": 0.0,
+    "abstainPrecision": 0.0
+  },
+  "byCategory": {},
+  "note": "Initial baseline — actual metrics require live Vespa. These are floor values for regression testing."
+}

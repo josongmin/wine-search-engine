@@ -3,10 +3,15 @@ import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
-import type { EntityResolverPort, QueryPlannerPort } from './port/search-pipeline-deps.port.js';
+import type {
+  EntityDocumentLookupPort,
+  EntityResolverPort,
+  QueryPlannerPort,
+} from './port/search-pipeline-deps.port.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
 import type { ResolveResponse } from './resolve-response.dto.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
+import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
 
 export type { ResolveRequest } from './resolve-request.dto.js';
 export type { ResolveResponse } from './resolve-response.dto.js';
@@ -17,6 +22,7 @@ export type { ResolveResponse } from './resolve-response.dto.js';
 export interface ResolveUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
+  readonly entityLookup?: EntityDocumentLookupPort | undefined;
   /** Shared public query entry guard: Layer 1 sanitizer is required. */
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
@@ -52,6 +58,11 @@ export class ResolveUseCase {
     const plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
 
     // Build resolver input
+    const candidateEntities = await buildResolverCandidatesFromPlan(
+      plan,
+      this.deps.entityLookup,
+    );
+
     const resolverInput: ResolverInput = {
       rawQuery: plan.rawQuery,
       normalizedQuery: plan.normalizedQuery,
@@ -62,7 +73,7 @@ export class ResolveUseCase {
       policy: plan.policy,
       anchorCandidates: plan.anchors,
       uncertainty: plan.uncertainty,
-      candidateEntities: [],
+      candidateEntities,
     };
 
     // Run entity resolver

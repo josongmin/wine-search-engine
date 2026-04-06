@@ -148,6 +148,8 @@
 
 ## Track F — Feedback Flywheel
 
+**상태 (저장소 기준): Deferred — 미구현.** Track A–E(벤치·정규화·후보·transliteration·matcher)가 안정된 뒤, 아래를 순차 도입한다. 자동 alias 승격은 하지 않는다는 원칙은 유지한다.
+
 ### Scope
 
 - query log mining

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { MAX_QUERY_LENGTH } from '../../../../domain/shared/constants.js';
 import { buildHttpRouteContractOpenApiBridge } from '../http-route-contract-openapi.js';
 
 const execFileAsync = promisify(execFile);
@@ -27,7 +28,7 @@ describe('HTTP contract OpenAPI bridge', () => {
         properties: expect.objectContaining({
           query: expect.objectContaining({
             type: 'string',
-            maxLength: 500,
+            maxLength: MAX_QUERY_LENGTH,
           }),
         }),
       }),

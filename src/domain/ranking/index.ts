@@ -17,19 +17,12 @@ export { ScoreAggregator } from './service/score-aggregator.js';
 export { EvidenceMapper } from './service/evidence-mapper.js';
 export { Ranker } from './service/ranker.js';
 
-// ── LambdaMART Learning-to-Rank (Epic 4) ─────────────────────────────────────
-export {
-  trainLambdaMARTModel,
-  scoreDocument,
-} from './service/lambdamart-ranker.js';
+// ── LambdaMART / LTR inference types (Epic 4) — training APIs: ./training.js ─
 export type {
   RankingFeatures,
   LambdaMARTExample,
   QueryClassWeights,
 } from './service/lambdamart-ranker.js';
-
-export { buildTrainingExamples, trainAllModels, createModelRegistry } from './service/ltr-training-service.js';
-export type { LTRModelRegistry } from './service/ltr-training-service.js';
 
 export { LTRRanker } from './service/ltr-ranker.js';
 export type { RankableDocument, RankedDocument } from './service/ltr-ranker.js';

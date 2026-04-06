@@ -149,6 +149,10 @@ interface CliArgs {
   mode: 'auto' | 'hybrid' | 'entity';
   timeoutMs: number;
   concurrency: number;
+  minRecallAt3?: number;
+  minResolutionMatchRate?: number;
+  minProvenanceMatchRate?: number;
+  maxFalseExactRate?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -160,6 +164,10 @@ function parseArgs(argv: string[]): CliArgs {
     mode: 'hybrid',
     timeoutMs: 60_000,
     concurrency: 8,
+    minRecallAt3: undefined,
+    minResolutionMatchRate: undefined,
+    minProvenanceMatchRate: undefined,
+    maxFalseExactRate: undefined,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -187,10 +195,85 @@ function parseArgs(argv: string[]): CliArgs {
       if (Number.isFinite(value) && value >= 1) {
         args.concurrency = Math.min(32, value);
       }
+    } else if (arg === '--min-recall-at-3') {
+      const value = Number.parseFloat(argv[++i] ?? '');
+      if (Number.isFinite(value)) {
+        args.minRecallAt3 = value;
+      }
+    } else if (arg === '--min-resolution-match-rate') {
+      const value = Number.parseFloat(argv[++i] ?? '');
+      if (Number.isFinite(value)) {
+        args.minResolutionMatchRate = value;
+      }
+    } else if (arg === '--min-provenance-match-rate') {
+      const value = Number.parseFloat(argv[++i] ?? '');
+      if (Number.isFinite(value)) {
+        args.minProvenanceMatchRate = value;
+      }
+    } else if (arg === '--max-false-exact-rate') {
+      const value = Number.parseFloat(argv[++i] ?? '');
+      if (Number.isFinite(value)) {
+        args.maxFalseExactRate = value;
+      }
     }
   }
 
   return args;
+}
+
+export function assertNoisyEntityQualityThresholds(
+  report: NoisyEntityBenchmarkReport,
+  thresholds: {
+    readonly minRecallAt3?: number;
+    readonly minResolutionMatchRate?: number;
+    readonly minProvenanceMatchRate?: number;
+    readonly maxFalseExactRate?: number;
+  },
+): void {
+  const violations: string[] = [];
+
+  if (
+    thresholds.minRecallAt3 !== undefined &&
+    report.recall_at_3 < thresholds.minRecallAt3
+  ) {
+    violations.push(
+      `recall_at_3=${report.recall_at_3.toFixed(4)} is below required ${thresholds.minRecallAt3.toFixed(4)}`,
+    );
+  }
+
+  if (
+    thresholds.minResolutionMatchRate !== undefined &&
+    report.resolution_match_rate !== null &&
+    report.resolution_match_rate < thresholds.minResolutionMatchRate
+  ) {
+    violations.push(
+      `resolution_match_rate=${report.resolution_match_rate.toFixed(4)} is below required ${thresholds.minResolutionMatchRate.toFixed(4)}`,
+    );
+  }
+
+  if (
+    thresholds.minProvenanceMatchRate !== undefined &&
+    report.provenance_match_rate !== null &&
+    report.provenance_match_rate < thresholds.minProvenanceMatchRate
+  ) {
+    violations.push(
+      `provenance_match_rate=${report.provenance_match_rate.toFixed(4)} is below required ${thresholds.minProvenanceMatchRate.toFixed(4)}`,
+    );
+  }
+
+  if (
+    thresholds.maxFalseExactRate !== undefined &&
+    report.false_exact_rate !== null &&
+    report.false_exact_rate > thresholds.maxFalseExactRate
+  ) {
+    violations.push(
+      `false_exact_rate=${report.false_exact_rate.toFixed(4)} is above allowed ${thresholds.maxFalseExactRate.toFixed(4)}`,
+    );
+  }
+
+  if (violations.length > 0) {
+    throw new Error(`Noisy entity quality gate failed:\n- ${violations.join('\n- ')}`);
+  }
 }
 
 async function readValidatedJsonl<T>(
@@ -599,6 +682,13 @@ async function run(): Promise<void> {
       `  category:${category} n=${metrics.query_count} recall@1=${metrics.recall_at_1.toFixed(3)} recall@3=${metrics.recall_at_3.toFixed(3)} mrr=${metrics.mrr.toFixed(3)}`,
     );
   }
+
+  assertNoisyEntityQualityThresholds(finalReport, {
+    minRecallAt3: args.minRecallAt3,
+    minResolutionMatchRate: args.minResolutionMatchRate,
+    minProvenanceMatchRate: args.minProvenanceMatchRate,
+    maxFalseExactRate: args.maxFalseExactRate,
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

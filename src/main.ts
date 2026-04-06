@@ -12,6 +12,7 @@ import { connectRedisClient } from './infrastructure/db/redis-client.js';
 import { getTracer, initTelemetry } from './infrastructure/telemetry/tracer.js';
 import { RedisWatchlistPublisher } from './infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber } from './infrastructure/watchlist/redis-watchlist-subscriber.js';
+import { bootstrapLogger } from './config/bootstrap-logger.js';
 
 /**
  * Wine Intelligence Engine — main entry point.
@@ -39,7 +40,10 @@ async function main(): Promise<void> {
           `Watchlist delivery requires Redis at startup: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
-      console.warn('[Main] Redis unavailable during startup; continuing without Redis-backed features:', err);
+      bootstrapLogger.warn(
+        { err },
+        '[Main] Redis unavailable during startup; continuing without Redis-backed features',
+      );
     }
   }
   const runtimeHandles: RuntimeHandles = {
@@ -53,7 +57,12 @@ async function main(): Promise<void> {
   };
   const managedRuntime = createManagedRuntimeHandles(runtimeHandles, { telemetrySdk });
   const container = await createContainer(config, managedRuntime);
-  const healthOptions = buildHealthRouteOptions(config, managedRuntime, container.watchlistRuntime);
+  const healthOptions = buildHealthRouteOptions(
+    config,
+    managedRuntime,
+    container.watchlistRuntime,
+    container.drinkingWindowPredictor,
+  );
 
   // Step 3: Create server (async: registers plugins including rate-limiting)
   const server = await createServer(container, {

@@ -61,8 +61,10 @@ function isRerankApiResultArray(v: unknown): v is RerankApiResult[] {
 export class HttpCrossEncoderReranker implements RerankerPort {
   private readonly url: string;
 
-  constructor() {
-    this.url = config.reranker.url;
+  constructor(options?: {
+    readonly url?: string;
+  }) {
+    this.url = options?.url ?? config.reranker.url;
   }
 
   // -------------------------------------------------------------------------

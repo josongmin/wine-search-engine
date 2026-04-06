@@ -113,4 +113,7 @@ export interface RankedResult {
 
   /** Last year the wine is in its optimal drinking window (Epic 15). Optional. */
   readonly drinkingWindowEnd?: number | undefined;
+
+  /** Model version for cached drinking-window data, when known. */
+  readonly drinkingWindowModelVersion?: string | undefined;
 }

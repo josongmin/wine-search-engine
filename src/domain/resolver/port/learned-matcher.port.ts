@@ -1,5 +1,8 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { ResolverCandidate } from '../model/resolved-candidate.js';
+import type { QueryClass } from '../../shared/types/index.js';
+import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+import type { MatcherFeatureVector } from '../service/learned-matcher-features.js';
 
 /**
  * Output of a learned (ML-based) entity matcher for a single candidate.
@@ -29,6 +32,20 @@ export interface LearnedMatcherOutput {
 }
 
 /**
+ * Optional noisy-lookup context passed to learned matchers so remote models can
+ * condition on transliteration/fuzzy provenance, not just raw query text.
+ */
+export interface LearnedMatcherContext {
+  readonly queryClass?: QueryClass | undefined;
+  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
+  readonly anchorLookupVariants?: readonly string[] | undefined;
+  readonly anchorLookupStrategies?: readonly string[] | undefined;
+
+  /** Per-candidate feature vectors computed by `computeMatcherFeatures`. */
+  readonly candidateFeatures?: ReadonlyMap<string, MatcherFeatureVector> | undefined;
+}
+
+/**
  * Port for an optional ML-based entity matcher, per RFC-006 §5.2.
  *
  * When available, the learned matcher provides match probabilities that
@@ -43,5 +60,9 @@ export interface LearnedMatcherPort {
    * @param candidates - Pre-filtered candidates from the blocking stage.
    * @returns Match outputs for each candidate, unordered.
    */
-  match(query: string, candidates: readonly ResolverCandidate[]): Promise<readonly LearnedMatcherOutput[]>;
+  match(
+    query: string,
+    candidates: readonly ResolverCandidate[],
+    context?: LearnedMatcherContext,
+  ): Promise<readonly LearnedMatcherOutput[]>;
 }

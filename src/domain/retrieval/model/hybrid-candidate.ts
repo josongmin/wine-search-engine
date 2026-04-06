@@ -33,6 +33,9 @@ export interface HybridCandidate {
   /** Last year the wine is in its optimal drinking window (Epic 15). Optional. */
   readonly drinkingWindowEnd?: number | undefined;
 
+  /** Model version for cached drinking-window data, when propagated from the index. */
+  readonly drinkingWindowModelVersion?: string | undefined;
+
   // ─────────────────────────────────────────────────────────────────
   // Epic 15: Wine attributes for dynamic drinking window prediction
   // (Propagated from RetrievalDocument via Ranker)

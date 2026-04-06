@@ -11,54 +11,35 @@ import type { QueryTargetType } from '../model/query-target-type.js';
 import { DEFAULT_QUERY_BUDGET } from '../model/query-budget.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
 import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
+import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { PolicyCompiler } from './policy-compiler.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import { QueryNormalizer } from './query-normalizer.js';
+import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
+import {
+  ANCHOR_PRESENT_CONFIDENCE,
+  detectQueryIntent,
+  EXACT_ANCHOR_CONFIDENCE,
+} from './planner-intent-detection.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
 
-/** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
-const RULE_BASED_MAPPING_VERSION = 'rule-based-v1.0';
-
 /** Current policy rule version. */
 const POLICY_RULE_VERSION = '1.0.0';
 
-/** Minimum anchor confidence to consider an anchor "present" for intent detection. */
-const ANCHOR_PRESENT_CONFIDENCE = 0.5;
-
-/** Anchor confidence above which entity_exact intent is assigned. */
-const EXACT_ANCHOR_CONFIDENCE = 0.85;
-
-/** Price-related keywords for budget search detection. */
-const PRICE_KEYWORDS: readonly RegExp[] = [
-  /\d+\s*(?:원|만원|dollar|usd|\$|€|£)/i,
-  /\b(?:under|below|cheaper|budget|affordable)\b|(?:저렴|싼|가성비)/i,
-  /만원\s*(?:이하|미만|대)/,
-] as const;
-
-/** Pairing-related keywords. */
-const PAIRING_KEYWORDS: readonly RegExp[] = [
-  /\b(?:pair|pairing|goes?\s+with|match|accompany)\b/i,
-  /\b(?:어울리|곁들|맞는|페어링)\b/,
-  /\b(?:steak|fish|cheese|chicken|pasta|pizza|beef|pork|seafood)\b/i,
-  /\b(?:스테이크|생선|치즈|치킨|파스타|피자|소고기|돼지고기|해산물)\b/,
-] as const;
-
-/** Constraint keywords indicating structured filtering. */
-const CONSTRAINT_KEYWORDS: readonly RegExp[] = [
-  /\b(?:red|white|rose|sparkling|natural)\b/i,
-  /\b(?:레드|화이트|로제|스파클링|내추럴)\b/,
-  /\b(?:from|region|grape|variety|vintage|year)\b/i,
-  /\b(?:지역|품종|빈티지|연도)\b/,
-  /\b(?:dry|sweet|tannic|fruity|oaky|light|full[\s-]?body)\b/i,
-  /\b(?:드라이|스위트|타닌|과일|오크|라이트|풀바디)\b/,
-] as const;
-
 /** Vintage year pattern to detect explicit vintage specification. */
 const VINTAGE_YEAR_PATTERN = /\b(19|20)\d{2}\b/;
+
+/** Producer catalog browse: "Château X best wines" (Epic 7, golden `producer_browse`). */
+const PRODUCER_BROWSE_QUERY_PATTERN = /\b(?:best|top|great|famous)\s+wines\b/i;
+
+/** Region path: hierarchical "A / B / C" (Epic 7, golden `region_browse`). */
+function regionHierarchySlashCount(normalizedQuery: string): number {
+  return (normalizedQuery.match(/\//g) ?? []).length;
+}
 
 /** Region/location keywords for geographic entity detection. */
 const REGION_KEYWORDS: readonly RegExp[] = [
@@ -100,6 +81,7 @@ export class Planner {
     private readonly anchorExtractor: AnchorExtractor,
     private readonly expansionBuilder: ExpansionBuilder,
     private readonly nlMapper: NLMapper,
+    private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
   ) {}
 
   /**
@@ -112,7 +94,7 @@ export class Planner {
    * 4. Determine route.
    * 5. Determine retrieval mode (RFC-017 §8.3).
    * 6. Determine query class.
-   * 7. Parse constraints (placeholder -- returns empty bundle).
+   * 7. Parse constraints (NLMapper + {@link extractRuleBasedConstraints}).
    * 8. Build expansions.
    * 9. Compute uncertainty.
    * 10. Compile policy.
@@ -129,8 +111,20 @@ export class Planner {
     // 2. Extract anchors.
     const anchors = await this.anchorExtractor.extract(normalizedQuery, queryViews);
 
+    // 2b. Fuzzy-match fallback: when anchor extraction finds nothing, try
+    //     approximate matching against the known-term index.
+    let fuzzyExpansions: readonly string[] = [];
+    if (anchors.length === 0 && this.fuzzyMatcher !== undefined) {
+      const fuzzyHits = this.fuzzyMatcher.match(normalizedQuery);
+      fuzzyExpansions = fuzzyHits.map((h) => h.term);
+    }
+
     // 3. Detect intent.
-    const intent = this.detectIntent(normalizedQuery, anchors);
+    const intent = detectQueryIntent(
+      normalizedQuery,
+      anchors,
+      this.anchorExtractor,
+    );
 
     // 4. Determine route.
     const route = this.determineRoute(intent, anchors);
@@ -153,11 +147,20 @@ export class Planner {
     const constraints = await this.parseConstraints(normalizedQuery);
 
     // 7. Build expansions.
-    const expansions = this.expansionBuilder.build(
+    const baseExpansions = this.expansionBuilder.build(
       normalizedQuery,
       intent,
       anchors,
     );
+
+    // Merge fuzzy-match results into lexical expansions.
+    const expansions =
+      fuzzyExpansions.length > 0
+        ? {
+            ...baseExpansions,
+            lexical: [...baseExpansions.lexical, ...fuzzyExpansions],
+          }
+        : baseExpansions;
 
     // 8. Compute uncertainty.
     const uncertainty = await this.computeUncertainty(
@@ -231,125 +234,6 @@ export class Planner {
   }
 
   /**
-   * Detects the primary intent based on anchors, patterns, and keywords.
-   *
-   * Multi-stage detection with confidence-aware fallback:
-   * 1. Fuzzy/exact matching from anchors (high confidence scores)
-   * 2. Comparison and mixed-query markers (requires anchor presence)
-   * 3. Constraint keywords with/without anchors
-   * 4. Pairing and budget markers
-   * 5. Default semantic discovery
-   *
-   * Key improvements (SOTA++ §1-2):
-   * - Respects anchor confidence thresholds for intent determination
-   * - Treats weak anchors (0.5-0.85) differently than strong (≥0.85)
-   * - Prefers entity_fuzzy when weak anchor + found results
-   * - Escalates to mixed_query when constraints present with any anchor
-   */
-  private detectIntent(
-    normalizedQuery: string,
-    anchors: readonly AnchorCandidate[],
-  ): QueryIntent {
-    const hasStrongAnchor = anchors.some(
-      (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
-    );
-    const hasWeakAnchor = anchors.some(
-      (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE &&
-        a.confidence < EXACT_ANCHOR_CONFIDENCE,
-    );
-    const hasAnyAnchor = anchors.some(
-      (a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE,
-    );
-    const hasComparisonMarker =
-      this.anchorExtractor.hasComparisonMarkers(normalizedQuery);
-    const hasKoreanMixed =
-      this.anchorExtractor.hasKoreanMixedQueryMarkers(normalizedQuery);
-    const hasPriceKeyword = PRICE_KEYWORDS.some((re) =>
-      re.test(normalizedQuery),
-    );
-    const hasPairingKeyword = PAIRING_KEYWORDS.some((re) =>
-      re.test(normalizedQuery),
-    );
-    const hasConstraintKeyword = CONSTRAINT_KEYWORDS.some((re) =>
-      re.test(normalizedQuery),
-    );
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 1: Comparison detection (requires explicit markers + anchors)
-    // ───────────────────────────────────────────────────────────────────────
-    if (hasComparisonMarker && hasAnyAnchor) {
-      return 'comparison_search';
-    }
-    if (anchors.length >= 2 && hasComparisonMarker) {
-      return 'comparison_search';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 2: Korean mixed-query detection (requires marker + anchor)
-    // ───────────────────────────────────────────────────────────────────────
-    if (hasKoreanMixed && hasAnyAnchor) {
-      return 'mixed_query';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 3: Strong single anchor handling
-    // ───────────────────────────────────────────────────────────────────────
-    // Strong anchor with constraint keywords -> mixed (entity + filters).
-    if (hasStrongAnchor && hasConstraintKeyword) {
-      return 'mixed_query';
-    }
-
-    // Strong single anchor, no constraints -> exact entity.
-    if (hasStrongAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
-      return 'entity_exact';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 4: Weak anchor (0.5-0.85) handling — SOTA++ improvement
-    // ───────────────────────────────────────────────────────────────────────
-    // Weak anchor without constraints -> fuzzy entity (found some wines but need disambiguation).
-    if (hasWeakAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
-      return 'entity_fuzzy';
-    }
-
-    // Weak anchor + constraints -> mixed (apply filters to anchor set).
-    if (hasWeakAnchor && (hasConstraintKeyword || hasPriceKeyword)) {
-      return 'mixed_query';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 5: Any anchor + constraints (catch-all for anchor + filters)
-    // ───────────────────────────────────────────────────────────────────────
-    if (hasAnyAnchor && (hasConstraintKeyword || hasPriceKeyword)) {
-      return 'mixed_query';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 6: Pairing and budget keywords (no anchor required)
-    // ───────────────────────────────────────────────────────────────────────
-    if (hasPairingKeyword) {
-      return 'pairing_search';
-    }
-
-    // Budget/price keywords without entity.
-    if (hasPriceKeyword) {
-      return 'budget_search';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // STAGE 7: Pure constraint keywords (no anchor)
-    // ───────────────────────────────────────────────────────────────────────
-    if (hasConstraintKeyword) {
-      return 'facet_search';
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // DEFAULT: Semantic discovery (no anchors, no keywords)
-    // ───────────────────────────────────────────────────────────────────────
-    return 'semantic_discovery';
-  }
-
-  /**
    * Determines the query route based on intent and anchors.
    */
   private determineRoute(
@@ -385,11 +269,13 @@ export class Planner {
    *  - pairing_search → recommendation
    *  - facet_search/budget_search (no anchor) → constraint_filter
    *  - semantic_discovery/generic anchor search → attribute_search
+   *  - entity_exact|mixed_query + strong anchor + "best wines" → producer_browse
+   *  - facet/semantic/budget + region path (≥2 '/') → region_browse
    */
   private determineRetrievalMode(
     intent: QueryIntent,
     anchors: readonly AnchorCandidate[],
-    _normalizedQuery: string,
+    normalizedQuery: string,
   ): RetrievalMode {
     const hasStrongAnchor = anchors.some(
       (a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE,
@@ -404,6 +290,25 @@ export class Planner {
     // Comparison search: multiple anchors or explicit comparison intent
     if (intent === 'comparison_search') {
       return 'compare_candidates';
+    }
+
+    // Producer catalog browse ("Domaine X best wines", Epic 7)
+    if (
+      (intent === 'entity_exact' || intent === 'mixed_query') &&
+      hasStrongAnchor &&
+      PRODUCER_BROWSE_QUERY_PATTERN.test(normalizedQuery)
+    ) {
+      return 'producer_browse';
+    }
+
+    // Region / appellation hierarchy path ("… / Napa Valley / …", Epic 7 + golden)
+    if (
+      (intent === 'facet_search' ||
+        intent === 'semantic_discovery' ||
+        intent === 'budget_search') &&
+      regionHierarchySlashCount(normalizedQuery) >= 2
+    ) {
+      return 'region_browse';
     }
 
     // Ambiguous entity: single anchor with multiple candidate entities
@@ -566,146 +471,7 @@ export class Planner {
     // or cold-start configs), fall back to rule-based extraction so that
     // wine_type, country, and sensory constraints are never silently dropped.
     if (hard.length === 0 && soft.length === 0) {
-      return this.extractRuleBasedConstraints(normalizedQuery);
-    }
-
-    return { hard, soft, inferred: [] };
-  }
-
-  /**
-   * Rule-based constraint extractor: pattern-matches the normalized query
-   * directly without a mapping table.
-   *
-   * Covers the most common wine-domain constraints:
-   *   - wine_type  (hard)  — red / white / rosé / sparkling / natural / dessert
-   *   - country    (hard)  — France / Italy / Spain / USA / etc.
-   *   - price_band (soft)  — "under $50", "만원 이하"
-   *   - body       (soft)  — full-body / light-body
-   *   - sweetness  (soft)  — dry / sweet
-   *
-   * Operates as a fallback only; NLMapper takes precedence when available.
-   */
-  private extractRuleBasedConstraints(normalizedQuery: string): ConstraintBundle {
-    const hard: ConstraintBundle['hard'][number][] = [];
-    const soft: ConstraintBundle['soft'][number][] = [];
-    const q = normalizedQuery;
-
-    // ── Wine type (hard) ───────────────────────────────────────────────────
-    const wineTypeRules: [RegExp, string][] = [
-      [/\b(?:red|rouge|레드|적포도주)\b/i, 'red'],
-      [/\b(?:white|blanc|화이트|백포도주)\b/i, 'white'],
-      [/\bros[eé]|로제\b/i, 'rosé'],
-      [/\b(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)\b/i, 'sparkling'],
-      [/\b(?:natural wine|내추럴 와인|내추럴)\b/i, 'natural'],
-      [/\b(?:dessert wine|디저트 와인|sauternes|icewine)\b/i, 'dessert'],
-      [/\b(?:fortified|주정강화|port|sherry|madeira|marsala)\b/i, 'fortified'],
-      [/\b(?:orange wine|오렌지 와인|amber wine)\b/i, 'orange'],
-    ];
-    for (const [pattern, value] of wineTypeRules) {
-      if (pattern.test(q)) {
-        hard.push({
-          attribute: 'wine_type',
-          operator: '=',
-          value,
-          source_phrase: value,
-          confidence: 0.9,
-          mapping_version: RULE_BASED_MAPPING_VERSION,
-        });
-        break; // Only one wine_type per query
-      }
-    }
-
-    // ── Country (hard) ─────────────────────────────────────────────────────
-    const countryRules: [RegExp, string][] = [
-      [/\b(?:french|france|프랑스)\b/i, 'France'],
-      [/\b(?:italian|italy|이탈리아)\b/i, 'Italy'],
-      [/\b(?:spanish|spain|스페인)\b/i, 'Spain'],
-      [/\b(?:american|usa|us wine|california|napa|sonoma|oregon|미국)\b/i, 'USA'],
-      [/\b(?:australian|australia|호주)\b/i, 'Australia'],
-      [/\b(?:argentinian|argentina|아르헨티나)\b/i, 'Argentina'],
-      [/\b(?:chilean|chile|칠레)\b/i, 'Chile'],
-      [/\b(?:german|germany|독일)\b/i, 'Germany'],
-      [/\b(?:portuguese|portugal|포르투갈)\b/i, 'Portugal'],
-      [/\b(?:new zealand|뉴질랜드)\b/i, 'New Zealand'],
-      [/\b(?:south african?|south africa|남아공)\b/i, 'South Africa'],
-      [/\b(?:austrian|austria|오스트리아)\b/i, 'Austria'],
-    ];
-    for (const [pattern, value] of countryRules) {
-      if (pattern.test(q)) {
-        hard.push({
-          attribute: 'country',
-          operator: '=',
-          value,
-          source_phrase: value,
-          confidence: 0.85,
-          mapping_version: RULE_BASED_MAPPING_VERSION,
-        });
-        break; // Only one country per query
-      }
-    }
-
-    // ── Price band (soft) ──────────────────────────────────────────────────
-    // Korean \b word boundary doesn't work with Hangul. Use (?:^|\s|\d) anchors instead.
-    const priceUnder =
-      /\bunder\s+\$?(\d+)\b/i.exec(q) ??
-      /(\d+)\s*(?:달러|dollar)\s*이하/i.exec(q) ??
-      /(\d+)\s*만원\s*(?:이하|미만|대)/i.exec(q);
-    if (priceUnder?.[1] !== undefined) {
-      const priceValue = parseInt(priceUnder[1], 10);
-      // 만원 unit in Korean (1만원 ≈ $7)
-      const usd = /만원/.test(q) ? priceValue * 7 : priceValue;
-      const band =
-        usd <= 20 ? 'budget' : usd <= 50 ? 'mid' : usd <= 100 ? 'premium' : 'luxury';
-      soft.push({
-        attribute: 'price_band',
-        operator: '=',
-        value: band,
-        source_phrase: priceUnder[0],
-        confidence: 0.8,
-        mapping_version: RULE_BASED_MAPPING_VERSION,
-      });
-    }
-
-    // ── Body (soft) ────────────────────────────────────────────────────────
-    if (/\b(?:full[\s-]?body|풀바디|bold|heavy|묵직)\b/i.test(q)) {
-      soft.push({
-        attribute: 'body',
-        operator: '=',
-        value: 'full',
-        source_phrase: 'full-body',
-        confidence: 0.75,
-        mapping_version: RULE_BASED_MAPPING_VERSION,
-      });
-    } else if (/\b(?:light[\s-]?body|라이트바디|light wine|가벼운|가볍)\b/i.test(q)) {
-      soft.push({
-        attribute: 'body',
-        operator: '=',
-        value: 'light',
-        source_phrase: 'light-body',
-        confidence: 0.75,
-        mapping_version: RULE_BASED_MAPPING_VERSION,
-      });
-    }
-
-    // ── Sweetness (soft) ───────────────────────────────────────────────────
-    if (/\b(?:dry wine|드라이|brut|extra[\s-]?brut)\b/i.test(q)) {
-      soft.push({
-        attribute: 'sweetness',
-        operator: '=',
-        value: 'dry',
-        source_phrase: 'dry',
-        confidence: 0.8,
-        mapping_version: RULE_BASED_MAPPING_VERSION,
-      });
-    } else if (/\b(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)\b/i.test(q)) {
-      soft.push({
-        attribute: 'sweetness',
-        operator: '=',
-        value: 'sweet',
-        source_phrase: 'sweet',
-        confidence: 0.8,
-        mapping_version: RULE_BASED_MAPPING_VERSION,
-      });
+      return extractRuleBasedConstraints(normalizedQuery);
     }
 
     return { hard, soft, inferred: [] };

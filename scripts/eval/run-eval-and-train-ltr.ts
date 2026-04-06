@@ -17,7 +17,7 @@ import { EvalRunner } from '../../src/domain/evaluation/service/eval-runner.js';
 import { PgGoldSetStore } from '../../src/infrastructure/adapter/pg-gold-set-store.js';
 import { PgEvalResultStore } from '../../src/infrastructure/adapter/pg-eval-result-store.js';
 import { SearchPipelineEvaluator } from '../../src/infrastructure/adapter/search-pipeline-evaluator.js';
-import { buildTrainingExamples, trainAllModels } from '../../src/domain/ranking/index.js';
+import { buildTrainingExamples, trainAllModels } from '../../src/domain/ranking/training.js';
 import { PgLtrModelRegistry } from '../../src/infrastructure/adapter/pg-ltr-model-registry.js';
 import type { SearchUseCase } from '../../src/application/search/search.usecase.js';
 

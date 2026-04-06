@@ -298,5 +298,15 @@ describe('Calibrator', () => {
       expect(result.decisionConfidenceC).toBeCloseTo(0.72, 10);
       expect(result.calibratedGap).toBeCloseTo(0.72 - 0.31, 10);
     });
+
+    it('throws when trained calibration is required but missing', async () => {
+      const calibrator = new Calibrator(makeStubStore(null), {
+        requireTrainedParams: true,
+      });
+
+      await expect(
+        calibrator.calibrate({ top1: 0.72, top2: 0.31 }, 'ambiguous_short_form'),
+      ).rejects.toThrow(/Missing trained calibration params/);
+    });
   });
 });

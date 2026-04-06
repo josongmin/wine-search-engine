@@ -57,4 +57,15 @@ describe('readiness probes', () => {
       probeJsonPostEndpoint('http://localhost:8080/health', { ping: true }),
     ).resolves.toBe('down');
   });
+
+  it('maps network exceptions to down', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')),
+    );
+
+    await expect(
+      probeJsonPostEndpoint('http://localhost:8080/health', { ping: true }),
+    ).resolves.toBe('down');
+  });
 });

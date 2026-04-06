@@ -37,6 +37,11 @@ export {
   type SourceLang,
 } from './service/transliterator.js';
 
+export {
+  CharNgramIndex,
+  type CharNgramMatch,
+} from './service/char-ngram-index.js';
+
 export { ConflictResolver } from './service/conflict-resolver.js';
 
 export {

@@ -8,7 +8,7 @@
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
-import type { CacheResult } from '../service/cache-service.js';
+import type { CacheResult } from '../model/cache-result.js';
 
 export interface SearchResponseCachePort {
   getSearchResponse(

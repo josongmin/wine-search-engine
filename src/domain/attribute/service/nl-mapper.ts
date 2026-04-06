@@ -210,6 +210,54 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
       source: DEFAULT_SOURCE,
     },
   ],
+  [
+    'drinking window',
+    {
+      phrase: 'drinking window',
+      mappedAttribute: 'drinking_window',
+      operator: '>=',
+      value: 0,
+      mappingConfidence: 0.9,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
+  [
+    'when to drink',
+    {
+      phrase: 'when to drink',
+      mappedAttribute: 'drinking_window',
+      operator: '>=',
+      value: 0,
+      mappingConfidence: 0.9,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
+  [
+    '마실 시기',
+    {
+      phrase: '마실 시기',
+      mappedAttribute: 'drinking_window',
+      operator: '>=',
+      value: 0,
+      mappingConfidence: 0.9,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
+  [
+    '음용 시기',
+    {
+      phrase: '음용 시기',
+      mappedAttribute: 'drinking_window',
+      operator: '>=',
+      value: 0,
+      mappingConfidence: 0.9,
+      mappingVersion: DEFAULT_MAPPING_VERSION,
+      source: DEFAULT_SOURCE,
+    },
+  ],
 ]);
 
 /**

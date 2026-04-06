@@ -23,6 +23,14 @@ const DEFAULT_PLATT_PARAMS: CalibrationParams = {
   ece: 1.0,
 };
 
+export interface CalibratorOptions {
+  /**
+   * When true, missing trained params are treated as a startup/runtime error rather than
+   * silently falling back to identity calibration.
+   */
+  readonly requireTrainedParams?: boolean | undefined;
+}
+
 /**
  * Converts raw match scores into calibrated probabilities using
  * learned calibration models, per RFC-006 §6.
@@ -36,7 +44,10 @@ const DEFAULT_PLATT_PARAMS: CalibrationParams = {
  * Raw scores are explicitly forbidden from influencing decisions.
  */
 export class Calibrator {
-  constructor(private readonly calibrationStore: CalibrationStore) {}
+  constructor(
+    private readonly calibrationStore: CalibrationStore,
+    private readonly options: CalibratorOptions = {},
+  ) {}
 
   /**
    * Calibrates the raw top-1 and top-2 scores into a {@link CalibratedResolutionScore}.
@@ -70,7 +81,15 @@ export class Calibrator {
    */
   private async loadParams(queryClass: QueryClass): Promise<CalibrationParams> {
     const stored = await this.calibrationStore.getCalibrationParams(queryClass);
-    return stored ?? DEFAULT_PLATT_PARAMS;
+    if (stored !== null) {
+      return stored;
+    }
+    if (this.options.requireTrainedParams) {
+      throw new Error(
+        `Missing trained calibration params for query class "${queryClass}". Refusing fallback calibration.`,
+      );
+    }
+    return DEFAULT_PLATT_PARAMS;
   }
 
   /**

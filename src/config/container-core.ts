@@ -10,6 +10,7 @@ import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type {
   BrowseRetrieverPort,
   CompareRetrieverPort,
+  EntityDocumentLookupPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
@@ -41,6 +42,7 @@ export interface CoreContainerServices {
   readonly mixedSolver: MixedSolver;
   readonly browseRetriever: BrowseRetrieverPort;
   readonly compareRetriever: CompareRetrieverPort;
+  readonly entityLookup: EntityDocumentLookupPort;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -56,8 +58,8 @@ export async function buildCoreContainerServices(
   const support = await buildRuntimeSupportServices(config, runtime);
   const adapters = buildCoreAdapterServices(config, runtime.pool);
 
-  const queryPlanner = buildQueryPlanner(adapters);
-  const entityResolver = buildEntityResolver(adapters);
+  const queryPlanner = await buildQueryPlanner(adapters, runtime.pool);
+  const entityResolver = buildEntityResolver(adapters, config);
   const candidatePool = buildCandidatePool(adapters, support, config);
   const browseRetriever = buildBrowseRetriever(adapters);
   const compareRetriever = buildCompareRetriever(adapters);
@@ -69,6 +71,7 @@ export async function buildCoreContainerServices(
     candidatePool,
     browseRetriever,
     compareRetriever,
+    entityLookup: adapters.searchIndex,
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),
     responseBuilder: buildResponseBuilder(),

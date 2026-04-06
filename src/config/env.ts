@@ -52,6 +52,18 @@ const envSchema = z.object({
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** Allow LLM injection judge failures to bypass Layer 2 blocking. Defaults to safer fail-closed. */
+  INJECTION_JUDGE_FAIL_OPEN: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+  /** Explicit production opt-in for heuristic-only drinking-window prediction. */
+  ALLOW_HEURISTIC_DRINKING_WINDOW: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+  /** Optional directory containing `window_start.onnx` and `window_end.onnx`. */
+  DRINKING_WINDOW_MODEL_DIR: z.string().min(1).optional(),
 
   // Watchlist webhook signing secret (Epic 17.1)
   WATCHLIST_ENABLED: z
@@ -160,6 +172,11 @@ function buildConfig(parsed: EnvVars) {
       apiKey: parsed.ANTHROPIC_API_KEY,
     },
 
+    /** Query-entry security behavior (Layer 1 + Layer 2 prompt-injection defense). */
+    queryEntrySecurity: {
+      judgeFailureMode: parsed.INJECTION_JUDGE_FAIL_OPEN ? 'fail_open' : 'fail_closed',
+    },
+
     /** Watchlist webhook settings (Epic 17.1). */
     watchlist: {
       enabled: watchlistEnabled,
@@ -169,6 +186,12 @@ function buildConfig(parsed: EnvVars) {
     /** Confidence refusal settings (Epic 17.3: Hallucination Verify). */
     confidenceRefusal: {
       threshold: parsed.CONFIDENCE_REFUSAL_THRESHOLD,
+    },
+
+    /** Drinking-window runtime policy. */
+    drinkingWindow: {
+      allowHeuristicInProduction: parsed.ALLOW_HEURISTIC_DRINKING_WINDOW,
+      modelDir: parsed.DRINKING_WINDOW_MODEL_DIR,
     },
 
     /** Kill switches for feature flags / circuit breakers. */

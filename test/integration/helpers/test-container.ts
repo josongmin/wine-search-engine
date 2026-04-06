@@ -181,6 +181,7 @@ export function createTestContainer(): TestContainerParts {
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
+    entityLookup: searchIndex,
     candidatePool,
     browseRetriever,
     compareRetriever,
@@ -198,7 +199,13 @@ export function createTestContainer(): TestContainerParts {
 
   const replayUseCase = new ReplayUseCase({ searchUseCase });
   const interpretUseCase = new InterpretUseCase({ queryPlanner, querySanitizer, injectionJudge });
-  const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver, querySanitizer, injectionJudge });
+  const resolveUseCase = new ResolveUseCase({
+    queryPlanner,
+    entityResolver,
+    entityLookup: searchIndex,
+    querySanitizer,
+    injectionJudge,
+  });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -219,6 +226,11 @@ export function createTestContainer(): TestContainerParts {
     storage: watchlistStore,
   });
   const container: Container = {
+    feedbackStore: null,
+    proposalStore: null,
+    feedbackProcessor: null,
+    aliasProposer: null,
+    feedbackIngestEnabled: false,
     queryPlanner,
     entityResolver,
     candidatePool,
@@ -233,6 +245,7 @@ export function createTestContainer(): TestContainerParts {
     hybridUseCase,
     decomposedSearchUseCase,
     drinkingWindowUseCase,
+    drinkingWindowPredictor,
     batchSearchUseCase,
     adaptiveToolExecutor,
     watchlistService,

@@ -7,10 +7,10 @@
  */
 
 /**
- * A simple label encoder mapping strings to integers.
- * Unknown values map to OOV code (999).
+ * ML pipeline label encoder (drinking-window / Epic 15). Distinct from
+ * {@link ../../domain/ranking/service/wine-attribute-encoder.js#WineCatalogLabelEncoder}.
  */
-export class LabelEncoder {
+export class MlPipelineLabelEncoder {
   private readonly mapping: Map<string, number>;
   private readonly oovCode: number = 999;
 
@@ -52,8 +52,8 @@ export class LabelEncoder {
  */
 /** Namespace-style export: only static helpers (no instances). */
 // eslint-disable-next-line @typescript-eslint/no-extraneous-class -- static encoder registry
-export class WineAttributeEncoders {
-  private static readonly grapeEnc = new LabelEncoder([
+export class MlPipelineWineAttributeEncoders {
+  private static readonly grapeEnc = new MlPipelineLabelEncoder([
     // Most common varieties (sorted by frequency in dataset)
     'Cabernet Sauvignon',
     'Pinot Noir',
@@ -71,7 +71,7 @@ export class WineAttributeEncoders {
     // Add more as needed; unknown = 999
   ]);
 
-  private static readonly regionEnc = new LabelEncoder([
+  private static readonly regionEnc = new MlPipelineLabelEncoder([
     // Major regions (top producers by frequency)
     'Napa Valley',
     'Bordeaux',
@@ -96,7 +96,7 @@ export class WineAttributeEncoders {
     // Add more as needed; unknown = 999
   ]);
 
-  private static readonly countryEnc = new LabelEncoder([
+  private static readonly countryEnc = new MlPipelineLabelEncoder([
     // Wine-producing countries (sorted by frequency in dataset)
     'United States',
     'France',

@@ -38,10 +38,40 @@ function createHttpServerDeps(): HttpServerDeps {
       clear: vi.fn(),
     },
     evalRunner: null,
+    feedbackStore: null,
+    feedbackIngestEnabled: false,
   };
 }
 
 describe('HTTP server route registration', () => {
+  it('registers POST /v1/feedback (returns 503 when feedback ingest is disabled)', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+    });
+    try {
+      const routes = app.printRoutes();
+      expect(routes).toContain('feedback (POST)');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/feedback',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({
+          query: 'Opus One',
+          entity_id: 'wine-opus-one',
+          signal_type: 'click',
+          session_id: 'sess-1',
+        }),
+      });
+      expect(res.statusCode).toBe(503);
+      const body = JSON.parse(res.body) as { error?: { code?: string } };
+      expect(body.error?.code).toBe('FEEDBACK_UNAVAILABLE');
+    } finally {
+      await app.close();
+    }
+  });
+
   it('exposes the Claude tools endpoint through the server', async () => {
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',
@@ -120,6 +150,75 @@ describe('HTTP server route registration', () => {
           redis: { status: 'down', required: false },
         },
       });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('marks required readiness checks down when the probe throws', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      health: {
+        readiness: {
+          vespa: {
+            required: true,
+            check: async () => {
+              throw new Error('vespa unavailable');
+            },
+          },
+        },
+      },
+    });
+
+    try {
+      await app.ready();
+      const res = await app.inject({
+        method: 'GET',
+        url: '/ready',
+      });
+
+      expect(res.statusCode).toBe(503);
+      expect(res.json()).toMatchObject({
+        ready: false,
+        checks: {
+          vespa: { status: 'down', required: true },
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not block startup when background eval runner fails during onReady', async () => {
+    const evalRunner = {
+      run: vi.fn(async () => {
+        throw new Error('eval backend unavailable');
+      }),
+    };
+    const app = await createServer(
+      {
+        ...createHttpServerDeps(),
+        evalRunner,
+      },
+      {
+        logLevel: 'silent',
+        nodeEnv: 'test',
+        runEvalAtStartup: true,
+      },
+    );
+
+    try {
+      await expect(app.ready()).resolves.toBe(app);
+      expect(evalRunner.run).toHaveBeenCalledTimes(1);
+
+      const res = await app.inject({
+        method: 'GET',
+        url: '/health',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ status: 'ok' });
     } finally {
       await app.close();
     }

@@ -34,6 +34,17 @@ describe('assert-baseline-regression', () => {
           decision_utility: 0.4,
         },
       },
+      by_mode: {
+        entity_lookup: {
+          retrieval_mode: 'entity_lookup',
+          query_count: 20,
+          ndcg_at_10: 0.72,
+          mrr_at_10: 0.69,
+          recall_at_10: 0.9,
+          wrong_top1_rate: 0,
+          decision_utility: 0.45,
+        },
+      },
     };
     const current: OfflineEvalReport = {
       ...baseline,
@@ -79,6 +90,17 @@ describe('assert-baseline-regression', () => {
           decision_utility: 0.4,
         },
       },
+      by_mode: {
+        entity_lookup: {
+          retrieval_mode: 'entity_lookup',
+          query_count: 20,
+          ndcg_at_10: 0.72,
+          mrr_at_10: 0.69,
+          recall_at_10: 0.9,
+          wrong_top1_rate: 0,
+          decision_utility: 0.45,
+        },
+      },
     };
     const current: OfflineEvalReport = {
       ...baseline,
@@ -92,6 +114,17 @@ describe('assert-baseline-regression', () => {
           mrr_at_10: 0.68,
           wrong_top1_rate: 0.02,
           decision_utility: 0.5,
+        },
+      },
+      by_mode: {
+        entity_lookup: {
+          retrieval_mode: 'entity_lookup',
+          query_count: 20,
+          ndcg_at_10: 0.68,
+          mrr_at_10: 0.66,
+          recall_at_10: 0.85,
+          wrong_top1_rate: 0.01,
+          decision_utility: 0.45,
         },
       },
     };
@@ -110,6 +143,10 @@ describe('assert-baseline-regression', () => {
       'wrong_top1_rate',
       'scenario.A.ndcg_at_10',
       'scenario.A.wrong_top1_rate',
+      'mode.entity_lookup.ndcg_at_10',
+      'mode.entity_lookup.mrr_at_10',
+      'mode.entity_lookup.wrong_top1_rate',
+      'mode.entity_lookup.recall_at_10',
     ]);
   });
 

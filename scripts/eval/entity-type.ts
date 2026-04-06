@@ -1,6 +1,24 @@
 import type { GoldenQuery } from '../etl/types.js';
 import type { EntityTargetType, RankedHit } from './metrics.js';
 
+/**
+ * Epic 2 (`docs/plans/apr-5-v0.1/epic-2-golden-query-set.md` §8 scenarios A–H):
+ * primary graded targets are **wine entities** except when retrieval mode explicitly
+ * selects producer/region browse. Scenario letters alone do not imply producer/region
+ * — use `retrieval_mode` / `query_class` first.
+ */
+const SCENARIO_LETTER_DEFAULT_TARGET: Partial<Record<string, EntityTargetType>> = {
+  A: 'wine',
+  B: 'wine',
+  C: 'wine',
+  D: 'wine',
+  E: 'wine',
+  F: 'wine',
+  G: 'wine',
+  H: 'wine',
+  no_match: 'wine',
+};
+
 const RETRIEVAL_MODE_TARGET_TYPE_MAP: Partial<Record<NonNullable<GoldenQuery['retrieval_mode']>, EntityTargetType>> = {
   entity_lookup: 'wine',
   entity_resolution: 'wine',
@@ -47,11 +65,14 @@ export function inferEntityTargetType(query: QueryTargetTypeSource): EntityTarge
     return fromQueryClass;
   }
 
-  // Historical fallback for legacy scenario-only datasets.
-  if (query.scenario === 'no_match') {
-    return 'wine';
+  const letter = SCENARIO_LETTER_DEFAULT_TARGET[query.scenario];
+  if (letter !== undefined) {
+    return letter;
   }
-  return 'wine';
+
+  // Historical scenario-only datasets may omit retrieval mode and query class fidelity.
+  // Treat those as unknown rather than optimistically assuming wine.
+  return 'unknown';
 }
 
 export function inferResolvedEntityType(hit: Pick<RankedHit, 'entity_type'> | undefined): EntityTargetType {

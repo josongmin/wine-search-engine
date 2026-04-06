@@ -12,6 +12,15 @@ const OfflineEvalSchema = z.object({
   recall_at_3: z.number().optional(),
   recall_at_100: z.number().optional(),
   wrong_top1_rate: z.number(),
+  by_mode: z.record(z.object({
+    retrieval_mode: z.string().min(1),
+    query_count: z.number().nonnegative(),
+    ndcg_at_10: z.number(),
+    mrr_at_10: z.number(),
+    recall_at_10: z.number(),
+    wrong_top1_rate: z.number(),
+    decision_utility: z.number(),
+  }).passthrough()).optional(),
   by_scenario: z.record(z.object({
     query_count: z.number().nonnegative(),
     ndcg_at_10: z.number(),
@@ -138,9 +147,17 @@ export function compareOfflineRegression(
   }
 
   const compareSlices = (
-    currentSlices: OfflineEvalReport['by_scenario'] | OfflineEvalReport['by_language'] | undefined,
-    baselineSlices: OfflineEvalReport['by_scenario'] | OfflineEvalReport['by_language'] | undefined,
-    prefix: 'scenario' | 'language',
+    currentSlices:
+      | OfflineEvalReport['by_scenario']
+      | OfflineEvalReport['by_language']
+      | OfflineEvalReport['by_mode']
+      | undefined,
+    baselineSlices:
+      | OfflineEvalReport['by_scenario']
+      | OfflineEvalReport['by_language']
+      | OfflineEvalReport['by_mode']
+      | undefined,
+    prefix: 'scenario' | 'language' | 'mode',
   ): void => {
     if (currentSlices === undefined || baselineSlices === undefined) {
       return;
@@ -178,11 +195,28 @@ export function compareOfflineRegression(
           message: `${prefix} ${sliceName} wrong_top1_rate increased by ${(currentSlice.wrong_top1_rate - baselineSlice.wrong_top1_rate).toFixed(4)} (> ${thresholds.wrong_top1_rate_max_increase.toFixed(4)})`,
         });
       }
+
+      if (
+        prefix === 'mode'
+        && 'recall_at_10' in baselineSlice
+        && 'recall_at_10' in currentSlice
+        && typeof baselineSlice.recall_at_10 === 'number'
+        && typeof currentSlice.recall_at_10 === 'number'
+        && currentSlice.recall_at_10 < baselineSlice.recall_at_10 - thresholds.recall_at_3_max_drop
+      ) {
+        violations.push({
+          metric: `${prefix}.${sliceName}.recall_at_10`,
+          baseline: baselineSlice.recall_at_10,
+          current: currentSlice.recall_at_10,
+          message: `${prefix} ${sliceName} recall_at_10 dropped by ${(baselineSlice.recall_at_10 - currentSlice.recall_at_10).toFixed(4)} (> ${thresholds.recall_at_3_max_drop.toFixed(4)})`,
+        });
+      }
     }
   };
 
   compareSlices(current.by_scenario, baseline.by_scenario, 'scenario');
   compareSlices(current.by_language, baseline.by_language, 'language');
+  compareSlices(current.by_mode, baseline.by_mode, 'mode');
 
   return violations;
 }

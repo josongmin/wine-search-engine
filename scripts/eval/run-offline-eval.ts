@@ -12,6 +12,7 @@
  * Usage:
  *   npx tsx --env-file=.env scripts/eval/run-offline-eval.ts
  *   npx tsx --env-file=.env scripts/eval/run-offline-eval.ts --tier gate --output data/eval-results.json
+ *   npx tsx scripts/eval/run-offline-eval.ts --verify-splits   # run split integrity first (RFC-017 §2.5)
  */
 
 import 'dotenv/config';
@@ -46,6 +47,7 @@ import {
   inferEntityTargetType as inferEntityTargetTypeFromQuery,
   inferResolvedEntityType,
 } from './entity-type.js';
+import { verifyDefaultGoldenSplits } from './split-integrity.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -128,6 +130,8 @@ interface Args {
   input: string;
   output: string;
   tier: 'bronze' | 'silver' | 'gate';
+  /** When true, run `verify-splits` logic before any search (fail-fast on leakage). */
+  verifySplits: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -135,6 +139,7 @@ function parseArgs(argv: string[]): Args {
     input: DEFAULT_INPUT,
     output: DEFAULT_OUTPUT,
     tier: 'bronze',
+    verifySplits: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -143,6 +148,8 @@ function parseArgs(argv: string[]): Args {
     else if (a === '--tier') {
       const t = argv[++i];
       if (t === 'bronze' || t === 'silver' || t === 'gate') out.tier = t;
+    } else if (a === '--verify-splits') {
+      out.verifySplits = true;
     }
   }
   return out;
@@ -164,6 +171,10 @@ function evalSearchConcurrency(): number {
   const n = raw === undefined ? NaN : Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 1) return 12;
   return Math.min(64, n);
+}
+
+function shouldSkipEmbeddingValidation(): boolean {
+  return process.env['EVAL_SKIP_EMBEDDING_VALIDATION'] === 'true';
 }
 
 async function mapPool<T, R>(
@@ -475,6 +486,30 @@ function computeEntityTypeMetrics(
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
+  if (args.verifySplits) {
+    console.log('Running split integrity check (RFC-017 §2.5) …');
+    const splitResult = await verifyDefaultGoldenSplits();
+    if (
+      splitResult.stats.train === 0 &&
+      splitResult.stats.val === 0 &&
+      splitResult.stats.gate === 0
+    ) {
+      console.error(
+        '  verify-splits: no split files (data/splits/*.jsonl). Run build-splits or omit --verify-splits.',
+      );
+      process.exit(1);
+    }
+    if (!splitResult.valid) {
+      console.error(
+        `  Split integrity FAILED (${splitResult.violations.length} violations). First: ${splitResult.violations[0] ?? 'unknown'}`,
+      );
+      process.exit(1);
+    }
+    console.log(
+      `  Split integrity OK (train=${splitResult.stats.train}, val=${splitResult.stats.val}, gate=${splitResult.stats.gate})\n`,
+    );
+  }
+
   console.log(`Loading golden queries from ${args.input} (tier: ${args.tier}) …`);
   const content = await fs.readFile(args.input, 'utf8');
   const { records: allQueries } = parseNdjson<GoldenQuery>(content, args.input);
@@ -747,6 +782,10 @@ async function run(): Promise<void> {
 
   // Epic 6: Run embedding validation if available
   console.log('\n=== EMBEDDING VALIDATION (Epic 6) ===');
+  if (shouldSkipEmbeddingValidation()) {
+    console.log('⏭️  Skipped (EVAL_SKIP_EMBEDDING_VALIDATION=true)');
+    return;
+  }
   try {
     const validateEmbeddingPath = new URL('../ltr/validate-embedding.ts', import.meta.url).pathname;
     const fs_exists = await import('node:fs/promises').then((m) =>

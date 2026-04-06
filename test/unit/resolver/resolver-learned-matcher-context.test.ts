@@ -130,4 +130,61 @@ describe('Resolver learned matcher context', () => {
       }),
     );
   });
+
+  it('falls back to heuristic resolver scoring when the learned matcher fails', async () => {
+    const match = vi.fn<LearnedMatcherPort['match']>().mockRejectedValue(
+      new Error('matcher unavailable'),
+    );
+    const learnedMatcher: LearnedMatcherPort = { match };
+    const resolver = new Resolver(
+      new Blocker(blockingPort),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator(calibrationStore),
+      learnedMatcher,
+    );
+
+    const queryViews = new QueryNormalizer().normalize('오푸스원 18');
+    const input: ResolverInput = {
+      rawQuery: '오푸스원 18',
+      normalizedQuery: queryViews.accentless,
+      normalizedQueryViews: queryViews,
+      queryClass: 'short_entity',
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'hybrid',
+        policyReasonCodes: [],
+      },
+      anchorCandidates: [
+        {
+          surfaceForm: 'Opus One 2018',
+          normalizedForm: 'opus one 2018',
+          candidateEntityIds: [createEntityId('entity-opus-one-2018')],
+          lookupVariants: ['opus one'],
+          lookupStrategies: ['transliterated_exact'],
+          confidence: 0.95,
+          source: 'alias',
+        },
+      ],
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.95,
+        anchorConfidence: 0.95,
+        constraintConfidence: 0.95,
+      },
+      candidateEntities: [makeCandidate()],
+    };
+
+    const result = await resolver.resolve(input);
+
+    expect(match).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('resolved');
+    expect(result.decisionTrace.learnedMatcherTrace).toBeUndefined();
+  });
 });

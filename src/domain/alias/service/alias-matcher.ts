@@ -1,6 +1,7 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { Alias, AliasScope, AliasType } from '../model/alias.js';
 import type { AliasRepository } from '../port/alias-repository.port.js';
+import type { CharNgramIndex } from './char-ngram-index.js';
 
 /**
  * Result of matching a query string against the alias index.
@@ -11,7 +12,7 @@ export interface AliasMatchResult {
   /** The alias that matched. */
   readonly alias: Alias;
   /** How the match was found. */
-  readonly matchType: 'exact' | 'normalized' | 'fuzzy' | 'phonetic';
+  readonly matchType: 'exact' | 'normalized' | 'char_ngram' | 'fuzzy' | 'phonetic';
   /**
    * Raw match score in [0, 1].
    * 1.0 for exact, scaled by similarity for fuzzy/phonetic.
@@ -112,7 +113,16 @@ const MIN_FUZZY_LENGTH = 4;
  * Embedding-only match is forbidden as sole authority per RFC-003.
  */
 export class AliasMatcher {
-  constructor(private readonly aliasRepo: AliasRepository) {}
+  private readonly charNgramIndex?: CharNgramIndex | undefined;
+
+  constructor(
+    private readonly aliasRepo: AliasRepository,
+    options?: { readonly charNgramIndex?: CharNgramIndex },
+  ) {
+    if (options?.charNgramIndex) {
+      this.charNgramIndex = options.charNgramIndex;
+    }
+  }
 
   /**
    * Matches a query string against the alias index using a cascading
@@ -138,6 +148,12 @@ export class AliasMatcher {
     const normalizedResults = await this.normalizedMatch(query, scope);
     if (normalizedResults.length > 0) {
       return this.rankAndLimit(normalizedResults, limit);
+    }
+
+    // Stage 2.5: Char n-gram match (handles collapsed whitespace, missing spaces)
+    const charNgramResults = await this.charNgramMatch(query, scope);
+    if (charNgramResults.length > 0) {
+      return this.rankAndLimit(charNgramResults, limit);
     }
 
     // Stage 3: Fuzzy match (Levenshtein-based)
@@ -188,6 +204,39 @@ export class AliasMatcher {
       matchScore: 0.95,
       weightedScore: 0.95 * TYPE_WEIGHTS[alias.type] * alias.confidencePrior,
     }));
+  }
+
+  /**
+   * Char n-gram match: uses trigram Jaccard similarity to find aliases that
+   * match despite collapsed whitespace, missing spaces, or minor character
+   * differences (e.g. "opusone" -> "Opus One").
+   */
+  private async charNgramMatch(
+    query: string,
+    scope?: AliasScope,
+  ): Promise<AliasMatchResult[]> {
+    if (!this.charNgramIndex) return [];
+
+    const matches = this.charNgramIndex.search(query);
+    if (matches.length === 0) return [];
+
+    const results: AliasMatchResult[] = [];
+    for (const m of matches) {
+      // Look up the alias by its original surface form
+      const aliases = await this.aliasRepo.findByValue(m.term, scope);
+      const active = this.activeOnly(aliases);
+      for (const alias of active) {
+        results.push({
+          entityId: alias.entityId,
+          alias,
+          matchType: 'char_ngram',
+          matchScore: m.similarity,
+          weightedScore: m.similarity * TYPE_WEIGHTS[alias.type] * alias.confidencePrior,
+        });
+      }
+    }
+
+    return results;
   }
 
   /**

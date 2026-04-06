@@ -23,3 +23,9 @@ export const QUERY_CLASSES = [
  * - `unknown` — the query does not match any known pattern.
  */
 export type QueryClass = (typeof QUERY_CLASSES)[number];
+
+const QUERY_CLASS_SET = new Set<string>(QUERY_CLASSES);
+
+export function isQueryClass(value: string): value is QueryClass {
+  return QUERY_CLASS_SET.has(value);
+}

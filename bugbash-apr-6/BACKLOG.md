@@ -2,7 +2,8 @@
 
 **작성 기준:** `docs/plans/apr-5-v0.1/*`와 저장소 코드·데이터를 대조한 감사 결과.  
 **목적:** 계획 대비 갭·버그·부채를 **근거와 함께** 추적해 다음 스프린트에서 처리한다.  
-**최종 갱신:** 2026-04-06 (제4패스 **§39–41**: CORS 없음 · `HTTP_RATE_LIMIT_MAX=0` 시 rate limit off · OpenAPI 없음 / `GAPS` **G-46–G-48** · Epic 15 문서 경로 ID **G-45**)
+**현행 “실제 빵꾸만” SSOT:** [`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md) — 해소된 ID(G-05/6/10/22/40/43/48 등)는 아래 **구간별 서술**과 함께 갱신됨.  
+**최종 갱신:** 2026-04-06 (제5패스: **`ACTUAL-GAPS.md`** 추가 · `GAPS`/`PLANS-GAP-AUDIT` 7차 정렬)
 
 ### 제5패스 스냅샷 (명령·건수)
 
@@ -10,9 +11,9 @@
 |------|------|
 | `npm run typecheck` | 통과 |
 | `npm run test` | 1083 tests 통과 (68 files) |
-| `npm run lint` | **실패** — **214** problems (errors), exit 1 |
+| `npm run lint` | **통과** (2026-04-06 재확인) — 과거 감사의 **214건** 기록은 [`AUDIT-LOG.md`](./AUDIT-LOG.md) 참고 |
 
-상세 라인 근거: [`AUDIT-LOG.md`](./AUDIT-LOG.md) §2026-04-06. P2 “ESLint 다수”는 이번 기준 **214건**으로 구체화.
+상세 라인 근거: [`AUDIT-LOG.md`](./AUDIT-LOG.md) §2026-04-06. 구간 §8·§14 등 **lint 대량 실패** 서술은 **G-06 해소** 후 [`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md)와 불일치할 수 있음.
 
 ---
 

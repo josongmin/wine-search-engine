@@ -31,6 +31,7 @@ RFCs under `docs/` remain the source of truth for behavior and terminology.
 - `npm run test:all`: run the main unit/integration/watchlist/e2e/quality regression stack
 - `npm run contracts:http -- data/http-contract-manifest.json`: export the declared HTTP contract manifest
 - `npm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json`: export the OpenAPI bridge generated from route contracts
+- `npm run verify:drinking-window-model -- models/drinking-window`: verify a drinking-window ONNX bundle contains the required files
 - `npm run test:watchlist:pg`: run the real-Postgres watchlist storage integration test when `PG_TEST_URL` is set
 
 ## Test Lanes
@@ -39,12 +40,24 @@ RFCs under `docs/` remain the source of truth for behavior and terminology.
 - `npm run test:e2e:fast`: main in-memory fast lane used by PR CI
 - `npm run test:e2e:inmemory`: alias for the full in-memory e2e lane
 - `npm run test:e2e:vespa`: Vespa-backed e2e lane with setup and teardown included
-- `npm run test:quality:vespa`: Vespa-backed quality regression lane
+- `npm run test:e2e:vespa:only`: same Vespa lane wrapper, but emits verbose Vitest output
+- `npm run test:e2e:vespa:network`: semi-full-stack Vespa lane that also verifies external ML HTTP adapters (`/embeddings`, `/rerank`)
+- `npm run test:quality:vespa`: Vespa-backed quality regression lane, also wrapped
+- `npm run test:verification:core`: core release gate (`typecheck + fast e2e + noisy quality gate + noisy baseline assert`)
+- `npm run test:verification:vespa`: full Vespa verification lane (`vespa e2e + network-services + quality`)
+- GitHub Actions mirrors this split:
+  - PR / push CI runs the explicit `verification-core` gate
+  - nightly runs `verification-core` first, then `verification:vespa`
+- All Vespa-backed test lanes go through `scripts/run-vespa-test-lane.sh`, so setup, env, and teardown stay consistent.
+- Vespa-backed suites now self-gate on `GET {VESPA_URL}/state/v1/health`, so a stray `VESPA_URL` value does not create false-red local runs.
 
 Practical rule:
 - use `contract` for fast protocol debugging
 - use `fast` or `inmemory` for normal local regression work
 - use `vespa` lanes only when validating live retrieval/ranking behavior
+- use `vespa:network` when you specifically want `real Vespa + fake external ML services over HTTP`
+- use `test:verification:core` when you want the current repo-level quality gate, not just raw test execution
+- use `test:verification:vespa` for the closest thing to a nightly full-stack search verification pass in this repo
 
 ## HTTP Contract Surface
 
@@ -71,12 +84,21 @@ runtime source of truth remains the route contract catalog plus the exported art
   - watchlist delivery runtime when watchlist is enabled
   - Vespa
   - embedding service unless dense retrieval is disabled
+  - learned matcher when configured
+  - drinking-window model state as a non-required degradation check
   - reranker as optional
 
 Operational note:
 - Postgres is optional for local/runtime configurations that do not enable PG-backed adapters.
 - Redis is optional unless watchlist delivery or other startup-required Redis features are enabled.
 - Watchlist storage may fall back to in-memory in `development` and `test`, but `production` now requires PostgreSQL-backed watchlist storage whenever watchlist delivery is enabled.
+- Query-entry security defaults to fail-closed if the LLM injection judge errors; set `INJECTION_JUDGE_FAIL_OPEN=true` only with explicit approval.
+- Production resolver wiring requires trained calibration params; missing params now fail instead of silently passing raw scores through.
+- Production startup refuses heuristic-only drinking-window prediction unless `ALLOW_HEURISTIC_DRINKING_WINDOW=true` is explicitly set.
+- When `DRINKING_WINDOW_MODEL_DIR` points to a directory containing `window_start.onnx` and `window_end.onnx`, startup now attempts to load a real ONNX-backed drinking-window predictor. If that explicit model directory cannot be loaded, startup fails instead of silently falling back.
+- Cached or heuristic drinking-window data is surfaced conservatively; heuristic or unknown model versions are not reported as high-confidence.
+- Model bundle contract:
+  [`docs/drinking-window-model-bundle.md`](/Users/songmin/wine-search-engine/docs/drinking-window-model-bundle.md)
 
 ## Watchlist Verification
 

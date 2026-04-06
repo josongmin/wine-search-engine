@@ -12,6 +12,7 @@
  */
 
 // Models
+export type { CacheResult } from './model/cache-result.js';
 export {
   type QueryCacheKey,
   type ResultCacheKey,
@@ -32,7 +33,4 @@ export {
   type CacheEligibilityResult,
 } from './service/cache-eligibility.js';
 
-export {
-  CacheService,
-  type CacheResult,
-} from './service/cache-service.js';
+export { CacheService } from './service/cache-service.js';

@@ -124,6 +124,9 @@ export interface RetrievalDocument {
   /** Last year the wine is in its optimal drinking window (inclusive). */
   readonly drinkingWindowEnd?: number | undefined;
 
+  /** Model version that produced the cached drinking-window fields, when known. */
+  readonly drinkingWindowModelVersion?: string | undefined;
+
   /** Oak aging regime (e.g. "new French oak 18 months", "unoaked stainless"). */
   readonly oakTreatment?: string | undefined;
 

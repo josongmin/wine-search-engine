@@ -40,6 +40,24 @@ describe('entity type inference', () => {
     ).toBe('wine');
   });
 
+  it('returns unknown when neither retrieval mode nor query class maps to an entity type', () => {
+    expect(
+      inferEntityTargetType({
+        query_class: 'unknown' as import('../../../scripts/etl/types.js').GoldenQuery['query_class'],
+        scenario: 'legacy_only' as import('../../../scripts/etl/types.js').GoldenQuery['scenario'],
+      }),
+    ).toBe('unknown');
+  });
+
+  it('falls back to Epic 2 scenario letter when query_class is not in the map', () => {
+    expect(
+      inferEntityTargetType({
+        query_class: 'future_class' as import('../../../scripts/etl/types.js').GoldenQuery['query_class'],
+        scenario: 'F',
+      }),
+    ).toBe('wine');
+  });
+
   it('reads resolved entity type from response metadata rather than decision status', () => {
     expect(inferResolvedEntityType({ entity_type: 'wine' })).toBe('wine');
     expect(inferResolvedEntityType({ entity_type: 'producer' })).toBe('producer');

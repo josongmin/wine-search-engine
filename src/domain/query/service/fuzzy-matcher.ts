@@ -1,43 +1,97 @@
-import { BKTree, levenshteinDistance } from './bk-tree.js';
-import { soundexKo, soundexEn } from './phonetic.js';
+/**
+ * FuzzyMatcher — combines BK-tree edit-distance search with phonetic scoring.
+ *
+ * Builds a BK-tree index from a set of known terms (e.g. alias surface forms)
+ * and uses it to find approximate matches for user queries. A combined score
+ * blends edit distance with phonetic similarity to rank candidates.
+ */
+
+import { BKTree } from './bk-tree.js';
+import { soundexEn, soundexKo } from './phonetic.js';
 
 export interface FuzzyMatchResult {
   readonly term: string;
   readonly editDistance: number;
-  readonly phoneticSim: number;
   readonly combinedScore: number;
 }
 
-// TODO: Initialize at startup with alias terms from the database.
-// Planner integration is deferred until an alias store (infrastructure concern) is available.
-export class FuzzyMatcher {
-  private bkTreeEn: BKTree | null = null;
-  private bkTreeKo: BKTree | null = null;
+/**
+ * Weight given to phonetic match in combined scoring (0–1).
+ * Remainder goes to normalized edit-distance similarity.
+ */
+const PHONETIC_WEIGHT = 0.3;
 
+/**
+ * Default maximum edit distance for fuzzy lookups.
+ */
+const DEFAULT_MAX_EDIT_DISTANCE = 2;
+
+/**
+ * Detects whether a string contains any Hangul characters.
+ */
+function containsKorean(s: string): boolean {
+  return /[\uac00-\ud7a3]/.test(s);
+}
+
+export class FuzzyMatcher {
+  private readonly tree = new BKTree();
+  private readonly terms: string[] = [];
+
+  /**
+   * Populates the internal BK-tree with a set of known terms.
+   * Must be called before {@link match}.
+   */
   initialize(terms: readonly string[]): void {
-    const enTerms = terms.filter((t) => /[a-z]/i.test(t));
-    const koTerms = terms.filter((t) => /[가-힣]/.test(t));
-    this.bkTreeEn = BKTree.build(enTerms, levenshteinDistance);
-    this.bkTreeKo = BKTree.build(koTerms, levenshteinDistance);
+    this.terms.length = 0;
+    for (const t of terms) {
+      this.tree.insert(t);
+      this.terms.push(t);
+    }
   }
 
-  match(query: string, maxEditDistance: number = 2): readonly FuzzyMatchResult[] {
-    const isKorean = /[가-힣]/.test(query);
-    const tree = isKorean ? this.bkTreeKo : this.bkTreeEn;
-    if (!tree) return [];
+  /**
+   * Finds terms within `maxEditDistance` of `query`, ranked by combined score.
+   */
+  match(
+    query: string,
+    maxEditDistance: number = DEFAULT_MAX_EDIT_DISTANCE,
+  ): readonly FuzzyMatchResult[] {
+    const bkResults = this.tree.search(query, maxEditDistance);
 
-    const phoneticFn = isKorean ? soundexKo : soundexEn;
-    const queryPhonetic = phoneticFn(query);
-    const candidates = tree.search(query, maxEditDistance, levenshteinDistance);
+    const scored: FuzzyMatchResult[] = bkResults.map((r) => ({
+      term: r.term,
+      editDistance: r.editDistance,
+      combinedScore: this.combinedScore(query, r.term, r.editDistance),
+    }));
 
-    return candidates
-      .map((c) => {
-        const phoneticSim = phoneticFn(c.term) === queryPhonetic ? 1.0 : 0.0;
-        const editSim = 1 - c.distance / Math.max(query.length, c.term.length, 1);
-        const combinedScore = 0.6 * editSim + 0.4 * phoneticSim;
-        return { term: c.term, editDistance: c.distance, phoneticSim, combinedScore };
-      })
-      .filter((r) => r.combinedScore >= 0.5)
-      .sort((a, b) => b.combinedScore - a.combinedScore);
+    // Sort by combined score descending (higher is better).
+    scored.sort((a, b) => b.combinedScore - a.combinedScore);
+
+    return scored;
+  }
+
+  /**
+   * Computes a combined score blending edit-distance similarity and phonetic match.
+   *
+   * Edit-distance similarity: 1 - (editDistance / max(len(query), len(term)))
+   * Phonetic similarity: 1 if phonetic keys match, 0 otherwise.
+   */
+  private combinedScore(query: string, term: string, editDistance: number): number {
+    const maxLen = Math.max(query.length, term.length);
+    const editSimilarity = maxLen > 0 ? 1 - editDistance / maxLen : 1;
+
+    const phoneticMatch = this.phoneticMatch(query, term) ? 1 : 0;
+
+    return (1 - PHONETIC_WEIGHT) * editSimilarity + PHONETIC_WEIGHT * phoneticMatch;
+  }
+
+  /**
+   * Checks phonetic similarity using the appropriate Soundex variant.
+   */
+  private phoneticMatch(a: string, b: string): boolean {
+    if (containsKorean(a) || containsKorean(b)) {
+      return soundexKo(a) === soundexKo(b);
+    }
+    return soundexEn(a) === soundexEn(b);
   }
 }

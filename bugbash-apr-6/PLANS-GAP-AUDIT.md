@@ -2,8 +2,8 @@
 
 **기준 시점:** 저장소 정적 대조 (코드·스크립트 존재, 주요 심볼 `rg`).  
 **범위:** `docs/plans/apr-5-v0.1/*`, `docs/plans/apr-5-v0.2/*`, **`docs/plans/apr-6-v0.3/*` (Epic 18 요약)**  
-**용도:** 플랜 문서와 실제 구현의 빵꾸를 한곳에 모음. 상세 근거·행 번호는 [`BACKLOG.md`](./BACKLOG.md)·[`TASKS.md`](./TASKS.md)·[`GAPS.md`](./GAPS.md)와 교차 참고.  
-**최종 갱신:** 2026-04-06 (6차: **`npm run eval`·Epic 9 본문 표·v0.3 Epic 18 Track A/B** 재대조)
+**용도:** 플랜 문서와 실제 구현의 빵꾸를 한곳에 모음. 상세 근거·행 번호는 [`BACKLOG.md`](./BACKLOG.md)·[`TASKS.md`](./TASKS.md)·[`GAPS.md`](./GAPS.md)와 교차 참고. **현행 “실제 빵꾸만” SSOT:** [`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md).  
+**최종 갱신:** 2026-04-06 (7차: **해소 ID 반영** — ConstraintSAT·CI verify-splits·엔드포인트 보안·OpenAPI·resolve requestId 등 [`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md) 참조)
 
 ---
 
@@ -17,7 +17,7 @@
 |----------------|------|-----------|
 | 10K ETL | 1 | 스크립트·스키마 있음; 품질·10K는 운영 데이터로 재확인 |
 | Golden 500 | 2 | `bronze`+`splits`; 파일명·`ENTITY_TARGET_TYPE_MAP` → `G-03`, `G-32` |
-| Eval | 3 | `npm run eval` → `scripts/eval/run-offline-eval.ts` **존재** (과거 `run-eval.ts` 가정 **해소**); `verify-splits`·eval 연동·CI **없음** → `G-21`, `G-22` |
+| Eval | 3 | `npm run eval` → `run-offline-eval.ts` **존재**; CI **`verify-splits` 잡 있음** (`G-22` **해소**). `run-offline-eval` 단일 스크립트가 verify를 **직접 호출하지 않음** → `G-21` |
 | LTR | 4 | TS LTR vs 문서 Python/Vespa → `G-19` |
 | Reranker | 5 | 서비스 있음; README 없음 → `G-33` |
 | Embedding FT | 6 | 스크립트 있음; 커밋 모델 없음 → `BACKLOG` §11 |
@@ -64,10 +64,10 @@
 
 | 플랜 항목 | 확인 | 갭 |
 |-----------|------|-----|
-| `src/domain/query/service/constraint-sat.ts` / `ConstraintSAT` | `rg ConstraintSAT src` → **매칭 없음** | **미구현** — 플랜 Step 13.1과 불일치 |
-| Calibrated entropy abstain (top-K 분산) | planner에 entropy 분기 없음 | **미구현/부분** → BACKLOG §29 |
-| BK-tree + Soundex 통합 | `rg` BK-tree / Soundex (별칭 경로) → **의미 있는 구현 없음** | **미구현** |
-| Planner 직후 모순 탐지 | `extractRuleBasedConstraints` if/else if 체인만 (dry/sweet 등) | TASKS §A “dry sweet” 모순 한계 |
+| `constraint-sat.ts` / `ConstraintSAT` | `SearchUseCase` 등에서 **사용** | 플랜 Step 13.1 **충족** (2026-04-06 재대조) |
+| Calibrated entropy abstain (top-K 분산) | planner에 entropy 분기 없음 | **미구현/부분** → BACKLOG §29 · `G-11` |
+| BK-tree + Soundex 통합 | 별칭 경로에 **char-ngram·phonetic** 등 다른 구현 | 플랜 문구와 1:1 아님 → `G-39` |
+| Planner 직후 모순 탐지 | `ConstraintSAT` + 룰 추출 | 일부 NL 모순은 여전히 한계 → TASKS §A |
 
 ### Epic 14 — Decomposition API + `retrieval_mode` override
 
@@ -84,7 +84,7 @@
 |-----------|------|-----|
 | `scripts/etl/collect-drinking-windows.ts` (플랜 Step 15.1) | **`Glob` 0건** | 플랜 파일명·경로와 **불일치** — 대안으로 `scripts/etl/drinking-window-backfill.ts` 존재 |
 | `scripts/ml/drinking-window-features.ts` (플랜 Step 15.2) | **`scripts/ml/` 디렉터리 없음** | 플랜의 ML 파이프라인 분리 구조 **미반영** (피처는 인프라/도메인 코드에 흡수되었을 수 있음 → 문서 정합성 검토) |
-| LightGBM 회귀·ONNX 서빙 | `drinking-window-predictor.ts` **TODO·스텁** | [`BACKLOG.md`](./BACKLOG.md) §19 |
+| LightGBM 회귀·ONNX 서빙 | ONNX 파일 있으면 `predictWithOnnx`, 없으면 **휴리스틱** | 운영에서 모델 배치·버전 고정 → [`BACKLOG.md`](./BACKLOG.md) §19 |
 | NL 매핑 `drinking_window_now` | Vespa `mapping.ts`만 분기 | [`TASKS.md`](./TASKS.md) §H (`nl-mapper` 단절) |
 
 ### Epic 16 — Security & batch
@@ -102,8 +102,8 @@
 | Watchlist + Redis pub/sub + webhook | 라우트·Redis 어댑터 존재 | **subscriber 서버 기동·DB 마이그레이션·id 타입** 등 → [`TASKS.md`](./TASKS.md) §H · [`BACKLOG.md`](./BACKLOG.md) §34–§37 |
 | Hallucination verify (Epic 17 overview §완료 기준) | `confidence-refusal.ts`·`admission-gate`에 **저신뢰 refusal** 로직 존재 | 플랜의 “LLM 검증 루프”와 동일한지 **제품 문서화** 필요; 별도 `HallucinationVerifier` 모듈은 없음 |
 | Agentic multi-step / tool 체인 | `AdaptiveToolExecutor`·Claude 라우트 존재 | 플랜의 “5-step 성공률” **자동 지표·E2E**는 저장소에 **고정 스위트 없음** (수동/옵션) |
-| `Hybrid`/`Interpret`/`Resolve` injection 방어 | [`GAPS.md`](./GAPS.md) **G-40** | [`BACKLOG.md`](./BACKLOG.md) §38 — `/v1/search` 외 경로 샌itizer 미적용 가능성 |
-| `check_drinking_window` | **플레이스홀더 에러** | [`BACKLOG.md`](./BACKLOG.md) §20 |
+| `Hybrid`/`Interpret`/`Resolve` injection 방어 | 각 유스케이스 **`QueryEntrySecurityGate`** | ~~G-40~~ **해소** ([`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md)) |
+| `check_drinking_window` | `entityLookup` + `DrinkingWindowUseCase.check` **구현** (주석은 구식일 수 있음) | 인덱스·속성 없을 때 에러 경로 → [`BACKLOG.md`](./BACKLOG.md) §20 |
 
 ---
 
@@ -115,7 +115,7 @@
 |--------------------|------------------------|-----|
 | **Track A** — `noisy-entity-benchmark.jsonl`, `run-noisy-entity-eval.ts` | `data/noisy-entity-benchmark.jsonl` **존재**; `scripts/eval/run-noisy-entity-eval.ts` **존재**; `package.json`에 `eval:noisy` / `eval:noisy:smoke` 등 | **부분 충족** — 벤치·러너 스켈레톤은 있음. North Star 수치(Recall@3≥0.92 등)·feedback flywheel·alias mining은 **플랜 대비 미완 또는 별도 검증 필요** |
 | **Track B** — `NormalizedQueryViews`, `query-normalizer.ts` | `src/domain/query/model/query-views.ts`, `query-normalizer.ts`, `buildNormalizedQueryViews`가 **resolver·alias matcher·planner 경로에 존재** | 실행 계획의 “신규 구현” 체크와 어긋남 → **문서를 구현 상태에 맞게 갱신** 권장 (기능 빵꾸로 보이기 쉬움) |
-| **Track C–G** — 편집거리 funnel, phonetic, learned entity matcher, 운영 루프 | BK-tree/Soundex·`ConstraintSAT` 등은 **v0.2 Epic 13과 동일하게 미구현/부분** | Epic 18은 Epic 13·14·16과 **같은 기술 부채 축**을 공유; 독립 완료는 **추가 구현** 필요 |
+| **Track C–G** — 편집거리 funnel, phonetic, learned entity matcher, 운영 루프 | `ConstraintSAT` **구현됨**; 별칭·매처에 phonetic/ngram 등 **부분 구현** | North Star 수치·flywheel·벤치 규모는 **플랜 대비 미완** ([`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md)) |
 
 ---
 

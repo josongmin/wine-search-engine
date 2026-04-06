@@ -63,9 +63,12 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
   private readonly url: string;
   private readonly model: string;
 
-  constructor() {
-    this.url = config.embedding.url;
-    this.model = config.embedding.model;
+  constructor(options?: {
+    readonly url?: string;
+    readonly model?: string;
+  }) {
+    this.url = options?.url ?? config.embedding.url;
+    this.model = options?.model ?? config.embedding.model;
   }
 
   // -------------------------------------------------------------------------

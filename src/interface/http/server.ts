@@ -17,6 +17,8 @@ import {
 } from './routes/health.route.js';
 import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
+import { registerFeedbackRoute } from './routes/feedback.route.js';
+import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
@@ -193,6 +195,8 @@ export async function createServer(
   registerResolveRoute(app, deps);
   registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
+  registerFeedbackRoute(app, deps);
+  registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)
   // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)

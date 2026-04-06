@@ -21,6 +21,7 @@ import type {
 } from './port/search-pipeline-deps.port.js';
 import type { HybridSearchRequest } from './hybrid-request.dto.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
+import { inferDrinkingWindowConfidence } from './drinking-window-confidence.js';
 
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
 
@@ -175,7 +176,10 @@ export class HybridUseCase {
               currentlyDrinkable:
                 currentYear >= r.drinkingWindowStart &&
                 currentYear <= r.drinkingWindowEnd,
-              confidence: 'high' as const,
+              confidence: inferDrinkingWindowConfidence(r.drinkingWindowModelVersion),
+              ...(r.drinkingWindowModelVersion !== undefined
+                ? { modelVersion: r.drinkingWindowModelVersion }
+                : {}),
             }
           : undefined;
 

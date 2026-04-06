@@ -12,6 +12,26 @@
 수동 `scoring-weights.ts` → LambdaMART 학습 가중치 대체.
 NDCG@10 baseline + 0.05 이상 개선.
 
+---
+
+## 구현 현황 (저장소 기준)
+
+원 계획은 `scripts/ltr/train_lambdamart.py` + Vespa `lightgbm()` second-phase였으나, **실제 구현은 TypeScript 애플리케이션 레이어 LTR**이다. 훈련·추론이 같은 feature 추출(`extractLTRFeatures`)을 공유해 train-serve skew를 줄인다.
+
+| 역할 | 실제 경로 |
+|------|-----------|
+| Feature 추출 (추론·학습 공용) | [`src/domain/ranking/service/ltr-feature-extractor.ts`](../../../src/domain/ranking/service/ltr-feature-extractor.ts) |
+| LambdaMART 점수 / 학습 헬퍼 | [`src/domain/ranking/service/lambdamart-ranker.ts`](../../../src/domain/ranking/service/lambdamart-ranker.ts) |
+| 런타임 rerank | [`src/domain/ranking/service/ltr-ranker.ts`](../../../src/domain/ranking/service/ltr-ranker.ts), [`search-usecase-ltr-rerank.ts`](../../../src/application/search/search-usecase-ltr-rerank.ts) |
+| Eval → 학습 예제 | [`src/domain/ranking/service/ltr-training-service.ts`](../../../src/domain/ranking/service/ltr-training-service.ts) |
+| Training barrel export | [`src/domain/ranking/training.ts`](../../../src/domain/ranking/training.ts) |
+| Eval + 학습 오케스트레이션 | [`scripts/eval/run-eval-and-train-ltr.ts`](../../../scripts/eval/run-eval-and-train-ltr.ts) |
+| 모델 레지스트리 (PG) | [`src/infrastructure/adapter/pg-ltr-model-registry.ts`](../../../src/infrastructure/adapter/pg-ltr-model-registry.ts), [`container-runtime-support.ts`](../../../src/config/container-runtime-support.ts) |
+
+**서빙 결정:** Vespa native GBDT rank-profile(`ltr_v1`)는 **미적용**. **Option B — 애플리케이션 레이어 스코어링**이 채택된 상태다.
+
+---
+
 ## 이미 존재하는 것
 
 | 컴포넌트 | 상태 |
@@ -21,104 +41,44 @@ NDCG@10 baseline + 0.05 이상 개선.
 | Vespa match-features | ✅ BM25 per-field + closeness |
 | Query-class weight overrides (6 profiles) | ✅ |
 
-## 작업 항목
+## 작업 항목 (설계 참고 — 구현은 TS 경로로 대체됨)
 
-### 4.1 Feature Vector (27개)
+### 4.1 Feature Vector
 
-**파일:** `scripts/ltr/feature-schema.ts`
-
-```
-Vespa match (8): bm25 × 5 fields + closeness + bm25_producer + bm25_appellation
-Signal computer (7): entity_integrity, semantic, soft_constraint, attribute_alignment,
-                      popularity, availability, uncertainty_penalty
-Wine domain (4): vintage_freshness, drinking_window, critic_score, price_band_match
-Query-candidate (4): query_length, exact_phrase_match, vintage_in_query, producer_in_query
-Query target (4): target_type_wine/producer/region, scenario_set_retrieval
-```
+Feature 정의는 `ltr-feature-extractor.ts` / `lambdamart-ranker.ts`의 `RankingFeatures` 및 학습 파이프라인을 본다. 원문 27차원 스키마 문서(`feature-schema.ts`)는 **작성되지 않음** — 대신 코드가 단일 출처다.
 
 ### 4.2 Training Data 수집
 
-**파일:** `scripts/ltr/collect-training-data.ts`
-
-- golden-queries-bronze + silver의 train/val split
-- 각 query → hybrid retrieval top-100 candidate
-- candidate별 27-feature vector 추출
-- grade를 label로 설정
-- LETOR format 출력
-- **gate holdout은 절대 포함하지 않음**
+- `run-eval-and-train-ltr.ts` + `PgGoldSetStore` / eval 결과가 학습 입력.
+- gate holdout은 DB·eval 설정에서 분리 유지 (기존 원칙 동일).
 
 ### 4.3 LambdaMART 학습
 
-**파일:** `scripts/ltr/train_lambdamart.py`
+- Python LightGBM 스크립트 대신 **`trainLambdaMARTModel`** 등 TS 경로 (`lambdamart-ranker.ts`, `ltr-training-service.ts`).
+- `models/lambdamart_v1.txt` 대신 **Postgres 레지스트리에 저장되는 모델 blob**을 사용한다.
 
-```python
-params = {
-    'objective': 'lambdarank',
-    'metric': 'ndcg',
-    'ndcg_eval_at': [5, 10],
-    'learning_rate': 0.05,
-    'num_leaves': 31,
-    'min_data_in_leaf': 20,       # overfitting 방어
-    'feature_fraction': 0.8,
-    'bagging_fraction': 0.8,
-    'lambda_l1': 0.1,
-    'lambda_l2': 1.0,
-    'n_estimators': 500,
-    'early_stopping_rounds': 50,
-}
-```
-
-- temporal split (random 금지, RFC-017 §6.4)
-- same query family cross-split 금지 (epic-2 §2.5 leakage contract)
-- **gate holdout은 절대 학습/validation에 포함하지 않음**
-- feature importance 분석 필수 → `models/feature_importance_v1.json`
-- RFC-010 §2.1: Vivino ratings_average는 popularity signal 초기값으로만. canonical 덮어쓰기 금지.
-
-**Feature Provenance (재현성 필수, RFC-015 연동):**
-
-LETOR 출력 각 query group에 provenance 블록 첨부:
-```json
-{
-  "dataset_version": "golden-v1-bronze",
-  "embedding_model_id": "BAAI/bge-m3",
-  "embedding_model_digest": "sha256:...",
-  "retrieval_index_version": "vespa-wine-entity@2026-04-05",
-  "signal_computer_version": "signal-compute-v1",
-  "feature_extractor_version": "ltr-feature-v1",
-  "feature_extracted_at": "2026-04-07T12:00:00Z"
-}
-```
-2주 후 재현 시 provenance mismatch → 재추출 필요 여부 즉시 판단 가능.
+**Feature Provenance:** eval/학습 파이프라인 확장 시 RFC-015 provenance 블록은 eval 출력 메타에 추가하는 것이 권장된다.
 
 ### 4.4 서빙 통합
 
-**Option A (권장):** Vespa native GBDT
+**채택:** Option B — 애플리케이션 레이어에서 LTR rerank (`search-usecase-ltr-rerank.ts`).
 
-```
-rank-profile ltr_v1 inherits hybrid {
-  second-phase {
-    rerank-count: 50
-    expression: lightgbm("lambdamart_v1.json")
-  }
-}
-```
+**미구현:** Option A — Vespa `rank-profile` + `lightgbm("…")` second-phase.
 
-**Option B:** Application-layer scoring (유연성 우선 시)
+---
 
-**결정 기준:** latency budget < 50ms → A. 모델 교체 빈도 높으면 → B.
+## Deliverables (실제)
 
-## Deliverables
-
-- [ ] `scripts/ltr/feature-schema.ts`
-- [ ] `scripts/ltr/collect-training-data.ts`
-- [ ] `scripts/ltr/train_lambdamart.py`
-- [ ] `models/lambdamart_v1.txt`
-- [ ] `models/feature_importance_v1.json`
-- [ ] Vespa rank-profile `ltr_v1` (Option A 시)
+- [x] Feature / 학습 / 추론: `ltr-feature-extractor.ts`, `lambdamart-ranker.ts`, `ltr-ranker.ts`, `ltr-training-service.ts`, `training.ts`
+- [x] Eval 연동 학습: `scripts/eval/run-eval-and-train-ltr.ts`
+- [x] 모델 저장·로드: `pg-ltr-model-registry.ts`, 컨테이너 LTR 로드
+- [ ] Vespa rank-profile `ltr_v1` (Option A) — **의도적으로 미구현**; 앱 레이어 LTR 사용
 
 ## 완료 기준
 
 - [ ] NDCG@10 ≥ baseline + 0.05 (gate tier, significance p < 0.05)
 - [ ] wrong_top1_rate 악화 없음
-- [ ] feature importance 분석 완료
+- [ ] feature importance 분석 완료 (필요 시 학습 출력에서 도출)
 - [ ] Decision Utility 악화 없음
+
+위 수치 기준은 **오프라인 eval 실행**으로 검증한다.

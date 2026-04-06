@@ -1,57 +1,107 @@
+/**
+ * BK-tree data structure for approximate string matching.
+ *
+ * Stores terms in a tree where edges are labelled by Levenshtein distance.
+ * Supports efficient range queries: given a query term and a maximum edit
+ * distance, the tree prunes subtrees whose distances fall outside the
+ * triangle-inequality window.
+ */
+
+/**
+ * Computes the Levenshtein edit distance between two strings.
+ */
+export function levenshteinDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+
+  // Optimisation: use a single-row DP array.
+  const row: number[] = Array.from({ length: n + 1 }, (_, i) => i);
+
+  for (let i = 1; i <= m; i++) {
+    let prev = i - 1;
+    row[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const val = Math.min(
+        (row[j] ?? 0) + 1,          // deletion
+        (row[j - 1] ?? 0) + 1,      // insertion
+        prev + cost,                  // substitution
+      );
+      prev = row[j] ?? 0;
+      row[j] = val;
+    }
+  }
+
+  return row[n] ?? 0;
+}
+
 interface BKNode {
   readonly term: string;
   readonly children: Map<number, BKNode>;
 }
 
-export class BKTree {
-  private constructor(private readonly root: BKNode | null) {}
-
-  static build(terms: readonly string[], distFn: (a: string, b: string) => number): BKTree {
-    if (terms.length === 0) return new BKTree(null);
-    const root: BKNode = { term: terms[0]!, children: new Map() };
-    for (let i = 1; i < terms.length; i++) {
-      BKTree.insert(root, terms[i]!, distFn);
-    }
-    return new BKTree(root);
-  }
-
-  search(query: string, maxDistance: number, distFn: (a: string, b: string) => number): Array<{ term: string; distance: number }> {
-    if (!this.root) return [];
-    const results: Array<{ term: string; distance: number }> = [];
-    BKTree.searchNode(this.root, query, maxDistance, distFn, results);
-    return results;
-  }
-
-  private static insert(node: BKNode, term: string, distFn: (a: string, b: string) => number): void {
-    const d = distFn(node.term, term);
-    const existing = node.children.get(d);
-    if (existing) {
-      BKTree.insert(existing, term, distFn);
-    } else {
-      node.children.set(d, { term, children: new Map() });
-    }
-  }
-
-  private static searchNode(node: BKNode, query: string, max: number, distFn: (a: string, b: string) => number, out: Array<{ term: string; distance: number }>): void {
-    const d = distFn(node.term, query);
-    if (d <= max) out.push({ term: node.term, distance: d });
-    for (const [k, child] of node.children) {
-      if (k >= d - max && k <= d + max) BKTree.searchNode(child, query, max, distFn, out);
-    }
-  }
+export interface BKSearchResult {
+  readonly term: string;
+  readonly editDistance: number;
 }
 
-export function levenshteinDistance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i]![j] = Math.min(dp[i - 1]![j]! + 1, dp[i]![j - 1]! + 1, dp[i - 1]![j - 1]! + cost);
+/**
+ * BK-tree supporting build-once, query-many approximate lookups.
+ */
+export class BKTree {
+  private root: BKNode | undefined;
+
+  /**
+   * Inserts a term into the tree.
+   */
+  insert(term: string): void {
+    if (this.root === undefined) {
+      this.root = { term, children: new Map() };
+      return;
+    }
+
+    let current = this.root;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    while (true) {
+      const d = levenshteinDistance(term, current.term);
+      if (d === 0) return; // duplicate
+      const child = current.children.get(d);
+      if (child === undefined) {
+        current.children.set(d, { term, children: new Map() });
+        return;
+      }
+      current = child;
     }
   }
-  return dp[m]![n]!;
+
+  /**
+   * Searches for all terms within `maxDistance` edit distance of `query`.
+   */
+  search(query: string, maxDistance: number): readonly BKSearchResult[] {
+    if (this.root === undefined) return [];
+
+    const results: BKSearchResult[] = [];
+    const stack: BKNode[] = [this.root];
+
+    while (stack.length > 0) {
+      const node = stack.pop()!;
+      const d = levenshteinDistance(query, node.term);
+
+      if (d <= maxDistance) {
+        results.push({ term: node.term, editDistance: d });
+      }
+
+      // Triangle inequality pruning: only visit children with edge labels
+      // in the range [d - maxDistance, d + maxDistance].
+      const lo = d - maxDistance;
+      const hi = d + maxDistance;
+      for (const [edge, child] of node.children) {
+        if (edge >= lo && edge <= hi) {
+          stack.push(child);
+        }
+      }
+    }
+
+    return results;
+  }
 }

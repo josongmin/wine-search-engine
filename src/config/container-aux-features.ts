@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { bootstrapLogger } from './bootstrap-logger.js';
 import { WineToolExecutor } from '../interface/claude-tools/tool-executor.js';
 import { AdaptiveToolExecutor } from '../interface/claude-tools/adaptive-tool-executor.js';
 import { EvalRunner } from '../domain/evaluation/service/eval-runner.js';
@@ -28,11 +29,13 @@ export function buildEvalRunner(
   searchUseCase: UseCaseContainerServices['searchUseCase'],
 ): EvalRunner | null {
   if (!pool) {
-    console.warn('[Container] Evaluation infrastructure skipped (Postgres pool not available)');
+    bootstrapLogger.warn(
+      '[Container] Evaluation infrastructure skipped (Postgres pool not available)',
+    );
     return null;
   }
 
-  console.warn('[Container] Evaluation infrastructure initialized');
+  bootstrapLogger.warn('[Container] Evaluation infrastructure initialized');
   return new EvalRunner(
     new PgGoldSetStore(pool),
     new PgEvalResultStore(pool),

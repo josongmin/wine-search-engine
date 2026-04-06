@@ -7,10 +7,9 @@ import {
 } from '../model/wine-attribute-vocabulary.js';
 
 /**
- * Label encoder for categorical wine attributes.
- * Moved into the ranking domain because ranking consumes the encoding directly.
+ * Categorical label encoder for wine catalog attributes (ranking domain).
  */
-export class LabelEncoder {
+export class WineCatalogLabelEncoder {
   private readonly mapping: Map<string, number>;
   private readonly oovCode: number = WINE_ATTRIBUTE_OOV_CODE;
 
@@ -33,11 +32,11 @@ export class LabelEncoder {
   }
 }
 
-const grapeEnc = new LabelEncoder(GRAPE_VOCABULARY);
+const grapeEnc = new WineCatalogLabelEncoder(GRAPE_VOCABULARY);
 
-const regionEnc = new LabelEncoder(REGION_VOCABULARY);
+const regionEnc = new WineCatalogLabelEncoder(REGION_VOCABULARY);
 
-const countryEnc = new LabelEncoder(COUNTRY_VOCABULARY);
+const countryEnc = new WineCatalogLabelEncoder(COUNTRY_VOCABULARY);
 
 export const WineAttributeEncoders: WineAttributeEncoderPort = {
   encodeGrape(grape: string | null | undefined): number {

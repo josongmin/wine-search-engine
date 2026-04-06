@@ -18,4 +18,13 @@ describe('query entry security config', () => {
 
     expect(config.queryEntrySecurity.judgeFailureMode).toBe('fail_open');
   });
+
+  it('keeps fail_closed as runtime default when flag is omitted', () => {
+    const config = parseEnv({
+      NODE_ENV: 'production',
+      PG_PASSWORD: 'secret',
+    });
+
+    expect(config.queryEntrySecurity.judgeFailureMode).toBe('fail_closed');
+  });
 });

@@ -1,3 +1,6 @@
+import { access } from 'node:fs/promises';
+import path from 'node:path';
+
 /**
  * Epic 15, Step 15.3: Drinking Window Predictor (ONNX Runtime)
  *
@@ -15,6 +18,31 @@
  * enc version pins the label encoders (grape, region, country).
  */
 export const DRINKING_WINDOW_MODEL_VERSION = 'heuristic-v1.0-enc20260405';
+
+type OrtTensor = {
+  readonly data: Float32Array;
+};
+
+type OrtSession = {
+  run(feeds: Record<string, unknown>): Promise<Record<string, OrtTensor>>;
+  runSync?: ((feeds: Record<string, unknown>) => Record<string, OrtTensor>) | undefined;
+};
+
+type OrtModule = {
+  InferenceSession: {
+    create(modelPath: string): Promise<OrtSession>;
+  };
+  Tensor: new (
+    type: string,
+    data: Float32Array,
+    dims: readonly number[],
+  ) => unknown;
+};
+
+async function loadOrtModule(): Promise<OrtModule> {
+  const moduleName = 'onnxruntime-node';
+  return import(moduleName) as Promise<OrtModule>;
+}
 
 /**
  * Feature input for drinking window prediction.
@@ -44,6 +72,14 @@ export interface DrinkingWindowPrediction {
 }
 
 /**
+ * When `allowHeuristicFallback` is false, {@link DrinkingWindowPredictor.predict}
+ * requires successful {@link DrinkingWindowPredictor.load} (ONNX only — no silent rule-based path).
+ */
+export interface DrinkingWindowPredictorOptions {
+  readonly allowHeuristicFallback?: boolean;
+}
+
+/**
  * LightGBM-backed Drinking Window Predictor via ONNX Runtime.
  *
  * Expected ONNX model files:
@@ -54,66 +90,96 @@ export interface DrinkingWindowPrediction {
  *            tannin×acidity, body×tannin]
  */
 export class DrinkingWindowPredictor {
-  readonly modelVersion = DRINKING_WINDOW_MODEL_VERSION;
+  private currentModelVersion = DRINKING_WINDOW_MODEL_VERSION;
+  private sessionStart?: OrtSession;
+  private sessionEnd?: OrtSession;
+  private tensorCtor?: OrtModule['Tensor'];
+  private readonly allowHeuristicFallback: boolean;
 
-  /**
-   * Loads predictor resources.
-   *
-   * ONNX runtime is not wired in this repository yet, so loading is a no-op
-   * that makes the fallback state explicit instead of pretending models are active.
-   */
-  load(modelDir: string): Promise<void> {
-    console.warn(
-      `[DrinkingWindowPredictor] ONNX runtime is not wired yet; using heuristic fallback for ${modelDir}`,
-    );
-    return Promise.resolve();
+  constructor(options?: DrinkingWindowPredictorOptions) {
+    this.allowHeuristicFallback = options?.allowHeuristicFallback ?? true;
+  }
+
+  get modelVersion(): string {
+    return this.currentModelVersion;
   }
 
   /**
-   * Predicts drinking window for a wine using the deterministic heuristic fallback.
+   * Loads ONNX sessions from `window_start.onnx` and `window_end.onnx` under `modelDir`.
+   */
+  async load(modelDir: string): Promise<void> {
+    const startPath = path.join(modelDir, 'window_start.onnx');
+    const endPath = path.join(modelDir, 'window_end.onnx');
+
+    await access(startPath);
+    await access(endPath);
+
+    const ort = await loadOrtModule();
+    this.sessionStart = await ort.InferenceSession.create(startPath);
+    this.sessionEnd = await ort.InferenceSession.create(endPath);
+    this.tensorCtor = ort.Tensor;
+    this.currentModelVersion = `onnx:${path.basename(modelDir)}`;
+  }
+
+  /**
+   * Predicts drinking window: ONNX when loaded; otherwise rule-based heuristic
+   * if {@link DrinkingWindowPredictorOptions.allowHeuristicFallback} is true (default).
    */
   predict(input: DrinkingWindowInput): DrinkingWindowPrediction {
-    // ─── Feature engineering ───────────────────────────────────────────
+    if (this.isOnnxReady()) {
+      return this.predictWithOnnx(
+        input,
+        this.sessionStart!,
+        this.sessionEnd!,
+        this.tensorCtor!,
+      );
+    }
+
+    if (!this.allowHeuristicFallback) {
+      throw new Error(
+        'DrinkingWindowPredictor: ONNX required (allowHeuristicFallback=false). Load window_start.onnx and window_end.onnx via load().',
+      );
+    }
+
+    return this.predictHeuristic(input);
+  }
+
+  private isOnnxReady(): boolean {
+    return (
+      this.sessionStart !== undefined &&
+      this.sessionEnd !== undefined &&
+      this.tensorCtor !== undefined
+    );
+  }
+
+  private predictHeuristic(input: DrinkingWindowInput): DrinkingWindowPrediction {
     const vintage = input.vintage;
-    const body = input.body; // 1–5
-    const tannin = input.tannin; // 1–5
-    const acidity = input.acidity; // 1–5
-    const criticScore = Math.max(0, input.avgCriticProxyScore); // 0–100
+    const body = input.body;
+    const tannin = input.tannin;
+    const acidity = input.acidity;
+    const score = Math.max(0, input.avgCriticProxyScore);
 
-    // Interaction terms (for future ONNX model compatibility)
-    const tanninAcidity = tannin * acidity;
+    const baseWindow = 3;
+    const bodyBonus = Math.max(0, (body - 2) * 1.5);
+    const tanninBonus = Math.max(0, (tannin - 2) * 1.5);
+    const acidityBonus = Math.max(0, (acidity - 2) * 1.0);
+    const criticBonus = score >= 95 ? 5 : score >= 90 ? 3 : score >= 85 ? 1 : 0;
 
-    // ─── Heuristic fallback prediction ──────────────────────────────────
-
-    const startOffsetRaw =
-      tannin * 0.8 + acidity * 0.5 + (criticScore / 100) * 3 - body * 0.2;
-    const endOffsetRaw =
-      tannin * 2.0 +
-      acidity * 1.2 +
-      (criticScore / 100) * 5 +
-      tanninAcidity * 0.05 -
-      body * 0.3;
-
-    // Clamp to reasonable ranges
-    const startOffset = Math.max(0, Math.min(15, startOffsetRaw));
-    const endOffset = Math.max(startOffset + 5, Math.min(50, endOffsetRaw));
-
-    const drinkingWindowStart = Math.round(vintage + startOffset);
-    const drinkingWindowEnd = Math.round(vintage + endOffset);
-    const peakYear = Math.round(
-      vintage + startOffset + (endOffset - startOffset) / 2,
+    const totalWindow = Math.min(
+      25,
+      baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus,
     );
 
-    // ─── Confidence calibration ─────────────────────────────────────────
-    let confidence: 'high' | 'medium' | 'low' = 'medium';
+    const drinkingWindowStart = vintage + 2;
+    const drinkingWindowEnd = Math.round(vintage + totalWindow);
+    const peakYear = Math.round(
+      drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
+    );
 
-    // High confidence: structured wines with good critic scores
-    if (criticScore >= 90 && (tannin >= 3 || acidity >= 4)) {
-      confidence = 'high';
-    }
-    // Low confidence: light wines or low scores
-    else if (criticScore < 75 || (tannin < 1.5 && body < 2)) {
-      confidence = 'low';
+    let confidence: 'high' | 'medium' | 'low' = 'low';
+
+    if (score >= 90 && (tannin >= 3 || acidity >= 4)) {
+      confidence = 'medium';
     }
 
     return {
@@ -123,5 +189,64 @@ export class DrinkingWindowPredictor {
       confidence,
       modelVersion: this.modelVersion,
     };
+  }
+
+  private predictWithOnnx(
+    input: DrinkingWindowInput,
+    sessionStart: OrtSession,
+    sessionEnd: OrtSession,
+    TensorCtor: OrtModule['Tensor'],
+  ): DrinkingWindowPrediction {
+    const features = this.toFeatureArray(input);
+    const tensor = new TensorCtor('float32', features, [1, features.length]);
+
+    const runSync = (session: OrtSession): number => {
+      if (session.runSync === undefined) {
+        throw new Error(
+          `DrinkingWindowPredictor loaded ${this.modelVersion}, but the ONNX runtime does not expose runSync().`,
+        );
+      }
+      const result = session.runSync({ input: tensor });
+      const first = Object.values(result)[0];
+      if (first === undefined || first.data[0] === undefined) {
+        throw new Error('DrinkingWindowPredictor ONNX output was empty.');
+      }
+      return first.data[0];
+    };
+
+    const startOffset = runSync(sessionStart);
+    const endOffset = runSync(sessionEnd);
+
+    const drinkingWindowStart = Math.round(input.vintage + Math.max(0, startOffset));
+    const drinkingWindowEnd = Math.round(
+      input.vintage + Math.max(startOffset + 1, endOffset),
+    );
+    const peakYear = Math.round(
+      drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
+    );
+
+    return {
+      drinkingWindowStart,
+      drinkingWindowEnd,
+      peakYear,
+      confidence: 'medium',
+      modelVersion: this.modelVersion,
+    };
+  }
+
+  private toFeatureArray(input: DrinkingWindowInput): Float32Array {
+    return new Float32Array([
+      input.grapePrimaryEnc,
+      input.regionEnc,
+      input.countryEnc,
+      input.vintage,
+      input.body,
+      input.tannin,
+      input.acidity,
+      input.sweetness,
+      input.avgCriticProxyScore,
+      input.tannin * input.acidity,
+      input.body * input.tannin,
+    ]);
   }
 }

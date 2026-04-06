@@ -372,9 +372,10 @@ export class SignalComputer {
       return 0; // Single item or empty → no diversity penalty
     }
 
-    // Count how many prior candidates share the same focus attribute value
-    // This is a simplified heuristic; real implementation would use attribute enrichment.
-    // For now, we estimate diversity from producer/region fields if available.
+    // Count how many prior candidates share the same focus attribute value.
+    // This implementation intentionally uses the metadata already propagated into
+    // HybridCandidate so browse/compare diversity stays deterministic and explainable
+    // without requiring an extra enrichment round-trip.
 
     let duplicateCount = 0;
     if (focusAttribute === 'producer') {

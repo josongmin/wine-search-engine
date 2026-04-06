@@ -161,3 +161,21 @@ describe('Planner – route determination', () => {
     expect(plan.route).toBe('hybrid');
   });
 });
+
+// ── Retrieval mode (Epic 7: producer_browse / region_browse) ───────────────────
+
+describe('Planner – retrieval mode', () => {
+  it('strong anchor + "best wines" → producer_browse', async () => {
+    const entries = new Map([['opus one', makeMatchResult('Opus One', 0.95)]]);
+    const planner = makePlanner(entries);
+    const plan = await planner.plan('Opus One best wines');
+    expect(plan.retrievalMode).toBe('producer_browse');
+  });
+
+  it('facet query with hierarchical path (≥2 slashes) → region_browse', async () => {
+    const planner = makePlanner(new Map());
+    const plan = await planner.plan('red wine from france / bordeaux / medoc');
+    expect(plan.intent).toBe('facet_search');
+    expect(plan.retrievalMode).toBe('region_browse');
+  });
+});

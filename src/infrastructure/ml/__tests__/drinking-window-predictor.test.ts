@@ -22,18 +22,21 @@ describe('DrinkingWindowPredictor', () => {
     expect(prediction.drinkingWindowEnd).toBeGreaterThan(
       prediction.drinkingWindowStart,
     );
-    expect(prediction.confidence).toBe('high');
+    // High critic score + structured tannin/acidity → heuristic upgrades to medium (see predictor).
+    expect(prediction.confidence).toBe('medium');
     expect(prediction.modelVersion).toContain('heuristic');
   });
 
   it('keeps the heuristic fallback contract even after load()', async () => {
     const predictor = new DrinkingWindowPredictor();
 
-    await expect(predictor.load('/tmp/onnx-models')).resolves.toBeUndefined();
+    await expect(predictor.load('/tmp/onnx-models')).rejects.toBeDefined();
+    expect(predictor.modelVersion).toContain('heuristic');
+  });
 
-    const prediction = predictor.predict(input);
+  it('throws when heuristic is disabled and ONNX is not loaded', () => {
+    const predictor = new DrinkingWindowPredictor({ allowHeuristicFallback: false });
 
-    expect(prediction.modelVersion).toContain('heuristic');
-    expect(prediction.modelVersion).toContain('v1.0');
+    expect(() => predictor.predict(input)).toThrow(/ONNX required/);
   });
 });

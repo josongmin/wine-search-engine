@@ -1,4 +1,5 @@
 import type { InjectionResult } from '../model/injection-result.js';
+import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 
 /**
  * Static pattern-based prompt injection detection for wine search queries.
@@ -10,7 +11,7 @@ import type { InjectionResult } from '../model/injection-result.js';
  * - SQL injection ("'; DROP", "UNION SELECT")
  * - Script injection ("<script>", "javascript:", "onclick=")
  * - Command injection ("bash", "shell", "exec", "system(")
- * - Length abuse (>500 chars)
+ * - Length abuse (see {@link MAX_QUERY_LENGTH})
  * - Unicode tricks (zero-width chars, bidirectional text)
  *
  * Design notes:
@@ -19,9 +20,6 @@ import type { InjectionResult } from '../model/injection-result.js';
  * - No pattern leakage: error messages do not reveal patterns to attacker
  */
 export class QuerySanitizer {
-  /** Maximum query length in characters. */
-  private static readonly MAX_QUERY_LENGTH = 500;
-
   /** Injection pattern groups tested in order of specificity. */
   private static readonly INJECTION_PATTERNS = {
     // System prompt / instruction hijacking
@@ -103,7 +101,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1a: Length check (fast, simple DoS prevention)
-    if (rawQuery.length > QuerySanitizer.MAX_QUERY_LENGTH) {
+    if (rawQuery.length > MAX_QUERY_LENGTH) {
       return {
         safe: false,
         reason: 'LENGTH_EXCEEDED',

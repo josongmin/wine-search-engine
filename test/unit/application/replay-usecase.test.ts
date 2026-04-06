@@ -19,6 +19,7 @@ const VALID_SNAPSHOT: DecisionSnapshot = {
 
 /** A minimal valid SearchResponseV1 stub. */
 const STUB_RESPONSE: SearchResponseV1 = {
+  queryType: 'search',
   engineDecision: {
     decisionStatus: 'resolved',
     nextAction: 'return_results',

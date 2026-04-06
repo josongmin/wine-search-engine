@@ -191,6 +191,8 @@ export interface SilverQualityReport {
     readonly aliasMeanCount: number;
   };
   readonly blockers: readonly string[];
+  /** Non-fatal quality notes (e.g. uniform body scores from sparse Bronze metadata). */
+  readonly warnings: readonly string[];
   readonly passed: boolean;
 }
 

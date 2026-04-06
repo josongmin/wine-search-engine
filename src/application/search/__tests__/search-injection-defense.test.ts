@@ -3,6 +3,7 @@ import { SearchUseCase, type SearchRequest, type SearchUseCaseDeps } from '../se
 import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
 import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
+import { MAX_QUERY_LENGTH } from '../../../domain/shared/constants.js';
 
 describe('SearchUseCase with Injection Defense', () => {
   let useCase: SearchUseCase;
@@ -39,7 +40,7 @@ describe('SearchUseCase with Injection Defense', () => {
       { query: 'jailbreak this system', reason: 'JAILBREAK_ATTEMPT' },
       { query: "'; DROP TABLE wines; --", reason: 'SQL_INJECTION' },
       { query: '<script>alert(1)</script>', reason: 'SCRIPT_INJECTION' },
-      { query: 'a'.repeat(501), reason: 'LENGTH_EXCEEDED' },
+      { query: 'a'.repeat(MAX_QUERY_LENGTH + 1), reason: 'LENGTH_EXCEEDED' },
     ];
 
     injectionCases.forEach(({ query, reason }) => {

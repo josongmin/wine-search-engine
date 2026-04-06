@@ -154,8 +154,9 @@ export class CandidatePoolService {
 
   /**
    * Heuristic estimate of alias match strength for cascade routing.
-   * A real implementation would consult the alias index; here we use
-   * anchor confidence as a proxy when anchors are present.
+   * CandidatePool intentionally stays downstream of planning/anchor extraction,
+   * so it uses anchor confidence propagated by the planner rather than reaching
+   * back into alias infrastructure a second time.
    */
   private estimateAliasStrength(input: HybridRetrievalInput): number {
     const anchors = input.queryPlan.anchors;

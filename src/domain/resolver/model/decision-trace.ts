@@ -61,4 +61,18 @@ export interface ResolverDecisionTrace {
 
   /** Query-side provenance useful for noisy lookup debugging. */
   readonly queryProvenance?: ResolverQueryProvenance | undefined;
+
+  /**
+   * When a learned matcher blended scores (RFC-006 §5.2), mirrors model outputs
+   * for debugging and regression tests.
+   */
+  readonly learnedMatcherTrace?: {
+    readonly modelId: string;
+    readonly modelVersion: string;
+    readonly candidates: readonly {
+      readonly entityId: string;
+      readonly matchProbability: number;
+      readonly matchSignalVector?: readonly number[] | undefined;
+    }[];
+  } | undefined;
 }

@@ -1,4 +1,8 @@
-import type { LearnedMatcherPort, LearnedMatcherOutput } from '../../domain/resolver/port/learned-matcher.port.js';
+import type {
+  LearnedMatcherContext,
+  LearnedMatcherPort,
+  LearnedMatcherOutput,
+} from '../../domain/resolver/port/learned-matcher.port.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
 
@@ -71,6 +75,7 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
   async match(
     query: string,
     candidates: readonly ResolverCandidate[],
+    context?: LearnedMatcherContext,
   ): Promise<readonly LearnedMatcherOutput[]> {
     if (candidates.length === 0) return [];
 
@@ -82,7 +87,11 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
     const response = await fetch(`${this.url}/match`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, candidates: apiCandidates }),
+      body: JSON.stringify({
+        query,
+        candidates: apiCandidates,
+        ...(context !== undefined ? { context: toApiContext(context) } : {}),
+      }),
     });
 
     if (!response.ok) {
@@ -114,4 +123,37 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
     }
     return outputs;
   }
+}
+
+function toApiContext(context: LearnedMatcherContext): Record<string, unknown> {
+  return {
+    ...(context.queryClass !== undefined ? { query_class: context.queryClass } : {}),
+    ...(context.normalizedQueryViews !== undefined
+      ? {
+          normalized_query_views: {
+            raw: context.normalizedQueryViews.raw,
+            strict: context.normalizedQueryViews.strict,
+            accentless: context.normalizedQueryViews.accentless,
+            collapsed_whitespace: context.normalizedQueryViews.collapsedWhitespace,
+            punctuation_stripped: context.normalizedQueryViews.punctuationStripped,
+            compact: context.normalizedQueryViews.compact,
+            vintage_canonicalized: context.normalizedQueryViews.vintageCanonicalized,
+            vintage_stripped: context.normalizedQueryViews.vintageStripped,
+            lookup_variants: context.normalizedQueryViews.lookupVariants,
+            ...(context.normalizedQueryViews.transliterated !== undefined
+              ? { transliterated: context.normalizedQueryViews.transliterated }
+              : {}),
+            ...(context.normalizedQueryViews.phoneticCompact !== undefined
+              ? { phonetic_compact: context.normalizedQueryViews.phoneticCompact }
+              : {}),
+          },
+        }
+      : {}),
+    ...(context.anchorLookupVariants !== undefined
+      ? { anchor_lookup_variants: context.anchorLookupVariants }
+      : {}),
+    ...(context.anchorLookupStrategies !== undefined
+      ? { anchor_lookup_strategies: context.anchorLookupStrategies }
+      : {}),
+  };
 }

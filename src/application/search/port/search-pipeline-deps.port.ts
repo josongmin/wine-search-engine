@@ -4,6 +4,7 @@ import type { ResolverInput } from '../../../domain/resolver/service/resolver.js
 import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
 import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
+import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import type { DecisionInput } from '../../../domain/decision/model/decision-input.js';
@@ -27,6 +28,10 @@ export interface EntityResolverPort {
 
 export interface CandidatePoolPort {
   generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
+}
+
+export interface EntityDocumentLookupPort {
+  getDocument(entityId: EntityId): Promise<RetrievalDocument | null>;
 }
 
 export interface BrowseRetrieverPort {

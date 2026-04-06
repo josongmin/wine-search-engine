@@ -153,6 +153,9 @@ export function toVespaFields(
   if (doc.alcoholPct !== undefined) fields['alcohol_pct'] = doc.alcoholPct;
   if (doc.drinkingWindowStart !== undefined) fields['drinking_window_start'] = doc.drinkingWindowStart;
   if (doc.drinkingWindowEnd !== undefined) fields['drinking_window_end'] = doc.drinkingWindowEnd;
+  if (doc.drinkingWindowModelVersion !== undefined) {
+    fields['drinking_window_model_version'] = doc.drinkingWindowModelVersion;
+  }
   if (doc.oakTreatment !== undefined) fields['oak_treatment'] = doc.oakTreatment;
   if (doc.certifications !== undefined) fields['certifications'] = [...doc.certifications];
   if (doc.soilType !== undefined) fields['soil_type'] = doc.soilType;
@@ -216,6 +219,7 @@ export function fromVespaFields(
   const alcoholPct = getOptionalNumber(fields, 'alcohol_pct');
   const drinkingWindowStart = getOptionalNumber(fields, 'drinking_window_start');
   const drinkingWindowEnd = getOptionalNumber(fields, 'drinking_window_end');
+  const drinkingWindowModelVersion = getOptionalString(fields, 'drinking_window_model_version');
   const oakTreatment = getOptionalString(fields, 'oak_treatment');
   const certificationsRaw = fields['certifications'];
   const certifications = isStringArray(certificationsRaw) ? certificationsRaw : undefined;
@@ -262,6 +266,7 @@ export function fromVespaFields(
     ...(alcoholPct !== undefined && { alcoholPct }),
     ...(drinkingWindowStart !== undefined && { drinkingWindowStart }),
     ...(drinkingWindowEnd !== undefined && { drinkingWindowEnd }),
+    ...(drinkingWindowModelVersion !== undefined && { drinkingWindowModelVersion }),
     ...(oakTreatment !== undefined && { oakTreatment }),
     ...(certifications !== undefined && { certifications }),
     ...(soilType !== undefined && { soilType }),

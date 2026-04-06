@@ -73,7 +73,10 @@ fi
 # ── Step 6: Seed wine data ────────────────────────────────────────────────────
 echo "[setup] Seeding wine data..."
 if [ -f "$REPO_ROOT/scripts/seed-wines-real.ts" ]; then
-  VESPA_URL="$VESPA_QUERY_URL" npx tsx "$REPO_ROOT/scripts/seed-wines-real.ts"
+  # Force deterministic embeddings in the Vespa test lane so seeding stays
+  # self-contained even when .env points at a local embedding service.
+  USE_REAL_EMBEDDINGS="false" VESPA_URL="$VESPA_QUERY_URL" \
+    npx tsx "$REPO_ROOT/scripts/seed-wines-real.ts"
 else
   VESPA_URL="$VESPA_QUERY_URL" npx tsx "$REPO_ROOT/scripts/seed-vespa-test-data.ts"
 fi

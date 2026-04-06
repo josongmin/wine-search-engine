@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_QUERY_LENGTH } from '../../../../domain/shared/constants.js';
 import { buildHttpRouteContractOpenApiBridge } from '../http-route-contract-openapi.js';
 
 describe('HTTP contract OpenAPI bridge', () => {
@@ -20,7 +21,7 @@ describe('HTTP contract OpenAPI bridge', () => {
         properties: expect.objectContaining({
           query: expect.objectContaining({
             type: 'string',
-            maxLength: 500,
+            maxLength: MAX_QUERY_LENGTH,
           }),
         }),
       }),

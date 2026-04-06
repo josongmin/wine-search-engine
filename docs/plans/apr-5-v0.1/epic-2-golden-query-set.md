@@ -159,14 +159,17 @@ function verifySplitIntegrity(
 
 ## Deliverables
 
-- [ ] `scripts/eval/generate-golden-queries.ts`
-- [ ] `scripts/eval/mine-hard-negatives.ts`
-- [ ] `scripts/eval/build-splits.ts` (leakage-safe split assignment)
-- [ ] `scripts/eval/verify-splits.ts` (split integrity validation)
-- [ ] `data/golden-queries-bronze.jsonl` (500, full JSONL schema with leakage keys)
-- [ ] `data/golden-queries-silver.jsonl` (subset, human-reviewed)
-- [ ] `data/golden-queries-gate.jsonl` (holdout, human-validated)
-- [ ] `data/hard-negatives.jsonl`
+- [x] `scripts/eval/generate-golden-queries.ts`
+- [x] `scripts/eval/mine-hard-negatives.ts`
+- [x] `scripts/eval/build-splits.ts` (leakage-safe split assignment)
+- [x] `scripts/eval/verify-splits.ts` (split integrity validation)
+- [x] `data/golden-queries-bronze.jsonl` (500, full JSONL schema with leakage keys)
+- [x] `data/golden-queries-silver.jsonl` — **symlink** → `data/splits/train.jsonl` (training tier; same rows as split artifact)
+- [x] `data/golden-queries-gate.jsonl` — **symlink** → `data/splits/gate.jsonl` (holdout)
+- [x] `data/golden-queries-val.jsonl` — **symlink** → `data/splits/val.jsonl` (validation; optional tier)
+- [x] `data/hard-negatives.jsonl`
+
+**Canonical split files:** `data/splits/{train,val,gate}.jsonl` (합 500행, bronze와 동일 스키마). 루트의 `golden-queries-{silver,gate,val}.jsonl` 이름은 epic 문서·스크립트 호환용으로 위 분할 파일을 가리킨다.
 
 ## Temporal Split Rules (RFC-017 §6.4)
 

@@ -2,8 +2,11 @@ import type { Config } from './env.js';
 import { buildCoreContainerServices } from './container-core.js';
 import { buildFeatureContainerServices } from './container-features.js';
 import { buildWatchlistContainerServices } from './container-watchlist.js';
+import { buildLearningContainerServices } from './container-learning.js';
+import type { LearningContainerServices } from './container-learning.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import type { DrinkingWindowUseCasePort } from '../application/drinking-window/port/drinking-window-usecase.port.js';
+import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
   BatchSearchUseCasePort,
@@ -27,7 +30,7 @@ import type {
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 
-export interface Container {
+export interface Container extends LearningContainerServices {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly candidatePool: CandidatePoolPort;
@@ -42,11 +45,14 @@ export interface Container {
   readonly hybridUseCase: HybridUseCasePort;
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
+  readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
   readonly batchSearchUseCase: BatchSearchUseCasePort;
   readonly adaptiveToolExecutor: AdaptiveToolExecutorContract;
   readonly watchlistService: WatchlistServicePort;
   readonly watchlistRuntime: WatchlistRuntimePort | null;
   readonly evalRunner: EvalRunnerContract | null;
+  /** True when Postgres feedback store is wired and learning kill-switch is off. */
+  readonly feedbackIngestEnabled: boolean;
 }
 
 export async function createContainer(
@@ -54,10 +60,15 @@ export async function createContainer(
   runtime: RuntimeHandles = {},
 ): Promise<Container> {
   const core = await buildCoreContainerServices(config, runtime);
-  const features = buildFeatureContainerServices(core, runtime);
+  const features = buildFeatureContainerServices(config, core, runtime);
   const watchlist = buildWatchlistContainerServices(config, runtime);
+  const learning = buildLearningContainerServices(runtime);
+  const feedbackIngestEnabled =
+    !config.killSwitch.learning && learning.feedbackStore !== null;
 
   return {
+    ...learning,
+    feedbackIngestEnabled,
     queryPlanner: core.queryPlanner,
     entityResolver: core.entityResolver,
     candidatePool: core.candidatePool,
@@ -66,6 +77,7 @@ export async function createContainer(
     responseBuilder: core.responseBuilder,
     mixedSolver: core.mixedSolver,
     ...features,
+    drinkingWindowPredictor: core.drinkingWindowPredictor,
     ...watchlist,
   };
 }

@@ -1,17 +1,22 @@
 /**
  * Vespa-backed test DI container.
  *
- * Wires the full application stack with:
- *   - Real VespaSearchIndex (talks to a live Vespa instance)
- *   - InMemory stubs for everything else (aliases, thresholds, etc.)
- *
- * The Vespa URL is read from process.env['VESPA_URL'] and falls back
- * to 'http://localhost:18080'.
+ * Wires the application stack with:
+ * - Real VespaSearchIndex
+ * - Optional real PostgreSQL-backed lookup/decision stores when TEST_DB_URL is set
+ * - In-memory fallbacks for the remaining adapters so the suite can still run
+ *   in lighter environments
  */
 
+import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Pool } from 'pg';
 import { Planner } from '../../../../src/domain/query/service/planner.js';
 import { AnchorExtractor } from '../../../../src/domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../../../../src/domain/query/service/expansion-builder.js';
+import { normalizeQueryStrict } from '../../../../src/domain/query/service/query-normalizer.js';
 import { NLMapper } from '../../../../src/domain/attribute/service/nl-mapper.js';
 import type { MappingTablePort } from '../../../../src/domain/attribute/port/mapping-table.port.js';
 import { Resolver } from '../../../../src/domain/resolver/service/resolver.js';
@@ -40,14 +45,23 @@ import { ReplayUseCase } from '../../../../src/application/search/replay.usecase
 import { InterpretUseCase } from '../../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { HybridUseCase } from '../../../../src/application/search/hybrid.usecase.js';
+import { WatchlistService } from '../../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../../src/application/search/search.usecase.js';
 import { WineToolExecutor } from '../../../../src/interface/claude-tools/tool-executor.js';
 import { AdaptiveToolExecutor } from '../../../../src/interface/claude-tools/adaptive-tool-executor.js';
-
 import { VespaClient } from '../../../../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../../../../src/infrastructure/vespa/vespa-search-index.js';
-
+import { HttpLearnedMatcherAdapter } from '../../../../src/infrastructure/adapter/http-learned-matcher.js';
+import { HttpEmbeddingService } from '../../../../src/infrastructure/vespa/embedding-service.js';
+import { HttpCrossEncoderReranker } from '../../../../src/infrastructure/vespa/reranker.js';
+import { PgAliasMatcher } from '../../../../src/infrastructure/adapter/pg-alias-matcher.js';
+import { PgAmbiguityDictionary } from '../../../../src/infrastructure/adapter/pg-ambiguity-dictionary.js';
+import { PgBlockingAdapter } from '../../../../src/infrastructure/adapter/pg-blocking-adapter.js';
+import { PgCalibrationStore } from '../../../../src/infrastructure/adapter/pg-calibration-store.js';
+import { PgThresholdStore } from '../../../../src/infrastructure/adapter/pg-threshold-store.js';
+import { DEFAULT_THRESHOLD_PROFILE } from '../../../../src/domain/query/model/threshold-profile.js';
+import { InMemoryWatchlistStore } from '../../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -59,67 +73,115 @@ import {
   InMemorySimilarRetrieval,
   InMemoryCandidateAttributes,
 } from '../../../integration/helpers/in-memory-adapters.js';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
+import type { EntityId } from '../../../../src/domain/shared/types/index.js';
 
 const VESPA_NAMESPACE = 'wine';
 const VESPA_DOC_TYPE = 'wine_entity';
+const TEST_DB_URL = process.env['TEST_DB_URL'] ?? process.env['PG_TEST_URL'];
 
-// ---------------------------------------------------------------------------
-// Exported types
-// ---------------------------------------------------------------------------
+type AmbiguitySeverity = 'low' | 'medium' | 'high';
 
-export interface VespaTestContainerParts {
-  /** The fully wired DI container backed by real Vespa. */
-  readonly container: Container;
-  /** The raw VespaClient for low-level operations in tests. */
-  readonly vespaClient: VespaClient;
-  /** The VespaSearchIndex for direct port-level assertions. */
-  readonly vespaSearchIndex: VespaSearchIndex;
-  /** In-memory alias matcher — tests can add aliases for resolution. */
-  readonly aliasMatcher: InMemoryAliasMatcher;
-  /** In-memory ambiguity dictionary. */
-  readonly ambiguityDict: InMemoryAmbiguityDictionary;
-  /** In-memory blocking adapter. */
-  readonly blockingAdapter: InMemoryBlockingAdapter;
-  /** Base URL of the Vespa instance used for this container. */
-  readonly vespaUrl: string;
+async function applyMigrations(pool: Pool): Promise<void> {
+  const migrationsDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../../../src/infrastructure/db/migrations',
+  );
+  const migrationFiles = readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
+
+  for (const file of migrationFiles) {
+    const sql = readFileSync(join(migrationsDir, file), 'utf-8');
+    await pool.query(sql);
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Factory
-// ---------------------------------------------------------------------------
+async function resetPgFixtures(pool: Pool): Promise<void> {
+  await pool.query(`
+    TRUNCATE TABLE
+      watchlist_delivery_logs,
+      watchlists,
+      threshold_profiles,
+      calibration_params,
+      ambiguity_registry,
+      aliases
+    RESTART IDENTITY
+    CASCADE
+  `);
+}
 
-/**
- * Creates the full DI container wired against a REAL Vespa instance.
- *
- * Use `process.env['VESPA_URL']` (or the default 'http://localhost:18080')
- * to point at the running Vespa container during test execution.
- */
-export function createVespaTestContainer(): VespaTestContainerParts {
-  const vespaUrl =
-    process.env['VESPA_URL'] ?? 'http://localhost:18080';
+async function seedDefaultThresholdProfile(pool: Pool): Promise<void> {
+  await pool.query(
+    `INSERT INTO threshold_profiles (profile_id, profile_data, is_default, updated_at)
+     VALUES ($1, $2, TRUE, NOW())
+     ON CONFLICT (profile_id) DO UPDATE SET
+       profile_data = EXCLUDED.profile_data,
+       is_default = TRUE,
+       updated_at = NOW()`,
+    [DEFAULT_THRESHOLD_PROFILE.id, JSON.stringify(DEFAULT_THRESHOLD_PROFILE)],
+  );
+}
 
-  // Real Vespa infrastructure
+export interface VespaTestContainerParts {
+  readonly container: Container;
+  readonly vespaClient: VespaClient;
+  readonly vespaSearchIndex: VespaSearchIndex;
+  readonly vespaUrl: string;
+  readonly usesPgBackedLookup: boolean;
+  seedAlias(surfaceForm: string, entityId: EntityId, confidence: number): Promise<void>;
+  seedBlockingEntities(entityIds: readonly EntityId[]): Promise<void>;
+  seedAmbiguity(
+    normalizedForm: string,
+    ambiguityTypes: readonly string[],
+    severity: AmbiguitySeverity,
+  ): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface VespaTestContainerOptions {
+  readonly mlServiceBaseUrl?: string;
+  readonly rerankThreshold?: number;
+}
+
+export async function createVespaTestContainer(
+  options: VespaTestContainerOptions = {},
+): Promise<VespaTestContainerParts> {
+  const vespaUrl = process.env['VESPA_URL'] ?? 'http://localhost:18080';
   const vespaClient = new VespaClient(vespaUrl, VESPA_NAMESPACE, VESPA_DOC_TYPE);
   const vespaSearchIndex = new VespaSearchIndex(vespaClient);
 
-  // In-memory stubs for all other infrastructure
-  const ambiguityDict = new InMemoryAmbiguityDictionary();
-  const blockingAdapter = new InMemoryBlockingAdapter();
-  const calibrationStore = new InMemoryCalibrationStore();
-  const embeddingService = new InMemoryEmbeddingService();
-  const thresholdStore = new InMemoryThresholdStore();
-  const aliasMatcher = new InMemoryAliasMatcher();
+  const pool = TEST_DB_URL !== undefined
+    ? new Pool({
+        connectionString: TEST_DB_URL,
+        max: 4,
+        idleTimeoutMillis: 5_000,
+        connectionTimeoutMillis: 5_000,
+      })
+    : null;
+
+  if (pool !== null) {
+    await applyMigrations(pool);
+    await resetPgFixtures(pool);
+    await seedDefaultThresholdProfile(pool);
+  }
+
+  const ambiguityDict = pool ? new PgAmbiguityDictionary(pool) : new InMemoryAmbiguityDictionary();
+  const blockingAdapter = pool ? new PgBlockingAdapter(pool) : new InMemoryBlockingAdapter();
+  const calibrationStore = pool ? new PgCalibrationStore(pool) : new InMemoryCalibrationStore();
+  const embeddingService = options.mlServiceBaseUrl !== undefined
+    ? new HttpEmbeddingService({
+        url: options.mlServiceBaseUrl,
+        model: 'vespa-e2e-test',
+      })
+    : new InMemoryEmbeddingService();
+  const thresholdStore = pool ? new PgThresholdStore(pool) : new InMemoryThresholdStore();
+  const aliasMatcher = pool ? new PgAliasMatcher(pool) : new InMemoryAliasMatcher();
   const anchorResolver = new InMemoryAnchorResolver();
   const similarRetrieval = new InMemorySimilarRetrieval();
   const candidateAttributes = new InMemoryCandidateAttributes();
   const querySanitizer = new QuerySanitizer();
   const injectionJudge = { judge: async () => false };
 
-  // Domain services — query planning
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
   const noOpMappingTable: MappingTablePort = {
@@ -135,7 +197,6 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     nlMapper,
   );
 
-  // Domain services — entity resolution
   const blocker = new Blocker(blockingAdapter);
   const candidateScorer = new CandidateScorer();
   const ambiguityClassifier = new AmbiguityClassifier();
@@ -145,9 +206,11 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     candidateScorer,
     ambiguityClassifier,
     calibrator,
+    options.mlServiceBaseUrl !== undefined
+      ? new HttpLearnedMatcherAdapter(options.mlServiceBaseUrl)
+      : undefined,
   );
 
-  // Domain services — retrieval (using real Vespa search index)
   const fusionService = new FusionService();
   const candidatePool = new CandidatePoolService(
     vespaSearchIndex,
@@ -155,13 +218,22 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     fusionService,
   );
 
-  // Domain services — ranking
   const signalComputer = new SignalComputer();
   const scoreAggregator = new ScoreAggregator();
   const evidenceMapper = new EvidenceMapper();
-  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper);
+  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper, {
+    ...(options.mlServiceBaseUrl !== undefined
+      ? {
+          reranker: new HttpCrossEncoderReranker({
+            url: options.mlServiceBaseUrl,
+          }),
+        }
+      : {}),
+    ...(options.rerankThreshold !== undefined
+      ? { rerankThreshold: options.rerankThreshold }
+      : {}),
+  });
 
-  // Domain services — decision, response, mixed
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();
   const anchorProfiler = new AnchorProfiler();
@@ -178,16 +250,15 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     ranker,
   );
 
-  // Snapshot versions for tracing
   const snapshotVersions: SnapshotVersions = {
     modelVersions: { embedding: 'in-memory-hash-v1' },
     indexVersions: { wine_content: 'vespa-e2e-test' },
   };
 
-  // Use cases
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
+    entityLookup: vespaSearchIndex,
     candidatePool,
     ranker,
     decisionEngine,
@@ -199,8 +270,18 @@ export function createVespaTestContainer(): VespaTestContainerParts {
   });
 
   const replayUseCase = new ReplayUseCase({ searchUseCase });
-  const interpretUseCase = new InterpretUseCase({ queryPlanner, querySanitizer, injectionJudge });
-  const resolveUseCase = new ResolveUseCase({ queryPlanner, entityResolver, querySanitizer, injectionJudge });
+  const interpretUseCase = new InterpretUseCase({
+    queryPlanner,
+    querySanitizer,
+    injectionJudge,
+  });
+  const resolveUseCase = new ResolveUseCase({
+    queryPlanner,
+    entityResolver,
+    entityLookup: vespaSearchIndex,
+    querySanitizer,
+    injectionJudge,
+  });
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -213,15 +294,18 @@ export function createVespaTestContainer(): VespaTestContainerParts {
   });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
-  const drinkingWindowUseCase = new DrinkingWindowUseCase({
+
+  const drinkingWindowPredictor = {
+    modelVersion: 'vespa-test',
     predict: () => ({
       drinkingWindowStart: 2020,
       drinkingWindowEnd: 2030,
       peakYear: 2025,
-      confidence: 'medium',
+      confidence: 'medium' as const,
       modelVersion: 'vespa-test',
     }),
-  });
+  };
+  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const adaptiveToolExecutor = new AdaptiveToolExecutor(
     new WineToolExecutor({
       searchUseCase,
@@ -229,8 +313,16 @@ export function createVespaTestContainer(): VespaTestContainerParts {
       drinkingWindowUseCase,
     }),
   );
+  const watchlistService = new WatchlistService({
+    storage: new InMemoryWatchlistStore(),
+  });
 
   const container: Container = {
+    feedbackStore: null,
+    proposalStore: null,
+    feedbackProcessor: null,
+    aliasProposer: null,
+    feedbackIngestEnabled: false,
     queryPlanner,
     entityResolver,
     candidatePool,
@@ -245,8 +337,11 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     hybridUseCase,
     decomposedSearchUseCase,
     drinkingWindowUseCase,
+    drinkingWindowPredictor,
     batchSearchUseCase,
     adaptiveToolExecutor,
+    watchlistService,
+    watchlistRuntime: null,
     evalRunner: null,
   };
 
@@ -254,9 +349,54 @@ export function createVespaTestContainer(): VespaTestContainerParts {
     container,
     vespaClient,
     vespaSearchIndex,
-    aliasMatcher,
-    ambiguityDict,
-    blockingAdapter,
     vespaUrl,
+    usesPgBackedLookup: pool !== null,
+    async seedAlias(surfaceForm, entityId, confidence) {
+      if (pool === null) {
+        (aliasMatcher as InMemoryAliasMatcher).addAlias(surfaceForm, entityId, confidence);
+        return;
+      }
+
+      await pool.query(
+        `INSERT INTO aliases (
+          alias_id, entity_id, alias_type, alias_scope, surface_form,
+          normalized_value, language, source, source_trust, confidence, is_suppressed
+        ) VALUES ($1, $2, 'identity_safe', 'global', $3, $4, NULL, 'vespa-e2e', 1.0, $5, FALSE)`,
+        [randomUUID(), entityId, surfaceForm, normalizeQueryStrict(surfaceForm), confidence],
+      );
+    },
+    async seedBlockingEntities(_entityIds) {
+      if (pool === null) {
+        (blockingAdapter as InMemoryBlockingAdapter).addEntityIds(_entityIds);
+      }
+    },
+    async seedAmbiguity(normalizedForm, ambiguityTypes, severity) {
+      if (pool === null) {
+        (ambiguityDict as InMemoryAmbiguityDictionary).setAmbiguous(
+          normalizedForm,
+          [...ambiguityTypes],
+          severity,
+        );
+        return;
+      }
+
+      await pool.query(
+        `INSERT INTO ambiguity_registry (
+          registry_id, normalized_form, entity_ids, ambiguity_types, severity
+        ) VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (normalized_form) DO UPDATE SET
+          entity_ids = EXCLUDED.entity_ids,
+          ambiguity_types = EXCLUDED.ambiguity_types,
+          severity = EXCLUDED.severity,
+          updated_at = NOW()`,
+        [randomUUID(), normalizedForm, [], ambiguityTypes, severity],
+      );
+    },
+    async close() {
+      if (pool !== null) {
+        await resetPgFixtures(pool);
+        await pool.end();
+      }
+    },
   };
 }

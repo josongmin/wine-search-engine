@@ -13,6 +13,8 @@ import type { SearchRequest } from '../../application/search/search-request.dto.
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
+import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
+import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 
 /**
  * Zod schema for search_wines tool input.
@@ -72,6 +74,14 @@ export type WineToolInput =
 /**
  * Dependencies for WineToolExecutor.
  */
+/**
+ * Port for fetching a single entity's document from the search index.
+ * Used by check_drinking_window to look up wine attributes by entity_id.
+ */
+export interface EntityDocumentLookupPort {
+  getDocument(entityId: EntityId): Promise<RetrievalDocument | null>;
+}
+
 export interface WineToolExecutorDeps {
   /** Main search use case for wine queries */
   readonly searchUseCase: SearchExecutorPort;
@@ -79,6 +89,8 @@ export interface WineToolExecutorDeps {
   readonly decomposedSearchUseCase: DecomposedSearchUseCasePort;
   /** Drinking window predictor */
   readonly drinkingWindowUseCase: DrinkingWindowUseCasePort;
+  /** Entity lookup for drinking window tool (optional — degrades gracefully) */
+  readonly entityLookup?: EntityDocumentLookupPort | undefined;
 }
 
 /**
@@ -213,21 +225,47 @@ export class WineToolExecutor {
    * @param requestId - Parent request ID
    * @returns DrinkingWindowBlock (or error if entity not found)
    */
-  private executeDrinkingWindow(
+  private async executeDrinkingWindow(
     input: unknown,
     requestId: string,
   ): Promise<DrinkingWindowBlock | { error: string }> {
     const validated = DrinkingWindowInputSchema.parse(input);
     const targetYear = validated.target_year ?? new Date().getFullYear();
 
-    // In a full implementation, fetch entity from search index using entity_id
-    // For now, return a placeholder error indicating this requires entity context
+    if (!this.deps.entityLookup) {
+      return { error: 'Entity lookup not available. Use search_wines first to get drinking window from results.' };
+    }
+
+    const entityId = createEntityId(validated.entity_id);
+    const doc = await this.deps.entityLookup.getDocument(entityId);
+
+    if (!doc) {
+      return { error: `Entity ${validated.entity_id} not found in search index.` };
+    }
+
+    if (!doc.vintageYear) {
+      return { error: `Entity ${validated.entity_id} has no vintage year — cannot predict drinking window.` };
+    }
+
     console.warn(
-      `[WineToolExecutor] check_drinking_window: entity_id=${validated.entity_id}, target_year=${targetYear}, requestId=${requestId}`,
+      `[WineToolExecutor] check_drinking_window: entity_id=${validated.entity_id}, vintage=${doc.vintageYear}, target_year=${targetYear}, requestId=${requestId}`,
     );
 
-    return Promise.resolve({
-      error: `Entity lookup for ${validated.entity_id} not yet implemented in tool executor. Use search_wines to get entity_id from results first.`,
+    const tannin01 = doc.tannin !== undefined ? doc.tannin : 0.5;
+    const acidity01 = doc.acidity !== undefined ? doc.acidity : 0.5;
+    const critic01 = doc.criticScoreNormalized !== undefined ? doc.criticScoreNormalized : 0.85;
+
+    return this.deps.drinkingWindowUseCase.check({
+      vintage: doc.vintageYear,
+      grapePrimaryEnc: 0,
+      regionEnc: 0,
+      countryEnc: 0,
+      body: doc.body,
+      tannin: tannin01 * 5,
+      acidity: acidity01 * 5,
+      sweetness: doc.sweetness,
+      avgCriticProxyScore: critic01 * 100,
+      targetYear,
     });
   }
 

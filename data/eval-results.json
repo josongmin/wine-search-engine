@@ -3,11 +3,12 @@
   "query_count": 500,
   "ndcg_at_10": 0,
   "mrr_at_10": 0,
+  "recall_at_3": 0.08,
   "recall_at_100": 0.08,
-  "decision_utility": -0.24399999999999858,
+  "decision_utility": -0.29999999999999993,
   "wrong_top1_rate": 0,
-  "safe_abstain_rate": 0.08,
-  "avoidable_abstain_rate": 0.92,
+  "safe_abstain_rate": 0,
+  "avoidable_abstain_rate": 1,
   "aurc": 0,
   "e_aurc": 0,
   "ece": 0,
@@ -73,7 +74,7 @@
       "ndcg_at_10": 0,
       "mrr_at_10": 0,
       "wrong_top1_rate": 0,
-      "decision_utility": 0.4000000000000002
+      "decision_utility": -0.30000000000000016
     }
   },
   "by_language": {
@@ -82,14 +83,14 @@
       "ndcg_at_10": 0,
       "mrr_at_10": 0,
       "wrong_top1_rate": 0,
-      "decision_utility": -0.2182965299684522
+      "decision_utility": -0.29999999999999827
     },
     "ko": {
       "query_count": 138,
       "ndcg_at_10": 0,
       "mrr_at_10": 0,
       "wrong_top1_rate": 0,
-      "decision_utility": -0.284782608695652
+      "decision_utility": -0.2999999999999997
     },
     "mixed": {
       "query_count": 45,
@@ -125,7 +126,7 @@
       "mrr_at_10": 0,
       "recall_at_10": 0.18617021276595744,
       "wrong_top1_rate": 0,
-      "decision_utility": -0.16968085106382963
+      "decision_utility": -0.29999999999999905
     },
     "constraint_filter": {
       "retrieval_mode": "constraint_filter",
@@ -143,9 +144,9 @@
       "mrr_at_10": 0,
       "recall_at_10": 0.125,
       "wrong_top1_rate": 0,
-      "decision_utility": -0.21250000000000002,
+      "decision_utility": -0.3,
       "diversity_score": 0,
-      "producer_variety": 0.5
+      "producer_variety": 0
     },
     "region_browse": {
       "retrieval_mode": "region_browse",
@@ -154,9 +155,9 @@
       "mrr_at_10": 0,
       "recall_at_10": 0.26666666666666666,
       "wrong_top1_rate": 0,
-      "decision_utility": -0.11333333333333331,
+      "decision_utility": -0.29999999999999993,
       "diversity_score": 0,
-      "producer_variety": 0.5
+      "producer_variety": 0
     },
     "recommendation": {
       "retrieval_mode": "recommendation",
@@ -175,42 +176,42 @@
       "recall_at_10": 0,
       "wrong_top1_rate": 0,
       "decision_utility": -0.3,
-      "anchor_preservation_score": 0.5,
-      "seed_exclusion_rate": 0.95
+      "anchor_preservation_score": 0,
+      "seed_exclusion_rate": 1
     }
   },
   "by_target_type": {
     "wine": {
       "target_type": "wine",
-      "query_count": 350,
+      "query_count": 477,
       "correct_type_rate": 0,
       "confusion_matrix": {
         "wine": 0,
         "producer": 0,
         "region": 0,
-        "unknown": 350
-      }
-    },
-    "producer": {
-      "target_type": "producer",
-      "query_count": 50,
-      "correct_type_rate": 0,
-      "confusion_matrix": {
-        "wine": 0,
-        "producer": 0,
-        "region": 0,
-        "unknown": 50
+        "unknown": 477
       }
     },
     "region": {
       "target_type": "region",
-      "query_count": 100,
+      "query_count": 15,
       "correct_type_rate": 0,
       "confusion_matrix": {
         "wine": 0,
         "producer": 0,
         "region": 0,
-        "unknown": 100
+        "unknown": 15
+      }
+    },
+    "producer": {
+      "target_type": "producer",
+      "query_count": 8,
+      "correct_type_rate": 0,
+      "confusion_matrix": {
+        "wine": 0,
+        "producer": 0,
+        "region": 0,
+        "unknown": 8
       }
     }
   }

@@ -22,8 +22,7 @@
   },
   "blockers": [],
   "warnings": [
-    "Body std dev 0.0000 is low (< 0.008); consider enriching Bronze payload or using strict profile in CI"
+    "Body std dev 0.0000 is low (< 0.01) — Vivino payloads often lack body variance; verify transform if you expect spread"
   ],
-  "profile": "bronze",
   "passed": true
 }

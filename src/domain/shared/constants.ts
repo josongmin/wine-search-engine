@@ -4,4 +4,4 @@
  */
 
 /** Maximum allowed query length in characters. */
-export const MAX_QUERY_LENGTH = 2000;
+export const MAX_QUERY_LENGTH = 500;

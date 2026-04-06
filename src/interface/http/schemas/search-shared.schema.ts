@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { MAX_QUERY_LENGTH } from '../../../domain/shared/constants.js';
 
 export const QueryStringSchema = z
   .string()
   .min(1, 'query must be a non-empty string')
-  .max(500);
+  .max(MAX_QUERY_LENGTH);
 
 export const SearchModeSchema = z.enum(['auto', 'entity', 'hybrid', 'mixed']);
 

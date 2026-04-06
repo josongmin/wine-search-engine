@@ -35,5 +35,6 @@ export interface DrinkingWindowPrediction {
  * Minimal predictor contract consumed by the drinking-window use case.
  */
 export interface DrinkingWindowPredictorPort {
+  readonly modelVersion: string;
   predict(input: DrinkingWindowInput): DrinkingWindowPrediction;
 }

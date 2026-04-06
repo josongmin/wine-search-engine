@@ -270,7 +270,7 @@ describe('WineToolExecutor', () => {
       );
 
       expect(result).toEqual({
-        error: expect.stringContaining('not yet implemented'),
+        error: expect.stringMatching(/Entity lookup not (yet implemented|available)/),
       });
     });
 

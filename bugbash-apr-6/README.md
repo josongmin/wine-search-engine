@@ -6,7 +6,9 @@
 
 | 우선순위 | 파일 | 내용 |
 |----------|------|------|
-| **한 줄 색인** | [`GAPS.md`](./GAPS.md) | `G-xx` ID ↔ 한 줄 요약 ↔ `BACKLOG`/`TASKS` 조항 |
+| **실제 빵꾸만 (현행)** | [`ACTUAL-GAPS.md`](./ACTUAL-GAPS.md) | 해소 vs 유효 ID, 2026-04-06 코드 재검증 |
+| **보완 계획** | [`REMEDIATION-PLAN.md`](./REMEDIATION-PLAN.md) | 난이도·규모(XS–XL)·웨이브 A–E |
+| **한 줄 색인 (역사 포함)** | [`GAPS.md`](./GAPS.md) | `G-xx` ID ↔ 한 줄 요약 ↔ `BACKLOG`/`TASKS` 조항 |
 | **병렬 매트릭스 (파일·명령)** | [`FINDINGS-MATRIX.md`](./FINDINGS-MATRIX.md) | **`M-xx`** 행 — 코드·CI·스키마 대조 **SSOT** |
 | **영역 색인** | [`AUDIT-SNAPSHOT.md`](./AUDIT-SNAPSHOT.md) | A–E 영역 ↔ `M-xx` ID만 묶기 (표 본문은 매트릭스) |
 | **플랜 전체 매트릭스** | [`PLANS-GAP-AUDIT.md`](./PLANS-GAP-AUDIT.md) | v0.1+v0.2+v0.3(Epic 18) 표 + **`[ ]` vs 코드 드리프트** 절 + 재현 `rg` |

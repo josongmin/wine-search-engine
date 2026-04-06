@@ -1,4 +1,5 @@
 import type { Config } from './env.js';
+import { bootstrapLogger } from './bootstrap-logger.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { QuerySanitizer } from '../domain/security/service/query-sanitizer.js';
 import { LLMInjectionJudge } from '../domain/security/service/llm-injection-judge.js';
@@ -65,7 +66,9 @@ export async function buildRuntimeSupportServices(
         : new InMemoryJudgmentCacheAdapter(),
     );
     if (!redisClient) {
-      console.warn('[Container] Redis unavailable; using in-memory cache for LLMInjectionJudge');
+      bootstrapLogger.warn(
+        '[Container] Redis unavailable; using in-memory cache for LLMInjectionJudge',
+      );
     }
   }
 
@@ -78,9 +81,11 @@ export async function buildRuntimeSupportServices(
         5,
         60000,
       );
-      console.warn('[Container] Cache infrastructure initialized');
+      bootstrapLogger.warn('[Container] Cache infrastructure initialized');
     } else {
-      console.warn('[Container] Redis unavailable; continuing without cache infrastructure');
+      bootstrapLogger.warn(
+        '[Container] Redis unavailable; continuing without cache infrastructure',
+      );
     }
   }
 
@@ -91,13 +96,19 @@ export async function buildRuntimeSupportServices(
       try {
         ltrModels = await ltrRegistry.getAllModels();
         if (ltrModels.size > 0) {
-          console.warn(`[Container] Loaded ${ltrModels.size} LTR models from registry`);
+          bootstrapLogger.warn(
+            { ltrModelCount: ltrModels.size },
+            '[Container] Loaded LTR models from registry',
+          );
         } else {
-          console.warn('[Container] No LTR models found in registry');
+          bootstrapLogger.warn('[Container] No LTR models found in registry');
         }
         break; // success
       } catch (err) {
-        console.error(`[Container] LTR model load attempt ${attempt}/2 failed:`, err);
+        bootstrapLogger.error(
+          { err, attempt },
+          '[Container] LTR model load failed',
+        );
         if (attempt < 2) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
@@ -105,11 +116,21 @@ export async function buildRuntimeSupportServices(
     }
   }
 
-  const drinkingWindowPredictor = new DrinkingWindowPredictor();
+  const allowHeuristicFallback =
+    config.nodeEnv !== 'production' || config.drinkingWindow.allowHeuristicInProduction;
+
+  const drinkingWindowPredictor = new DrinkingWindowPredictor({ allowHeuristicFallback });
+  if (config.drinkingWindow.modelDir !== undefined) {
+    await drinkingWindowPredictor.load(config.drinkingWindow.modelDir);
+    bootstrapLogger.warn(
+      { modelVersion: drinkingWindowPredictor.modelVersion },
+      '[Container] Drinking-window predictor loaded',
+    );
+  }
   if (
     config.nodeEnv === 'production'
     && drinkingWindowPredictor.modelVersion.startsWith('heuristic')
-    && process.env['ALLOW_HEURISTIC_DRINKING_WINDOW'] !== 'true'
+    && !config.drinkingWindow.allowHeuristicInProduction
   ) {
     throw new Error(
       'Production startup refuses heuristic-only drinking-window prediction. Set ALLOW_HEURISTIC_DRINKING_WINDOW=true only with explicit approval.',

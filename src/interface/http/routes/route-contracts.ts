@@ -25,6 +25,10 @@ import {
   WatchlistErrorResponseSchema,
   WatchlistIdParamsSchema,
 } from '../schemas/watchlist.schema.js';
+import {
+  PostFeedbackRequestSchema,
+  PostFeedbackResponseSchema,
+} from '../schemas/feedback.schema.js';
 
 type ResponseSchema = z.ZodTypeAny | null;
 
@@ -220,5 +224,15 @@ export const WatchlistDeliveriesRouteContract = defineRouteContract({
     400: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
+  },
+});
+
+export const FeedbackSubmitRouteContract = defineRouteContract({
+  operationId: 'learning.submitFeedback',
+  body: PostFeedbackRequestSchema,
+  responses: {
+    201: PostFeedbackResponseSchema,
+    400: ErrorResponseSchema,
+    503: ErrorResponseSchema,
   },
 });

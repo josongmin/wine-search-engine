@@ -1,6 +1,10 @@
 import { Planner } from '../domain/query/service/planner.js';
 import { AnchorExtractor } from '../domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../domain/query/service/expansion-builder.js';
+import type { Pool } from 'pg';
+import { FuzzyMatcher } from '../domain/query/service/fuzzy-matcher.js';
+import type { FuzzyMatcherPort } from '../domain/query/port/fuzzy-matcher.port.js';
+import { CharNgramIndex } from '../domain/alias/service/char-ngram-index.js';
 import { Resolver } from '../domain/resolver/service/resolver.js';
 import { Blocker } from '../domain/resolver/service/blocker.js';
 import { CandidateScorer } from '../domain/resolver/service/candidate-scorer.js';
@@ -38,21 +42,63 @@ export function buildSnapshotVersions(config: Config): SnapshotVersions {
   };
 }
 
-export function buildQueryPlanner(adapters: CoreAdapterServices): Planner {
+export async function buildCharNgramIndex(pool?: Pool): Promise<CharNgramIndex | undefined> {
+  if (pool === undefined) return undefined;
+  try {
+    const { rows } = await pool.query<{ surface_form: string }>(
+      'SELECT DISTINCT surface_form FROM aliases WHERE is_suppressed = FALSE',
+    );
+    const terms = rows.map((r) => r.surface_form);
+    if (terms.length > 0) {
+      const index = new CharNgramIndex();
+      index.initialize(terms);
+      return index;
+    }
+  } catch {
+    // Alias table may not exist yet; proceed without char n-gram index.
+  }
+  return undefined;
+}
+
+export async function buildQueryPlanner(
+  adapters: CoreAdapterServices,
+  pool?: Pool,
+): Promise<Planner> {
+  let fuzzyMatcher: FuzzyMatcherPort | undefined;
+
+  if (pool !== undefined) {
+    try {
+      const { rows } = await pool.query<{ surface_form: string }>(
+        'SELECT DISTINCT surface_form FROM aliases WHERE is_suppressed = FALSE',
+      );
+      const terms = rows.map((r) => r.surface_form);
+      if (terms.length > 0) {
+        const fm = new FuzzyMatcher();
+        fm.initialize(terms);
+        fuzzyMatcher = fm;
+      }
+    } catch {
+      // Alias table may not exist yet; proceed without fuzzy matching.
+    }
+  }
+
   return new Planner(
     adapters.ambiguityDict,
     new AnchorExtractor(adapters.aliasMatcher),
     new ExpansionBuilder(),
     new NLMapper(adapters.mappingTable),
+    fuzzyMatcher,
   );
 }
 
-export function buildEntityResolver(adapters: CoreAdapterServices): Resolver {
+export function buildEntityResolver(adapters: CoreAdapterServices, config: Config): Resolver {
   return new Resolver(
     new Blocker(adapters.blockingPort),
     new CandidateScorer(),
     new AmbiguityClassifier(),
-    new Calibrator(adapters.calibrationStore),
+    new Calibrator(adapters.calibrationStore, {
+      requireTrainedParams: config.nodeEnv === 'production',
+    }),
     adapters.learnedMatcher,
   );
 }
@@ -72,8 +118,7 @@ export function buildCandidatePool(
 }
 
 export function buildBrowseRetriever(adapters: CoreAdapterServices): BrowseRetrieverPort {
-  void adapters;
-  return new BrowseRetriever();
+  return new BrowseRetriever(adapters.searchIndex);
 }
 
 export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRetrieverPort {

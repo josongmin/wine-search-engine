@@ -47,6 +47,7 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     const gate = new QueryEntrySecurityGate({
       querySanitizer: sanitizer,
       injectionJudge: { judge } as never,
+      judgeFailureMode: 'fail_open',
     });
 
     await expect(gate.getSafeQueryOrThrow('  Chateau Margaux 2015  ')).resolves.toBe('Chateau Margaux 2015');

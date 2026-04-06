@@ -121,9 +121,13 @@ User Query
 
 ### Deliverables
 
-- `data/noisy-entity-benchmark.jsonl`
+- `data/noisy-entity-benchmark.jsonl` (저장소: **100**행 규모 초안; 카테고리·언어 슬라이스 확장은 지속)
 - `scripts/eval/run-noisy-entity-eval.ts`
 - CI or nightly report slice
+
+**Baseline 수치:** `data/eval-baselines/noisy-entity-*.json` 및 `scripts/eval/check-noisy-entity-baseline.ts`로 회귀 확인. North Star(Recall@1/3 등)는 벤치·엔진 버전이 바뀔 때마다 재산출.
+
+**Feedback flywheel (alias mining → benchmark refresh):** [epic-18-execution-plan.md](./epic-18-execution-plan.md) Track F — 현재 **Deferred**; 런타임 로그·리뷰 큐 도입 후 구현.
 
 ### SOTA++ notes
 

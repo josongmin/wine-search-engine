@@ -4,6 +4,13 @@ on:
     branches: [main, develop]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -59,9 +66,50 @@ jobs:
       - run: npm ci
       - run: npm run test:e2e:fast
 
+  verification-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Run core verification gate
+        run: npm run test:verification:core
+      - name: CI summary
+        run: |
+          {
+            echo "## Core Verification"
+            echo ""
+            echo "- Gate: \`npm run test:verification:core\`"
+            echo "- Includes: typecheck, fast e2e, noisy quality gate, noisy baseline regression"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify-splits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Verify eval splits
+        run: npx tsx scripts/eval/verify-splits.ts
+
+  eval-noisy-entity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - name: Noisy entity eval smoke
+        run: npm run eval:noisy:smoke
+      - name: Assert noisy entity baseline
+        run: npm run eval:noisy:assert-baseline
+
   build:
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test-unit, test-integration, test-watchlist, test-e2e-fast]
+    needs: [lint, typecheck, test-unit, test-integration, test-watchlist, test-e2e-fast, verify-splits, eval-noisy-entity, verification-core]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

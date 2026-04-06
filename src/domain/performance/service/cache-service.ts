@@ -13,6 +13,7 @@ import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { QueryCachePort } from '../port/query-cache.port.js';
 import type { EmbeddingCachePort } from '../port/embedding-cache.port.js';
 import type { SearchResponseCachePort } from '../port/search-response-cache.port.js';
+import type { CacheResult } from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 
@@ -37,17 +38,6 @@ function recordMismatch(
     }
   }
   return false;
-}
-
-/**
- * Cache operation result with metrics.
- */
-export interface CacheResult<T> {
-  readonly hit: boolean;
-  readonly data?: T;
-  readonly reason?: string;
-  readonly durationMs: number;
-  readonly isStale?: boolean;
 }
 
 /**

@@ -1,4 +1,7 @@
-version: '3.9'
+# Local full stack: API + Postgres + Redis + Vespa + reranker.
+# Project name isolates this from docker-compose.test.yml (`wine-search-test`).
+name: wine-search-dev
+
 services:
   app:
     build: .
@@ -8,8 +11,22 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       vespa: { condition: service_healthy }
+      reranker: { condition: service_healthy }
     environment:
-      - NODE_ENV=development
+      NODE_ENV: development
+      # Override host-relative defaults from .env so the container reaches sibling services.
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      PG_DATABASE: wine_engine
+      PG_USER: wine
+      PG_PASSWORD: wine_dev
+      REDIS_URL: redis://redis:6379
+      VESPA_URL: http://vespa:8080
+      RERANKER_SERVICE_URL: http://reranker:8081
+      # No embedding container in this compose; point at a service on the host if you run one.
+      EMBEDDING_SERVICE_URL: http://host.docker.internal:8081
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   postgres:
     image: postgres:16-alpine
@@ -40,8 +57,9 @@ services:
   vespa:
     image: vespaengine/vespa:8
     ports:
-      - "8080:8080"  # query/feed API
-      - "19071:19071"  # config server
+      - "8080:8080"  # query/feed API (VESPA_URL from host: http://localhost:8080)
+      # Host 19072 avoids clashing with docker-compose.test.yml (Vespa config on 19071 there).
+      - "19072:19071"  # config server (host: http://localhost:19072)
     volumes:
       - vespa_data:/opt/vespa/var
       - ./vespa/app:/vespa-app
@@ -59,11 +77,16 @@ services:
       - MODEL_NAME=BAAI/bge-reranker-v2-m3
       - DEVICE=cpu
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8081/health"]
-      interval: 10s
+      # python:3.12-slim has no curl; model download can exceed 120s on first boot.
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8081/health\")" || exit 1',
+        ]
+      interval: 15s
       timeout: 10s
-      retries: 5
-      start_period: 120s
+      retries: 8
+      start_period: 300s
 
 volumes:
   pg_data:

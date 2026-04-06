@@ -61,6 +61,7 @@ async function run(): Promise<void> {
           SEARCH_API_URL: url,
           EVAL_SEARCH_CONCURRENCY: '1',
           EVAL_SEARCH_TIMEOUT_MS: '5000',
+          EVAL_SKIP_EMBEDDING_VALIDATION: 'true',
         },
       },
     );

@@ -4,6 +4,7 @@ import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
+import { createEntityId } from '../../../domain/shared/types/index.js';
 
 function makePlan(overrides: Partial<QueryPlanV1>): QueryPlanV1 {
   return {
@@ -106,6 +107,9 @@ describe('SearchUseCase specialized retrieval routing', () => {
           },
           conformalSetSize: 1,
         }),
+      },
+      entityLookup: {
+        getDocument: vi.fn(),
       },
       candidatePool: {
         generate: vi.fn(),
@@ -214,5 +218,33 @@ describe('SearchUseCase specialized retrieval routing', () => {
       20,
     );
     expect(deps.candidatePool.generate).not.toHaveBeenCalled();
+  });
+
+  it('hydrates entity-route resolver candidates from entityLookup before resolve', async () => {
+    const plan = makePlan({
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
+    });
+    vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
+    vi.mocked(deps.entityLookup!.getDocument).mockResolvedValue({
+      entityId: createEntityId('wine-1'),
+      entityType: 'wine',
+      canonicalLabel: 'Opus One 2018',
+    });
+
+    const useCase = new SearchUseCase(deps);
+    await useCase.execute({ query: 'Opus One' }, 'req-entity');
+
+    expect(deps.entityLookup?.getDocument).toHaveBeenCalledWith('wine-1');
+    expect(deps.entityResolver.resolve).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidateEntities: [
+          expect.objectContaining({
+            entityId: 'wine-1',
+            canonicalLabel: 'Opus One 2018',
+          }),
+        ],
+      }),
+    );
   });
 });

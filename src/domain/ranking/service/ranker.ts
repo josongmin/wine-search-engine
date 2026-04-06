@@ -62,6 +62,7 @@ interface ScoredEntry {
   readonly finalScore: number;
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
+  readonly drinkingWindowModelVersion?: string | undefined;
 
   // Wine attributes for Epic 15 dynamic prediction
   readonly vintageYear?: number | undefined;
@@ -78,6 +79,7 @@ interface ScoredEntry {
 export type RankerOptions = {
   readonly rerankTopK?: number;
   readonly rerankBlendScale?: number;
+  readonly rerankThreshold?: number;
   readonly attributeEncoder?: WineAttributeEncoderPort;
   readonly reranker?: RerankerPort;
 };
@@ -107,6 +109,7 @@ export class Ranker {
   private readonly attributeEncoder: WineAttributeEncoderPort;
   private readonly rerankTopK: number;
   private readonly rerankBlendScale: number;
+  private readonly rerankThreshold: number;
 
   /**
    * @param signalComputer - Computes individual signal scores.
@@ -127,6 +130,7 @@ export class Ranker {
     this.attributeEncoder = options.attributeEncoder ?? WineAttributeEncoders;
     this.rerankTopK = options.rerankTopK ?? DEFAULT_RERANK_TOP_K;
     this.rerankBlendScale = options.rerankBlendScale ?? 1;
+    this.rerankThreshold = options.rerankThreshold ?? RERANK_THRESHOLD;
   }
 
   /**
@@ -172,6 +176,9 @@ export class Ranker {
           : {}),
         ...(candidate.drinkingWindowStart !== undefined ? { drinkingWindowStart: candidate.drinkingWindowStart } : {}),
         ...(candidate.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: candidate.drinkingWindowEnd } : {}),
+        ...(candidate.drinkingWindowModelVersion !== undefined
+          ? { drinkingWindowModelVersion: candidate.drinkingWindowModelVersion }
+          : {}),
         // Epic 15: Wine attributes with label encoding
         ...(candidate.vintageYear !== undefined ? { vintageYear: candidate.vintageYear } : {}),
         ...(candidate.body !== undefined ? { body: candidate.body } : {}),
@@ -208,7 +215,7 @@ export class Ranker {
     let finalOrder: readonly ScoredEntry[] = viable;
     if (
       this.reranker !== undefined &&
-      viable.length > RERANK_THRESHOLD
+      viable.length > this.rerankThreshold
     ) {
       try {
         finalOrder = await this.applyReranking(
@@ -236,6 +243,9 @@ export class Ranker {
         evidenceItems,
         ...(entry.drinkingWindowStart !== undefined ? { drinkingWindowStart: entry.drinkingWindowStart } : {}),
         ...(entry.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: entry.drinkingWindowEnd } : {}),
+        ...(entry.drinkingWindowModelVersion !== undefined
+          ? { drinkingWindowModelVersion: entry.drinkingWindowModelVersion }
+          : {}),
         // Epic 15: Wine attributes for dynamic prediction
         ...(entry.vintageYear !== undefined ? { vintage: entry.vintageYear } : {}),
         ...(entry.body !== undefined ? { body: entry.body } : {}),

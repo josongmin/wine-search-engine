@@ -13,6 +13,7 @@ import { createServer } from '../../../../src/interface/http/server.js';
 import {
   createVespaTestContainer,
   type VespaTestContainerParts,
+  type VespaTestContainerOptions,
 } from './vespa-test-container.js';
 
 export interface VespaTestServer {
@@ -30,8 +31,10 @@ export interface VespaTestServer {
  * @returns An initialized Fastify instance and the container parts for
  *          direct access to the VespaClient / aliasMatcher in tests.
  */
-export async function createVespaTestServer(): Promise<VespaTestServer> {
-  const parts = createVespaTestContainer();
+export async function createVespaTestServer(
+  options: VespaTestContainerOptions = {},
+): Promise<VespaTestServer> {
+  const parts = await createVespaTestContainer(options);
 
   const app = await createServer(parts.container, {
     logLevel: 'silent',
@@ -47,4 +50,5 @@ export async function createVespaTestServer(): Promise<VespaTestServer> {
  */
 export async function closeVespaTestServer(server: VespaTestServer): Promise<void> {
   await server.app.close();
+  await server.parts.close();
 }

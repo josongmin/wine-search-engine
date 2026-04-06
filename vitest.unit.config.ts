@@ -1,15 +1,31 @@
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
 
+const testInclude = [
+  'test/unit/**/*.test.ts',
+  'src/application/**/__tests__/**/*.test.ts',
+  'src/config/**/__tests__/**/*.test.ts',
+  'src/domain/**/__tests__/**/*.test.ts',
+  'src/infrastructure/**/__tests__/**/*.test.ts',
+  'src/interface/**/__tests__/**/*.test.ts',
+  'src/__tests__/**/*.test.ts',
+] as const;
+
 export default defineConfig({
   test: {
     globals: true,
-    include: ['test/unit/**/*.test.ts'],
-    exclude: [
-      'test/unit/application/replay-usecase.test.ts',
-      'test/unit/infrastructure/http-learned-matcher.test.ts',
-      'test/unit/resolver/resolver-learned-matcher-context.test.ts',
-    ],
+    include: [...testInclude],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.ts'],
+      exclude: [
+        '**/*.test.ts',
+        '**/__tests__/**',
+        'src/main.ts',
+      ],
+      reporter: ['text', 'lcov'],
+      reportsDirectory: './coverage',
+    },
   },
   resolve: {
     alias: {
