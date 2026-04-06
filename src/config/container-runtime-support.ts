@@ -60,10 +60,16 @@ export async function buildRuntimeSupportServices(
   let injectionJudge: InjectionJudgePort | undefined;
   if (config.anthropic.apiKey && !config.killSwitch.injectionJudge) {
     injectionJudge = new LLMInjectionJudge(
-      new AnthropicLLMInjectionClassifier(config.anthropic.apiKey),
+      new AnthropicLLMInjectionClassifier(config.anthropic.apiKey, {
+        model: config.anthropic.injectionModel,
+      }),
       redisClient
         ? new RedisJudgmentCacheAdapter(redisClient)
         : new InMemoryJudgmentCacheAdapter(),
+    );
+    bootstrapLogger.info(
+      { model: config.anthropic.injectionModel, cache: redisClient ? 'redis' : 'memory' },
+      '[Container] LLM injection judge (Layer 2) enabled',
     );
     if (!redisClient) {
       bootstrapLogger.warn(

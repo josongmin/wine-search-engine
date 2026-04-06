@@ -54,6 +54,9 @@ export async function mapRankedResultsToResultItems(
   });
 
   return rankedResults.map((r) => {
+    const matchedConstraints = r.matchedConstraints ?? [];
+    const unmetConstraints = r.unmetConstraints ?? [];
+    const inferredConstraints = r.inferredConstraints ?? [];
     let drinkingWindowBlock: DrinkingWindowBlock | undefined;
 
     if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined) {
@@ -98,9 +101,9 @@ export async function mapRankedResultsToResultItems(
         },
       },
       constraints: {
-        matched: [],
-        unmet: [],
-        inferred: [],
+        matched: matchedConstraints,
+        unmet: unmetConstraints,
+        inferred: inferredConstraints,
       },
       uncertainty: {
         uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
@@ -110,8 +113,10 @@ export async function mapRankedResultsToResultItems(
       evidenceItems: r.evidenceItems,
     };
 
-    return drinkingWindowBlock !== undefined
-      ? { ...baseItem, drinkingWindow: drinkingWindowBlock }
-      : baseItem;
+    return {
+      ...baseItem,
+      ...(drinkingWindowBlock !== undefined ? { drinkingWindow: drinkingWindowBlock } : {}),
+      ...(unmetConstraints.length > 0 ? { violatedConstraints: unmetConstraints } : {}),
+    };
   });
 }

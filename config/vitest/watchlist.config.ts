@@ -1,5 +1,13 @@
 import { defineConfig } from 'vitest/config';
+import os from 'node:os';
 import { vitestResolveAliases } from './aliases.js';
+
+const maxWatchlistThreads = (() => {
+  const parsed = Number.parseInt(process.env.VITEST_MAX_THREADS ?? '8', 10);
+  const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+  const cpus = os.availableParallelism?.() ?? os.cpus().length;
+  return Math.min(cap, Math.max(2, cpus));
+})();
 
 export default defineConfig({
   test: {
@@ -16,6 +24,14 @@ export default defineConfig({
       'src/__tests__/redis-watchlist-publisher.test.ts',
       'src/__tests__/webhook-delivery.test.ts',
     ],
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        maxThreads: maxWatchlistThreads,
+        minThreads: 1,
+        useAtomics: true,
+      },
+    },
   },
   resolve: {
     alias: vitestResolveAliases(),

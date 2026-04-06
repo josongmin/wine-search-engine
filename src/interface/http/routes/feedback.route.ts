@@ -11,6 +11,7 @@ import type { FeedbackSignal, FeedbackType } from '../../../domain/learning/mode
 import { isQueryClass, type QueryClass } from '../../../domain/shared/types/query-class.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../../domain/shared/types/decision-snapshot.js';
+import { getRequestId } from '../request-id.js';
 
 const DEFAULT_DECISION_SNAPSHOT: DecisionSnapshot = {
   model_versions: {},
@@ -45,7 +46,7 @@ export function registerFeedbackRoute(
     url: '/v1/feedback',
     contract: FeedbackSubmitRouteContract,
     handler: async (request, reply) => {
-      const requestId = request.requestId;
+      const requestId = getRequestId(request);
 
       if (!deps.feedbackIngestEnabled || deps.feedbackStore === null) {
         sendRouteContractResponse(

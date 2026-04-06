@@ -17,6 +17,9 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 | `npm run test:e2e:inmemory` | Alias for the full in-memory e2e lane |
 | `npm run test:e2e:vespa` | Vespa-backed e2e lane with setup/teardown |
 | `npm run test:quality:vespa` | Vespa-backed quality regression lane |
+| `npm run verify:http-contracts` | OpenAPI/catalog parity (runs on `git:prepush`) |
+| `npm run git:prepush` | Husky pre-push: typecheck + unit + `verify:http-contracts` |
+| `npm run git:prepush:quick` | typecheck + unit only (skip HTTP contract check) |
 
 ## Architecture (short)
 

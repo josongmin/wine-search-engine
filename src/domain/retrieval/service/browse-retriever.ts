@@ -5,6 +5,7 @@ import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { ConstraintFilter } from './constraint-filter.js';
+import { summaryToHybridCandidateFields } from './hybrid-candidate-summary.js';
 import {
   browseSparseFetchLimit,
   dedupeSparseHitsByEntity,
@@ -34,34 +35,7 @@ function sparseHitsToBrowseCandidates(
     };
     return {
       entityId: hit.entityId,
-      canonicalLabel: summary?.canonicalLabel,
-      producer: summary?.producer,
-      region: summary?.region,
-      searchTextEn: summary?.searchTextEn,
-      grapePrimary: summary?.grapePrimary,
-      style: summary?.style,
-      priceBand: summary?.priceBand,
-      pairing: summary?.pairing,
-      occasion: summary?.occasion,
-      vintageYear: summary?.vintageYear,
-      body: summary?.body,
-      tannin: summary?.tannin,
-      acidity: summary?.acidity,
-      sweetness: summary?.sweetness,
-      finishLength: summary?.finishLength,
-      wineType: summary?.wineType,
-      criticScoreNormalized: summary?.criticScoreNormalized,
-      producerPrestige: summary?.producerPrestige,
-      country: summary?.country,
-      appellation: summary?.appellation,
-      classification: summary?.classification,
-      alcoholPct: summary?.alcoholPct,
-      drinkingWindowStart: summary?.drinkingWindowStart,
-      drinkingWindowEnd: summary?.drinkingWindowEnd,
-      priceUsd: summary?.priceUsd,
-      certifications: summary?.certifications,
-      soilType: summary?.soilType,
-      producerType: summary?.producerType,
+      ...summaryToHybridCandidateFields(summary),
       sparseRank: index + 1,
       retrievalFusionScore: hit.score,
       matchedConstraints: [],

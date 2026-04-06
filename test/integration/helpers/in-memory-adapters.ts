@@ -44,6 +44,7 @@ import type { ExistingAliasChecker } from '../../../src/domain/learning/service/
 import type { AdversarialGuardPort } from '../../../src/domain/learning/service/promotion-gate.js';
 import type { FeedbackType } from '../../../src/domain/learning/model/feedback-signal.js';
 import { buildNormalizedQueryViews } from '../../../src/domain/query/service/query-normalizer.js';
+import { retrievalDocumentToHitSummary } from '../../../src/domain/retrieval/service/hybrid-candidate-summary.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // InMemoryAmbiguityDictionary
@@ -118,47 +119,7 @@ export class InMemoryCalibrationStore implements CalibrationStore {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function hitSummaryFromDoc(doc: RetrievalDocument): RetrievalHitSummary {
-  const searchSlice =
-    doc.searchTextEn.trim().length > 800
-      ? doc.searchTextEn.trim().slice(0, 800)
-      : doc.searchTextEn.trim();
-  const grapeFromArray = doc.grapes[0]?.trim();
-  const grape =
-    grapeFromArray !== undefined && grapeFromArray.length > 0
-      ? grapeFromArray
-      : undefined;
-  return {
-    canonicalLabel: doc.canonicalLabel,
-    ...(doc.producer.trim().length > 0 ? { producer: doc.producer.trim() } : {}),
-    ...(doc.region.trim().length > 0 ? { region: doc.region.trim() } : {}),
-    ...(searchSlice.length > 0 ? { searchTextEn: searchSlice } : {}),
-    ...(grape !== undefined ? { grapePrimary: grape } : {}),
-    ...(doc.style.trim().length > 0 ? { style: doc.style.trim() } : {}),
-    ...(doc.priceBand.trim().length > 0 ? { priceBand: doc.priceBand.trim() } : {}),
-    ...(doc.pairing.length > 0 ? { pairing: [...doc.pairing] } : {}),
-    ...(doc.occasion.length > 0 ? { occasion: [...doc.occasion] } : {}),
-    ...(doc.vintageYear !== undefined ? { vintageYear: doc.vintageYear } : {}),
-    ...(doc.body !== undefined ? { body: doc.body } : {}),
-    ...(doc.tannin !== undefined ? { tannin: doc.tannin } : {}),
-    ...(doc.acidity !== undefined ? { acidity: doc.acidity } : {}),
-    ...(doc.sweetness !== undefined ? { sweetness: doc.sweetness } : {}),
-    ...(doc.finishLength !== undefined ? { finishLength: doc.finishLength } : {}),
-    ...(doc.wineType !== undefined ? { wineType: doc.wineType } : {}),
-    ...(doc.criticScoreNormalized !== undefined
-      ? { criticScoreNormalized: doc.criticScoreNormalized }
-      : {}),
-    ...(doc.producerPrestige !== undefined ? { producerPrestige: doc.producerPrestige } : {}),
-    ...(doc.country !== undefined ? { country: doc.country } : {}),
-    ...(doc.appellation !== undefined ? { appellation: doc.appellation } : {}),
-    ...(doc.classification !== undefined ? { classification: doc.classification } : {}),
-    ...(doc.alcoholPct !== undefined ? { alcoholPct: doc.alcoholPct } : {}),
-    ...(doc.drinkingWindowStart !== undefined ? { drinkingWindowStart: doc.drinkingWindowStart } : {}),
-    ...(doc.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: doc.drinkingWindowEnd } : {}),
-    ...(doc.priceUsd !== undefined ? { priceUsd: doc.priceUsd } : {}),
-    ...(doc.certifications !== undefined ? { certifications: [...doc.certifications] } : {}),
-    ...(doc.soilType !== undefined ? { soilType: doc.soilType } : {}),
-    ...(doc.producerType !== undefined ? { producerType: doc.producerType } : {}),
-  };
+  return retrievalDocumentToHitSummary(doc);
 }
 
 /**

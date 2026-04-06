@@ -19,7 +19,7 @@
  * }
  */
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance } from 'fastify';
 import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import type { ClaudeToolsRouteDeps } from './route-deps.js';
 import {
@@ -31,10 +31,7 @@ import {
   ClaudeToolsExecuteRouteContract,
   ClaudeToolsListRouteContract,
 } from './route-contracts.js';
-
-function getRequestId(request: FastifyRequest): string {
-  return request.requestId;
-}
+import { getRequestId, resolveRequestId } from '../request-id.js';
 
 /**
  * Register /v1/claude-tools endpoint.
@@ -51,28 +48,29 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
     url: '/v1/claude-tools',
     contract: ClaudeToolsExecuteRouteContract,
     handler: async (request, reply) => {
+      let requestId = getRequestId(request);
       try {
         const parsed = parseContractBody(request, ClaudeToolsExecuteRouteContract);
-      const requestId = parsed.request_id ?? getRequestId(request);
-      const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
-        parsed.tool_name,
-        parsed.tool_input,
-        requestId,
-      );
-      sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 200, {
-        tool_name: parsed.tool_name,
-        tool_result: executionResult.result,
-        request_id: requestId,
-        ...(executionResult.fallbackApplied !== undefined
-          ? { fallback_applied: executionResult.fallbackApplied }
-          : {}),
-      });
+        requestId = resolveRequestId(request, parsed.request_id);
+        const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
+          parsed.tool_name,
+          parsed.tool_input,
+          requestId,
+        );
+        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 200, {
+          tool_name: parsed.tool_name,
+          tool_result: executionResult.result,
+          request_id: requestId,
+          ...(executionResult.fallbackApplied !== undefined
+            ? { fallback_applied: executionResult.fallbackApplied }
+            : {}),
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 400, {
-        error: 'TOOL_EXECUTION_FAILED',
-        message,
-        request_id: getRequestId(request),
+          error: 'TOOL_EXECUTION_FAILED',
+          message,
+          request_id: requestId,
         });
       }
     },

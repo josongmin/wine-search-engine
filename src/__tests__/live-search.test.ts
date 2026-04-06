@@ -125,7 +125,9 @@ describe('Live Search — silver-docquery.ndjson', () => {
     console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      const top = result.results[0];
+      const score = top.relevanceScore !== undefined ? top.relevanceScore.toFixed(2) : 'n/a';
+      console.error(`   Top: ${top.entity.entityId} (${score})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -150,7 +152,9 @@ describe('Live Search — silver-docquery.ndjson', () => {
     console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      const top = result.results[0];
+      const score = top.relevanceScore !== undefined ? top.relevanceScore.toFixed(2) : 'n/a';
+      console.error(`   Top: ${top.entity.entityId} (${score})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -175,7 +179,9 @@ describe('Live Search — silver-docquery.ndjson', () => {
     console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      const top = result.results[0];
+      const score = top.relevanceScore !== undefined ? top.relevanceScore.toFixed(2) : 'n/a';
+      console.error(`   Top: ${top.entity.entityId} (${score})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -200,7 +206,8 @@ describe('Live Search — silver-docquery.ndjson', () => {
     console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      const top = result.results[0];
+      console.error(`   Top: ${top.entity.entityId} (${top.relevanceScore.toFixed(2)})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();

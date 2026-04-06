@@ -5,10 +5,10 @@ import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked
 import { SnapshotMismatchError } from '../../../application/search/replay.usecase.js';
 import {
   buildSearchErrorResponse,
-  getErrorRequestId,
   sendSearchErrorResponse,
 } from '../errors/error-response.js';
 import { sendPolicyBlockedResponse } from '../errors/policy-blocked.js';
+import { getRequestId } from '../request-id.js';
 
 /**
  * Maps DomainError codes to HTTP status codes.
@@ -47,7 +47,7 @@ export function errorHandler(
   request: FastifyRequest,
   reply: FastifyReply,
 ): void {
-  const requestId = getErrorRequestId(request);
+  const requestId = getRequestId(request);
 
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
   // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the

@@ -2,8 +2,8 @@ import type { MixedQueryResult } from '../../domain/mixed/model/mixed-query-resu
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
+import { buildRankedRouteResolveResult } from './search-usecase-ranked-route-resolve.js';
 
 /**
  * Synthetic resolver output for the mixed query route (anchor + similarity + constraints).
@@ -11,25 +11,11 @@ import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch
 export function buildMixedRouteResolveResult(
   plan: QueryPlanV1,
   rankedResults: readonly RankedResult[],
-  mixedDecisionC: number,
+  _mixedResult: MixedQueryResult,
 ): EntityResolveResult {
-  return {
-    status: rankedResults.length > 0 ? 'resolved' : 'failed',
-    candidates: [],
-    decisionConfidenceC: mixedDecisionC,
-    decisionTrace: {
-      queryClass: plan.queryClass,
-      top1CalibratedScore: mixedDecisionC,
-      top2CalibratedScore: 0,
-      calibratedGap: mixedDecisionC,
-      decisionConfidenceC: mixedDecisionC,
-      ambiguityDetected: false,
-      ambiguityTypes: [],
-      appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-      outcomeReasonCodes: ['MIXED_ROUTE'],
-    },
-    conformalSetSize: computeConformalSetSize(mixedDecisionC, DEFAULT_ALPHA, rankedResults.length),
-  };
+  return buildRankedRouteResolveResult(plan, rankedResults, {
+    outcomeReasonCode: 'MIXED_ROUTE',
+  });
 }
 
 /**
@@ -40,9 +26,8 @@ export function mixedQueryResultToSearchRouteExecution(
   mixedResult: MixedQueryResult,
 ): SearchRouteExecutionResult {
   const rankedResults = mixedResult.rankedResults;
-  const mixedDecisionC = mixedResult.anchor.anchorConfidence;
   return {
-    resolveResult: buildMixedRouteResolveResult(plan, rankedResults, mixedDecisionC),
+    resolveResult: buildMixedRouteResolveResult(plan, rankedResults, mixedResult),
     rankedResults,
   };
 }

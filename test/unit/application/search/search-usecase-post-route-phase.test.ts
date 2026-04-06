@@ -51,6 +51,9 @@ describe('runSearchPostRoutePhase', () => {
           availability: 1,
           uncertaintyPenalty: 0,
         },
+        matchedConstraints: [],
+        unmetConstraints: [],
+        inferredConstraints: [],
         evidenceItems: [],
       },
     ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];

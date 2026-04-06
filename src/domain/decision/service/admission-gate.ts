@@ -181,7 +181,7 @@ export class AdmissionGate {
     // The policy is OPTIONAL: if not provided, this check is skipped entirely
     // (backward compatible).
     if (this.confidenceRefusalPolicy !== undefined) {
-      const C = input.resolverResult.decisionConfidenceC ?? 1.0;
+      const C = input.resolverResult.decisionTrace.decisionConfidenceC;
       if (this.confidenceRefusalPolicy.shouldRefuse(C)) {
         return this.reject('CONFIDENCE_BELOW_THRESHOLD', input, snapshot);
       }

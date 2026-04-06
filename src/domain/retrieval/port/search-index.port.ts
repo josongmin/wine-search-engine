@@ -35,6 +35,7 @@ export interface RetrievalHitSummary {
   readonly alcoholPct?: number | undefined;
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
+  readonly drinkingWindowModelVersion?: string | undefined;
   readonly priceUsd?: number | undefined;
   readonly certifications?: readonly string[] | undefined;
   readonly soilType?: string | undefined;

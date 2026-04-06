@@ -221,6 +221,18 @@ describe('FusionService', () => {
       expect(candidates[0]?.canonicalLabel).toBe('Wine');
     });
 
+    it('propagates producerPrestige from hit summaries', () => {
+      const sparse: SparseHit[] = [
+        {
+          ...makeSparse('wine-a', 1),
+          summary: { canonicalLabel: 'Wine', producerPrestige: 0.82 },
+        },
+      ];
+
+      const candidates = fusion.fuse(sparse, []);
+      expect(candidates[0]?.producerPrestige).toBe(0.82);
+    });
+
     it('prefers sparse grapePrimary over dense', () => {
       const sparse: SparseHit[] = [
         {

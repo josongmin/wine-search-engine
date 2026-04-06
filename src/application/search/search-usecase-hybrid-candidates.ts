@@ -57,6 +57,20 @@ export interface HybridCandidateRetrievalPorts {
   readonly compareRetriever?: CompareRetrieverPort | undefined;
 }
 
+export function buildHybridRetrievalInputForPlan(
+  plan: QueryPlanV1,
+  route: HybridRetrievalInput['route'] = 'hybrid',
+): HybridRetrievalInput {
+  return {
+    queryPlan: plan,
+    route,
+    lexicalQueries: [plan.normalizedQuery],
+    semanticQueries: [plan.rawQuery],
+    hardConstraints: plan.constraints.hard,
+    softConstraints: plan.constraints.soft,
+  };
+}
+
 /**
  * Specialized browse/compare paths first; falls back to {@link CandidatePoolPort.generate}.
  */
@@ -118,14 +132,7 @@ export async function retrieveHybridCandidatesForPlan(
       break;
   }
 
-  const retrievalInput: HybridRetrievalInput = {
-    queryPlan: plan,
-    route: 'hybrid',
-    lexicalQueries: [plan.normalizedQuery],
-    semanticQueries: [plan.rawQuery],
-    hardConstraints: plan.constraints.hard,
-    softConstraints: plan.constraints.soft,
-  };
+  const retrievalInput = buildHybridRetrievalInputForPlan(plan, 'hybrid');
 
   return ports.candidatePool.generate(retrievalInput);
 }

@@ -7,6 +7,7 @@ import type {
 } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
+import { summaryToHybridCandidateFields } from './hybrid-candidate-summary.js';
 
 /**
  * Merges per-pass hit summaries. Priority: sparse > dense > anchor (first non-empty wins).
@@ -34,6 +35,7 @@ function mergeRetrievalSummaries(
   readonly finishLength?: number;
   readonly wineType?: string;
   readonly criticScoreNormalized?: number;
+  readonly producerPrestige?: number;
   readonly country?: string;
   readonly appellation?: string;
   readonly classification?: string;
@@ -70,6 +72,8 @@ function mergeRetrievalSummaries(
   const wineType = sparse?.wineType ?? dense?.wineType ?? anchor?.wineType;
   const criticScoreNormalized =
     sparse?.criticScoreNormalized ?? dense?.criticScoreNormalized ?? anchor?.criticScoreNormalized;
+  const producerPrestige =
+    sparse?.producerPrestige ?? dense?.producerPrestige ?? anchor?.producerPrestige;
   const country = sparse?.country ?? dense?.country ?? anchor?.country;
   const appellation = sparse?.appellation ?? dense?.appellation ?? anchor?.appellation;
   const classification =
@@ -104,6 +108,7 @@ function mergeRetrievalSummaries(
     ...(finishLength !== undefined ? { finishLength } : {}),
     ...(wineType !== undefined ? { wineType } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(producerPrestige !== undefined ? { producerPrestige } : {}),
     ...(country !== undefined ? { country } : {}),
     ...(appellation !== undefined ? { appellation } : {}),
     ...(classification !== undefined ? { classification } : {}),
@@ -240,7 +245,7 @@ export class FusionService {
         retrievalFusionScore: fusionScore,
         matchedConstraints: [],
         retrievalTrace: trace,
-        ...merged,
+        ...summaryToHybridCandidateFields(merged),
       });
     }
 

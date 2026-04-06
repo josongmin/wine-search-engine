@@ -285,6 +285,8 @@ export async function createVespaTestContainer(
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
+    entityResolver,
+    entityLookup: vespaSearchIndex,
     ranker,
     decisionEngine,
     responseBuilder,

@@ -124,7 +124,6 @@ function evaluateOperator(
       if (
         typeof attrValue !== 'number' ||
         typeof constraintValue !== 'object' ||
-        constraintValue === null ||
         Array.isArray(constraintValue) ||
         !('min' in constraintValue) ||
         !('max' in constraintValue)
@@ -213,6 +212,7 @@ export function annotateCandidateConstraintEvidence(
   candidate: HybridCandidate,
   constraints: ConstraintBundle,
 ): HybridCandidate {
+  const { unmetHardConstraints: _ignored, ...rest } = candidate;
   const matched = new Set(candidate.matchedConstraints);
   const unmetHard: string[] = [];
 
@@ -237,7 +237,7 @@ export function annotateCandidateConstraintEvidence(
   }
 
   return {
-    ...candidate,
+    ...rest,
     matchedConstraints: [...matched],
     ...(unmetHard.length > 0 ? { unmetHardConstraints: unmetHard } : {}),
   };

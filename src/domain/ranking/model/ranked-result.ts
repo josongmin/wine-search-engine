@@ -76,6 +76,15 @@ export interface RankedResult {
   /** Evidence trail explaining why this candidate received its score. */
   readonly evidenceItems: readonly EvidenceItem[];
 
+  /** Constraint attribute names satisfied by this ranked result. */
+  readonly matchedConstraints: readonly string[];
+
+  /** Constraint attribute names not satisfied by this ranked result. */
+  readonly unmetConstraints: readonly string[];
+
+  /** Constraint attribute names that originated from inferred query constraints. */
+  readonly inferredConstraints: readonly string[];
+
   // ─────────────────────────────────────────────────────────────────
   // Epic 15: Wine attributes for drinking window prediction
   // (Populated from Vespa documents during ranking pipeline)
@@ -83,6 +92,9 @@ export interface RankedResult {
 
   /** Vintage year (e.g. 2018). */
   readonly vintage?: number | undefined;
+
+  /** Canonical vintage-year field matching retrieval documents/candidates. */
+  readonly vintageYear?: number | undefined;
 
   /** Wine body intensity (1–5 ordinal scale). */
   readonly body?: number | undefined;
@@ -98,6 +110,9 @@ export interface RankedResult {
 
   /** Critic proxy score (80–100 or 0 if absent). */
   readonly avgCriticProxyScore?: number | undefined;
+
+  /** Canonical critic score normalized to [0, 1]. */
+  readonly criticScoreNormalized?: number | undefined;
 
   /** Label-encoded primary grape variety (0–N, OOV→999). */
   readonly grapePrimaryEnc?: number | undefined;

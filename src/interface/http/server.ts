@@ -20,6 +20,7 @@ import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
+import { getRequestId } from './request-id.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 
@@ -159,7 +160,7 @@ export async function createServer(
     if (request.method === 'POST') {
       const ct = (request.headers['content-type'] ?? '').toLowerCase();
       if (!ct.includes('application/json')) {
-        const requestId = request.requestId;
+        const requestId = getRequestId(request);
         await reply.status(415).send({
           error: {
             request_id: requestId,

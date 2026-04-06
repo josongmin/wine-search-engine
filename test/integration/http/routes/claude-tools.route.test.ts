@@ -75,4 +75,27 @@ describe('Claude tools HTTP route', () => {
     expect(body.tool_result.ok).toBe(true);
     expect(body.request_id).toBe('req-123');
   });
+
+  it('POST /v1/claude-tools preserves client request_id on execution failure', async () => {
+    executeWithFallback.mockRejectedValueOnce(new Error('boom'));
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/claude-tools',
+      payload: {
+        tool_name: 'search_wines',
+        tool_input: { query: 'Opus One 2018' },
+        request_id: 'req-failed-123',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as {
+      error: string;
+      message: string;
+      request_id: string;
+    };
+    expect(body.error).toBe('TOOL_EXECUTION_FAILED');
+    expect(body.request_id).toBe('req-failed-123');
+  });
 });

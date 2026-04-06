@@ -22,6 +22,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { SearchUseCase } from '../application/search/search.usecase.js';
 import type { Container } from '../config/container.js';
+import { retrieveHybridCandidatesForPlan } from '../application/search/search-usecase-hybrid-candidates.js';
+import { buildResolverCandidatesFromPlan } from '../application/search/search-usecase-resolver-candidates.js';
+import { buildHybridRouteResolveResult } from '../application/search/search-usecase-hybrid-route.js';
+import { buildSearchDecisionInput } from '../application/search/search-usecase-decision-input.js';
+import { buildDecisionSnapshotFromPlan } from '../application/search/search-usecase-decision-snapshot.js';
 
 type WineRecord = {
   sourceId: string;
@@ -63,6 +68,8 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
   let container: Container;
   let blockingAdapter: ReturnType<typeof createTestContainer>['blockingAdapter'];
   let searchIndex: ReturnType<typeof createTestContainer>['searchIndex'];
+  let browseRetriever: ReturnType<typeof createTestContainer>['browseRetriever'];
+  let compareRetriever: ReturnType<typeof createTestContainer>['compareRetriever'];
 
   const QUERY = 'David Arthur Cabernet 2014';
   const REQUEST_ID = 'root-cause-trace-001';
@@ -72,6 +79,8 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     container = testContainer.container;
     blockingAdapter = testContainer.blockingAdapter;
     searchIndex = testContainer.searchIndex;
+    browseRetriever = testContainer.browseRetriever;
+    compareRetriever = testContainer.compareRetriever;
 
     // Load wine data
     const dataPath = join(process.cwd(), 'data', 'silver-docquery.ndjson');
@@ -182,22 +191,35 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
-    const retrievalInput = {
-      queryPlan: plan,
-      route: 'hybrid' as const,
-      lexicalQueries: [plan.normalizedQuery],
-      semanticQueries: [plan.rawQuery],
-      hardConstraints: plan.constraints.hard,
-      softConstraints: plan.constraints.soft,
-    };
-
     console.error(`\nRetrieval Input:`);
-    console.error(`  lexicalQueries: [${retrievalInput.lexicalQueries.join(', ')}]`);
-    console.error(`  semanticQueries: [${retrievalInput.semanticQueries.join(', ')}]`);
-    console.error(`  hardConstraints: ${retrievalInput.hardConstraints.length}`);
-    console.error(`  softConstraints: ${retrievalInput.softConstraints.length}`);
+    console.error(`  lexicalQueries: [${plan.normalizedQuery}]`);
+    console.error(`  semanticQueries: [${plan.rawQuery}]`);
+    console.error(`  hardConstraints: ${plan.constraints.hard.length}`);
+    console.error(`  softConstraints: ${plan.constraints.soft.length}`);
 
-    const candidates = await container.candidatePool.generate(retrievalInput);
+    const candidates = await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: container.candidatePool,
+        browseRetriever,
+        compareRetriever,
+      },
+      async (resolverPlan) => {
+        const candidateEntities = await buildResolverCandidatesFromPlan(resolverPlan, searchIndex);
+        return container.entityResolver.resolve({
+          rawQuery: resolverPlan.rawQuery,
+          normalizedQuery: resolverPlan.normalizedQuery,
+          ...(resolverPlan.normalizedQueryViews !== undefined
+            ? { normalizedQueryViews: resolverPlan.normalizedQueryViews }
+            : {}),
+          queryClass: resolverPlan.queryClass,
+          policy: resolverPlan.policy,
+          anchorCandidates: resolverPlan.anchors,
+          uncertainty: resolverPlan.uncertainty,
+          candidateEntities,
+        });
+      },
+    );
 
     console.error(`\nCandidate Pool Output:`);
     console.error(`  Total candidates: ${candidates.length}`);
@@ -206,9 +228,9 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     } else {
       candidates.slice(0, 5).forEach((c, i) => {
         console.error(`  [${i}] ${c.entityId} (${c.canonicalLabel})`);
-        console.error(`      BM25 Score: ${c.bm25Score?.toFixed(3) ?? 'N/A'}`);
-        console.error(`      Dense Score: ${c.denseScore?.toFixed(3) ?? 'N/A'}`);
-        console.error(`      Fusion Score: ${c.fusionScore?.toFixed(3) ?? 'N/A'}`);
+        console.error(`      Sparse Rank: ${c.sparseRank ?? 'N/A'}`);
+        console.error(`      Dense Rank: ${c.denseRank ?? 'N/A'}`);
+        console.error(`      Fusion Score: ${c.retrievalFusionScore.toFixed(3)}`);
       });
       if (candidates.length > 5) {
         console.error(`  ... and ${candidates.length - 5} more`);
@@ -221,7 +243,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     // Check if David Arthur is in candidates
     const davidArthurFound = candidates.some((c) =>
-      c.canonicalLabel.toLowerCase().includes('david arthur'),
+      String(c.canonicalLabel).toLowerCase().includes('david arthur'),
     );
     console.error(`\n  David Arthur found in candidates: ${davidArthurFound ? '✅' : '❌'}`);
 
@@ -242,16 +264,29 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
-    const retrievalInput = {
-      queryPlan: plan,
-      route: 'hybrid' as const,
-      lexicalQueries: [plan.normalizedQuery],
-      semanticQueries: [plan.rawQuery],
-      hardConstraints: plan.constraints.hard,
-      softConstraints: plan.constraints.soft,
-    };
-
-    const candidates = await container.candidatePool.generate(retrievalInput);
+    const candidates = await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: container.candidatePool,
+        browseRetriever,
+        compareRetriever,
+      },
+      async (resolverPlan) => {
+        const candidateEntities = await buildResolverCandidatesFromPlan(resolverPlan, searchIndex);
+        return container.entityResolver.resolve({
+          rawQuery: resolverPlan.rawQuery,
+          normalizedQuery: resolverPlan.normalizedQuery,
+          ...(resolverPlan.normalizedQueryViews !== undefined
+            ? { normalizedQueryViews: resolverPlan.normalizedQueryViews }
+            : {}),
+          queryClass: resolverPlan.queryClass,
+          policy: resolverPlan.policy,
+          anchorCandidates: resolverPlan.anchors,
+          uncertainty: resolverPlan.uncertainty,
+          candidateEntities,
+        });
+      },
+    );
 
     const rankingInput = {
       queryPlan: plan,
@@ -313,16 +348,29 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     const plan = await container.queryPlanner.plan(QUERY, {});
 
     // Build synthetic resolver result (as the SearchUseCase does for hybrid route)
-    const retrievalInput = {
-      queryPlan: plan,
-      route: 'hybrid' as const,
-      lexicalQueries: [plan.normalizedQuery],
-      semanticQueries: [plan.rawQuery],
-      hardConstraints: plan.constraints.hard,
-      softConstraints: plan.constraints.soft,
-    };
-
-    const candidates = await container.candidatePool.generate(retrievalInput);
+    const candidates = await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: container.candidatePool,
+        browseRetriever,
+        compareRetriever,
+      },
+      async (resolverPlan) => {
+        const candidateEntities = await buildResolverCandidatesFromPlan(resolverPlan, searchIndex);
+        return container.entityResolver.resolve({
+          rawQuery: resolverPlan.rawQuery,
+          normalizedQuery: resolverPlan.normalizedQuery,
+          ...(resolverPlan.normalizedQueryViews !== undefined
+            ? { normalizedQueryViews: resolverPlan.normalizedQueryViews }
+            : {}),
+          queryClass: resolverPlan.queryClass,
+          policy: resolverPlan.policy,
+          anchorCandidates: resolverPlan.anchors,
+          uncertainty: resolverPlan.uncertainty,
+          candidateEntities,
+        });
+      },
+    );
 
     const rankingInput = {
       queryPlan: plan,
@@ -332,104 +380,32 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     const rankedResults = await container.ranker.rank(rankingInput);
 
-    // Build resolver result (hybrid route — per search.usecase.ts:354-377)
-    const top1Score = rankedResults[0]?.finalScore ?? 0;
-    const top2Score = rankedResults[1]?.finalScore ?? 0;
-    const hybridConfidence = Math.max(0, Math.min(1, top1Score));
-    const hybridGap = Math.max(0, Math.min(1, top1Score - top2Score));
-
-    // RFC-016: Include topEntity from top-ranked result for AdmissionGate
-    const topResult = rankedResults[0];
-    const topEntity = topResult ? {
-      entityId: topResult.entityId,
-      canonicalLabel: topResult.canonicalLabel,
-    } : undefined;
-
-    const resolveResult = {
-      status: rankedResults.length > 0 ? 'resolved' as const : 'failed' as const,
-      topEntity,
-      candidates: [],
-      decisionConfidenceC: hybridConfidence,
-      decisionTrace: {
-        queryClass: plan.queryClass,
-        top1CalibratedScore: hybridConfidence,
-        top2CalibratedScore: Math.max(0, Math.min(1, top2Score)),
-        calibratedGap: hybridGap,
-        decisionConfidenceC: hybridConfidence,
-        ambiguityDetected: false,
-        ambiguityTypes: [] as string[],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: ['HYBRID_ROUTE'],
-      },
-      conformalSetSize: 1,
-    };
+    const resolveResult = buildHybridRouteResolveResult(plan, rankedResults);
 
     console.error(`\nResolver Result (synthetic for hybrid):`);
     console.error(`  Status: ${resolveResult.status}`);
     console.error(`  Candidates count: ${resolveResult.candidates.length}`);
-    console.error(`  Decision Confidence C: ${resolveResult.decisionConfidenceC.toFixed(4)}`);
+    console.error(`  Decision Confidence C: ${(resolveResult.decisionConfidenceC ?? 0).toFixed(4)}`);
     console.error(`  Top1 Score: ${resolveResult.decisionTrace.top1CalibratedScore.toFixed(4)}`);
     console.error(`  Top2 Score: ${resolveResult.decisionTrace.top2CalibratedScore.toFixed(4)}`);
     console.error(`  Calibrated Gap: ${resolveResult.decisionTrace.calibratedGap.toFixed(4)}`);
     console.error(`  Ambiguity Detected: ${resolveResult.decisionTrace.ambiguityDetected}`);
 
-    // Build decision input (topResult already defined above)
-    // const topResult = rankedResults[0];
-    const rankingSignals = topResult
-      ? {
-          entity_integrity_score: topResult.componentScores.entityIntegrity,
-          hard_constraint_pass: topResult.componentScores.hardConstraintPass ? 1 : 0,
-          soft_constraint_score: topResult.componentScores.softConstraint,
-          semantic_relevance_score: topResult.componentScores.semantic,
-          preference_alignment_score: topResult.componentScores.preferenceAlignment,
-          popularity_score: topResult.componentScores.popularity,
-          availability_score: topResult.componentScores.availability,
-          uncertainty_penalty: topResult.componentScores.uncertaintyPenalty,
-        }
-      : undefined;
-
-    const identityEvidencePresent =
-      (rankedResults.length > 0 && rankedResults.length > 0) ||
-      false;
-
-    const decisionInput = {
-      queryPlan: plan,
-      resolverResult: resolveResult,
-      policy: plan.policy,
-      uncertainty: plan.uncertainty,
-      ...(rankingSignals !== undefined ? { rankingSignals } : {}),
-      evidenceSummary: {
-        identityEvidencePresent,
-        ...(topResult !== undefined
-          ? {
-              constraintEvidencePresent: topResult.componentScores.hardConstraintPass,
-              evidenceRefCount: topResult.evidenceItems.length,
-            }
-          : {}),
-      },
-      ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
-      conformalSetSize: resolveResult.conformalSetSize,
-    };
+    const topResult = rankedResults[0];
+    const decisionInput = buildSearchDecisionInput(plan, resolveResult, rankedResults, 'hybrid');
 
     console.error(`\nDecision Input:`);
     console.error(`  Policy fallback mode: ${decisionInput.policy.fallbackMode}`);
     console.error(`  Uncertainty decision effect: ${decisionInput.uncertainty.decisionEffect ?? 'none'}`);
     console.error(`  Identity evidence present: ${decisionInput.evidenceSummary.identityEvidencePresent}`);
-    console.error(`  Ranking signals present: ${rankingSignals !== undefined ? '✅' : '❌'}`);
-    if (rankingSignals) {
-      console.error(`    semantic_relevance_score: ${rankingSignals.semantic_relevance_score.toFixed(3)}`);
-      console.error(`    hard_constraint_pass: ${rankingSignals.hard_constraint_pass}`);
+    console.error(`  Ranking signals present: ${decisionInput.rankingSignals !== undefined ? '✅' : '❌'}`);
+    if (decisionInput.rankingSignals) {
+      console.error(`    semantic_relevance_score: ${decisionInput.rankingSignals.semantic_relevance_score.toFixed(3)}`);
+      console.error(`    hard_constraint_pass: ${decisionInput.rankingSignals.hard_constraint_pass}`);
     }
 
     // Run decision engine
-    const snapshot = {
-      model_versions: {},
-      index_versions: {},
-      policy_rule_version: '1',
-      threshold_profile_id: 'default',
-      planner_version: 'test',
-      feature_flags: {},
-    };
+    const snapshot = buildDecisionSnapshotFromPlan(plan);
 
     const decisionOutput = await container.decisionEngine.decide(decisionInput, snapshot);
 
@@ -548,16 +524,29 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     );
 
     const plan = await container.queryPlanner.plan(QUERY, {});
-    const retrievalInput = {
-      queryPlan: plan,
-      route: 'hybrid' as const,
-      lexicalQueries: [plan.normalizedQuery],
-      semanticQueries: [plan.rawQuery],
-      hardConstraints: plan.constraints.hard,
-      softConstraints: plan.constraints.soft,
-    };
-
-    const candidates = await container.candidatePool.generate(retrievalInput);
+    const candidates = await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: container.candidatePool,
+        browseRetriever,
+        compareRetriever,
+      },
+      async (resolverPlan) => {
+        const candidateEntities = await buildResolverCandidatesFromPlan(resolverPlan, searchIndex);
+        return container.entityResolver.resolve({
+          rawQuery: resolverPlan.rawQuery,
+          normalizedQuery: resolverPlan.normalizedQuery,
+          ...(resolverPlan.normalizedQueryViews !== undefined
+            ? { normalizedQueryViews: resolverPlan.normalizedQueryViews }
+            : {}),
+          queryClass: resolverPlan.queryClass,
+          policy: resolverPlan.policy,
+          anchorCandidates: resolverPlan.anchors,
+          uncertainty: resolverPlan.uncertainty,
+          candidateEntities,
+        });
+      },
+    );
 
     console.error(`\nTrace Summary:`);
     console.error(`  1. Planner produces queryClass: ${plan.queryClass} ✅`);

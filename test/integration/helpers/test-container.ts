@@ -70,6 +70,8 @@ export interface TestContainerParts {
   ambiguityDict: InMemoryAmbiguityDictionary;
   blockingAdapter: InMemoryBlockingAdapter;
   searchIndex: InMemorySearchIndex;
+  browseRetriever: BrowseRetriever;
+  compareRetriever: CompareRetriever;
   aliasMatcher: InMemoryAliasMatcher;
   anchorResolver: InMemoryAnchorResolver;
   similarRetrieval: InMemorySimilarRetrieval;
@@ -209,6 +211,10 @@ export function createTestContainer(): TestContainerParts {
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
+    browseRetriever,
+    compareRetriever,
+    entityResolver,
+    entityLookup: searchIndex,
     ranker,
     decisionEngine,
     responseBuilder,
@@ -258,6 +264,8 @@ export function createTestContainer(): TestContainerParts {
     ambiguityDict,
     blockingAdapter,
     searchIndex,
+    browseRetriever,
+    compareRetriever,
     aliasMatcher,
     anchorResolver,
     similarRetrieval,

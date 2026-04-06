@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
-# CI-light: full typecheck + unit + HTTP/OpenAPI parity. Skip: git push --no-verify
+# typecheck + full unit lane (includes HTTP/OpenAPI parity test). Skip: git push --no-verify
 set -eu
 npm run git:prepush

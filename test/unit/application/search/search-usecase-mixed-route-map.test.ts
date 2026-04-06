@@ -27,6 +27,7 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
   it('maps mixed solver output to dispatch shape', () => {
     const plan = minimalPlan();
     const eid = createEntityId();
+    const resultEid = createEntityId('result-1');
     const mixedResult: MixedQueryResult = {
       anchor: {
         entityId: eid,
@@ -38,13 +39,40 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
         style: 'bold',
         anchorConfidence: 0.88,
       },
-      rankedResults: [],
+      rankedResults: [
+        {
+          entityId: resultEid,
+          canonicalLabel: 'Result Wine',
+          finalScore: 0.64,
+          rank: 1,
+          componentScores: {
+            entityIntegrity: 1,
+            semantic: 0.64,
+            hardConstraintPass: true,
+            softConstraint: 0.4,
+            attributeAlignment: 0.3,
+            preferenceAlignment: 0.2,
+            popularity: 0.1,
+            availability: 1,
+            uncertaintyPenalty: 0,
+          },
+          evidenceItems: [],
+          matchedConstraints: [],
+          unmetConstraints: [],
+          inferredConstraints: [],
+        },
+      ],
       constraintOverlay: { hard: [], soft: [], inferred: [] },
       anchorPreservationRate: 1,
     };
     const out = mixedQueryResultToSearchRouteExecution(plan, mixedResult);
-    expect(out.rankedResults).toEqual([]);
-    expect(out.resolveResult.decisionConfidenceC).toBe(0.88);
+    expect(out.rankedResults).toHaveLength(1);
+    expect(out.resolveResult.decisionConfidenceC).toBe(0.64);
+    expect(out.resolveResult.topEntity).toEqual({
+      entityId: resultEid,
+      canonicalLabel: 'Result Wine',
+      calibratedScore: 0.64,
+    });
     expect(out.resolveResult.decisionTrace.outcomeReasonCodes).toContain('MIXED_ROUTE');
   });
 });

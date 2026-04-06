@@ -240,9 +240,11 @@ flowchart TD
 
 | 명령 | 확인 내용 |
 |------|-----------|
-| `npm run eval:noisy:smoke` + `eval:noisy:assert-baseline` | `data/eval-baselines/noisy-entity-smoke-v1.json` 대비 노이즈 지표 |
+| `npm run eval:noisy:assert-baseline` | 스모크 1회 실행 후 베이스라인 대비 (`eval:noisy:validate` + assert) |
+| `npm run eval:noisy:smoke` | `data/noisy-entity-eval-smoke-results.json` 생성(로컬·아티팩트용) |
 | `npm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
-| `npm run test:verification:core` | `typecheck` + 빠른 e2e + `eval:noisy:gate` + 노이즈 베이스라인 assert |
+| `npm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) — CI는 `typecheck`·`e2e fast` 이후 이 잡만 |
+| `npm run test:verification:core` | 로컬/나이틀리용: `typecheck` + 빠른 e2e + `test:verification:noisy` |
 | `npm run eval:offline:*` | 전체 오프라인 티어; 스모크 베이스라인: `eval:offline:smoke:assert-baseline` |
 
 ---
@@ -512,7 +514,7 @@ npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; 
 
 | 영역 | 명령 |
 |------|------|
-| 품질 | `npm run lint`, `npm run typecheck`, `npm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:core`, `test:verification:vespa` |
+| 품질 | `npm run lint`, `npm run typecheck`, `npm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:noisy`, `test:verification:core`, `test:verification:vespa` |
 | HTTP 계약 | `npm run contracts:http`, `contracts:http:openapi-bridge` |
 | Eval | `npm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
 | ETL | `npm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
@@ -524,7 +526,7 @@ npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; 
 
 <h2 id="ci-github-actions">CI (GitHub Actions)</h2>
 
-잡에 **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:core`), **verify-splits**, **noisy entity eval smoke + baseline assert**, 이후 **build** + **Docker 이미지 빌드** 포함. **`.github/workflows/ci.yml`** 참고.
+잡에 **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:noisy`: gate 1회 + 베이스라인 assert만), **verify-splits**, 이후 **build** + **Docker 이미지 빌드** 포함. 공통 단계는 **`.github/actions/setup-node-ci`**(checkout + Node 22 + `npm ci`). **수동 실행:** Actions에서 `workflow_dispatch`. 노이즈 스모크 JSON은 로컬 `eval:noisy:smoke`. **`.github/workflows/ci.yml`** 참고.
 
 ---
 

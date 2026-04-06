@@ -5,10 +5,10 @@ import {
 } from '../../../domain/shared/error/policy-blocked.js';
 import {
   buildSearchErrorResponse,
-  getErrorRequestId,
   sendSearchErrorResponse,
 } from './error-response.js';
 import type { ErrorResponseBody } from '../schemas/search-response.schema.js';
+import { getRequestId } from '../request-id.js';
 
 export function buildPolicyBlockedErrorResponse(requestId: string): ErrorResponseBody {
   return buildSearchErrorResponse(
@@ -23,7 +23,7 @@ export function buildPolicyBlockedErrorResponse(requestId: string): ErrorRespons
 export function sendPolicyBlockedResponse(
   request: FastifyRequest,
   reply: FastifyReply,
-  requestId: string = getErrorRequestId(request),
+  requestId: string = getRequestId(request),
 ): void {
   sendSearchErrorResponse(request, reply, 403, buildPolicyBlockedErrorResponse(requestId));
 }

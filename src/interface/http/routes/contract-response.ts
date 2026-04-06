@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type z } from 'zod';
 import type { HttpRouteContract } from './route-contracts.js';
 import { deepKeysToSnake } from '../middleware/snake-case-hook.js';
+import { getRequestId } from '../request-id.js';
 
 function formatIssues(error: z.ZodError): string {
   return error.issues
@@ -21,7 +22,7 @@ export function validateContractResponse<T>(
 
   request.log.error(
     {
-      requestId: request.requestId,
+      requestId: getRequestId(request),
       issues: parsed.error.issues,
     },
     'http_response_contract_violation',

@@ -278,7 +278,7 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(response.statusCode).toBe(207);
+      expect(response.statusCode).toBe(200);
 
       const body = response.json();
       expect(body.results).toHaveLength(1);

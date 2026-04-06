@@ -7,6 +7,7 @@ import {
 import { registerContractRoute } from './register-contract-route.js';
 import { SearchRouteContract } from './route-contracts.js';
 import { toSearchRequest } from './search-request-mappers.js';
+import { getRequestId } from '../request-id.js';
 
 /**
  * POST /v1/search — main search endpoint.
@@ -28,7 +29,7 @@ export function registerSearchRoute(
       const parsed = parseContractBody(request, SearchRouteContract);
       const searchRequest = toSearchRequest(parsed);
 
-      const response = await deps.searchUseCase.execute(searchRequest, request.requestId);
+      const response = await deps.searchUseCase.execute(searchRequest, getRequestId(request));
 
       sendRouteContractResponse(request, reply, SearchRouteContract, 200, response);
     },

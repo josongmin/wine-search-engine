@@ -93,6 +93,10 @@ export function buildUseCaseContainerServices(
     hybridUseCase: new HybridUseCase({
       queryPlanner: core.queryPlanner,
       candidatePool: core.candidatePool,
+      browseRetriever: core.browseRetriever,
+      compareRetriever: core.compareRetriever,
+      entityResolver: core.entityResolver,
+      entityLookup: core.entityLookup,
       ranker: core.ranker,
       decisionEngine: core.decisionEngine,
       responseBuilder: core.responseBuilder,

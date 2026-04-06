@@ -52,6 +52,8 @@ const envSchema = z.object({
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
+  /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
+  ANTHROPIC_INJECTION_MODEL: z.string().min(1).optional(),
   /** Allow LLM injection judge failures to bypass Layer 2 blocking. Defaults to safer fail-closed. */
   INJECTION_JUDGE_FAIL_OPEN: z
     .enum(['true', 'false'])
@@ -170,6 +172,8 @@ function buildConfig(parsed: EnvVars) {
     /** Anthropic API settings (optional, for LLM-based security features). */
     anthropic: {
       apiKey: parsed.ANTHROPIC_API_KEY,
+      injectionModel:
+        parsed.ANTHROPIC_INJECTION_MODEL ?? 'claude-haiku-4-5-20251001',
     },
 
     /** Query-entry security behavior (Layer 1 + Layer 2 prompt-injection defense). */

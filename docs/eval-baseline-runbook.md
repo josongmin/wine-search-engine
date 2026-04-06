@@ -4,9 +4,9 @@ This runbook defines how we refresh and validate the lightweight regression base
 
 ## Baselines
 
-- Offline smoke baseline: [`/Users/songmin/wine-search-engine/data/eval-baselines/offline-smoke-v1.json`](/Users/songmin/wine-search-engine/data/eval-baselines/offline-smoke-v1.json)
-- Noisy entity smoke baseline: [`/Users/songmin/wine-search-engine/data/eval-baselines/noisy-entity-smoke-v1.json`](/Users/songmin/wine-search-engine/data/eval-baselines/noisy-entity-smoke-v1.json)
-- Baseline manifest: [`/Users/songmin/wine-search-engine/data/eval-baselines/manifest.json`](/Users/songmin/wine-search-engine/data/eval-baselines/manifest.json)
+- Offline smoke baseline: [`data/eval-baselines/offline-smoke-v1.json`](../data/eval-baselines/offline-smoke-v1.json)
+- Noisy entity smoke baseline: [`data/eval-baselines/noisy-entity-smoke-v1.json`](../data/eval-baselines/noisy-entity-smoke-v1.json)
+- Baseline manifest: [`data/eval-baselines/manifest.json`](../data/eval-baselines/manifest.json)
 
 ## When To Refresh
 
@@ -21,13 +21,15 @@ This runbook defines how we refresh and validate the lightweight regression base
 3. If the new metrics are intentionally better and stable, run `npm run eval:offline:smoke:refresh-baseline`.
 4. Re-run `npm run eval:offline:smoke:assert-baseline` and confirm it passes.
 
-The smoke dataset lives at [`/Users/songmin/wine-search-engine/data/eval-smoke-queries.jsonl`](/Users/songmin/wine-search-engine/data/eval-smoke-queries.jsonl). It should stay small, deterministic, and fixture-backed.
+The smoke dataset lives at [`data/eval-smoke-queries.jsonl`](../data/eval-smoke-queries.jsonl). It should stay small, deterministic, and fixture-backed.
 
 ## Noisy Benchmark Workflow
 
-1. Run `npm run eval:noisy:assert-baseline`.
+1. Run `npm run eval:noisy:assert-baseline` (runs `eval:noisy:validate` once, then compares `/tmp/noisy-entity-eval-results.json` to the baseline).
 2. If the improvement is intentional and stable, run `npm run eval:noisy:refresh-baseline`.
 3. Re-run `npm run eval:noisy:assert-baseline` and confirm it passes.
+
+CI uses `eval:noisy:gate` followed by `eval:noisy:assert-baseline:current` so the benchmark is not executed twice.
 
 ## Review Checklist
 

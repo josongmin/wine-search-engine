@@ -6,6 +6,8 @@ import {
 import { registerContractRoute } from './register-contract-route.js';
 import { BatchSearchRouteContract } from './route-contracts.js';
 import { ErrorResponseSchema } from '../schemas/search-response.schema.js';
+import type { BatchSearchResponse } from '../../../application/search/batch-search.usecase.js';
+import { getRequestId } from '../request-id.js';
 
 function createValidationErrorResponse(requestId: string, message: string) {
   return ErrorResponseSchema.parse({
@@ -17,6 +19,23 @@ function createValidationErrorResponse(requestId: string, message: string) {
       retryable: false,
     },
   });
+}
+
+function normalizeBatchResponse(
+  response: Omit<BatchSearchResponse, 'batch_status' | 'has_failures'>
+    & Partial<Pick<BatchSearchResponse, 'batch_status' | 'has_failures'>>,
+): BatchSearchResponse {
+  const succeeded = response.succeeded;
+  const failed = response.failed;
+  const batch_status = response.batch_status
+    ?? (failed === 0 ? 'succeeded' : succeeded === 0 ? 'failed' : 'partial_failure');
+  const has_failures = response.has_failures ?? failed > 0;
+
+  return {
+    ...response,
+    batch_status,
+    has_failures,
+  };
 }
 
 /**
@@ -93,7 +112,7 @@ export function registerBatchSearchRoute(
           reply,
           BatchSearchRouteContract,
           400,
-          createValidationErrorResponse(request.requestId, 'Invalid batch search request'),
+          createValidationErrorResponse(getRequestId(request), 'Invalid batch search request'),
         );
         return;
       }
@@ -107,7 +126,13 @@ export function registerBatchSearchRoute(
       // HTTP transport indicates the batch request itself succeeded.
       // Clients should inspect batch_status / has_failures / results[].status
       // to determine item-level outcomes.
-      sendRouteContractResponse(request, reply, BatchSearchRouteContract, 200, response);
+      sendRouteContractResponse(
+        request,
+        reply,
+        BatchSearchRouteContract,
+        200,
+        normalizeBatchResponse(response),
+      );
     },
   });
 }

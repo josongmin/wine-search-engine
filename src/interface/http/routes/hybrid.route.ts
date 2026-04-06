@@ -7,6 +7,7 @@ import { registerContractRoute } from './register-contract-route.js';
 import type { HybridRouteDeps } from './route-deps.js';
 import { HybridRouteContract } from './route-contracts.js';
 import { toHybridSearchRequest } from './search-request-mappers.js';
+import { getRequestId } from '../request-id.js';
 
 /**
  * POST /v1/search/hybrid — force hybrid search route.
@@ -23,7 +24,7 @@ export function registerHybridRoute(
       const parsed = parseContractBody(request, HybridRouteContract);
       const hybridRequest = toHybridSearchRequest(parsed);
 
-      const response = await deps.hybridUseCase.execute(hybridRequest, request.requestId);
+      const response = await deps.hybridUseCase.execute(hybridRequest, getRequestId(request));
 
       sendRouteContractResponse(request, reply, HybridRouteContract, 200, response);
     },

@@ -7,6 +7,7 @@ import {
 import { registerContractRoute } from './register-contract-route.js';
 import { ReplayRouteContract } from './route-contracts.js';
 import { toReplayRequest } from './search-request-mappers.js';
+import { getRequestId } from '../request-id.js';
 
 /**
  * POST /v1/search/replay — replay search with pinned decision snapshot.
@@ -24,7 +25,7 @@ export function registerReplayRoute(
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, ReplayRouteContract);
       const replayRequest = toReplayRequest(parsed);
-      const response = await deps.replayUseCase.execute(replayRequest, request.requestId);
+      const response = await deps.replayUseCase.execute(replayRequest, getRequestId(request));
 
       sendRouteContractResponse(request, reply, ReplayRouteContract, 200, response);
     },

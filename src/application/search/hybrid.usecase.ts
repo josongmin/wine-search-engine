@@ -1,27 +1,30 @@
 import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
-import type { DecisionInput } from '../../domain/decision/model/decision-input.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
-import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
-import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
-import type { ResultItem } from '../../domain/response/model/result-item.js';
-import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { SnapshotVersions } from './search.usecase.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
 import type {
+  BrowseRetrieverPort,
   CandidatePoolPort,
+  CompareRetrieverPort,
   DecisionEnginePort,
+  EntityDocumentLookupPort,
+  EntityResolverPort,
   QueryPlannerPort,
   RankingPort,
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
 import type { HybridSearchRequest } from './hybrid-request.dto.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
-import { inferDrinkingWindowConfidence } from './drinking-window-confidence.js';
+import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
+import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
+import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
+import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
+import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
+import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
 
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
 
@@ -31,6 +34,10 @@ export type { HybridSearchRequest } from './hybrid-request.dto.js';
 export interface HybridUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly candidatePool: CandidatePoolPort;
+  readonly browseRetriever?: BrowseRetrieverPort | undefined;
+  readonly compareRetriever?: CompareRetrieverPort | undefined;
+  readonly entityResolver?: EntityResolverPort | undefined;
+  readonly entityLookup?: EntityDocumentLookupPort | undefined;
   readonly ranker: RankingPort;
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
@@ -82,18 +89,53 @@ export class HybridUseCase {
 
     const plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
 
-    // Build retrieval input (force hybrid route)
-    const retrievalInput: HybridRetrievalInput = {
-      queryPlan: plan,
-      route: 'hybrid',
-      lexicalQueries: [plan.normalizedQuery],
-      semanticQueries: [plan.rawQuery],
-      hardConstraints: plan.constraints.hard,
-      softConstraints: plan.constraints.soft,
-    };
+    // Run hybrid retrieval through the same specialized browse/compare entrypoint as SearchUseCase.
+    const candidates = await retrieveHybridCandidatesForPlan(
+      plan,
+      {
+        candidatePool: this.deps.candidatePool,
+        browseRetriever: this.deps.browseRetriever,
+        compareRetriever: this.deps.compareRetriever,
+      },
+      async (resolverPlan) => {
+        if (this.deps.entityResolver === undefined) {
+          return {
+            status: 'failed' as const,
+            candidates: [],
+            decisionTrace: {
+              queryClass: resolverPlan.queryClass,
+              top1CalibratedScore: 0,
+              top2CalibratedScore: 0,
+              calibratedGap: 0,
+              decisionConfidenceC: 0,
+              ambiguityDetected: false,
+              ambiguityTypes: [],
+              appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+              outcomeReasonCodes: ['HYBRID_ROUTE_MISSING_ENTITY_RESOLVER'],
+            },
+            conformalSetSize: 1,
+          };
+        }
 
-    // Run hybrid retrieval
-    const candidates = await this.deps.candidatePool.generate(retrievalInput);
+        const candidateEntities = await buildResolverCandidatesFromPlan(
+          resolverPlan,
+          this.deps.entityLookup,
+        );
+
+        return this.deps.entityResolver.resolve({
+          rawQuery: resolverPlan.rawQuery,
+          normalizedQuery: resolverPlan.normalizedQuery,
+          ...(resolverPlan.normalizedQueryViews !== undefined
+            ? { normalizedQueryViews: resolverPlan.normalizedQueryViews }
+            : {}),
+          queryClass: resolverPlan.queryClass,
+          policy: resolverPlan.policy,
+          anchorCandidates: resolverPlan.anchors,
+          uncertainty: resolverPlan.uncertainty,
+          candidateEntities,
+        });
+      },
+    );
 
     // Rank candidates
     const rankingInput: RankingInput = {
@@ -103,53 +145,27 @@ export class HybridUseCase {
     };
 
     const rankedResults = await this.deps.ranker.rank(rankingInput);
-
-    // Build a synthetic resolve result for the hybrid path
-    const top1Score = rankedResults[0]?.finalScore ?? 0;
-    const top2Score = rankedResults[1]?.finalScore ?? 0;
-    const hybridDecisionC = Math.max(0, Math.min(1, top1Score));
-    const hybridGap = Math.max(0, Math.min(1, top1Score - top2Score));
-    const resolveResult: EntityResolveResult = {
-      status: rankedResults.length > 0 ? 'resolved' : 'failed',
-      candidates: [],
-      decisionConfidenceC: hybridDecisionC,
-      decisionTrace: {
-        queryClass: plan.queryClass,
-        top1CalibratedScore: hybridDecisionC,
-        top2CalibratedScore: Math.max(0, Math.min(1, top2Score)),
-        calibratedGap: hybridGap,
-        decisionConfidenceC: hybridDecisionC,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: ['HYBRID_ONLY_ROUTE'],
-      },
-      conformalSetSize: computeConformalSetSize(hybridDecisionC, DEFAULT_ALPHA, rankedResults.length),
-    };
+    const resolveResult = buildHybridRouteResolveResult(plan, rankedResults);
 
     // Build decision input
-    const decisionInput: DecisionInput = {
-      queryPlan: plan,
-      resolverResult: resolveResult,
-      policy: plan.policy,
-      uncertainty: plan.uncertainty,
-    };
+    const decisionInput = buildSearchDecisionInput(
+      plan,
+      resolveResult,
+      rankedResults,
+      'hybrid',
+    );
 
     // Build snapshot and decide
-    const snapshot: DecisionSnapshot = {
-      model_versions: this.deps.snapshotVersions?.modelVersions ?? {},
-      index_versions: this.deps.snapshotVersions?.indexVersions ?? {},
-      policy_rule_version: plan.policyRuleVersion,
-      threshold_profile_id: plan.thresholdProfileId,
-      planner_version: plan.plannerVersion,
-      feature_flags: {},
-    };
+    const snapshot: DecisionSnapshot = buildDecisionSnapshotFromPlan(
+      plan,
+      this.deps.snapshotVersions,
+    );
 
     const decisionOutput = await this.deps.decisionEngine.decide(decisionInput, snapshot);
 
     // Build response
     const queryTimeMs = Date.now() - startTime;
-    const results = this.mapRankedToResultItems(rankedResults);
+    const results = await mapRankedResultsToResultItems(rankedResults, undefined);
 
     return this.deps.responseBuilder.build({
       decisionOutput,
@@ -158,61 +174,6 @@ export class HybridUseCase {
       requestId,
       queryTimeMs,
       route: 'hybrid',
-    });
-  }
-  /**
-   * Maps ranked results to response-level ResultItems.
-   */
-  private mapRankedToResultItems(rankedResults: readonly RankedResult[]): readonly ResultItem[] {
-    const currentYear = new Date().getFullYear();
-
-    return rankedResults.map((r) => {
-      // Build drinking window block if data is available
-      const drinkingWindow =
-        r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
-          ? {
-              drinkingWindowStart: r.drinkingWindowStart,
-              drinkingWindowEnd: r.drinkingWindowEnd,
-              currentlyDrinkable:
-                currentYear >= r.drinkingWindowStart &&
-                currentYear <= r.drinkingWindowEnd,
-              confidence: inferDrinkingWindowConfidence(r.drinkingWindowModelVersion),
-              ...(r.drinkingWindowModelVersion !== undefined
-                ? { modelVersion: r.drinkingWindowModelVersion }
-                : {}),
-            }
-          : undefined;
-
-      return {
-        entity: {
-          entityId: r.entityId,
-          canonicalLabel: r.canonicalLabel,
-          type: 'wine',
-        },
-        relevanceScore: r.finalScore,
-        match: {
-          matchType: 'hybrid' as const,
-          scoreComponents: {
-            lexical: 0,
-            semantic: r.componentScores.semantic,
-            attribute: r.componentScores.attributeAlignment,
-            popularity: r.componentScores.popularity,
-            preferenceAlignment: r.componentScores.preferenceAlignment,
-          },
-        },
-        constraints: {
-          matched: [],
-          unmet: [],
-          inferred: [],
-        },
-        uncertainty: {
-          uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
-          missingInfo: [],
-          approximationUsed: false,
-        },
-        evidenceItems: r.evidenceItems,
-        ...(drinkingWindow !== undefined ? { drinkingWindow } : {}),
-      };
     });
   }
 }

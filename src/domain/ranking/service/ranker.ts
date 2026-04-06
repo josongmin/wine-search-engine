@@ -1,4 +1,5 @@
 import type { EntityId, QueryClass } from '../../shared/types/index.js';
+import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
@@ -62,6 +63,9 @@ interface ScoredEntry {
   readonly producerPrestige?: number;
   readonly componentScores: ComponentScores;
   readonly finalScore: number;
+  readonly matchedConstraints: readonly string[];
+  readonly unmetConstraints: readonly string[];
+  readonly inferredConstraints: readonly string[];
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
   readonly drinkingWindowModelVersion?: string | undefined;
@@ -76,6 +80,47 @@ interface ScoredEntry {
   readonly grapePrimaryEnc?: number | undefined;
   readonly regionEnc?: number | undefined;
   readonly countryEnc?: number | undefined;
+}
+
+function unique(values: readonly string[]): readonly string[] {
+  return [...new Set(values)];
+}
+
+function buildConstraintState(
+  input: RankingInput,
+  candidate: HybridCandidate,
+): {
+  readonly matchedConstraints: readonly string[];
+  readonly unmetConstraints: readonly string[];
+  readonly inferredConstraints: readonly string[];
+} {
+  const matchedSet = new Set(candidate.matchedConstraints);
+  const inferredConstraints = unique(
+    input.constraints.inferred.map((constraint) => constraint.attribute),
+  );
+  const softUnmet = input.constraints.soft
+    .map((constraint) => constraint.attribute)
+    .filter((attribute) => !matchedSet.has(attribute));
+  const inferredUnmet = inferredConstraints
+    .filter((attribute) => !matchedSet.has(attribute));
+  const unmetConstraints = unique([
+    ...(candidate.unmetHardConstraints ?? []),
+    ...softUnmet,
+    ...inferredUnmet,
+  ]);
+  const trackedAttributes = new Set([
+    ...input.constraints.hard.map((constraint) => constraint.attribute),
+    ...input.constraints.soft.map((constraint) => constraint.attribute),
+    ...inferredConstraints,
+  ]);
+  const matchedConstraints = candidate.matchedConstraints
+    .filter((attribute: string) => trackedAttributes.has(attribute));
+
+  return {
+    matchedConstraints,
+    unmetConstraints,
+    inferredConstraints,
+  };
 }
 
 export type RankerOptions = {
@@ -158,6 +203,7 @@ export class Ranker {
         constraints,
         anchorProfile,
       );
+      const constraintState = buildConstraintState(input, candidate);
 
       // Step 3: Aggregate signals into final score
       const finalScore = this.scoreAggregator.aggregate(
@@ -204,6 +250,9 @@ export class Ranker {
         ...(candidate.producerPrestige !== undefined
           ? { producerPrestige: candidate.producerPrestige }
           : {}),
+        matchedConstraints: constraintState.matchedConstraints,
+        unmetConstraints: constraintState.unmetConstraints,
+        inferredConstraints: constraintState.inferredConstraints,
         componentScores,
         finalScore,
       });
@@ -247,6 +296,9 @@ export class Ranker {
         rank: index + 1,
         componentScores: entry.componentScores,
         evidenceItems,
+        matchedConstraints: entry.matchedConstraints,
+        unmetConstraints: entry.unmetConstraints,
+        inferredConstraints: entry.inferredConstraints,
         ...(entry.producer !== undefined ? { producer: entry.producer } : {}),
         ...(entry.region !== undefined ? { region: entry.region } : {}),
         ...(entry.grapePrimary !== undefined ? { grapePrimary: entry.grapePrimary } : {}),
@@ -258,13 +310,18 @@ export class Ranker {
           ? { drinkingWindowModelVersion: entry.drinkingWindowModelVersion }
           : {}),
         // Epic 15: Wine attributes for dynamic prediction
-        ...(entry.vintageYear !== undefined ? { vintage: entry.vintageYear } : {}),
+        ...(entry.vintageYear !== undefined
+          ? { vintage: entry.vintageYear, vintageYear: entry.vintageYear }
+          : {}),
         ...(entry.body !== undefined ? { body: entry.body } : {}),
         ...(entry.tannin !== undefined ? { tannin: entry.tannin } : {}),
         ...(entry.acidity !== undefined ? { acidity: entry.acidity } : {}),
         ...(entry.sweetness !== undefined ? { sweetness: entry.sweetness } : {}),
         ...(entry.criticScoreNormalized !== undefined
-          ? { avgCriticProxyScore: Math.round(80 + entry.criticScoreNormalized * 20) }
+          ? {
+              avgCriticProxyScore: Math.round(80 + entry.criticScoreNormalized * 20),
+              criticScoreNormalized: entry.criticScoreNormalized,
+            }
           : {}),
         ...(entry.grapePrimaryEnc !== undefined ? { grapePrimaryEnc: entry.grapePrimaryEnc } : {}),
         ...(entry.regionEnc !== undefined ? { regionEnc: entry.regionEnc } : {}),

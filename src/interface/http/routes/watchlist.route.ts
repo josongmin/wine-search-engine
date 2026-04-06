@@ -27,10 +27,7 @@ import {
   WatchlistDeliveriesRouteContract,
   WatchlistGetRouteContract,
 } from './route-contracts.js';
-
-function getRequestId(request: { requestId?: string; id: string }): string {
-  return request.requestId ?? request.id;
-}
+import { getRequestId } from '../request-id.js';
 
 function createErrorResponse(requestId: string, code: string, message: string) {
   return WatchlistErrorResponseSchema.parse({

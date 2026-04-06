@@ -5,10 +5,6 @@ import {
   type ErrorResponseBody,
 } from '../schemas/search-response.schema.js';
 
-export function getErrorRequestId(request: FastifyRequest): string {
-  return request.requestId;
-}
-
 export function buildSearchErrorResponse(
   requestId: string,
   code: string,

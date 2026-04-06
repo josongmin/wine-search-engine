@@ -171,6 +171,9 @@ describe('Ranker', () => {
       expect(results[0]!.rank).toBe(1);
       expect(results[0]!.finalScore).toBe(0.9);
       expect(results[0]!.evidenceItems).toEqual([STUB_EVIDENCE]);
+      expect(results[0]!.matchedConstraints).toEqual([]);
+      expect(results[0]!.unmetConstraints).toEqual([]);
+      expect(results[0]!.inferredConstraints).toEqual([]);
     });
   });
 
@@ -209,6 +212,73 @@ describe('Ranker', () => {
 
       expect(results[0]!.rank).toBe(1);
       expect(results[1]!.rank).toBe(2);
+    });
+  });
+
+  describe('constraint evidence propagation', () => {
+    it('carries matched/unmet/inferred constraint state into ranked results', async () => {
+      const candidate = {
+        ...makeCandidate('wine-001'),
+        matchedConstraints: ['country', 'price_band'],
+        unmetHardConstraints: ['wine_type'],
+      };
+      const sharedConstraints: ConstraintBundle = {
+        hard: [
+          {
+            attribute: 'wine_type',
+            operator: '=',
+            value: 'red',
+            source_phrase: 'red',
+            confidence: 1,
+          },
+        ],
+        soft: [
+          {
+            attribute: 'country',
+            operator: '=',
+            value: 'France',
+            source_phrase: 'france',
+            confidence: 0.8,
+          },
+          {
+            attribute: 'price_band',
+            operator: '=',
+            value: 'premium',
+            source_phrase: 'premium',
+            confidence: 0.7,
+          },
+        ],
+        inferred: [
+          {
+            attribute: 'appellation',
+            operator: '=',
+            value: 'Bordeaux',
+            source_phrase: 'bordeaux',
+            confidence: 0.6,
+          },
+        ],
+      };
+
+      const input: RankingInput = {
+        queryPlan: {
+          ...makeQueryPlan(),
+          constraints: sharedConstraints,
+        },
+        candidates: [candidate],
+        constraints: sharedConstraints,
+      };
+
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregator(0.9),
+        makeEvidenceMapper([STUB_EVIDENCE]),
+      );
+
+      const [result] = await ranker.rank(input);
+
+      expect(result?.matchedConstraints).toEqual(['country', 'price_band']);
+      expect(result?.unmetConstraints).toEqual(['wine_type', 'appellation']);
+      expect(result?.inferredConstraints).toEqual(['appellation']);
     });
   });
 

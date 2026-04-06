@@ -7,6 +7,7 @@ import {
 import { registerContractRoute } from './register-contract-route.js';
 import { ResolveRouteContract } from './route-contracts.js';
 import { toResolveRequest } from './search-request-mappers.js';
+import { getRequestId } from '../request-id.js';
 
 /**
  * POST /v1/entity/resolve — entity resolution only.
@@ -21,7 +22,7 @@ export function registerResolveRoute(
     contract: ResolveRouteContract,
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, ResolveRouteContract);
-      const resolveRequest = toResolveRequest(parsed, request.requestId);
+      const resolveRequest = toResolveRequest(parsed, getRequestId(request));
 
       const result = await deps.resolveUseCase.execute(resolveRequest);
 

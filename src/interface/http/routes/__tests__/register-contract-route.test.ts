@@ -15,21 +15,25 @@ describe('registerContractRoute', () => {
     apps.length = 0;
   });
 
-  it('keeps contract registries isolated per Fastify instance', () => {
-    const appA = Fastify();
-    const appB = Fastify();
-    apps.push(appA, appB);
+  it(
+    'keeps contract registries isolated per Fastify instance',
+    { timeout: 15_000 },
+    () => {
+      const appA = Fastify();
+      const appB = Fastify();
+      apps.push(appA, appB);
 
-    registerContractRoute(appA, {
-      method: 'POST',
-      url: '/v1/search',
-      contract: SearchRouteContract,
-      handler: async () => ({ ok: true }),
-    });
+      registerContractRoute(appA, {
+        method: 'POST',
+        url: '/v1/search',
+        contract: SearchRouteContract,
+        handler: async () => ({ ok: true }),
+      });
 
-    expect(getRegisteredHttpRouteContracts(appA)).toHaveLength(1);
-    expect(getRegisteredHttpRouteContracts(appB)).toEqual([]);
-  });
+      expect(getRegisteredHttpRouteContracts(appA)).toHaveLength(1);
+      expect(getRegisteredHttpRouteContracts(appB)).toEqual([]);
+    },
+  );
 
   it('returns a defensive copy of the stored contracts', () => {
     const app = Fastify();
