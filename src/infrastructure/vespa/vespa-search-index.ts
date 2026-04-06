@@ -22,7 +22,11 @@ import {
   buildSparseFilters,
   buildDenseFilters,
 } from './mapping.js';
-import { normalizeRetrievalHitSummary } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
+import {
+  normalizeRetrievalHitSummary,
+  normalizeSummarySearchText,
+  trimNonEmptySummaryValue,
+} from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -102,12 +106,8 @@ function normaliseSimilarity(score: number): number {
   return Math.max(0, Math.min(1, score));
 }
 
-const RERANK_SUMMARY_SEARCH_TEXT_MAX = 800;
-
-function trimNonEmpty(v: unknown): string | undefined {
-  if (!isString(v)) return undefined;
-  const t = v.trim();
-  return t.length > 0 ? t : undefined;
+function trimHitSummaryText(v: unknown): string | undefined {
+  return isString(v) ? trimNonEmptySummaryValue(v) : undefined;
 }
 
 /**
@@ -115,20 +115,16 @@ function trimNonEmpty(v: unknown): string | undefined {
  * and wine attribute enrichment (Epic 15).
  */
 function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary | undefined {
-  const canonicalLabel = trimNonEmpty(fields['canonical_label']);
-  const producer = trimNonEmpty(fields['producer']);
-  const region = trimNonEmpty(fields['region']);
-  let searchTextEn = trimNonEmpty(fields['search_text_en']);
-  if (
-    searchTextEn !== undefined &&
-    searchTextEn.length > RERANK_SUMMARY_SEARCH_TEXT_MAX
-  ) {
-    searchTextEn = searchTextEn.slice(0, RERANK_SUMMARY_SEARCH_TEXT_MAX);
-  }
+  const canonicalLabel = trimHitSummaryText(fields['canonical_label']);
+  const producer = trimHitSummaryText(fields['producer']);
+  const region = trimHitSummaryText(fields['region']);
+  const searchTextEn = isString(fields['search_text_en'])
+    ? normalizeSummarySearchText(fields['search_text_en'])
+    : undefined;
 
-  const grapePrimary = trimNonEmpty(fields['grape_primary']);
-  const style = trimNonEmpty(fields['style']);
-  const priceBand = trimNonEmpty(fields['price_band']);
+  const grapePrimary = trimHitSummaryText(fields['grape_primary']);
+  const style = trimHitSummaryText(fields['style']);
+  const priceBand = trimHitSummaryText(fields['price_band']);
   const pairing = Array.isArray(fields['pairing'])
     ? fields['pairing'].filter((value): value is string => typeof value === 'string')
     : undefined;
@@ -143,16 +139,16 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   const acidity = typeof fields['acidity'] === 'number' ? fields['acidity'] : undefined;
   const sweetness = typeof fields['sweetness'] === 'number' ? fields['sweetness'] : undefined;
   const finishLength = typeof fields['finish_length'] === 'number' ? fields['finish_length'] : undefined;
-  const wineType = trimNonEmpty(fields['wine_type']);
+  const wineType = trimHitSummaryText(fields['wine_type']);
   const criticScoreNormalized = typeof fields['critic_score_normalized'] === 'number'
     ? fields['critic_score_normalized']
     : undefined;
   const producerPrestige = typeof fields['producer_prestige'] === 'number'
     ? fields['producer_prestige']
     : undefined;
-  const country = trimNonEmpty(fields['country']);
-  const appellation = trimNonEmpty(fields['appellation']);
-  const classification = trimNonEmpty(fields['classification']);
+  const country = trimHitSummaryText(fields['country']);
+  const appellation = trimHitSummaryText(fields['appellation']);
+  const classification = trimHitSummaryText(fields['classification']);
   const alcoholPct = typeof fields['alcohol_pct'] === 'number' ? fields['alcohol_pct'] : undefined;
   const drinkingWindowStart = typeof fields['drinking_window_start'] === 'number'
     ? fields['drinking_window_start']
@@ -160,13 +156,13 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   const drinkingWindowEnd = typeof fields['drinking_window_end'] === 'number'
     ? fields['drinking_window_end']
     : undefined;
-  const drinkingWindowModelVersion = trimNonEmpty(fields['drinking_window_model_version']);
+  const drinkingWindowModelVersion = trimHitSummaryText(fields['drinking_window_model_version']);
   const priceUsd = typeof fields['price_usd'] === 'number' ? fields['price_usd'] : undefined;
   const certifications = Array.isArray(fields['certifications'])
     ? fields['certifications'].filter((value): value is string => typeof value === 'string')
     : undefined;
-  const soilType = trimNonEmpty(fields['soil_type']);
-  const producerType = trimNonEmpty(fields['producer_type']);
+  const soilType = trimHitSummaryText(fields['soil_type']);
+  const producerType = trimHitSummaryText(fields['producer_type']);
 
   return normalizeRetrievalHitSummary({
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),

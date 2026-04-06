@@ -10,9 +10,16 @@ type HybridCandidateSummaryFields = Pick<HybridCandidate, RetrievalHitSummaryKey
 
 const RERANK_SUMMARY_SEARCH_TEXT_MAX = 800;
 
-function trimNonEmpty(value: string | undefined): string | undefined {
+export function trimNonEmptySummaryValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
+}
+
+export function normalizeSummarySearchText(value: string | undefined): string | undefined {
+  const trimmed = trimNonEmptySummaryValue(value);
+  return trimmed !== undefined && trimmed.length > RERANK_SUMMARY_SEARCH_TEXT_MAX
+    ? trimmed.slice(0, RERANK_SUMMARY_SEARCH_TEXT_MAX)
+    : trimmed;
 }
 
 export function normalizeRetrievalHitSummary(
@@ -65,26 +72,22 @@ export function summaryToHybridCandidateFields(
 }
 
 export function retrievalDocumentToHitSummary(doc: RetrievalDocument): RetrievalHitSummary {
-  const searchTextEn = trimNonEmpty(doc.searchTextEn);
-  const truncatedSearchTextEn =
-    searchTextEn !== undefined && searchTextEn.length > RERANK_SUMMARY_SEARCH_TEXT_MAX
-      ? searchTextEn.slice(0, RERANK_SUMMARY_SEARCH_TEXT_MAX)
-      : searchTextEn;
-  const grapePrimary = trimNonEmpty(doc.grapePrimary)
+  const truncatedSearchTextEn = normalizeSummarySearchText(doc.searchTextEn);
+  const grapePrimary = trimNonEmptySummaryValue(doc.grapePrimary)
     ?? doc.grapes
-      .map((grape) => trimNonEmpty(grape))
+      .map((grape) => trimNonEmptySummaryValue(grape))
       .find((grape): grape is string => grape !== undefined);
-  const producer = trimNonEmpty(doc.producer);
-  const region = trimNonEmpty(doc.region);
-  const style = trimNonEmpty(doc.style);
-  const priceBand = trimNonEmpty(doc.priceBand);
-  const wineType = trimNonEmpty(doc.wineType);
-  const country = trimNonEmpty(doc.country);
-  const appellation = trimNonEmpty(doc.appellation);
-  const classification = trimNonEmpty(doc.classification);
-  const drinkingWindowModelVersion = trimNonEmpty(doc.drinkingWindowModelVersion);
-  const soilType = trimNonEmpty(doc.soilType);
-  const producerType = trimNonEmpty(doc.producerType);
+  const producer = trimNonEmptySummaryValue(doc.producer);
+  const region = trimNonEmptySummaryValue(doc.region);
+  const style = trimNonEmptySummaryValue(doc.style);
+  const priceBand = trimNonEmptySummaryValue(doc.priceBand);
+  const wineType = trimNonEmptySummaryValue(doc.wineType);
+  const country = trimNonEmptySummaryValue(doc.country);
+  const appellation = trimNonEmptySummaryValue(doc.appellation);
+  const classification = trimNonEmptySummaryValue(doc.classification);
+  const drinkingWindowModelVersion = trimNonEmptySummaryValue(doc.drinkingWindowModelVersion);
+  const soilType = trimNonEmptySummaryValue(doc.soilType);
+  const producerType = trimNonEmptySummaryValue(doc.producerType);
 
   return normalizeRetrievalHitSummary({
     canonicalLabel: doc.canonicalLabel,

@@ -254,6 +254,17 @@ export async function createVespaTestContainer(
     modelVersions: { embedding: 'in-memory-hash-v1' },
     indexVersions: { wine_content: 'vespa-e2e-test' },
   };
+  const drinkingWindowPredictor = {
+    modelVersion: 'vespa-test',
+    predict: () => ({
+      drinkingWindowStart: 2020,
+      drinkingWindowEnd: 2030,
+      peakYear: 2025,
+      confidence: 'medium' as const,
+      modelVersion: 'vespa-test',
+    }),
+  };
+  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
   const searchUseCase = new SearchUseCase({
     queryPlanner,
@@ -297,18 +308,6 @@ export async function createVespaTestContainer(
   });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
-
-  const drinkingWindowPredictor = {
-    modelVersion: 'vespa-test',
-    predict: () => ({
-      drinkingWindowStart: 2020,
-      drinkingWindowEnd: 2030,
-      peakYear: 2025,
-      confidence: 'medium' as const,
-      modelVersion: 'vespa-test',
-    }),
-  };
-  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const adaptiveToolExecutor = new AdaptiveToolExecutor(
     new WineToolExecutor({
       searchUseCase,

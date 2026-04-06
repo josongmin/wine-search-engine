@@ -338,6 +338,26 @@ describe('DecisionEngine', () => {
       expect(output.decisionStatus).toBe('ambiguous');
     });
 
+    it('resolved with coarse identity flag but ranked/resolver mismatch → downgraded', async () => {
+      const input = makeInput({
+        resolverResult: makeResolverResult(0.85, 0.20, false),
+        evidenceSummary: {
+          identityEvidencePresent: true,
+          identityEvidence: {
+            topEntityPresent: true,
+            resolverTopCandidateMatchesTopEntity: true,
+            resolverEvidenceRefCount: 1,
+            rankedTopResultPresent: true,
+            rankedTopResultMatchesTopEntity: false,
+            rankedEvidenceItemCount: 2,
+          },
+        },
+      });
+      const output = await engine.decide(input, TEST_SNAPSHOT);
+      expect(output.decisionStatus).toBe('ambiguous');
+      expect(output.decisionTrace.rulesApplied).toContain('EVIDENCE_GATE_DOWNGRADE');
+    });
+
     it('resolved with constraints but no constraint evidence → downgraded', async () => {
       const input = makeInput({
         resolverResult: makeResolverResult(0.85, 0.20, false),
@@ -437,6 +457,34 @@ describe('DecisionEngine', () => {
       const output = await engine.decide(input, TEST_SNAPSHOT);
       expect(output.decisionStatus).toBe('ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_DOWNGRADE');
+    });
+
+    it('requireExact=true and ranked evidence disagrees with resolver identity → downgrade to ambiguous', async () => {
+      const input = makeInput({
+        resolverResult: makeResolverResult(0.995, 0.20, false),
+        policy: {
+          requireExact: true,
+          allowApproximate: false,
+          requireClarification: false,
+          fallbackMode: 'clarify',
+          policyReasonCodes: [],
+        },
+        evidenceSummary: {
+          identityEvidencePresent: true,
+          identityEvidence: {
+            topEntityPresent: true,
+            resolverTopCandidateMatchesTopEntity: true,
+            resolverEvidenceRefCount: 1,
+            rankedTopResultPresent: true,
+            rankedTopResultMatchesTopEntity: false,
+            rankedEvidenceItemCount: 3,
+            exactMatchCandidatePresent: true,
+          },
+        },
+      });
+      const output = await engine.decide(input, TEST_SNAPSHOT);
+      expect(output.decisionStatus).toBe('ambiguous');
+      expect(output.decisionTrace.rulesApplied).toContain('EVIDENCE_GATE_DOWNGRADE');
     });
 
     it('allowApproximate=false switches nextAction from hybrid_search to clarify', async () => {

@@ -10,6 +10,7 @@ import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
 import { WineAttributeEncoders } from './wine-attribute-encoder.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -278,7 +279,16 @@ export class Ranker {
           viable,
           queryPlan.queryClass,
         );
-      } catch {
+      } catch (err) {
+        bootstrapLogger.warn(
+          {
+            err: err instanceof Error ? err.message : String(err),
+            queryClass: queryPlan.queryClass,
+            viableCount: viable.length,
+            rerankTopK: this.rerankTopK,
+          },
+          '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
+        );
         finalOrder = viable;
       }
     }

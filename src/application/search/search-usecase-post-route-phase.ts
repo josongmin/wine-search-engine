@@ -45,6 +45,7 @@ export interface SearchPostRouteExecutionContext {
 export async function runSearchPostRoutePhase(
   ctx: SearchPostRouteExecutionContext,
 ): Promise<SearchResponseV1> {
+  const cacheRequestContext = buildSearchCacheRequestContext(ctx.request);
   const topScores = topKFinalScores(ctx.rankedResults);
   const abstainDecision = ctx.abstainPolicy.shouldAbstain(topScores);
 
@@ -54,7 +55,7 @@ export async function runSearchPostRoutePhase(
       ctx.rankedResults,
       ctx.drinkingWindow,
     );
-    return ctx.responseBuilder.build(
+    const response = ctx.responseBuilder.build(
       buildEntropyAbstainResponseParams({
         plan: ctx.plan,
         snapshot,
@@ -68,6 +69,20 @@ export async function runSearchPostRoutePhase(
         rankedResults: ctx.rankedResults,
       }),
     );
+    if (ctx.cacheService) {
+      const stored = await ctx.cacheService.setSearchResponse(
+        ctx.plan,
+        cacheRequestContext,
+        response,
+      );
+      if (!stored) {
+        bootstrapLogger.debug(
+          { requestId: ctx.requestId },
+          '[Search] setSearchResponse skipped for entropy abstain response',
+        );
+      }
+    }
+    return response;
   }
 
   const decisionInput = buildSearchDecisionInput(
@@ -104,7 +119,7 @@ export async function runSearchPostRoutePhase(
   if (ctx.cacheService) {
     const stored = await ctx.cacheService.setSearchResponse(
       ctx.plan,
-      buildSearchCacheRequestContext(ctx.request),
+      cacheRequestContext,
       response,
     );
     if (!stored) {

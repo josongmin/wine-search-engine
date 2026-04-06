@@ -4,6 +4,7 @@ import type { QueryEntrySecurityObserver } from '../../infrastructure/observabil
 import {
   PolicyBlockedError,
 } from '../../domain/shared/error/policy-blocked.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 export type QueryEntrySecurityLayer = 'LAYER_1_BLOCKED' | 'LAYER_2_BLOCKED';
 
@@ -61,7 +62,13 @@ export async function evaluateQueryEntrySecurity(
         };
       }
     } catch (err) {
-      console.error('[QueryEntrySecurity] LLM judge error:', err);
+      bootstrapLogger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          judgeFailureMode,
+        },
+        '[QueryEntrySecurity] LLM judge error',
+      );
       deps.observer?.onJudgeError(err, judgeFailureMode);
       if (judgeFailureMode === 'fail_closed') {
         deps.observer?.onFailClosedBlock();

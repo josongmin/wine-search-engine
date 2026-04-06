@@ -10,6 +10,7 @@ import { AdmissionGate } from './admission-gate.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Internal intermediate state used during decision processing.
@@ -498,11 +499,34 @@ export class DecisionEngine {
    */
   private async loadThresholds(input: DecisionInput): Promise<ThresholdEntry> {
     const profileId = input.queryPlan.thresholdProfileId;
-    const profile = await this.thresholdStore.getProfile(profileId);
+    let profile = null;
+    try {
+      profile = await this.thresholdStore.getProfile(profileId);
+    } catch (err) {
+      bootstrapLogger.warn(
+        {
+          err: err instanceof Error ? err.message : String(err),
+          profileId,
+        },
+        '[DecisionEngine] Threshold profile load failed; falling back to default profile',
+      );
+    }
     const effectiveProfile = profile ?? DEFAULT_THRESHOLD_PROFILE;
 
     const queryClass = input.queryPlan.queryClass;
-    const baseThreshold = effectiveProfile.perQueryClass[queryClass];
+    const baseThreshold = effectiveProfile.perQueryClass[queryClass]
+      ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass[queryClass]
+      ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass.unknown;
+    if (effectiveProfile.perQueryClass[queryClass] === undefined) {
+      bootstrapLogger.warn(
+        {
+          profileId: effectiveProfile.id,
+          queryClass,
+          fallbackProfileId: DEFAULT_THRESHOLD_PROFILE.id,
+        },
+        '[DecisionEngine] Threshold profile missing query class; using default threshold entry',
+      );
+    }
 
     // Compute dynamic gap threshold (Wave 3 enhancement, RFC-009 §5.3)
     const confidence = input.resolverResult.decisionTrace.decisionConfidenceC;

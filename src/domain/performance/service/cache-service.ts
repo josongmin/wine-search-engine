@@ -16,6 +16,7 @@ import type { SearchResponseCachePort } from '../port/search-response-cache.port
 import type { CacheResult } from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 function constraintValueString(value: unknown): string {
   if (value === null || value === undefined) {
@@ -27,9 +28,9 @@ function constraintValueString(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function recordMismatch(
-  a: Readonly<Record<string, string>>,
-  b: Readonly<Record<string, string>>,
+function recordMismatch<T extends string | boolean>(
+  a: Readonly<Record<string, T>>,
+  b: Readonly<Record<string, T>>,
 ): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key of keys) {
@@ -54,18 +55,21 @@ export class CacheService implements SearchResponseCachePort {
   private readonly queryCacheKeyBuilder: QueryCacheKeyBuilder;
   private readonly embeddingCacheKeyBuilder: EmbeddingCacheKeyBuilder;
   private readonly eligibilityAnalyzer: CacheEligibilityAnalyzer;
+  private readonly circuitBreakerThreshold: number;
   private circuitBreakerOpen = false;
   private circuitBreakerResetTime = 0;
+  private consecutiveErrorCount = 0;
 
   constructor(
     private readonly queryCache: QueryCachePort | undefined,
     private readonly embeddingCache: EmbeddingCachePort | undefined,
-    _circuitBreakerThreshold: number = 5,
+    circuitBreakerThreshold: number = 5,
     private readonly circuitBreakerResetMs: number = 60000,
   ) {
     this.queryCacheKeyBuilder = new QueryCacheKeyBuilder();
     this.embeddingCacheKeyBuilder = new EmbeddingCacheKeyBuilder();
     this.eligibilityAnalyzer = new CacheEligibilityAnalyzer();
+    this.circuitBreakerThreshold = Math.max(1, circuitBreakerThreshold);
   }
 
   /**
@@ -153,6 +157,7 @@ export class CacheService implements SearchResponseCachePort {
         data: cached,
         durationMs: Date.now() - startTime,
       };
+      
     } catch (err) {
       this.recordCacheError(err);
       return {
@@ -199,6 +204,7 @@ export class CacheService implements SearchResponseCachePort {
       );
 
       await this.queryCache.set(cacheKey, response, eligibility.ttlSeconds);
+      this.recordCacheSuccess();
       return true;
     } catch (err) {
       this.recordCacheError(err);
@@ -271,6 +277,7 @@ export class CacheService implements SearchResponseCachePort {
         }
       }
 
+      this.recordCacheSuccess();
       return results;
     } catch (err) {
       this.recordCacheError(err);
@@ -352,8 +359,22 @@ export class CacheService implements SearchResponseCachePort {
 
     // Policy rule version must match
     const policyMismatch = cachedVersions.policy_rule_version !== currentSnapshot.policy_rule_version;
+    const thresholdProfileMismatch =
+      cachedVersions.threshold_profile_id !== currentSnapshot.threshold_profile_id;
+    const plannerMismatch = cachedVersions.planner_version !== currentSnapshot.planner_version;
+    const featureFlagsMismatch = recordMismatch(
+      cachedVersions.feature_flags,
+      currentSnapshot.feature_flags,
+    );
 
-    return modelVersionsMismatch || indexVersionsMismatch || policyMismatch;
+    return (
+      modelVersionsMismatch
+      || indexVersionsMismatch
+      || policyMismatch
+      || thresholdProfileMismatch
+      || plannerMismatch
+      || featureFlagsMismatch
+    );
   }
 
   /**
@@ -381,6 +402,7 @@ export class CacheService implements SearchResponseCachePort {
     const now = Date.now();
     if (now > this.circuitBreakerResetTime) {
       this.circuitBreakerOpen = false;
+      this.consecutiveErrorCount = 0;
       return false;
     }
 
@@ -391,11 +413,32 @@ export class CacheService implements SearchResponseCachePort {
    * Record cache error and update circuit breaker.
    */
   private recordCacheError(err: unknown): void {
-    console.error('[CacheService] Cache operation failed:', err);
+    this.consecutiveErrorCount += 1;
+    bootstrapLogger.warn(
+      {
+        err: err instanceof Error ? err.message : String(err),
+        consecutiveErrorCount: this.consecutiveErrorCount,
+        circuitBreakerThreshold: this.circuitBreakerThreshold,
+      },
+      '[CacheService] Cache operation failed',
+    );
 
-    // Simple circuit breaker: hardcoded to 1 error opens breaker
-    // In production, use a proper counter
+    if (this.consecutiveErrorCount < this.circuitBreakerThreshold) {
+      return;
+    }
+
     this.circuitBreakerOpen = true;
     this.circuitBreakerResetTime = Date.now() + this.circuitBreakerResetMs;
+    bootstrapLogger.warn(
+      {
+        consecutiveErrorCount: this.consecutiveErrorCount,
+        circuitBreakerResetMs: this.circuitBreakerResetMs,
+      },
+      '[CacheService] Circuit breaker opened after repeated cache failures',
+    );
+  }
+
+  private recordCacheSuccess(): void {
+    this.consecutiveErrorCount = 0;
   }
 }

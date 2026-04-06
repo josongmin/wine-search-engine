@@ -350,6 +350,28 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
         expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');
       }
     });
+
+    it('richer identity evidence mismatch is rejected before confidence refusal', () => {
+      const input = makeInput({
+        resolverResult: makeResolverResult(0.9, 0.3),
+        evidenceSummary: {
+          identityEvidencePresent: true,
+          identityEvidence: {
+            topEntityPresent: true,
+            resolverTopCandidateMatchesTopEntity: true,
+            resolverEvidenceRefCount: 1,
+            rankedTopResultPresent: true,
+            rankedTopResultMatchesTopEntity: false,
+            rankedEvidenceItemCount: 2,
+          },
+        },
+      });
+      const result = gate.check(input, TEST_SNAPSHOT);
+      expect(result.admitted).toBe(false);
+      if (!result.admitted) {
+        expect(result.reason).toBe('EVIDENCE_INSUFFICIENT');
+      }
+    });
   });
 
   describe('different threshold values', () => {
