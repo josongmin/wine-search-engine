@@ -50,7 +50,7 @@ describe('BrowseRetriever', () => {
     expect(out).toHaveLength(1);
     expect(out[0]?.entityId).toBe(createEntityId('wine-1'));
     expect(out[0]?.retrievalTrace.retrievalProfile).toBe('producer_browse');
-    expect(out[0]?.retrievalTrace.candidateSources).toEqual(['sparse']);
+    expect(out[0]?.retrievalTrace.candidateSources).toEqual(['sparse_bm25', 'browse_producer']);
   });
 
   it('browseRegion uses region_browse profile', async () => {

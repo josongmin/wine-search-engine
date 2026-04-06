@@ -21,7 +21,7 @@ import type { EnrichedSilverRecord } from '../etl/types.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
 const DEFAULT_OUTPUT = 'data/hard-negatives.jsonl';
 
 // ---------------------------------------------------------------------------

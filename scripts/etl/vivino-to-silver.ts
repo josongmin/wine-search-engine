@@ -300,13 +300,17 @@ export function extractPriceUsd(
   merchantPrices: VivinoPayload['merchant_prices'],
   bottleMl: number | undefined,
 ): number | null {
-  // From merchant_prices, prefer the lowest USD price for a standard 750ml bottle
+  // From merchant_prices, use the median USD price (min is susceptible to loss-leader outliers)
   if (merchantPrices && merchantPrices.length > 0) {
     const stdPrices = merchantPrices
       .filter((mp) => (mp.currency ?? 'USD') === 'USD' && mp.price !== undefined && mp.price > 0)
-      .map((mp) => mp.price as number);
+      .map((mp) => mp.price as number)
+      .sort((a, b) => a - b);
     if (stdPrices.length > 0) {
-      return Math.min(...stdPrices);
+      const mid = Math.floor(stdPrices.length / 2);
+      return stdPrices.length % 2 === 1
+        ? (stdPrices[mid] ?? null)
+        : ((stdPrices[mid - 1]! + stdPrices[mid]!) / 2);
     }
   }
 
@@ -452,8 +456,13 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     return 0.1; // dry
   })();
 
-  const rawBody = normalizeScale(taste?.intensity, 5);
-  const rawSweetness = normalizeScale(taste?.sweetness, 5);
+  // Use taste_profile fallback only when structure fields are truly absent (not just 0)
+  const rawBody = taste?.intensity !== undefined && taste.intensity > 0
+    ? normalizeScale(taste.intensity, 5)
+    : null;
+  const rawSweetness = taste?.sweetness !== undefined && taste.sweetness > 0
+    ? normalizeScale(taste.sweetness, 5)
+    : null;
 
   // SOTA++: best price from merchant_prices
   const priceUsd = extractPriceUsd(row.price, payload?.merchant_prices, payload?.bottle_ml);
@@ -485,8 +494,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     wineType: detectedWineType,
     grapePrimary,
     grapes,
-    body: rawBody > 0 ? rawBody : bodyFallback,
-    sweetness: rawSweetness > 0 ? rawSweetness : sweetnessFallback,
+    body: rawBody !== null ? rawBody : bodyFallback,
+    sweetness: rawSweetness !== null ? rawSweetness : sweetnessFallback,
     acidity: normalizeScale(taste?.acidity, 5),
     tannin: normalizeScale(taste?.tannin, 5),
     pairingTags: extractPairings(payload),
@@ -509,10 +518,32 @@ export function transformRow(row: BronzeRow): PreSilver | null {
 // ---------------------------------------------------------------------------
 
 /**
+ * When a newer scrape wins dedup but lacks SOTA++ fields (e.g. Vivino payload
+ * structure changed), preserve the values from the losing scrape.
+ */
+function mergeSOTAPlusFields(winner: PreSilver, fallback: PreSilver): PreSilver {
+  return {
+    ...winner,
+    alcoholPct: winner.alcoholPct ?? fallback.alcoholPct,
+    producerPrestige: winner.producerPrestige ?? fallback.producerPrestige,
+    isTopRated: winner.isTopRated || fallback.isTopRated,
+    // Prefer longer searchTextEn if winner's is empty (different scrape depth)
+    searchTextEn: winner.searchTextEn.length >= fallback.searchTextEn.length
+      ? winner.searchTextEn
+      : fallback.searchTextEn,
+  };
+}
+
+/**
  * Dedup by (external_id, vintage_year). Keeps the row with:
  * 1. Most recent scraped_at
  * 2. Highest ratings_count
  * 3. Non-empty search text
+ *
+ * After selecting the winner, merges SOTA++ fields from the loser when the
+ * winner lacks them — a newer scrape may not have winery_rating / alcoholPct
+ * if Vivino's page structure changed, so we preserve the older value rather
+ * than silently dropping it.
  */
 export function dedup(records: PreSilver[]): PreSilver[] {
   const byKey = new Map<string, PreSilver>();
@@ -532,11 +563,12 @@ export function dedup(records: PreSilver[]): PreSilver[] {
       : 0;
     const newTime = rec.scrapedAt ? new Date(rec.scrapedAt).getTime() : 0;
     if (newTime > existingTime) {
-      byKey.set(key, rec);
+      // Winner = rec; fill SOTA++ gaps from existing
+      byKey.set(key, mergeSOTAPlusFields(rec, existing));
       continue;
     }
     if (newTime === existingTime && rec.ratingsCount > existing.ratingsCount) {
-      byKey.set(key, rec);
+      byKey.set(key, mergeSOTAPlusFields(rec, existing));
       continue;
     }
     if (
@@ -544,7 +576,7 @@ export function dedup(records: PreSilver[]): PreSilver[] {
       rec.ratingsCount === existing.ratingsCount &&
       rec.searchTextEn.length > existing.searchTextEn.length
     ) {
-      byKey.set(key, rec);
+      byKey.set(key, mergeSOTAPlusFields(rec, existing));
     }
   }
 

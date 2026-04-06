@@ -11,7 +11,7 @@
  *
  * Usage:
  *   npx tsx --env-file=.env scripts/etl/index-to-vespa.ts
- *   npx tsx --env-file=.env scripts/etl/index-to-vespa.ts --input data/silver-enriched.ndjson --dry-run
+ *   npx tsx --env-file=.env scripts/etl/index-to-vespa.ts --input data/silver-docquery.ndjson --dry-run
  */
 
 import 'dotenv/config';

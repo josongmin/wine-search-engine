@@ -1,9 +1,8 @@
-import type { QueryPlannerPort } from '../application/search/port/search-pipeline-deps.port.js';
+import type { QueryPlannerPort, RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
 import { PlannerV1Adapter } from './planner-v1-adapter.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
 import type { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
-import type { Ranker } from '../domain/ranking/service/ranker.js';
 import type { DecisionEngine } from '../domain/decision/service/decision-engine.js';
 import type { ResponseBuilder } from '../domain/response/service/response-builder.js';
 import type { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
@@ -28,6 +27,7 @@ import {
   buildEntityResolver,
   buildQueryPlanner,
   buildRanker,
+  buildRankingPipeline,
   buildSnapshotVersions,
   buildDecisionEngine,
   buildMixedSolver,
@@ -41,7 +41,7 @@ export interface CoreContainerServices {
   readonly chatLlm?: ChatLlmPort;
   readonly entityResolver: Resolver;
   readonly candidatePool: CandidatePoolService;
-  readonly ranker: Ranker;
+  readonly ranker: RankingPort;
   readonly decisionEngine: DecisionEngine;
   readonly responseBuilder: ResponseBuilder;
   readonly mixedSolver: MixedSolver;
@@ -73,7 +73,8 @@ export async function buildCoreContainerServices(
   const candidatePool = buildCandidatePool(adapters, support, config);
   const browseRetriever = buildBrowseRetriever(adapters);
   const compareRetriever = buildCompareRetriever(adapters);
-  const ranker = buildRanker(adapters, config);
+  const baseRanker = buildRanker(adapters, config, support);
+  const ranker = buildRankingPipeline(baseRanker);
 
   return {
     queryPlanner,
@@ -85,7 +86,7 @@ export async function buildCoreContainerServices(
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),
     responseBuilder: buildResponseBuilder(),
-    mixedSolver: buildMixedSolver(adapters, ranker),
+    mixedSolver: buildMixedSolver(adapters, baseRanker),
     snapshotVersions: buildSnapshotVersions(config),
     ...support,
   };

@@ -40,6 +40,10 @@ describe('CandidatePoolService sparse filter tokens', () => {
         denseFilters.push(filters);
         return [];
       }),
+      searchLearnedSparse: vi.fn(async (_queryWeights, filters) => {
+        denseFilters.push(filters);
+        return [];
+      }),
       getDocument: vi.fn(async () => null),
       upsertDocument: vi.fn(async () => {}),
       bulkUpsert: vi.fn(async () => {}),
@@ -96,6 +100,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
         },
       ]),
       denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async () => []),
       getDocument: vi.fn(async () => null),
       upsertDocument: vi.fn(async () => {}),
       bulkUpsert: vi.fn(async () => {}),
@@ -132,6 +137,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
     const searchIndex: SearchIndexPort = {
       sparseSearch: vi.fn(async () => []),
       denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async () => []),
       getDocument: vi.fn(async () => null),
       upsertDocument: vi.fn(async () => {}),
       bulkUpsert: vi.fn(async () => {}),
@@ -152,5 +158,120 @@ describe('CandidatePoolService sparse filter tokens', () => {
       hardConstraints: [],
       softConstraints: [],
     })).rejects.toThrow('Dense retrieval failed: embedding service returned no primary embedding');
+  });
+
+  it('executes learned sparse on the live path when the profile activates that channel', async () => {
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => []),
+      denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async () => [
+        {
+          entityId: 'wine-learned',
+          score: 3.5,
+          rank: 1,
+          similarity: 0.88,
+          summary: {
+            canonicalLabel: 'Learned Sparse Wine',
+            style: 'bold red',
+            wineType: 'red',
+          },
+        },
+      ]),
+      getDocument: vi.fn(async () => null),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch: vi.fn(async () => [[0.1]]),
+    };
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
+    const out = await pool.generate({
+      queryPlan: minimalPlan({
+        queryClass: 'semantic_preference',
+        retrievalMode: 'semantic_hybrid',
+      }),
+      route: 'hybrid',
+      lexicalQueries: ['structured cabernet'],
+      semanticQueries: ['structured cabernet'],
+      hardConstraints: [],
+      softConstraints: [],
+    });
+
+    expect(searchIndex.searchLearnedSparse).toHaveBeenCalledOnce();
+    expect(out[0]?.retrievalTrace.candidateSources).toContain('learned_sparse');
+  });
+
+  it('applies the relative filter on the live path for compare-mode fallbacks with an anchor entity', async () => {
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => [
+        {
+          entityId: 'wine-peer-match',
+          score: 7,
+          rank: 1,
+          matchedFields: ['canonical_label'],
+          summary: {
+            canonicalLabel: 'Peer Match',
+            region: 'Napa Valley',
+            style: 'bold red',
+            wineType: 'red',
+          },
+        },
+        {
+          entityId: 'wine-peer-miss',
+          score: 6,
+          rank: 2,
+          matchedFields: ['canonical_label'],
+          summary: {
+            canonicalLabel: 'Peer Miss',
+            region: 'Mosel',
+            style: 'crisp white',
+            wineType: 'white',
+          },
+        },
+      ]),
+      denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async () => []),
+      getDocument: vi.fn(async () => ({
+        entityId: 'wine-anchor',
+        entityType: 'wine',
+        canonicalLabel: 'Anchor Wine',
+        aliasesIdentitySafe: [],
+        aliasesNoisyRecall: [],
+        semanticSummary: 'Napa Valley bold red',
+        region: 'Napa Valley',
+        style: 'bold red',
+        grapePrimary: 'Cabernet Sauvignon',
+        availability: true,
+        popularityScore: 0.9,
+      })),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch: vi.fn(async () => [[0.1]]),
+    };
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
+    const out = await pool.generate({
+      queryPlan: minimalPlan({
+        queryClass: 'comparison_query',
+        retrievalMode: 'compare_candidates',
+      }),
+      route: 'hybrid',
+      lexicalQueries: ['wines like opus one'],
+      semanticQueries: [],
+      hardConstraints: [],
+      softConstraints: [],
+      anchorEntityId: 'wine-anchor',
+    });
+
+    expect(searchIndex.getDocument).toHaveBeenCalledWith('wine-anchor');
+    expect(out.map((candidate) => candidate.entityId)).toEqual(['wine-peer-match']);
+    expect(out[0]?.retrievalTrace.candidateSources).toContain('relative_filter');
   });
 });

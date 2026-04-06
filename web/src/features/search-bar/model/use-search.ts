@@ -12,7 +12,6 @@ export function useSearch(query: string, enabled = true) {
       const body: SearchRequest = {
         query,
         options: { mode: 'auto', explain: true, clarification: true },
-        session_context: { session_id: getSessionId() },
       };
       return api.search(body);
     },

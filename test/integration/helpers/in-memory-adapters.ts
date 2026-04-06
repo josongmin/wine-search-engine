@@ -191,6 +191,16 @@ export class InMemorySearchIndex implements SearchIndexPort {
     }));
   }
 
+  async searchLearnedSparse(
+    _queryWeights: readonly { token: string; weight: number }[],
+    filters?: readonly string[],
+    limit?: number,
+  ): Promise<readonly DenseHit[]> {
+    // Wave 1 compatibility: in-memory integration lanes reuse deterministic
+    // dense-style ranking until a dedicated learned-sparse in-memory index exists.
+    return this.denseSearch([], filters, limit);
+  }
+
   async getDocument(entityId: EntityId): Promise<RetrievalDocument | null> {
     return this.docs.get(entityId) ?? null;
   }

@@ -123,14 +123,14 @@ describe('FusionService', () => {
   });
 
   describe('retrievalTrace', () => {
-    it('entity only in sparse has candidateSources = ["sparse"]', () => {
+    it('entity only in sparse has candidateSources = ["sparse_bm25"]', () => {
       const sparse = [makeSparse('wine-sparse', 1)];
       const dense = [makeDense('wine-dense', 1)];
 
       const candidates = fusion.fuse(sparse, dense);
       const sparseCandidate = candidates.find((c) => c.entityId === createEntityId('wine-sparse'));
-      expect(sparseCandidate?.retrievalTrace.candidateSources).toContain('sparse');
-      expect(sparseCandidate?.retrievalTrace.candidateSources).not.toContain('dense');
+      expect(sparseCandidate?.retrievalTrace.candidateSources).toContain('sparse_bm25');
+      expect(sparseCandidate?.retrievalTrace.candidateSources).not.toContain('dense_semantic');
     });
 
     it('entity in both sparse and dense has both sources', () => {
@@ -139,18 +139,18 @@ describe('FusionService', () => {
 
       const candidates = fusion.fuse(sparse, dense);
       const bothCandidate = candidates[0];
-      expect(bothCandidate?.retrievalTrace.candidateSources).toContain('sparse');
-      expect(bothCandidate?.retrievalTrace.candidateSources).toContain('dense');
+      expect(bothCandidate?.retrievalTrace.candidateSources).toContain('sparse_bm25');
+      expect(bothCandidate?.retrievalTrace.candidateSources).toContain('dense_semantic');
     });
 
-    it('entity with anchor hit has "anchor" in sources', () => {
+    it('entity with anchor hit has "anchor_similarity" in sources', () => {
       const sparse: SparseHit[] = [];
       const dense: DenseHit[] = [];
       const anchor = [makeDense('wine-anchor', 1)];
 
       const candidates = fusion.fuse(sparse, dense, anchor);
       const anchorCandidate = candidates.find((c) => c.entityId === createEntityId('wine-anchor'));
-      expect(anchorCandidate?.retrievalTrace.candidateSources).toContain('anchor');
+      expect(anchorCandidate?.retrievalTrace.candidateSources).toContain('anchor_similarity');
     });
   });
 

@@ -8,7 +8,7 @@
  *
  * Usage:
  *   npx tsx scripts/etl/generate-aliases.ts
- *   npx tsx scripts/etl/generate-aliases.ts --input data/silver.ndjson --output data/silver-enriched.ndjson
+ *   npx tsx scripts/etl/generate-aliases.ts --input data/silver.ndjson --output data/silver-aliases.ndjson
  */
 
 import fs from 'node:fs/promises';

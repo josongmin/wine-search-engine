@@ -1,6 +1,5 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import type { FailureReason } from '../../decision/model/failure-reason.js';
-import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 
 /**
  * The external-facing decision record included in every {@link SearchResponseV1}.
@@ -81,10 +80,4 @@ export interface EngineDecision {
    */
   readonly plannerSuggestedMode?: string | undefined;
 
-  /**
-   * T5.6: Aggregate ranking funnel metrics for this query execution.
-   * Populated from the pipeline's {@link RankingFunnelTrace.metrics}.
-   * Omitted when the ranking pipeline was not invoked (e.g. cache hits).
-   */
-  readonly funnelMetrics?: FunnelMetrics | undefined;
 }

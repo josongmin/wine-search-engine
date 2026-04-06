@@ -7,7 +7,6 @@ import type { ClarificationPayload } from '../model/clarification.js';
 import type { CounterfactualReject, ResponseMeta } from '../model/counterfactual.js';
 import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-response.js';
 import type { GroupedResult } from './result-grouper.js';
-import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 import { ResultGrouper } from './result-grouper.js';
 import { deterministicHash } from '../../shared/utils/hash.js';
 
@@ -57,13 +56,6 @@ export interface ResponseBuildParams {
     readonly blockingEligible?: boolean | undefined;
     readonly degradationReasons?: readonly string[] | undefined;
   } | undefined;
-
-  /**
-   * T5.6: Optional funnel metrics from the ranking pipeline.
-   * When present, attached to the {@link EngineDecision} in the response.
-   * Omitted for cache hits or non-ranking routes.
-   */
-  readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
 /** Reason code attached when a result has no evidence items. */
@@ -98,7 +90,6 @@ export class ResponseBuilder {
       params.retrievalModeSource,
       params.plannerSuggestedMode,
       params.requestId,
-      params.funnelMetrics,
     );
 
     // Compute a deterministic response hash for the determinism gate
@@ -182,7 +173,6 @@ export class ResponseBuilder {
     retrievalModeSource?: 'planner' | 'api_override',
     plannerSuggestedMode?: string,
     requestId?: string,
-    funnelMetrics?: FunnelMetrics,
   ): EngineDecision {
     return {
       decisionStatus: output.decisionStatus,
@@ -207,7 +197,6 @@ export class ResponseBuilder {
         : {}),
       ...(retrievalModeSource !== undefined ? { retrievalModeSource } : {}),
       ...(plannerSuggestedMode !== undefined ? { plannerSuggestedMode } : {}),
-      ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
     };
   }
 

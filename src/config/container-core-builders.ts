@@ -15,9 +15,11 @@ import { BrowseRetriever } from '../domain/retrieval/service/browse-retriever.js
 import { CompareRetriever } from '../domain/retrieval/service/compare-retriever.js';
 import { FusionService } from '../domain/retrieval/service/fusion.js';
 import { Ranker } from '../domain/ranking/service/ranker.js';
+import { RankingStagePipeline } from '../domain/ranking/service/ranking-stage-pipeline.js';
 import { SignalComputer } from '../domain/ranking/service/signal-computer.js';
 import { ScoreAggregator } from '../domain/ranking/service/score-aggregator.js';
 import { EvidenceMapper } from '../domain/ranking/service/evidence-mapper.js';
+import { DefaultRankingPolicy } from '../domain/ranking/service/default-ranking-policy.js';
 import { DecisionEngine } from '../domain/decision/service/decision-engine.js';
 import { ConfidenceRefusalPolicy } from '../domain/decision/service/confidence-refusal.js';
 import { ResponseBuilder } from '../domain/response/service/response-builder.js';
@@ -136,6 +138,7 @@ export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRet
 export function buildRanker(
   adapters: CoreAdapterServices,
   config: Config,
+  support?: RuntimeSupportServices,
 ): Ranker {
   return new Ranker(
     new SignalComputer(),
@@ -144,8 +147,15 @@ export function buildRanker(
     {
       reranker: adapters.reranker,
       rerankBlendScale: config.reranker.blendScale,
+      ltrModels: support?.ltrModels,
     },
   );
+}
+
+export function buildRankingPipeline(ranker: Ranker): RankingStagePipeline {
+  return new RankingStagePipeline(ranker, {
+    policy: new DefaultRankingPolicy(),
+  });
 }
 
 export function buildDecisionEngine(

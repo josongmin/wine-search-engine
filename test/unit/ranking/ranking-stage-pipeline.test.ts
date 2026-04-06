@@ -4,7 +4,11 @@ import { RankingStagePipeline } from '../../../src/domain/ranking/service/rankin
 import type { SignalComputer } from '../../../src/domain/ranking/service/signal-computer.js';
 import type { ScoreAggregator } from '../../../src/domain/ranking/service/score-aggregator.js';
 import type { EvidenceMapper } from '../../../src/domain/ranking/service/evidence-mapper.js';
-import type { RerankerPort, RerankCandidate, RerankResult } from '../../../src/domain/ranking/port/reranker.port.js';
+import type {
+  RerankerPort,
+  RerankCandidate,
+  RerankResult,
+} from '../../../src/domain/ranking/port/reranker.port.js';
 import type { RankingInput } from '../../../src/domain/ranking/model/ranking-input.js';
 import type { ComponentScores } from '../../../src/domain/ranking/model/ranked-result.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
@@ -12,8 +16,6 @@ import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js'
 import type { ConstraintBundle, EvidenceItem } from '../../../src/domain/shared/types/index.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import { RANKING_STAGES } from '../../../src/domain/ranking/model/ranking-stage.js';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeComponentScores(overrides?: Partial<ComponentScores>): ComponentScores {
   return {
@@ -105,11 +107,13 @@ function makeScoreAggregator(finalScore: number): ScoreAggregator {
 
 function makeScoreAggregatorSequence(scores: number[]): ScoreAggregator {
   const mock = vi.fn();
-  scores.forEach((s) => mock.mockReturnValueOnce(s));
+  scores.forEach((score) => mock.mockReturnValueOnce(score));
   return { aggregate: mock } as unknown as ScoreAggregator;
 }
 
-function makeEvidenceMapper(evidenceItems: EvidenceItem[] = [STUB_EVIDENCE]): EvidenceMapper {
+function makeEvidenceMapper(
+  evidenceItems: EvidenceItem[] = [STUB_EVIDENCE],
+): EvidenceMapper {
   return {
     mapToEvidence: vi.fn().mockReturnValue(evidenceItems),
   } as unknown as EvidenceMapper;
@@ -123,7 +127,11 @@ function makeReranker(results: RerankResult[]): {
   return { port: { rerank: spy }, spy };
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+function readFunnelTrace(pipeline: RankingStagePipeline) {
+  const funnelTrace = pipeline.getLastFunnelTrace();
+  expect(funnelTrace).toBeDefined();
+  return funnelTrace!;
+}
 
 describe('RankingStagePipeline (T5.1)', () => {
   describe('funnel trace always has all 4 stages', () => {
@@ -136,10 +144,11 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.stages).toHaveLength(4);
-      expect(funnelTrace.stages.map((s) => s.stage)).toEqual(RANKING_STAGES);
+      expect(funnelTrace.stages.map((stage) => stage.stage)).toEqual(RANKING_STAGES);
     });
 
     it('emits all 4 stages even when no reranker is configured', async () => {
@@ -151,9 +160,10 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
-      const stageNames = funnelTrace.stages.map((s) => s.stage);
+      const stageNames = funnelTrace.stages.map((stage) => stage.stage);
       expect(stageNames).toContain('coarse_prune');
       expect(stageNames).toContain('primary_rank');
       expect(stageNames).toContain('precision_rerank');
@@ -163,7 +173,6 @@ describe('RankingStagePipeline (T5.1)', () => {
 
   describe('stage inputCount/outputCount', () => {
     it('coarse_prune outputCount equals retained count when some are pruned', async () => {
-      // 3 candidates: 2 viable (0.9, 0.7), 1 pruned (-Infinity)
       const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-0${i}`));
       const ranker = new Ranker(
         makeSignalComputer(makeComponentScores()),
@@ -172,9 +181,10 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace, results } = await pipeline.rank(makeInput(candidates));
+      const results = await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
-      const pruneStage = funnelTrace.stages.find((s) => s.stage === 'coarse_prune');
+      const pruneStage = funnelTrace.stages.find((stage) => stage.stage === 'coarse_prune');
       expect(pruneStage).toBeDefined();
       expect(pruneStage!.inputCount).toBe(3);
       expect(pruneStage!.outputCount).toBe(2);
@@ -190,9 +200,10 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
-      const primaryStage = funnelTrace.stages.find((s) => s.stage === 'primary_rank');
+      const primaryStage = funnelTrace.stages.find((stage) => stage.stage === 'primary_rank');
       expect(primaryStage).toBeDefined();
       expect(primaryStage!.inputCount).toBe(2);
       expect(primaryStage!.outputCount).toBe(2);
@@ -207,7 +218,8 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       for (const stage of funnelTrace.stages) {
         expect(stage.latencyMs).toBeGreaterThanOrEqual(0);
@@ -225,13 +237,13 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.precisionRerankExecuted).toBe(false);
     });
 
     it('is false when candidate count is at or below the rerank threshold', async () => {
-      // rerankThreshold default is 5; 4 candidates should not trigger reranking
       const candidates = Array.from({ length: 4 }, (_, i) => makeCandidate(`wine-0${i}`));
       const { port } = makeReranker([]);
       const ranker = new Ranker(
@@ -242,18 +254,18 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.precisionRerankExecuted).toBe(false);
     });
 
     it('is true when reranker is configured and rerankForced is set', async () => {
-      // T5.4: gate controls reranking; use rerankForced to bypass gate
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
-      const rerankResults: RerankResult[] = candidates.map((c, i) => ({
-        entityId: c.entityId,
-        score: 0.9 - i * 0.05,
-        rank: i + 1,
+      const rerankResults: RerankResult[] = candidates.map((candidate, index) => ({
+        entityId: candidate.entityId,
+        score: 0.9 - index * 0.05,
+        rank: index + 1,
       }));
       const { port } = makeReranker(rerankResults);
       const ranker = new Ranker(
@@ -264,26 +276,23 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates, true));
+      await pipeline.rank(makeInput(candidates, true));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.precisionRerankExecuted).toBe(true);
     });
 
     it('is true even when reranking preserves descending score order', async () => {
-      // This tests that we do NOT use the flawed score-order heuristic.
-      // The reranker returns the same order as input → scores remain descending,
-      // but reranking still executed so the flag must be true.
-      // T5.4: use rerankForced to bypass gate for this small candidate set.
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
       const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
 
       const reranker: RerankerPort = {
         rerank: (_query, rerankCandidates: readonly RerankCandidate[]) =>
           Promise.resolve(
-            rerankCandidates.map((c, i) => ({
-              entityId: c.entityId,
-              score: 1.0 - i * 0.1,
-              rank: i + 1,
+            rerankCandidates.map((candidate, index) => ({
+              entityId: candidate.entityId,
+              score: 1.0 - index * 0.1,
+              rank: index + 1,
             })),
           ),
       };
@@ -296,14 +305,15 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates, true));
+      await pipeline.rank(makeInput(candidates, true));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.precisionRerankExecuted).toBe(true);
     });
   });
 
-  describe('RankingFunnelResult contract', () => {
-    it('returns both results and funnelTrace', async () => {
+  describe('RankingStagePipeline contract', () => {
+    it('returns ranked results and caches funnelTrace separately', async () => {
       const candidates = [makeCandidate('wine-001')];
       const ranker = new Ranker(
         makeSignalComputer(makeComponentScores()),
@@ -313,10 +323,11 @@ describe('RankingStagePipeline (T5.1)', () => {
       const pipeline = new RankingStagePipeline(ranker);
 
       const output = await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
-      expect(output.results).toBeDefined();
-      expect(output.funnelTrace).toBeDefined();
-      expect(Array.isArray(output.results)).toBe(true);
+      expect(output).toBeDefined();
+      expect(funnelTrace).toBeDefined();
+      expect(Array.isArray(output)).toBe(true);
     });
 
     it('totalLatencyMs is non-negative', async () => {
@@ -328,7 +339,8 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.totalLatencyMs).toBeGreaterThanOrEqual(0);
     });
@@ -342,7 +354,8 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      await pipeline.rank(makeInput(candidates));
+      const funnelTrace = readFunnelTrace(pipeline);
 
       expect(funnelTrace.policyApplied).toBe(false);
     });
@@ -358,7 +371,7 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { results } = await pipeline.rank(makeInput(candidates));
+      const results = await pipeline.rank(makeInput(candidates));
 
       for (const result of results) {
         expect(result.coarsePruneMeta).toBeDefined();

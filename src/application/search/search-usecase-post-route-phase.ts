@@ -3,7 +3,6 @@ import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
-import type { FunnelMetrics } from '../../domain/ranking/model/ranking-stage.js';
 import type { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
@@ -42,8 +41,6 @@ export interface SearchPostRouteExecutionContext {
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly cacheService?: SearchResponseCachePort | undefined;
-  /** T5.6: Funnel metrics from the ranking pipeline, when available. */
-  readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
 export interface RankedRouteDecisionPhaseContext {
@@ -61,8 +58,6 @@ export interface RankedRouteDecisionPhaseContext {
   readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
   readonly plannerSuggestedMode?: QueryRoute | undefined;
   readonly includeCounterfactuals?: boolean | undefined;
-  /** T5.6: Funnel metrics from the ranking pipeline, when available. */
-  readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
 /**
@@ -113,7 +108,6 @@ export async function runRankedRouteDecisionPhase(
     ...(ctx.plannerSuggestedMode !== undefined
       ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
       : {}),
-    ...(ctx.funnelMetrics !== undefined ? { funnelMetrics: ctx.funnelMetrics } : {}),
   });
   /* Unit tests may stub partial SearchResponseV1; skip structured log when snapshot missing. */
   const engineDecision = built.engineDecision as SearchResponseV1['engineDecision'] | undefined;
@@ -222,7 +216,6 @@ export async function runSearchPostRoutePhase(
     responseBuilder: ctx.responseBuilder,
     retrievalModeSource: ctx.retrievalModeSource,
     plannerSuggestedMode: ctx.plannerSuggestedMode,
-    ...(ctx.funnelMetrics !== undefined ? { funnelMetrics: ctx.funnelMetrics } : {}),
   });
 
   if (ctx.cacheService) {

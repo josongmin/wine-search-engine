@@ -100,7 +100,7 @@ export class HybridUseCase {
     }
 
     const { plan } = preRoute;
-    const { resolveResult, rankedResults, decisionContext, funnelMetrics } = await executeHybridRouteRankingPipeline(
+    const { resolveResult, rankedResults, decisionContext } = await executeHybridRouteRankingPipeline(
       plan,
       {
         candidatePool: this.deps.candidatePool,
@@ -132,7 +132,6 @@ export class HybridUseCase {
       decisionEngine: this.deps.decisionEngine,
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
-      ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
     });
   }
 }

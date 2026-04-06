@@ -190,6 +190,14 @@ class InMemorySearchIndex implements SearchIndexPort {
     }));
   }
 
+  async searchLearnedSparse(
+    _queryWeights: readonly { token: string; weight: number }[],
+    filters?: readonly string[],
+    limit?: number,
+  ): Promise<readonly DenseHit[]> {
+    return this.denseSearch([], filters, limit);
+  }
+
   async getDocument(_entityId: ReturnType<typeof createEntityId>): Promise<RetrievalDocument | null> {
     return null;
   }

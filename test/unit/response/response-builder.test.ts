@@ -191,6 +191,12 @@ describe('ResponseBuilder', () => {
       expect(response.engineDecision.retrievalModeSource).toBe('api_override');
       expect(response.engineDecision.plannerSuggestedMode).toBe('entity');
     });
+
+    it('does not expose funnel metrics on the public engineDecision contract', () => {
+      const response = builder.build(makeBaseParams());
+
+      expect(response.engineDecision).not.toHaveProperty('funnelMetrics');
+    });
   });
 
   describe('evidence enforcement', () => {

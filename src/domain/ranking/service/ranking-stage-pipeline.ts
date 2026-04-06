@@ -43,7 +43,8 @@ export interface RankingStagePipelineOptions {
  *
  * Usage:
  *   const pipeline = new RankingStagePipeline(ranker);
- *   const { results, funnelTrace } = await pipeline.rank(input);
+ *   const results = await pipeline.rank(input);
+ *   const funnelTrace = pipeline.getLastFunnelTrace();
  *
  *   // With policy (T5.5a):
  *   const pipeline = new RankingStagePipeline(ranker, { policy: new DefaultRankingPolicy() });

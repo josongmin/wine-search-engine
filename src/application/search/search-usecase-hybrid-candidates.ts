@@ -2,6 +2,7 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
 import type {
   BrowseRetrieverPort,
   CandidatePoolPort,
@@ -60,7 +61,7 @@ export interface HybridCandidateRetrievalPorts {
 export function buildHybridRetrievalInputForPlan(
   plan: QueryPlanV1,
   route: HybridRetrievalInput['route'] = 'hybrid',
-  anchorEntityId?: string,
+  anchorEntityId?: EntityId,
 ): HybridRetrievalInput {
   return {
     queryPlan: plan,

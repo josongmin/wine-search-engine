@@ -426,6 +426,9 @@ export class Ranker {
             finalOrder = viable;
           }
         }
+        if (hasLearnedRerank) {
+          this._lastRerankExecuted = true;
+        }
       }
     }
 
@@ -487,21 +490,11 @@ export class Ranker {
     });
 
     if (this._lastRerankGateReason !== undefined && hasLearnedRerank) {
-      const gateDecision = evaluateRerankGate({
-        candidateCount: viable.length,
-        queryClass: queryPlan.queryClass,
-        effectiveRoute: queryPlan.route,
-        hasAnchor: anchorProfile !== undefined,
-        ...(input.rerankForced !== undefined ? { rerankForced: input.rerankForced } : {}),
-      });
-      if (gateDecision.shouldRerank) {
-        results = applyLtrRerankIfAvailable(
-          results,
-          queryPlan.queryClass,
-          this.ltrModels,
-        );
-        this._lastRerankExecuted = true;
-      }
+      results = applyLearnedLtrRerank(
+        results,
+        queryPlan.queryClass,
+        this.ltrModels,
+      );
     }
 
     return results;

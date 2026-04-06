@@ -5,7 +5,7 @@
  *
  * Usage:
  *   npx tsx scripts/etl/validate-silver.ts
- *   npx tsx scripts/etl/validate-silver.ts --input data/silver-enriched.ndjson
+ *   npx tsx scripts/etl/validate-silver.ts --input data/silver-docquery.ndjson
  */
 
 import fs from 'node:fs/promises';

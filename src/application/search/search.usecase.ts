@@ -166,7 +166,7 @@ export class SearchUseCase {
     } = buildSearchRouteResolutionContext(plan, request);
 
     // Step 3: Execute based on route
-    const { resolveResult, rankedResults, decisionContext, funnelMetrics } = await dispatchSearchRouteExecution(
+    const { resolveResult, rankedResults, decisionContext } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
         executeEntity: () => this.executeEntityRoute(plan),
@@ -196,7 +196,6 @@ export class SearchUseCase {
       decisionEngine: this.deps.decisionEngine,
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
-      ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
     });
 
     const retrievalProvenanceSlices = includeEvalProvenance

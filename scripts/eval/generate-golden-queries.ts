@@ -11,7 +11,7 @@
  *
  * Usage:
  *   npx tsx scripts/eval/generate-golden-queries.ts
- *   npx tsx scripts/eval/generate-golden-queries.ts --input data/silver-enriched.ndjson
+ *   npx tsx scripts/eval/generate-golden-queries.ts --input data/silver-docquery.ndjson
  */
 
 import fs from 'node:fs/promises';
@@ -29,7 +29,7 @@ import type {
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
 const DEFAULT_OUTPUT = 'data/golden-queries-bronze.jsonl';
 const RUN_ID = `run-${new Date().toISOString().slice(0, 10)}-001`;
 
