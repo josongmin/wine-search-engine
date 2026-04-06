@@ -120,6 +120,18 @@ describe('Group 1: Rate Limiting (RFC-014 §13)', () => {
     expect((error['request_id'] as string).length).toBeGreaterThan(0);
   });
 
+  it('rate-limit response includes Retry-After header', async () => {
+    const r = await rateLimitServer.app.inject({
+      method: 'POST',
+      url: '/v1/search',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ query: 'retry-after header test' }),
+    });
+    expect(r.statusCode).toBe(429);
+    expect(r.headers['retry-after']).toBeDefined();
+    expect(Number(r.headers['retry-after'])).toBeGreaterThan(0);
+  });
+
   it('fresh server allows requests after the rate-limited server is full', async () => {
     // A brand-new server has its own rate-limit counter starting at 0.
     const freshServer = await createTestServer();
@@ -256,8 +268,8 @@ describe('Group 2: Request ID Correctness', () => {
     expect(uniqueIds.size).toBe(50);
   });
 
-  it('client-provided X-Request-Id header is IGNORED (server generates its own)', async () => {
-    const clientId = 'client-provided-id-should-be-ignored';
+  it('valid client-provided X-Request-Id is echoed and matches meta.request_id', async () => {
+    const clientId = 'gateway-trace-abc-123';
     const r = await server.app.inject({
       method: 'POST',
       url: '/v1/search',
@@ -270,16 +282,33 @@ describe('Group 2: Request ID Correctness', () => {
 
     expect(r.statusCode).toBe(200);
 
-    const serverIdStr = getHeader(r, 'x-request-id');
+    const headerId = getHeader(r, 'x-request-id');
+    expect(headerId).toBe(clientId);
 
-    // The server must set its own ID — it must not echo the client-provided one.
-    expect(serverIdStr).not.toBe(clientId);
-    expect(serverIdStr).toBeTruthy();
-
-    // The body requestId must match the server-generated header, not the client id.
     const bodyRequestId = getSearchRequestId(parseSearchResponse(r));
-    expect(bodyRequestId).toBe(serverIdStr);
-    expect(bodyRequestId).not.toBe(clientId);
+    expect(bodyRequestId).toBe(clientId);
+  });
+
+  it('invalid X-Request-Id is rejected and replaced (does not echo unsafe values)', async () => {
+    const unsafeId = 'not@valid/id';
+    const r = await server.app.inject({
+      method: 'POST',
+      url: '/v1/search',
+      headers: {
+        'content-type': 'application/json',
+        'x-request-id': unsafeId,
+      },
+      payload: JSON.stringify({ query: 'Opus One 2018' }),
+    });
+
+    expect(r.statusCode).toBe(200);
+
+    const headerId = getHeader(r, 'x-request-id');
+    expect(headerId).not.toBe(unsafeId);
+    expect(headerId.length).toBeGreaterThan(0);
+
+    const bodyRequestId = getSearchRequestId(parseSearchResponse(r));
+    expect(bodyRequestId).toBe(headerId);
   });
 });
 

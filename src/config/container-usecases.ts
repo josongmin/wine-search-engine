@@ -6,12 +6,14 @@ import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
 import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
+import { getQueryEntrySecurityMetricsCollector } from '../infrastructure/observability/query-entry-security-metrics.js';
 import type {
   DrinkingWindowUseCasePort,
 } from '../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
   BatchSearchUseCasePort,
+  DecomposedSearchParentContext,
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
@@ -37,6 +39,7 @@ export function buildUseCaseContainerServices(
   config: Config,
 ): UseCaseContainerServices {
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
+  const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
   // Use a deferred reference to break the circular dependency:
   // SearchUseCase needs decomposedSearch, but DecomposedSearchUseCase needs SearchUseCase.
@@ -57,6 +60,7 @@ export function buildUseCaseContainerServices(
     querySanitizer: core.querySanitizer,
     injectionJudge: core.injectionJudge,
     judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+    queryEntrySecurityObserver,
     drinkingWindow: drinkingWindowUseCase,
     cacheService: core.cacheService,
     ltrModels: core.ltrModels,
@@ -67,7 +71,15 @@ export function buildUseCaseContainerServices(
         originalQuery: string,
         requestId: string,
         startTime: number,
-      ) => deferredDecomposed.ref!.execute(subQueries, comparisonIntent, originalQuery, requestId, startTime),
+        parentContext: DecomposedSearchParentContext | undefined,
+      ) => deferredDecomposed.ref!.execute(
+        subQueries,
+        comparisonIntent,
+        originalQuery,
+        requestId,
+        startTime,
+        parentContext,
+      ),
     },
   });
 
@@ -83,12 +95,18 @@ export function buildUseCaseContainerServices(
     interpretUseCase: new InterpretUseCase({
       queryPlanner: core.queryPlanner,
       querySanitizer: core.querySanitizer,
+      injectionJudge: core.injectionJudge,
+      judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+      queryEntrySecurityObserver,
     }),
     resolveUseCase: new ResolveUseCase({
       queryPlanner: core.queryPlanner,
       entityResolver: core.entityResolver,
       entityLookup: core.entityLookup,
       querySanitizer: core.querySanitizer,
+      injectionJudge: core.injectionJudge,
+      judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+      queryEntrySecurityObserver,
     }),
     hybridUseCase: new HybridUseCase({
       queryPlanner: core.queryPlanner,
@@ -106,6 +124,7 @@ export function buildUseCaseContainerServices(
       querySanitizer: core.querySanitizer,
       injectionJudge: core.injectionJudge,
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
+      queryEntrySecurityObserver,
       cacheService: core.cacheService,
     }),
     decomposedSearchUseCase,

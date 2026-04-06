@@ -12,9 +12,13 @@
  * - Still memory-efficient for typical embedding sizes (384-1024 dims)
  */
 
-import type { RedisClient } from '../db/redis-client.js';
-import type { EmbeddingCachePort } from '../../domain/performance/port/embedding-cache.port.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EmbeddingCacheKey } from '../../domain/performance/model/cache-key.js';
+import type { EmbeddingCachePort } from '../../domain/performance/port/embedding-cache.port.js';
+import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
+import type { RedisClient } from '../db/redis-client.js';
+
+const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
 
 /**
  * Redis embedding cache: Store dense vectors efficiently.
@@ -46,7 +50,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       const embedding = JSON.parse(cached) as readonly number[];
       return embedding;
     } catch (error) {
-      console.error('[EmbeddingCache] Deserialization error:', error);
+      log.error({ err: error }, 'deserialization error');
       await this.redis.incr(this.statsKeyMisses);
       return undefined;
     }
@@ -61,7 +65,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       const serialized = JSON.stringify(embedding);
       await this.redis.set(cacheKey.redisKey, serialized, { EX: ttlSeconds });
     } catch (error) {
-      console.error('[EmbeddingCache] Write error:', error);
+      log.error({ err: error }, 'write error');
     }
   }
 
@@ -69,15 +73,18 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
     try {
       await this.redis.del(cacheKey.redisKey);
     } catch (error) {
-      console.error('[EmbeddingCache] Delete error:', error);
+      log.error({ err: error }, 'delete error');
     }
   }
 
   async deleteByModel(modelId: string): Promise<number> {
     try {
-      return await this._deleteByPattern(`embedding:${modelId}:*`);
+      return await deleteRedisKeysMatchingPattern(
+        this.redis,
+        `embedding:${modelId}:*`,
+      );
     } catch (error) {
-      console.error('[EmbeddingCache] Delete by model error:', error);
+      log.error({ err: error }, 'delete by model error');
       return 0;
     }
   }
@@ -123,34 +130,17 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
         entriesCount,
       };
     } catch (error) {
-      console.error('[EmbeddingCache] Stats error:', error);
+      log.error({ err: error }, 'stats error');
       return { hits: 0, misses: 0, size: 0, entriesCount: 0 };
     }
   }
 
   async clear(): Promise<number> {
     try {
-      return await this._deleteByPattern('embedding:*');
+      return await deleteRedisKeysMatchingPattern(this.redis, 'embedding:*');
     } catch (error) {
-      console.error('[EmbeddingCache] Clear error:', error);
+      log.error({ err: error }, 'clear error');
       return 0;
     }
-  }
-
-  /**
-   * Delete all keys matching a pattern using scanIterator.
-   */
-  private async _deleteByPattern(pattern: string): Promise<number> {
-    let count = 0;
-    for await (const key of this.redis.scanIterator({
-      MATCH: pattern,
-      COUNT: 100,
-    })) {
-      if (typeof key === 'string') {
-        await this.redis.del(key);
-        count++;
-      }
-    }
-    return count;
   }
 }

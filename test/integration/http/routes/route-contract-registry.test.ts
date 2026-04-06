@@ -53,9 +53,9 @@ describe('HTTP route contract registry', () => {
         operationId: 'tools.execute',
         hasBody: true,
         hasParams: false,
-        responseStatusCodes: [200, 400],
+        responseStatusCodes: [200, 400, 500],
         successStatusCodes: [200],
-        errorStatusCodes: [400],
+        errorStatusCodes: [400, 500],
       },
       {
         method: 'POST',

@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 
 export type PgPoolConfig = typeof config.pg;
@@ -12,12 +13,12 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
     database: pgConfig.database,
     user: pgConfig.user,
     password: pgConfig.password,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+    max: pgConfig.poolMax,
+    idleTimeoutMillis: pgConfig.idleTimeoutMillis,
+    connectionTimeoutMillis: pgConfig.connectionTimeoutMillis,
   });
   nextPool.on('error', (err) => {
-    console.error('pg pool error', err);
+    bootstrapLogger.error({ err }, 'PostgreSQL pool error');
   });
   return nextPool;
 }

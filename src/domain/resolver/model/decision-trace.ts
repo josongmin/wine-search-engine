@@ -1,18 +1,11 @@
-import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+import type { QueryLookupProvenance } from '../../query/model/query-lookup-provenance.js';
 
 /**
  * Query-side provenance attached to resolver traces for noisy lookup debugging.
+ *
+ * Extends {@link QueryLookupProvenance} with resolver-only score-adjustment detail.
  */
-export interface ResolverQueryProvenance {
-  /** Multi-view normalization snapshot used during lookup. */
-  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
-
-  /** Lookup variants that contributed to anchor extraction. */
-  readonly anchorLookupVariants?: readonly string[] | undefined;
-
-  /** Lookup strategies that contributed to anchor extraction. */
-  readonly anchorLookupStrategies?: readonly string[] | undefined;
-
+export interface ResolverQueryProvenance extends QueryLookupProvenance {
   /** Per-entity raw score adjustments derived from lookup strategies. */
   readonly lookupStrategyAdjustments?: readonly {
     readonly entityId: string;

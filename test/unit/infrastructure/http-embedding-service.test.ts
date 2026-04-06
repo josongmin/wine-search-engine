@@ -103,4 +103,32 @@ describe('HttpEmbeddingService', () => {
       'Embedding service: unexpected response shape',
     );
   });
+
+  it('throws when the HTTP request exceeds the configured timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          const sig = init?.signal;
+          if (sig?.aborted) {
+            reject(new DOMException('Aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      }),
+    );
+
+    const service = new HttpEmbeddingService({
+      url: 'http://embedding.local',
+      model: 'bge-m3-test',
+      httpTimeoutMs: 5,
+    });
+
+    await expect(service.embed('query')).rejects.toThrow(
+      'Embedding service: request timed out after 5ms',
+    );
+  });
 });

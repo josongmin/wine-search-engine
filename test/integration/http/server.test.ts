@@ -288,4 +288,27 @@ describe('HTTP server route registration', () => {
       await app.close();
     }
   });
+
+  it('echoes a valid inbound X-Request-Id on the response', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+    });
+
+    try {
+      await app.ready();
+      const res = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: {
+          'x-request-id': 'gateway-trace-abc',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-request-id']).toBe('gateway-trace-abc');
+    } finally {
+      await app.close();
+    }
+  });
 });

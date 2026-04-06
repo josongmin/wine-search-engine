@@ -9,6 +9,17 @@
 import { config } from '../../config/env.js';
 import type { EmbeddingServicePort } from '../../domain/retrieval/port/embedding-service.port.js';
 
+function isAbortError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'AbortError') {
+    return true;
+  }
+  return (
+    typeof DOMException !== 'undefined' &&
+    error instanceof DOMException &&
+    error.name === 'AbortError'
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Response shape
 // ---------------------------------------------------------------------------
@@ -62,13 +73,32 @@ function isEmbeddingApiResponse(v: unknown): v is EmbeddingApiResponse {
 export class HttpEmbeddingService implements EmbeddingServicePort {
   private readonly url: string;
   private readonly model: string;
+  private readonly httpTimeoutMs: number;
 
   constructor(options?: {
     readonly url?: string;
     readonly model?: string;
+    readonly httpTimeoutMs?: number;
   }) {
     this.url = options?.url ?? config.embedding.url;
     this.model = options?.model ?? config.embedding.model;
+    this.httpTimeoutMs = options?.httpTimeoutMs ?? config.embedding.httpTimeoutMs;
+  }
+
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const id = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
+      clearTimeout(id);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -130,11 +160,25 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
   ): Promise<readonly (readonly number[])[]> {
     const endpoint = `${this.url}/embeddings`;
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.model, input }),
-    });
+    let response: Response;
+    try {
+      response = await this.fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: this.model, input }),
+        },
+        this.httpTimeoutMs,
+      );
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw new Error(
+          `Embedding service: request timed out after ${this.httpTimeoutMs}ms`,
+        );
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');

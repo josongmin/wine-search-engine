@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { nanoid } from 'nanoid';
 
 /**
  * Augment Fastify request with a typed request_id property.
@@ -13,14 +12,13 @@ declare module 'fastify' {
 
 /**
  * Registers a Fastify hook that:
- * 1. Generates a request_id via nanoid
- * 2. Attaches it to the request object
- * 3. Sets the X-Request-Id response header
- * 4. Logs request start/end with latency
+ * 1. Copies `request.id` (from Fastify `genReqId`, see server) to `request.requestId`
+ * 2. Sets the X-Request-Id response header
+ * 3. Logs request start/end with latency
  */
 export function registerRequestContext(app: FastifyInstance): void {
   app.addHook('onRequest', (request, reply, done) => {
-    const requestId = nanoid();
+    const requestId = request.id;
     request.requestId = requestId;
     request.startTime = Date.now();
 

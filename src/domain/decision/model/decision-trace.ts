@@ -1,18 +1,12 @@
-import type { NormalizedQueryViews } from '../../query/model/query-views.js';
+import type { QueryLookupProvenance } from '../../query/model/query-lookup-provenance.js';
 
 /**
  * Query-side provenance preserved in decision traces for noisy lookup debugging.
+ *
+ * Same structural shape as {@link QueryLookupProvenance}; kept as a named alias
+ * for RFC-007 wording and call-site clarity.
  */
-export interface DecisionQueryProvenance {
-  /** Multi-view normalization snapshot used during lookup. */
-  readonly normalizedQueryViews?: NormalizedQueryViews | undefined;
-
-  /** Lookup variants that contributed to anchor extraction. */
-  readonly anchorLookupVariants?: readonly string[] | undefined;
-
-  /** Lookup strategies that contributed to anchor extraction. */
-  readonly anchorLookupStrategies?: readonly string[] | undefined;
-}
+export type DecisionQueryProvenance = QueryLookupProvenance;
 
 /**
  * A complete diagnostic trace of a decision, per RFC-007 §9.

@@ -1,6 +1,8 @@
 import type { ResolverInput } from '../../domain/resolver/service/resolver.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
+import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type {
   EntityDocumentLookupPort,
   EntityResolverPort,
@@ -26,6 +28,8 @@ export interface ResolveUseCaseDeps {
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
   readonly injectionJudge?: InjectionJudgePort | undefined;
+  readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
 }
 
 /**
@@ -34,12 +38,16 @@ export interface ResolveUseCaseDeps {
  * Returns the resolve result with status, candidates, and a decision_trace_ref.
  */
 export class ResolveUseCase {
+  private readonly constraintSAT = new ConstraintSAT();
+
   constructor(private readonly deps: ResolveUseCaseDeps) {}
 
   async execute(request: ResolveRequest): Promise<ResolveResponse> {
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
+      judgeFailureMode: this.deps.judgeFailureMode,
+      queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
@@ -51,6 +59,21 @@ export class ResolveUseCase {
         sessionContext: request.sessionContext,
       }),
     );
+
+    const satResult = this.constraintSAT.check(plan.constraints);
+    if (satResult.contradicted) {
+      const traceRef = request.requestId !== undefined
+        ? `resolve:${request.requestId}:${plan.queryClass}:constraint-sat`
+        : `resolve:${plan.queryClass}:constraint-sat`;
+
+      return {
+        status: 'failed',
+        candidates: [],
+        topEntity: undefined,
+        decision_trace_ref: traceRef,
+        ...(request.requestId !== undefined ? { request_id: request.requestId } : {}),
+      };
+    }
 
     // Build resolver input
     const candidateEntities = await buildResolverCandidatesFromPlan(

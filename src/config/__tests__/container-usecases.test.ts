@@ -1,0 +1,70 @@
+import { describe, expect, it, vi } from 'vitest';
+import { buildUseCaseContainerServices } from '../container-usecases.js';
+import { parseEnv } from '../env.js';
+import { getQueryEntrySecurityMetricsCollector } from '../../infrastructure/observability/query-entry-security-metrics.js';
+
+describe('buildUseCaseContainerServices', () => {
+  it('wires the shared query-entry security policy into all public query entry use cases', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      INJECTION_JUDGE_FAIL_OPEN: 'true',
+    });
+    const injectionJudge = { judge: vi.fn() };
+    const querySanitizer = {
+      sanitize: vi.fn().mockReturnValue({
+        safe: true,
+        sanitizedQuery: 'Opus One',
+      }),
+    };
+    const core = {
+      queryPlanner: { plan: vi.fn() },
+      entityResolver: { resolve: vi.fn() },
+      entityLookup: { getDocument: vi.fn() },
+      candidatePool: { generate: vi.fn() },
+      browseRetriever: { retrieve: vi.fn() },
+      compareRetriever: { retrieve: vi.fn() },
+      ranker: { rank: vi.fn() },
+      decisionEngine: { decide: vi.fn() },
+      responseBuilder: { build: vi.fn() },
+      mixedSolver: { solve: vi.fn() },
+      snapshotVersions: { modelVersions: {}, indexVersions: {} },
+      querySanitizer,
+      injectionJudge,
+      cacheService: { getSearchResponse: vi.fn(), setSearchResponse: vi.fn() },
+      ltrModels: new Map(),
+      drinkingWindowPredictor: {
+        modelVersion: 'heuristic-test',
+        predict: vi.fn().mockReturnValue({
+          drinkingWindowStart: 2020,
+          drinkingWindowEnd: 2030,
+          confidence: 0.8,
+          modelVersion: 'heuristic-test',
+        }),
+      },
+    };
+
+    const useCases = buildUseCaseContainerServices(core as never, config);
+    const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
+
+    expect((useCases.searchUseCase as any).deps).toEqual(expect.objectContaining({
+      injectionJudge,
+      judgeFailureMode: 'fail_open',
+      queryEntrySecurityObserver,
+    }));
+    expect((useCases.hybridUseCase as any).deps).toEqual(expect.objectContaining({
+      injectionJudge,
+      judgeFailureMode: 'fail_open',
+      queryEntrySecurityObserver,
+    }));
+    expect((useCases.interpretUseCase as any).deps).toEqual(expect.objectContaining({
+      injectionJudge,
+      judgeFailureMode: 'fail_open',
+      queryEntrySecurityObserver,
+    }));
+    expect((useCases.resolveUseCase as any).deps).toEqual(expect.objectContaining({
+      injectionJudge,
+      judgeFailureMode: 'fail_open',
+      queryEntrySecurityObserver,
+    }));
+  });
+});

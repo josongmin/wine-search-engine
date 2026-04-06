@@ -203,4 +203,53 @@ describe('ResolveUseCase', () => {
       }),
     );
   });
+
+  it('fails fast on contradictory hard constraints without calling the resolver', async () => {
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'cheap expensive merlot',
+        normalizedQuery: 'cheap expensive merlot',
+        intent: 'search',
+        route: 'entity',
+        retrievalMode: 'entity_lookup',
+        queryClass: 'constraint_heavy',
+        anchors: [],
+        constraints: {
+          hard: [
+            { attribute: 'price', operator: '<=', value: 20 },
+            { attribute: 'price', operator: '>=', value: 50 },
+          ],
+          soft: [],
+          inferred: [],
+        },
+        expansions: { lexical: [], semantic: [] },
+        policy: {},
+        uncertainty: {},
+        plannerVersion: '1',
+        policyRuleVersion: '1',
+        thresholdProfileId: 'default',
+      }),
+    };
+
+    const entityResolver: EntityResolverPort = {
+      resolve: vi.fn(),
+    };
+
+    const useCase = new ResolveUseCase({
+      queryPlanner,
+      entityResolver,
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({ safe: true, sanitizedQuery: 'cheap expensive merlot' }),
+      },
+    });
+
+    await expect(useCase.execute({ query: 'cheap expensive merlot', requestId: 'req-constraint' })).resolves.toEqual({
+      status: 'failed',
+      candidates: [],
+      topEntity: undefined,
+      decision_trace_ref: 'resolve:req-constraint:constraint_heavy:constraint-sat',
+      request_id: 'req-constraint',
+    });
+    expect(entityResolver.resolve).not.toHaveBeenCalled();
+  });
 });

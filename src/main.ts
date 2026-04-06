@@ -73,6 +73,9 @@ async function main(): Promise<void> {
     runEvalAtStartup: config.eval.runAtStartup,
     health: healthOptions,
     tracer: getTracer(),
+    trustProxy: config.http.trustProxy,
+    bodyLimitBytes: config.http.bodyLimitBytes,
+    enableSecurityHeaders: config.http.securityHeaders,
   });
 
   let shuttingDown = false;

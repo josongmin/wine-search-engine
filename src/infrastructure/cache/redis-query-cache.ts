@@ -7,10 +7,12 @@
  * Implements QueryCachePort from domain (dependency inversion).
  */
 
-import type { RedisClient } from '../db/redis-client.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js';
 import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
-import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js';
+import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
+import type { RedisClient } from '../db/redis-client.js';
 
 /**
  * Redis query cache: Store complete search responses.
@@ -24,6 +26,8 @@ import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js'
  * - Track hits/misses via counter keys (query:stats:hits, query:stats:misses)
  * - Auto-compute hit rate as: hits / (hits + misses)
  */
+const log = bootstrapLogger.child({ component: 'RedisQueryCache' });
+
 export class RedisQueryCache implements QueryCachePort {
   private readonly redis: RedisClient;
   private readonly statsKeyHits = 'query:cache:stats:hits';
@@ -49,7 +53,7 @@ export class RedisQueryCache implements QueryCachePort {
       return response;
     } catch (error) {
       // On deserialization error, treat as miss (don't throw)
-      console.error('[QueryCache] Deserialization error:', error);
+      log.error({ err: error }, 'deserialization error');
       await this.redis.incr(this.statsKeyMisses);
       return undefined;
     }
@@ -65,7 +69,7 @@ export class RedisQueryCache implements QueryCachePort {
       await this.redis.set(cacheKey.redisKey, serialized, { EX: ttlSeconds });
     } catch (error) {
       // On serialization/write error, log and continue
-      console.error('[QueryCache] Write error:', error);
+      log.error({ err: error }, 'write error');
     }
   }
 
@@ -73,23 +77,15 @@ export class RedisQueryCache implements QueryCachePort {
     try {
       await this.redis.del(cacheKey.redisKey);
     } catch (error) {
-      console.error('[QueryCache] Delete error:', error);
+      log.error({ err: error }, 'delete error');
     }
   }
 
   async deletePattern(pattern: string): Promise<number> {
     try {
-      let count = 0;
-      for await (const key of this.redis.scanIterator({
-        MATCH: pattern,
-        COUNT: 100,
-      })) {
-        await this.redis.del(key);
-        count++;
-      }
-      return count;
+      return await deleteRedisKeysMatchingPattern(this.redis, pattern);
     } catch (error) {
-      console.error('[QueryCache] Delete pattern error:', error);
+      log.error({ err: error }, 'delete pattern error');
       return 0;
     }
   }
@@ -145,7 +141,7 @@ export class RedisQueryCache implements QueryCachePort {
         entriesCount,
       };
     } catch (error) {
-      console.error('[QueryCache] Stats error:', error);
+      log.error({ err: error }, 'stats error');
       return { hits: 0, misses: 0, size: 0, entriesCount: 0 };
     }
   }
@@ -154,7 +150,7 @@ export class RedisQueryCache implements QueryCachePort {
     try {
       return await this.deletePattern('query:*');
     } catch (error) {
-      console.error('[QueryCache] Clear error:', error);
+      log.error({ err: error }, 'clear error');
       return 0;
     }
   }

@@ -103,6 +103,7 @@ export const ClaudeToolsExecuteRouteContract = defineRouteContract({
   responses: {
     200: ClaudeToolsExecuteResponseSchema,
     400: ClaudeToolsErrorResponseSchema,
+    500: ClaudeToolsErrorResponseSchema,
   },
 });
 

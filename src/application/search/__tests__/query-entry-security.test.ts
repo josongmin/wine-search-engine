@@ -103,6 +103,25 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     expect(queryPlanner.plan).not.toHaveBeenCalled();
   });
 
+  it('InterpretUseCase fail-opens when configured and the judge errors', async () => {
+    const queryPlanner = {
+      plan: vi.fn().mockResolvedValue({
+        route: 'hybrid',
+      }),
+    };
+    const useCase = new InterpretUseCase({
+      queryPlanner: queryPlanner as never,
+      querySanitizer: sanitizer,
+      injectionJudge: {
+        judge: vi.fn().mockRejectedValue(new Error('judge offline')),
+      },
+      judgeFailureMode: 'fail_open',
+    });
+
+    await expect(useCase.execute({ query: '  Ridge Cabernet  ' })).resolves.toEqual({ route: 'hybrid' });
+    expect(queryPlanner.plan).toHaveBeenCalledWith('Ridge Cabernet', expect.any(Object));
+  });
+
   it('ResolveUseCase throws POLICY_BLOCKED for blocked queries', async () => {
     const queryPlanner = { plan: vi.fn() };
     const entityResolver = { resolve: vi.fn() };
@@ -139,6 +158,43 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     });
     expect(queryPlanner.plan).not.toHaveBeenCalled();
     expect(entityResolver.resolve).not.toHaveBeenCalled();
+  });
+
+  it('ResolveUseCase fail-opens when configured and the judge errors', async () => {
+    const queryPlanner = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'Opus One',
+        normalizedQuery: 'opus one',
+        route: 'entity',
+        queryClass: 'known_item',
+        anchors: [],
+        constraints: { hard: [], soft: [], inferred: [] },
+        policy: {},
+        uncertainty: {},
+      }),
+    };
+    const entityResolver = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved',
+        candidates: [],
+        topEntity: undefined,
+      }),
+    };
+    const useCase = new ResolveUseCase({
+      queryPlanner: queryPlanner as never,
+      entityResolver: entityResolver as never,
+      querySanitizer: sanitizer,
+      injectionJudge: {
+        judge: vi.fn().mockRejectedValue(new Error('judge offline')),
+      },
+      judgeFailureMode: 'fail_open',
+    });
+
+    await expect(useCase.execute({ query: '  Opus One  ' })).resolves.toMatchObject({
+      status: 'resolved',
+    });
+    expect(queryPlanner.plan).toHaveBeenCalledWith('Opus One', expect.any(Object));
+    expect(entityResolver.resolve).toHaveBeenCalled();
   });
 
   it('HybridUseCase plans with the sanitized query and throws policy-blocked errors for unsafe input', async () => {

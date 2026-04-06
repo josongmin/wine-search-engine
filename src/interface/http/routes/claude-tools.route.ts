@@ -20,6 +20,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { ZodError } from 'zod';
 import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import type { ClaudeToolsRouteDeps } from './route-deps.js';
 import {
@@ -66,10 +67,13 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
             : {}),
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
-        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 400, {
+        if (err instanceof ZodError) {
+          throw err;
+        }
+        request.log.error({ err, requestId }, 'claude_tools_execution_failed');
+        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 500, {
           error: 'TOOL_EXECUTION_FAILED',
-          message,
+          message: 'An unexpected error occurred while executing the tool.',
           request_id: requestId,
         });
       }

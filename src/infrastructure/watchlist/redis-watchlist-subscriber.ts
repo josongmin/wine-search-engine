@@ -6,6 +6,7 @@
  */
 
 import { createClient } from 'redis';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { config } from '../../config/env.js';
 import {
   parseWatchlistChangeEvent,
@@ -30,6 +31,8 @@ export interface WatchlistSubscriberPort {
 
 type RedisSubscriberClient = ReturnType<typeof createClient>;
 type RedisSubscriberFactory = (redisConfig: RedisConfig) => RedisSubscriberClient;
+
+const log = bootstrapLogger.child({ component: 'RedisWatchlistSubscriber' });
 
 /**
  * Subscribes to watchlist event channels using pattern matching.
@@ -61,7 +64,7 @@ export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
     // Create a dedicated subscriber connection
     this.subscriber = this.createSubscriber(this.redisConfig);
     this.subscriber.on('error', (err: Error) => {
-      console.error('Redis Subscriber Error', err);
+      log.error({ err }, 'Redis subscriber connection error');
     });
 
     await this.subscriber.connect();
@@ -74,7 +77,7 @@ export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
 
       // Fire handler as floating promise to avoid blocking the subscriber
       void this.handleEvent(entityId, payload, handler).catch((err: unknown) => {
-        console.error('Handler error for entity', entityId, ':', err);
+        log.error({ err, entityId }, 'watchlist handler error');
       });
     });
   }
@@ -108,7 +111,7 @@ export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
       await handler(entityId, event);
     } catch (err: unknown) {
       // Prevent handler errors from propagating
-      console.error('Failed to process watchlist event:', err);
+      log.error({ err, entityId }, 'failed to process watchlist event');
     }
   }
 

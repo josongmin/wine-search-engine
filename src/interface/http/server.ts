@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { type Span, SpanStatusCode, type Tracer } from '@opentelemetry/api';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
@@ -20,7 +21,7 @@ import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
-import { getRequestId } from './request-id.js';
+import { getRequestId, resolveIncomingRequestId } from './request-id.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 
@@ -43,6 +44,15 @@ export interface ServerOptions {
   readonly enableCors?: boolean;
   readonly enableTelemetry?: boolean;
   readonly tracer?: Tracer;
+  /**
+   * When true, trust `X-Forwarded-For` / `X-Forwarded-Host` (reverse proxy in front).
+   * @default false
+   */
+  readonly trustProxy?: boolean;
+  /** Fastify JSON body size cap in bytes. @default 1_048_576 */
+  readonly bodyLimitBytes?: number;
+  /** Register `@fastify/helmet` (CSP disabled for JSON API). @default true */
+  readonly enableSecurityHeaders?: boolean;
 }
 
 function registerCorsSupport(
@@ -69,7 +79,11 @@ function registerCorsSupport(
       }
     }
     reply.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    reply.header(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Request-Id, X-Correlation-Id',
+    );
+    reply.header('Access-Control-Expose-Headers', 'X-Request-Id, Retry-After');
     reply.header('Access-Control-Max-Age', '86400');
     done();
   });
@@ -125,7 +139,17 @@ export async function createServer(
     logger: {
       level: options?.logLevel ?? 'info',
     },
+    genReqId: (req) => resolveIncomingRequestId(req.headers),
+    trustProxy: options?.trustProxy ?? false,
+    bodyLimit: options?.bodyLimitBytes ?? 1_048_576,
   });
+
+  if (options?.enableSecurityHeaders ?? true) {
+    await app.register(helmet, {
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    });
+  }
 
   // CORS headers (G-46).
   // In development/test: allow all origins, echoing the request origin when present.

@@ -15,6 +15,24 @@ const envSchema = z.object({
   /** Per-IP request cap (RFC-014 §13). Set high for local offline eval; use 0 to disable. */
   HTTP_RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(100),
 
+  /**
+   * Trust `X-Forwarded-*` headers (client IP, proto) when behind a reverse proxy / load balancer.
+   * Set true in production behind ALB/nginx; keep false for direct-to-process local runs.
+   */
+  HTTP_TRUST_PROXY: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+
+  /** Max JSON body size in bytes (Fastify `bodyLimit`). Default 1 MiB. */
+  HTTP_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(32 * 1024 * 1024).default(1_048_576),
+
+  /** Register `@fastify/helmet` security headers (recommended on in production). */
+  HTTP_SECURITY_HEADERS: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
+
   /** Comma-separated list of allowed CORS origins. Defaults to '*' in development. */
   CORS_ALLOWED_ORIGINS: z.string().default(''),
 
@@ -30,6 +48,9 @@ const envSchema = z.object({
   PG_DATABASE: z.string().min(1).default('wine_engine'),
   PG_USER: z.string().min(1).default('wine'),
   PG_PASSWORD: z.string().default(''),
+  PG_POOL_MAX: z.coerce.number().int().positive().default(10),
+  PG_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  PG_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
   // Redis
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
@@ -41,6 +62,8 @@ const envSchema = z.object({
   // Embedding Service
   EMBEDDING_SERVICE_URL: z.string().url().default('http://localhost:8081'),
   EMBEDDING_MODEL: z.string().min(1).default('bge-m3'),
+  /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
+  EMBEDDING_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // Reranker Service
   RERANKER_SERVICE_URL: z.string().url().default('http://localhost:8082'),
@@ -124,6 +147,13 @@ function buildConfig(parsed: EnvVars) {
       max: parsed.HTTP_RATE_LIMIT_MAX,
     },
 
+    /** HTTP server tuning (Fastify instance options). */
+    http: {
+      trustProxy: parsed.HTTP_TRUST_PROXY,
+      bodyLimitBytes: parsed.HTTP_BODY_LIMIT_BYTES,
+      securityHeaders: parsed.HTTP_SECURITY_HEADERS,
+    },
+
     /** CORS allowed origins. Empty string means allow all in dev, none in production. */
     corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS,
 
@@ -139,6 +169,9 @@ function buildConfig(parsed: EnvVars) {
       database: parsed.PG_DATABASE,
       user: parsed.PG_USER,
       password: parsed.PG_PASSWORD,
+      poolMax: parsed.PG_POOL_MAX,
+      idleTimeoutMillis: parsed.PG_POOL_IDLE_TIMEOUT_MS,
+      connectionTimeoutMillis: parsed.PG_POOL_CONNECTION_TIMEOUT_MS,
     },
 
     /** Redis connection settings. */
@@ -156,6 +189,7 @@ function buildConfig(parsed: EnvVars) {
     embedding: {
       url: parsed.EMBEDDING_SERVICE_URL,
       model: parsed.EMBEDDING_MODEL,
+      httpTimeoutMs: parsed.EMBEDDING_HTTP_TIMEOUT_MS,
     },
 
     /** Reranker service settings. */

@@ -18,6 +18,7 @@ export {
   DEFAULT_THRESHOLD_PROFILE,
 } from './model/threshold-profile.js';
 export { type NormalizedQueryViews } from './model/query-views.js';
+export { type QueryLookupProvenance } from './model/query-lookup-provenance.js';
 export { type QueryPlanV1 } from './model/query-plan.js';
 
 // Ports

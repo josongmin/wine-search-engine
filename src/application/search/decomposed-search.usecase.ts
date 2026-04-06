@@ -8,6 +8,7 @@
 import type { SearchRequest } from './search-request.dto.js';
 import type { ComparisonSearchResponse, ComparisonEntity } from '../../domain/response/model/comparison-response.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
+import type { DecomposedSearchParentContext } from './port/search-route-usecases.port.js';
 
 export class DecomposedSearchUseCase {
   constructor(private readonly searchUseCase: SearchExecutorPort) {}
@@ -27,9 +28,15 @@ export class DecomposedSearchUseCase {
     originalQuery: string,
     requestId: string,
     startTime: number,
+    parentContext?: DecomposedSearchParentContext,
   ): Promise<ComparisonSearchResponse> {
     const baseRequest: Omit<SearchRequest, 'query'> = {
       options: { mode: 'auto', explain: false, clarification: false },
+      ...(parentContext?.context !== undefined ? { context: parentContext.context } : {}),
+      ...(parentContext?.sessionContext !== undefined
+        ? { sessionContext: parentContext.sessionContext }
+        : {}),
+      ...(parentContext?.queryBudget !== undefined ? { queryBudget: parentContext.queryBudget } : {}),
     };
 
     // Execute both sub-queries in parallel

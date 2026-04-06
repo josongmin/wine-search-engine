@@ -1,10 +1,14 @@
+import { createRequire } from 'node:module';
 import { trace, type Tracer } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
 const SERVICE_NAME = 'wine-search-engine';
-const SERVICE_VERSION = '1.0.0';
+const require = createRequire(import.meta.url);
+const SERVICE_VERSION = (
+  require('../../../package.json') as { readonly version: string }
+).version;
 
 /**
  * Returns a named tracer for the wine-search-engine service.

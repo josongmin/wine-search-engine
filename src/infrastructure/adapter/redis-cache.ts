@@ -1,3 +1,4 @@
+import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
 import type { RedisClient } from '../db/redis-client.js';
 
 export class RedisCache {
@@ -27,11 +28,6 @@ export class RedisCache {
   }
 
   async invalidatePattern(pattern: string): Promise<void> {
-    for await (const key of this.client.scanIterator({
-      MATCH: pattern,
-      COUNT: 100,
-    })) {
-      await this.client.del(key);
-    }
+    await deleteRedisKeysMatchingPattern(this.client, pattern);
   }
 }

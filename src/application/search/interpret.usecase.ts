@@ -1,6 +1,7 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { InterpretRequest } from './interpret-request.dto.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
@@ -17,6 +18,8 @@ export interface InterpretUseCaseDeps {
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
   readonly injectionJudge?: InjectionJudgePort | undefined;
+  readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
 }
 
 /**
@@ -32,6 +35,8 @@ export class InterpretUseCase {
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
+      judgeFailureMode: this.deps.judgeFailureMode,
+      queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 

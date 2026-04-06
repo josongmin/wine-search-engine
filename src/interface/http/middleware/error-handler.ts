@@ -11,6 +11,29 @@ import { sendPolicyBlockedResponse } from '../errors/policy-blocked.js';
 import { getRequestId } from '../request-id.js';
 
 /**
+ * Derive `Retry-After` (seconds) from @fastify/rate-limit default message, e.g.
+ * "Rate limit exceeded, retry in 1 minute".
+ */
+function parseRetryAfterSecondsFromRateLimitMessage(message: string): number {
+  const minuteMatch = message.match(/retry in (\d+)\s*minute/i);
+  if (minuteMatch?.[1] !== undefined) {
+    const n = Number.parseInt(minuteMatch[1], 10);
+    return Number.isFinite(n) ? n * 60 : 60;
+  }
+  const secondMatch = message.match(/retry in (\d+)\s*second/i);
+  if (secondMatch?.[1] !== undefined) {
+    const n = Number.parseInt(secondMatch[1], 10);
+    return Number.isFinite(n) ? n : 60;
+  }
+  const msMatch = message.match(/retry in (\d+)\s*ms/i);
+  if (msMatch?.[1] !== undefined) {
+    const n = Number.parseInt(msMatch[1], 10);
+    return Number.isFinite(n) ? Math.max(1, Math.ceil(n / 1000)) : 60;
+  }
+  return 60;
+}
+
+/**
  * Maps DomainError codes to HTTP status codes.
  */
 const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
@@ -60,6 +83,9 @@ export function errorHandler(
     const retryPart = message.replace('Rate limit exceeded, retry in', 'Retry after');
 
     request.log.warn({ requestId }, 'rate_limit_exceeded');
+
+    const retrySeconds = parseRetryAfterSecondsFromRateLimitMessage(message);
+    reply.header('Retry-After', String(retrySeconds));
 
     const body = buildSearchErrorResponse(
       requestId,

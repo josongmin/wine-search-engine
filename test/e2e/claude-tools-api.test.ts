@@ -92,7 +92,7 @@ describe('POST /v1/claude-tools', () => {
     expect(getSearchRequestId(parsed.data)).toBeTruthy();
   });
 
-  it('rejects invalid payloads with a 400 error envelope', async () => {
+  it('rejects invalid payloads with RFC-014 validation error (400)', async () => {
     const res = await postJson(server.app, '/v1/claude-tools', {
       tool_input: {
         query: 'Opus One 2018',
@@ -104,10 +104,11 @@ describe('POST /v1/claude-tools', () => {
     const headerRequestId = getHeader(res, 'x-request-id');
     expect(headerRequestId).toBeTruthy();
 
-    const body = res.json() as Record<string, unknown>;
-    expect(body.error).toBe('TOOL_EXECUTION_FAILED');
-    expect(typeof body.message).toBe('string');
-    expect((body.message as string).length).toBeGreaterThan(0);
-    expect(body.request_id).toBe(headerRequestId);
+    const body = res.json() as {
+      error: { code: string; message: string; request_id: string };
+    };
+    expect(body.error.code).toBe('VALIDATION_ERROR');
+    expect(body.error.message.length).toBeGreaterThan(0);
+    expect(body.error.request_id).toBe(headerRequestId);
   });
 });

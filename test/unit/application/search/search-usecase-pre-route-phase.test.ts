@@ -55,4 +55,52 @@ describe('runSearchPreRoutePhase', () => {
     }
     expect(queryPlanner.plan).toHaveBeenCalled();
   });
+
+  it('passes parent context, session, and budget into decomposed search sub-queries', async () => {
+    const decomposedSearch = {
+      execute: vi.fn().mockResolvedValue({
+        queryType: 'comparison',
+        originalQuery: 'Opus One vs Screaming Eagle',
+        comparisonIntent: 'compare',
+        entities: [],
+        overallStatus: 'failed',
+        requestId: 'r-compare',
+        executionTimeMs: 5,
+      }),
+    };
+
+    const result = await runSearchPreRoutePhase({
+      request: {
+        query: 'Opus One vs Screaming Eagle',
+        context: { locale: 'ko-KR', currency: 'KRW' },
+        sessionContext: { sessionId: 's-1', previousEntities: ['entity-1'] },
+        queryBudget: { maxLatencyMs: 800, maxCandidates: 20, rerankLimit: 10 },
+      },
+      requestId: 'r-compare',
+      startTime: 123,
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner: { plan: vi.fn() },
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch,
+    });
+
+    expect(result.outcome).toBe('return');
+    expect(decomposedSearch.execute).toHaveBeenCalledWith(
+      ['Opus One', 'Screaming Eagle'],
+      'compare',
+      'Opus One vs Screaming Eagle',
+      'r-compare',
+      123,
+      {
+        context: { locale: 'ko-KR', currency: 'KRW' },
+        sessionContext: { sessionId: 's-1', previousEntities: ['entity-1'] },
+        queryBudget: { maxLatencyMs: 800, maxCandidates: 20, rerankLimit: 10 },
+      },
+    );
+  });
 });

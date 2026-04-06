@@ -11,6 +11,13 @@ import type { InterpretRequest } from '../interpret-request.dto.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
 import type { ResolveResponse } from '../resolve-response.dto.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
+import type { SearchQueryBudget, SearchRequestContext, SearchSessionContext } from '../search-request.dto.js';
+
+export interface DecomposedSearchParentContext {
+  readonly context?: SearchRequestContext | undefined;
+  readonly sessionContext?: SearchSessionContext | undefined;
+  readonly queryBudget?: SearchQueryBudget | undefined;
+}
 
 export interface DecomposedSearchUseCasePort {
   execute(
@@ -19,6 +26,7 @@ export interface DecomposedSearchUseCasePort {
     originalQuery: string,
     requestId: string,
     startTime: number,
+    parentContext?: DecomposedSearchParentContext,
   ): Promise<ComparisonSearchResponse>;
 }
 

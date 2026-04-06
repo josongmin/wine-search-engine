@@ -1,21 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ReplayUseCase, SnapshotMismatchError } from '../../../src/application/search/replay.usecase.js';
+import {
+  ReplayUseCase,
+  SnapshotMismatchError,
+  UnexpectedReplayResponseError,
+} from '../../../src/application/search/replay.usecase.js';
 import type { ReplayRequest } from '../../../src/application/search/replay.usecase.js';
 import type { SearchUseCase } from '../../../src/application/search/search.usecase.js';
+import { buildDecisionSnapshotFromRuntimeVersions } from '../../../src/application/search/search-usecase-decision-snapshot.js';
 import type { SearchResponseV1 } from '../../../src/domain/response/model/search-response.js';
 import type { DecisionSnapshot } from '../../../src/domain/shared/types/index.js';
 
 // ── Fixtures ───────────────────────────────────────────────────────────────────
 
-/** The snapshot that ReplayUseCase.buildCurrentSnapshot() produces internally. */
-const VALID_SNAPSHOT: DecisionSnapshot = {
-  model_versions: {},
-  index_versions: {},
-  policy_rule_version: '1.0.0',
-  threshold_profile_id: 'default',
-  planner_version: '1.0.0',
-  feature_flags: {},
-};
+/** The canonical runtime snapshot shape ReplayUseCase should compare against. */
+const VALID_SNAPSHOT: DecisionSnapshot = buildDecisionSnapshotFromRuntimeVersions();
 
 /** A minimal valid SearchResponseV1 stub. */
 const STUB_RESPONSE: SearchResponseV1 = {
@@ -50,6 +48,16 @@ function makeReplayUseCase(searchUseCase: SearchUseCase): ReplayUseCase {
   return new ReplayUseCase({ searchUseCase });
 }
 
+function makeReplayUseCaseWithVersions(searchUseCase: SearchUseCase): ReplayUseCase {
+  return new ReplayUseCase({
+    searchUseCase,
+    snapshotVersions: {
+      modelVersions: { embedding: 'bge-m3-v1.2' },
+      indexVersions: { wine_content: '2026-04-01' },
+    },
+  });
+}
+
 /** Minimal valid replay request using a matching snapshot. */
 function makeRequest(snapshot: DecisionSnapshot = VALID_SNAPSHOT): ReplayRequest {
   return {
@@ -66,6 +74,17 @@ describe('ReplayUseCase', () => {
       const inner = makeSearchUseCase();
       const useCase = makeReplayUseCase(inner);
       const result = await useCase.execute(makeRequest(), 'req-001');
+      expect(result).toEqual(STUB_RESPONSE);
+    });
+
+    it('matches the injected runtime snapshot versions', async () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCaseWithVersions(inner);
+      const requestSnapshot = buildDecisionSnapshotFromRuntimeVersions({
+        modelVersions: { embedding: 'bge-m3-v1.2' },
+        indexVersions: { wine_content: '2026-04-01' },
+      });
+      const result = await useCase.execute(makeRequest(requestSnapshot), 'req-001b');
       expect(result).toEqual(STUB_RESPONSE);
     });
   });
@@ -138,6 +157,24 @@ describe('ReplayUseCase', () => {
         // DomainError / SnapshotMismatchError does not expose a retryable flag.
         // The absence or falsy value of `retryable` means it is not retryable.
         expect((e as Record<string, unknown>)['retryable']).toBeFalsy();
+      }
+    });
+
+    it('UnexpectedReplayResponseError has code UNEXPECTED_REPLAY_RESPONSE', async () => {
+      const inner = {
+        execute: vi.fn().mockResolvedValue({
+          ...STUB_RESPONSE,
+          queryType: 'comparison',
+        }),
+      } as unknown as SearchUseCase;
+      const useCase = makeReplayUseCase(inner);
+      try {
+        await useCase.execute(makeRequest(), 'req-008');
+        expect.fail('Expected UnexpectedReplayResponseError to be thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(UnexpectedReplayResponseError);
+        const e = err as UnexpectedReplayResponseError;
+        expect(e.code).toBe('UNEXPECTED_REPLAY_RESPONSE');
       }
     });
   });

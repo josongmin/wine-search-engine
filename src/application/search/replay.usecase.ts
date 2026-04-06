@@ -5,6 +5,7 @@ import type { SnapshotVersions } from './search.usecase.js';
 import type { ReplayRequest } from './replay-request.dto.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
+import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
 
 export type { ReplayRequest } from './replay-request.dto.js';
 
@@ -49,6 +50,19 @@ export class DeterminismViolationError extends DomainError {
 }
 
 /**
+ * Error thrown when replay delegates to a non-search response shape.
+ */
+export class UnexpectedReplayResponseError extends DomainError {
+  constructor() {
+    super(
+      'UNEXPECTED_REPLAY_RESPONSE',
+      'Replay expected a standard search response but received a comparison response.',
+    );
+    this.name = 'UnexpectedReplayResponseError';
+  }
+}
+
+/**
  * Dependencies injected into the ReplayUseCase.
  */
 export interface ReplayUseCaseDeps {
@@ -72,7 +86,7 @@ export class ReplayUseCase {
     requestId: string,
   ): Promise<SearchResponseV1> {
     // Step 2: Build current runtime snapshot for comparison
-    const currentSnapshot = this.buildCurrentSnapshot();
+    const currentSnapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
 
     // Step 3: Compare snapshot with current runtime snapshot
     if (!this.snapshotsMatch(request.decision_snapshot, currentSnapshot)) {
@@ -92,7 +106,7 @@ export class ReplayUseCase {
 
     // Replay always targets a standard search, never a comparison
     if (rawResponse.queryType !== 'search') {
-      throw new Error('Replay returned unexpected comparison response');
+      throw new UnexpectedReplayResponseError();
     }
     const response = rawResponse;
 
@@ -111,22 +125,6 @@ export class ReplayUseCase {
     }
 
     return response;
-  }
-
-  /**
-   * Builds the current runtime decision snapshot for comparison.
-   * Populates model_versions and index_versions from injected snapshotVersions
-   * per RFC-015, which requires actual version strings (not empty objects).
-   */
-  private buildCurrentSnapshot(): DecisionSnapshot {
-    return {
-      model_versions: this.deps.snapshotVersions?.modelVersions ?? {},
-      index_versions: this.deps.snapshotVersions?.indexVersions ?? {},
-      policy_rule_version: '1.0.0',
-      threshold_profile_id: 'default',
-      planner_version: '1.0.0',
-      feature_flags: {},
-    };
   }
 
   /**

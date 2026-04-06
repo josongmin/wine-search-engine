@@ -89,13 +89,14 @@ describe('Claude tools HTTP route', () => {
       },
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(500);
     const body = JSON.parse(response.body) as {
       error: string;
       message: string;
       request_id: string;
     };
     expect(body.error).toBe('TOOL_EXECUTION_FAILED');
+    expect(body.message).toBe('An unexpected error occurred while executing the tool.');
     expect(body.request_id).toBe('req-failed-123');
   });
 });

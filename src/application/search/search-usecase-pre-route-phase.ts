@@ -52,6 +52,13 @@ export async function runSearchPreRoutePhase(
         sanitizedQuery,
         ctx.requestId,
         ctx.startTime,
+        {
+          ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
+          ...(ctx.request.sessionContext !== undefined
+            ? { sessionContext: ctx.request.sessionContext }
+            : {}),
+          ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+        },
       );
       return { outcome: 'return', response };
     }
