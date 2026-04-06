@@ -7,14 +7,8 @@ import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { ConstraintFilter } from './constraint-filter.js';
+import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import type { CacheService } from '../../performance/index.js';
-
-function formatConstraintValue(value: unknown): string {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-  return JSON.stringify(value);
-}
 
 /**
  * Orchestrates the full hybrid retrieval pipeline (RFC-012).
@@ -74,10 +68,8 @@ export class CandidatePoolService {
     const allPhases: RetrievalPhase[] = ['sparse', 'dense', 'anchor_neighborhood', 'rerank'];
     const skippedPhases = allPhases.filter((p) => !phaseSet.has(p));
 
-    // Build filter expressions from hard constraints
-    const filters = input.hardConstraints.map(
-      (c) => `${c.attribute}${c.operator}${formatConstraintValue(c.value)}`,
-    );
+    // Vespa sparse filter tokens (aligned with browse/compare + buildSparseFilters)
+    const filters = [...hardConstraintsToSparseFilterTokens(input.hardConstraints)];
 
     // Step 1: Sparse search
     const sparseHits = phaseSet.has('sparse')

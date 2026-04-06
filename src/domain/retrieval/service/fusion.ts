@@ -22,14 +22,28 @@ function mergeRetrievalSummaries(
   readonly region?: string;
   readonly searchTextEn?: string;
   readonly grapePrimary?: string;
+  readonly style?: string;
+  readonly priceBand?: string;
+  readonly pairing?: readonly string[];
+  readonly occasion?: readonly string[];
   readonly vintageYear?: number;
   readonly body?: number;
   readonly tannin?: number;
   readonly acidity?: number;
   readonly sweetness?: number;
+  readonly finishLength?: number;
+  readonly wineType?: string;
   readonly criticScoreNormalized?: number;
   readonly country?: string;
   readonly appellation?: string;
+  readonly classification?: string;
+  readonly alcoholPct?: number;
+  readonly drinkingWindowStart?: number;
+  readonly drinkingWindowEnd?: number;
+  readonly priceUsd?: number;
+  readonly certifications?: readonly string[];
+  readonly soilType?: string;
+  readonly producerType?: string;
 } {
   const canonicalLabel =
     sparse?.canonicalLabel ?? dense?.canonicalLabel ?? anchor?.canonicalLabel;
@@ -39,6 +53,10 @@ function mergeRetrievalSummaries(
     sparse?.searchTextEn ?? dense?.searchTextEn ?? anchor?.searchTextEn;
   const grapePrimary =
     sparse?.grapePrimary ?? dense?.grapePrimary ?? anchor?.grapePrimary;
+  const style = sparse?.style ?? dense?.style ?? anchor?.style;
+  const priceBand = sparse?.priceBand ?? dense?.priceBand ?? anchor?.priceBand;
+  const pairing = sparse?.pairing ?? dense?.pairing ?? anchor?.pairing;
+  const occasion = sparse?.occasion ?? dense?.occasion ?? anchor?.occasion;
 
   // Epic 15: Wine attributes (for dynamic prediction)
   const vintageYear =
@@ -47,10 +65,26 @@ function mergeRetrievalSummaries(
   const tannin = sparse?.tannin ?? dense?.tannin ?? anchor?.tannin;
   const acidity = sparse?.acidity ?? dense?.acidity ?? anchor?.acidity;
   const sweetness = sparse?.sweetness ?? dense?.sweetness ?? anchor?.sweetness;
+  const finishLength =
+    sparse?.finishLength ?? dense?.finishLength ?? anchor?.finishLength;
+  const wineType = sparse?.wineType ?? dense?.wineType ?? anchor?.wineType;
   const criticScoreNormalized =
     sparse?.criticScoreNormalized ?? dense?.criticScoreNormalized ?? anchor?.criticScoreNormalized;
   const country = sparse?.country ?? dense?.country ?? anchor?.country;
   const appellation = sparse?.appellation ?? dense?.appellation ?? anchor?.appellation;
+  const classification =
+    sparse?.classification ?? dense?.classification ?? anchor?.classification;
+  const alcoholPct = sparse?.alcoholPct ?? dense?.alcoholPct ?? anchor?.alcoholPct;
+  const drinkingWindowStart =
+    sparse?.drinkingWindowStart ?? dense?.drinkingWindowStart ?? anchor?.drinkingWindowStart;
+  const drinkingWindowEnd =
+    sparse?.drinkingWindowEnd ?? dense?.drinkingWindowEnd ?? anchor?.drinkingWindowEnd;
+  const priceUsd = sparse?.priceUsd ?? dense?.priceUsd ?? anchor?.priceUsd;
+  const certifications =
+    sparse?.certifications ?? dense?.certifications ?? anchor?.certifications;
+  const soilType = sparse?.soilType ?? dense?.soilType ?? anchor?.soilType;
+  const producerType =
+    sparse?.producerType ?? dense?.producerType ?? anchor?.producerType;
 
   return {
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
@@ -58,14 +92,28 @@ function mergeRetrievalSummaries(
     ...(region !== undefined ? { region } : {}),
     ...(searchTextEn !== undefined ? { searchTextEn } : {}),
     ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+    ...(style !== undefined ? { style } : {}),
+    ...(priceBand !== undefined ? { priceBand } : {}),
+    ...(pairing !== undefined ? { pairing } : {}),
+    ...(occasion !== undefined ? { occasion } : {}),
     ...(vintageYear !== undefined ? { vintageYear } : {}),
     ...(body !== undefined ? { body } : {}),
     ...(tannin !== undefined ? { tannin } : {}),
     ...(acidity !== undefined ? { acidity } : {}),
     ...(sweetness !== undefined ? { sweetness } : {}),
+    ...(finishLength !== undefined ? { finishLength } : {}),
+    ...(wineType !== undefined ? { wineType } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
     ...(country !== undefined ? { country } : {}),
     ...(appellation !== undefined ? { appellation } : {}),
+    ...(classification !== undefined ? { classification } : {}),
+    ...(alcoholPct !== undefined ? { alcoholPct } : {}),
+    ...(drinkingWindowStart !== undefined ? { drinkingWindowStart } : {}),
+    ...(drinkingWindowEnd !== undefined ? { drinkingWindowEnd } : {}),
+    ...(priceUsd !== undefined ? { priceUsd } : {}),
+    ...(certifications !== undefined ? { certifications } : {}),
+    ...(soilType !== undefined ? { soilType } : {}),
+    ...(producerType !== undefined ? { producerType } : {}),
   };
 }
 

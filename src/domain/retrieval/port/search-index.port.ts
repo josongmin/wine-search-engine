@@ -13,6 +13,10 @@ export interface RetrievalHitSummary {
   readonly region?: string;
   readonly searchTextEn?: string;
   readonly grapePrimary?: string;
+  readonly style?: string | undefined;
+  readonly priceBand?: string | undefined;
+  readonly pairing?: readonly string[] | undefined;
+  readonly occasion?: readonly string[] | undefined;
 
   // Epic 15: Wine attributes for dynamic prediction
   readonly vintageYear?: number | undefined;
@@ -20,11 +24,21 @@ export interface RetrievalHitSummary {
   readonly tannin?: number | undefined;
   readonly acidity?: number | undefined;
   readonly sweetness?: number | undefined;
+  readonly finishLength?: number | undefined;
+  readonly wineType?: string | undefined;
   readonly criticScoreNormalized?: number | undefined;
   /** Producer prestige score from the index (scale varies; browse uses it for ranking only). */
   readonly producerPrestige?: number | undefined;
   readonly country?: string | undefined;
   readonly appellation?: string | undefined;
+  readonly classification?: string | undefined;
+  readonly alcoholPct?: number | undefined;
+  readonly drinkingWindowStart?: number | undefined;
+  readonly drinkingWindowEnd?: number | undefined;
+  readonly priceUsd?: number | undefined;
+  readonly certifications?: readonly string[] | undefined;
+  readonly soilType?: string | undefined;
+  readonly producerType?: string | undefined;
 }
 
 /**

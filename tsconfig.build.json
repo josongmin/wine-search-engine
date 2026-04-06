@@ -3,7 +3,8 @@
   "compilerOptions": {
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "incremental": false,
+    "incremental": true,
+    "tsBuildInfoFile": ".tsbuildinfo.build",
     "rootDir": "src"
   },
   "include": ["src/**/*.ts"],

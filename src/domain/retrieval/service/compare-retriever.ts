@@ -6,12 +6,9 @@ import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { dedupeSparseHitsByEntity } from './browse-diversity.js';
 
-/**
- * Comparison candidate — enriched with structured attribute data for side-by-side comparison.
- *
- * Unlike {@link HybridCandidate}, which is optimized for retrieval/ranking,
- * ComparisonCandidate exposes all comparison-relevant attributes in a structured form.
- */
+/** Compatibility alias for older callers. */
+export type ComparisonCandidate = HybridCandidate;
+
 export class CompareRetriever {
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
@@ -38,15 +35,29 @@ export class CompareRetriever {
         region: summary?.region,
         searchTextEn: summary?.searchTextEn,
         grapePrimary: summary?.grapePrimary,
+        style: summary?.style,
+        priceBand: summary?.priceBand,
+        pairing: summary?.pairing,
+        occasion: summary?.occasion,
         vintageYear: summary?.vintageYear,
         body: summary?.body,
         tannin: summary?.tannin,
         acidity: summary?.acidity,
         sweetness: summary?.sweetness,
+        finishLength: summary?.finishLength,
+        wineType: summary?.wineType,
         criticScoreNormalized: summary?.criticScoreNormalized,
         producerPrestige: summary?.producerPrestige,
         country: summary?.country,
         appellation: summary?.appellation,
+        classification: summary?.classification,
+        alcoholPct: summary?.alcoholPct,
+        drinkingWindowStart: summary?.drinkingWindowStart,
+        drinkingWindowEnd: summary?.drinkingWindowEnd,
+        priceUsd: summary?.priceUsd,
+        certifications: summary?.certifications,
+        soilType: summary?.soilType,
+        producerType: summary?.producerType,
         sparseRank: index + 1,
         retrievalFusionScore: hit.score,
         matchedConstraints: [],

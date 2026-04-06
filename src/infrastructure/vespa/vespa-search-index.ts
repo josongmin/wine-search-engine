@@ -126,6 +126,14 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   }
 
   const grapePrimary = trimNonEmpty(fields['grape_primary']);
+  const style = trimNonEmpty(fields['style']);
+  const priceBand = trimNonEmpty(fields['price_band']);
+  const pairing = Array.isArray(fields['pairing'])
+    ? fields['pairing'].filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const occasion = Array.isArray(fields['occasion'])
+    ? fields['occasion'].filter((value): value is string => typeof value === 'string')
+    : undefined;
 
   // Epic 15: Wine attributes
   const vintageYear = typeof fields['vintage_year'] === 'number' ? fields['vintage_year'] : undefined;
@@ -133,6 +141,8 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   const tannin = typeof fields['tannin'] === 'number' ? fields['tannin'] : undefined;
   const acidity = typeof fields['acidity'] === 'number' ? fields['acidity'] : undefined;
   const sweetness = typeof fields['sweetness'] === 'number' ? fields['sweetness'] : undefined;
+  const finishLength = typeof fields['finish_length'] === 'number' ? fields['finish_length'] : undefined;
+  const wineType = trimNonEmpty(fields['wine_type']);
   const criticScoreNormalized = typeof fields['critic_score_normalized'] === 'number'
     ? fields['critic_score_normalized']
     : undefined;
@@ -141,6 +151,20 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
     : undefined;
   const country = trimNonEmpty(fields['country']);
   const appellation = trimNonEmpty(fields['appellation']);
+  const classification = trimNonEmpty(fields['classification']);
+  const alcoholPct = typeof fields['alcohol_pct'] === 'number' ? fields['alcohol_pct'] : undefined;
+  const drinkingWindowStart = typeof fields['drinking_window_start'] === 'number'
+    ? fields['drinking_window_start']
+    : undefined;
+  const drinkingWindowEnd = typeof fields['drinking_window_end'] === 'number'
+    ? fields['drinking_window_end']
+    : undefined;
+  const priceUsd = typeof fields['price_usd'] === 'number' ? fields['price_usd'] : undefined;
+  const certifications = Array.isArray(fields['certifications'])
+    ? fields['certifications'].filter((value): value is string => typeof value === 'string')
+    : undefined;
+  const soilType = trimNonEmpty(fields['soil_type']);
+  const producerType = trimNonEmpty(fields['producer_type']);
 
   const summary: RetrievalHitSummary = {
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
@@ -148,15 +172,29 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
     ...(region !== undefined ? { region } : {}),
     ...(searchTextEn !== undefined ? { searchTextEn } : {}),
     ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+    ...(style !== undefined ? { style } : {}),
+    ...(priceBand !== undefined ? { priceBand } : {}),
+    ...(pairing !== undefined ? { pairing } : {}),
+    ...(occasion !== undefined ? { occasion } : {}),
     ...(vintageYear !== undefined ? { vintageYear } : {}),
     ...(body !== undefined ? { body } : {}),
     ...(tannin !== undefined ? { tannin } : {}),
     ...(acidity !== undefined ? { acidity } : {}),
     ...(sweetness !== undefined ? { sweetness } : {}),
+    ...(finishLength !== undefined ? { finishLength } : {}),
+    ...(wineType !== undefined ? { wineType } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
     ...(producerPrestige !== undefined ? { producerPrestige } : {}),
     ...(country !== undefined ? { country } : {}),
     ...(appellation !== undefined ? { appellation } : {}),
+    ...(classification !== undefined ? { classification } : {}),
+    ...(alcoholPct !== undefined ? { alcoholPct } : {}),
+    ...(drinkingWindowStart !== undefined ? { drinkingWindowStart } : {}),
+    ...(drinkingWindowEnd !== undefined ? { drinkingWindowEnd } : {}),
+    ...(priceUsd !== undefined ? { priceUsd } : {}),
+    ...(certifications !== undefined ? { certifications } : {}),
+    ...(soilType !== undefined ? { soilType } : {}),
+    ...(producerType !== undefined ? { producerType } : {}),
   };
 
   return Object.keys(summary).length > 0 ? summary : undefined;

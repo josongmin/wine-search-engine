@@ -4,6 +4,7 @@ dist/
 coverage/
 .turbo/
 *.tsbuildinfo
+.tsbuildinfo.build
 
 # Environment & secrets
 .env

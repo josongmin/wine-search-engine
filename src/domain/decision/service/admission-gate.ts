@@ -150,7 +150,7 @@ export class AdmissionGate {
     //      `type` is an anchor signal ('anchor_similarity', 'anchor_match',
     //      or 'anchor_preserved') — the boolean flag alone is not sufficient;
     //      the trail must be substantiated (RFC-011 §11).
-    if (admissionContext?.requires_anchor_evidence === true) {
+    if (admissionContext.requires_anchor_evidence) {
       if (input.evidenceSummary.anchorEvidencePresent !== true) {
         return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
       }

@@ -356,8 +356,8 @@ export class DecisionEngine {
     }
 
     const admissionContext = deriveAdmissionContext(input);
-    const hasConstraints = admissionContext?.requires_constraint_evidence === true;
-    const hasAnchor = admissionContext?.requires_anchor_evidence === true;
+    const hasConstraints = admissionContext.requires_constraint_evidence;
+    const hasAnchor = admissionContext.requires_anchor_evidence;
 
     const gateResult: EvidenceGateResult = this.evidenceGate.check(
       state.status,

@@ -79,6 +79,14 @@ describe('UtilityScorer', () => {
       expect(result.isCorrectResolve).toBe(false);
     });
 
+    it('resolved with no expected entity id (hybrid / open-set) → correct resolve when engine resolves', () => {
+      const evalCase = makeEvalCase('resolved');
+      const result = scorer.score('resolved', ENTITY_A, evalCase);
+      expect(result.utilityScore).toBe(1.0);
+      expect(result.isCorrectResolve).toBe(true);
+      expect(result.isWrongResolve).toBe(false);
+    });
+
     it('safe abstain (genuinely ambiguous) → +0.4', () => {
       const evalCase = makeEvalCase('ambiguous');
       const result = scorer.score('ambiguous', undefined, evalCase);

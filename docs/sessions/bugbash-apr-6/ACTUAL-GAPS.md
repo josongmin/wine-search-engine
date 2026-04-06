@@ -19,6 +19,10 @@
 | **G-40** | `HybridUseCase`·`InterpretUseCase`·`ResolveUseCase` 모두 **`QueryEntrySecurityGate`** |
 | **G-43** | `toResolveRequest(..., requestId)` + `ResolveUseCase`에서 trace/`request_id` 반영 |
 | **G-48** | **`GET /openapi.json`** (`openapi.route.ts`) — 잔여 갭은 “계약 커버리지·문서화 수준” 수준 |
+| **G-01** | `Planner` 클래스·`parseConstraints` JSDoc — **NLMapper + 룰 추출**으로 정렬됨 (구 “placeholder” 서술 제거) |
+| **G-02** | `determineRetrievalMode`가 **`producer_browse` / `region_browse` / `no_match_detection`** 등 반환 (`planner.ts`) |
+| **G-08** | `BrowseRetriever` / `CompareRetriever` — **Vespa 필터·오버페치·다양성** 등 실제 검색 경로 (스텁 아님) |
+| **G-64** | 하이브리드 `CandidatePoolService`가 **`hardConstraintsToSparseFilterTokens`**로 Vespa 필터 토큰 정렬 (`browse`/`compare`와 동일 계약) |
 
 ---
 
@@ -26,10 +30,7 @@
 
 | ID | 한 줄 |
 |----|--------|
-| **G-01** | `Planner` JSDoc이 “constraints placeholder” — **실제는** `parseConstraints` (NLMapper+룰). **문서만 틀림** |
-| **G-02** | `determineRetrievalMode`가 `producer_browse` / `region_browse` / `no_match_detection` **미반환** |
-| **G-03** | 오프라인 eval `ENTITY_TARGET_TYPE_MAP` ↔ Epic 2 시나리오 A–H **의미 불일치** (슬라이스 메트릭 왜곡 가능) |
-| **G-08** | `BrowseRetriever`/`CompareRetriever` **컨테이너 배선은 됨**, **`browseProducer`/`browseRegion`/`compareToAnchor` 본문은 빈 배열 스텁** |
+| **G-03** | 골든 행에 **`retrieval_mode` 누락** 시 시나리오 문자만으로는 producer/region browse와 구분 불가 — `scripts/eval/entity-type.ts`는 **모드 우선**; 골든 데이터에 모드 채우기 권장 |
 | **G-09** | `ResultGrouper` — **정의만**, 응답 빌더/HTTP 경로 **미연결** |
 | **G-13** | `extractPairingConstraint` — **`pairing-extractor.ts` 정의만**, 검색 파이프라인 **미import** |
 | **G-14** | `mapping.ts` 등 Vespa 요약 필드 ↔ Epic 12 필드(`critic_proxy`·`pairing_tags` 등) **정합 미검/미매핑** 가능 |
@@ -77,8 +78,11 @@
 ## 재현 (빠른 확인)
 
 ```bash
-# G-02: planner가 browse/no_match를 반환하는지
-rg "return '(producer_browse|region_browse|no_match_detection)'" src/domain/query/service/planner.ts
+# G-02: planner가 browse/no_match 모드를 반환하는지
+rg "producer_browse|region_browse|no_match_detection" src/domain/query/service/planner.ts
+
+# G-64: CandidatePool이 sparse 필터 토큰 매퍼를 쓰는지
+rg "hardConstraintsToSparseFilterTokens" src/domain/retrieval/service/candidate-pool.ts
 
 # G-09: Grouper 연결 여부
 rg "ResultGrouper" src --glob '*.ts'

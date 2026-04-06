@@ -133,6 +133,31 @@ function hitSummaryFromDoc(doc: RetrievalDocument): RetrievalHitSummary {
     ...(doc.region.trim().length > 0 ? { region: doc.region.trim() } : {}),
     ...(searchSlice.length > 0 ? { searchTextEn: searchSlice } : {}),
     ...(grape !== undefined ? { grapePrimary: grape } : {}),
+    ...(doc.style.trim().length > 0 ? { style: doc.style.trim() } : {}),
+    ...(doc.priceBand.trim().length > 0 ? { priceBand: doc.priceBand.trim() } : {}),
+    ...(doc.pairing.length > 0 ? { pairing: [...doc.pairing] } : {}),
+    ...(doc.occasion.length > 0 ? { occasion: [...doc.occasion] } : {}),
+    ...(doc.vintageYear !== undefined ? { vintageYear: doc.vintageYear } : {}),
+    ...(doc.body !== undefined ? { body: doc.body } : {}),
+    ...(doc.tannin !== undefined ? { tannin: doc.tannin } : {}),
+    ...(doc.acidity !== undefined ? { acidity: doc.acidity } : {}),
+    ...(doc.sweetness !== undefined ? { sweetness: doc.sweetness } : {}),
+    ...(doc.finishLength !== undefined ? { finishLength: doc.finishLength } : {}),
+    ...(doc.wineType !== undefined ? { wineType: doc.wineType } : {}),
+    ...(doc.criticScoreNormalized !== undefined
+      ? { criticScoreNormalized: doc.criticScoreNormalized }
+      : {}),
+    ...(doc.producerPrestige !== undefined ? { producerPrestige: doc.producerPrestige } : {}),
+    ...(doc.country !== undefined ? { country: doc.country } : {}),
+    ...(doc.appellation !== undefined ? { appellation: doc.appellation } : {}),
+    ...(doc.classification !== undefined ? { classification: doc.classification } : {}),
+    ...(doc.alcoholPct !== undefined ? { alcoholPct: doc.alcoholPct } : {}),
+    ...(doc.drinkingWindowStart !== undefined ? { drinkingWindowStart: doc.drinkingWindowStart } : {}),
+    ...(doc.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: doc.drinkingWindowEnd } : {}),
+    ...(doc.priceUsd !== undefined ? { priceUsd: doc.priceUsd } : {}),
+    ...(doc.certifications !== undefined ? { certifications: [...doc.certifications] } : {}),
+    ...(doc.soilType !== undefined ? { soilType: doc.soilType } : {}),
+    ...(doc.producerType !== undefined ? { producerType: doc.producerType } : {}),
   };
 }
 

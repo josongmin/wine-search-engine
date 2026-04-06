@@ -67,6 +67,28 @@ export class UtilityScorer {
 
     // Resolved cases
     if (predictedStatus === 'resolved') {
+      // Gold label expects resolution but not a specific entity (e.g. hybrid / set queries).
+      if (evalCase.expectedStatus === 'resolved' && evalCase.expectedEntityId === undefined) {
+        return {
+          utilityScore: UTILITY_WEIGHTS.CORRECT_RESOLVE,
+          isCorrectResolve: true,
+          isWrongResolve: false,
+          isSafeAbstain: false,
+          isAvoidableAbstain: false,
+        };
+      }
+
+      // Gold says ambiguous — resolving to any entity is not a "wrong entity" wrong-resolve.
+      if (evalCase.expectedStatus === 'ambiguous') {
+        return {
+          utilityScore: UTILITY_WEIGHTS.AVOIDABLE_ABSTAIN,
+          isCorrectResolve: false,
+          isWrongResolve: false,
+          isSafeAbstain: false,
+          isAvoidableAbstain: false,
+        };
+      }
+
       const isCorrect = this.isEntityMatch(predictedEntityId, evalCase.expectedEntityId);
       if (isCorrect) {
         return {

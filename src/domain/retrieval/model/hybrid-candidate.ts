@@ -27,6 +27,18 @@ export interface HybridCandidate {
   /** Primary grape from index summary (cross-encoder passage). */
   readonly grapePrimary?: string | undefined;
 
+  /** Style descriptor propagated from retrieval summaries. */
+  readonly style?: string | undefined;
+
+  /** Price band propagated from retrieval summaries. */
+  readonly priceBand?: string | undefined;
+
+  /** Pairing suggestions propagated from retrieval summaries. */
+  readonly pairing?: readonly string[] | undefined;
+
+  /** Occasion suggestions propagated from retrieval summaries. */
+  readonly occasion?: readonly string[] | undefined;
+
   /** First year the wine enters its optimal drinking window (Epic 15). Optional. */
   readonly drinkingWindowStart?: number | undefined;
 
@@ -56,6 +68,12 @@ export interface HybridCandidate {
   /** Sweetness (1–5 ordinal scale). */
   readonly sweetness?: number | undefined;
 
+  /** Finish length in [0, 1] or normalized ordinal scale. */
+  readonly finishLength?: number | undefined;
+
+  /** Catalog wine type (e.g. red, white, sparkling). */
+  readonly wineType?: string | undefined;
+
   /** Critic score normalized from 0-100 to raw value (80–100 or 0 if absent). */
   readonly criticScoreNormalized?: number | undefined;
 
@@ -67,6 +85,24 @@ export interface HybridCandidate {
 
   /** Appellation/region (e.g. "Napa Valley"). */
   readonly appellation?: string | undefined;
+
+  /** Classification tier or legal designation. */
+  readonly classification?: string | undefined;
+
+  /** Alcohol percentage. */
+  readonly alcoholPct?: number | undefined;
+
+  /** Actual price in USD. */
+  readonly priceUsd?: number | undefined;
+
+  /** Certifications carried by the candidate wine. */
+  readonly certifications?: readonly string[] | undefined;
+
+  /** Vineyard soil type. */
+  readonly soilType?: string | undefined;
+
+  /** Producer archetype. */
+  readonly producerType?: string | undefined;
 
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
