@@ -33,6 +33,19 @@ RFCs under `docs/` remain the source of truth for behavior and terminology.
 - `npm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json`: export the OpenAPI bridge generated from route contracts
 - `npm run test:watchlist:pg`: run the real-Postgres watchlist storage integration test when `PG_TEST_URL` is set
 
+## Test Lanes
+
+- `npm run test:e2e:contract`: tiny HTTP-contract lane for route/schema surface checks
+- `npm run test:e2e:fast`: main in-memory fast lane used by PR CI
+- `npm run test:e2e:inmemory`: alias for the full in-memory e2e lane
+- `npm run test:e2e:vespa`: Vespa-backed e2e lane with setup and teardown included
+- `npm run test:quality:vespa`: Vespa-backed quality regression lane
+
+Practical rule:
+- use `contract` for fast protocol debugging
+- use `fast` or `inmemory` for normal local regression work
+- use `vespa` lanes only when validating live retrieval/ranking behavior
+
 ## HTTP Contract Surface
 
 - Declared route catalog: `src/interface/http/routes/http-route-contract-catalog.ts`

@@ -12,6 +12,11 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 | `npm run lint` / `npm run lint:fix` | ESLint (type-checked rules for `src/`) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test` | Vitest |
+| `npm run test:e2e:contract` | Contract-only HTTP surface checks |
+| `npm run test:e2e:fast` | Main in-memory fast e2e lane used in CI |
+| `npm run test:e2e:inmemory` | Alias for the full in-memory e2e lane |
+| `npm run test:e2e:vespa` | Vespa-backed e2e lane with setup/teardown |
+| `npm run test:quality:vespa` | Vespa-backed quality regression lane |
 
 ## Architecture (short)
 
