@@ -376,7 +376,7 @@ Condensed **feature checklist** (pipeline stages, endpoints, and algorithms are 
 | `vespa/app/` | Vespa schema (`schemas/`), `services.xml`, `hosts.xml`, query profiles |
 | `services/reranker/` | Python FastAPI reranker image (Compose) |
 | `data/` | Eval queries, baselines, smoke predictions (large files — review before commit) |
-| `docs/` | RFCs, plans, runbooks (`docs/RFC-*.md`, `docs/plans/`, …) |
+| `docs/` | RFCs, plans, runbooks; **`docs/archive/`** (dated note dumps); **`docs/sessions/`** (e.g. bug bash) |
 | `models/` | Optional ONNX / model bundles (see drinking-window docs) |
 | `docker-compose.yml` | Full dev stack (**project `wine-search-dev`**) |
 | `docker-compose.test.yml` | Ephemeral test DB / alt ports (**project `wine-search-test`**) |
@@ -545,6 +545,8 @@ Jobs include **lint**, **typecheck**, **unit**, **integration**, **watchlist**, 
 - **`docs/RFC-*.md`** — protocol and behavior (authoritative for edge cases).
 - **`CLAUDE.md`** — short architecture + command cheat sheet.
 - **`docs/eval-baseline-runbook.md`** — refreshing / asserting offline & noisy baselines.
+- **`docs/archive/2026-04-root-notes/`** — archived epic/debugging/wave/task notes (moved from repo root).
+- **`docs/sessions/bugbash-apr-6/`** — Apr 2026 bug bash audit and remediation backlog.
 
 **Reading order (new hires):** Quick start → Document map → Bootstrap & Docker → Architecture + HTTP flow → Evaluation + Tests → RFCs for your area.
 

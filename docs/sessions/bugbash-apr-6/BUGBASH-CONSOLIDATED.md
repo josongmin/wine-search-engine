@@ -222,7 +222,7 @@
 | `AUDIT-SNAPSHOT.md` | **삭제 가능** | FINDINGS-MATRIX의 순수 중복 |
 | `PLANS-GAP-AUDIT.md` | 아카이브 | RC-13, RC-14로 흡수 |
 | `README.md` | **대체됨** | 이 파일이 새 진입점 |
-| `bugbash-apr-6` | **삭제 가능** | 빈 마커 파일 |
+| `docs/sessions/bugbash-apr-6` | **삭제 가능** | 빈 마커 파일 |
 
 ---
 

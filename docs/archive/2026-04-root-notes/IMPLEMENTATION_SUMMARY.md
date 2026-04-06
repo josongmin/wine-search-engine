@@ -88,7 +88,7 @@ scripts/ltr/
 docs/
 ├── EPIC-6-EMBEDDING-FINETUNING.md   (comprehensive guide)
 
-Root:
+docs/archive/2026-04-root-notes/
 ├── EPIC-6-QUICKSTART.md             (quick reference)
 └── IMPLEMENTATION_SUMMARY.md        (this file)
 ```

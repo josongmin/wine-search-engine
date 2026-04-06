@@ -1,4 +1,4 @@
-# bugbash-apr-6
+# bugbash-apr-6 (`docs/sessions/bugbash-apr-6`)
 
 `docs/plans/apr-5-v0.1`·`apr-5-v0.2`·`apr-6-v0.3`(Epic 18) 및 실제 코드·CI·`package.json`을 대조한 **빵꾸(갭)·보완점** 기록소입니다.
 
