@@ -73,6 +73,9 @@ function makeRankedResult(entityId: string, label: string): RankedResult {
       uncertaintyPenalty: 0,
     },
     evidenceItems: [],
+    matchedConstraints: [],
+    unmetConstraints: [],
+    inferredConstraints: [],
   };
 }
 
