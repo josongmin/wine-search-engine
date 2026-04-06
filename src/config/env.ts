@@ -69,6 +69,8 @@ const envSchema = z.object({
   RERANKER_SERVICE_URL: z.string().url().default('http://localhost:8082'),
   /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
   RERANK_BLEND_SCALE: z.coerce.number().min(0).max(1).default(0.7),
+  /** Per-request HTTP timeout for reranker API calls (AbortSignal). */
+  RERANKER_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
   LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
@@ -196,6 +198,7 @@ function buildConfig(parsed: EnvVars) {
     reranker: {
       url: parsed.RERANKER_SERVICE_URL,
       blendScale: parsed.RERANK_BLEND_SCALE,
+      httpTimeoutMs: parsed.RERANKER_HTTP_TIMEOUT_MS,
     },
 
     /** Learned matcher service settings (optional). */

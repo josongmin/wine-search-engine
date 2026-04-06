@@ -36,6 +36,10 @@ export {
   type FeedbackQualityIssue,
 } from './service/feedback-processor.js';
 export {
+  FeedbackTTLEnforcer,
+  type TTLEnforcementResult,
+} from './service/feedback-ttl-enforcer.js';
+export {
   AliasProposer,
   type AliasProposerConfig,
   type ExistingAliasChecker,

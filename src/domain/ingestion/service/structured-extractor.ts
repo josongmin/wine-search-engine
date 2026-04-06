@@ -10,6 +10,7 @@ import { nanoid } from 'nanoid';
 
 import type { CanonicalizationCandidate, ExtractedFields } from '../model/canonicalization-candidate.js';
 import type { RawSourceRecord } from '../model/raw-source-record.js';
+import { detectContamination } from './contamination-detector.js';
 import { normalizeField, normalizeKoreanText, normalizeVolume, normalizeYear } from './field-normalizer.js';
 import { stripNoiseTokens } from './noise-stripper.js';
 
@@ -62,15 +63,38 @@ export function extract(record: RawSourceRecord): CanonicalizationCandidate {
   // Step 5: Compute raw parsing confidence
   const parsingConfidence = computeParsingConfidence(extracted);
 
+  // Step 6: Marketplace title contamination vs structured label (RFC-002 §5.4)
+  const canonicalForContamination = buildCanonicalLabelForContamination(
+    extracted,
+    normalizedTitle,
+  );
+  const contamination = detectContamination(record.rawTitle, canonicalForContamination);
+  const mergedNoiseFlags = contamination.flagged
+    ? [...noiseFlags, 'marketplace_contamination_suspected']
+    : [...noiseFlags];
+
   return {
     candidateId: nanoid(),
     sourceRecordId: record.sourceRecordId,
     normalizedTitle,
     extracted,
-    noiseFlags,
+    noiseFlags: mergedNoiseFlags,
     aliasCandidates,
     parsingConfidence,
   };
+}
+
+function buildCanonicalLabelForContamination(
+  extracted: ExtractedFields,
+  fallbackTitle: string,
+): string {
+  const parts = [extracted.producer, extracted.wineLabel].filter(
+    (p): p is string => p !== undefined && p.trim().length > 0,
+  );
+  if (parts.length > 0) {
+    return parts.join(' ').trim();
+  }
+  return fallbackTitle;
 }
 
 /**

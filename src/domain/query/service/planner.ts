@@ -1,4 +1,5 @@
 import type { QueryClass, ConstraintBundle } from '../../shared/types/index.js';
+import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
@@ -23,6 +24,7 @@ import {
   detectQueryIntent,
   EXACT_ANCHOR_CONFIDENCE,
 } from './planner-intent-detection.js';
+import { extractAllPairingConstraints } from './pairing-extractor.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -143,8 +145,11 @@ export class Planner {
       anchors,
     );
 
-    // 6. Parse constraints.
-    const constraints = await this.parseConstraints(normalizedQuery);
+    // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
+    const constraints = this.mergePairingIntoBundle(
+      await this.parseConstraints(normalizedQuery),
+      normalizedQuery,
+    );
 
     // 7. Build expansions.
     const baseExpansions = this.expansionBuilder.build(
@@ -434,6 +439,32 @@ export class Planner {
    * query and probes each against the mapping table. Matched constraints are
    * classified as hard (body, sweetness, etc.) or soft (price_band, occasion).
    */
+  /**
+   * Adds soft `pairing` constraints from the pairing taxonomy when the query
+   * mentions foods or occasions (e.g. salmon → pairing tag for retrieval).
+   */
+  private mergePairingIntoBundle(
+    bundle: ConstraintBundle,
+    normalizedQuery: string,
+  ): ConstraintBundle {
+    const tags = extractAllPairingConstraints(normalizedQuery);
+    if (tags.length === 0) {
+      return bundle;
+    }
+    const extraSoft: NormalizedConstraint[] = tags.map((tag) => ({
+      attribute: 'pairing',
+      operator: 'in',
+      value: [tag],
+      source_phrase: normalizedQuery,
+      confidence: 0.88,
+    }));
+    return {
+      hard: bundle.hard,
+      soft: [...bundle.soft, ...extraSoft],
+      inferred: bundle.inferred,
+    };
+  }
+
   private async parseConstraints(
     normalizedQuery: string,
   ): Promise<ConstraintBundle> {

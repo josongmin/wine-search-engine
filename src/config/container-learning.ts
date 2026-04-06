@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { FeedbackTTLEnforcer } from '../domain/learning/service/feedback-ttl-enforcer.js';
 import { FeedbackProcessor } from '../domain/learning/service/feedback-processor.js';
 import { AliasProposer } from '../domain/learning/service/alias-proposer.js';
 import type { ExistingAliasChecker } from '../domain/learning/service/alias-proposer.js';
@@ -13,6 +14,8 @@ export interface LearningContainerServices {
   readonly proposalStore: ProposalStore | null;
   readonly feedbackProcessor: FeedbackProcessor | null;
   readonly aliasProposer: AliasProposer | null;
+  /** RFC-010 §8 retention policy; requires Postgres feedback store. */
+  readonly feedbackTtlEnforcer: FeedbackTTLEnforcer | null;
 }
 
 function buildPgAliasChecker(pool: Pool): ExistingAliasChecker {
@@ -40,12 +43,14 @@ export function buildLearningContainerServices(
       proposalStore: null,
       feedbackProcessor: null,
       aliasProposer: null,
+      feedbackTtlEnforcer: null,
     };
   }
 
   const feedbackStore = new PgFeedbackStore(pool);
   const proposalStore = new PgProposalStore(pool);
   const feedbackProcessor = new FeedbackProcessor(feedbackStore);
+  const feedbackTtlEnforcer = new FeedbackTTLEnforcer(feedbackStore);
   const aliasChecker = buildPgAliasChecker(pool);
   const aliasProposer = new AliasProposer(proposalStore, aliasChecker);
 
@@ -54,5 +59,6 @@ export function buildLearningContainerServices(
     proposalStore,
     feedbackProcessor,
     aliasProposer,
+    feedbackTtlEnforcer,
   };
 }

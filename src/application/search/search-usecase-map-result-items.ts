@@ -54,9 +54,9 @@ export async function mapRankedResultsToResultItems(
   });
 
   return rankedResults.map((r) => {
-    const matchedConstraints = r.matchedConstraints ?? [];
-    const unmetConstraints = r.unmetConstraints ?? [];
-    const inferredConstraints = r.inferredConstraints ?? [];
+    const matchedConstraints = r.matchedConstraints;
+    const unmetConstraints = r.unmetConstraints;
+    const inferredConstraints = r.inferredConstraints;
     let drinkingWindowBlock: DrinkingWindowBlock | undefined;
 
     if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined) {

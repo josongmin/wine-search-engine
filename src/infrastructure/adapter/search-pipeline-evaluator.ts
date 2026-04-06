@@ -5,12 +5,35 @@
  * enabling RFC-009 evaluation pipeline integration.
  */
 
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
+import type { EvalCase } from '../../domain/evaluation/model/eval-case.js';
 import type {
   SearchPipelinePort,
   SearchPipelineOutput,
 } from '../../domain/evaluation/service/eval-runner.js';
-import type { QueryClass, DecisionStatus } from '../../domain/shared/types/index.js';
-import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
+import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+
+const log = bootstrapLogger.child({ component: 'SearchPipelineEvaluator' });
+
+const FAILED_EVAL_PIPELINE_SNAPSHOT: DecisionSnapshot = {
+  model_versions: {},
+  index_versions: {},
+  policy_rule_version: '1',
+  threshold_profile_id: 'default',
+  planner_version: '1',
+  feature_flags: {},
+};
+
+function failedEvalOutput(latencyMs: number): SearchPipelineOutput {
+  return {
+    predictedStatus: 'failed',
+    decisionConfidence: 0,
+    evidenceItems: [],
+    latencyMs,
+    decisionSnapshot: FAILED_EVAL_PIPELINE_SNAPSHOT,
+  };
+}
 
 /**
  * Adapter that exposes SearchUseCase as a SearchPipelinePort for evaluation.
@@ -27,11 +50,15 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
   /**
    * Executes a single query through the search pipeline and returns
    * the output in evaluation format.
+   *
+   * Gold-set `queryClass` is forwarded for observability; the live search
+   * execution path still uses planner-derived classification (no eval override).
    */
   async execute(
     query: string,
-    _queryClass: QueryClass,
+    queryClass: EvalCase['queryClass'],
   ): Promise<SearchPipelineOutput> {
+    log.debug({ queryClass }, 'eval search pipeline execute');
     const startMs = Date.now();
 
     try {
@@ -50,20 +77,7 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
 
       // Evaluation always targets standard search queries
       if (rawResponse.queryType !== 'search') {
-        return {
-          predictedStatus: 'failed',
-          decisionConfidence: 0,
-          evidenceItems: [],
-          latencyMs,
-          decisionSnapshot: {
-            model_versions: {},
-            index_versions: {},
-            policy_rule_version: '1',
-            threshold_profile_id: 'default',
-            planner_version: '1',
-            feature_flags: {},
-          },
-        };
+        return failedEvalOutput(latencyMs);
       }
       const response = rawResponse;
 
@@ -74,12 +88,14 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       const predictedEntityId = topResult?.entity.entityId;
       const evidenceItems = topResult?.evidenceItems ?? [];
 
-      const topResultScoreComponents = topResult ? {
-        semantic: topResult.match.scoreComponents.semantic,
-        popularity: topResult.match.scoreComponents.popularity,
-        attributeAlignment: topResult.match.scoreComponents.attribute,
-        preferenceAlignment: topResult.match.scoreComponents.preferenceAlignment,
-      } : undefined;
+      const topResultScoreComponents = topResult
+        ? {
+            semantic: topResult.match.scoreComponents.semantic,
+            popularity: topResult.match.scoreComponents.popularity,
+            attributeAlignment: topResult.match.scoreComponents.attribute,
+            preferenceAlignment: topResult.match.scoreComponents.preferenceAlignment,
+          }
+        : undefined;
 
       const output: SearchPipelineOutput = {
         predictedStatus,
@@ -88,28 +104,18 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
         latencyMs,
         decisionSnapshot: decision.decisionSnapshot,
         ...(predictedEntityId !== undefined ? { predictedEntityId } : {}),
-        ...(topResultScoreComponents !== undefined ? { topResultScoreComponents } : {}),
+        ...(topResultScoreComponents !== undefined
+          ? { topResultScoreComponents }
+          : {}),
       };
       return output;
     } catch (error) {
-      // On exception, treat as failed decision with error latency
       const latencyMs = Date.now() - startMs;
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[SearchPipelineEvaluator] Query failed (${latencyMs}ms): ${message}`);
-      return {
-        predictedStatus: 'failed' as DecisionStatus,
-        decisionConfidence: 0,
-        evidenceItems: [],
-        latencyMs,
-        decisionSnapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1',
-          threshold_profile_id: 'default',
-          planner_version: '1',
-          feature_flags: {},
-        },
-      };
+      log.error(
+        { err: error, latencyMs, query, queryClass },
+        'eval pipeline query failed',
+      );
+      return failedEvalOutput(latencyMs);
     }
   }
 }

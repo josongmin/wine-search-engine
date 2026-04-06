@@ -1,5 +1,7 @@
 # Bug bash — `src/application/search` audit
 
+> **SOTA++ 요약**: **§0** = 병렬 레인·심각도·DoD·안티패턴(운영 메타). **§3 / §6** = RC·WC 루트 코어스(기술 본문). 스프린트 할당은 §0.2만 봐도 됨.
+
 `src/application/search` 하위 **전체 감사** 결과와 **문제점·남은 과제**를 모았다. **`src/application/watchlist`·`src/application/drinking-window` 감사는 §6.**
 
 **범위**: 기본은 `src/application/search/**/*.ts` + 유스케이스 주입 `src/config/container-usecases.ts`. §6은 경계 모듈 보조.
@@ -7,6 +9,84 @@
 **최종 갱신**: 2026-04-06 (전체 감사 재실행 · 아래 항목 코드와 대조 확인)
 
 **구조**: §3·§6 남은 과제는 **루트 코어스(RC-*, WC-*)** 로 묶음 — 번호(3.1, 6.3…) 나열이 아니라 **원인별 한 방향 액션** 위주.
+
+---
+
+## 0. 병렬 실행 · 완료 정의 (SOTA 메타)
+
+**목표**: 패치를 한 줄씩 쌓지 않고, **트랙 단위로 병렬 착수**하고 **DoD로 끝을 명시**한다.
+
+### 0.1 심각도 × 영향 (우선순위 한 장)
+
+| 루트 | 유형 | 제품/보안 영향 | 기술 부채 |
+|------|------|----------------|-----------|
+| **WC-A** | 신뢰 경계 | **높음** — IDOR·주체 위조 가능 시 프로덕션 노출 불가 | 인증 붙이면 API 계약 전면 |
+| **RC-A** | 정합성 | **중~높음** — 리플레이·회귀 비교 의미 흔들림 | 스냅샷 빌더·비교 규칙 한 번에 고쳐야 함 |
+| **WC-B** | 정합성 | **중간** — 응답 품질·연도 불일치는 점진적 악화 | DTO·매퍼·유스케이스 동시 정리 |
+| **RC-B** | 기능 패리티 | **중간** — 라우트별 기대 불일치 | 매트릭스 확정 후 일괄 wiring |
+| **RC-C** | 운영성 | **낮음~중간** — 디버깅·HTTP 일관성 | 소수 에러 코드로 수렴 가능 |
+| **WC-C** | 무결성 | **낮음** (PG FK 있으면 DB가 보조) | 정책 한 번이면 끝 |
+| **RC-D / WC-D** | 유지보수 | 낮음 | 파일 단위 |
+
+### 0.2 병렬 레인 (동시에 가져갈 수 있는 조합)
+
+**파일/도메인 충돌이 적어 동시 착수에 좋은 조합:**
+
+| 레인 | 루트 | 주요 터치 영역 | 비고 |
+|------|------|----------------|------|
+| **L1** | RC-A | `replay.usecase.ts`, `search-usecase-decision-snapshot.ts`, `replay` 비교 | 제품/RFC와 **스냅샷 의미** 합의 선행 권장 |
+| **L2** | RC-B + 일부 RC-D | `hybrid.usecase.ts`, `decomposed-search`, `interpret`, `resolve`, OpenAPI | **기능 매트릭스** 문서 한 장 먼저 |
+| **L3** | RC-C | `decomposed-search.usecase.ts`, 도메인 에러 타입 | RC-A와 **거의 독립** — 병렬 가능 |
+| **L4** | WC-A | `watchlist.route.ts`, `watchlist.schema.ts`, `WatchlistService`, 인증 훅 | 검색 코드와 **경로 분리** — 병렬 가능 |
+| **L5** | WC-B | `search-usecase-map-result-items.ts`, `drinking-window.usecase.ts`, DTO | **WC-B는 L5 단일 PR**이 이상적 (쪼개면 또 패치) |
+| **L6** | WC-C | `watchlist.service.ts`, 스토리지 포트 | WC-A와 **나중에 맞춰도 됨**; 무결성만 먼저도 가능 |
+| **L7** | RC-D + WC-D | LTR, 캐시 가이드, watchlist 단위 테스트 | **언제든 병렬** |
+
+**직렬로 묶는 편이 나은 것**: **WC-B**(입력/출력 DTO·실패 정책)는 한 번에 설계 → 구현. **RC-A**(비교 제외 필드 vs SSOT)는 제품 결정 한 번 후 구현.
+
+### 0.3 루트 코어별 완료 정의 (DoD)
+
+- **RC-A DoD**: (1) “리플레이가 비교하는 스냅샷”과 “검색 응답 스냅샷”의 필드 의미가 문서에 표로 고정되거나 (2) 동일 빌더를 쓴다. `SNAPSHOT_MISMATCH`가 **의도된 것만** 난다는 회귀 테스트 또는 체크리스트.
+- **RC-B DoD**: 라우트 × (decomposed / SAT / 캐시 / …) **매트릭스**가 RFC 또는 이 문서에 있고, 코드·OpenAPI와 불일치 항목 0.
+- **RC-C DoD**: 해당 경로에 plain `Error` 0, DomainError(또는 합의된 타입) + 코드 + HTTP 매핑 테스트.
+- **RC-D DoD**: LTR·캐시 가이드 항목이 “완료” 또는 “의도적 유지”로 표시.
+
+- **WC-A DoD**: 인증된 주체만 본인 리소스 CRUD; `user_id` 스키마가 주체 모델과 일치; IDOR 재현 시나리오 테스트 실패(차단).
+- **WC-B DoD**: `targetYear`·critic·peak 노출 여부·실패 시 동작이 **한 타입/한 헬퍼**에서 결정되고, 매퍼는 그걸 호출만 함.
+- **WC-C DoD**: 로그 append 불변식이 코드 또는 DB 제약으로 보장되거나 문서화; `clear()`는 운영 경로에서 분리.
+- **WC-D DoD**: 앱 레이어 최소 1개 파일에 단위 테스트 또는 계약 테스트로 고정.
+
+### 0.4 의존성 (병렬 vs 직렬)
+
+```mermaid
+flowchart TB
+  subgraph search["§3 Search"]
+    direction TB
+    RCA["RC-A 스냅샷 SSOT"]
+    RCB["RC-B 라우트 매트릭스"]
+    RCC["RC-C DomainError"]
+    RCD["RC-D 로컬 부채"]
+  end
+  subgraph edge["§6 Watchlist / DW"]
+    direction TB
+    WCA["WC-A 인가"]
+    WCB["WC-B DW 관측 SSOT"]
+    WCC["WC-C 영속 무결성"]
+    WCD["WC-D 테스트·스타일"]
+  end
+```
+
+- **검색(§3)** 과 **워치리스트/음주창(§6)** 은 코드 경로가 다르므로 **팀·PR 단위로 병렬** 가능.
+- **판단 선행 권장(직렬이 덜 아픈 순서)**: RC-A·WC-B는 “의미/스키마” 합의 → 구현. WC-A 인가 모델이 잡혀야 “내 워치리스트” UX(WC-A 표의 ‘목록’)가 자연스럽게 닫힘.
+
+### 0.5 안티패턴 (점수 깎는 행위)
+
+- 동일 루트에서 나온 증상을 **파일마다 다른 숫자로만** 고치기.
+- RC-A에서 필드 하나만 맞추고 `recordsMatch`는 그대로 두기.
+- WC-B에서 `targetYear`만 넣고 critic 기본값·실패 무음은 나중에.
+- WC-A에서 라우트만 막고 서비스 레이어는 그대로 두기(우회 경로 남음).
+
+---
 
 ### 이번 실행에서 확인한 것 (요약)
 
@@ -139,11 +219,15 @@
 
 ## 5. 권장 처리 순서 (루트 코어스 기준)
 
+**병렬 할당은 §0.2 레인 표**를 쓴다. 아래는 **리스크 대비 권장 순서**(한 줄기로만 읽을 때).
+
 1. **RC-A**: 스냅샷 비교 SSOT 한 번에 고정(또는 비교 제외 필드 문서화) → shallow compare·policy 캐스트는 그 다음에만.
 2. **RC-B**: 검색 패밀리 **기능 매트릭스** 확정 → Hybrid / Decomposed / Resolve / Interpret wiring·문서를 한 번에.
 3. **RC-C**: decomposed 등 남은 plain `Error` → DomainError 승격을 한 규칙으로.
 4. **RC-D**: LTR·캐시 가이드 파일 등 로컬 부채.
-5. **§6 WC-A ~ WC-B**: Watchlist **인가 모델** + Drinking window **관측 컨텍스트 SSOT**(한 번에 잡는 게 `targetYear`/critic/실패 노출 패치를 반복하지 않게 함).
+5. **WC-A ~ WC-B**: Watchlist **인가 모델** + Drinking window **관측 컨텍스트 SSOT**(한 번에 잡는 게 `targetYear`/critic/실패 노출 패치를 반복하지 않게 함).
+
+**동시에 진행 예시**: (RC-C + RC-D + WC-D) 는 (RC-A + WC-A) 과 **다른 사람/브랜치**로 병렬 가능 — §0.1 심각도로 WC-A·RC-A에 리소스 우선 배정.
 
 ---
 
@@ -204,4 +288,4 @@
 
 ---
 
-*리팩터링 후 §3·§6를 루트 코어스 기준으로 다시 맞출 것.*
+*리팩터링 후 §3·§6·§0 DoD를 루트 코어스 기준으로 맞출 것.*

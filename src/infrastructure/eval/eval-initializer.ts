@@ -5,8 +5,11 @@
  * RFC-009: Complete evaluation framework integration.
  */
 
-import type { QueryClass } from '../../domain/shared/types/index.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import type { QueryClass } from '../../domain/shared/types/index.js';
+
+const log = bootstrapLogger.child({ component: 'EvalInitializer' });
 
 /**
  * Options for running evaluation.
@@ -50,22 +53,27 @@ export async function runEvaluation(
           }
         : undefined;
 
-    console.warn('[EvalInitializer] Starting evaluation run...');
+    log.warn('starting evaluation run');
     const report = await evalRunner.run(filter);
 
     if (options?.verbose) {
-      console.warn('[EvalInitializer] Evaluation complete:');
-      console.warn(`  Cases evaluated: ${report.caseCount}`);
-      console.warn(`  Overall utility: ${report.overallMetrics.decisionUtility.toFixed(3)}`);
-      console.warn(`  Wrong resolve rate: ${report.overallMetrics.wrongResolveRate.toFixed(3)}`);
-      console.warn(`  Release gates passed: ${report.releaseGateResult.passed}`);
-
-      if (report.flaggedSlices.length > 0) {
-        console.warn(`  Flagged slices: ${report.flaggedSlices.length}`);
-        for (const slice of report.flaggedSlices) {
-          console.warn(`    - ${slice.sliceTag} (${slice.metric}): ${slice.sliceValue.toFixed(3)} vs ${slice.overallValue.toFixed(3)} (Δ${slice.delta.toFixed(3)})`);
-        }
-      }
+      log.warn(
+        {
+          caseCount: report.caseCount,
+          decisionUtility: report.overallMetrics.decisionUtility,
+          wrongResolveRate: report.overallMetrics.wrongResolveRate,
+          releaseGatesPassed: report.releaseGateResult.passed,
+          flaggedSliceCount: report.flaggedSlices.length,
+          flaggedSlices: report.flaggedSlices.map((slice) => ({
+            sliceTag: slice.sliceTag,
+            metric: slice.metric,
+            sliceValue: slice.sliceValue,
+            overallValue: slice.overallValue,
+            delta: slice.delta,
+          })),
+        },
+        'evaluation complete',
+      );
     }
 
     const passed = report.releaseGateResult.passed;
@@ -73,7 +81,7 @@ export async function runEvaluation(
       ? `✓ Evaluation passed (${report.caseCount} cases)`
       : `✗ Evaluation failed: release gates did not pass`;
 
-    console.warn(`[EvalInitializer] ${message}`);
+    log.warn({ message, passed }, 'evaluation finished');
 
     return {
       success: passed,
@@ -82,7 +90,7 @@ export async function runEvaluation(
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`[EvalInitializer] Evaluation failed: ${errorMessage}`);
+    log.error({ err: error }, 'evaluation failed');
     return {
       success: false,
       caseCount: 0,

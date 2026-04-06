@@ -8,17 +8,10 @@
 
 import { config } from '../../config/env.js';
 import type { EmbeddingServicePort } from '../../domain/retrieval/port/embedding-service.port.js';
-
-function isAbortError(error: unknown): boolean {
-  if (error instanceof Error && error.name === 'AbortError') {
-    return true;
-  }
-  return (
-    typeof DOMException !== 'undefined' &&
-    error instanceof DOMException &&
-    error.name === 'AbortError'
-  );
-}
+import {
+  fetchWithTimeout,
+  isAbortError,
+} from '../http/fetch-with-timeout.js';
 
 // ---------------------------------------------------------------------------
 // Response shape
@@ -85,22 +78,6 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
     this.httpTimeoutMs = options?.httpTimeoutMs ?? config.embedding.httpTimeoutMs;
   }
 
-  private async fetchWithTimeout(
-    url: string,
-    init: RequestInit,
-    timeoutMs: number,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const id = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
-    try {
-      return await fetch(url, { ...init, signal: controller.signal });
-    } finally {
-      clearTimeout(id);
-    }
-  }
-
   // -------------------------------------------------------------------------
   // embed
   // -------------------------------------------------------------------------
@@ -162,7 +139,7 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
 
     let response: Response;
     try {
-      response = await this.fetchWithTimeout(
+      response = await fetchWithTimeout(
         endpoint,
         {
           method: 'POST',

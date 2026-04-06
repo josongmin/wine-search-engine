@@ -5,10 +5,21 @@
  * parallel entity resolution + merging results.
  */
 
+import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { ComparisonSearchResponse, ComparisonEntity } from '../../domain/response/model/comparison-response.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
 import type { DecomposedSearchParentContext } from './port/search-route-usecases.port.js';
+
+export class UnexpectedDecomposedResponseError extends DomainError {
+  constructor() {
+    super(
+      'UNEXPECTED_DECOMPOSED_RESPONSE',
+      'Decomposed search expected standard search responses but received a comparison response.',
+    );
+    this.name = 'UnexpectedDecomposedResponseError';
+  }
+}
 
 export class DecomposedSearchUseCase {
   constructor(private readonly searchUseCase: SearchExecutorPort) {}
@@ -53,7 +64,7 @@ export class DecomposedSearchUseCase {
 
     // Sub-queries should never themselves be comparison queries; narrow via discriminant
     if (rawResultA.queryType !== 'search' || rawResultB.queryType !== 'search') {
-      throw new Error('Decomposed sub-query returned unexpected comparison response');
+      throw new UnexpectedDecomposedResponseError();
     }
     const resultA = rawResultA;
     const resultB = rawResultB;

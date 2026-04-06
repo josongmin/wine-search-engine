@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DecomposedSearchUseCase } from '../../../../src/application/search/decomposed-search.usecase.js';
+import {
+  DecomposedSearchUseCase,
+  UnexpectedDecomposedResponseError,
+} from '../../../../src/application/search/decomposed-search.usecase.js';
 import type { SearchExecutorPort } from '../../../../src/application/search/port/search-executor.port.js';
 
 describe('DecomposedSearchUseCase', () => {
@@ -57,5 +60,49 @@ describe('DecomposedSearchUseCase', () => {
       },
       'req-compare-b',
     );
+  });
+
+  it('throws a typed domain error when a sub-query returns a comparison response', async () => {
+    const searchUseCase: SearchExecutorPort = {
+      execute: vi.fn().mockResolvedValueOnce({
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'resolved',
+        },
+        results: [],
+        meta: {
+          queryTimeMs: 5,
+          route: 'entity',
+          version: '1',
+          engine_schema_version: 'search_response_v1',
+        },
+      } as never).mockResolvedValueOnce({
+        queryType: 'comparison',
+      } as never),
+    };
+
+    const useCase = new DecomposedSearchUseCase(searchUseCase);
+
+    await expect(
+      useCase.execute(
+        ['Opus One', 'Screaming Eagle'],
+        'compare',
+        'Opus One vs Screaming Eagle',
+        'req-compare',
+        100,
+      ),
+    ).rejects.toBeInstanceOf(UnexpectedDecomposedResponseError);
+
+    await expect(
+      useCase.execute(
+        ['Opus One', 'Screaming Eagle'],
+        'compare',
+        'Opus One vs Screaming Eagle',
+        'req-compare',
+        100,
+      ),
+    ).rejects.toMatchObject({
+      code: 'UNEXPECTED_DECOMPOSED_RESPONSE',
+    });
   });
 });

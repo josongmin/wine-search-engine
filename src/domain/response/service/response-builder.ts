@@ -5,6 +5,8 @@ import type { ResultItem } from '../model/result-item.js';
 import type { ClarificationPayload } from '../model/clarification.js';
 import type { CounterfactualReject, ResponseMeta } from '../model/counterfactual.js';
 import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-response.js';
+import type { GroupedResult } from './result-grouper.js';
+import { ResultGrouper } from './result-grouper.js';
 import { deterministicHash } from '../../shared/utils/hash.js';
 
 /**
@@ -58,6 +60,8 @@ const NO_EVIDENCE_REASON = 'no_evidence_available';
  * - Attaches response-level metadata.
  */
 export class ResponseBuilder {
+  private readonly resultGrouper = new ResultGrouper();
+
   /**
    * Build a {@link SearchResponseV1} from the given parameters.
    *
@@ -105,7 +109,11 @@ export class ResponseBuilder {
 
     // Extract LLM envelope fields (Epic 9)
     const retrievalMode = params.queryPlan?.retrievalMode;
-    const resultType = this.computeResultType(enrichedResults, params.decisionOutput.decisionStatus);
+    const resultType = this.computeResultType(
+      enrichedResults,
+      params.decisionOutput.decisionStatus,
+      params.queryPlan,
+    );
     const parsedConstraints = params.queryPlan ? this.buildParsedConstraints(params.queryPlan) : undefined;
     const abstainReason = this.extractAbstainReason(params.decisionOutput);
 
@@ -212,17 +220,14 @@ export class ResponseBuilder {
 
   /**
    * Compute resultType from the results and decision status (Epic 9).
-   * Returns:
-   * - 'single_entity': exactly 1 result
-   * - 'entity_set': 2+ results with resolved status
-   * - 'comparison': results present with comparison intent detected
-   * - 'no_match': zero results or failed status
-   * - undefined: if none of the above applies
+   * When the planner inferred a {@link QueryPlanV1.targetEntityType}, uses
+   * {@link ResultGrouper} to emit Epic 8 set types (producer_set, etc.).
    */
   private computeResultType(
     results: readonly ResultItem[],
     decisionStatus: string,
-  ): 'single_entity' | 'entity_set' | 'comparison' | 'no_match' | undefined {
+    queryPlan?: QueryPlanV1 | undefined,
+  ): SearchResponseV1['resultType'] {
     // No match case
     if (results.length === 0 || decisionStatus === 'failed') {
       return 'no_match';
@@ -233,8 +238,19 @@ export class ResponseBuilder {
       return 'single_entity';
     }
 
-    // Multiple entities case
+    // Multiple results: optional grouping by planner target type (Epic 8)
+    if (queryPlan?.targetEntityType !== undefined) {
+      const grouped = this.resultGrouper.group(results, queryPlan.targetEntityType);
+      return this.mapGroupedResultTypeToResponse(grouped.resultType);
+    }
+
     return 'entity_set';
+  }
+
+  private mapGroupedResultTypeToResponse(
+    t: GroupedResult['resultType'],
+  ): SearchResponseV1['resultType'] {
+    return t;
   }
 
   /**

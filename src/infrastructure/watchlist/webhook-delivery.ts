@@ -6,7 +6,10 @@
  */
 
 import { createHmac, randomUUID } from 'crypto';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
+
+const log = bootstrapLogger.child({ component: 'WebhookDelivery' });
 
 /**
  * Webhook payload structure sent to the callback URL.
@@ -121,7 +124,10 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
           errorMessage,
           deliveredAt: new Date(),
         });
-        console.error(`Webhook delivery attempt ${attemptNumber} failed for ${entry.id}:`, err);
+        log.warn(
+          { err, watchlistId: entry.id, attempt: attemptNumber, entityId: entry.entityId },
+          'webhook delivery attempt failed (will retry if attempts remain)',
+        );
       }
 
       // Wait before retry (except after last attempt)

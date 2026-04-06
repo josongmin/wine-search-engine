@@ -12,6 +12,10 @@ import type {
   RerankCandidate,
   RerankResult,
 } from '../../domain/ranking/port/reranker.port.js';
+import {
+  fetchWithTimeout,
+  isAbortError,
+} from '../http/fetch-with-timeout.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
 
@@ -60,11 +64,14 @@ function isRerankApiResultArray(v: unknown): v is RerankApiResult[] {
  */
 export class HttpCrossEncoderReranker implements RerankerPort {
   private readonly url: string;
+  private readonly httpTimeoutMs: number;
 
   constructor(options?: {
     readonly url?: string;
+    readonly httpTimeoutMs?: number;
   }) {
     this.url = options?.url ?? config.reranker.url;
+    this.httpTimeoutMs = options?.httpTimeoutMs ?? config.reranker.httpTimeoutMs;
   }
 
   // -------------------------------------------------------------------------
@@ -94,11 +101,25 @@ export class HttpCrossEncoderReranker implements RerankerPort {
     const texts = candidates.map((c) => c.text);
     const endpoint = `${this.url}/rerank`;
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, texts }),
-    });
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query, texts }),
+        },
+        this.httpTimeoutMs,
+      );
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw new Error(
+          `Reranker service: request timed out after ${this.httpTimeoutMs}ms`,
+        );
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
