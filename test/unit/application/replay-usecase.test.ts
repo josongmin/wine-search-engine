@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  MissingSnapshotError,
   ReplayUseCase,
   SnapshotMismatchError,
   UnexpectedReplayResponseError,
@@ -194,6 +195,16 @@ describe('ReplayUseCase', () => {
   });
 
   describe('error properties', () => {
+    it('MissingSnapshotError has code MISSING_SNAPSHOT', async () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCase(inner);
+
+      await expect(useCase.execute({
+        query: 'Opus One 2018',
+        decision_snapshot: null as unknown as DecisionSnapshot,
+      }, 'req-006b')).rejects.toBeInstanceOf(MissingSnapshotError);
+    });
+
     it('SnapshotMismatchError has code SNAPSHOT_MISMATCH and no retryable flag', async () => {
       const inner = makeSearchUseCase();
       const useCase = makeReplayUseCase(inner);

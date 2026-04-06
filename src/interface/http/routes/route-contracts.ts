@@ -33,12 +33,24 @@ import {
 } from '../schemas/feedback.schema.js';
 
 type ResponseSchema = z.ZodTypeAny | null;
+type SearchRouteCapability =
+  | 'security'
+  | 'decomposition'
+  | 'planner'
+  | 'SAT'
+  | 'cache'
+  | 'route_resolution'
+  | 'ranked_post_route'
+  | 'forced_hybrid_retrieval'
+  | 'planner_only'
+  | 'resolver_only';
 
 export interface HttpRouteContract {
   readonly operationId: string;
   readonly body?: z.ZodTypeAny;
   readonly params?: z.ZodTypeAny;
   readonly headers?: z.ZodTypeAny;
+  readonly capabilities?: readonly SearchRouteCapability[];
   readonly responses: Readonly<Record<number, ResponseSchema>>;
 }
 
@@ -120,6 +132,15 @@ export const ClaudeToolsListRouteContract = defineRouteContract({
 export const SearchRouteContract = defineRouteContract({
   operationId: 'search.execute',
   body: SearchRequestSchema,
+  capabilities: [
+    'security',
+    'decomposition',
+    'planner',
+    'SAT',
+    'cache',
+    'route_resolution',
+    'ranked_post_route',
+  ],
   responses: {
     200: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
     400: ErrorResponseSchema,
@@ -132,6 +153,15 @@ export const SearchRouteContract = defineRouteContract({
 export const HybridRouteContract = defineRouteContract({
   operationId: 'search.hybrid',
   body: HybridRequestSchema,
+  capabilities: [
+    'security',
+    'decomposition',
+    'planner',
+    'SAT',
+    'cache',
+    'forced_hybrid_retrieval',
+    'ranked_post_route',
+  ],
   responses: {
     200: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
     400: ErrorResponseSchema,
@@ -144,6 +174,10 @@ export const HybridRouteContract = defineRouteContract({
 export const InterpretRouteContract = defineRouteContract({
   operationId: 'search.interpret',
   body: InterpretRequestSchema,
+  capabilities: [
+    'security',
+    'planner_only',
+  ],
   responses: {
     200: InterpretResponseSchema,
     400: ErrorResponseSchema,
@@ -156,6 +190,12 @@ export const InterpretRouteContract = defineRouteContract({
 export const ResolveRouteContract = defineRouteContract({
   operationId: 'entity.resolve',
   body: ResolveRequestSchema,
+  capabilities: [
+    'security',
+    'planner',
+    'SAT',
+    'resolver_only',
+  ],
   responses: {
     200: ResolveResponseSchema,
     400: ErrorResponseSchema,

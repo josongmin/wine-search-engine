@@ -2,7 +2,13 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { SnapshotMismatchError } from '../../../../src/application/search/replay.usecase.js';
+import {
+  DeterminismViolationError,
+  SnapshotMismatchError,
+  UnexpectedReplayResponseError,
+} from '../../../../src/application/search/replay.usecase.js';
+import { UnexpectedDecomposedResponseError } from '../../../../src/application/search/decomposed-search.usecase.js';
+import { BlockingMissError } from '../../../../src/domain/shared/error/domain-error.js';
 import {
   POLICY_BLOCKED_CODE,
   POLICY_BLOCKED_MESSAGE,
@@ -47,6 +53,22 @@ describe('errorHandler policy-blocked contract', () => {
           feature_flags: {},
         },
       );
+    });
+
+    app.get('/determinism-violation', async () => {
+      throw new DeterminismViolationError('expected-hash', 'actual-hash');
+    });
+
+    app.get('/blocking-miss', async () => {
+      throw new BlockingMissError('Candidate dropped before final decision.');
+    });
+
+    app.get('/unexpected-replay', async () => {
+      throw new UnexpectedReplayResponseError();
+    });
+
+    app.get('/unexpected-decomposed', async () => {
+      throw new UnexpectedDecomposedResponseError();
     });
 
     app.get('/unknown-error', async () => {
@@ -106,6 +128,60 @@ describe('errorHandler policy-blocked contract', () => {
     expect(body).toMatchObject({
       error: {
         code: 'SNAPSHOT_MISMATCH',
+        retryable: false,
+      },
+    });
+  });
+
+  it('maps DeterminismViolationError to a validated 409 error contract', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/determinism-violation',
+    });
+
+    expect(response.statusCode).toBe(409);
+    const body = response.json();
+    expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+    expect(body).toMatchObject({
+      error: {
+        code: 'DETERMINISM_VIOLATION',
+        retryable: false,
+      },
+    });
+  });
+
+  it('marks BLOCKING_MISS domain errors as retryable', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/blocking-miss',
+    });
+
+    expect(response.statusCode).toBe(500);
+    const body = response.json();
+    expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+    expect(body).toMatchObject({
+      error: {
+        code: 'BLOCKING_MISS',
+        retryable: true,
+      },
+    });
+  });
+
+  it.each([
+    ['/unexpected-replay', 'UNEXPECTED_REPLAY_RESPONSE'],
+    ['/unexpected-decomposed', 'UNEXPECTED_DECOMPOSED_RESPONSE'],
+  ])('maps %s to an exact validated 500 contract', async (url, code) => {
+    const response = await app.inject({
+      method: 'GET',
+      url,
+    });
+
+    expect(response.statusCode).toBe(500);
+    const body = response.json();
+    expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+    expect(body).toMatchObject({
+      error: {
+        code,
         retryable: false,
       },
     });

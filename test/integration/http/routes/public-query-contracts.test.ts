@@ -14,4 +14,35 @@ describe('public query route contracts', () => {
     expect(InterpretRouteContract.responses[403]).toBe(ErrorResponseSchema);
     expect(ResolveRouteContract.responses[403]).toBe(ErrorResponseSchema);
   });
+
+  it('pins the search-family capability matrix in route contract metadata', () => {
+    expect(SearchRouteContract.capabilities).toEqual([
+      'security',
+      'decomposition',
+      'planner',
+      'SAT',
+      'cache',
+      'route_resolution',
+      'ranked_post_route',
+    ]);
+    expect(HybridRouteContract.capabilities).toEqual([
+      'security',
+      'decomposition',
+      'planner',
+      'SAT',
+      'cache',
+      'forced_hybrid_retrieval',
+      'ranked_post_route',
+    ]);
+    expect(InterpretRouteContract.capabilities).toEqual([
+      'security',
+      'planner_only',
+    ]);
+    expect(ResolveRouteContract.capabilities).toEqual([
+      'security',
+      'planner',
+      'SAT',
+      'resolver_only',
+    ]);
+  });
 });

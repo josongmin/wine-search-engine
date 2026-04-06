@@ -327,9 +327,7 @@ describe('Search Pipeline Integration', () => {
       ).rejects.toMatchObject({ name: 'SnapshotMismatchError' });
     });
 
-    it('replay without decision_snapshot field throws MISSING_SNAPSHOT', async () => {
-      // Simulate null snapshot being passed — TypeScript won't allow this at
-      // compile time but the guard is a runtime check.
+    it('replay with a null decision_snapshot throws MISSING_SNAPSHOT', async () => {
       await expect(
         parts.container.replayUseCase.execute(
           {
@@ -340,7 +338,7 @@ describe('Search Pipeline Integration', () => {
           },
           'req-replay-3',
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({ code: 'MISSING_SNAPSHOT' });
     });
   });
 

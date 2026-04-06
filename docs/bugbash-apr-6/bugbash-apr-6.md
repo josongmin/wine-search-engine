@@ -19,11 +19,12 @@
 | Task | 상태 | 코드 기준 |
 |------|------|-----------|
 | **T10–T12** | **완료** | replay가 search 응답의 `decision_snapshot`을 우선 비교하고, nested `feature_flags`까지 계약 필드 기준 deep compare. legacy runtime snapshot은 호환 fallback으로만 유지. |
-| **T20–T22** | **부분 완료** | search/hybrid/interpret/resolve capability matrix를 문서·계약 기준으로 고정. Hybrid는 shared pre-route(`security + SAT + cache + decomposition`)를 공유, Interpret는 planner only, Resolve는 `security + SAT + resolver only`. |
+| **T20–T22** | **완료** | search/hybrid/interpret/resolve capability matrix를 문서·계약 기준으로 고정. Hybrid는 shared pre-route(`security + SAT + cache + decomposition`)를 공유, Interpret는 planner only, Resolve는 `security + planner + SAT + resolver only`이며 `queryBudget`도 공통 planner context로 전달. OpenAPI bridge에는 route capability metadata를 노출한다. |
 | **T40–T43** | **완료** | watchlist는 `X-Authenticated-Subject` 기반 subject-scoped CRUD/list/deliveries. `POST` body의 `user_id` 제거, `GET /v1/watchlist` 추가, cross-user는 `404`, missing subject는 `401`, delivery log append는 부모 존재 시에만 기록. |
 | **T50–T52** | **완료** | drinking-window는 canonical check DTO에 `targetYear`를 필수화하고, 결과 block에 optional `peakYear` 노출. predictor 실패는 block omit + warning log의 soft-fail. |
 | **T60** | **완료** | LTR rerank는 duplicate `entityId` overwrite 없이 stable bucket으로 보정. cache integration 파일은 runtime 코드가 아닌 documentation-only reference로 명시. |
-| **T90** | **진행 중** | 관련 unit/e2e/contract 회귀 테스트 추가. 전체 lane 검증은 `typecheck + targeted vitest` 기준으로 확인. |
+| **T30** | **완료** | replay determinism/hash mismatch는 `409 DETERMINISM_VIOLATION`으로 명시 매핑되고, generic search-family DomainError 및 `BLOCKING_MISS` retryability가 글로벌 HTTP error contract 테스트로 잠김. `MISSING_SNAPSHOT`은 replay use case runtime guard로 복구. |
+| **T90** | **완료** | 관련 unit/integration/contract 회귀 테스트 추가. `npm run typecheck`, `npm test`, `npm run verify:http-contracts` 기준으로 검증 완료. |
 
 ### 0A.1 Search-Family Matrix (fixed)
 

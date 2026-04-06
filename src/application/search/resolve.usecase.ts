@@ -57,6 +57,7 @@ export class ResolveUseCase {
         query: effectiveQuery,
         context: request.context,
         sessionContext: request.sessionContext,
+        queryBudget: request.queryBudget,
       }),
     );
 

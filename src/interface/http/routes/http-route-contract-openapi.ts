@@ -5,6 +5,7 @@ import { DeclaredHttpRouteContractCatalog } from './http-route-contract-catalog.
 export interface OpenApiBridgeOperation {
   readonly operationId: string;
   readonly tags: readonly string[];
+  readonly 'x-search-capabilities'?: readonly string[] | undefined;
   readonly parameters?: readonly {
     readonly name: string;
     readonly in: 'path' | 'header';
@@ -187,6 +188,9 @@ export function buildHttpRouteContractOpenApiBridge(): OpenApiBridgeDocument {
     const operation: OpenApiBridgeOperation = {
       operationId: entry.contract.operationId,
       tags: [inferTag(entry.contract.operationId)],
+      ...(entry.contract.capabilities !== undefined
+        ? { 'x-search-capabilities': entry.contract.capabilities }
+        : {}),
       responses: Object.fromEntries(
         statusCodes.map((statusCode) => [
           String(statusCode),

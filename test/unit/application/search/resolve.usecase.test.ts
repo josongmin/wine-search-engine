@@ -7,7 +7,7 @@ import type {
 } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 
 describe('ResolveUseCase', () => {
-  it('reuses the shared planner context mapping for locale and session', async () => {
+  it('reuses the shared planner context mapping for locale, session, and budget', async () => {
     const queryPlanner: QueryPlannerPort = {
       plan: vi.fn().mockResolvedValue({
         rawQuery: 'Opus One',
@@ -61,6 +61,11 @@ describe('ResolveUseCase', () => {
         sessionId: 'session-42',
         previousEntities: [previousEntity],
       },
+      queryBudget: {
+        maxLatencyMs: 850,
+        maxCandidates: 24,
+        rerankLimit: 10,
+      },
     });
 
     expect(queryPlanner.plan).toHaveBeenCalledWith('Opus One', {
@@ -69,7 +74,11 @@ describe('ResolveUseCase', () => {
         sessionId: 'session-42',
         previousEntities: [previousEntity],
       },
-      budget: undefined,
+      budget: {
+        maxLatencyMs: 850,
+        maxCandidates: 24,
+        rerankLimit: 10,
+      },
     });
   });
 

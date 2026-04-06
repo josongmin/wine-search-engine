@@ -89,6 +89,7 @@ export function toResolveRequest(
     requestId,
     ...(body.context !== undefined ? { context: body.context } : {}),
     ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
+    ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
   };
 }
 
@@ -113,5 +114,8 @@ export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): Rep
     ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
     ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
     ...(options !== undefined ? { options } : {}),
+    ...(body.expected_response_hash !== undefined
+      ? { expected_response_hash: body.expected_response_hash }
+      : {}),
   };
 }

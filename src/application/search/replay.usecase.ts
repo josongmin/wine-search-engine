@@ -31,6 +31,16 @@ export class SnapshotMismatchError extends DomainError {
   }
 }
 
+export class MissingSnapshotError extends DomainError {
+  constructor() {
+    super(
+      'MISSING_SNAPSHOT',
+      'Replay requires a decision snapshot for fail-closed execution.',
+    );
+    this.name = 'MissingSnapshotError';
+  }
+}
+
 /**
  * Error thrown when a replay response hash does not match the expected hash.
  *
@@ -89,6 +99,10 @@ export class ReplayUseCase {
     request: ReplayRequest,
     requestId: string,
   ): Promise<SearchResponseV1> {
+    if (request.decision_snapshot == null) {
+      throw new MissingSnapshotError();
+    }
+
     const searchRequest: SearchRequest = {
       query: request.query,
       context: request.context,

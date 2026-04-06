@@ -54,4 +54,32 @@ describe('POST /v1/entity/resolve', () => {
       }),
     );
   });
+
+  it('passes queryBudget through to the resolve use case', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/entity/resolve',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: 'Opus One 2018',
+        queryBudget: {
+          maxLatencyMs: 750,
+          maxCandidates: 16,
+          rerankLimit: 8,
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockDeps.resolveUseCase.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'Opus One 2018',
+        queryBudget: {
+          maxLatencyMs: 750,
+          maxCandidates: 16,
+          rerankLimit: 8,
+        },
+      }),
+    );
+  });
 });

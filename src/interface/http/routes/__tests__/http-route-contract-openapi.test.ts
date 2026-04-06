@@ -10,6 +10,15 @@ describe('HTTP contract OpenAPI bridge', () => {
     expect(document.paths['/v1/search']?.post).toEqual(expect.objectContaining({
       operationId: 'search.execute',
       tags: ['search'],
+      'x-search-capabilities': [
+        'security',
+        'decomposition',
+        'planner',
+        'SAT',
+        'cache',
+        'route_resolution',
+        'ranked_post_route',
+      ],
       'x-contract-has-body': true,
       'x-contract-has-params': false,
       'x-contract-success-status-codes': [200],
@@ -44,6 +53,26 @@ describe('HTTP contract OpenAPI bridge', () => {
           schema: { type: 'string', minLength: 1, maxLength: 128 },
         },
       ],
+    }));
+    expect(document.paths['/v1/search/hybrid']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.hybrid',
+      'x-search-capabilities': [
+        'security',
+        'decomposition',
+        'planner',
+        'SAT',
+        'cache',
+        'forced_hybrid_retrieval',
+        'ranked_post_route',
+      ],
+    }));
+    expect(document.paths['/v1/search/interpret']?.post).toEqual(expect.objectContaining({
+      operationId: 'search.interpret',
+      'x-search-capabilities': ['security', 'planner_only'],
+    }));
+    expect(document.paths['/v1/entity/resolve']?.post).toEqual(expect.objectContaining({
+      operationId: 'entity.resolve',
+      'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
     }));
   });
 });

@@ -28,6 +28,7 @@ export const ReplayRequestSchema = z.object({
   sessionContext: SessionContextSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),
   options: SearchOptionsSchema.optional(),
+  expected_response_hash: z.string().min(1).optional(),
 }).strict();
 
 export type ReplayRequestBody = z.infer<typeof ReplayRequestSchema>;
@@ -45,6 +46,7 @@ export const ResolveRequestSchema = z.object({
   query: QueryStringSchema,
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
+  queryBudget: QueryBudgetSchema.optional(),
 }).strict();
 
 export type ResolveRequestBody = z.infer<typeof ResolveRequestSchema>;

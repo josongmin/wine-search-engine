@@ -346,6 +346,19 @@ describe('POST /v1/search/replay', () => {
     // Feature flags mismatch means snapshot mismatch → 409
     expect([200, 409]).toContain(res.statusCode);
   });
+
+  it('mismatched expected_response_hash returns 409 with DETERMINISM_VIOLATION', async () => {
+    const res = await postJson(server.app, '/v1/search/replay', {
+      query: 'Opus One 2018',
+      decision_snapshot: MATCHING_SNAPSHOT,
+      expected_response_hash: 'definitely-not-the-real-hash',
+    });
+
+    expect(res.statusCode).toBe(409);
+    const error = parseErrorResponse(res).error;
+    expect(error.code).toBe('DETERMINISM_VIOLATION');
+    expect(error.retryable).toBe(false);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
