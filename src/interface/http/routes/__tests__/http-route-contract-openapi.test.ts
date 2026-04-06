@@ -37,6 +37,12 @@ describe('HTTP contract OpenAPI bridge', () => {
           required: true,
           schema: { type: 'string', format: 'uuid' },
         },
+        {
+          name: 'x-authenticated-subject',
+          in: 'header',
+          required: true,
+          schema: { type: 'string', minLength: 1, maxLength: 128 },
+        },
       ],
     }));
   });

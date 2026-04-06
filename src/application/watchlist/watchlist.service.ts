@@ -24,16 +24,21 @@ export interface RecordWatchlistDeliveryLogCommand {
   readonly deliveredAt?: Date;
 }
 
+export interface WatchlistOwnershipQuery {
+  readonly watchlistId: string;
+  readonly userId: string;
+}
+
 export interface WatchlistServicePort {
   create(command: CreateWatchlistCommand): Promise<WatchlistEntry>;
-  getById(id: string): Promise<WatchlistEntry | null>;
+  getByIdForUser(query: WatchlistOwnershipQuery): Promise<WatchlistEntry | null>;
+  listByUserId(userId: string): Promise<readonly WatchlistEntry[]>;
   listByEntityId(entityId: string): Promise<readonly WatchlistEntry[]>;
-  delete(id: string): Promise<boolean>;
+  deleteForUser(query: WatchlistOwnershipQuery): Promise<boolean>;
   listDeliveries(
-    watchlistId: string,
+    query: WatchlistOwnershipQuery,
   ): Promise<readonly WatchlistDeliveryLogEntry[] | null>;
-  recordDeliveryLog(command: RecordWatchlistDeliveryLogCommand): Promise<void>;
-  clear(): Promise<void>;
+  recordDeliveryLog(command: RecordWatchlistDeliveryLogCommand): Promise<boolean>;
 }
 
 interface WatchlistServiceDeps {
@@ -65,30 +70,44 @@ export class WatchlistService implements WatchlistServicePort {
     return entry;
   }
 
-  async getById(id: string): Promise<WatchlistEntry | null> {
-    return this.storage.findById(id);
+  async getByIdForUser(query: WatchlistOwnershipQuery): Promise<WatchlistEntry | null> {
+    return this.findOwnedEntry(query);
+  }
+
+  async listByUserId(userId: string): Promise<readonly WatchlistEntry[]> {
+    return this.storage.findByUserId(userId);
   }
 
   async listByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
     return this.storage.findByEntityId(entityId);
   }
 
-  async delete(id: string): Promise<boolean> {
-    return this.storage.delete(id);
+  async deleteForUser(query: WatchlistOwnershipQuery): Promise<boolean> {
+    const entry = await this.findOwnedEntry(query);
+    if (entry === null) {
+      return false;
+    }
+
+    return this.storage.delete(entry.id);
   }
 
   async listDeliveries(
-    watchlistId: string,
+    query: WatchlistOwnershipQuery,
   ): Promise<readonly WatchlistDeliveryLogEntry[] | null> {
-    const entry = await this.storage.findById(watchlistId);
+    const entry = await this.findOwnedEntry(query);
     if (entry === null) {
       return null;
     }
 
-    return this.storage.listByWatchlistId(watchlistId);
+    return this.storage.listByWatchlistId(query.watchlistId);
   }
 
-  async recordDeliveryLog(command: RecordWatchlistDeliveryLogCommand): Promise<void> {
+  async recordDeliveryLog(command: RecordWatchlistDeliveryLogCommand): Promise<boolean> {
+    const entry = await this.storage.findById(command.watchlistId);
+    if (entry === null) {
+      return false;
+    }
+
     const log: WatchlistDeliveryLogEntry = {
       id: this.idGenerator(),
       watchlistId: command.watchlistId,
@@ -99,9 +118,17 @@ export class WatchlistService implements WatchlistServicePort {
     };
 
     await this.storage.append(log);
+    return true;
   }
 
-  async clear(): Promise<void> {
-    await this.storage.clear();
+  private async findOwnedEntry(
+    query: WatchlistOwnershipQuery,
+  ): Promise<WatchlistEntry | null> {
+    const entry = await this.storage.findById(query.watchlistId);
+    if (entry === null || entry.userId !== query.userId) {
+      return null;
+    }
+
+    return entry;
   }
 }

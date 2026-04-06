@@ -77,6 +77,7 @@ describe.skipIf(!PG_TEST_URL)('PgWatchlistStore integration', () => {
     await store.append(log);
 
     await expect(store.findById(entry.id)).resolves.toEqual(entry);
+    await expect(store.findByUserId(entry.userId)).resolves.toEqual([entry]);
     await expect(store.findByEntityId(entry.entityId)).resolves.toEqual([entry]);
     await expect(store.listByWatchlistId(entry.id)).resolves.toEqual([log]);
 

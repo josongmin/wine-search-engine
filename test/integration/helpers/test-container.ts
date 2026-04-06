@@ -177,6 +177,7 @@ export function createTestContainer(): TestContainerParts {
   const snapshotVersions: SnapshotVersions = {
     modelVersions: { embedding: 'text-embedding-3-small-v1' },
     indexVersions: { wine_content: 'wine_content_v1' },
+    featureFlags: {},
   };
 
   // Use cases

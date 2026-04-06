@@ -45,6 +45,23 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
           required: true,
           schema: { type: 'string', format: 'uuid' },
         },
+        {
+          name: 'x-authenticated-subject',
+          in: 'header',
+          required: true,
+          schema: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+      ],
+    }));
+    expect(document.paths['/v1/watchlist']?.get).toEqual(expect.objectContaining({
+      operationId: 'watchlist.list',
+      parameters: [
+        {
+          name: 'x-authenticated-subject',
+          in: 'header',
+          required: true,
+          schema: { type: 'string', minLength: 1, maxLength: 128 },
+        },
       ],
     }));
     expect(document.paths['/v1/watchlist']?.post?.responses['201']).toEqual(expect.objectContaining({

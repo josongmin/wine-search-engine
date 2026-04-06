@@ -557,6 +557,7 @@ describe('HybridUseCase', () => {
       check: vi.fn().mockResolvedValue({
         drinkingWindowStart: 2026,
         drinkingWindowEnd: 2032,
+        peakYear: 2029,
         currentlyDrinkable: true,
         confidence: 'medium' as const,
         modelVersion: 'predictor-v1',
@@ -608,9 +609,15 @@ describe('HybridUseCase', () => {
     const responseParams = responseBuilder.build.mock.calls[0]?.[0];
 
     expect(drinkingWindow.check).toHaveBeenCalledOnce();
+    expect(drinkingWindow.check).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetYear: new Date().getFullYear(),
+      }),
+    );
     expect(responseParams?.results[0]?.drinkingWindow).toEqual({
       drinkingWindowStart: 2026,
       drinkingWindowEnd: 2032,
+      peakYear: 2029,
       currentlyDrinkable: true,
       confidence: 'medium',
       modelVersion: 'predictor-v1',

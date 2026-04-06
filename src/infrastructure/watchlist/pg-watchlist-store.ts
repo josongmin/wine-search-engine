@@ -95,6 +95,14 @@ export class PgWatchlistStore implements WatchlistStoragePort {
     return row !== undefined ? rowToWatchlistEntry(row) : null;
   }
 
+  async findByUserId(userId: string): Promise<readonly WatchlistEntry[]> {
+    const result = await this.pool.query<WatchlistRow>(
+      `SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId],
+    );
+    return result.rows.map(rowToWatchlistEntry);
+  }
+
   async findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
     const result = await this.pool.query<WatchlistRow>(
       `SELECT * FROM watchlists WHERE entity_id = $1 ORDER BY created_at ASC`,

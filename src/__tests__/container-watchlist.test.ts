@@ -7,6 +7,7 @@ function createStorage(): WatchlistStoragePort {
   return {
     save: vi.fn(async () => {}),
     findById: vi.fn(async () => null),
+    findByUserId: vi.fn(async () => []),
     findByEntityId: vi.fn(async () => []),
     delete: vi.fn(async () => false),
     listByWatchlistId: vi.fn(async () => []),
@@ -39,12 +40,21 @@ describe('buildWatchlistContainerServices', () => {
     expect(storage.save).toHaveBeenCalledTimes(1);
   });
 
-  it('delegates delete cleanup to the storage implementation', async () => {
+  it('delegates owned-entry deletion to the storage implementation', async () => {
     const storage = createStorage();
     const config = parseEnv({
       NODE_ENV: 'test',
       WATCHLIST_ENABLED: 'false',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
+    });
+    (storage.findById as any).mockResolvedValueOnce({
+      id: 'watchlist-1',
+      userId: 'user-1',
+      entityId: 'entity-1',
+      triggerConditions: [],
+      callbackUrl: 'https://example.com/webhook',
+      createdAt: new Date('2026-04-06T00:00:00.000Z'),
+      expiresAt: null,
     });
     (storage.delete as any).mockResolvedValueOnce(true);
 
@@ -52,7 +62,10 @@ describe('buildWatchlistContainerServices', () => {
       createWatchlistStore: () => storage,
     });
 
-    await container.watchlistService.delete('watchlist-1');
+    await container.watchlistService.deleteForUser({
+      watchlistId: 'watchlist-1',
+      userId: 'user-1',
+    });
 
     expect(storage.delete).toHaveBeenCalledWith('watchlist-1');
   });

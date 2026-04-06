@@ -21,7 +21,9 @@ import {
   CreateWatchlistRequestSchema,
   CreateWatchlistResponseSchema,
   GetWatchlistResponseSchema,
+  ListWatchlistResponseSchema,
   ListDeliveriesResponseSchema,
+  WatchlistAuthHeadersSchema,
   WatchlistErrorResponseSchema,
   WatchlistIdParamsSchema,
 } from '../schemas/watchlist.schema.js';
@@ -36,6 +38,7 @@ export interface HttpRouteContract {
   readonly operationId: string;
   readonly body?: z.ZodTypeAny;
   readonly params?: z.ZodTypeAny;
+  readonly headers?: z.ZodTypeAny;
   readonly responses: Readonly<Record<number, ResponseSchema>>;
 }
 
@@ -185,12 +188,24 @@ export const BatchSearchRouteContract = defineRouteContract({
   },
 });
 
+export const WatchlistListRouteContract = defineRouteContract({
+  operationId: 'watchlist.list',
+  headers: WatchlistAuthHeadersSchema,
+  responses: {
+    200: ListWatchlistResponseSchema,
+    401: WatchlistErrorResponseSchema,
+    500: WatchlistErrorResponseSchema,
+  },
+});
+
 export const WatchlistCreateRouteContract = defineRouteContract({
   operationId: 'watchlist.create',
   body: CreateWatchlistRequestSchema,
+  headers: WatchlistAuthHeadersSchema,
   responses: {
     201: CreateWatchlistResponseSchema,
     400: WatchlistErrorResponseSchema,
+    401: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
 });
@@ -198,9 +213,11 @@ export const WatchlistCreateRouteContract = defineRouteContract({
 export const WatchlistGetRouteContract = defineRouteContract({
   operationId: 'watchlist.get',
   params: WatchlistIdParamsSchema,
+  headers: WatchlistAuthHeadersSchema,
   responses: {
     200: GetWatchlistResponseSchema,
     400: WatchlistErrorResponseSchema,
+    401: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
@@ -209,9 +226,11 @@ export const WatchlistGetRouteContract = defineRouteContract({
 export const WatchlistDeleteRouteContract = defineRouteContract({
   operationId: 'watchlist.delete',
   params: WatchlistIdParamsSchema,
+  headers: WatchlistAuthHeadersSchema,
   responses: {
     204: null,
     400: WatchlistErrorResponseSchema,
+    401: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
@@ -220,9 +239,11 @@ export const WatchlistDeleteRouteContract = defineRouteContract({
 export const WatchlistDeliveriesRouteContract = defineRouteContract({
   operationId: 'watchlist.listDeliveries',
   params: WatchlistIdParamsSchema,
+  headers: WatchlistAuthHeadersSchema,
   responses: {
     200: ListDeliveriesResponseSchema,
     400: WatchlistErrorResponseSchema,
+    401: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },

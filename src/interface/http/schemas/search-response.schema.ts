@@ -66,6 +66,7 @@ export const UncertaintyBlockSchema = z.object({
 export const DrinkingWindowSchema = z.object({
   drinking_window_start: z.number().int(),
   drinking_window_end: z.number().int(),
+  peak_year: z.number().int().optional(),
   currently_drinkable: z.boolean(),
   confidence: z.enum(['high', 'medium', 'low']),
   model_version: z.string().min(1).optional(),

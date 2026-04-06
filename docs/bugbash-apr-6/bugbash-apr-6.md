@@ -6,9 +6,38 @@
 
 **범위**: 기본은 `src/application/search/**/*.ts` + 유스케이스 주입 `src/config/container-usecases.ts`. §6은 경계 모듈 보조.
 
-**최종 갱신**: 2026-04-06 (전체 감사 재실행 · 아래 항목 코드와 대조 확인)
+**최종 갱신**: 2026-04-06 (전체 감사 재실행 · 아래 항목 코드와 대조 확인 · **§0.6** 100점 인정 체크리스트)
 
 **구조**: §3·§6 남은 과제는 **루트 코어스(RC-*, WC-*)** 로 묶음 — 번호(3.1, 6.3…) 나열이 아니라 **원인별 한 방향 액션** 위주.
+
+---
+
+## 0A. Re-baseline SSOT (2026-04-06 implementation)
+
+이번 구현 반영 후 이 문서는 아래 태스크를 **코드 기준 완료/부분 완료** 상태로 본다.
+
+| Task | 상태 | 코드 기준 |
+|------|------|-----------|
+| **T10–T12** | **완료** | replay가 search 응답의 `decision_snapshot`을 우선 비교하고, nested `feature_flags`까지 계약 필드 기준 deep compare. legacy runtime snapshot은 호환 fallback으로만 유지. |
+| **T20–T22** | **부분 완료** | search/hybrid/interpret/resolve capability matrix를 문서·계약 기준으로 고정. Hybrid는 shared pre-route(`security + SAT + cache + decomposition`)를 공유, Interpret는 planner only, Resolve는 `security + SAT + resolver only`. |
+| **T40–T43** | **완료** | watchlist는 `X-Authenticated-Subject` 기반 subject-scoped CRUD/list/deliveries. `POST` body의 `user_id` 제거, `GET /v1/watchlist` 추가, cross-user는 `404`, missing subject는 `401`, delivery log append는 부모 존재 시에만 기록. |
+| **T50–T52** | **완료** | drinking-window는 canonical check DTO에 `targetYear`를 필수화하고, 결과 block에 optional `peakYear` 노출. predictor 실패는 block omit + warning log의 soft-fail. |
+| **T60** | **완료** | LTR rerank는 duplicate `entityId` overwrite 없이 stable bucket으로 보정. cache integration 파일은 runtime 코드가 아닌 documentation-only reference로 명시. |
+| **T90** | **진행 중** | 관련 unit/e2e/contract 회귀 테스트 추가. 전체 lane 검증은 `typecheck + targeted vitest` 기준으로 확인. |
+
+### 0A.1 Search-Family Matrix (fixed)
+
+| Route | 고정 capability |
+|------|------------------|
+| **`POST /v1/search`** | `security + decomposition + planner + SAT + cache + route resolution + ranked post-route` |
+| **`POST /v1/search/hybrid`** | `security + decomposition + planner + SAT + cache + forced hybrid retrieval + ranked post-route` |
+| **`POST /v1/search/interpret`** | `security + planner only` |
+| **`POST /v1/entity/resolve`** | `security + planner + SAT + resolver only` |
+
+### 0A.2 Deferred / not closed here
+
+- **RC-C**: search application layer plain `Error` 잔여는 이번 패치 기준 새 증거 없음. 기존 domain error 경로 유지.
+- **응답 grouping / broader contract enrichments**: `ResultGrouper`의 추가 메타 노출 같은 API 확장은 이번 묶음 범위 밖.
 
 ---
 
@@ -85,6 +114,20 @@ flowchart TB
 - RC-A에서 필드 하나만 맞추고 `recordsMatch`는 그대로 두기.
 - WC-B에서 `targetYear`만 넣고 critic 기본값·실패 무음은 나중에.
 - WC-A에서 라우트만 막고 서비스 레이어는 그대로 두기(우회 경로 남음).
+
+### 0.6 도메인 연결·품질 **100점 인정** 체크리스트 (이번 트랙)
+
+아래를 **전부** 만족하면 “이번 변경 묶음(도메인 연결 + 도구)”은 **100점 인정**으로 본다. (항목은 병렬로 찍어도 됨.)
+
+| # | 완료 기준 |
+|---|-----------|
+| **1** | `npm run typecheck` + `npm run test` (unit) + `npm run verify:http-contracts` **통과**. |
+| **2** | `npm run domain:orphans` 실행 시 **비-barrel orphan 0건** (배럴 `index.ts` 안내만 나오는 것은 OK). |
+| **3** | **페어링 soft 제약**: 의도 쿼리 1건 이상에서 `pairing` 제약이 플랜에 붙는 것을 **단위 테스트 또는 스모크**로 고정 (NL 매퍼와 중복 시 우선순위/중복이 의도인지 한 줄 코멘트). |
+| **4** | **`resultType` (Epic 8)**: `targetEntityType`이 있을 때 `producer_set` / `region_set` / `style_set` / `wine_set`이 나오는 경로가 **OpenAPI·`SearchResponseV1` 주석과 모순 없음** (스키마 필드 누락 시 §3 RC-B와 합의). |
+| **5** | **Ingestion 오염 플래그**: `marketplace_contamination_suspected`가 **다음 중 하나**로 문서화됨 — (a) 매칭 게이트에서 소비, (b) 수동 리뷰 큐만, (c) “플래그만·추후” **의도 명시**. |
+| **6** | **Feedback TTL**: `npm run feedback:prune-ttl`을 **스테이징 또는 로컬 PG**에서 1회 실행해 에러 없이 종료(또는 `feedbackTtlEnforcer`를 호출하는 크론/잡이 합의됨). |
+| **7** | **모드 가중치**: `getModeWeights`가 **랭킹 수식에 아직 안 섞였다면** “RFC-017 대기 / 배럴 노출만”이 코드 주석 또는 이 문서 **한 줄**에 있음 (나중에 섞을 때 회귀 기준). |
 
 ---
 

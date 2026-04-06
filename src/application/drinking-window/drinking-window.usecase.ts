@@ -9,7 +9,10 @@ import type {
   DrinkingWindowInput,
   DrinkingWindowPredictorPort,
 } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
-import type { DrinkingWindowUseCasePort } from './port/drinking-window-usecase.port.js';
+import type {
+  DrinkingWindowCheckRequest,
+  DrinkingWindowUseCasePort,
+} from './port/drinking-window-usecase.port.js';
 
 /**
  * Request to check drinking window for a wine.
@@ -20,20 +23,7 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
   /**
    * Predicts drinking window for a wine and checks if currently drinkable.
    */
-  check(request: {
-    readonly vintage: number;
-    readonly grapePrimaryEnc: number;
-    readonly regionEnc: number;
-    readonly countryEnc: number;
-    readonly body: number;
-    readonly tannin: number;
-    readonly acidity: number;
-    readonly sweetness: number;
-    readonly avgCriticProxyScore: number;
-    readonly targetYear?: number;
-  }): Promise<DrinkingWindowBlock> {
-    const targetYear = request.targetYear ?? new Date().getFullYear();
-
+  check(request: DrinkingWindowCheckRequest): Promise<DrinkingWindowBlock> {
     // Use predictor to get drinking window
     const predictionInput: DrinkingWindowInput = {
       vintage: request.vintage,
@@ -51,9 +41,10 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
     return Promise.resolve({
       drinkingWindowStart: prediction.drinkingWindowStart,
       drinkingWindowEnd: prediction.drinkingWindowEnd,
+      peakYear: prediction.peakYear,
       currentlyDrinkable:
-        targetYear >= prediction.drinkingWindowStart &&
-        targetYear <= prediction.drinkingWindowEnd,
+        request.targetYear >= prediction.drinkingWindowStart &&
+        request.targetYear <= prediction.drinkingWindowEnd,
       confidence: prediction.confidence,
       modelVersion: prediction.modelVersion,
     });

@@ -337,6 +337,7 @@ describe('runSearchPostRoutePhase', () => {
       snapshotVersions: {
         modelVersions: {},
         indexVersions: {},
+        featureFlags: {},
       },
       decisionEngine: decisionEngine as never,
       responseBuilder: responseBuilder as never,
@@ -358,6 +359,7 @@ describe('runSearchPostRoutePhase', () => {
       snapshotVersions: {
         modelVersions: {},
         indexVersions: {},
+        featureFlags: {},
       },
       decisionEngine: decisionEngine as never,
       responseBuilder: responseBuilder as never,

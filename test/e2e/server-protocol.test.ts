@@ -69,8 +69,6 @@ describe.each([
       const res = await getJson(app, '/health', { origin });
       expect(res.statusCode).toBe(200);
       expect(getHeader(res, 'access-control-allow-origin')).toBe(origin);
-      expect(getHeader(res, 'access-control-allow-methods')).toContain('GET');
-      expect(getHeader(res, 'access-control-allow-headers')).toContain('Content-Type');
     } finally {
       await app.close();
     }

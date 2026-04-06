@@ -1,13 +1,9 @@
 /**
- * Wave 4 Track D Phase 3 Integration Guide
+ * Documentation-only cache integration guide.
  *
- * This file documents the cache integration points for SearchUseCase.
- *
- * Integration Strategy:
- * 1. Query cache: Check BEFORE planning (earliest exit point)
- * 2. Embedding cache: Hook in CandidatePoolService (high-value reuse)
- * 3. Result cache: Hook AFTER ranking (skip ranking computation)
- * 4. Cache invalidation: Model upgrade events
+ * This module is intentionally not imported by runtime code. It exists as a
+ * typed design note for future cache wiring and should be treated as
+ * documentation/reference rather than executable application behavior.
  */
 
 import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';

@@ -5,8 +5,10 @@
  */
 
 import { z } from 'zod';
+import { AUTHENTICATED_SUBJECT_HEADER } from '../authenticated-subject.js';
 
 const WatchlistIdSchema = z.string().uuid();
+const AuthenticatedSubjectSchema = z.string().min(1).max(128);
 const HttpsUrlSchema = z.string().url().max(2048).refine(
   (value) => value.startsWith('https://'),
   'callback_url must use https',
@@ -102,8 +104,13 @@ export const WatchlistIdParamsSchema = z.object({
 
 export type WatchlistIdParams = z.infer<typeof WatchlistIdParamsSchema>;
 
+export const WatchlistAuthHeadersSchema = z.object({
+  [AUTHENTICATED_SUBJECT_HEADER]: AuthenticatedSubjectSchema,
+}).strict();
+
+export type WatchlistAuthHeaders = z.infer<typeof WatchlistAuthHeadersSchema>;
+
 export const CreateWatchlistRequestSchema = z.object({
-  user_id: WatchlistIdSchema,
   entity_id: z.string().min(1).max(256),
   trigger_conditions: z.array(WatchlistTriggerSchema).min(1).max(10),
   callback_url: HttpsUrlSchema,
@@ -120,7 +127,7 @@ export type CreateWatchlistResponse = z.infer<typeof CreateWatchlistResponseSche
 
 export const GetWatchlistResponseSchema = z.object({
   watchlist_id: WatchlistIdSchema,
-  user_id: WatchlistIdSchema,
+  user_id: AuthenticatedSubjectSchema,
   entity_id: z.string().min(1),
   trigger_conditions: z.array(WatchlistTriggerResponseSchema),
   callback_url: HttpsUrlSchema,
@@ -129,6 +136,13 @@ export const GetWatchlistResponseSchema = z.object({
 }).strict();
 
 export type GetWatchlistResponse = z.infer<typeof GetWatchlistResponseSchema>;
+
+export const ListWatchlistResponseSchema = z.object({
+  entries: z.array(GetWatchlistResponseSchema),
+  total: z.number().int().nonnegative(),
+}).strict();
+
+export type ListWatchlistResponse = z.infer<typeof ListWatchlistResponseSchema>;
 
 export const DeliveryLogEntrySchema = z.object({
   id: WatchlistIdSchema,

@@ -1,7 +1,15 @@
 import type { DrinkingWindowBlock, ResultItem } from '../../domain/response/model/result-item.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
-import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
+import {
+  DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
+  type DrinkingWindowUseCasePort,
+} from '../drinking-window/port/drinking-window-usecase.port.js';
 import { inferDrinkingWindowConfidence } from './drinking-window-confidence.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+const drinkingWindowLogger = bootstrapLogger.child({
+  component: 'search-result-drinking-window',
+});
 
 function needsDrinkingWindowPrediction(r: RankedResult): boolean {
   return (
@@ -23,7 +31,7 @@ function needsDrinkingWindowPrediction(r: RankedResult): boolean {
 export async function mapRankedResultsToResultItems(
   rankedResults: readonly RankedResult[],
   drinkingWindow: DrinkingWindowUseCasePort | undefined,
-  currentYear: number = new Date().getFullYear(),
+  targetYear: number = new Date().getFullYear(),
 ): Promise<readonly ResultItem[]> {
   const resultsPendingPrediction = rankedResults.filter(
     (r) => drinkingWindow !== undefined && needsDrinkingWindowPrediction(r),
@@ -40,7 +48,9 @@ export async function mapRankedResultsToResultItems(
         tannin: r.tannin!,
         acidity: r.acidity!,
         sweetness: r.sweetness!,
-        avgCriticProxyScore: r.avgCriticProxyScore ?? 80,
+        avgCriticProxyScore:
+          r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
+        targetYear,
       }),
     ),
   );
@@ -50,6 +60,16 @@ export async function mapRankedResultsToResultItems(
     const settled = predictions[idx];
     if (settled?.status === 'fulfilled') {
       predictionMap.set(r.entityId, settled.value);
+      return;
+    }
+    if (settled?.status === 'rejected') {
+      drinkingWindowLogger.warn(
+        {
+          entityId: r.entityId,
+          err: settled.reason,
+        },
+        'drinking_window_prediction_soft_failed',
+      );
     }
   });
 
@@ -64,7 +84,7 @@ export async function mapRankedResultsToResultItems(
         drinkingWindowStart: r.drinkingWindowStart,
         drinkingWindowEnd: r.drinkingWindowEnd,
         currentlyDrinkable:
-          currentYear >= r.drinkingWindowStart && currentYear <= r.drinkingWindowEnd,
+          targetYear >= r.drinkingWindowStart && targetYear <= r.drinkingWindowEnd,
         confidence: inferDrinkingWindowConfidence(r.drinkingWindowModelVersion),
         ...(r.drinkingWindowModelVersion !== undefined
           ? { modelVersion: r.drinkingWindowModelVersion }

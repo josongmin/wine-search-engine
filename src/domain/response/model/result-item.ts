@@ -7,6 +7,7 @@ import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
 export interface DrinkingWindowBlock {
   readonly drinkingWindowStart: number;   // Year when wine becomes drinkable
   readonly drinkingWindowEnd: number;     // Year when wine is past peak
+  readonly peakYear?: number | undefined; // Optional peak maturity year
   readonly currentlyDrinkable: boolean;   // true if current year is within window
   readonly confidence: 'high' | 'medium' | 'low';
   readonly modelVersion?: string | undefined;

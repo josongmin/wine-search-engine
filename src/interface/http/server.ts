@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { type Span, SpanStatusCode, type Tracer } from '@opentelemetry/api';
@@ -58,37 +59,38 @@ export interface ServerOptions {
   readonly enableSecurityHeaders?: boolean;
 }
 
-function registerCorsSupport(
+async function registerCorsSupport(
   app: FastifyInstance,
   options: {
     readonly nodeEnv: 'development' | 'production' | 'test';
     readonly allowedOrigins: string;
   },
-): void {
-  app.options('*', async (_request, reply) => {
-    return reply.status(204).send();
-  });
+): Promise<void> {
+  const originList = options.allowedOrigins
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
 
-  app.addHook('preHandler', (request, reply, done) => {
-    const origin = request.headers.origin ?? '';
-    if (options.nodeEnv !== 'production') {
-      reply.header('Access-Control-Allow-Origin', origin.length > 0 ? origin : '*');
-    } else if (options.allowedOrigins.length > 0) {
-      const originList = options.allowedOrigins.split(',').map((o) => o.trim());
-      if (originList.includes(origin)) {
-        // nosemgrep
-        // Production only echoes origins that matched the configured allowlist.
-        reply.header('Access-Control-Allow-Origin', origin);
+  await app.register(cors, {
+    hook: 'preHandler',
+    origin(origin, callback) {
+      if (options.nodeEnv !== 'production') {
+        callback(null, true);
+        return;
       }
-    }
-    reply.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    reply.header(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Request-Id, X-Correlation-Id',
-    );
-    reply.header('Access-Control-Expose-Headers', 'X-Request-Id, Retry-After');
-    reply.header('Access-Control-Max-Age', '86400');
-    done();
+
+      if (origin === undefined) {
+        callback(null, false);
+        return;
+      }
+
+      callback(null, originList.includes(origin));
+    },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
+    exposedHeaders: ['X-Request-Id', 'Retry-After'],
+    maxAge: 86400,
+    strictPreflight: false,
   });
 }
 
@@ -161,7 +163,7 @@ export async function createServer(
   const nodeEnv = options?.nodeEnv ?? 'development';
   const allowedOrigins = options?.corsAllowedOrigins ?? '';
   if (options?.enableCors ?? true) {
-    registerCorsSupport(app, { nodeEnv, allowedOrigins });
+    await registerCorsSupport(app, { nodeEnv, allowedOrigins });
   }
 
   // Register middleware

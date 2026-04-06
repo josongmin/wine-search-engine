@@ -7,8 +7,8 @@ export interface OpenApiBridgeOperation {
   readonly tags: readonly string[];
   readonly parameters?: readonly {
     readonly name: string;
-    readonly in: 'path';
-    readonly required: true;
+    readonly in: 'path' | 'header';
+    readonly required: boolean;
     readonly schema: OpenApiBridgeSchema;
   }[] | undefined;
   readonly requestBody?: {
@@ -126,6 +126,26 @@ function inferPathParameters(
   }));
 }
 
+function inferHeaderParameters(
+  headersSchema: z.ZodTypeAny | undefined,
+): OpenApiBridgeOperation['parameters'] {
+  if (headersSchema === undefined) {
+    return undefined;
+  }
+
+  const unwrapped = unwrapSchema(headersSchema);
+  if (!(unwrapped instanceof z.ZodObject)) {
+    return undefined;
+  }
+
+  return getObjectEntries(unwrapped).map(([name, schema]) => ({
+    name,
+    in: 'header' as const,
+    required: !isOptionalSchema(schema),
+    schema: zodToOpenApiSchema(schema),
+  }));
+}
+
 function describeResponse(statusCode: number): string {
   if (statusCode >= 200 && statusCode < 300) {
     return `Successful response (${statusCode})`;
@@ -189,8 +209,13 @@ export function buildHttpRouteContractOpenApiBridge(): OpenApiBridgeDocument {
             },
           }
         : {}),
-      ...(entry.contract.params !== undefined
-        ? { parameters: inferPathParameters(entry.url, entry.contract.params) }
+      ...((entry.contract.params !== undefined || entry.contract.headers !== undefined)
+        ? {
+            parameters: [
+              ...(inferPathParameters(entry.url, entry.contract.params) ?? []),
+              ...(inferHeaderParameters(entry.contract.headers) ?? []),
+            ],
+          }
         : {}),
     };
 

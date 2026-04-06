@@ -5,7 +5,11 @@ import type { SnapshotVersions } from './search.usecase.js';
 import type { ReplayRequest } from './replay-request.dto.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
-import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
+import {
+  buildDecisionSnapshotFromRuntimeVersions,
+  decisionSnapshotsMatch,
+  readDecisionSnapshotFromSearchResponse,
+} from './search-usecase-decision-snapshot.js';
 
 export type { ReplayRequest } from './replay-request.dto.js';
 
@@ -85,15 +89,6 @@ export class ReplayUseCase {
     request: ReplayRequest,
     requestId: string,
   ): Promise<SearchResponseV1> {
-    // Step 2: Build current runtime snapshot for comparison
-    const currentSnapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
-
-    // Step 3: Compare snapshot with current runtime snapshot
-    if (!this.snapshotsMatch(request.decision_snapshot, currentSnapshot)) {
-      throw new SnapshotMismatchError(request.decision_snapshot, currentSnapshot);
-    }
-
-    // Step 4: Execute search with pinned versions
     const searchRequest: SearchRequest = {
       query: request.query,
       context: request.context,
@@ -109,6 +104,17 @@ export class ReplayUseCase {
       throw new UnexpectedReplayResponseError();
     }
     const response = rawResponse;
+    const currentSnapshot = readDecisionSnapshotFromSearchResponse(response);
+    const legacyRuntimeSnapshot = buildDecisionSnapshotFromRuntimeVersions(
+      this.deps.snapshotVersions,
+    );
+
+    if (
+      !this.snapshotsMatch(request.decision_snapshot, currentSnapshot)
+      && !this.snapshotsMatch(request.decision_snapshot, legacyRuntimeSnapshot)
+    ) {
+      throw new SnapshotMismatchError(request.decision_snapshot, currentSnapshot);
+    }
 
     // Step 5: Determinism gate (RFC-009 §8 / RFC-015)
     // If the caller supplied an expected_response_hash, validate it against
@@ -135,73 +141,6 @@ export class ReplayUseCase {
     expected: DecisionSnapshot,
     actual: DecisionSnapshot,
   ): boolean {
-    return (
-      expected.policy_rule_version === actual.policy_rule_version &&
-      expected.threshold_profile_id === actual.threshold_profile_id &&
-      expected.planner_version === actual.planner_version &&
-      this.recordsMatch(expected.model_versions, actual.model_versions) &&
-      this.recordsMatch(expected.index_versions, actual.index_versions) &&
-      this.deepEqualUnknown(
-        expected.feature_flags as Readonly<Record<string, unknown>>,
-        actual.feature_flags as Readonly<Record<string, unknown>>,
-      )
-    );
-  }
-
-  /**
-   * Shallow-compares two string-keyed records.
-   */
-  private recordsMatch(
-    a: Readonly<Record<string, unknown>>,
-    b: Readonly<Record<string, unknown>>,
-  ): boolean {
-    const aKeys = Object.keys(a).sort();
-    const bKeys = Object.keys(b).sort();
-    if (aKeys.length !== bKeys.length) return false;
-    for (let i = 0; i < aKeys.length; i++) {
-      const ak = aKeys[i];
-      const bk = bKeys[i];
-      if (ak === undefined || bk === undefined) return false;
-      if (ak !== bk) return false;
-      if (a[ak] !== b[bk]) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Deep structural equality for snapshot feature flags.
-   */
-  private deepEqualUnknown(a: unknown, b: unknown): boolean {
-    if (Object.is(a, b)) return true;
-
-    if (Array.isArray(a) || Array.isArray(b)) {
-      if (!Array.isArray(a) || !Array.isArray(b)) return false;
-      if (a.length !== b.length) return false;
-      for (let i = 0; i < a.length; i++) {
-        if (!this.deepEqualUnknown(a[i], b[i])) return false;
-      }
-      return true;
-    }
-
-    if (this.isPlainRecord(a) || this.isPlainRecord(b)) {
-      if (!this.isPlainRecord(a) || !this.isPlainRecord(b)) return false;
-      const aKeys = Object.keys(a).sort();
-      const bKeys = Object.keys(b).sort();
-      if (aKeys.length !== bKeys.length) return false;
-      for (let i = 0; i < aKeys.length; i++) {
-        const ak = aKeys[i];
-        const bk = bKeys[i];
-        if (ak === undefined || bk === undefined) return false;
-        if (ak !== bk) return false;
-        if (!this.deepEqualUnknown(a[ak], b[bk])) return false;
-      }
-      return true;
-    }
-
-    return false;
-  }
-
-  private isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
+    return decisionSnapshotsMatch(expected, actual);
   }
 }

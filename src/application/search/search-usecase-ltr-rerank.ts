@@ -31,10 +31,17 @@ export function applyLtrRerankIfAvailable(
 
   const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
 
-  const origMap = new Map(rankedResults.map((r) => [r.entityId as string, r]));
+  const origBuckets = new Map<string, RankedResult[]>();
+  for (const result of rankedResults) {
+    const bucket = origBuckets.get(result.entityId) ?? [];
+    bucket.push(result);
+    origBuckets.set(result.entityId, bucket);
+  }
+
   return rerankedDocs
     .map((reranked) => {
-      const orig = origMap.get(reranked.entityId);
+      const bucket = origBuckets.get(reranked.entityId);
+      const orig = bucket?.shift();
       if (!orig) return undefined;
       return { ...orig, finalScore: reranked.ltrScore, rank: reranked.finalRank };
     })

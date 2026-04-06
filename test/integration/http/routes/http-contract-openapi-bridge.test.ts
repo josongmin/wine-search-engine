@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { MAX_QUERY_LENGTH } from '../../../../src/domain/shared/constants.js';
 import { buildHttpRouteContractOpenApiBridge } from '../../../../src/interface/http/routes/http-route-contract-openapi.js';
 import { CAN_RUN_TSX_SUBPROCESS } from '../../../helpers/runtime-capabilities.js';
 
@@ -28,7 +29,7 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
         properties: expect.objectContaining({
           query: expect.objectContaining({
             type: 'string',
-            maxLength: 500,
+            maxLength: MAX_QUERY_LENGTH,
           }),
         }),
       }),
@@ -37,14 +38,19 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
       operationId: 'watchlist.get',
       'x-contract-has-body': false,
       'x-contract-has-params': true,
-      parameters: [
-        {
+      parameters: expect.arrayContaining([
+        expect.objectContaining({
           name: 'id',
           in: 'path',
           required: true,
-          schema: { type: 'string', format: 'uuid' },
-        },
-      ],
+          schema: expect.objectContaining({ type: 'string', format: 'uuid' }),
+        }),
+        expect.objectContaining({
+          name: 'x-authenticated-subject',
+          in: 'header',
+          required: true,
+        }),
+      ]),
     }));
     expect(document.paths['/v1/watchlist']?.post?.responses['201']).toEqual(expect.objectContaining({
       content: {
@@ -54,6 +60,17 @@ describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
           }),
         },
       },
+    }));
+    expect(document.paths['/v1/watchlist']?.get).toEqual(expect.objectContaining({
+      operationId: 'watchlist.list',
+      parameters: [
+        {
+          name: 'x-authenticated-subject',
+          in: 'header',
+          required: true,
+          schema: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+      ],
     }));
   });
 

@@ -259,6 +259,7 @@ export async function createVespaTestContainer(
   const snapshotVersions: SnapshotVersions = {
     modelVersions: { embedding: 'in-memory-hash-v1' },
     indexVersions: { wine_content: 'vespa-e2e-test' },
+    featureFlags: {},
   };
   const drinkingWindowPredictor = {
     modelVersion: 'vespa-test',

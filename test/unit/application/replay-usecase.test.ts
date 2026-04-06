@@ -54,6 +54,7 @@ function makeReplayUseCaseWithVersions(searchUseCase: SearchUseCase): ReplayUseC
     snapshotVersions: {
       modelVersions: { embedding: 'bge-m3-v1.2' },
       indexVersions: { wine_content: '2026-04-01' },
+      featureFlags: {},
     },
   });
 }

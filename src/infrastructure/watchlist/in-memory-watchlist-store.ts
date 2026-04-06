@@ -22,6 +22,12 @@ export class InMemoryWatchlistStore implements WatchlistStoragePort {
     return Promise.resolve(this.watchlists.get(id) ?? null);
   }
 
+  findByUserId(userId: string): Promise<readonly WatchlistEntry[]> {
+    return Promise.resolve(
+      [...this.watchlists.values()].filter((entry) => entry.userId === userId),
+    );
+  }
+
   findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
     return Promise.resolve(
       [...this.watchlists.values()].filter((entry) => entry.entityId === entityId),

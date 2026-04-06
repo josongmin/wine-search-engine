@@ -799,6 +799,7 @@ describe('Search Pipeline Integration', () => {
     it('marks wine as currently drinkable if in window', async () => {
       const predictor = new DrinkingWindowPredictor();
       const useCase = new DrinkingWindowUseCase(predictor);
+      const currentYear = new Date().getFullYear();
 
       // 2018 vintage mature wine (should be drinkable now in 2026)
       const prediction = await useCase.check({
@@ -811,9 +812,9 @@ describe('Search Pipeline Integration', () => {
         acidity: 3,
         sweetness: 1,
         avgCriticProxyScore: 92,
+        targetYear: currentYear,
       });
 
-      const currentYear = new Date().getFullYear();
       const isInWindow = currentYear >= prediction.drinkingWindowStart &&
         currentYear <= prediction.drinkingWindowEnd;
 
