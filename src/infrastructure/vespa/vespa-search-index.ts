@@ -136,6 +136,9 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   const criticScoreNormalized = typeof fields['critic_score_normalized'] === 'number'
     ? fields['critic_score_normalized']
     : undefined;
+  const producerPrestige = typeof fields['producer_prestige'] === 'number'
+    ? fields['producer_prestige']
+    : undefined;
   const country = trimNonEmpty(fields['country']);
   const appellation = trimNonEmpty(fields['appellation']);
 
@@ -151,6 +154,7 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
     ...(acidity !== undefined ? { acidity } : {}),
     ...(sweetness !== undefined ? { sweetness } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(producerPrestige !== undefined ? { producerPrestige } : {}),
     ...(country !== undefined ? { country } : {}),
     ...(appellation !== undefined ? { appellation } : {}),
   };

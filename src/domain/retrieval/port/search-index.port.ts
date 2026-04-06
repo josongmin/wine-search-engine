@@ -21,6 +21,8 @@ export interface RetrievalHitSummary {
   readonly acidity?: number | undefined;
   readonly sweetness?: number | undefined;
   readonly criticScoreNormalized?: number | undefined;
+  /** Producer prestige score from the index (scale varies; browse uses it for ranking only). */
+  readonly producerPrestige?: number | undefined;
   readonly country?: string | undefined;
   readonly appellation?: string | undefined;
 }

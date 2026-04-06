@@ -79,6 +79,12 @@ export async function mapRankedResultsToResultItems(
         entityId: r.entityId,
         canonicalLabel: r.canonicalLabel,
         type: 'wine',
+        ...(r.producer !== undefined ? { producer: r.producer } : {}),
+        ...(r.region !== undefined ? { region: r.region } : {}),
+        ...(r.appellation !== undefined ? { appellation: r.appellation } : {}),
+        ...(r.grapePrimary !== undefined ? { grapes: [r.grapePrimary] } : {}),
+        ...(r.vintage !== undefined ? { vintage: r.vintage } : {}),
+        ...(r.producerPrestige !== undefined ? { producerPrestige: r.producerPrestige } : {}),
       },
       relevanceScore: r.finalScore,
       match: {

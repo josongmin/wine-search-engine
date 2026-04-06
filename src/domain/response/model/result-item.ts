@@ -31,6 +31,12 @@ export interface EntitySummary {
   /** Region of origin. */
   readonly region?: string | undefined;
 
+  /** Appellation when distinct from region (browse / eval signals). */
+  readonly appellation?: string | undefined;
+
+  /** Producer prestige from the index (0–1 or 0–100 scale from source). */
+  readonly producerPrestige?: number | undefined;
+
   /** Vintage year, when applicable. */
   readonly vintage?: number | undefined;
 

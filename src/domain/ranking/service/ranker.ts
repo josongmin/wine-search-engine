@@ -58,6 +58,8 @@ interface ScoredEntry {
   readonly region?: string;
   readonly searchTextEn?: string;
   readonly grapePrimary?: string;
+  readonly appellation?: string;
+  readonly producerPrestige?: number;
   readonly componentScores: ComponentScores;
   readonly finalScore: number;
   readonly drinkingWindowStart?: number | undefined;
@@ -198,6 +200,10 @@ export class Ranker {
         ...(candidate.country !== undefined
           ? { countryEnc: this.attributeEncoder.encodeCountry(candidate.country) }
           : {}),
+        ...(candidate.appellation !== undefined ? { appellation: candidate.appellation } : {}),
+        ...(candidate.producerPrestige !== undefined
+          ? { producerPrestige: candidate.producerPrestige }
+          : {}),
         componentScores,
         finalScore,
       });
@@ -241,6 +247,11 @@ export class Ranker {
         rank: index + 1,
         componentScores: entry.componentScores,
         evidenceItems,
+        ...(entry.producer !== undefined ? { producer: entry.producer } : {}),
+        ...(entry.region !== undefined ? { region: entry.region } : {}),
+        ...(entry.grapePrimary !== undefined ? { grapePrimary: entry.grapePrimary } : {}),
+        ...(entry.appellation !== undefined ? { appellation: entry.appellation } : {}),
+        ...(entry.producerPrestige !== undefined ? { producerPrestige: entry.producerPrestige } : {}),
         ...(entry.drinkingWindowStart !== undefined ? { drinkingWindowStart: entry.drinkingWindowStart } : {}),
         ...(entry.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: entry.drinkingWindowEnd } : {}),
         ...(entry.drinkingWindowModelVersion !== undefined

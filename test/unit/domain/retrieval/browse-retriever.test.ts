@@ -39,7 +39,11 @@ describe('BrowseRetriever', () => {
 
     const out = await retriever.browseProducer('Opus One', emptyConstraints, 20);
 
-    expect(searchIndex.sparseSearch).toHaveBeenCalledWith(['Opus One'], undefined, 160);
+    expect(searchIndex.sparseSearch).toHaveBeenCalledWith(
+      ['Opus One', 'opus one'],
+      undefined,
+      160,
+    );
     expect(out).toHaveLength(1);
     expect(out[0]?.entityId).toBe(createEntityId('wine-1'));
     expect(out[0]?.retrievalTrace.retrievalProfile).toBe('producer_browse');
@@ -92,7 +96,7 @@ describe('BrowseRetriever', () => {
     const out = await retriever.browseProducer('Opus One', constraints, 12);
 
     expect(searchIndex.sparseSearch).toHaveBeenCalledWith(
-      ['Opus One'],
+      ['Opus One', 'opus one'],
       ['wine_type:red'],
       96,
     );

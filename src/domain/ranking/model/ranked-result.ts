@@ -116,4 +116,11 @@ export interface RankedResult {
 
   /** Model version for cached drinking-window data, when known. */
   readonly drinkingWindowModelVersion?: string | undefined;
+
+  /** Display metadata for responses & offline eval (browse diversity, prestige@k). */
+  readonly producer?: string | undefined;
+  readonly region?: string | undefined;
+  readonly grapePrimary?: string | undefined;
+  readonly appellation?: string | undefined;
+  readonly producerPrestige?: number | undefined;
 }

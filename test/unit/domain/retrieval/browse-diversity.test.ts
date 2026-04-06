@@ -3,7 +3,9 @@ import {
   dedupeSparseHitsByEntity,
   diversifyProducerBrowseHits,
   diversifyRegionBrowseHits,
+  expandProducerBrowseLexicalQueries,
   expandRegionBrowseLexicalQueries,
+  producerBrowseRankScore,
   stripVintageFromLabel,
 } from '../../../../src/domain/retrieval/service/browse-diversity.js';
 import type { SparseHit } from '../../../../src/domain/retrieval/port/search-index.port.js';
@@ -32,6 +34,16 @@ describe('browse diversity helpers', () => {
     expect(expandRegionBrowseLexicalQueries('A / B / C')).toEqual(['A / B / C', 'A', 'B', 'C']);
   });
 
+  it('expandProducerBrowseLexicalQueries adds lowercase variant', () => {
+    expect(expandProducerBrowseLexicalQueries('Opus One')).toEqual(['Opus One', 'opus one']);
+  });
+
+  it('producerBrowseRankScore lifts when prestige is present', () => {
+    const low = hit('a', 10, { canonicalLabel: 'X', producerPrestige: 0 });
+    const high = hit('b', 10, { canonicalLabel: 'Y', producerPrestige: 80 });
+    expect(producerBrowseRankScore(high)).toBeGreaterThan(producerBrowseRankScore(low));
+  });
+
   it('dedupeSparseHitsByEntity keeps best score', () => {
     const a = hit('x', 1, { canonicalLabel: 'Wine' });
     const b = hit('x', 3, { canonicalLabel: 'Wine' });
@@ -41,14 +53,23 @@ describe('browse diversity helpers', () => {
   it('diversifyProducerBrowseHits keeps one per product line × vintage', () => {
     const h1 = hit('a', 10, {
       canonicalLabel: 'Foo 2018',
+      producer: 'P',
+      grapePrimary: 'Cabernet',
+      appellation: 'Napa',
       vintageYear: 2018,
     });
     const h2 = hit('b', 9, {
       canonicalLabel: 'Foo 2019',
+      producer: 'P',
+      grapePrimary: 'Cabernet',
+      appellation: 'Napa',
       vintageYear: 2019,
     });
     const h3 = hit('c', 8, {
       canonicalLabel: 'Foo 2018',
+      producer: 'P',
+      grapePrimary: 'Cabernet',
+      appellation: 'Napa',
       vintageYear: 2018,
     });
     const out = diversifyProducerBrowseHits([h1, h2, h3], 2);

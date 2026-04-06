@@ -30,6 +30,8 @@ export const EntitySummarySchema = z.object({
   type: z.string().min(1),
   producer: z.string().min(1).optional(),
   region: z.string().min(1).optional(),
+  appellation: z.string().min(1).optional(),
+  producer_prestige: z.number().optional(),
   vintage: z.number().int().optional(),
   grapes: z.array(z.string().min(1)).optional(),
   price_range: z.string().min(1).optional(),

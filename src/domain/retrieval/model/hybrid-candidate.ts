@@ -59,6 +59,9 @@ export interface HybridCandidate {
   /** Critic score normalized from 0-100 to raw value (80–100 or 0 if absent). */
   readonly criticScoreNormalized?: number | undefined;
 
+  /** Producer prestige from the search index (browse / rerank signal). */
+  readonly producerPrestige?: number | undefined;
+
   /** Country of origin (e.g. "France"). */
   readonly country?: string | undefined;
 

@@ -9,15 +9,19 @@ import { buildDeclaredHttpRouteContractManifest } from '../http-route-contract-c
 const execFileAsync = promisify(execFile);
 
 describe('HTTP contract manifest script', () => {
-  it('exports the declared route manifest as JSON', async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'http-contract-manifest-'));
-    const outputPath = path.join(tempDir, 'manifest.json');
+  it(
+    'exports the declared route manifest as JSON',
+    async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), 'http-contract-manifest-'));
+      const outputPath = path.join(tempDir, 'manifest.json');
 
-    await execFileAsync('npm', ['run', 'contracts:http', '--', outputPath], {
-      cwd: '/Users/songmin/wine-search-engine',
-    });
+      await execFileAsync('npm', ['run', 'contracts:http', '--', outputPath], {
+        cwd: process.cwd(),
+      });
 
-    const written = await readFile(outputPath, 'utf8');
-    expect(JSON.parse(written)).toEqual(buildDeclaredHttpRouteContractManifest());
-  });
+      const written = await readFile(outputPath, 'utf8');
+      expect(JSON.parse(written)).toEqual(buildDeclaredHttpRouteContractManifest());
+    },
+    60_000,
+  );
 });

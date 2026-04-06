@@ -82,15 +82,19 @@ describe('HTTP contract OpenAPI bridge', () => {
     }));
   });
 
-  it('exports the OpenAPI-lite document as JSON', async () => {
-    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'http-contract-openapi-'));
-    const outputPath = path.join(tempDir, 'openapi-bridge.json');
+  it(
+    'exports the OpenAPI-lite document as JSON',
+    async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), 'http-contract-openapi-'));
+      const outputPath = path.join(tempDir, 'openapi-bridge.json');
 
-    await execFileAsync('npm', ['run', 'contracts:http:openapi-bridge', '--', outputPath], {
-      cwd: '/Users/songmin/wine-search-engine',
-    });
+      await execFileAsync('npm', ['run', 'contracts:http:openapi-bridge', '--', outputPath], {
+        cwd: process.cwd(),
+      });
 
-    const written = await readFile(outputPath, 'utf8');
-    expect(JSON.parse(written)).toEqual(buildHttpRouteContractOpenApiBridge());
-  });
+      const written = await readFile(outputPath, 'utf8');
+      expect(JSON.parse(written)).toEqual(buildHttpRouteContractOpenApiBridge());
+    },
+    60_000,
+  );
 });

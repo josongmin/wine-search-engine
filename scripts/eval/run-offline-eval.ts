@@ -33,6 +33,10 @@ import {
   setDiversityScore,
   anchorPreservationScore,
   producerVariety,
+  setCoverage,
+  browseLineDiversityAtK,
+  grapeVarietyAtK,
+  prestigeMeanAtK,
   type RankedHit,
   type DecisionOutcome,
   type GroundTruth,
@@ -257,13 +261,19 @@ async function executeSearch(query: string, timeoutMs: number): Promise<SearchRe
       const entityType = entity['type'];
       const producer = entity['producer'];
       const region = entity['region'];
+      const appellation = entity['appellation'];
+      const prestigeRaw = entity['producer_prestige'] ?? entity['producerPrestige'];
       const grapes = entity['grapes'];
+      const producer_prestige =
+        typeof prestigeRaw === 'number' && Number.isFinite(prestigeRaw) ? prestigeRaw : undefined;
       return {
         entity_id: String(entityId),
         score,
         ...(typeof entityType === 'string' ? { entity_type: entityType } : {}),
         ...(typeof producer === 'string' ? { producer } : {}),
         ...(typeof region === 'string' ? { region } : {}),
+        ...(typeof appellation === 'string' ? { appellation } : {}),
+        ...(producer_prestige !== undefined ? { producer_prestige } : {}),
         ...(Array.isArray(grapes)
           ? { grapes: grapes.filter((value): value is string => typeof value === 'string') }
           : {}),
@@ -390,6 +400,30 @@ function computeModeMetrics(
     metrics.diversity_score = diversityScores.reduce((a, b) => a + b, 0) / diversityScores.length;
     const varietyScores = results.map((r) => producerVariety(r.ranked));
     metrics.producer_variety = varietyScores.reduce((a, b) => a + b, 0) / varietyScores.length;
+
+    const coverageScores = results.map((r) =>
+      setCoverage(
+        new Set(r.ranked.slice(0, 10).map((h) => h.entity_id)),
+        r.truth.relevant,
+        2,
+      ),
+    );
+    metrics.set_coverage =
+      coverageScores.reduce((a, b) => a + b, 0) / coverageScores.length;
+
+    const lineScores = results.map((r) => browseLineDiversityAtK(r.ranked, 10));
+    metrics.browse_line_diversity_at_10 =
+      lineScores.reduce((a, b) => a + b, 0) / lineScores.length;
+
+    const prestigeScores = results.map((r) => prestigeMeanAtK(r.ranked, 10));
+    metrics.prestige_mean_at_10 =
+      prestigeScores.reduce((a, b) => a + b, 0) / prestigeScores.length;
+
+    if (mode === 'region_browse') {
+      const grapeScores = results.map((r) => grapeVarietyAtK(r.ranked, 10));
+      metrics.grape_variety_at_10 =
+        grapeScores.reduce((a, b) => a + b, 0) / grapeScores.length;
+    }
   }
 
   if (mode === 'similar_items') {
@@ -736,6 +770,33 @@ async function run(): Promise<void> {
         }
         if (gates.recall_at_10_min !== undefined && metrics.recall_at_10 < gates.recall_at_10_min) {
           modeViolations.push(`${mode} recall_at_10 ${metrics.recall_at_10.toFixed(4)} < ${gates.recall_at_10_min}`);
+        }
+        if (
+          gates.set_coverage_min !== undefined &&
+          metrics.set_coverage !== undefined &&
+          metrics.set_coverage < gates.set_coverage_min
+        ) {
+          modeViolations.push(
+            `${mode} set_coverage ${metrics.set_coverage.toFixed(4)} < ${gates.set_coverage_min}`,
+          );
+        }
+        if (
+          gates.diversity_min !== undefined &&
+          metrics.diversity_score !== undefined &&
+          metrics.diversity_score < gates.diversity_min
+        ) {
+          modeViolations.push(
+            `${mode} diversity_score ${metrics.diversity_score.toFixed(4)} < ${gates.diversity_min}`,
+          );
+        }
+        if (
+          gates.producer_variety_min !== undefined &&
+          metrics.producer_variety !== undefined &&
+          metrics.producer_variety < gates.producer_variety_min
+        ) {
+          modeViolations.push(
+            `${mode} producer_variety ${metrics.producer_variety.toFixed(4)} < ${gates.producer_variety_min}`,
+          );
         }
         if (modeViolations.length > 0) {
           console.log(`  [ADVISORY] Mode ${mode}:`);

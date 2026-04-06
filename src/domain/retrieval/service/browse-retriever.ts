@@ -8,6 +8,7 @@ import {
   dedupeSparseHitsByEntity,
   diversifyProducerBrowseHits,
   diversifyRegionBrowseHits,
+  expandProducerBrowseLexicalQueries,
   expandRegionBrowseLexicalQueries,
 } from './browse-diversity.js';
 
@@ -42,6 +43,7 @@ function sparseHitsToBrowseCandidates(
       acidity: summary?.acidity,
       sweetness: summary?.sweetness,
       criticScoreNormalized: summary?.criticScoreNormalized,
+      producerPrestige: summary?.producerPrestige,
       country: summary?.country,
       appellation: summary?.appellation,
       sparseRank: index + 1,
@@ -56,8 +58,9 @@ function sparseHitsToBrowseCandidates(
  * Epic 10: Browse Retriever — set retrieval for producer / region exploration.
  *
  * - Applies hard constraints as Vespa sparse filter tokens (when mappable).
- * - Over-fetches sparse hits, then diversifies: producer browse by product line × vintage,
- *   region browse by per-producer caps + critic-informed ranking.
+ * - Over-fetches sparse hits, then diversifies: producer browse by structured line × vintage
+ *   (producer+grape+geo when available) and prestige/critic-aware ranking; region browse by
+ *   per-producer caps + prestige/critic-informed ranking.
  * - Region browse issues multiple OR queries (path + segments) for recall on hierarchical paths.
  */
 export class BrowseRetriever {
@@ -74,14 +77,16 @@ export class BrowseRetriever {
     }
     const filters = [...hardConstraintsToSparseFilterTokens(constraints.hard)];
     const fetchLimit = browseSparseFetchLimit(limit);
+    const lexical = expandProducerBrowseLexicalQueries(q);
+    const queries = lexical.length > 0 ? [...lexical] : [q];
     const rawHits = await this.searchIndex.sparseSearch(
-      [q],
+      queries,
       filters.length > 0 ? filters : undefined,
       fetchLimit,
     );
     const hits = dedupeSparseHitsByEntity(rawHits);
     const diversified = diversifyProducerBrowseHits(hits, limit);
-    return sparseHitsToBrowseCandidates(diversified, 'producer_browse', [q], filters);
+    return sparseHitsToBrowseCandidates(diversified, 'producer_browse', queries, filters);
   }
 
   async browseRegion(

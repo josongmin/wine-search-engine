@@ -17,6 +17,9 @@ export interface RankedHit {
   readonly entity_type?: string;
   readonly producer?: string;
   readonly region?: string;
+  readonly appellation?: string;
+  /** Normalized 0–1 or 0–100 from index; eval normalizes for prestige@k. */
+  readonly producer_prestige?: number;
   readonly grapes?: readonly string[];
 }
 
@@ -464,6 +467,12 @@ export interface ModeMetrics {
   diversity_score?: number;
   anchor_preservation_score?: number;
   producer_variety?: number;
+  /** Distinct browse line keys (producer|grape|app) / min(n,10) in top 10. */
+  browse_line_diversity_at_10?: number;
+  /** Distinct primary grapes / count in top 10 (region browse). */
+  grape_variety_at_10?: number;
+  /** Mean normalized producer prestige mass in top-10 slots (missing = 0). */
+  prestige_mean_at_10?: number;
   set_coverage?: number;
   seed_exclusion_rate?: number;
   attribute_coverage?: number;
@@ -533,11 +542,16 @@ export function anchorPreservationScore(
  * Placeholder: requires producer metadata in results.
  */
 export function producerVariety(results: readonly RankedHit[]): number {
-  if (results.length === 0) {
+  return producerVarietyAtK(results, 10);
+}
+
+/** Distinct producers in top-K / min(K, n). */
+export function producerVarietyAtK(results: readonly RankedHit[], k: number): number {
+  if (results.length === 0 || k <= 0) {
     return 0;
   }
-
-  const producers = results
+  const slice = results.slice(0, k);
+  const producers = slice
     .map((result) => result.producer)
     .filter((producer): producer is string => typeof producer === 'string' && producer.length > 0);
 
@@ -546,6 +560,67 @@ export function producerVariety(results: readonly RankedHit[]): number {
   }
 
   return new Set(producers).size / producers.length;
+}
+
+function primaryGrape(h: RankedHit): string {
+  const g = h.grapes?.[0];
+  return typeof g === 'string' ? g.trim().toLowerCase() : '';
+}
+
+function browseLineKey(h: RankedHit): string {
+  const p = (h.producer ?? '').trim().toLowerCase();
+  const g = primaryGrape(h);
+  const a = (h.appellation ?? h.region ?? '').trim().toLowerCase();
+  if (p.length > 0 && g.length > 0 && a.length > 0) {
+    return `${p}|${g}|${a}`;
+  }
+  if (p.length > 0 && g.length > 0) {
+    return `${p}|${g}`;
+  }
+  return p.length > 0 ? p : h.entity_id;
+}
+
+/**
+ * Fraction of distinct structured product lines in top-K (aligns with browse-diversity.ts intent).
+ */
+export function browseLineDiversityAtK(ranked: readonly RankedHit[], k: number): number {
+  const slice = ranked.slice(0, k);
+  if (slice.length === 0) {
+    return 0;
+  }
+  const keys = new Set(slice.map((h) => browseLineKey(h)));
+  return keys.size / slice.length;
+}
+
+/** Distinct primary grapes / number of hits with grape metadata in top-K. */
+export function grapeVarietyAtK(ranked: readonly RankedHit[], k: number): number {
+  const slice = ranked.slice(0, k);
+  const grapes = slice.map(primaryGrape).filter((g) => g.length > 0);
+  if (grapes.length === 0) {
+    return 0;
+  }
+  return new Set(grapes).size / grapes.length;
+}
+
+function normalizePrestige(p: number | undefined): number {
+  if (p === undefined || !Number.isFinite(p)) {
+    return 0;
+  }
+  return p <= 1 ? p : p / 100;
+}
+
+/**
+ * Mean prestige score in top-K slots (missing prestige counts as 0), divide by K.
+ */
+export function prestigeMeanAtK(ranked: readonly RankedHit[], k: number): number {
+  if (k <= 0) {
+    return 0;
+  }
+  let sum = 0;
+  for (let i = 0; i < k; i++) {
+    sum += normalizePrestige(ranked[i]?.producer_prestige);
+  }
+  return sum / k;
 }
 
 // ---------------------------------------------------------------------------
