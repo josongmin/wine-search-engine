@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canonicalJsonStringify } from './canonical-json.js';
 
 /**
  * Computes a deterministic SHA-256 identity hash from one or more string fields.
@@ -23,19 +24,19 @@ export function identityHash(...fields: string[]): string {
 }
 
 /**
- * Computes a deterministic SHA-256 hash of an ordered sequence of values.
+ * Computes a deterministic SHA-256 hash of one or more values.
  *
- * Unlike {@link identityHash}, fields are NOT sorted — order is significant.
- * A pipe (`|`) separator is used between fields. The result is truncated to
- * 16 hex characters (64 bits of entropy) for use as a compact response hash.
+ * Each value is serialized with {@link canonicalJsonStringify} (sorted object
+ * keys, stable arrays, no `undefined`) and separated by newline in the digest
+ * input stream so part boundaries are unambiguous.
  *
- * Used by the determinism gate (RFC-009 §8 / RFC-015) to validate that a
- * replay with the same snapshot produces an equivalent engine decision.
- *
- * @param fields - Ordered values to hash. Each is coerced to string.
- * @returns 16-character lowercase hexadecimal digest.
+ * Used for authority traces, snapshot ids, batch ids, and `response_hash`.
  */
-export function deterministicHash(...fields: (string | number | boolean)[]): string {
-  const joined = fields.map(String).join('|');
-  return createHash('sha256').update(joined, 'utf8').digest('hex').slice(0, 16);
+export function deterministicHash(...parts: unknown[]): string {
+  const hash = createHash('sha256');
+  for (const part of parts) {
+    hash.update(canonicalJsonStringify(part));
+    hash.update('\n');
+  }
+  return hash.digest('hex');
 }

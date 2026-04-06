@@ -11,6 +11,7 @@ import type { FailureReason } from '../model/failure-reason.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { buildAuthorityTraceRef } from './authority-trace.js';
 
 /**
  * Internal intermediate state used during decision processing.
@@ -629,7 +630,14 @@ export class DecisionEngine {
       candidates: input.resolverResult.candidates,
       signalSet,
       evidenceItems: input.evidenceItems ?? [],
-      decisionTraceRef: `trace:${input.queryPlan.queryClass}:${String(Date.now())}`,
+      decisionTraceRef: buildAuthorityTraceRef({
+        queryPlan: input.queryPlan,
+        snapshot,
+        ...(topCandidate !== undefined ? { chosenEntityId: topCandidate.entityId } : {}),
+        decisionStatus: state.status,
+        nextAction: state.nextAction,
+        ...(failureReason !== undefined ? { failureReason } : {}),
+      }),
       decisionSnapshot: snapshot,
       decisionTrace: trace,
       ...(failureReason !== undefined ? { failureReason } : {}),

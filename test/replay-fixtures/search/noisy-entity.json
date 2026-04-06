@@ -1,0 +1,7 @@
+{
+  "name": "noisy-entity",
+  "expected": {
+    "execution_mode": "authoritative",
+    "degradation_reasons": []
+  }
+}

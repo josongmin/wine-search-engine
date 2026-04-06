@@ -350,4 +350,16 @@ export interface DecisionInput {
    * evidenceItems will be empty.
    */
   readonly evidenceItems?: readonly EvidenceItem[] | undefined;
+
+  /**
+   * Optional execution / honesty mode for admission policy (Wave 3).
+   * Defaults to `authoritative` when omitted.
+   */
+  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+
+  /** When false, admission policy rejects (route unhealthy). Defaults to true. */
+  readonly routeHealthy?: boolean;
+
+  /** When true with heuristic execution mode, admission rejects blocking paths. */
+  readonly blockingRequested?: boolean;
 }

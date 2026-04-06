@@ -1,5 +1,7 @@
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
+import { BATCH_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schema-version.js';
+import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import type {
   BatchErrorCode,
   BatchSearchOptions,
@@ -69,7 +71,11 @@ export class BatchSearchUseCase {
     batchId?: string,
   ): Promise<BatchSearchResponse> {
     const startTime = Date.now();
-    const actualBatchId = batchId ?? this.generateBatchId();
+    const timeoutMs = this.normalizeTimeout(options?.timeout_ms);
+    const actualBatchId = batchId ?? this.generateBatchId(requests, {
+      failFast: options?.fail_fast ?? false,
+      timeoutMs,
+    });
 
     // Validate batch size
     if (requests.length === 0) {
@@ -104,9 +110,6 @@ export class BatchSearchUseCase {
         processing_time_ms: Date.now() - startTime,
       };
     }
-
-    // Validate and normalize timeout
-    const timeoutMs = this.normalizeTimeout(options?.timeout_ms);
 
     // Determine execution strategy
     const failFast = options?.fail_fast ?? false;
@@ -380,15 +383,28 @@ export class BatchSearchUseCase {
   }
 
   /**
-   * Generate a unique batch identifier.
-   *
-   * Format: `batch_${timestamp}_${randomSuffix}`
-   *
-   * @returns A unique batch ID.
+   * Deterministic batch id from ordered request items (id + trimmed query per row).
+   * Schema: `batch:<version>:<sha256 hex>`
    */
-  private generateBatchId(): string {
-    const timestamp = Date.now();
-    const random = Math.random().toString(36).substring(2, 8);
-    return `batch_${timestamp}_${random}`;
+  private generateBatchId(
+    requests: readonly BatchSearchRequestItem[],
+    options: {
+      readonly failFast: boolean;
+      readonly timeoutMs: number;
+    },
+  ): string {
+    const digest = deterministicHash({
+      requests: requests.map((request) => ({
+        id: request.id,
+        query: request.query.trim(),
+        ...(request.limit !== undefined ? { limit: request.limit } : {}),
+        ...(request.retrieval_mode !== undefined ? { retrieval_mode: request.retrieval_mode } : {}),
+        ...(request.context !== undefined ? { context: request.context } : {}),
+        ...(request.sessionContext !== undefined ? { sessionContext: request.sessionContext } : {}),
+        ...(request.queryBudget !== undefined ? { queryBudget: request.queryBudget } : {}),
+      })),
+      options,
+    });
+    return `batch:${BATCH_ID_SCHEMA_VERSION}:${digest}`;
   }
 }

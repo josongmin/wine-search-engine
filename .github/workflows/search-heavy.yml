@@ -7,11 +7,14 @@ on:
         required: false
         type: boolean
         default: false
+  merge_group:
   pull_request:
     paths:
       - 'package.json'
       - 'package-lock.json'
       - 'config/vitest/e2e.vespa.config.ts'
+      - 'config/vitest/e2e.vespa.smoke.config.ts'
+      - 'config/vitest/ingest.contract.config.ts'
       - 'config/vitest/quality.config.ts'
       - 'config/vitest/quality.vespa.config.ts'
       - 'src/application/search/**'
@@ -19,6 +22,7 @@ on:
       - 'src/domain/ranking/**'
       - 'src/domain/retrieval/**'
       - 'src/infrastructure/vespa/**'
+      - 'scripts/etl/**'
       - 'test/e2e/golden-set.test.ts'
       - 'test/e2e/specialized-modes-quality.test.ts'
       - 'test/e2e/vespa/**'
@@ -57,18 +61,40 @@ jobs:
             echo "- Typecheck: \`npm run typecheck\`"
             echo "- Quality gate: \`npm run test:quality\`"
             echo "- Offline eval smoke: \`npm run eval:offline:smoke:assert-baseline\`"
+            echo "- Vespa smoke lane: \`npm run test:e2e:vespa:smoke\`"
             echo "- Optional Vespa-heavy lane: manual dispatch with \`run_vespa_verification=true\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  vespa-smoke:
+    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.run_vespa_verification) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [search-quality]
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Vespa smoke lane
+        run: npm run test:e2e:vespa:smoke
+      - name: Vespa smoke summary
+        if: always()
+        run: |
+          {
+            echo "## Vespa Smoke"
+            echo ""
+            echo "- Lane: \`npm run test:e2e:vespa:smoke\`"
+            echo "- Covers: direct Vespa sparse search, hybrid HTTP path, learned matcher HTTP path"
           } >> "$GITHUB_STEP_SUMMARY"
 
   vespa-verification:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vespa_verification }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: [search-quality]
+    needs: [search-quality, vespa-smoke]
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Vespa-heavy verification
         run: npm run test:verification:vespa
+      - name: Ingest indexing smoke
+        run: npm run test:ingest:indexing
       - name: Vespa summary
         if: always()
         run: |
@@ -76,5 +102,6 @@ jobs:
             echo "## Vespa-Heavy Verification"
             echo ""
             echo "- Vespa verification: \`npm run test:verification:vespa\`"
+            echo "- Ingest indexing smoke: \`npm run test:ingest:indexing\`"
             echo "- Includes: Vespa e2e, network-services lane, Vespa quality lane"
           } >> "$GITHUB_STEP_SUMMARY"

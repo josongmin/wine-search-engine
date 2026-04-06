@@ -33,6 +33,14 @@ jobs:
       - uses: ./.github/actions/setup-node-ci
       - run: npm run test:e2e:inmemory
 
+  ingest-indexing:
+    runs-on: ubuntu-latest
+    needs: [verification-core]
+    timeout-minutes: 25
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - run: npm run test:ingest:indexing
+
   vespa-e2e:
     runs-on: ubuntu-latest
     needs: [verification-core]

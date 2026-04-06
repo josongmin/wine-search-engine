@@ -9,8 +9,9 @@ export default defineConfig({
     hookTimeout: 30_000,
     pool: 'forks',
     poolOptions: { forks: { singleFork: true } },
+    // Do not set VESPA_URL here — it would override the host/shell and hide dev Vespa (8080).
+    // run-vespa-test-lane.sh exports VESPA_URL=http://localhost:18080; for local dev use .env or export.
     env: {
-      VESPA_URL: 'http://localhost:18080',
       TEST_MODE: 'vespa',
     },
   },

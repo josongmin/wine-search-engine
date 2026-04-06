@@ -1,6 +1,9 @@
 import type { Pool } from 'pg';
 import type { SnapshotStore } from '../../domain/decision/port/snapshot-store.port.js';
+import { SNAPSHOT_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schema-version.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import { canonicalJsonStringify } from '../../domain/shared/utils/canonical-json.js';
+import { deterministicHash } from '../../domain/shared/utils/hash.js';
 
 interface DecisionSnapshotRow {
   snapshot_id: string;
@@ -19,17 +22,36 @@ interface SnapshotEnvelope {
   snapshot: DecisionSnapshot;
 }
 
+/**
+ * Deterministic id for a persisted {@link DecisionSnapshot} (SSOT for replay/audit).
+ */
+export function buildDeterministicSnapshotId(snapshot: DecisionSnapshot): string {
+  const canonical = canonicalJsonStringify({
+    model_versions: snapshot.model_versions,
+    index_versions: snapshot.index_versions,
+    policy_rule_version: snapshot.policy_rule_version,
+    threshold_profile_id: snapshot.threshold_profile_id,
+    planner_version: snapshot.planner_version,
+    feature_flags: snapshot.feature_flags,
+    ...(snapshot.nondeterminism_notes !== undefined
+      ? { nondeterminism_notes: snapshot.nondeterminism_notes }
+      : {}),
+  });
+  return [
+    'snapshot',
+    SNAPSHOT_ID_SCHEMA_VERSION,
+    snapshot.threshold_profile_id,
+    snapshot.planner_version,
+    snapshot.policy_rule_version,
+    deterministicHash(canonical),
+  ].join(':');
+}
+
 export class PgSnapshotStore implements SnapshotStore {
   constructor(private readonly pool: Pool) {}
 
   async save(snapshot: DecisionSnapshot): Promise<void> {
-    // Generate a deterministic-ish id from profile + planner + timestamp
-    const snapshotId = [
-      snapshot.threshold_profile_id,
-      snapshot.planner_version,
-      snapshot.policy_rule_version,
-      Date.now().toString(36),
-    ].join(':');
+    const snapshotId = buildDeterministicSnapshotId(snapshot);
 
     const envelope: SnapshotEnvelope = { snapshotId, snapshot };
 

@@ -74,8 +74,9 @@ flowchart TB
 |----------|------|
 | `npm run vivino:bronze` | `tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts` |
 | `npm run etl:transliteration` | `scripts/etl/generate-transliteration-aliases.ts` |
-| `npm run ingest` | 선언: `src/interface/cli/ingest.command.ts` — **파일 없음** |
-| `npm run kill-switch` | 선언: `src/interface/cli/kill-switch.command.ts` — **파일 없음** |
+| `npm run bootstrap:smoke` | `scripts/bootstrap-smoke.sh` |
+
+`ingest` / `kill-switch` CLI 스크립트는 현재 레포에 존재하지 않으므로 `package.json`에서 제거되었다. 인입 관련 작업은 개별 `scripts/etl/*.ts`를 직접 사용한다.
 
 ---
 

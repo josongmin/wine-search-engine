@@ -206,6 +206,27 @@ describe('CacheService', () => {
       expect(result.isStale).toBeUndefined();
     });
 
+    it('should refuse caching heuristic responses even on cacheable routes', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const mockResponse = createMockResponse('test-v1', {
+        executionMode: 'heuristic',
+        blockingEligible: false,
+        degradationReasons: ['heuristic_drinking_window'],
+      });
+
+      await expect(
+        cacheService.setSearchResponse(mockPlan, mockRequest, mockResponse),
+      ).resolves.toBe(false);
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+      );
+      expect(result.hit).toBe(false);
+    });
+
     it('should invalidate stale entries with version mismatch', async () => {
       const mockPlan = createMockPlan();
       const mockRequest = {};
@@ -462,8 +483,18 @@ function createMockSnapshot(modelVersion = 'test-v1'): DecisionSnapshot {
   };
 }
 
-function createMockResponse(modelVersion = 'test-v1'): SearchResponseV1 {
+function createMockResponse(
+  modelVersion = 'test-v1',
+  overrides?: {
+    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+    readonly blockingEligible?: boolean;
+    readonly degradationReasons?: readonly string[];
+  },
+): SearchResponseV1 {
   const decisionSnapshot = createMockSnapshot(modelVersion);
+  const executionMode = overrides?.executionMode ?? 'authoritative';
+  const blockingEligible = overrides?.blockingEligible ?? true;
+  const degradationReasons = overrides?.degradationReasons;
   return {
     queryType: 'search',
     engineDecision: {
@@ -473,6 +504,10 @@ function createMockResponse(modelVersion = 'test-v1'): SearchResponseV1 {
       decisionConfidence: 0.9,
       confidenceSemantics: 'calibrated_decision_confidence',
       decisionTraceRef: 'test-trace',
+      authorityTraceRef: 'test-trace',
+      executionMode,
+      blockingEligible,
+      ...(degradationReasons !== undefined ? { degradationReasons } : {}),
       decisionSnapshot,
     },
     results: [],
@@ -484,6 +519,10 @@ function createMockResponse(modelVersion = 'test-v1'): SearchResponseV1 {
       engine_schema_version: 'search_response_v1',
       decisionSnapshot,
       response_hash: 'test-hash',
+      authorityTraceRef: 'test-trace',
+      executionMode,
+      blockingEligible,
+      ...(degradationReasons !== undefined ? { degradationReasons } : {}),
     },
   };
 }

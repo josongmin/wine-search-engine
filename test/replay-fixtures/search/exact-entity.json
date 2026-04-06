@@ -1,0 +1,7 @@
+{
+  "name": "exact-entity",
+  "expected": {
+    "execution_mode": "authoritative",
+    "degradation_reasons": []
+  }
+}

@@ -27,8 +27,23 @@ export interface EngineDecision {
   /** Semantic tag — always `'calibrated_decision_confidence'`. */
   readonly confidenceSemantics: 'calibrated_decision_confidence';
 
-  /** Unique trace reference for pipeline debugging. */
+  /**
+   * Legacy trace string — same value as {@link authorityTraceRef} in Wave 3+.
+   * Prefer `authorityTraceRef` for new integrations (OpenAPI migration Phase A–C).
+   */
   readonly decisionTraceRef: string;
+
+  /** Deterministic authority identifier for replay, audit, and cache keys. */
+  readonly authorityTraceRef?: string | undefined;
+
+  /** Observability-only correlation (may equal HTTP request id). */
+  readonly runtimeCorrelationRef?: string | undefined;
+
+  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+
+  readonly blockingEligible?: boolean;
+
+  readonly degradationReasons?: readonly string[] | undefined;
 
   /** Snapshot of system versions active at decision time. */
   readonly decisionSnapshot: DecisionSnapshot;

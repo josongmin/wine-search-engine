@@ -2,6 +2,7 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
+import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
 /**
@@ -44,7 +45,13 @@ export function buildConstraintContradictionResponseParams(options: {
       uncertainty_penalty: 0,
     },
     evidenceItems: [],
-    decisionTraceRef: `constraint-sat:${requestId}`,
+    decisionTraceRef: buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot,
+      decisionStatus: 'failed',
+      nextAction: 'fail',
+      failureReason: 'HARD_CONSTRAINT_VIOLATION',
+    }),
     decisionSnapshot: snapshot,
     failureReason: 'HARD_CONSTRAINT_VIOLATION',
     decisionTrace: {
@@ -130,7 +137,12 @@ export function buildEntropyAbstainResponseParams(options: {
       uncertainty_penalty: 0,
     },
     evidenceItems: [],
-    decisionTraceRef: `entropy-abstain:${requestId}`,
+    decisionTraceRef: buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot,
+      decisionStatus: 'ambiguous',
+      nextAction: 'clarify',
+    }),
     decisionSnapshot: snapshot,
     decisionTrace: {
       decisionStatus: 'ambiguous',

@@ -1,0 +1,7 @@
+{
+  "name": "ambiguous-vintage",
+  "expected": {
+    "execution_mode": "authoritative",
+    "degradation_reasons": []
+  }
+}

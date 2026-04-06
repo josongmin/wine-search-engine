@@ -10,6 +10,8 @@ export interface DrinkingWindowBlock {
   readonly peakYear?: number | undefined; // Optional peak maturity year
   readonly currentlyDrinkable: boolean;   // true if current year is within window
   readonly confidence: 'high' | 'medium' | 'low';
+  readonly evidenceLevel?: 'learned' | 'heuristic' | undefined;
+  readonly blockingEligible?: boolean | undefined;
   readonly modelVersion?: string | undefined;
 }
 

@@ -17,6 +17,7 @@ import type { CacheResult } from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { decideResponseCachePolicy } from '../../cache/cache-policy.js';
 
 const log = bootstrapLogger.child({ component: 'CacheService' });
 
@@ -41,6 +42,14 @@ function recordMismatch<T extends string | boolean>(
     }
   }
   return false;
+}
+
+function buildSnapshotCachePolicyRef(snapshot: DecisionSnapshot): string {
+  return [
+    snapshot.threshold_profile_id,
+    snapshot.planner_version,
+    snapshot.policy_rule_version,
+  ].join(':');
 }
 
 /**
@@ -188,6 +197,24 @@ export class CacheService implements SearchResponseCachePort {
   ): Promise<boolean> {
     const eligibility = this.eligibilityAnalyzer.analyze(plan);
     if (!eligibility.isCacheable || !this.queryCache) {
+      return false;
+    }
+
+    const snapshot = response.meta.decisionSnapshot ?? response.engineDecision.decisionSnapshot;
+    const policy = decideResponseCachePolicy({
+      executionMode: response.meta.executionMode ?? response.engineDecision.executionMode ?? 'authoritative',
+      ...(snapshot !== undefined ? { snapshotId: buildSnapshotCachePolicyRef(snapshot) } : {}),
+      ...(
+        response.meta.blockingEligible !== undefined || response.engineDecision.blockingEligible !== undefined
+          ? {
+              blockingEligible:
+                response.meta.blockingEligible ?? response.engineDecision.blockingEligible,
+            }
+          : {}
+      ),
+    });
+    if (policy.eligibility === 'non_cacheable') {
+      log.debug({ reason: policy.reason }, 'Skipping response cache write due to response contract policy');
       return false;
     }
 

@@ -4,7 +4,11 @@ import {
   DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
   type DrinkingWindowUseCasePort,
 } from '../drinking-window/port/drinking-window-usecase.port.js';
-import { inferDrinkingWindowConfidence } from './drinking-window-confidence.js';
+import {
+  inferDrinkingWindowBlockingEligibility,
+  inferDrinkingWindowConfidence,
+  inferDrinkingWindowEvidenceLevel,
+} from './drinking-window-confidence.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const drinkingWindowLogger = bootstrapLogger.child({
@@ -86,6 +90,8 @@ export async function mapRankedResultsToResultItems(
         currentlyDrinkable:
           targetYear >= r.drinkingWindowStart && targetYear <= r.drinkingWindowEnd,
         confidence: inferDrinkingWindowConfidence(r.drinkingWindowModelVersion),
+        evidenceLevel: inferDrinkingWindowEvidenceLevel(r.drinkingWindowModelVersion),
+        blockingEligible: inferDrinkingWindowBlockingEligibility(r.drinkingWindowModelVersion),
         ...(r.drinkingWindowModelVersion !== undefined
           ? { modelVersion: r.drinkingWindowModelVersion }
           : {}),

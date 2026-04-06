@@ -29,7 +29,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const SOURCE_ID = 'vivino';
-const DEFAULT_OUTPUT = 'data/silver.ndjson';
+export const DEFAULT_OUTPUT = 'data/silver.ndjson';
 
 const VIVINO_STYLE_MAP: Record<string, WineType> = {
   'red wine': 'red',
@@ -127,7 +127,7 @@ function makeEntityId(externalId: string): string {
  * 2. Remove leading producer duplication ("Opus One Winery Opus One" → "Opus One").
  * 3. Ensure vintage year is appended if present and not already in string.
  */
-function normalizeLabel(
+export function normalizeLabel(
   displayName: string,
   producer: string | null,
   vintageYear: number | null,
@@ -249,11 +249,11 @@ function extractPairings(payload: VivinoPayload | null): readonly string[] {
 // Transform: BronzeRow → SilverWineRecord (pre-popularity)
 // ---------------------------------------------------------------------------
 
-interface PreSilver extends Omit<SilverWineRecord, 'popularityScore'> {
+export interface PreSilver extends Omit<SilverWineRecord, 'popularityScore'> {
   readonly ratingsCount: number;
 }
 
-function transformRow(row: BronzeRow): PreSilver | null {
+export function transformRow(row: BronzeRow): PreSilver | null {
   const externalId = row.external_id;
   if (!externalId) return null;
 
@@ -322,7 +322,7 @@ function transformRow(row: BronzeRow): PreSilver | null {
  * 2. Highest ratings_count
  * 3. Non-empty search text
  */
-function dedup(records: PreSilver[]): PreSilver[] {
+export function dedup(records: PreSilver[]): PreSilver[] {
   const byKey = new Map<string, PreSilver>();
 
   for (const rec of records) {
@@ -363,7 +363,7 @@ function dedup(records: PreSilver[]): PreSilver[] {
 // Popularity normalisation (log1p across corpus)
 // ---------------------------------------------------------------------------
 
-function normalizePopularity(records: PreSilver[]): SilverWineRecord[] {
+export function normalizePopularity(records: PreSilver[]): SilverWineRecord[] {
   const maxCount = records.reduce(
     (mx, r) => Math.max(mx, r.ratingsCount),
     1,
@@ -379,7 +379,7 @@ function normalizePopularity(records: PreSilver[]): SilverWineRecord[] {
 // Main
 // ---------------------------------------------------------------------------
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const pool = poolFromEnv();
 
@@ -452,8 +452,10 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

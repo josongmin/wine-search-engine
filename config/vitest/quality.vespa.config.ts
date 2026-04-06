@@ -10,7 +10,6 @@ export default defineConfig({
     pool: 'forks',
     poolOptions: { forks: { singleFork: true } },
     env: {
-      VESPA_URL: 'http://localhost:18080',
       TEST_MODE: 'vespa',
     },
   },

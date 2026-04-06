@@ -1,0 +1,7 @@
+{
+  "name": "reranker-timeout",
+  "expected": {
+    "execution_mode": "degraded",
+    "degradation_reasons": ["reranker_timeout"]
+  }
+}

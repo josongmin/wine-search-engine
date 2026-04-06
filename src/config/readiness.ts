@@ -4,7 +4,7 @@ import {
   expectsRedisAtStartup,
   isWatchlistEnabled,
 } from './watchlist.js';
-import { probeJsonPostEndpoint } from './readiness-probes.js';
+import { probeJsonPostEndpoint } from '../infrastructure/health/readiness-probes.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type {

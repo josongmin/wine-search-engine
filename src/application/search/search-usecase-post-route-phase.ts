@@ -18,6 +18,7 @@ import { mapRankedResultsToResultItems } from './search-usecase-map-result-items
 import { topKFinalScores } from './search-usecase-ranking-scores.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { logSearchEvent } from '../../observability/log-search-event.js';
 
 /**
  * Context for Steps 3b–7: entropy abstain → DecisionEngine → ResponseBuilder → optional cache write.
@@ -87,7 +88,7 @@ export async function runRankedRouteDecisionPhase(
       ctx.rankedResults,
     );
 
-  return ctx.responseBuilder.build({
+  const built = ctx.responseBuilder.build({
     queryPlan: ctx.plan,
     decisionOutput,
     results,
@@ -102,6 +103,25 @@ export async function runRankedRouteDecisionPhase(
       ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
       : {}),
   });
+  /* Unit tests may stub partial SearchResponseV1; skip structured log when snapshot missing. */
+  const engineDecision = built.engineDecision as SearchResponseV1['engineDecision'] | undefined;
+  const decisionSnapshot = engineDecision?.decisionSnapshot;
+  if (decisionSnapshot !== undefined) {
+    logSearchEvent({
+      ...(built.meta.authorityTraceRef !== undefined
+        ? { authority_trace_ref: built.meta.authorityTraceRef }
+        : {}),
+      runtime_correlation_ref: built.meta.runtimeCorrelationRef ?? ctx.requestId,
+      ...(built.meta.executionMode !== undefined ? { execution_mode: built.meta.executionMode } : {}),
+      ...(built.meta.degradationReasons !== undefined
+        ? { degradation_reasons: built.meta.degradationReasons }
+        : {}),
+      route_name: ctx.effectiveRoute,
+      model_versions: { ...decisionSnapshot.model_versions },
+      kill_switch_state: { ...decisionSnapshot.feature_flags },
+    });
+  }
+  return built;
 }
 
 /**
@@ -134,6 +154,27 @@ export async function runSearchPostRoutePhase(
         rankedResults: ctx.rankedResults,
       }),
     );
+    const entropyEngineDecision = response.engineDecision as
+      | SearchResponseV1['engineDecision']
+      | undefined;
+    const entropySnapshot = entropyEngineDecision?.decisionSnapshot;
+    if (entropySnapshot !== undefined) {
+      logSearchEvent({
+        ...(response.meta.authorityTraceRef !== undefined
+          ? { authority_trace_ref: response.meta.authorityTraceRef }
+          : {}),
+        runtime_correlation_ref: response.meta.runtimeCorrelationRef ?? ctx.requestId,
+        ...(response.meta.executionMode !== undefined
+          ? { execution_mode: response.meta.executionMode }
+          : {}),
+        ...(response.meta.degradationReasons !== undefined
+          ? { degradation_reasons: response.meta.degradationReasons }
+          : {}),
+        route_name: ctx.effectiveRoute,
+        model_versions: { ...entropySnapshot.model_versions },
+        kill_switch_state: { ...entropySnapshot.feature_flags },
+      });
+    }
     if (ctx.cacheService) {
       const stored = await ctx.cacheService.setSearchResponse(
         ctx.plan,

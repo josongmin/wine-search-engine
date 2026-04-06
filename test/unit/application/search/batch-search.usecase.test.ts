@@ -444,7 +444,20 @@ describe('BatchSearchUseCase', () => {
       const response = await useCase.execute(requests);
 
       expect(response.batch_id).toBeDefined();
-      expect(response.batch_id).toMatch(/^batch_\d+_[a-z0-9]+$/);
+      expect(response.batch_id).toMatch(/^batch:v1:[a-f0-9]{64}$/);
+    });
+
+    it('changes batch_id when request shape changes beyond query text', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse());
+
+      const base = await useCase.execute([
+        { id: '1', query: 'Test', limit: 5, retrieval_mode: 'hybrid' },
+      ]);
+      const changed = await useCase.execute([
+        { id: '1', query: 'Test', limit: 10, retrieval_mode: 'hybrid' },
+      ]);
+
+      expect(base.batch_id).not.toBe(changed.batch_id);
     });
   });
 

@@ -1,0 +1,7 @@
+{
+  "name": "heuristic-drinking-window",
+  "expected": {
+    "execution_mode": "authoritative",
+    "degradation_reasons": []
+  }
+}

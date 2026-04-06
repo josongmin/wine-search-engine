@@ -10,9 +10,14 @@ export function mergeCachedSearchResponseMeta(
 ): SearchResponseV1 {
   return {
     ...cached,
+    engineDecision: {
+      ...cached.engineDecision,
+      runtimeCorrelationRef: requestId,
+    },
     meta: {
       ...cached.meta,
       requestId,
+      runtimeCorrelationRef: requestId,
       queryTimeMs: Date.now() - startTimeMs,
     },
   };

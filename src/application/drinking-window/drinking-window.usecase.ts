@@ -13,6 +13,10 @@ import type {
   DrinkingWindowCheckRequest,
   DrinkingWindowUseCasePort,
 } from './port/drinking-window-usecase.port.js';
+import {
+  inferDrinkingWindowBlockingEligibility,
+  inferDrinkingWindowEvidenceLevel,
+} from '../search/drinking-window-confidence.js';
 
 /**
  * Request to check drinking window for a wine.
@@ -46,6 +50,8 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
         request.targetYear >= prediction.drinkingWindowStart &&
         request.targetYear <= prediction.drinkingWindowEnd,
       confidence: prediction.confidence,
+      evidenceLevel: inferDrinkingWindowEvidenceLevel(prediction.modelVersion),
+      blockingEligible: inferDrinkingWindowBlockingEligibility(prediction.modelVersion),
       modelVersion: prediction.modelVersion,
     });
   }

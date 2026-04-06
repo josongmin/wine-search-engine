@@ -99,6 +99,8 @@ export class ReplayUseCase {
     request: ReplayRequest,
     requestId: string,
   ): Promise<SearchResponseV1> {
+    // Runtime guard: tests cast null through unknown to exercise MissingSnapshotError.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see replay-usecase.test.ts
     if (request.decision_snapshot == null) {
       throw new MissingSnapshotError();
     }

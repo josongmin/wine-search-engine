@@ -1,0 +1,7 @@
+{
+  "name": "transliteration-ko-en",
+  "expected": {
+    "execution_mode": "authoritative",
+    "degradation_reasons": []
+  }
+}

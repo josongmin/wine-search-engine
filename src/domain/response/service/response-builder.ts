@@ -45,6 +45,13 @@ export interface ResponseBuildParams {
 
   /** Response format version (defaults to "1.0.0"). */
   readonly version?: string | undefined;
+
+  /** Optional precomputed honesty/degradation contract from upstream route phases. */
+  readonly contract?: {
+    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
+    readonly blockingEligible?: boolean | undefined;
+    readonly degradationReasons?: readonly string[] | undefined;
+  } | undefined;
 }
 
 /** Reason code attached when a result has no evidence items. */
@@ -69,14 +76,17 @@ export class ResponseBuilder {
    * @returns A fully assembled, immutable search response.
    */
   build(params: ResponseBuildParams): SearchResponseV1 {
+    const validatedResults = this.enforceEvidence(params.results);
+    const enrichedResults = this.enrichResults(validatedResults);
+    const contract = this.resolveContract(params, enrichedResults);
     const engineDecision = this.mapDecision(
       params.decisionOutput,
       params.route,
+      contract,
       params.retrievalModeSource,
       params.plannerSuggestedMode,
+      params.requestId,
     );
-    const validatedResults = this.enforceEvidence(params.results);
-    const enrichedResults = this.enrichResults(validatedResults);
 
     // Compute a deterministic response hash for the determinism gate
     // (RFC-009 §8 / RFC-015). The hash covers only stable, input-derived
@@ -105,6 +115,13 @@ export class ResponseBuilder {
       decisionSnapshot: snapshot,
       ...(debugRefs !== undefined ? { debugRefs } : {}),
       response_hash: responseHash,
+      authorityTraceRef: params.decisionOutput.decisionTraceRef,
+      ...(params.requestId !== undefined ? { runtimeCorrelationRef: params.requestId } : {}),
+      executionMode: contract.executionMode,
+      blockingEligible: contract.blockingEligible,
+      ...(contract.degradationReasons.length > 0
+        ? { degradationReasons: contract.degradationReasons }
+        : {}),
     };
 
     // Extract LLM envelope fields (Epic 9)
@@ -141,8 +158,14 @@ export class ResponseBuilder {
   private mapDecision(
     output: DecisionOutput,
     route: string,
+    contract: {
+      readonly executionMode: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+      readonly blockingEligible: boolean;
+      readonly degradationReasons: readonly string[];
+    },
     retrievalModeSource?: 'planner' | 'api_override',
     plannerSuggestedMode?: string,
+    requestId?: string,
   ): EngineDecision {
     return {
       decisionStatus: output.decisionStatus,
@@ -151,7 +174,14 @@ export class ResponseBuilder {
       decisionConfidence: output.decisionConfidence,
       confidenceSemantics: output.confidenceSemantics,
       decisionTraceRef: output.decisionTraceRef,
+      authorityTraceRef: output.decisionTraceRef,
       decisionSnapshot: output.decisionSnapshot,
+      ...(requestId !== undefined ? { runtimeCorrelationRef: requestId } : {}),
+      executionMode: contract.executionMode,
+      blockingEligible: contract.blockingEligible,
+      ...(contract.degradationReasons.length > 0
+        ? { degradationReasons: contract.degradationReasons }
+        : {}),
       ...(output.failureReason !== undefined
         ? { failure_reason: output.failureReason }
         : {}),
@@ -160,6 +190,41 @@ export class ResponseBuilder {
         : {}),
       ...(retrievalModeSource !== undefined ? { retrievalModeSource } : {}),
       ...(plannerSuggestedMode !== undefined ? { plannerSuggestedMode } : {}),
+    };
+  }
+
+  private resolveContract(
+    params: ResponseBuildParams,
+    results: readonly ResultItem[],
+  ): {
+    readonly executionMode: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+    readonly blockingEligible: boolean;
+    readonly degradationReasons: readonly string[];
+  } {
+    const explicitReasons = params.contract?.degradationReasons ?? [];
+    const inferredReasons = new Set<string>(explicitReasons);
+    const hasHeuristicDrinkingWindow = results.some(
+      (result) => result.drinkingWindow?.evidenceLevel === 'heuristic',
+    );
+
+    if (hasHeuristicDrinkingWindow) {
+      inferredReasons.add('heuristic_drinking_window');
+    }
+
+    const executionMode = params.contract?.executionMode
+      ?? (hasHeuristicDrinkingWindow ? 'heuristic' : 'authoritative');
+
+    const blockingEligible = params.contract?.blockingEligible
+      ?? (
+        executionMode !== 'heuristic'
+        && executionMode !== 'advisory'
+        && results.every((result) => result.drinkingWindow?.blockingEligible !== false)
+      );
+
+    return {
+      executionMode,
+      blockingEligible,
+      degradationReasons: [...inferredReasons],
     };
   }
 

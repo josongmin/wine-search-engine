@@ -13,6 +13,7 @@ import { getTracer, initTelemetry } from './infrastructure/telemetry/tracer.js';
 import { RedisWatchlistPublisher } from './infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber } from './infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { bootstrapLogger } from './config/bootstrap-logger.js';
+import { logKillSwitchPolicyAtStartup } from './config/kill-switch-policy.js';
 
 /**
  * Wine Intelligence Engine — main entry point.
@@ -25,6 +26,7 @@ import { bootstrapLogger } from './config/bootstrap-logger.js';
  */
 async function main(): Promise<void> {
   const config = loadConfig();
+  logKillSwitchPolicyAtStartup(config, bootstrapLogger);
   const telemetrySdk = initTelemetry();
 
   // Step 1 & 2: Create container with loaded config and PG pool

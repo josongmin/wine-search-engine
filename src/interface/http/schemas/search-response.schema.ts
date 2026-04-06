@@ -69,6 +69,8 @@ export const DrinkingWindowSchema = z.object({
   peak_year: z.number().int().optional(),
   currently_drinkable: z.boolean(),
   confidence: z.enum(['high', 'medium', 'low']),
+  evidence_level: z.enum(['learned', 'heuristic']).optional(),
+  blocking_eligible: z.boolean().optional(),
   model_version: z.string().min(1).optional(),
 }).strict();
 
@@ -110,7 +112,17 @@ export const EngineDecisionSchema = z.object({
   route: z.string().min(1),
   decision_confidence: z.number().min(0).max(1),
   confidence_semantics: z.literal('calibrated_decision_confidence'),
-  decision_trace_ref: z.string().min(1),
+  decision_trace_ref: z
+    .string()
+    .min(1)
+    .describe('Deprecated in favor of authority_trace_ref; kept for Phase A migration'),
+  authority_trace_ref: z.string().min(1).optional(),
+  runtime_correlation_ref: z.string().min(1).optional(),
+  execution_mode: z
+    .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
+    .optional(),
+  blocking_eligible: z.boolean().optional(),
+  degradation_reasons: z.array(z.string()).optional(),
   decision_snapshot: DecisionSnapshotSchema,
   failure_reason: z.string().optional(),
   admission_trace_ref: z.string().optional(),
@@ -142,6 +154,13 @@ export const SearchResponseMetaSchema = z.object({
   decision_snapshot: DecisionSnapshotSchema.optional(),
   debug_refs: z.array(z.string()).optional(),
   response_hash: z.string().min(1).optional(),
+  authority_trace_ref: z.string().min(1).optional(),
+  runtime_correlation_ref: z.string().min(1).optional(),
+  execution_mode: z
+    .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
+    .optional(),
+  blocking_eligible: z.boolean().optional(),
+  degradation_reasons: z.array(z.string()).optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({

@@ -47,12 +47,20 @@ export interface ResponseMeta {
   readonly debugRefs?: readonly string[] | undefined;
 
   /**
-   * Deterministic 16-hex-char SHA-256 hash of key response fields
-   * (decision_status, next_action, confidence, top entity, snapshot versions).
-   *
-   * Used by the determinism gate (RFC-009 §8 / RFC-015) to validate that
-   * a replay with the same DecisionSnapshot produces an equivalent decision.
-   * Consumers may compare this value across replay runs to detect drift.
+   * Deterministic SHA-256 hex hash of key response fields
+   * (canonical serialization; RFC-009 §8 / RFC-015).
    */
   readonly response_hash?: string | undefined;
+
+  /** Deterministic authority id (mirrors `engineDecision.authorityTraceRef`). */
+  readonly authorityTraceRef?: string | undefined;
+
+  /** Non-authoritative correlation (e.g. request id) for logs and support. */
+  readonly runtimeCorrelationRef?: string | undefined;
+
+  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+
+  readonly blockingEligible?: boolean;
+
+  readonly degradationReasons?: readonly string[] | undefined;
 }

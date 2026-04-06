@@ -24,8 +24,8 @@ import { parseNdjson } from './ndjson.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver.ndjson';
-const DEFAULT_OUTPUT = 'data/silver-enriched.ndjson';
+export const DEFAULT_INPUT = 'data/silver.ndjson';
+export const DEFAULT_OUTPUT = 'data/silver-enriched.ndjson';
 
 /** Confidence thresholds for projection decisions. */
 const IDENTITY_SAFE_THRESHOLD = 0.80;
@@ -102,7 +102,7 @@ function extractShortName(producer: string): string | null {
 // Alias generation
 // ---------------------------------------------------------------------------
 
-function generateAliases(record: SilverWineRecord): AliasBundle {
+export function generateAliases(record: SilverWineRecord): AliasBundle {
   const proposed: ProposedAlias[] = [];
 
   // 1. Producer identity (high confidence)
@@ -206,7 +206,7 @@ function generateAliases(record: SilverWineRecord): AliasBundle {
 // Main
 // ---------------------------------------------------------------------------
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   console.log(`Reading Silver records from ${args.input} …`);
@@ -240,8 +240,10 @@ async function run(): Promise<void> {
   console.log(`  Written to: ${args.output}`);
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

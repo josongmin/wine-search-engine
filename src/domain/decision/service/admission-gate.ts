@@ -7,6 +7,8 @@ import {
 } from '../model/decision-input.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
+import { buildAdmissionAuthorityTraceRef } from './authority-trace.js';
+import { decideAdmission } from './admission-policy.js';
 
 /**
  * Result of the AdmissionGate closure check (RFC-016).
@@ -191,6 +193,26 @@ export class AdmissionGate {
       }
     }
 
+    const policyOutcome = decideAdmission({
+      confidence: input.resolverResult.decisionTrace.decisionConfidenceC,
+      evidenceSufficient: hasIdentityEvidence(input.evidenceSummary),
+      ambiguityHigh: input.ambiguitySummary?.severity === 'high',
+      routeHealthy: input.routeHealthy ?? true,
+      executionMode: input.executionMode ?? 'authoritative',
+      ...(input.blockingRequested !== undefined
+        ? { blockingRequested: input.blockingRequested }
+        : {}),
+    });
+    if (policyOutcome === 'reject') {
+      return this.reject('POLICY_BLOCKED', input, snapshot);
+    }
+    if (policyOutcome === 'clarify') {
+      if (input.ambiguitySummary?.severity === 'high') {
+        return this.reject('AMBIGUITY_BLOCKED', input, snapshot);
+      }
+      return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
+    }
+
     return { admitted: true };
   }
 
@@ -205,7 +227,11 @@ export class AdmissionGate {
     input: DecisionInput,
     snapshot: DecisionSnapshot,
   ): AdmissionResult {
-    const traceRef = `admission:${input.queryPlan.queryClass}:${snapshot.threshold_profile_id}:${String(Date.now())}`;
+    const traceRef = buildAdmissionAuthorityTraceRef({
+      queryPlan: input.queryPlan,
+      snapshot,
+      reason,
+    });
     return { admitted: false, reason, traceRef };
   }
 }

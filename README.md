@@ -26,9 +26,14 @@
 ```bash
 git clone <internal-remote> wine-search-engine && cd wine-search-engine
 npm ci && cp .env.example .env   # PG_*, REDIS_URL, VESPA_URL, 시크릿 편집
+npm run migrate
 npm run dev                       # http://localhost:3000 — GET /health 참고
 npm run lint && npm run typecheck && npm run test   # 푸시 전
 ```
+
+`npm run bootstrap:smoke`는 `.env.example`을 기준으로 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 한 번에 점검합니다. CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
+
+현재 레포에는 `ingest` / `kill-switch` 전용 CLI 진입점이 없습니다. 문서와 `package.json`에서도 제거해 “있는 척” 하지 않도록 맞췄고, ETL/운영 작업은 개별 `scripts/etl/*.ts` 또는 기존 HTTP/설정 경로를 사용합니다.
 
 ---
 
@@ -522,7 +527,7 @@ npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; 
 | HTTP 계약 | `npm run contracts:http`, `contracts:http:openapi-bridge` |
 | Eval | `npm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
 | ETL | `npm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
-| 운영 | `npm run ingest`, `kill-switch`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
+| 운영 | `npm run bootstrap:smoke`, `npm run migrate`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
 
 많은 ETL/eval 호출은 **`npx tsx --env-file=.env …`**를 씁니다.
 

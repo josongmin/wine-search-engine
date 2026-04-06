@@ -333,6 +333,51 @@ describe('ResponseBuilder', () => {
 
       expect(response.meta.decisionSnapshot).toEqual(snapshot);
     });
+
+    it('surfaces heuristic drinking-window responses as heuristic and non-blocking', () => {
+      const params = makeBaseParams({
+        results: [
+          {
+            ...makeResultItem([makeEvidenceItem()]),
+            drinkingWindow: {
+              drinkingWindowStart: 2025,
+              drinkingWindowEnd: 2030,
+              currentlyDrinkable: true,
+              confidence: 'low',
+              evidenceLevel: 'heuristic',
+              blockingEligible: false,
+              modelVersion: 'heuristic-v1.0-enc20260405',
+            },
+          },
+        ],
+      });
+
+      const response = builder.build(params);
+
+      expect(response.meta.executionMode).toBe('heuristic');
+      expect(response.meta.blockingEligible).toBe(false);
+      expect(response.meta.degradationReasons).toContain('heuristic_drinking_window');
+      expect(response.engineDecision.executionMode).toBe('heuristic');
+      expect(response.engineDecision.blockingEligible).toBe(false);
+      expect(response.engineDecision.degradationReasons).toContain('heuristic_drinking_window');
+    });
+
+    it('preserves explicit degraded contract overrides from upstream', () => {
+      const response = builder.build(
+        makeBaseParams({
+          contract: {
+            executionMode: 'degraded',
+            blockingEligible: false,
+            degradationReasons: ['reranker_timeout'],
+          },
+        }),
+      );
+
+      expect(response.meta.executionMode).toBe('degraded');
+      expect(response.meta.degradationReasons).toEqual(['reranker_timeout']);
+      expect(response.engineDecision.executionMode).toBe('degraded');
+      expect(response.engineDecision.blockingEligible).toBe(false);
+    });
   });
 
   describe('engineDecision', () => {
