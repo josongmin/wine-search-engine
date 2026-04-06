@@ -359,6 +359,52 @@ describe('RankingStagePipeline (T5.1)', () => {
 
       expect(funnelTrace.policyApplied).toBe(false);
     });
+
+    it('reports rerankChangedTopK=false when rerank executes but preserves order', async () => {
+      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-stable-${i}`));
+      const rerankResults: RerankResult[] = candidates.map((candidate, index) => ({
+        entityId: candidate.entityId,
+        score: 1 - index * 0.1,
+        rank: index + 1,
+      }));
+      const { port } = makeReranker(rerankResults);
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]),
+        makeEvidenceMapper(),
+        { reranker: port },
+      );
+      const pipeline = new RankingStagePipeline(ranker);
+
+      await pipeline.rank(makeInput(candidates, true));
+      const funnelTrace = readFunnelTrace(pipeline);
+
+      expect(funnelTrace.precisionRerankExecuted).toBe(true);
+      expect(funnelTrace.metrics?.rerankChangedTopK).toBe(false);
+    });
+
+    it('reports rerankChangedTopK=true when rerank reorders the top-5', async () => {
+      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-flip-${i}`));
+      const rerankResults: RerankResult[] = [...candidates].reverse().map((candidate, index) => ({
+        entityId: candidate.entityId,
+        score: 1 - index * 0.1,
+        rank: index + 1,
+      }));
+      const { port } = makeReranker(rerankResults);
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregatorSequence([0.600, 0.599, 0.598, 0.597, 0.596, 0.595]),
+        makeEvidenceMapper(),
+        { reranker: port },
+      );
+      const pipeline = new RankingStagePipeline(ranker);
+
+      await pipeline.rank(makeInput(candidates, true));
+      const funnelTrace = readFunnelTrace(pipeline);
+
+      expect(funnelTrace.precisionRerankExecuted).toBe(true);
+      expect(funnelTrace.metrics?.rerankChangedTopK).toBe(true);
+    });
   });
 
   describe('coarsePruneMeta on retained candidates (T5.2)', () => {

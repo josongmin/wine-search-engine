@@ -7,7 +7,11 @@
 
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
-import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import type {
+  RetrievalDocument,
+  RetrievalHitProjection,
+  RetrievalFeatureProjection,
+} from '../../domain/retrieval/model/retrieval-document.js';
 import type {
   SearchIndexPort,
   SparseHit,
@@ -22,6 +26,8 @@ import {
   buildSparseFilters,
   buildDenseFilters,
   readRawVespaRetrievalSummary,
+  parseHitSummary,
+  parseFeatureSummary,
 } from './mapping.js';
 import {
   normalizeRetrievalHitSummary,
@@ -36,6 +42,17 @@ const DEFAULT_SPARSE_LIMIT = 100;
 const DEFAULT_DENSE_LIMIT = 100;
 const BULK_BATCH_SIZE = 50;
 
+/**
+ * Maximum number of entity IDs to include in a single Vespa IN(...) clause.
+ *
+ * Vespa imposes no hard documented limit on IN-clause size, but very large
+ * clauses (hundreds of IDs) can cause request-body size limits to be hit and
+ * significantly increase query planning time. Batching at 200 keeps each
+ * request within safe bounds while still being efficient for typical callers.
+ * Results from multiple batches are concatenated in call order.
+ */
+const FETCH_SUMMARY_BATCH_SIZE = 200;
+
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------
@@ -46,6 +63,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function isString(v: unknown): v is string {
   return typeof v === 'string';
+}
+
+function yqlEscapeString(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +426,89 @@ export class VespaSearchIndex implements SearchIndexPort {
           allErrors.join('\n'),
       );
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // fetchWithHitSummary
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fetches hit-projection fields for a set of entity IDs using the
+   * `hit_summary` Vespa document-summary (T7.2).
+   *
+   * Only the fields defined by {@link RetrievalHitProjection} are returned;
+   * feature/ranking fields are excluded from the response payload.
+   *
+   * @param entityIds - Entity identifiers to fetch.
+   * @returns Hit projections in the same order as `entityIds` (absent docs omitted).
+   */
+  async fetchWithHitSummary(
+    entityIds: readonly EntityId[],
+  ): Promise<readonly RetrievalHitProjection[]> {
+    if (entityIds.length === 0) return [];
+
+    // Batch large ID lists to avoid unbounded YQL IN-clause size.
+    // Entity IDs are escaped via yqlEscapeString to prevent YQL injection
+    // (a raw `"${id}"` template could be manipulated if an ID contains
+    // double-quotes or backslashes).
+    const results: RetrievalHitProjection[] = [];
+    for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
+      const batch = entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE);
+      const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
+      const yql =
+        `select entity_id, canonical_label, producer, region, appellation,` +
+        ` grape_primary, vintage_year, search_text_en, producer_prestige` +
+        ` from ${SCHEMA} where entity_id in (${idList})` +
+        ` limit ${batch.length}`;
+
+      const response = await this.client.query(yql, {
+        'presentation.summary': 'hit_summary',
+      });
+
+      const children = response.root.children ?? [];
+      results.push(...children.map((hit) => parseHitSummary(hit.fields)));
+    }
+    return results;
+  }
+
+  // -------------------------------------------------------------------------
+  // fetchWithFeatureSummary
+  // -------------------------------------------------------------------------
+
+  /**
+   * Fetches feature-projection fields for a set of entity IDs using the
+   * `feature_summary` Vespa document-summary (T7.2).
+   *
+   * Only the fields defined by {@link RetrievalFeatureProjection} are returned;
+   * display/hit fields are excluded from the response payload.
+   *
+   * @param entityIds - Entity identifiers to fetch.
+   * @returns Feature projections in the same order as `entityIds` (absent docs omitted).
+   */
+  async fetchWithFeatureSummary(
+    entityIds: readonly EntityId[],
+  ): Promise<readonly RetrievalFeatureProjection[]> {
+    if (entityIds.length === 0) return [];
+
+    // Batch large ID lists and escape each ID to prevent YQL injection.
+    const results: RetrievalFeatureProjection[] = [];
+    for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
+      const batch = entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE);
+      const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
+      const yql =
+        `select entity_id, body, tannin, acidity, sweetness, critic_score_normalized,` +
+        ` drinking_window_start, drinking_window_end, drinking_window_model_version` +
+        ` from ${SCHEMA} where entity_id in (${idList})` +
+        ` limit ${batch.length}`;
+
+      const response = await this.client.query(yql, {
+        'presentation.summary': 'feature_summary',
+      });
+
+      const children = response.root.children ?? [];
+      results.push(...children.map((hit) => parseFeatureSummary(hit.fields)));
+    }
+    return results;
   }
 
   // -------------------------------------------------------------------------

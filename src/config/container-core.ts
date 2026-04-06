@@ -8,6 +8,7 @@ import type { ResponseBuilder } from '../domain/response/service/response-builde
 import type { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
+import type { CacheLookupRuntimeState } from '../application/search/search-usecase-cache-lookup.js';
 import type {
   BrowseRetrieverPort,
   CompareRetrieverPort,
@@ -33,6 +34,10 @@ import {
   buildMixedSolver,
   buildResponseBuilder,
 } from './container-core-builders.js';
+import {
+  buildCacheReadRuntimeState,
+  buildCacheReadRuntimeStateProvider,
+} from './kill-switch-policy.js';
 
 export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
@@ -52,6 +57,8 @@ export interface CoreContainerServices {
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
   readonly cacheService?: RuntimeSupportServices['cacheService'];
+  readonly cacheLookupRuntimeState: CacheLookupRuntimeState;
+  readonly cacheLookupRuntimeStateProvider: () => CacheLookupRuntimeState;
   readonly ltrModels?: RuntimeSupportServices['ltrModels'];
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
 }
@@ -86,8 +93,10 @@ export async function buildCoreContainerServices(
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),
     responseBuilder: buildResponseBuilder(),
-    mixedSolver: buildMixedSolver(adapters, baseRanker),
+    mixedSolver: buildMixedSolver(adapters, ranker),
     snapshotVersions: buildSnapshotVersions(config),
+    cacheLookupRuntimeState: buildCacheReadRuntimeState(config),
+    cacheLookupRuntimeStateProvider: buildCacheReadRuntimeStateProvider(config, ranker),
     ...support,
   };
 }

@@ -126,7 +126,7 @@ describe('Pipeline Tracing', () => {
 
       // Step 2: Candidate pool (sparse search)
       console.error('\n🔎 Step 2: Candidate Pool');
-      const candidates = await retrieveHybridCandidatesForPlan(
+      const retrieval = await retrieveHybridCandidatesForPlan(
         plan,
         {
           candidatePool: container.candidatePool,
@@ -149,6 +149,7 @@ describe('Pipeline Tracing', () => {
           });
         },
       );
+      const candidates = retrieval.candidates;
       console.error(`  Total candidates from pool: ${candidates.length}`);
       if (candidates.length > 0) {
         console.error(`  Top 3:`);

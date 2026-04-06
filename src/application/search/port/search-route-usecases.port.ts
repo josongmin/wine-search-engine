@@ -8,6 +8,7 @@ import type {
 } from '../batch-search.dto.js';
 import type { ReplayRequest } from '../replay-request.dto.js';
 import type { InterpretRequest } from '../interpret-request.dto.js';
+import type { InterpretResultWithV2 } from '../interpret.usecase.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
 import type { ResolveResponse } from '../resolve-response.dto.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
@@ -43,7 +44,8 @@ export interface ReplayUseCasePort {
 }
 
 export interface InterpretUseCasePort {
-  execute(request: InterpretRequest): Promise<QueryPlanV1>;
+  execute(request: InterpretRequest & { readonly buildV2: true }): Promise<InterpretResultWithV2>;
+  execute(request: InterpretRequest & { readonly buildV2?: boolean | undefined }): Promise<QueryPlanV1 | InterpretResultWithV2>;
 }
 
 export interface ResolveUseCasePort {

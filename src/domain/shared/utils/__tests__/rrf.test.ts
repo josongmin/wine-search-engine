@@ -102,6 +102,23 @@ describe('rrfFuse', () => {
     expect(resultDefault.get('wine-a')).toBe(resultExplicit.get('wine-a'));
   });
 
+  describe('k guard', () => {
+    it('throws when k=0 is passed', () => {
+      const ranking = new Map([['wine-a', 1]]);
+      expect(() => rrfFuse([ranking], 0)).toThrow('k must be ≥ 1');
+    });
+
+    it('throws when k is negative', () => {
+      const ranking = new Map([['wine-a', 1]]);
+      expect(() => rrfFuse([ranking], -5)).toThrow('k must be ≥ 1');
+    });
+
+    it('does not throw when k=1', () => {
+      const ranking = new Map([['wine-a', 1]]);
+      expect(() => rrfFuse([ranking], 1)).not.toThrow();
+    });
+  });
+
   it('entity only in one of two lists still appears in result', () => {
     const sparse = new Map([['wine-a', 1]]);
     const dense = new Map([['wine-b', 1]]);

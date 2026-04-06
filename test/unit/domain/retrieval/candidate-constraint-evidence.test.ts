@@ -26,7 +26,7 @@ function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidat
       lexicalQueriesUsed: [],
       semanticQueriesUsed: [],
       filtersApplied: [],
-      candidateSources: ['sparse'],
+      candidateSources: ['sparse_bm25'],
     },
     ...overrides,
   };

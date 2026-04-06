@@ -7,6 +7,10 @@
  */
 
 import type { CandidateEnvelope, CandidateChannel } from '../model/candidate-envelope.js';
+import {
+  preferCanonicalRetrievalChannelLabel,
+  preferCanonicalRetrievalChannelLabels,
+} from '../model/retrieval-channel.js';
 
 const PROTECTION_PRIORITY: Readonly<Record<string, number>> = {
   known_item_lookup: 0,
@@ -75,6 +79,23 @@ function pickProtectedReason(group: readonly CandidateEnvelope[]) {
   return bestReason;
 }
 
+function toCanonicalCandidateChannel(channel: string): CandidateChannel | null {
+  const canonical = preferCanonicalRetrievalChannelLabel(channel);
+  switch (canonical) {
+    case 'sparse_bm25':
+    case 'dense_semantic':
+    case 'anchor_similarity':
+    case 'learned_sparse':
+    case 'relative_filter':
+    case 'browse_producer':
+    case 'browse_region':
+    case 'compare_anchor':
+      return canonical;
+    default:
+      return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Accumulator function
 // ---------------------------------------------------------------------------
@@ -121,7 +142,10 @@ export function accumulateEvidence(
     const channelSet = new Set<CandidateChannel>();
     for (const c of group) {
       for (const ch of c.provenance.channels) {
-        channelSet.add(ch);
+        const canonical = toCanonicalCandidateChannel(ch);
+        if (canonical !== null) {
+          channelSet.add(canonical);
+        }
       }
     }
 
@@ -130,16 +154,21 @@ export function accumulateEvidence(
     const bestScorePerChannel = new Map<CandidateChannel, (typeof group)[number]['provenance']['channelScores'][number]>();
     for (const c of group) {
       for (const ev of c.provenance.channelScores) {
-        const current = bestRankPerChannel[ev.channel];
-        if (current === undefined || ev.rank < current) {
-          bestRankPerChannel[ev.channel] = ev.rank;
+        const canonical = toCanonicalCandidateChannel(ev.channel);
+        if (canonical === null) {
+          continue;
         }
-        const bestEvidence = bestScorePerChannel.get(ev.channel);
+        const current = bestRankPerChannel[canonical];
+        if (current === undefined || ev.rank < current) {
+          bestRankPerChannel[canonical] = ev.rank;
+        }
+        const normalizedEvidence = { ...ev, channel: canonical };
+        const bestEvidence = bestScorePerChannel.get(canonical);
         if (
           bestEvidence === undefined
-          || compareChannelEvidence(ev, bestEvidence) < 0
+          || compareChannelEvidence(normalizedEvidence, bestEvidence) < 0
         ) {
-          bestScorePerChannel.set(ev.channel, ev);
+          bestScorePerChannel.set(canonical, normalizedEvidence);
         }
       }
     }
@@ -157,10 +186,15 @@ export function accumulateEvidence(
         failedHardConstraintSet.add(failedConstraint);
       }
       for (const match of c.provenance.queryViewMatches) {
-        const key = `${match.viewName}\u0000${match.matchedText}\u0000${match.channel}`;
+        const canonical = toCanonicalCandidateChannel(match.channel);
+        if (canonical === null) {
+          continue;
+        }
+        const normalizedMatch = { ...match, channel: canonical };
+        const key = `${normalizedMatch.viewName}\u0000${normalizedMatch.matchedText}\u0000${normalizedMatch.channel}`;
         if (!queryViewKeySet.has(key)) {
           queryViewKeySet.add(key);
-          queryViewMatches.push(match);
+          queryViewMatches.push(normalizedMatch);
         }
       }
     }
@@ -194,7 +228,7 @@ export function accumulateEvidence(
         ...(failedHardConstraints.length > 0 ? { unmetHardConstraints: failedHardConstraints } : {}),
         retrievalTrace: {
           ...canonical.legacyCandidate.retrievalTrace,
-          candidateSources: channels,
+          candidateSources: preferCanonicalRetrievalChannelLabels(channels),
         },
         retrievalProvenance: mergedProvenance,
       },

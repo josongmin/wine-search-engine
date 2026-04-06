@@ -9,6 +9,10 @@ import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-c
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 import { buildInterpretResponseV2 } from './interpret-explain-adapter-v2.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
+import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+
+const retrievalProfileService = new RetrievalProfileService();
 
 export type { InterpretRequest } from './interpret-request.dto.js';
 
@@ -45,10 +49,10 @@ export interface InterpretResultWithV2 {
 export class InterpretUseCase {
   constructor(private readonly deps: InterpretUseCaseDeps) {}
 
-  async execute(request: InterpretRequest & { readonly buildV2?: boolean }): Promise<QueryPlanV1>;
+  async execute(request: InterpretRequest & { readonly buildV2?: boolean | undefined }): Promise<QueryPlanV1>;
   async execute(request: InterpretRequest & { readonly buildV2: true }): Promise<InterpretResultWithV2>;
   async execute(
-    request: InterpretRequest & { readonly buildV2?: boolean },
+    request: InterpretRequest & { readonly buildV2?: boolean | undefined },
   ): Promise<QueryPlanV1 | InterpretResultWithV2> {
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
@@ -68,19 +72,39 @@ export class InterpretUseCase {
       }),
     );
 
+    pipelineDebug(
+      {
+        step: 'interpret.planner.done',
+        query_class: plan.queryClass,
+        route: plan.route,
+        retrieval_mode: plan.retrievalMode,
+        query_preview: sanitizeQueryForDebug(effectiveQuery),
+        build_v2: request.buildV2 === true,
+      },
+      'pipeline interpret',
+    );
+
     if (request.buildV2 !== true) {
       return plan;
     }
 
     const queryId = `interpret-${Date.now()}`;
     const observabilitySlice = planToObservabilitySlice(queryId, plan);
+    const activeChannels = retrievalProfileService.getChannelMix(
+      plan.queryClass,
+      plan.route,
+      plan.retrievalMode,
+      observabilitySlice.queryFamily,
+    );
 
     const v2Explain = buildInterpretResponseV2({
       queryId,
       queryText: effectiveQuery,
       observabilitySlice,
       decompositionHint: plan.decompositionHint,
-      activeChannels: [],
+      activeChannels,
+      hardConstraints: plan.constraints.hard,
+      softConstraints: plan.constraints.soft,
     });
 
     return { v1Plan: plan, v2Explain };

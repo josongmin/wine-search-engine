@@ -12,14 +12,13 @@ import { isQueryClass, type QueryClass } from '../../../domain/shared/types/quer
 import { createEntityId } from '../../../domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../../domain/shared/types/decision-snapshot.js';
 import { getRequestId } from '../request-id.js';
+import { buildDecisionSnapshotFromRuntimeVersions } from '../../../application/search/search-usecase-decision-snapshot.js';
 
 const DEFAULT_DECISION_SNAPSHOT: DecisionSnapshot = {
-  model_versions: {},
-  index_versions: {},
+  ...buildDecisionSnapshotFromRuntimeVersions(),
   policy_rule_version: 'http-feedback-ingest-v1',
-  threshold_profile_id: 'default',
   planner_version: 'unknown',
-  feature_flags: {},
+  snapshot_id: 'default:unknown:http-feedback-ingest-v1::',
 };
 
 function mapSignal(

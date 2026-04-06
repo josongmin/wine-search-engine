@@ -55,18 +55,6 @@ const ComponentScoresV2Schema = z.object({
   uncertaintyPenalty: z.number(),
 }).strict();
 
-/**
- * FunnelMetrics serialized as a plain object for V2 human envelope.
- * Matches the shape of {@link FunnelMetrics} from ranking-stage.ts.
- */
-const FunnelMetricsV2Schema = z.object({
-  coarsePrunePassRate: z.number(),
-  rerankChangedTopK: z.boolean(),
-  meanFinalScore: z.number(),
-  scoreGapRank1Rank2: z.number().nullable(),
-  producerDiversity: z.number().int(),
-}).strict();
-
 // ---------------------------------------------------------------------------
 // ResultItemV2Human
 // ---------------------------------------------------------------------------
@@ -97,18 +85,56 @@ export const ResultItemV2HumanSchema = z.object({
 // SearchResponseV2Human
 // ---------------------------------------------------------------------------
 
+const DECISION_STATUS_V2 = ['resolved', 'ambiguous', 'failed'] as const;
+
 /**
- * V2 human-readable search response envelope.
- * Returned by POST /v2/search and POST /v2/search/hybrid.
+ * One side of an "A vs B" comparison in the human V2 envelope.
  */
-export const SearchResponseV2HumanSchema = z.object({
+export const ComparisonEntityV2HumanSchema = z.object({
+  subQuery: z.string().min(1),
+  resolutionStatus: z.enum(DECISION_STATUS_V2),
+  resultCount: z.number().int().nonnegative(),
+  topResult: ResultItemV2HumanSchema.nullable(),
+}).strict();
+
+/**
+ * Standard ranked-search payload (discriminator {@link queryType} = {@code search}).
+ */
+export const SearchResponseV2HumanSearchSchema = z.object({
   queryId: z.string().min(1),
+  queryType: z.literal('search'),
   results: z.array(ResultItemV2HumanSchema),
   totalCandidates: z.number().int().nonnegative(),
-  funnelMetrics: FunnelMetricsV2Schema.optional(),
   version: z.literal('2'),
   responseType: z.literal('human'),
 }).strict();
+
+/**
+ * Decomposed comparison payload (discriminator {@link queryType} = {@code comparison}).
+ */
+export const SearchResponseV2HumanComparisonSchema = z.object({
+  queryId: z.string().min(1),
+  queryType: z.literal('comparison'),
+  originalQuery: z.string().min(1),
+  comparisonIntent: z.enum(['compare', 'recommend_one', 'list_both']),
+  overallStatus: z.enum(DECISION_STATUS_V2),
+  entities: z.tuple([ComparisonEntityV2HumanSchema, ComparisonEntityV2HumanSchema]),
+  totalCandidates: z.number().int().nonnegative(),
+  version: z.literal('2'),
+  responseType: z.literal('human'),
+}).strict();
+
+/**
+ * V2 human-readable search response envelope.
+ * Returned by POST /v2/search and POST /v2/search/hybrid.
+ *
+ * Discriminated union: {@code queryType} is {@code search} for normal ranked results,
+ * or {@code comparison} for Epic 14 "A vs B" decomposition responses.
+ */
+export const SearchResponseV2HumanSchema = z.discriminatedUnion('queryType', [
+  SearchResponseV2HumanSearchSchema,
+  SearchResponseV2HumanComparisonSchema,
+]);
 
 // ---------------------------------------------------------------------------
 // ResultItemV2Machine
@@ -161,7 +187,7 @@ export const SearchResponseV2MachineSchema = z.object({
 export const InterpretResponseV2Schema = z.object({
   queryId: z.string().min(1),
   queryText: z.string().min(1),
-  /** High-level intent label detected by the planner (e.g. "entity_lookup"). */
+  /** Query-family label from planner observability (e.g. entity_exact, comparison, pairing). */
   detectedIntent: z.string().min(1),
   /** Decomposition strategy when query was split into sub-queries. */
   decompositionStrategy: z.string().min(1).optional(),
@@ -182,6 +208,9 @@ export const InterpretResponseV2Schema = z.object({
 // ---------------------------------------------------------------------------
 
 export type ResultItemV2Human = z.infer<typeof ResultItemV2HumanSchema>;
+export type ComparisonEntityV2Human = z.infer<typeof ComparisonEntityV2HumanSchema>;
+export type SearchResponseV2HumanSearch = z.infer<typeof SearchResponseV2HumanSearchSchema>;
+export type SearchResponseV2HumanComparison = z.infer<typeof SearchResponseV2HumanComparisonSchema>;
 export type SearchResponseV2Human = z.infer<typeof SearchResponseV2HumanSchema>;
 export type ResultItemV2Machine = z.infer<typeof ResultItemV2MachineSchema>;
 export type SearchResponseV2Machine = z.infer<typeof SearchResponseV2MachineSchema>;

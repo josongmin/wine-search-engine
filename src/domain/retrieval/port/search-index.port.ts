@@ -1,17 +1,23 @@
 import type { EntityId } from '../../shared/types/index.js';
-import type { RetrievalDocument } from '../model/retrieval-document.js';
+import type { RetrievalDocument, RetrievalHitProjection } from '../model/retrieval-document.js';
 
 /**
  * Summary fields from an index hit, used for cross-encoder passages and display.
  * Populated when the backend returns document summaries alongside scores.
  *
+ * Extends {@link RetrievalHitProjection} for structural alignment.
+ * Overrides `entityId` to optional: summaries carry partial document data and
+ * entity identity is provided separately by {@link RetrievalSummaryCarrier}.
+ *
  * Includes wine attributes for Epic 15 (drinking window prediction).
  */
-export interface RetrievalHitSummary {
+export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entityId'> {
+  readonly entityId?: EntityId | undefined;
   readonly canonicalLabel?: string;
   readonly producer?: string;
   readonly region?: string;
   readonly searchTextEn?: string;
+  readonly searchTextKo?: string;
   readonly grapePrimary?: string;
   readonly style?: string | undefined;
   readonly priceBand?: string | undefined;
@@ -47,6 +53,7 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'producer',
   'region',
   'searchTextEn',
+  'searchTextKo',
   'grapePrimary',
   'style',
   'priceBand',
@@ -134,12 +141,14 @@ export interface SearchIndexPort {
    * @param queries - One or more query strings to match against text fields.
    * @param filters - Optional filter expressions to narrow the candidate set.
    * @param limit - Maximum number of hits to return (default: implementation-defined).
+   * @param rankProfile - Optional backend-native rank profile for mode-specific retrieval tuning.
    * @returns Sparse hits sorted by descending score.
    */
   sparseSearch(
     queries: readonly string[],
     filters?: readonly string[],
     limit?: number,
+    rankProfile?: string,
   ): Promise<readonly SparseHit[]>;
 
   /**
@@ -148,12 +157,14 @@ export interface SearchIndexPort {
    * @param embedding - Query embedding vector.
    * @param filters - Optional filter expressions to narrow the candidate set.
    * @param limit - Maximum number of hits to return.
+   * @param rankProfile - Optional backend-native rank profile for mode-specific retrieval tuning.
    * @returns Dense hits sorted by descending similarity.
    */
   denseSearch(
     embedding: readonly number[],
     filters?: readonly string[],
     limit?: number,
+    rankProfile?: string,
   ): Promise<readonly DenseHit[]>;
 
   /**

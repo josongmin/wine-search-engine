@@ -161,10 +161,12 @@ export class WineToolExecutor {
   ): Promise<SearchResponseV1 | SearchResponseV2Machine | ComparisonSearchResponse | DrinkingWindowBlock | { error: string }> {
     switch (toolName) {
       case 'search_wines': {
-        // T6.3: When useV2MachineFormat is set, bypass the V1 use case and
-        // build the V2 machine response directly from the caller-supplied
-        // ranked results.  V1 path is unchanged when v2Options is absent.
-        if (v2Options !== undefined) {
+        // T6.3: When useV2MachineFormat is explicitly true, bypass the V1
+        // use case and build the V2 machine response directly from the
+        // caller-supplied ranked results. V1 path is unchanged otherwise.
+        // Guard on the flag value itself (not just presence) so an accidental
+        // falsy v2Options does not silently fall through to V2 projection.
+        if (v2Options !== undefined && v2Options.useV2MachineFormat === true) {
           const queryId = v2Options.queryId ?? requestId;
           return buildMachineResponseV2({
             queryId,

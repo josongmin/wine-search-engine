@@ -1,5 +1,13 @@
 {
   "name": "transliteration-ko-en",
+  "request": {
+    "query": "오푸스 원 2018",
+    "options": {
+      "mode": "entity",
+      "explain": false,
+      "clarification": false
+    }
+  },
   "expected": {
     "execution_mode": "authoritative",
     "degradation_reasons": []

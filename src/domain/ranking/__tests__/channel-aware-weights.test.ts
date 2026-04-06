@@ -6,6 +6,7 @@ import {
 } from '../model/scoring-weights.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
+import { getModeWeights } from '../model/mode-weights.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -19,7 +20,11 @@ function nonPenaltySum(w: ScoringWeights): number {
     w.attributeAlignment +
     w.preferenceAlignment +
     w.popularity +
-    w.availability
+    w.availability +
+    w.producerPrestige +
+    w.recency +
+    w.criticScore +
+    w.multilingualScore
   );
 }
 
@@ -114,6 +119,14 @@ describe('resolveChannelAwareWeights', () => {
       const withCompare = resolveChannelAwareWeights(['compare_anchor'], base);
       expect(withAnchor.anchorSimilarity).toBeCloseTo(withCompare.anchorSimilarity, 10);
       expect(withAnchor.semantic).toBeCloseTo(withCompare.semantic, 10);
+    });
+
+    it('repeated anchor_similarity entries resolve to the same weighting as a single anchor_similarity', () => {
+      const base = DEFAULT_WEIGHTS;
+      const withCanonical = resolveChannelAwareWeights(['anchor_similarity'], base);
+      const withRepeated = resolveChannelAwareWeights(['anchor_similarity', 'anchor_similarity'], base);
+      expect(withCanonical.anchorSimilarity).toBeCloseTo(withRepeated.anchorSimilarity, 10);
+      expect(withCanonical.semantic).toBeCloseTo(withRepeated.semantic, 10);
     });
 
     it('semantic weight is lower after anchor channel applied', () => {
@@ -220,5 +233,83 @@ describe('resolveChannelAwareWeights', () => {
       );
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(DEFAULT_WEIGHTS), 10);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mode-overlay normalization invariant
+// Verifies that after Math.max overlay + re-normalization the non-penalty sum
+// is preserved — a regression guard for ranker.ts lines 317-353.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const NON_PENALTY_KEYS = [
+  'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
+  'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
+  'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+] as const;
+
+function applyModeOverlayWithNorm(
+  baseWeights: ScoringWeights,
+  mode: Parameters<typeof getModeWeights>[0],
+): ScoringWeights {
+  const modeProfile = getModeWeights(mode);
+  const overlaid: ScoringWeights = {
+    ...baseWeights,
+    semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
+    popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
+    attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
+    preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
+    producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
+    recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
+  };
+  const baseSum = NON_PENALTY_KEYS.reduce((s, k) => s + (baseWeights[k] ?? 0), 0);
+  const overlaidSum = NON_PENALTY_KEYS.reduce((s, k) => s + (overlaid[k] ?? 0), 0);
+  const normFactor = overlaidSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
+  if (normFactor === 1) return overlaid;
+  return {
+    ...overlaid,
+    entityIntegrity: overlaid.entityIntegrity * normFactor,
+    anchorSimilarity: overlaid.anchorSimilarity * normFactor,
+    semantic: overlaid.semantic * normFactor,
+    softConstraint: overlaid.softConstraint * normFactor,
+    attributeAlignment: overlaid.attributeAlignment * normFactor,
+    preferenceAlignment: overlaid.preferenceAlignment * normFactor,
+    popularity: overlaid.popularity * normFactor,
+    availability: overlaid.availability * normFactor,
+    producerPrestige: overlaid.producerPrestige * normFactor,
+    recency: overlaid.recency * normFactor,
+    criticScore: overlaid.criticScore * normFactor,
+    multilingualScore: overlaid.multilingualScore * normFactor,
+  };
+}
+
+describe('mode-overlay normalization invariant', () => {
+  const queryClasses = [
+    'semantic_preference', 'comparison_query', 'pure_constraint',
+    'anchored_similarity', 'short_entity', 'ambiguous_short_form',
+  ] as const;
+  const modes = [
+    'producer_browse', 'region_browse', 'compare_candidates',
+    'recommendation', 'similar_items', 'entity_lookup',
+  ] as const;
+
+  for (const qc of queryClasses) {
+    for (const mode of modes) {
+      it(`preserves non-penalty sum: ${qc} + ${mode}`, () => {
+        const base = resolveWeights(qc);
+        const result = applyModeOverlayWithNorm(base, mode);
+        const baseSum = NON_PENALTY_KEYS.reduce((s, k) => s + (base[k] ?? 0), 0);
+        const resultSum = NON_PENALTY_KEYS.reduce((s, k) => s + (result[k] ?? 0), 0);
+        expect(resultSum).toBeCloseTo(baseSum, 8);
+      });
+    }
+  }
+
+  it('undefined/DEFAULT_WEIGHTS mode is a no-op — base weights unchanged', () => {
+    const base = resolveWeights('comparison_query');
+    const result = applyModeOverlayWithNorm(base, undefined);
+    expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+    expect(result.semantic).toBeCloseTo(base.semantic, 10);
+    expect(result.popularity).toBeCloseTo(base.popularity, 10);
   });
 });

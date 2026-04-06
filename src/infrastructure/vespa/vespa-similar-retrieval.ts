@@ -55,7 +55,7 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
           lexicalQueriesUsed: [],
           semanticQueriesUsed: [anchorProfile.canonicalLabel],
           filtersApplied: [],
-          candidateSources: ['dense'],
+          candidateSources: ['anchor_similarity'],
         },
         ...summaryToHybridCandidateFields(hit.summary),
       }),

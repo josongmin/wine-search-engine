@@ -3,6 +3,8 @@
  * per RFC-015. This enables exact reproducibility analysis and regression triage.
  */
 export interface DecisionSnapshot {
+  /** Stable snapshot identifier for cache/replay/audit comparisons. */
+  readonly snapshot_id: string;
   /** Version identifiers for each ML model involved (e.g. { embedding: "bge-m3-v1.2" }). */
   readonly model_versions: Readonly<Record<string, string>>;
 
@@ -20,6 +22,8 @@ export interface DecisionSnapshot {
 
   /** Feature flags (including kill switches) active at decision time. */
   readonly feature_flags: Readonly<Record<string, boolean>>;
+  /** Public response contract version emitted by the engine for this decision. */
+  readonly response_contract_version: string;
 
   /** Optional notes on sources of nondeterminism (e.g. "embedding service jitter observed"). */
   readonly nondeterminism_notes?: string;

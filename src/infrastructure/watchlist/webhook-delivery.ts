@@ -28,7 +28,7 @@ export interface WebhookPayload {
 export interface DeliveryLog {
   readonly id: string; // UUID
   readonly watchlistId: string;
-  readonly attempt: number; // 1-3
+  readonly attempt: number; // 1-4
   readonly statusCode: number | null; // null if connection failed
   readonly errorMessage: string | null;
   readonly deliveredAt: Date;
@@ -53,29 +53,37 @@ interface WebhookAttemptResult {
 }
 
 /**
- * Delivers watchlist events via HTTP webhook with exponential backoff retry.
+ * Delivers watchlist events via HTTP webhook with fixed retry schedule.
  * Computes HMAC-SHA256 signature using webhook secret from config.
+ *
+ * Retry schedule: up to 4 attempts total (1 initial + 3 retries).
+ * Waits between attempts: 1 s → 5 s → 30 s.
  */
 export class WebhookDelivery implements WatchlistDeliveryPort {
   private readonly secret: string;
+  private readonly sleepFn: (ms: number) => Promise<void>;
 
   /**
-   * @param secret - HMAC-SHA256 signing secret (min 16 chars).
+   * @param secret   - HMAC-SHA256 signing secret (min 16 chars).
+   * @param sleepFn  - Optional sleep implementation (injectable for tests).
    */
-  constructor(secret: string) {
+  constructor(secret: string, sleepFn?: (ms: number) => Promise<void>) {
     if (secret.length < 16) {
       throw new Error('WEBHOOK_SECRET must be at least 16 characters');
     }
     this.secret = secret;
+    this.sleepFn = sleepFn ?? this.defaultSleep;
   }
 
   /**
    * Delivers a watchlist event to a callback URL with retry logic.
-   * Retries on failure: 1s, 5s, 30s backoff.
+   *
+   * Attempts: 4 total (1 initial + 3 retries).
+   * Waits between attempts: 1 s, 5 s, 30 s.
    *
    * @param entry - The watchlist entry with callback URL.
    * @param event - The change event to deliver.
-   * @returns true if delivery succeeded, false after 3 failed attempts.
+   * @returns true if delivery succeeded, false after all attempts are exhausted.
    */
   async deliver(
     entry: WatchlistEntry,
@@ -90,8 +98,10 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
       triggered_at: event.occurredAt,
     };
 
-    const maxAttempts = 3;
-    const backoffs = [1000, 5000, 30000]; // 1s, 5s, 30s in milliseconds
+    // 4 total attempts: initial try + 3 retries separated by 1 s, 5 s, 30 s waits.
+    // backoffs[i] is the wait *before* attempt i+1 (i.e. after attempt i fails).
+    const maxAttempts = 4;
+    const backoffs = [1000, 5000, 30000]; // 1s, 5s, 30s — one entry per inter-attempt gap
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptNumber = attempt + 1;
@@ -130,11 +140,11 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
         );
       }
 
-      // Wait before retry (except after last attempt)
+      // Wait before next retry (no wait after the last attempt)
       if (attempt < maxAttempts - 1) {
         const backoff = backoffs[attempt];
         if (backoff !== undefined) {
-          await this.sleep(backoff);
+          await this.sleepFn(backoff);
         }
       }
     }
@@ -195,9 +205,9 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
   }
 
   /**
-   * Sleeps for the specified milliseconds.
+   * Default sleep implementation (real timer).  Replaced in tests via constructor injection.
    */
-  private sleep(ms: number): Promise<void> {
+  private defaultSleep(ms: number): Promise<void> {
     return new Promise((resolve) => {
       setTimeout(resolve, ms);
     });

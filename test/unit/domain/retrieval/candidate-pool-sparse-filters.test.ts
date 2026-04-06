@@ -271,7 +271,80 @@ describe('CandidatePoolService sparse filter tokens', () => {
     });
 
     expect(searchIndex.getDocument).toHaveBeenCalledWith('wine-anchor');
+    expect(searchIndex.denseSearch).not.toHaveBeenCalled();
+    expect(searchIndex.searchLearnedSparse).not.toHaveBeenCalled();
     expect(out.map((candidate) => candidate.entityId)).toEqual(['wine-peer-match']);
     expect(out[0]?.retrievalTrace.candidateSources).toContain('relative_filter');
+    expect(out[0]?.retrievalTrace.candidateSources).not.toContain('compare_anchor');
+  });
+
+  it('deduplicates repeated anchor_similarity when upstream retrieval provenance already uses canonical channels', async () => {
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => []),
+      denseSearch: vi.fn(async () => []),
+      searchLearnedSparse: vi.fn(async () => []),
+      getDocument: vi.fn(async () => null),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch: vi.fn(async () => [[0.1]]),
+    };
+
+    const fusionService = {
+      fuse: vi.fn(() => [{
+        entityId: 'wine-alias',
+        canonicalLabel: 'Alias Wine',
+        retrievalFusionScore: 0.83,
+        matchedConstraints: [],
+        retrievalTrace: {
+          candidateSources: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+          queryViews: [],
+          retrievalProfile: 'mixed_anchor',
+        },
+        retrievalProvenance: {
+          channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+          channelScores: [
+            { channel: 'anchor_similarity', rawScore: 0.83, rank: 1, rrfContribution: 0.02 },
+            { channel: 'dense_semantic', rawScore: 0.6, rank: 3, rrfContribution: 0.01 },
+          ],
+          queryViewMatches: [
+            { viewName: 'strict', matchedText: 'sassicaia', channel: 'anchor_similarity' },
+            { viewName: 'strict', matchedText: 'sassicaia', channel: 'anchor_similarity' },
+          ],
+          anchorConditioned: true,
+          matchedFilterConstraints: [],
+          fusionProfile: 'mixed_anchor',
+          fusionScore: 0.83,
+        },
+      }]),
+    } as unknown as FusionService;
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, fusionService);
+    const out = await pool.generate({
+      queryPlan: minimalPlan({
+        queryClass: 'anchored_similarity',
+        route: 'mixed',
+        retrievalMode: 'recommendation',
+      }),
+      route: 'mixed',
+      lexicalQueries: ['like sassicaia'],
+      semanticQueries: ['like sassicaia'],
+      hardConstraints: [],
+      softConstraints: [],
+    });
+
+    expect(out).toHaveLength(1);
+    expect(out[0]?.retrievalProvenance?.channels).toEqual(['anchor_similarity', 'dense_semantic']);
+    expect(out[0]?.retrievalProvenance?.channelScores).toEqual([
+      expect.objectContaining({ channel: 'anchor_similarity' }),
+      expect.objectContaining({ channel: 'dense_semantic' }),
+    ]);
+    expect(out[0]?.retrievalProvenance?.queryViewMatches).toEqual([
+      expect.objectContaining({ channel: 'anchor_similarity', viewName: 'strict' }),
+    ]);
+    expect(out[0]?.retrievalTrace.candidateSources).toEqual(['anchor_similarity', 'dense_semantic']);
   });
 });

@@ -85,7 +85,7 @@ describe('CompareRetriever', () => {
       entityId: 'wine-compare',
       canonicalLabel: 'Ridge Monte Bello 2018',
     }));
-    expect(candidates[0]?.retrievalTrace.retrievalProfile).toBe('compare_candidates');
+    expect(candidates[0]?.retrievalTrace.retrievalProfile).toBe('compare_default');
     expect(candidates[0]?.retrievalTrace.candidateSources).toEqual(['sparse_bm25', 'compare_anchor']);
     expect(candidates[0]?.matchedConstraints).toContain('wine_type');
   });

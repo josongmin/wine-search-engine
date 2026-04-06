@@ -161,6 +161,27 @@ export const SearchResponseMetaSchema = z.object({
     .optional(),
   blocking_eligible: z.boolean().optional(),
   degradation_reasons: z.array(z.string()).optional(),
+  specialized_route_requested: z
+    .enum(['producer_browse', 'region_browse', 'compare_candidates'])
+    .nullable()
+    .optional(),
+  specialized_route_executed: z
+    .enum(['producer_browse', 'region_browse', 'compare_candidates'])
+    .nullable()
+    .optional(),
+  fallback_applied: z.boolean().optional(),
+  fallback_reason: z
+    .enum([
+      'producer_browse_unavailable',
+      'producer_browse_fallback',
+      'region_browse_unavailable',
+      'region_browse_fallback',
+      'compare_retriever_unavailable',
+      'compare_anchor_resolution_failed',
+      'compare_candidates_fallback',
+    ])
+    .nullable()
+    .optional(),
   retrieval_provenance_slices: z.array(z.object({
     query_id: z.string().min(1),
     candidate_entity_id: z.string().min(1),

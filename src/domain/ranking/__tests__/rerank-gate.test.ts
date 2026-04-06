@@ -54,9 +54,9 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('too_few_candidates');
     });
 
-    it('does not skip at exactly 5 candidates', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 5 }));
-      // 5 candidates with semantic_preference and no anchor — below the >=20 threshold, default skip
+    it('does not skip at exactly 5 candidates (pure_constraint falls through to default_skip)', () => {
+      // Use pure_constraint so the test is not affected by the semantic_preference rule.
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 5, queryClass: 'pure_constraint' }));
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
@@ -115,31 +115,59 @@ describe('evaluateRerankGate', () => {
     });
   });
 
+  describe('semantic_preference — always rerank (ambiguous semantics)', () => {
+    it('reranks for semantic_preference with candidateCount 10 (below large_candidate_set threshold)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'semantic_preference', candidateCount: 10, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('semantic_preference');
+    });
+
+    it('reranks for semantic_preference with candidateCount 5 (minimum viable)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'semantic_preference', candidateCount: 5, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('semantic_preference');
+    });
+
+    it('semantic_preference with candidateCount < 5 still skips (too_few_candidates fires first)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'semantic_preference', candidateCount: 3, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('too_few_candidates');
+    });
+  });
+
   describe('candidateCount >= 20', () => {
-    it('reranks when candidateCount is exactly 20', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 20 }));
+    it('reranks when candidateCount is exactly 20 (pure_constraint)', () => {
+      // Use pure_constraint to isolate the large_candidate_set rule from semantic_preference.
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'pure_constraint' }));
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('large_candidate_set');
     });
 
-    it('reranks when candidateCount exceeds 20', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 50 }));
+    it('reranks when candidateCount exceeds 20 (pure_constraint)', () => {
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 50, queryClass: 'pure_constraint' }));
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('large_candidate_set');
     });
   });
 
   describe('default: skip', () => {
-    it('skips when candidateCount is between 5 and 19 with no high-value signal', () => {
+    it('skips when candidateCount is between 5 and 19 with no high-value signal (pure_constraint)', () => {
+      // Use pure_constraint so semantic_preference rule does not interfere.
       const decision = evaluateRerankGate(
-        makeInput({ candidateCount: 10, queryClass: 'semantic_preference', hasAnchor: false }),
+        makeInput({ candidateCount: 10, queryClass: 'pure_constraint', hasAnchor: false }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
 
-    it('skips for candidateCount 19 (just below threshold)', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 19 }));
+    it('skips for candidateCount 19 just below threshold (pure_constraint)', () => {
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 19, queryClass: 'pure_constraint' }));
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
@@ -147,7 +175,8 @@ describe('evaluateRerankGate', () => {
 
   describe('topKOverride', () => {
     it('does not set topKOverride in default cases', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 20 }));
+      // Use pure_constraint to exercise the large_candidate_set path without semantic_preference.
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'pure_constraint' }));
       expect(decision.topKOverride).toBeUndefined();
     });
 
@@ -180,10 +209,11 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('edge cases', () => {
-    it('empty string effectiveRoute does not match exact_lookup', () => {
+    it('empty string effectiveRoute does not match exact_lookup (pure_constraint falls to default_skip)', () => {
       // effectiveRoute='' must NOT trigger already_precise; falls through to default_skip.
+      // Use pure_constraint so semantic_preference rule does not fire.
       const decision = evaluateRerankGate(
-        makeInput({ effectiveRoute: '', candidateCount: 10 }),
+        makeInput({ effectiveRoute: '', candidateCount: 10, queryClass: 'pure_constraint' }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');

@@ -36,6 +36,14 @@ export class FusionService {
     k?: number,
     learnedSparseHits: readonly DenseHit[] = [],
   ): readonly HybridCandidate[] {
+    // Guard against k=0 or negative k: the `??` operator passes through
+    // explicit 0 (only catches null/undefined), so we need an explicit check.
+    // k must be ≥ 1 — k=0 makes rank-1 scores equal to 1.0 (fine), but
+    // k<0 produces negative scores for high ranks, corrupting the fusion.
+    // The standard RRF value is 60; callers should never pass k<1.
+    if (k !== undefined && k < 1) {
+      throw new Error(`FusionService.fuse: k must be ≥ 1, got ${k}`);
+    }
     const effectiveK = k ?? 60;
 
     // Build rank maps for RRF

@@ -187,6 +187,18 @@ describe('buildMachineResponseV2', () => {
     expect(item.retrievalProvenance).toContain('0.7812');
   });
 
+  it('serializes retrieval provenance with repeated anchor_similarity labels only once', () => {
+    const ranked = makeRankedResult({
+      retrievalProvenance: {
+        ...makeCandidateProvenance(),
+        channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+      },
+    });
+    const response = buildMachineResponseV2({ queryId: 'q-006b', results: [ranked] });
+    const item = response.results[0]!;
+    expect(item.retrievalProvenance).toContain('anchor_similarity,dense_semantic');
+  });
+
   it('omits retrievalProvenance when RankedResult has none', () => {
     const ranked = makeRankedResult({ retrievalProvenance: undefined });
     const response = buildMachineResponseV2({ queryId: 'q-007', results: [ranked] });

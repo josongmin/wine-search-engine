@@ -151,7 +151,7 @@ export function applyRelativeFilter(
         ...c,
         retrievalTrace: {
           ...c.retrievalTrace,
-          candidateSources: [...c.retrievalTrace.candidateSources, 'relative_filter'] as const,
+          candidateSources: [...c.retrievalTrace.candidateSources, 'relative_filter'] as readonly string[],
         },
       };
     });

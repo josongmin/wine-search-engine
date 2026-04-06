@@ -134,8 +134,14 @@ export class CandidateAssembler {
     const assembled: CandidateEnvelope[] = [...protected_];
     let cappedBy: AssemblyTrace['cappedBy'] | undefined;
 
-    // Channel quota tracking
+    // Channel quota tracking — seed with protected candidates so their
+    // channel slots count against non-protected candidates' quotas.
     const channelCounts = new Map<CandidateChannel, number>();
+    for (const c of protected_) {
+      for (const ch of c.provenance.channels) {
+        channelCounts.set(ch, (channelCounts.get(ch) ?? 0) + 1);
+      }
+    }
 
     // Producer slot tracking (by first channel's raw match — use entityId prefix heuristic)
     // Full producer diversity logic would require knowledge of entity relationships;

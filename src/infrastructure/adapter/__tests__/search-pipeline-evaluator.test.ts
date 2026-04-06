@@ -13,6 +13,9 @@ describe('SearchPipelineEvaluator', () => {
           engineDecision: {
             decisionStatus: 'resolved',
             decisionConfidence: 0.91,
+            executionMode: 'degraded',
+            blockingEligible: false,
+            degradationReasons: ['reranker_timeout'],
             decisionSnapshot: {
               model_versions: {},
               index_versions: {},
@@ -41,6 +44,13 @@ describe('SearchPipelineEvaluator', () => {
           fusionScore: 0.77,
           rank: 1,
         }],
+        funnelMetrics: {
+          coarsePrunePassRate: 0.6,
+          rerankChangedTopK: true,
+          meanFinalScore: 0.77,
+          scoreGapRank1Rank2: 0.12,
+          producerDiversity: 1,
+        },
       })),
     };
 
@@ -55,6 +65,15 @@ describe('SearchPipelineEvaluator', () => {
         protectedReason: 'known_item_lookup',
       }),
     ]);
+    expect(output.funnelMetrics).toEqual(
+      expect.objectContaining({
+        coarsePrunePassRate: 0.6,
+        rerankChangedTopK: true,
+      }),
+    );
+    expect(output.executionMode).toBe('degraded');
+    expect(output.blockingEligible).toBe(false);
+    expect(output.degradationReasons).toEqual(['reranker_timeout']);
   });
 
   it('reuses runtime-produced response meta provenance slices when direct slices are absent', async () => {
@@ -81,8 +100,8 @@ describe('SearchPipelineEvaluator', () => {
           retrievalProvenanceSlices: [{
             queryId: 'eval-derived',
             candidateEntityId: 'wine-1',
-            channels: ['dense_anchor', 'dense_semantic'],
-            topChannel: 'dense_anchor',
+            channels: ['anchor_similarity', 'dense_semantic'],
+            topChannel: 'anchor_similarity',
             anchorConditioned: true,
             protected: false,
             fusionScore: 0.88,
@@ -141,7 +160,161 @@ describe('SearchPipelineEvaluator', () => {
     expect(output.retrievalProvenanceSlices).toEqual([
       expect.objectContaining({
         candidateEntityId: 'wine-1',
-        topChannel: 'dense_anchor',
+        topChannel: 'anchor_similarity',
+      }),
+    ]);
+  });
+
+  it('deduplicates repeated anchor_similarity entries in runtime response meta provenance fallback slices', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async () => ({
+        queryType: 'search' as const,
+        engineDecision: {
+          decisionStatus: 'resolved',
+          decisionConfidence: 0.91,
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            feature_flags: {},
+          },
+        },
+        meta: {
+          queryTimeMs: 1,
+          route: 'hybrid',
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+          retrievalProvenanceSlices: [{
+            queryId: 'eval-derived-dedupe',
+            candidateEntityId: 'wine-fallback-dedupe',
+            channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+            topChannel: 'anchor_similarity',
+            anchorConditioned: true,
+            protected: false,
+            fusionScore: 0.88,
+            rank: 1,
+          }],
+        },
+        results: [],
+      })),
+    };
+
+    const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
+    const output = await evaluator.execute('Opus One like wine', 'anchored_similarity');
+
+    expect(output.retrievalProvenanceSlices).toEqual([
+      expect.objectContaining({
+        candidateEntityId: 'wine-fallback-dedupe',
+        channels: ['anchor_similarity', 'dense_semantic'],
+        topChannel: 'anchor_similarity',
+      }),
+    ]);
+  });
+
+  it('deduplicates repeated anchor_similarity entries in direct eval slices', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async () => {
+        throw new Error('fallback execute should not be used');
+      }),
+      executeForEvaluation: vi.fn(async () => ({
+        response: {
+          queryType: 'search' as const,
+          engineDecision: {
+            decisionStatus: 'resolved',
+            decisionConfidence: 0.91,
+            decisionSnapshot: {
+              model_versions: {},
+              index_versions: {},
+              policy_rule_version: '1',
+              threshold_profile_id: 'default',
+              planner_version: '1',
+              feature_flags: {},
+            },
+          },
+          results: [],
+          meta: {
+            queryTimeMs: 1,
+            route: 'hybrid',
+            version: '1.0.0',
+            engine_schema_version: 'search_response_v1',
+          },
+        },
+        retrievalProvenanceSlices: [{
+          queryId: 'eval-dedupe',
+          candidateEntityId: 'wine-anchor-dedupe',
+          channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+          topChannel: 'anchor_similarity',
+          anchorConditioned: true,
+          protected: false,
+          fusionScore: 0.81,
+          rank: 1,
+        }],
+      })),
+    };
+
+    const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
+    const output = await evaluator.execute('anchor alias query', 'anchored_similarity');
+
+    expect(output.retrievalProvenanceSlices).toEqual([
+      expect.objectContaining({
+        candidateEntityId: 'wine-anchor-dedupe',
+        channels: ['anchor_similarity', 'dense_semantic'],
+        topChannel: 'anchor_similarity',
+      }),
+    ]);
+  });
+
+  it('deduplicates repeated anchor_similarity when direct eval slices already contain duplicates', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async () => {
+        throw new Error('fallback execute should not be used');
+      }),
+      executeForEvaluation: vi.fn(async () => ({
+        response: {
+          queryType: 'search' as const,
+          engineDecision: {
+            decisionStatus: 'resolved',
+            decisionConfidence: 0.91,
+            decisionSnapshot: {
+              model_versions: {},
+              index_versions: {},
+              policy_rule_version: '1',
+              threshold_profile_id: 'default',
+              planner_version: '1',
+              feature_flags: {},
+            },
+          },
+          results: [],
+          meta: {
+            queryTimeMs: 1,
+            route: 'hybrid',
+            version: '1.0.0',
+            engine_schema_version: 'search_response_v1',
+          },
+        },
+        retrievalProvenanceSlices: [{
+          queryId: 'eval-duplicate-anchor',
+          candidateEntityId: 'wine-anchor-both',
+          channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+          topChannel: 'anchor_similarity',
+          anchorConditioned: true,
+          protected: false,
+          fusionScore: 0.81,
+          rank: 1,
+        }],
+      })),
+    };
+
+    const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
+    const output = await evaluator.execute('anchor alias dedupe query', 'anchored_similarity');
+
+    expect(output.retrievalProvenanceSlices).toEqual([
+      expect.objectContaining({
+        candidateEntityId: 'wine-anchor-both',
+        channels: ['anchor_similarity', 'dense_semantic'],
+        topChannel: 'anchor_similarity',
       }),
     ]);
   });

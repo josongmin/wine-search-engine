@@ -36,11 +36,13 @@ export const HybridOptionsSchema = z.object({
 }).strict();
 
 export const DecisionSnapshotSchema = z.object({
+  snapshot_id: z.string().min(1),
   model_versions: z.record(z.string(), z.string()),
   index_versions: z.record(z.string(), z.string()),
   policy_rule_version: z.string().min(1),
   threshold_profile_id: z.string().min(1),
   planner_version: z.string().min(1),
   feature_flags: z.record(z.string(), z.boolean()),
+  response_contract_version: z.literal('search_response_v1'),
   nondeterminism_notes: z.string().optional(),
 }).strict();

@@ -8,6 +8,7 @@ import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieva
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
+import type { RankerRuntimeSignal } from '../../../domain/ranking/model/ranking-runtime-signal.js';
 import type { DecisionInput } from '../../../domain/decision/model/decision-input.js';
 import type { DecisionOutput } from '../../../domain/decision/model/decision-output.js';
 import type {
@@ -65,6 +66,7 @@ export interface RankingPort {
    * Returns undefined when funnel metrics are not tracked (plain Ranker).
    */
   getLastFunnelMetrics?(): FunnelMetrics | undefined;
+  getLastRuntimeSignal?(): RankerRuntimeSignal | undefined;
 }
 
 export interface DecisionEnginePort {

@@ -13,6 +13,8 @@ import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
+import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 // ---------------------------------------------------------------------------
 // HttpEmbeddingService
@@ -98,6 +100,8 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
     input: string | string[],
   ): Promise<readonly (readonly number[])[]> {
     const endpoint = `${this.url}/embeddings`;
+    const batchSize = Array.isArray(input) ? input.length : 1;
+    const httpStart = Date.now();
 
     let response: Response;
     try {
@@ -112,24 +116,77 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
       );
     } catch (err) {
       if (isAbortError(err)) {
+        pipelineDebug(
+          {
+            step: PipelineDebugStep.HTTP_EMBEDDING_TIMEOUT,
+            provider: 'http_embedding_service',
+            model: this.model,
+            batch_size: batchSize,
+            latency_ms: Date.now() - httpStart,
+          },
+          'pipeline embedding HTTP',
+        );
         throw new Error(
           `Embedding service: request timed out after ${this.httpTimeoutMs}ms`,
         );
       }
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_EMBEDDING_NETWORK_ERROR,
+          provider: 'http_embedding_service',
+          model: this.model,
+          batch_size: batchSize,
+        },
+        'pipeline embedding HTTP',
+      );
       throw err;
     }
 
     if (!response.ok) {
+      const status = response.status;
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_EMBEDDING_HTTP_ERROR,
+          provider: 'http_embedding_service',
+          model: this.model,
+          batch_size: batchSize,
+          http_status: status,
+          latency_ms: Date.now() - httpStart,
+        },
+        'pipeline embedding HTTP',
+      );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `Embedding service call failed [HTTP ${response.status}]: ${text}`,
+        `Embedding service call failed [HTTP ${status}]: ${text}`,
       );
     }
 
     const data: unknown = await response.json();
     try {
-      return embeddingsFromOpenAiResponse(data);
+      const vectors = embeddingsFromOpenAiResponse(data);
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_EMBEDDING_OK,
+          provider: 'http_embedding_service',
+          model: this.model,
+          batch_size: batchSize,
+          latency_ms: Date.now() - httpStart,
+          http_status: response.status,
+        },
+        'pipeline embedding HTTP',
+      );
+      return vectors;
     } catch (error) {
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_EMBEDDING_PARSE_ERROR,
+          provider: 'http_embedding_service',
+          model: this.model,
+          batch_size: batchSize,
+          latency_ms: Date.now() - httpStart,
+        },
+        'pipeline embedding HTTP',
+      );
       throw new Error(
         `Embedding service: unexpected response shape${error instanceof Error ? ` (${error.message})` : ''}`,
       );

@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   planToObservabilitySlice,
+  isQueryPlanV2,
   QUERY_FAMILY_LABELS,
 } from '../../model/query-observability-vocab.js';
-import type { QueryPlanV2 } from '../../model/query-plan.js';
+import type { QueryPlanV1, QueryPlanV2 } from '../../model/query-plan.js';
 
 // ---------------------------------------------------------------------------
 // Minimal fixture factory
@@ -120,7 +121,7 @@ describe('planToObservabilitySlice', () => {
         ambiguityDetected: true,
         ambiguityTypes: ['entity'],
         ambiguitySeverity: 'high',
-        decisionEffect: 'force_clarification',
+        decisionEffect: 'force_clarify',
         parserConfidence: 0.5,
         anchorConfidence: 0.5,
         constraintConfidence: 0.5,
@@ -210,5 +211,107 @@ describe('QUERY_FAMILY_LABELS', () => {
     expect(QUERY_FAMILY_LABELS).toContain('no_match');
     expect(QUERY_FAMILY_LABELS).toContain('ambiguous');
     expect(QUERY_FAMILY_LABELS).toContain('unknown');
+  });
+});
+
+describe('isQueryPlanV2', () => {
+  it('returns true for a genuine QueryPlanV2', () => {
+    const plan = makePlan();
+    expect(isQueryPlanV2(plan)).toBe(true);
+  });
+
+  it('returns false for a genuine QueryPlanV1', () => {
+    // Minimal V1 shape: has `route` + `retrievalMode`, no `suggestedRoute`.
+    const v1: QueryPlanV1 = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      intent: 'entity_exact',
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
+      queryClass: 'short_entity',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {
+        requireExact: true,
+        allowApproximate: false,
+        requireClarification: false,
+        fallbackMode: 'hybrid',
+        policyReasonCodes: [],
+      },
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0.9,
+        constraintConfidence: 0.9,
+      },
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+    };
+    expect(isQueryPlanV2(v1)).toBe(false);
+  });
+
+  it('returns false for a V1 plan accidentally spread with suggestedRoute', () => {
+    // Simulates the dangerous object-spread scenario: a V1 plan gets an
+    // accidental `suggestedRoute` key. The double-check (`!('route' in plan)`)
+    // must correctly reject this as non-V2 because `route` is still present.
+    const v1Base: QueryPlanV1 = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      intent: 'entity_exact',
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
+      queryClass: 'short_entity',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {
+        requireExact: true,
+        allowApproximate: false,
+        requireClarification: false,
+        fallbackMode: 'hybrid',
+        policyReasonCodes: [],
+      },
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0.9,
+        constraintConfidence: 0.9,
+      },
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+    };
+    // Force-add suggestedRoute to simulate accidental spread: { ...v1Plan, suggestedRoute: ... }
+    const contaminatedV1 = { ...v1Base, suggestedRoute: 'entity' } as unknown as QueryPlanV1 | QueryPlanV2;
+    // Must NOT be classified as V2 because `route` is still present.
+    expect(isQueryPlanV2(contaminatedV1)).toBe(false);
+  });
+
+  it('clamps overallUncertainty to 1 when plan.uncertainty.overall is NaN', () => {
+    const plan = makePlan({
+      uncertainty: {
+        overall: NaN,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0.9,
+        constraintConfidence: 0.9,
+      },
+    });
+    const slice = planToObservabilitySlice('q-nan', plan);
+    expect(Number.isFinite(slice.overallUncertainty)).toBe(true);
+    expect(slice.overallUncertainty).toBe(1);
   });
 });

@@ -25,6 +25,19 @@ export function applyLtrRerankIfAvailable(
       popularity: doc.componentScores.popularity,
       attributeAlignment: doc.componentScores.attributeAlignment,
       preferenceAlignment: doc.componentScores.preferenceAlignment,
+      // SOTA++ signals — forward all optional fields so LTR model can use them
+      ...(doc.componentScores.criticScore !== undefined
+        ? { criticScore: doc.componentScores.criticScore }
+        : {}),
+      ...(doc.componentScores.recency !== undefined
+        ? { recency: doc.componentScores.recency }
+        : {}),
+      ...(doc.componentScores.producerPrestige !== undefined
+        ? { producerPrestige: doc.componentScores.producerPrestige }
+        : {}),
+      ...(doc.componentScores.multilingualScore !== undefined
+        ? { multilingualScore: doc.componentScores.multilingualScore }
+        : {}),
     }),
     originalRank: idx + 1,
   }));

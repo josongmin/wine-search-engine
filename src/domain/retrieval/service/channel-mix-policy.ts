@@ -48,7 +48,11 @@ const PROFILE_CHANNEL_MIXES = {
   hybrid_default: ['sparse_bm25', 'dense_semantic'] as const,
   mixed_anchor: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'] as const,
   compare_default: ['sparse_bm25', 'dense_semantic', 'compare_anchor'] as const,
-  browse_default: ['sparse_bm25', 'dense_semantic'] as const,
+  // browse_default activates browse_producer so producer-browse dispatch is visible
+  // in ChannelMixDecision.channelMix (mirrors the BROWSE_DEFAULT profile object).
+  browse_default: ['sparse_bm25', 'dense_semantic', 'browse_producer'] as const,
+  // region_browse activates browse_region — distinct from producer browse.
+  region_browse: ['sparse_bm25', 'dense_semantic', 'browse_region'] as const,
   exact_safe_fallback: ['sparse_bm25', 'dense_semantic'] as const,
   relative_filter: ['sparse_bm25', 'relative_filter'] as const,
 } as const satisfies Record<string, readonly RetrievalChannel[]>;
@@ -131,8 +135,8 @@ const FAMILY_POLICY: Record<QueryFamily, { profile: ProfileName; reason: string 
   },
 
   region_browse: {
-    profile: 'browse_default',
-    reason: 'region_browse family → browse_default (sparse-heavy) for region names',
+    profile: 'region_browse',
+    reason: 'region_browse family → region_browse profile (browse_region channel) for region names',
   },
 
   // No-match / ambiguous / unknown: fall back to generic hybrid.

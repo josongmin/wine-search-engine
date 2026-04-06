@@ -3,6 +3,8 @@ import {
   RETRIEVAL_CHANNELS,
   isRetrievalChannel,
   toRetrievalChannel,
+  preferCanonicalRetrievalChannelLabel,
+  preferCanonicalRetrievalChannelLabels,
   PHASE_TO_CHANNEL,
 } from '../retrieval-channel.js';
 import { PHASE_TO_CHANNEL as CASCADE_PHASE_TO_CHANNEL } from '../../service/cascade-router.js';
@@ -12,7 +14,6 @@ describe('RetrievalChannel vocabulary', () => {
     expect(RETRIEVAL_CHANNELS).toContain('sparse_bm25');
     expect(RETRIEVAL_CHANNELS).toContain('learned_sparse');
     expect(RETRIEVAL_CHANNELS).toContain('dense_semantic');
-    expect(RETRIEVAL_CHANNELS).toContain('dense_anchor');
     expect(RETRIEVAL_CHANNELS).toContain('anchor_similarity');
     expect(RETRIEVAL_CHANNELS).toContain('relative_filter');
     expect(RETRIEVAL_CHANNELS).toContain('browse_producer');
@@ -51,6 +52,25 @@ describe('RetrievalChannel vocabulary', () => {
 
   it('toRetrievalChannel falls back to sparse_bm25 for truly unknown strings', () => {
     expect(toRetrievalChannel('completely_unknown')).toBe('sparse_bm25');
+  });
+
+  it('preferCanonicalRetrievalChannelLabel preserves already-canonical channels', () => {
+    expect(preferCanonicalRetrievalChannelLabel('anchor_similarity')).toBe('anchor_similarity');
+    expect(preferCanonicalRetrievalChannelLabel('compare_anchor')).toBe('compare_anchor');
+  });
+
+  it('preferCanonicalRetrievalChannelLabel does not coerce unknown strings', () => {
+    expect(preferCanonicalRetrievalChannelLabel('mystery_channel')).toBe('mystery_channel');
+  });
+
+  it('preferCanonicalRetrievalChannelLabels deduplicates repeated canonical values in order', () => {
+    expect(
+      preferCanonicalRetrievalChannelLabels([
+        'anchor_similarity',
+        'anchor_similarity',
+        'dense_semantic',
+      ]),
+    ).toEqual(['anchor_similarity', 'dense_semantic']);
   });
 });
 

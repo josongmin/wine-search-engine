@@ -1,4 +1,5 @@
 import type { MixedQueryResult } from '../../domain/mixed/model/mixed-query-result.js';
+import type { MixedFallbackReason } from '../../domain/mixed/model/mixed-degradation.js';
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -43,5 +44,47 @@ export function mixedQueryResultToSearchRouteExecution(
         confidence: mixedResult.anchor.anchorConfidence,
       },
     },
+    ...(mixedResult.routeDegradation !== undefined
+      ? { routeDegradation: mixedResult.routeDegradation }
+      : {}),
+    ...(mixedResult.fallbackReason !== undefined
+      ? { fallbackReason: mixedResult.fallbackReason }
+      : {}),
+    ...(mixedResult.funnelMetrics !== undefined
+      ? { funnelMetrics: mixedResult.funnelMetrics }
+      : {}),
+  };
+}
+
+export function buildFailedMixedRouteExecution(
+  plan: QueryPlanV1,
+  reason: MixedFallbackReason,
+): SearchRouteExecutionResult {
+  const resolveResult: EntityResolveResult = {
+    status: 'failed',
+    candidates: [],
+    decisionTrace: {
+      queryClass: plan.queryClass,
+      top1CalibratedScore: 0,
+      top2CalibratedScore: 0,
+      calibratedGap: 0,
+      decisionConfidenceC: 0,
+      ambiguityDetected: false,
+      ambiguityTypes: [],
+      appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+      outcomeReasonCodes: ['MIXED_ROUTE'],
+    },
+    degradation: { reasons: [reason] },
+    conformalSetSize: 1,
+  };
+
+  return {
+    resolveResult,
+    rankedResults: [],
+    routeDegradation: {
+      executionMode: 'degraded',
+      degradationReasons: [reason],
+    },
+    fallbackReason: reason,
   };
 }

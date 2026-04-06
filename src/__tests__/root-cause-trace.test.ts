@@ -197,7 +197,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     console.error(`  hardConstraints: ${plan.constraints.hard.length}`);
     console.error(`  softConstraints: ${plan.constraints.soft.length}`);
 
-    const candidates = await retrieveHybridCandidatesForPlan(
+    const retrieval = await retrieveHybridCandidatesForPlan(
       plan,
       {
         candidatePool: container.candidatePool,
@@ -220,6 +220,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
         });
       },
     );
+    const candidates = retrieval.candidates;
 
     console.error(`\nCandidate Pool Output:`);
     console.error(`  Total candidates: ${candidates.length}`);
@@ -264,7 +265,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
-    const candidates = await retrieveHybridCandidatesForPlan(
+    const retrieval = await retrieveHybridCandidatesForPlan(
       plan,
       {
         candidatePool: container.candidatePool,
@@ -287,6 +288,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
         });
       },
     );
+    const candidates = retrieval.candidates;
 
     const rankingInput = {
       queryPlan: plan,
@@ -348,7 +350,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     const plan = await container.queryPlanner.plan(QUERY, {});
 
     // Build synthetic resolver result (as the SearchUseCase does for hybrid route)
-    const candidates = await retrieveHybridCandidatesForPlan(
+    const retrieval = await retrieveHybridCandidatesForPlan(
       plan,
       {
         candidatePool: container.candidatePool,
@@ -371,6 +373,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
         });
       },
     );
+    const candidates = retrieval.candidates;
 
     const rankingInput = {
       queryPlan: plan,
@@ -524,7 +527,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     );
 
     const plan = await container.queryPlanner.plan(QUERY, {});
-    const candidates = await retrieveHybridCandidatesForPlan(
+    const retrieval = await retrieveHybridCandidatesForPlan(
       plan,
       {
         candidatePool: container.candidatePool,
@@ -547,6 +550,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
         });
       },
     );
+    const candidates = retrieval.candidates;
 
     console.error(`\nTrace Summary:`);
     console.error(`  1. Planner produces queryClass: ${plan.queryClass} ✅`);

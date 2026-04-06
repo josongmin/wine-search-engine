@@ -22,6 +22,38 @@
  * Ranking features extracted from retrieval results.
  */
 /**
+ * Deterministic pseudo-random number generator (xorshift32).
+ *
+ * Returns a value in [0, 1) given a mutable state object so callers can
+ * advance the sequence without closure allocation.  The seed is derived
+ * from the training context (queryClass + exampleCount) so training runs
+ * are reproducible across process restarts.
+ */
+function xorshift32(state: { value: number }): number {
+  let x = state.value;
+  x ^= x << 13;
+  x ^= x >> 17;
+  x ^= x << 5;
+  // Ensure positive 32-bit integer
+  state.value = x >>> 0;
+  return (x >>> 0) / 0x100000000;
+}
+
+/**
+ * Deterministic Fisher-Yates shuffle that mutates `arr` in-place.
+ * Uses xorshift32 seeded from the provided seed value.
+ */
+function deterministicShuffle<T>(arr: T[], seed: number): void {
+  const rng = { value: (seed >>> 0) || 1 };
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(xorshift32(rng) * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j] as T;
+    arr[j] = tmp as T;
+  }
+}
+
+/**
  * Numerically stable sigmoid that avoids exp() overflow.
  * For x >= 0 we compute exp(-x) (always <= 1, no overflow).
  * For x <  0 we compute exp(x)  (always <= 1, no overflow).
@@ -109,8 +141,16 @@ export function trainLambdaMARTModel(
       'multilingualScore',
     ] as const;
 
+    // Derive a deterministic seed from the queryClass string and example count
+    // so training is reproducible across process restarts (no Math.random()).
+    let classSeed = classExamples.length;
+    for (let ci = 0; ci < queryClass.length; ci++) {
+      classSeed = (classSeed * 31 + queryClass.charCodeAt(ci)) >>> 0;
+    }
+
     for (let iter = 0; iter < numIterations; iter++) {
-      const shuffled = [...classExamples].sort(() => Math.random() - 0.5);
+      const shuffled = [...classExamples];
+      deterministicShuffle(shuffled, (classSeed + iter) >>> 0);
       const batch = shuffled.slice(0, batchSize);
 
       const gradients: number[] = [0, 0, 0, 0, 0, 0, 0, 0];

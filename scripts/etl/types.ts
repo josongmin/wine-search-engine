@@ -5,6 +5,8 @@
  * representations — not part of the runtime domain model.
  */
 
+import type { LearnedSparseVector } from './learned-sparse-spec.js';
+
 // ---------------------------------------------------------------------------
 // Vivino Bronze payload shape (from wine_pdp_snapshot.payload JSONB)
 // ---------------------------------------------------------------------------
@@ -261,6 +263,128 @@ export interface AliasBundle {
 
 export interface EnrichedSilverRecord extends SilverWineRecord {
   readonly aliases: AliasBundle;
+}
+
+// ---------------------------------------------------------------------------
+// Indexable wine record (projection family alignment — T7.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * IndexableWineRecord: the explicit intermediate representation between the
+ * Silver record and the Vespa feed.
+ *
+ * Fields are grouped by ownership per the retrieval projection families
+ * defined in {@link RetrievalHitProjection} and {@link RetrievalFeatureProjection}
+ * (src/domain/retrieval/model/retrieval-document.ts).
+ *
+ * This type makes the ETL → Vespa field mapping auditable and testable
+ * without touching the runtime query/HTTP surface.
+ */
+export interface IndexableWineRecord {
+  // -------------------------------------------------------------------------
+  // RetrievalHitProjection fields — hit display + evidence fields
+  // -------------------------------------------------------------------------
+
+  /** Required: unique entity identifier (non-empty). */
+  readonly entityId: string;
+  /** Required: canonical display label (non-empty). */
+  readonly canonicalLabel: string;
+  /** Producer / winery name. */
+  readonly producer?: string | undefined;
+  /** Region of origin. */
+  readonly region?: string | undefined;
+  /** Appellation (more specific than region, if available). */
+  readonly appellation?: string | undefined;
+  /** Primary grape variety. */
+  readonly grapePrimary?: string | undefined;
+  /** Vintage year (e.g. 2018). */
+  readonly vintageYear?: number | undefined;
+  /** English full-text search field. */
+  readonly searchTextEn?: string | undefined;
+  /** Producer prestige score in [0, 1]. */
+  readonly producerPrestige?: number | undefined;
+  /** Critic score normalised to [0, 1]. */
+  readonly avgCriticProxyScore?: number | undefined;
+
+  // -------------------------------------------------------------------------
+  // RetrievalFeatureProjection fields — ranker / ML feature fields
+  // -------------------------------------------------------------------------
+
+  /** Body score in [0, 1]. */
+  readonly body?: number | undefined;
+  /** Tannin level in [0, 1]. */
+  readonly tannin?: number | undefined;
+  /** Acidity level in [0, 1]. */
+  readonly acidity?: number | undefined;
+  /** Sweetness level in [0, 1]. */
+  readonly sweetness?: number | undefined;
+  /** Critic score normalised to [0, 1] (feature copy). */
+  readonly criticScoreNormalized?: number | undefined;
+  /** Encoded grape primary (LTR feature). */
+  readonly grapePrimaryEnc?: number | undefined;
+  /** Encoded region (LTR feature). */
+  readonly regionEnc?: number | undefined;
+  /** Encoded country (LTR feature). */
+  readonly countryEnc?: number | undefined;
+  /** First year of optimal drinking window. */
+  readonly drinkingWindowStart?: number | undefined;
+  /** Last year of optimal drinking window. */
+  readonly drinkingWindowEnd?: number | undefined;
+  /** Model version that produced the drinking-window estimate. */
+  readonly drinkingWindowModelVersion?: string | undefined;
+
+  // -------------------------------------------------------------------------
+  // Payload fields — stored in the index but not in either projection
+  // -------------------------------------------------------------------------
+
+  /** Entity type discriminator. */
+  readonly entityType: string;
+  /** Identity-safe aliases for high-precision matching. */
+  readonly aliasesIdentitySafe: readonly string[];
+  /** Noisy-recall aliases for broader recall. */
+  readonly aliasesNoisyRecall: readonly string[];
+  /** All grape varieties. */
+  readonly grapes: readonly string[];
+  /** Korean full-text search field. */
+  readonly searchTextKo: string;
+  /** Natural-language summary for semantic embedding. */
+  readonly semanticSummary: string;
+  /** Wine style descriptor (e.g. "bold red"). */
+  readonly style: string;
+  /** Price band label (e.g. "premium"). */
+  readonly priceBand: string;
+  /** Food pairing suggestions. */
+  readonly pairing: readonly string[];
+  /** Occasion tags. */
+  readonly occasion: readonly string[];
+  /** Whether the wine is available for purchase. */
+  readonly availability: boolean;
+  /** Popularity score in [0, 1]. */
+  readonly popularityScore: number;
+  /** Wine type (e.g. "red", "white"). */
+  readonly wineType?: string | undefined;
+  /** Country of origin. */
+  readonly country?: string | undefined;
+  /** Actual price in USD. */
+  readonly priceUsd?: number | undefined;
+  /** Flavor descriptor vocabulary. */
+  readonly flavorProfiles?: readonly string[] | undefined;
+  /** Alcohol by volume percentage. */
+  readonly alcoholPct?: number | undefined;
+  /** Certifications (e.g. ["organic", "biodynamic"]). */
+  readonly certifications?: readonly string[] | undefined;
+  /** SPLADE-style learned sparse weights. Embedding is generated separately. */
+  readonly learnedSparseWeights?: LearnedSparseVector | undefined;
+  /** Legal classification or tier designation (e.g. "Premier Cru", "Grand Cru"). */
+  readonly classification?: string | undefined;
+  /** Vineyard soil type (e.g. "clay", "limestone"). */
+  readonly soilType?: string | undefined;
+  /** Producer archetype (e.g. "family_estate", "negociant"). */
+  readonly producerType?: string | undefined;
+  /** Finish length in [0, 1] normalized ordinal. */
+  readonly finishLength?: number | undefined;
+  /** Oak aging regime (e.g. "new French oak 18 months", "unoaked stainless"). */
+  readonly oakTreatment?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------

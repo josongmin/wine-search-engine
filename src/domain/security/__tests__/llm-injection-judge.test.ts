@@ -68,9 +68,9 @@ describe('LLMInjectionJudge', () => {
 
     it('returns cached result on cache HIT without calling classifier', async () => {
       const query = 'cached wine query';
-      const prefix = query.slice(0, 32);
-      const encoded = Buffer.from(prefix).toString('base64url');
-      const cacheKey = `injection_judge:${encoded}`;
+      const { createHash } = await import('node:crypto');
+      const digest = createHash('sha256').update(query, 'utf8').digest('hex');
+      const cacheKey = `injection_judge:${digest}`;
       mockRedisClient.cache.set(cacheKey, JSON.stringify({ is_injection: true }));
 
       const result = await judge.judge(query);
@@ -90,12 +90,16 @@ describe('LLMInjectionJudge', () => {
       expect(mockClassifier.getCallCount()).toBe(1);
     });
 
-    it('produces identical cache keys for queries sharing the same first 32 characters', async () => {
+    it('produces distinct cache keys for queries sharing the same first 32 characters', async () => {
+      // Previously the cache key was built from only the first 32 characters,
+      // so queryA and queryB below would collide and queryB would be served
+      // queryA's cached result without calling the classifier — a security bypass.
+      // The fix uses SHA-256 of the full query, eliminating this collision.
       const sharedPrefix = 'abcdefghijklmnopqrstuvwxyz012345';
       const queryA = `${sharedPrefix}AAAA`;
       const queryB = `${sharedPrefix}BBBB`;
 
-      mockClassifier.queueResponse(false);
+      mockClassifier.queueResponse(false); // queryA → safe
       const resultA = await judge.judge(queryA);
 
       expect(resultA).toBe(false);
@@ -103,10 +107,12 @@ describe('LLMInjectionJudge', () => {
 
       await new Promise((resolve) => process.nextTick(resolve));
 
+      // queryB must also call the classifier since it is a different query
+      mockClassifier.queueResponse(true); // queryB → injection
       const resultB = await judge.judge(queryB);
 
-      expect(resultB).toBe(false);
-      expect(mockClassifier.getCallCount()).toBe(1);
+      expect(resultB).toBe(true);
+      expect(mockClassifier.getCallCount()).toBe(2);
     });
   });
 

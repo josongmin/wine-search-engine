@@ -563,6 +563,13 @@ schema wine_entity {
     }
   }
 
+  # --- learned_sparse: fallback to BM25 (no SPLADE model in dev) -----------
+  rank-profile learned_sparse inherits lexical {
+    first-phase {
+      expression: bm25_wine
+    }
+  }
+
   # ---------------------------------------------------------------------------
   # Synonym Rules — NOT supported in Vespa 8.x .sd schema syntax.
   #

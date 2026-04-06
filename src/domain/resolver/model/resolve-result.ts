@@ -43,6 +43,11 @@ export interface EntityResolveResult {
   /** Full diagnostic trace of how the resolver reached its conclusion. */
   readonly decisionTrace: ResolverDecisionTrace;
 
+  /** Runtime degradation signals surfaced to upstream response contract assembly. */
+  readonly degradation?: {
+    readonly reasons: readonly string[];
+  } | undefined;
+
   /**
    * Conformal prediction set size derived from the calibrated confidence C
    * and significance level alpha.

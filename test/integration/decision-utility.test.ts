@@ -15,6 +15,7 @@ import {
 import type { EvalCase } from '../../src/domain/evaluation/model/eval-case.js';
 import type { EntityId, EvidenceItem } from '../../src/domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../src/domain/shared/types/index.js';
+import type { FunnelMetrics } from '../../src/domain/ranking/model/ranking-stage.js';
 import { InMemoryGoldSetStore, InMemoryEvalResultStore } from './helpers/in-memory-adapters.js';
 import {
   OPUS_ONE_ID,
@@ -48,6 +49,14 @@ const STUB_SNAPSHOT: DecisionSnapshot = {
   feature_flags: {},
 };
 
+const STUB_FUNNEL_METRICS: FunnelMetrics = {
+  coarsePrunePassRate: 0.8,
+  rerankChangedTopK: false,
+  meanFinalScore: 0.88,
+  scoreGapRank1Rank2: 0.11,
+  producerDiversity: 1,
+};
+
 /**
  * Returns exactly the gold label for each query so aggregate metrics are stable.
  */
@@ -66,6 +75,7 @@ class GoldenEvalPipelineAdapter implements SearchPipelinePort {
       ...(resolved && c.expectedEntityId !== undefined ? { predictedEntityId: c.expectedEntityId } : {}),
       decisionConfidence: 0.88,
       evidenceItems: resolved ? STUB_EVIDENCE : [],
+      ...(resolved ? { funnelMetrics: STUB_FUNNEL_METRICS } : {}),
       latencyMs: 1,
       decisionSnapshot: STUB_SNAPSHOT,
     };
@@ -188,6 +198,22 @@ describe('Decision Utility — Eval Set Integration', () => {
       expect(result.evidenceItems).toBeDefined();
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it('propagates ranking funnel metrics into stored eval results when available', async () => {
+    await evalRunner.run();
+
+    const stored = evalResultStore.getAll();
+    const resolvedWithEvidence = stored.find((result) => result.predictedStatus === 'resolved');
+    expect(resolvedWithEvidence?.funnelMetrics).toEqual(
+      expect.objectContaining({
+        coarsePrunePassRate: 0.8,
+        meanFinalScore: 0.88,
+      }),
+    );
+
+    const ambiguous = stored.find((result) => result.predictedStatus === 'ambiguous');
+    expect(ambiguous?.funnelMetrics).toBeUndefined();
   });
 
   it('eval report contains per-slice metrics', async () => {

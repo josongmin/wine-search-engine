@@ -12,10 +12,9 @@
  */
 
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
-import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 import type {
   ResultItemV2Human,
-  SearchResponseV2Human,
+  SearchResponseV2HumanSearch,
 } from '../model/result-item-v2.js';
 
 // ---------------------------------------------------------------------------
@@ -26,7 +25,6 @@ export interface HumanResponseBuildParamsV2 {
   readonly queryId: string;
   readonly results: readonly RankedResult[];
   readonly totalCandidates: number;
-  readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -116,8 +114,8 @@ function normaliseConfidences(results: readonly RankedResult[]): readonly number
 // Main builder function
 // ---------------------------------------------------------------------------
 
-export function buildHumanResponseV2(params: HumanResponseBuildParamsV2): SearchResponseV2Human {
-  const { queryId, results, totalCandidates, funnelMetrics } = params;
+export function buildHumanResponseV2(params: HumanResponseBuildParamsV2): SearchResponseV2HumanSearch {
+  const { queryId, results, totalCandidates } = params;
 
   const confidences = normaliseConfidences(results);
 
@@ -160,9 +158,9 @@ export function buildHumanResponseV2(params: HumanResponseBuildParamsV2): Search
 
   return {
     queryId,
+    queryType: 'search',
     results: mappedResults,
     totalCandidates,
-    ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
     version: '2',
     responseType: 'human',
   };

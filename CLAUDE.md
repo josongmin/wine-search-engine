@@ -2,6 +2,8 @@
 
 This repository is a **wine intelligence / search engine** backend: typed TypeScript on Node 22, Fastify HTTP API, PostgreSQL and Redis, with Vespa-related code under `src/infrastructure/vespa/`. Product and protocol details are in **`docs/RFC-*.md`**.
 
+**HTTP debug & tracing requests:** agents read **`.ai/llm-debugging-playbook.md`** first; setup and limits: **`.ai/debug-mode.md`**. Canonical `step` strings: **`src/observability/pipeline-debug-steps.ts`**. Index: **`.ai/README.md`**.
+
 ## Commands
 
 | Command | Purpose |

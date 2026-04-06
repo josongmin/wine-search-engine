@@ -110,12 +110,28 @@ describe('traceToEvalSlice', () => {
   it('sets anchorConditioned=true when candidate is anchor-conditioned', () => {
     const c = makeCandidate('e1', {
       anchorConditioned: true,
-      channels: ['dense_anchor'],
-      channelScores: [{ channel: 'dense_anchor', rawScore: 0.8, rank: 1, rrfContribution: 0.8 }],
+      channels: ['anchor_similarity'],
+      channelScores: [{ channel: 'anchor_similarity', rawScore: 0.8, rank: 1, rrfContribution: 0.8 }],
     });
     const slice = traceToEvalSlice('q1', 2, c);
     expect(slice!.anchorConditioned).toBe(true);
+    expect(slice!.channels).toEqual(['anchor_similarity']);
+    expect(slice!.topChannel).toBe('anchor_similarity');
     expect(slice!.rank).toBe(2);
+  });
+
+  it('deduplicates repeated anchor_similarity entries when both appear in provenance', () => {
+    const c = makeCandidate('e1', {
+      channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+      channelScores: [
+        { channel: 'anchor_similarity', rawScore: 0.8, rank: 1, rrfContribution: 0.8 },
+        { channel: 'dense_semantic', rawScore: 0.4, rank: 3, rrfContribution: 0.4 },
+      ],
+      anchorConditioned: true,
+    });
+    const slice = traceToEvalSlice('q1', 2, c);
+    expect(slice!.channels).toEqual(['anchor_similarity', 'dense_semantic']);
+    expect(slice!.topChannel).toBe('anchor_similarity');
   });
 
   it('returns null if candidate has no recognized channels', () => {

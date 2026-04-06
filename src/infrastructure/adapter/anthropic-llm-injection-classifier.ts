@@ -100,13 +100,18 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
       }
     }
 
+    // Re-throw so the caller (QueryEntrySecurityGate) can apply the configured
+    // fail-open / fail-closed policy.  Previously this swallowed all errors and
+    // returned false, making judgeFailureMode='fail_closed' a no-op: an attacker
+    // who triggers a classifier outage (e.g. via key exhaustion) would bypass
+    // Layer 2 entirely regardless of the operator's intent.
     bootstrapLogger.warn(
       {
         err: lastError instanceof Error ? lastError.message : String(lastError),
       },
-      '[AnthropicLLMInjectionClassifier] Claude API error (failing open)',
+      '[AnthropicLLMInjectionClassifier] Claude API error — propagating to caller for fail-open/closed policy',
     );
-    return false;
+    throw lastError;
   }
 
   private async classifyOnce(query: string): Promise<boolean> {

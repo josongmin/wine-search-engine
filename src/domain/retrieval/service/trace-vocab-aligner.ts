@@ -15,6 +15,10 @@ import type {
 } from '../model/candidate-envelope.js';
 import type { EvalProvenanceSlice, ProvenanceChannel } from '../model/provenance.js';
 import { isProvenanceChannel, PROVENANCE_CHANNELS } from '../model/provenance.js';
+import {
+  preferCanonicalRetrievalChannelLabel,
+  preferCanonicalRetrievalChannelLabels,
+} from '../model/retrieval-channel.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
 
 interface ProvenanceCarrier {
@@ -22,29 +26,13 @@ interface ProvenanceCarrier {
   readonly provenance: CandidateProvenance;
 }
 
-// ---------------------------------------------------------------------------
-// Channel alias map: runtime CandidateChannel → canonical ProvenanceChannel
-// ---------------------------------------------------------------------------
-
-const CHANNEL_ALIAS_MAP: Readonly<Record<string, ProvenanceChannel>> = {
-  sparse_bm25:      'sparse_bm25',
-  dense_semantic:   'dense_semantic',
-  dense_anchor:     'dense_anchor',
-  learned_sparse:   'learned_sparse',
-  anchor_similarity:'anchor_similarity',
-  relative_filter:  'relative_filter',
-  browse_producer:  'browse_producer',
-  browse_region:    'browse_region',
-  compare_anchor:   'compare_anchor',
-} as const;
-
 /**
  * Convert a runtime CandidateChannel to its canonical ProvenanceChannel.
  * Falls back to null if the channel is not recognized in the eval vocabulary.
  */
 function toCanonicalChannel(ch: CandidateChannel): ProvenanceChannel | null {
-  const mapped = CHANNEL_ALIAS_MAP[ch];
-  return mapped ?? null;
+  const mapped = preferCanonicalRetrievalChannelLabel(ch);
+  return isProvenanceChannel(mapped) ? mapped : null;
 }
 
 /**
@@ -88,9 +76,9 @@ function carrierToEvalSlice(
   rank: number,
   candidate: ProvenanceCarrier,
 ): EvalProvenanceSlice | null {
-  const canonicalChannels: ProvenanceChannel[] = candidate.provenance.channels
-    .map(toCanonicalChannel)
-    .filter((ch): ch is ProvenanceChannel => ch !== null);
+  const canonicalChannels: ProvenanceChannel[] = preferCanonicalRetrievalChannelLabels(
+    candidate.provenance.channels,
+  ).filter(isProvenanceChannel);
 
   if (canonicalChannels.length === 0) return null;
 

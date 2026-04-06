@@ -5,6 +5,8 @@ import type {
   DecisionSnapshot,
 } from '../../shared/types/index.js';
 import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
+import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
+import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 
 /**
  * The result of evaluating a single case through the search pipeline,
@@ -25,6 +27,15 @@ export interface EvalResult {
 
   /** Calibrated decision confidence in [0, 1]. */
   readonly decisionConfidence: number;
+
+  /** Surfaced execution contract for honesty-aware offline analysis. */
+  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+
+  /** Whether the execution contract was blocking-eligible. */
+  readonly blockingEligible?: boolean;
+
+  /** Structured degradation reasons surfaced by the runtime contract. */
+  readonly degradationReasons?: readonly string[];
 
   /**
    * Decision Utility score for this case, computed from the utility formula:
@@ -61,6 +72,15 @@ export interface EvalResult {
 
   /** Score components from the top result, for LTR training. */
   readonly topResultScoreComponents?: LTRScoreComponents;
+
+  /** T5.6: Ranking funnel metrics captured for this execution when available. */
+  readonly funnelMetrics?: FunnelMetrics;
+
+  /**
+   * Retrieval provenance slices for this case, forwarded from the eval adapter.
+   * Used for channel-level offline analysis and quality regression.
+   */
+  readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[];
 
   /** End-to-end latency in milliseconds for this case. */
   readonly latencyMs: number;

@@ -8,6 +8,7 @@ interface Args {
   input: string;
   output: string;
   tier: 'bronze' | 'silver' | 'gate';
+  baselineReport?: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -15,6 +16,7 @@ function parseArgs(argv: readonly string[]): Args {
     input: 'data/eval-smoke-queries.jsonl',
     output: 'data/eval-results-smoke.json',
     tier: 'bronze',
+    baselineReport: undefined,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -28,6 +30,8 @@ function parseArgs(argv: readonly string[]): Args {
       if (tier === 'bronze' || tier === 'silver' || tier === 'gate') {
         out.tier = tier;
       }
+    } else if (arg === '--baseline-report') {
+      out.baselineReport = argv[++index];
     }
   }
 
@@ -52,6 +56,9 @@ async function run(): Promise<void> {
         args.output,
         '--tier',
         args.tier,
+        ...(args.baselineReport !== undefined
+          ? ['--baseline-report', args.baselineReport]
+          : []),
       ],
       {
         cwd: process.cwd(),

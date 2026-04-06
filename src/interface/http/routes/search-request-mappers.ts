@@ -96,12 +96,14 @@ export function toResolveRequest(
 export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): ReplayRequest {
   const options = normalizeSearchOptions(body.options);
   const snapshot: DecisionSnapshot = {
+    snapshot_id: body.decision_snapshot.snapshot_id,
     model_versions: body.decision_snapshot.model_versions,
     index_versions: body.decision_snapshot.index_versions,
     policy_rule_version: body.decision_snapshot.policy_rule_version,
     threshold_profile_id: body.decision_snapshot.threshold_profile_id,
     planner_version: body.decision_snapshot.planner_version,
     feature_flags: body.decision_snapshot.feature_flags,
+    response_contract_version: body.decision_snapshot.response_contract_version,
     ...(body.decision_snapshot.nondeterminism_notes !== undefined
       ? { nondeterminism_notes: body.decision_snapshot.nondeterminism_notes }
       : {}),

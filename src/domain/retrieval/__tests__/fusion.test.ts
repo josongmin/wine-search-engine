@@ -277,6 +277,31 @@ describe('FusionService', () => {
     });
   });
 
+  describe('k parameter guard', () => {
+    it('throws when k=0 is passed explicitly', () => {
+      const sparse = [makeSparse('wine-a', 1)];
+      const dense = [makeDense('wine-a', 1)];
+      // k=0 passes through `??` (only catches null/undefined), so the guard
+      // must be an explicit range check, not `k ?? 60`.
+      expect(() => fusion.fuse(sparse, dense, undefined, 0)).toThrow('k must be ≥ 1');
+    });
+
+    it('throws when k is negative', () => {
+      const sparse = [makeSparse('wine-a', 1)];
+      expect(() => fusion.fuse(sparse, [], undefined, -10)).toThrow('k must be ≥ 1');
+    });
+
+    it('does not throw when k=undefined (uses default 60)', () => {
+      const sparse = [makeSparse('wine-a', 1)];
+      expect(() => fusion.fuse(sparse, [], undefined, undefined)).not.toThrow();
+    });
+
+    it('does not throw when k=1', () => {
+      const sparse = [makeSparse('wine-a', 1)];
+      expect(() => fusion.fuse(sparse, [], undefined, 1)).not.toThrow();
+    });
+  });
+
   describe('RRF formula correctness', () => {
     it('fusion score for rank 1 in both = 2 * (1/(60+1))', () => {
       const sparse = [makeSparse('wine-a', 1)];

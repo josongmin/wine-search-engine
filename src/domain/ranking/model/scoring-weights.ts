@@ -1,5 +1,8 @@
 import type { QueryClass } from '../../shared/types/index.js';
-import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
+import {
+  type RetrievalChannel,
+  preferCanonicalRetrievalChannelLabels,
+} from '../../retrieval/model/retrieval-channel.js';
 
 /**
  * Weight configuration for the score aggregation formula.
@@ -41,6 +44,18 @@ export interface ScoringWeights {
    * Acts as a gate similar to hard constraints.
    */
   readonly entityIntegrityThreshold: number;
+
+  /** Weight for producer prestige signal (producer_browse, region_browse, compare). */
+  readonly producerPrestige: number;
+
+  /** Weight for vintage recency signal (browse / comparison modes). */
+  readonly recency: number;
+
+  /** Weight for critic score signal (recommendation, attribute_search modes). */
+  readonly criticScore: number;
+
+  /** Weight for multilingual (Korean) match signal. */
+  readonly multilingualScore: number;
 }
 
 /**
@@ -58,6 +73,10 @@ const DEFAULT_WEIGHTS: ScoringWeights = {
   availability: 0.07,
   uncertaintyPenalty: 0.05,
   entityIntegrityThreshold: 0.3,
+  producerPrestige: 0.0,
+  recency: 0.0,
+  criticScore: 0.0,
+  multilingualScore: 0.0,
 } as const;
 
 /**
@@ -79,26 +98,38 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     popularity: 0.02,
     availability: 0.08,
     uncertaintyPenalty: 0.05,
+    producerPrestige: 0.0,
+    recency: 0.0,
+    criticScore: 0.0,
+    multilingualScore: 0.05,
   },
   pure_constraint: {
     softConstraint: 0.30,
     attributeAlignment: 0.25,
     semantic: 0.10,
     entityIntegrity: 0.10,
-    preferenceAlignment: 0.10,
+    preferenceAlignment: 0.05,
     popularity: 0.03,
     availability: 0.07,
     uncertaintyPenalty: 0.05,
+    producerPrestige: 0.0,
+    recency: 0.0,
+    criticScore: 0.05,
+    multilingualScore: 0.0,
   },
   semantic_preference: {
-    semantic: 0.30,
-    preferenceAlignment: 0.25,
+    semantic: 0.25,
+    preferenceAlignment: 0.20,
     softConstraint: 0.10,
     attributeAlignment: 0.10,
     entityIntegrity: 0.10,
     popularity: 0.03,
-    availability: 0.07,
+    availability: 0.05,
     uncertaintyPenalty: 0.05,
+    producerPrestige: 0.02,
+    recency: 0.0,
+    criticScore: 0.10,   // critic score boosts quality-preference queries
+    multilingualScore: 0.05,
   },
   short_entity: {
     entityIntegrity: 0.30,
@@ -109,6 +140,10 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     popularity: 0.03,
     availability: 0.07,
     uncertaintyPenalty: 0.05,
+    producerPrestige: 0.0,
+    recency: 0.0,
+    criticScore: 0.0,
+    multilingualScore: 0.0,
   },
   ambiguous_short_form: {
     entityIntegrity: 0.25,
@@ -119,16 +154,24 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     popularity: 0.03,
     availability: 0.07,
     uncertaintyPenalty: 0.10,
+    producerPrestige: 0.0,
+    recency: 0.0,
+    criticScore: 0.0,
+    multilingualScore: 0.0,
   },
   comparison_query: {
     entityIntegrity: 0.20,
-    attributeAlignment: 0.20,
-    semantic: 0.20,
-    softConstraint: 0.15,
-    preferenceAlignment: 0.05,
-    popularity: 0.03,
-    availability: 0.07,
-    uncertaintyPenalty: 0.10,
+    attributeAlignment: 0.15,
+    semantic: 0.15,
+    softConstraint: 0.10,
+    preferenceAlignment: 0.03,
+    popularity: 0.02,
+    availability: 0.05,
+    uncertaintyPenalty: 0.05,
+    producerPrestige: 0.10,  // prestige matters for head-to-head comparisons
+    recency: 0.05,           // vintage recency relevant for comparison
+    criticScore: 0.10,       // critic score is key for comparison queries
+    multilingualScore: 0.0,
   },
 } as const;
 
@@ -176,10 +219,11 @@ export { DEFAULT_WEIGHTS };
  * @returns Channel-adjusted, proportionally-normalised weights.
  */
 export function resolveChannelAwareWeights(
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
   channels: readonly (RetrievalChannel | string)[],
   baseWeights: ScoringWeights,
 ): ScoringWeights {
-  const channelSet = new Set(channels);
+  const channelSet = new Set(preferCanonicalRetrievalChannelLabels(channels));
 
   const hasAnchorChannel =
     channelSet.has('anchor_similarity') || channelSet.has('compare_anchor');
@@ -189,7 +233,6 @@ export function resolveChannelAwareWeights(
   // "Only sparse_bm25, no dense" — none of the dense/semantic family is present.
   const hasDenseChannel =
     channelSet.has('dense_semantic') ||
-    channelSet.has('dense_anchor') ||
     channelSet.has('anchor_similarity') ||
     channelSet.has('compare_anchor');
   const onlySparseBm25 = channelSet.has('sparse_bm25') && !hasDenseChannel;
@@ -204,6 +247,11 @@ export function resolveChannelAwareWeights(
   const popularity = baseWeights.popularity;
   const availability = baseWeights.availability;
   const uncertaintyPenalty = baseWeights.uncertaintyPenalty;
+  // New SOTA++ weights — not channel-adjusted (domain signals, not retrieval signals)
+  const producerPrestige = baseWeights.producerPrestige;
+  const recency = baseWeights.recency;
+  const criticScore = baseWeights.criticScore;
+  const multilingualScore = baseWeights.multilingualScore;
 
   if (hasAnchorChannel) {
     anchorSimilarity *= 1.3;
@@ -220,8 +268,8 @@ export function resolveChannelAwareWeights(
   }
 
   // Proportional normalisation — preserve total of non-gate, non-penalty weights.
-  // Penalty (uncertaintyPenalty) is excluded from the normalisation pool because
-  // it is subtracted in the aggregator; we normalise it separately.
+  // New SOTA++ weights (producerPrestige, recency, criticScore, multilingualScore)
+  // are included in both base and adjusted sums so the norm factor accounts for them.
   const baseNonPenaltySum =
     baseWeights.entityIntegrity +
     baseWeights.anchorSimilarity +
@@ -230,7 +278,11 @@ export function resolveChannelAwareWeights(
     baseWeights.attributeAlignment +
     baseWeights.preferenceAlignment +
     baseWeights.popularity +
-    baseWeights.availability;
+    baseWeights.availability +
+    baseWeights.producerPrestige +
+    baseWeights.recency +
+    baseWeights.criticScore +
+    baseWeights.multilingualScore;
 
   const adjustedNonPenaltySum =
     entityIntegrity +
@@ -240,7 +292,11 @@ export function resolveChannelAwareWeights(
     attributeAlignment +
     preferenceAlignment +
     popularity +
-    availability;
+    availability +
+    producerPrestige +
+    recency +
+    criticScore +
+    multilingualScore;
 
   // Guard: if there is nothing to normalise (all weights are zero) return as-is.
   const normFactor =
@@ -259,5 +315,9 @@ export function resolveChannelAwareWeights(
     availability: availability * normFactor,
     uncertaintyPenalty,
     entityIntegrityThreshold: baseWeights.entityIntegrityThreshold,
+    producerPrestige: producerPrestige * normFactor,
+    recency: recency * normFactor,
+    criticScore: criticScore * normFactor,
+    multilingualScore: multilingualScore * normFactor,
   };
 }

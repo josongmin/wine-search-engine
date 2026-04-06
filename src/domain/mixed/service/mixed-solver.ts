@@ -2,7 +2,7 @@ import type { EntityId } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
-import type { Ranker } from '../../ranking/service/ranker.js';
+import type { RankerPort } from '../../ranking/port/ranker.port.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
 import type {
   AnchorResolverPort,
@@ -13,6 +13,10 @@ import type { MixedQueryResult } from '../model/mixed-query-result.js';
 import type { AnchorProfiler } from './anchor-profiler.js';
 import type { SimilarityScorer } from './similarity-scorer.js';
 import type { ConstraintOverlay } from './constraint-overlay.js';
+import {
+  MixedRouteDegradationError,
+  type MixedFallbackReason,
+} from '../model/mixed-degradation.js';
 export type {
   AnchorResolverPort,
   SimilarRetrievalPort,
@@ -48,7 +52,7 @@ export class MixedSolver {
   private readonly candidateAttributes: CandidateAttributePort;
   private readonly similarityScorer: SimilarityScorer;
   private readonly constraintOverlay: ConstraintOverlay;
-  private readonly ranker: Ranker;
+  private readonly ranker: RankerPort;
   private readonly retrievalLimit: number;
 
   constructor(
@@ -58,7 +62,7 @@ export class MixedSolver {
     candidateAttributes: CandidateAttributePort,
     similarityScorer: SimilarityScorer,
     constraintOverlay: ConstraintOverlay,
-    ranker: Ranker,
+    ranker: RankerPort,
     retrievalLimit?: number,
   ) {
     this.anchorResolver = anchorResolver;
@@ -85,21 +89,24 @@ export class MixedSolver {
     // Step 1: Resolve anchor entity
     const anchorCandidate = queryPlan.anchors[0];
     if (anchorCandidate === undefined) {
-      throw new Error(
+      throw new MixedRouteDegradationError(
+        'mixed_anchor_resolution_failed',
         'MixedSolver requires at least one anchor candidate in the query plan',
       );
     }
 
     const anchorEntityId = anchorCandidate.candidateEntityIds[0];
     if (anchorEntityId === undefined) {
-      throw new Error(
+      throw new MixedRouteDegradationError(
+        'mixed_anchor_resolution_failed',
         'Anchor candidate has no entity IDs to resolve',
       );
     }
 
     const entityData = await this.anchorResolver.resolve(anchorEntityId);
     if (entityData === undefined) {
-      throw new Error(
+      throw new MixedRouteDegradationError(
+        'mixed_anchor_resolution_failed',
         `Failed to resolve anchor entity: ${String(anchorEntityId)}`,
       );
     }
@@ -115,6 +122,7 @@ export class MixedSolver {
       anchorProfile,
       this.retrievalLimit,
     );
+    let fallbackReason: MixedFallbackReason | undefined;
 
     // Step 3a: For similar_items mode (mixed route), apply set-specific constraints
     if (queryPlan.retrievalMode === 'similar_items') {
@@ -122,6 +130,9 @@ export class MixedSolver {
         candidates,
         anchorEntityId,
       );
+    }
+    if (candidates.length === 0) {
+      fallbackReason = 'mixed_similar_retrieval_fallback';
     }
 
     // Step 4: Build the retrieval-layer anchor profile for the ranking pipeline
@@ -154,12 +165,35 @@ export class MixedSolver {
       overlayedResults,
       anchorProfile,
     );
+    const runtimeSignal = this.ranker.getLastRuntimeSignal();
+    const runtimeDegradation = runtimeSignal?.degradation;
+    const combinedDegradationReasons = fallbackReason === undefined
+      ? runtimeDegradation?.degradationReasons
+      : [
+          ...new Set([
+            ...(runtimeDegradation?.degradationReasons ?? []),
+            fallbackReason,
+          ]),
+        ];
+    const routeDegradation = combinedDegradationReasons === undefined
+      ? undefined
+      : {
+          executionMode: runtimeDegradation?.executionMode ?? 'degraded' as const,
+          degradationReasons: combinedDegradationReasons,
+        };
 
     return {
       anchor: anchorProfile,
       rankedResults: overlayedResults,
       constraintOverlay: queryPlan.constraints,
       anchorPreservationRate: preservationRate,
+      ...(routeDegradation !== undefined ? { routeDegradation } : {}),
+      ...(fallbackReason !== undefined
+        ? { fallbackReason }
+        : {}),
+      ...(this.ranker.getLastFunnelMetrics?.() !== undefined
+        ? { funnelMetrics: this.ranker.getLastFunnelMetrics?.() }
+        : {}),
     };
   }
 

@@ -1,5 +1,17 @@
 import type { QueryPlanV1, QueryPlanV2 } from './query-plan.js';
 
+/**
+ * Type guard that distinguishes a QueryPlanV2 from a QueryPlanV1.
+ *
+ * V2 carries `suggestedRoute` + `suggestedRetrievalMode` (planner hints, NOT
+ * bound execution decisions) and does NOT carry V1's `route` / `retrievalMode`.
+ * Checking both conditions prevents misclassification if a V1 plan is ever
+ * accidentally spread with extra keys (e.g. `{ ...v1Plan, suggestedRoute: ... }`).
+ */
+export function isQueryPlanV2(plan: QueryPlanV1 | QueryPlanV2): plan is QueryPlanV2 {
+  return 'suggestedRoute' in plan && !('route' in plan);
+}
+
 export const QUERY_FAMILY_LABELS = [
   'entity_exact',
   'entity_fuzzy',
@@ -41,17 +53,18 @@ export interface QueryObservabilitySlice {
 }
 
 function getSuggestedRoute(plan: PlanLike): string {
-  return 'suggestedRoute' in plan ? plan.suggestedRoute : plan.route;
+  return isQueryPlanV2(plan) ? plan.suggestedRoute : plan.route;
 }
 
 function getSuggestedRetrievalMode(plan: PlanLike): string {
-  return 'suggestedRetrievalMode' in plan ? plan.suggestedRetrievalMode : plan.retrievalMode;
+  return isQueryPlanV2(plan) ? plan.suggestedRetrievalMode : plan.retrievalMode;
 }
 
 export function deriveQueryFamily(plan: PlanLike): QueryFamilyLabel {
   const mode = getSuggestedRetrievalMode(plan);
   const intent = plan.intent;
-  const decompositionHint = 'decompositionHint' in plan ? plan.decompositionHint : undefined;
+  // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
+  const decompositionHint = plan.decompositionHint;
 
   if (mode === 'no_match_detection') return 'no_match';
   if (mode === 'producer_browse') return 'producer_browse';
@@ -81,7 +94,16 @@ export function planToObservabilitySlice(
   queryId: string,
   plan: PlanLike,
 ): QueryObservabilitySlice {
-  const decompositionHint = 'decompositionHint' in plan ? plan.decompositionHint : undefined;
+  // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
+  const decompositionHint = plan.decompositionHint;
+
+  // Guard against NaN propagating to downstream confidence computation.
+  // plan.uncertainty.overall must be a valid finite number in [0, 1]; if it
+  // is somehow NaN (e.g. corrupted planner output), clamp to the max-uncertainty
+  // sentinel (1.0) so downstream metrics stay meaningful.
+  const overallUncertainty = Number.isFinite(plan.uncertainty.overall)
+    ? plan.uncertainty.overall
+    : 1;
 
   return {
     queryId,
@@ -94,7 +116,7 @@ export function planToObservabilitySlice(
     anchorCount: plan.anchors.length,
     hardConstraintCount: plan.constraints.hard.length,
     softConstraintCount: plan.constraints.soft.length,
-    overallUncertainty: plan.uncertainty.overall,
+    overallUncertainty,
     ambiguityDetected: plan.uncertainty.ambiguityDetected,
     plannerVersion: plan.plannerVersion,
     policyRuleVersion: plan.policyRuleVersion,

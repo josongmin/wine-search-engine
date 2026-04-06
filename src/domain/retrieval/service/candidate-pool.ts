@@ -2,9 +2,17 @@ import type { SearchIndexPort, DenseHit } from '../port/search-index.port.js';
 import type { EmbeddingServicePort } from '../port/embedding-service.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
-import type { CandidateEnvelope, CandidateChannel } from '../model/candidate-envelope.js';
+import type {
+  CandidateEnvelope,
+  CandidateChannel,
+  QueryViewMatch,
+} from '../model/candidate-envelope.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
+import {
+  preferCanonicalRetrievalChannelLabel,
+  preferCanonicalRetrievalChannelLabels,
+} from '../model/retrieval-channel.js';
 import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
@@ -17,6 +25,7 @@ import { accumulateEvidence } from './evidence-accumulator.js';
 import { applyRelativeFilter } from './relative-filter-policy.js';
 import type { CacheService } from '../../performance/index.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { pipelineDebug } from '../../../observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
 
 /**
@@ -44,6 +53,7 @@ export class CandidatePoolService {
     private readonly fusionService: FusionService,
     private readonly cacheService?: CacheService | undefined,
     private readonly embeddingModelId: string = 'bge-m3',
+    private readonly killSwitchLearning: boolean = false,
   ) {
     this.profileService = new RetrievalProfileService();
     this.cascadeRouter = new CascadeRouter();
@@ -91,12 +101,18 @@ export class CandidatePoolService {
     const anchorDocument = await this.loadAnchorDocumentIfNeeded(input, activeChannels);
     const anchorProfile = this.resolveAnchorProfile(input, anchorDocument);
 
+    // Select Vespa rank profile based on retrieval mode.
+    // Browse modes use prestige_hybrid to boost critic score + producer prestige
+    // at the Vespa native-ranking stage, reducing post-retrieval re-ranking load.
+    const vespaRankProfile = resolveVespaRankProfile(retrievalMode);
+
     // Step 1: Sparse search
     const sparseHits = activeChannels.has('sparse_bm25')
       ? await this.searchIndex.sparseSearch(
           input.lexicalQueries,
           filters.length > 0 ? filters : undefined,
           profile.sparseTopN,
+          vespaRankProfile,
         )
       : [];
 
@@ -137,6 +153,7 @@ export class CandidatePoolService {
         primaryEmbedding,
         filters.length > 0 ? filters : undefined,
         profile.denseTopN,
+        vespaRankProfile,
       );
     }
 
@@ -150,6 +167,7 @@ export class CandidatePoolService {
         anchorEmbedding,
         filters.length > 0 ? filters : undefined,
         profile.denseTopN,
+        vespaRankProfile,
       );
     }
 
@@ -204,6 +222,22 @@ export class CandidatePoolService {
       buildAssemblyPolicy(profile.finalTopK),
     );
 
+    pipelineDebug(
+      {
+        step: 'retrieval.candidate_pool.assembled',
+        query_class: input.queryPlan.queryClass,
+        profile: profile.name,
+        vespa_rank_profile: vespaRankProfile,
+        sparse_hits: sparseHits.length,
+        learned_sparse_hits: learnedSparseHits.length,
+        dense_hits: denseHits.length,
+        anchor_hits: anchorHits?.length ?? 0,
+        skipped_phases: skippedPhases,
+        final_candidates: assembled.candidates.length,
+      },
+      'pipeline candidate pool',
+    );
+
     return assembled.candidates.map((candidate) => ({
       ...candidate.legacyCandidate,
       retrievalProvenance: candidate.provenance,
@@ -249,7 +283,7 @@ export class CandidatePoolService {
         continue;
       }
 
-      if (channel === 'learned_sparse' && dispatchChannels.has('sparse_bm25')) {
+      if (channel === 'learned_sparse' && dispatchChannels.has('sparse_bm25') && !this.killSwitchLearning) {
         active.add(channel);
         continue;
       }
@@ -326,6 +360,28 @@ export class CandidatePoolService {
   }
 }
 
+/**
+ * Maps a retrieval mode to the Vespa rank profile that best serves it.
+ *
+ * - producer_browse / region_browse → `prestige_hybrid`: blends BM25+ANN with
+ *   critic score (35%) and producer prestige (25%), surfacing quality-first results
+ *   without a second post-retrieval rerank pass.
+ * - compare_candidates / relative → `prestige_hybrid`: head-to-head comparisons
+ *   benefit from the same quality-first signal set.
+ * - everything else → `hybrid`: standard 50/50 BM25+ANN.
+ */
+function resolveVespaRankProfile(retrievalMode: string | undefined): string {
+  switch (retrievalMode) {
+    case 'producer_browse':
+    case 'region_browse':
+    case 'compare_candidates':
+    case 'relative':
+      return 'prestige_hybrid';
+    default:
+      return 'hybrid';
+  }
+}
+
 function buildAssemblyPolicy(maxTotal: number): AssemblyPolicy {
   return {
     maxTotal,
@@ -344,7 +400,86 @@ function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {
   if (candidate.denseRank !== undefined) channels.push('dense_semantic');
   if (candidate.learnedSparseRank !== undefined) channels.push('learned_sparse');
   if (candidate.anchorRank !== undefined) channels.push('anchor_similarity');
+
+  for (const source of candidate.retrievalTrace.candidateSources) {
+    const canonicalSource = toCanonicalCandidateChannel(source);
+    if (canonicalSource !== null && !channels.includes(canonicalSource)) {
+      channels.push(canonicalSource);
+    }
+  }
+
   return channels;
+}
+
+function toCanonicalCandidateChannel(value: string): CandidateChannel | null {
+  const canonical = preferCanonicalRetrievalChannelLabel(value);
+  return isCandidateChannel(canonical) ? canonical : null;
+}
+
+function normalizeCandidateChannelScores(
+  channelScores: CandidateEnvelope['provenance']['channelScores'],
+): CandidateEnvelope['provenance']['channelScores'] {
+  return channelScores.flatMap((score) => {
+    const canonical = toCanonicalCandidateChannel(score.channel);
+    return canonical === null ? [] : [{ ...score, channel: canonical }];
+  });
+}
+
+function normalizeCandidateQueryViewMatches(
+  queryViewMatches: readonly QueryViewMatch[],
+): CandidateEnvelope['provenance']['queryViewMatches'] {
+  const seen = new Set<string>();
+  const normalized: QueryViewMatch[] = [];
+
+  for (const match of queryViewMatches) {
+    const canonical = toCanonicalCandidateChannel(match.channel);
+    if (canonical === null) {
+      continue;
+    }
+    const next = { ...match, channel: canonical } satisfies QueryViewMatch;
+    const key = `${next.viewName}\u0000${next.matchedText}\u0000${next.channel}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      normalized.push(next);
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeCandidateProvenance(
+  provenance: CandidateEnvelope['provenance'],
+): CandidateEnvelope['provenance'] {
+  const channels: CandidateChannel[] = [];
+  for (const channel of provenance.channels) {
+    const canonical = toCanonicalCandidateChannel(channel);
+    if (canonical !== null && !channels.includes(canonical)) {
+      channels.push(canonical);
+    }
+  }
+
+  return {
+    ...provenance,
+    channels,
+    channelScores: normalizeCandidateChannelScores(provenance.channelScores),
+    queryViewMatches: normalizeCandidateQueryViewMatches(provenance.queryViewMatches),
+  };
+}
+
+function isCandidateChannel(value: string): value is CandidateChannel {
+  switch (value) {
+    case 'sparse_bm25':
+    case 'dense_semantic':
+    case 'learned_sparse':
+    case 'anchor_similarity':
+    case 'relative_filter':
+    case 'browse_producer':
+    case 'browse_region':
+    case 'compare_anchor':
+      return true;
+    default:
+      return false;
+  }
 }
 
 function hybridCandidateToEnvelope(
@@ -352,10 +487,19 @@ function hybridCandidateToEnvelope(
   fusionK: number,
 ): CandidateEnvelope {
   if (candidate.retrievalProvenance !== undefined) {
+    const provenance = normalizeCandidateProvenance(candidate.retrievalProvenance);
     return {
       entityId: candidate.entityId,
-      provenance: candidate.retrievalProvenance,
-      legacyCandidate: candidate,
+      provenance,
+      legacyCandidate: {
+        ...candidate,
+        retrievalTrace: {
+          ...candidate.retrievalTrace,
+          candidateSources: preferCanonicalRetrievalChannelLabels(
+            candidate.retrievalTrace.candidateSources,
+          ),
+        },
+      },
     };
   }
 
@@ -407,13 +551,20 @@ function hybridCandidateToEnvelope(
     fusionProfile: candidate.retrievalTrace.retrievalProfile,
     fusionScore: candidate.retrievalFusionScore,
   } satisfies CandidateEnvelope['provenance'];
+  const normalizedProvenance = normalizeCandidateProvenance(provenance);
 
   return {
     entityId: candidate.entityId,
-    provenance,
+    provenance: normalizedProvenance,
     legacyCandidate: {
       ...candidate,
-      retrievalProvenance: provenance,
+      retrievalTrace: {
+        ...candidate.retrievalTrace,
+        candidateSources: preferCanonicalRetrievalChannelLabels(
+          candidate.retrievalTrace.candidateSources,
+        ),
+      },
+      retrievalProvenance: normalizedProvenance,
     },
   };
 }

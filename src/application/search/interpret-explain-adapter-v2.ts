@@ -9,7 +9,9 @@
 
 import type { QueryObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import type { QueryDecompositionHint, DecompositionStrategy } from '../../domain/query/model/query-decomposition.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import type { InterpretResponseV2 } from '../../domain/response/model/result-item-v2.js';
+import { preferCanonicalRetrievalChannelLabels } from '../../domain/retrieval/model/retrieval-channel.js';
 
 export interface ExplainAdapterV2Input {
   readonly queryId: string;
@@ -17,35 +19,81 @@ export interface ExplainAdapterV2Input {
   readonly observabilitySlice: QueryObservabilitySlice;
   readonly decompositionHint?: QueryDecompositionHint | undefined;
   readonly activeChannels: readonly string[];
+  /**
+   * Actual hard constraint descriptors from the query plan.
+   * When provided, constraint attribute names are used in appliedConstraints
+   * instead of count-based generic labels.
+   */
+  readonly hardConstraints?: readonly NormalizedConstraint[] | undefined;
+  /**
+   * Actual soft constraint descriptors from the query plan.
+   * When provided, constraint attribute names are used in appliedConstraints
+   * instead of count-based generic labels.
+   */
+  readonly softConstraints?: readonly NormalizedConstraint[] | undefined;
 }
 
 /**
  * Channel name suffixes/substrings that indicate an anchor-conditioned retrieval
  * channel is active. Used to gate inclusion of "anchor_similarity" ranking signal.
  */
-const ANCHOR_CHANNEL_MARKERS = ['anchor', 'anchor_similarity', 'dense_anchor', 'compare_anchor'];
+const ANCHOR_CHANNELS = new Set(['anchor_similarity', 'compare_anchor']);
 
 function isAnchorChannel(channel: string): boolean {
-  return ANCHOR_CHANNEL_MARKERS.some((marker) => channel.includes(marker));
+  return ANCHOR_CHANNELS.has(channel);
 }
 
 /**
- * Derive applied constraint labels from the observability slice.
+ * Derive applied constraint labels from actual constraint arrays when
+ * available, falling back to count-based labels from the observability slice.
  *
- * The slice carries raw constraint counts but not the individual constraint
- * labels (those live inside the full query plan). We surface generic labels
- * only when counts > 0 so consumers know constraints were active.
+ * When `hardConstraints` / `softConstraints` are supplied (from the full
+ * query plan), each constraint is represented as
+ * `"hard:<attribute>"` / `"soft:<attribute>"` so machine consumers can
+ * identify which attributes were constrained. Duplicates within each group
+ * are deduplicated (e.g. two `region` hard constraints → one label).
+ *
+ * Falls back to count-based generic labels when the arrays are absent,
+ * e.g. when called from a context that only has the observability slice.
  */
-function deriveAppliedConstraints(slice: QueryObservabilitySlice): string[] {
-  const labels: string[] = [];
+function deriveAppliedConstraints(
+  slice: QueryObservabilitySlice,
+  hardConstraints?: readonly NormalizedConstraint[],
+  softConstraints?: readonly NormalizedConstraint[],
+): string[] {
+  // Prefer actual attribute names when arrays are provided.
+  if (hardConstraints !== undefined || softConstraints !== undefined) {
+    const labels: string[] = [];
 
+    const hardSeen = new Set<string>();
+    for (const c of hardConstraints ?? []) {
+      const label = `hard:${c.attribute}`;
+      if (!hardSeen.has(label)) {
+        hardSeen.add(label);
+        labels.push(label);
+      }
+    }
+
+    const softSeen = new Set<string>();
+    for (const c of softConstraints ?? []) {
+      const label = `soft:${c.attribute}`;
+      if (!softSeen.has(label)) {
+        softSeen.add(label);
+        labels.push(label);
+      }
+    }
+
+    return labels;
+  }
+
+  // Fallback: count-based generic labels from the observability slice.
+  const labels: string[] = [];
   if (slice.hardConstraintCount > 0) {
     labels.push(`hard_constraints: ${slice.hardConstraintCount}`);
   }
   if (slice.softConstraintCount > 0) {
     labels.push(`soft_constraints: ${slice.softConstraintCount}`);
   }
-
   return labels;
 }
 
@@ -70,15 +118,25 @@ function deriveConfidence(slice: QueryObservabilitySlice): number {
  * explain-family shape.
  */
 export function buildInterpretResponseV2(input: ExplainAdapterV2Input): InterpretResponseV2 {
-  const { queryId, queryText, observabilitySlice, decompositionHint, activeChannels } = input;
+  const {
+    queryId,
+    queryText,
+    observabilitySlice,
+    decompositionHint,
+    activeChannels,
+    hardConstraints,
+    softConstraints,
+  } = input;
 
   // Decomposition strategy — omit when absent or 'none'
   const strategyValue: DecompositionStrategy | undefined = decompositionHint?.strategy;
   const includeStrategy =
     strategyValue !== undefined && strategyValue !== 'none';
 
+  const canonicalActiveChannels = preferCanonicalRetrievalChannelLabels(activeChannels);
+
   // Ranking signals — fixed baseline, extended with anchor signal when active
-  const hasAnchorChannel = activeChannels.some(isAnchorChannel);
+  const hasAnchorChannel = canonicalActiveChannels.some(isAnchorChannel);
   const rankingSignals: string[] = [
     'semantic_similarity',
     'attribute_alignment',
@@ -91,8 +149,8 @@ export function buildInterpretResponseV2(input: ExplainAdapterV2Input): Interpre
     queryText,
     detectedIntent: observabilitySlice.queryFamily,
     ...(includeStrategy ? { decompositionStrategy: strategyValue } : {}),
-    activeChannels: [...activeChannels],
-    appliedConstraints: deriveAppliedConstraints(observabilitySlice),
+    activeChannels: canonicalActiveChannels,
+    appliedConstraints: deriveAppliedConstraints(observabilitySlice, hardConstraints, softConstraints),
     rankingSignals,
     confidence: deriveConfidence(observabilitySlice),
     version: '2',

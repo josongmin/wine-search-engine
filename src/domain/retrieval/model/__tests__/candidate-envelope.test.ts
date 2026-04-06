@@ -86,14 +86,14 @@ describe('CandidateProvenance', () => {
       rrfContribution: 0.016393,
     };
     const anchorEvidence: ChannelScoreEvidence = {
-      channel: 'dense_anchor',
+      channel: 'anchor_similarity',
       rawScore: 0.88,
       rank: 2,
       rrfContribution: 0.016129,
     };
 
     const provenance: CandidateProvenance = {
-      channels: ['sparse_bm25', 'dense_semantic', 'dense_anchor'],
+      channels: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
       channelScores: [sparseEvidence, denseEvidence, anchorEvidence],
       queryViewMatches: [
         { viewName: 'strict', matchedText: 'Penfolds Grange', channel: 'sparse_bm25' },
@@ -108,7 +108,7 @@ describe('CandidateProvenance', () => {
     expect(provenance.channels).toHaveLength(3);
     expect(provenance.channels).toContain('sparse_bm25');
     expect(provenance.channels).toContain('dense_semantic');
-    expect(provenance.channels).toContain('dense_anchor');
+    expect(provenance.channels).toContain('anchor_similarity');
     expect(provenance.anchorConditioned).toBe(true);
     expect(provenance.matchedFilterConstraints).toContain('region:barossa_valley');
     expect(provenance.queryViewMatches).toHaveLength(2);
@@ -189,13 +189,13 @@ describe('CandidateProvenance', () => {
     const channelScores: ChannelScoreEvidence[] = [
       { channel: 'sparse_bm25', rawScore: 9.1, rank: 2, rrfContribution: 0.015873 },
       { channel: 'dense_semantic', rawScore: 0.91, rank: 1, rrfContribution: 0.016393 },
-      { channel: 'dense_anchor', rawScore: 0.85, rank: 4, rrfContribution: 0.015625 },
+      { channel: 'anchor_similarity', rawScore: 0.85, rank: 4, rrfContribution: 0.015625 },
     ];
 
     const computedFusionScore = channelScores.reduce((sum, ev) => sum + ev.rrfContribution, 0);
 
     const provenance: CandidateProvenance = {
-      channels: ['sparse_bm25', 'dense_semantic', 'dense_anchor'],
+      channels: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
       channelScores,
       queryViewMatches: [],
       anchorConditioned: false,

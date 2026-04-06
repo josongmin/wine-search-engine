@@ -1,4 +1,7 @@
 import type { Config } from './env.js';
+import type { CacheReadRuntimeState } from '../domain/cache/cache-policy.js';
+import type { RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
+import type { RankerRuntimeSignal } from '../domain/ranking/model/ranking-runtime-signal.js';
 
 export type KillSwitchEffect =
   | 'boot_fail'
@@ -60,4 +63,39 @@ export function logKillSwitchPolicyAtStartup(config: Config, log: { info: (o: ob
       active,
     });
   }
+}
+
+function rerankerRuntimeUnavailable(signal?: RankerRuntimeSignal | undefined): boolean {
+  const reasons = signal?.degradation?.degradationReasons ?? [];
+  return reasons.some((reason) =>
+    reason === 'reranker_timeout' || reason === 'reranker_unavailable');
+}
+
+export function buildCacheReadRuntimeState(
+  config: Config,
+  signal?: RankerRuntimeSignal | undefined,
+): CacheReadRuntimeState {
+  const learningKillSwitchEnabled = config.killSwitch.learning;
+  const denseRetrievalEnabled = !config.killSwitch.denseRetrieval;
+  const rerankerConfigured = config.reranker.url.trim().length > 0;
+  const rerankerAvailable = rerankerConfigured && !rerankerRuntimeUnavailable(signal);
+  const runtimeDegraded =
+    learningKillSwitchEnabled
+    || !denseRetrievalEnabled
+    || !rerankerAvailable
+    || signal?.degradation !== undefined;
+
+  return {
+    learningKillSwitchEnabled,
+    denseRetrievalEnabled,
+    rerankerAvailable,
+    currentExecutionModeHint: runtimeDegraded ? 'degraded' : 'authoritative',
+  };
+}
+
+export function buildCacheReadRuntimeStateProvider(
+  config: Config,
+  ranker?: Pick<RankingPort, 'getLastRuntimeSignal'> | undefined,
+): () => CacheReadRuntimeState {
+  return () => buildCacheReadRuntimeState(config, ranker?.getLastRuntimeSignal?.());
 }

@@ -24,6 +24,7 @@ import {
   ndcg,
   reciprocalRank,
   recall,
+  classifyDecision,
   queryUtility,
   wrongTop1Rate,
   safeAbstainRate,
@@ -47,7 +48,18 @@ import {
   type ModeMetrics,
   type EntityTargetType,
   type EntityTypeMetrics,
+  type SpecializedFallbackMetrics,
+  type EvalExecutionModeBucket,
+  type EvalBlockingEligibleBucket,
+  type EvalCountShareBucket,
+  type EvalReleaseReport,
 } from './metrics.js';
+import { multipleComparison, type MultiComparisonResult } from './significance.js';
+import {
+  buildEvalMetricPolicySummary,
+  createEvalMetricViolation,
+  splitEvalMetricViolations,
+} from './eval-metric-policy.js';
 import {
   inferEntityTargetType as inferEntityTargetTypeFromQuery,
   inferResolvedEntityType,
@@ -136,6 +148,16 @@ const ALL_RETRIEVAL_MODES: RetrievalMode[] = [
   'no_match_detection',
 ];
 
+const SPECIALIZED_FALLBACK_REASONS = new Set([
+  'producer_browse_unavailable',
+  'producer_browse_fallback',
+  'region_browse_unavailable',
+  'region_browse_fallback',
+  'compare_retriever_unavailable',
+  'compare_anchor_resolution_failed',
+  'compare_candidates_fallback',
+]);
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -144,6 +166,7 @@ interface Args {
   input: string;
   output: string;
   tier: 'bronze' | 'silver' | 'gate';
+  baselineReport?: string;
   /** When true, run `verify-splits` logic before any search (fail-fast on leakage). */
   verifySplits: boolean;
 }
@@ -153,12 +176,14 @@ function parseArgs(argv: string[]): Args {
     input: DEFAULT_INPUT,
     output: DEFAULT_OUTPUT,
     tier: 'bronze',
+    baselineReport: undefined,
     verifySplits: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
     else if (a === '--output' || a === '-o') out.output = argv[++i] ?? DEFAULT_OUTPUT;
+    else if (a === '--baseline-report') out.baselineReport = argv[++i];
     else if (a === '--tier') {
       const t = argv[++i];
       if (t === 'bronze' || t === 'silver' || t === 'gate') out.tier = t;
@@ -220,6 +245,22 @@ async function mapPool<T, R>(
 interface SearchResult {
   readonly ranked: RankedHit[];
   readonly decision: DecisionOutcome;
+}
+
+export interface OfflineEvalCaseResult {
+  readonly query: GoldenQuery;
+  readonly ranked: RankedHit[];
+  readonly decision: DecisionOutcome;
+  readonly truth: GroundTruth;
+}
+
+export interface OfflinePerQueryMetrics {
+  readonly ndcg_at_10: readonly number[];
+  readonly mrr_at_10: readonly number[];
+  readonly recall_at_3: readonly number[];
+  readonly recall_at_100: readonly number[];
+  readonly decision_utility: readonly number[];
+  readonly non_wrong_top1_rate: readonly number[];
 }
 
 interface EvalSearchRequestBody {
@@ -284,6 +325,7 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
 
     // Accept both engine_decision (snake) and engineDecision (camel)
     const engineDecision = (raw['engine_decision'] ?? raw['engineDecision'] ?? {}) as Record<string, unknown>;
+    const meta = (raw['meta'] ?? {}) as Record<string, unknown>;
     const rawResults = (raw['results'] ?? []) as Record<string, unknown>[];
 
     const ranked: RankedHit[] = rawResults.map((r) => {
@@ -315,11 +357,69 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
 
     const decisionStatus = (engineDecision['decision_status'] ?? engineDecision['decisionStatus'] ?? 'failed') as string;
     const decisionConfidence = (engineDecision['decision_confidence'] ?? engineDecision['decisionConfidence'] ?? 0) as number;
+    const executionMode = engineDecision['execution_mode'] ?? engineDecision['executionMode'];
+    const blockingEligible = engineDecision['blocking_eligible'] ?? engineDecision['blockingEligible'];
+    const degradationReasons = engineDecision['degradation_reasons'] ?? engineDecision['degradationReasons'];
+    const specializedRouteRequested =
+      meta['specialized_route_requested'] ?? meta['specializedRouteRequested'];
+    const specializedRouteExecuted =
+      meta['specialized_route_executed'] ?? meta['specializedRouteExecuted'];
+    const fallbackApplied = meta['fallback_applied'] ?? meta['fallbackApplied'];
+    const fallbackReason = meta['fallback_reason'] ?? meta['fallbackReason'];
 
     const decision: DecisionOutcome = {
       decision_status: decisionStatus as 'resolved' | 'ambiguous' | 'failed',
       top_entity_id: ranked[0]?.entity_id ?? null,
       decision_confidence: decisionConfidence,
+      ...(typeof executionMode === 'string'
+        ? {
+            execution_mode: executionMode as
+              | 'authoritative'
+              | 'degraded'
+              | 'heuristic'
+              | 'advisory',
+          }
+        : {}),
+      ...(typeof blockingEligible === 'boolean' ? { blocking_eligible: blockingEligible } : {}),
+      ...(Array.isArray(degradationReasons)
+        ? {
+            degradation_reasons: degradationReasons.filter(
+              (value): value is string => typeof value === 'string',
+            ),
+          }
+        : {}),
+      ...(typeof specializedRouteRequested === 'string' || specializedRouteRequested === null
+        ? {
+            specialized_route_requested: specializedRouteRequested as
+              | 'producer_browse'
+              | 'region_browse'
+              | 'compare_candidates'
+              | null,
+          }
+        : {}),
+      ...(typeof specializedRouteExecuted === 'string' || specializedRouteExecuted === null
+        ? {
+            specialized_route_executed: specializedRouteExecuted as
+              | 'producer_browse'
+              | 'region_browse'
+              | 'compare_candidates'
+              | null,
+          }
+        : {}),
+      ...(typeof fallbackApplied === 'boolean' ? { fallback_applied: fallbackApplied } : {}),
+      ...(typeof fallbackReason === 'string' || fallbackReason === null
+        ? {
+            fallback_reason: fallbackReason as
+              | 'producer_browse_unavailable'
+              | 'producer_browse_fallback'
+              | 'region_browse_unavailable'
+              | 'region_browse_fallback'
+              | 'compare_retriever_unavailable'
+              | 'compare_anchor_resolution_failed'
+              | 'compare_candidates_fallback'
+              | null,
+          }
+        : {}),
     };
 
     return { ranked, decision };
@@ -351,6 +451,452 @@ function queryToGroundTruth(q: GoldenQuery): GroundTruth {
     ambiguity_expected: q.decision_labels.ambiguity_expected,
     requires_abstain: q.decision_labels.requires_abstain,
     relevant: { judgments },
+  };
+}
+
+export function buildOfflinePerQueryMetrics(
+  results: readonly OfflineEvalCaseResult[],
+): OfflinePerQueryMetrics {
+  return {
+    ndcg_at_10: results.map((r) => ndcg(r.ranked, r.truth.relevant, 10)),
+    mrr_at_10: results.map((r) => reciprocalRank(r.ranked, r.truth.relevant, 10)),
+    recall_at_3: results.map((r) => recall(r.ranked, r.truth.relevant, 3)),
+    recall_at_100: results.map((r) => recall(r.ranked, r.truth.relevant, 100)),
+    decision_utility: results.map((r) => queryUtility(r.decision, r.truth)),
+    non_wrong_top1_rate: results.map((r) =>
+      classifyDecision(r.decision, r.truth) === 'wrong_resolve' ? 0 : 1),
+  };
+}
+
+interface StoredOfflinePerQueryMetrics {
+  readonly ndcg_at_10?: readonly number[];
+  readonly mrr_at_10?: readonly number[];
+  readonly recall_at_3?: readonly number[];
+  readonly recall_at_100?: readonly number[];
+  readonly decision_utility?: readonly number[];
+  readonly non_wrong_top1_rate?: readonly number[];
+}
+
+interface StoredOfflineEvalReport {
+  readonly query_count?: number;
+  readonly ndcg_at_10?: number;
+  readonly mrr_at_10?: number;
+  readonly recall_at_3?: number;
+  readonly recall_at_100?: number;
+  readonly decision_utility?: number;
+  readonly wrong_top1_rate?: number;
+  readonly by_execution_mode?: Partial<Record<EvalExecutionModeBucket, { readonly query_count?: number }>>;
+  readonly by_blocking_eligible?: Partial<Record<EvalBlockingEligibleBucket, { readonly query_count?: number }>>;
+  readonly degradation_reason_histogram?: Record<string, number>;
+  readonly diagnostics?: {
+    readonly per_query_metrics?: StoredOfflinePerQueryMetrics;
+  };
+}
+
+export interface OfflineBaselineComparison {
+  readonly baseline_path: string;
+  readonly deltas: {
+    readonly ndcg_at_10: number;
+    readonly mrr_at_10: number;
+    readonly recall_at_3: number;
+    readonly recall_at_100: number;
+    readonly decision_utility: number;
+    readonly wrong_top1_rate: number;
+    readonly execution_mode_mix?: Partial<Record<EvalExecutionModeBucket, number>>;
+    readonly blocking_eligible_share?: Partial<Record<EvalBlockingEligibleBucket, number>>;
+    readonly degradation_reason_distribution?: Record<string, {
+      readonly count_delta: number;
+      readonly percentage_point_delta: number;
+    }>;
+  };
+  readonly highlights?: readonly string[];
+  readonly significance?: {
+    readonly corrected_alpha: number;
+    readonly significant_metrics: readonly string[];
+    readonly metrics: Record<string, {
+      readonly p_value: number;
+      readonly ci_95: readonly [number, number];
+      readonly mean_diff: number;
+      readonly significant: boolean;
+    }>;
+  };
+  readonly significance_skipped_reason?: string;
+}
+
+function toExecutionModeBucket(decision: DecisionOutcome): EvalExecutionModeBucket {
+  switch (decision.execution_mode) {
+    case 'authoritative':
+    case 'degraded':
+    case 'heuristic':
+    case 'advisory':
+      return decision.execution_mode;
+    default:
+      return 'unknown';
+  }
+}
+
+function toBlockingEligibleBucket(decision: DecisionOutcome): EvalBlockingEligibleBucket {
+  if (decision.blocking_eligible === true) {
+    return 'blocking_eligible';
+  }
+  if (decision.blocking_eligible === false) {
+    return 'non_blocking_eligible';
+  }
+  return 'unknown';
+}
+
+export function computeExecutionModeSlices(
+  results: readonly OfflineEvalCaseResult[],
+): Record<EvalExecutionModeBucket, ScenarioSlice> {
+  const buckets = new Map<EvalExecutionModeBucket, OfflineEvalCaseResult[]>();
+  for (const result of results) {
+    const bucket = toExecutionModeBucket(result.decision);
+    const existing = buckets.get(bucket);
+    if (existing) {
+      existing.push(result);
+    } else {
+      buckets.set(bucket, [result]);
+    }
+  }
+
+  const orderedBuckets: readonly EvalExecutionModeBucket[] = [
+    'authoritative',
+    'degraded',
+    'heuristic',
+    'advisory',
+    'unknown',
+  ];
+  return Object.fromEntries(
+    orderedBuckets
+      .filter((bucket) => (buckets.get(bucket)?.length ?? 0) > 0)
+      .map((bucket) => [bucket, computeSlice(buckets.get(bucket) ?? [])]),
+  ) as Record<EvalExecutionModeBucket, ScenarioSlice>;
+}
+
+export function computeBlockingEligibleSlices(
+  results: readonly OfflineEvalCaseResult[],
+): Record<EvalBlockingEligibleBucket, ScenarioSlice> {
+  const buckets = new Map<EvalBlockingEligibleBucket, OfflineEvalCaseResult[]>();
+  for (const result of results) {
+    const bucket = toBlockingEligibleBucket(result.decision);
+    const existing = buckets.get(bucket);
+    if (existing) {
+      existing.push(result);
+    } else {
+      buckets.set(bucket, [result]);
+    }
+  }
+
+  const orderedBuckets: readonly EvalBlockingEligibleBucket[] = [
+    'blocking_eligible',
+    'non_blocking_eligible',
+    'unknown',
+  ];
+  return Object.fromEntries(
+    orderedBuckets
+      .filter((bucket) => (buckets.get(bucket)?.length ?? 0) > 0)
+      .map((bucket) => [bucket, computeSlice(buckets.get(bucket) ?? [])]),
+  ) as Record<EvalBlockingEligibleBucket, ScenarioSlice>;
+}
+
+export function computeDegradationReasonHistogram(
+  results: readonly OfflineEvalCaseResult[],
+): Record<string, number> {
+  const histogram = new Map<string, number>();
+  for (const result of results) {
+    for (const reason of result.decision.degradation_reasons ?? []) {
+      histogram.set(reason, (histogram.get(reason) ?? 0) + 1);
+    }
+  }
+  return Object.fromEntries(
+    [...histogram.entries()].sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+export function computeExecutionModeBlockingEligibleMatrix(
+  results: readonly OfflineEvalCaseResult[],
+): Record<EvalExecutionModeBucket, Partial<Record<EvalBlockingEligibleBucket, EvalCountShareBucket>>> {
+  const counts = new Map<EvalExecutionModeBucket, Map<EvalBlockingEligibleBucket, number>>();
+  for (const result of results) {
+    const modeBucket = toExecutionModeBucket(result.decision);
+    const blockingBucket = toBlockingEligibleBucket(result.decision);
+    const row = counts.get(modeBucket) ?? new Map<EvalBlockingEligibleBucket, number>();
+    row.set(blockingBucket, (row.get(blockingBucket) ?? 0) + 1);
+    counts.set(modeBucket, row);
+  }
+
+  const total = results.length === 0 ? 1 : results.length;
+  const orderedModes: readonly EvalExecutionModeBucket[] = [
+    'authoritative',
+    'degraded',
+    'heuristic',
+    'advisory',
+    'unknown',
+  ];
+  const orderedBlocking: readonly EvalBlockingEligibleBucket[] = [
+    'blocking_eligible',
+    'non_blocking_eligible',
+    'unknown',
+  ];
+
+  return Object.fromEntries(
+    orderedModes
+      .filter((modeBucket) => counts.has(modeBucket))
+      .map((modeBucket) => [
+        modeBucket,
+        Object.fromEntries(
+          orderedBlocking
+            .filter((blockingBucket) => (counts.get(modeBucket)?.get(blockingBucket) ?? 0) > 0)
+            .map((blockingBucket) => {
+              const query_count = counts.get(modeBucket)?.get(blockingBucket) ?? 0;
+              return [
+                blockingBucket,
+                {
+                  query_count,
+                  share: query_count / total,
+                } satisfies EvalCountShareBucket,
+              ];
+            }),
+        ),
+      ]),
+  ) as Record<EvalExecutionModeBucket, Partial<Record<EvalBlockingEligibleBucket, EvalCountShareBucket>>>;
+}
+
+function toSerializableMultiComparison(
+  result: MultiComparisonResult,
+): OfflineBaselineComparison['significance'] {
+  const metrics = Object.fromEntries(
+    [...result.raw_results.entries()].map(([name, metric]) => [
+      name,
+      {
+        p_value: metric.p_value,
+        ci_95: metric.ci_95,
+        mean_diff: metric.mean_diff,
+        significant: metric.significant,
+      },
+    ]),
+  );
+  return {
+    corrected_alpha: result.corrected_alpha,
+    significant_metrics: result.significant_metrics,
+    metrics,
+  };
+}
+
+export function buildOfflineBaselineComparison(
+  baselinePath: string,
+  current: Pick<
+    EvalResult,
+    | 'ndcg_at_10'
+    | 'mrr_at_10'
+    | 'recall_at_3'
+    | 'recall_at_100'
+    | 'decision_utility'
+    | 'wrong_top1_rate'
+    | 'by_execution_mode'
+    | 'by_blocking_eligible'
+    | 'degradation_reason_histogram'
+  >,
+  baseline: StoredOfflineEvalReport,
+  currentPerQuery: OfflinePerQueryMetrics,
+): OfflineBaselineComparison {
+  const baselineNdcg = baseline.ndcg_at_10 ?? 0;
+  const baselineMrr = baseline.mrr_at_10 ?? 0;
+  const baselineRecallAt3 = baseline.recall_at_3 ?? 0;
+  const baselineRecallAt100 = baseline.recall_at_100 ?? 0;
+  const baselineDecisionUtility = baseline.decision_utility ?? 0;
+  const baselineWrongTop1Rate = baseline.wrong_top1_rate ?? 0;
+  const currentQueryCount = Math.max(1, currentPerQuery.ndcg_at_10.length);
+  const baselineQueryCount = Math.max(1, baseline.query_count ?? currentQueryCount);
+  const baselineExecutionModeCounts = baseline.by_execution_mode;
+  const baselineBlockingEligibleCounts = baseline.by_blocking_eligible;
+  const baselineDegradationHistogram = baseline.degradation_reason_histogram ?? {};
+
+  function deltaFromCount(
+    currentCount: number | undefined,
+    baselineCount: number | undefined,
+  ): number {
+    const currentShare = (currentCount ?? 0) / currentQueryCount;
+    const baselineShare = (baselineCount ?? 0) / baselineQueryCount;
+    return currentShare - baselineShare;
+  }
+
+  const comparison: OfflineBaselineComparison = {
+    baseline_path: baselinePath,
+    deltas: {
+      ndcg_at_10: current.ndcg_at_10 - baselineNdcg,
+      mrr_at_10: current.mrr_at_10 - baselineMrr,
+      recall_at_3: current.recall_at_3 - baselineRecallAt3,
+      recall_at_100: current.recall_at_100 - baselineRecallAt100,
+      decision_utility: current.decision_utility - baselineDecisionUtility,
+      wrong_top1_rate: current.wrong_top1_rate - baselineWrongTop1Rate,
+      ...(current.by_execution_mode !== undefined || baselineExecutionModeCounts !== undefined
+        ? {
+            execution_mode_mix: {
+              authoritative: deltaFromCount(
+                current.by_execution_mode?.authoritative?.query_count,
+                baselineExecutionModeCounts?.authoritative?.query_count,
+              ),
+              degraded: deltaFromCount(
+                current.by_execution_mode?.degraded?.query_count,
+                baselineExecutionModeCounts?.degraded?.query_count,
+              ),
+              heuristic: deltaFromCount(
+                current.by_execution_mode?.heuristic?.query_count,
+                baselineExecutionModeCounts?.heuristic?.query_count,
+              ),
+              advisory: deltaFromCount(
+                current.by_execution_mode?.advisory?.query_count,
+                baselineExecutionModeCounts?.advisory?.query_count,
+              ),
+              unknown: deltaFromCount(
+                current.by_execution_mode?.unknown?.query_count,
+                baselineExecutionModeCounts?.unknown?.query_count,
+              ),
+            },
+          }
+        : {}),
+      ...(current.by_blocking_eligible !== undefined || baselineBlockingEligibleCounts !== undefined
+        ? {
+            blocking_eligible_share: {
+              blocking_eligible: deltaFromCount(
+                current.by_blocking_eligible?.blocking_eligible?.query_count,
+                baselineBlockingEligibleCounts?.blocking_eligible?.query_count,
+              ),
+              non_blocking_eligible: deltaFromCount(
+                current.by_blocking_eligible?.non_blocking_eligible?.query_count,
+                baselineBlockingEligibleCounts?.non_blocking_eligible?.query_count,
+              ),
+              unknown: deltaFromCount(
+                current.by_blocking_eligible?.unknown?.query_count,
+                baselineBlockingEligibleCounts?.unknown?.query_count,
+              ),
+            },
+          }
+        : {}),
+      ...(
+        current.degradation_reason_histogram !== undefined || Object.keys(baselineDegradationHistogram).length > 0
+          ? {
+              degradation_reason_distribution: Object.fromEntries(
+                [...new Set([
+                  ...Object.keys(current.degradation_reason_histogram ?? {}),
+                  ...Object.keys(baselineDegradationHistogram),
+                ])]
+                  .sort((left, right) => left.localeCompare(right))
+                  .map((reason) => {
+                    const currentCount = current.degradation_reason_histogram?.[reason] ?? 0;
+                    const baselineCount = baselineDegradationHistogram[reason] ?? 0;
+                    return [
+                      reason,
+                      {
+                        count_delta: currentCount - baselineCount,
+                        percentage_point_delta:
+                          currentCount / currentQueryCount - baselineCount / baselineQueryCount,
+                      },
+                    ];
+                  }),
+              ),
+            }
+          : {}
+      ),
+    },
+  };
+
+  const highlights: string[] = [];
+  const degradedDelta = comparison.deltas.execution_mode_mix?.degraded ?? 0;
+  if (Math.abs(comparison.deltas.ndcg_at_10) < 0.01 && degradedDelta > 0.05) {
+    highlights.push(
+      `accuracy stable but degraded share up (${(degradedDelta * 100).toFixed(1)}pp)`,
+    );
+  }
+
+  const baselinePerQuery = baseline.diagnostics?.per_query_metrics;
+  if (baselinePerQuery === undefined) {
+    return {
+      ...comparison,
+      significance_skipped_reason: 'baseline report is missing diagnostics.per_query_metrics',
+    };
+  }
+
+  const metrics = new Map<string, { baseline: readonly number[]; candidate: readonly number[] }>();
+  const pairs: readonly [keyof OfflinePerQueryMetrics, string][] = [
+    ['ndcg_at_10', 'ndcg_at_10'],
+    ['mrr_at_10', 'mrr_at_10'],
+    ['recall_at_3', 'recall_at_3'],
+    ['recall_at_100', 'recall_at_100'],
+    ['decision_utility', 'decision_utility'],
+    ['non_wrong_top1_rate', 'non_wrong_top1_rate'],
+  ];
+
+  for (const [key, name] of pairs) {
+    const baselineSeries = baselinePerQuery[key];
+    const candidateSeries = currentPerQuery[key];
+    if (baselineSeries === undefined) {
+      return {
+        ...comparison,
+        significance_skipped_reason: `baseline report is missing diagnostics.per_query_metrics.${key}`,
+      };
+    }
+    if (baselineSeries.length !== candidateSeries.length) {
+      return {
+        ...comparison,
+        significance_skipped_reason:
+          `per-query metric length mismatch for ${key}: baseline=${baselineSeries.length} current=${candidateSeries.length}`,
+      };
+    }
+    metrics.set(name, { baseline: baselineSeries, candidate: candidateSeries });
+  }
+
+  return {
+    ...comparison,
+    ...(highlights.length > 0 ? { highlights } : {}),
+    significance: toSerializableMultiComparison(multipleComparison(metrics)),
+  };
+}
+
+export function buildDegradationAwareReleaseReport(
+  result: Pick<
+    EvalResult,
+    | 'query_count'
+    | 'by_execution_mode'
+    | 'by_blocking_eligible'
+    | 'degradation_reason_histogram'
+    | 'specialized_fallback'
+  >,
+): EvalReleaseReport {
+  const total = Math.max(1, result.query_count);
+  const byExecutionMode = result.by_execution_mode ?? {};
+  const byBlockingEligible = result.by_blocking_eligible ?? {};
+  const histogram = result.degradation_reason_histogram ?? {};
+
+  function toCountShare(query_count: number | undefined): EvalCountShareBucket {
+    const count = query_count ?? 0;
+    return {
+      query_count: count,
+      share: count / total,
+    };
+  }
+
+  return {
+    degraded_query_share: toCountShare(byExecutionMode.degraded?.query_count),
+    heuristic_query_share: toCountShare(byExecutionMode.heuristic?.query_count),
+    blocking_vs_advisory_summary: {
+      blocking_eligible: toCountShare(byBlockingEligible.blocking_eligible?.query_count),
+      non_blocking_eligible: toCountShare(byBlockingEligible.non_blocking_eligible?.query_count),
+      unknown: toCountShare(byBlockingEligible.unknown?.query_count),
+      advisory_queries: toCountShare(byExecutionMode.advisory?.query_count),
+    },
+    top_degradation_reasons: Object.entries(histogram)
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .slice(0, 5)
+      .map(([reason, query_count]) => ({
+        reason,
+        query_count,
+        share: query_count / total,
+      })),
+    ...(result.specialized_fallback !== undefined
+      ? { specialized_fallback_summary: result.specialized_fallback }
+      : {}),
   };
 }
 
@@ -546,6 +1092,62 @@ function computeEntityTypeMetrics(
   };
 }
 
+export function computeSpecializedFallbackMetrics(
+  results: readonly OfflineEvalCaseResult[],
+): SpecializedFallbackMetrics {
+  const modes = ['producer_browse', 'region_browse', 'compare_candidates'] as const;
+  const requestedCounts = {
+    producer_browse: 0,
+    region_browse: 0,
+    compare_candidates: 0,
+  };
+  const fallbackCounts = {
+    producer_browse: 0,
+    region_browse: 0,
+    compare_candidates: 0,
+  };
+  const histogram = new Map<string, number>();
+
+  for (const result of results) {
+    const requestedMode = result.decision.specialized_route_requested;
+    if (
+      requestedMode !== 'producer_browse'
+      && requestedMode !== 'region_browse'
+      && requestedMode !== 'compare_candidates'
+    ) {
+      continue;
+    }
+    requestedCounts[requestedMode] += 1;
+    if (result.decision.fallback_applied === true) {
+      fallbackCounts[requestedMode] += 1;
+      if (
+        typeof result.decision.fallback_reason === 'string'
+        && SPECIALIZED_FALLBACK_REASONS.has(result.decision.fallback_reason)
+      ) {
+        histogram.set(
+          result.decision.fallback_reason,
+          (histogram.get(result.decision.fallback_reason) ?? 0) + 1,
+        );
+      }
+    }
+  }
+
+  const fallback_rate = Object.fromEntries(
+    modes.map((mode) => [
+      mode,
+      {
+        requested_count: requestedCounts[mode],
+        fallback_rate: requestedCounts[mode] === 0 ? null : fallbackCounts[mode] / requestedCounts[mode],
+      },
+    ]),
+  ) as SpecializedFallbackMetrics['fallback_rate'];
+
+  return {
+    fallback_rate,
+    ...(histogram.size > 0 ? { fallback_reason_histogram: Object.fromEntries(histogram) } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -590,6 +1192,40 @@ async function run(): Promise<void> {
   }
   const evalQueries = queries.length > 0 ? queries : allQueries;
 
+  // Validate queries before running to prevent silent metric corruption from
+  // empty query strings or duplicate qids.
+  const emptyQueryRows = evalQueries
+    .map((q, i) => ({ q, i }))
+    .filter(({ q }) => typeof q.query !== 'string' || q.query.trim() === '');
+  if (emptyQueryRows.length > 0) {
+    const indices = emptyQueryRows.map(({ i }) => i + 1).join(', ');
+    console.error(
+      `  ERROR: ${emptyQueryRows.length} eval case(s) have empty query strings (rows: ${indices}). ` +
+      'Fix the eval set before running — empty queries produce meaningless metrics.',
+    );
+    process.exit(1);
+  }
+
+  const seenQids = new Set<string>();
+  const duplicateQids: string[] = [];
+  for (const q of evalQueries) {
+    if (seenQids.has(q.qid)) {
+      if (!duplicateQids.includes(q.qid)) {
+        duplicateQids.push(q.qid);
+      }
+    } else {
+      seenQids.add(q.qid);
+    }
+  }
+  if (duplicateQids.length > 0) {
+    console.error(
+      `  ERROR: ${duplicateQids.length} duplicate qid(s) found: ${duplicateQids.slice(0, 5).join(', ')}` +
+      `${duplicateQids.length > 5 ? ` … (+${duplicateQids.length - 5} more)` : ''}. ` +
+      'Duplicate cases inflate per-query metric averages and skew release-gate decisions.',
+    );
+    process.exit(1);
+  }
+
   const timeoutMs = evalSearchTimeoutMs();
   const concurrency = evalSearchConcurrency();
   console.log(
@@ -619,19 +1255,12 @@ async function run(): Promise<void> {
   console.log('\nComputing metrics …');
   const decisions = allResults.map((r) => r.decision);
   const truths = allResults.map((r) => r.truth);
+  const perQueryMetrics = buildOfflinePerQueryMetrics(allResults);
 
-  const globalNdcg = allResults
-    .map((r) => ndcg(r.ranked, r.truth.relevant, 10))
-    .reduce((a, b) => a + b, 0) / allResults.length;
-  const globalMrr = allResults
-    .map((r) => reciprocalRank(r.ranked, r.truth.relevant, 10))
-    .reduce((a, b) => a + b, 0) / allResults.length;
-  const globalRecallAt3 = allResults
-    .map((r) => recall(r.ranked, r.truth.relevant, 3))
-    .reduce((a, b) => a + b, 0) / allResults.length;
-  const globalRecall = allResults
-    .map((r) => recall(r.ranked, r.truth.relevant, 100))
-    .reduce((a, b) => a + b, 0) / allResults.length;
+  const globalNdcg = perQueryMetrics.ndcg_at_10.reduce((a, b) => a + b, 0) / allResults.length;
+  const globalMrr = perQueryMetrics.mrr_at_10.reduce((a, b) => a + b, 0) / allResults.length;
+  const globalRecallAt3 = perQueryMetrics.recall_at_3.reduce((a, b) => a + b, 0) / allResults.length;
+  const globalRecall = perQueryMetrics.recall_at_100.reduce((a, b) => a + b, 0) / allResults.length;
 
   // Scenario slices
   const byScenario: Record<string, ScenarioSlice> = {};
@@ -705,6 +1334,10 @@ async function run(): Promise<void> {
     byTargetTypeEntries.push([targetType, computeEntityTypeMetrics(group, targetType)]);
   }
   const byTargetType = Object.fromEntries(byTargetTypeEntries) as Record<EntityTargetType, EntityTypeMetrics>;
+  const byExecutionMode = computeExecutionModeSlices(allResults);
+  const byBlockingEligible = computeBlockingEligibleSlices(allResults);
+  const degradationReasonHistogram = computeDegradationReasonHistogram(allResults);
+  const executionModeBlockingEligible = computeExecutionModeBlockingEligibleMatrix(allResults);
 
   const evalResult: EvalResult = {
     dataset_tier: args.tier,
@@ -722,14 +1355,36 @@ async function run(): Promise<void> {
     ece: ece(decisions, truths),
     by_scenario: byScenario,
     by_language: byLanguage,
+    by_execution_mode: byExecutionMode,
+    by_blocking_eligible: byBlockingEligible,
+    degradation_reason_histogram: degradationReasonHistogram,
+    execution_mode_x_blocking_eligible: executionModeBlockingEligible,
   };
 
   // Add optional Epic 11 fields if present
   if (Object.keys(byMode).length > 0) {
     evalResult.by_mode = byMode;
   }
+  evalResult.specialized_fallback = computeSpecializedFallbackMetrics(allResults);
   if (Object.keys(byTargetType).length > 0) {
     evalResult.by_target_type = byTargetType;
+  }
+  evalResult.release_report = buildDegradationAwareReleaseReport(evalResult);
+  evalResult.metric_policy = buildEvalMetricPolicySummary();
+  evalResult.non_blocking_metrics = evalResult.metric_policy.advisory_metrics;
+  evalResult.diagnostics = {
+    per_query_metrics: perQueryMetrics,
+  };
+
+  if (args.baselineReport) {
+    const baselineRaw = await fs.readFile(args.baselineReport, 'utf8');
+    const baseline = JSON.parse(baselineRaw) as StoredOfflineEvalReport;
+    evalResult.baseline_comparison = buildOfflineBaselineComparison(
+      args.baselineReport,
+      evalResult,
+      baseline,
+      perQueryMetrics,
+    );
   }
 
   // Print summary
@@ -743,6 +1398,42 @@ async function run(): Promise<void> {
   console.log(`  WrongTop1 rate:   ${evalResult.wrong_top1_rate.toFixed(4)}`);
   console.log(`  AURC:             ${evalResult.aurc.toFixed(4)}`);
   console.log(`  ECE:              ${evalResult.ece.toFixed(4)}`);
+  if (evalResult.baseline_comparison) {
+    console.log('\n  vs baseline:');
+    console.log(`    ndcg@10 Δ:       ${evalResult.baseline_comparison.deltas.ndcg_at_10.toFixed(4)}`);
+    console.log(`    mrr@10 Δ:        ${evalResult.baseline_comparison.deltas.mrr_at_10.toFixed(4)}`);
+    console.log(`    recall@3 Δ:      ${evalResult.baseline_comparison.deltas.recall_at_3.toFixed(4)}`);
+    console.log(`    decision util Δ: ${evalResult.baseline_comparison.deltas.decision_utility.toFixed(4)}`);
+    if (evalResult.baseline_comparison.significance) {
+      const metrics = evalResult.baseline_comparison.significance.significant_metrics;
+      console.log(`    significant:     ${metrics.length > 0 ? metrics.join(', ') : 'none'}`);
+    } else if (evalResult.baseline_comparison.significance_skipped_reason) {
+      console.log(`    significance:    skipped (${evalResult.baseline_comparison.significance_skipped_reason})`);
+    }
+    if ((evalResult.baseline_comparison.highlights?.length ?? 0) > 0) {
+      console.log(`    highlights:      ${evalResult.baseline_comparison.highlights?.join(' | ')}`);
+    }
+  }
+
+  if (evalResult.release_report) {
+    console.log('\n  Degradation-aware release report:');
+    console.log(
+      `    degraded share:  ${(evalResult.release_report.degraded_query_share.share * 100).toFixed(1)}% `
+      + `(${evalResult.release_report.degraded_query_share.query_count}/${evalResult.query_count})`,
+    );
+    console.log(
+      `    heuristic share: ${(evalResult.release_report.heuristic_query_share.share * 100).toFixed(1)}% `
+      + `(${evalResult.release_report.heuristic_query_share.query_count}/${evalResult.query_count})`,
+    );
+    console.log(
+      `    blocking share:  ${(evalResult.release_report.blocking_vs_advisory_summary.blocking_eligible.share * 100).toFixed(1)}% `
+      + `(${evalResult.release_report.blocking_vs_advisory_summary.blocking_eligible.query_count}/${evalResult.query_count})`,
+    );
+    console.log(
+      `    advisory share:  ${(evalResult.release_report.blocking_vs_advisory_summary.advisory_queries.share * 100).toFixed(1)}% `
+      + `(${evalResult.release_report.blocking_vs_advisory_summary.advisory_queries.query_count}/${evalResult.query_count})`,
+    );
+  }
 
   console.log('\n  By scenario:');
   for (const [s, m] of Object.entries(evalResult.by_scenario)) {
@@ -750,19 +1441,40 @@ async function run(): Promise<void> {
   }
 
   // Release gate check (only for gate tier)
-  const gateViolations: string[] = [];
+  const metricViolations = {
+    blocking: [] as string[],
+    advisory: [] as string[],
+  };
   if (args.tier === 'gate') {
     console.log('\n=== RELEASE GATE ===');
 
     // Global metric gates
     if (evalResult.wrong_top1_rate > RELEASE_GATES.wrong_top1_rate_max) {
-      gateViolations.push(`wrong_top1_rate ${evalResult.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.wrong_top1_rate_max}`);
+      metricViolations.blocking.push(
+        createEvalMetricViolation(
+          'global',
+          'wrong_top1_rate',
+          `wrong_top1_rate ${evalResult.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.wrong_top1_rate_max}`,
+        ).message,
+      );
     }
     if (evalResult.recall_at_100 < RELEASE_GATES.recall_at_100_min) {
-      gateViolations.push(`recall_at_100 ${evalResult.recall_at_100.toFixed(4)} < ${RELEASE_GATES.recall_at_100_min}`);
+      metricViolations.blocking.push(
+        createEvalMetricViolation(
+          'global',
+          'recall_at_100',
+          `recall_at_100 ${evalResult.recall_at_100.toFixed(4)} < ${RELEASE_GATES.recall_at_100_min}`,
+        ).message,
+      );
     }
     if (evalResult.ece > 0.10) {
-      gateViolations.push(`ece ${evalResult.ece.toFixed(4)} > 0.10 (calibration degraded)`);
+      metricViolations.blocking.push(
+        createEvalMetricViolation(
+          'global',
+          'ece',
+          `ece ${evalResult.ece.toFixed(4)} > 0.10 (calibration degraded)`,
+        ).message,
+      );
     }
 
     // Scenario-specific gates
@@ -770,7 +1482,13 @@ async function run(): Promise<void> {
     for (const s of entitySlices) {
       const slice = evalResult.by_scenario[s];
       if (slice && slice.wrong_top1_rate > RELEASE_GATES.entity_resolve_wrong_top1_max) {
-        gateViolations.push(`scenario ${s} wrong_top1_rate ${slice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.entity_resolve_wrong_top1_max}`);
+        metricViolations.blocking.push(
+          createEvalMetricViolation(
+            'scenario',
+            'wrong_top1_rate',
+            `scenario ${s} wrong_top1_rate ${slice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.entity_resolve_wrong_top1_max}`,
+          ).message,
+        );
       }
     }
 
@@ -778,14 +1496,28 @@ async function run(): Promise<void> {
     for (const s of setSlices) {
       const slice = evalResult.by_scenario[s];
       if (slice && slice.ndcg_at_10 < RELEASE_GATES.set_retrieval_recall_at_10_min) {
-        gateViolations.push(`scenario ${s} ndcg_at_10 ${slice.ndcg_at_10.toFixed(4)} < ${RELEASE_GATES.set_retrieval_recall_at_10_min}`);
+        metricViolations.blocking.push(
+          createEvalMetricViolation(
+            'scenario',
+            'ndcg_at_10',
+            `scenario ${s} ndcg_at_10 ${slice.ndcg_at_10.toFixed(4)} < ${RELEASE_GATES.set_retrieval_recall_at_10_min}`,
+          ).message,
+        );
       }
     }
 
     const noMatchSlice = evalResult.by_scenario['no_match'];
     if (noMatchSlice && noMatchSlice.wrong_top1_rate > RELEASE_GATES.no_match_false_resolve_max) {
-      gateViolations.push(`no_match false_resolve ${noMatchSlice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.no_match_false_resolve_max}`);
+      metricViolations.blocking.push(
+        createEvalMetricViolation(
+          'scenario',
+          'wrong_top1_rate',
+          `no_match false_resolve ${noMatchSlice.wrong_top1_rate.toFixed(4)} > ${RELEASE_GATES.no_match_false_resolve_max}`,
+        ).message,
+      );
     }
+
+    const modeViolations = [] as ReturnType<typeof createEvalMetricViolation>[];
 
     // Epic 11: Mode-specific release gates (advisory, non-blocking in phase 1)
     if (evalResult.by_mode) {
@@ -793,104 +1525,133 @@ async function run(): Promise<void> {
         const gates = (MODE_RELEASE_GATES as Record<string, Record<string, number>>)[mode];
         if (!gates) continue;
 
-        // Advisory gates: log but don't block
-        const modeViolations: string[] = [];
         if (gates.wrong_top1_rate_max !== undefined && metrics.wrong_top1_rate > gates.wrong_top1_rate_max) {
-          modeViolations.push(`${mode} wrong_top1_rate ${metrics.wrong_top1_rate.toFixed(4)} > ${gates.wrong_top1_rate_max}`);
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'wrong_top1_rate',
+            `${mode} wrong_top1_rate ${metrics.wrong_top1_rate.toFixed(4)} > ${gates.wrong_top1_rate_max}`,
+          ));
         }
         if (gates.ndcg_at_10_min !== undefined && metrics.ndcg_at_10 < gates.ndcg_at_10_min) {
-          modeViolations.push(`${mode} ndcg_at_10 ${metrics.ndcg_at_10.toFixed(4)} < ${gates.ndcg_at_10_min}`);
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'ndcg_at_10',
+            `${mode} ndcg_at_10 ${metrics.ndcg_at_10.toFixed(4)} < ${gates.ndcg_at_10_min}`,
+          ));
         }
         if (gates.recall_at_10_min !== undefined && metrics.recall_at_10 < gates.recall_at_10_min) {
-          modeViolations.push(`${mode} recall_at_10 ${metrics.recall_at_10.toFixed(4)} < ${gates.recall_at_10_min}`);
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'recall_at_10',
+            `${mode} recall_at_10 ${metrics.recall_at_10.toFixed(4)} < ${gates.recall_at_10_min}`,
+          ));
         }
         if (
           gates.set_coverage_min !== undefined &&
           metrics.set_coverage !== undefined &&
           metrics.set_coverage < gates.set_coverage_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'set_coverage',
             `${mode} set_coverage ${metrics.set_coverage.toFixed(4)} < ${gates.set_coverage_min}`,
-          );
+          ));
         }
         if (
           gates.diversity_min !== undefined &&
           metrics.diversity_score !== undefined &&
           metrics.diversity_score < gates.diversity_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'diversity_score',
             `${mode} diversity_score ${metrics.diversity_score.toFixed(4)} < ${gates.diversity_min}`,
-          );
+          ));
         }
         if (
           gates.producer_variety_min !== undefined &&
           metrics.producer_variety !== undefined &&
           metrics.producer_variety < gates.producer_variety_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'producer_variety',
             `${mode} producer_variety ${metrics.producer_variety.toFixed(4)} < ${gates.producer_variety_min}`,
-          );
+          ));
         }
         if (
           gates.browse_line_diversity_at_10_min !== undefined &&
           metrics.browse_line_diversity_at_10 !== undefined &&
           metrics.browse_line_diversity_at_10 < gates.browse_line_diversity_at_10_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'browse_line_diversity_at_10',
             `${mode} browse_line_diversity_at_10 ${metrics.browse_line_diversity_at_10.toFixed(4)} < ${gates.browse_line_diversity_at_10_min}`,
-          );
+          ));
         }
         if (
           gates.grape_variety_at_10_min !== undefined &&
           metrics.grape_variety_at_10 !== undefined &&
           metrics.grape_variety_at_10 < gates.grape_variety_at_10_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'grape_variety_at_10',
             `${mode} grape_variety_at_10 ${metrics.grape_variety_at_10.toFixed(4)} < ${gates.grape_variety_at_10_min}`,
-          );
+          ));
         }
         if (
           gates.prestige_mean_at_10_min !== undefined &&
           metrics.prestige_mean_at_10 !== undefined &&
           metrics.prestige_mean_at_10 < gates.prestige_mean_at_10_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'prestige_mean_at_10',
             `${mode} prestige_mean_at_10 ${metrics.prestige_mean_at_10.toFixed(4)} < ${gates.prestige_mean_at_10_min}`,
-          );
+          ));
         }
         if (
           gates.attribute_coverage_min !== undefined &&
           metrics.attribute_coverage !== undefined &&
           metrics.attribute_coverage < gates.attribute_coverage_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'attribute_coverage',
             `${mode} attribute_coverage ${metrics.attribute_coverage.toFixed(4)} < ${gates.attribute_coverage_min}`,
-          );
+          ));
         }
         if (
           gates.anchor_preservation_min !== undefined &&
           metrics.anchor_preservation_score !== undefined &&
           metrics.anchor_preservation_score < gates.anchor_preservation_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'anchor_preservation_score',
             `${mode} anchor_preservation_score ${metrics.anchor_preservation_score.toFixed(4)} < ${gates.anchor_preservation_min}`,
-          );
+          ));
         }
         if (
           gates.seed_exclusion_min !== undefined &&
           metrics.seed_exclusion_rate !== undefined &&
           metrics.seed_exclusion_rate < gates.seed_exclusion_min
         ) {
-          modeViolations.push(
+          modeViolations.push(createEvalMetricViolation(
+            'mode',
+            'seed_exclusion_rate',
             `${mode} seed_exclusion_rate ${metrics.seed_exclusion_rate.toFixed(4)} < ${gates.seed_exclusion_min}`,
-          );
+          ));
         }
-        if (modeViolations.length > 0) {
-          console.log(`  [ADVISORY] Mode ${mode}:`);
-          for (const v of modeViolations) {
-            console.log(`    - ${v}`);
-          }
-        }
+      }
+    }
+
+    const advisoryModeViolations = splitEvalMetricViolations(modeViolations).advisory;
+    if (advisoryModeViolations.length > 0) {
+      for (const violation of advisoryModeViolations) {
+        metricViolations.advisory.push(violation.message);
       }
     }
 
@@ -900,25 +1661,39 @@ async function run(): Promise<void> {
       for (const [targetType, metrics] of Object.entries(evalResult.by_target_type)) {
         const confusionRate = 1 - metrics.correct_type_rate;
         if (confusionRate > entityTypeGate) {
-          console.log(`  [ADVISORY] Entity type ${targetType} confusion_rate ${confusionRate.toFixed(4)} > ${entityTypeGate}`);
+          metricViolations.advisory.push(
+            createEvalMetricViolation(
+              'entity_type',
+              'confusion_rate',
+              `Entity type ${targetType} confusion_rate ${confusionRate.toFixed(4)} > ${entityTypeGate}`,
+            ).message,
+          );
         }
       }
     }
 
+    if (metricViolations.advisory.length > 0) {
+      console.log('  [ADVISORY] Non-blocking metrics:');
+      for (const violation of metricViolations.advisory) {
+        console.log(`    - ${violation}`);
+      }
+    }
+
     // Final verdict
-    if (gateViolations.length === 0) {
+    if (metricViolations.blocking.length === 0) {
       console.log('  ✅ RELEASE GATE PASSED');
     } else {
       console.log('  ❌ RELEASE GATE FAILED:');
-      for (const v of gateViolations) {
+      for (const v of metricViolations.blocking) {
         console.log(`    - ${v}`);
       }
     }
 
     // Add gate verdict to result
-    const verdict: { passed: boolean; failures: readonly string[] } = {
-      passed: gateViolations.length === 0,
-      failures: gateViolations,
+    const verdict: { passed: boolean; failures: readonly string[]; advisories: readonly string[] } = {
+      passed: metricViolations.blocking.length === 0,
+      failures: metricViolations.blocking,
+      advisories: metricViolations.advisory,
     };
     evalResult.release_gate_verdict = verdict;
   }

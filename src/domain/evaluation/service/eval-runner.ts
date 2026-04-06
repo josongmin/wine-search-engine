@@ -1,5 +1,7 @@
 import type { DecisionStatus, EntityId, EvidenceItem, DecisionSnapshot } from '../../shared/types/index.js';
 import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
+import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
+import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EvalCase } from '../model/eval-case.js';
 import type { EvalResult } from '../model/eval-result.js';
 import type { EvalMetrics, SliceMetrics } from '../model/eval-metrics.js';
@@ -26,6 +28,15 @@ export interface SearchPipelineOutput {
   /** Calibrated decision confidence. */
   readonly decisionConfidence: number;
 
+  /** Surfaced execution contract for honesty-aware evaluation. */
+  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+
+  /** Whether the surfaced execution path was blocking-eligible. */
+  readonly blockingEligible?: boolean;
+
+  /** Structured degradation reasons surfaced by the runtime contract. */
+  readonly degradationReasons?: readonly string[];
+
   /** Evidence trail for the decision. */
   readonly evidenceItems: readonly EvidenceItem[];
 
@@ -44,6 +55,15 @@ export interface SearchPipelineOutput {
 
   /** Score components from the top-ranked result, for LTR training. */
   readonly topResultScoreComponents?: LTRScoreComponents;
+
+  /** T5.6: Stage-aware funnel metrics emitted by the ranking pipeline when available. */
+  readonly funnelMetrics?: FunnelMetrics;
+
+  /**
+   * Retrieval provenance slices for this query, collected by the eval adapter.
+   * Used for channel-level offline analysis and quality regression.
+   */
+  readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[];
 }
 
 /**
@@ -247,6 +267,9 @@ export class EvalRunner {
         : {}),
       predictedStatus: output.predictedStatus,
       decisionConfidence: output.decisionConfidence,
+      ...(output.executionMode !== undefined ? { executionMode: output.executionMode } : {}),
+      ...(output.blockingEligible !== undefined ? { blockingEligible: output.blockingEligible } : {}),
+      ...(output.degradationReasons !== undefined ? { degradationReasons: output.degradationReasons } : {}),
       utilityScore: classification.utilityScore,
       isCorrectResolve: classification.isCorrectResolve,
       isWrongResolve: classification.isWrongResolve,
@@ -258,6 +281,12 @@ export class EvalRunner {
         : {}),
       ...(output.topResultScoreComponents !== undefined
         ? { topResultScoreComponents: output.topResultScoreComponents }
+        : {}),
+      ...(output.funnelMetrics !== undefined
+        ? { funnelMetrics: output.funnelMetrics }
+        : {}),
+      ...(output.retrievalProvenanceSlices !== undefined && output.retrievalProvenanceSlices.length > 0
+        ? { retrievalProvenanceSlices: output.retrievalProvenanceSlices }
         : {}),
       latencyMs: output.latencyMs,
       decisionSnapshot: output.decisionSnapshot,

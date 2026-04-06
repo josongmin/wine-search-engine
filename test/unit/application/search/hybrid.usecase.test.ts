@@ -157,7 +157,7 @@ describe('HybridUseCase', () => {
           lexicalQueriesUsed: ['ridge vineyards'],
           semanticQueriesUsed: ['ridge vineyards'],
           filtersApplied: [],
-          candidateSources: ['browse'],
+          candidateSources: ['sparse_bm25', 'browse_producer'],
         },
       }]),
       browseRegion: vi.fn(),
@@ -342,11 +342,11 @@ describe('HybridUseCase', () => {
         retrievalFusionScore: 0.84,
         matchedConstraints: [],
         retrievalTrace: {
-          retrievalProfile: 'compare_candidates',
+          retrievalProfile: 'compare_default',
           lexicalQueriesUsed: ['opus one'],
           semanticQueriesUsed: ['opus one'],
           filtersApplied: [],
-          candidateSources: ['compare'],
+          candidateSources: ['sparse_bm25', 'compare_anchor'],
         },
       }]),
     };
@@ -434,6 +434,108 @@ describe('HybridUseCase', () => {
       20,
     );
     expect(candidatePool.generate).not.toHaveBeenCalled();
+  });
+
+  it('preserves anchorEntityId when compare retrieval falls back to candidate pool generation', async () => {
+    const anchorEntityId = createEntityId('anchor');
+    const plan = createPlan({
+      retrievalMode: 'compare_candidates',
+      anchors: [{
+        surfaceForm: 'Opus One',
+        normalizedForm: 'opus one',
+        confidence: 0.98,
+        candidateEntityIds: [anchorEntityId],
+      }] as QueryPlanV1['anchors'],
+    });
+    const compareRetriever = {
+      compareAgainstAnchor: vi.fn().mockResolvedValue([]),
+    };
+    const entityLookup = {
+      getDocument: vi.fn().mockResolvedValue({
+        entityId: anchorEntityId,
+        entityType: 'wine',
+        canonicalLabel: 'Opus One 2021',
+        aliasesIdentitySafe: ['opus one'],
+        aliasesNoisyRecall: ['opus'],
+        producer: 'Opus One Winery',
+        region: 'Napa Valley',
+        grapes: ['Cabernet Sauvignon'],
+        searchTextKo: '오퍼스 원 나파 밸리',
+        searchTextEn: 'Opus One Napa Valley',
+        semanticSummary: 'A benchmark Napa Valley Cabernet blend.',
+        body: 5,
+        sweetness: 1,
+        style: 'bold red',
+        priceBand: 'luxury',
+        pairing: ['steak'],
+        occasion: ['cellaring'],
+        availability: true,
+        popularityScore: 0.92,
+      }),
+    };
+    const entityResolver = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved' as const,
+        topEntity: {
+          entityId: anchorEntityId,
+          canonicalLabel: 'Opus One 2021',
+          calibratedScore: 0.96,
+        },
+        candidates: [{
+          entityId: anchorEntityId,
+          canonicalLabel: 'Opus One 2021',
+          calibratedScore: 0.96,
+          rank: 1,
+          evidenceRefs: ['alias'],
+        }],
+        decisionTrace: {
+          queryClass: plan.queryClass,
+          top1CalibratedScore: 0.96,
+          top2CalibratedScore: 0.2,
+          calibratedGap: 0.76,
+          decisionConfidenceC: 0.96,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+          outcomeReasonCodes: ['TEST'],
+        },
+        conformalSetSize: 1,
+      }),
+    };
+    const candidatePool = {
+      generate: vi.fn().mockResolvedValue([]),
+    };
+    const responseBuilder = createResponseBuilder();
+    const useCase = new HybridUseCase({
+      queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
+      candidatePool: candidatePool as never,
+      compareRetriever: compareRetriever as never,
+      entityResolver: entityResolver as never,
+      entityLookup: entityLookup as never,
+      ranker: { rank: vi.fn().mockResolvedValue([]) } as never,
+      decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
+      responseBuilder: responseBuilder as never,
+      querySanitizer: safeSanitizer as never,
+    });
+
+    await useCase.execute({ query: 'Opus One alternatives' }, 'req-compare-fallback');
+
+    expect(compareRetriever.compareAgainstAnchor).toHaveBeenCalledWith(
+      anchorEntityId,
+      plan.constraints,
+      20,
+    );
+    expect(candidatePool.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryPlan: plan,
+        anchorEntityId,
+      }),
+    );
+    const responseParams = responseBuilder.build.mock.calls[0]?.[0];
+    expect(responseParams?.contract).toEqual({
+      executionMode: 'degraded',
+      degradationReasons: ['compare_candidates_fallback'],
+    });
   });
 
   it('applies shared LTR reranking before synthetic resolve and decision assembly', async () => {
@@ -525,27 +627,28 @@ describe('HybridUseCase', () => {
     const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
     const responseParams = responseBuilder.build.mock.calls[0]?.[0];
 
-    expect(decisionInput?.resolverResult.topEntity?.entityId).toBe(secondEntityId);
+    expect(decisionInput?.resolverResult.topEntity?.entityId).toBe(firstEntityId);
     expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(true);
     expect(decisionInput?.evidenceSummary?.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(
       true,
     );
     expect(decisionInput?.evidenceItems).toEqual([
       {
-        type: 'beta',
+        type: 'alpha',
         source: 'ranker',
-        contribution: '+0.20',
-        strength: 'high',
-        provenance: 'beta evidence',
+        contribution: '+0.10',
+        strength: 'medium',
+        provenance: 'alpha evidence',
       },
     ]);
-    expect(responseParams?.results[0]?.entity.entityId).toBe(secondEntityId);
+    expect(responseParams?.results[0]?.entity.entityId).toBe(firstEntityId);
     expect(responseParams?.retrievalModeSource).toBe('api_override');
     expect(responseParams?.plannerSuggestedMode).toBe('hybrid');
+    expect(responseParams).not.toHaveProperty('funnelMetrics');
     expect(responseParams?.counterfactuals).toEqual([
       expect.objectContaining({
-        entityId: firstEntityId,
-        canonicalLabel: 'Alpha',
+        entityId: secondEntityId,
+        canonicalLabel: 'Beta',
       }),
     ]);
   });

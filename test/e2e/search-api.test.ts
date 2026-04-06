@@ -67,6 +67,31 @@ describe('POST /v1/search — happy paths', () => {
     expect(decision.decision_status).toBeDefined();
     expect(decision.decision_snapshot).toBeDefined();
     expect(decision.decision_trace_ref).toBeDefined();
+    expect(decision.authority_trace_ref).toBeDefined();
+    expect(decision.authority_trace_ref).toBe(decision.decision_trace_ref);
+  });
+
+  it('Phase A contract co-exposes authority/runtime/execution metadata with deprecated decision_trace_ref', async () => {
+    const res = await postJson(server.app, '/v1/search', {
+      query: 'Opus One 2018',
+      options: { mode: 'entity', explain: false, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res);
+    const decision = getSearchDecision(body);
+    const meta = getSearchMeta(body);
+
+    expect(decision.decision_trace_ref).toBeTruthy();
+    expect(decision.authority_trace_ref).toBeTruthy();
+    expect(decision.authority_trace_ref).toBe(decision.decision_trace_ref);
+    expect(decision.runtime_correlation_ref).toBeTruthy();
+    expect(meta.authority_trace_ref).toBe(decision.authority_trace_ref);
+    expect(meta.runtime_correlation_ref).toBe(decision.runtime_correlation_ref);
+    expect(['authoritative', 'degraded', 'heuristic', 'advisory']).toContain(
+      decision.execution_mode,
+    );
+    expect(typeof decision.blocking_eligible).toBe('boolean');
   });
 
   it('clarification=true with ambiguous query — clarification field is not null', async () => {

@@ -4,7 +4,6 @@ import {
   type HumanResponseBuildParamsV2,
 } from '../service/human-response-builder-v2.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
-import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 import { createEntityId } from '../../shared/types/index.js';
 
 // ---------------------------------------------------------------------------
@@ -32,16 +31,6 @@ function makeResult(overrides: Partial<RankedResult> & Pick<RankedResult, 'entit
   };
 }
 
-function makeFunnelMetrics(): FunnelMetrics {
-  return {
-    coarsePrunePassRate: 0.85,
-    rerankChangedTopK: true,
-    meanFinalScore: 0.72,
-    scoreGapRank1Rank2: 0.15,
-    producerDiversity: 3,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -55,6 +44,7 @@ describe('buildHumanResponseV2', () => {
         totalCandidates: 0,
       });
 
+      expect(result.queryType).toBe('search');
       expect(result.version).toBe('2');
       expect(result.responseType).toBe('human');
     });
@@ -363,21 +353,8 @@ describe('buildHumanResponseV2', () => {
     });
   });
 
-  describe('funnelMetrics', () => {
-    it('propagates funnelMetrics when provided', () => {
-      const metrics = makeFunnelMetrics();
-      const params: HumanResponseBuildParamsV2 = {
-        queryId: 'q-fm',
-        results: [],
-        totalCandidates: 5,
-        funnelMetrics: metrics,
-      };
-
-      const response = buildHumanResponseV2(params);
-      expect(response.funnelMetrics).toEqual(metrics);
-    });
-
-    it('omits funnelMetrics when not provided', () => {
+  describe('public envelope boundaries', () => {
+    it('does not expose funnelMetrics on the V2 human response envelope', () => {
       const params: HumanResponseBuildParamsV2 = {
         queryId: 'q-nofm',
         results: [],

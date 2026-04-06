@@ -61,7 +61,21 @@ export const BatchSearchRequestSchema = z.object({
     .min(1, 'batch_id must be a non-empty string')
     .max(256, 'batch_id must not exceed 256 characters')
     .optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const ids = value.requests.map((r) => r.id);
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Duplicate request id: "${id}". Each item in the batch must have a unique id.`,
+        path: ['requests'],
+      });
+      return;
+    }
+    seen.add(id);
+  }
+});
 
 export type BatchSearchRequestBody = z.infer<typeof BatchSearchRequestSchema>;
 

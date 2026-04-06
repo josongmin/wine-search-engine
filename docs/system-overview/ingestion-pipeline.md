@@ -395,5 +395,5 @@ export { EntityMatcher } from './service/entity-matcher.js';
 | 골든·스플릿·LTR 학습 | §15 |
 | 런타임 리트리버 | **제외** → [`retriever-pipeline.md`](./retriever-pipeline.md) |
 | `vivino:bronze` / `etl:transliteration` | §2 |
-| `ingest` / `kill-switch` 선언 vs 파일 없음 | §2 |
+| bootstrap/ETL 스크립트 현재 상태 (`bootstrap:smoke`, `vivino:bronze`, `etl:transliteration`) | §2 |
 | **의도적 제외** | `find-domain-orphans.ts`, `export-http-contract-manifest.ts`, `export-http-openapi-bridge.ts`, `verify-anthropic-wiring.ts`, `dev/test-search-direct.ts` |

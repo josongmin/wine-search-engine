@@ -31,8 +31,9 @@ export interface RerankGateDecision {
  *  2. candidateCount < 5           → skip (not enough candidates)
  *  3. short_entity / exact_lookup   → skip (already highly precise)
  *  4. comparison_query / hasAnchor → always rerank (high value)
- *  5. candidateCount >= 20         → rerank (enough candidates to benefit)
- *  6. default                      → skip
+ *  5. semantic_preference          → always rerank (ambiguous semantics benefit most)
+ *  6. candidateCount >= 20         → rerank (enough candidates to benefit)
+ *  7. default                      → skip
  */
 export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
   const { candidateCount, queryClass, effectiveRoute, hasAnchor, rerankForced } = input;
@@ -51,6 +52,13 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
 
   if (queryClass === 'comparison_query' || hasAnchor) {
     return { shouldRerank: true, reason: hasAnchor ? 'has_anchor' : 'comparison_query' };
+  }
+
+  // semantic_preference queries have ambiguous intent — cross-encoder reranking
+  // adds the most value here because dense retrieval alone cannot reliably rank
+  // nuanced preference-driven matches. Always rerank regardless of candidate count.
+  if (queryClass === 'semantic_preference') {
+    return { shouldRerank: true, reason: 'semantic_preference' };
   }
 
   if (candidateCount >= 20) {

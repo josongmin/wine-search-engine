@@ -1,0 +1,72 @@
+name: Replay Fixtures
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'config/vitest/e2e.config.ts'
+      - 'config/vitest/e2e.replay.config.ts'
+      - 'config/vitest/unit.config.ts'
+      - 'test/e2e/search-replay-fixtures.test.ts'
+      - 'test/replay-fixtures/search/**'
+      - 'test/unit/replay-fixtures/**'
+      - 'src/application/search/replay.usecase.ts'
+      - 'src/application/search/search-usecase-decision-snapshot.ts'
+      - 'src/domain/decision/**'
+      - 'src/domain/shared/types/decision-snapshot.ts'
+      - 'src/interface/http/routes/**'
+      - '.github/workflows/replay-fixtures.yml'
+  merge_group:
+  workflow_dispatch:
+    inputs:
+      run_runtime_required_lane:
+        description: 'Run the runtime-required replay routing audit lane'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: replay-fixtures-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  self-contained-replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Self-contained replay fixture lane
+        run: npm run test:e2e:replay:fixtures:self-contained
+      - name: Replay summary
+        if: always()
+        run: |
+          {
+            echo "## Replay Fixture Lane"
+            echo ""
+            echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:self-contained\`"
+            echo "- Fixture routing source of truth: \`test/replay-fixtures/search/run-search-fixture.ts\`"
+            echo "- Selection rule: fixtures with empty/absent \`requires_runtime_capability\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  runtime-required-replay-routing-audit:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_required_lane }}
+    runs-on: ubuntu-latest
+    needs: [self-contained-replay]
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Runtime-required replay routing audit
+        run: npm run test:replay:fixtures:runtime-required:audit
+      - name: Runtime-required replay audit summary
+        if: always()
+        run: |
+          {
+            echo "## Runtime-Required Replay Routing Audit"
+            echo ""
+            echo "- Opt-in audit: \`npm run test:replay:fixtures:runtime-required:audit\`"
+            echo "- Gate: manual workflow_dispatch with \`run_runtime_required_lane=true\`"
+            echo "- Scope: validates classification and helper routing for fixtures with non-empty \`requires_runtime_capability\`"
+            echo "- Not a full runtime-required fixture execution lane"
+          } >> "$GITHUB_STEP_SUMMARY"

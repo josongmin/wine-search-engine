@@ -13,7 +13,6 @@ describe('PROVENANCE_CHANNELS', () => {
     const expected: ProvenanceChannel[] = [
       'sparse_bm25',
       'dense_semantic',
-      'dense_anchor',
       'learned_sparse',
       'anchor_similarity',
       'relative_filter',

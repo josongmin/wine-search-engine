@@ -5,7 +5,6 @@
 export type CandidateChannel =
   | 'sparse_bm25'
   | 'dense_semantic'
-  | 'dense_anchor'
   | 'learned_sparse'    // future: Epic 4
   | 'anchor_similarity' // future: Epic 4
   | 'relative_filter'   // future: Epic 4

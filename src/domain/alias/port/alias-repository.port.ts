@@ -26,12 +26,30 @@ export interface AliasRepository {
 
   /**
    * Finds all active aliases matching a pre-normalized value.
-   * Used for normalized and fuzzy matching pipelines.
+   * Used for normalized matching pipelines (exact-normalized lookup).
    *
    * @param normalized - The normalized surface form.
    * @returns Matching aliases, ordered by confidencePrior descending.
    */
   findByNormalizedValue(normalized: string): Promise<readonly Alias[]>;
+
+  /**
+   * Returns a set of candidate aliases for fuzzy matching against the given
+   * normalized query prefix. Implementations should retrieve aliases that
+   * share at least one significant token or prefix with the query, so the
+   * caller can apply edit-distance filtering. The result set trades precision
+   * for recall: false positives are expected and filtered by the caller.
+   *
+   * A minimal implementation may return aliases that share the first
+   * `Math.ceil(normalized.length / 2)` characters of their normalizedValue,
+   * or use a trigram index. Returning an empty array is a valid (if degraded)
+   * implementation — fuzzy matching simply produces no results in that case.
+   *
+   * @param normalized - The normalized query form.
+   * @param scope - Optional scope filter.
+   * @returns Candidate aliases for edit-distance filtering.
+   */
+  findFuzzyCandidates(normalized: string, scope?: AliasScope): Promise<readonly Alias[]>;
 
   /**
    * Persists a single alias.

@@ -1,7 +1,23 @@
 {
   "name": "reranker-timeout",
+  "replay_request": {
+    "query": "best napa cabernet under 200",
+    "decision_snapshot": {
+      "snapshot_id": "default:1.0.0:1.0.0::",
+      "model_versions": {
+        "reranker": "timeout-test"
+      },
+      "index_versions": {},
+      "policy_rule_version": "1.0.0",
+      "threshold_profile_id": "default",
+      "planner_version": "1.0.0",
+      "feature_flags": {},
+      "response_contract_version": "search_response_v1"
+    }
+  },
   "expected": {
     "execution_mode": "degraded",
     "degradation_reasons": ["reranker_timeout"]
-  }
+  },
+  "requires_runtime_capability": ["replay_route", "reranker_runtime"]
 }

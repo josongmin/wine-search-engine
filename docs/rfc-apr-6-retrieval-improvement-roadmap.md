@@ -1041,7 +1041,7 @@ anchor similarity의 한 축으로 behavioral similarity는 유용하다.
 | CI | `scripts/bootstrap-smoke.sh`, `SKIP_MIGRATE` 옵션 | `.github/workflows/bootstrap-smoke.yml` |
 | 응답 캐시 정책 | `degraded`/`heuristic` 등 비캐시 응답은 `setSearchResponse`에서 스킵 | `cache-policy.ts`, `CacheService` |
 
-**후속 (로드맵과 겹침):** replay fixture를 런타임 HTTP 검색과 통합(`runSearchFixture`), `scripts/eval`의 advisory vs blocking 메트릭 정책(`eval-metric-policy`), ID 스키마 버전별 replay/audit 디코더 등은 `docs/bugbash/apr-6-hardening-wave3.md`에 정리됨. readiness SSOT·`CacheService` write 게이트는 **반영 완료**.
+**후속 (로드맵과 겹침):** replay fixture를 런타임 HTTP 검색과 통합(`runSearchFixture`), `scripts/eval`의 advisory vs blocking 메트릭 정책(`eval-metric-policy`), ID 스키마 버전별 replay/audit 디코더 등은 `docs/bugbash/apr-6-hardening-wave3.md`에 정리됨. Wave 3 이후 운영 closure 티켓 보드는 `docs/bugbash/apr-6-hardening-wave4.md`를 참조. readiness SSOT·`CacheService` write 게이트는 **반영 완료**.
 
 ---
 

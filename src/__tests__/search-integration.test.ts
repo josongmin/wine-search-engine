@@ -168,6 +168,7 @@ class InMemorySearchIndex implements SearchIndexPort {
     _queries: readonly string[],
     _filters?: readonly string[],
     _limit?: number,
+    _rankProfile?: string,
   ): Promise<readonly SparseHit[]> {
     return WINE_ENTITIES.map((e, i) => ({
       entityId: e.id,
@@ -181,6 +182,7 @@ class InMemorySearchIndex implements SearchIndexPort {
     _embedding: readonly number[],
     _filters?: readonly string[],
     _limit?: number,
+    _rankProfile?: string,
   ): Promise<readonly DenseHit[]> {
     return WINE_ENTITIES.map((e, i) => ({
       entityId: e.id,

@@ -3,6 +3,7 @@
 # Trust this repo in Codex so project config loads.
 #
 # Architecture & commands: see ../CLAUDE.md (repo root).
+# HTTP debug / LLM trace playbook: ../.ai/llm-debugging-playbook.md — setup: ../.ai/debug-mode.md — steps: ../src/observability/pipeline-debug-steps.ts
 
 model = "gpt-5.4"
 approval_policy = "on-request"

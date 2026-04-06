@@ -1,6 +1,5 @@
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
-import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { SnapshotVersions } from './search.usecase.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
@@ -27,8 +26,10 @@ import {
   resolveEntityRouteForPlan,
 } from './search-usecase-hybrid-ranking-pipeline.js';
 import type { SearchRequest } from './search-request.dto.js';
+import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
 
@@ -47,7 +48,6 @@ export interface HybridUseCaseDeps {
   readonly responseBuilder: ResponseBuilderPort;
   readonly snapshotVersions?: SnapshotVersions | undefined;
   readonly drinkingWindow?: DrinkingWindowUseCasePort | undefined;
-  readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   /** Shared public query entry guard: Layer 1 sanitizer is required. */
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
@@ -55,6 +55,8 @@ export interface HybridUseCaseDeps {
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   readonly cacheService?: SearchResponseCachePort | undefined;
+  readonly cacheLookupRuntimeState?: CacheLookupRuntimeState | undefined;
+  readonly cacheLookupRuntimeStateProvider?: (() => CacheLookupRuntimeState) | undefined;
   readonly decomposedSearch?: DecomposedSearchUseCasePort | undefined;
 }
 
@@ -77,6 +79,16 @@ export class HybridUseCase {
   ): Promise<SearchResponseV1 | ComparisonSearchResponse> {
     const startTime = Date.now();
     const searchRequest = toSearchRequest(request);
+
+    pipelineDebug(
+      {
+        step: 'hybrid.execute.start',
+        query_len: request.query.length,
+        query_preview: sanitizeQueryForDebug(request.query),
+      },
+      'pipeline hybrid use case',
+    );
+
     const preRoute = await runSearchPreRoutePhase({
       request: searchRequest,
       requestId,
@@ -92,6 +104,9 @@ export class HybridUseCase {
       responseBuilder: this.deps.responseBuilder,
       constraintSAT: this.constraintSAT,
       cacheService: this.deps.cacheService,
+      cacheLookupRuntimeState:
+        this.deps.cacheLookupRuntimeStateProvider?.()
+        ?? this.deps.cacheLookupRuntimeState,
       decomposedSearch: this.deps.decomposedSearch,
     });
 
@@ -100,19 +115,34 @@ export class HybridUseCase {
     }
 
     const { plan } = preRoute;
-    const { resolveResult, rankedResults, decisionContext } = await executeHybridRouteRankingPipeline(
+    const {
+      resolveResult,
+      rankedResults,
+      decisionContext,
+      routeDegradation,
+      specializedRouteObservability,
+    } = await executeHybridRouteRankingPipeline(
       plan,
       {
         candidatePool: this.deps.candidatePool,
         browseRetriever: this.deps.browseRetriever,
         compareRetriever: this.deps.compareRetriever,
         ranker: this.deps.ranker,
-        ltrModels: this.deps.ltrModels,
       },
       (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
         entityResolver: this.deps.entityResolver,
         entityLookup: this.deps.entityLookup,
       }),
+    );
+
+    pipelineDebug(
+      {
+        step: 'hybrid.execute.ranked',
+        ranked_count: rankedResults.length,
+        resolve_status: resolveResult.status,
+        latency_ms_so_far: Date.now() - startTime,
+      },
+      'pipeline hybrid retrieval+rank done',
     );
 
     return runSearchPostRoutePhase({
@@ -132,6 +162,8 @@ export class HybridUseCase {
       decisionEngine: this.deps.decisionEngine,
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
+      routeDegradation,
+      specializedRouteObservability,
     });
   }
 }

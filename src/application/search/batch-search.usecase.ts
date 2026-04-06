@@ -2,6 +2,7 @@ import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { BATCH_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schema-version.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
+import { decodeBatchIdDetailed } from '../../domain/decision/service/id-schema-decoder.js';
 import type {
   BatchErrorCode,
   BatchSearchOptions,
@@ -11,6 +12,7 @@ import type {
 } from './batch-search.dto.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 export type {
   BatchErrorCode,
@@ -113,6 +115,21 @@ export class BatchSearchUseCase {
 
     // Determine execution strategy
     const failFast = options?.fail_fast ?? false;
+    const decodedBatchId = decodeBatchIdDetailed(actualBatchId);
+
+    pipelineDebug(
+      {
+        step: 'batch.search.start',
+        batch_id: actualBatchId,
+        ...(decodedBatchId.ok
+          ? { batch_id_schema_version: decodedBatchId.value.schemaVersion }
+          : { invalid_batch_id_reason: decodedBatchId.error.reason }),
+        batch_size: requests.length,
+        fail_fast: failFast,
+        timeout_ms: timeoutMs,
+      },
+      'pipeline batch search',
+    );
 
     // Execute requests
     const results = failFast
@@ -211,6 +228,8 @@ export class BatchSearchUseCase {
    * - Error mapping to BatchErrorCode
    * - Sub-request ID generation: `${batchId}-${req.id}`
    * - Proper error handling and logging
+   * - Timer cleanup so the timeout handle is always cancelled after the race
+   *   settles (prevents event-loop retention and spurious rejections).
    *
    * @param req - The individual batch request item.
    * @param batchId - The batch identifier.
@@ -238,11 +257,24 @@ export class BatchSearchUseCase {
         },
       };
 
-      // Execute with timeout
-      const rawResponse = await Promise.race([
-        this.searchUseCase.execute(searchRequest, requestId),
-        this.createTimeoutPromise(timeoutMs),
-      ]);
+      // Execute with timeout; always cancel the timer after the race settles
+      // to avoid holding the Node.js event loop open on successful requests.
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_resolve, reject) => {
+        timerId = setTimeout(() => {
+          reject(new Error('RETRIEVAL_TIMEOUT'));
+        }, timeoutMs);
+      });
+
+      let rawResponse;
+      try {
+        rawResponse = await Promise.race([
+          this.searchUseCase.execute(searchRequest, requestId),
+          timeoutPromise,
+        ]);
+      } finally {
+        clearTimeout(timerId);
+      }
 
       // Batch items are always standard search queries, not comparisons
       if (rawResponse.queryType !== 'search') {
@@ -297,7 +329,7 @@ export class BatchSearchUseCase {
    * @returns Code and message suitable for BatchSearchError.
    */
   private mapError(err: unknown): { code: BatchErrorCode; message: string } {
-    // Timeout error (thrown by createTimeoutPromise)
+    // Timeout error (thrown by the inline timeout promise in executeSingle)
     if (err instanceof Error && err.message === 'RETRIEVAL_TIMEOUT') {
       return {
         code: 'RETRIEVAL_TIMEOUT',
@@ -345,23 +377,6 @@ export class BatchSearchUseCase {
       code: 'INTERNAL_ERROR',
       message: 'Unknown error occurred',
     };
-  }
-
-  /**
-   * Create a promise that rejects after the specified timeout.
-   *
-   * Used with Promise.race() to enforce per-request timeouts.
-   *
-   * @param timeoutMs - Timeout in milliseconds.
-   * @returns A promise that rejects with RETRIEVAL_TIMEOUT.
-   */
-  private createTimeoutPromise(timeoutMs: number): Promise<never> {
-    return new Promise((_resolve, reject) => {
-      setTimeout(() => {
-        const err = new Error('RETRIEVAL_TIMEOUT');
-        reject(err);
-      }, timeoutMs);
-    });
   }
 
   /**

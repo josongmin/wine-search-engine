@@ -324,13 +324,32 @@ export class AliasMatcher {
     return aliases.filter((a) => !a.suppressed);
   }
 
-  /** Sorts by weightedScore descending and limits results. */
+  /** Sorts by weightedScore descending and limits results.
+   *
+   * Deduplicates by entityId before limiting: when multiple aliases for the
+   * same entity match (e.g. an English and a Japanese alias both found in the
+   * same stage), only the highest-scoring entry is retained. Without this,
+   * a multilingual entity could occupy multiple slots in the result list,
+   * artificially boosting its apparent rank and shrinking the effective limit
+   * for other candidates.
+   */
   private rankAndLimit(
     results: readonly AliasMatchResult[],
     limit: number,
   ): readonly AliasMatchResult[] {
-    return [...results]
-      .sort((a, b) => b.weightedScore - a.weightedScore)
-      .slice(0, limit);
+    const sorted = [...results].sort((a, b) => b.weightedScore - a.weightedScore);
+
+    // Deduplicate: keep only the best-scoring result per entityId.
+    const seen = new Set<string>();
+    const deduped: AliasMatchResult[] = [];
+    for (const result of sorted) {
+      const key = String(result.entityId);
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(result);
+      }
+    }
+
+    return deduped.slice(0, limit);
   }
 }

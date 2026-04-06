@@ -11,10 +11,11 @@ import type { SearchRequest } from './search-request.dto.js';
 import { buildConstraintContradictionExitParams } from './search-usecase-constraint-early-exit.js';
 import { mergeCachedSearchResponseMeta } from './search-usecase-cache-hit.js';
 import { tryGetCachedSearchResponse } from './search-usecase-cache-lookup.js';
-import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
+import type { CacheLookupRuntimeState, SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate, type SearchSecurityGateDeps } from './search-usecase-security-gate.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 
 export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
@@ -33,6 +34,7 @@ export interface SearchPreRoutePhaseContext {
   readonly responseBuilder: ResponseBuilderPort;
   readonly constraintSAT: ConstraintSAT;
   readonly cacheService?: SearchResponseCachePort | undefined;
+  readonly cacheLookupRuntimeState?: CacheLookupRuntimeState | undefined;
   readonly decomposedSearch?: DecomposedSearchUseCasePort | undefined;
 }
 
@@ -66,6 +68,13 @@ export async function runSearchPreRoutePhase(
         runtime_correlation_ref: ctx.requestId,
         decomposition_strategy: decomposition.hint.strategy,
       });
+      pipelineDebug(
+        {
+          step: 'pre_route.decomposed_comparison',
+          decomposition_strategy: decomposition.hint.strategy,
+        },
+        'pipeline pre_route comparison branch',
+      );
       return { outcome: 'return', response };
     }
   }
@@ -85,6 +94,14 @@ export async function runSearchPreRoutePhase(
 
   const satResult = ctx.constraintSAT.check(plan.constraints);
   if (satResult.contradicted) {
+    pipelineDebug(
+      {
+        step: 'pre_route.constraint_contradiction',
+        query_class: plan.queryClass,
+        conflict_pairs: satResult.conflictPairs.length,
+      },
+      'pipeline pre_route constraint exit',
+    );
     const response = ctx.responseBuilder.build(
       buildConstraintContradictionExitParams(
         plan,
@@ -104,8 +121,16 @@ export async function runSearchPreRoutePhase(
       plan,
       ctx.request,
       ctx.snapshotVersions,
+      ctx.cacheLookupRuntimeState,
     );
     if (cached !== undefined) {
+      pipelineDebug(
+        {
+          step: 'pre_route.cache_hit',
+          query_class: plan.queryClass,
+        },
+        'pipeline pre_route cache hit',
+      );
       const response = mergeCachedSearchResponseMeta(
         cached,
         ctx.requestId,
@@ -114,6 +139,15 @@ export async function runSearchPreRoutePhase(
       return { outcome: 'return', response };
     }
   }
+
+  pipelineDebug(
+    {
+      step: 'pre_route.continue',
+      query_class: plan.queryClass,
+      plan_route: plan.route,
+    },
+    'pipeline pre_route plan ready',
+  );
 
   return { outcome: 'continue', plan };
 }

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildDecisionSnapshotFromPlan } from '../../../../src/application/search/search-usecase-decision-snapshot.js';
+import {
+  buildDecisionSnapshotFromPlan,
+  buildDecisionSnapshotId,
+  SEARCH_RESPONSE_CONTRACT_VERSION,
+} from '../../../../src/application/search/search-usecase-decision-snapshot.js';
 import { buildSearchCounterfactuals } from '../../../../src/application/search/search-usecase-counterfactuals.js';
 import {
   extractProducerBrowseSeed,
@@ -100,6 +104,47 @@ describe('buildDecisionSnapshotFromPlan', () => {
       indexVersions: {},
     });
     expect(snap.nondeterminism_notes).toContain('empty');
+  });
+
+  it('hashes the actual snapshot payload including nondeterminism notes', () => {
+    const plan = minimalPlan();
+    const snap = buildDecisionSnapshotFromPlan(plan, undefined);
+
+    expect(snap.snapshot_id).toBe(buildDecisionSnapshotId({
+      threshold_profile_id: snap.threshold_profile_id,
+      planner_version: snap.planner_version,
+      policy_rule_version: snap.policy_rule_version,
+      model_versions: snap.model_versions,
+      index_versions: snap.index_versions,
+      feature_flags: snap.feature_flags,
+      response_contract_version: snap.response_contract_version,
+      ...(snap.nondeterminism_notes !== undefined
+        ? { nondeterminism_notes: snap.nondeterminism_notes }
+        : {}),
+    }));
+  });
+
+  it('changes snapshot_id when response contract version changes', () => {
+    const baseId = buildDecisionSnapshotId({
+      threshold_profile_id: 'default',
+      planner_version: '1',
+      policy_rule_version: '1',
+      model_versions: {},
+      index_versions: {},
+      feature_flags: {},
+      response_contract_version: SEARCH_RESPONSE_CONTRACT_VERSION,
+    });
+    const changedId = buildDecisionSnapshotId({
+      threshold_profile_id: 'default',
+      planner_version: '1',
+      policy_rule_version: '1',
+      model_versions: {},
+      index_versions: {},
+      feature_flags: {},
+      response_contract_version: 'search_response_v2',
+    });
+
+    expect(changedId).not.toBe(baseId);
   });
 });
 

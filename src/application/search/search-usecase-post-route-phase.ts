@@ -18,8 +18,42 @@ import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-prove
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
 import { topKFinalScores } from './search-usecase-ranking-scores.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
+import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
+import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import {
+  toSpecializedRouteMeta,
+  type SpecializedRouteObservability,
+} from './specialized-route-observability.js';
+
+function mergeRouteDegradation(
+  snapshot: DecisionSnapshot,
+  effectiveRoute: QueryRoute,
+  routeDegradation?: RankingDegradationSignal,
+  resolveResult?: EntityResolveResult,
+): RankingDegradationSignal | undefined {
+  const reasons = new Set([
+    ...(routeDegradation?.degradationReasons ?? []),
+    ...(resolveResult?.degradation?.reasons ?? []),
+  ]);
+  if (snapshot.feature_flags['killSwitchLearning'] === true) {
+    reasons.add('learning_kill_switch');
+  }
+  if (
+    snapshot.feature_flags['killSwitchDenseRetrieval'] === true
+    && effectiveRoute !== 'entity'
+  ) {
+    reasons.add('dense_retrieval_disabled');
+  }
+  if (reasons.size === 0) {
+    return undefined;
+  }
+  return {
+    executionMode: 'degraded',
+    degradationReasons: [...reasons],
+  };
+}
 
 /**
  * Context for Steps 3b–7: entropy abstain → DecisionEngine → ResponseBuilder → optional cache write.
@@ -41,6 +75,8 @@ export interface SearchPostRouteExecutionContext {
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly cacheService?: SearchResponseCachePort | undefined;
+  readonly routeDegradation?: RankingDegradationSignal | undefined;
+  readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
 }
 
 export interface RankedRouteDecisionPhaseContext {
@@ -58,6 +94,27 @@ export interface RankedRouteDecisionPhaseContext {
   readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
   readonly plannerSuggestedMode?: QueryRoute | undefined;
   readonly includeCounterfactuals?: boolean | undefined;
+  readonly routeDegradation?: RankingDegradationSignal | undefined;
+  readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+}
+
+function toAdmissionHonestyContract(
+  routeDegradation: RankingDegradationSignal | undefined,
+): {
+  readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
+  readonly routeHealthy?: boolean | undefined;
+} {
+  if (routeDegradation === undefined) {
+    return {
+      executionMode: 'authoritative',
+      routeHealthy: true,
+    };
+  }
+
+  return {
+    executionMode: routeDegradation.executionMode,
+    routeHealthy: false,
+  };
 }
 
 /**
@@ -67,15 +124,53 @@ export interface RankedRouteDecisionPhaseContext {
 export async function runRankedRouteDecisionPhase(
   ctx: RankedRouteDecisionPhaseContext,
 ): Promise<SearchResponseV1> {
+  pipelineDebug(
+    {
+      step: 'decision.phase.enter',
+      effective_route: ctx.effectiveRoute,
+      resolve_status: ctx.resolveResult.status,
+      ranked_count: ctx.rankedResults.length,
+    },
+    'pipeline decision phase',
+  );
+
+  const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
+  const mergedRouteDegradation = mergeRouteDegradation(
+    snapshot,
+    ctx.effectiveRoute,
+    ctx.routeDegradation,
+    ctx.resolveResult,
+  );
   const decisionInput = buildSearchDecisionInput(
     ctx.plan,
     ctx.resolveResult,
     ctx.rankedResults,
     ctx.effectiveRoute,
     ctx.decisionContext,
+    toAdmissionHonestyContract(mergedRouteDegradation),
   );
-  const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
+  pipelineDebug(
+    {
+      step: 'decision.engine.request',
+      query_class: ctx.plan.queryClass,
+    },
+    'pipeline decision engine request',
+  );
+
   const decisionOutput = await ctx.decisionEngine.decide(decisionInput, snapshot);
+
+  pipelineDebug(
+    {
+      step: 'decision.engine.response',
+      decision_status: decisionOutput.decisionStatus,
+      next_action: decisionOutput.nextAction,
+      decision_confidence: decisionOutput.decisionConfidence,
+      ...(decisionOutput.failureReason !== undefined
+        ? { failure_reason: decisionOutput.failureReason }
+        : {}),
+    },
+    'pipeline decision engine response',
+  );
 
   const queryTimeMs = Date.now() - ctx.startTime;
   const results = await mapRankedResultsToResultItems(
@@ -108,6 +203,10 @@ export async function runRankedRouteDecisionPhase(
     ...(ctx.plannerSuggestedMode !== undefined
       ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
       : {}),
+    ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
+    ...(ctx.specializedRouteObservability !== undefined
+      ? { specializedRouteObservability: ctx.specializedRouteObservability }
+      : {}),
   });
   /* Unit tests may stub partial SearchResponseV1; skip structured log when snapshot missing. */
   const engineDecision = built.engineDecision as SearchResponseV1['engineDecision'] | undefined;
@@ -122,6 +221,7 @@ export async function runRankedRouteDecisionPhase(
       ...(built.meta.degradationReasons !== undefined
         ? { degradation_reasons: built.meta.degradationReasons }
         : {}),
+      ...toSpecializedRouteMeta(ctx.specializedRouteObservability),
       route_name: ctx.effectiveRoute,
       model_versions: { ...decisionSnapshot.model_versions },
       kill_switch_state: { ...decisionSnapshot.feature_flags },
@@ -136,12 +236,37 @@ export async function runRankedRouteDecisionPhase(
 export async function runSearchPostRoutePhase(
   ctx: SearchPostRouteExecutionContext,
 ): Promise<SearchResponseV1> {
+  pipelineDebug(
+    {
+      step: 'post_route.enter',
+      effective_route: ctx.effectiveRoute,
+      resolve_status: ctx.resolveResult.status,
+      ranked_count: ctx.rankedResults.length,
+    },
+    'pipeline post-route',
+  );
+
   const cacheRequestContext = buildSearchCacheRequestContext(ctx.request);
   const topScores = topKFinalScores(ctx.rankedResults);
   const abstainDecision = ctx.abstainPolicy.shouldAbstain(topScores);
 
   if (abstainDecision.abstain) {
+    pipelineDebug(
+      {
+        step: 'post_route.entropy_abstain',
+        effective_route: ctx.effectiveRoute,
+        entropy: abstainDecision.entropy,
+        score_count: topScores.length,
+      },
+      'pipeline entropy abstain',
+    );
     const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
+    const mergedRouteDegradation = mergeRouteDegradation(
+      snapshot,
+      ctx.effectiveRoute,
+      ctx.routeDegradation,
+      ctx.resolveResult,
+    );
     const results = await mapRankedResultsToResultItems(
       ctx.rankedResults,
       ctx.drinkingWindow,
@@ -151,19 +276,25 @@ export async function runSearchPostRoutePhase(
       ctx.rankedResults,
     );
     const response = ctx.responseBuilder.build(
-      buildEntropyAbstainResponseParams({
-        plan: ctx.plan,
-        snapshot,
-        requestId: ctx.requestId,
-        startTime: ctx.startTime,
-        effectiveRoute: ctx.effectiveRoute,
-        retrievalModeSource: ctx.retrievalModeSource,
-        plannerSuggestedMode: ctx.plannerSuggestedMode,
-        entropy: abstainDecision.entropy,
-        results,
-        rankedResults: ctx.rankedResults,
-        ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
-      }),
+      {
+        ...buildEntropyAbstainResponseParams({
+          plan: ctx.plan,
+          snapshot,
+          requestId: ctx.requestId,
+          startTime: ctx.startTime,
+          effectiveRoute: ctx.effectiveRoute,
+          retrievalModeSource: ctx.retrievalModeSource,
+          plannerSuggestedMode: ctx.plannerSuggestedMode,
+          entropy: abstainDecision.entropy,
+          results,
+          rankedResults: ctx.rankedResults,
+          ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+        }),
+        ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
+        ...(ctx.specializedRouteObservability !== undefined
+          ? { specializedRouteObservability: ctx.specializedRouteObservability }
+          : {}),
+      },
     );
     const entropyEngineDecision = response.engineDecision as
       | SearchResponseV1['engineDecision']
@@ -181,6 +312,7 @@ export async function runSearchPostRoutePhase(
         ...(response.meta.degradationReasons !== undefined
           ? { degradation_reasons: response.meta.degradationReasons }
           : {}),
+        ...toSpecializedRouteMeta(ctx.specializedRouteObservability),
         route_name: ctx.effectiveRoute,
         model_versions: { ...entropySnapshot.model_versions },
         kill_switch_state: { ...entropySnapshot.feature_flags },
@@ -193,8 +325,8 @@ export async function runSearchPostRoutePhase(
         response,
       );
       if (!stored) {
-        bootstrapLogger.debug(
-          { requestId: ctx.requestId },
+        pipelineDebug(
+          { step: 'cache.set_skipped', reason: 'entropy_abstain' },
           '[Search] setSearchResponse skipped for entropy abstain response',
         );
       }
@@ -202,6 +334,13 @@ export async function runSearchPostRoutePhase(
     return response;
   }
 
+  const rankedSnapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
+  const mergedRouteDegradation = mergeRouteDegradation(
+    rankedSnapshot,
+    ctx.effectiveRoute,
+    ctx.routeDegradation,
+    ctx.resolveResult,
+  );
   const response = await runRankedRouteDecisionPhase({
     plan: ctx.plan,
     requestId: ctx.requestId,
@@ -216,6 +355,8 @@ export async function runSearchPostRoutePhase(
     responseBuilder: ctx.responseBuilder,
     retrievalModeSource: ctx.retrievalModeSource,
     plannerSuggestedMode: ctx.plannerSuggestedMode,
+    routeDegradation: mergedRouteDegradation,
+    specializedRouteObservability: ctx.specializedRouteObservability,
   });
 
   if (ctx.cacheService) {
@@ -225,8 +366,8 @@ export async function runSearchPostRoutePhase(
       response,
     );
     if (!stored) {
-      bootstrapLogger.debug(
-        { requestId: ctx.requestId },
+      pipelineDebug(
+        { step: 'cache.set_skipped', reason: 'ineligible_or_breaker' },
         '[Search] setSearchResponse skipped (ineligible mode, circuit breaker, or policy)',
       );
     }

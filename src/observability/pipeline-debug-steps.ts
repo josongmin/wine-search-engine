@@ -1,0 +1,83 @@
+/**
+ * Canonical `step` strings for {@link pipelineDebug} / log filters.
+ *
+ * **Convention:** `domain.area.detail` (e.g. `decision.engine.response`).
+ * Prefer importing these constants for new call sites; legacy code may still use inline strings.
+ *
+ * @see `.ai/debug-mode.md` — operator guide
+ */
+export const PipelineDebugStep = {
+  // Search use case
+  SEARCH_EXECUTE_START: 'search.execute.start',
+  SEARCH_PRE_ROUTE_EARLY_EXIT: 'search.pre_route.early_exit',
+  SEARCH_ROUTE_RESOLUTION: 'search.route_resolution',
+  SEARCH_EXECUTE_DONE: 'search.execute.done',
+
+  // Entity-only route
+  ROUTE_ENTITY_ONLY_START: 'route.entity.only.start',
+  ROUTE_ENTITY_ONLY_DONE: 'route.entity.only.done',
+
+  // Hybrid anchor resolver (ranked routes)
+  RESOLVER_ANCHOR_MISSING: 'resolver.anchor.missing',
+  RESOLVER_ANCHOR_START: 'resolver.anchor.start',
+  RESOLVER_ANCHOR_DONE: 'resolver.anchor.done',
+
+  // Pre-route
+  PRE_ROUTE_DECOMPOSED_COMPARISON: 'pre_route.decomposed_comparison',
+  PRE_ROUTE_CONSTRAINT_CONTRADICTION: 'pre_route.constraint_contradiction',
+  PRE_ROUTE_CACHE_HIT: 'pre_route.cache_hit',
+  PRE_ROUTE_CONTINUE: 'pre_route.continue',
+
+  // Dispatch
+  DISPATCH_ROUTE: 'dispatch.route',
+  DISPATCH_ENTITY_COMPLETE: 'dispatch.entity.complete',
+  DISPATCH_HYBRID_COMPLETE: 'dispatch.hybrid.complete',
+  DISPATCH_MIXED_COMPLETE: 'dispatch.mixed.complete',
+
+  // Retrieval / ranking
+  RETRIEVAL_HYBRID_CANDIDATES_START: 'retrieval.hybrid_candidates.start',
+  RETRIEVAL_PRODUCER_BROWSE: 'retrieval.producer_browse',
+  RETRIEVAL_REGION_BROWSE: 'retrieval.region_browse',
+  RETRIEVAL_COMPARE_CANDIDATES: 'retrieval.compare_candidates',
+  RETRIEVAL_CANDIDATE_POOL_FALLBACK: 'retrieval.candidate_pool.fallback',
+  RETRIEVAL_CANDIDATE_POOL_ASSEMBLED: 'retrieval.candidate_pool.assembled',
+  RANKING_HYBRID_COMPLETE: 'ranking.hybrid.complete',
+
+  // Post-route / decision
+  POST_ROUTE_ENTER: 'post_route.enter',
+  POST_ROUTE_ENTROPY_ABSTAIN: 'post_route.entropy_abstain',
+  DECISION_PHASE_ENTER: 'decision.phase.enter',
+  DECISION_ENGINE_REQUEST: 'decision.engine.request',
+  DECISION_ENGINE_RESPONSE: 'decision.engine.response',
+  CACHE_SET_SKIPPED: 'cache.set_skipped',
+
+  // Hybrid use case
+  HYBRID_EXECUTE_START: 'hybrid.execute.start',
+  HYBRID_EXECUTE_RANKED: 'hybrid.execute.ranked',
+
+  // Batch
+  BATCH_SEARCH_START: 'batch.search.start',
+
+  // Resolve / interpret
+  RESOLVE_USE_CASE_START: 'resolve.use_case.start',
+  RESOLVE_CONSTRAINT_SAT_CONTRADICTED: 'resolve.constraint_sat.contradicted',
+  RESOLVE_USE_CASE_DONE: 'resolve.use_case.done',
+  INTERPRET_PLANNER_DONE: 'interpret.planner.done',
+
+  // Infrastructure HTTP
+  HTTP_EMBEDDING_OK: 'http.embedding.ok',
+  HTTP_EMBEDDING_HTTP_ERROR: 'http.embedding.http_error',
+  HTTP_EMBEDDING_TIMEOUT: 'http.embedding.timeout',
+  HTTP_EMBEDDING_NETWORK_ERROR: 'http.embedding.network_error',
+  HTTP_EMBEDDING_PARSE_ERROR: 'http.embedding.parse_error',
+
+  HTTP_RERANKER_OK: 'http.reranker.ok',
+  HTTP_RERANKER_HTTP_ERROR: 'http.reranker.http_error',
+  HTTP_RERANKER_TIMEOUT: 'http.reranker.timeout',
+  HTTP_RERANKER_NETWORK_ERROR: 'http.reranker.network_error',
+  HTTP_RERANKER_PARSE_ERROR: 'http.reranker.parse_error',
+
+  VESPA_QUERY: 'vespa.query',
+} as const;
+
+export type PipelineDebugStepId = (typeof PipelineDebugStep)[keyof typeof PipelineDebugStep];

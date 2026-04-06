@@ -117,13 +117,14 @@ describe('AnthropicLLMInjectionClassifier', () => {
     expect(result).toBe(true);
   });
 
-  it('fails open on API error', async () => {
+  it('propagates API errors to the caller so the gate can apply fail-open/closed policy', async () => {
+    // Previously the classifier swallowed all errors and returned false (safe),
+    // making judgeFailureMode='fail_closed' a dead code path.  Now errors are
+    // re-thrown so QueryEntrySecurityGate can enforce the operator's policy.
     anthropicMocks.messagesCreate.mockRejectedValueOnce(new Error('API connection error'));
 
     const classifier = new AnthropicLLMInjectionClassifier('sk-test');
-    const result = await classifier.classify('find wine');
-
-    expect(result).toBe(false);
+    await expect(classifier.classify('find wine')).rejects.toThrow('API connection error');
   });
 
   it('uses custom model when provided', async () => {

@@ -99,7 +99,7 @@ function parseWithSchema<T>(
   const parsed = schema.safeParse(response.json());
   if (!parsed.success) {
     throw new Error(
-      `${label} schema validation failed: ${JSON.stringify(z.treeifyError(parsed.error), null, 2)}`,
+      `${label} schema validation failed: ${JSON.stringify(parsed.error.flatten(), null, 2)}; raw_body=${response.body}`,
     );
   }
   return parsed.data;

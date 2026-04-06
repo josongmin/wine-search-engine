@@ -47,15 +47,16 @@ export interface ModeWeightProfile {
 }
 
 /**
- * Default weights (neutral hybrid profile).
- * Used as fallback when no mode-specific override applies.
+ * No-op fallback used when retrievalMode is undefined or unrecognised.
+ * All values are 0.0 so Math.max(baseWeight, 0) = baseWeight — the
+ * query-class weights are preserved exactly with no mode interference.
  */
 export const DEFAULT_WEIGHTS: ModeWeightProfile = {
-  lexicalWeight: 0.55,
-  semanticWeight: 0.30,
-  popularityWeight: 0.15,
-  entityIntegrityWeight: 0.05,
-  attributeAlignmentWeight: 0.05,
+  lexicalWeight: 0.0,
+  semanticWeight: 0.0,
+  popularityWeight: 0.0,
+  entityIntegrityWeight: 0.0,
+  attributeAlignmentWeight: 0.0,
   diversityWeight: 0.0,
   recencyWeight: 0.0,
   producerPrestigeWeight: 0.0,
@@ -211,7 +212,8 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
 
 /**
  * Returns the weight profile for a given retrieval mode.
+ * Falls back to DEFAULT_WEIGHTS for unknown or missing modes.
  */
-export function getModeWeights(mode: RetrievalMode): ModeWeightProfile {
-  return MODE_WEIGHT_PROFILES[mode];
+export function getModeWeights(mode: RetrievalMode | undefined): ModeWeightProfile {
+  return (mode !== undefined ? MODE_WEIGHT_PROFILES[mode] : undefined) ?? DEFAULT_WEIGHTS;
 }

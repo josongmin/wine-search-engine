@@ -18,6 +18,10 @@ import {
   SearchResponseSchema,
 } from '../schemas/search-response.schema.js';
 import {
+  InterpretResponseV2Schema,
+  SearchResponseV2HumanSchema,
+} from '../schemas/search-response-v2.schema.js';
+import {
   CreateWatchlistRequestSchema,
   CreateWatchlistResponseSchema,
   GetWatchlistResponseSchema,
@@ -52,6 +56,10 @@ export interface HttpRouteContract {
   readonly headers?: z.ZodTypeAny;
   readonly capabilities?: readonly SearchRouteCapability[];
   readonly responses: Readonly<Record<number, ResponseSchema>>;
+  /** API version string for x-version extension (e.g. '2' for V2 routes). */
+  readonly apiVersion?: string;
+  /** Response type tag for x-response-type extension (e.g. 'human', 'interpret'). */
+  readonly responseType?: string;
 }
 
 function defineRouteContract<T extends HttpRouteContract>(contract: T): T {
@@ -300,7 +308,7 @@ export const FeedbackSubmitRouteContract = defineRouteContract({
 });
 
 // ---------------------------------------------------------------------------
-// V2 route catalog — skeleton only (handler wiring in T6.5)
+// V2 route catalog — handler wiring added in T6.5
 // ---------------------------------------------------------------------------
 
 /**
@@ -309,7 +317,7 @@ export const FeedbackSubmitRouteContract = defineRouteContract({
  * Versioning matrix:
  *
  * Human routes:
- *   POST /v2/search              → SearchResponseV2Human
+ *   POST /v2/search              → SearchResponseV2Human (queryType: search | comparison)
  *   POST /v2/search/hybrid       → SearchResponseV2Human
  *   POST /v2/search/interpret    → InterpretResponseV2
  *
@@ -323,10 +331,77 @@ export const FeedbackSubmitRouteContract = defineRouteContract({
  *   /v1/search, /v1/search/hybrid, /v1/search/interpret, /v1/entity/resolve,
  *   /v1/batch-search, /v1/search/replay are adapter-compatible and maintained
  *   until post-Wave-3 deprecation.
+ *
+ * Full migration story — V1 maintenance policy, V2 adoption rules, machine/LLM
+ * migration steps, deprecation schedule, and the new-route decision tree:
+ *   docs/migration/v1-v2-api-migration.md
  */
-// V2 route skeletons — handler wiring in T6.5
 export const SEARCH_V2_ROUTES = {
   search: '/v2/search',
   hybrid: '/v2/search/hybrid',
   interpret: '/v2/search/interpret',
 } as const;
+
+export const SearchV2RouteContract = defineRouteContract({
+  operationId: 'search.v2.execute',
+  body: SearchRequestSchema,
+  capabilities: [
+    'security',
+    'decomposition',
+    'planner',
+    'SAT',
+    'cache',
+    'route_resolution',
+    'ranked_post_route',
+  ],
+  apiVersion: '2',
+  responseType: 'human',
+  responses: {
+    200: SearchResponseV2HumanSchema,
+    400: ErrorResponseSchema,
+    403: ErrorResponseSchema,
+    429: ErrorResponseSchema,
+    500: ErrorResponseSchema,
+  },
+});
+
+export const HybridV2RouteContract = defineRouteContract({
+  operationId: 'search.v2.hybrid',
+  body: HybridRequestSchema,
+  capabilities: [
+    'security',
+    'decomposition',
+    'planner',
+    'SAT',
+    'cache',
+    'forced_hybrid_retrieval',
+    'ranked_post_route',
+  ],
+  apiVersion: '2',
+  responseType: 'human',
+  responses: {
+    200: SearchResponseV2HumanSchema,
+    400: ErrorResponseSchema,
+    403: ErrorResponseSchema,
+    429: ErrorResponseSchema,
+    500: ErrorResponseSchema,
+  },
+});
+
+export const InterpretV2RouteContract = defineRouteContract({
+  operationId: 'search.v2.interpret',
+  body: InterpretRequestSchema,
+  capabilities: [
+    'security',
+    'planner_only',
+  ],
+  apiVersion: '2',
+  responseType: 'interpret',
+  responses: {
+    200: InterpretResponseV2Schema,
+    400: ErrorResponseSchema,
+    403: ErrorResponseSchema,
+    429: ErrorResponseSchema,
+    500: ErrorResponseSchema,
+  },
+});

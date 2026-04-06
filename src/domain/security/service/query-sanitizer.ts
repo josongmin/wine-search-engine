@@ -62,12 +62,21 @@ export class QuerySanitizer {
     ],
 
     // Command injection
+    // Note on false-positive risk: shell names (bash, sh, …) and exec() calls are
+    // unlikely in legitimate wine queries and are high-confidence injection signals.
+    // Backticks and $(...) are unambiguous.  For chaining, we remain conservative:
+    // a single pipe or semicolon can appear in English text, so we only block when
+    // both ; and && are present together, or when a pipe is followed by && or ;
+    // (clear chaining intent).  Previously these patterns existed in the array but
+    // were never evaluated (dead code) — only backticks/$(…)  and "; && together"
+    // were checked via inline code in Layer 1g.
     command_injection: [
-      /\b(?:bash|sh|cmd|powershell|bash|zsh)\b/i,
+      /\b(?:bash|sh|cmd|powershell|zsh)\b/i,   // removed duplicate 'bash'
       /\b(?:exec|system|eval|spawn)\s*\(/i,
       /`[^`]*`/,                        // Backticks
       /\$\([^)]*\)/,                    // Command substitution
-      /&&|;|\|\s*\w+\s*(?:&&|;|$)/,    // Command chaining
+      /(?=.*&&)(?=.*;)/,                // Both && and ; present (command chaining)
+      /\|\s*\w+\s*(?:&&|;)/,           // Pipe followed by chaining operator
     ],
 
     // Unicode / encoding tricks
@@ -153,17 +162,13 @@ export class QuerySanitizer {
       };
     }
 
-    // Layer 1g: Command injection (careful — Unix pipes common in English)
-    // Block immediately on high-confidence signals: backticks, $(...)
-    // Block on semicolon + && pattern (command chaining)
-    if (/`[^`]*`/.test(rawQuery) || /\$\([^)]*\)/.test(rawQuery)) {
-      return {
-        safe: false,
-        reason: 'COMMAND_INJECTION',
-      };
-    }
-    // Check for command chaining: semicolon and double ampersand both present
-    if (/;/.test(rawQuery) && /&&/.test(rawQuery)) {
+    // Layer 1g: Command injection — use the canonical INJECTION_PATTERNS entry so that
+    // all command-injection patterns (shell names, exec/system/eval, backticks, command
+    // substitution, chaining) are checked in one place.  The previous inline checks only
+    // covered backticks and "both ; and && present", leaving shell names, exec(), and
+    // command substitution completely undetected (dead code in INJECTION_PATTERNS).
+    const commandMatch = this.matchPatterns(rawQuery, 'command_injection');
+    if (commandMatch !== undefined) {
       return {
         safe: false,
         reason: 'COMMAND_INJECTION',

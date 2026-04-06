@@ -31,6 +31,7 @@ import { ConstraintOverlay } from '../../../src/domain/mixed/service/constraint-
 import { DrinkingWindowPredictor } from '../../../src/infrastructure/ml/drinking-window-predictor.js';
 import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/drinking-window.usecase.js';
 import { SearchUseCase } from '../../../src/application/search/search.usecase.js';
+import { DecomposedSearchAdapter } from '../../../src/application/search/decomposed-search-adapter.js';
 import { DecomposedSearchUseCase } from '../../../src/application/search/decomposed-search.usecase.js';
 import { BatchSearchUseCase } from '../../../src/application/search/batch-search.usecase.js';
 import { ReplayUseCase } from '../../../src/application/search/replay.usecase.js';
@@ -184,7 +185,9 @@ export function createTestContainer(): TestContainerParts {
     featureFlags: {},
   };
 
-  // Use cases
+  // Use cases — same DecomposedSearchAdapter cycle as production container-usecases.
+  const decomposedAdapter = new DecomposedSearchAdapter();
+
   const searchUseCase = new SearchUseCase({
     queryPlanner,
     entityResolver,
@@ -199,12 +202,17 @@ export function createTestContainer(): TestContainerParts {
     querySanitizer,
     injectionJudge,
     snapshotVersions,
+    decomposedSearch: decomposedAdapter,
   });
 
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
+  decomposedAdapter.setDelegate(decomposedSearchUseCase);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
-  const replayUseCase = new ReplayUseCase({ searchUseCase });
+  const replayUseCase = new ReplayUseCase({
+    searchUseCase,
+    snapshotVersions,
+  });
   const interpretUseCase = new InterpretUseCase({ queryPlanner, querySanitizer, injectionJudge });
   const resolveUseCase = new ResolveUseCase({
     queryPlanner,

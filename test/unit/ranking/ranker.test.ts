@@ -9,7 +9,10 @@ import type { ComponentScores } from '../../../src/domain/ranking/model/ranked-r
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js';
 import type { ConstraintBundle, EvidenceItem } from '../../../src/domain/shared/types/index.js';
+import type { QueryClassWeights } from '../../../src/domain/ranking/service/lambdamart-ranker.js';
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
+import { resolveChannelAwareWeights, resolveWeights } from '../../../src/domain/ranking/model/scoring-weights.js';
+import { getModeWeights } from '../../../src/domain/ranking/model/mode-weights.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -84,6 +87,60 @@ function makeInput(candidates: HybridCandidate[], rerankForced?: boolean): Ranki
     constraints: makeConstraints(),
     ...(rerankForced !== undefined ? { rerankForced } : {}),
   };
+}
+
+function makeInputWithOverrides(
+  candidates: HybridCandidate[],
+  overrides: Partial<RankingInput> & { queryPlan?: Partial<QueryPlanV1> } = {},
+): RankingInput {
+  return {
+    queryPlan: {
+      ...makeQueryPlan(),
+      ...overrides.queryPlan,
+    } as QueryPlanV1,
+    candidates,
+    constraints: makeConstraints(),
+    ...(overrides.anchorProfile !== undefined ? { anchorProfile: overrides.anchorProfile } : {}),
+    ...(overrides.rerankForced !== undefined ? { rerankForced: overrides.rerankForced } : {}),
+  };
+}
+
+function resolveExpectedRankerWeights(input: RankingInput, channels: readonly string[]) {
+  const baseWeights = resolveWeights(input.queryPlan.queryClass);
+  const modeProfile = getModeWeights(input.queryPlan.retrievalMode);
+  const overlaid = {
+    ...baseWeights,
+    semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
+    popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
+    attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
+    preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
+    producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
+    recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
+  };
+  const nonPenaltyKeys = [
+    'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
+    'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
+    'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+  ] as const;
+  const baseSum = nonPenaltyKeys.reduce((s, k) => s + (baseWeights[k] ?? 0), 0);
+  const overlaidSum = nonPenaltyKeys.reduce((s, k) => s + (overlaid[k] ?? 0), 0);
+  const normFactor = overlaidSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
+  const modeAdjusted = normFactor === 1 ? overlaid : {
+    ...overlaid,
+    entityIntegrity: overlaid.entityIntegrity * normFactor,
+    anchorSimilarity: overlaid.anchorSimilarity * normFactor,
+    semantic: overlaid.semantic * normFactor,
+    softConstraint: overlaid.softConstraint * normFactor,
+    attributeAlignment: overlaid.attributeAlignment * normFactor,
+    preferenceAlignment: overlaid.preferenceAlignment * normFactor,
+    popularity: overlaid.popularity * normFactor,
+    availability: overlaid.availability * normFactor,
+    producerPrestige: overlaid.producerPrestige * normFactor,
+    recency: overlaid.recency * normFactor,
+    criticScore: overlaid.criticScore * normFactor,
+    multilingualScore: overlaid.multilingualScore * normFactor,
+  };
+  return resolveChannelAwareWeights(channels, modeAdjusted);
 }
 
 /** A simple evidence item stub. */
@@ -290,6 +347,81 @@ describe('Ranker', () => {
     });
   });
 
+  describe('channel-aware primary rank (T5.3)', () => {
+    it('passes channel-adjusted weights into the score aggregator for learned sparse candidates', async () => {
+      const candidate: HybridCandidate = {
+        ...makeCandidate('wine-learned-sparse'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['learned_sparse'],
+        },
+      } as HybridCandidate;
+      const aggregate = vi.fn().mockReturnValue(0.8);
+      const aggregator = { aggregate } as unknown as ScoreAggregator;
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        aggregator,
+        makeEvidenceMapper(),
+      );
+
+      const input = makeInput([candidate]);
+      await ranker.rank(input);
+
+      const passedWeights = aggregate.mock.calls[0]?.[1];
+      expect(passedWeights).toEqual(
+        resolveExpectedRankerWeights(input, ['learned_sparse']),
+      );
+    });
+
+    it('uses different channel-aware weight profiles for sparse-only and relative-filter candidates', async () => {
+      const sparseCandidate: HybridCandidate = {
+        ...makeCandidate('wine-sparse'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+          candidateSources: ['sparse_bm25'],
+        },
+      } as HybridCandidate;
+      const relativeCandidate: HybridCandidate = {
+        ...makeCandidate('wine-relative'),
+        retrievalTrace: {
+          retrievalProfile: 'default',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: ['relative'],
+          candidateSources: ['relative_filter'],
+        },
+      } as HybridCandidate;
+      const aggregate = vi.fn()
+        .mockReturnValueOnce(0.7)
+        .mockReturnValueOnce(0.6);
+      const aggregator = { aggregate } as unknown as ScoreAggregator;
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        aggregator,
+        makeEvidenceMapper(),
+      );
+
+      const input = makeInput([sparseCandidate, relativeCandidate]);
+      await ranker.rank(input);
+
+      const sparseWeights = aggregate.mock.calls[0]?.[1];
+      const relativeWeights = aggregate.mock.calls[1]?.[1];
+      expect(sparseWeights).not.toEqual(relativeWeights);
+      expect(sparseWeights).toEqual(
+        resolveExpectedRankerWeights(input, ['sparse_bm25']),
+      );
+      expect(relativeWeights).toEqual(
+        resolveExpectedRankerWeights(input, ['relative_filter']),
+      );
+    });
+  });
+
   describe('-Infinity filtering', () => {
     it('all -Infinity scores → returns []', async () => {
       const candidates = [makeCandidate('wine-001'), makeCandidate('wine-002')];
@@ -420,6 +552,125 @@ describe('Ranker', () => {
 
       expect(results).toHaveLength(10);
     });
+
+    it('uses has_anchor gate reason and executes reranking when anchor profile is present', async () => {
+      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-anchor-${i}`));
+      const rerankResults: RerankResult[] = candidates.map((candidate, index) => ({
+        entityId: candidate.entityId,
+        score: 0.9 - index * 0.05,
+        rank: index + 1,
+      }));
+      const { port, spy } = makeReranker(rerankResults);
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregator(0.5),
+        makeEvidenceMapper(),
+        { reranker: port },
+      );
+
+      await ranker.rank(makeInputWithOverrides(candidates, {
+        anchorProfile: { anchorEntityId: createEntityId('anchor-1') } as never,
+      }));
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(ranker.getLastRerankGateReason()).toBe('has_anchor');
+      expect(ranker.getLastRerankExecuted()).toBe(true);
+    });
+
+    it('uses already_precise gate reason and skips reranking for exact_lookup route', async () => {
+      const candidates = Array.from({ length: 8 }, (_, i) => makeCandidate(`wine-exact-${i}`));
+      const { port, spy } = makeReranker([]);
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregator(0.5),
+        makeEvidenceMapper(),
+        { reranker: port },
+      );
+
+      await ranker.rank(makeInputWithOverrides(candidates, {
+        queryPlan: {
+          route: 'exact_lookup',
+        },
+      }));
+
+      expect(spy).not.toHaveBeenCalled();
+      expect(ranker.getLastRerankGateReason()).toBe('already_precise');
+      expect(ranker.getLastRerankExecuted()).toBe(false);
+    });
+
+    it('learned LTR rerank is skipped when gate returns shouldRerank=false (too_few_candidates)', async () => {
+      // Regression test: previously, ltrModels presence caused the learned rerank
+      // to fire even when gateDecision.shouldRerank === false (gate was bypassed).
+      // With <5 candidates the gate always returns shouldRerank=false (too_few_candidates).
+      // The learned LTR rerank must NOT execute in this case.
+      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-gate-${i}`));
+      const aggregatorScores = [0.9, 0.7, 0.5];
+
+      // A minimal LTR model for 'semantic_preference' with neutral uniform weights.
+      const ltrModel: QueryClassWeights = {
+        queryClass: 'semantic_preference',
+        weights: [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125],
+        bias: 0.5,
+        trainingExampleCount: 10,
+        ndcg5ValidationScore: 0.8,
+        trainedAt: new Date(),
+      };
+      const ltrModels = new Map([['semantic_preference', ltrModel]]);
+
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregatorSequence(aggregatorScores),
+        makeEvidenceMapper(),
+        { ltrModels },
+      );
+
+      const results = await ranker.rank(makeInput(candidates));
+
+      // Gate returns too_few_candidates (< 5), so LTR rerank must NOT run.
+      expect(ranker.getLastRerankExecuted()).toBe(false);
+      expect(ranker.getLastRerankGateReason()).toBe('too_few_candidates');
+
+      // Original ordering must be preserved (LTR rerank did not run).
+      expect(results).toHaveLength(3);
+      expect(results[0]!.finalScore).toBeCloseTo(0.9, 5);
+      expect(results[1]!.finalScore).toBeCloseTo(0.7, 5);
+      expect(results[2]!.finalScore).toBeCloseTo(0.5, 5);
+    });
+
+    it('learned LTR rerank executes when gate returns shouldRerank=true (rerankForced)', async () => {
+      // Companion test: with rerankForced=true and an LTR model, the learned
+      // rerank must fire. Verifies the gate-pass path works after the bug fix.
+      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-ltr-${i}`));
+      const aggregatorScores = [0.9, 0.5, 0.3];
+
+      const ltrModel: QueryClassWeights = {
+        queryClass: 'semantic_preference',
+        // Weights that heavily favour bm25Score (feature[0]); all features
+        // are 0.0 in extractLTRFeatures (bm25 sentinel), so scores collapse
+        // to bias=0.5. This still exercises the LTR path without needing real
+        // feature data.
+        weights: [1.0, 0, 0, 0, 0, 0, 0, 0],
+        bias: 0.5,
+        trainingExampleCount: 10,
+        ndcg5ValidationScore: 0.8,
+        trainedAt: new Date(),
+      };
+      const ltrModels = new Map([['semantic_preference', ltrModel]]);
+
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregatorSequence(aggregatorScores),
+        makeEvidenceMapper(),
+        { ltrModels },
+      );
+
+      // rerankForced bypasses the too_few_candidates gate rule.
+      const results = await ranker.rank(makeInput(candidates, true));
+
+      // LTR rerank must have executed.
+      expect(ranker.getLastRerankExecuted()).toBe(true);
+      expect(results).toHaveLength(3);
+    });
   });
 
   describe('score blending', () => {
@@ -527,6 +778,33 @@ describe('Ranker', () => {
       for (let i = 0; i < results.length - 1; i++) {
         expect(results[i]!.finalScore).toBeGreaterThanOrEqual(results[i + 1]!.finalScore);
       }
+    });
+
+    it('surfaces reranker timeout fallback as a degraded runtime signal', async () => {
+      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const reranker: RerankerPort = {
+        rerank: async () => {
+          throw new Error('Reranker service: request timed out after 30000ms');
+        },
+      };
+
+      const ranker = new Ranker(
+        makeSignalComputer(makeComponentScores()),
+        makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]),
+        makeEvidenceMapper(),
+        { reranker },
+      );
+
+      await ranker.rank(makeInput(candidates, true));
+
+      expect(ranker.getLastRuntimeSignal()).toEqual({
+        rerankerStatus: 'failed',
+        rerankerFailureReason: 'timeout',
+        degradation: {
+          executionMode: 'degraded',
+          degradationReasons: ['reranker_timeout'],
+        },
+      });
     });
   });
 });

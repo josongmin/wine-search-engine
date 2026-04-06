@@ -62,4 +62,62 @@ describe('InterpretUseCase', () => {
       },
     });
   });
+
+  it('builds V2 explain with retrieval-profile active channels instead of an empty placeholder', async () => {
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'wines like Sassicaia',
+        normalizedQuery: 'wines like sassicaia',
+        intent: 'semantic_discovery',
+        route: 'mixed',
+        retrievalMode: 'recommendation',
+        queryClass: 'anchored_similarity',
+        anchors: [{
+          entityId: createEntityId('sassicaia'),
+          label: 'Sassicaia',
+          confidence: 0.97,
+          type: 'wine',
+        }],
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] },
+        policy: {},
+        uncertainty: {
+          overall: 0.2,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          ambiguitySeverity: 'low',
+          decisionEffect: 'trace_only',
+          parserConfidence: 0.92,
+          anchorConfidence: 0.97,
+          constraintConfidence: 0.9,
+        },
+        plannerVersion: '1',
+        policyRuleVersion: '1',
+        thresholdProfileId: 'default',
+      }),
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner,
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'wines like Sassicaia',
+        }),
+      },
+    });
+
+    const result = await useCase.execute({
+      query: 'wines like Sassicaia',
+      context: { locale: 'en-US', currency: 'USD' },
+      buildV2: true,
+    });
+
+    expect(result.v2Explain.activeChannels).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'anchor_similarity',
+    ]);
+    expect(result.v2Explain.rankingSignals).toContain('anchor_similarity');
+  });
 });

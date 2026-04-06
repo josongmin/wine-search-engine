@@ -51,6 +51,11 @@ export class ScoreAggregator {
     score += signals.preferenceAlignment * weights.preferenceAlignment;
     score += signals.popularity * weights.popularity;
     score += signals.availability * weights.availability;
+    // SOTA++ signals — only contribute when the mode weights them (> 0)
+    score += (signals.producerPrestige ?? 0) * weights.producerPrestige;
+    score += (signals.recency ?? 0) * weights.recency;
+    score += (signals.criticScore ?? 0) * weights.criticScore;
+    score += (signals.multilingualScore ?? 0) * weights.multilingualScore;
 
     // Uncertainty penalty is subtracted
     score -= signals.uncertaintyPenalty * weights.uncertaintyPenalty;

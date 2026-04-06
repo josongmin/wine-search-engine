@@ -75,6 +75,21 @@ function makeBronzeFixtures(): BronzeRow[] {
             { group: 'oak', stats: { count: 18 } },
           ],
         },
+        // SOTA++ fields — exercises parseAlcohol, producerPrestige, isTopRated, merchant_prices
+        alcohol: '14.5%',
+        winery_rating: 4.6,
+        winery_wine_count: 2,
+        winery_rating_count: 1200,
+        winery_location: 'Napa Valley',
+        badges: ['Top 1%', 'Best Value'],
+        varietal: 'Cabernet Sauvignon, Merlot',
+        rating_count: 812,
+        bottle_ml: 750,
+        merchant_prices: [
+          { price: 420, currency: 'USD', merchant: 'WineAccess' },
+          { price: 435, currency: 'USD', merchant: 'VinoCellars' },
+          { price: 410, currency: 'USD', merchant: 'WineSearcher' },
+        ],
       },
     },
     {
@@ -120,6 +135,10 @@ function makeBronzeFixtures(): BronzeRow[] {
           },
           flavor: [{ group: 'black-fruit', stats: { count: 10 } }],
         },
+        // Older scrape — lacks some SOTA++ fields to exercise mergeSOTAPlusFields()
+        alcohol: '14.5%',
+        winery_rating: 4.6,
+        badges: [],
       },
     },
     {
@@ -168,6 +187,20 @@ function makeBronzeFixtures(): BronzeRow[] {
             { group: 'floral', stats: { count: 9 } },
           ],
         },
+        // SOTA++ fields for Margaux
+        alcohol: '13.0%',
+        winery_rating: 4.9,
+        winery_wine_count: 4,
+        winery_rating_count: 5000,
+        winery_location: 'Margaux',
+        badges: ['Top 1%'],
+        varietal: 'Cabernet Sauvignon, Merlot, Petit Verdot',
+        rating_count: 620,
+        bottle_ml: 750,
+        merchant_prices: [
+          { price: 950, currency: 'USD', merchant: 'WineAccess' },
+          { price: 980, currency: 'USD', merchant: 'VinoCellars' },
+        ],
       },
     },
   ];

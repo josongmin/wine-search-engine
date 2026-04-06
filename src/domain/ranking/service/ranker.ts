@@ -3,10 +3,13 @@ import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js'
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
+import type { RankerRuntimeSignal, RerankerFailureReason } from '../model/ranking-runtime-signal.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import type { QueryClassWeights } from '../index.js';
 import { resolveWeights, resolveChannelAwareWeights } from '../model/scoring-weights.js';
+import type { ScoringWeights } from '../model/scoring-weights.js';
+import { getModeWeights } from '../model/mode-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
@@ -24,6 +27,14 @@ const DEFAULT_RERANK_TOP_K = 20;
 
 /** Max characters sent to the cross-encoder (latency + model context). */
 const RERANK_PASSAGE_MAX_CHARS = 1200;
+
+function classifyRerankerFailureReason(error: unknown): RerankerFailureReason {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes('timed out')) return 'timeout';
+  if (message.includes('http')) return 'http_error';
+  if (message.includes('unexpected response shape')) return 'parse_error';
+  return 'unknown';
+}
 
 /**
  * Builds a wine-aware passage text for cross-encoder reranking (RFC-017 §5.2).
@@ -106,18 +117,31 @@ function applyLearnedLtrRerank(
       popularity: doc.componentScores.popularity,
       attributeAlignment: doc.componentScores.attributeAlignment,
       preferenceAlignment: doc.componentScores.preferenceAlignment,
+      // SOTA++ signals — forward all optional fields so LTR model can use them
+      ...(doc.componentScores.criticScore !== undefined
+        ? { criticScore: doc.componentScores.criticScore }
+        : {}),
+      ...(doc.componentScores.recency !== undefined
+        ? { recency: doc.componentScores.recency }
+        : {}),
+      ...(doc.componentScores.producerPrestige !== undefined
+        ? { producerPrestige: doc.componentScores.producerPrestige }
+        : {}),
+      ...(doc.componentScores.multilingualScore !== undefined
+        ? { multilingualScore: doc.componentScores.multilingualScore }
+        : {}),
     }),
     originalRank: idx + 1,
   }));
 
   const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
-  const originalByEntity = new Map(
-    rankedResults.map((result) => [String(result.entityId), result]),
+  const originalByEntity = new Map<string, RankedResult>(
+    rankedResults.map((result) => [result.entityId, result]),
   );
 
   return rerankedDocs
     .map((reranked) => {
-      const original = originalByEntity.get(String(reranked.entityId));
+      const original = originalByEntity.get(reranked.entityId);
       if (original === undefined) {
         return undefined;
       }
@@ -197,6 +221,7 @@ export class Ranker {
   private _lastCoarsePruneSummary: CoarsePruneStageSummary | undefined;
   private _lastRerankExecuted = false;
   private _lastRerankGateReason: string | undefined;
+  private _lastRuntimeSignal: RankerRuntimeSignal | undefined;
   /** T5.6: Top-5 entityIds captured immediately after primary sort, before rerank. */
   private _lastPreRerankTop5: readonly string[] = [];
   private readonly signalComputer: SignalComputer;
@@ -254,6 +279,10 @@ export class Ranker {
     return this._lastRerankGateReason;
   }
 
+  getLastRuntimeSignal(): RankerRuntimeSignal | undefined {
+    return this._lastRuntimeSignal;
+  }
+
   /**
    * T5.6: Returns the top-5 entityIds captured immediately after primary_rank
    * sort but before precision rerank ran. Used by RankingStagePipeline to
@@ -275,13 +304,59 @@ export class Ranker {
 
     this._lastRerankExecuted = false;
     this._lastRerankGateReason = undefined;
+    this._lastRuntimeSignal = undefined;
     this._lastPreRerankTop5 = [];
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
 
-    // Step 2: Select weights based on query class
-    const weights = resolveWeights(queryPlan.queryClass);
+    // Step 2: Select weights based on query class, then overlay retrieval-mode
+    // specific boosts from mode-weights.ts (producer prestige, recency, geo).
+    const baseWeights = resolveWeights(queryPlan.queryClass);
+    const modeProfile = getModeWeights(queryPlan.retrievalMode);
+    // Mode overlay: max(queryClass base, mode boost).
+    // DEFAULT_WEIGHTS are all 0.0 (no-op) so neutral/undefined modes preserve base.
+    // Explicit modes (producer_browse etc.) can only raise a signal, never suppress.
+    // After overlay, re-normalise so the non-penalty sum is preserved — otherwise
+    // Math.max can inflate the total (e.g. popularity 0.02→0.15 adds +0.13).
+    const overlaid: ScoringWeights = {
+      ...baseWeights,
+      semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
+      popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
+      attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
+      preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
+      producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
+      recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
+    };
+    const nonPenaltyFields = [
+      'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
+      'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
+      'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+    ] as const;
+    const baseSum = nonPenaltyFields.reduce((s, k) => s + baseWeights[k], 0);
+    const overlaidSum = nonPenaltyFields.reduce((s, k) => s + overlaid[k], 0);
+    const modeNormFactor = overlaidSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
+    const weights: ScoringWeights = modeNormFactor === 1 ? overlaid : {
+      ...overlaid,
+      entityIntegrity: overlaid.entityIntegrity * modeNormFactor,
+      anchorSimilarity: overlaid.anchorSimilarity * modeNormFactor,
+      semantic: overlaid.semantic * modeNormFactor,
+      softConstraint: overlaid.softConstraint * modeNormFactor,
+      attributeAlignment: overlaid.attributeAlignment * modeNormFactor,
+      preferenceAlignment: overlaid.preferenceAlignment * modeNormFactor,
+      popularity: overlaid.popularity * modeNormFactor,
+      availability: overlaid.availability * modeNormFactor,
+      producerPrestige: overlaid.producerPrestige * modeNormFactor,
+      recency: overlaid.recency * modeNormFactor,
+      criticScore: overlaid.criticScore * modeNormFactor,
+      multilingualScore: overlaid.multilingualScore * modeNormFactor,
+    };
+
+    // Pre-compute query-level signals shared across all candidates.
+    const referenceYear = new Date().getFullYear();
+    const queryContainsHangul = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(
+      queryPlan.rawQuery,
+    );
 
     for (const candidate of candidates) {
       const componentScores = this.signalComputer.computeAll(
@@ -289,6 +364,8 @@ export class Ranker {
         queryPlan,
         constraints,
         anchorProfile,
+        referenceYear,
+        queryContainsHangul,
       );
       const constraintState = buildConstraintState(input, candidate);
 
@@ -390,6 +467,11 @@ export class Ranker {
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
     const hasLearnedRerank = this.ltrModels?.has(queryPlan.queryClass) ?? false;
+    // Tracks whether the gate cleared the learned LTR rerank for this request.
+    // Must only be set inside the `gateDecision.shouldRerank` block so the gate
+    // is honoured — setting it outside would bypass short_entity / too_few_candidates
+    // rules and run LTR on every query regardless of quality signals.
+    let shouldApplyLearnedRerank = false;
     if (this.reranker !== undefined || hasLearnedRerank) {
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
@@ -412,7 +494,9 @@ export class Ranker {
               effectiveTopK,
             );
             this._lastRerankExecuted = true;
+            this._lastRuntimeSignal = { rerankerStatus: 'executed' };
           } catch (err) {
+            const rerankerFailureReason = classifyRerankerFailureReason(err);
             bootstrapLogger.warn(
               {
                 err: err instanceof Error ? err.message : String(err),
@@ -420,14 +504,24 @@ export class Ranker {
                 viableCount: viable.length,
                 rerankTopK: effectiveTopK,
                 gateReason: gateDecision.reason,
+                rerankerFailureReason,
               },
               '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
             );
             finalOrder = viable;
+            this._lastRuntimeSignal = {
+              rerankerStatus: 'failed',
+              rerankerFailureReason,
+              degradation: {
+                executionMode: 'degraded',
+                degradationReasons: [`reranker_${rerankerFailureReason}`],
+              },
+            };
           }
         }
         if (hasLearnedRerank) {
           this._lastRerankExecuted = true;
+          shouldApplyLearnedRerank = true;
         }
       }
     }
@@ -489,7 +583,7 @@ export class Ranker {
       };
     });
 
-    if (this._lastRerankGateReason !== undefined && hasLearnedRerank) {
+    if (shouldApplyLearnedRerank) {
       results = applyLearnedLtrRerank(
         results,
         queryPlan.queryClass,

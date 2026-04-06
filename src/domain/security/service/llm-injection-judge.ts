@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
@@ -15,7 +16,7 @@ const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
  * - Single responsibility: judge **only** whether query is a prompt injection attempt
  * - Input: raw query string (no context, no conversation history)
  * - Output: boolean (is_injection)
- * - Caching: Redis, 1h TTL, keyed by base64url(query[:32])
+ * - Caching: Redis, 1h TTL, keyed by SHA-256(full query) — full hash prevents prefix-collision bypass
  * - Fallback: cache miss → query classifier once, store result
  * - Cost: ~0.1ms cached, ~1-2s uncached (amortized across many queries)
  * - Safety: model instructions explicitly reject pattern leakage in explanation
@@ -104,16 +105,22 @@ export class LLMInjectionJudge implements InjectionJudgePort {
   }
 
   /**
-   * Builds a cache key from the query string.
-   * Uses first 32 chars (base64url encoded) to keep keys short and deterministic.
+   * Builds a cache key from the full query string using SHA-256.
+   *
+   * Using only the first N characters was a collision vulnerability: two queries
+   * sharing the same prefix produced the same key. A safe query could prime the
+   * cache and a subsequent injection attempt with the same prefix would be served
+   * the cached "safe" result without classifier evaluation.
+   *
+   * SHA-256 of the full query produces a collision-resistant 64-char hex key at
+   * negligible CPU cost (< 1 µs for sub-500-char queries).
    *
    * @param query - The full query string
    * @returns Cache key for Redis
    */
   private buildCacheKey(query: string): string {
-    const prefix = query.slice(0, 32);
-    const encoded = Buffer.from(prefix).toString('base64url');
-    return `${LLMInjectionJudge.CACHE_KEY_PREFIX}${encoded}`;
+    const digest = createHash('sha256').update(query, 'utf8').digest('hex');
+    return `${LLMInjectionJudge.CACHE_KEY_PREFIX}${digest}`;
   }
 
   /**

@@ -1,5 +1,13 @@
 {
   "name": "exact-entity",
+  "request": {
+    "query": "Opus One 2018",
+    "options": {
+      "mode": "entity",
+      "explain": false,
+      "clarification": false
+    }
+  },
   "expected": {
     "execution_mode": "authoritative",
     "degradation_reasons": []

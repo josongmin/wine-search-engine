@@ -6,12 +6,13 @@ default:
     @just --list
 
 # Docker test stack overrides (wine-search-test: PG 5433, Redis 6380, Vespa 18080)
-_test_env := "PORT=4000 PG_HOST=localhost PG_PORT=5433 PG_DATABASE=wine_engine_test PG_USER=wine PG_PASSWORD=wine_test REDIS_URL=redis://localhost:6380 VESPA_URL=http://localhost:18080"
+_test_env := "PORT=4000 PG_HOST=localhost PG_PORT=5433 PG_DATABASE=wine_engine_test PG_USER=wine PG_PASSWORD=wine_test REDIS_URL=redis://localhost:6380 VESPA_URL=http://localhost:18080 KILL_SWITCH_LEARNING=true"
 
 # Fastify API — tsx watch against Docker test stack
+# --ignore prevents tsx from restarting on register-contract-route.ts changes (ESM path issue)
 alias d := api
 api:
-    env {{_test_env}} npm run dev
+    env {{_test_env}} npx tsx watch --ignore './src/interface/http/routes/register-contract-route.ts' src/main.ts
 
 # Legacy alias: plain dev (uses whatever .env says)
 dev:
@@ -32,7 +33,7 @@ full:
     @just _kill 3000
     @sleep 1
     @echo "Starting backend (4000) + frontend (3000)..."
-    @env {{_test_env}} npm run dev & cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
+    @env {{_test_env}} npx tsx watch --ignore './src/interface/http/routes/register-contract-route.ts' src/main.ts & cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
 
 # ── Docker infra ─────────────────────────────────────────────────────────────
 

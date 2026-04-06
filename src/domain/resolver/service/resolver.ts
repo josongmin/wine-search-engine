@@ -22,6 +22,13 @@ import type {
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
 
+function classifyLearnedMatcherFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return message.includes('timed out')
+    ? 'learned_matcher_timeout'
+    : 'learned_matcher_failed';
+}
+
 /**
  * Input required to run the entity resolution pipeline.
  */
@@ -176,6 +183,7 @@ export class Resolver {
     // Step 2.5: Optionally blend learned match probabilities (RFC-006 §5.2)
     let blendedScored = adjustedScored;
     let learnedMatcherOutputs: readonly LearnedMatcherOutput[] | undefined;
+    const degradationReasons = new Set<string>();
     if (this.learnedMatcher !== undefined && adjustedScored.length > 0) {
       try {
         const blended = await this.applyLearnedMatcherBlend(
@@ -186,13 +194,21 @@ export class Resolver {
         );
         blendedScored = blended.scored;
         learnedMatcherOutputs = blended.learnedOutputs;
-      } catch {
+      } catch (error) {
         blendedScored = adjustedScored;
+        degradationReasons.add(classifyLearnedMatcherFailureReason(error));
       }
     }
 
-    // Step 3: Sort by raw score descending
-    blendedScored.sort((a, b) => b.rawScore - a.rawScore);
+    // Step 3: Sort by raw score descending.
+    // Tiebreak on entityId string to guarantee a stable, deterministic order
+    // when two candidates share identical raw scores (e.g. vintage siblings
+    // "Opus One 2018" vs "Opus One 2019" matched by the same alias signals).
+    blendedScored.sort((a, b) => {
+      const scoreDiff = b.rawScore - a.rawScore;
+      if (scoreDiff !== 0) return scoreDiff;
+      return String(a.candidate.entityId).localeCompare(String(b.candidate.entityId));
+    });
 
     // Step 4: Calibrate top scores
     const top1RawScore = blendedScored[0]?.rawScore ?? 0;
@@ -254,6 +270,9 @@ export class Resolver {
           }
         : {}),
       candidates: resolvedCandidates,
+      ...(degradationReasons.size > 0
+        ? { degradation: { reasons: [...degradationReasons] } }
+        : {}),
       ...(ambiguityState.detected
         ? {
             ambiguity: {
@@ -269,6 +288,7 @@ export class Resolver {
 
     return result;
   }
+
 
   /**
    * Applies the RFC-006 decision boundary:

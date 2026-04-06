@@ -56,7 +56,7 @@ describe('DefaultProtectedRecallPolicy', () => {
   it('classifies anchor-conditioned candidates as anchor_conditioned', () => {
     const c = makeCandidate('e2', {
       anchorConditioned: true,
-      channelScores: [{ channel: 'dense_anchor', rawScore: 0.8, rank: 2, rrfContribution: 0.8 }],
+      channelScores: [{ channel: 'anchor_similarity', rawScore: 0.8, rank: 2, rrfContribution: 0.8 }],
     });
     const result = policy.classify(c);
     expect(result.protect).toBe(true);

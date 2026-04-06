@@ -41,4 +41,12 @@ alwaysApply: true
 - `src/interface/` — HTTP, CLI.
 - `src/config/` — env and DI container.
 
+## Debug HTTP & pipeline logging
+
+- **`.ai/llm-debugging-playbook.md`** — **start here for LLM-led debugging:** log shape, `step` order, symptom→file, grep, pitfalls.
+- **`.ai/debug-mode.md`** — `HTTP_DEBUG_SECRET`, `X-Debug-Key`, `pipeline_debug` / `pipelineDebug()` usage, scope, limitations (batch parallel, non-contract routes).
+- **`src/observability/pipeline-debug-steps.ts`** — `PipelineDebugStep` constants for `step` fields.
+- **`.ai/pipeline-debug-steps.md`** — short index for the step catalog.
+- **`.ai/README.md`** — index of repo-local agent/operator notes under `.ai/`.
+
 Longer context for humans and Claude Code: root **`CLAUDE.md`**.

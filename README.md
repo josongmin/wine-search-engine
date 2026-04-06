@@ -2,7 +2,7 @@
 
 와인 인텔리전스 / 검색 백엔드: **TypeScript**, **Node.js 22**, **Fastify** HTTP API, **PostgreSQL**, **Redis**, **Vespa** 검색, 선택적 **HTTP ML 서비스**(임베딩, 크로스 인코더 리랭크, 학습형 매처).
 
-이 문서는 **이 저장소에서 작업하는 엔지니어**를 위한 것입니다. 제품 동작·용어는 **`docs/RFC-*.md`**를 따릅니다. 에디터/에이전트 단축: **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/wine-search-engine.mdc`**.
+이 문서는 **이 저장소에서 작업하는 엔지니어**를 위한 것입니다. 제품 동작·용어는 **`docs/RFC-*.md`**를 따릅니다. 에디터/에이전트 단축: **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/wine-search-engine.mdc`**. **HTTP 요청 추적·에이전트 자율 디버깅:** **`.ai/llm-debugging-playbook.md`** (플레이북), **`.ai/debug-mode.md`** (활성화·한계).
 
 ### 문서 지도
 
@@ -249,7 +249,7 @@ flowchart TD
 | `npm run eval:noisy:smoke` | `data/noisy-entity-eval-smoke-results.json` 생성(로컬·아티팩트용) |
 | `npm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
 | `npm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) |
-| `npm run test:verification:core` | 로컬/나이틀리용: `typecheck` + `e2e:contract` + `e2e:fast` + `e2e:runtime` + `ingest:contract` + `test:verification:noisy` |
+| `npm run test:verification:core` | 로컬/나이틀리용: `typecheck` + `e2e:contract` + `e2e:runtime` + `ingest:contract` + `test:verification:noisy` |
 | `npm run eval:offline:*` | 전체 오프라인 티어; 스모크 베이스라인: `eval:offline:smoke:assert-baseline` |
 
 ---

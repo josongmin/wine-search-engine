@@ -5,6 +5,7 @@ import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
+import { MixedRouteDegradationError } from '../../../domain/mixed/model/mixed-degradation.js';
 
 function makePlan(overrides: Partial<QueryPlanV1>): QueryPlanV1 {
   return {
@@ -50,7 +51,7 @@ function makeCandidate(entityId: string, label: string): HybridCandidate {
       lexicalQueriesUsed: ['Opus One'],
       semanticQueriesUsed: [],
       filtersApplied: [],
-      candidateSources: ['sparse'],
+      candidateSources: ['sparse_bm25', 'browse_producer'],
     },
   };
 }
@@ -223,6 +224,37 @@ describe('SearchUseCase specialized retrieval routing', () => {
     expect(deps.candidatePool.generate).not.toHaveBeenCalled();
   });
 
+  it('falls back to candidate-pool relative retrieval when compare retriever returns no candidates', async () => {
+    const plan = makePlan({
+      rawQuery: 'opus one vs napa cabs',
+      normalizedQuery: 'opus one vs napa cabs',
+      intent: 'comparison_search',
+      retrievalMode: 'compare_candidates',
+      queryClass: 'comparison_query',
+    });
+    vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
+    vi.mocked(deps.compareRetriever!.compareAgainstAnchor).mockResolvedValue([]);
+    vi.mocked(deps.candidatePool.generate).mockResolvedValue([
+      makeCandidate('wine-3', 'Fallback Relative Candidate'),
+    ]);
+
+    const useCase = new SearchUseCase(deps);
+    await useCase.execute({ query: 'opus one vs napa cabs' }, 'req-compare-fallback');
+
+    expect(deps.compareRetriever?.compareAgainstAnchor).toHaveBeenCalledWith(
+      'wine-1',
+      plan.constraints,
+      20,
+    );
+    expect(deps.candidatePool.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryPlan: plan,
+        route: 'hybrid',
+        anchorEntityId: 'wine-1',
+      }),
+    );
+  });
+
   it('hydrates entity-route resolver candidates from entityLookup before resolve', async () => {
     const plan = makePlan({
       route: 'entity',
@@ -247,6 +279,36 @@ describe('SearchUseCase specialized retrieval routing', () => {
             canonicalLabel: 'Opus One 2018',
           }),
         ],
+      }),
+    );
+  });
+
+  it('surfaces mixed anchor failures as degraded response contracts instead of throwing', async () => {
+    const plan = makePlan({
+      rawQuery: 'opus one 같은 와인',
+      normalizedQuery: 'opus one 같은 와인',
+      intent: 'mixed_query',
+      route: 'mixed',
+      retrievalMode: 'similar_items',
+      queryClass: 'anchored_similarity',
+    });
+    vi.mocked(deps.queryPlanner.plan).mockResolvedValue(plan);
+    vi.mocked(deps.mixedSolver.solve).mockRejectedValue(
+      new MixedRouteDegradationError(
+        'mixed_anchor_resolution_failed',
+        'anchor missing',
+      ),
+    );
+
+    const useCase = new SearchUseCase(deps);
+    await useCase.execute({ query: 'opus one 같은 와인' }, 'req-mixed-anchor');
+
+    expect(deps.responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: {
+          executionMode: 'degraded',
+          degradationReasons: ['mixed_anchor_resolution_failed'],
+        },
       }),
     );
   });

@@ -25,6 +25,10 @@ export interface OpenApiBridgeOperation {
   readonly 'x-contract-has-params': boolean;
   readonly 'x-contract-success-status-codes': readonly number[];
   readonly 'x-contract-error-status-codes': readonly number[];
+  /** API version tag derived from the route contract (e.g. '2' for V2 routes). */
+  readonly 'x-version'?: string | undefined;
+  /** Response type tag for V2 routes (e.g. 'human' or 'interpret'). */
+  readonly 'x-response-type'?: string | undefined;
 }
 
 export interface OpenApiBridgeResponse {
@@ -190,6 +194,12 @@ export function buildHttpRouteContractOpenApiBridge(): OpenApiBridgeDocument {
       tags: [inferTag(entry.contract.operationId)],
       ...(entry.contract.capabilities !== undefined
         ? { 'x-search-capabilities': entry.contract.capabilities }
+        : {}),
+      ...(entry.contract.apiVersion !== undefined
+        ? { 'x-version': entry.contract.apiVersion }
+        : {}),
+      ...(entry.contract.responseType !== undefined
+        ? { 'x-response-type': entry.contract.responseType }
         : {}),
       responses: Object.fromEntries(
         statusCodes.map((statusCode) => [

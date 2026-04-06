@@ -23,6 +23,8 @@ function headerKeysEqualConstantTime(headerValue: string, secret: string): boole
  * - `request.debugRequest === true`
  * - `request.log` replaced with a child logger at level `debug` (bindings include `debug_request: true`)
  * - response header `X-Debug-Active: 1`
+ * - Contract routes run with request pipeline debug context so `pipelineDebug()` from
+ *   `observability/request-pipeline-debug` emits structured `pipeline_debug` lines through this logger.
  *
  * Register this hook **before** {@link registerRequestContext} so `request_start` / `request_end`
  * respect the per-request log level.

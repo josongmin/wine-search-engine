@@ -22,6 +22,7 @@ npm ci
 npm run typecheck
 npm run build
 npm run verify:http-contracts
+npm run test:e2e:replay:fixtures:self-contained
 if [ "${SKIP_MIGRATE:-}" = "1" ]; then
   echo "SKIP_MIGRATE=1 — skipping npm run migrate (set PG_* in .env for local full smoke)"
 else

@@ -219,6 +219,7 @@ export class RetrievalProfileService {
         case 'compare_default':    return COMPARE_DEFAULT;
         case 'mixed_anchor':       return MIXED_ANCHOR;
         case 'browse_default':     return BROWSE_DEFAULT;
+        case 'region_browse':      return REGION_BROWSE;
         case 'exact_safe_fallback': return EXACT_SAFE_FALLBACK;
         case 'relative_filter':    return RELATIVE_FILTER;
         case 'hybrid_default':     return HYBRID_DEFAULT;

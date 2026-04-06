@@ -19,6 +19,7 @@
 import type { RankedResult } from '../model/ranked-result.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { FunnelMetrics, RankingFunnelTrace, RankingStageTrace } from '../model/ranking-stage.js';
+import type { RankerRuntimeSignal } from '../model/ranking-runtime-signal.js';
 import type { Ranker } from './ranker.js';
 import type { RankingPolicyPort, PolicyContext } from '../port/ranking-policy.port.js';
 import { computeFunnelMetrics } from './funnel-metrics.js';
@@ -72,7 +73,17 @@ export class RankingStagePipeline {
     return this._lastFunnelTrace;
   }
 
+  getLastRuntimeSignal(): RankerRuntimeSignal | undefined {
+    return this.ranker.getLastRuntimeSignal();
+  }
+
   async rank(input: RankingInput): Promise<readonly RankedResult[]> {
+    // Reset cached metrics/trace at the start of every call so that a
+    // caller who catches a thrown error and reads getLastFunnelMetrics()
+    // does not see stale values from the previous successful request.
+    this._lastFunnelMetrics = undefined;
+    this._lastFunnelTrace = undefined;
+
     const wallStart = Date.now();
     const stageTraces: RankingStageTrace[] = [];
 

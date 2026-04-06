@@ -32,6 +32,21 @@ export interface DecisionOutcome {
   readonly decision_status: 'resolved' | 'ambiguous' | 'failed';
   readonly top_entity_id: string | null;
   readonly decision_confidence: number;
+  readonly execution_mode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+  readonly blocking_eligible?: boolean;
+  readonly degradation_reasons?: readonly string[];
+  readonly specialized_route_requested?: 'producer_browse' | 'region_browse' | 'compare_candidates' | null;
+  readonly specialized_route_executed?: 'producer_browse' | 'region_browse' | 'compare_candidates' | null;
+  readonly fallback_applied?: boolean;
+  readonly fallback_reason?:
+    | 'producer_browse_unavailable'
+    | 'producer_browse_fallback'
+    | 'region_browse_unavailable'
+    | 'region_browse_fallback'
+    | 'compare_retriever_unavailable'
+    | 'compare_anchor_resolution_failed'
+    | 'compare_candidates_fallback'
+    | null;
 }
 
 export interface GroundTruth {
@@ -478,6 +493,20 @@ export interface ModeMetrics {
   attribute_coverage?: number;
 }
 
+export interface SpecializedFallbackRate {
+  readonly requested_count: number;
+  readonly fallback_rate: number | null;
+}
+
+export interface SpecializedFallbackMetrics {
+  readonly fallback_rate: {
+    readonly producer_browse: SpecializedFallbackRate;
+    readonly region_browse: SpecializedFallbackRate;
+    readonly compare_candidates: SpecializedFallbackRate;
+  };
+  readonly fallback_reason_histogram?: Readonly<Record<string, number>>;
+}
+
 /**
  * Per-entity-type metrics — confusion matrix for entity resolution.
  * Tracks whether the engine resolved to the correct entity type.
@@ -651,9 +680,18 @@ export interface EvalResult {
   // Scenario slices
   readonly by_scenario: Record<string, ScenarioSlice>;
   readonly by_language: Record<string, ScenarioSlice>;
+  readonly by_execution_mode?: Record<EvalExecutionModeBucket, ScenarioSlice>;
+  readonly by_blocking_eligible?: Record<EvalBlockingEligibleBucket, ScenarioSlice>;
+  readonly degradation_reason_histogram?: Record<string, number>;
+  readonly execution_mode_x_blocking_eligible?: Record<
+    EvalExecutionModeBucket,
+    Partial<Record<EvalBlockingEligibleBucket, EvalCountShareBucket>>
+  >;
+  readonly release_report?: EvalReleaseReport;
 
   // Epic 11: Mode-specific slices
   by_mode?: Record<RetrievalMode, ModeMetrics>;
+  specialized_fallback?: SpecializedFallbackMetrics;
 
   // Epic 11: Entity target type slices
   by_target_type?: Record<EntityTargetType, EntityTypeMetrics>;
@@ -662,6 +700,57 @@ export interface EvalResult {
   release_gate_verdict?: {
     readonly passed: boolean;
     readonly failures: readonly string[];
+    readonly advisories?: readonly string[];
+  };
+
+  metric_policy?: {
+    readonly blocking_metrics: readonly string[];
+    readonly advisory_metrics: readonly string[];
+  };
+
+  non_blocking_metrics?: readonly string[];
+
+  // T5.7: Optional statistical diagnostics for offline eval comparisons.
+  diagnostics?: {
+    readonly per_query_metrics?: {
+      readonly ndcg_at_10: readonly number[];
+      readonly mrr_at_10: readonly number[];
+      readonly recall_at_3: readonly number[];
+      readonly recall_at_100: readonly number[];
+      readonly decision_utility: readonly number[];
+      readonly non_wrong_top1_rate: readonly number[];
+    };
+  };
+
+  // T5.7: Optional baseline delta + significance summary.
+  baseline_comparison?: {
+    readonly baseline_path: string;
+    readonly deltas: {
+      readonly ndcg_at_10: number;
+      readonly mrr_at_10: number;
+      readonly recall_at_3: number;
+      readonly recall_at_100: number;
+      readonly decision_utility: number;
+      readonly wrong_top1_rate: number;
+      readonly execution_mode_mix?: Partial<Record<EvalExecutionModeBucket, number>>;
+      readonly blocking_eligible_share?: Partial<Record<EvalBlockingEligibleBucket, number>>;
+      readonly degradation_reason_distribution?: Record<string, {
+        readonly count_delta: number;
+        readonly percentage_point_delta: number;
+      }>;
+    };
+    readonly highlights?: readonly string[];
+    readonly significance?: {
+      readonly corrected_alpha: number;
+      readonly significant_metrics: readonly string[];
+      readonly metrics: Record<string, {
+        readonly p_value: number;
+        readonly ci_95: readonly [number, number];
+        readonly mean_diff: number;
+        readonly significant: boolean;
+      }>;
+    };
+    readonly significance_skipped_reason?: string;
   };
 }
 
@@ -671,4 +760,40 @@ export interface ScenarioSlice {
   readonly mrr_at_10: number;
   readonly wrong_top1_rate: number;
   readonly decision_utility: number;
+}
+
+export type EvalExecutionModeBucket =
+  | 'authoritative'
+  | 'degraded'
+  | 'heuristic'
+  | 'advisory'
+  | 'unknown';
+
+export type EvalBlockingEligibleBucket =
+  | 'blocking_eligible'
+  | 'non_blocking_eligible'
+  | 'unknown';
+
+export interface EvalCountShareBucket {
+  readonly query_count: number;
+  readonly share: number;
+}
+
+export interface EvalReleaseReportReasonSummary {
+  readonly reason: string;
+  readonly query_count: number;
+  readonly share: number;
+}
+
+export interface EvalReleaseReport {
+  readonly degraded_query_share: EvalCountShareBucket;
+  readonly heuristic_query_share: EvalCountShareBucket;
+  readonly blocking_vs_advisory_summary: {
+    readonly blocking_eligible: EvalCountShareBucket;
+    readonly non_blocking_eligible: EvalCountShareBucket;
+    readonly unknown: EvalCountShareBucket;
+    readonly advisory_queries: EvalCountShareBucket;
+  };
+  readonly top_degradation_reasons: readonly EvalReleaseReportReasonSummary[];
+  readonly specialized_fallback_summary?: SpecializedFallbackMetrics;
 }

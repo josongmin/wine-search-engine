@@ -15,25 +15,38 @@ import type {
 } from '../../domain/evaluation/service/eval-runner.js';
 import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import {
+  preferCanonicalRetrievalChannelLabel,
+  preferCanonicalRetrievalChannelLabels,
+} from '../../domain/retrieval/model/retrieval-channel.js';
+import { buildDecisionSnapshotFromRuntimeVersions } from '../../application/search/search-usecase-decision-snapshot.js';
 
 const log = bootstrapLogger.child({ component: 'SearchPipelineEvaluator' });
 
-const FAILED_EVAL_PIPELINE_SNAPSHOT: DecisionSnapshot = {
-  model_versions: {},
-  index_versions: {},
-  policy_rule_version: '1',
-  threshold_profile_id: 'default',
-  planner_version: '1',
-  feature_flags: {},
-};
+const FAILED_EVAL_PIPELINE_SNAPSHOT: DecisionSnapshot = buildDecisionSnapshotFromRuntimeVersions();
 
 function failedEvalOutput(latencyMs: number): SearchPipelineOutput {
   return {
     predictedStatus: 'failed',
     decisionConfidence: 0,
+    executionMode: 'degraded',
+    blockingEligible: false,
+    degradationReasons: ['evaluation_pipeline_failed'],
     evidenceItems: [],
     latencyMs,
     decisionSnapshot: FAILED_EVAL_PIPELINE_SNAPSHOT,
+  };
+}
+
+function normalizeEvalChannel(channel: EvalProvenanceSlice['topChannel']): EvalProvenanceSlice['topChannel'] {
+  return preferCanonicalRetrievalChannelLabel(channel) as EvalProvenanceSlice['topChannel'];
+}
+
+function normalizeEvalSlice(slice: EvalProvenanceSlice): EvalProvenanceSlice {
+  return {
+    ...slice,
+    channels: preferCanonicalRetrievalChannelLabels(slice.channels) as EvalProvenanceSlice['channels'],
+    topChannel: normalizeEvalChannel(slice.topChannel),
   };
 }
 
@@ -107,9 +120,8 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       const predictedEntityId = topResult?.entity.entityId;
       const evidenceItems = topResult?.evidenceItems ?? [];
       const retrievalProvenanceSlices: readonly EvalProvenanceSlice[] =
-        response.meta.retrievalProvenanceSlices
-        ?? evalExecution.retrievalProvenanceSlices
-        ?? [];
+        (response.meta.retrievalProvenanceSlices ?? evalExecution.retrievalProvenanceSlices ?? [])
+          .map(normalizeEvalSlice);
 
       const topResultScoreComponents = topResult
         ? {
@@ -123,10 +135,20 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       const output: SearchPipelineOutput = {
         predictedStatus,
         decisionConfidence: decision.decisionConfidence,
+        ...(decision.executionMode !== undefined ? { executionMode: decision.executionMode } : {}),
+        ...(decision.blockingEligible !== undefined
+          ? { blockingEligible: decision.blockingEligible }
+          : {}),
+        ...(decision.degradationReasons !== undefined
+          ? { degradationReasons: decision.degradationReasons }
+          : {}),
         evidenceItems,
         latencyMs,
         decisionSnapshot: decision.decisionSnapshot,
         ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+        ...(evalExecution.funnelMetrics !== undefined
+          ? { funnelMetrics: evalExecution.funnelMetrics }
+          : {}),
         ...(predictedEntityId !== undefined ? { predictedEntityId } : {}),
         ...(topResultScoreComponents !== undefined
           ? { topResultScoreComponents }

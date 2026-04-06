@@ -18,6 +18,8 @@ import {
 } from '../http/fetch-with-timeout.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
+import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 // ---------------------------------------------------------------------------
 // API response shapes
@@ -100,6 +102,7 @@ export class HttpCrossEncoderReranker implements RerankerPort {
 
     const texts = candidates.map((c) => c.text);
     const endpoint = `${this.url}/rerank`;
+    const httpStart = Date.now();
 
     let response: Response;
     try {
@@ -114,22 +117,75 @@ export class HttpCrossEncoderReranker implements RerankerPort {
       );
     } catch (err) {
       if (isAbortError(err)) {
+        pipelineDebug(
+          {
+            step: PipelineDebugStep.HTTP_RERANKER_TIMEOUT,
+            candidate_count: candidates.length,
+            limit,
+            latency_ms: Date.now() - httpStart,
+          },
+          'pipeline cross-encoder reranker HTTP',
+        );
         throw new Error(
           `Reranker service: request timed out after ${this.httpTimeoutMs}ms`,
         );
       }
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_RERANKER_NETWORK_ERROR,
+          candidate_count: candidates.length,
+          limit,
+        },
+        'pipeline cross-encoder reranker HTTP',
+      );
       throw err;
     }
 
     if (!response.ok) {
+      const status = response.status;
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_RERANKER_HTTP_ERROR,
+          http_status: status,
+          candidate_count: candidates.length,
+          limit,
+          latency_ms: Date.now() - httpStart,
+        },
+        'pipeline cross-encoder reranker HTTP',
+      );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `Reranker service call failed [HTTP ${response.status}]: ${text}`,
+        `Reranker service call failed [HTTP ${status}]: ${text}`,
       );
     }
 
     const data: unknown = await response.json();
-    const apiResults = this.parseResponse(data);
+    let apiResults: RerankApiResult[];
+    try {
+      apiResults = this.parseResponse(data);
+    } catch (parseErr) {
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_RERANKER_PARSE_ERROR,
+          candidate_count: candidates.length,
+          limit,
+          latency_ms: Date.now() - httpStart,
+        },
+        'pipeline cross-encoder reranker HTTP',
+      );
+      throw parseErr;
+    }
+
+    pipelineDebug(
+      {
+        step: PipelineDebugStep.HTTP_RERANKER_OK,
+        candidate_count: candidates.length,
+        limit,
+        latency_ms: Date.now() - httpStart,
+        http_status: response.status,
+      },
+      'pipeline cross-encoder reranker HTTP',
+    );
 
     // Pair scores with entity IDs via index, then sort by score descending.
     const scored: Array<{ entityId: EntityId; score: number }> = [];

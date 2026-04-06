@@ -50,6 +50,11 @@ export class PlannerV1Adapter {
       ...(v2.sessionContext !== undefined && { sessionContext: v2.sessionContext }),
       queryBudget: v2.queryBudget,
       ...(v2.targetEntityType !== undefined && { targetEntityType: v2.targetEntityType }),
+      // Preserve decompositionHint from V2 so downstream consumers (observability,
+      // interpret explainer, pre-route phase) can surface decomposition signals.
+      // Previously dropped here, causing decompositionStrategy to be silently absent
+      // from all observability slices and V2 explain responses.
+      ...(v2.decompositionHint !== undefined && { decompositionHint: v2.decompositionHint }),
     };
   }
 }

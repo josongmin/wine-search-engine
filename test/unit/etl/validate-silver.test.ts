@@ -142,6 +142,10 @@ describe('validateSilverRecords', () => {
       flavorProfiles: 0,
       pairingTags: 0,
       vintageYear: 0,
+      alcoholPct: 0,
+      producerPrestige: 0,
+      criticProxy: 0,
+      drinkingWindow: 0,
     });
   });
 });

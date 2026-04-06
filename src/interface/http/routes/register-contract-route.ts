@@ -1,4 +1,5 @@
 import type { FastifyInstance, RouteHandlerMethod } from 'fastify';
+import { runWithRequestPipelineDebug } from '../../../observability/request-pipeline-debug.js';
 import type { HttpRouteContract } from './route-contracts.js';
 
 export interface RegisteredHttpRouteContract {
@@ -59,10 +60,32 @@ export function registerContractRoute(
     errorStatusCodes,
   });
 
+  const rawHandler = options.handler;
+
+  const wrappedHandler: RouteHandlerMethod = async function routeWithPipelineDebug(
+    this: FastifyInstance,
+    request,
+    reply,
+  ) {
+    const requestId = request.requestId ?? request.id;
+    return runWithRequestPipelineDebug(
+      {
+        requestId,
+        debugRequest: request.debugRequest,
+        requestLog: request.log,
+      },
+      async () => Reflect.apply(
+        rawHandler as (...args: unknown[]) => unknown,
+        this,
+        [request, reply],
+      ),
+    );
+  };
+
   app.route({
     method: options.method,
     url: options.url,
-    handler: options.handler,
+    handler: wrappedHandler,
   });
 }
 

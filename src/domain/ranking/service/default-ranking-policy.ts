@@ -80,7 +80,7 @@ function applyProducerDiversity(results: readonly RankedResult[]): readonly Rank
       producerCounts.set(producer, count + 1);
       retained.push(result);
     } else {
-      demoted.push(result);
+      demoted.push({ ...result, policyDemoted: true });
     }
   }
 

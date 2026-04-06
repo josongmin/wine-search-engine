@@ -25,6 +25,9 @@ export interface HybridCandidate {
   /** English search text snippet from index (cross-encoder passage). */
   readonly searchTextEn?: string | undefined;
 
+  /** Korean search text from index — non-empty when wine has Korean aliases. */
+  readonly searchTextKo?: string | undefined;
+
   /** Primary grape from index summary (cross-encoder passage). */
   readonly grapePrimary?: string | undefined;
 

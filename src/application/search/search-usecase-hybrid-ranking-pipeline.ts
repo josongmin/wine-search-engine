@@ -1,7 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
-import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type {
   BrowseRetrieverPort,
@@ -11,6 +10,7 @@ import type {
   EntityResolverPort,
   RankingPort,
 } from './port/search-pipeline-deps.port.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
 import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
@@ -21,7 +21,6 @@ export interface HybridRankingRouteDeps {
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
   readonly ranker: RankingPort;
-  readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
 }
 
 export interface RankedRouteEntityResolutionDeps {
@@ -48,6 +47,7 @@ function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResul
       outcomeReasonCodes: ['HYBRID_ROUTE_MISSING_ENTITY_RESOLVER'],
     },
     conformalSetSize: 1,
+    degradation: { reasons: ['entity_resolver_unavailable'] },
   };
 }
 
@@ -60,6 +60,10 @@ export async function resolveEntityRouteForPlan(
   deps: RankedRouteEntityResolutionDeps,
 ): Promise<EntityResolveResult> {
   if (deps.entityResolver === undefined) {
+    pipelineDebug(
+      { step: 'resolver.anchor.missing', query_class: plan.queryClass },
+      'pipeline hybrid anchor resolver unavailable',
+    );
     return buildMissingEntityResolverResult(plan);
   }
 
@@ -68,7 +72,16 @@ export async function resolveEntityRouteForPlan(
     deps.entityLookup,
   );
 
-  return deps.entityResolver.resolve({
+  pipelineDebug(
+    {
+      step: 'resolver.anchor.start',
+      query_class: plan.queryClass,
+      resolver_candidate_count: candidateEntities.length,
+    },
+    'pipeline hybrid anchor resolve',
+  );
+
+  const resolved = await deps.entityResolver.resolve({
     rawQuery: plan.rawQuery,
     normalizedQuery: plan.normalizedQuery,
     ...(plan.normalizedQueryViews !== undefined
@@ -80,6 +93,17 @@ export async function resolveEntityRouteForPlan(
     uncertainty: plan.uncertainty,
     candidateEntities,
   });
+
+  pipelineDebug(
+    {
+      step: 'resolver.anchor.done',
+      resolve_status: resolved.status,
+      candidate_count: resolved.candidates.length,
+    },
+    'pipeline hybrid anchor resolve',
+  );
+
+  return resolved;
 }
 
 /**
@@ -99,7 +123,6 @@ export async function runHybridRankingPipeline(
   plan: QueryPlanV1,
   candidates: readonly HybridCandidate[],
   ranker: RankingPort,
-  _ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
 ): Promise<SearchRouteExecutionResult> {
   const rankingInput: RankingInput = {
     queryPlan: plan,
@@ -108,10 +131,28 @@ export async function runHybridRankingPipeline(
   };
 
   const rankedResults = await ranker.rank(rankingInput);
+  const rankerDegradation = ranker.getLastRuntimeSignal?.()?.degradation;
+  const funnelMetrics = ranker.getLastFunnelMetrics?.();
+
+  pipelineDebug(
+    {
+      step: 'ranking.hybrid.complete',
+      query_class: plan.queryClass,
+      input_candidates: candidates.length,
+      ranked_count: rankedResults.length,
+      has_funnel_metrics: funnelMetrics !== undefined,
+    },
+    'pipeline hybrid ranking',
+  );
 
   const resolveResult: EntityResolveResult = buildHybridRouteResolveResult(plan, rankedResults);
 
-  return { resolveResult, rankedResults };
+  return {
+    resolveResult,
+    rankedResults,
+    ...(rankerDegradation !== undefined ? { routeDegradation: rankerDegradation } : {}),
+    ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
+  };
 }
 
 /**
@@ -123,7 +164,7 @@ export async function executeHybridRouteRankingPipeline(
   deps: HybridRankingRouteDeps,
   resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
 ): Promise<SearchRouteExecutionResult> {
-  const candidates = await retrieveHybridCandidatesForPlan(
+  const retrieval = await retrieveHybridCandidatesForPlan(
     plan,
     {
       candidatePool: deps.candidatePool,
@@ -132,8 +173,33 @@ export async function executeHybridRouteRankingPipeline(
     },
     resolveEntity,
   );
+  const ranked = await runHybridRankingPipeline(plan, retrieval.candidates, deps.ranker);
+  if (retrieval.routeDegradation === undefined) {
+    return {
+      ...ranked,
+      ...(retrieval.specializedRouteObservability !== undefined
+        ? { specializedRouteObservability: retrieval.specializedRouteObservability }
+        : {}),
+    };
+  }
 
-  return runHybridRankingPipeline(plan, candidates, deps.ranker, deps.ltrModels);
+  return {
+    ...ranked,
+    routeDegradation: ranked.routeDegradation === undefined
+      ? retrieval.routeDegradation
+      : {
+          executionMode: 'degraded',
+          degradationReasons: [
+            ...new Set([
+              ...ranked.routeDegradation.degradationReasons,
+              ...retrieval.routeDegradation.degradationReasons,
+            ]),
+          ],
+        },
+    ...(retrieval.specializedRouteObservability !== undefined
+      ? { specializedRouteObservability: retrieval.specializedRouteObservability }
+      : {}),
+  };
 }
 
 /**

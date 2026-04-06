@@ -7,7 +7,7 @@
  *
  * Channel taxonomy:
  *  - LEXICAL family: sparse_bm25, learned_sparse
- *  - SEMANTIC family: dense_semantic, dense_anchor
+ *  - SEMANTIC family: dense_semantic
  *  - STRUCTURAL family: anchor_similarity, relative_filter
  *  - SPECIALIZED family: browse_producer, browse_region, compare_anchor
  */
@@ -23,7 +23,6 @@ export const RETRIEVAL_CHANNELS = [
 
   // Semantic family
   'dense_semantic',    // General bi-encoder ANN
-  'dense_anchor',      // Anchor-conditioned ANN (T4.4)
 
   // Structural family
   'anchor_similarity', // anchor neighborhood (T4.4 upgrade)
@@ -42,7 +41,7 @@ export type RetrievalChannel = (typeof RETRIEVAL_CHANNELS)[number];
 // ---------------------------------------------------------------------------
 
 export const LEXICAL_CHANNELS = ['sparse_bm25', 'learned_sparse'] as const satisfies readonly RetrievalChannel[];
-export const SEMANTIC_CHANNELS = ['dense_semantic', 'dense_anchor'] as const satisfies readonly RetrievalChannel[];
+export const SEMANTIC_CHANNELS = ['dense_semantic'] as const satisfies readonly RetrievalChannel[];
 export const STRUCTURAL_CHANNELS = ['anchor_similarity', 'relative_filter'] as const satisfies readonly RetrievalChannel[];
 export const SPECIALIZED_CHANNELS = ['browse_producer', 'browse_region', 'compare_anchor'] as const satisfies readonly RetrievalChannel[];
 
@@ -89,6 +88,14 @@ export const LEGACY_CHANNEL_ALIAS: Readonly<Record<string, RetrievalChannel>> = 
 } as const;
 
 /**
+ * Preferred canonical output labels for compatibility channels.
+ *
+ * The map is intentionally empty after compat removal; the helper remains as
+ * the SSOT seam for any future raw-input aliases.
+ */
+export const PREFERRED_CHANNEL_ALIAS: Readonly<Record<string, string>> = {} as const;
+
+/**
  * Coerce a legacy/unknown channel string to canonical RetrievalChannel.
  * Falls back to 'sparse_bm25' for unrecognized strings.
  */
@@ -98,4 +105,30 @@ export function toRetrievalChannel(raw: string): RetrievalChannel {
   if (alias !== undefined) return alias;
   console.warn(`[toRetrievalChannel] Unknown channel '${raw}'; falling back to 'sparse_bm25'`);
   return 'sparse_bm25';
+}
+
+/**
+ * Normalize a channel label to the preferred canonical outward-facing form
+ * without coercing unknown strings to a fallback channel.
+ */
+export function preferCanonicalRetrievalChannelLabel(channel: string): string {
+  return PREFERRED_CHANNEL_ALIAS[channel] ?? channel;
+}
+
+/**
+ * Normalize an ordered channel list to preferred canonical outward-facing
+ * labels while preserving first-seen order and removing duplicates created by
+ * compatibility aliases.
+ */
+export function preferCanonicalRetrievalChannelLabels(
+  channels: readonly string[],
+): string[] {
+  const canonical: string[] = [];
+  for (const channel of channels) {
+    const next = preferCanonicalRetrievalChannelLabel(channel);
+    if (!canonical.includes(next)) {
+      canonical.push(next);
+    }
+  }
+  return canonical;
 }

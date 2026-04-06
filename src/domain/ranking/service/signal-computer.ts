@@ -318,6 +318,88 @@ export class SignalComputer {
   }
 
   /**
+   * Computes producer prestige signal from the candidate's indexed prestige score.
+   *
+   * Producer prestige is stored in Vespa as [0, 1] (winery_rating / 5).
+   * When absent we return a neutral mid-point (0.5) rather than 0 so that
+   * wines without prestige data are not systematically suppressed.
+   *
+   * @param candidate - The hybrid candidate to evaluate.
+   * @returns Producer prestige in [0, 1].
+   */
+  computeProducerPrestige(candidate: HybridCandidate): number {
+    if (candidate.producerPrestige !== undefined) {
+      return clamp01(candidate.producerPrestige);
+    }
+    // Neutral when prestige data is absent — don't penalise missing data.
+    return 0.5;
+  }
+
+  /**
+   * Computes vintage recency signal.
+   *
+   * More recent vintages score higher. We use an exponential decay so that
+   * wines more than 15 years old asymptote near 0 while the current year
+   * scores 1.0.  The reference year is fixed at query time to avoid
+   * non-determinism in tests.
+   *
+   * Formula: exp(-decay * max(0, referenceYear - vintageYear))
+   *   decay = ln(2) / 8  → half-life of 8 years.
+   *
+   * @param candidate - The hybrid candidate to evaluate.
+   * @param referenceYear - The year against which recency is measured (usually current).
+   * @returns Recency signal in [0, 1], or undefined when vintageYear is absent.
+   */
+  computeRecency(candidate: HybridCandidate, referenceYear: number): number | undefined {
+    const vintage = candidate.vintageYear;
+    if (vintage === undefined) return undefined;
+    const ageDelta = Math.max(0, referenceYear - vintage);
+    const HALF_LIFE_YEARS = 8;
+    const decay = Math.LN2 / HALF_LIFE_YEARS;
+    return clamp01(Math.exp(-decay * ageDelta));
+  }
+
+  /**
+   * Computes critic score signal.
+   *
+   * Uses the criticScoreNormalized field from the Vespa index (produced by
+   * Track-C step 1 or falling back to Vivino ratingAvg / 5).
+   * Returns undefined when no critic signal is available so that the
+   * aggregator can skip it rather than using a misleading neutral.
+   *
+   * @param candidate - The hybrid candidate to evaluate.
+   * @returns Critic score in [0, 1], or undefined when absent.
+   */
+  computeCriticScore(candidate: HybridCandidate): number | undefined {
+    if (candidate.criticScoreNormalized !== undefined) {
+      return clamp01(candidate.criticScoreNormalized);
+    }
+    return undefined;
+  }
+
+  /**
+   * Computes multilingual match signal.
+   *
+   * Returns 1.0 when the query contains Hangul AND the candidate has Korean
+   * aliases (stored in search_text_ko).  Returns 0.0 in all other cases.
+   * The signal acts as a precision booster for Korean-language queries rather
+   * than as a penalty for non-Korean ones.
+   *
+   * @param candidate - The hybrid candidate to evaluate.
+   * @param queryContainsHangul - True when the query string contains any Korean characters.
+   * @returns Multilingual signal in {0, 1}.
+   */
+  computeMultilingualScore(
+    candidate: HybridCandidate,
+    queryContainsHangul: boolean,
+  ): number {
+    if (!queryContainsHangul) return 0;
+    // Only boost candidates that actually have Korean text/aliases indexed.
+    // Returning 1 unconditionally over-rewarded all wines on Korean queries.
+    return candidate.searchTextKo !== undefined && candidate.searchTextKo.length > 0 ? 1 : 0;
+  }
+
+  /**
    * Computes all signal components for a single candidate.
    *
    * Convenience method that calls each individual signal computation
@@ -327,6 +409,8 @@ export class SignalComputer {
    * @param queryPlan - The query plan driving scoring.
    * @param constraints - The constraint bundle to enforce.
    * @param anchorProfile - Optional anchor profile for similarity scoring.
+   * @param referenceYear - Year for recency computation (defaults to current year).
+   * @param queryContainsHangul - Whether the original query contained Korean characters.
    * @returns The full set of component scores.
    */
   computeAll(
@@ -334,7 +418,11 @@ export class SignalComputer {
     queryPlan: QueryPlanV1,
     constraints: ConstraintBundle,
     anchorProfile?: AnchorProfile,
+    referenceYear: number = new Date().getFullYear(),
+    queryContainsHangul = false,
   ): ComponentScores {
+    const recency = this.computeRecency(candidate, referenceYear);
+    const criticScore = this.computeCriticScore(candidate);
     return {
       entityIntegrity: this.computeEntityIntegrity(candidate, queryPlan),
       anchorSimilarity: anchorProfile !== undefined
@@ -348,6 +436,10 @@ export class SignalComputer {
       popularity: this.computePopularity(candidate),
       availability: this.computeAvailability(candidate),
       uncertaintyPenalty: this.computeUncertaintyPenalty(candidate, queryPlan),
+      producerPrestige: this.computeProducerPrestige(candidate),
+      ...(recency !== undefined ? { recency } : {}),
+      ...(criticScore !== undefined ? { criticScore } : {}),
+      multilingualScore: this.computeMultilingualScore(candidate, queryContainsHangul),
     };
   }
 

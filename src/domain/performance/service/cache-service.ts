@@ -17,7 +17,12 @@ import type { CacheResult } from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
-import { decideResponseCachePolicy } from '../../cache/cache-policy.js';
+import {
+  decideResponseCachePolicy,
+  decideResponseCacheReadPolicy,
+  isDestructiveResponseCacheBypassReason,
+  type CacheReadRuntimeState,
+} from '../../cache/cache-policy.js';
 
 const log = bootstrapLogger.child({ component: 'CacheService' });
 
@@ -31,25 +36,8 @@ function constraintValueString(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function recordMismatch<T extends string | boolean>(
-  a: Readonly<Record<string, T>>,
-  b: Readonly<Record<string, T>>,
-): boolean {
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
-  for (const key of keys) {
-    if (a[key] !== b[key]) {
-      return true;
-    }
-  }
-  return false;
-}
-
 function buildSnapshotCachePolicyRef(snapshot: DecisionSnapshot): string {
-  return [
-    snapshot.threshold_profile_id,
-    snapshot.planner_version,
-    snapshot.policy_rule_version,
-  ].join(':');
+  return snapshot.snapshot_id;
 }
 
 /**
@@ -103,6 +91,7 @@ export class CacheService implements SearchResponseCachePort {
       context?: { locale: string };
     },
     currentSnapshot: DecisionSnapshot,
+    runtimeState?: CacheReadRuntimeState,
   ): Promise<CacheResult<SearchResponseV1>> {
     const startTime = Date.now();
 
@@ -146,19 +135,38 @@ export class CacheService implements SearchResponseCachePort {
         };
       }
 
-      // RFC-015: Check version staleness
-      const isStale = this.isResponseStale(cached, currentSnapshot);
-      if (isStale) {
-        // Invalidate stale entry
-        try {
-          await this.queryCache.delete(cacheKey);
-        } catch (err) {
-          log.warn({ err }, 'failed to delete stale entry');
+      const cachedSnapshot = cached.meta.decisionSnapshot ?? cached.engineDecision.decisionSnapshot;
+      const cachedBlockingEligible = cached.meta.blockingEligible ?? cached.engineDecision.blockingEligible;
+      const readPolicy = decideResponseCacheReadPolicy({
+        cachedExecutionMode:
+          cached.meta.executionMode ?? cached.engineDecision.executionMode ?? 'authoritative',
+        ...(cachedBlockingEligible !== undefined ? { cachedBlockingEligible } : {}),
+        ...(cachedSnapshot !== undefined
+          ? {
+              cachedSnapshotId: cachedSnapshot.snapshot_id,
+              cachedModelVersions: cachedSnapshot.model_versions,
+            }
+          : {}),
+        cachedContractVersion:
+          cachedSnapshot?.response_contract_version ?? cached.meta.engine_schema_version,
+        currentSnapshotId: currentSnapshot.snapshot_id,
+        currentContractVersion: currentSnapshot.response_contract_version,
+        currentModelVersions: currentSnapshot.model_versions,
+        ...(runtimeState !== undefined ? { runtimeState } : {}),
+      });
+
+      if (readPolicy.eligibility === 'bypass') {
+        if (isDestructiveResponseCacheBypassReason(readPolicy.reason)) {
+          try {
+            await this.queryCache.delete(cacheKey);
+          } catch (err) {
+            log.warn({ err }, 'failed to delete stale entry');
+          }
         }
         return {
           hit: false,
           isStale: true,
-          reason: 'version_mismatch',
+          ...(readPolicy.reason !== undefined ? { reason: readPolicy.reason } : {}),
           durationMs: Date.now() - startTime,
         };
       }
@@ -232,7 +240,24 @@ export class CacheService implements SearchResponseCachePort {
         request.context?.locale,
       );
 
-      await this.queryCache.set(cacheKey, response, eligibility.ttlSeconds);
+      // Stratify TTL by decision status (Bug fix: non-resolved responses must
+      // not occupy cache slots for the full retrieval-mode TTL).
+      //
+      // - resolved   → full TTL (the result is stable until the snapshot drifts)
+      // - ambiguous  → 60 s   (ambiguity often clears after a query reformulation;
+      //                         a long TTL would keep "please clarify" stale in the
+      //                         cache while the index or model has moved on)
+      // - failed     → 30 s   (failure is frequently transient; short TTL limits
+      //                         blast radius while still absorbing retry bursts)
+      const decisionStatus = response.engineDecision.decisionStatus;
+      const effectiveTtl =
+        decisionStatus === 'resolved'
+          ? eligibility.ttlSeconds
+          : decisionStatus === 'ambiguous'
+            ? Math.min(eligibility.ttlSeconds, 60)
+            : /* failed */ Math.min(eligibility.ttlSeconds, 30);
+
+      await this.queryCache.set(cacheKey, response, effectiveTtl);
       this.recordCacheSuccess();
       return true;
     } catch (err) {
@@ -359,53 +384,6 @@ export class CacheService implements SearchResponseCachePort {
 
     return stats;
   }
-
-  /**
-   * RFC-015: Check if cached response's versions match current system versions.
-   *
-   * Returns true if response is stale (version mismatch).
-   */
-  private isResponseStale(
-    response: SearchResponseV1,
-    currentSnapshot: DecisionSnapshot,
-  ): boolean {
-    const cachedVersions = response.meta.decisionSnapshot;
-
-    // Null check: decisionSnapshot may be undefined in some response types
-    if (!cachedVersions) {
-      return true; // Treat missing versions as stale
-    }
-
-    const modelVersionsMismatch = recordMismatch(
-      cachedVersions.model_versions,
-      currentSnapshot.model_versions,
-    );
-
-    const indexVersionsMismatch = recordMismatch(
-      cachedVersions.index_versions,
-      currentSnapshot.index_versions,
-    );
-
-    // Policy rule version must match
-    const policyMismatch = cachedVersions.policy_rule_version !== currentSnapshot.policy_rule_version;
-    const thresholdProfileMismatch =
-      cachedVersions.threshold_profile_id !== currentSnapshot.threshold_profile_id;
-    const plannerMismatch = cachedVersions.planner_version !== currentSnapshot.planner_version;
-    const featureFlagsMismatch = recordMismatch(
-      cachedVersions.feature_flags,
-      currentSnapshot.feature_flags,
-    );
-
-    return (
-      modelVersionsMismatch
-      || indexVersionsMismatch
-      || policyMismatch
-      || thresholdProfileMismatch
-      || plannerMismatch
-      || featureFlagsMismatch
-    );
-  }
-
   /**
    * Store embedding in cache (non-blocking).
    */

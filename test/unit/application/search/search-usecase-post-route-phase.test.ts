@@ -380,4 +380,202 @@ describe('runSearchPostRoutePhase', () => {
     expect(responseBuilder.build).toHaveBeenCalledTimes(2);
     expect(decisionEngine.decide).toHaveBeenCalledTimes(2);
   });
+
+  it('passes route degradation into the response contract for ranked routes', async () => {
+    const responseBuilder = {
+      build: vi.fn(() => ({ queryType: 'search' as const, meta: {} })),
+    };
+
+    await runRankedRouteDecisionPhase({
+      plan: minimalPlan(),
+      requestId: 'req-degraded',
+      startTime: Date.now() - 10,
+      resolveResult: {
+        status: 'resolved',
+        candidates: [],
+        decisionTrace: {
+          queryClass: 'unknown',
+          top1CalibratedScore: 0.9,
+          top2CalibratedScore: 0.1,
+          calibratedGap: 0.8,
+          decisionConfidenceC: 0.9,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.7, gapThreshold: 0.2 },
+          outcomeReasonCodes: [],
+        },
+        conformalSetSize: 1,
+      },
+      rankedResults: [],
+      effectiveRoute: 'hybrid',
+      snapshotVersions: undefined,
+      decisionEngine: {
+        decide: vi.fn().mockResolvedValue({
+          decisionStatus: 'resolved',
+          nextAction: 'return_result',
+          decisionConfidence: 0.9,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          signalSet: {
+            entity_integrity_score: 1,
+            hard_constraint_pass: 1,
+            soft_constraint_score: 1,
+            semantic_relevance_score: 1,
+            preference_alignment_score: 1,
+            popularity_score: 1,
+            availability_score: 1,
+            uncertainty_penalty: 0,
+          },
+          evidenceItems: [],
+          decisionTraceRef: 'trace',
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            feature_flags: {},
+          },
+          decisionTrace: {
+            decisionStatus: 'resolved',
+            nextAction: 'return_result',
+            inputs: {
+              queryClass: 'unknown',
+              policy: minimalPlan().policy,
+            },
+            signals: {
+              decisionConfidence: 0.9,
+              calibratedGap: 0.8,
+              ambiguity: false,
+            },
+            thresholds: {
+              resolveThreshold: 0.7,
+              gapThreshold: 0.2,
+            },
+            versions: {
+              plannerVersion: '1',
+              policyRuleVersion: '1',
+              thresholdProfileId: 'default',
+            },
+            rulesApplied: [],
+            finalReason: 'ok',
+          },
+        }),
+      } as never,
+      responseBuilder: responseBuilder as never,
+      routeDegradation: {
+        executionMode: 'degraded',
+        degradationReasons: ['reranker_timeout'],
+      },
+    });
+
+    expect(responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: {
+          executionMode: 'degraded',
+          degradationReasons: ['reranker_timeout'],
+        },
+      }),
+    );
+  });
+
+  it('marks learning kill switch as degraded in the surfaced response contract', async () => {
+    const responseBuilder = {
+      build: vi.fn(() => ({ queryType: 'search' as const, meta: {} })),
+    };
+
+    await runRankedRouteDecisionPhase({
+      plan: minimalPlan(),
+      requestId: 'req-learning-ks',
+      startTime: Date.now() - 10,
+      resolveResult: {
+        status: 'resolved',
+        candidates: [],
+        decisionTrace: {
+          queryClass: 'unknown',
+          top1CalibratedScore: 0.9,
+          top2CalibratedScore: 0.1,
+          calibratedGap: 0.8,
+          decisionConfidenceC: 0.9,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.7, gapThreshold: 0.2 },
+          outcomeReasonCodes: [],
+        },
+        conformalSetSize: 1,
+      },
+      rankedResults: [],
+      effectiveRoute: 'hybrid',
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+        featureFlags: {
+          killSwitchLearning: true,
+        },
+      },
+      decisionEngine: {
+        decide: vi.fn().mockResolvedValue({
+          decisionStatus: 'resolved',
+          nextAction: 'return_result',
+          decisionConfidence: 0.9,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          signalSet: {
+            entity_integrity_score: 1,
+            hard_constraint_pass: 1,
+            soft_constraint_score: 1,
+            semantic_relevance_score: 1,
+            preference_alignment_score: 1,
+            popularity_score: 1,
+            availability_score: 1,
+            uncertainty_penalty: 0,
+          },
+          evidenceItems: [],
+          decisionTraceRef: 'trace',
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            feature_flags: {
+              killSwitchLearning: true,
+            },
+          },
+          decisionTrace: {
+            decisionStatus: 'resolved',
+            nextAction: 'return_result',
+            inputs: {
+              queryClass: 'unknown',
+              policy: minimalPlan().policy,
+            },
+            signals: {
+              decisionConfidence: 0.9,
+              calibratedGap: 0.8,
+              ambiguity: false,
+            },
+            thresholds: {
+              resolveThreshold: 0.7,
+              gapThreshold: 0.2,
+            },
+            versions: {
+              plannerVersion: '1',
+              policyRuleVersion: '1',
+              thresholdProfileId: 'default',
+            },
+            rulesApplied: [],
+            finalReason: 'ok',
+          },
+        }),
+      } as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    expect(responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contract: {
+          executionMode: 'degraded',
+          degradationReasons: ['learning_kill_switch'],
+        },
+      }),
+    );
+  });
 });

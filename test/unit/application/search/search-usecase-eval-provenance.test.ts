@@ -94,4 +94,51 @@ describe('search-usecase-eval-provenance', () => {
       anchorConditioned: true,
     })]);
   });
+
+  it('deduplicates repeated anchor_similarity values in response meta provenance slices', () => {
+    const slices = searchResponseToEvalProvenanceSlices({
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        route: 'hybrid',
+        decisionConfidence: 0.9,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: 'trace-2',
+        decisionSnapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1',
+          threshold_profile_id: 'default',
+          planner_version: '1',
+          feature_flags: {},
+        },
+      },
+      results: [],
+      clarification: null,
+      meta: {
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+        engine_schema_version: 'search_response_v1',
+        retrievalProvenanceSlices: [{
+          queryId: 'req-3',
+          candidateEntityId: 'wine-3',
+          channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+          topChannel: 'anchor_similarity',
+          anchorConditioned: true,
+          protected: false,
+          fusionScore: 0.84,
+          rank: 1,
+        }],
+      },
+    });
+
+    expect(slices).toEqual([expect.objectContaining({
+      candidateEntityId: 'wine-3',
+      topChannel: 'anchor_similarity',
+      channels: ['anchor_similarity', 'dense_semantic'],
+      anchorConditioned: true,
+    })]);
+  });
 });

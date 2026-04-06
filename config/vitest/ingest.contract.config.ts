@@ -8,6 +8,7 @@ export default defineConfig({
       'test/unit/etl/ndjson.test.ts',
       'test/unit/etl/index-to-vespa.test.ts',
       'test/unit/etl/validate-silver.test.ts',
+      'test/unit/etl/indexable-record.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,

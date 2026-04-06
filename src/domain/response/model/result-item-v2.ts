@@ -10,6 +10,9 @@
 export type {
   ResultItemV2Human,
   SearchResponseV2Human,
+  SearchResponseV2HumanSearch,
+  SearchResponseV2HumanComparison,
+  ComparisonEntityV2Human,
   ResultItemV2Machine,
   SearchResponseV2Machine,
   InterpretResponseV2,

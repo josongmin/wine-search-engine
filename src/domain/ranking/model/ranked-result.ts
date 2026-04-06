@@ -46,6 +46,34 @@ export interface ComponentScores {
 
   /** Penalty for uncertainty/ambiguity; subtracted from final score. */
   readonly uncertaintyPenalty: number;
+
+  /**
+   * Producer prestige from winery_rating [0, 1].
+   * Defined for producer_browse / region_browse / compare_candidates modes.
+   * Absent (undefined) when mode does not weight prestige.
+   */
+  readonly producerPrestige?: number | undefined;
+
+  /**
+   * Vintage recency signal [0, 1]. Higher = more recent vintage.
+   * Used in browse / comparison modes where recency matters.
+   * Absent (undefined) when vintageYear is not available.
+   */
+  readonly recency?: number | undefined;
+
+  /**
+   * Critic score signal [0, 1] normalized from Track-C criticProxy.proxyScore.
+   * Falls back to Vivino ratingAvg / 5 when criticProxy absent.
+   * Absent (undefined) when no critic signal is available for the candidate.
+   */
+  readonly criticScore?: number | undefined;
+
+  /**
+   * Multilingual match signal [0, 1].
+   * 1.0 when the candidate has Korean aliases and the query contained Hangul.
+   * 0.0 when no Korean text is present or query is purely Latin.
+   */
+  readonly multilingualScore?: number | undefined;
 }
 
 /**
@@ -143,6 +171,14 @@ export interface RankedResult {
   readonly appellation?: string | undefined;
   readonly producerPrestige?: number | undefined;
   readonly retrievalProvenance?: CandidateProvenance | undefined;
+
+  /**
+   * Set to `true` when the policy stage demoted this result from a higher rank
+   * (e.g. producer diversity rule). Consumers should use `rank` as the
+   * authoritative position; `finalScore` may be higher than results ranked
+   * above this one when `policyDemoted` is true.
+   */
+  readonly policyDemoted?: boolean | undefined;
 
   /**
    * T5.2: Coarse prune metadata — present only for retained candidates.

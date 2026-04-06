@@ -12,6 +12,7 @@
  */
 
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
+import { preferCanonicalRetrievalChannelLabels } from '../../retrieval/model/retrieval-channel.js';
 import type {
   ResultItemV2Machine,
   SearchResponseV2Machine,
@@ -32,7 +33,7 @@ export interface MachineResponseBuildParamsV2 {
 function serializeProvenance(
   provenance: NonNullable<RankedResult['retrievalProvenance']>,
 ): string {
-  const channels = provenance.channels.join(',');
+  const channels = preferCanonicalRetrievalChannelLabels(provenance.channels).join(',');
   const score = provenance.fusionScore.toFixed(4);
   return `${channels}@${provenance.fusionProfile}/${score}`;
 }

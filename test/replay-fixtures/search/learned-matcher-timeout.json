@@ -1,7 +1,23 @@
 {
   "name": "learned-matcher-timeout",
+  "replay_request": {
+    "query": "Opus One 2018!!!",
+    "decision_snapshot": {
+      "snapshot_id": "default:1.0.0:1.0.0::",
+      "model_versions": {
+        "learned_matcher": "timeout-test"
+      },
+      "index_versions": {},
+      "policy_rule_version": "1.0.0",
+      "threshold_profile_id": "default",
+      "planner_version": "1.0.0",
+      "feature_flags": {},
+      "response_contract_version": "search_response_v1"
+    }
+  },
   "expected": {
     "execution_mode": "degraded",
-    "degradation_reasons": ["learned_matcher_unavailable"]
-  }
+    "degradation_reasons": ["learned_matcher_timeout"]
+  },
+  "requires_runtime_capability": ["replay_route", "learned_matcher_runtime"]
 }

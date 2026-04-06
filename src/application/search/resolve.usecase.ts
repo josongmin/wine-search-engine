@@ -13,6 +13,7 @@ import type { ResolveResponse } from './resolve-response.dto.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 
 export type { ResolveRequest } from './resolve-request.dto.js';
 export type { ResolveResponse } from './resolve-response.dto.js';
@@ -43,6 +44,15 @@ export class ResolveUseCase {
   constructor(private readonly deps: ResolveUseCaseDeps) {}
 
   async execute(request: ResolveRequest): Promise<ResolveResponse> {
+    pipelineDebug(
+      {
+        step: 'resolve.use_case.start',
+        query_preview: sanitizeQueryForDebug(request.query),
+        ...(request.requestId !== undefined ? { request_id: request.requestId } : {}),
+      },
+      'pipeline resolve-only',
+    );
+
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
@@ -63,6 +73,13 @@ export class ResolveUseCase {
 
     const satResult = this.constraintSAT.check(plan.constraints);
     if (satResult.contradicted) {
+      pipelineDebug(
+        {
+          step: 'resolve.constraint_sat.contradicted',
+          query_class: plan.queryClass,
+        },
+        'pipeline resolve-only early exit',
+      );
       const traceRef = request.requestId !== undefined
         ? `resolve:${request.requestId}:${plan.queryClass}:constraint-sat`
         : `resolve:${plan.queryClass}:constraint-sat`;
@@ -97,6 +114,16 @@ export class ResolveUseCase {
 
     // Run entity resolver
     const result = await this.deps.entityResolver.resolve(resolverInput);
+
+    pipelineDebug(
+      {
+        step: 'resolve.use_case.done',
+        resolve_status: result.status,
+        candidate_count: result.candidates.length,
+        has_top_entity: result.topEntity !== undefined,
+      },
+      'pipeline resolve-only',
+    );
 
     // Build trace ref
     const traceRef = request.requestId !== undefined

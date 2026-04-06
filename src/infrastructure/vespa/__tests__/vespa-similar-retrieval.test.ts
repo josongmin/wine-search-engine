@@ -55,6 +55,10 @@ describe('VespaSimilarRetrieval', () => {
       pairing: ['steak'],
       occasion: ['celebration'],
       certifications: ['organic'],
+      retrievalTrace: expect.objectContaining({
+        retrievalProfile: 'similar_anchor',
+        candidateSources: ['anchor_similarity'],
+      }),
     });
     expect(candidate?.searchTextEn).toBe('S'.repeat(800));
   });

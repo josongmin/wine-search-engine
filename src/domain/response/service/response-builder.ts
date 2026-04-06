@@ -9,6 +9,8 @@ import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-
 import type { GroupedResult } from './result-grouper.js';
 import { ResultGrouper } from './result-grouper.js';
 import { deterministicHash } from '../../shared/utils/hash.js';
+import type { SpecializedRouteObservability } from '../../../application/search/specialized-route-observability.js';
+import { toSpecializedRouteMeta } from '../../../application/search/specialized-route-observability.js';
 
 /**
  * Parameters required by {@link ResponseBuilder.build}.
@@ -56,6 +58,9 @@ export interface ResponseBuildParams {
     readonly blockingEligible?: boolean | undefined;
     readonly degradationReasons?: readonly string[] | undefined;
   } | undefined;
+
+  /** Optional specialized retrieval provenance surfaced by route execution. */
+  readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
 }
 
 /** Reason code attached when a result has no evidence items. */
@@ -129,6 +134,7 @@ export class ResponseBuilder {
       ...(params.retrievalProvenanceSlices !== undefined && params.retrievalProvenanceSlices.length > 0
         ? { retrievalProvenanceSlices: params.retrievalProvenanceSlices }
         : {}),
+      ...toSpecializedRouteMeta(params.specializedRouteObservability),
     };
 
     // Extract LLM envelope fields (Epic 9)

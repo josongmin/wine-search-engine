@@ -89,7 +89,7 @@ describe('buildInterpretResponseV2', () => {
     expect(result.decompositionStrategy).toBe('multi_intent');
   });
 
-  it('passes through activeChannels unchanged', () => {
+  it('passes through already-canonical activeChannels unchanged', () => {
     const channels = ['sparse_bm25', 'dense_semantic', 'relative_filter'] as const;
     const result = buildInterpretResponseV2(makeInput({ activeChannels: channels }));
     expect(result.activeChannels).toEqual(['sparse_bm25', 'dense_semantic', 'relative_filter']);
@@ -107,11 +107,19 @@ describe('buildInterpretResponseV2', () => {
     expect(result.rankingSignals).toContain('anchor_similarity');
   });
 
-  it('includes anchor_similarity when dense_anchor channel is active', () => {
+  it('includes anchor_similarity when anchor_similarity channel is active', () => {
     const result = buildInterpretResponseV2(makeInput({
-      activeChannels: ['dense_semantic', 'dense_anchor'],
+      activeChannels: ['dense_semantic', 'anchor_similarity'],
     }));
+    expect(result.activeChannels).toEqual(['dense_semantic', 'anchor_similarity']);
     expect(result.rankingSignals).toContain('anchor_similarity');
+  });
+
+  it('deduplicates activeChannels when anchor_similarity repeats', () => {
+    const result = buildInterpretResponseV2(makeInput({
+      activeChannels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+    }));
+    expect(result.activeChannels).toEqual(['anchor_similarity', 'dense_semantic']);
   });
 
   it('includes anchor_similarity when compare_anchor channel is active', () => {

@@ -15,6 +15,11 @@ import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import {
+  registerSearchV2Route,
+  registerHybridV2Route,
+  registerInterpretV2Route,
+} from './routes/search-v2.route.js';
+import {
   registerHealthRoutes,
   type HealthRouteOptions,
 } from './routes/health.route.js';
@@ -85,8 +90,11 @@ async function registerCorsSupport(
         return;
       }
 
+      // Requests without an Origin header (server-to-server, curl, load-balancer
+      // health checks) are not browser CORS requests.  Allow them through
+      // unconditionally; CORS headers simply won't be set, which is correct.
       if (origin === undefined) {
-        callback(null, false);
+        callback(null, true);
         return;
       }
 
@@ -107,13 +115,20 @@ async function registerCorsSupport(
 }
 
 function registerTelemetryHooks(app: FastifyInstance, tracer: Tracer): void {
+  // NOTE: this hook runs after registerRequestContext so request.requestId is
+  // already populated. If it were registered before registerRequestContext we
+  // would have to fall back to request.id (which Fastify always sets via
+  // genReqId before any onRequest hook runs).
   app.addHook('onRequest', (request, _reply, done) => {
     const spanName = `${request.method} ${request.url}`;
     const span = tracer.startSpan(spanName, {
       attributes: {
         'http.method': request.method,
         'http.url': request.url,
-        'request.id': request.requestId,
+        // request.id is always present (set by Fastify genReqId before hooks).
+        // request.requestId is an alias populated by registerRequestContext; use
+        // request.id as the canonical source so this hook is order-independent.
+        'request.id': request.id,
       },
     });
     request.otelSpan = span;
@@ -159,6 +174,13 @@ export async function createServer(
     genReqId: (req) => resolveIncomingRequestId(req.headers),
     trustProxy: options?.trustProxy ?? false,
     bodyLimit: options?.bodyLimitBytes ?? 1_048_576,
+    // Close idle keep-alive connections when server.close() is called so that
+    // the process can exit cleanly during graceful shutdown (SIGTERM/SIGINT).
+    // Without this, open keep-alive connections with no active request prevent
+    // the server from finishing its close sequence, causing a hang or forceful
+    // kill.  'idle' only affects connections with no in-flight request;
+    // connections that are mid-request are drained normally.
+    forceCloseConnections: 'idle',
   });
 
   if (options?.enableSecurityHeaders ?? true) {
@@ -190,10 +212,24 @@ export async function createServer(
   // errorResponseBuilder is intentionally omitted: in @fastify/rate-limit v10 it replaces the
   // thrown error object, stripping statusCode and causing setErrorHandler to see an unknown
   // object and fall back to 500. The 429 branch is handled in the global error handler instead.
+  //
+  // Key strategy: prefer x-authenticated-subject (the API-key principal set by the upstream
+  // proxy) over raw IP.  IP-only keying is bypassable via IPv6 rotation; principal-based
+  // keying enforces the limit per identity even when an attacker cycles source addresses.
+  // Fall back to IP when no authenticated subject header is present (unauthenticated paths).
   if ((options?.rateLimitMax ?? 100) > 0) {
     await app.register(rateLimit, {
       max: options?.rateLimitMax ?? 100,
       timeWindow: '1 minute',
+      keyGenerator(request) {
+        const subject = request.headers['x-authenticated-subject'];
+        const subjectStr = Array.isArray(subject) ? subject[0] : subject;
+        if (subjectStr !== undefined && subjectStr.trim().length > 0) {
+          return `subject:${subjectStr.trim()}`;
+        }
+        // Fall back to IP (works with trustProxy: the right IP is already resolved).
+        return request.ip;
+      },
     });
   }
 
@@ -201,10 +237,18 @@ export async function createServer(
   // Must run in preParsing (before the body parser) so that missing or
   // wrong Content-Type headers never reach the JSON parser and cause a 500.
   // RFC 2046: media types are case-insensitive, so we lowercase before checking.
+  //
+  // We extract the media-type token (the part before the first semicolon) and
+  // compare it exactly to 'application/json'.  This correctly:
+  //   - accepts   "application/json"
+  //   - accepts   "application/json; charset=utf-8"
+  //   - rejects   "text/plain"
+  //   - rejects   "not-application/json"   (would pass a naive .includes() check)
   app.addHook('preParsing', async (request, reply) => {
     if (request.method === 'POST') {
-      const ct = (request.headers['content-type'] ?? '').toLowerCase();
-      if (!ct.includes('application/json')) {
+      const rawCt = request.headers['content-type'] ?? '';
+      const mediaType = rawCt.split(';')[0]?.trim().toLowerCase() ?? '';
+      if (mediaType !== 'application/json') {
         const requestId = getRequestId(request);
         await reply.status(415).send({
           error: {
@@ -242,6 +286,9 @@ export async function createServer(
   registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
+  registerSearchV2Route(app, deps);
+  registerHybridV2Route(app, deps);
+  registerInterpretV2Route(app, deps);
   registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)

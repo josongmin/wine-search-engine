@@ -1,7 +1,23 @@
 {
   "name": "heuristic-drinking-window",
+  "replay_request": {
+    "query": "Can I drink this cabernet now?",
+    "decision_snapshot": {
+      "snapshot_id": "default:1.0.0:1.0.0::",
+      "model_versions": {
+        "drinking_window": "heuristic-only"
+      },
+      "index_versions": {},
+      "policy_rule_version": "1.0.0",
+      "threshold_profile_id": "default",
+      "planner_version": "1.0.0",
+      "feature_flags": {},
+      "response_contract_version": "search_response_v1"
+    }
+  },
   "expected": {
-    "execution_mode": "authoritative",
-    "degradation_reasons": []
-  }
+    "execution_mode": "heuristic",
+    "degradation_reasons": ["heuristic_drinking_window"]
+  },
+  "requires_runtime_capability": ["replay_route", "drinking_window_runtime"]
 }

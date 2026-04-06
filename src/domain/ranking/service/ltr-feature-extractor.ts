@@ -18,16 +18,28 @@ import type { RankingFeatures } from './lambdamart-ranker.js';
  * and the evaluation pipeline (stored in EvalResult).
  *
  * Fields correspond 1:1 to the non-zero RankingFeatures:
- *   semantic          → semanticScore
- *   popularity        → popularityScore
- *   attributeAlignment→ attributeMatchScore
+ *   semantic           → semanticScore
+ *   popularity         → popularityScore
+ *   attributeAlignment → attributeMatchScore
  *   preferenceAlignment→ classMatchScore
+ *   criticScore        → criticScore (Track-C / Vivino rating proxy)
+ *   recency            → recencyScore (vintage age decay)
+ *   producerPrestige   → producerPrestigeScore (winery_rating)
+ *   multilingualScore  → multilingualScore (Korean query × Korean alias match)
  */
 export interface LTRScoreComponents {
   readonly semantic: number;
   readonly popularity: number;
   readonly attributeAlignment: number;
   readonly preferenceAlignment: number;
+  /** Critic score [0,1]: Track-C criticProxy or Vivino ratingAvg/5. Undefined = absent. */
+  readonly criticScore?: number | undefined;
+  /** Vintage recency signal [0,1]. Undefined when vintageYear is absent. */
+  readonly recency?: number | undefined;
+  /** Producer prestige [0,1] from winery_rating. Undefined = absent from index. */
+  readonly producerPrestige?: number | undefined;
+  /** Multilingual (Korean) match signal {0,1}. */
+  readonly multilingualScore?: number | undefined;
 }
 
 /**
@@ -38,26 +50,62 @@ export interface LTRScoreComponents {
  * eliminating train-serve skew by construction.
  *
  * Feature mapping:
- *   - 4 real signals from score components
- *   - 4 zero sentinels (no data available in current pipeline)
+ *   - 4 core signals from score components (unchanged)
+ *   - 4 SOTA++ signals now populated from real data
+ *     (previously zero sentinels: bm25Score, recencyScore, diversityScore, multilingualScore)
+ *
+ * Notes:
+ * - bm25Score remains 0.0: Vespa does not expose per-candidate BM25 scores in
+ *   query responses without a custom summary expression. When Vespa custom
+ *   rank features are wired, replace 0.0 with the candidate's bm25 rank signal.
+ * - diversityScore remains 0.0: diversity is computed at the set level in
+ *   SignalComputer.computeSetDiversity() but is not yet carried per-candidate.
+ *   When per-candidate diversity is added to ComponentScores, map it here.
  *
  * @param scores - Score components from ranking (inference) or stored eval data (training)
  * @returns RankingFeatures for LambdaMART scoring
  */
 export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures {
   return {
-    // Real signals — directly from score components
+    // Core signals — directly from score components
     semanticScore: scores.semantic,
     popularityScore: scores.popularity,
     attributeMatchScore: scores.attributeAlignment,
     classMatchScore: scores.preferenceAlignment,
 
-    // No-data sentinels — no corresponding signal exists in current pipeline.
-    // When real signals become available (e.g., BM25 from Vespa, recency from
-    // vintage data), add them to LTRScoreComponents and map here.
+    // SOTA++ signals — now real values (previously zero sentinels)
+    // Fall back to 0.0 only when absent from the index (no data = neutral, not positive)
+    recencyScore: scores.recency ?? 0.0,
+    multilingualScore: scores.multilingualScore ?? 0.0,
+
+    // bm25Score: Vespa BM25 not yet exposed per-candidate in query responses.
+    // This remains 0.0 until Vespa custom rank features are wired to ranking input.
     bm25Score: 0.0,
-    recencyScore: 0.0,
+
+    // diversityScore: set-level signal, not yet per-candidate.
+    // Remains 0.0 until ComponentScores gains a per-candidate diversity field.
     diversityScore: 0.0,
-    multilingualScore: 0.0,
+  };
+}
+
+/**
+ * Extended LTR feature extraction for offline training that includes
+ * additional prestige and critic signals not yet in the 8-feature
+ * LambdaMART model. Used by ltr-training-service.ts for next-generation
+ * model training without affecting the live inference path.
+ *
+ * When the next LambdaMART model version adds these features, promote
+ * them to extractLTRFeatures() and update RankingFeatures accordingly.
+ */
+export interface ExtendedLTRFeatures extends RankingFeatures {
+  readonly criticScoreFeature: number;
+  readonly producerPrestigeFeature: number;
+}
+
+export function extractExtendedLTRFeatures(scores: LTRScoreComponents): ExtendedLTRFeatures {
+  return {
+    ...extractLTRFeatures(scores),
+    criticScoreFeature: scores.criticScore ?? 0.0,
+    producerPrestigeFeature: scores.producerPrestige ?? 0.5,
   };
 }

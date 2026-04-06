@@ -62,6 +62,7 @@ function normalizeRetrievalHitSummaryValue(
         typeof value === 'string' ? value : undefined,
       ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
     case 'searchTextEn':
+    case 'searchTextKo':
       return normalizeSummarySearchText(
         typeof value === 'string' ? value : undefined,
       ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
@@ -160,6 +161,7 @@ export function retrievalDocumentToHitSummary(doc: RetrievalDocument): Retrieval
     producer: doc.producer,
     region: doc.region,
     searchTextEn: doc.searchTextEn,
+    searchTextKo: doc.searchTextKo,
     grapePrimary,
     style: doc.style,
     priceBand: doc.priceBand,

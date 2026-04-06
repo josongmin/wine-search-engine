@@ -51,6 +51,10 @@ function assertMixedResponse(body: unknown): void {
   expect(results.length).toBeGreaterThan(0);
   expect(meta['route']).toMatch(/^(mixed|hybrid)$/);
   expect(decision['decision_status']).not.toBe('failed');
+  expect(typeof decision['authority_trace_ref']).toBe('string');
+  expect(typeof decision['runtime_correlation_ref']).toBe('string');
+  expect(['authoritative', 'degraded', 'heuristic', 'advisory']).toContain(decision['execution_mode']);
+  expect(Array.isArray(decision['degradation_reasons'] ?? [])).toBe(true);
 }
 
 describe('Mixed search E2E', () => {

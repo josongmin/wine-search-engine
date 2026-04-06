@@ -20,6 +20,10 @@ import type { QueryCacheKey, EmbeddingCacheKey } from '../../domain/performance/
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import {
+  SEARCH_RESPONSE_CONTRACT_VERSION,
+  buildDecisionSnapshotId,
+} from '../../application/search/search-usecase-decision-snapshot.js';
 
 function buildPlanCacheKey(
   plan: QueryPlanV1,
@@ -199,7 +203,12 @@ describe('CacheService', () => {
       await cacheService.setSearchResponse(mockPlan, mockRequest, mockResponse);
 
       // Get from cache
-      const result = await cacheService.getSearchResponse(mockPlan, mockRequest, mockSnapshot);
+      const result = await cacheService.getSearchResponse(mockPlan, mockRequest, mockSnapshot, {
+        learningKillSwitchEnabled: false,
+        denseRetrievalEnabled: true,
+        rerankerAvailable: true,
+        currentExecutionModeHint: 'authoritative',
+      });
 
       expect(result.hit).toBe(true);
       expect(result.data).toBeDefined();
@@ -223,6 +232,12 @@ describe('CacheService', () => {
         mockPlan,
         mockRequest,
         createMockSnapshot(),
+        {
+          learningKillSwitchEnabled: false,
+          denseRetrievalEnabled: true,
+          rerankerAvailable: true,
+          currentExecutionModeHint: 'authoritative',
+        },
       );
       expect(result.hit).toBe(false);
     });
@@ -240,16 +255,15 @@ describe('CacheService', () => {
 
       expect(result.hit).toBe(false);
       expect(result.isStale).toBe(true);
-      expect(result.reason).toBe('version_mismatch');
+      expect(result.reason).toBe('model_version_drift');
     });
 
     it('should invalidate stale entries when threshold profile changes', async () => {
       const mockPlan = createMockPlan();
       const mockRequest = {};
-      const currentSnapshot = {
-        ...createMockSnapshot(),
+      const currentSnapshot = createMockSnapshot('test-v1', {
         threshold_profile_id: 'threshold-v2',
-      } satisfies DecisionSnapshot;
+      });
       const mockResponse = createMockResponse();
 
       await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), mockResponse, 3600);
@@ -258,16 +272,15 @@ describe('CacheService', () => {
 
       expect(result.hit).toBe(false);
       expect(result.isStale).toBe(true);
-      expect(result.reason).toBe('version_mismatch');
+      expect(result.reason).toBe('snapshot_id_drift');
     });
 
     it('should invalidate stale entries when feature flags change', async () => {
       const mockPlan = createMockPlan();
       const mockRequest = {};
-      const currentSnapshot = {
-        ...createMockSnapshot(),
+      const currentSnapshot = createMockSnapshot('test-v1', {
         feature_flags: { killSwitchDenseRetrieval: true },
-      } satisfies DecisionSnapshot;
+      });
       const mockResponse = createMockResponse();
 
       await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), mockResponse, 3600);
@@ -276,7 +289,218 @@ describe('CacheService', () => {
 
       expect(result.hit).toBe(false);
       expect(result.isStale).toBe(true);
-      expect(result.reason).toBe('version_mismatch');
+      expect(result.reason).toBe('snapshot_id_drift');
+    });
+
+    it('should bypass degraded cached entries even when the key matches', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const mockResponse = createMockResponse('test-v1', {
+        executionMode: 'degraded',
+        blockingEligible: false,
+        degradationReasons: ['reranker_unavailable'],
+      });
+
+      await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), mockResponse, 3600);
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+      );
+
+      expect(result.hit).toBe(false);
+      expect(result.isStale).toBe(true);
+      expect(result.reason).toBe('cached_not_blocking_eligible');
+    });
+
+    it('should bypass contract-version drift with a stable reason', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const mockResponse = createMockResponse('test-v1', {
+        contractVersion: 'search_response_v0',
+      });
+
+      await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), mockResponse, 3600);
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+      );
+
+      expect(result.hit).toBe(false);
+      expect(result.isStale).toBe(true);
+      expect(result.reason).toBe('contract_version_drift');
+    });
+
+    it('should bypass cache hits when learning is kill-switched at runtime', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      await cacheService.setSearchResponse(mockPlan, mockRequest, createMockResponse());
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+        {
+          learningKillSwitchEnabled: true,
+          denseRetrievalEnabled: true,
+          rerankerAvailable: true,
+          currentExecutionModeHint: 'degraded',
+        },
+      );
+
+      expect(result.hit).toBe(false);
+      expect(result.reason).toBe('learning_disabled');
+      expect(await queryCache.get(buildPlanCacheKey(mockPlan, mockRequest))).toBeDefined();
+    });
+
+    it('should bypass cache hits when dense retrieval is disabled at runtime', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      await cacheService.setSearchResponse(mockPlan, mockRequest, createMockResponse());
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+        {
+          learningKillSwitchEnabled: false,
+          denseRetrievalEnabled: false,
+          rerankerAvailable: true,
+          currentExecutionModeHint: 'degraded',
+        },
+      );
+
+      expect(result.hit).toBe(false);
+      expect(result.reason).toBe('dense_retrieval_disabled');
+      expect(await queryCache.get(buildPlanCacheKey(mockPlan, mockRequest))).toBeDefined();
+    });
+
+    it('should bypass cache hits when reranker is unavailable at runtime', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      await cacheService.setSearchResponse(mockPlan, mockRequest, createMockResponse());
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+        {
+          learningKillSwitchEnabled: false,
+          denseRetrievalEnabled: true,
+          rerankerAvailable: false,
+          currentExecutionModeHint: 'degraded',
+        },
+      );
+
+      expect(result.hit).toBe(false);
+      expect(result.reason).toBe('reranker_unavailable');
+      expect(await queryCache.get(buildPlanCacheKey(mockPlan, mockRequest))).toBeDefined();
+    });
+
+    it('should fail closed when cached model versions are missing', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const response = createMockResponse('test-v1');
+      const snapshotWithoutModels: DecisionSnapshot = {
+        ...response.meta.decisionSnapshot!,
+        model_versions: {},
+      };
+      response.meta.decisionSnapshot = snapshotWithoutModels;
+      response.engineDecision.decisionSnapshot = snapshotWithoutModels;
+
+      await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), response, 3600);
+
+      const result = await cacheService.getSearchResponse(
+        mockPlan,
+        mockRequest,
+        createMockSnapshot(),
+        {
+          learningKillSwitchEnabled: false,
+          denseRetrievalEnabled: true,
+          rerankerAvailable: true,
+          currentExecutionModeHint: 'authoritative',
+        },
+      );
+
+      expect(result.hit).toBe(false);
+      expect(result.isStale).toBe(true);
+      expect(result.reason).toBe('model_version_drift');
+    });
+
+    it('should refuse to write non-blocking-eligible responses to cache', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const nonBlockingResponse = createMockResponse('test-v1', {
+        executionMode: 'authoritative',
+        blockingEligible: false,
+      });
+
+      const stored = await cacheService.setSearchResponse(mockPlan, mockRequest, nonBlockingResponse);
+
+      // Write must be rejected — read policy would unconditionally bypass it anyway,
+      // so storing it wastes Redis capacity.
+      expect(stored).toBe(false);
+      expect(await queryCache.get(buildPlanCacheKey(mockPlan, mockRequest))).toBeUndefined();
+    });
+
+    it('should use shorter TTL for ambiguous responses than for resolved ones', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+
+      let capturedTtl = 0;
+      const delegateCache = new MockQueryCache();
+      const spyCache: QueryCachePort = {
+        get: (k) => delegateCache.get(k),
+        set: async (k, v, ttl) => {
+          capturedTtl = ttl;
+          return delegateCache.set(k, v, ttl);
+        },
+        delete: (k) => delegateCache.delete(k),
+        deletePattern: (p) => delegateCache.deletePattern(p),
+        getStats: () => delegateCache.getStats(),
+        clear: () => delegateCache.clear(),
+      };
+      const spyService = new CacheService(spyCache, embeddingCache, 5, 60000);
+
+      const ambiguousResponse = createMockResponse('test-v1', { decisionStatus: 'ambiguous' });
+      await spyService.setSearchResponse(mockPlan, mockRequest, ambiguousResponse);
+      const ambiguousTtl = capturedTtl;
+
+      const resolvedResponse = createMockResponse('test-v1');
+      await spyService.setSearchResponse(mockPlan, mockRequest, resolvedResponse);
+      const resolvedTtl = capturedTtl;
+
+      // Ambiguous results must be cached for much less time than resolved ones.
+      expect(ambiguousTtl).toBeLessThan(resolvedTtl);
+      expect(ambiguousTtl).toBeLessThanOrEqual(60);
+    });
+
+    it('should use the shortest TTL for failed responses', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+
+      let capturedTtl = 0;
+      const delegateCache = new MockQueryCache();
+      const spyCache: QueryCachePort = {
+        get: (k) => delegateCache.get(k),
+        set: async (k, v, ttl) => {
+          capturedTtl = ttl;
+          return delegateCache.set(k, v, ttl);
+        },
+        delete: (k) => delegateCache.delete(k),
+        deletePattern: (p) => delegateCache.deletePattern(p),
+        getStats: () => delegateCache.getStats(),
+        clear: () => delegateCache.clear(),
+      };
+      const spyService = new CacheService(spyCache, embeddingCache, 5, 60000);
+
+      const failedResponse = createMockResponse('test-v1', { decisionStatus: 'failed' });
+      await spyService.setSearchResponse(mockPlan, mockRequest, failedResponse);
+
+      expect(capturedTtl).toBeLessThanOrEqual(30);
     });
   });
 
@@ -472,14 +696,23 @@ function createMockPlan(_modelVersion = 'test-v1'): QueryPlanV1 {
   } as unknown as QueryPlanV1;
 }
 
-function createMockSnapshot(modelVersion = 'test-v1'): DecisionSnapshot {
-  return {
+function createMockSnapshot(
+  modelVersion = 'test-v1',
+  overrides?: Partial<Omit<DecisionSnapshot, 'snapshot_id'>>,
+): DecisionSnapshot {
+  const snapshotBase = {
     model_versions: { embedding: modelVersion },
     index_versions: { wine_content: '2026-04-01' },
     policy_rule_version: '1',
     threshold_profile_id: 'default',
     planner_version: '1',
     feature_flags: {},
+    response_contract_version: SEARCH_RESPONSE_CONTRACT_VERSION,
+    ...overrides,
+  };
+  return {
+    snapshot_id: buildDecisionSnapshotId(snapshotBase),
+    ...snapshotBase,
   };
 }
 
@@ -489,16 +722,25 @@ function createMockResponse(
     readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
     readonly blockingEligible?: boolean;
     readonly degradationReasons?: readonly string[];
+    readonly contractVersion?: string;
+    readonly decisionStatus?: 'resolved' | 'ambiguous' | 'failed';
   },
 ): SearchResponseV1 {
   const decisionSnapshot = createMockSnapshot(modelVersion);
+  const normalizedDecisionSnapshot =
+    overrides?.contractVersion !== undefined
+      ? createMockSnapshot(modelVersion, {
+          response_contract_version: overrides.contractVersion,
+        })
+      : decisionSnapshot;
   const executionMode = overrides?.executionMode ?? 'authoritative';
   const blockingEligible = overrides?.blockingEligible ?? true;
   const degradationReasons = overrides?.degradationReasons;
+  const decisionStatus = overrides?.decisionStatus ?? 'resolved';
   return {
     queryType: 'search',
     engineDecision: {
-      decisionStatus: 'resolved',
+      decisionStatus,
       nextAction: 'return_result',
       route: 'hybrid',
       decisionConfidence: 0.9,
@@ -508,7 +750,7 @@ function createMockResponse(
       executionMode,
       blockingEligible,
       ...(degradationReasons !== undefined ? { degradationReasons } : {}),
-      decisionSnapshot,
+      decisionSnapshot: normalizedDecisionSnapshot,
     },
     results: [],
     meta: {
@@ -516,8 +758,8 @@ function createMockResponse(
       queryTimeMs: 100,
       route: 'hybrid',
       version: '1.0.0',
-      engine_schema_version: 'search_response_v1',
-      decisionSnapshot,
+      engine_schema_version: overrides?.contractVersion ?? 'search_response_v1',
+      decisionSnapshot: normalizedDecisionSnapshot,
       response_hash: 'test-hash',
       authorityTraceRef: 'test-trace',
       executionMode,

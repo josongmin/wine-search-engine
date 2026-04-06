@@ -1,6 +1,7 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
 import type { AnchorProfile } from './anchor-profile.js';
+import type { MixedDegradationState } from './mixed-degradation.js';
 
 /**
  * Result of a mixed query ("wines like X but ...") execution.
@@ -9,7 +10,7 @@ import type { AnchorProfile } from './anchor-profile.js';
  * constraint overlays applied, and diagnostic metrics about how well
  * the anchor's characteristics were preserved in the result set.
  */
-export interface MixedQueryResult {
+export interface MixedQueryResult extends MixedDegradationState {
   /** The resolved anchor entity profile. */
   readonly anchor: AnchorProfile;
 

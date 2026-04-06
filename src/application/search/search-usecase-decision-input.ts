@@ -36,6 +36,11 @@ export function buildSearchDecisionInput(
   rankedResults?: readonly RankedResult[],
   effectiveRoute: QueryRoute = plan.route,
   decisionContext?: SearchRouteDecisionContext,
+  honestyContract?: {
+    readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
+    readonly routeHealthy?: boolean | undefined;
+    readonly blockingRequested?: boolean | undefined;
+  },
 ): DecisionInput {
   const topResult = rankedResults?.[0];
   const topEntity = resolverResult.topEntity;
@@ -227,6 +232,15 @@ export function buildSearchDecisionInput(
     policy: plan.policy,
     uncertainty: plan.uncertainty,
     admissionContext,
+    ...(honestyContract?.executionMode !== undefined
+      ? { executionMode: honestyContract.executionMode }
+      : {}),
+    ...(honestyContract?.routeHealthy !== undefined
+      ? { routeHealthy: honestyContract.routeHealthy }
+      : {}),
+    ...(honestyContract?.blockingRequested !== undefined
+      ? { blockingRequested: honestyContract.blockingRequested }
+      : {}),
     ...(rankingSignals !== undefined ? { rankingSignals } : {}),
     evidenceSummary,
     ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),

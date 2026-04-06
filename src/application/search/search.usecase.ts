@@ -11,11 +11,14 @@ import type { SearchResponseCachePort } from '../../domain/performance/port/sear
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
+import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
+import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import type { SearchExecutorEvaluationResult } from './port/search-executor.port.js';
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
 import type { SearchRequest } from './search-request.dto.js';
+import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import type {
   BrowseRetrieverPort,
   CandidatePoolPort,
@@ -29,11 +32,15 @@ import type {
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
 import { runHybridRankingPipeline } from './search-usecase-hybrid-ranking-pipeline.js';
-import { mixedQueryResultToSearchRouteExecution } from './search-usecase-mixed-route.js';
+import {
+  buildFailedMixedRouteExecution,
+  mixedQueryResultToSearchRouteExecution,
+} from './search-usecase-mixed-route.js';
 import { buildSearchRouteResolutionContext } from './search-usecase-route-resolution.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
+import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import {
   rankedResultsToEvalProvenanceSlices,
   searchResponseToEvalProvenanceSlices,
@@ -80,6 +87,8 @@ export interface SearchUseCaseDeps {
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   /** Unified cache service for query/embedding/result caching (Wave 4, Phase 3). Optional. */
   readonly cacheService?: SearchResponseCachePort | undefined;
+  readonly cacheLookupRuntimeState?: CacheLookupRuntimeState | undefined;
+  readonly cacheLookupRuntimeStateProvider?: (() => CacheLookupRuntimeState) | undefined;
   /** Epic 4: Per-query-class LambdaMART models for LTR reranking. Optional. */
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   /** Epic 14: Decomposed search for "A vs B" comparison queries. Optional. */
@@ -126,6 +135,16 @@ export class SearchUseCase {
   ): Promise<SearchExecutorEvaluationResult> {
     const startTime = Date.now();
 
+    pipelineDebug(
+      {
+        step: 'search.execute.start',
+        eval_mode: includeEvalProvenance,
+        query_len: request.query.length,
+        query_preview: sanitizeQueryForDebug(request.query),
+      },
+      'pipeline search.execute',
+    );
+
     const preRoute = await runSearchPreRoutePhase({
       request,
       requestId,
@@ -141,10 +160,20 @@ export class SearchUseCase {
       responseBuilder: this.deps.responseBuilder,
       constraintSAT: this.constraintSAT,
       cacheService: this.deps.cacheService,
+      cacheLookupRuntimeState:
+        this.deps.cacheLookupRuntimeStateProvider?.()
+        ?? this.deps.cacheLookupRuntimeState,
       decomposedSearch: this.deps.decomposedSearch,
     });
 
     if (preRoute.outcome === 'return') {
+      pipelineDebug(
+        {
+          step: 'search.pre_route.early_exit',
+          query_type: preRoute.response.queryType,
+        },
+        'pipeline pre_route return',
+      );
       const response = preRoute.response;
       if (includeEvalProvenance && response.queryType === 'search') {
         const retrievalProvenanceSlices = searchResponseToEvalProvenanceSlices(response);
@@ -165,15 +194,41 @@ export class SearchUseCase {
       retrievalModeSource,
     } = buildSearchRouteResolutionContext(plan, request);
 
+    pipelineDebug(
+      {
+        step: 'search.route_resolution',
+        query_class: plan.queryClass,
+        effective_route: effectiveRoute,
+        planner_suggested_mode: plannerSuggestedMode,
+        retrieval_mode_source: retrievalModeSource,
+        plan_route: plan.route,
+      },
+      'pipeline route context',
+    );
+
     // Step 3: Execute based on route
-    const { resolveResult, rankedResults, decisionContext } = await dispatchSearchRouteExecution(
+    const {
+      resolveResult,
+      rankedResults,
+      decisionContext,
+      routeDegradation,
+      funnelMetrics,
+      specializedRouteObservability,
+    } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
         executeEntity: () => this.executeEntityRoute(plan),
         executeHybrid: () => this.executeHybridRoute(plan),
         executeMixed: async () => {
-          const mixedResult = await this.deps.mixedSolver.solve(plan);
-          return mixedQueryResultToSearchRouteExecution(plan, mixedResult);
+          try {
+            const mixedResult = await this.deps.mixedSolver.solve(plan);
+            return mixedQueryResultToSearchRouteExecution(plan, mixedResult);
+          } catch (error) {
+            if (error instanceof MixedRouteDegradationError) {
+              return buildFailedMixedRouteExecution(plan, error.reason);
+            }
+            throw error;
+          }
         },
       },
     );
@@ -196,15 +251,29 @@ export class SearchUseCase {
       decisionEngine: this.deps.decisionEngine,
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
+      routeDegradation,
+      specializedRouteObservability,
     });
+
+    pipelineDebug(
+      {
+        step: 'search.execute.done',
+        latency_ms: Date.now() - startTime,
+        ranked_count: rankedResults.length,
+        resolve_status: resolveResult.status,
+      },
+      'pipeline search.execute complete',
+    );
 
     const retrievalProvenanceSlices = includeEvalProvenance
       ? rankedResultsToEvalProvenanceSlices(requestId, rankedResults)
       : [];
+    const evaluationFunnelMetrics = includeEvalProvenance ? funnelMetrics : undefined;
 
     return {
       response,
       ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+      ...(evaluationFunnelMetrics !== undefined ? { funnelMetrics: evaluationFunnelMetrics } : {}),
     };
   }
 
@@ -214,7 +283,16 @@ export class SearchUseCase {
   private async executeEntityRoute(plan: QueryPlanV1): Promise<EntityResolveResult> {
     const candidateEntities = await buildResolverCandidatesFromPlan(plan, this.deps.entityLookup);
 
-    return this.deps.entityResolver.resolve({
+    pipelineDebug(
+      {
+        step: 'route.entity.only.start',
+        query_class: plan.queryClass,
+        resolver_candidate_count: candidateEntities.length,
+      },
+      'pipeline entity-only route',
+    );
+
+    const resolved = await this.deps.entityResolver.resolve({
       rawQuery: plan.rawQuery,
       normalizedQuery: plan.normalizedQuery,
       ...(plan.normalizedQueryViews !== undefined
@@ -226,6 +304,18 @@ export class SearchUseCase {
       uncertainty: plan.uncertainty,
       candidateEntities,
     });
+
+    pipelineDebug(
+      {
+        step: 'route.entity.only.done',
+        resolve_status: resolved.status,
+        candidate_count: resolved.candidates.length,
+        has_degradation: resolved.degradation !== undefined,
+      },
+      'pipeline entity-only route',
+    );
+
+    return resolved;
   }
 
   /**
@@ -233,8 +323,14 @@ export class SearchUseCase {
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
-  ): Promise<{ resolveResult: EntityResolveResult; rankedResults: readonly RankedResult[] }> {
-    const candidates = await retrieveHybridCandidatesForPlan(
+  ): Promise<{
+    resolveResult: EntityResolveResult;
+    rankedResults: readonly RankedResult[];
+    routeDegradation?: SearchRouteExecutionResult['routeDegradation'];
+    funnelMetrics?: SearchRouteExecutionResult['funnelMetrics'];
+    specializedRouteObservability?: SearchRouteExecutionResult['specializedRouteObservability'];
+  }> {
+    const retrieval = await retrieveHybridCandidatesForPlan(
       plan,
       {
         candidatePool: this.deps.candidatePool,
@@ -244,6 +340,37 @@ export class SearchUseCase {
       (p) => this.executeEntityRoute(p),
     );
 
-    return runHybridRankingPipeline(plan, candidates, this.deps.ranker, this.deps.ltrModels);
+    const ranked = await runHybridRankingPipeline(
+      plan,
+      retrieval.candidates,
+      this.deps.ranker,
+    );
+
+    if (retrieval.routeDegradation === undefined) {
+      return {
+        ...ranked,
+        ...(retrieval.specializedRouteObservability !== undefined
+          ? { specializedRouteObservability: retrieval.specializedRouteObservability }
+          : {}),
+      };
+    }
+
+    return {
+      ...ranked,
+      routeDegradation: ranked.routeDegradation === undefined
+        ? retrieval.routeDegradation
+        : {
+            executionMode: 'degraded',
+            degradationReasons: [
+              ...new Set([
+                ...ranked.routeDegradation.degradationReasons,
+                ...retrieval.routeDegradation.degradationReasons,
+              ]),
+            ],
+          },
+      ...(retrieval.specializedRouteObservability !== undefined
+        ? { specializedRouteObservability: retrieval.specializedRouteObservability }
+        : {}),
+    };
   }
 }

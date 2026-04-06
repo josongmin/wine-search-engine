@@ -140,6 +140,40 @@ describe('accumulateEvidence', () => {
     ]);
   });
 
+  it('deduplicates repeated anchor_similarity values when merging provenance and trace outputs', () => {
+    const c1 = makeCandidate('e1', 0.7, {
+      channels: ['anchor_similarity'],
+      channelScores: [{ channel: 'anchor_similarity', rawScore: 0.7, rank: 2, rrfContribution: 0.02 }],
+      queryViewMatches: [{ viewName: 'strict', matchedText: 'sassicaia', channel: 'anchor_similarity' }],
+      anchorConditioned: true,
+    });
+    const c2 = makeCandidate('e1', 0.9, {
+      channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
+      channelScores: [
+        { channel: 'anchor_similarity', rawScore: 0.9, rank: 1, rrfContribution: 0.03 },
+        { channel: 'dense_semantic', rawScore: 0.5, rank: 4, rrfContribution: 0.01 },
+      ],
+      queryViewMatches: [{ viewName: 'strict', matchedText: 'sassicaia', channel: 'anchor_similarity' }],
+      anchorConditioned: true,
+    });
+
+    const [result] = accumulateEvidence([c1, c2]);
+
+    expect(result?.channels).toEqual(['anchor_similarity', 'dense_semantic']);
+    expect(result?.mergedEnvelope.provenance.channels).toEqual(['anchor_similarity', 'dense_semantic']);
+    expect(result?.mergedEnvelope.provenance.channelScores).toEqual([
+      expect.objectContaining({ channel: 'anchor_similarity', rank: 1 }),
+      expect.objectContaining({ channel: 'dense_semantic', rank: 4 }),
+    ]);
+    expect(result?.mergedEnvelope.provenance.queryViewMatches).toEqual([
+      expect.objectContaining({ channel: 'anchor_similarity', viewName: 'strict' }),
+    ]);
+    expect(result?.mergedEnvelope.legacyCandidate.retrievalTrace.candidateSources).toEqual([
+      'anchor_similarity',
+      'dense_semantic',
+    ]);
+  });
+
   it('sorts output by bestFusionScore descending', () => {
     const candidates = [
       makeCandidate('e3', 0.3),

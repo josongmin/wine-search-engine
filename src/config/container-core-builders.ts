@@ -124,6 +124,7 @@ export function buildCandidatePool(
     new FusionService(),
     support.cacheService,
     config.embedding.model,
+    config.killSwitch.learning,
   );
 }
 
@@ -175,7 +176,7 @@ export function buildResponseBuilder(): ResponseBuilder {
 
 export function buildMixedSolver(
   adapters: CoreAdapterServices,
-  ranker: Ranker,
+  ranker: RankingStagePipeline,
 ): MixedSolver {
   return new MixedSolver(
     adapters.anchorResolver,

@@ -53,6 +53,44 @@ function makeDocument(overrides: Partial<RetrievalDocument> = {}): RetrievalDocu
   };
 }
 
+describe('fromVespaFields entity_id validation', () => {
+  it('throws a descriptive error when entity_id is missing from Vespa response', () => {
+    // Previously, fromVespaFields called createEntityId(getString(fields, 'entity_id'))
+    // which would invoke createEntityId('') and throw a cryptic
+    // "EntityId cannot be an empty string" error with no context about
+    // which document or which fields were present.
+    expect(() =>
+      fromVespaFields({
+        canonical_label: 'Some Wine',
+        producer: 'Some Producer',
+        // entity_id deliberately absent
+      }),
+    ).toThrow(/fromVespaFields: missing or invalid entity_id/);
+  });
+
+  it('throws a descriptive error when entity_id is not a string', () => {
+    expect(() =>
+      fromVespaFields({
+        entity_id: 12345, // number instead of string
+        canonical_label: 'Some Wine',
+      }),
+    ).toThrow(/fromVespaFields: missing or invalid entity_id/);
+  });
+
+  it('error message includes available field keys to aid debugging', () => {
+    let message = '';
+    try {
+      fromVespaFields({ canonical_label: 'Wine', vintage_year: 2019 });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    // The error should show which keys ARE present so the caller knows
+    // what Vespa actually returned.
+    expect(message).toContain('canonical_label');
+    expect(message).toContain('vintage_year');
+  });
+});
+
 describe('vespa mapping retrieval summary SSOT', () => {
   it('writes and reads retrieval summary fields through the shared Vespa mapping contract', () => {
     const doc = makeDocument();

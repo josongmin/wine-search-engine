@@ -121,7 +121,12 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
       });
     }
 
-    if (previous?.availability !== next.availability) {
+    // Only emit stock_changed when a *known* previous state exists and the
+    // availability actually flipped.  When previous is null the document is
+    // being indexed for the first time and there is no baseline to compare
+    // against, so emitting here would generate spurious events for every
+    // initial ingest batch.
+    if (previous !== null && previous.availability !== next.availability) {
       events.push({
         type: 'stock_changed',
         data: {

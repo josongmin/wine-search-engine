@@ -1,6 +1,8 @@
 /**
  * Tests for WebhookDelivery service.
  * Validates HMAC signature generation, payload structure, and retry logic.
+ *
+ * All retry tests inject a no-op sleepFn so they run without real delays.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -8,12 +10,14 @@ import { WebhookDelivery } from '../infrastructure/watchlist/webhook-delivery.js
 import type { WatchlistEntry, WatchlistChangeEvent } from '../domain/watchlist/model/watchlist-entry.js';
 
 const SECRET = 'test-secret-min-16-characters!!!!';
+const noopSleep = (_ms: number): Promise<void> => Promise.resolve();
 
 describe('WebhookDelivery', () => {
   let delivery: WebhookDelivery;
 
   beforeEach(() => {
-    delivery = new WebhookDelivery(SECRET);
+    // Inject no-op sleep so retry tests finish instantly.
+    delivery = new WebhookDelivery(SECRET, noopSleep);
     vi.clearAllMocks();
   });
 
@@ -83,53 +87,47 @@ describe('WebhookDelivery', () => {
       }
     });
 
-    it(
-      'should return false on non-2xx response',
-      { timeout: 10000 },
-      async () => {
-        const fetchSpy = vi.fn()
-          .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }))
-          .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }))
-          .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }));
-        global.fetch = fetchSpy as any;
+    it('should return false on non-2xx response (exhausts all 4 attempts)', async () => {
+      const fetchSpy = vi.fn()
+        .mockResolvedValue(new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }));
+      global.fetch = fetchSpy as any;
 
-        const result = await delivery.deliver(entry, event);
+      const result = await delivery.deliver(entry, event);
 
-        expect(result).toBe(false);
-        expect(fetchSpy).toHaveBeenCalledTimes(3); // 3 attempts
-      },
-    );
+      expect(result).toBe(false);
+      expect(fetchSpy).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    });
 
-    it(
-      'should retry with exponential backoff on failure',
-      { timeout: 40000 },
-      async () => {
-        const fetchSpy = vi.fn()
-          .mockResolvedValue(new Response('{}', { status: 500 }));
-        global.fetch = fetchSpy as any;
+    it('should retry with 1 s, 5 s, 30 s backoff schedule (3 retries = 4 total attempts)', async () => {
+      const sleepSpy = vi.fn(noopSleep);
+      const d = new WebhookDelivery(SECRET, sleepSpy);
 
-        const result = await delivery.deliver(entry, event);
+      const fetchSpy = vi.fn().mockResolvedValue(new Response('{}', { status: 500 }));
+      global.fetch = fetchSpy as any;
 
-        expect(result).toBe(false);
-        expect(fetchSpy).toHaveBeenCalledTimes(3);
-      },
-    );
+      const result = await d.deliver(entry, event);
 
-    it(
-      'should succeed on retry if eventual response is 2xx',
-      { timeout: 10000 },
-      async () => {
-        const fetchSpy = vi.fn()
-          .mockResolvedValueOnce(new Response('{}', { status: 500 }))
-          .mockResolvedValueOnce(new Response('{}', { status: 200 }));
-        global.fetch = fetchSpy as any;
+      expect(result).toBe(false);
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
 
-        const result = await delivery.deliver(entry, event);
+      // Verify exact backoff durations: 1 s after attempt 1, 5 s after 2, 30 s after 3.
+      expect(sleepSpy).toHaveBeenCalledTimes(3);
+      expect(sleepSpy).toHaveBeenNthCalledWith(1, 1000);
+      expect(sleepSpy).toHaveBeenNthCalledWith(2, 5000);
+      expect(sleepSpy).toHaveBeenNthCalledWith(3, 30000);
+    });
 
-        expect(result).toBe(true);
-        expect(fetchSpy).toHaveBeenCalledTimes(2);
-      },
-    );
+    it('should succeed on retry if eventual response is 2xx', async () => {
+      const fetchSpy = vi.fn()
+        .mockResolvedValueOnce(new Response('{}', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+      global.fetch = fetchSpy as any;
+
+      const result = await delivery.deliver(entry, event);
+
+      expect(result).toBe(true);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
 
     it('should include watchlist_id in payload', async () => {
       const fetchSpy = vi.fn().mockResolvedValueOnce(

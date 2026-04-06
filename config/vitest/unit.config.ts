@@ -13,10 +13,12 @@ const maxUnitThreads = (() => {
 
 const testInclude = [
   'test/unit/**/*.test.ts',
+  'test/helpers/**/*.test.ts',
   'src/application/**/__tests__/**/*.test.ts',
   'src/config/**/__tests__/**/*.test.ts',
   'src/domain/**/__tests__/**/*.test.ts',
   'src/infrastructure/**/__tests__/**/*.test.ts',
+  'src/observability/**/__tests__/**/*.test.ts',
   'src/interface/**/__tests__/**/*.test.ts',
   'src/__tests__/**/*.test.ts',
 ] as const;

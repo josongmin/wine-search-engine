@@ -11,7 +11,6 @@
 export const PROVENANCE_CHANNELS = [
   'sparse_bm25',
   'dense_semantic',
-  'dense_anchor',
   'learned_sparse',
   'anchor_similarity',
   'relative_filter',

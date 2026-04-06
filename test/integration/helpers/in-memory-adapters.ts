@@ -133,6 +133,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
     queries: readonly string[],
     _filters?: readonly string[],
     limit?: number,
+    _rankProfile?: string,
   ): Promise<readonly SparseHit[]> {
     const hits: SparseHit[] = [];
     const queryLower = queries.map((q) => q.toLowerCase());
@@ -176,6 +177,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
     _embedding: readonly number[],
     _filters?: readonly string[],
     limit?: number,
+    _rankProfile?: string,
   ): Promise<readonly DenseHit[]> {
     // Return all docs with a deterministic fake similarity in popularity order
     const docs = Array.from(this.docs.values()).sort(

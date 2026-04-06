@@ -13,13 +13,73 @@ export interface DocumentSparseVector {
 }
 
 /**
+ * Summary projection — search hit display + evidence fields.
+ * These are the fields returned in Vespa summary and needed for ranking evidence.
+ * SSOT for: RetrievalHitSummary seam, response builder, eval display.
+ *
+ * `entityId` is required: every hit projection must carry a stable entity identity
+ * so that consumers (response builder, eval display) can rely on it being present.
+ * {@link RetrievalHitSummary} (partial data from a search result) overrides
+ * `entityId` back to optional because summaries do not always carry entity identity
+ * — that is the responsibility of {@link RetrievalSummaryCarrier}.
+ *
+ * `canonicalLabel` remains optional for partial projections (e.g. feature-only hits).
+ *
+ * The `| undefined` on optional fields is consistent with
+ * `exactOptionalPropertyTypes` usage in this codebase (some downstream interfaces
+ * use the explicit union form; matching it here avoids subtype incompatibility).
+ */
+export interface RetrievalHitProjection {
+  readonly entityId: EntityId;
+  readonly canonicalLabel?: string | undefined;
+  readonly producer?: string | undefined;
+  readonly region?: string | undefined;
+  readonly appellation?: string | undefined;
+  readonly grapePrimary?: string | undefined;
+  readonly vintage?: number | undefined;
+  readonly vintageYear?: number | undefined;
+  readonly searchTextEn?: string | undefined;
+  readonly producerPrestige?: number | undefined;
+  readonly avgCriticProxyScore?: number | undefined;
+}
+
+/**
+ * Feature projection — ranking runtime + ML feature fields.
+ * These are the fields needed by the ranker but NOT displayed to users.
+ * SSOT for: Ranker, signal computers, LTR features.
+ *
+ * All fields are intentionally optional; {@link RetrievalDocument} overrides
+ * `entityId` as required.
+ *
+ * The `| undefined` on optional fields is consistent with
+ * `exactOptionalPropertyTypes` usage in this codebase.
+ */
+export interface RetrievalFeatureProjection {
+  readonly entityId?: EntityId | undefined;
+  readonly body?: number | undefined;
+  readonly tannin?: number | undefined;
+  readonly acidity?: number | undefined;
+  readonly sweetness?: number | undefined;
+  readonly criticScoreNormalized?: number | undefined;
+  readonly grapePrimaryEnc?: number | undefined;
+  readonly regionEnc?: number | undefined;
+  readonly countryEnc?: number | undefined;
+  readonly drinkingWindowStart?: number | undefined;
+  readonly drinkingWindowEnd?: number | undefined;
+  readonly drinkingWindowModelVersion?: string | undefined;
+}
+
+/**
  * Projection schema for a document stored in the search index (RFC-012 S11).
+ *
+ * Full retrieval document = hit projection + feature projection + payload fields.
+ * Only used in indexing/ETL layer. Runtime code should use hit or feature projection.
  *
  * This represents the complete set of fields that the retrieval layer
  * indexes and queries. It is the contract between the ingestion pipeline
  * and the search infrastructure.
  */
-export interface RetrievalDocument {
+export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeatureProjection {
   /** Unique entity identifier. */
   readonly entityId: EntityId;
 

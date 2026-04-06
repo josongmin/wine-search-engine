@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { mixedQueryResultToSearchRouteExecution } from '../../../../src/application/search/search-usecase-mixed-route.js';
+import {
+  buildFailedMixedRouteExecution,
+  mixedQueryResultToSearchRouteExecution,
+} from '../../../../src/application/search/search-usecase-mixed-route.js';
 import type { MixedQueryResult } from '../../../../src/domain/mixed/model/mixed-query-result.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import { MIXED_FALLBACK_REASONS } from '../../../../src/domain/mixed/model/mixed-degradation.js';
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -64,6 +68,11 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
       ],
       constraintOverlay: { hard: [], soft: [], inferred: [] },
       anchorPreservationRate: 1,
+      routeDegradation: {
+        executionMode: 'degraded',
+        degradationReasons: ['mixed_similar_retrieval_fallback'],
+      },
+      fallbackReason: 'mixed_similar_retrieval_fallback',
     };
     const out = mixedQueryResultToSearchRouteExecution(plan, mixedResult);
     expect(out.rankedResults).toHaveLength(1);
@@ -78,6 +87,38 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
       canonicalLabel: 'Wine',
       confidence: 0.88,
     });
+    expect(out.routeDegradation).toEqual({
+      executionMode: 'degraded',
+      degradationReasons: ['mixed_similar_retrieval_fallback'],
+    });
+    expect(out.fallbackReason).toBe('mixed_similar_retrieval_fallback');
     expect(out.resolveResult.decisionTrace.outcomeReasonCodes).toContain('MIXED_ROUTE');
+  });
+
+  it('keeps the mixed fallback taxonomy stable', () => {
+    expect(MIXED_FALLBACK_REASONS).toMatchInlineSnapshot(`
+      [
+        "mixed_anchor_resolution_failed",
+        "mixed_similar_retrieval_unavailable",
+        "mixed_similar_retrieval_fallback",
+        "mixed_ranker_unavailable",
+      ]
+    `);
+  });
+
+  it('builds a structured failed mixed-route execution for anchor degradation', () => {
+    const out = buildFailedMixedRouteExecution(
+      minimalPlan(),
+      'mixed_anchor_resolution_failed',
+    );
+
+    expect(out.rankedResults).toEqual([]);
+    expect(out.routeDegradation).toEqual({
+      executionMode: 'degraded',
+      degradationReasons: ['mixed_anchor_resolution_failed'],
+    });
+    expect(out.fallbackReason).toBe('mixed_anchor_resolution_failed');
+    expect(out.resolveResult.status).toBe('failed');
+    expect(out.resolveResult.degradation?.reasons).toEqual(['mixed_anchor_resolution_failed']);
   });
 });

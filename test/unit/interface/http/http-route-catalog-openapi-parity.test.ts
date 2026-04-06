@@ -34,4 +34,39 @@ describe('DeclaredHttpRouteContractCatalog ↔ OpenAPI bridge', () => {
     const extra = keys.filter((k) => !declaredKeys.has(k));
     expect(extra.length, `unexpected OpenAPI paths: ${extra.join(', ')}`).toBe(0);
   });
+
+  it('all operationId values are unique across the catalog (duplicate operationId breaks codegen)', () => {
+    const seen = new Map<string, string>();
+    for (const entry of DeclaredHttpRouteContractCatalog) {
+      const { operationId } = entry.contract;
+      const prev = seen.get(operationId);
+      expect(
+        prev,
+        `duplicate operationId "${operationId}" on ${entry.method} ${entry.url} (first seen on ${prev ?? '?'})`,
+      ).toBeUndefined();
+      seen.set(operationId, `${entry.method} ${entry.url}`);
+    }
+  });
+
+  it('every catalog entry has a non-empty operationId', () => {
+    for (const entry of DeclaredHttpRouteContractCatalog) {
+      expect(
+        entry.contract.operationId.length,
+        `empty operationId on ${entry.method} ${entry.url}`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('no duplicate {method, url} pairs in the catalog (collision overwrites OpenAPI operation)', () => {
+    const seen = new Map<string, string>();
+    for (const entry of DeclaredHttpRouteContractCatalog) {
+      const key = `${entry.method} ${entry.url}`;
+      const prev = seen.get(key);
+      expect(
+        prev,
+        `duplicate catalog entry "${key}" (operationId ${entry.contract.operationId}) already seen`,
+      ).toBeUndefined();
+      seen.set(key, entry.contract.operationId);
+    }
+  });
 });

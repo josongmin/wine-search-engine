@@ -14,6 +14,14 @@ export function rrfFuse(
   rankings: ReadonlyArray<ReadonlyMap<string, number>>,
   k: number = 60,
 ): Map<string, number> {
+  // k must be ≥ 1. k=0 with rank=1 gives 1/1 = 1.0 (diverges from the
+  // smoothing intent), and k<0 produces negative scores for high ranks,
+  // inverting the entire ranking. Guard here as the authoritative
+  // low-level function so all callers are protected.
+  if (k < 1) {
+    throw new Error(`rrfFuse: k must be ≥ 1, got ${k}`);
+  }
+
   const fused = new Map<string, number>();
 
   for (const ranking of rankings) {

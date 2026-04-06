@@ -120,7 +120,7 @@ function buildHybridCandidate(
       lexicalQueriesUsed: [anchorDoc.canonicalLabel],
       semanticQueriesUsed: [anchorDoc.searchTextEn],
       filtersApplied: [],
-      candidateSources: ['anchor'],
+      candidateSources: ['sparse_bm25', 'dense_semantic', 'anchor_similarity'],
     },
   };
 }

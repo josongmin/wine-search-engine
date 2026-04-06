@@ -210,6 +210,41 @@ describe('buildSearchDecisionInput', () => {
     expect(input.rankingSignals).toBeUndefined();
   });
 
+  it('passes execution honesty signals into the decision input', () => {
+    const plan = minimalPlan('hybrid');
+    const resolverResult: EntityResolveResult = {
+      status: 'resolved',
+      candidates: [],
+      decisionTrace: {
+        queryClass: 'unknown',
+        top1CalibratedScore: 0.8,
+        top2CalibratedScore: 0.2,
+        calibratedGap: 0.6,
+        decisionConfidenceC: 0.8,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+        outcomeReasonCodes: [],
+      },
+      conformalSetSize: 1,
+    };
+
+    const input = buildSearchDecisionInput(
+      plan,
+      resolverResult,
+      undefined,
+      'hybrid',
+      undefined,
+      {
+        executionMode: 'degraded',
+        routeHealthy: false,
+      },
+    );
+
+    expect(input.executionMode).toBe('degraded');
+    expect(input.routeHealthy).toBe(false);
+  });
+
   it('does not treat an unaligned ranked result as identity evidence', () => {
     const resolvedId = createEntityId('entity-resolved');
     const differentRankedId = createEntityId('entity-ranked');

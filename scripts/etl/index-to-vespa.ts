@@ -16,7 +16,7 @@
 
 import 'dotenv/config';
 import fs from 'node:fs/promises';
-import type { EnrichedSilverRecord } from './types.js';
+import type { EnrichedSilverRecord, IndexableWineRecord } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
@@ -162,6 +162,10 @@ const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
  * Returns empty string when no Korean aliases exist for this record.
  */
 export function buildSearchTextKo(rec: EnrichedSilverRecord): string {
+  // Prefer pre-built Korean text from Phase-1 enrichment (stored in the NDJSON)
+  const prebuilt = (rec as Record<string, unknown>)['searchTextKo'];
+  if (typeof prebuilt === 'string' && prebuilt.length > 0) return prebuilt;
+
   const koAliases = rec.aliases.noisyRecallProjection.filter((a) =>
     HANGUL_RE.test(a),
   );
@@ -255,10 +259,23 @@ function computePopularity(rec: GoldRecord): number {
   return Math.min(1, base + boost);
 }
 
-export function silverToRetrievalDoc(
-  rec: EnrichedSilverRecord,
-  embedding: readonly number[],
-): RetrievalDocument {
+/**
+ * Validation result for an {@link IndexableWineRecord}.
+ */
+export interface IndexableValidationResult {
+  readonly valid: boolean;
+  readonly errors: string[];
+}
+
+/**
+ * Maps an {@link EnrichedSilverRecord} to an {@link IndexableWineRecord}.
+ *
+ * This is the explicit, auditable mapping layer between the Silver tier and
+ * the Vespa feed. All field assignments are deliberate — no implicit field
+ * grabbing.
+ */
+// Projection family: hit + feature + payload (see docs/migration/projection-reindex-strategy.md)
+export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecord {
   const gold = rec as GoldRecord;
 
   // criticScoreNormalized: Track C proxy (÷100) takes priority over raw Vivino rating (÷5)
@@ -273,46 +290,26 @@ export function silverToRetrievalDoc(
   const certTags: readonly string[] | undefined =
     gold.certifications != null ? buildCertificationTags(gold.certifications) : undefined;
 
-  const doc: RetrievalDocument = {
-    entityId: createEntityId(rec.sourceId),
-    entityType: 'wine',
+  return {
+    // RetrievalHitProjection fields
+    entityId: String(createEntityId(rec.sourceId)),
     canonicalLabel: rec.canonicalLabel,
-    aliasesIdentitySafe: rec.aliases.identitySafeProjection,
-    aliasesNoisyRecall: rec.aliases.noisyRecallProjection,
-    producer: rec.producer,
-    region: rec.region,
-    grapes: rec.grapes,
-    searchTextKo: buildSearchTextKo(rec),
-    searchTextEn: rec.searchTextEn,
-    semanticSummary: buildEmbedText(rec),
+    producer: rec.producer || undefined,
+    region: rec.region || undefined,
+    ...(rec.appellation ? { appellation: rec.appellation } : {}),
+    ...(rec.grapePrimary ? { grapePrimary: rec.grapePrimary } : {}),
+    ...(rec.vintageYear !== null ? { vintageYear: rec.vintageYear } : {}),
+    searchTextEn: rec.searchTextEn || undefined,
+    ...(gold.producerPrestige != null ? { producerPrestige: gold.producerPrestige } : {}),
+    // avgCriticProxyScore mirrors criticScoreNormalized for the hit-projection summary.
+    ...(criticScoreNormalized !== undefined ? { avgCriticProxyScore: criticScoreNormalized } : {}),
+
+    // RetrievalFeatureProjection fields
     body: rec.body,
     sweetness: rec.sweetness,
-    style: deriveStyle(gold),
-    priceBand: rec.priceBand,
-    pairing: rec.pairingTags,
-    occasion: [],
-    availability: true,
-    popularityScore: computePopularity(gold),
-    embedding,
-    // Core optional fields
-    ...(rec.vintageYear !== null ? { vintageYear: rec.vintageYear } : {}),
     ...(rec.acidity > 0 ? { acidity: rec.acidity } : {}),
     ...(rec.tannin > 0 ? { tannin: rec.tannin } : {}),
-    ...(rec.wineType ? { wineType: rec.wineType } : {}),
-    ...(rec.grapePrimary ? { grapePrimary: rec.grapePrimary } : {}),
-    ...(rec.country ? { country: rec.country } : {}),
-    ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
-    ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
-    ...(rec.learnedSparseWeights !== undefined
-      ? { learnedSparseWeights: rec.learnedSparseWeights }
-      : {}),
-    // SOTA++ Silver fields
-    ...(gold.alcoholPct != null ? { alcoholPct: gold.alcoholPct } : {}),
-    ...(gold.producerPrestige != null ? { producerPrestige: gold.producerPrestige } : {}),
-    // Track C Step 2 — certifications
-    ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
-    // Track C Step 4 — drinking window
     ...(gold.drinkingWindow != null
       ? {
           drinkingWindowStart: gold.drinkingWindow.drinkingWindowStart,
@@ -320,6 +317,150 @@ export function silverToRetrievalDoc(
           drinkingWindowModelVersion: gold.drinkingWindow.modelVersion,
         }
       : {}),
+
+    // Payload fields
+    entityType: 'wine',
+    aliasesIdentitySafe: rec.aliases.identitySafeProjection,
+    aliasesNoisyRecall: rec.aliases.noisyRecallProjection,
+    grapes: rec.grapes,
+    searchTextKo: buildSearchTextKo(rec),
+    semanticSummary: buildEmbedText(rec),
+    style: deriveStyle(gold),
+    priceBand: rec.priceBand,
+    pairing: rec.pairingTags,
+    occasion: [],
+    availability: true,
+    popularityScore: computePopularity(gold),
+    ...(rec.wineType ? { wineType: rec.wineType } : {}),
+    ...(rec.country ? { country: rec.country } : {}),
+    ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
+    ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
+    ...(gold.alcoholPct != null ? { alcoholPct: gold.alcoholPct } : {}),
+    ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
+    ...(rec.learnedSparseWeights !== undefined
+      ? { learnedSparseWeights: rec.learnedSparseWeights }
+      : {}),
+  };
+}
+
+/**
+ * Validates an {@link IndexableWineRecord} against required field contracts
+ * and expected numeric ranges for feature projection fields.
+ *
+ * Required: entityId (non-empty), canonicalLabel (non-empty).
+ * Feature ranges: body, tannin, acidity, sweetness are all stored as [0, 1]
+ * (normalized from the Vivino 1–5 scale during Silver transformation).
+ * Out-of-range means strictly outside [0, 1].
+ */
+// Validates hit projection required fields + feature projection numeric ranges
+export function validateIndexableRecord(rec: IndexableWineRecord): IndexableValidationResult {
+  const errors: string[] = [];
+
+  // Required fields
+  if (!rec.entityId || rec.entityId.trim().length === 0) {
+    errors.push('entityId is required and must be non-empty');
+  }
+  if (!rec.canonicalLabel || rec.canonicalLabel.trim().length === 0) {
+    errors.push('canonicalLabel is required and must be non-empty');
+  }
+
+  // Feature range validation (Silver [0, 1] normalised values)
+  const featureFields: ReadonlyArray<{ key: keyof IndexableWineRecord; label: string }> = [
+    { key: 'body', label: 'body' },
+    { key: 'tannin', label: 'tannin' },
+    { key: 'acidity', label: 'acidity' },
+    { key: 'sweetness', label: 'sweetness' },
+  ];
+
+  for (const { key, label } of featureFields) {
+    const val = rec[key];
+    if (val !== undefined && typeof val === 'number') {
+      if (val < 0 || val > 1) {
+        errors.push(`${label} must be in [0, 1], got ${val}`);
+      }
+    }
+  }
+
+  // Critic / prestige score ranges
+  if (rec.criticScoreNormalized !== undefined) {
+    if (rec.criticScoreNormalized < 0 || rec.criticScoreNormalized > 1) {
+      errors.push(`criticScoreNormalized must be in [0, 1], got ${rec.criticScoreNormalized}`);
+    }
+  }
+  if (rec.producerPrestige !== undefined) {
+    if (rec.producerPrestige < 0 || rec.producerPrestige > 1) {
+      errors.push(`producerPrestige must be in [0, 1], got ${rec.producerPrestige}`);
+    }
+  }
+  if (rec.popularityScore < 0 || rec.popularityScore > 1) {
+    errors.push(`popularityScore must be in [0, 1], got ${rec.popularityScore}`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export function silverToRetrievalDoc(
+  rec: EnrichedSilverRecord,
+  embedding: readonly number[],
+): RetrievalDocument {
+  const indexable = silverToIndexable(rec);
+
+  const doc: RetrievalDocument = {
+    entityId: createEntityId(rec.sourceId),
+    entityType: indexable.entityType,
+    canonicalLabel: indexable.canonicalLabel,
+    aliasesIdentitySafe: indexable.aliasesIdentitySafe,
+    aliasesNoisyRecall: indexable.aliasesNoisyRecall,
+    producer: rec.producer,
+    region: rec.region,
+    grapes: indexable.grapes,
+    searchTextKo: indexable.searchTextKo,
+    searchTextEn: rec.searchTextEn,
+    semanticSummary: indexable.semanticSummary,
+    body: rec.body,
+    sweetness: rec.sweetness,
+    style: indexable.style,
+    priceBand: indexable.priceBand,
+    pairing: indexable.pairing,
+    occasion: indexable.occasion,
+    availability: indexable.availability,
+    popularityScore: indexable.popularityScore,
+    embedding,
+    // Optional fields from indexable — omit keys when absent
+    ...(indexable.vintageYear !== undefined ? { vintageYear: indexable.vintageYear } : {}),
+    ...(indexable.acidity !== undefined ? { acidity: indexable.acidity } : {}),
+    ...(indexable.tannin !== undefined ? { tannin: indexable.tannin } : {}),
+    ...(indexable.wineType !== undefined ? { wineType: indexable.wineType } : {}),
+    ...(indexable.grapePrimary !== undefined ? { grapePrimary: indexable.grapePrimary } : {}),
+    ...(indexable.country !== undefined ? { country: indexable.country } : {}),
+    ...(indexable.priceUsd !== undefined ? { priceUsd: indexable.priceUsd } : {}),
+    ...(indexable.flavorProfiles !== undefined ? { flavorProfiles: indexable.flavorProfiles } : {}),
+    ...(indexable.criticScoreNormalized !== undefined
+      ? { criticScoreNormalized: indexable.criticScoreNormalized }
+      : {}),
+    ...(indexable.learnedSparseWeights !== undefined
+      ? { learnedSparseWeights: indexable.learnedSparseWeights }
+      : {}),
+    ...(indexable.alcoholPct !== undefined ? { alcoholPct: indexable.alcoholPct } : {}),
+    ...(indexable.producerPrestige !== undefined
+      ? { producerPrestige: indexable.producerPrestige }
+      : {}),
+    ...(indexable.certifications !== undefined ? { certifications: [...indexable.certifications] } : {}),
+    ...(indexable.drinkingWindowStart !== undefined
+      ? { drinkingWindowStart: indexable.drinkingWindowStart }
+      : {}),
+    ...(indexable.drinkingWindowEnd !== undefined
+      ? { drinkingWindowEnd: indexable.drinkingWindowEnd }
+      : {}),
+    ...(indexable.drinkingWindowModelVersion !== undefined
+      ? { drinkingWindowModelVersion: indexable.drinkingWindowModelVersion }
+      : {}),
+    ...(indexable.appellation !== undefined ? { appellation: indexable.appellation } : {}),
+    ...(indexable.finishLength !== undefined ? { finishLength: indexable.finishLength } : {}),
+    ...(indexable.classification !== undefined ? { classification: indexable.classification } : {}),
+    ...(indexable.soilType !== undefined ? { soilType: indexable.soilType } : {}),
+    ...(indexable.producerType !== undefined ? { producerType: indexable.producerType } : {}),
+    ...(indexable.oakTreatment !== undefined ? { oakTreatment: indexable.oakTreatment } : {}),
   };
   return doc;
 }

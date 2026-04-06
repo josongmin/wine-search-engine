@@ -9,6 +9,7 @@ import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { CacheResult } from '../model/cache-result.js';
+import type { CacheReadRuntimeState } from '../../cache/cache-policy.js';
 
 export interface SearchResponseCachePort {
   getSearchResponse(
@@ -18,6 +19,7 @@ export interface SearchResponseCachePort {
       readonly context?: { readonly locale: string };
     },
     currentSnapshot: DecisionSnapshot,
+    runtimeState?: CacheReadRuntimeState,
   ): Promise<CacheResult<SearchResponseV1>>;
 
   setSearchResponse(

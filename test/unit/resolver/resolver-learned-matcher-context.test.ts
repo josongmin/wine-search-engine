@@ -192,5 +192,49 @@ describe('Resolver learned matcher context', () => {
     expect(match).toHaveBeenCalledTimes(1);
     expect(result.status).toBe('resolved');
     expect(result.decisionTrace.learnedMatcherTrace).toBeUndefined();
+    expect(result.degradation?.reasons).toEqual(['learned_matcher_failed']);
+  });
+
+  it('classifies learned matcher timeouts as degraded timeout reasons', async () => {
+    const match = vi.fn<LearnedMatcherPort['match']>().mockRejectedValue(
+      new Error('LearnedMatcher service: request timed out after 30000ms'),
+    );
+    const learnedMatcher: LearnedMatcherPort = { match };
+    const resolver = new Resolver(
+      new Blocker(blockingPort),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator(calibrationStore),
+      learnedMatcher,
+    );
+
+    const queryViews = new QueryNormalizer().normalize('오푸스원 18');
+    const result = await resolver.resolve({
+      rawQuery: '오푸스원 18',
+      normalizedQuery: queryViews.accentless,
+      normalizedQueryViews: queryViews,
+      queryClass: 'short_entity',
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'hybrid',
+        policyReasonCodes: [],
+      },
+      anchorCandidates: [],
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.95,
+        anchorConfidence: 0.95,
+        constraintConfidence: 0.95,
+      },
+      candidateEntities: [makeCandidate()],
+    });
+
+    expect(result.degradation?.reasons).toEqual(['learned_matcher_timeout']);
   });
 });

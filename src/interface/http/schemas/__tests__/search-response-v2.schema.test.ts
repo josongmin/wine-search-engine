@@ -26,15 +26,34 @@ const validResultItemV2Human = {
 
 const validSearchResponseV2Human = {
   queryId: 'qid-abc-123',
+  queryType: 'search' as const,
   results: [validResultItemV2Human],
   totalCandidates: 42,
-  funnelMetrics: {
-    coarsePrunePassRate: 0.8,
-    rerankChangedTopK: false,
-    meanFinalScore: 0.71,
-    scoreGapRank1Rank2: 0.12,
-    producerDiversity: 5,
-  },
+  version: '2' as const,
+  responseType: 'human' as const,
+};
+
+const validSearchResponseV2HumanComparison = {
+  queryId: 'qid-cmp-001',
+  queryType: 'comparison' as const,
+  originalQuery: 'Opus One vs Château Margaux',
+  comparisonIntent: 'compare' as const,
+  overallStatus: 'resolved' as const,
+  entities: [
+    {
+      subQuery: 'Opus One',
+      resolutionStatus: 'resolved' as const,
+      resultCount: 1,
+      topResult: validResultItemV2Human,
+    },
+    {
+      subQuery: 'Château Margaux',
+      resolutionStatus: 'resolved' as const,
+      resultCount: 0,
+      topResult: null,
+    },
+  ] as const,
+  totalCandidates: 1,
   version: '2' as const,
   responseType: 'human' as const,
 };
@@ -93,9 +112,8 @@ describe('SearchResponseV2HumanSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('parses a response without optional funnelMetrics', () => {
-    const { funnelMetrics: _omitted, ...withoutMetrics } = validSearchResponseV2Human;
-    const result = SearchResponseV2HumanSchema.safeParse(withoutMetrics);
+  it('parses a valid comparison-branch SearchResponseV2Human object', () => {
+    const result = SearchResponseV2HumanSchema.safeParse(validSearchResponseV2HumanComparison);
     expect(result.success).toBe(true);
   });
 
@@ -118,6 +136,7 @@ describe('SearchResponseV2HumanSchema', () => {
   it('version field is the string literal "2"', () => {
     const result = SearchResponseV2HumanSchema.safeParse(validSearchResponseV2Human);
     if (!result.success) throw new Error('Parse failed');
+    expect(result.data.queryType).toBe('search');
     expect(result.data.version).toBe('2');
     expect(typeof result.data.version).toBe('string');
   });
@@ -156,6 +175,20 @@ describe('SearchResponseV2HumanSchema', () => {
   it('rejects when required field queryId is missing', () => {
     const { queryId: _omitted, ...withoutQueryId } = validSearchResponseV2Human;
     const result = SearchResponseV2HumanSchema.safeParse(withoutQueryId);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects funnelMetrics because V2 human responses do not expose internal funnel data', () => {
+    const result = SearchResponseV2HumanSchema.safeParse({
+      ...validSearchResponseV2Human,
+      funnelMetrics: {
+        coarsePrunePassRate: 0.8,
+        rerankChangedTopK: false,
+        meanFinalScore: 0.71,
+        scoreGapRank1Rank2: 0.12,
+        producerDiversity: 5,
+      },
+    });
     expect(result.success).toBe(false);
   });
 });

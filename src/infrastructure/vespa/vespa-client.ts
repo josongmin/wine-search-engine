@@ -64,6 +64,9 @@ function extractErrorMessage(body: unknown): string {
   return String(body);
 }
 
+import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+
 // ---------------------------------------------------------------------------
 // VespaClient
 // ---------------------------------------------------------------------------
@@ -148,7 +151,20 @@ export class VespaClient {
       throw new Error('Vespa: query response missing "root" field');
     }
 
-    return data as unknown as VespaQueryResponse;
+    const parsed = data as unknown as VespaQueryResponse;
+    const hitCount = parsed.root.children?.length ?? 0;
+    const totalCount = parsed.root.fields?.totalCount;
+    pipelineDebug(
+      {
+        step: PipelineDebugStep.VESPA_QUERY,
+        yql_length: yql.length,
+        hit_count: hitCount,
+        ...(totalCount !== undefined ? { total_count: totalCount } : {}),
+      },
+      'pipeline vespa query',
+    );
+
+    return parsed;
   }
 
   // -------------------------------------------------------------------------

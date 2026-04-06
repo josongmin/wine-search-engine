@@ -1,7 +1,23 @@
 {
   "name": "ambiguous-vintage",
+  "replay_request": {
+    "query": "Opus One vintage ambiguity",
+    "decision_snapshot": {
+      "snapshot_id": "default:1.0.0:1.0.0:wine_content=wine_content_v1:",
+      "model_versions": {
+        "embedding": "text-embedding-3-small-v1"
+      },
+      "index_versions": {
+        "wine_content": "wine_content_v1"
+      },
+      "policy_rule_version": "1.0.0",
+      "threshold_profile_id": "default",
+      "planner_version": "1.0.0",
+      "feature_flags": {},
+      "response_contract_version": "search_response_v1"
+    }
+  },
   "expected": {
-    "execution_mode": "authoritative",
-    "degradation_reasons": []
+    "error_code": "SNAPSHOT_MISMATCH"
   }
 }

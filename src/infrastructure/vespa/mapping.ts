@@ -5,7 +5,12 @@
  * No I/O occurs in this module — all functions are deterministic transforms.
  */
 
-import type { RetrievalDocument, DocumentSparseVector } from '../../domain/retrieval/model/retrieval-document.js';
+import type {
+  RetrievalDocument,
+  DocumentSparseVector,
+  RetrievalHitProjection,
+  RetrievalFeatureProjection,
+} from '../../domain/retrieval/model/retrieval-document.js';
 import {
   RETRIEVAL_HIT_SUMMARY_KEYS,
   type RetrievalHitSummary,
@@ -171,6 +176,7 @@ export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   certifications: { vespaField: 'certifications', kind: 'string_array' },
   soilType: { vespaField: 'soil_type', kind: 'string' },
   producerType: { vespaField: 'producer_type', kind: 'string' },
+  searchTextKo: { vespaField: 'search_text_ko', kind: 'string' },
 } as const satisfies Record<RetrievalHitSummaryKey, VespaRetrievalSummaryFieldSpec>;
 
 function readRawVespaRetrievalSummaryField(
@@ -320,8 +326,21 @@ export function fromVespaFields(
   // Learned sparse weights
   const learnedSparseWeights = parseSparseWeightsTensor(fields['learned_sparse_weights']);
 
+  // Validate entity_id before calling createEntityId: a missing or
+  // non-string entity_id would produce createEntityId('') which throws
+  // "EntityId cannot be an empty string" with no indication of which
+  // document was malformed. Fail early with the actual field value shown.
+  const rawEntityId = fields['entity_id'];
+  if (typeof rawEntityId !== 'string' || rawEntityId.length === 0) {
+    throw new Error(
+      `fromVespaFields: missing or invalid entity_id field ` +
+        `(got ${JSON.stringify(rawEntityId)}). ` +
+        `Available keys: [${Object.keys(fields).join(', ')}]`,
+    );
+  }
+
   return {
-    entityId: createEntityId(getString(fields, 'entity_id')),
+    entityId: createEntityId(rawEntityId),
     entityType: getString(fields, 'entity_type'),
     canonicalLabel: summary.canonicalLabel ?? '',
     aliasesIdentitySafe: getStringArray(fields, 'aliases_identity_safe'),
@@ -373,6 +392,138 @@ export function fromVespaFields(
 }
 
 // ---------------------------------------------------------------------------
+// Projection extractors
+// ---------------------------------------------------------------------------
+
+/**
+ * Extracts only the hit-projection fields from a {@link RetrievalDocument}.
+ * The returned object contains exactly the fields defined by {@link RetrievalHitProjection}:
+ * display / evidence fields used in summaries and response building.
+ * Feature-only and payload fields are excluded.
+ */
+export function toRetrievalHitProjection(doc: RetrievalDocument): RetrievalHitProjection {
+  const base: RetrievalHitProjection = {
+    entityId: doc.entityId,
+    canonicalLabel: doc.canonicalLabel,
+  };
+  return {
+    ...base,
+    ...(doc.producer !== undefined && doc.producer !== '' ? { producer: doc.producer } : {}),
+    ...(doc.region !== undefined && doc.region !== '' ? { region: doc.region } : {}),
+    ...(doc.appellation !== undefined ? { appellation: doc.appellation } : {}),
+    ...(doc.grapePrimary !== undefined ? { grapePrimary: doc.grapePrimary } : {}),
+    ...(doc.vintageYear !== undefined ? { vintageYear: doc.vintageYear } : {}),
+    ...(doc.searchTextEn !== undefined && doc.searchTextEn !== ''
+      ? { searchTextEn: doc.searchTextEn }
+      : {}),
+    ...(doc.producerPrestige !== undefined ? { producerPrestige: doc.producerPrestige } : {}),
+  };
+}
+
+/**
+ * Extracts only the feature-projection fields from a {@link RetrievalDocument}.
+ * The returned object contains exactly the fields defined by {@link RetrievalFeatureProjection}:
+ * ranking runtime and ML feature fields. Display fields are excluded.
+ */
+export function toRetrievalFeatureProjection(doc: RetrievalDocument): RetrievalFeatureProjection {
+  const base: RetrievalFeatureProjection = {
+    entityId: doc.entityId,
+  };
+  return {
+    ...base,
+    ...(doc.body !== undefined && doc.body !== 0 ? { body: doc.body } : {}),
+    ...(doc.tannin !== undefined ? { tannin: doc.tannin } : {}),
+    ...(doc.acidity !== undefined ? { acidity: doc.acidity } : {}),
+    ...(doc.sweetness !== undefined && doc.sweetness !== 0 ? { sweetness: doc.sweetness } : {}),
+    ...(doc.criticScoreNormalized !== undefined
+      ? { criticScoreNormalized: doc.criticScoreNormalized }
+      : {}),
+    ...(doc.drinkingWindowStart !== undefined
+      ? { drinkingWindowStart: doc.drinkingWindowStart }
+      : {}),
+    ...(doc.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: doc.drinkingWindowEnd } : {}),
+    ...(doc.drinkingWindowModelVersion !== undefined
+      ? { drinkingWindowModelVersion: doc.drinkingWindowModelVersion }
+      : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Projection summary parsers (T7.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a Vespa `hit_summary` response object into a {@link RetrievalHitProjection}.
+ *
+ * Only the canonical hit-projection fields are extracted; any feature or payload
+ * fields present in `raw` are ignored. Safe to call on a partial response.
+ *
+ * @param raw - The `fields` object from a Vespa summary hit.
+ * @returns A {@link RetrievalHitProjection} containing only the hit-display fields.
+ */
+export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProjection {
+  const entityIdRaw = raw['entity_id'];
+  if (!isString(entityIdRaw) || entityIdRaw.length === 0) {
+    throw new Error(
+      `parseHitSummary: missing or empty entity_id in hit_summary response (keys: ${Object.keys(raw).join(', ')})`,
+    );
+  }
+  const canonicalLabel = getOptionalString(raw, 'canonical_label');
+  const producer = getOptionalString(raw, 'producer');
+  const region = getOptionalString(raw, 'region');
+  const appellation = getOptionalString(raw, 'appellation');
+  const grapePrimary = getOptionalString(raw, 'grape_primary');
+  const vintageYear = getOptionalNumber(raw, 'vintage_year');
+  const searchTextEn = getOptionalString(raw, 'search_text_en');
+  const producerPrestige = getOptionalNumber(raw, 'producer_prestige');
+
+  return {
+    entityId: createEntityId(entityIdRaw),
+    ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
+    ...(producer !== undefined ? { producer } : {}),
+    ...(region !== undefined ? { region } : {}),
+    ...(appellation !== undefined ? { appellation } : {}),
+    ...(grapePrimary !== undefined ? { grapePrimary } : {}),
+    ...(vintageYear !== undefined ? { vintageYear } : {}),
+    ...(searchTextEn !== undefined ? { searchTextEn } : {}),
+    ...(producerPrestige !== undefined ? { producerPrestige } : {}),
+  };
+}
+
+/**
+ * Parses a Vespa `feature_summary` response object into a {@link RetrievalFeatureProjection}.
+ *
+ * Only the canonical feature-projection fields are extracted; any hit-display or
+ * payload fields present in `raw` are ignored. Safe to call on a partial response.
+ *
+ * @param raw - The `fields` object from a Vespa summary hit.
+ * @returns A {@link RetrievalFeatureProjection} containing only the ML/ranking feature fields.
+ */
+export function parseFeatureSummary(raw: Record<string, unknown>): RetrievalFeatureProjection {
+  const entityIdRaw = raw['entity_id'];
+  const body = getOptionalNumber(raw, 'body');
+  const tannin = getOptionalNumber(raw, 'tannin');
+  const acidity = getOptionalNumber(raw, 'acidity');
+  const sweetness = getOptionalNumber(raw, 'sweetness');
+  const criticScoreNormalized = getOptionalNumber(raw, 'critic_score_normalized');
+  const drinkingWindowStart = getOptionalNumber(raw, 'drinking_window_start');
+  const drinkingWindowEnd = getOptionalNumber(raw, 'drinking_window_end');
+  const drinkingWindowModelVersion = getOptionalString(raw, 'drinking_window_model_version');
+
+  return {
+    ...(isString(entityIdRaw) ? { entityId: createEntityId(entityIdRaw) } : {}),
+    ...(body !== undefined ? { body } : {}),
+    ...(tannin !== undefined ? { tannin } : {}),
+    ...(acidity !== undefined ? { acidity } : {}),
+    ...(sweetness !== undefined ? { sweetness } : {}),
+    ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
+    ...(drinkingWindowStart !== undefined ? { drinkingWindowStart } : {}),
+    ...(drinkingWindowEnd !== undefined ? { drinkingWindowEnd } : {}),
+    ...(drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Filter builders
 // ---------------------------------------------------------------------------
 
@@ -397,12 +548,29 @@ function parseFilterToken(token: string): { key: string; value: string } {
 }
 
 /**
- * Wraps a string value for inclusion in a YQL predicate, escaping
- * double-quote characters.
+ * Wraps a string value for safe inclusion in a YQL predicate, escaping
+ * backslashes and double-quote characters.
+ *
+ * MUST be used for any user-controlled or externally-sourced string that
+ * is interpolated into a YQL string literal (e.g. IN-clause entity IDs,
+ * `contains` predicates). Using raw string interpolation allows YQL
+ * injection if the value contains `"` or `\`.
+ *
+ * @example
+ * // Safe: uses this function
+ * `entity_id in (${ids.map(yqlEscapeString).join(', ')})`
+ *
+ * // UNSAFE: raw interpolation
+ * `entity_id in ("${id}")`  // breaks if id contains " or \
  */
-function yqlString(value: string): string {
+export function yqlEscapeString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
+
+/**
+ * @internal Alias for filter builders within this module.
+ */
+const yqlString = yqlEscapeString;
 
 /**
  * Builds YQL AND filter clauses from an array of filter tokens for use in
