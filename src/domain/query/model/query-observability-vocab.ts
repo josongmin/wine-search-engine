@@ -48,7 +48,7 @@ function getSuggestedRetrievalMode(plan: PlanLike): string {
   return 'suggestedRetrievalMode' in plan ? plan.suggestedRetrievalMode : plan.retrievalMode;
 }
 
-function deriveQueryFamily(plan: PlanLike): QueryFamilyLabel {
+export function deriveQueryFamily(plan: PlanLike): QueryFamilyLabel {
   const mode = getSuggestedRetrievalMode(plan);
   const intent = plan.intent;
   const decompositionHint = 'decompositionHint' in plan ? plan.decompositionHint : undefined;

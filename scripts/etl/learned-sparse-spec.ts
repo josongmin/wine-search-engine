@@ -126,7 +126,6 @@ export function validateLearnedSparseVector(
   for (const entry of vec.entries) {
     if (entry.weight <= 0) {
       errors.push(`Zero/negative weight for token '${entry.token}'`);
-      break; // report only the first
     }
   }
 

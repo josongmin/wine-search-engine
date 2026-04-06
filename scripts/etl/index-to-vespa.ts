@@ -27,7 +27,7 @@ import type { RetrievalDocument } from '../../src/domain/retrieval/model/retriev
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+export const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
 const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
@@ -169,10 +169,110 @@ export function buildSearchTextKo(rec: EnrichedSilverRecord): string {
   return [rec.canonicalLabel, ...koAliases].join(' ');
 }
 
+// ---------------------------------------------------------------------------
+// Track C gold record type (fields added in-place by run-track-c.ts)
+// ---------------------------------------------------------------------------
+
+interface CriticProxy {
+  readonly proxyScore: number;
+  readonly scoreTier: string;
+  readonly confidence: string;
+  readonly isSynthetic: boolean;
+}
+
+interface CertificationResult {
+  readonly organic: boolean;
+  readonly biodynamic: boolean;
+  readonly vegan: boolean;
+  readonly naturalWine: boolean;
+  readonly certificationSource: string;
+  readonly certificationConfidence: string;
+}
+
+interface DrinkingWindowResult {
+  readonly drinkingWindowStart: number;
+  readonly drinkingWindowEnd: number;
+  readonly peakYear: number;
+  readonly confidence: 'high' | 'medium' | 'low';
+  readonly modelVersion: string;
+}
+
+// Gold = EnrichedSilverRecord + all Track C fields + SOTA++ Silver fields
+type GoldRecord = EnrichedSilverRecord & {
+  // SOTA++ Silver fields
+  readonly alcoholPct?: number | null;
+  readonly producerPrestige?: number | null;
+  readonly isTopRated?: boolean;
+  // Track C Step 1
+  readonly criticProxy?: CriticProxy | null;
+  // Track C Step 2
+  readonly certifications?: CertificationResult | null;
+  // Track C Step 4
+  readonly drinkingWindow?: DrinkingWindowResult | null;
+};
+
+/**
+ * Converts certification flags to a flat string array for Vespa certifications[].
+ * e.g. {organic:true, biodynamic:false, vegan:true} → ["organic", "vegan"]
+ */
+function buildCertificationTags(cert: CertificationResult): readonly string[] {
+  const tags: string[] = [];
+  if (cert.organic) tags.push('organic');
+  if (cert.biodynamic) tags.push('biodynamic');
+  if (cert.vegan) tags.push('vegan');
+  if (cert.naturalWine) tags.push('natural');
+  return tags;
+}
+
+/**
+ * Derives a style label from body, sweetness, and wine type.
+ * More granular than the old 3-bucket approach.
+ */
+function deriveStyle(rec: GoldRecord): string {
+  const wt = rec.wineType ?? 'red';
+  if (wt === 'sparkling') return 'sparkling';
+  if (wt === 'dessert' || rec.sweetness >= 0.6) return 'sweet';
+  if (wt === 'fortified') return 'fortified';
+  if (wt === 'rosé') return 'rosé';
+  if (wt === 'white') {
+    if (rec.body >= 0.6) return 'full white';
+    if (rec.body >= 0.35) return 'medium white';
+    return 'crisp white';
+  }
+  // Red
+  if (rec.body >= 0.7) return 'bold red';
+  if (rec.body >= 0.4) return 'medium red';
+  return 'light red';
+}
+
+/**
+ * Computes final popularity score.
+ * Boosts "Top 1%" wines by up to +0.10 (capped at 1.0).
+ */
+function computePopularity(rec: GoldRecord): number {
+  const base = rec.popularityScore;
+  const boost = rec.isTopRated === true ? 0.10 : 0;
+  return Math.min(1, base + boost);
+}
+
 export function silverToRetrievalDoc(
   rec: EnrichedSilverRecord,
   embedding: readonly number[],
 ): RetrievalDocument {
+  const gold = rec as GoldRecord;
+
+  // criticScoreNormalized: Track C proxy (÷100) takes priority over raw Vivino rating (÷5)
+  const criticScoreNormalized: number | undefined = (() => {
+    if (gold.criticProxy?.proxyScore != null) {
+      return Math.max(0, Math.min(1, gold.criticProxy.proxyScore / 100));
+    }
+    if (gold.ratingAvg != null) return gold.ratingAvg / 5;
+    return undefined;
+  })();
+
+  const certTags: readonly string[] | undefined =
+    gold.certifications != null ? buildCertificationTags(gold.certifications) : undefined;
+
   const doc: RetrievalDocument = {
     entityId: createEntityId(rec.sourceId),
     entityType: 'wine',
@@ -187,14 +287,14 @@ export function silverToRetrievalDoc(
     semanticSummary: buildEmbedText(rec),
     body: rec.body,
     sweetness: rec.sweetness,
-    style: rec.body >= 0.7 ? 'bold red' : rec.body >= 0.4 ? 'medium body' : 'light',
+    style: deriveStyle(gold),
     priceBand: rec.priceBand,
     pairing: rec.pairingTags,
     occasion: [],
     availability: true,
-    popularityScore: rec.popularityScore,
+    popularityScore: computePopularity(gold),
     embedding,
-    // Optional fields — use conditional spread for exactOptionalPropertyTypes
+    // Core optional fields
     ...(rec.vintageYear !== null ? { vintageYear: rec.vintageYear } : {}),
     ...(rec.acidity > 0 ? { acidity: rec.acidity } : {}),
     ...(rec.tannin > 0 ? { tannin: rec.tannin } : {}),
@@ -203,9 +303,22 @@ export function silverToRetrievalDoc(
     ...(rec.country ? { country: rec.country } : {}),
     ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
     ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
-    ...(rec.ratingAvg !== null ? { criticScoreNormalized: rec.ratingAvg / 5 } : {}),
+    ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
     ...(rec.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: rec.learnedSparseWeights }
+      : {}),
+    // SOTA++ Silver fields
+    ...(gold.alcoholPct != null ? { alcoholPct: gold.alcoholPct } : {}),
+    ...(gold.producerPrestige != null ? { producerPrestige: gold.producerPrestige } : {}),
+    // Track C Step 2 — certifications
+    ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
+    // Track C Step 4 — drinking window
+    ...(gold.drinkingWindow != null
+      ? {
+          drinkingWindowStart: gold.drinkingWindow.drinkingWindowStart,
+          drinkingWindowEnd: gold.drinkingWindow.drinkingWindowEnd,
+          drinkingWindowModelVersion: gold.drinkingWindow.modelVersion,
+        }
       : {}),
   };
   return doc;

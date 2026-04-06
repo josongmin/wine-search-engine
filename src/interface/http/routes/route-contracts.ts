@@ -298,3 +298,35 @@ export const FeedbackSubmitRouteContract = defineRouteContract({
     503: ErrorResponseSchema,
   },
 });
+
+// ---------------------------------------------------------------------------
+// V2 route catalog — skeleton only (handler wiring in T6.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * V2 route URL constants.
+ *
+ * Versioning matrix:
+ *
+ * Human routes:
+ *   POST /v2/search              → SearchResponseV2Human
+ *   POST /v2/search/hybrid       → SearchResponseV2Human
+ *   POST /v2/search/interpret    → InterpretResponseV2
+ *
+ * Machine V2:
+ *   NOT exposed via /v2/search/* routes.
+ *   Machine/LLM consumers continue to use the /v1/claude-tools seam
+ *   (WineToolExecutor). The executor will project SearchResponseV2Machine
+ *   when the T6.5 handler wiring is complete.
+ *
+ * V1 routes:
+ *   /v1/search, /v1/search/hybrid, /v1/search/interpret, /v1/entity/resolve,
+ *   /v1/batch-search, /v1/search/replay are adapter-compatible and maintained
+ *   until post-Wave-3 deprecation.
+ */
+// V2 route skeletons — handler wiring in T6.5
+export const SEARCH_V2_ROUTES = {
+  search: '/v2/search',
+  hybrid: '/v2/search/hybrid',
+  interpret: '/v2/search/interpret',
+} as const;

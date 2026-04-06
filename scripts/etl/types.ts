@@ -42,6 +42,76 @@ export interface VivinoPayload {
       readonly stats?: { readonly count?: number };
     }[];
   };
+
+  // ---------------------------------------------------------------------------
+  // Fields present in real Vivino data but previously untyped
+  // ---------------------------------------------------------------------------
+
+  /** Alcohol by volume string, e.g. "14%", "13.5%", "14.4% alc". */
+  readonly alcohol?: string;
+
+  /**
+   * Comma-separated grape varieties from Vivino's varietal field,
+   * e.g. "Tempranillo" or "Grenache, Shiraz/Syrah".
+   * Used as fallback when payload.grapes[] is absent.
+   */
+  readonly varietal?: string;
+
+  /** Quality badges, e.g. ["Top 1%", "Best value"]. */
+  readonly badges?: readonly string[];
+
+  /**
+   * Short tasting note summary, e.g. "red fruit notes (cherry)".
+   * Supplements style.description when the latter is absent.
+   */
+  readonly tasting_notes?: string;
+
+  /**
+   * High-level taste profile from Vivino's UI sliders.
+   * Useful as fallback when taste.structure is absent.
+   */
+  readonly taste_profile?: {
+    readonly dry_sweet?: string;    // "Dry" | "Off-dry" | "Sweet"
+    readonly light_bold?: string;   // "Light" | "Medium" | "Bold"
+    readonly soft_acidic?: string;  // "Soft" | "Acidic"
+  };
+
+  /** Winery-level average rating (1–5 scale). Maps to producer_prestige. */
+  readonly winery_rating?: number;
+
+  /** Total number of wines in the winery's portfolio. */
+  readonly winery_wine_count?: number;
+
+  /** Total ratings count for the winery. */
+  readonly winery_rating_count?: number;
+
+  /**
+   * Winery's primary location label, e.g. "Napa Valley", "Côte de Nuits".
+   * Cleaner than the raw region path in BronzeRow.region.
+   */
+  readonly winery_location?: string;
+
+  /**
+   * Structured flavor notes with per-group descriptors and review counts.
+   * Each key is a flavor group (e.g. "oaky", "earthy"); value shape varies.
+   */
+  readonly flavor_notes?: Record<string, unknown>;
+
+  /** Merchant price listings. Used to derive a reliable price_usd. */
+  readonly merchant_prices?: readonly {
+    readonly price?: number;
+    readonly currency?: string;
+    readonly merchant?: string;
+  }[];
+
+  /** Top-level ratings count (may differ from statistics.ratings_count). */
+  readonly rating_count?: number;
+
+  /** Number of text reviews. */
+  readonly review_count?: number;
+
+  /** Bottle volume in ml, e.g. 750, 1500. */
+  readonly bottle_ml?: number;
 }
 
 /** Row from wine_pdp_snapshot table (Bronze tier). */
@@ -132,6 +202,25 @@ export interface SilverWineRecord {
   readonly popularityScore: number;
   /** Scraped timestamp for temporal ordering. */
   readonly scrapedAt: string | null;
+
+  // ---------------------------------------------------------------------------
+  // SOTA++ fields extracted from previously-unused Vivino payload fields
+  // ---------------------------------------------------------------------------
+
+  /** Alcohol by volume in %, e.g. 14.0. Null when absent in payload. */
+  readonly alcoholPct: number | null;
+
+  /**
+   * Winery-level prestige proxy in [0, 1], derived from payload.winery_rating
+   * (original 1–5 scale, divided by 5). Null when absent.
+   */
+  readonly producerPrestige: number | null;
+
+  /**
+   * True when Vivino's "Top 1%" badge is present.
+   * Used to boost popularity_score and producer_prestige during indexing.
+   */
+  readonly isTopRated: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,9 +9,11 @@ export const metadata: Metadata = {
 
 function SearchFallback() {
   return (
-    <div className="space-y-4">
-      {Array.from({ length: 3 }, (_, i) => (
-        <WineCardSkeleton key={i} />
+    <div className="masonry px-4 pt-4 pb-36">
+      {Array.from({ length: 8 }, (_, i) => (
+        <div key={i} className="masonry-item">
+          <WineCardSkeleton />
+        </div>
       ))}
     </div>
   );
@@ -19,10 +21,8 @@ function SearchFallback() {
 
 export default function SearchPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <Suspense fallback={<SearchFallback />}>
-        <SearchResultsView />
-      </Suspense>
-    </div>
+    <Suspense fallback={<SearchFallback />}>
+      <SearchResultsView />
+    </Suspense>
   );
 }

@@ -77,11 +77,12 @@ function makeConstraints(): ConstraintBundle {
 }
 
 /** Minimal RankingInput for N candidates. */
-function makeInput(candidates: HybridCandidate[]): RankingInput {
+function makeInput(candidates: HybridCandidate[], rerankForced?: boolean): RankingInput {
   return {
     queryPlan: makeQueryPlan(),
     candidates,
     constraints: makeConstraints(),
+    ...(rerankForced !== undefined ? { rerankForced } : {}),
   };
 }
 
@@ -325,10 +326,10 @@ describe('Ranker', () => {
   });
 
   describe('reranking threshold', () => {
-    it('reranker provided + 6 candidates → reranker.rerank() is called', async () => {
+    it('reranker provided + 6 candidates + rerankForced → reranker.rerank() is called', async () => {
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-00${i}`));
 
-      // All scores 0.5 so all are viable; 6 > RERANK_THRESHOLD(5) → rerank
+      // rerankForced bypasses the gate regardless of candidate count
       const rerankResults: RerankResult[] = candidates.map((c, i) => ({
         entityId: c.entityId,
         score: 0.9 - i * 0.05,
@@ -343,7 +344,7 @@ describe('Ranker', () => {
         { reranker: port },
       );
 
-      await ranker.rank(makeInput(candidates));
+      await ranker.rank(makeInput(candidates, true));
 
       expect(spy).toHaveBeenCalledOnce();
     });
@@ -374,7 +375,8 @@ describe('Ranker', () => {
         { reranker: port },
       );
 
-      await ranker.rank(makeInput(candidates));
+      // rerankForced bypasses the gate for this passage-building test
+      await ranker.rank(makeInput(candidates, true));
 
       expect(spy).toHaveBeenCalledOnce();
       const rerankCandidates = spy.mock.calls[0]![1] as readonly RerankCandidate[];
@@ -422,7 +424,7 @@ describe('Ranker', () => {
 
   describe('score blending', () => {
     it('originalScore=0.8, rerankerScore=0.6 → min-max norm + semantic_preference blend (w=0.18)', async () => {
-      // Need > 5 viable candidates to trigger reranking
+      // Use rerankForced to trigger reranking regardless of gate conditions
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
 
       // Give the first candidate originalScore=0.8, others lower so first stays first
@@ -444,7 +446,7 @@ describe('Ranker', () => {
         { reranker: port },
       );
 
-      const results = await ranker.rank(makeInput(candidates));
+      const results = await ranker.rank(makeInput(candidates, true));
 
       // Find result for first candidate
       const firstResult = results.find((r) => r.entityId === firstEntityId);
@@ -482,7 +484,7 @@ describe('Ranker', () => {
         { reranker, rerankTopK: 3 },
       );
 
-      const results = await ranker.rank(makeInput(candidates));
+      const results = await ranker.rank(makeInput(candidates, true));
 
       // Reranker should have been called with exactly 3 candidates
       expect(rerankSpy).toHaveBeenCalledOnce();
@@ -494,7 +496,7 @@ describe('Ranker', () => {
     });
 
     it('after reranking, results are re-sorted by blended score descending', async () => {
-      // 6 candidates → triggers reranking (> RERANK_THRESHOLD=5)
+      // Use rerankForced to trigger reranking with a small set
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
 
       // Original scores (sorted: [0.9, 0.8, 0.7, 0.6, 0.5, 0.4])
@@ -519,7 +521,7 @@ describe('Ranker', () => {
         { reranker },
       );
 
-      const results = await ranker.rank(makeInput(candidates));
+      const results = await ranker.rank(makeInput(candidates, true));
 
       // Verify results are sorted descending by blended score
       for (let i = 0; i < results.length - 1; i++) {

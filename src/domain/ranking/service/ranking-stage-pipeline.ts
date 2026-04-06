@@ -18,8 +18,10 @@
 
 import type { RankedResult } from '../model/ranked-result.js';
 import type { RankingInput } from '../model/ranking-input.js';
-import type { RankingFunnelTrace, RankingStageTrace } from '../model/ranking-stage.js';
+import type { FunnelMetrics, RankingFunnelTrace, RankingStageTrace } from '../model/ranking-stage.js';
 import type { Ranker } from './ranker.js';
+import type { RankingPolicyPort, PolicyContext } from '../port/ranking-policy.port.js';
+import { computeFunnelMetrics } from './funnel-metrics.js';
 
 /**
  * RankingFunnelResult — output of the stage-aware pipeline.
@@ -31,6 +33,18 @@ export interface RankingFunnelResult {
 }
 
 /**
+ * Options for constructing a {@link RankingStagePipeline}.
+ */
+export interface RankingStagePipelineOptions {
+  /**
+   * Optional policy hook (T5.5a).
+   * When provided, the policy_apply stage calls policy.apply() and may
+   * reorder or truncate results. When absent, the stage is a no-op identity.
+   */
+  readonly policy?: RankingPolicyPort;
+}
+
+/**
  * T5.1: Stage-aware ranking pipeline wrapper.
  *
  * Delegates actual scoring to the existing Ranker but wraps
@@ -39,9 +53,28 @@ export interface RankingFunnelResult {
  * Usage:
  *   const pipeline = new RankingStagePipeline(ranker);
  *   const { results, funnelTrace } = await pipeline.rank(input);
+ *
+ *   // With policy (T5.5a):
+ *   const pipeline = new RankingStagePipeline(ranker, { policy: new DefaultRankingPolicy() });
  */
 export class RankingStagePipeline {
-  constructor(private readonly ranker: Ranker) {}
+  private readonly ranker: Ranker;
+  private readonly policy: RankingPolicyPort | undefined;
+  /** Funnel metrics from the most recent rank() call. Null until first call. */
+  private _lastFunnelMetrics: FunnelMetrics | undefined = undefined;
+
+  constructor(ranker: Ranker, options: RankingStagePipelineOptions = {}) {
+    this.ranker = ranker;
+    this.policy = options.policy;
+  }
+
+  /**
+   * Returns the funnel metrics computed during the most recent rank() call.
+   * Satisfies the optional {@link RankingPort.getLastFunnelMetrics} contract.
+   */
+  getLastFunnelMetrics(): FunnelMetrics | undefined {
+    return this._lastFunnelMetrics;
+  }
 
   async rank(input: RankingInput): Promise<RankingFunnelResult> {
     const wallStart = Date.now();
@@ -92,6 +125,8 @@ export class RankingStagePipeline {
     // even after reranking if the blend weight is low.
     const precisionRerankExecuted = this.ranker.getLastRerankExecuted();
     const rerankGateReason = this.ranker.getLastRerankGateReason();
+    // T5.6: Retrieve the pre-rerank top-5 snapshot for rerankChangedTopK metric.
+    const preRerankTop5 = this.ranker.getLastPreRerankTop5();
     stageTraces.push({
       stage: 'precision_rerank',
       inputCount: results.length,
@@ -106,26 +141,63 @@ export class RankingStagePipeline {
       },
     });
 
-    // --- Stage D: Policy apply seam (T5.5a) ---
+    // --- Stage D: Policy apply (T5.5a) ---
+    const policyStart = Date.now();
+    let finalResults: readonly RankedResult[] = results;
+    let policyApplied = false;
+
+    if (this.policy !== undefined) {
+      const policyContext: PolicyContext = {
+        queryClass: input.queryPlan.queryClass,
+        effectiveRoute: input.queryPlan.route,
+      };
+      const policyOutput = this.policy.apply(results, policyContext);
+      // policyApplied = true only when the policy actually changed something:
+      // either the result count differs, or any entity in the same position changed.
+      const changed =
+        policyOutput.length !== results.length ||
+        policyOutput.some((r, i) => r.entityId !== results[i]?.entityId);
+      if (changed) {
+        finalResults = policyOutput;
+        policyApplied = true;
+      }
+    }
+
+    const policyLatencyMs = Date.now() - policyStart;
+
     stageTraces.push({
       stage: 'policy_apply',
       inputCount: results.length,
-      outputCount: results.length,
-      latencyMs: 0,
-      notes: { status: 'identity_seam_t5_5a_will_populate' },
+      outputCount: finalResults.length,
+      latencyMs: policyLatencyMs,
+      notes: {
+        status: policyApplied ? 'applied' : 'identity_no_policy_configured',
+      },
     });
 
     // Wall-clock total is the authoritative latency. Stage latencies are
     // best-effort and their sum may undercount inter-stage overhead.
     const totalLatencyMs = Date.now() - wallStart;
 
+    // T5.6: Build the partial trace (without metrics) so we can pass it to computeFunnelMetrics.
+    const partialTrace: RankingFunnelTrace = {
+      stages: stageTraces,
+      totalLatencyMs,
+      precisionRerankExecuted,
+      policyApplied,
+    };
+
+    // T5.6: Compute aggregate funnel metrics and attach to the trace.
+    const metrics = computeFunnelMetrics(partialTrace, finalResults, preRerankTop5);
+
+    // Cache metrics so callers can retrieve them via getLastFunnelMetrics().
+    this._lastFunnelMetrics = metrics;
+
     return {
-      results,
+      results: finalResults,
       funnelTrace: {
-        stages: stageTraces,
-        totalLatencyMs,
-        precisionRerankExecuted,
-        policyApplied: false, // T5.5a will set this
+        ...partialTrace,
+        metrics,
       },
     };
   }

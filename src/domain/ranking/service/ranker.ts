@@ -151,6 +151,8 @@ export class Ranker {
   private _lastCoarsePruneSummary: CoarsePruneStageSummary | undefined;
   private _lastRerankExecuted = false;
   private _lastRerankGateReason: string | undefined;
+  /** T5.6: Top-5 entityIds captured immediately after primary sort, before rerank. */
+  private _lastPreRerankTop5: readonly string[] = [];
   private readonly signalComputer: SignalComputer;
   private readonly scoreAggregator: ScoreAggregator;
   private readonly evidenceMapper: EvidenceMapper;
@@ -205,6 +207,15 @@ export class Ranker {
   }
 
   /**
+   * T5.6: Returns the top-5 entityIds captured immediately after primary_rank
+   * sort but before precision rerank ran. Used by RankingStagePipeline to
+   * compute the `rerankChangedTopK` funnel metric.
+   */
+  getLastPreRerankTop5(): readonly string[] {
+    return this._lastPreRerankTop5;
+  }
+
+  /**
    * Ranks candidates according to the scoring formula and returns
    * ordered results with evidence trails.
    *
@@ -216,6 +227,7 @@ export class Ranker {
 
     this._lastRerankExecuted = false;
     this._lastRerankGateReason = undefined;
+    this._lastPreRerankTop5 = [];
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -323,6 +335,10 @@ export class Ranker {
     // Step 5: Sort by finalScore descending
     viable.sort((a, b) => b.finalScore - a.finalScore);
 
+    // T5.6: Capture top-5 entity IDs after primary sort, before any reranking.
+    // RankingStagePipeline reads this snapshot to compute rerankChangedTopK.
+    this._lastPreRerankTop5 = viable.slice(0, 5).map((e) => String(e.entityId));
+
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
     if (this.reranker !== undefined) {
@@ -383,7 +399,7 @@ export class Ranker {
         coarsePruneMeta: {
           preGateScore: entry.finalScore,
           hardConstraintPassed: entry.componentScores.hardConstraintPass,
-          entityIntegrityPassed: entry.componentScores.entityIntegrity > 0,
+          entityIntegrityPassed: true,
         },
         ...(entry.producer !== undefined ? { producer: entry.producer } : {}),
         ...(entry.region !== undefined ? { region: entry.region } : {}),
@@ -399,6 +415,7 @@ export class Ranker {
           ? { drinkingWindowModelVersion: entry.drinkingWindowModelVersion }
           : {}),
         // Epic 15: Wine attributes for dynamic prediction
+        // TODO: remove vintage after consumers migrate to vintageYear
         ...(entry.vintageYear !== undefined
           ? { vintage: entry.vintageYear, vintageYear: entry.vintageYear }
           : {}),

@@ -95,5 +95,7 @@ export const LEGACY_CHANNEL_ALIAS: Readonly<Record<string, RetrievalChannel>> = 
 export function toRetrievalChannel(raw: string): RetrievalChannel {
   if (isRetrievalChannel(raw)) return raw;
   const alias = LEGACY_CHANNEL_ALIAS[raw];
-  return alias ?? 'sparse_bm25';
+  if (alias !== undefined) return alias;
+  console.warn(`[toRetrievalChannel] Unknown channel '${raw}'; falling back to 'sparse_bm25'`);
+  return 'sparse_bm25';
 }

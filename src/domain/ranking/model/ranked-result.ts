@@ -91,7 +91,10 @@ export interface RankedResult {
   // (Populated from Vespa documents during ranking pipeline)
   // ─────────────────────────────────────────────────────────────────
 
-  /** Vintage year (e.g. 2018). */
+  /**
+   * Vintage year (e.g. 2018).
+   * @deprecated use vintageYear
+   */
   readonly vintage?: number | undefined;
 
   /** Canonical vintage-year field matching retrieval documents/candidates. */

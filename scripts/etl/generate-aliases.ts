@@ -25,7 +25,7 @@ import { parseNdjson } from './ndjson.js';
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_INPUT = 'data/silver.ndjson';
-export const DEFAULT_OUTPUT = 'data/silver-enriched.ndjson';
+export const DEFAULT_OUTPUT = 'data/silver-aliases.ndjson';
 
 /** Confidence thresholds for projection decisions. */
 const IDENTITY_SAFE_THRESHOLD = 0.80;

@@ -7,6 +7,7 @@ import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-can
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
+import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
 import type { DecisionInput } from '../../../domain/decision/model/decision-input.js';
 import type { DecisionOutput } from '../../../domain/decision/model/decision-output.js';
 import type {
@@ -58,6 +59,12 @@ export interface CompareRetrieverPort {
 
 export interface RankingPort {
   rank(input: RankingInput): Promise<readonly RankedResult[]>;
+  /**
+   * Returns the funnel metrics computed during the most recent rank() call.
+   * Only implemented by stage-aware pipeline wrappers (e.g. RankingStagePipeline).
+   * Returns undefined when funnel metrics are not tracked (plain Ranker).
+   */
+  getLastFunnelMetrics?(): FunnelMetrics | undefined;
 }
 
 export interface DecisionEnginePort {

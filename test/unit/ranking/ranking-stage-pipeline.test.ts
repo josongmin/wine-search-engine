@@ -36,6 +36,13 @@ function makeCandidate(id: string): HybridCandidate {
     retrievalFusionScore: 0.5,
     matchedConstraints: [],
     unmetHardConstraints: [],
+    retrievalTrace: {
+      retrievalProfile: 'default',
+      lexicalQueriesUsed: [],
+      semanticQueriesUsed: [],
+      filtersApplied: [],
+      candidateSources: [],
+    },
   } as unknown as HybridCandidate;
 }
 
@@ -67,11 +74,12 @@ function makeConstraints(): ConstraintBundle {
   return { hard: [], soft: [], inferred: [] };
 }
 
-function makeInput(candidates: HybridCandidate[]): RankingInput {
+function makeInput(candidates: HybridCandidate[], rerankForced?: boolean): RankingInput {
   return {
     queryPlan: makeQueryPlan(),
     candidates,
     constraints: makeConstraints(),
+    ...(rerankForced !== undefined ? { rerankForced } : {}),
   };
 }
 
@@ -239,8 +247,8 @@ describe('RankingStagePipeline (T5.1)', () => {
       expect(funnelTrace.precisionRerankExecuted).toBe(false);
     });
 
-    it('is true when reranker is configured and candidate count exceeds threshold', async () => {
-      // 6 candidates > RERANK_THRESHOLD(5) → reranking executes
+    it('is true when reranker is configured and rerankForced is set', async () => {
+      // T5.4: gate controls reranking; use rerankForced to bypass gate
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
       const rerankResults: RerankResult[] = candidates.map((c, i) => ({
         entityId: c.entityId,
@@ -256,7 +264,7 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      const { funnelTrace } = await pipeline.rank(makeInput(candidates, true));
 
       expect(funnelTrace.precisionRerankExecuted).toBe(true);
     });
@@ -265,6 +273,7 @@ describe('RankingStagePipeline (T5.1)', () => {
       // This tests that we do NOT use the flawed score-order heuristic.
       // The reranker returns the same order as input → scores remain descending,
       // but reranking still executed so the flag must be true.
+      // T5.4: use rerankForced to bypass gate for this small candidate set.
       const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
       const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
 
@@ -287,7 +296,7 @@ describe('RankingStagePipeline (T5.1)', () => {
       );
       const pipeline = new RankingStagePipeline(ranker);
 
-      const { funnelTrace } = await pipeline.rank(makeInput(candidates));
+      const { funnelTrace } = await pipeline.rank(makeInput(candidates, true));
 
       expect(funnelTrace.precisionRerankExecuted).toBe(true);
     });

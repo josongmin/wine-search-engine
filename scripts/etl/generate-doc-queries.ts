@@ -22,8 +22,8 @@ import { parseNdjson } from './ndjson.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
-const DEFAULT_OUTPUT = 'data/silver-enriched-docquery.ndjson';
+const DEFAULT_INPUT = 'data/silver-ko.ndjson';
+const DEFAULT_OUTPUT = 'data/silver-docquery.ndjson';
 const BATCH_SIZE = 10;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';

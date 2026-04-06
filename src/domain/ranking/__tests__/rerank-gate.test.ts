@@ -55,17 +55,17 @@ describe('evaluateRerankGate', () => {
     });
 
     it('does not skip at exactly 5 candidates', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 5, candidateCount: 5 }));
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 5 }));
       // 5 candidates with semantic_preference and no anchor — below the >=20 threshold, default skip
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
   });
 
-  describe('known_item / exact_lookup — skip (already precise)', () => {
-    it('skips for queryClass known_item with sufficient candidates', () => {
+  describe('short_entity / exact_lookup — skip (already precise)', () => {
+    it('skips for queryClass short_entity with sufficient candidates', () => {
       const decision = evaluateRerankGate(
-        makeInput({ queryClass: 'known_item', candidateCount: 25 }),
+        makeInput({ queryClass: 'short_entity', candidateCount: 25 }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('already_precise');
@@ -79,18 +79,18 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('already_precise');
     });
 
-    it('known_item takes precedence over large candidate set', () => {
+    it('short_entity takes precedence over large candidate set', () => {
       const decision = evaluateRerankGate(
-        makeInput({ queryClass: 'known_item', candidateCount: 100 }),
+        makeInput({ queryClass: 'short_entity', candidateCount: 100 }),
       );
       expect(decision.shouldRerank).toBe(false);
     });
   });
 
-  describe('comparison / hasAnchor — always rerank (high value)', () => {
-    it('reranks for comparison query class', () => {
+  describe('comparison_query / hasAnchor — always rerank (high value)', () => {
+    it('reranks for comparison_query query class', () => {
       const decision = evaluateRerankGate(
-        makeInput({ queryClass: 'comparison', candidateCount: 6 }),
+        makeInput({ queryClass: 'comparison_query', candidateCount: 6 }),
       );
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('comparison_query');
@@ -104,14 +104,14 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('has_anchor');
     });
 
-    it('hasAnchor with comparison uses has_anchor reason (anchor checked second)', () => {
-      // comparison matches first in the gate, so reason is comparison_query
+    it('hasAnchor with comparison_query uses has_anchor reason (hasAnchor takes precedence in ternary)', () => {
+      // Both queryClass=comparison_query and hasAnchor=true satisfy the gate condition.
+      // The reason ternary checks hasAnchor first → 'has_anchor'.
       const decision = evaluateRerankGate(
-        makeInput({ queryClass: 'comparison', hasAnchor: true, candidateCount: 6 }),
+        makeInput({ queryClass: 'comparison_query', hasAnchor: true, candidateCount: 6 }),
       );
       expect(decision.shouldRerank).toBe(true);
-      // Both branches match — comparison wins because it's checked first
-      expect(decision.reason).toBe('comparison_query');
+      expect(decision.reason).toBe('has_anchor');
     });
   });
 
@@ -176,6 +176,36 @@ describe('evaluateRerankGate', () => {
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('too_few_candidates');
+    });
+  });
+
+  describe('edge cases', () => {
+    it('empty string effectiveRoute does not match exact_lookup', () => {
+      // effectiveRoute='' must NOT trigger already_precise; falls through to default_skip.
+      const decision = evaluateRerankGate(
+        makeInput({ effectiveRoute: '', candidateCount: 10 }),
+      );
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('default_skip');
+    });
+
+    it('hasAnchor=true with candidateCount<5 → too_few_candidates (rule 2 beats rule 4)', () => {
+      // The too_few_candidates guard (rule 2) fires before the hasAnchor guard (rule 4).
+      // Even high-value anchor queries should skip reranking with < 5 candidates.
+      const decision = evaluateRerankGate(
+        makeInput({ hasAnchor: true, candidateCount: 3 }),
+      );
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('too_few_candidates');
+    });
+
+    it('short_entity with hasAnchor=true still skips (rule 3 beats rule 4)', () => {
+      // short_entity is already precise; reranking adds noise even with an anchor.
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'short_entity', hasAnchor: true, candidateCount: 10 }),
+      );
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('already_precise');
     });
   });
 });

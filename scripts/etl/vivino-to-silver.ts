@@ -41,6 +41,32 @@ const VIVINO_STYLE_MAP: Record<string, WineType> = {
   'fortified wine': 'fortified',
 };
 
+// Vivino wine_style substrings → WineType (for region-style labels like "Napa Valley Cabernet Sauvignon")
+const VIVINO_STYLE_KEYWORD_MAP: Array<[string, WineType]> = [
+  ['sparkling', 'sparkling'],
+  ['champagne', 'sparkling'],
+  ['cava', 'sparkling'],
+  ['prosecco', 'sparkling'],
+  ['rosé', 'rosé'],
+  ['rose', 'rosé'],
+  ['port', 'fortified'],
+  ['sherry', 'fortified'],
+  ['madeira', 'fortified'],
+  ['dessert', 'dessert'],
+  ['sauternes', 'dessert'],
+  ['white', 'white'],
+  ['blanc', 'white'],
+  ['blanco', 'white'],
+  ['bianco', 'white'],
+  ['chardonnay', 'white'],
+  ['sauvignon blanc', 'white'],
+  ['riesling', 'white'],
+  ['pinot gris', 'white'],
+  ['pinot grigio', 'white'],
+  ['gewurztraminer', 'white'],
+  ['viognier', 'white'],
+];
+
 // ---------------------------------------------------------------------------
 // DB connection (matches fetch-vivino-snapshots pattern)
 // ---------------------------------------------------------------------------
@@ -179,10 +205,118 @@ function priceBand(priceUsd: number | null): PriceBand {
 function detectWineType(wineStyle: string | null): WineType {
   if (!wineStyle) return 'red'; // default
   const lower = wineStyle.toLowerCase();
+  // Exact-key map first (highest precision)
   for (const [key, value] of Object.entries(VIVINO_STYLE_MAP)) {
     if (lower.includes(key)) return value;
   }
+  // Keyword fallback for region-style labels (e.g. "Napa Valley Cabernet Sauvignon")
+  for (const [keyword, type] of VIVINO_STYLE_KEYWORD_MAP) {
+    if (lower.includes(keyword)) return type;
+  }
   return 'red';
+}
+
+// ---------------------------------------------------------------------------
+// SOTA++ extraction helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses an alcohol string like "14%", "13.5%", "14.4% alc" → float or null.
+ * Returns null when the string is absent or unparseable.
+ */
+export function parseAlcohol(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const match = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!match || !match[1]) return null;
+  const val = parseFloat(match[1]);
+  // Sanity range: 0–25% ABV
+  return isFinite(val) && val >= 0 && val <= 25 ? val : null;
+}
+
+/**
+ * Parses Vivino's varietal string ("Grenache, Shiraz/Syrah") into an array of
+ * grape names. Splits on commas and slashes, trims each token.
+ * Returns empty array when absent.
+ */
+export function parseVarietal(raw: string | undefined): readonly string[] {
+  if (!raw || raw.trim().length === 0) return [];
+  return raw
+    .split(/[,/]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Cleans the raw Bronze region path.
+ *
+ * Vivino region strings are often repeated paths like:
+ *   "United States / Horse Heaven Hills / Washington / Columbia Valley / Horse Heaven Hills"
+ *
+ * Strategy:
+ *   1. If winery_location is available and concise, prefer it.
+ *   2. Otherwise take the last unique segment of the slash-delimited path.
+ */
+export function cleanRegion(
+  rawRegion: string | null,
+  wineryLocation: string | undefined,
+): string {
+  // Prefer winery_location when it's a single clean label
+  if (wineryLocation && !wineryLocation.includes('/') && wineryLocation.trim().length > 0) {
+    return wineryLocation.trim();
+  }
+
+  if (!rawRegion) return '';
+
+  // Take the last segment, deduplicate repeated segments
+  const segments = rawRegion
+    .split('/')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  // Find the last segment that isn't a duplicate of an earlier one
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const seg of segments) {
+    const lower = seg.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      deduped.push(seg);
+    }
+  }
+
+  // Return the most specific (last) segment
+  return deduped[deduped.length - 1] ?? rawRegion.trim();
+}
+
+/**
+ * Extracts the best available price in USD from a Bronze row.
+ *
+ * Priority:
+ *   1. payload.merchant_prices — find the lowest 750ml-equivalent USD price
+ *   2. row.price — top-level price (may be non-750ml, currency unknown)
+ */
+export function extractPriceUsd(
+  rowPrice: number | null,
+  merchantPrices: VivinoPayload['merchant_prices'],
+  bottleMl: number | undefined,
+): number | null {
+  // From merchant_prices, prefer the lowest USD price for a standard 750ml bottle
+  if (merchantPrices && merchantPrices.length > 0) {
+    const stdPrices = merchantPrices
+      .filter((mp) => (mp.currency ?? 'USD') === 'USD' && mp.price !== undefined && mp.price > 0)
+      .map((mp) => mp.price as number);
+    if (stdPrices.length > 0) {
+      return Math.min(...stdPrices);
+    }
+  }
+
+  // Fallback: top-level price; skip if the bottle is clearly non-standard (>750ml)
+  if (rowPrice !== null && rowPrice > 0) {
+    if (bottleMl !== undefined && bottleMl > 800) return null; // magnum+ skewed price
+    return rowPrice;
+  }
+
+  return null;
 }
 
 /** Build English search text from payload fields. */
@@ -204,17 +338,24 @@ function buildSearchText(
   const acidDesc = payload?.style?.acidity_description;
   if (acidDesc) parts.push(acidDesc);
 
-  // Flavor group tags
-  const flavors = (payload?.taste?.flavor ?? [])
+  // tasting_notes — short Vivino summary, supplements style.description when absent
+  const tastingNotes = payload?.tasting_notes;
+  if (tastingNotes && tastingNotes.length > 0 && !styleDesc) {
+    parts.push(tastingNotes);
+  }
+
+  // Flavor group tags (from taste.flavor)
+  const tasteFlavors = (payload?.taste?.flavor ?? [])
     .map((f) => f.group?.replace(/-/g, ' '))
     .filter((g): g is string => g !== undefined && g.length > 0);
-  if (flavors.length > 0) parts.push(flavors.join(', '));
+  if (tasteFlavors.length > 0) parts.push(tasteFlavors.join(', '));
 
-  // Grape names
-  const grapes = (payload?.grapes ?? [])
+  // Grape names (from payload.grapes, fallback to varietal)
+  const grapeNames = (payload?.grapes ?? [])
     .map((g) => g.name)
     .filter((n): n is string => n !== undefined && n.length > 0);
-  if (grapes.length > 0) parts.push(grapes.join(', '));
+  const grapeList = grapeNames.length > 0 ? grapeNames : parseVarietal(payload?.varietal);
+  if (grapeList.length > 0) parts.push([...grapeList].join(', '));
 
   // Canonical info for recall
   if (row.producer) parts.push(row.producer);
@@ -232,12 +373,13 @@ function extractFlavorProfiles(payload: VivinoPayload | null): readonly string[]
     .filter((g): g is string => g !== undefined && g.length > 0);
 }
 
-/** Extract grape names from payload. */
+/** Extract grape names from payload. Falls back to varietal field. */
 function extractGrapes(payload: VivinoPayload | null): readonly string[] {
-  if (!payload?.grapes) return [];
-  return payload.grapes
+  const fromGrapes = (payload?.grapes ?? [])
     .map((g) => g.name)
     .filter((n): n is string => n !== undefined && n.length > 0);
+  if (fromGrapes.length > 0) return fromGrapes;
+  return parseVarietal(payload?.varietal);
 }
 
 /** Extract food pairings from payload. */
@@ -251,6 +393,8 @@ function extractPairings(payload: VivinoPayload | null): readonly string[] {
 
 export interface PreSilver extends Omit<SilverWineRecord, 'popularityScore'> {
   readonly ratingsCount: number;
+  // ratingsCount is declared in SilverWineRecord but we re-declare here because
+  // PreSilver omits popularityScore (not yet computed) while keeping everything else.
 }
 
 export function transformRow(row: BronzeRow): PreSilver | null {
@@ -275,15 +419,59 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     payload?.region?.country?.name?.trim() ??
     '';
 
-  const region =
-    row.region?.trim() ??
-    payload?.region?.name?.trim() ??
-    '';
-
   const grapes = extractGrapes(payload);
   const grapePrimary = grapes[0] ?? null;
 
   const taste = payload?.taste?.structure;
+
+  // SOTA++: fizziness signal — if fizziness > 0.3, override to sparkling
+  const detectedWineType = (() => {
+    const base = detectWineType(row.wine_style);
+    if (base === 'red' && taste?.fizziness !== undefined && taste.fizziness > 1.5) {
+      return 'sparkling' as WineType;
+    }
+    return base;
+  })();
+
+  // SOTA++: body fallback from taste_profile.light_bold when structure absent
+  const bodyFallback = (() => {
+    const lb = payload?.taste_profile?.light_bold?.toLowerCase();
+    if (!lb) return 0.5;
+    if (lb.includes('bold') || lb.includes('full')) return 0.8;
+    if (lb.includes('medium')) return 0.55;
+    if (lb.includes('light')) return 0.3;
+    return 0.5;
+  })();
+
+  // SOTA++: sweetness fallback from taste_profile.dry_sweet when structure absent
+  const sweetnessFallback = (() => {
+    const ds = payload?.taste_profile?.dry_sweet?.toLowerCase();
+    if (!ds) return 0.1;
+    if (ds.includes('sweet')) return 0.8;
+    if (ds.includes('off')) return 0.35;
+    return 0.1; // dry
+  })();
+
+  const rawBody = normalizeScale(taste?.intensity, 5);
+  const rawSweetness = normalizeScale(taste?.sweetness, 5);
+
+  // SOTA++: best price from merchant_prices
+  const priceUsd = extractPriceUsd(row.price, payload?.merchant_prices, payload?.bottle_ml);
+
+  // SOTA++: producer_prestige from winery_rating (1–5 → 0–1)
+  const producerPrestige =
+    payload?.winery_rating !== undefined && isFinite(payload.winery_rating)
+      ? Math.max(0, Math.min(1, payload.winery_rating / 5))
+      : null;
+
+  // SOTA++: isTopRated from badges
+  const isTopRated = payload?.badges?.includes('Top 1%') ?? false;
+
+  // SOTA++: ratings count — prefer top-level rating_count, fallback to statistics
+  const ratingsCount =
+    payload?.rating_count ??
+    payload?.statistics?.ratings_count ??
+    0;
 
   return {
     sourceId: makeEntityId(externalId),
@@ -292,23 +480,27 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     producer,
     vintageYear,
     country,
-    region,
+    region: cleanRegion(row.region, payload?.winery_location),
     appellation: null, // Vivino rarely has appellation-level detail
-    wineType: detectWineType(row.wine_style),
+    wineType: detectedWineType,
     grapePrimary,
     grapes,
-    body: normalizeScale(taste?.intensity, 5),
-    sweetness: normalizeScale(taste?.sweetness, 5),
+    body: rawBody > 0 ? rawBody : bodyFallback,
+    sweetness: rawSweetness > 0 ? rawSweetness : sweetnessFallback,
     acidity: normalizeScale(taste?.acidity, 5),
     tannin: normalizeScale(taste?.tannin, 5),
     pairingTags: extractPairings(payload),
     flavorProfiles: extractFlavorProfiles(payload),
     searchTextEn: buildSearchText(row, payload),
     ratingAvg: row.rating ?? payload?.statistics?.ratings_average ?? null,
-    ratingsCount: payload?.statistics?.ratings_count ?? 0,
-    priceUsd: row.price, // simplified: treat all currencies as USD for now
-    priceBand: priceBand(row.price),
+    ratingsCount,
+    priceUsd,
+    priceBand: priceBand(priceUsd),
     scrapedAt: row.scraped_at,
+    // SOTA++ new fields
+    alcoholPct: parseAlcohol(payload?.alcohol),
+    producerPrestige,
+    isTopRated,
   };
 }
 

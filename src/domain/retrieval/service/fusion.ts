@@ -34,6 +34,7 @@ export class FusionService {
     denseHits: readonly DenseHit[],
     anchorHits?: readonly DenseHit[],
     k?: number,
+    learnedSparseHits: readonly DenseHit[] = [],
   ): readonly HybridCandidate[] {
     const effectiveK = k ?? 60;
 
@@ -46,6 +47,11 @@ export class FusionService {
     const denseRankMap = new Map<string, number>();
     for (const hit of denseHits) {
       denseRankMap.set(hit.entityId, hit.rank);
+    }
+
+    const learnedSparseRankMap = new Map<string, number>();
+    for (const hit of learnedSparseHits) {
+      learnedSparseRankMap.set(hit.entityId, hit.rank);
     }
 
     const anchorRankMap = new Map<string, number>();
@@ -61,6 +67,7 @@ export class FusionService {
     const rankings: ReadonlyMap<string, number>[] = [];
     if (sparseRankMap.size > 0) rankings.push(sparseRankMap);
     if (denseRankMap.size > 0) rankings.push(denseRankMap);
+    if (learnedSparseRankMap.size > 0) rankings.push(learnedSparseRankMap);
     if (anchorHits && anchorRankMap.size > 0) rankings.push(anchorRankMap);
 
     const fusedScores = rrfFuse(rankings, effectiveK);
@@ -69,6 +76,7 @@ export class FusionService {
     const allEntityIds = new Set<string>();
     for (const hit of sparseHits) allEntityIds.add(hit.entityId);
     for (const hit of denseHits) allEntityIds.add(hit.entityId);
+    for (const hit of learnedSparseHits) allEntityIds.add(hit.entityId);
     if (anchorHits) {
       for (const hit of anchorHits) allEntityIds.add(hit.entityId);
     }
@@ -80,12 +88,14 @@ export class FusionService {
       const fusionScore = fusedScores.get(entityId) ?? 0;
       const sparseRank = sparseRankMap.get(entityId);
       const denseRank = denseRankMap.get(entityId);
+      const learnedSparseRank = learnedSparseRankMap.get(entityId);
       const anchorRank = anchorRankMap.get(entityId);
 
       const candidateSources: string[] = [];
-      if (sparseRank !== undefined) candidateSources.push('sparse');
-      if (denseRank !== undefined) candidateSources.push('dense');
-      if (anchorRank !== undefined) candidateSources.push('anchor');
+      if (sparseRank !== undefined) candidateSources.push('sparse_bm25');
+      if (denseRank !== undefined) candidateSources.push('dense_semantic');
+      if (learnedSparseRank !== undefined) candidateSources.push('learned_sparse');
+      if (anchorRank !== undefined) candidateSources.push('anchor_similarity');
 
       const trace: RetrievalTrace = {
         retrievalProfile: 'fusion',
@@ -99,6 +109,7 @@ export class FusionService {
         entityId as EntityId,
         sparseHits,
         denseHits,
+        learnedSparseHits,
         anchorHits ?? [],
       );
 
@@ -106,6 +117,7 @@ export class FusionService {
         entityId: entityId as EntityId,
         sparseRank,
         denseRank,
+        learnedSparseRank,
         anchorRank,
         retrievalFusionScore: fusionScore,
         matchedConstraints: [],

@@ -93,12 +93,28 @@ const EXACT_SAFE_FALLBACK: RetrievalProfile = {
 } as const;
 
 /**
- * T4.1: Profile for producer/region browse queries.
- * Lean on sparse to match producer/region names; no anchor neighborhood.
+ * T4.1: Profile for producer browse queries.
+ * Lean on sparse to match producer names; no anchor neighborhood.
  */
 const BROWSE_DEFAULT: RetrievalProfile = {
   name: 'browse_default',
-  channelMix: ['sparse_bm25', 'dense_semantic'],
+  channelMix: ['sparse_bm25', 'dense_semantic', 'browse_producer'],
+  sparseWeight: 0.65,
+  denseWeight: 0.35,
+  anchorWeight: 0,
+  sparseTopN: 120,
+  denseTopN: 80,
+  fusionK: 60,
+  finalTopK: 150,
+} as const;
+
+/**
+ * Profile for region browse queries.
+ * Lean on sparse to match region names; includes browse_region channel.
+ */
+const REGION_BROWSE: RetrievalProfile = {
+  name: 'region_browse',
+  channelMix: ['sparse_bm25', 'dense_semantic', 'browse_region'],
   sparseWeight: 0.65,
   denseWeight: 0.35,
   anchorWeight: 0,
@@ -215,8 +231,11 @@ export class RetrievalProfileService {
       if (retrievalMode === 'learned_sparse') {
         return LEARNED_SPARSE_HYBRID;
       }
-      if (retrievalMode === 'producer_browse' || retrievalMode === 'region_browse') {
+      if (retrievalMode === 'producer_browse') {
         return BROWSE_DEFAULT;
+      }
+      if (retrievalMode === 'region_browse') {
+        return REGION_BROWSE;
       }
       if (retrievalMode === 'compare_candidates') {
         return COMPARE_DEFAULT;

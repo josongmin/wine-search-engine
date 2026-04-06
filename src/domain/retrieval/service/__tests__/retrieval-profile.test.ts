@@ -29,12 +29,15 @@ describe('RetrievalProfileService (T4.1)', () => {
   it('producer_browse mode → browse_default profile', () => {
     const profile = service.getProfile('pure_constraint', 'hybrid', 'producer_browse');
     expect(profile.name).toBe('browse_default');
+    expect(profile.channelMix).toContain('browse_producer');
     expect(profile.channelMix).not.toContain('anchor_similarity');
   });
 
-  it('region_browse mode → browse_default profile', () => {
+  it('region_browse mode → region_browse profile', () => {
     const profile = service.getProfile('pure_constraint', 'hybrid', 'region_browse');
-    expect(profile.name).toBe('browse_default');
+    expect(profile.name).toBe('region_browse');
+    expect(profile.channelMix).toContain('browse_region');
+    expect(profile.channelMix).not.toContain('anchor_similarity');
   });
 
   it('compare_candidates mode → compare_default profile with compare_anchor channel', () => {

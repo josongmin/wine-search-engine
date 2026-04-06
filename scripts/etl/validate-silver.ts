@@ -16,11 +16,11 @@ import { parseNdjson } from './ndjson.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+export const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
 export const REPORT_OUTPUT = 'data/silver-quality-report.json';
 
 /**
- * Quality gate thresholds (Epic 1).
+ * Quality gate thresholds (Epic 1 + SOTA++ extension).
  * `minRecords`: Current Vivino Bronze connector yields ~7K deduped rows; RFC target remains 8K+ / 10K when the feed grows.
  * Raise `minRecords` toward 8_000 as the snapshot expands (see epic-1-etl-pipeline.md).
  */
@@ -30,6 +30,12 @@ export const SILVER_QUALITY_GATES = {
   minAliasMeanCount: 3,
   bodyMinMean: 0.1,
   bodyMaxMean: 0.9,
+  // SOTA++ coverage gates — warn only (not blockers) so pipeline is not broken
+  // during a first run when these fields may not yet be 100% populated.
+  minAlcoholPctCoverage: 0.50,       // ≥50% of records should have alcohol_pct
+  minProducerPrestigeCoverage: 0.70, // ≥70% from winery_rating
+  minDrinkingWindowCoverage: 0.60,   // ≥60% from Track C step 4
+  minCriticProxyCoverage: 0.80,      // ≥80% from Track C step 1
 } as const;
 
 export interface SilverQualityGateThresholds {
@@ -38,6 +44,10 @@ export interface SilverQualityGateThresholds {
   readonly minAliasMeanCount: number;
   readonly bodyMinMean: number;
   readonly bodyMaxMean: number;
+  readonly minAlcoholPctCoverage?: number;
+  readonly minProducerPrestigeCoverage?: number;
+  readonly minDrinkingWindowCoverage?: number;
+  readonly minCriticProxyCoverage?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +93,16 @@ export function validateSilverRecords(
   const warnings: string[] = [];
   const ratio = (count: number): number => (n === 0 ? 0 : count / n);
 
+  // Helper: access optional Track-C fields that are attached to the gold record
+  // but not typed on EnrichedSilverRecord (they are added in-place by run-track-c)
+  type GoldRecord = EnrichedSilverRecord & {
+    readonly alcoholPct?: number | null;
+    readonly producerPrestige?: number | null;
+    readonly criticProxy?: { readonly proxyScore?: number } | null;
+    readonly drinkingWindow?: unknown;
+  };
+  const gold = records as readonly GoldRecord[];
+
   // Field coverage
   const fieldCoverage: Record<string, number> = {
     producer: ratio(records.filter((r) => r.producer.length > 0).length),
@@ -94,6 +114,11 @@ export function validateSilverRecords(
     flavorProfiles: ratio(records.filter((r) => r.flavorProfiles.length > 0).length),
     pairingTags: ratio(records.filter((r) => r.pairingTags.length > 0).length),
     vintageYear: ratio(records.filter((r) => r.vintageYear !== null).length),
+    // SOTA++ fields
+    alcoholPct: ratio(gold.filter((r) => r.alcoholPct != null).length),
+    producerPrestige: ratio(gold.filter((r) => r.producerPrestige != null).length),
+    criticProxy: ratio(gold.filter((r) => r.criticProxy?.proxyScore != null).length),
+    drinkingWindow: ratio(gold.filter((r) => r.drinkingWindow != null).length),
   };
 
   // Distribution checks
@@ -134,6 +159,39 @@ export function validateSilverRecords(
   if (bodyStd < 0.01) {
     warnings.push(
       `Body std dev ${bodyStd.toFixed(4)} is low (< 0.01) — Vivino payloads often lack body variance; verify transform if you expect spread`,
+    );
+  }
+
+  // SOTA++ coverage warnings (non-blocking)
+  const alcoholCov = fieldCoverage['alcoholPct'] ?? 0;
+  const minAlc = gates.minAlcoholPctCoverage ?? 0;
+  if (minAlc > 0 && alcoholCov < minAlc) {
+    warnings.push(
+      `alcohol_pct coverage ${(alcoholCov * 100).toFixed(1)}% < target ${(minAlc * 100).toFixed(0)}% — many Vivino records lack ABV; acceptable for first run`,
+    );
+  }
+
+  const prestigeCov = fieldCoverage['producerPrestige'] ?? 0;
+  const minPres = gates.minProducerPrestigeCoverage ?? 0;
+  if (minPres > 0 && prestigeCov < minPres) {
+    warnings.push(
+      `producer_prestige coverage ${(prestigeCov * 100).toFixed(1)}% < target ${(minPres * 100).toFixed(0)}% — winery_rating absent for some records`,
+    );
+  }
+
+  const criticCov = fieldCoverage['criticProxy'] ?? 0;
+  const minCritic = gates.minCriticProxyCoverage ?? 0;
+  if (minCritic > 0 && criticCov < minCritic) {
+    warnings.push(
+      `criticProxy coverage ${(criticCov * 100).toFixed(1)}% < target ${(minCritic * 100).toFixed(0)}% — run Track C step 1 to generate LLM critic scores`,
+    );
+  }
+
+  const dwCov = fieldCoverage['drinkingWindow'] ?? 0;
+  const minDw = gates.minDrinkingWindowCoverage ?? 0;
+  if (minDw > 0 && dwCov < minDw) {
+    warnings.push(
+      `drinkingWindow coverage ${(dwCov * 100).toFixed(1)}% < target ${(minDw * 100).toFixed(0)}% — run Track C step 4 (drinking-window-backfill)`,
     );
   }
 

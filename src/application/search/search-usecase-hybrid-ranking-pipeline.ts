@@ -110,6 +110,12 @@ export async function runHybridRankingPipeline(
 
   let rankedResults = await ranker.rank(rankingInput);
 
+  // T5.6: Capture funnel metrics immediately after rank() returns (no async gap).
+  // Only available when the ranker is a RankingStagePipeline (duck-type check).
+  const funnelMetrics = typeof ranker.getLastFunnelMetrics === 'function'
+    ? ranker.getLastFunnelMetrics()
+    : undefined;
+
   rankedResults = applyLtrRerankIfAvailable(
     rankedResults,
     plan.queryClass,
@@ -118,7 +124,11 @@ export async function runHybridRankingPipeline(
 
   const resolveResult: EntityResolveResult = buildHybridRouteResolveResult(plan, rankedResults);
 
-  return { resolveResult, rankedResults };
+  return {
+    resolveResult,
+    rankedResults,
+    ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
+  };
 }
 
 /**

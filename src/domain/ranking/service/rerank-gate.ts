@@ -29,8 +29,8 @@ export interface RerankGateDecision {
  * Gate priority (first matching rule wins):
  *  1. rerankForced === true        → always rerank
  *  2. candidateCount < 5           → skip (not enough candidates)
- *  3. known_item / exact_lookup    → skip (already highly precise)
- *  4. comparison / hasAnchor       → always rerank (high value)
+ *  3. short_entity / exact_lookup   → skip (already highly precise)
+ *  4. comparison_query / hasAnchor → always rerank (high value)
  *  5. candidateCount >= 20         → rerank (enough candidates to benefit)
  *  6. default                      → skip
  */
@@ -45,11 +45,11 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return { shouldRerank: false, reason: 'too_few_candidates' };
   }
 
-  if (queryClass === 'known_item' || effectiveRoute === 'exact_lookup') {
+  if (queryClass === 'short_entity' || effectiveRoute === 'exact_lookup') {
     return { shouldRerank: false, reason: 'already_precise' };
   }
 
-  if (queryClass === 'comparison' || hasAnchor) {
+  if (queryClass === 'comparison_query' || hasAnchor) {
     return { shouldRerank: true, reason: hasAnchor ? 'has_anchor' : 'comparison_query' };
   }
 

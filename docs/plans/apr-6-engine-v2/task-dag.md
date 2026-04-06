@@ -726,7 +726,7 @@ Must not change:
 
 | Task | 1PR 크기 | Write-set | 목적 | 브레이킹 표면 | 검증 명령 |
 |---|---|---|---|---|---|
-| T4.1 | S | `src/domain/retrieval/model/retrieval-input.ts`, `src/domain/retrieval/model/retrieval-trace.ts`, `src/domain/retrieval/port/search-index.port.ts`, `src/domain/retrieval/service/retrieval-profile.ts`, `src/domain/retrieval/service/cascade-router.ts`, `src/application/search/port/search-pipeline-deps.port.ts`, `src/application/search/search-usecase-hybrid-candidates.ts` | channel interface + dispatch 계약 | internal retrieval contract | `npm run typecheck`, `npm run test:integration`, `npm run test:integration:search-pipeline` |
+| T4.1 | S | `src/domain/retrieval/model/retrieval-channel.ts`, `src/domain/retrieval/model/retrieval-input.ts`, `src/domain/retrieval/model/retrieval-trace.ts`, `src/domain/retrieval/port/search-index.port.ts`, `src/domain/retrieval/service/retrieval-profile.ts`, `src/domain/retrieval/service/cascade-router.ts`, `src/domain/retrieval/service/candidate-pool.ts`, `src/application/search/port/search-pipeline-deps.port.ts`, `src/application/search/search-usecase-hybrid-candidates.ts` | channel interface + dispatch 계약 | internal retrieval contract | `npm run typecheck`, `npm run test:integration`, `npm run test:integration:search-pipeline` |
 | T4.1a | M | `docs/plans/apr-6-engine-v2/epic-4-retrieval-channels-upgrade.md`, `scripts/etl/index-to-vespa.ts`, `src/infrastructure/vespa/mapping.ts`, `scripts/eval/run-offline-eval.ts` | learned sparse artifact/spec pipeline | ETL/eval interface only | `npm run test:ingest:contract`, `npm run eval:offline:smoke` |
 | T4.2 | M | `src/infrastructure/vespa/vespa-schema.sd`, `src/infrastructure/vespa/mapping.ts`, `scripts/etl/index-to-vespa.ts`, `src/infrastructure/vespa/__tests__/mapping.test.ts`, `src/infrastructure/vespa/__tests__/vespa-search-index.test.ts` | learned sparse schema/feed plumbing | Vespa schema + ETL | `npm run test:ingest:contract`, `npm run test:e2e:vespa:smoke` |
 | T4.3 | M | `src/domain/retrieval/port/search-index.port.ts`, `src/domain/retrieval/model/retrieval-trace.ts`, `src/infrastructure/vespa/vespa-search-index.ts`, `src/domain/retrieval/service/fusion.ts`, `src/domain/retrieval/service/candidate-pool.ts`, `src/domain/retrieval/service/retrieval-profile.ts`, `src/application/search/search-usecase-hybrid-candidates.ts` | learned sparse runtime channel | internal retrieval runtime | `npm run test:integration:search-pipeline`, `npm run test:quality` |
@@ -738,7 +738,7 @@ Must not change:
 
 | Task | 1PR 크기 | Write-set | 목적 | 브레이킹 표면 | 검증 명령 |
 |---|---|---|---|---|---|
-| T5.1 | M | `src/domain/ranking/model/ranking-stage.ts` (new), `src/domain/ranking/model/ranking-input.ts`, `src/domain/ranking/model/ranked-result.ts`, `src/domain/ranking/service/ranker.ts`, `src/application/search/search-usecase-hybrid-ranking-pipeline.ts` | ranking stage contract 정의 | internal ranking contract | `npm run typecheck`, `npm run test:unit` |
+| T5.1 | M | `src/domain/ranking/model/ranking-stage.ts` (new), `src/domain/ranking/model/ranking-input.ts`, `src/domain/ranking/model/ranked-result.ts`, `src/domain/ranking/service/ranker.ts`, `src/domain/ranking/service/ranking-stage-pipeline.ts`, `src/application/search/search-usecase-hybrid-ranking-pipeline.ts` | ranking stage contract 정의 | internal ranking contract | `npm run typecheck`, `npm run test:unit` |
 | T5.2 | M | `src/domain/ranking/service/ranker.ts`, `src/domain/ranking/service/score-aggregator.ts`, `src/domain/ranking/model/ranked-result.ts`, `src/domain/ranking/__tests__/score-aggregator.test.ts` | coarse pruning stage | internal ranking | `npm run test:unit`, `npm run test:quality` |
 | T5.3 | M | `src/domain/ranking/model/ranked-result.ts`, `src/domain/ranking/service/signal-computer.ts`, `src/domain/ranking/service/score-aggregator.ts`, `src/domain/ranking/service/ltr-feature-extractor.ts`, `src/domain/ranking/service/lambdamart-ranker.ts`, `src/domain/ranking/__tests__/signal-computer.test.ts` | channel-aware primary rank | internal ranking features | `npm run test:unit`, `npm run test:quality` |
 | T5.4 | M | `src/application/search/search-usecase-ltr-rerank.ts`, `src/application/search/search-usecase-hybrid-ranking-pipeline.ts`, `src/domain/ranking/service/ranker.ts`, `src/domain/ranking/service/ltr-feature-extractor.ts`, `src/domain/ranking/service/ltr-ranker.ts`, `src/domain/ranking/port/reranker.port.ts` | selective precision rerank | internal ranking/LTR | `npm run test:quality`, `npm run test:integration:search-pipeline` |
@@ -833,10 +833,12 @@ Wave 2에서는 retrieval/ranking 품질 향상을 이유로 API, projection, of
 - specialized browse/compare handoff와 candidate-pool 내부 channel dispatch의 경계가 분리되고, 후자가 ad-hoc boolean 조합 대신 channel vocabulary를 통해 retrieval path를 선택함
 
 Must change:
+- canonical retrieval channel vocabulary
 - retrieval input contract
 - retrieval trace vocabulary
 - search index port contract
 - retrieval profile / cascade dispatch vocabulary
+- candidate-pool phase/channel dispatch seam
 - hybrid candidate dispatch glue
 
 Must not change:
@@ -848,6 +850,7 @@ Must not change:
 
 필수 신규 테스트:
 - retrieval contract shape unit tests
+- canonical channel vocabulary / legacy alias compatibility tests
 - channel dispatch integration test via `npm run test:integration:search-pipeline`
 
 #### `T4.1a Learned sparse artifact/spec pipeline`
@@ -953,16 +956,19 @@ Must change:
 - compare/relative retrieval helper
 - constraint evidence/filter helper
 - retrieval profile for comparative query family
+- relative-query / anchor-conditioned orchestration seam
 - candidate pool or hybrid candidate orchestration
 
 Must not change:
 - producer/region browse dispatch
+- `plan.retrievalMode` existing literals
 - 새 public query mode 정의
 - Vespa schema 재설계
 - offer-aware policy
 
 필수 신규 테스트:
 - relative retrieval integration tests
+- specialized compare short-circuit precedence regression test
 - comparative query quality regression
 
 #### `T4.6 Query family별 channel mix policy`
@@ -997,6 +1003,7 @@ Must change:
 - ranking stage model
 - ranking input contract
 - ranked result contract
+- ranking stage pipeline seam
 - ranker pipeline glue
 
 Must not change:
@@ -1007,6 +1014,7 @@ Must not change:
 필수 신규 테스트:
 - stage contract unit tests
 - ranker pipeline structure regression tests
+- ranking-stage-pipeline trace contract tests
 
 #### `T5.2 Coarse pruning stage`
 
@@ -1071,8 +1079,13 @@ Must not change:
 - policy insertion point contract
 - public response schema
 
+추가 실행 규칙:
+- `ranker.ts` 또는 `search-usecase-ltr-rerank.ts` 중 하나만 최종 score/rank mutation owner로 남긴다
+- `search-usecase-hybrid-ranking-pipeline.ts`는 chosen owner 바깥에서 결과 순서를 다시 바꾸지 않는다
+
 필수 신규 테스트:
 - rerank dispatch integration test
+- single mutation owner regression test
 - selective rerank quality regression
 
 #### `T5.5a Policy hook separation`
@@ -1083,6 +1096,7 @@ Must not change:
 
 Must change:
 - ranker output contract
+- ranking stage pipeline / policy port glue
 - hybrid ranking pipeline glue
 
 Must not change:
@@ -1092,6 +1106,7 @@ Must not change:
 필수 신규 테스트:
 - policy hook no-op regression test
 - ranking contract compatibility test
+- stage pipeline policy identity regression test
 
 #### `T5.6 Stage metrics / explainability`
 

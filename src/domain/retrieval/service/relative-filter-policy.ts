@@ -10,6 +10,7 @@
 
 import type { EntityId } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import type { RetrievalDocument } from '../model/retrieval-document.js';
 
 // ---------------------------------------------------------------------------
 // Input contract
@@ -30,6 +31,7 @@ import type { HybridCandidate } from '../model/hybrid-candidate.js';
 export interface RelativeFilterInput {
   readonly anchorEntityId: EntityId;
   readonly constraints: readonly string[];
+  readonly anchorDocument?: RetrievalDocument | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +55,13 @@ interface CandidateAttributes {
   readonly appellation: string;
 }
 
-function extractAttributes(candidate: HybridCandidate): CandidateAttributes {
+function extractAttributes(candidate: {
+  readonly region?: string | undefined;
+  readonly grapePrimary?: string | undefined;
+  readonly style?: string | undefined;
+  readonly country?: string | undefined;
+  readonly appellation?: string | undefined;
+}): CandidateAttributes {
   return {
     region: norm(candidate.region),
     grapePrimary: norm(candidate.grapePrimary),
@@ -121,13 +129,14 @@ export function applyRelativeFilter(
   candidates: readonly HybridCandidate[],
   input: RelativeFilterInput,
 ): readonly HybridCandidate[] {
-  const anchor = candidates.find((c) => c.entityId === input.anchorEntityId);
+  const anchorSource = input.anchorDocument
+    ?? candidates.find((c) => c.entityId === input.anchorEntityId);
 
-  if (anchor === undefined) {
+  if (anchorSource === undefined) {
     return [];
   }
 
-  const anchorAttrs = extractAttributes(anchor);
+  const anchorAttrs = extractAttributes(anchorSource);
 
   return candidates
     .filter((c) => {

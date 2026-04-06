@@ -1,5 +1,6 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { EntityId } from '../../shared/types/index.js';
 
 /**
  * Profile of the anchor entity used for similarity-based retrieval.
@@ -42,4 +43,11 @@ export interface HybridRetrievalInput {
 
   /** Optional anchor profile for similarity-based ("wines like X") queries. */
   readonly anchorProfile?: AnchorProfile | undefined;
+
+  /**
+   * Optional resolved anchor entity for channel-aware retrieval passes.
+   * CandidatePool may use this to build an anchor profile or apply
+   * relative filtering without inventing a new public retrieval mode.
+   */
+  readonly anchorEntityId?: EntityId | undefined;
 }

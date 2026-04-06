@@ -111,6 +111,9 @@ export interface HybridCandidate {
   /** Rank from the dense (embedding) retrieval pass, if present. */
   readonly denseRank?: number | undefined;
 
+  /** Rank from the learned-sparse retrieval pass, if present. */
+  readonly learnedSparseRank?: number | undefined;
+
   /** Rank from the anchor-neighbourhood retrieval pass, if present. */
   readonly anchorRank?: number | undefined;
 

@@ -21,6 +21,19 @@ dev:
 web:
     cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
 
+# Kill any process listening on a given port
+_kill port:
+    @lsof -ti :{{port}} | xargs kill -9 2>/dev/null || true
+
+# Backend + frontend together (kills existing processes on 3000/4000 first)
+full:
+    @echo "Clearing ports 4000 and 3000..."
+    @just _kill 4000
+    @just _kill 3000
+    @sleep 1
+    @echo "Starting backend (4000) + frontend (3000)..."
+    @env {{_test_env}} npm run dev & cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
+
 # ── Docker infra ─────────────────────────────────────────────────────────────
 
 # Start test infra (PG 5433 / Redis 6380 / Vespa 18080)

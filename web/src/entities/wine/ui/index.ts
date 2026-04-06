@@ -1,4 +1,5 @@
 export { WineCard } from './wine-card';
+export { WinePinCard } from './wine-pin-card';
 export { WineCardSkeleton } from './wine-card-skeleton';
 export { TasteProfileBar } from './taste-profile-bar';
 export { DrinkingWindowBar } from './drinking-window-bar';

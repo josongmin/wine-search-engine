@@ -160,6 +160,28 @@ export interface RankingStageTrace {
   readonly notes?: Readonly<Record<string, unknown>>;
 }
 
+// ---------------------------------------------------------------------------
+// Funnel-level aggregate metrics (T5.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Aggregate metrics computed across the full ranking funnel for one query.
+ * Attached to {@link RankingFunnelTrace} after all stages complete.
+ * Used for stage-level explainability and offline quality monitoring.
+ */
+export interface FunnelMetrics {
+  /** Fraction of candidates that passed coarse prune. */
+  readonly coarsePrunePassRate: number;
+  /** Whether precision rerank actually changed top-5 order. */
+  readonly rerankChangedTopK: boolean;
+  /** Mean final score of retained candidates. */
+  readonly meanFinalScore: number;
+  /** Score gap between rank-1 and rank-2 (confidence signal). Null when fewer than 2 results. */
+  readonly scoreGapRank1Rank2: number | null;
+  /** Number of unique producers in final result set. */
+  readonly producerDiversity: number;
+}
+
 /**
  * Full ranking funnel trace for one query execution.
  */
@@ -171,4 +193,6 @@ export interface RankingFunnelTrace {
   readonly precisionRerankExecuted: boolean;
   /** Whether policy adjustments were applied. */
   readonly policyApplied: boolean;
+  /** Aggregate funnel metrics computed after all stages complete (T5.6). */
+  readonly metrics?: FunnelMetrics | undefined;
 }

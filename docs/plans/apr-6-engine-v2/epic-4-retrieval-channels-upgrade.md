@@ -122,23 +122,30 @@ learned sparse 채널의 경우 구체적으로:
 
 | Task | 닫는 기준 | Must change | Must not change |
 |---|---|---|---|
-| T4.1 | retrieval input이 channel-aware shape를 갖고 specialized route handoff와 candidate-pool 내부 channel dispatch가 분리됨 | `retrieval-input.ts`, `retrieval-trace.ts`, `search-index.port.ts`, `retrieval-profile.ts`, `cascade-router.ts`, hybrid candidate dispatch contract | Vespa schema, ranking weights, public HTTP contract |
+| T4.1 | retrieval input이 channel-aware shape를 갖고 specialized route handoff와 candidate-pool 내부 channel dispatch가 분리됨 | `retrieval-channel.ts`, `retrieval-input.ts`, `retrieval-trace.ts`, `search-index.port.ts`, `retrieval-profile.ts`, `cascade-router.ts`, `candidate-pool.ts`, hybrid candidate dispatch contract | Vespa schema, ranking weights, public HTTP contract |
 | T4.1a | learned sparse artifact format, serialization key, offline validation 기준이 문서와 ETL stub에서 같은 이름을 사용 | Epic 4 spec 문서, ETL stub, offline eval script entry | runtime retrieval path, candidate scoring |
 | T4.2 | schema/feed가 learned sparse field를 실제로 전달하고 Vespa smoke lane에서 깨지지 않음 | `vespa-schema.sd`, `mapping.ts`, `index-to-vespa.ts`, mapping/index adapter tests | candidate-pool policy, ranking logic |
 | T4.3 | learned sparse query가 runtime candidate generation에 연결되고 trace에서 channel source가 보임 | `search-index.port.ts`, `vespa-search-index.ts`, `fusion.ts`, `candidate-pool.ts`, `retrieval-profile.ts`, `retrieval-trace.ts`, port implementation parity | channel policy retune, rerank logic |
 | T4.4 | anchor similarity가 dedicated retrieval channel로 trace되고 generic dense fallback과 구분됨 | `fusion.ts`, `candidate-pool.ts`, `vespa-similar-retrieval.ts`, `retrieval-profile.ts`, `retrieval-trace.ts` | relative retrieval semantics, ranking stage contract |
-| T4.5 | relative query path가 anchor-conditioned candidate shaping을 가지며 compare/generic hybrid fallback과 구분됨 | `compare-retriever.ts`, constraint evidence/filter helpers, `candidate-pool.ts`, `retrieval-profile.ts`, `search-usecase-hybrid-candidates.ts` | public query mode 추가, Vespa schema 재설계 |
+| T4.5 | relative query path가 anchor-conditioned candidate shaping을 가지며 compare/generic hybrid fallback과 구분됨 | `compare-retriever.ts`, constraint evidence/filter helpers, relative-query / anchor-conditioned orchestration seam, `candidate-pool.ts`, `retrieval-profile.ts`, `search-usecase-hybrid-candidates.ts` | public query mode 추가, Vespa schema 재설계 |
 | T4.6 | query family별 channel mix가 profile/policy/trace vocabulary로 고정되고 eval slice에서 검증 가능 | `retrieval-profile.ts`, `cascade-router.ts`, `candidate-pool.ts`, `retrieval-trace.ts`, eval runner/script vocabulary | ranker scoring, public response explain format |
 
 ### Hotspot ownership
 
 - `T4.1` owns retrieval contract naming. 이후 task는 channel 이름을 새로 발명하지 않고 그 vocabulary를 그대로 재사용한다.
+- `T4.1`은 [retrieval-channel.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/model/retrieval-channel.ts) canonical vocabulary와 [candidate-pool.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/candidate-pool.ts) dispatch seam을 함께 고정해야 닫힌다. trace/profile만 바꾸고 runtime dispatch가 legacy string을 계속 쓰게 두면 미완료다.
 - `T4.1a`는 docs/stub only다. runtime query adapter나 candidate trace를 미리 바꾸지 않는다.
 - `T4.2` owns schema/feed only. runtime dispatch를 미리 넣으려 하지 않는다.
 - `T4.3` owns learned sparse runtime hookup. current code에서 `candidateSources` 기본 라벨은 `fusion.ts`가 만든다. learned sparse를 기존 `sparse` 라벨로 우겨넣지 말고, 여기서 anchor/relative policy까지 같이 넣지 않는다.
 - `T4.4` owns anchor channel semantics. current code에서 main anchor path는 `candidate-pool.ts`, mixed seam은 `vespa-similar-retrieval.ts`이므로 둘 중 하나만 고치고 끝내지 않는다. `T4.5`와 같은 PR에서 합치지 않는다.
-- `T4.5`는 새 파일을 억지로 만드는 것보다 현재 [compare-retriever.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/compare-retriever.ts)와 candidate evidence/filter seam 위에서 상대 비교 path를 정리하는 쪽을 우선한다. specialized compare short-circuit를 generic candidate pool보다 뒤로 보내지 않는다.
+- `T4.5`는 새 public retrieval mode를 추가하는 티켓이 아니다. 현재 planner/execution contract에는 `compare_candidates` specialized mode가 있고, 상대 비교 표현은 relative-query extractor/anchor-conditioned query seam에서 이미 감지된다. 따라서 이 티켓은 [compare-retriever.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/compare-retriever.ts)와 candidate evidence/filter seam 위에서 relative path를 정리하되, specialized compare short-circuit를 generic candidate pool보다 뒤로 보내지 않는 방식으로 닫는다.
 - `T4.6`는 retrieval mix policy만 고정한다. profile 숫자와 cascade phase를 따로 놀게 두지 말고, specialized browse/compare route switch나 ranking weight 조정으로 품질 문제를 덮지 않는다.
+
+### Mechanical execution rules
+
+- `T4.1`에서 channel vocabulary를 바꾸면 `retrieval-trace.ts`, `candidate-pool.ts`, `fusion.ts`, specialized retriever trace literals를 같은 PR에서 정렬하거나, 아니면 명시적 legacy alias test를 함께 둬야 한다.
+- `T4.5`는 relative intent를 이유로 `plan.retrievalMode` literal set을 늘리지 않는다. 기존 compare/browse dispatch는 유지하고, generic hybrid 내부 path 또는 relative-query derived signals로만 닫는다.
+- `T4.5`는 compare short-circuit 실패 시 generic fallback이 동작하는 것은 허용하지만, compare short-circuit 성공 케이스를 generic candidate-pool이 먼저 먹어버리게 만들면 실패다.
 
 ### Required verification by slice
 
