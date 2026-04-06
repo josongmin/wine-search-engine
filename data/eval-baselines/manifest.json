@@ -9,6 +9,7 @@
     "offline": {
       "ndcg_at_10_max_drop": 0.02,
       "mrr_at_10_max_drop": 0.02,
+      "recall_at_3_max_drop": 0.02,
       "recall_at_100_max_drop": 0.02,
       "wrong_top1_rate_max_increase": 0
     },

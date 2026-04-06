@@ -417,19 +417,40 @@ export class SignalComputer {
    * @returns Coverage score in [0, 1]. 1 = all target values represented.
    */
   computeSetCoverage(
-    _candidates: HybridCandidate[],
+    candidates: HybridCandidate[],
     targetSet: Set<string>,
   ): number {
     if (targetSet.size === 0) {
       return 1.0; // No target → perfect coverage trivially
     }
 
-    // For now, return neutral score. Real implementation would:
-    // 1. Extract attribute values from candidates.
-    // 2. Check intersection with targetSet.
-    // 3. Return intersection size / targetSet size.
+    const observed = new Set<string>();
+    for (const candidate of candidates) {
+      for (const value of [
+        candidate.producer,
+        candidate.region,
+        candidate.appellation,
+        candidate.grapePrimary,
+        candidate.vintageYear?.toString(),
+      ]) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          observed.add(value.trim().toLowerCase());
+        }
+      }
+    }
 
-    return 0.5;
+    if (observed.size === 0) {
+      return 0;
+    }
+
+    let covered = 0;
+    for (const target of targetSet) {
+      if (observed.has(target.trim().toLowerCase())) {
+        covered++;
+      }
+    }
+
+    return clamp01(covered / targetSet.size);
   }
 
   /**
@@ -449,33 +470,42 @@ export class SignalComputer {
     anchor: HybridCandidate,
     candidate: HybridCandidate,
   ): number {
-    // If no anchor, return neutral
-    if (anchor.canonicalLabel === undefined || candidate.canonicalLabel === undefined) {
-      return 0.5;
+    let totalWeight = 0;
+    let preservedWeight = 0;
+
+    if (anchor.region !== undefined && candidate.region !== undefined) {
+      totalWeight += 0.25;
+      if (anchor.region === candidate.region) {
+        preservedWeight += 0.25;
+      }
     }
 
-    // Simple heuristic: wines that share region and similar body/tannin profile
-    // preserve the anchor well. Real implementation would use embedding distance
-    // and attribute alignment.
-
-    let preservationScore = 0.5;
-
-    // Bonus if same region
-    if (anchor.region && anchor.region === candidate.region) {
-      preservationScore += 0.2;
+    if (anchor.grapePrimary !== undefined && candidate.grapePrimary !== undefined) {
+      totalWeight += 0.20;
+      if (anchor.grapePrimary === candidate.grapePrimary) {
+        preservedWeight += 0.20;
+      }
     }
 
-    // Bonus if same grape (would require attribute enrichment)
-    if (anchor.grapePrimary && anchor.grapePrimary === candidate.grapePrimary) {
-      preservationScore += 0.15;
+    preservedWeight += attributeSimilarity(anchor.body, candidate.body, 0.15);
+    totalWeight += comparableWeight(anchor.body, candidate.body, 0.15);
+
+    preservedWeight += attributeSimilarity(anchor.tannin, candidate.tannin, 0.15);
+    totalWeight += comparableWeight(anchor.tannin, candidate.tannin, 0.15);
+
+    preservedWeight += attributeSimilarity(anchor.acidity, candidate.acidity, 0.10);
+    totalWeight += comparableWeight(anchor.acidity, candidate.acidity, 0.10);
+
+    preservedWeight += attributeSimilarity(anchor.sweetness, candidate.sweetness, 0.05);
+    totalWeight += comparableWeight(anchor.sweetness, candidate.sweetness, 0.05);
+
+    if (totalWeight === 0) {
+      return clamp01(candidate.retrievalFusionScore > 0.05 ? 0.6 : 0.4);
     }
 
-    // Bonus for high retrieval fusion score (embedding similarity proxy)
-    if (candidate.retrievalFusionScore > 0.05) {
-      preservationScore += 0.15;
-    }
-
-    return clamp01(preservationScore);
+    const metadataScore = preservedWeight / totalWeight;
+    const retrievalBoost = candidate.retrievalFusionScore > 0.05 ? 0.05 : 0;
+    return clamp01(metadataScore + retrievalBoost);
   }
 }
 
@@ -484,4 +514,26 @@ export class SignalComputer {
  */
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function comparableWeight(
+  left: number | undefined,
+  right: number | undefined,
+  weight: number,
+): number {
+  return left !== undefined && right !== undefined ? weight : 0;
+}
+
+function attributeSimilarity(
+  left: number | undefined,
+  right: number | undefined,
+  weight: number,
+): number {
+  if (left === undefined || right === undefined) {
+    return 0;
+  }
+
+  const maxDelta = 4;
+  const normalized = 1 - Math.min(Math.abs(left - right), maxDelta) / maxDelta;
+  return normalized * weight;
 }

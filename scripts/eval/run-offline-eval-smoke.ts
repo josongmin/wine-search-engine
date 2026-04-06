@@ -1,0 +1,81 @@
+#!/usr/bin/env tsx
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import process from 'node:process';
+import { createTestServer, closeTestServer } from '../../test/e2e/helpers/test-server.js';
+
+interface Args {
+  input: string;
+  output: string;
+  tier: 'bronze' | 'silver' | 'gate';
+}
+
+function parseArgs(argv: readonly string[]): Args {
+  const out: Args = {
+    input: 'data/eval-smoke-queries.jsonl',
+    output: 'data/eval-results-smoke.json',
+    tier: 'bronze',
+  };
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--input' || arg === '-i') {
+      out.input = argv[++index] ?? out.input;
+    } else if (arg === '--output' || arg === '-o') {
+      out.output = argv[++index] ?? out.output;
+    } else if (arg === '--tier') {
+      const tier = argv[++index];
+      if (tier === 'bronze' || tier === 'silver' || tier === 'gate') {
+        out.tier = tier;
+      }
+    }
+  }
+
+  return out;
+}
+
+async function run(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  const server = await createTestServer();
+  const address = await server.app.listen({ port: 0, host: '127.0.0.1' });
+
+  try {
+    const url = typeof address === 'string' ? address : `http://127.0.0.1:${address.port}`;
+    const child = spawn(
+      'npx',
+      [
+        'tsx',
+        path.resolve(process.cwd(), 'scripts/eval/run-offline-eval.ts'),
+        '--input',
+        args.input,
+        '--output',
+        args.output,
+        '--tier',
+        args.tier,
+      ],
+      {
+        cwd: process.cwd(),
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          SEARCH_API_URL: url,
+          EVAL_SEARCH_CONCURRENCY: '1',
+          EVAL_SEARCH_TIMEOUT_MS: '5000',
+        },
+      },
+    );
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      child.on('error', reject);
+      child.on('exit', (code) => resolve(code ?? 1));
+    });
+
+    if (exitCode !== 0) {
+      process.exitCode = exitCode;
+    }
+  } finally {
+    await closeTestServer(server);
+  }
+}
+
+void run();

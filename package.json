@@ -38,6 +38,8 @@
     "eval": "tsx scripts/eval/run-offline-eval.ts",
     "eval:offline:bronze": "tsx scripts/eval/run-offline-eval.ts --tier bronze --output data/eval-results.json",
     "eval:offline:assert-baseline": "tsx scripts/eval/assert-baseline-regression.ts --kind offline --current data/eval-results.json",
+    "eval:offline:smoke": "tsx scripts/eval/run-offline-eval-smoke.ts --tier bronze --input data/eval-smoke-queries.jsonl --output /tmp/offline-eval-smoke-results.json",
+    "eval:offline:smoke:assert-baseline": "npm run eval:offline:smoke && tsx scripts/eval/assert-baseline-regression.ts --kind offline --current /tmp/offline-eval-smoke-results.json --baseline data/eval-baselines/offline-smoke-v1.json",
     "eval:noisy": "tsx scripts/eval/run-noisy-entity-eval.ts",
     "eval:noisy:smoke": "tsx scripts/eval/run-noisy-entity-eval.ts --predictions data/noisy-entity-predictions-smoke.jsonl --output data/noisy-entity-eval-smoke-results.json",
     "eval:noisy:validate": "tsx scripts/eval/run-noisy-entity-eval.ts --predictions data/noisy-entity-predictions-smoke.jsonl --output /tmp/noisy-entity-eval-results.json",

@@ -54,6 +54,8 @@ export interface DrinkingWindowPrediction {
  *            tannin×acidity, body×tannin]
  */
 export class DrinkingWindowPredictor {
+  readonly modelVersion = DRINKING_WINDOW_MODEL_VERSION;
+
   /**
    * Loads predictor resources.
    *
@@ -119,7 +121,7 @@ export class DrinkingWindowPredictor {
       drinkingWindowEnd,
       peakYear,
       confidence,
-      modelVersion: DRINKING_WINDOW_MODEL_VERSION,
+      modelVersion: this.modelVersion,
     };
   }
 }

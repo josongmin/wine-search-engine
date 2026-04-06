@@ -28,6 +28,19 @@ class RedisJudgmentCacheAdapter implements JudgmentCachePort {
   }
 }
 
+class InMemoryJudgmentCacheAdapter implements JudgmentCachePort {
+  private readonly store = new Map<string, string>();
+
+  get(key: string): Promise<string | null> {
+    return Promise.resolve(this.store.get(key) ?? null);
+  }
+
+  setEx(key: string, _ttlSeconds: number, value: string): Promise<void> {
+    this.store.set(key, value);
+    return Promise.resolve();
+  }
+}
+
 export interface RuntimeSupportServices {
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
@@ -45,13 +58,14 @@ export async function buildRuntimeSupportServices(
 
   let injectionJudge: InjectionJudgePort | undefined;
   if (config.anthropic.apiKey && !config.killSwitch.injectionJudge) {
-    if (redisClient) {
-      injectionJudge = new LLMInjectionJudge(
-        new AnthropicLLMInjectionClassifier(config.anthropic.apiKey),
-        new RedisJudgmentCacheAdapter(redisClient),
-      );
-    } else {
-      console.warn('[Container] Redis unavailable; skipping LLMInjectionJudge initialization');
+    injectionJudge = new LLMInjectionJudge(
+      new AnthropicLLMInjectionClassifier(config.anthropic.apiKey),
+      redisClient
+        ? new RedisJudgmentCacheAdapter(redisClient)
+        : new InMemoryJudgmentCacheAdapter(),
+    );
+    if (!redisClient) {
+      console.warn('[Container] Redis unavailable; using in-memory cache for LLMInjectionJudge');
     }
   }
 
@@ -91,11 +105,22 @@ export async function buildRuntimeSupportServices(
     }
   }
 
+  const drinkingWindowPredictor = new DrinkingWindowPredictor();
+  if (
+    config.nodeEnv === 'production'
+    && drinkingWindowPredictor.modelVersion.startsWith('heuristic')
+    && process.env['ALLOW_HEURISTIC_DRINKING_WINDOW'] !== 'true'
+  ) {
+    throw new Error(
+      'Production startup refuses heuristic-only drinking-window prediction. Set ALLOW_HEURISTIC_DRINKING_WINDOW=true only with explicit approval.',
+    );
+  }
+
   return {
     querySanitizer,
     injectionJudge,
     cacheService,
     ltrModels,
-    drinkingWindowPredictor: new DrinkingWindowPredictor(),
+    drinkingWindowPredictor,
   };
 }

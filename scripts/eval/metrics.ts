@@ -559,6 +559,7 @@ export interface EvalResult {
   // Global metrics
   readonly ndcg_at_10: number;
   readonly mrr_at_10: number;
+  readonly recall_at_3: number;
   readonly recall_at_100: number;
   readonly decision_utility: number;
   readonly wrong_top1_rate: number;

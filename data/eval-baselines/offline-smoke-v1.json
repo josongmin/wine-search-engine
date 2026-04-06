@@ -1,0 +1,121 @@
+{
+  "dataset_tier": "bronze",
+  "query_count": 9,
+  "ndcg_at_10": 0.8866830353822381,
+  "mrr_at_10": 0.8888888888888888,
+  "recall_at_3": 0.9444444444444444,
+  "recall_at_100": 1,
+  "decision_utility": -0.2222222222222222,
+  "wrong_top1_rate": 0,
+  "safe_abstain_rate": 0.1111111111111111,
+  "avoidable_abstain_rate": 0.8888888888888888,
+  "aurc": 0,
+  "e_aurc": 0,
+  "ece": 0,
+  "by_scenario": {
+    "A": {
+      "query_count": 4,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    },
+    "D": {
+      "query_count": 3,
+      "ndcg_at_10": 0.9933824394800478,
+      "mrr_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    },
+    "B": {
+      "query_count": 1,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": 0.4
+    },
+    "no_match": {
+      "query_count": 1,
+      "ndcg_at_10": 0,
+      "mrr_at_10": 0,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    }
+  },
+  "by_language": {
+    "en": {
+      "query_count": 2,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    },
+    "ko": {
+      "query_count": 7,
+      "ndcg_at_10": 0.8543067597771633,
+      "mrr_at_10": 0.8571428571428571,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.2
+    }
+  },
+  "by_mode": {
+    "entity_lookup": {
+      "retrieval_mode": "entity_lookup",
+      "query_count": 4,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "recall_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    },
+    "entity_resolution": {
+      "retrieval_mode": "entity_resolution",
+      "query_count": 1,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "recall_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": 0.4
+    },
+    "attribute_search": {
+      "retrieval_mode": "attribute_search",
+      "query_count": 1,
+      "ndcg_at_10": 0.980147318440143,
+      "mrr_at_10": 1,
+      "recall_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    },
+    "recommendation": {
+      "retrieval_mode": "recommendation",
+      "query_count": 2,
+      "ndcg_at_10": 1,
+      "mrr_at_10": 1,
+      "recall_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    },
+    "no_match_detection": {
+      "retrieval_mode": "no_match_detection",
+      "query_count": 1,
+      "ndcg_at_10": 0,
+      "mrr_at_10": 0,
+      "recall_at_10": 1,
+      "wrong_top1_rate": 0,
+      "decision_utility": -0.3
+    }
+  },
+  "by_target_type": {
+    "wine": {
+      "target_type": "wine",
+      "query_count": 9,
+      "correct_type_rate": 0,
+      "confusion_matrix": {
+        "wine": 0,
+        "producer": 0,
+        "region": 0,
+        "unknown": 9
+      }
+    }
+  }
+}

@@ -3,26 +3,33 @@ import { buildRuntimeSupportServices } from '../container-runtime-support.js';
 import { parseEnv } from '../env.js';
 
 describe('buildRuntimeSupportServices', () => {
-  it('propagates the configured judge failure mode and observer', async () => {
+  it('initializes injection judge with in-memory cache when Redis is unavailable', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
-      INJECTION_JUDGE_FAIL_OPEN: 'true',
+      ANTHROPIC_API_KEY: 'sk-test',
     });
 
     const services = await buildRuntimeSupportServices(config, {});
 
-    expect(services.judgeFailureMode).toBe('fail_open');
-    expect(services.queryEntrySecurityObserver).toBeDefined();
+    expect(services.injectionJudge).toBeDefined();
   });
 
-  it('defaults to fail_closed mode when unset', async () => {
+  it('allows heuristic drinking-window predictor outside production', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
     });
 
     const services = await buildRuntimeSupportServices(config, {});
 
-    expect(services.judgeFailureMode).toBe('fail_closed');
-    expect(services.queryEntrySecurityObserver).toBeDefined();
+    expect(services.drinkingWindowPredictor.modelVersion).toContain('heuristic');
+  });
+
+  it('rejects heuristic drinking-window predictor in production without explicit opt-in', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'production',
+      PG_PASSWORD: 'secret',
+    });
+
+    await expect(buildRuntimeSupportServices(config, {})).rejects.toThrow(/heuristic-only drinking-window/);
   });
 });

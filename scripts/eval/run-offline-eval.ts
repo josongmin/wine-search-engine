@@ -30,6 +30,7 @@ import {
   excessAurc,
   ece,
   setDiversityScore,
+  anchorPreservationScore,
   producerVariety,
   type RankedHit,
   type DecisionOutcome,
@@ -41,6 +42,10 @@ import {
   type EntityTargetType,
   type EntityTypeMetrics,
 } from './metrics.js';
+import {
+  inferEntityTargetType as inferEntityTargetTypeFromQuery,
+  inferResolvedEntityType,
+} from './entity-type.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -100,19 +105,6 @@ const MODE_RELEASE_GATES: Record<RetrievalMode, Record<string, number>> = {
   no_match_detection: {
     wrong_top1_rate_max: 0.05,
   },
-} as const;
-
-/** Entity target type inferred from query class and scenario. */
-const ENTITY_TARGET_TYPE_MAP: Record<string, EntityTargetType> = {
-  'A': 'wine',      // Exact entity lookup (wine)
-  'B': 'wine',      // Ambiguous wine
-  'C': 'wine',      // Short-form wine
-  'D': 'wine',      // Semantic preference (wine)
-  'E': 'producer',  // Producer browse
-  'F': 'region',    // Region browse
-  'G': 'region',    // Region/appellation browse
-  'H': 'wine',      // Comparison (wines)
-  'no_match': 'wine',
 } as const;
 
 const ALL_RETRIEVAL_MODES: RetrievalMode[] = [
@@ -213,7 +205,14 @@ async function executeSearch(query: string, timeoutMs: number): Promise<SearchRe
     const response = await fetch(`${apiUrl}/v1/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({
+        query,
+        options: {
+          mode: 'hybrid',
+          explain: false,
+          clarification: false,
+        },
+      }),
       signal: AbortSignal.timeout(timeoutMs),
     });
 
@@ -244,7 +243,20 @@ async function executeSearch(query: string, timeoutMs: number): Promise<SearchRe
       // Accept both entity_id (snake) and entityId (camel)
       const entityId = (entity['entity_id'] ?? entity['entityId'] ?? '') as string;
       const score = (r['relevance_score'] ?? r['relevanceScore'] ?? 0) as number;
-      return { entity_id: String(entityId), score };
+      const entityType = entity['type'];
+      const producer = entity['producer'];
+      const region = entity['region'];
+      const grapes = entity['grapes'];
+      return {
+        entity_id: String(entityId),
+        score,
+        ...(typeof entityType === 'string' ? { entity_type: entityType } : {}),
+        ...(typeof producer === 'string' ? { producer } : {}),
+        ...(typeof region === 'string' ? { region } : {}),
+        ...(Array.isArray(grapes)
+          ? { grapes: grapes.filter((value): value is string => typeof value === 'string') }
+          : {}),
+      };
     });
 
     const decisionStatus = (engineDecision['decision_status'] ?? engineDecision['decisionStatus'] ?? 'failed') as string;
@@ -370,24 +382,41 @@ function computeModeMetrics(
   }
 
   if (mode === 'similar_items') {
-    // Anchor preservation would require anchor context from query metadata
-    // For now, use placeholder
-    metrics.anchor_preservation_score = results.length > 0 ? 0.5 : 0;
-    metrics.seed_exclusion_rate = 0.95; // Placeholder
+    metrics.anchor_preservation_score = results.length > 0
+      ? results
+        .map((r) => anchorPreservationScore(r.truth.expected_entity_id ?? '', r.ranked))
+        .reduce((a, b) => a + b, 0) / results.length
+      : 0;
+    metrics.seed_exclusion_rate = results.length > 0
+      ? results
+        .map((r) => {
+          const anchorId = r.truth.expected_entity_id;
+          if (anchorId === undefined || r.ranked.length === 0) {
+            return 1;
+          }
+          return r.ranked.some((hit) => hit.entity_id === anchorId) ? 0 : 1;
+        })
+        .reduce((a, b) => a + b, 0) / results.length
+      : 0;
   }
 
   if (mode === 'compare_candidates') {
-    metrics.attribute_coverage = 0.7; // Placeholder: would require attribute extraction
+    metrics.attribute_coverage = results.length > 0
+      ? results
+        .map((r) => {
+          if (r.ranked.length === 0) {
+            return 0;
+          }
+          const covered = r.ranked.filter(
+            (hit) => hit.producer !== undefined || hit.region !== undefined || (hit.grapes?.length ?? 0) > 0,
+          ).length;
+          return covered / r.ranked.length;
+        })
+        .reduce((a, b) => a + b, 0) / results.length
+      : 0;
   }
 
   return metrics;
-}
-
-/**
- * Infer entity target type from scenario code.
- */
-function inferEntityTargetType(scenario: string): EntityTargetType {
-  return (ENTITY_TARGET_TYPE_MAP as Record<string, EntityTargetType>)[scenario] ?? 'unknown';
 }
 
 /**
@@ -421,20 +450,11 @@ function computeEntityTypeMetrics(
 
   let correctCount = 0;
   for (const r of results) {
-    // Infer the actual type from decision and entity_id (heuristic)
-    // In production, would use entity metadata
-    let resolvedType: EntityTargetType = 'unknown';
-
-    // For now, use a simple heuristic: if decision status is 'resolved' and
-    // there's a top entity, assume it matches target type in most cases.
-    // In reality, would need entity metadata to determine actual type.
-    if (r.decision.decision_status === 'resolved') {
-      // Simplified: assume correct type for resolved decisions (optimistic)
-      resolvedType = targetType;
+    const resolvedType = r.decision.decision_status === 'resolved'
+      ? inferResolvedEntityType(r.ranked[0])
+      : 'unknown';
+    if (resolvedType === targetType) {
       correctCount++;
-    } else {
-      // Ambiguous or failed → mark as unknown
-      resolvedType = 'unknown';
     }
 
     confusion[resolvedType]++;
@@ -504,6 +524,9 @@ async function run(): Promise<void> {
   const globalMrr = allResults
     .map((r) => reciprocalRank(r.ranked, r.truth.relevant, 10))
     .reduce((a, b) => a + b, 0) / allResults.length;
+  const globalRecallAt3 = allResults
+    .map((r) => recall(r.ranked, r.truth.relevant, 3))
+    .reduce((a, b) => a + b, 0) / allResults.length;
   const globalRecall = allResults
     .map((r) => recall(r.ranked, r.truth.relevant, 100))
     .reduce((a, b) => a + b, 0) / allResults.length;
@@ -564,7 +587,11 @@ async function run(): Promise<void> {
   const byTargetTypeEntries: [EntityTargetType, EntityTypeMetrics][] = [];
   const typeGroups = new Map<EntityTargetType, typeof allResults>();
   for (const r of allResults) {
-    const targetType = inferEntityTargetType(r.query.scenario);
+    const targetType = inferEntityTargetTypeFromQuery({
+      retrieval_mode: r.query.retrieval_mode,
+      query_class: r.query.query_class,
+      scenario: r.query.scenario,
+    });
     const existing = typeGroups.get(targetType);
     if (existing) {
       existing.push(r);
@@ -582,6 +609,7 @@ async function run(): Promise<void> {
     query_count: allResults.length,
     ndcg_at_10: globalNdcg,
     mrr_at_10: globalMrr,
+    recall_at_3: globalRecallAt3,
     recall_at_100: globalRecall,
     decision_utility: decisionUtilityScore(decisions, truths),
     wrong_top1_rate: wrongTop1Rate(decisions, truths),
@@ -607,6 +635,7 @@ async function run(): Promise<void> {
   console.log(`  Queries:          ${evalResult.query_count}`);
   console.log(`  NDCG@10:          ${evalResult.ndcg_at_10.toFixed(4)}`);
   console.log(`  MRR@10:           ${evalResult.mrr_at_10.toFixed(4)}`);
+  console.log(`  Recall@3:         ${evalResult.recall_at_3.toFixed(4)}`);
   console.log(`  Recall@100:       ${evalResult.recall_at_100.toFixed(4)}`);
   console.log(`  Decision Utility: ${evalResult.decision_utility.toFixed(4)}`);
   console.log(`  WrongTop1 rate:   ${evalResult.wrong_top1_rate.toFixed(4)}`);

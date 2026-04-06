@@ -9,8 +9,23 @@ const OfflineEvalSchema = z.object({
   query_count: z.number().nonnegative(),
   ndcg_at_10: z.number(),
   mrr_at_10: z.number(),
-  recall_at_100: z.number(),
+  recall_at_3: z.number().optional(),
+  recall_at_100: z.number().optional(),
   wrong_top1_rate: z.number(),
+  by_scenario: z.record(z.object({
+    query_count: z.number().nonnegative(),
+    ndcg_at_10: z.number(),
+    mrr_at_10: z.number(),
+    wrong_top1_rate: z.number(),
+    decision_utility: z.number(),
+  })).optional(),
+  by_language: z.record(z.object({
+    query_count: z.number().nonnegative(),
+    ndcg_at_10: z.number(),
+    mrr_at_10: z.number(),
+    wrong_top1_rate: z.number(),
+    decision_utility: z.number(),
+  })).optional(),
 });
 
 const NoisyEvalSchema = z.object({
@@ -33,7 +48,8 @@ const BaselineManifestSchema = z.object({
     offline: z.object({
       ndcg_at_10_max_drop: z.number().nonnegative(),
       mrr_at_10_max_drop: z.number().nonnegative(),
-      recall_at_100_max_drop: z.number().nonnegative(),
+      recall_at_3_max_drop: z.number().nonnegative(),
+      recall_at_100_max_drop: z.number().nonnegative().optional(),
       wrong_top1_rate_max_increase: z.number().nonnegative(),
     }),
     noisy: z.object({
@@ -89,7 +105,21 @@ export function compareOfflineRegression(
     });
   }
 
-  if (current.recall_at_100 < baseline.recall_at_100 - thresholds.recall_at_100_max_drop) {
+  if (current.recall_at_3 !== undefined && baseline.recall_at_3 !== undefined) {
+    if (current.recall_at_3 < baseline.recall_at_3 - thresholds.recall_at_3_max_drop) {
+      violations.push({
+        metric: 'recall_at_3',
+        baseline: baseline.recall_at_3,
+        current: current.recall_at_3,
+        message: `recall_at_3 dropped by ${(baseline.recall_at_3 - current.recall_at_3).toFixed(4)} (> ${thresholds.recall_at_3_max_drop.toFixed(4)})`,
+      });
+    }
+  } else if (
+    thresholds.recall_at_100_max_drop !== undefined
+    && current.recall_at_100 !== undefined
+    && baseline.recall_at_100 !== undefined
+    && current.recall_at_100 < baseline.recall_at_100 - thresholds.recall_at_100_max_drop
+  ) {
     violations.push({
       metric: 'recall_at_100',
       baseline: baseline.recall_at_100,
@@ -106,6 +136,53 @@ export function compareOfflineRegression(
       message: `wrong_top1_rate increased by ${(current.wrong_top1_rate - baseline.wrong_top1_rate).toFixed(4)} (> ${thresholds.wrong_top1_rate_max_increase.toFixed(4)})`,
     });
   }
+
+  const compareSlices = (
+    currentSlices: OfflineEvalReport['by_scenario'] | OfflineEvalReport['by_language'] | undefined,
+    baselineSlices: OfflineEvalReport['by_scenario'] | OfflineEvalReport['by_language'] | undefined,
+    prefix: 'scenario' | 'language',
+  ): void => {
+    if (currentSlices === undefined || baselineSlices === undefined) {
+      return;
+    }
+
+    for (const [sliceName, baselineSlice] of Object.entries(baselineSlices)) {
+      const currentSlice = currentSlices[sliceName];
+      if (currentSlice === undefined) {
+        continue;
+      }
+
+      if (currentSlice.ndcg_at_10 < baselineSlice.ndcg_at_10 - thresholds.ndcg_at_10_max_drop) {
+        violations.push({
+          metric: `${prefix}.${sliceName}.ndcg_at_10`,
+          baseline: baselineSlice.ndcg_at_10,
+          current: currentSlice.ndcg_at_10,
+          message: `${prefix} ${sliceName} ndcg_at_10 dropped by ${(baselineSlice.ndcg_at_10 - currentSlice.ndcg_at_10).toFixed(4)} (> ${thresholds.ndcg_at_10_max_drop.toFixed(4)})`,
+        });
+      }
+
+      if (currentSlice.mrr_at_10 < baselineSlice.mrr_at_10 - thresholds.mrr_at_10_max_drop) {
+        violations.push({
+          metric: `${prefix}.${sliceName}.mrr_at_10`,
+          baseline: baselineSlice.mrr_at_10,
+          current: currentSlice.mrr_at_10,
+          message: `${prefix} ${sliceName} mrr_at_10 dropped by ${(baselineSlice.mrr_at_10 - currentSlice.mrr_at_10).toFixed(4)} (> ${thresholds.mrr_at_10_max_drop.toFixed(4)})`,
+        });
+      }
+
+      if (currentSlice.wrong_top1_rate > baselineSlice.wrong_top1_rate + thresholds.wrong_top1_rate_max_increase) {
+        violations.push({
+          metric: `${prefix}.${sliceName}.wrong_top1_rate`,
+          baseline: baselineSlice.wrong_top1_rate,
+          current: currentSlice.wrong_top1_rate,
+          message: `${prefix} ${sliceName} wrong_top1_rate increased by ${(currentSlice.wrong_top1_rate - baselineSlice.wrong_top1_rate).toFixed(4)} (> ${thresholds.wrong_top1_rate_max_increase.toFixed(4)})`,
+        });
+      }
+    }
+  };
+
+  compareSlices(current.by_scenario, baseline.by_scenario, 'scenario');
+  compareSlices(current.by_language, baseline.by_language, 'language');
 
   return violations;
 }
