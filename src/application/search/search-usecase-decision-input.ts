@@ -59,7 +59,7 @@ export function buildSearchDecisionInput(
   const matchedRequiredAttributes =
     topResult !== undefined
       ? unique(
-          (topResult.matchedConstraints ?? []).filter((attribute) =>
+          topResult.matchedConstraints.filter((attribute) =>
             requiredConstraintAttributes.includes(attribute),
           ),
         )
@@ -67,7 +67,7 @@ export function buildSearchDecisionInput(
   const unmetRequiredAttributes =
     topResult !== undefined
       ? unique(
-          (topResult.unmetConstraints ?? []).filter((attribute) =>
+          topResult.unmetConstraints.filter((attribute) =>
             requiredConstraintAttributes.includes(attribute),
           ),
         )
@@ -81,9 +81,7 @@ export function buildSearchDecisionInput(
     ...(topResult !== undefined && topEntity !== undefined
       ? { rankedTopResultMatchesTopEntity }
       : {}),
-    ...(topResult !== undefined
-      ? { rankedEvidenceItemCount: (topResult.evidenceItems ?? []).length }
-      : {}),
+    ...(topResult !== undefined ? { rankedEvidenceItemCount: topResult.evidenceItems.length } : {}),
     ...(resolverTopCandidateMatchesTopEntity
       ? { exactMatchCandidatePresent: resolverTopCandidate.calibratedScore >= 0.99 }
       : {}),
@@ -95,7 +93,7 @@ export function buildSearchDecisionInput(
           requiredAttributes: requiredConstraintAttributes,
           matchedRequiredAttributes,
           unmetRequiredAttributes,
-          inferredAttributes: unique(topResult.inferredConstraints ?? []),
+          inferredAttributes: unique(topResult.inferredConstraints),
         }
       : undefined;
 
@@ -111,7 +109,7 @@ export function buildSearchDecisionInput(
           ? {
               rankedSignalPresent:
                 (topResult.componentScores.anchorSimilarity ?? 0) > 0 ||
-                (topResult.evidenceItems ?? []).some((item) => item.type === 'anchor_similarity'),
+                topResult.evidenceItems.some((item) => item.type === 'anchor_similarity'),
             }
           : {}),
       }
@@ -134,14 +132,16 @@ export function buildSearchDecisionInput(
       ? {
           evidenceRefCount:
             resolverEvidenceRefCount +
-              (rankedTopResultMatchesTopEntity ? (topResult.evidenceItems ?? []).length : 0),
+            (topResult !== undefined && rankedTopResultMatchesTopEntity
+              ? topResult.evidenceItems.length
+              : 0),
         }
       : {}),
   };
   const evidenceSummary: EvidenceSummary = {
     ...evidenceSummaryBase,
     identityEvidencePresent: hasIdentityEvidence(evidenceSummaryBase),
-    ...(constraintEvidence !== undefined
+    ...(constraintEvidence !== undefined && topResult !== undefined
       ? {
           constraintEvidencePresent:
             topResult.componentScores.hardConstraintPass &&
@@ -162,7 +162,7 @@ export function buildSearchDecisionInput(
     admissionContext,
     ...(rankingSignals !== undefined ? { rankingSignals } : {}),
     evidenceSummary,
-    ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems ?? [] } : {}),
+    ...(topResult !== undefined ? { evidenceItems: topResult.evidenceItems } : {}),
     conformalSetSize: resolverResult.conformalSetSize,
   };
 }
