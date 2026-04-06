@@ -30,6 +30,28 @@ const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
 
+function deriveAdmissionContext(
+  input: DecisionInput,
+): NonNullable<DecisionInput['admissionContext']> {
+  if (input.admissionContext !== undefined) {
+    return input.admissionContext;
+  }
+  if (input.queryPlan.admission_context !== undefined) {
+    return input.queryPlan.admission_context;
+  }
+  const effectiveRoute = input.effectiveRoute ?? input.queryPlan.route;
+  return {
+    requires_identity_seal:
+      input.queryPlan.intent === 'entity_exact' ||
+      input.queryPlan.intent === 'entity_fuzzy' ||
+      input.queryPlan.intent === 'comparison_search' ||
+      input.queryPlan.intent === 'mixed_query' ||
+      effectiveRoute === 'mixed',
+    requires_constraint_evidence: input.queryPlan.constraints.hard.length > 0,
+    requires_anchor_evidence: effectiveRoute === 'mixed' && input.queryPlan.anchors.length > 0,
+  };
+}
+
 /**
  * THE FINAL AUTHORITY — the Decision Engine, per RFC-007.
  *
@@ -333,9 +355,9 @@ export class DecisionEngine {
       return state;
     }
 
-    const hasConstraints = input.queryPlan.constraints.hard.length > 0 ||
-      input.queryPlan.constraints.soft.length > 0;
-    const hasAnchor = input.queryPlan.anchors.length > 0;
+    const admissionContext = deriveAdmissionContext(input);
+    const hasConstraints = admissionContext?.requires_constraint_evidence === true;
+    const hasAnchor = admissionContext?.requires_anchor_evidence === true;
 
     const gateResult: EvidenceGateResult = this.evidenceGate.check(
       state.status,
@@ -516,6 +538,7 @@ export class DecisionEngine {
       nextAction: state.nextAction,
       inputs: {
         queryClass: input.queryPlan.queryClass,
+        effectiveRoute: input.effectiveRoute ?? input.queryPlan.route,
         policy: {
           requireExact: input.policy.requireExact,
           allowApproximate: input.policy.allowApproximate,

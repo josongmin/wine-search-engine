@@ -136,9 +136,6 @@ export class ResponseBuilder {
     retrievalModeSource?: 'planner' | 'api_override',
     plannerSuggestedMode?: string,
   ): EngineDecision {
-    void retrievalModeSource;
-    void plannerSuggestedMode;
-
     return {
       decisionStatus: output.decisionStatus,
       nextAction: output.nextAction,
@@ -153,6 +150,8 @@ export class ResponseBuilder {
       ...(output.admissionTraceRef !== undefined
         ? { admission_trace_ref: output.admissionTraceRef }
         : {}),
+      ...(retrievalModeSource !== undefined ? { retrievalModeSource } : {}),
+      ...(plannerSuggestedMode !== undefined ? { plannerSuggestedMode } : {}),
     };
   }
 

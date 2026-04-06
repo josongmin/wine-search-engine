@@ -70,6 +70,21 @@ export class AdmissionGate {
    *   admitted or rejected with a specific {@link FailureReason}.
    */
   check(input: DecisionInput, snapshot: DecisionSnapshot): AdmissionResult {
+    const admissionContext = input.admissionContext
+      ?? input.queryPlan.admission_context
+      ?? {
+        requires_identity_seal:
+          input.queryPlan.intent === 'entity_exact' ||
+          input.queryPlan.intent === 'entity_fuzzy' ||
+          input.queryPlan.intent === 'comparison_search' ||
+          input.queryPlan.intent === 'mixed_query' ||
+          (input.effectiveRoute ?? input.queryPlan.route) === 'mixed',
+        requires_constraint_evidence: input.queryPlan.constraints.hard.length > 0,
+        requires_anchor_evidence:
+          (input.effectiveRoute ?? input.queryPlan.route) === 'mixed' &&
+          input.queryPlan.anchors.length > 0,
+      };
+
     // ── (a) Identity-signature consistency ──────────────────────────────────
     //
     // The resolved top entity must be present and its entityId must be a
@@ -135,7 +150,6 @@ export class AdmissionGate {
     //      `type` is an anchor signal ('anchor_similarity', 'anchor_match',
     //      or 'anchor_preserved') — the boolean flag alone is not sufficient;
     //      the trail must be substantiated (RFC-011 §11).
-    const admissionContext = input.queryPlan.admission_context;
     if (admissionContext?.requires_anchor_evidence === true) {
       if (input.evidenceSummary.anchorEvidencePresent !== true) {
         return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);

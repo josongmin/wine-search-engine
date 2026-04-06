@@ -174,6 +174,20 @@ describe('ResponseBuilder', () => {
     });
   });
 
+  describe('route provenance', () => {
+    it('preserves retrieval override provenance in engineDecision when provided', () => {
+      const response = builder.build(
+        makeBaseParams({
+          retrievalModeSource: 'api_override',
+          plannerSuggestedMode: 'entity',
+        }),
+      );
+
+      expect(response.engineDecision.retrievalModeSource).toBe('api_override');
+      expect(response.engineDecision.plannerSuggestedMode).toBe('entity');
+    });
+  });
+
   describe('evidence enforcement', () => {
     it('result with non-empty evidenceItems → returned unchanged (no synthetic item added)', () => {
       const existingEvidence = makeEvidenceItem();

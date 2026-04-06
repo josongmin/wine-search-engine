@@ -167,6 +167,8 @@ describe('User Journeys — replay consistency and policy handling', () => {
     const replayResponse = await postJson(server.app, '/v1/search/replay', {
       query: 'Opus One 2018',
       decision_snapshot: matchingSnapshot,
+      // Must mirror the original search options; default mode is `auto` and changes routing/decision.
+      options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
     expect(originalResponse.statusCode).toBe(200);

@@ -26,7 +26,16 @@ function minimalPlan(route: QueryPlanV1['route']): QueryPlanV1 {
 describe('buildSearchDecisionInput', () => {
   it('sets anchorEvidencePresent when mixed route and topEntity', () => {
     const eid = createEntityId();
-    const plan = minimalPlan('mixed');
+    const plan = {
+      ...minimalPlan('mixed'),
+      anchors: [{
+        surfaceForm: 'Opus One',
+        normalizedForm: 'opus one',
+        candidateEntityIds: [eid],
+        confidence: 0.95,
+        source: 'alias',
+      }],
+    } as QueryPlanV1;
     const resolverResult: EntityResolveResult = {
       status: 'resolved',
       candidates: [],
@@ -46,6 +55,42 @@ describe('buildSearchDecisionInput', () => {
     };
     const input = buildSearchDecisionInput(plan, resolverResult, []);
     expect(input.evidenceSummary.anchorEvidencePresent).toBe(true);
+  });
+
+  it('uses effectiveRoute when API override forces mixed execution', () => {
+    const eid = createEntityId();
+    const plan = {
+      ...minimalPlan('entity'),
+      anchors: [{
+        surfaceForm: 'Opus One',
+        normalizedForm: 'opus one',
+        candidateEntityIds: [eid],
+        confidence: 0.95,
+        source: 'alias',
+      }],
+    } as QueryPlanV1;
+    const resolverResult: EntityResolveResult = {
+      status: 'resolved',
+      candidates: [],
+      topEntity: { entityId: eid, canonicalLabel: 'X', calibratedScore: 0.9 },
+      decisionTrace: {
+        queryClass: 'unknown',
+        top1CalibratedScore: 0.9,
+        top2CalibratedScore: 0,
+        calibratedGap: 0.9,
+        decisionConfidenceC: 0.9,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+        outcomeReasonCodes: [],
+      },
+      conformalSetSize: 1,
+    };
+
+    const input = buildSearchDecisionInput(plan, resolverResult, [], 'mixed');
+    expect(input.effectiveRoute).toBe('mixed');
+    expect(input.evidenceSummary.anchorEvidencePresent).toBe(true);
+    expect(input.admissionContext?.requires_anchor_evidence).toBe(true);
   });
 
   it('omits rankingSignals when no ranked results', () => {

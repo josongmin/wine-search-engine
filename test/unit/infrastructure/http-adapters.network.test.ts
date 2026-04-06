@@ -146,6 +146,16 @@ describe('HTTP adapters — real local network round-trip', () => {
         },
         anchorLookupVariants: ['opus one', 'opusone18'],
         anchorLookupStrategies: ['transliterated_exact', 'compact_exact'],
+        candidateFeatures: new Map([
+          ['entity-opus-one', {
+            charNgramOverlap: 0.81,
+            tokenCoverage: 1,
+            vintageConsistency: true,
+            scriptCompatibility: 0.5,
+            provenanceStage: 'transliterated_exact',
+            queryCompactLength: 8,
+          }],
+        ]),
       },
     );
 
@@ -167,6 +177,16 @@ describe('HTTP adapters — real local network round-trip', () => {
           query_class: 'short_entity',
           anchor_lookup_variants: ['opus one', 'opusone18'],
           anchor_lookup_strategies: ['transliterated_exact', 'compact_exact'],
+          candidate_features: {
+            'entity-opus-one': {
+              char_ngram_overlap: 0.81,
+              token_coverage: 1,
+              vintage_consistency: true,
+              script_compatibility: 0.5,
+              provenance_stage: 'transliterated_exact',
+              query_compact_length: 8,
+            },
+          },
           normalized_query_views: expect.objectContaining({
             transliterated: 'opus one',
             phonetic_compact: 'psn18',

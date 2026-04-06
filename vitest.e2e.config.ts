@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
+import os from 'node:os';
 
 export default defineConfig({
   test: {
@@ -9,7 +10,19 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     pool: 'forks',
-    poolOptions: { forks: { singleFork: true } },
+    // Parallel test files; each suite uses its own Fastify inject server.
+    // maxForks caps memory on large CI runners; override with VITEST_MAX_FORKS if needed.
+    poolOptions: {
+      forks: {
+        singleFork: false,
+        maxForks: (() => {
+          const parsed = Number.parseInt(process.env.VITEST_MAX_FORKS ?? '8', 10);
+          const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+          const cpus = Math.max(2, os.availableParallelism?.() ?? os.cpus().length);
+          return Math.min(cap, cpus);
+        })(),
+      },
+    },
   },
   resolve: {
     alias: {

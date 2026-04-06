@@ -286,8 +286,8 @@ describe('Calibrator', () => {
   // Store returning null falls back to isotonic identity
   // -------------------------------------------------------------------------
 
-  describe('null store → fallback to isotonic identity', () => {
-    it('case 17 – CalibrationStore returning null falls back to clamped identity', async () => {
+  describe('null store → fallback normalization + isotonic identity', () => {
+    it('case 17 – CalibrationStore returning null preserves in-range scores', async () => {
       // Null store triggers DEFAULT_PLATT_PARAMS (isotonic, breakpoint_count=0)
       const calibrator = new Calibrator(makeStubStore(null));
       const result = await calibrator.calibrate({ top1: 0.72, top2: 0.31 }, 'ambiguous_short_form');
@@ -297,6 +297,15 @@ describe('Calibrator', () => {
       expect(result.top2CalibratedScore).toBeCloseTo(0.31, 10);
       expect(result.decisionConfidenceC).toBeCloseTo(0.72, 10);
       expect(result.calibratedGap).toBeCloseTo(0.72 - 0.31, 10);
+    });
+
+    it('normalizes additive resolver scores above 1.0 before fallback calibration', async () => {
+      const calibrator = new Calibrator(makeStubStore(null));
+      const result = await calibrator.calibrate({ top1: 2.2, top2: 1.1 }, 'ambiguous_short_form');
+
+      expect(result.top1CalibratedScore).toBeCloseTo(1, 10);
+      expect(result.top2CalibratedScore).toBeCloseTo(0.5, 10);
+      expect(result.calibratedGap).toBeCloseTo(0.5, 10);
     });
 
     it('throws when trained calibration is required but missing', async () => {

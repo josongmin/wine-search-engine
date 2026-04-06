@@ -38,6 +38,7 @@
     "typecheck": "tsc --noEmit --incremental false",
     "contracts:http": "tsx scripts/export-http-contract-manifest.ts",
     "contracts:http:openapi-bridge": "tsx scripts/export-http-openapi-bridge.ts",
+    "verify:http-contracts": "vitest run --config vitest.unit.config.ts test/unit/interface/http/http-route-catalog-openapi-parity.test.ts",
     "verify:drinking-window-model": "tsx scripts/verify-drinking-window-model.ts",
     "eval": "tsx scripts/eval/run-offline-eval.ts",
     "eval:offline:with-splits": "tsx scripts/eval/run-offline-eval.ts --verify-splits",

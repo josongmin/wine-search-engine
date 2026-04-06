@@ -114,6 +114,12 @@ describe('Resolver learned matcher context', () => {
         normalizedQueryViews: expect.objectContaining({
           transliterated: 'opus one',
         }),
+        candidateFeatures: expect.any(Map),
+      }),
+    );
+    expect(match.mock.calls[0]?.[2]?.candidateFeatures?.get('entity-opus-one-2018')).toEqual(
+      expect.objectContaining({
+        provenanceStage: 'compact_exact',
       }),
     );
     expect(result.decisionTrace.learnedMatcherTrace).toEqual(

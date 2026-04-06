@@ -122,14 +122,7 @@ export function buildBrowseRetriever(adapters: CoreAdapterServices): BrowseRetri
 }
 
 export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRetrieverPort {
-  void adapters;
-  const retriever = new CompareRetriever();
-  return {
-    compareAgainstAnchor(_anchorEntityId, _constraints, _limit) {
-      void retriever;
-      return Promise.resolve([]);
-    },
-  };
+  return new CompareRetriever(adapters.searchIndex);
 }
 
 export function buildRanker(

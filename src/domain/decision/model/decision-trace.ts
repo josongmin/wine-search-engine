@@ -32,6 +32,8 @@ export interface DecisionTrace {
   readonly inputs: {
     /** The query class that determined threshold selection. */
     readonly queryClass: string;
+    /** The route that actually executed after API overrides. */
+    readonly effectiveRoute?: string | undefined;
     /** Policy directives active during decision-making. */
     readonly policy: Readonly<Record<string, unknown>>;
   };

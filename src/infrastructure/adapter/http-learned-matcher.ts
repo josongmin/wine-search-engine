@@ -126,6 +126,23 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
 }
 
 function toApiContext(context: LearnedMatcherContext): Record<string, unknown> {
+  const candidateFeatures =
+    context.candidateFeatures !== undefined
+      ? Object.fromEntries(
+          [...context.candidateFeatures.entries()].map(([entityId, features]) => [
+            entityId,
+            {
+              char_ngram_overlap: features.charNgramOverlap,
+              token_coverage: features.tokenCoverage,
+              vintage_consistency: features.vintageConsistency,
+              script_compatibility: features.scriptCompatibility,
+              provenance_stage: features.provenanceStage,
+              query_compact_length: features.queryCompactLength,
+            },
+          ]),
+        )
+      : undefined;
+
   return {
     ...(context.queryClass !== undefined ? { query_class: context.queryClass } : {}),
     ...(context.normalizedQueryViews !== undefined
@@ -155,5 +172,6 @@ function toApiContext(context: LearnedMatcherContext): Record<string, unknown> {
     ...(context.anchorLookupStrategies !== undefined
       ? { anchor_lookup_strategies: context.anchorLookupStrategies }
       : {}),
+    ...(candidateFeatures !== undefined ? { candidate_features: candidateFeatures } : {}),
   };
 }

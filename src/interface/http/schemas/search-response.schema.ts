@@ -114,6 +114,8 @@ export const EngineDecisionSchema = z.object({
   failure_reason: z.string().optional(),
   admission_trace_ref: z.string().optional(),
   abstain_reason: z.string().optional(),
+  retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
+  planner_suggested_mode: z.string().min(1).optional(),
 }).strict();
 
 export const ParsedConstraintsExternSchema = z.object({

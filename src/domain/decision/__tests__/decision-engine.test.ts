@@ -364,6 +364,7 @@ describe('DecisionEngine', () => {
         resolverResult: makeResolverResult(0.85, 0.20, false),
         queryPlan: {
           ...makeQueryPlan(),
+          route: 'mixed',
           anchors: [{
             surfaceForm: '마고',
             normalizedForm: '마고',

@@ -74,6 +74,7 @@ export async function runSearchPostRoutePhase(
     ctx.plan,
     ctx.resolveResult,
     ctx.rankedResults,
+    ctx.effectiveRoute,
   );
   const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
   const decisionOutput = await ctx.decisionEngine.decide(decisionInput, snapshot);

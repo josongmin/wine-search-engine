@@ -68,6 +68,16 @@ describe('HttpLearnedMatcherAdapter', () => {
         },
         anchorLookupVariants: ['opus one', 'opusone18'],
         anchorLookupStrategies: ['transliterated_exact', 'compact_exact'],
+        candidateFeatures: new Map([
+          ['entity-opus-one', {
+            charNgramOverlap: 0.75,
+            tokenCoverage: 1,
+            vintageConsistency: true,
+            scriptCompatibility: 0.5,
+            provenanceStage: 'transliterated_exact',
+            queryCompactLength: 8,
+          }],
+        ]),
       },
     );
 
@@ -82,6 +92,16 @@ describe('HttpLearnedMatcherAdapter', () => {
           query_class: 'short_entity',
           anchor_lookup_variants: ['opus one', 'opusone18'],
           anchor_lookup_strategies: ['transliterated_exact', 'compact_exact'],
+          candidate_features: {
+            'entity-opus-one': {
+              char_ngram_overlap: 0.75,
+              token_coverage: 1,
+              vintage_consistency: true,
+              script_compatibility: 0.5,
+              provenance_stage: 'transliterated_exact',
+              query_compact_length: 8,
+            },
+          },
         }),
       }),
     );

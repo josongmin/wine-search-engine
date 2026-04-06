@@ -1,5 +1,6 @@
 import type { SignalSet, EvidenceItem } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
@@ -52,6 +53,14 @@ export interface DecisionInput {
   /** The query plan that drove the pipeline. */
   readonly queryPlan: QueryPlanV1;
 
+  /**
+   * The route that actually executed after any API-level override.
+   *
+   * This can differ from `queryPlan.route` when the caller forces a route
+   * via the top-level `retrieval_mode` field.
+   */
+  readonly effectiveRoute?: QueryRoute | undefined;
+
   /** The resolver's result including its suggested status. */
   readonly resolverResult: EntityResolveResult;
 
@@ -63,6 +72,13 @@ export interface DecisionInput {
 
   /** Uncertainty assessment from the planner. */
   readonly uncertainty: QueryUncertainty;
+
+  /**
+   * Admission/evidence obligations that apply to the executed route.
+   *
+   * Defaults to `queryPlan.admission_context` when absent.
+   */
+  readonly admissionContext?: QueryPlanV1['admission_context'] | undefined;
 
   /** Aggregated ambiguity summary from all pipeline stages. */
   readonly ambiguitySummary?: AmbiguitySummary;

@@ -4,16 +4,12 @@ import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
 import type { CalibrationStore, CalibrationParams } from '../port/calibration-store.port.js';
 
 /**
- * Identity pass-through calibration params used when no trained model
- * exists for a query class.
+ * Default fallback calibration params used when no trained model exists.
  *
- * We use the isotonic path with breakpoint_count=0, which causes
- * applyIsotonicFallback to return clamp(rawScore, 0, 1) unchanged.
- * This preserves the raw score (already in [0,1] from CandidateScorer)
- * as the calibrated probability, avoiding the sigmoid distortion that
- * Platt scaling with a=1, b=0 would introduce (e.g., a raw score of 1.0
- * would only yield ≈0.731, making it impossible to exceed resolveTau for
- * most query classes).
+ * The calibrator routes these through the isotonic path. Before doing so,
+ * `calibrate()` normalizes oversized raw scores into a stable [0, 1] range
+ * so non-production/test environments remain monotonic even when the weighted
+ * scorer emits additive scores above 1.0.
  */
 const DEFAULT_PLATT_PARAMS: CalibrationParams = {
   method: 'isotonic',
@@ -61,9 +57,12 @@ export class Calibrator {
     queryClass: QueryClass,
   ): Promise<CalibratedResolutionScore> {
     const params = await this.loadParams(queryClass);
+    const normalizedRawScores = this.isDefaultFallbackParams(params)
+      ? this.normalizeFallbackRawScores(rawScores)
+      : rawScores;
 
-    const top1Calibrated = this.applyCalibration(rawScores.top1, params);
-    const top2Calibrated = this.applyCalibration(rawScores.top2, params);
+    const top1Calibrated = this.applyCalibration(normalizedRawScores.top1, params);
+    const top2Calibrated = this.applyCalibration(normalizedRawScores.top2, params);
 
     const calibratedGap = top1Calibrated - top2Calibrated;
 
@@ -90,6 +89,24 @@ export class Calibrator {
       );
     }
     return DEFAULT_PLATT_PARAMS;
+  }
+
+  private isDefaultFallbackParams(params: CalibrationParams): boolean {
+    return params === DEFAULT_PLATT_PARAMS;
+  }
+
+  /**
+   * Keeps the default fallback monotonic when the additive resolver score
+   * exceeds 1.0 by scaling both scores with the same top-score factor.
+   */
+  private normalizeFallbackRawScores(
+    rawScores: { readonly top1: number; readonly top2: number },
+  ): { readonly top1: number; readonly top2: number } {
+    const factor = Math.max(1, rawScores.top1);
+    return {
+      top1: rawScores.top1 / factor,
+      top2: rawScores.top2 / factor,
+    };
   }
 
   /**
