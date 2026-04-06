@@ -1,0 +1,105 @@
+{
+  "benchmark": "noisy-entity-benchmark",
+  "query_count": 33,
+  "recall_at_1": 1,
+  "recall_at_3": 1,
+  "mrr": 1,
+  "by_category": {
+    "typo": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "accent_stripped": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "whitespace_collapse_split": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "abbreviation": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "transliteration": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "producer_label_partial": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "vintage_partial": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "mixed_language": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "noisy_short_form": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "adversarial_near_miss": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "phonetic": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    }
+  },
+  "by_language": {
+    "en": {
+      "query_count": 26,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "ko": {
+      "query_count": 4,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    },
+    "mixed": {
+      "query_count": 3,
+      "recall_at_1": 1,
+      "recall_at_3": 1,
+      "mrr": 1
+    }
+  },
+  "misses": [],
+  "provenance_checked_count": 6,
+  "provenance_match_rate": 1,
+  "provenance_misses": [],
+  "resolution_checked_count": 3,
+  "resolution_match_rate": 1,
+  "false_exact_rate": 0,
+  "resolution_misses": [],
+  "source": "predictions",
+  "evaluated_at": "2026-04-06T05:39:10.693Z"
+}

@@ -159,12 +159,10 @@ describe('LLMInjectionJudge', () => {
   });
 
   describe('Error handling', () => {
-    it('fails open (false) when the classifier throws', async () => {
+    it('propagates classifier failures to the caller', async () => {
       (mockClassifier.classify as any).mockRejectedValueOnce(new Error('classifier down'));
 
-      const result = await judge.judge('find wine');
-
-      expect(result).toBe(false);
+      await expect(judge.judge('find wine')).rejects.toThrow('classifier down');
     });
   });
 

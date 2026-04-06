@@ -36,13 +36,15 @@ function createValidationErrorResponse(requestId: string, message: string) {
  * }
  * ```
  *
- * Response (HTTP 207 Multi-Status, regardless of partial failures):
+ * Response (HTTP 200 OK; inspect batch_status for outcome):
  * ```json
  * {
  *   "batch_id": "my-batch-123",
  *   "total": 2,
  *   "succeeded": 1,
  *   "failed": 1,
+ *   "batch_status": "partial_failure",
+ *   "has_failures": true,
  *   "results": [
  *     {
  *       "id": "1",
@@ -69,7 +71,7 @@ function createValidationErrorResponse(requestId: string, message: string) {
  * - INTERNAL_ERROR: Unexpected server error
  *
  * HTTP status codes:
- * - 207 Multi-Status: Batch executed (may contain mixed success/failure)
+ * - 200 OK: Batch executed; inspect batch_status/results for outcome
  * - 400 Bad Request: Validation error in batch request structure
  * - 415 Unsupported Media Type: Wrong Content-Type header
  * - 429 Too Many Requests: Rate limit exceeded
@@ -102,13 +104,10 @@ export function registerBatchSearchRoute(
         parsed.data.batch_id,
       );
 
-      // Always return 207 Multi-Status (RFC 7231 §6.3.7)
-      // HTTP 207 allows a single response body to convey information about
-      // multiple status values. Used here to indicate that:
-      // - Batch structure was valid (not 400)
-      // - Individual requests may have succeeded or failed (not 200/500)
-      // - Client must inspect response.results[].status to determine outcome
-      sendRouteContractResponse(request, reply, BatchSearchRouteContract, 207, response);
+      // HTTP transport indicates the batch request itself succeeded.
+      // Clients should inspect batch_status / has_failures / results[].status
+      // to determine item-level outcomes.
+      sendRouteContractResponse(request, reply, BatchSearchRouteContract, 200, response);
     },
   });
 }

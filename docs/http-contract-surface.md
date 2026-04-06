@@ -18,6 +18,7 @@ Use:
 
 ```bash
 npm run contracts:http -- data/http-contract-manifest.json
+npm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json
 ```
 
 The script writes a stable JSON manifest of declared methods, URLs,
@@ -33,6 +34,8 @@ That file is lightweight enough to diff in PRs when the public route surface cha
 
 Implementation:
 - [`scripts/export-http-contract-manifest.ts`](/Users/songmin/wine-search-engine/scripts/export-http-contract-manifest.ts)
+- [`scripts/export-http-openapi-bridge.ts`](/Users/songmin/wine-search-engine/scripts/export-http-openapi-bridge.ts)
+- [`src/interface/http/routes/http-route-contract-openapi.ts`](/Users/songmin/wine-search-engine/src/interface/http/routes/http-route-contract-openapi.ts)
 
 ## Validation
 
@@ -40,11 +43,14 @@ Implementation:
   [`test/integration/http/routes/route-contract-registry.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/route-contract-registry.test.ts)
 - Declared manifest export check:
   [`test/integration/http/routes/http-contract-manifest-script.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/http-contract-manifest-script.test.ts)
+- OpenAPI bridge export check:
+  [`test/integration/http/routes/http-contract-openapi-bridge.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/http-contract-openapi-bridge.test.ts)
 - Public query 403 contract check:
   [`test/integration/http/routes/public-query-contracts.test.ts`](/Users/songmin/wine-search-engine/test/integration/http/routes/public-query-contracts.test.ts)
 
 ## Current Limitation
 
-OpenAPI/Swagger generation is still not implemented. The manifest is enough to
-track the declared route surface and contract drift, but it is not a full API
-description format.
+The OpenAPI bridge is generated from route contracts and projects Zod schemas
+into a conservative JSON-schema-like form. It is useful for contract drift
+detection and tooling bootstrap, but it is not yet a full Swagger UI stack or
+a richly annotated hand-authored API spec.

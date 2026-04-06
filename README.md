@@ -23,11 +23,14 @@ RFCs under `docs/` remain the source of truth for behavior and terminology.
 
 - `npm run dev`: start the dev server with watch mode
 - `npm run build`: compile production output
-- `npm run start`: run the compiled server
+- `npm run start`: run the compiled app bootstrap (`dist/main.js`)
 - `npm run typecheck`: check production TypeScript sources
 - `npx tsc --noEmit -p tsconfig.tests.json`: check test helper TypeScript contracts
 - `npm run test`: run Vitest
+- `npm run test:watchlist`: run the watchlist-focused regression suite
+- `npm run test:all`: run the main unit/integration/watchlist/e2e/quality regression stack
 - `npm run contracts:http -- data/http-contract-manifest.json`: export the declared HTTP contract manifest
+- `npm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json`: export the OpenAPI bridge generated from route contracts
 - `npm run test:watchlist:pg`: run the real-Postgres watchlist storage integration test when `PG_TEST_URL` is set
 
 ## HTTP Contract Surface
@@ -35,12 +38,15 @@ RFCs under `docs/` remain the source of truth for behavior and terminology.
 - Declared route catalog: `src/interface/http/routes/http-route-contract-catalog.ts`
 - Route schema definitions: `src/interface/http/routes/route-contracts.ts`
 - Export script: `scripts/export-http-contract-manifest.ts`
+- OpenAPI bridge script: `scripts/export-http-openapi-bridge.ts`
 - Integration checks:
   - `test/integration/http/routes/route-contract-registry.test.ts`
   - `test/integration/http/routes/http-contract-manifest-script.test.ts`
+  - `test/integration/http/routes/http-contract-openapi-bridge.test.ts`
 
-This repo does not yet generate OpenAPI/Swagger. The current source of truth for
-the public HTTP surface is the route contract catalog plus the exported manifest.
+This repo now exports a generated OpenAPI bridge from the declared route contracts.
+It is intentionally lightweight, but it is machine-readable and diffable. The
+runtime source of truth remains the route contract catalog plus the exported artifacts.
 
 ## Runtime / Readiness
 

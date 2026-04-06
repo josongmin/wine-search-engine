@@ -179,51 +179,70 @@ export class SearchUseCase {
     const satResult = this.constraintSAT.check(plan.constraints);
     if (satResult.contradicted) {
       const conflictDesc = satResult.conflictPairs
-        .map(([a, b]) => `${a.attribute}: ${String(a.value)} vs ${String(b.value)}`)
+        .map(([a, b]) => `${a.attribute}: ${JSON.stringify(a.value)} vs ${JSON.stringify(b.value)}`)
         .join('; ');
+      const snapshot = this.buildSnapshot(plan);
+      const apiOverrideMode = request.retrieval_mode !== undefined && request.retrieval_mode !== 'auto'
+        ? request.retrieval_mode
+        : undefined;
+      const effectiveRoute = apiOverrideMode ?? this.resolveRoute(plan, request.options?.mode);
+      const retrievalModeSource: 'planner' | 'api_override' = apiOverrideMode !== undefined
+        ? 'api_override'
+        : 'planner';
 
       return this.deps.responseBuilder.build({
         queryPlan: plan,
-        resolveResult: {
-          status: 'failed',
-          candidates: [],
-          decisionConfidenceC: 0,
-          decisionTrace: {
-            queryClass: plan.queryClass,
-            top1CalibratedScore: 0,
-            top2CalibratedScore: 0,
-            calibratedGap: 0,
-            decisionConfidenceC: 0,
-            ambiguityDetected: false,
-            ambiguityTypes: [],
-            appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-            outcomeReasonCodes: ['HARD_CONSTRAINT_VIOLATION'],
-          },
-          conformalSetSize: 0,
-        },
-        rankedResults: [],
         decisionOutput: {
           decisionStatus: 'failed',
-          nextAction: 'refine',
+          nextAction: 'fail',
           decisionConfidence: 0,
-          failureReason: `Contradictory constraints: ${conflictDesc}`,
-          rulesApplied: ['CONSTRAINT_SAT'],
+          confidenceSemantics: 'calibrated_decision_confidence',
+          signalSet: {
+            entity_integrity_score: 0,
+            hard_constraint_pass: 0,
+            soft_constraint_score: 0,
+            semantic_relevance_score: 0,
+            preference_alignment_score: 0,
+            popularity_score: 0,
+            availability_score: 0,
+            uncertainty_penalty: 0,
+          },
+          evidenceItems: [],
+          decisionTraceRef: `constraint-sat:${requestId}`,
+          decisionSnapshot: snapshot,
+          failureReason: 'HARD_CONSTRAINT_VIOLATION',
           decisionTrace: {
+            decisionStatus: 'failed',
+            nextAction: 'fail',
             inputs: {
               queryClass: plan.queryClass,
-              decisionConfidenceC: 0,
-              conformalSetSize: 0,
-              signals: { bm25: 0, semantic: 0, popularity: 0, availability: 0, attributeAlignment: 0, entityIntegrity: 0, uncertaintyPenalty: 0, softConstraint: 0, preferenceAlignment: 0, anchorSimilarity: 0 },
+              policy: plan.policy as unknown as Readonly<Record<string, unknown>>,
+            },
+            signals: {
+              decisionConfidence: 0,
+              calibratedGap: 0,
+              ambiguity: false,
+            },
+            thresholds: {
+              resolveThreshold: 0,
+              gapThreshold: 0,
+            },
+            versions: {
+              plannerVersion: plan.plannerVersion,
+              policyRuleVersion: plan.policyRuleVersion,
+              thresholdProfileId: plan.thresholdProfileId,
             },
             rulesApplied: ['CONSTRAINT_SAT'],
-            outcome: 'failed',
-            outcomeReason: `Contradictory constraints detected: ${conflictDesc}`,
+            finalReason: `Contradictory constraints: ${conflictDesc}`,
           },
+          candidates: [],
         },
+        results: [],
         requestId,
         queryTimeMs: Date.now() - startTime,
-        snapshot: this.buildSnapshot(plan),
-        route: 'hybrid',
+        route: effectiveRoute,
+        retrievalModeSource,
+        plannerSuggestedMode: plan.route,
       });
     }
 

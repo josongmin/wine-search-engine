@@ -14,6 +14,10 @@
 export interface RankedHit {
   readonly entity_id: string;
   readonly score: number;
+  readonly entity_type?: string;
+  readonly producer?: string;
+  readonly region?: string;
+  readonly grapes?: readonly string[];
 }
 
 export interface RelevanceMap {
@@ -486,9 +490,23 @@ export type EntityTargetType = 'wine' | 'producer' | 'region' | 'unknown';
  * price spread, grape variety, etc.
  */
 export function setDiversityScore(candidates: readonly RankedHit[]): number {
-  // Placeholder: uniform distribution heuristic
-  // In practice, would need entity metadata (producer, region, grape, etc.)
-  return candidates.length <= 1 ? 0 : 0.5;
+  if (candidates.length <= 1) {
+    return 0;
+  }
+
+  const labels = candidates
+    .map((candidate) => candidate.producer ?? candidate.region)
+    .filter((label): label is string => typeof label === 'string' && label.length > 0);
+
+  if (labels.length === 0) {
+    return 0;
+  }
+
+  const counts = new Map<string, number>();
+  for (const label of labels) {
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return intraSetDiversity(counts, labels.length);
 }
 
 /**
@@ -498,11 +516,14 @@ export function setDiversityScore(candidates: readonly RankedHit[]): number {
  * Currently placeholder; would require anchor entity in query context.
  */
 export function anchorPreservationScore(
-  _anchor: string,
-  _results: readonly RankedHit[],
+  anchor: string,
+  results: readonly RankedHit[],
 ): number {
-  // Placeholder: would compare results against known similar items
-  return 0.5;
+  if (results.length === 0) {
+    return 0;
+  }
+
+  return results.some((result) => result.entity_id === anchor) ? 1 : 0;
 }
 
 /**
@@ -511,9 +532,20 @@ export function anchorPreservationScore(
  *
  * Placeholder: requires producer metadata in results.
  */
-export function producerVariety(_results: readonly RankedHit[]): number {
-  // Placeholder: in practice would extract producer from entity_id or metadata
-  return 0.5;
+export function producerVariety(results: readonly RankedHit[]): number {
+  if (results.length === 0) {
+    return 0;
+  }
+
+  const producers = results
+    .map((result) => result.producer)
+    .filter((producer): producer is string => typeof producer === 'string' && producer.length > 0);
+
+  if (producers.length === 0) {
+    return 0;
+  }
+
+  return new Set(producers).size / producers.length;
 }
 
 // ---------------------------------------------------------------------------

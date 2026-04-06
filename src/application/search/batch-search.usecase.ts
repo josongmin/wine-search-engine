@@ -31,7 +31,7 @@ export type {
  * - Maps domain errors to BatchErrorCode
  * - Provides idempotent execution with batch_id
  * - Generates sub-request IDs: `${batchId}-${item.id}`
- * - Returns HTTP 207 Multi-Status regardless of partial failures
+ * - Returns a transport-safe batch summary for HTTP 200 responses
  *
  * RFC compliance:
  * - Error codes align with FailureReason enum (POLICY_BLOCKED, etc.)
@@ -78,6 +78,8 @@ export class BatchSearchUseCase {
         total: 0,
         succeeded: 0,
         failed: 0,
+        batch_status: 'succeeded',
+        has_failures: false,
         results: [],
         processing_time_ms: Date.now() - startTime,
       };
@@ -89,6 +91,8 @@ export class BatchSearchUseCase {
         total: requests.length,
         succeeded: 0,
         failed: requests.length,
+        batch_status: 'failed',
+        has_failures: true,
         results: requests.map((req) => ({
           id: req.id,
           status: 'failed',
@@ -115,12 +119,20 @@ export class BatchSearchUseCase {
     // Aggregate results
     const succeeded = results.filter((r) => r.status === 'succeeded').length;
     const failed = results.length - succeeded;
+    const batchStatus =
+      failed === 0
+        ? 'succeeded'
+        : succeeded === 0
+          ? 'failed'
+          : 'partial_failure';
 
     return {
       batch_id: actualBatchId,
       total: requests.length,
       succeeded,
       failed,
+      batch_status: batchStatus,
+      has_failures: failed > 0,
       results,
       processing_time_ms: Date.now() - startTime,
     };

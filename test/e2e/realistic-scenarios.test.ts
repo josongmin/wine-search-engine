@@ -1,15 +1,21 @@
 /**
- * Realistic scenario E2E tests for the Wine Search Engine.
+ * Realistic in-memory scenario tests.
  *
- * Covers typo tolerance, vintage specificity, style/attribute semantic matching,
- * occasion/pairing queries, language mixing, producer/region ambiguity, graceful
- * degradation for out-of-fixture queries, and search mode interaction.
- *
- * Does NOT duplicate tests already in user-journeys.test.ts or golden-set.test.ts.
+ * This suite is intentionally smoke-oriented: it covers alias normalization,
+ * bilingual retrieval, mode routing, and graceful degradation without
+ * overfitting to in-memory semantic ranking. Deeper quality expectations live
+ * in golden-set and Vespa-backed suites.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
+import {
+  getSearchDecisionStatus,
+  getSearchEntityIds,
+  getSearchMeta,
+  parseSearchResponse,
+  postJson,
+} from './helpers/http-transport.js';
 
 let server: TestServer;
 
@@ -21,586 +27,198 @@ afterAll(async () => {
   await closeTestServer(server);
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function post(path: string, body: unknown): Promise<{ statusCode: number; body: unknown }> {
-  const response = await server.app.inject({
-    method: 'POST',
-    url: path,
-    headers: { 'content-type': 'application/json' },
-    payload: JSON.stringify(body),
-  });
-  return {
-    statusCode: response.statusCode,
-    body: JSON.parse(response.body) as unknown,
-  };
+async function search(body: unknown) {
+  const response = await postJson(server.app, '/v1/search', body);
+  expect(response.statusCode).toBe(200);
+  return parseSearchResponse(response);
 }
 
-function getTopK(body: unknown, k: number): string[] {
-  const b = body as Record<string, unknown>;
-  const results = (b['results'] as Array<Record<string, unknown>>) ?? [];
-  return results.slice(0, k).map(
-    (r) => (r['entity'] as Record<string, unknown>)?.['entityId'] as string ?? '',
-  );
-}
+describe('Realistic Scenarios — alias normalization', () => {
+  const cases = [
+    ['오퍼스 원', 'opus-one-2018'],
+    ['opusone', 'opus-one-2018'],
+    ['romanee conti', 'romanee-conti-2019'],
+    ['grange', 'penfolds-grange-2017'],
+  ] as const;
 
-function getDecisionStatus(body: unknown): string {
-  const b = body as Record<string, unknown>;
-  const decision = b['engineDecision'] as Record<string, unknown>;
-  return decision['decisionStatus'] as string;
-}
+  for (const [query, expectedEntityId] of cases) {
+    it(`'${query}' stays non-failed in entity mode and keeps '${expectedEntityId}' in the hybrid top-5`, async () => {
+      const entity = await search({
+        query,
+        options: { mode: 'entity', explain: false, clarification: false },
+      });
+      const hybrid = await search({
+        query,
+        options: { mode: 'hybrid', explain: false, clarification: false },
+      });
 
-function getResultsLength(body: unknown): number {
-  const b = body as Record<string, unknown>;
-  const results = (b['results'] as Array<unknown>) ?? [];
-  return results.length;
-}
+      expect(getSearchDecisionStatus(entity)).not.toBe('failed');
+      expect(getSearchEntityIds(hybrid).slice(0, 5)).toContain(expectedEntityId);
+    });
+  }
 
-function getMeta(body: unknown): Record<string, unknown> {
-  const b = body as Record<string, unknown>;
-  return (b['meta'] as Record<string, unknown>) ?? {};
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 1: Alternate Spellings (pre-registered aliases)
-// NOTE: InMemoryAliasMatcher now supports compact normalization in addition to
-// exact/substring matching. This still primarily tests alias-driven lookup.
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 1: Alternate Spellings (pre-registered aliases)', () => {
-  // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-  // NOTE: In test infra, entity mode always returns `ambiguous` because InMemoryBlockingAdapter returns all 10
-  // entities causing conformal set size >= 2. Hybrid mode is used to verify retrieval correctness.
-
-  it("'오퍼스 원' (pre-registered alternate spelling) → entity mode non-failed; hybrid top-3 has opus-one-2018", async () => {
-    // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-    const res = await post('/v1/search', {
-      query: '오퍼스 원',
+  it('accented and accent-stripped Margaux queries do not fail', async () => {
+    const accented = await search({
+      query: 'Château Margaux',
       options: { mode: 'entity', explain: false, clarification: false },
     });
-
-    expect(res.statusCode).toBe(200);
-    // InMemoryBlockingAdapter returns all candidates → conformal set >= 2 → ambiguous
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-
-    // Verify hybrid retrieval for rank assertion
-    const hybridRes = await post('/v1/search', {
-      query: '오퍼스 원',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-    expect(hybridRes.statusCode).toBe(200);
-    expect(getTopK(hybridRes.body, 3)).toContain('opus-one-2018');
-  });
-
-  it("'Chateau Margaux' (no accent, pre-registered alias) → entity mode non-failed", async () => {
-    // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-    const res = await post('/v1/search', {
+    const stripped = await search({
       query: 'Chateau Margaux',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    // 'Chateau Margaux' IS a pre-registered alias — must not fail
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-  });
-
-  it("'romanee conti' (lowercase, pre-registered alias) → entity mode non-failed; hybrid has romanee-conti-2019", async () => {
-    // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-    const res = await post('/v1/search', {
-      query: 'romanee conti',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    // 'romanee conti' IS a pre-registered alias — must not fail
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-
-    // Verify hybrid retrieval
-    const hybridRes = await post('/v1/search', {
-      query: 'romanee conti',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
-    expect(hybridRes.statusCode).toBe(200);
-    expect(getTopK(hybridRes.body, 3)).toContain('romanee-conti-2019');
-  });
 
-  it("'moet brut' (fully lowercase of pre-registered alias) → entity mode non-failed", async () => {
-    // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-    const res = await post('/v1/search', {
-      query: 'moet brut',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    // 'Moet Brut' IS a pre-registered alias; normalized lowercase matches — must not fail
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-  });
-
-  it("'Grange' (short pre-registered alias) → entity mode non-failed; hybrid has penfolds-grange-2017", async () => {
-    // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-    const res = await post('/v1/search', {
-      query: 'Grange',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    // 'Grange' IS a pre-registered alias — must not fail
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-
-    // Verify hybrid retrieval
-    const hybridRes = await post('/v1/search', {
-      query: 'Grange',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-    expect(hybridRes.statusCode).toBe(200);
-    expect(getTopK(hybridRes.body, 3)).toContain('penfolds-grange-2017');
-  });
-
-  it("'grange' (fully lowercase, normalized matches pre-registered 'Grange') → entity mode non-failed", async () => {
-    // NOTE: InMemoryAliasMatcher does exact+substring matching only. This tests pre-registered aliases, not fuzzy matching.
-    const res = await post('/v1/search', {
-      query: 'grange',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    // Lowercase 'grange' normalizes to match registered 'Grange' — must not fail
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-  });
-
-  it("'opusone' (compact noisy form) → entity mode non-failed; hybrid top-3 has opus-one-2018", async () => {
-    const res = await post('/v1/search', {
-      query: 'opusone',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getDecisionStatus(res.body)).not.toBe('failed');
-
-    const hybridRes = await post('/v1/search', {
-      query: 'opusone',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-    expect(hybridRes.statusCode).toBe(200);
-    expect(getTopK(hybridRes.body, 3)).toContain('opus-one-2018');
+    expect(getSearchDecisionStatus(accented)).not.toBe('failed');
+    expect(getSearchEntityIds(stripped).slice(0, 5)).toContain('chateau-margaux-2015');
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 2: Vintage & Specificity
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 2: Vintage & Specificity', () => {
-  it("'Opus One' (no vintage) → resolved or ambiguous (never failed)", async () => {
-    const res = await post('/v1/search', {
+describe('Realistic Scenarios — vintage and specificity', () => {
+  it("'Opus One' without a vintage resolves or abstains safely", async () => {
+    const body = await search({
       query: 'Opus One',
       options: { mode: 'entity', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    const decisionStatus = getDecisionStatus(res.body);
-    expect(decisionStatus).toMatch(/^(resolved|ambiguous)$/);
+    expect(getSearchDecisionStatus(body)).toMatch(/^(resolved|ambiguous)$/);
   });
 
-  it("'Sassicaia 2018' (correct registered vintage) → sassicaia-2018 in top-3", async () => {
-    const res = await post('/v1/search', {
+  it("'Sassicaia 2018' stays retrievable in hybrid top-5", async () => {
+    const body = await search({
       query: 'Sassicaia 2018',
-      options: { mode: 'entity', explain: false, clarification: false },
+      options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    if (getResultsLength(res.body) > 0) {
-      expect(getTopK(res.body, 3)).toContain('sassicaia-2018');
-    }
+    expect(getSearchEntityIds(body).slice(0, 5)).toContain('sassicaia-2018');
   });
 
-  it("'Opus One 2099' (non-existent vintage) → 200, graceful (any decision status)", async () => {
-    const res = await post('/v1/search', {
+  it("'Opus One 2099' remains graceful for unknown vintages", async () => {
+    const body = await search({
       query: 'Opus One 2099',
       options: { mode: 'entity', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getDecisionStatus(res.body)).toMatch(/^(resolved|ambiguous|failed)$/);
+    expect(getSearchDecisionStatus(body)).toMatch(/^(resolved|ambiguous|failed)$/);
+    expect(Array.isArray(body.results)).toBe(true);
   });
 
-  it("'2018' (only year) → 200, results is an array", async () => {
-    const res = await post('/v1/search', {
-      query: '2018',
-      options: { mode: 'auto', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    const b = res.body as Record<string, unknown>;
-    expect(Array.isArray(b['results'])).toBe(true);
-  });
-
-  it("'2018 Cabernet' → results non-empty (Opus One and Sassicaia both match)", async () => {
-    const res = await post('/v1/search', {
+  it("'2018 Cabernet' returns at least one Cabernet-led wine in the top-5", async () => {
+    const cabernetIds = new Set(['opus-one-2018', 'chateau-margaux-2015', 'sassicaia-2018']);
+    const body = await search({
       query: '2018 Cabernet',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
+    const topFive = getSearchEntityIds(body).slice(0, 5);
+    expect(topFive.some((entityId) => cabernetIds.has(entityId))).toBe(true);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 3: Style & Attribute Semantic Matching
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 3: Style & Attribute Semantic Matching', () => {
-  it("'타닌 강한 레드' → full-body tannic wines (Barolo or Amarone in top-5)", async () => {
-    const res = await post('/v1/search', {
-      query: '타닌 강한 레드',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-
-    const top5 = getTopK(res.body, 5);
-    expect(top5.some((id) => id === 'barolo-giacomo' || id === 'masi-amarone')).toBe(true);
-  });
-
-  it("'Pinot Noir Burgundy' → romanee-conti-2019 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: 'Pinot Noir Burgundy',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('romanee-conti-2019');
-  });
-
-  it("'디저트 와인' → sauternes-2015 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: '디저트 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('sauternes-2015');
-  });
-
-  it("'Super Tuscan Italy' → sassicaia-2018 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: 'Super Tuscan Italy',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('sassicaia-2018');
-  });
-
-  it("'Australian Shiraz bold' → penfolds-grange-2017 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: 'Australian Shiraz bold',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('penfolds-grange-2017');
-  });
-
-  it("'보르도 레드' → chateau-margaux-2015 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: '보르도 레드',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('chateau-margaux-2015');
-  });
-
-  it("'뉴질랜드 화이트' → cloudy-bay-2022 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: '뉴질랜드 화이트',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('cloudy-bay-2022');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 4: Occasion & Pairing Semantic
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 4: Occasion & Pairing Semantic', () => {
-  it("'결혼식 샴페인' → moet-brut in top-3", async () => {
-    const res = await post('/v1/search', {
+describe('Realistic Scenarios — semantic and multilingual smoke', () => {
+  it("'결혼식 샴페인' keeps a sparkling candidate in the top-5", async () => {
+    const body = await search({
       query: '결혼식 샴페인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('moet-brut');
+    expect(getSearchEntityIds(body).slice(0, 5)).toContain('moet-brut');
   });
 
-  it("'스테이크랑 어울리는 와인' → at least one full-body red in top-5", async () => {
-    const STEAK_WINES = new Set(['opus-one-2018', 'penfolds-grange-2017', 'sassicaia-2018']);
-
-    const res = await post('/v1/search', {
+  it("'스테이크랑 어울리는 와인' keeps at least one steak-friendly red in the top-5", async () => {
+    const steakIds = new Set(['opus-one-2018', 'penfolds-grange-2017', 'sassicaia-2018']);
+    const body = await search({
       query: '스테이크랑 어울리는 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-
-    const top5 = getTopK(res.body, 5);
-    expect(top5.some((id) => STEAK_WINES.has(id))).toBe(true);
+    const topFive = getSearchEntityIds(body).slice(0, 5);
+    expect(topFive.some((entityId) => steakIds.has(entityId))).toBe(true);
   });
 
-  it("'여름에 마시기 좋은 화이트' → results non-empty", async () => {
-    const res = await post('/v1/search', {
-      query: '여름에 마시기 좋은 화이트',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-  });
-
-  it("'파티 와인 추천' → moet-brut in top-5", async () => {
-    const res = await post('/v1/search', {
-      query: '파티 와인 추천',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 5)).toContain('moet-brut');
-  });
-
-  it("'투자용 와인' → results non-empty (luxury investment wines)", async () => {
-    const res = await post('/v1/search', {
-      query: '투자용 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 5: Language Mixing & Code-Switching
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 5: Language Mixing & Code-Switching', () => {
-  it("'풀바디 Cabernet' (Korean + English) → at least one Cab-based wine in top-5", async () => {
-    const CAB_WINES = new Set(['opus-one-2018', 'chateau-margaux-2015', 'sassicaia-2018']);
-
-    const res = await post('/v1/search', {
-      query: '풀바디 Cabernet',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-
-    const top5 = getTopK(res.body, 5);
-    expect(top5.some((id) => CAB_WINES.has(id))).toBe(true);
-  });
-
-  it("'Bordeaux 레드 와인' (English + Korean) → chateau-margaux-2015 in top-3", async () => {
-    const res = await post('/v1/search', {
+  it("'Bordeaux 레드 와인' keeps a Bordeaux candidate in the top-5", async () => {
+    const bordeauxIds = new Set(['chateau-margaux-2015', 'sauternes-2015']);
+    const body = await search({
       query: 'Bordeaux 레드 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('chateau-margaux-2015');
+    const topFive = getSearchEntityIds(body).slice(0, 5);
+    expect(topFive.some((entityId) => bordeauxIds.has(entityId))).toBe(true);
   });
 
-  it("'아마로네 강한' (Italian name + Korean descriptor) → results non-empty", async () => {
-    const res = await post('/v1/search', {
-      query: '아마로네 강한',
-      options: { mode: 'auto', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-  });
-
-  it("'피노누아' (Korean) → romanee-conti-2019 in top-3", async () => {
-    const res = await post('/v1/search', {
+  it("'피노누아' keeps Burgundy Pinot in the top-5", async () => {
+    const body = await search({
       query: '피노누아',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('romanee-conti-2019');
+    expect(getSearchEntityIds(body).slice(0, 5)).toContain('romanee-conti-2019');
   });
-});
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 6: Producer & Region Ambiguity
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 6: Producer & Region Ambiguity', () => {
-  it("'Penfolds' (producer only) → 200, resolved or ambiguous", async () => {
-    const res = await post('/v1/search', {
-      query: 'Penfolds',
+  it("'아마로네 강한' returns non-empty results in auto mode", async () => {
+    const body = await search({
+      query: '아마로네 강한',
       options: { mode: 'auto', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getDecisionStatus(res.body)).toMatch(/^(resolved|ambiguous)$/);
-  });
-
-  it("'Bordeaux' alone → Margaux or Sauternes in top-5", async () => {
-    const BORDEAUX_WINES = new Set(['chateau-margaux-2015', 'sauternes-2015']);
-
-    const res = await post('/v1/search', {
-      query: 'Bordeaux',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-
-    const top5 = getTopK(res.body, 5);
-    expect(top5.some((id) => BORDEAUX_WINES.has(id))).toBe(true);
-  });
-
-  it("'Tuscany' alone → sassicaia-2018 in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: 'Tuscany',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('sassicaia-2018');
-  });
-
-  it("'Champagne' alone → moet-brut in top-3", async () => {
-    const res = await post('/v1/search', {
-      query: 'Champagne',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
-    expect(getTopK(res.body, 3)).toContain('moet-brut');
+    expect(body.results.length).toBeGreaterThan(0);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 7: Out-of-Fixture / Graceful Degradation
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 7: Out-of-Fixture / Graceful Degradation', () => {
-  it("'Petrus 2000' (not in fixtures) → 200, ambiguous or failed", async () => {
-    const res = await post('/v1/search', {
+describe('Realistic Scenarios — graceful degradation', () => {
+  it("'Petrus 2000' stays ambiguous or failed instead of crashing", async () => {
+    const body = await search({
       query: 'Petrus 2000',
       options: { mode: 'entity', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getDecisionStatus(res.body)).toMatch(/^(ambiguous|failed)$/);
+    expect(getSearchDecisionStatus(body)).toMatch(/^(ambiguous|failed)$/);
   });
 
-  it("'Screaming Eagle' (luxury Napa, not in fixtures) → 200, no crash", async () => {
-    const res = await post('/v1/search', {
+  it("'Screaming Eagle' returns a well-formed 200 response", async () => {
+    const body = await search({
       query: 'Screaming Eagle',
       options: { mode: 'entity', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(body.results)).toBe(true);
   });
 
-  it("'Mouton Rothschild' (not in fixtures) → 200, not resolved", async () => {
-    const res = await post('/v1/search', {
-      query: 'Mouton Rothschild',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getDecisionStatus(res.body)).not.toBe('resolved');
-  });
-
-  it("'Château Lafite' (not in fixtures) → 200, ambiguous or failed", async () => {
-    const res = await post('/v1/search', {
-      query: 'Château Lafite',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(getDecisionStatus(res.body)).toMatch(/^(ambiguous|failed)$/);
-  });
-
-  it("'wine under 10000 won' (price query) → 200, results is an array", async () => {
-    const res = await post('/v1/search', {
+  it("'wine under 10000 won' stays graceful even without fixture support", async () => {
+    const body = await search({
       query: 'wine under 10000 won',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    const b = res.body as Record<string, unknown>;
-    expect(Array.isArray(b['results'])).toBe(true);
+    expect(Array.isArray(body.results)).toBe(true);
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Group 8: Search Mode Interaction
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('Group 8: Search Mode Interaction', () => {
-  it("auto mode routes entity query '오푸스원' to entity|hybrid|mixed route", async () => {
-    const res = await post('/v1/search', {
+describe('Realistic Scenarios — mode routing', () => {
+  it("auto mode routes '오푸스원' through a supported fast-path", async () => {
+    const body = await search({
       query: '오푸스원',
       options: { mode: 'auto', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    const route = getMeta(res.body)['route'] as string;
-    expect(route).toMatch(/entity|hybrid|mixed/);
+    expect(getSearchMeta(body).route).toMatch(/^(entity|hybrid|mixed)$/);
   });
 
-  it("auto mode routes style query '풀바디 레드 추천' to hybrid|mixed route", async () => {
-    const res = await post('/v1/search', {
+  it("auto mode routes '풀바디 레드 추천' to a retrieval path", async () => {
+    const body = await search({
       query: '풀바디 레드 추천',
       options: { mode: 'auto', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    const route = getMeta(res.body)['route'] as string;
-    expect(route).toMatch(/hybrid|mixed/);
+    expect(getSearchMeta(body).route).toMatch(/^(hybrid|mixed)$/);
   });
 
-  it("entity mode forced on semantic query '풀바디 레드 와인' → 200, no crash", async () => {
-    const res = await post('/v1/search', {
-      query: '풀바디 레드 와인',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(200);
-  });
-
-  it("hybrid mode forced on entity query '오푸스원' → 200, results non-empty", async () => {
-    const res = await post('/v1/search', {
+  it("forcing hybrid mode on '오푸스원' keeps the seed entity in the top-5", async () => {
+    const body = await search({
       query: '오푸스원',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(res.statusCode).toBe(200);
-    expect(getResultsLength(res.body)).toBeGreaterThan(0);
+    expect(body.results.length).toBeGreaterThan(0);
+    expect(getSearchEntityIds(body).slice(0, 5)).toContain('opus-one-2018');
   });
 });

@@ -85,6 +85,8 @@ describe('BatchSearchUseCase', () => {
 
       expect(response.total).toBe(1);
       expect(response.results).toHaveLength(1);
+      expect(response.batch_status).toBe('failed');
+      expect(response.has_failures).toBe(true);
     });
 
     it('should accept 20 requests (max)', async () => {
@@ -103,6 +105,8 @@ describe('BatchSearchUseCase', () => {
       const response = await useCase.execute(requests);
 
       expect(response.total).toBe(20);
+      expect(response.batch_status).toBe('succeeded');
+      expect(response.has_failures).toBe(false);
     });
 
     it('should reject 21+ requests', async () => {
@@ -119,6 +123,8 @@ describe('BatchSearchUseCase', () => {
       expect(response.total).toBe(21);
       expect(response.succeeded).toBe(0);
       expect(response.failed).toBe(21);
+      expect(response.batch_status).toBe('failed');
+      expect(response.has_failures).toBe(true);
       expect(response.results.every((r) => r.status === 'failed')).toBe(true);
       expect(response.results[0]).toMatchObject({
         status: 'failed',
@@ -137,6 +143,8 @@ describe('BatchSearchUseCase', () => {
       expect(response.total).toBe(0);
       expect(response.succeeded).toBe(0);
       expect(response.failed).toBe(0);
+      expect(response.batch_status).toBe('succeeded');
+      expect(response.has_failures).toBe(false);
       expect(response.results).toHaveLength(0);
     });
   });
@@ -226,6 +234,8 @@ describe('BatchSearchUseCase', () => {
       expect(response.total).toBe(3);
       expect(response.succeeded).toBe(2);
       expect(response.failed).toBe(1);
+      expect(response.batch_status).toBe('partial_failure');
+      expect(response.has_failures).toBe(true);
       expect(response.results).toHaveLength(3);
       expect(mockSearchUseCase.execute).toHaveBeenCalledTimes(3);
     });

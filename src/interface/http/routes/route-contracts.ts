@@ -173,7 +173,7 @@ export const BatchSearchRouteContract = defineRouteContract({
   operationId: 'search.batch',
   body: BatchSearchRequestSchema,
   responses: {
-    207: BatchSearchResponseSchema,
+    200: BatchSearchResponseSchema,
     400: ErrorResponseSchema,
     429: ErrorResponseSchema,
     500: ErrorResponseSchema,

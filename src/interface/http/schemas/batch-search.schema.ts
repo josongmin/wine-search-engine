@@ -93,6 +93,8 @@ export const BatchSearchResponseSchema = z.object({
   total: z.number().int().nonnegative(),
   succeeded: z.number().int().nonnegative(),
   failed: z.number().int().nonnegative(),
+  batch_status: z.enum(['succeeded', 'partial_failure', 'failed']),
+  has_failures: z.boolean(),
   results: z.array(BatchSearchResultItemSchema),
   processing_time_ms: z.number().int().nonnegative(),
 }).strict().superRefine((value, ctx) => {
@@ -109,6 +111,28 @@ export const BatchSearchResponseSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: 'results length must equal total',
       path: ['results'],
+    });
+  }
+
+  const expectedStatus =
+    value.failed === 0
+      ? 'succeeded'
+      : value.succeeded === 0
+        ? 'failed'
+        : 'partial_failure';
+  if (value.batch_status !== expectedStatus) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'batch_status must match succeeded/failed counts',
+      path: ['batch_status'],
+    });
+  }
+
+  if (value.has_failures !== (value.failed > 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'has_failures must match failed count',
+      path: ['has_failures'],
     });
   }
 });

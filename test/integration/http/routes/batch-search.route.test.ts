@@ -12,7 +12,7 @@ import { errorHandler } from '../../../../src/interface/http/middleware/error-ha
  * Integration tests for the batch search HTTP route.
  *
  * Coverage:
- * - HTTP 207 Multi-Status response (regardless of partial failures)
+ * - HTTP 200 OK response with batch_status summary
  * - Valid request validation and error handling
  * - Invalid request rejection (400 Bad Request)
  * - Batch ID propagation
@@ -83,8 +83,8 @@ describe('POST /v1/batch-search', () => {
     registerBatchSearchRoute(app, mockDeps);
   });
 
-  describe('HTTP 207 Multi-Status', () => {
-    it('should return 207 when all requests succeed', async () => {
+  describe('HTTP 200 OK', () => {
+    it('should return 200 when all requests succeed', async () => {
       const mockResponse = makeSearchResponse();
 
       const batchResponse: BatchSearchResponse = {
@@ -92,6 +92,8 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        batch_status: 'succeeded',
+        has_failures: false,
         results: [
           {
             id: '1',
@@ -114,13 +116,15 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(response.statusCode).toBe(207);
+      expect(response.statusCode).toBe(200);
 
       const body = response.json();
       expect(body.batch_id).toBe('batch-123');
       expect(body.total).toBe(1);
       expect(body.succeeded).toBe(1);
       expect(body.failed).toBe(0);
+      expect(body.batch_status).toBe('succeeded');
+      expect(body.has_failures).toBe(false);
       expect(body.results).toHaveLength(1);
       expect(body.results[0]).toMatchObject({
         id: '1',
@@ -129,12 +133,14 @@ describe('POST /v1/batch-search', () => {
       expect(body.results[0].response).toBeDefined();
     });
 
-    it('should return 207 when requests partially fail', async () => {
+    it('should return 200 when requests partially fail', async () => {
       const batchResponse: BatchSearchResponse = {
         batch_id: 'batch-123',
         total: 2,
         succeeded: 1,
         failed: 1,
+        batch_status: 'partial_failure',
+        has_failures: true,
         results: [
           {
             id: '1',
@@ -168,18 +174,22 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(response.statusCode).toBe(207);
+      expect(response.statusCode).toBe(200);
       const body = JSON.parse(response.body);
       expect(body.succeeded).toBe(1);
       expect(body.failed).toBe(1);
+      expect(body.batch_status).toBe('partial_failure');
+      expect(body.has_failures).toBe(true);
     });
 
-    it('should return 207 when all requests fail', async () => {
+    it('should return 200 when all requests fail', async () => {
       const batchResponse: BatchSearchResponse = {
         batch_id: 'batch-123',
         total: 1,
         succeeded: 0,
         failed: 1,
+        batch_status: 'failed',
+        has_failures: true,
         results: [
           {
             id: '1',
@@ -205,12 +215,14 @@ describe('POST /v1/batch-search', () => {
         },
       });
 
-      expect(response.statusCode).toBe(207);
+      expect(response.statusCode).toBe(200);
 
       const body = response.json();
       expect(body.total).toBe(1);
       expect(body.succeeded).toBe(0);
       expect(body.failed).toBe(1);
+      expect(body.batch_status).toBe('failed');
+      expect(body.has_failures).toBe(true);
       expect(body.results).toHaveLength(1);
       expect(body.results[0]).toMatchObject({
         id: '1',
@@ -230,6 +242,8 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        batch_status: 'succeeded',
+        has_failures: false,
         results: [
           {
             id: '1',

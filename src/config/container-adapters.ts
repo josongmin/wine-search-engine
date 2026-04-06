@@ -89,6 +89,12 @@ export function buildCoreAdapterServices(
   const runtimeHandles = resolveRuntimeHandles(runtime);
   const pool = resolvePool(runtimeHandles);
 
+  if (config.nodeEnv === 'production' && pool === undefined) {
+    throw new Error(
+      'Production core adapter wiring requires PostgreSQL-backed adapters; refusing to start with stub core adapters.',
+    );
+  }
+
   const vespaClient = new VespaClient(config.vespa.url, 'wine', 'wine_entity');
   const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
   const searchIndex: SearchIndexPort = isWatchlistEnabled(config)

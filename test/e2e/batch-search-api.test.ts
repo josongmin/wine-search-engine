@@ -51,7 +51,7 @@ function parseJson(body: string): unknown {
 }
 
 describe('POST /v1/batch-search', () => {
-  it('returns 207 with a schema-valid successful batch response', async () => {
+  it('returns 200 with a schema-valid successful batch response', async () => {
     const res = await post('/v1/batch-search', {
       batch_id: 'batch-123',
       requests: [
@@ -63,7 +63,7 @@ describe('POST /v1/batch-search', () => {
       ],
     });
 
-    expect(res.statusCode).toBe(207);
+    expect(res.statusCode).toBe(200);
     expect(headerValue(res.headers, 'x-request-id')).toBeTruthy();
 
     const parsed = BatchSearchResponseSchema.safeParse(parseJson(res.body));
@@ -90,7 +90,7 @@ describe('POST /v1/batch-search', () => {
     expect(first.response.results.length).toBeGreaterThan(0);
   });
 
-  it('returns 207 with mixed success and failure results when one item is policy blocked', async () => {
+  it('returns 200 with mixed success and failure results when one item is policy blocked', async () => {
     const res = await post('/v1/batch-search', {
       batch_id: 'batch-456',
       requests: [
@@ -106,7 +106,7 @@ describe('POST /v1/batch-search', () => {
       ],
     });
 
-    expect(res.statusCode).toBe(207);
+    expect(res.statusCode).toBe(200);
     expect(headerValue(res.headers, 'x-request-id')).toBeTruthy();
 
     const parsed = BatchSearchResponseSchema.safeParse(parseJson(res.body));

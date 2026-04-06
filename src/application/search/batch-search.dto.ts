@@ -50,6 +50,8 @@ export interface BatchSearchResponse {
   readonly total: number;
   readonly succeeded: number;
   readonly failed: number;
+  readonly batch_status: 'succeeded' | 'partial_failure' | 'failed';
+  readonly has_failures: boolean;
   readonly results: readonly BatchSearchResultItem[];
   readonly processing_time_ms: number;
 }

@@ -86,12 +86,13 @@ export class LLMInjectionJudge implements InjectionJudgePort {
     try {
       isInjection = await this.classifier.classify(query);
     } catch (err) {
-      // Generic classifier failure — fail open to preserve service availability
+      // Propagate classifier failures so the query-entry security layer can
+      // apply the configured fail-open/fail-closed policy consistently.
       console.warn(
-        '[LLMInjectionJudge] LLM classifier error (failing open):',
+        '[LLMInjectionJudge] LLM classifier error:',
         err instanceof Error ? err.message : String(err),
       );
-      return false;
+      throw err;
     }
 
     // Store result in Redis (non-blocking)

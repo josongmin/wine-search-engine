@@ -1,0 +1,21 @@
+{
+  "version": "v1-stable-green",
+  "created_at": "2026-04-06T14:45:00+09:00",
+  "baselines": {
+    "offline_bronze": "data/eval-baselines/baseline-v1-bronze.json",
+    "noisy_entity_smoke": "data/eval-baselines/noisy-entity-smoke-v1.json"
+  },
+  "thresholds": {
+    "offline": {
+      "ndcg_at_10_max_drop": 0.02,
+      "mrr_at_10_max_drop": 0.02,
+      "recall_at_100_max_drop": 0.02,
+      "wrong_top1_rate_max_increase": 0
+    },
+    "noisy": {
+      "recall_at_3_max_drop": 0.02,
+      "mrr_max_drop": 0.02,
+      "false_exact_rate_max_increase": 0
+    }
+  }
+}

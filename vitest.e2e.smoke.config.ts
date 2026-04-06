@@ -4,6 +4,7 @@ import path from 'node:path';
 export default defineConfig({
   test: {
     globals: true,
+    // Contract-only lane: keep this intentionally tiny for focused HTTP surface checks.
     include: [
       'test/e2e/search-api.test.ts',
       'test/e2e/schema-contract.test.ts',

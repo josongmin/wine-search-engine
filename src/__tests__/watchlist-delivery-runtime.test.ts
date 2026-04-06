@@ -23,7 +23,11 @@ describe('WatchlistDeliveryRuntime', () => {
     };
     const event: WatchlistChangeEvent = {
       type: 'price_updated',
-      data: { newPrice: 100 },
+      data: {
+        oldPrice: 120,
+        newPrice: 100,
+        percentageDrop: 16.6667,
+      },
       occurredAt: '2026-04-06T10:00:00.000Z',
     };
     const recordDeliveryLog = vi.fn(async () => {});

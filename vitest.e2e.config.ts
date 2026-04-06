@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['test/e2e/**/*.test.ts'],
+    exclude: ['test/e2e/vespa/**/*.test.ts'],
     testTimeout: 30_000,
     hookTimeout: 30_000,
     pool: 'forks',
