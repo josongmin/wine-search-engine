@@ -5,10 +5,11 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { buildDeclaredHttpRouteContractManifest } from '../http-route-contract-catalog.js';
+import { CAN_RUN_TSX_SUBPROCESS } from '../../../../../test/helpers/runtime-capabilities.js';
 
 const execFileAsync = promisify(execFile);
 
-describe('HTTP contract manifest script', () => {
+describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract manifest script', () => {
   it(
     'exports the declared route manifest as JSON',
     async () => {

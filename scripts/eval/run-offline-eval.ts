@@ -72,7 +72,11 @@ const RELEASE_GATES = {
   no_match_false_resolve_max: 0.05,
 } as const;
 
-/** Release gates for retrieval modes (Epic 11, advisory in phase 1). */
+/**
+ * Release gates for retrieval modes (Epic 11, advisory in phase 1).
+ * Optional keys (handled when present): `prestige_mean_at_10_min` — opt-in when eval hits
+ * include stable `producer_prestige`; otherwise omit to avoid noisy advisories.
+ */
 const MODE_RELEASE_GATES: Record<RetrievalMode, Record<string, number>> = {
   entity_lookup: {
     wrong_top1_rate_max: 0.02,
@@ -92,10 +96,15 @@ const MODE_RELEASE_GATES: Record<RetrievalMode, Record<string, number>> = {
   producer_browse: {
     set_coverage_min: 0.50,
     producer_variety_min: 0.60,
+    /** Distinct browse-line keys in top-10 / 10 (see `browseLineDiversityAtK`). */
+    browse_line_diversity_at_10_min: 0.35,
   },
   region_browse: {
     set_coverage_min: 0.55,
     diversity_min: 0.60,
+    browse_line_diversity_at_10_min: 0.35,
+    /** Distinct primary grapes / hits with grape metadata in top-10. */
+    grape_variety_at_10_min: 0.25,
   },
   compare_candidates: {
     attribute_coverage_min: 0.70,
@@ -796,6 +805,60 @@ async function run(): Promise<void> {
         ) {
           modeViolations.push(
             `${mode} producer_variety ${metrics.producer_variety.toFixed(4)} < ${gates.producer_variety_min}`,
+          );
+        }
+        if (
+          gates.browse_line_diversity_at_10_min !== undefined &&
+          metrics.browse_line_diversity_at_10 !== undefined &&
+          metrics.browse_line_diversity_at_10 < gates.browse_line_diversity_at_10_min
+        ) {
+          modeViolations.push(
+            `${mode} browse_line_diversity_at_10 ${metrics.browse_line_diversity_at_10.toFixed(4)} < ${gates.browse_line_diversity_at_10_min}`,
+          );
+        }
+        if (
+          gates.grape_variety_at_10_min !== undefined &&
+          metrics.grape_variety_at_10 !== undefined &&
+          metrics.grape_variety_at_10 < gates.grape_variety_at_10_min
+        ) {
+          modeViolations.push(
+            `${mode} grape_variety_at_10 ${metrics.grape_variety_at_10.toFixed(4)} < ${gates.grape_variety_at_10_min}`,
+          );
+        }
+        if (
+          gates.prestige_mean_at_10_min !== undefined &&
+          metrics.prestige_mean_at_10 !== undefined &&
+          metrics.prestige_mean_at_10 < gates.prestige_mean_at_10_min
+        ) {
+          modeViolations.push(
+            `${mode} prestige_mean_at_10 ${metrics.prestige_mean_at_10.toFixed(4)} < ${gates.prestige_mean_at_10_min}`,
+          );
+        }
+        if (
+          gates.attribute_coverage_min !== undefined &&
+          metrics.attribute_coverage !== undefined &&
+          metrics.attribute_coverage < gates.attribute_coverage_min
+        ) {
+          modeViolations.push(
+            `${mode} attribute_coverage ${metrics.attribute_coverage.toFixed(4)} < ${gates.attribute_coverage_min}`,
+          );
+        }
+        if (
+          gates.anchor_preservation_min !== undefined &&
+          metrics.anchor_preservation_score !== undefined &&
+          metrics.anchor_preservation_score < gates.anchor_preservation_min
+        ) {
+          modeViolations.push(
+            `${mode} anchor_preservation_score ${metrics.anchor_preservation_score.toFixed(4)} < ${gates.anchor_preservation_min}`,
+          );
+        }
+        if (
+          gates.seed_exclusion_min !== undefined &&
+          metrics.seed_exclusion_rate !== undefined &&
+          metrics.seed_exclusion_rate < gates.seed_exclusion_min
+        ) {
+          modeViolations.push(
+            `${mode} seed_exclusion_rate ${metrics.seed_exclusion_rate.toFixed(4)} < ${gates.seed_exclusion_min}`,
           );
         }
         if (modeViolations.length > 0) {

@@ -17,6 +17,9 @@ function makeSparseHit(entityId: string, rank: number): SparseHit {
       canonicalLabel: 'Test Wine',
       producer: 'Test Producer',
       region: 'Napa',
+      style: 'bold red',
+      priceBand: 'premium',
+      wineType: 'red',
     },
   };
 }
@@ -101,5 +104,6 @@ describe('BrowseRetriever', () => {
       96,
     );
     expect(out[0]?.retrievalTrace.filtersApplied).toEqual(['wine_type:red']);
+    expect(out[0]?.matchedConstraints).toContain('wine_type');
   });
 });

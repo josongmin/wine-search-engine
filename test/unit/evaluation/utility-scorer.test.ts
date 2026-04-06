@@ -93,6 +93,21 @@ describe('UtilityScorer', () => {
       expect(result.isWrongResolve).toBe(true);
       expect(result.utilityScore).toBe(-1.5);
     });
+
+    it('resolved with no expected entity id (open-set) → correct resolve', () => {
+      const evalCase = makeEvalCase({ expectedStatus: 'resolved', expectedEntityId: undefined });
+      const result = scorer.score('resolved', 'entity-1' as any, evalCase);
+      expect(result.utilityScore).toBe(1.0);
+      expect(result.isCorrectResolve).toBe(true);
+      expect(result.isWrongResolve).toBe(false);
+    });
+
+    it('resolved when gold is ambiguous → not wrong-resolve (overconfident penalty)', () => {
+      const evalCase = makeEvalCase({ expectedStatus: 'ambiguous', expectedEntityId: undefined });
+      const result = scorer.score('resolved', 'entity-1' as any, evalCase);
+      expect(result.isWrongResolve).toBe(false);
+      expect(result.utilityScore).toBe(-0.3);
+    });
   });
 
   describe('aggregate utility', () => {

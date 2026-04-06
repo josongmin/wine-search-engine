@@ -1,0 +1,3 @@
+#!/usr/bin/env sh
+# Staged *.ts(x) only — fast. Skip: HUSKY=0 git commit
+npx lint-staged

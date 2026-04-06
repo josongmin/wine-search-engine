@@ -12,16 +12,7 @@ const maxIntegrationThreads = (() => {
 export default defineConfig({
   test: {
     globals: true,
-    include: [
-      'test/integration/http/middleware/error-handler.policy-blocked.test.ts',
-      'test/integration/http/routes/policy-blocked.helper.test.ts',
-      'test/integration/http/routes/public-query-contracts.test.ts',
-      'test/integration/http/routes/public-query-security.route.test.ts',
-      'test/integration/http/routes/resolve.route.test.ts',
-      'test/integration/http/routes/route-contract-registry.test.ts',
-      'test/integration/http/schemas/interpret-response.schema.test.ts',
-      'test/integration/http/server.test.ts',
-    ],
+    include: ['test/integration/**/*.test.ts'],
     pool: 'threads',
     poolOptions: {
       threads: {

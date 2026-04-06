@@ -23,6 +23,11 @@ export default defineConfig({
   test: {
     globals: true,
     include: [...testInclude],
+    exclude: [
+      'test/unit/infrastructure/http-adapters.network.test.ts',
+      'src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts',
+      'src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts',
+    ],
     pool: 'threads',
     poolOptions: {
       threads: {

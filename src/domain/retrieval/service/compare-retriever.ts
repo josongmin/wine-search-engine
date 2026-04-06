@@ -5,11 +5,15 @@ import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { dedupeSparseHitsByEntity } from './browse-diversity.js';
+import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
+import { ConstraintFilter } from './constraint-filter.js';
 
 /** Compatibility alias for older callers. */
 export type ComparisonCandidate = HybridCandidate;
 
 export class CompareRetriever {
+  private readonly constraintFilter = new ConstraintFilter();
+
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
   private static readonly FETCH_MULTIPLIER = 4;
@@ -137,6 +141,10 @@ export class CompareRetriever {
       .filter((hit) => hit.entityId !== anchorEntityId)
       .slice(0, limit);
 
-    return CompareRetriever.hitsToCandidates(hits, lexicalQueries, filters);
+    const candidates = annotateCandidateConstraintEvidenceBatch(
+      CompareRetriever.hitsToCandidates(hits, lexicalQueries, filters),
+      constraints,
+    );
+    return this.constraintFilter.applyHardFilters(candidates, constraints.hard);
   }
 }

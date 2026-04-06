@@ -24,6 +24,9 @@ describe('CompareRetriever', () => {
             producer: 'Ridge',
             region: 'Napa Valley',
             grapePrimary: 'Cabernet Sauvignon',
+            style: 'bold red',
+            priceBand: 'premium',
+            wineType: 'red',
           },
         },
       ]),
@@ -59,7 +62,19 @@ describe('CompareRetriever', () => {
 
     const candidates = await retriever.compareAgainstAnchor(
       createEntityId('wine-anchor'),
-      { hard: [], soft: [], inferred: [] },
+      {
+        hard: [
+          {
+            attribute: 'wine_type',
+            operator: '=',
+            value: 'red',
+            source_phrase: 'red',
+            confidence: 1,
+          },
+        ],
+        soft: [],
+        inferred: [],
+      },
       5,
     );
 
@@ -72,5 +87,6 @@ describe('CompareRetriever', () => {
     }));
     expect(candidates[0]?.retrievalTrace.retrievalProfile).toBe('compare_candidates');
     expect(candidates[0]?.retrievalTrace.candidateSources).toEqual(['sparse', 'anchor']);
+    expect(candidates[0]?.matchedConstraints).toContain('wine_type');
   });
 });

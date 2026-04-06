@@ -5,6 +5,7 @@ import { HttpLearnedMatcherAdapter } from '../../../src/infrastructure/adapter/h
 import { createEntityId } from '../../../src/domain/shared/types/index.js';
 import type { ResolverCandidate } from '../../../src/domain/resolver/model/resolved-candidate.js';
 import { startJsonTestServer, type TestHttpServer } from './http-service-test-server.js';
+import { CAN_BIND_LOOPBACK_HTTP } from '../../helpers/runtime-capabilities.js';
 
 function makeCandidate(entityId: string, canonicalLabel: string): ResolverCandidate {
   return {
@@ -29,7 +30,7 @@ function makeCandidate(entityId: string, canonicalLabel: string): ResolverCandid
   };
 }
 
-describe('HTTP adapters — real local network round-trip', () => {
+describe.skipIf(!CAN_BIND_LOOPBACK_HTTP)('HTTP adapters — real local network round-trip', () => {
   let server: TestHttpServer | null = null;
 
   afterEach(async () => {

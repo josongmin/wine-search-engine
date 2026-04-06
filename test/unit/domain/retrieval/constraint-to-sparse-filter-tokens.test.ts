@@ -44,4 +44,11 @@ describe('hardConstraintsToSparseFilterTokens', () => {
     ]);
     expect(tokens).toEqual([]);
   });
+
+  it('does not corrupt multi-value in constraints into ANDed sparse filters', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      c({ attribute: 'country', operator: 'in', value: ['France', 'Italy'] }),
+    ]);
+    expect(tokens).toEqual([]);
+  });
 });

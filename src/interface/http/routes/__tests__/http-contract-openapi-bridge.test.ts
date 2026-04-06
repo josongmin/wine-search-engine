@@ -6,10 +6,11 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { MAX_QUERY_LENGTH } from '../../../../domain/shared/constants.js';
 import { buildHttpRouteContractOpenApiBridge } from '../http-route-contract-openapi.js';
+import { CAN_RUN_TSX_SUBPROCESS } from '../../../../../test/helpers/runtime-capabilities.js';
 
 const execFileAsync = promisify(execFile);
 
-describe('HTTP contract OpenAPI bridge', () => {
+describe.skipIf(!CAN_RUN_TSX_SUBPROCESS)('HTTP contract OpenAPI bridge', () => {
   it('builds an OpenAPI-lite document from the declared route catalog', () => {
     const document = buildHttpRouteContractOpenApiBridge();
 

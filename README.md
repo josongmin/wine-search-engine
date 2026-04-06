@@ -1,116 +1,116 @@
-# Wine Search Engine — Internal Developer Guide
+# Wine Search Engine — 내부 개발자 가이드
 
-Wine intelligence / search backend: typed **TypeScript** on **Node.js 22**, **Fastify** HTTP API, **PostgreSQL**, **Redis**, **Vespa** retrieval, and optional **HTTP ML services** (embeddings, cross-encoder rerank, learned matcher).
+와인 인텔리전스 / 검색 백엔드: **TypeScript**, **Node.js 22**, **Fastify** HTTP API, **PostgreSQL**, **Redis**, **Vespa** 검색, 선택적 **HTTP ML 서비스**(임베딩, 크로스 인코더 리랭크, 학습형 매처).
 
-This document is for **engineers working in this repo**. Product behavior and terminology live in **`docs/RFC-*.md`**. Editor/agent shortcuts: **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/wine-search-engine.mdc`**.
+이 문서는 **이 저장소에서 작업하는 엔지니어**를 위한 것입니다. 제품 동작·용어는 **`docs/RFC-*.md`**를 따릅니다. 에디터/에이전트 단축: **`CLAUDE.md`**, **`AGENTS.md`**, **`.cursor/rules/wine-search-engine.mdc`**.
 
-### Document map
+### 문서 지도
 
-| # | Section |
-|---|---------|
-| 1 | [Technical stack](#technical-stack) |
-| 2 | [Architecture & composition](#architecture--composition) |
-| 3 | [HTTP API & search flow](#http-api-entry-points--request-flow) |
-| 4 | [Retrieval & ranking](#retrieval--ranking-engine-conceptual) |
-| 5 | [Algorithms](#algorithms--established-methods-where-used) |
-| 6 | [Completeness vs product maturity](#completeness-engineering-sota-vs-product-maturity) |
-| 7 | [Evaluation metrics](#evaluation-metrics-definitions--gates) |
-| 8 | [Test coverage & E2E](#test-coverage--e2e-scenarios) |
-| 9 | [Capabilities summary](#what-this-codebase-implements-capabilities) |
-| 10 | [Repository structure](#repository-structure) |
-| 11 | [Prerequisites & bootstrap](#prerequisites) · [Config](#configuration-env) · [Run](#running-the-api) · [Docker](#docker-compose) · [Migrations](#database-migrations) |
-| 12 | [Scripts](#scripts--npm-commands-reference) · [CI](#ci-github-actions) · [Further reading](#further-reading) |
+| # | 섹션 |
+|---|------|
+| 1 | [기술 스택](#technical-stack) |
+| 2 | [아키텍처·구성](#architecture--composition) |
+| 3 | [HTTP API·검색 흐름](#http-api-entry-points--request-flow) |
+| 4 | [검색·랭킹](#retrieval--ranking-engine-conceptual) |
+| 5 | [알고리즘](#algorithms--established-methods-where-used) |
+| 6 | [완성도: 엔지니어링 깊이와 제품 성숙도](#completeness-engineering-sota-vs-product-maturity) |
+| 7 | [평가 지표](#evaluation-metrics-definitions--gates) |
+| 8 | [테스트·커버리지·E2E](#test-coverage--e2e-scenarios) |
+| 9 | [기능 요약](#what-this-codebase-implements-capabilities) |
+| 10 | [저장소 구조](#repository-structure) |
+| 11 | [전제·부트스트랩](#prerequisites) · [설정](#configuration-env) · [실행](#running-the-api) · [Docker](#docker-compose) · [마이그레이션](#database-migrations) |
+| 12 | [스크립트](#scripts--npm-commands-reference) · [CI](#ci-github-actions) · [추가 읽을거리](#further-reading) |
 
-### Quick start
+### 빠른 시작
 
 ```bash
 git clone <internal-remote> wine-search-engine && cd wine-search-engine
-npm ci && cp .env.example .env   # edit PG_*, REDIS_URL, VESPA_URL, secrets
-npm run dev                       # http://localhost:3000 — see GET /health
-npm run lint && npm run typecheck && npm run test   # before pushing
+npm ci && cp .env.example .env   # PG_*, REDIS_URL, VESPA_URL, 시크릿 편집
+npm run dev                       # http://localhost:3000 — GET /health 참고
+npm run lint && npm run typecheck && npm run test   # 푸시 전
 ```
 
 ---
 
-## Technical stack
+<h2 id="technical-stack">기술 스택</h2>
 
-| Layer | Technology |
-|-------|------------|
-| Runtime | **Node.js ≥ 22**, **ESM** (`"type": "module"`) |
-| Language | **TypeScript** — `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` |
-| HTTP | **Fastify 5**, **Zod** (schemas + route contracts), **Pino** logging |
-| API docs | Contract catalog → **`GET /openapi.json`** (OpenAPI bridge from Zod contracts) |
-| DB | **`pg`** — entities, aliases, feedback, proposals, watchlist (where applicable) |
-| Cache / pub-sub | **`redis`** (official client, not ioredis) |
-| Search engine | **Vespa 8** — ANN + sparse; app package under **`vespa/app/`** |
-| ML / numeric | **onnxruntime-node** (drinking-window ONNX optional), HTTP adapters for remote models |
-| LLM / tools | **@anthropic-ai/sdk** (optional; security / tooling paths) |
-| Telemetry | **OpenTelemetry** API/SDK hooks (see `src/infrastructure/telemetry/`) |
-| Tests | **Vitest** — unit (`src/**/__tests__`, `test/unit/`), integration, e2e, quality configs |
-| Lint | **ESLint** flat config + **typescript-eslint** (type-aware rules for `src/`) |
+| 레이어 | 기술 |
+|--------|------|
+| 런타임 | **Node.js ≥ 22**, **ESM** (`"type": "module"`) |
+| 언어 | **TypeScript** — `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess` |
+| HTTP | **Fastify 5**, **Zod**(스키마·라우트 계약), **Pino** 로깅 |
+| API 문서 | 계약 카탈로그 → **`GET /openapi.json`** (Zod 계약에서 OpenAPI 브리지) |
+| DB | **`pg`** — 엔터티, 별칭, 피드백, 제안, 워치리스트(해당 시) |
+| 캐시 / pub-sub | **`redis`** (공식 클라이언트, ioredis 아님) |
+| 검색 엔진 | **Vespa 8** — ANN + sparse; 앱 패키지는 **`vespa/app/`** |
+| ML / 수치 | **onnxruntime-node**(음주 가능 기간 ONNX 선택), 원격 모델용 HTTP 어댑터 |
+| LLM / 도구 | **@anthropic-ai/sdk** (선택; 보안·도구 경로) |
+| 텔레메트리 | **OpenTelemetry** API/SDK 훅 (`src/infrastructure/telemetry/`) |
+| 테스트 | **Vitest** — 단위(`src/**/__tests__`, `test/unit/`), 통합, e2e, 품질 설정 |
+| 린트 | **ESLint** 플랫 설정 + **typescript-eslint** (`src/` 타입 인지 규칙) |
 
-**Path aliases** (`tsconfig.json`): `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config`.
-
----
-
-## Architecture & composition
-
-### Layering (hexagonal / ports & adapters)
-
-| Layer | Responsibility |
-|-------|----------------|
-| **Interface** (`src/interface/`) | Fastify routes, Zod contracts, middleware, Claude tools, CLI entrypoints |
-| **Application** (`src/application/`) | Use-case orchestration: search pipeline phases, watchlist, drinking-window facade |
-| **Domain** (`src/domain/`) | Pure logic, entities, policies, **ports** (interfaces) — no direct I/O |
-| **Infrastructure** (`src/infrastructure/`) | **Adapters**: Postgres, Redis, Vespa clients, HTTP ML clients, ONNX, telemetry |
-
-Dependencies point **inward**: application and domain define ports; infrastructure implements them.
-
-### Composition root (`createContainer`)
-
-Wiring is split across modules and merged into one **`Container`**:
-
-1. **`buildCoreContainerServices`** (`container-core.ts` / `container-core-builders.ts`) — query planner, entity resolver (+ calibrator, learned matcher HTTP), candidate pool / fusion, ranker, decision engine, response builder, mixed solver, Vespa search index, embedding + reranker HTTP, drinking-window predictor, etc.
-2. **`buildFeatureContainerServices`** (`container-features.ts` + `container-usecases.ts`) — search / hybrid / resolve / interpret / replay / batch / decomposed search, drinking-window use case, adaptive Claude tool executor, optional eval runner.
-3. **`buildWatchlistContainerServices`** — watchlist service + optional Redis delivery runtime.
-4. **`buildLearningContainerServices`** (`container-learning.ts`) — `PgFeedbackStore`, `PgProposalStore`, `FeedbackProcessor`, `AliasProposer` (alias duplicate check against **`aliases`** when PG is available).
-
-`main.ts` builds **runtime handles** (Postgres pool, Redis client, watchlist factories), then **`createContainer(config, runtime)`**, then **`createServer(container)`** with readiness options from **`buildHealthRouteOptions`**.
+**경로 별칭** (`tsconfig.json`): `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config`.
 
 ---
 
-## HTTP API: entry points & request flow
+<h2 id="architecture--composition">아키텍처·구성</h2>
 
-### Route catalog (declared contracts)
+### 레이어링 (육각형 / 포트·어댑터)
 
-Authoritative list: **`src/interface/http/routes/http-route-contract-catalog.ts`** (mirrors registered handlers in **`server.ts`**).
+| 레이어 | 책임 |
+|--------|------|
+| **Interface** (`src/interface/`) | Fastify 라우트, Zod 계약, 미들웨어, Claude 도구, CLI 진입점 |
+| **Application** (`src/application/`) | 유스케이스 오케스트레이션: 검색 파이프라인 단계, 워치리스트, 음주 가능 기간 파사드 |
+| **Domain** (`src/domain/`) | 순수 로직, 엔티티, 정책, **포트**(인터페이스) — 직접 I/O 없음 |
+| **Infrastructure** (`src/infrastructure/`) | **어댑터**: Postgres, Redis, Vespa 클라이언트, HTTP ML 클라이언트, ONNX, 텔레메트리 |
 
-| Method | Path | Use case |
-|--------|------|----------|
-| GET | `/health` | Liveness |
-| GET | `/ready` | Readiness probes |
-| GET | `/openapi.json` | Generated API description |
-| POST | `/v1/search` | Primary search (may decompose to comparison) |
-| POST | `/v1/batch-search` | Batched searches |
-| POST | `/v1/search/replay` | Replay with pinned snapshot (409 on mismatch) |
-| POST | `/v1/search/interpret` | **Query plan only** — no retrieval |
-| POST | `/v1/entity/resolve` | Entity resolution only |
-| POST | `/v1/search/hybrid` | Force hybrid retrieval path |
-| GET/POST | `/v1/claude-tools` | Agent tool listing / execution |
-| POST/GET/DELETE | `/v1/watchlist`, `/v1/watchlist/:id`, … | Watchlist |
-| POST | `/v1/feedback` | Learning-loop feedback (may 503 if disabled) |
+의존성은 **안쪽**을 향합니다: 애플리케이션·도메인이 포트를 정의하고, 인프라가 구현합니다.
 
-### Typical flow: `POST /v1/search`
+### 구성 루트 (`createContainer`)
 
-High-level stages (see **`SearchUseCase.execute`** in `search.usecase.ts`):
+배선은 모듈로 나뉘어 하나의 **`Container`**로 합쳐집니다.
 
-1. **Pre-route** (`runSearchPreRoutePhase`) — security gate (sanitizer ± LLM judge), optional cache read, **query planning** (`QueryPlanner`), constraint SAT, optional **decomposed** “A vs B” short-circuit.
-2. **Route resolution** — effective route: **entity** / **hybrid** / **mixed** (from plan + request `retrieval_mode`).
+1. **`buildCoreContainerServices`** (`container-core.ts` / `container-core-builders.ts`) — 쿼리 플래너, 엔터티 리졸버(+ 캘리브레이터, 학습형 매처 HTTP), 후보 풀·퓨전, 랭커, 의사결정 엔진, 응답 빌더, mixed 솔버, Vespa 검색 인덱스, 임베딩·리랭커 HTTP, 음주 가능 기간 예측기 등.
+2. **`buildFeatureContainerServices`** (`container-features.ts` + `container-usecases.ts`) — search / hybrid / resolve / interpret / replay / batch / 분해 검색, 음주 가능 기간 유스케이스, 적응형 Claude 도구 실행기, 선택적 eval 러너.
+3. **`buildWatchlistContainerServices`** — 워치리스트 서비스 + 선택적 Redis 전달 런타임.
+4. **`buildLearningContainerServices`** (`container-learning.ts`) — `PgFeedbackStore`, `PgProposalStore`, `FeedbackProcessor`, `AliasProposer`(PG 사용 시 **`aliases`** 대비 별칭 중복 검사).
+
+`main.ts`는 **런타임 핸들**(Postgres 풀, Redis 클라이언트, 워치리스트 팩토리)을 만든 뒤 **`createContainer(config, runtime)`**, 그다음 **`buildHealthRouteOptions`**의 준비 상태 옵션으로 **`createServer(container)`**를 호출합니다.
+
+---
+
+<h2 id="http-api-entry-points--request-flow">HTTP API: 진입점·요청 흐름</h2>
+
+### 라우트 카탈로그 (선언 계약)
+
+권위 목록: **`src/interface/http/routes/http-route-contract-catalog.ts`** (`**server.ts**`에 등록된 핸들러와 대응).
+
+| 메서드 | 경로 | 유스케이스 |
+|--------|------|------------|
+| GET | `/health` | 생존(liveness) |
+| GET | `/ready` | 준비 상태 프로브 |
+| GET | `/openapi.json` | 생성된 API 설명 |
+| POST | `/v1/search` | 기본 검색(비교로 분해될 수 있음) |
+| POST | `/v1/batch-search` | 배치 검색 |
+| POST | `/v1/search/replay` | 고정 스냅샷 리플레이(불일치 시 409) |
+| POST | `/v1/search/interpret` | **쿼리 플랜만** — 검색 없음 |
+| POST | `/v1/entity/resolve` | 엔터티 해소만 |
+| POST | `/v1/search/hybrid` | 하이브리드 검색 경로 강제 |
+| GET/POST | `/v1/claude-tools` | 에이전트 도구 나열·실행 |
+| POST/GET/DELETE | `/v1/watchlist`, `/v1/watchlist/:id`, … | 워치리스트 |
+| POST | `/v1/feedback` | 학습 루프 피드백(비활성 시 503 가능) |
+
+### 일반 흐름: `POST /v1/search`
+
+상위 단계(`search.usecase.ts`의 **`SearchUseCase.execute`** 참고):
+
+1. **Pre-route** (`runSearchPreRoutePhase`) — 보안 게이트(새니타이저 ± LLM 판정), 선택적 캐시 읽기, **쿼리 계획** (`QueryPlanner`), 제약 SAT, 선택적 **분해** “A vs B” 단축.
+2. **Route resolution** — 실효 경로: **entity** / **hybrid** / **mixed** (플랜 + 요청 `retrieval_mode`).
 3. **Dispatch** (`dispatchSearchRouteExecution`):
-   - **Entity** — build resolver candidates → **`EntityResolver.resolve`** (blocking, scoring, calibration, optional learned matcher features).
-   - **Hybrid** — **`CandidatePool`** (sparse + dense + fusion) → **`Ranker`** (+ optional **LTR** per query class) → packaged as resolve/rank inputs.
-   - **Mixed** — **`MixedSolver`** (anchor + similarity neighborhoods).
-4. **Post-route** (`runSearchPostRoutePhase`) — abstain policy, **`DecisionEngine`**, **`ResponseBuilder`**, optional drinking-window enrichment, cache write.
+   - **Entity** — 리졸버 후보 구성 → **`EntityResolver.resolve`** (블로킹, 스코어링, 캘리브레이션, 선택적 학습형 매처 피처).
+   - **Hybrid** — **`CandidatePool`** (sparse + dense + fusion) → **`Ranker`** (+ 쿼리 클래스별 선택적 **LTR**) → 해소/랭킹 입력으로 패키징.
+   - **Mixed** — **`MixedSolver`** (앵커 + 유사 이웃).
+4. **Post-route** (`runSearchPostRoutePhase`) — 기권 정책, **`DecisionEngine`**, **`ResponseBuilder`**, 선택적 음주 가능 기간 보강, 캐시 쓰기.
 
 ```mermaid
 flowchart TD
@@ -124,338 +124,338 @@ flowchart TD
   F --> G
 ```
 
-### Smaller entry points
+### 보조 진입점
 
-- **`/v1/search/interpret`** — planner only; useful for debugging plans without hitting Vespa.
-- **`/v1/entity/resolve`** — resolver path without full search response assembly.
-- **`/v1/search/hybrid`** — same orchestration as search but **forces** hybrid execution.
-- **`/v1/feedback`** — persists **`FeedbackSignal`** when Postgres + ingest enabled.
-
----
-
-## Retrieval & ranking engine (conceptual)
-
-| Stage | Role | Key code |
-|-------|------|----------|
-| **Query planning** | Classify query, anchors, policy, uncertainty | `domain/query/`, `Planner` |
-| **Blocking / aliases** | Identity graph, **pg_trgm**-friendly blocking, char **n-gram** funnel | `domain/alias/`, `infrastructure/adapter/*blocking*` |
-| **Sparse retrieval** | Lexical / **BM25**-style hits via Vespa | `vespa-search-index.ts` |
-| **Dense retrieval** | **ANN** over document embeddings (`nearestNeighbor`, **angular** distance) | `vespa-search-index.ts`, schema in `vespa/app/` |
-| **Fusion** | **RRF** across sparse/dense (and related) ranked lists | `fusion.ts`, `shared/utils/rrf.ts` |
-| **Cross-encoder rerank** | Second-stage scoring over query–passage pairs (HTTP service) | `infrastructure/vespa/reranker.ts` |
-| **Calibration** | **Platt** / **isotonic** / **temperature** on resolver scores | `domain/resolver/service/calibrator.ts`, `calibration` table |
-| **Decision** | Thresholds, abstention, evidence packaging | `domain/decision/` |
-
-Hybrid candidates carry **RRF-derived** fusion scores (see `hybrid-candidate.ts`); calibrated **decision confidence** is defined at the resolver/decision boundary per RFCs.
+- **`/v1/search/interpret`** — 플래너만; Vespa 없이 플랜 디버깅에 유용.
+- **`/v1/entity/resolve`** — 전체 검색 응답 조립 없이 리졸버 경로만.
+- **`/v1/search/hybrid`** — 검색과 동일 오케스트레이션이나 **하이브리드만** 강제 실행.
+- **`/v1/feedback`** — Postgres + 수집이 켜져 있을 때 **`FeedbackSignal`** 저장.
 
 ---
 
-## Algorithms & established methods (where used)
+<h2 id="retrieval--ranking-engine-conceptual">검색·랭킹 엔진 (개념)</h2>
 
-The codebase intentionally combines **classical IR**, **neural retrieval / reranking**, and **calibrated decisioning**. Below are the **patterns** and **where they appear** (not an exhaustive literature survey).
+| 단계 | 역할 | 주요 코드 |
+|------|------|-----------|
+| **쿼리 계획** | 쿼리 분류, 앵커, 정책, 불확실성 | `domain/query/`, `Planner` |
+| **블로킹·별칭** | 정체성 그래프, **pg_trgm** 친화 블로킹, 문자 **n-gram** 퍼널 | `domain/alias/`, `infrastructure/adapter/*blocking*` |
+| **Sparse 검색** | Vespa를 통한 어휘 / **BM25** 스타일 히트 | `vespa-search-index.ts` |
+| **Dense 검색** | 문서 임베딩 **ANN** (`nearestNeighbor`, **angular** 거리) | `vespa-search-index.ts`, `vespa/app/` 스키마 |
+| **Fusion** | sparse/dense(및 관련) 순위 목록에 **RRF** | `fusion.ts`, `shared/utils/rrf.ts` |
+| **Cross-encoder 리랭크** | 쿼리–패시지 쌍 2단계 스코어링(HTTP 서비스) | `infrastructure/vespa/reranker.ts` |
+| **Calibration** | 리졸버 스코어에 **Platt** / **isotonic** / **temperature** | `domain/resolver/service/calibrator.ts`, `calibration` 테이블 |
+| **Decision** | 임계값, 기권, 증거 패키징 | `domain/decision/` |
 
-| Method / pattern | Typical use | In-repo touchpoints |
-|------------------|-------------|----------------------|
-| **BM25** (sparse lexical) | Lexical relevance | Vespa sparse queries; comments in `vespa-search-index.ts`, `browse-diversity.ts` |
-| **Dense ANN** (embedding similarity) | Semantic recall | Vespa `nearestNeighbor` + **angular** metric; BGE-style embeddings via HTTP |
-| **Reciprocal Rank Fusion (RRF)** | Merge ranked lists without score normalization | `rrfFuse(..., k=60)` in `shared/utils/rrf.ts`, `FusionService` |
-| **Cross-encoder reranking** | Re-score top candidates with a transformer pairwise model | HTTP `RerankerPort` implementation |
-| **Platt scaling / isotonic / temperature** | Calibrate scores to probabilities | `Calibrator`, `calibration_params` table, `shared/utils/calibration.js` |
-| **Learning-to-rank (LambdaMART-style weights)** | Optional per–query-class linear blend | `QueryClassWeights`, `search-usecase-ltr-rerank.ts` (when models loaded) |
-| **BK-tree** | Metric tree for string / edit-distance style lookups | `domain/query/service/bk-tree.ts` |
-| **Character n-grams** | Fuzzy alias surface matching | `CharNgramIndex`, alias matcher funnel |
-| **Phonetic / transliteration helpers** | Query + batch alias surfaces | `phonetic.ts`, `Transliterator` (ETL) |
-| **Trigram index (GIN)** | DB-side fuzzy alias lookup | `pg_trgm` in migrations; `PgBlockingAdapter` / alias repos |
-| **ONNX Runtime** | Drinking-window regression | `infrastructure/ml/drinking-window-predictor.ts` |
-| **Conformal / abstention policies** | Refuse low-confidence outcomes | Abstain policy + decision engine (RFC-013 references in code) |
-
-**Citations (illustrative, not exclusive):** BM25 (Robertson & Walker lineage); RRF popularized in modern hybrid search stacks (e.g. Cormack et al. duplicate-detection fusion; many IR systems use **k≈60**); Platt (1999) probabilistic SVM outputs; isotonic regression for monotonic calibration; cross-encoders follow the “sentence pair classification” paradigm common in neural IR since Nogueira & Cho (2019) style work.
+하이브리드 후보는 **RRF 기반** 퓨전 스코어를 담습니다(`hybrid-candidate.ts` 참고); 캘리브레이션된 **의사결정 신뢰도**는 RFC에 따라 리졸버/의사결정 경계에서 정의됩니다.
 
 ---
 
-## Completeness: engineering “SOTA” vs product maturity
+<h2 id="algorithms--established-methods-where-used">알고리즘·정립된 방법 (사용 위치)</h2>
 
-- **Strengths:** The **architecture** matches common **production search** practice: **hybrid retrieval** (sparse + dense), **fusion**, optional **cross-encoder**, **calibrated** resolver scores, explicit **decision layer**, **Vespa** for scalable retrieval, **contract-first HTTP**, and **offline eval hooks** (noisy entity, offline tiers).
-- **Gaps / honesty:** “SOTA++” is a **project aspiration**, not a single benchmark score. Offline eval lanes may use **smoke / golden** fixtures; **live A/B** and **continuous calibration** against production traffic are **out-of-repo concerns**. ML services (embedding, reranker, learned matcher) are **HTTP-contracted** — quality depends on **model choice**, **data**, and **ops**, not only this service.
-- **How to extend:** New retrieval modes → Vespa schema + `SearchIndexPort`; new ranking signals → `Ranker` / LTR weights; new safety → `query-entry-security` and policies in RFCs.
+코드베이스는 **고전 IR**, **신경 검색·리랭킹**, **캘리브레이션 의사결정**을 의도적으로 결합합니다. 아래는 **패턴**과 **등장 위치**이며 문헌 조사 전체는 아닙니다.
 
----
+| 방법·패턴 | 일반적 용도 | 저장소 연결점 |
+|-----------|-------------|----------------|
+| **BM25** (sparse 어휘) | 어휘 관련성 | Vespa sparse 쿼리; `vespa-search-index.ts`, `browse-diversity.ts` 주석 |
+| **Dense ANN** (임베딩 유사도) | 의미적 리콜 | Vespa `nearestNeighbor` + **angular**; HTTP로 BGE 스타일 임베딩 |
+| **Reciprocal Rank Fusion (RRF)** | 점수 정규화 없이 순위 목록 병합 | `shared/utils/rrf.ts`의 `rrfFuse(..., k=60)`, `FusionService` |
+| **Cross-encoder 리랭킹** | 트랜스포머 쌍별 모델로 상위 후보 재점수 | HTTP `RerankerPort` 구현 |
+| **Platt scaling / isotonic / temperature** | 점수를 확률로 보정 | `Calibrator`, `calibration_params` 테이블, `shared/utils/calibration.js` |
+| **Learning-to-rank (LambdaMART 스타일 가중치)** | 선택적 쿼리 클래스별 선형 블렌드 | `QueryClassWeights`, `search-usecase-ltr-rerank.ts`(모델 로드 시) |
+| **BK-tree** | 문자열·편집거리 스타일 조회용 메트릭 트리 | `domain/query/service/bk-tree.ts` |
+| **Character n-grams** | 퍼지 별칭 표면 매칭 | `CharNgramIndex`, 별칭 매처 퍼널 |
+| **음성·음역 헬퍼** | 쿼리·배치 별칭 표면 | `phonetic.ts`, `Transliterator`(ETL) |
+| **Trigram 인덱스 (GIN)** | DB 쪽 퍼지 별칭 조회 | 마이그레이션의 `pg_trgm`; `PgBlockingAdapter` / 별칭 레포 |
+| **ONNX Runtime** | 음주 가능 기간 회귀 | `infrastructure/ml/drinking-window-predictor.ts` |
+| **Conformal / 기권 정책** | 저신뢰 결과 거부 | 기권 정책 + 의사결정 엔진(RFC-013 코드 참조) |
 
-## Evaluation metrics (definitions & gates)
-
-**Source of truth for formulas:** `scripts/eval/metrics.ts` (pure functions, no I/O). **RFC alignment:** decision utility / AURC / ECE per **RFC-009**; release gates per **RFC-017 §3.2** (see `RELEASE_GATES` in `scripts/eval/run-offline-eval.ts`). **Operational runbook:** `docs/eval-baseline-runbook.md`.
-
-### Offline evaluation (`run-offline-eval.ts`)
-
-Runs golden-query JSONL through the pipeline and aggregates **global** and **slice** (scenario, language, retrieval mode) statistics.
-
-| Metric | Symbol / scope | Definition (summary) |
-|--------|----------------|----------------------|
-| **NDCG@10** | Graded relevance | Normalized DCG at rank 10; gain = **2^grade − 1**, discount = **1 / log2(rank+1)**. Grades in `RelevanceMap` (0–3). |
-| **MRR@10** | First relevant in top 10 | Reciprocal rank of first hit with grade ≥ 1; 0 if none. |
-| **Recall@3** | Coverage in top 3 | Fraction of ground-truth relevant entities (grade ≥ 1) that appear in positions 1–3. |
-| **Recall@10** | Coverage in top 10 | Same, for **K = 10** (used in mode slices). |
-| **Recall@100** | Coverage in top 100 | Same, for **K = 100** (global retrieval health). |
-| **Wrong Top-1 rate** | Decision quality | Fraction of queries classified as **`wrong_resolve`** (RFC-009 §4.1). |
-| **Decision utility** | Expected utility | Mean of per-query utility from **RFC-009 §5.1** weights (`correct_resolve`, `safe_abstain`, `wrong_resolve`, …). |
-| **Safe / avoidable abstain rate** | Abstention behavior | Rates of `safe_abstain` vs `avoidable_abstain` after `classifyDecision`. |
-| **AURC** | Selective prediction | Area under risk–coverage curve when sorting by `decision_confidence` (RFC-009 §5.3); lower is better. |
-| **Excess AURC** | Calibration gap | `AURC − optimal AURC` for the same label set. |
-| **ECE** | Calibration error | Expected calibration error (binned); targets documented in RFC-009 §7 / code comments. |
-
-**Mode-specific extras** (Epic 11), when applicable: **diversity**, **producer variety**, **anchor preservation**, **attribute coverage**, **set coverage**, etc. — see `ModeMetrics` / `run-offline-eval.ts` aggregation.
-
-**Default global release gates** (offline runner — advisory unless you run with `--tier gate`):
-
-| Gate key | Example threshold | Role |
-|----------|-------------------|------|
-| `wrong_top1_rate_max` | ≤ 0.02 | Hard cap on wrong resolutions |
-| `decision_utility_min_delta` | ≥ −0.05 | Regress utility vs baseline |
-| `ndcg_at_10_min_delta` | ≥ −0.03 | NDCG@10 regression tolerance |
-| `recall_at_100_min` | ≥ 0.90 | Broad recall floor |
-| `aurc_max_delta` | ≤ 0.01 | Selective-prediction regression |
-| `entity_resolve_wrong_top1_max` | ≤ 0.03 | Entity-resolve slice |
-| `set_retrieval_recall_at_10_min` | ≥ 0.60 | Set-retrieval slice |
-| `no_match_false_resolve_max` | ≤ 0.05 | No-match slice |
-
-**Per–retrieval-mode floors** (e.g. `entity_lookup`, `constraint_filter`, `producer_browse`, …) are in `MODE_RELEASE_GATES` in the same file (NDCG@10, recall@10, diversity, etc.).
-
-### Noisy entity benchmark (`run-noisy-entity-eval.ts`)
-
-Evaluates **entity resolution under noisy queries** using `data/noisy-entity-benchmark.jsonl` (or custom `--input`), either from **live API** (`SEARCH_API_URL`) or a **predictions JSONL** (`--predictions`).
-
-| Metric | Meaning |
-|--------|---------|
-| **Recall@1** | Expected entity appears at rank 1. |
-| **Recall@3** | Expected entity in top 3 (primary headline metric for noisy entity). |
-| **MRR** | Mean reciprocal rank of the expected entity. |
-| **by_category** / **by_language** | Same three metrics sliced (typo, transliteration, `en`/`ko`/`mixed`, …). |
-| **provenance_match_rate** | Agreement of reported provenance stage/source vs benchmark (when expectations exist). |
-| **resolution_match_rate** | Agreement of decision status vs `expected_resolution` (when set). |
-| **false_exact_rate** | Rate of “exact”-style outcomes where the benchmark expects a non-exact path (when tracked). |
-
-**CLI quality gates** (optional): `--min-recall-at-3`, `--min-resolution-match-rate`, `--min-provenance-match-rate`, `--max-false-exact-rate`. **`npm run eval:noisy:gate`** sets strict smoke thresholds (e.g. recall@3 = 1 on the smoke predictions fixture).
-
-### CI & npm shortcuts
-
-| Command | What it checks |
-|---------|----------------|
-| `npm run eval:noisy:smoke` + `eval:noisy:assert-baseline` | Noisy metrics vs `data/eval-baselines/noisy-entity-smoke-v1.json` |
-| `npm run eval:noisy:gate` | Threshold pass on smoke run (pipeline integrity) |
-| `npm run test:verification:core` | `typecheck` + fast e2e + `eval:noisy:gate` + noisy baseline assert |
-| `npm run eval:offline:*` | Full offline tiers; smoke baseline: `eval:offline:smoke:assert-baseline` |
+**인용(예시, 전부 아님):** BM25(Robertson & Walker 계열); RRF는 현대 하이브리드 검색에서 널리 사용(k≈60 등); Platt(1999); 단조 캘리브레이션용 isotonic 회귀; cross-encoder는 Nogueira & Cho(2019)류 신경 IR에서 흔한 문장 쌍 분류 패러다임.
 
 ---
 
-## Test coverage & E2E scenarios
+<h2 id="completeness-engineering-sota-vs-product-maturity">완성도: 엔지니어링 “SOTA”와 제품 성숙도</h2>
 
-### How coverage is measured
-
-- **Config:** `config/vitest/unit.config.ts` (also the **default** `vitest.config.ts` re-export).
-- **Provider:** `@vitest/coverage-v8` with **`coverage.include`** = `src/**/*.ts` and excludes `**/*.test.ts`, `**/__tests__/**`, and `src/main.ts`.
-- **Outputs:** `coverage/lcov.info` + terminal text (`coverage.reporter`: `text`, `lcov`).
-- **Run:** `npm run test:coverage` (unit lane only — integration/e2e Vespa lanes are separate configs).
-
-Coverage is **line-oriented on `src/`**; it does **not** automatically include HTTP e2e files under `test/e2e/` (those exercise the app via `inject()`, but live in another Vitest project).
-
-### Vitest lanes (config → purpose)
-
-| Config | `npm run …` | What runs |
-|--------|-------------|-----------|
-| `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + selected `src/__tests__` |
-| `config/vitest/integration.config.ts` | `test:integration` | Explicit list: HTTP server, error handler, public query security, resolve route, contract registry, interpret schema, … |
-| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e` | `test/e2e/**/*.test.ts` **except** `test/e2e/vespa/**` (in-memory harness, `singleFork`) |
-| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **Tiny** PR smoke: `search-api`, `schema-contract`, `batch-search-api`, `server-protocol` only |
-| `config/vitest/e2e.vespa.config.ts` | `test:e2e:vespa` (via `scripts/run-vespa-e2e.sh`) | All `test/e2e/vespa/**/*.test.ts`; sets `VESPA_URL` (default `http://localhost:18080` in config) |
-| `config/vitest/watchlist.config.ts` | `test:watchlist` | Watchlist domain + HTTP + Redis/webhook + contract manifest overlap |
-| `config/vitest/quality.config.ts` | `test:quality` | Golden set, user journeys, decision utility, learning flywheel, eval unit tests, … |
-
-### In-memory E2E (`test/e2e/*.test.ts`, `test:e2e:fast`)
-
-Uses **`createTestServer()`** + Fastify **`inject()`** (no real TCP port). Typical scenarios:
-
-| Suite file | Scenarios (summary) |
-|------------|---------------------|
-| **`search-api.test.ts`** | RFC-014 **HTTP contract** for `POST /v1/search`: entity/hybrid happy paths, `explain` / `clarification`, errors, policy blocks, interpret/resolve parity helpers |
-| **`batch-search-api.test.ts`** | Batch search request/response shape, partial failure |
-| **`schema-contract.test.ts`** | Response / request **Zod** shapes vs fixtures |
-| **`server-protocol.test.ts`** | Global protocol (CORS hook, content-type, etc.) |
-| **`golden-set.test.ts`** | **Retrieval quality** — top-k contains expected `entity_id` for named wines (EN/KO), relaxed ordering |
-| **`user-journeys.test.ts`** | End-to-end **journeys**: multilingual same-entity, accent variants, ambiguity, mixed route, replay, failure handling |
-| **`mixed-search.test.ts`** | Mixed route **does not crash**; non-empty results for seeded harness |
-| **`realistic-scenarios.test.ts`**, **`edge-cases.test.ts`**, **`hard-scenarios.test.ts`** | Broader query shapes and edge behavior |
-| **`response-invariants.test.ts`** | Stable fields / invariants on responses |
-| **`claude-tools-api.test.ts`** | Claude tools list/execute HTTP surface |
-| **`watchlist-api.test.ts`** | Watchlist CRUD / deliveries |
-| **`infrastructure.test.ts`** | Infra-level checks wired to the test harness |
-
-**Quality lane:** `test:quality` adds **`golden-set.test.ts`** + **`user-journeys.test.ts`** together with integration/unit eval tests (see `config/vitest/quality.config.ts`).
-
-### Vespa-backed E2E (`test/e2e/vespa/**`, `test:e2e:vespa`)
-
-Requires a **reachable Vespa** (`VESPA_URL`, health check). Many suites use **`describe.skipIf(!HAS_REACHABLE_VESPA)`** so local runs without Vespa **skip** instead of failing.
-
-| Suite file | Scenarios (summary) |
-|------------|---------------------|
-| **`search-correctness.test.ts`** | **Sparse** retrieval vs seeded entities (exact/partial lookup, filters) |
-| **`search-quality.test.ts`** | Ranking / quality assertions on live index |
-| **`infrastructure-pipeline.test.ts`** | End-to-end pipeline against real Vespa |
-| **`search-network-services.test.ts`** | **HTTP ML adapters** (`/embeddings`, `/rerank`) with **fake ML service** + Vespa test server |
-| **`vespa-test-real-stores.test.ts`** | Real-store / integration checks (when enabled) |
-
-Wrapper scripts (`scripts/run-vespa-test-lane.sh`, `setup-vespa-test.sh`, …) standardize env and teardown.
-
-### What to run locally
-
-| Goal | Command |
-|------|---------|
-| Default unit | `npm run test` |
-| CI parity (unit) | `npm run test:unit` |
-| HTTP + integration | `npm run test:integration` |
-| Full in-memory e2e | `npm run test:e2e:fast` |
-| Minimal contract smoke | `npm run test:e2e:contract` |
-| Watchlist slice | `npm run test:watchlist` |
-| Quality + eval units | `npm run test:quality` |
-| Coverage report | `npm run test:coverage` |
-| Vespa (Docker up) | `npm run test:e2e:vespa` |
+- **강점:** **아키텍처**가 일반적인 **프로덕션 검색** 관행과 맞음: **하이브리드 검색**(sparse + dense), **퓨전**, 선택적 **cross-encoder**, **캘리브레이션**된 리졸버 스코어, 명시적 **의사결정 레이어**, 확장 가능한 검색용 **Vespa**, **계약 우선 HTTP**, **오프라인 eval** 훅(노이즈 엔터티, 오프라인 티어).
+- **한계·솔직함:** “SOTA++”는 **프로젝트 지향**이지 단일 벤치마크 점수가 아님. 오프라인 eval 레인은 **스모크·골든** 픽스처를 쓸 수 있음; **라이브 A/B**와 프로덕션 트래픽 대비 **지속 캘리브레이션**은 **저장소 밖** 주제. ML 서비스(임베딩, 리랭커, 학습형 매처)는 **HTTP 계약** — 품질은 **모델·데이터·운영**에도 달리며 이 서비스만으로 결정되지 않음.
+- **확장 방법:** 새 검색 모드 → Vespa 스키마 + `SearchIndexPort`; 새 랭킹 시그널 → `Ranker` / LTR 가중치; 새 안전 → `query-entry-security`와 RFC의 정책.
 
 ---
 
-## What this codebase implements (capabilities)
+<h2 id="evaluation-metrics-definitions--gates">평가 지표 (정의·게이트)</h2>
 
-Condensed **feature checklist** (pipeline stages, endpoints, and algorithms are covered in sections 2–5 above). Details: **RFCs** + source.
+**수식의 근원:** `scripts/eval/metrics.ts`(순수 함수, I/O 없음). **RFC 정합:** 의사결정 유틸 / AURC / ECE는 **RFC-009**; 릴리스 게이트는 **RFC-017 §3.2** (`scripts/eval/run-offline-eval.ts`의 `RELEASE_GATES`). **운영 런북:** `docs/eval-baseline-runbook.md`.
 
-### Search & retrieval
+### 오프라인 평가 (`run-offline-eval.ts`)
 
-- **Query planning** — planner, ambiguity dictionary, anchor extraction, NL attribute mapping, constraint / intent handling (`src/domain/query/`, `src/application/search/`).
-- **Entity resolution** — blocking, scoring, calibration, optional **learned matcher** HTTP blend; **per-candidate matcher feature vectors** for the learned path (`learned-matcher-features.ts`, wired from `resolver.ts`).
-- **Alias matching** — multi-stage funnel including **char n-gram** fuzzy index (`CharNgramIndex`, `alias-matcher.ts`).
-- **Retrieval** — candidate pool, fusion, browse/compare retrievers, **Vespa** search index adapter, hybrid / dense-sparse routing.
-- **Ranking** — signals, evidence, optional **LTR**-style rerank hooks (`domain/ranking/`, application pipeline pieces).
-- **Decision & response** — decision engine, threshold profiles, response builder; **drinking window** hints with ONNX or heuristic policy (`domain/drinking-window/`, `infrastructure/ml/`).
-- **Mixed / similarity** — mixed solver for anchor + similarity neighborhoods (`domain/mixed/`).
-- **Caching** — search response cache port + Redis-backed usage where wired (`domain/performance/`).
+골든 쿼리 JSONL을 파이프라인에 통과시키고 **전역** 및 **슬라이스**(시나리오, 언어, 검색 모드) 통계를 집계합니다.
 
-### Security & quality gates
+| 지표 | 기호·범위 | 정의(요약) |
+|------|-----------|------------|
+| **NDCG@10** | 등급 관련성 | 랭크 10에서 정규화 DCG; 이득 = **2^grade − 1**, 할인 = **1 / log2(rank+1)**. 등급은 `RelevanceMap`(0–3). |
+| **MRR@10** | 상위 10 내 첫 관련 | 등급 ≥ 1인 첫 히트의 역순위; 없으면 0. |
+| **Recall@3** | 상위 3 커버리지 | 진실 관련 엔터티(등급 ≥ 1)가 1–3위에 나온 비율. |
+| **Recall@10** | 상위 10 | 동일, **K = 10**(모드 슬라이스). |
+| **Recall@100** | 상위 100 | 동일, **K = 100**(전역 검색 건강). |
+| **Wrong Top-1 rate** | 의사결정 품질 | **`wrong_resolve`**로 분류된 쿼리 비율(RFC-009 §4.1). |
+| **Decision utility** | 기대 유틸 | **RFC-009 §5.1** 가중치(`correct_resolve`, `safe_abstain`, `wrong_resolve`, …)의 쿼리별 유틸 평균. |
+| **Safe / avoidable abstain rate** | 기권 동작 | `classifyDecision` 이후 `safe_abstain` vs `avoidable_abstain` 비율. |
+| **AURC** | 선택적 예측 | `decision_confidence`로 정렬했을 때 risk–coverage 곡선 아래 면적(RFC-009 §5.3); 낮을수록 좋음. |
+| **Excess AURC** | 캘리브레이션 갭 | 동일 라벨 집합에 대해 `AURC − optimal AURC`. |
+| **ECE** | 캘리브레이션 오차 | 기대 캘리브레이션 오차(구간); 목표는 RFC-009 §7 / 코드 주석. |
 
-- **Query sanitization**, **query-entry security** (injection / abuse heuristics, optional LLM judge path).
-- **Rate limiting** (`@fastify/rate-limit`), structured **error contract** (RFC-014-style), snake_case response hook.
+**모드별 추가**(Epic 11, 해당 시): **다양성**, **생산자 다양성**, **앵커 보존**, **속성 커버리지**, **집합 커버리지** 등 — `ModeMetrics` / `run-offline-eval.ts` 집계 참고.
 
-### Data & learning (when Postgres is enabled)
+**기본 전역 릴리스 게이트**(오프라인 러너 — `--tier gate` 없으면 권고):
 
-- **Feedback ingestion** — `POST /v1/feedback` persists signals for the learning loop; disabled when **`KILL_SWITCH_LEARNING`** is on or DB unavailable (`feedback.route.ts`, `PgFeedbackStore`).
-- **Learning services** — feedback processor, alias proposer, proposal / feedback stores (`domain/learning/`, `container-learning.ts`). **Alias duplicate check** uses the live `aliases` table when a pool exists.
-- **ETL** — Silver/NDJSON pipelines, alias generation, **rule-based KO transliteration** batch job (`scripts/etl/generate-transliteration-aliases.ts`, `Transliterator`), Vespa indexing helpers (`scripts/etl/index-to-vespa.ts`, …).
+| 게이트 키 | 예시 임계값 | 역할 |
+|-----------|-------------|------|
+| `wrong_top1_rate_max` | ≤ 0.02 | 잘못된 해소 상한 |
+| `decision_utility_min_delta` | ≥ −0.05 | 베이스라인 대비 유틸 퇴보 허용 |
+| `ndcg_at_10_min_delta` | ≥ −0.03 | NDCG@10 퇴보 허용 |
+| `recall_at_100_min` | ≥ 0.90 | 넓은 리콜 바닥 |
+| `aurc_max_delta` | ≤ 0.01 | 선택적 예측 퇴보 |
+| `entity_resolve_wrong_top1_max` | ≤ 0.03 | entity-resolve 슬라이스 |
+| `set_retrieval_recall_at_10_min` | ≥ 0.60 | 집합 검색 슬라이스 |
+| `no_match_false_resolve_max` | ≤ 0.05 | no-match 슬라이스 |
 
-### Integrations
+**검색 모드별 바닥**(예: `entity_lookup`, `constraint_filter`, `producer_browse`, …)은 같은 파일의 `MODE_RELEASE_GATES`(NDCG@10, recall@10, diversity 등).
 
-- **Watchlist** — domain + HTTP CRUD + Redis-backed delivery runtime when configured (`application/watchlist/`, `infrastructure/watchlist/`).
-- **Claude tools** — tool executor + HTTP surface for agent-driven search (`interface/claude-tools/`).
-- **Eval & quality** — offline eval, noisy-entity eval, baseline regression scripts (`scripts/eval/`), split verification; CI runs smoke + baseline checks.
+### 노이즈 엔터티 벤치마크 (`run-noisy-entity-eval.ts`)
 
-### Infrastructure adapters (non-exhaustive)
+`data/noisy-entity-benchmark.jsonl`(또는 `--input` 커스텀)으로 **노이즈 쿼리 하의 엔터티 해소**를 평가합니다. **라이브 API**(`SEARCH_API_URL`) 또는 **예측 JSONL**(`--predictions`)에서 실행합니다.
 
-- Postgres repositories (aliases, blocking, feedback, proposals, watchlist storage, …).
-- Vespa client, embedding HTTP client, reranker HTTP client, learned matcher HTTP adapter.
-- Optional eval runner wiring in the container for startup eval (`infrastructure/eval/`).
+| 지표 | 의미 |
+|--------|------|
+| **Recall@1** | 기대 엔터티가 1위. |
+| **Recall@3** | 기대 엔터티가 상위 3(노이즈 엔터티의 주요 지표). |
+| **MRR** | 기대 엔터티의 평균 역순위. |
+| **by_category** / **by_language** | 동일 지표를 슬라이스(오타, 음역, `en`/`ko`/`mixed` 등). |
+| **provenance_match_rate** | 보고된 provenance 단계/출처가 벤치마크와 일치하는 비율(기대가 있을 때). |
+| **resolution_match_rate** | 의사결정 상태가 `expected_resolution`과 일치하는 비율(설정 시). |
+| **false_exact_rate** | 벤치마크가 비 exact 경로를 기대할 때 “exact” 스타일 결과 비율(추적 시). |
+
+**CLI 품질 게이트**(선택): `--min-recall-at-3`, `--min-resolution-match-rate`, `--min-provenance-match-rate`, `--max-false-exact-rate`. **`npm run eval:noisy:gate`**는 스모크 예측 픽스처에 엄격한 스모크 임계값(예: recall@3 = 1)을 둡니다.
+
+### CI·npm 단축
+
+| 명령 | 확인 내용 |
+|------|-----------|
+| `npm run eval:noisy:smoke` + `eval:noisy:assert-baseline` | `data/eval-baselines/noisy-entity-smoke-v1.json` 대비 노이즈 지표 |
+| `npm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
+| `npm run test:verification:core` | `typecheck` + 빠른 e2e + `eval:noisy:gate` + 노이즈 베이스라인 assert |
+| `npm run eval:offline:*` | 전체 오프라인 티어; 스모크 베이스라인: `eval:offline:smoke:assert-baseline` |
 
 ---
 
-## Repository structure
+<h2 id="test-coverage--e2e-scenarios">테스트·커버리지·E2E 시나리오</h2>
 
-### Root (selected)
+### 커버리지 측정 방식
 
-| Path | Role |
+- **설정:** `config/vitest/unit.config.ts`(루트 `vitest.config.ts`가 재export).
+- **제공:** `@vitest/coverage-v8`, **`coverage.include`** = `src/**/*.ts`, 제외 `**/*.test.ts`, `**/__tests__/**`, `src/main.ts`.
+- **산출:** `coverage/lcov.info` + 터미널(`coverage.reporter`: `text`, `lcov`).
+- **실행:** `npm run test:coverage`(단위 레인만 — 통합/e2e Vespa는 별도 설정).
+
+커버리지는 **`src/` 라인 기준**이며 `test/e2e/`의 HTTP e2e 파일은 자동 포함되지 않습니다(`inject()`로 앱을 돌리지만 Vitest 프로젝트가 다름).
+
+### Vitest 레인(설정 → 목적)
+
+| 설정 | `npm run …` | 실행 내용 |
+|------|-------------|-----------|
+| `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + 선택 `src/__tests__` |
+| `config/vitest/integration.config.ts` | `test:integration` | 명시 목록: HTTP 서버, 에러 핸들러, 공개 쿼리 보안, resolve 라우트, 계약 레지스트리, interpret 스키마 등 |
+| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e` | `test/e2e/**/*.test.ts` 중 **`test/e2e/vespa/**` 제외(인메모리 하네스, `singleFork`) |
+| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **초소형** PR 스모크: `search-api`, `schema-contract`, `batch-search-api`, `server-protocol`만 |
+| `config/vitest/e2e.vespa.config.ts` | `test:e2e:vespa` (`scripts/run-vespa-e2e.sh`) | 전체 `test/e2e/vespa/**/*.test.ts`; `VESPA_URL` 설정(기본 `http://localhost:18080`) |
+| `config/vitest/watchlist.config.ts` | `test:watchlist` | 워치리스트 도메인 + HTTP + Redis/웹훅 + 계약 매니페스트 겹침 |
+| `config/vitest/quality.config.ts` | `test:quality` | 골든 세트, 사용자 여정, 의사결정 유틸, 학습 플라이휠, eval 단위 테스트 등 |
+
+### 인메모리 E2E (`test/e2e/*.test.ts`, `test:e2e:fast`)
+
+**`createTestServer()`** + Fastify **`inject()`**(실제 TCP 포트 없음). 대표 시나리오:
+
+| 스위트 파일 | 시나리오(요약) |
+|-------------|----------------|
+| **`search-api.test.ts`** | RFC-014 **HTTP 계약** `POST /v1/search`: entity/hybrid 해피 경로, `explain` / `clarification`, 오류, 정책 차단, interpret/resolve 보조 |
+| **`batch-search-api.test.ts`** | 배치 검색 요청·응답 형태, 부분 실패 |
+| **`schema-contract.test.ts`** | 요청·응답 **Zod** 형태 vs 픽스처 |
+| **`server-protocol.test.ts`** | 전역 프로토콜(CORS 훅, content-type 등) |
+| **`golden-set.test.ts`** | **검색 품질** — 지명 와인에 대해 top-k에 기대 `entity_id`(EN/KO), 순서는 완화 |
+| **`user-journeys.test.ts`** | **엔드투엔드 여정**: 다국어 동일 엔터티, 악센트 변형, 모호성, mixed 경로, 리플레이, 실패 처리 |
+| **`mixed-search.test.ts`** | mixed 경로 **크래시 없음**; 시드 하네스에서 비어 있지 않은 결과 |
+| **`realistic-scenarios.test.ts`**, **`edge-cases.test.ts`**, **`hard-scenarios.test.ts`** | 넓은 쿼리 형태·엣지 |
+| **`response-invariants.test.ts`** | 응답 필드·불변식 |
+| **`claude-tools-api.test.ts`** | Claude 도구 나열/실행 HTTP |
+| **`watchlist-api.test.ts`** | 워치리스트 CRUD / 전달 |
+| **`infrastructure.test.ts`** | 테스트 하네스에 연결된 인프라 점검 |
+
+**품질 레인:** `test:quality`는 **`golden-set.test.ts`** + **`user-journeys.test.ts`**와 통합/단위 eval 테스트를 함께 돌립니다(`config/vitest/quality.config.ts`).
+
+### Vespa 기반 E2E (`test/e2e/vespa/**`, `test:e2e:vespa`)
+
+**도달 가능한 Vespa** 필요(`VESPA_URL`, 헬스 체크). 많은 스위트가 **`describe.skipIf(!HAS_REACHABLE_VESPA)`**로 Vespa 없으면 **스킵**합니다.
+
+| 스위트 파일 | 시나리오(요약) |
+|-------------|----------------|
+| **`search-correctness.test.ts`** | 시드 엔터티 대비 **sparse** 검색(정확/부분 조회, 필터) |
+| **`search-quality.test.ts`** | 라이브 인덱스 랭킹·품질 단언 |
+| **`infrastructure-pipeline.test.ts`** | 실제 Vespa 대상 E2E 파이프라인 |
+| **`search-network-services.test.ts`** | **HTTP ML 어댑터**(`/embeddings`, `/rerank`) + **가짜 ML 서비스** + Vespa 테스트 서버 |
+| **`vespa-test-real-stores.test.ts`** | 실제 스토어·통합 점검(활성화 시) |
+
+래퍼 스크립트(`scripts/run-vespa-test-lane.sh`, `setup-vespa-test.sh`, …)가 환경·정리를 표준화합니다.
+
+### 로컬에서 무엇을 돌릴지
+
+| 목표 | 명령 |
 |------|------|
-| `src/` | Application, domain, infrastructure, interface, config |
-| `test/unit/` | Unit tests by area |
-| `test/integration/` | HTTP, DB helpers, route contracts |
-| `test/e2e/` | Contract smoke, Vespa lanes, network-service tests |
-| `scripts/` | ETL, eval, Vespa lane shell wrappers, HTTP contract export |
-| `scripts/etl/` | NDJSON / Silver pipelines, transliteration, index-to-Vespa, validation |
-| `vespa/app/` | Vespa schema (`schemas/`), `services.xml`, `hosts.xml`, query profiles |
-| `services/reranker/` | Python FastAPI reranker image (Compose) |
-| `data/` | Eval queries, baselines, smoke predictions (large files — review before commit) |
-| `docs/` | RFCs, plans, runbooks; **`docs/archive/`** (dated note dumps); **`docs/sessions/`** (e.g. bug bash) |
-| `models/` | Optional ONNX / model bundles (see drinking-window docs) |
-| `docker-compose.yml` | Full dev stack (**project `wine-search-dev`**) |
-| `docker-compose.test.yml` | Ephemeral test DB / alt ports (**project `wine-search-test`**) |
-| `Dockerfile` | Multi-stage production image for the Node API |
-| `.github/workflows/` | CI (lint, typecheck, tests, eval gates, Docker build) |
-
-### `src/` layout (domain-driven)
-
-| Path | Responsibility |
-|------|----------------|
-| `src/main.ts` | Process entry; loads config, runtime handles, container, HTTP server |
-| `src/config/` | `env.ts`, **composition root** (`container.ts`, `container-core.ts`, `container-features.ts`, `container-learning.ts`, `container-watchlist.ts`, …), readiness |
-| `src/domain/` | Bounded contexts: **query**, **resolver**, **alias**, **retrieval**, **ranking**, **decision**, **response**, **mixed**, **security**, **watchlist**, **learning**, **entity**, **ingestion**, **evaluation**, **performance**, **drinking-window**, **attribute**, **shared** (types, errors, utils) |
-| `src/application/` | **Search** (orchestration + split helper modules), **resolve**, **hybrid**, **batch**, **replay**, **interpret**, **drinking-window**, **watchlist** use cases |
-| `src/infrastructure/` | **adapters** (Postgres, HTTP ML), **db** + migrations, **vespa/**, **ml/** (ONNX drinking window), **redis** usage via shared client, **watchlist**, **telemetry**, **eval** |
-| `src/interface/` | **http/** routes, schemas, middleware, errors; **claude-tools/**; **cli/** |
-
-### HTTP routes (conceptual)
-
-Declared in **`src/interface/http/routes/http-route-contract-catalog.ts`** (source of truth with `route-contracts.ts`). Includes search, batch, interpret, resolve, hybrid, replay, watchlist, **feedback**, Claude tools, health, OpenAPI JSON.
-
-### Tests
-
-See **Test coverage & E2E scenarios** (earlier in this document) for Vitest lanes, coverage scope, and per-file E2E intent.
-
-| Location | Role |
-|----------|------|
-| `src/**/__tests__/` | Co-located unit tests |
-| `test/unit/` | Focused unit suites |
-| `test/integration/` | Server, HTTP contracts, schemas, selected policy tests |
-| `test/e2e/` | In-memory HTTP e2e (`inject`) + `vespa/` for live retrieval |
-| `config/vitest/*.config.ts` | Split configs: unit, integration, e2e, smoke, Vespa, watchlist, quality |
+| 기본 단위 | `npm run test` |
+| CI에 가까운 단위 | `npm run test:unit` |
+| HTTP + 통합 | `npm run test:integration` |
+| 전체 인메모리 e2e | `npm run test:e2e:fast` |
+| 최소 계약 스모크 | `npm run test:e2e:contract` |
+| 워치리스트 슬라이스 | `npm run test:watchlist` |
+| 품질 + eval 단위 | `npm run test:quality` |
+| 커버리지 리포트 | `npm run test:coverage` |
+| Vespa(Docker 기동) | `npm run test:e2e:vespa` |
 
 ---
 
-## Prerequisites
+<h2 id="what-this-codebase-implements-capabilities">이 코드베이스가 구현하는 것(기능)</h2>
 
-- **Node.js ≥ 22** and **npm**
-- **Docker** + Docker Compose v2 (recommended for dependencies)
-- Optional: **Semgrep** (`npm run semgrep`), local tools for Vespa/ML
+요약 **기능 체크리스트**(파이프라인 단계·엔드포인트·알고리즘은 위 2–5절). 상세: **RFC** + 소스.
+
+### 검색·리트리벌
+
+- **쿼리 계획** — 플래너, 모호성 사전, 앵커 추출, NL 속성 매핑, 제약·의도 처리 (`src/domain/query/`, `src/application/search/`).
+- **엔터티 해소** — 블로킹, 스코어링, 캘리브레이션, 선택적 **학습형 매처** HTTP 블렌드; 학습 경로용 **후보별 매처 피처 벡터** (`learned-matcher-features.ts`, `resolver.ts`에서 연결).
+- **별칭 매칭** — **문자 n-gram** 퍼지 인덱스 포함 다단계 퍼널 (`CharNgramIndex`, `alias-matcher.ts`).
+- **검색** — 후보 풀, 퓨전, browse/compare 리트리버, **Vespa** 검색 인덱스 어댑터, 하이브리드·dense-sparse 라우팅.
+- **랭킹** — 시그널, 증거, 선택적 **LTR** 스타일 리랭크 훅 (`domain/ranking/`, 애플리케이션 파이프라인).
+- **의사결정·응답** — 의사결정 엔진, 임계 프로필, 응답 빌더; **음주 가능 기간** 힌트(ONNX 또는 휴리스틱 정책) (`domain/drinking-window/`, `infrastructure/ml/`).
+- **Mixed·유사도** — 앵커 + 유사 이웃용 mixed 솔버 (`domain/mixed/`).
+- **캐싱** — 검색 응답 캐시 포트 + 연결 시 Redis (`domain/performance/`).
+
+### 보안·품질 게이트
+
+- **쿼리 새니타이제이션**, **쿼리 진입 보안**(인젝션·남용 휴리스틱, 선택적 LLM 판정 경로).
+- **속도 제한** (`@fastify/rate-limit`), 구조화된 **에러 계약**(RFC-014 스타일), snake_case 응답 훅.
+
+### 데이터·학습(Postgres 사용 시)
+
+- **피드백 수집** — `POST /v1/feedback`이 학습 루프용 시그널을 저장; **`KILL_SWITCH_LEARNING`** 또는 DB 불가 시 비활성 (`feedback.route.ts`, `PgFeedbackStore`).
+- **학습 서비스** — 피드백 프로세서, 별칭 제안자, 제안/피드백 스토어 (`domain/learning/`, `container-learning.ts`). **별칭 중복 검사**는 풀이 있으면 live `aliases` 테이블 사용.
+- **ETL** — Silver/NDJSON 파이프라인, 별칭 생성, **규칙 기반 KO 음역** 배치 작업 (`scripts/etl/generate-transliteration-aliases.ts`, `Transliterator`), Vespa 인덱싱 헬퍼 (`scripts/etl/index-to-vespa.ts`, …).
+
+### 통합
+
+- **워치리스트** — 도메인 + HTTP CRUD + 설정 시 Redis 전달 런타임 (`application/watchlist/`, `infrastructure/watchlist/`).
+- **Claude 도구** — 에이전트 주도 검색용 도구 실행기 + HTTP (`interface/claude-tools/`).
+- **Eval·품질** — 오프라인 eval, 노이즈 엔터티 eval, 베이스라인 회귀 스크립트 (`scripts/eval/`), 스플릿 검증; CI는 스모크 + 베이스라인 검사.
+
+### 인프라 어댑터(일부)
+
+- Postgres 레포지토리(별칭, 블로킹, 피드백, 제안, 워치리스트 저장 등).
+- Vespa 클라이언트, 임베딩 HTTP 클라이언트, 리랭커 HTTP 클라이언트, 학습형 매처 HTTP 어댑터.
+- 기동 시 eval을 위한 선택적 eval 러너 배선 (`infrastructure/eval/`).
 
 ---
 
-## Bootstrap
+<h2 id="repository-structure">저장소 구조</h2>
+
+### 루트(선택)
+
+| 경로 | 역할 |
+|------|------|
+| `src/` | 애플리케이션, 도메인, 인프라, 인터페이스, 설정 |
+| `test/unit/` | 영역별 단위 테스트 |
+| `test/integration/` | HTTP, DB 헬퍼, 라우트 계약 |
+| `test/e2e/` | 계약 스모크, Vespa 레인, 네트워크 서비스 테스트 |
+| `scripts/` | ETL, eval, Vespa 레인 셸 래퍼, HTTP 계약 내보내기 |
+| `scripts/etl/` | NDJSON / Silver 파이프라인, 음역, index-to-Vespa, 검증 |
+| `vespa/app/` | Vespa 스키마(`schemas/`), `services.xml`, `hosts.xml`, 쿼리 프로파일 |
+| `services/reranker/` | Python FastAPI 리랭커 이미지(Compose) |
+| `data/` | eval 쿼리, 베이스라인, 스모크 예측(대용량 — 커밋 전 검토) |
+| `docs/` | RFC, 계획, 런북; **`docs/archive/`**(날짜별 메모); **`docs/sessions/`**(예: 버그배시) |
+| `models/` | 선택 ONNX / 모델 번들(음주 가능 기간 문서 참고) |
+| `docker-compose.yml` | 전체 개발 스택(**프로젝트 `wine-search-dev`**) |
+| `docker-compose.test.yml` | 임시 테스트 DB / 대체 포트(**프로젝트 `wine-search-test`**) |
+| `Dockerfile` | Node API용 멀티스테이지 프로덕션 이미지 |
+| `.github/workflows/` | CI(lint, typecheck, 테스트, eval 게이트, Docker 빌드) |
+
+### `src/` 레이아웃(도메인 주도)
+
+| 경로 | 책임 |
+|------|------|
+| `src/main.ts` | 프로세스 진입; 설정, 런타임 핸들, 컨테이너, HTTP 서버 로드 |
+| `src/config/` | `env.ts`, **구성 루트** (`container.ts`, `container-core.ts`, `container-features.ts`, `container-learning.ts`, `container-watchlist.ts`, …), 준비 상태 |
+| `src/domain/` | 바운디드 컨텍스트: **query**, **resolver**, **alias**, **retrieval**, **ranking**, **decision**, **response**, **mixed**, **security**, **watchlist**, **learning**, **entity**, **ingestion**, **evaluation**, **performance**, **drinking-window**, **attribute**, **shared**(타입, 에러, 유틸) |
+| `src/application/` | **Search**(오케스트레이션 + 분할 헬퍼), **resolve**, **hybrid**, **batch**, **replay**, **interpret**, **drinking-window**, **watchlist** 유스케이스 |
+| `src/infrastructure/` | **어댑터**(Postgres, HTTP ML), **db** + 마이그레이션, **vespa/**, **ml/**(ONNX 음주 가능 기간), 공유 클라이언트 **redis**, **watchlist**, **telemetry**, **eval** |
+| `src/interface/` | **http/** 라우트, 스키마, 미들웨어, 에러; **claude-tools/**; **cli/** |
+
+### HTTP 라우트(개념)
+
+**`src/interface/http/routes/http-route-contract-catalog.ts`**에 선언(`route-contracts.ts`와 함께 근원). search, batch, interpret, resolve, hybrid, replay, watchlist, **feedback**, Claude 도구, health, OpenAPI JSON 포함.
+
+### 테스트
+
+Vitest 레인, 커버리지 범위, 파일별 E2E 의도는 위 **테스트·커버리지·E2E 시나리오** 참고.
+
+| 위치 | 역할 |
+|------|------|
+| `src/**/__tests__/` | 동반 단위 테스트 |
+| `test/unit/` | 집중 단위 스위트 |
+| `test/integration/` | 서버, HTTP 계약, 스키마, 선택 정책 테스트 |
+| `test/e2e/` | 인메모리 HTTP e2e(`inject`) + 라이브 검색용 `vespa/` |
+| `config/vitest/*.config.ts` | 분리 설정: 단위, 통합, e2e, 스모크, Vespa, 워치리스트, 품질 |
+
+---
+
+<h2 id="prerequisites">전제 조건</h2>
+
+- **Node.js ≥ 22** 및 **npm**
+- **Docker** + Docker Compose v2(의존 서비스 권장)
+- 선택: **Semgrep**(`npm run semgrep`), Vespa/ML 로컬 도구
+
+---
+
+<h2 id="bootstrap">부트스트랩</h2>
 
 ```bash
 git clone <internal-remote> wine-search-engine
 cd wine-search-engine
 npm ci
 cp .env.example .env
-# Edit .env — PG_*, REDIS_URL, VESPA_URL, ML URLs, secrets.
+# .env 편집 — PG_*, REDIS_URL, VESPA_URL, ML URL, 시크릿.
 ```
 
-Before merging substantive changes: **`npm run lint`**, **`npm run typecheck`**, and tests touching your area.
+실질적 변경을 머지하기 전: **`npm run lint`**, **`npm run typecheck`**, 담당 영역 테스트.
 
 ---
 
-## Configuration (`.env`)
+<h2 id="configuration-env">설정 (`.env`)</h2>
 
-Start from **`.env.example`**. Important groups:
+**`.env.example`**을 복사해 시작. 주요 그룹:
 
-| Group | Examples |
-|-------|------------|
+| 그룹 | 예시 |
+|------|------|
 | Core | `NODE_ENV`, `PORT`, `LOG_LEVEL`, `HTTP_RATE_LIMIT_MAX`, `CORS_ALLOWED_ORIGINS` |
-| Postgres | `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` — empty password skips PG pool in several code paths |
+| Postgres | `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` — 비밀번호 비우면 여러 경로에서 PG 풀 생략 |
 | Redis | `REDIS_URL` |
 | Vespa | `VESPA_URL`, `VESPA_CONTENT_CLUSTER` |
-| ML HTTP | `EMBEDDING_SERVICE_URL`, `RERANKER_SERVICE_URL`, `RERANK_BLEND_SCALE`, optional `LEARNED_MATCHER_SERVICE_URL` |
-| Anthropic | `ANTHROPIC_API_KEY` (optional features) |
-| Drinking window | `ALLOW_HEURISTIC_DRINKING_WINDOW`, `DRINKING_WINDOW_MODEL_DIR` |
-| Watchlist | `WATCHLIST_ENABLED`, `WEBHOOK_SECRET` |
-| Kill switches | `KILL_SWITCH_ALIAS_OVERLAY`, `KILL_SWITCH_LEARNING`, `KILL_SWITCH_DENSE_RETRIEVAL`, `KILL_SWITCH_INJECTION_JUDGE`, `KILL_SWITCH_QUERY_CACHE` |
-| Tests | `PG_TEST_URL` — often `postgresql://wine:wine_test@localhost:5433/wine_engine_test` for test Compose |
+| ML HTTP | `EMBEDDING_SERVICE_URL`, `RERANKER_SERVICE_URL`, `RERANK_BLEND_SCALE`, 선택 `LEARNED_MATCHER_SERVICE_URL` |
+| Anthropic | `ANTHROPIC_API_KEY`(선택 기능) |
+| 음주 가능 기간 | `ALLOW_HEURISTIC_DRINKING_WINDOW`, `DRINKING_WINDOW_MODEL_DIR` |
+| 워치리스트 | `WATCHLIST_ENABLED`, `WEBHOOK_SECRET` |
+| 킬 스위치 | `KILL_SWITCH_ALIAS_OVERLAY`, `KILL_SWITCH_LEARNING`, `KILL_SWITCH_DENSE_RETRIEVAL`, `KILL_SWITCH_INJECTION_JUDGE`, `KILL_SWITCH_QUERY_CACHE` |
+| 테스트 | `PG_TEST_URL` — 테스트 Compose에서는 `postgresql://wine:wine_test@localhost:5433/wine_engine_test` 등 |
 
-**Docker Compose (`docker-compose.yml`)** sets **`app`** service env so **`postgres`**, **`redis`**, **`vespa`**, **`reranker`** resolve by DNS; embedding may still use **`host.docker.internal`** for a host-side service.
+**Docker Compose (`docker-compose.yml`)**는 **`app`** 서비스 환경을 설정해 **`postgres`**, **`redis`**, **`vespa`**, **`reranker`**를 DNS으로 해석; 임베딩은 **`host.docker.internal`**로 호스트 서비스를 쓸 수 있음.
 
 ---
 
-## Running the API
+<h2 id="running-the-api">API 실행</h2>
 
 ```bash
 npm run dev          # tsx watch src/main.ts
@@ -464,43 +464,43 @@ npm run build && npm run start   # dist/main.js
 
 ---
 
-## Docker Compose
+<h2 id="docker-compose">Docker Compose</h2>
 
-Two stacks; **avoid running two Vespa instances on conflicting host ports** on one machine.
+스택 두 가지; **한 머신에서 충돌하는 호스트 포트로 Vespa 두 개를 동시에 띄우지 않도록** 주의.
 
-### Full stack — `docker-compose.yml` (**`wine-search-dev`**)
+### 전체 스택 — `docker-compose.yml` (**`wine-search-dev`**)
 
 ```bash
 docker compose up -d --build
 ```
 
-| Service | Host ports | Notes |
-|---------|------------|--------|
+| 서비스 | 호스트 포트 | 비고 |
+|--------|-------------|------|
 | API | `3000` | |
-| Postgres | `5432` | `wine_engine` / `wine_dev` (see file) |
+| Postgres | `5432` | `wine_engine` / `wine_dev`(파일 참고) |
 | Redis | `6379` | |
-| Vespa | `8080`, config `19072`→`19071` | Host `VESPA_URL`: `http://localhost:8080` |
-| Reranker | `8081` | Python image; first boot may download HF weights |
+| Vespa | `8080`, 설정 `19072`→`19071` | 호스트 `VESPA_URL`: `http://localhost:8080` |
+| Reranker | `8081` | Python 이미지; 첫 부팅 시 HF 가중치 다운로드 가능 |
 
-### Test lane — `docker-compose.test.yml` (**`wine-search-test`**)
+### 테스트 레인 — `docker-compose.test.yml` (**`wine-search-test`**)
 
 ```bash
 docker compose -f docker-compose.test.yml up -d
 ```
 
-| Service | Host ports |
-|---------|------------|
+| 서비스 | 호스트 포트 |
+|--------|-------------|
 | Postgres | `5433` — `wine_engine_test` |
 | Redis | `6380` |
 | Vespa | `18080`, `19071` — `VESPA_URL`: `http://localhost:18080` |
 
 ---
 
-## Database migrations
+<h2 id="database-migrations">DB 마이그레이션</h2>
 
 SQL: `src/infrastructure/db/migrations/001_initial_schema.sql`.
 
-If **`npm run migrate`** fails to resolve modules in your checkout, use **tsx**:
+체크아웃에서 **`npm run migrate`**가 모듈 해석에 실패하면 **tsx** 사용:
 
 ```bash
 npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; void runMigrations().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });"
@@ -508,50 +508,50 @@ npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; 
 
 ---
 
-## Scripts & npm commands (reference)
+<h2 id="scripts--npm-commands-reference">스크립트·npm 명령(참고)</h2>
 
-| Area | Commands |
-|------|----------|
-| Quality | `npm run lint`, `npm run typecheck`, `npm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:core`, `test:verification:vespa` |
-| HTTP contracts | `npm run contracts:http`, `contracts:http:openapi-bridge` |
+| 영역 | 명령 |
+|------|------|
+| 품질 | `npm run lint`, `npm run typecheck`, `npm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:core`, `test:verification:vespa` |
+| HTTP 계약 | `npm run contracts:http`, `contracts:http:openapi-bridge` |
 | Eval | `npm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
-| ETL | `npm run etl:transliteration`, plus `scripts/etl/*.ts` (aliases, index-to-vespa, validate-silver, …) |
-| Ops | `npm run ingest`, `kill-switch`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
+| ETL | `npm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
+| 운영 | `npm run ingest`, `kill-switch`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
 
-Many ETL/eval invocations use **`npx tsx --env-file=.env …`**.
-
----
-
-## CI (GitHub Actions)
-
-Jobs include **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:core`), **verify-splits**, **noisy entity eval smoke + baseline assert**, then **build** + **Docker image build**. See **`.github/workflows/ci.yml`**.
+많은 ETL/eval 호출은 **`npx tsx --env-file=.env …`**를 씁니다.
 
 ---
 
-## HTTP surface (quick reference)
+<h2 id="ci-github-actions">CI (GitHub Actions)</h2>
 
-**Full route list** (every method/path): [HTTP API: entry points & request flow](#http-api-entry-points--request-flow). **`GET /openapi.json`** — generated contract bridge.
-
-| Topic | Notes |
-|-------|--------|
-| Readiness | `GET /ready` — dependency probes in `src/config/readiness.ts` |
-| Feedback | `POST /v1/feedback` — **503** when ingest disabled, no Postgres, or **`KILL_SWITCH_LEARNING`** |
-| Drinking window | ONNX bundle: **`docs/drinking-window-model-bundle.md`** |
+잡에 **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:core`), **verify-splits**, **noisy entity eval smoke + baseline assert**, 이후 **build** + **Docker 이미지 빌드** 포함. **`.github/workflows/ci.yml`** 참고.
 
 ---
 
-## Further reading
+<h2 id="http-surface-quick-reference">HTTP 표면(빠른 참고)</h2>
 
-- **`docs/RFC-*.md`** — protocol and behavior (authoritative for edge cases).
-- **`CLAUDE.md`** — short architecture + command cheat sheet.
-- **`docs/eval-baseline-runbook.md`** — refreshing / asserting offline & noisy baselines.
-- **`docs/archive/2026-04-root-notes/`** — archived epic/debugging/wave/task notes (moved from repo root).
-- **`docs/sessions/bugbash-apr-6/`** — Apr 2026 bug bash audit and remediation backlog.
+**전체 라우트 목록**(메서드·경로 전부): [HTTP API: 진입점·요청 흐름](#http-api-entry-points--request-flow). **`GET /openapi.json`** — 생성된 계약 브리지.
 
-**Reading order (new hires):** Quick start → Document map → Bootstrap & Docker → Architecture + HTTP flow → Evaluation + Tests → RFCs for your area.
+| 주제 | 비고 |
+|------|------|
+| 준비 상태 | `GET /ready` — `src/config/readiness.ts`의 의존성 프로브 |
+| 피드백 | `POST /v1/feedback` — 수집 비활성, Postgres 없음, 또는 **`KILL_SWITCH_LEARNING`** 시 **503** |
+| 음주 가능 기간 | ONNX 번들: **`docs/drinking-window-model-bundle.md`** |
 
 ---
 
-## License / distribution
+<h2 id="further-reading">추가 읽을거리</h2>
 
-Internal use unless otherwise stated by your organization.
+- **`docs/RFC-*.md`** — 프로토콜·동작(엣지 케이스의 근원).
+- **`CLAUDE.md`** — 짧은 아키텍처 + 명령 치트시트.
+- **`docs/eval-baseline-runbook.md`** — 오프라인·노이즈 베이스라인 갱신·검증.
+- **`docs/archive/2026-04-root-notes/`** — 에픽/디버깅/웨이브/태스크 메모(루트에서 이전).
+- **`docs/sessions/bugbash-apr-6/`** — 2026년 4월 버그배시 감사·수정 백로그.
+
+**읽는 순서(신규):** 빠른 시작 → 문서 지도 → 부트스트랩·Docker → 아키텍처·HTTP 흐름 → 평가·테스트 → 담당 영역 RFC.
+
+---
+
+<h2 id="license--distribution">라이선스·배포</h2>
+
+소속 조직에서 달리 정하지 않는 한 내부용.

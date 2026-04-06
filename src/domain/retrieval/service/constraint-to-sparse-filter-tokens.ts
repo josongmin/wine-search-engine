@@ -27,8 +27,8 @@ function constraintToSparseFilterTokens(
       return [`${key}:${value}`];
     }
     if (operator === 'in' && Array.isArray(value)) {
-      const first: unknown = value[0];
-      return typeof first === 'string' && first.length > 0 ? [`${key}:${first}`] : [];
+      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+      return normalized.length === 1 ? [`${key}:${normalized[0]}`] : [];
     }
     return [];
   };

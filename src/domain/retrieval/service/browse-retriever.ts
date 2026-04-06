@@ -3,6 +3,8 @@ import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
+import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
+import { ConstraintFilter } from './constraint-filter.js';
 import {
   browseSparseFetchLimit,
   dedupeSparseHitsByEntity,
@@ -78,6 +80,8 @@ function sparseHitsToBrowseCandidates(
  * - Region browse issues multiple OR queries (path + segments) for recall on hierarchical paths.
  */
 export class BrowseRetriever {
+  private readonly constraintFilter = new ConstraintFilter();
+
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
   async browseProducer(
@@ -100,7 +104,11 @@ export class BrowseRetriever {
     );
     const hits = dedupeSparseHitsByEntity(rawHits);
     const diversified = diversifyProducerBrowseHits(hits, limit);
-    return sparseHitsToBrowseCandidates(diversified, 'producer_browse', queries, filters);
+    const candidates = annotateCandidateConstraintEvidenceBatch(
+      sparseHitsToBrowseCandidates(diversified, 'producer_browse', queries, filters),
+      constraints,
+    );
+    return this.constraintFilter.applyHardFilters(candidates, constraints.hard);
   }
 
   async browseRegion(
@@ -123,11 +131,12 @@ export class BrowseRetriever {
     );
     const hits = dedupeSparseHitsByEntity(rawHits);
     const diversified = diversifyRegionBrowseHits(hits, limit);
-    return sparseHitsToBrowseCandidates(
+    const candidates = annotateCandidateConstraintEvidenceBatch(sparseHitsToBrowseCandidates(
       diversified,
       'region_browse',
       lexical,
       filters,
-    );
+    ), constraints);
+    return this.constraintFilter.applyHardFilters(candidates, constraints.hard);
   }
 }

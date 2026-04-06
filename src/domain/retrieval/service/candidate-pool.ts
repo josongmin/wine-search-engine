@@ -8,6 +8,7 @@ import { RetrievalProfileService } from './retrieval-profile.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
+import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import type { CacheService } from '../../performance/index.js';
 
 /**
@@ -134,6 +135,12 @@ export class CandidatePoolService {
         skippedPhases,
       } satisfies RetrievalTrace,
     }));
+
+    candidates = annotateCandidateConstraintEvidenceBatch(candidates, {
+      hard: input.hardConstraints,
+      soft: input.softConstraints,
+      inferred: input.queryPlan.constraints.inferred,
+    });
 
     // Step 5: Apply hard constraint filter
     candidates = [
