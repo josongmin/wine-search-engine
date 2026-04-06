@@ -39,6 +39,23 @@ describe('EvidenceGate', () => {
       expect(result.reason).toBeDefined();
       expect(result.reason).toContain('identity');
     });
+
+    it('fails when richer identity evidence shows ranked/resolver mismatch', () => {
+      const evidence: EvidenceSummary = {
+        identityEvidencePresent: true,
+        identityEvidence: {
+          topEntityPresent: true,
+          resolverTopCandidateMatchesTopEntity: true,
+          resolverEvidenceRefCount: 1,
+          rankedTopResultPresent: true,
+          rankedTopResultMatchesTopEntity: false,
+          rankedEvidenceItemCount: 2,
+        },
+      };
+      const result = gate.check('resolved', evidence);
+      expect(result.passed).toBe(false);
+      expect(result.downgradeTo).toBe('ambiguous');
+    });
   });
 
   describe('resolved + constraint evidence for constrained query → passes', () => {
@@ -119,6 +136,22 @@ describe('EvidenceGate', () => {
       };
       const result = gate.check('resolved', evidence, false, true);
       expect(result.passed).toBe(true);
+    });
+
+    it('fails when richer anchor evidence shows no ranked anchor signal', () => {
+      const evidence: EvidenceSummary = {
+        identityEvidencePresent: true,
+        anchorEvidencePresent: true,
+        anchorEvidence: {
+          topEntityPresent: true,
+          rankedTopResultPresent: true,
+          rankedTopResultMatchesTopEntity: true,
+          rankedSignalPresent: false,
+        },
+      };
+      const result = gate.check('resolved', evidence, false, true);
+      expect(result.passed).toBe(false);
+      expect(result.downgradeTo).toBe('ambiguous');
     });
 
     it('passes when no anchor (hasAnchor=false) regardless of anchor evidence', () => {

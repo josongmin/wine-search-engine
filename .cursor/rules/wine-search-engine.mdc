@@ -20,8 +20,10 @@ alwaysApply: true
 - `npm run build` — production compile (`tsconfig.build.json`, excludes tests).
 - `npm run start` — run compiled server.
 - `npm run lint` / `npm run lint:fix` — ESLint (flat config + `typescript-eslint` type-aware rules).
-- `npm run typecheck` — `tsc --noEmit` (includes tests).
+- `npm run typecheck` — `tsc --noEmit` (default `tsconfig.json`: `src/`).
 - `npm run test` — Vitest.
+- `npm run verify:http-contracts` — OpenAPI/catalog parity (also in `git:prepush`).
+- `npm run git:prepush:quick` — typecheck + unit without contract check.
 
 ## Conventions
 

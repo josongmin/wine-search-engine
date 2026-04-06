@@ -218,6 +218,7 @@ export function createTestContainer(): TestContainerParts {
     ranker,
     decisionEngine,
     responseBuilder,
+    drinkingWindow: drinkingWindowUseCase,
     querySanitizer,
     injectionJudge,
   });

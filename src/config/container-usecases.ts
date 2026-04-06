@@ -101,6 +101,8 @@ export function buildUseCaseContainerServices(
       decisionEngine: core.decisionEngine,
       responseBuilder: core.responseBuilder,
       snapshotVersions: core.snapshotVersions,
+      drinkingWindow: drinkingWindowUseCase,
+      ltrModels: core.ltrModels,
       querySanitizer: core.querySanitizer,
     }),
     decomposedSearchUseCase,

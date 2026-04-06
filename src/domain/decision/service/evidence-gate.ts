@@ -1,5 +1,10 @@
 import type { DecisionStatus, NextAction } from '../../shared/types/index.js';
-import type { EvidenceSummary } from '../model/decision-input.js';
+import {
+  type EvidenceSummary,
+  hasAnchorEvidence,
+  hasConstraintEvidence,
+  hasIdentityEvidence,
+} from '../model/decision-input.js';
 
 /**
  * Result of the evidence obligation gate check.
@@ -52,7 +57,7 @@ export class EvidenceGate {
     }
 
     // Rule 1: resolved + no identity evidence → downgrade
-    if (!evidenceSummary?.identityEvidencePresent) {
+    if (!hasIdentityEvidence(evidenceSummary)) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',
@@ -62,7 +67,7 @@ export class EvidenceGate {
     }
 
     // Rule 2: resolved + constraints present but no constraint evidence → downgrade
-    if (hasConstraints === true && evidenceSummary.constraintEvidencePresent !== true) {
+    if (hasConstraints === true && !hasConstraintEvidence(evidenceSummary)) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',
@@ -72,7 +77,7 @@ export class EvidenceGate {
     }
 
     // Rule 3: anchor present but no anchor evidence → downgrade
-    if (hasAnchor === true && evidenceSummary.anchorEvidencePresent !== true) {
+    if (hasAnchor === true && !hasAnchorEvidence(evidenceSummary)) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',

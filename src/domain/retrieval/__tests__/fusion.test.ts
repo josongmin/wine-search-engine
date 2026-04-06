@@ -233,6 +233,31 @@ describe('FusionService', () => {
       expect(candidates[0]?.producerPrestige).toBe(0.82);
     });
 
+    it('merges drinkingWindowModelVersion from later passes when sparse omits it', () => {
+      const sparse: SparseHit[] = [
+        {
+          ...makeSparse('wine-a', 1),
+          summary: { canonicalLabel: 'Wine' },
+        },
+      ];
+      const dense: DenseHit[] = [
+        {
+          ...makeDense('wine-a', 1),
+          summary: {
+            producerPrestige: 0.75,
+            drinkingWindowModelVersion: 'dw-dense-v2',
+          },
+        },
+      ];
+
+      const candidates = fusion.fuse(sparse, dense);
+      expect(candidates[0]).toMatchObject({
+        canonicalLabel: 'Wine',
+        producerPrestige: 0.75,
+        drinkingWindowModelVersion: 'dw-dense-v2',
+      });
+    });
+
     it('prefers sparse grapePrimary over dense', () => {
       const sparse: SparseHit[] = [
         {

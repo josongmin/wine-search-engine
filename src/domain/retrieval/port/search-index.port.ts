@@ -42,6 +42,40 @@ export interface RetrievalHitSummary {
   readonly producerType?: string | undefined;
 }
 
+export const RETRIEVAL_HIT_SUMMARY_KEYS = [
+  'canonicalLabel',
+  'producer',
+  'region',
+  'searchTextEn',
+  'grapePrimary',
+  'style',
+  'priceBand',
+  'pairing',
+  'occasion',
+  'vintageYear',
+  'body',
+  'tannin',
+  'acidity',
+  'sweetness',
+  'finishLength',
+  'wineType',
+  'criticScoreNormalized',
+  'producerPrestige',
+  'country',
+  'appellation',
+  'classification',
+  'alcoholPct',
+  'drinkingWindowStart',
+  'drinkingWindowEnd',
+  'drinkingWindowModelVersion',
+  'priceUsd',
+  'certifications',
+  'soilType',
+  'producerType',
+] as const satisfies readonly (keyof RetrievalHitSummary)[];
+
+export type RetrievalHitSummaryKey = (typeof RETRIEVAL_HIT_SUMMARY_KEYS)[number];
+
 /**
  * A single hit from the sparse (BM25 / lexical) retrieval pass.
  */

@@ -1,9 +1,10 @@
 import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
-import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
+import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { SnapshotVersions } from './search.usecase.js';
+import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
 import type {
@@ -19,8 +20,7 @@ import type {
 } from './port/search-pipeline-deps.port.js';
 import type { HybridSearchRequest } from './hybrid-request.dto.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
-import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
-import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
+import { executeHybridRouteRankingPipeline } from './search-usecase-hybrid-ranking-pipeline.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
@@ -42,6 +42,8 @@ export interface HybridUseCaseDeps {
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly snapshotVersions?: SnapshotVersions | undefined;
+  readonly drinkingWindow?: DrinkingWindowUseCasePort | undefined;
+  readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
   /** Shared public query entry guard: Layer 1 sanitizer is required. */
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
@@ -88,14 +90,14 @@ export class HybridUseCase {
     };
 
     const plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
-
-    // Run hybrid retrieval through the same specialized browse/compare entrypoint as SearchUseCase.
-    const candidates = await retrieveHybridCandidatesForPlan(
+    const { resolveResult, rankedResults } = await executeHybridRouteRankingPipeline(
       plan,
       {
         candidatePool: this.deps.candidatePool,
         browseRetriever: this.deps.browseRetriever,
         compareRetriever: this.deps.compareRetriever,
+        ranker: this.deps.ranker,
+        ltrModels: this.deps.ltrModels,
       },
       async (resolverPlan) => {
         if (this.deps.entityResolver === undefined) {
@@ -137,16 +139,6 @@ export class HybridUseCase {
       },
     );
 
-    // Rank candidates
-    const rankingInput: RankingInput = {
-      queryPlan: plan,
-      candidates,
-      constraints: plan.constraints,
-    };
-
-    const rankedResults = await this.deps.ranker.rank(rankingInput);
-    const resolveResult = buildHybridRouteResolveResult(plan, rankedResults);
-
     // Build decision input
     const decisionInput = buildSearchDecisionInput(
       plan,
@@ -165,7 +157,10 @@ export class HybridUseCase {
 
     // Build response
     const queryTimeMs = Date.now() - startTime;
-    const results = await mapRankedResultsToResultItems(rankedResults, undefined);
+    const results = await mapRankedResultsToResultItems(
+      rankedResults,
+      this.deps.drinkingWindow,
+    );
 
     return this.deps.responseBuilder.build({
       decisionOutput,

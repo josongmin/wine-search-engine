@@ -291,6 +291,7 @@ export async function createVespaTestContainer(
     decisionEngine,
     responseBuilder,
     snapshotVersions,
+    drinkingWindow: drinkingWindowUseCase,
     querySanitizer,
     injectionJudge,
   });

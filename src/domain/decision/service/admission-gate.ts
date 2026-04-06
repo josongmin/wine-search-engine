@@ -1,5 +1,10 @@
 import type { DecisionSnapshot } from '../../shared/types/index.js';
-import type { DecisionInput } from '../model/decision-input.js';
+import {
+  type DecisionInput,
+  hasAnchorEvidence,
+  hasConstraintEvidence,
+  hasIdentityEvidence,
+} from '../model/decision-input.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
 
@@ -126,7 +131,7 @@ export class AdmissionGate {
     // `identityEvidencePresent` is the canonical signal set by the EvidenceGate
     // earlier in the pipeline.  If the summary is absent or the flag is false,
     // the decision lacks substantiation.
-    if (!input.evidenceSummary?.identityEvidencePresent) {
+    if (!hasIdentityEvidence(input.evidenceSummary)) {
       return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
     }
 
@@ -137,7 +142,7 @@ export class AdmissionGate {
     // constraints exist means the entity was admitted without verifying
     // compliance with mandatory filters.
     const hasHardConstraints = input.queryPlan.constraints.hard.length > 0;
-    if (hasHardConstraints && input.evidenceSummary.constraintEvidencePresent !== true) {
+    if (hasHardConstraints && !hasConstraintEvidence(input.evidenceSummary)) {
       return this.reject('HARD_CONSTRAINT_VIOLATION', input, snapshot);
     }
 
@@ -151,7 +156,7 @@ export class AdmissionGate {
     //      or 'anchor_preserved') — the boolean flag alone is not sufficient;
     //      the trail must be substantiated (RFC-011 §11).
     if (admissionContext.requires_anchor_evidence) {
-      if (input.evidenceSummary.anchorEvidencePresent !== true) {
+      if (!hasAnchorEvidence(input.evidenceSummary)) {
         return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
       }
 

@@ -35,14 +35,148 @@ export interface EvidenceSummary {
   /** Whether identity evidence (alias match, canonical match) is present. */
   readonly identityEvidencePresent: boolean;
 
+  /**
+   * Richer identity evidence details for ranked and resolver-backed routes.
+   *
+   * This stays optional so older tests/callers that only provide the coarse
+   * booleans remain valid.
+   */
+  readonly identityEvidence?: {
+    /** Resolver emitted a topEntity reference. */
+    readonly topEntityPresent: boolean;
+
+    /** Resolver emitted a ranked top candidate aligned with topEntity. */
+    readonly resolverTopCandidateMatchesTopEntity: boolean;
+
+    /** Count of resolver evidence refs for the top candidate identity trail. */
+    readonly resolverEvidenceRefCount: number;
+
+    /** Whether a ranked top result was available for the same decision. */
+    readonly rankedTopResultPresent?: boolean | undefined;
+
+    /** Whether the ranked top result agreed with the resolver-selected entity. */
+    readonly rankedTopResultMatchesTopEntity?: boolean | undefined;
+
+    /** Count of ranked evidence items carried by the top ranked result. */
+    readonly rankedEvidenceItemCount?: number | undefined;
+
+    /**
+     * Whether the resolver top candidate satisfies exact-match expectations.
+     *
+     * This currently mirrors the resolver's calibrated exact-match heuristic
+     * used by the policy overlay.
+     */
+    readonly exactMatchCandidatePresent?: boolean | undefined;
+  };
+
   /** Whether constraint evidence (filter satisfaction) is present. */
   readonly constraintEvidencePresent?: boolean;
+
+  /** Richer hard-constraint coverage details for ranked routes. */
+  readonly constraintEvidence?: {
+    /** Required hard-constraint attributes from the query plan. */
+    readonly requiredAttributes: readonly string[];
+
+    /** Hard-constraint attributes explicitly matched by the top ranked result. */
+    readonly matchedRequiredAttributes: readonly string[];
+
+    /** Hard-constraint attributes still unmet on the top ranked result. */
+    readonly unmetRequiredAttributes: readonly string[];
+
+    /** Inferred attributes represented on the ranked result for trace/debugging. */
+    readonly inferredAttributes: readonly string[];
+  };
 
   /** Whether anchor evidence (similarity to anchor entity) is present. */
   readonly anchorEvidencePresent?: boolean;
 
+  /** Richer anchor evidence details for ranked mixed routes. */
+  readonly anchorEvidence?: {
+    /** Resolver emitted a topEntity for the anchored route. */
+    readonly topEntityPresent: boolean;
+
+    /** Whether a ranked top result was available for anchor validation. */
+    readonly rankedTopResultPresent?: boolean | undefined;
+
+    /** Whether the ranked top result matched the resolver-selected entity. */
+    readonly rankedTopResultMatchesTopEntity?: boolean | undefined;
+
+    /** Whether the ranked evidence trail contains an anchor signal. */
+    readonly rankedSignalPresent?: boolean | undefined;
+  };
+
   /** Total count of evidence references across all candidates. */
   readonly evidenceRefCount?: number;
+}
+
+/**
+ * Returns whether the evidence summary carries sufficient identity evidence.
+ *
+ * When richer identity details are present, they override the coarse boolean
+ * so ranked-route drift cannot silently mark identity evidence as present.
+ */
+export function hasIdentityEvidence(summary?: EvidenceSummary): boolean {
+  if (summary?.identityEvidence !== undefined) {
+    const detail = summary.identityEvidence;
+    if (
+      !detail.topEntityPresent ||
+      !detail.resolverTopCandidateMatchesTopEntity ||
+      detail.resolverEvidenceRefCount <= 0
+    ) {
+      return false;
+    }
+
+    if (detail.rankedTopResultPresent === true) {
+      return (
+        detail.rankedTopResultMatchesTopEntity === true &&
+        (detail.rankedEvidenceItemCount ?? 0) > 0
+      );
+    }
+
+    return true;
+  }
+
+  return summary?.identityEvidencePresent === true;
+}
+
+/**
+ * Returns whether the evidence summary carries sufficient hard-constraint evidence.
+ */
+export function hasConstraintEvidence(summary?: EvidenceSummary): boolean {
+  if (summary?.constraintEvidence !== undefined) {
+    const detail = summary.constraintEvidence;
+    return (
+      detail.requiredAttributes.every((attribute) =>
+        detail.matchedRequiredAttributes.includes(attribute),
+      ) &&
+      detail.unmetRequiredAttributes.length === 0
+    );
+  }
+
+  return summary?.constraintEvidencePresent === true;
+}
+
+/**
+ * Returns whether the evidence summary carries sufficient anchor evidence.
+ */
+export function hasAnchorEvidence(summary?: EvidenceSummary): boolean {
+  if (summary?.anchorEvidence !== undefined) {
+    const detail = summary.anchorEvidence;
+    if (!detail.topEntityPresent) {
+      return false;
+    }
+
+    if (detail.rankedTopResultPresent === true) {
+      return (
+        detail.rankedTopResultMatchesTopEntity === true &&
+        detail.rankedSignalPresent === true
+      );
+    }
+
+    return true;
+  }
+
+  return summary?.anchorEvidencePresent === true;
 }
 
 /**

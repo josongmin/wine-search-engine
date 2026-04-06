@@ -22,6 +22,7 @@ import {
   buildSparseFilters,
   buildDenseFilters,
 } from './mapping.js';
+import { normalizeRetrievalHitSummary } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -159,6 +160,7 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   const drinkingWindowEnd = typeof fields['drinking_window_end'] === 'number'
     ? fields['drinking_window_end']
     : undefined;
+  const drinkingWindowModelVersion = trimNonEmpty(fields['drinking_window_model_version']);
   const priceUsd = typeof fields['price_usd'] === 'number' ? fields['price_usd'] : undefined;
   const certifications = Array.isArray(fields['certifications'])
     ? fields['certifications'].filter((value): value is string => typeof value === 'string')
@@ -166,7 +168,7 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
   const soilType = trimNonEmpty(fields['soil_type']);
   const producerType = trimNonEmpty(fields['producer_type']);
 
-  const summary: RetrievalHitSummary = {
+  return normalizeRetrievalHitSummary({
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
     ...(producer !== undefined ? { producer } : {}),
     ...(region !== undefined ? { region } : {}),
@@ -191,13 +193,12 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
     ...(alcoholPct !== undefined ? { alcoholPct } : {}),
     ...(drinkingWindowStart !== undefined ? { drinkingWindowStart } : {}),
     ...(drinkingWindowEnd !== undefined ? { drinkingWindowEnd } : {}),
+    ...(drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion } : {}),
     ...(priceUsd !== undefined ? { priceUsd } : {}),
     ...(certifications !== undefined ? { certifications } : {}),
     ...(soilType !== undefined ? { soilType } : {}),
     ...(producerType !== undefined ? { producerType } : {}),
-  };
-
-  return Object.keys(summary).length > 0 ? summary : undefined;
+  });
 }
 
 // ---------------------------------------------------------------------------

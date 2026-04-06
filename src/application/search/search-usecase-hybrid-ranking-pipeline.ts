@@ -3,10 +3,24 @@ import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candid
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import type { RankingPort } from './port/search-pipeline-deps.port.js';
+import type {
+  BrowseRetrieverPort,
+  CandidatePoolPort,
+  CompareRetrieverPort,
+  RankingPort,
+} from './port/search-pipeline-deps.port.js';
 import { applyLtrRerankIfAvailable } from './search-usecase-ltr-rerank.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
+import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
+
+export interface HybridRankingRouteDeps {
+  readonly candidatePool: CandidatePoolPort;
+  readonly browseRetriever?: BrowseRetrieverPort | undefined;
+  readonly compareRetriever?: CompareRetrieverPort | undefined;
+  readonly ranker: RankingPort;
+  readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
+}
 
 /**
  * Candidate pool output → rank → optional LTR → synthetic hybrid resolve result.
@@ -34,4 +48,26 @@ export async function runHybridRankingPipeline(
   const resolveResult: EntityResolveResult = buildHybridRouteResolveResult(plan, rankedResults);
 
   return { resolveResult, rankedResults };
+}
+
+/**
+ * Shared hybrid-ranked route execution:
+ * specialized retrieval fallback + ranking/LTR + synthetic resolve.
+ */
+export async function executeHybridRouteRankingPipeline(
+  plan: QueryPlanV1,
+  deps: HybridRankingRouteDeps,
+  resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
+): Promise<SearchRouteExecutionResult> {
+  const candidates = await retrieveHybridCandidatesForPlan(
+    plan,
+    {
+      candidatePool: deps.candidatePool,
+      browseRetriever: deps.browseRetriever,
+      compareRetriever: deps.compareRetriever,
+    },
+    resolveEntity,
+  );
+
+  return runHybridRankingPipeline(plan, candidates, deps.ranker, deps.ltrModels);
 }
