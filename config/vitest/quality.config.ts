@@ -6,8 +6,8 @@ export default defineConfig({
     globals: true,
     include: [
       'test/e2e/golden-set.test.ts',
-      'test/e2e/specialized-modes-quality.test.ts',
       'test/e2e/user-journeys.test.ts',
+      'test/e2e/specialized-modes-quality.test.ts',
       'test/integration/decision-utility.test.ts',
       'test/integration/learning-flywheel.test.ts',
       'src/application/search/__tests__/specialized-retrieval-routing.test.ts',

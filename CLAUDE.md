@@ -14,8 +14,10 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 | `npm run test` | Vitest |
 | `npm run test:e2e:contract` | Contract-only HTTP surface checks |
 | `npm run test:e2e:fast` | Main in-memory fast e2e lane used in CI |
-| `npm run test:e2e:inmemory` | Alias for the full in-memory e2e lane |
+| `npm run test:e2e:inmemory` | Alias for `test:e2e:fast` |
+| `npm run test:e2e:runtime` | Runtime/quality-heavy e2e lane (`user-journeys`, `golden-set`, `specialized-modes-quality`) |
 | `npm run test:e2e:vespa` | Vespa-backed e2e lane with setup/teardown |
+| `npm run test:ingest:contract` | ETL/ingest contract checks for exported script helpers |
 | `npm run test:quality:vespa` | Vespa-backed quality regression lane |
 | `npm run verify:http-contracts` | OpenAPI/catalog parity (runs on `git:prepush`) |
 | `npm run git:prepush` | Husky pre-push: typecheck + unit + `verify:http-contracts` |

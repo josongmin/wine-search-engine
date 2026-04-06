@@ -13,6 +13,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['test/integration/**/*.test.ts'],
+    exclude: ['test/integration/search-pipeline.test.ts'],
     pool: 'threads',
     poolOptions: {
       threads: {

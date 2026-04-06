@@ -243,8 +243,8 @@ flowchart TD
 | `npm run eval:noisy:assert-baseline` | 스모크 1회 실행 후 베이스라인 대비 (`eval:noisy:validate` + assert) |
 | `npm run eval:noisy:smoke` | `data/noisy-entity-eval-smoke-results.json` 생성(로컬·아티팩트용) |
 | `npm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
-| `npm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) — CI는 `typecheck`·`e2e fast` 이후 이 잡만 |
-| `npm run test:verification:core` | 로컬/나이틀리용: `typecheck` + 빠른 e2e + `test:verification:noisy` |
+| `npm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) |
+| `npm run test:verification:core` | 로컬/나이틀리용: `typecheck` + `e2e:contract` + `e2e:fast` + `e2e:runtime` + `ingest:contract` + `test:verification:noisy` |
 | `npm run eval:offline:*` | 전체 오프라인 티어; 스모크 베이스라인: `eval:offline:smoke:assert-baseline` |
 
 ---
@@ -266,11 +266,12 @@ flowchart TD
 |------|-------------|-----------|
 | `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + 선택 `src/__tests__` |
 | `config/vitest/integration.config.ts` | `test:integration` | 명시 목록: HTTP 서버, 에러 핸들러, 공개 쿼리 보안, resolve 라우트, 계약 레지스트리, interpret 스키마 등 |
-| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e` | `test/e2e/**/*.test.ts` 중 **`test/e2e/vespa/**` 제외(인메모리 하네스, `singleFork`) |
+| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e`, `test:e2e:inmemory` | 핵심 인메모리 E2E 회귀군: HTTP 계약, watchlist, infrastructure, edge/hard scenario, mixed-search 등 |
+| `config/vitest/e2e.runtime.config.ts` | `test:e2e:runtime` | 런타임/품질 성격이 강한 `user-journeys`, `golden-set`, `specialized-modes-quality` |
 | `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **초소형** PR 스모크: `search-api`, `schema-contract`, `batch-search-api`, `server-protocol`만 |
 | `config/vitest/e2e.vespa.config.ts` | `test:e2e:vespa` (`scripts/run-vespa-e2e.sh`) | 전체 `test/e2e/vespa/**/*.test.ts`; `VESPA_URL` 설정(기본 `http://localhost:18080`) |
 | `config/vitest/watchlist.config.ts` | `test:watchlist` | 워치리스트 도메인 + HTTP + Redis/웹훅 + 계약 매니페스트 겹침 |
-| `config/vitest/quality.config.ts` | `test:quality` | 골든 세트, 사용자 여정, 의사결정 유틸, 학습 플라이휠, eval 단위 테스트 등 |
+| `config/vitest/quality.config.ts` | `test:quality` | 골든 세트, 사용자 여정, specialized quality, 의사결정 유틸, 학습 플라이휠, eval 단위 테스트 등 |
 
 ### 인메모리 E2E (`test/e2e/*.test.ts`, `test:e2e:fast`)
 
@@ -291,7 +292,9 @@ flowchart TD
 | **`watchlist-api.test.ts`** | 워치리스트 CRUD / 전달 |
 | **`infrastructure.test.ts`** | 테스트 하네스에 연결된 인프라 점검 |
 
-**품질 레인:** `test:quality`는 **`golden-set.test.ts`** + **`user-journeys.test.ts`**와 통합/단위 eval 테스트를 함께 돌립니다(`config/vitest/quality.config.ts`).
+**런타임 보강 레인:** `test:e2e:runtime`는 **`golden-set.test.ts`**, **`user-journeys.test.ts`**, **`specialized-modes-quality.test.ts`**를 별도로 묶어 돌립니다.
+
+**품질 레인:** `test:quality`는 위 품질성 e2e 3종과 통합/단위 eval 테스트를 함께 돌립니다(`config/vitest/quality.config.ts`).
 
 ### Vespa 기반 E2E (`test/e2e/vespa/**`, `test:e2e:vespa`)
 
@@ -315,6 +318,7 @@ flowchart TD
 | CI에 가까운 단위 | `npm run test:unit` |
 | HTTP + 통합 | `npm run test:integration` |
 | 전체 인메모리 e2e | `npm run test:e2e:fast` |
+| 런타임/품질 e2e | `npm run test:e2e:runtime` |
 | 최소 계약 스모크 | `npm run test:e2e:contract` |
 | 워치리스트 슬라이스 | `npm run test:watchlist` |
 | 품질 + eval 단위 | `npm run test:quality` |

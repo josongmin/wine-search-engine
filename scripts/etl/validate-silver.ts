@@ -16,21 +16,29 @@ import { parseNdjson } from './ndjson.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
-const REPORT_OUTPUT = 'data/silver-quality-report.json';
+export const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+export const REPORT_OUTPUT = 'data/silver-quality-report.json';
 
 /**
  * Quality gate thresholds (Epic 1).
  * `minRecords`: Current Vivino Bronze connector yields ~7K deduped rows; RFC target remains 8K+ / 10K when the feed grows.
  * Raise `minRecords` toward 8_000 as the snapshot expands (see epic-1-etl-pipeline.md).
  */
-const GATES = {
+export const SILVER_QUALITY_GATES = {
   minRecords: 7_000,
   minTastingNotesCoverage: 0.30,
   minAliasMeanCount: 3,
   bodyMinMean: 0.1,
   bodyMaxMean: 0.9,
 } as const;
+
+export interface SilverQualityGateThresholds {
+  readonly minRecords: number;
+  readonly minTastingNotesCoverage: number;
+  readonly minAliasMeanCount: number;
+  readonly bodyMinMean: number;
+  readonly bodyMaxMean: number;
+}
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -66,28 +74,26 @@ function stdDev(values: readonly number[]): number {
 // Validation
 // ---------------------------------------------------------------------------
 
-function validate(records: readonly EnrichedSilverRecord[]): SilverQualityReport {
+export function validateSilverRecords(
+  records: readonly EnrichedSilverRecord[],
+  gates: SilverQualityGateThresholds = SILVER_QUALITY_GATES,
+): SilverQualityReport {
   const n = records.length;
   const blockers: string[] = [];
   const warnings: string[] = [];
+  const ratio = (count: number): number => (n === 0 ? 0 : count / n);
 
   // Field coverage
   const fieldCoverage: Record<string, number> = {
-    producer: records.filter((r) => r.producer.length > 0).length / n,
-    country: records.filter((r) => r.country.length > 0).length / n,
-    region: records.filter((r) => r.region.length > 0).length / n,
-    grapePrimary:
-      records.filter((r) => r.grapePrimary !== null).length / n,
-    priceUsd:
-      records.filter((r) => r.priceUsd !== null).length / n,
-    searchTextEn:
-      records.filter((r) => r.searchTextEn.length > 30).length / n,
-    flavorProfiles:
-      records.filter((r) => r.flavorProfiles.length > 0).length / n,
-    pairingTags:
-      records.filter((r) => r.pairingTags.length > 0).length / n,
-    vintageYear:
-      records.filter((r) => r.vintageYear !== null).length / n,
+    producer: ratio(records.filter((r) => r.producer.length > 0).length),
+    country: ratio(records.filter((r) => r.country.length > 0).length),
+    region: ratio(records.filter((r) => r.region.length > 0).length),
+    grapePrimary: ratio(records.filter((r) => r.grapePrimary !== null).length),
+    priceUsd: ratio(records.filter((r) => r.priceUsd !== null).length),
+    searchTextEn: ratio(records.filter((r) => r.searchTextEn.length > 30).length),
+    flavorProfiles: ratio(records.filter((r) => r.flavorProfiles.length > 0).length),
+    pairingTags: ratio(records.filter((r) => r.pairingTags.length > 0).length),
+    vintageYear: ratio(records.filter((r) => r.vintageYear !== null).length),
   };
 
   // Distribution checks
@@ -101,27 +107,27 @@ function validate(records: readonly EnrichedSilverRecord[]): SilverQualityReport
   );
 
   // Gate checks
-  if (n < GATES.minRecords) {
+  if (n < gates.minRecords) {
     blockers.push(
-      `Record count ${n} < minimum ${GATES.minRecords} (after dedup)`,
+      `Record count ${n} < minimum ${gates.minRecords} (after dedup)`,
     );
   }
 
-  if (tastingNotesCoverage < GATES.minTastingNotesCoverage) {
+  if (tastingNotesCoverage < gates.minTastingNotesCoverage) {
     blockers.push(
-      `Tasting notes coverage ${(tastingNotesCoverage * 100).toFixed(1)}% < minimum ${GATES.minTastingNotesCoverage * 100}% — semantic search will be severely degraded`,
+      `Tasting notes coverage ${(tastingNotesCoverage * 100).toFixed(1)}% < minimum ${gates.minTastingNotesCoverage * 100}% — semantic search will be severely degraded`,
     );
   }
 
-  if (aliasMeanCount < GATES.minAliasMeanCount) {
+  if (aliasMeanCount < gates.minAliasMeanCount) {
     blockers.push(
-      `Mean alias count ${aliasMeanCount.toFixed(1)} < minimum ${GATES.minAliasMeanCount} — alias search will fail`,
+      `Mean alias count ${aliasMeanCount.toFixed(1)} < minimum ${gates.minAliasMeanCount} — alias search will fail`,
     );
   }
 
-  if (bodyMean < GATES.bodyMinMean || bodyMean > GATES.bodyMaxMean) {
+  if (bodyMean < gates.bodyMinMean || bodyMean > gates.bodyMaxMean) {
     blockers.push(
-      `Body mean ${bodyMean.toFixed(3)} outside expected range [${GATES.bodyMinMean}, ${GATES.bodyMaxMean}] — possible normalisation bug`,
+      `Body mean ${bodyMean.toFixed(3)} outside expected range [${gates.bodyMinMean}, ${gates.bodyMaxMean}] — possible normalisation bug`,
     );
   }
 
@@ -155,14 +161,14 @@ function validate(records: readonly EnrichedSilverRecord[]): SilverQualityReport
 // Main
 // ---------------------------------------------------------------------------
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   console.log(`Validating Silver records from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');
   const { records } = parseNdjson<EnrichedSilverRecord>(content, args.input);
 
-  const report = validate(records);
+  const report = validateSilverRecords(records);
 
   // Write report
   await fs.writeFile(
@@ -199,8 +205,10 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

@@ -1,22 +1,67 @@
 # 리트리버 파이프라인 (Retriever pipeline)
 
-> **Audience:** 시스템·아키텍처 **리뷰** 전용. 스코프는 `README.md` 참고.
+> **Audience:** 시스템·아키텍처 **리뷰** 전용. 상위 맥락은 [`README.md`](./README.md).
 
-플래너·보안 이후 **`effectiveRoute === 'hybrid'`** 일 때 후보를 만드는 경로를 코드 기준으로 정리한다. 핵심은 (1) **모드별 전문 리트리버**(`browse` / `compare`) 우선, (2) 실패 시 **`CandidatePoolPort.generate`** 로 가는 **하이브리드 풀**(sparse+dense+fusion, RFC-012에 맞춘 도메인 서비스).
+**범위:** 플래너·보안·캐시·SAT 이후, **`effectiveRoute === 'hybrid'`** 일 때 **후보(`HybridCandidate[]`)를 만드는 경로**와, 그 직후 **랭킹·합성 리졸브**까지.  
+**비범위:** `entity` 전용 리졸브, `mixed` 솔버, `DecisionEngine`·`ResponseBuilder` 전체, HTTP 라우트 등록 — 필요 시 아래 “전후 단계”만 참조.
 
 **Last updated:** 2026-04-06
 
 ---
 
-## 1. 한 줄 요약
+## 목차
 
-- **진입:** `SearchUseCase`의 `executeHybridRoute` 또는 `HybridUseCase`가 `executeHybridRouteRankingPipeline`을 호출한다.
-- **후보 생성:** `retrieveHybridCandidatesForPlan`이 `plan.retrievalMode`에 따라 `browseRetriever` / `compareRetriever`를 쓰거나, 기본적으로 `candidatePool.generate(buildHybridRetrievalInputForPlan(...))`로 **Vespa 스파스·임베딩 덴스·RRF 퓨전** 파이프라인을 탄다.
-- **후보 이후:** 동일 파일 흐름에서 `runHybridRankingPipeline`이 `ranker.rank` → 선택적 LTR → `buildHybridRouteResolveResult`로 합성 리졸브 결과를 만든다 (리트리버 이후 랭킹 단계).
+1. [한 줄 요약](#1-한-줄-요약)  
+2. [전후 단계 (이 문서 밖)](#2-전후-단계-이-문서-밖)  
+3. [라우트 스위치 → 하이브리드 실행](#3-라우트-스위치--하이브리드-실행)  
+4. [포트 (도메인 경계)](#4-포트-도메인-경계)  
+5. [`retrieveHybridCandidatesForPlan`](#5-retrievehybridcandidatesforplan--전문-경로-우선-풀-폴백)  
+6. [공유 랭킹 래퍼](#6-공유-랭킹-래퍼-후보--랭커)  
+7. [`CandidatePoolService.generate`](#7-candidatepoolservicegenerate--하이브리드-풀)  
+8. [DI·구현 클래스](#8-di구현-클래스)  
+9. [`entity` / `mixed` 와의 구분](#9-entity--mixed-와의-구분)  
+10. [RFC·리뷰 체크](#10-rfc리뷰-체크)
 
 ---
 
-## 2. 라우트 스위치 → 하이브리드 실행
+## 1. 한 줄 요약
+
+```mermaid
+flowchart TB
+  subgraph retrieve["후보 생성"]
+    M[plan.retrievalMode]
+    BR[browse / compare]
+    CP[CandidatePool.generate]
+    M --> BR
+    M --> CP
+    BR -->|빈 결과 시| CP
+  end
+  subgraph rank["랭킹·합성"]
+    RK[ranker.rank]
+    LTR[applyLtrRerankIfAvailable]
+    RES[buildHybridRouteResolveResult]
+    RK --> LTR --> RES
+  end
+  retrieve --> rank
+```
+
+- **진입:** `SearchUseCase.executeHybridRoute` 또는 `HybridUseCase` → `executeHybridRouteRankingPipeline`.  
+- **후보:** `retrieveHybridCandidatesForPlan` — `producer_browse` / `region_browse` / `compare_candidates` 시 전문 포트 우선, 아니면 **`CandidatePoolPort.generate`** (sparse + dense + RRF, RFC-012).  
+- **이후:** `runHybridRankingPipeline` — `rank` → 선택적 LTR → 합성 `EntityResolveResult`.
+
+---
+
+## 2. 전후 단계 (이 문서 밖)
+
+| 단계 | 위치 | 비고 |
+|------|------|------|
+| 보안·플래너·SAT·캐시·분해 | `runSearchPreRoutePhase` (`search-usecase-pre-route-phase.ts`) | 하이브리드 **전** |
+| 라우트 결정 | `buildSearchRouteResolutionContext` (`search-usecase-route-resolution.ts`) | `retrieval_mode` vs 플래너 |
+| 엔트로피·결정·응답·캐시 | `runSearchPostRoutePhase` (`search-usecase-post-route-phase.ts`) | 하이브리드 **후** |
+
+---
+
+## 3. 라우트 스위치 → 하이브리드 실행
 
 `effectiveRoute`가 `hybrid`이면 `dispatchSearchRouteExecution`이 `executeHybrid`만 호출한다.
 
@@ -42,7 +87,7 @@ export async function dispatchSearchRouteExecution(
 }
 ```
 
-메인 검색의 하이브리드 경로는 후보를 가져온 뒤 랭킹 파이프라인으로 넘긴다.
+메인 검색의 하이브리드 경로:
 
 ```196:210:src/application/search/search.usecase.ts
   private async executeHybridRoute(
@@ -62,7 +107,7 @@ export async function dispatchSearchRouteExecution(
   }
 ```
 
-`HybridUseCase`는 pre-route 이후 동일한 `executeHybridRouteRankingPipeline` 경로를 쓴다.
+`HybridUseCase` — pre-route 이후 동일한 `executeHybridRouteRankingPipeline`:
 
 ```102:116:src/application/search/hybrid.usecase.ts
     const { plan } = preRoute;
@@ -84,9 +129,7 @@ export async function dispatchSearchRouteExecution(
 
 ---
 
-## 3. 포트 (도메인 경계)
-
-리트리버 관련 주입 포트는 `CandidatePoolPort` · `BrowseRetrieverPort` · `CompareRetrieverPort` 이다.
+## 4. 포트 (도메인 경계)
 
 ```29:57:src/application/search/port/search-pipeline-deps.port.ts
 export interface CandidatePoolPort {
@@ -118,9 +161,7 @@ export interface CompareRetrieverPort {
 
 ---
 
-## 4. `retrieveHybridCandidatesForPlan` — 전문 경로 우선, 풀 폴백
-
-`plan.retrievalMode`가 `producer_browse` / `region_browse` / `compare_candidates` 이면 각각 브라우즈·컴페어 리트리버를 시도하고, 비어 있거나 해당 모드가 아니면 **`CandidatePoolPort.generate`** 로 폴백한다. `compare_candidates`는 앵커 엔티티가 필요해 `resolveEntity(plan)`을 먼저 호출한다.
+## 5. `retrieveHybridCandidatesForPlan` — 전문 경로 우선, 풀 폴백
 
 ```74:138:src/application/search/search-usecase-hybrid-candidates.ts
 /**
@@ -190,13 +231,11 @@ export async function retrieveHybridCandidatesForPlan(
 }
 ```
 
-`buildHybridRetrievalInputForPlan`은 정규화/원문 쿼리와 제약을 `HybridRetrievalInput`으로 묶는다 (`60:71:src/application/search/search-usecase-hybrid-candidates.ts`).
+`buildHybridRetrievalInputForPlan`: `60:71:src/application/search/search-usecase-hybrid-candidates.ts`.
 
 ---
 
-## 5. 공유 랭킹 래퍼 (후보 → 랭커)
-
-배치·메인·하이브리드 유스케이스가 같은 “후보 + 랭크” 조합을 쓰도록 `executeHybridRouteRankingPipeline`이 `retrieveHybridCandidatesForPlan`과 `runHybridRankingPipeline`을 연결한다.
+## 6. 공유 랭킹 래퍼 (후보 → 랭커)
 
 ```128:144:src/application/search/search-usecase-hybrid-ranking-pipeline.ts
 export async function executeHybridRouteRankingPipeline(
@@ -247,9 +286,9 @@ export async function runHybridRankingPipeline(
 
 ---
 
-## 6. `CandidatePoolService.generate` — 하이브리드 풀 (기본 리트리버)
+## 7. `CandidatePoolService.generate` — 하이브리드 풀
 
-`CandidatePoolPort`의 구현체는 `CandidatePoolService` (`src/domain/retrieval/service/candidate-pool.ts`). 난이도에 따라 `CascadeRouter`가 단계(`sparse` / `dense` / `anchor_neighborhood` / `rerank`)를 고르고, sparse·dense·앵커 이웃 검색 후 **RRF 퓨전**, 제약 주석·하드 필터, top-K 반환.
+구현체 `src/domain/retrieval/service/candidate-pool.ts` — `CascadeRouter` 단계, RRF, 하드 필터, top-K.
 
 ```15:43:src/domain/retrieval/service/candidate-pool.ts
 /**
@@ -359,11 +398,11 @@ export class CandidatePoolService {
 
 ---
 
-## 7. DI (구성 루트)
+## 8. DI·구현 클래스
 
-`container-core-builders.ts`에서 풀·브라우즈·컴페어 리트리버가 `SearchIndexPort` 등과 함께 조립된다.
+`container-core-builders.ts`에서 풀·브라우즈·컴페어 조립.
 
-**도메인 구현 클래스:** `BrowseRetriever` → `src/domain/retrieval/service/browse-retriever.ts`, `CompareRetriever` → `src/domain/retrieval/service/compare-retriever.ts` (둘 다 `SearchIndexPort` 기반 sparse/제약 경로).
+**도메인 구현:** `BrowseRetriever` → `src/domain/retrieval/service/browse-retriever.ts`, `CompareRetriever` → `src/domain/retrieval/service/compare-retriever.ts` (`SearchIndexPort` 기반).
 
 ```114:134:src/config/container-core-builders.ts
 export function buildCandidatePool(
@@ -389,17 +428,49 @@ export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRet
 }
 ```
 
----
-
-## 8. `entity` / `mixed` 와의 구분 (참고)
-
-- **`entity` 라우트:** 스파스·덴스 풀 없이 리졸버만 (`executeEntityRoute`).
-- **`mixed` 라우트:** `MixedSolver`·`similarRetrieval` 등 **별도** 혼합 솔버 경로 (`search.usecase.ts`의 `executeMixed` → `mixedSolver.solve`). 이 문서의 “하이브리드 리트리버 파이프라인”과는 다른 모듈이다. 구현은 `src/domain/mixed/` 및 `src/config/container-core-builders.ts`의 `buildMixedSolver` 참고.
+**런타임 인덱스:** `VespaSearchIndex` (`src/infrastructure/vespa/vespa-search-index.ts`) — `SearchIndexPort` 구현.
 
 ---
 
-## 관련 RFC
+## 9. `entity` / `mixed` 와의 구분
 
-- **RFC-012** — Hybrid retrieval (sparse + dense + fusion 개념 정합)
+| 라우트 | 후보 풀 | 메모 |
+|--------|---------|------|
+| **entity** | 없음 | `executeEntityRoute` → 리졸버만 |
+| **hybrid** | 이 문서 전체 | `retrieveHybridCandidatesForPlan` + `runHybridRankingPipeline` |
+| **mixed** | 별도 | `MixedSolver.solve` (`src/domain/mixed/`, `buildMixedSolver`) — 하이브리드 풀과 **다른** 코드 경로 |
 
-인덱스: `docs/RFC-INDEX.md`.
+---
+
+## 10. RFC·리뷰 체크
+
+**RFC**
+
+| RFC | 이 문서와의 관계 |
+|-----|------------------|
+| **RFC-012** | Hybrid retrieval (sparse+dense+fusion) — 정합의 핵심 |
+| **RFC-005** | `QueryPlanV1`, `retrievalMode` — 전문 브라우즈/컴페어 분기 입력 |
+| **RFC-013** | Ranking signals — 랭커 출력은 “authority”가 아님 (Decision은 별층) |
+
+**리뷰어 자가 점검**
+
+- [ ] `compare_candidates`에서 앵커가 없으면 어떤 경로로 폴백하는가? (§5 스위치 + `resolveEntity`)  
+- [ ] `CandidatePoolService`가 스킵하는 phase는 어디에 기록되는가? (`retrievalTrace.skippedPhases`)  
+- [ ] LTR은 어디서 켜지는가? (`applyLtrRerankIfAvailable`, `ltrModels` 주입)
+
+**RFC 목차:** [`docs/RFC-INDEX.md`](../RFC-INDEX.md).
+
+---
+
+## 빠른 파일 인덱스
+
+| 파일 |
+|------|
+| `search-usecase-route-dispatch.ts` |
+| `search.usecase.ts` |
+| `hybrid.usecase.ts` |
+| `search-usecase-hybrid-candidates.ts` |
+| `search-usecase-hybrid-ranking-pipeline.ts` |
+| `search-usecase-hybrid-route.ts` (합성 resolve) |
+| `candidate-pool.ts` |
+| `container-core-builders.ts` |

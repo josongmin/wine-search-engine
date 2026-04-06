@@ -1,23 +1,67 @@
-# System overview (리뷰 전용)
+# System overview — review kit
 
-이 디렉터리는 **시스템·아키텍처 리뷰할 때만** 쓰는 읽기 순서와 요약을 두는 곳이다. **온보딩 SSOT나 장기 문서가 아니다.**  
-`docs/sessions/`, `docs/bugbash-*` 등 다른 메모는 정리되거나 지워질 수 있고, **리뷰 시에는 아래 목록만 보면 된다.**
+**목적:** 아키텍처·시스템 **리뷰 한 세션**에 필요한 경로를 한 디렉터리에서 끝낸다.  
+**아닌 것:** 온보딩 SSOT, 제품 스펙 원문, 버그배시/세션 노트 대체재.
 
-## 리뷰용 읽기 순서 (짧게)
+| 문서 | 한 줄 |
+|------|--------|
+| [`retriever-pipeline.md`](./retriever-pipeline.md) | 런타임 **하이브리드 리트리버** — 후보 생성 → 랭킹까지 코드 앵커 |
+| [`ingestion-pipeline.md`](./ingestion-pipeline.md) | **배치 인입·ETL·인덱싱·평가 시딩** — `scripts/`·도구·제외 범위까지 |
 
-1. **루트 `CLAUDE.md`** — 스택, 디렉터리, `npm run` 품질 게이트  
-2. **`retriever-pipeline.md`** (이 폴더) — 하이브리드 리트리버 경로(후보 생성·풀·코드 라인 인용)  
-3. **`ingestion-pipeline.md`** (이 폴더) — Bronze→Silver→Enriched→Vespa·평가 시딩·`scripts/etl` 전부  
-4. **`docs/http-contract-surface.md`** — 공개 HTTP 계약의 SSOT가 어디인지  
-5. **`docs/RFC-INDEX.md`** — 목차만 보고 필요한 RFC만 골라 읽기  
-6. **도메인·계약 축** (리뷰 깊이에 따라 선택): `RFC-000` → `RFC-005`~`008` → `RFC-014`~`016` (`docs/RFC-*.md`)
+외부으로 한 번만 열면 되는 것: 루트 [`CLAUDE.md`](../../CLAUDE.md), [`docs/http-contract-surface.md`](../http-contract-surface.md), [`docs/RFC-INDEX.md`](../RFC-INDEX.md).
 
-그 외 계획서·버그배시·세션 노트는 **리뷰 필수 경로에 넣지 않는다.**
+---
 
-## 이 폴더에 있는 파일
+## 두 축 (머릿속 모델)
 
-| 파일 | 용도 |
-|------|------|
-| `README.md` | 리뷰 전용 스코프·읽기 순서 (본 파일) |
-| `retriever-pipeline.md` | 리트리버 파이프라인 요약 + 관련 소스 코드 라인 인용 |
-| `ingestion-pipeline.md` | 인입·ETL·인덱싱·평가 시딩 스크립트 전체 목록 + 코드 인용 |
+```mermaid
+flowchart LR
+  subgraph offline["오프라인 (ingestion)"]
+    B[Bronze PG]
+    S[Silver NDJSON]
+    E[Enriched + 확장]
+    V[Vespa index]
+    B --> S --> E --> V
+  end
+  subgraph online["온라인 (retrieval)"]
+    P[Planner + security]
+    H[Hybrid candidates]
+    R[Ranker + LTR]
+    D[Decision + response]
+    P --> H --> R --> D
+  end
+  V -.->|검색 인덱스| H
+```
+
+- **Ingestion** 문서: 왼쪽 가지 전부 + 평가·학습 보조 스크립트.
+- **Retriever** 문서: 오른쪽 가지 중 **`effectiveRoute === hybrid'`** 일 때만 상세.
+
+---
+
+## 읽기 순서 (권장)
+
+1. **`CLAUDE.md`** — 스택, 디렉터리, `npm run typecheck|test|lint` 게이트  
+2. **`retriever-pipeline.md`** — 질의가 인덱스에 닿는 **런타임** 경로  
+3. **`ingestion-pipeline.md`** — 카탈로그가 쌓이는 **오프라인** 경로  
+4. **`http-contract-surface.md`** — 공개 HTTP 계약의 SSOT (카탈로그·route-contracts)  
+5. **`RFC-INDEX.md`** → 필요 시 **`RFC-000`**, **005–008**, **014–016** (계약·플래너·결정·API)
+
+`docs/sessions/`, `docs/bugbash-*` 는 **필수 리뷰 경로에 넣지 않는다.**
+
+---
+
+## 리뷰 완료 기준 (DoD)
+
+리뷰어가 아래를 **예/아니오**로 채울 수 있으면 이 키트는 역할을 다했다.
+
+| 질문 | 답을 찾는 곳 |
+|------|----------------|
+| 하이브리드 후보가 어디서 나오고, 언제 Vespa 풀로 폴백하는가? | `retriever-pipeline.md` §4–6 |
+| Bronze→Silver→Enriched→Vespa 배치 순서와 파일명 함정(Track C·validate)은? | `ingestion-pipeline.md` §2 |
+| `scripts/etl` 전 파일과 그 밖 학습·시딩 스크립트가 표로 잡혀 있는가? | `ingestion-pipeline.md` §3, §11–§15 |
+| 공개 API 계약 파일이 어디인가? | `http-contract-surface.md` |
+| 인입 문서에 **의도적 제외**로 박힌 스크립트는 무엇인가? | `ingestion-pipeline.md` §17 |
+
+---
+
+**Last updated:** 2026-04-06

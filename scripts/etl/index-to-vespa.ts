@@ -27,7 +27,7 @@ import type { RetrievalDocument } from '../../src/domain/retrieval/model/retriev
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+export const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
 const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
@@ -112,7 +112,7 @@ function parseArgs(argv: string[]): Args {
 // Deterministic embedding fallback (same formula as seed-wines-real.ts)
 // ---------------------------------------------------------------------------
 
-function deterministicEmbedding(
+export function deterministicEmbedding(
   body: number,
   sweetness: number,
   acidity: number,
@@ -141,7 +141,7 @@ function deterministicEmbedding(
  * Build the embedding text for a document.
  * BGE-M3 document side: NO instruction prefix (query side adds prefix at search time).
  */
-function buildEmbedText(rec: EnrichedSilverRecord): string {
+export function buildEmbedText(rec: EnrichedSilverRecord): string {
   return [
     rec.canonicalLabel,
     rec.producer,
@@ -161,7 +161,7 @@ const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
  * found in the alias bundle (added by generate-korean-aliases.ts).
  * Returns empty string when no Korean aliases exist for this record.
  */
-function buildSearchTextKo(rec: EnrichedSilverRecord): string {
+export function buildSearchTextKo(rec: EnrichedSilverRecord): string {
   const koAliases = rec.aliases.noisyRecallProjection.filter((a) =>
     HANGUL_RE.test(a),
   );
@@ -169,7 +169,7 @@ function buildSearchTextKo(rec: EnrichedSilverRecord): string {
   return [rec.canonicalLabel, ...koAliases].join(' ');
 }
 
-function silverToRetrievalDoc(
+export function silverToRetrievalDoc(
   rec: EnrichedSilverRecord,
   embedding: readonly number[],
 ): RetrievalDocument {
@@ -224,7 +224,7 @@ function chunkArray<T>(arr: readonly T[], size: number): T[][] {
 // Main
 // ---------------------------------------------------------------------------
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   console.log(`Reading enriched Silver from ${args.input} …`);
@@ -321,8 +321,10 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}
