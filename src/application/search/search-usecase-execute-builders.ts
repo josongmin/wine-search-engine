@@ -3,6 +3,7 @@ import type { DecisionOutput } from '../../domain/decision/model/decision-output
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
 /**
@@ -107,6 +108,7 @@ export function buildEntropyAbstainResponseParams(options: {
   readonly entropy: number;
   readonly results: readonly ResultItem[];
   readonly rankedResults: readonly RankedResult[];
+  readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[];
 }): ResponseBuildParams {
   const {
     plan,
@@ -119,6 +121,7 @@ export function buildEntropyAbstainResponseParams(options: {
     entropy,
     results,
     rankedResults,
+    retrievalProvenanceSlices,
   } = options;
 
   const decisionOutput: DecisionOutput = {
@@ -188,5 +191,8 @@ export function buildEntropyAbstainResponseParams(options: {
     route: effectiveRoute,
     retrievalModeSource,
     plannerSuggestedMode,
+    ...(retrievalProvenanceSlices !== undefined && retrievalProvenanceSlices.length > 0
+      ? { retrievalProvenanceSlices }
+      : {}),
   };
 }

@@ -3,7 +3,7 @@ import type { SearchResponseV1 } from '../../domain/response/model/search-respon
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
-import { detectDecomposition, isValidDecomposition } from '../../domain/query/service/decomposition-detector.js';
+import { analyzeQueryDecomposition, isValidDecomposition } from '../../domain/query/service/decomposition-detector.js';
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { ResponseBuilderPort } from './port/search-pipeline-deps.port.js';
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
@@ -14,6 +14,8 @@ import { tryGetCachedSearchResponse } from './search-usecase-cache-lookup.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate, type SearchSecurityGateDeps } from './search-usecase-security-gate.js';
+import { logSearchEvent } from '../../observability/log-search-event.js';
+import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 
 export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
@@ -44,11 +46,11 @@ export async function runSearchPreRoutePhase(
   const sanitizedQuery = await securityGate.getSafeQueryOrThrow(ctx.request.query);
 
   if (ctx.decomposedSearch) {
-    const decomposed = detectDecomposition(sanitizedQuery);
-    if (isValidDecomposition(decomposed)) {
+    const decomposition = analyzeQueryDecomposition(sanitizedQuery);
+    if (isValidDecomposition(decomposition.outcome)) {
       const response = await ctx.decomposedSearch.execute(
-        decomposed.subQueries,
-        decomposed.comparisonIntent,
+        decomposition.outcome.subQueries,
+        decomposition.outcome.comparisonIntent,
         sanitizedQuery,
         ctx.requestId,
         ctx.startTime,
@@ -60,6 +62,10 @@ export async function runSearchPreRoutePhase(
           ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
         },
       );
+      logSearchEvent({
+        runtime_correlation_ref: ctx.requestId,
+        decomposition_strategy: decomposition.hint.strategy,
+      });
       return { outcome: 'return', response };
     }
   }
@@ -68,6 +74,14 @@ export async function runSearchPreRoutePhase(
     sanitizedQuery,
     buildPlannerContextFromSearchRequest(ctx.request),
   );
+
+  logSearchEvent({
+    runtime_correlation_ref: ctx.requestId,
+    query_observability: planToObservabilitySlice(ctx.requestId, plan),
+    ...(plan.decompositionHint !== undefined
+      ? { decomposition_strategy: plan.decompositionHint.strategy }
+      : {}),
+  });
 
   const satResult = ctx.constraintSAT.check(plan.constraints);
   if (satResult.contradicted) {

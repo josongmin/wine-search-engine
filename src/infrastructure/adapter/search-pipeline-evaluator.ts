@@ -7,11 +7,13 @@
 
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
+import type { SearchExecutorEvaluationResult } from '../../application/search/port/search-executor.port.js';
 import type { EvalCase } from '../../domain/evaluation/model/eval-case.js';
 import type {
   SearchPipelinePort,
   SearchPipelineOutput,
 } from '../../domain/evaluation/service/eval-runner.js';
+import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 
 const log = bootstrapLogger.child({ component: 'SearchPipelineEvaluator' });
@@ -62,16 +64,33 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
     const startMs = Date.now();
 
     try {
-      const rawResponse = await this.searchUseCase.execute(
-        {
-          query,
-          context: {
-            locale: 'en-US',
-            currency: 'USD',
-          },
-        },
-        `eval-${Date.now()}`,
-      );
+      const requestId = `eval-${Date.now()}`;
+      const evalExecution = 'executeForEvaluation' in this.searchUseCase
+        && typeof this.searchUseCase.executeForEvaluation === 'function'
+        ? await this.searchUseCase.executeForEvaluation(
+            {
+              query,
+              context: {
+                locale: 'en-US',
+                currency: 'USD',
+              },
+            },
+            requestId,
+          )
+        : {
+            response: await this.searchUseCase.execute(
+              {
+                query,
+                context: {
+                  locale: 'en-US',
+                  currency: 'USD',
+                },
+              },
+              requestId,
+            ),
+          } satisfies SearchExecutorEvaluationResult;
+
+      const rawResponse = evalExecution.response;
 
       const latencyMs = Date.now() - startMs;
 
@@ -87,6 +106,10 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       const topResult = response.results[0];
       const predictedEntityId = topResult?.entity.entityId;
       const evidenceItems = topResult?.evidenceItems ?? [];
+      const retrievalProvenanceSlices: readonly EvalProvenanceSlice[] =
+        response.meta.retrievalProvenanceSlices
+        ?? evalExecution.retrievalProvenanceSlices
+        ?? [];
 
       const topResultScoreComponents = topResult
         ? {
@@ -103,6 +126,7 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
         evidenceItems,
         latencyMs,
         decisionSnapshot: decision.decisionSnapshot,
+        ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
         ...(predictedEntityId !== undefined ? { predictedEntityId } : {}),
         ...(topResultScoreComponents !== undefined
           ? { topResultScoreComponents }

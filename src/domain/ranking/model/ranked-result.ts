@@ -1,4 +1,5 @@
 import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
+import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 
 /**
  * Breakdown of individual scoring components for a ranked candidate.
@@ -138,4 +139,32 @@ export interface RankedResult {
   readonly grapePrimary?: string | undefined;
   readonly appellation?: string | undefined;
   readonly producerPrestige?: number | undefined;
+  readonly retrievalProvenance?: CandidateProvenance | undefined;
+
+  /**
+   * T5.2: Coarse prune metadata — present only for retained candidates.
+   * Pruned candidates never appear in results, so this is always defined
+   * on every result returned by the ranking pipeline.
+   */
+  readonly coarsePruneMeta?: CoarsePruneMeta | undefined;
+}
+
+/**
+ * T5.2: Coarse prune stage metadata attached to retained candidates.
+ */
+export interface CoarsePruneMeta {
+  readonly preGateScore: number;
+  readonly hardConstraintPassed: boolean;
+  readonly entityIntegrityPassed: boolean;
+}
+
+/**
+ * T5.2: Summary of the coarse prune stage for one query execution.
+ */
+export interface CoarsePruneStageSummary {
+  readonly inputCount: number;
+  readonly retainedCount: number;
+  readonly prunedCount: number;
+  readonly hardConstraintFailCount: number;
+  readonly entityIntegrityFailCount: number;
 }

@@ -157,6 +157,25 @@ export interface SearchIndexPort {
   ): Promise<readonly DenseHit[]>;
 
   /**
+   * Execute a learned-sparse (SPLADE-style) retrieval pass.
+   *
+   * Queries the `learned_sparse_weights` mapped tensor field in the index
+   * using a `dotProduct` operator. Returns results in {@link DenseHit}
+   * format so they can be fused alongside dense ANN hits.
+   *
+   * @param queryWeights - Token → weight pairs produced by the sparse encoder.
+   *   When empty, the implementation must return `[]` immediately (no I/O).
+   * @param filters - Optional filter expressions to narrow the candidate set.
+   * @param limit - Maximum number of hits to return.
+   * @returns Hits sorted by descending learned-sparse score, shaped as DenseHit.
+   */
+  searchLearnedSparse(
+    queryWeights: readonly { token: string; weight: number }[],
+    filters?: readonly string[],
+    limit?: number,
+  ): Promise<readonly DenseHit[]>;
+
+  /**
    * Retrieve a single document by entity ID.
    *
    * @param entityId - The entity to fetch.

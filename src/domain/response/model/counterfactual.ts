@@ -1,3 +1,4 @@
+import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EntityId, DecisionSnapshot } from '../../shared/types/index.js';
 
 /**
@@ -63,4 +64,7 @@ export interface ResponseMeta {
   readonly blockingEligible?: boolean;
 
   readonly degradationReasons?: readonly string[] | undefined;
+
+  /** Canonical retrieval provenance slices for runtime/eval SSOT. */
+  readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[] | undefined;
 }

@@ -5,8 +5,8 @@
  * into a bounded, diverse final set according to AssemblyPolicy.
  *
  * Algorithm (5 steps):
- * 1. Collect all candidates from all channels into a unified pool (by entityId).
- * 2. Apply hard filters: remove candidates that fail hard constraints.
+ * 1. Apply hard filters: remove candidates that fail hard constraints.
+ * 2. Dedup by entityId, keeping the highest fusionScore among valid candidates.
  * 3. Sort by fusionScore descending.
  * 4. Apply protected recall: ensure protected candidates survive.
  * 5. Apply quotas and maxTotal cap.
@@ -91,9 +91,17 @@ export class CandidateAssembler {
   ): AssemblyResult {
     const inputCount = candidates.length;
 
-    // --- Step 1: Dedup by entityId, keeping highest fusionScore ---
+    // --- Step 1: Remove candidates with failed hard constraints ---
+    const hardFiltered = candidates.filter(
+      (c) =>
+        c.provenance.failedHardConstraints === undefined ||
+        c.provenance.failedHardConstraints.length === 0,
+    );
+    const afterHardFilter = hardFiltered.length;
+
+    // --- Step 2: Dedup by entityId, keeping highest fusionScore among valid candidates ---
     const byEntityId = new Map<string, CandidateEnvelope>();
-    for (const c of candidates) {
+    for (const c of hardFiltered) {
       const existing = byEntityId.get(c.entityId);
       if (existing === undefined || c.provenance.fusionScore > existing.provenance.fusionScore) {
         byEntityId.set(c.entityId, c);
@@ -102,16 +110,8 @@ export class CandidateAssembler {
     const deduped = [...byEntityId.values()];
     const afterDedup = deduped.length;
 
-    // --- Step 2: Remove candidates with failed hard constraints ---
-    const hardFiltered = deduped.filter(
-      (c) =>
-        c.provenance.failedHardConstraints === undefined ||
-        c.provenance.failedHardConstraints.length === 0,
-    );
-    const afterHardFilter = hardFiltered.length;
-
     // --- Step 3: Sort by fusionScore descending ---
-    const sorted = [...hardFiltered].sort(
+    const sorted = [...deduped].sort(
       (a, b) => b.provenance.fusionScore - a.provenance.fusionScore,
     );
 

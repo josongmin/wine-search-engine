@@ -2,6 +2,7 @@ import type { SearchIndexPort, DenseHit } from '../port/search-index.port.js';
 import type { EmbeddingServicePort } from '../port/embedding-service.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import type { CandidateEnvelope, CandidateChannel } from '../model/candidate-envelope.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
@@ -9,6 +10,9 @@ import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
+import { CandidateAssembler, type AssemblyPolicy } from './candidate-assembly.js';
+import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
+import { accumulateEvidence } from './evidence-accumulator.js';
 import type { CacheService } from '../../performance/index.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
@@ -29,6 +33,7 @@ export class CandidatePoolService {
   private readonly profileService: RetrievalProfileService;
   private readonly cascadeRouter: CascadeRouter;
   private readonly constraintFilter: ConstraintFilter;
+  private readonly candidateAssembler: CandidateAssembler;
 
   constructor(
     private readonly searchIndex: SearchIndexPort,
@@ -40,6 +45,7 @@ export class CandidatePoolService {
     this.profileService = new RetrievalProfileService();
     this.cascadeRouter = new CascadeRouter();
     this.constraintFilter = new ConstraintFilter();
+    this.candidateAssembler = new CandidateAssembler();
   }
 
   /**
@@ -158,8 +164,20 @@ export class CandidatePoolService {
       ...this.constraintFilter.applyHardFilters(candidates, input.hardConstraints),
     ];
 
-    // Step 6: Return top-K
-    return candidates.slice(0, profile.finalTopK);
+    // Step 6: Structured assembly + protected recall.
+    const envelopes = candidates.map((candidate) =>
+      hybridCandidateToEnvelope(candidate, profile.fusionK));
+    const protectedCandidates = applyProtectedRecallPolicy(envelopes);
+    const accumulated = accumulateEvidence(protectedCandidates);
+    const assembled = this.candidateAssembler.assemble(
+      accumulated.map((entry) => entry.mergedEnvelope),
+      buildAssemblyPolicy(profile.finalTopK),
+    );
+
+    return assembled.candidates.map((candidate) => ({
+      ...candidate.legacyCandidate,
+      retrievalProvenance: candidate.provenance,
+    }));
   }
 
   /**
@@ -176,4 +194,87 @@ export class CandidatePoolService {
     // Use the highest anchor confidence as a proxy for alias match strength
     return Math.max(...anchors.map((a) => a.confidence));
   }
+}
+
+function buildAssemblyPolicy(maxTotal: number): AssemblyPolicy {
+  return {
+    maxTotal,
+    protectExactMatches: true,
+    protectAnchorConditioned: true,
+  };
+}
+
+function reciprocalRankContribution(rank: number, fusionK: number): number {
+  return 1 / (fusionK + rank);
+}
+
+function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {
+  const channels: CandidateChannel[] = [];
+  if (candidate.sparseRank !== undefined) channels.push('sparse_bm25');
+  if (candidate.denseRank !== undefined) channels.push('dense_semantic');
+  if (candidate.anchorRank !== undefined) channels.push('dense_anchor');
+  return channels;
+}
+
+function hybridCandidateToEnvelope(
+  candidate: HybridCandidate,
+  fusionK: number,
+): CandidateEnvelope {
+  if (candidate.retrievalProvenance !== undefined) {
+    return {
+      entityId: candidate.entityId,
+      provenance: candidate.retrievalProvenance,
+      legacyCandidate: candidate,
+    };
+  }
+
+  const channels = toCandidateChannels(candidate);
+  const channelScores = [];
+
+  if (candidate.sparseRank !== undefined) {
+    channelScores.push({
+      channel: 'sparse_bm25' as const,
+      rawScore: candidate.retrievalFusionScore,
+      rank: candidate.sparseRank,
+      rrfContribution: reciprocalRankContribution(candidate.sparseRank, fusionK),
+    });
+  }
+  if (candidate.denseRank !== undefined) {
+    channelScores.push({
+      channel: 'dense_semantic' as const,
+      rawScore: candidate.retrievalFusionScore,
+      rank: candidate.denseRank,
+      rrfContribution: reciprocalRankContribution(candidate.denseRank, fusionK),
+    });
+  }
+  if (candidate.anchorRank !== undefined) {
+    channelScores.push({
+      channel: 'dense_anchor' as const,
+      rawScore: candidate.retrievalFusionScore,
+      rank: candidate.anchorRank,
+      rrfContribution: reciprocalRankContribution(candidate.anchorRank, fusionK),
+    });
+  }
+
+  const provenance = {
+    channels,
+    channelScores,
+    queryViewMatches: [],
+    anchorConditioned: candidate.anchorRank !== undefined,
+    matchedFilterConstraints: candidate.matchedConstraints,
+    ...(candidate.unmetHardConstraints !== undefined
+      ? { failedHardConstraints: candidate.unmetHardConstraints }
+      : {}),
+    fusionProfile: candidate.retrievalTrace.retrievalProfile,
+    fusionScore: candidate.retrievalFusionScore,
+  } satisfies CandidateEnvelope['provenance'];
+
+  return {
+    entityId: candidate.entityId,
+    provenance,
+    legacyCandidate: {
+      ...candidate,
+      retrievalProvenance: provenance,
+    },
+  };
 }

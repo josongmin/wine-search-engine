@@ -78,6 +78,7 @@ async function main(): Promise<void> {
     trustProxy: config.http.trustProxy,
     bodyLimitBytes: config.http.bodyLimitBytes,
     enableSecurityHeaders: config.http.securityHeaders,
+    httpDebugSecret: config.http.debugSecret,
   });
 
   let shuttingDown = false;

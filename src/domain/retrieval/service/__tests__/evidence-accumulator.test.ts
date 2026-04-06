@@ -49,6 +49,7 @@ describe('accumulateEvidence', () => {
     expect(result[0]!.entityId).toBe('e1');
     expect(result[0]!.bestFusionScore).toBe(0.8);
     expect(result[0]!.canonicalEnvelope).toBe(c);
+    expect(result[0]!.mergedEnvelope.provenance).toEqual(c.provenance);
   });
 
   it('merges two contributions for same entity, picks best fusionScore', () => {
@@ -100,6 +101,43 @@ describe('accumulateEvidence', () => {
     });
     const result = accumulateEvidence([c1, c2]);
     expect(result[0]!.bestRankPerChannel['sparse_bm25']).toBe(1);
+  });
+
+  it('builds a merged envelope with accumulated provenance propagated downstream', () => {
+    const c1 = makeCandidate('e1', 0.5, {
+      channels: ['sparse_bm25'],
+      channelScores: [{ channel: 'sparse_bm25', rawScore: 0.5, rank: 3, rrfContribution: 0.01 }],
+      matchedFilterConstraints: ['vintage:2020'],
+      queryViewMatches: [{ viewName: 'strict', matchedText: 'opus one', channel: 'sparse_bm25' }],
+      protectedInclusionReason: 'hard_constraint_compatible',
+    });
+    const c2 = makeCandidate('e1', 0.9, {
+      channels: ['dense_semantic'],
+      channelScores: [{ channel: 'dense_semantic', rawScore: 0.9, rank: 1, rrfContribution: 0.03 }],
+      matchedFilterConstraints: ['region:napa'],
+      anchorConditioned: true,
+      protectedInclusionReason: 'known_item_lookup',
+    });
+    const [result] = accumulateEvidence([c1, c2]);
+
+    expect(result?.mergedEnvelope.provenance.channels).toEqual(['sparse_bm25', 'dense_semantic']);
+    expect(result?.mergedEnvelope.provenance.matchedFilterConstraints).toEqual([
+      'vintage:2020',
+      'region:napa',
+    ]);
+    expect(result?.mergedEnvelope.provenance.anchorConditioned).toBe(true);
+    expect(result?.mergedEnvelope.provenance.protectedInclusionReason).toBe('known_item_lookup');
+    expect(result?.mergedEnvelope.provenance.channelScores).toEqual([
+      expect.objectContaining({ channel: 'sparse_bm25', rank: 3 }),
+      expect.objectContaining({ channel: 'dense_semantic', rank: 1 }),
+    ]);
+    expect(result?.mergedEnvelope.legacyCandidate.retrievalProvenance).toEqual(
+      result?.mergedEnvelope.provenance,
+    );
+    expect(result?.mergedEnvelope.legacyCandidate.matchedConstraints).toEqual([
+      'vintage:2020',
+      'region:napa',
+    ]);
   });
 
   it('sorts output by bestFusionScore descending', () => {

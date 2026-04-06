@@ -1,0 +1,138 @@
+import { describe, expect, it, vi } from 'vitest';
+import { SearchPipelineEvaluator } from '../search-pipeline-evaluator.js';
+
+describe('SearchPipelineEvaluator', () => {
+  it('prefers direct eval provenance slices when the search executor exposes them', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async () => {
+        throw new Error('fallback execute should not be used');
+      }),
+      executeForEvaluation: vi.fn(async () => ({
+        response: {
+          queryType: 'search' as const,
+          engineDecision: {
+            decisionStatus: 'resolved',
+            decisionConfidence: 0.91,
+            decisionSnapshot: {
+              model_versions: {},
+              index_versions: {},
+              policy_rule_version: '1',
+              threshold_profile_id: 'default',
+              planner_version: '1',
+              feature_flags: {},
+            },
+          },
+          results: [],
+          meta: {
+            queryTimeMs: 1,
+            route: 'hybrid',
+            version: '1.0.0',
+            engine_schema_version: 'search_response_v1',
+          },
+        },
+        retrievalProvenanceSlices: [{
+          queryId: 'eval-fixed',
+          candidateEntityId: 'wine-direct',
+          channels: ['dense_semantic'],
+          topChannel: 'dense_semantic',
+          anchorConditioned: false,
+          protected: true,
+          protectedReason: 'known_item_lookup',
+          fusionScore: 0.77,
+          rank: 1,
+        }],
+      })),
+    };
+
+    const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
+    const output = await evaluator.execute('Opus One', 'known_item_lookup');
+
+    expect(searchUseCase.executeForEvaluation).toHaveBeenCalledOnce();
+    expect(output.retrievalProvenanceSlices).toEqual([
+      expect.objectContaining({
+        candidateEntityId: 'wine-direct',
+        topChannel: 'dense_semantic',
+        protectedReason: 'known_item_lookup',
+      }),
+    ]);
+  });
+
+  it('derives retrieval provenance slices from result items when direct slices are absent', async () => {
+    const searchUseCase = {
+      execute: vi.fn(async () => ({
+        queryType: 'search' as const,
+        engineDecision: {
+          decisionStatus: 'resolved',
+          decisionConfidence: 0.91,
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            feature_flags: {},
+          },
+        },
+        meta: {
+          queryTimeMs: 1,
+          route: 'hybrid',
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+        },
+        results: [
+          {
+            entity: {
+              entityId: 'wine-1',
+              canonicalLabel: 'Wine 1',
+              type: 'wine',
+            },
+            relevanceScore: 0.88,
+            match: {
+              matchType: 'hybrid',
+              anchorUsed: true,
+              scoreComponents: {
+                lexical: 0.3,
+                semantic: 0.5,
+                attribute: 0.1,
+                popularity: 0.0,
+                preferenceAlignment: 0.0,
+              },
+            },
+            constraints: { matched: [], unmet: [], inferred: [] },
+            uncertainty: {
+              uncertaintyConfidence: 0.9,
+              missingInfo: [],
+              approximationUsed: false,
+            },
+            evidenceItems: [
+              {
+                type: 'semantic_relevance',
+                source: 'ranking_signal_computer',
+                contribution: '+0.55',
+                strength: 'high',
+                provenance: 'semantic',
+              },
+              {
+                type: 'anchor_similarity',
+                source: 'ranking_signal_computer',
+                contribution: '+0.35',
+                strength: 'medium',
+                provenance: 'anchor',
+              },
+            ],
+          },
+        ],
+      })),
+    };
+
+    const evaluator = new SearchPipelineEvaluator(searchUseCase as never);
+    const output = await evaluator.execute('Opus One like wine', 'anchored_similarity');
+
+    expect(output.retrievalProvenanceSlices).toEqual([
+      expect.objectContaining({
+        candidateEntityId: 'wine-1',
+        topChannel: 'anchor_similarity',
+      }),
+    ]);
+  });
+});

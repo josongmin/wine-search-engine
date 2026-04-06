@@ -65,6 +65,9 @@ schema wine_entity {
         distance-metric: angular
       }
     }
+    field learned_sparse_weights type tensor<float>(token{}) {
+      indexing: summary | attribute
+    }
   }
 
   fieldset default {
@@ -92,6 +95,15 @@ schema wine_entity {
     }
     first-phase {
       expression: 0.5 * bm25(canonical_label) + 0.5 * closeness(field, embedding)
+    }
+  }
+
+  rank-profile learned_sparse inherits default {
+    inputs {
+      query(sparse_query_embedding) tensor<float>(token{})
+    }
+    first-phase {
+      expression: dotProduct(learned_sparse_weights, sparse_query_embedding)
     }
   }
 }

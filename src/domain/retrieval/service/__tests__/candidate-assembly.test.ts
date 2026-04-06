@@ -79,6 +79,19 @@ describe('CandidateAssembler', () => {
     expect(result.candidates.map((c) => c.entityId)).not.toContain('e2');
   });
 
+  it('keeps a valid lower-scoring duplicate when the higher-scoring duplicate fails hard constraints', () => {
+    const candidates = [
+      makeCandidate('e1', 0.95, { failedHardConstraints: ['region:napa'] }),
+      makeCandidate('e1', 0.6),
+      makeCandidate('e2', 0.5),
+    ];
+    const result = assembler.assemble(candidates, defaultPolicy);
+    expect(result.candidates.map((c) => c.entityId)).toContain('e1');
+    expect(result.candidates.find((c) => c.entityId === 'e1')?.provenance.fusionScore).toBe(0.6);
+    expect(result.trace.afterHardFilter).toBe(2);
+    expect(result.trace.afterDedup).toBe(2);
+  });
+
   it('sorts output by fusionScore descending', () => {
     const candidates = [
       makeCandidate('e1', 0.3),

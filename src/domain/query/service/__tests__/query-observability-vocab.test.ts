@@ -130,6 +130,30 @@ describe('planToObservabilitySlice', () => {
     expect(slice.queryFamily).toBe('ambiguous');
   });
 
+  it('derives queryFamily multi_intent for non-comparison decomposition hints', () => {
+    const plan = makePlan({
+      intent: 'facet_search',
+      suggestedRetrievalMode: 'attribute_search',
+      decompositionHint: {
+        strategy: 'multi_intent',
+        subQueryCount: 2,
+        confidence: 0.8,
+      },
+      uncertainty: {
+        overall: 0.2,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0.9,
+        constraintConfidence: 0.9,
+      },
+    });
+    const slice = planToObservabilitySlice('q1', plan);
+    expect(slice.queryFamily).toBe('multi_intent');
+  });
+
   it('derives queryFamily attribute_constrained for facet_search with attribute_search mode', () => {
     const plan = makePlan({
       intent: 'facet_search',

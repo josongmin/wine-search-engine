@@ -7,6 +7,7 @@ import type { SessionContext } from './session-context.js';
 import type { QueryBudget } from './query-budget.js';
 import type { QueryTargetType } from './query-target-type.js';
 import type { NormalizedQueryViews } from './query-views.js';
+import type { QueryDecompositionHint } from './query-decomposition.js';
 
 /**
  * The understanding portion of a query plan — everything the planner
@@ -69,4 +70,7 @@ export interface QueryUnderstandingSnapshot {
 
   /** Optional resource budget constraints. */
   readonly queryBudget?: QueryBudget;
+
+  /** Optional decomposition hint for decomposition-aware execution. */
+  readonly decompositionHint?: QueryDecompositionHint;
 }

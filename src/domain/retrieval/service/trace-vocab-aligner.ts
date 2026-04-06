@@ -8,9 +8,19 @@
  * between runtime and eval vocabularies early.
  */
 
-import type { CandidateEnvelope, CandidateChannel } from '../model/candidate-envelope.js';
+import type {
+  CandidateEnvelope,
+  CandidateChannel,
+  CandidateProvenance,
+} from '../model/candidate-envelope.js';
 import type { EvalProvenanceSlice, ProvenanceChannel } from '../model/provenance.js';
 import { isProvenanceChannel, PROVENANCE_CHANNELS } from '../model/provenance.js';
+import type { RankedResult } from '../../ranking/model/ranked-result.js';
+
+interface ProvenanceCarrier {
+  readonly entityId: string;
+  readonly provenance: CandidateProvenance;
+}
 
 // ---------------------------------------------------------------------------
 // Channel alias map: runtime CandidateChannel → canonical ProvenanceChannel
@@ -41,7 +51,7 @@ function toCanonicalChannel(ch: CandidateChannel): ProvenanceChannel | null {
  * Pick the "top channel" — the channel with the highest rrfContribution.
  * Falls back to the first recognized channel if no scores are present.
  */
-function pickTopChannel(candidate: CandidateEnvelope): ProvenanceChannel | null {
+function pickTopChannel(candidate: ProvenanceCarrier): ProvenanceChannel | null {
   let topChannel: CandidateChannel | null = null;
   let topContribution = -Infinity;
 
@@ -73,10 +83,10 @@ function pickTopChannel(candidate: CandidateEnvelope): ProvenanceChannel | null 
  * @param candidate - The candidate envelope.
  * @returns EvalProvenanceSlice or null if no recognized channels are present.
  */
-export function traceToEvalSlice(
+function carrierToEvalSlice(
   queryId: string,
   rank: number,
-  candidate: CandidateEnvelope,
+  candidate: ProvenanceCarrier,
 ): EvalProvenanceSlice | null {
   const canonicalChannels: ProvenanceChannel[] = candidate.provenance.channels
     .map(toCanonicalChannel)
@@ -102,6 +112,30 @@ export function traceToEvalSlice(
     fusionScore: prov.fusionScore,
     rank,
   };
+}
+
+export function traceToEvalSlice(
+  queryId: string,
+  rank: number,
+  candidate: CandidateEnvelope,
+): EvalProvenanceSlice | null {
+  return carrierToEvalSlice(queryId, rank, {
+    entityId: candidate.entityId,
+    provenance: candidate.provenance,
+  });
+}
+
+export function rankedResultToEvalSlice(
+  queryId: string,
+  result: RankedResult,
+): EvalProvenanceSlice | null {
+  if (result.retrievalProvenance === undefined) {
+    return null;
+  }
+  return carrierToEvalSlice(queryId, result.rank, {
+    entityId: result.entityId,
+    provenance: result.retrievalProvenance,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +168,20 @@ export function candidatesToEvalSlices(
   const slices: EvalProvenanceSlice[] = [];
   for (let i = 0; i < candidates.length; i++) {
     const slice = traceToEvalSlice(queryId, i + 1, candidates[i]!);
+    if (slice !== null) {
+      slices.push(slice);
+    }
+  }
+  return slices;
+}
+
+export function rankedResultsToEvalSlices(
+  queryId: string,
+  rankedResults: readonly RankedResult[],
+): readonly EvalProvenanceSlice[] {
+  const slices: EvalProvenanceSlice[] = [];
+  for (const result of rankedResults) {
+    const slice = rankedResultToEvalSlice(queryId, result);
     if (slice !== null) {
       slices.push(slice);
     }

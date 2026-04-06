@@ -1,7 +1,8 @@
 import type { EntityId, QueryClass } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
+import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import type { RankingInput } from '../model/ranking-input.js';
-import type { RankedResult, ComponentScores } from '../model/ranked-result.js';
+import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import { resolveWeights } from '../model/scoring-weights.js';
@@ -67,6 +68,7 @@ interface ScoredEntry {
   readonly matchedConstraints: readonly string[];
   readonly unmetConstraints: readonly string[];
   readonly inferredConstraints: readonly string[];
+  readonly retrievalProvenance?: CandidateProvenance | undefined;
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
   readonly drinkingWindowModelVersion?: string | undefined;
@@ -150,6 +152,8 @@ export type RankerOptions = {
  * ranked results is NOT a calibrated confidence C.
  */
 export class Ranker {
+  private _lastCoarsePruneSummary: CoarsePruneStageSummary | undefined;
+  private _lastRerankExecuted = false;
   private readonly signalComputer: SignalComputer;
   private readonly scoreAggregator: ScoreAggregator;
   private readonly evidenceMapper: EvidenceMapper;
@@ -182,6 +186,22 @@ export class Ranker {
   }
 
   /**
+   * T5.2: Returns the coarse prune summary from the most recent rank() call.
+   * Consumed by RankingStagePipeline to populate the coarse_prune stage trace.
+   */
+  getLastCoarsePruneSummary(): CoarsePruneStageSummary | undefined {
+    return this._lastCoarsePruneSummary;
+  }
+
+  /**
+   * T5.1: Returns whether precision reranking was executed in the most recent rank() call.
+   * Authoritative flag — reliable even when blended scores remain in descending order.
+   */
+  getLastRerankExecuted(): boolean {
+    return this._lastRerankExecuted;
+  }
+
+  /**
    * Ranks candidates according to the scoring formula and returns
    * ordered results with evidence trails.
    *
@@ -190,6 +210,8 @@ export class Ranker {
    */
   async rank(input: RankingInput): Promise<readonly RankedResult[]> {
     const { queryPlan, candidates, anchorProfile, constraints } = input;
+
+    this._lastRerankExecuted = false;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -251,6 +273,9 @@ export class Ranker {
         ...(candidate.producerPrestige !== undefined
           ? { producerPrestige: candidate.producerPrestige }
           : {}),
+        ...(candidate.retrievalProvenance !== undefined
+          ? { retrievalProvenance: candidate.retrievalProvenance }
+          : {}),
         matchedConstraints: constraintState.matchedConstraints,
         unmetConstraints: constraintState.unmetConstraints,
         inferredConstraints: constraintState.inferredConstraints,
@@ -259,10 +284,31 @@ export class Ranker {
       });
     }
 
-    // Step 4: Filter out -Infinity scores (hard constraint / integrity failures)
-    const viable = scored.filter(
-      (entry) => Number.isFinite(entry.finalScore),
-    );
+    // Step 4 (T5.2): Coarse prune — explicit stage boundary.
+    // Filter out -Infinity scores (hard constraint / entity integrity failures).
+    // Track prune reason counts for CoarsePruneStageSummary.
+    let hardConstraintFailCount = 0;
+    let entityIntegrityFailCount = 0;
+
+    const viable = scored.filter((entry) => {
+      if (Number.isFinite(entry.finalScore)) return true;
+      if (!entry.componentScores.hardConstraintPass) {
+        hardConstraintFailCount++;
+      } else {
+        entityIntegrityFailCount++;
+      }
+      return false;
+    });
+
+    // T5.2: Expose coarse prune summary — RankingStagePipeline reads this via
+    // getLastCoarsePruneSummary() to populate the coarse_prune stage trace.
+    this._lastCoarsePruneSummary = {
+      inputCount: scored.length,
+      retainedCount: viable.length,
+      prunedCount: scored.length - viable.length,
+      hardConstraintFailCount,
+      entityIntegrityFailCount,
+    };
 
     // Step 5: Sort by finalScore descending
     viable.sort((a, b) => b.finalScore - a.finalScore);
@@ -279,6 +325,7 @@ export class Ranker {
           viable,
           queryPlan.queryClass,
         );
+        this._lastRerankExecuted = true;
       } catch (err) {
         bootstrapLogger.warn(
           {
@@ -293,7 +340,9 @@ export class Ranker {
       }
     }
 
-    // Step 7 & 8: Map to RankedResult with evidence items and assign ranks
+    // Step 7 & 8: Map to RankedResult with evidence items and assign ranks.
+    // T5.2: coarsePruneMeta is attached to every retained candidate.
+    // Pruned candidates never appear here (they were filtered out in step 4).
     const results: RankedResult[] = finalOrder.map((entry, index) => {
       const evidenceItems = this.evidenceMapper.mapToEvidence(
         entry.componentScores,
@@ -309,11 +358,19 @@ export class Ranker {
         matchedConstraints: entry.matchedConstraints,
         unmetConstraints: entry.unmetConstraints,
         inferredConstraints: entry.inferredConstraints,
+        coarsePruneMeta: {
+          preGateScore: entry.finalScore,
+          hardConstraintPassed: entry.componentScores.hardConstraintPass,
+          entityIntegrityPassed: entry.componentScores.entityIntegrity > 0,
+        },
         ...(entry.producer !== undefined ? { producer: entry.producer } : {}),
         ...(entry.region !== undefined ? { region: entry.region } : {}),
         ...(entry.grapePrimary !== undefined ? { grapePrimary: entry.grapePrimary } : {}),
         ...(entry.appellation !== undefined ? { appellation: entry.appellation } : {}),
         ...(entry.producerPrestige !== undefined ? { producerPrestige: entry.producerPrestige } : {}),
+        ...(entry.retrievalProvenance !== undefined
+          ? { retrievalProvenance: entry.retrievalProvenance }
+          : {}),
         ...(entry.drinkingWindowStart !== undefined ? { drinkingWindowStart: entry.drinkingWindowStart } : {}),
         ...(entry.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: entry.drinkingWindowEnd } : {}),
         ...(entry.drinkingWindowModelVersion !== undefined

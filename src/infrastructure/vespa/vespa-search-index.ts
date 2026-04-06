@@ -268,6 +268,76 @@ export class VespaSearchIndex implements SearchIndexPort {
   }
 
   // -------------------------------------------------------------------------
+  // searchLearnedSparse
+  // -------------------------------------------------------------------------
+
+  /**
+   * Executes a learned-sparse (SPLADE-style) retrieval pass against the
+   * `learned_sparse_weights` mapped tensor field.
+   *
+   * Uses Vespa's `dotProduct` operator — the correct operator for
+   * `tensor<float>(token{})` mapped tensor fields. The query tensor is passed
+   * as an input parameter rather than inlined in the YQL to avoid size limits
+   * on large token vocabularies.
+   *
+   * @param queryWeights - Token → weight pairs from the sparse encoder.
+   *   An empty array causes an immediate `[]` return without any I/O.
+   * @param filters - Optional filter tokens (see {@link buildDenseFilters}).
+   * @param limit - Maximum hits to return (default: 100).
+   * @returns Hits sorted by descending learned-sparse score.
+   */
+  async searchLearnedSparse(
+    queryWeights: readonly { token: string; weight: number }[],
+    filters?: readonly string[],
+    limit?: number,
+  ): Promise<readonly DenseHit[]> {
+    if (queryWeights.length === 0) {
+      return [];
+    }
+
+    const targetHits = limit ?? DEFAULT_DENSE_LIMIT;
+    const filterClause = buildDenseFilters(filters ?? []);
+
+    // Build the query tensor as a Vespa mapped tensor cell array.
+    // Vespa computes dotProduct(learned_sparse_weights, sparse_query_embedding)
+    // by summing weight_doc[t] * weight_query[t] for each shared token t.
+    const sparseQueryTensor = {
+      cells: queryWeights.map(({ token, weight }) => ({
+        address: { token },
+        value: weight,
+      })),
+    };
+
+    const yql =
+      `select * from ${SCHEMA} where ` +
+      `({targetHits: ${targetHits}}` +
+      `dotProduct(learned_sparse_weights, sparse_query_embedding))` +
+      ` AND availability = true` +
+      filterClause +
+      ` limit ${targetHits}`;
+
+    const response = await this.client.query(yql, {
+      'ranking.profile': 'learned_sparse',
+      'presentation.summary': 'default',
+      'input.query(sparse_query_embedding)': sparseQueryTensor,
+    });
+
+    const children = response.root.children ?? [];
+
+    return children.map((hit, index) => {
+      const entityId = this.extractEntityId(hit);
+      const summary = extractHitSummary(hit.fields);
+      return {
+        entityId,
+        score: hit.relevance,
+        rank: index + 1,
+        similarity: normaliseSimilarity(hit.relevance),
+        ...(summary !== undefined ? { summary } : {}),
+      } satisfies DenseHit;
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // getDocument
   // -------------------------------------------------------------------------
 

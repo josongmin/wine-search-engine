@@ -31,6 +31,10 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     return this.inner.denseSearch(...args);
   }
 
+  searchLearnedSparse(...args: Parameters<SearchIndexPort['searchLearnedSparse']>) {
+    return this.inner.searchLearnedSparse(...args);
+  }
+
   getDocument(...args: Parameters<SearchIndexPort['getDocument']>) {
     return this.inner.getDocument(...args);
   }

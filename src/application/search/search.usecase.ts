@@ -13,6 +13,7 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
+import type { SearchExecutorEvaluationResult } from './port/search-executor.port.js';
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type {
@@ -33,6 +34,10 @@ import { buildSearchRouteResolutionContext } from './search-usecase-route-resolu
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
+import {
+  rankedResultsToEvalProvenanceSlices,
+  searchResponseToEvalProvenanceSlices,
+} from './search-usecase-eval-provenance.js';
 
 export type { SearchRequest } from './search-request.dto.js';
 
@@ -103,6 +108,22 @@ export class SearchUseCase {
     request: SearchRequest,
     requestId: string,
   ): Promise<SearchResponseV1 | ComparisonSearchResponse> {
+    const execution = await this.executeInternal(request, requestId, false);
+    return execution.response;
+  }
+
+  async executeForEvaluation(
+    request: SearchRequest,
+    requestId: string,
+  ): Promise<SearchExecutorEvaluationResult> {
+    return this.executeInternal(request, requestId, true);
+  }
+
+  private async executeInternal(
+    request: SearchRequest,
+    requestId: string,
+    includeEvalProvenance: boolean,
+  ): Promise<SearchExecutorEvaluationResult> {
     const startTime = Date.now();
 
     const preRoute = await runSearchPreRoutePhase({
@@ -124,7 +145,15 @@ export class SearchUseCase {
     });
 
     if (preRoute.outcome === 'return') {
-      return preRoute.response;
+      const response = preRoute.response;
+      if (includeEvalProvenance && response.queryType === 'search') {
+        const retrievalProvenanceSlices = searchResponseToEvalProvenanceSlices(response);
+        return {
+          response,
+          ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+        };
+      }
+      return { response };
     }
 
     const { plan } = preRoute;
@@ -150,7 +179,7 @@ export class SearchUseCase {
     );
 
     // Steps 3b–7: Entropy abstain (RFC-013) → DecisionEngine → response → cache write
-    return runSearchPostRoutePhase({
+    const response = await runSearchPostRoutePhase({
       plan,
       request,
       requestId,
@@ -168,6 +197,15 @@ export class SearchUseCase {
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
     });
+
+    const retrievalProvenanceSlices = includeEvalProvenance
+      ? rankedResultsToEvalProvenanceSlices(requestId, rankedResults)
+      : [];
+
+    return {
+      response,
+      ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+    };
   }
 
   /**

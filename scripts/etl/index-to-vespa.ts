@@ -204,6 +204,9 @@ export function silverToRetrievalDoc(
     ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
     ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
     ...(rec.ratingAvg !== null ? { criticScoreNormalized: rec.ratingAvg / 5 } : {}),
+    ...(rec.learnedSparseWeights !== undefined
+      ? { learnedSparseWeights: rec.learnedSparseWeights }
+      : {}),
   };
   return doc;
 }

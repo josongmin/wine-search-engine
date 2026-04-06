@@ -14,6 +14,7 @@ import { buildSearchCacheRequestContext } from './search-usecase-cache-context.j
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
+import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
 import { topKFinalScores } from './search-usecase-ranking-scores.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
@@ -81,6 +82,10 @@ export async function runRankedRouteDecisionPhase(
     ctx.rankedResults,
     ctx.drinkingWindow,
   );
+  const retrievalProvenanceSlices = rankedResultsToEvalProvenanceSlices(
+    ctx.requestId,
+    ctx.rankedResults,
+  );
   const counterfactuals = ctx.includeCounterfactuals === false
     ? []
     : buildSearchCounterfactuals(
@@ -93,6 +98,7 @@ export async function runRankedRouteDecisionPhase(
     decisionOutput,
     results,
     ...(counterfactuals.length > 0 ? { counterfactuals } : {}),
+    ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
     requestId: ctx.requestId,
     queryTimeMs,
     route: ctx.effectiveRoute,
@@ -140,6 +146,10 @@ export async function runSearchPostRoutePhase(
       ctx.rankedResults,
       ctx.drinkingWindow,
     );
+    const retrievalProvenanceSlices = rankedResultsToEvalProvenanceSlices(
+      ctx.requestId,
+      ctx.rankedResults,
+    );
     const response = ctx.responseBuilder.build(
       buildEntropyAbstainResponseParams({
         plan: ctx.plan,
@@ -152,6 +162,7 @@ export async function runSearchPostRoutePhase(
         entropy: abstainDecision.entropy,
         results,
         rankedResults: ctx.rankedResults,
+        ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
       }),
     );
     const entropyEngineDecision = response.engineDecision as

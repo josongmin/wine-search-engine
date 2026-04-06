@@ -5,7 +5,7 @@
  * No I/O occurs in this module — all functions are deterministic transforms.
  */
 
-import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import type { RetrievalDocument, DocumentSparseVector } from '../../domain/retrieval/model/retrieval-document.js';
 import {
   RETRIEVAL_HIT_SUMMARY_KEYS,
   type RetrievalHitSummary,
@@ -70,6 +70,40 @@ function getStringArray(
 ): readonly string[] {
   const v = fields[key];
   return isStringArray(v) ? v : [];
+}
+
+/**
+ * Parses a Vespa mapped sparse tensor (tensor<float>(token{})) back into a
+ * {@link DocumentSparseVector}. Returns `undefined` for absent or malformed values.
+ */
+function parseSparseWeightsTensor(raw: unknown): DocumentSparseVector | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const obj = raw as Record<string, unknown>;
+  const cells = obj['cells'];
+  if (!Array.isArray(cells)) return undefined;
+
+  const entries: { token: string; weight: number }[] = [];
+  for (const cell of cells) {
+    if (typeof cell !== 'object' || cell === null) continue;
+    const c = cell as Record<string, unknown>;
+    const address = c['address'];
+    const value = c['value'];
+    if (
+      typeof address !== 'object' ||
+      address === null ||
+      typeof value !== 'number'
+    ) continue;
+    const token = (address as Record<string, unknown>)['token'];
+    if (typeof token !== 'string') continue;
+    entries.push({ token, weight: value });
+  }
+
+  if (entries.length === 0) return undefined;
+  const weightSum = entries.reduce((s, e) => s + e.weight, 0);
+  const modelId = isString(obj['modelId']) ? obj['modelId'] : '';
+  const rawVersion = obj['schemaVersion'];
+  const schemaVersion = isNumber(rawVersion) ? rawVersion : 1;
+  return { entries, weightSum, modelId, schemaVersion };
 }
 
 /**
@@ -229,6 +263,18 @@ export function toVespaFields(
   if (doc.flavorProfiles !== undefined) fields['flavor_profiles'] = [...doc.flavorProfiles];
   if (doc.oakTreatment !== undefined) fields['oak_treatment'] = doc.oakTreatment;
 
+  // Learned sparse weights: serialize as Vespa mapped tensor cells.
+  // Skip when entries is empty — an empty tensor cell array is a no-op in Vespa
+  // and causes parseSparseWeightsTensor to return undefined on roundtrip anyway.
+  if (doc.learnedSparseWeights !== undefined && doc.learnedSparseWeights.entries.length > 0) {
+    fields['learned_sparse_weights'] = {
+      cells: doc.learnedSparseWeights.entries.map((e) => ({
+        address: { token: e.token },
+        value: e.weight,
+      })),
+    };
+  }
+
   return fields;
 }
 
@@ -270,6 +316,9 @@ export function fromVespaFields(
   const flavorProfilesRaw = fields['flavor_profiles'];
   const flavorProfiles = isStringArray(flavorProfilesRaw) ? flavorProfilesRaw : undefined;
   const oakTreatment = getOptionalString(fields, 'oak_treatment');
+
+  // Learned sparse weights
+  const learnedSparseWeights = parseSparseWeightsTensor(fields['learned_sparse_weights']);
 
   return {
     entityId: createEntityId(getString(fields, 'entity_id')),
@@ -319,6 +368,7 @@ export function fromVespaFields(
     ...(summary.certifications !== undefined && { certifications: [...summary.certifications] }),
     ...(summary.soilType !== undefined && { soilType: summary.soilType }),
     ...(summary.producerType !== undefined && { producerType: summary.producerType }),
+    ...(learnedSparseWeights !== undefined && { learnedSparseWeights }),
   };
 }
 

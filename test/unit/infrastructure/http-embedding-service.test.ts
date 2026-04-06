@@ -100,7 +100,7 @@ describe('HttpEmbeddingService', () => {
     });
 
     await expect(service.embed('query')).rejects.toThrow(
-      'Embedding service: unexpected response shape',
+      'Embedding API: unexpected response shape',
     );
   });
 

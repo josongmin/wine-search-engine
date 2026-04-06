@@ -11,6 +11,7 @@ import type { QueryBudget } from './query-budget.js';
 import type { QueryTargetType } from './query-target-type.js';
 import type { NormalizedQueryViews } from './query-views.js';
 import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.js';
+import type { QueryDecompositionHint } from './query-decomposition.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -95,6 +96,9 @@ export interface QueryPlanV1 {
   /** Optional resource budget constraints. */
   readonly queryBudget?: QueryBudget | undefined;
 
+  /** Optional decomposition hint for decomposition-aware execution. */
+  readonly decompositionHint?: QueryDecompositionHint | undefined;
+
   /** Inferred target entity type for result grouping (Epic 8). */
   readonly targetEntityType?: QueryTargetType | undefined;
 }
@@ -125,6 +129,7 @@ export interface QueryPlanV2 {
   readonly thresholdProfileId: string;
   readonly sessionContext?: SessionContext;
   readonly queryBudget?: QueryBudget;
+  readonly decompositionHint?: QueryDecompositionHint;
 
   // --- Admission context (planner still populates this) ---
   readonly admission_context?: {
@@ -159,5 +164,6 @@ export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstan
     thresholdProfileId: plan.thresholdProfileId,
     ...(plan.sessionContext !== undefined && { sessionContext: plan.sessionContext }),
     ...(plan.queryBudget !== undefined && { queryBudget: plan.queryBudget }),
+    ...(plan.decompositionHint !== undefined && { decompositionHint: plan.decompositionHint }),
   };
 }

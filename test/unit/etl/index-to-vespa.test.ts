@@ -6,6 +6,12 @@ import {
   silverToRetrievalDoc,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { toVespaFields } from '../../../src/infrastructure/vespa/mapping.js';
+import {
+  LEARNED_SPARSE_EVAL_KEY,
+  LEARNED_SPARSE_FIELD_KEY,
+  LEARNED_SPARSE_ETL_KEY,
+  validateLearnedSparseVector,
+} from '../../../scripts/etl/learned-sparse-spec.js';
 
 function makeEnrichedRecord(
   overrides: Partial<EnrichedSilverRecord> = {},
@@ -101,5 +107,111 @@ describe('index-to-vespa bridge', () => {
     expect(fields).not.toHaveProperty('price_usd');
     expect(fields).not.toHaveProperty('flavor_profiles');
     expect(fields).not.toHaveProperty('critic_score_normalized');
+  });
+});
+
+describe('learned sparse ingest contract (T4.1a)', () => {
+  it('LEARNED_SPARSE_EVAL_KEY is the eval presence flag used by offline eval scripts', () => {
+    expect(LEARNED_SPARSE_EVAL_KEY).toBe('learned_sparse_present');
+  });
+
+  it('LEARNED_SPARSE_FIELD_KEY matches the Vespa schema field name', () => {
+    expect(LEARNED_SPARSE_FIELD_KEY).toBe('learned_sparse_weights');
+  });
+
+  it('LEARNED_SPARSE_ETL_KEY matches the Silver record property name', () => {
+    expect(LEARNED_SPARSE_ETL_KEY).toBe('learnedSparseWeights');
+  });
+
+  it('toVespaFields serializes learnedSparseWeights as Vespa mapped tensor cells', () => {
+    const record = makeEnrichedRecord({
+      learnedSparseWeights: {
+        entries: [
+          { token: 'cabernet', weight: 1.2 },
+          { token: 'napa', weight: 0.8 },
+          { token: 'tannin', weight: 0.5 },
+          { token: 'oak', weight: 0.4 },
+          { token: 'cassis', weight: 0.9 },
+          { token: 'cedar', weight: 0.7 },
+          { token: 'dark', weight: 0.6 },
+          { token: 'fruit', weight: 0.55 },
+          { token: 'bold', weight: 0.45 },
+          { token: 'finish', weight: 0.35 },
+        ],
+        weightSum: 6.45,
+        modelId: 'splade-v1',
+        schemaVersion: 1,
+      },
+    });
+
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    expect(fields).toHaveProperty(LEARNED_SPARSE_FIELD_KEY);
+    const tensor = fields[LEARNED_SPARSE_FIELD_KEY] as { cells: unknown[] };
+    expect(Array.isArray(tensor.cells)).toBe(true);
+    expect(tensor.cells).toHaveLength(10);
+
+    const firstCell = tensor.cells[0] as { address: { token: string }; value: number };
+    expect(firstCell).toHaveProperty('address');
+    expect(firstCell.address).toHaveProperty('token');
+    expect(typeof firstCell.value).toBe('number');
+  });
+
+  it('toVespaFields omits learned_sparse_weights when entries is empty', () => {
+    const record = makeEnrichedRecord({
+      learnedSparseWeights: {
+        entries: [],
+        weightSum: 0,
+        modelId: 'splade-v1',
+        schemaVersion: 1,
+      },
+    });
+
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    expect(fields).not.toHaveProperty(LEARNED_SPARSE_FIELD_KEY);
+  });
+
+  it('silverToRetrievalDoc passes learnedSparseWeights through to RetrievalDocument', () => {
+    const sparseWeights = {
+      entries: [
+        { token: 'cabernet', weight: 1.2 },
+        { token: 'napa', weight: 0.8 },
+        { token: 'tannin', weight: 0.5 },
+        { token: 'oak', weight: 0.4 },
+        { token: 'cassis', weight: 0.9 },
+        { token: 'cedar', weight: 0.7 },
+        { token: 'dark', weight: 0.6 },
+        { token: 'fruit', weight: 0.55 },
+        { token: 'bold', weight: 0.45 },
+        { token: 'finish', weight: 0.35 },
+      ],
+      weightSum: 6.45,
+      modelId: 'splade-v1',
+      schemaVersion: 1,
+    };
+
+    const validation = validateLearnedSparseVector(sparseWeights);
+    expect(validation.valid).toBe(true);
+
+    const record = makeEnrichedRecord({ learnedSparseWeights: sparseWeights });
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+
+    expect(doc.learnedSparseWeights).toBeDefined();
+    expect(doc.learnedSparseWeights?.entries).toHaveLength(10);
+    expect(doc.learnedSparseWeights?.modelId).toBe('splade-v1');
+  });
+
+  it('silverToRetrievalDoc omits learnedSparseWeights when absent from Silver record', () => {
+    const record = makeEnrichedRecord();
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+
+    expect(doc).not.toHaveProperty(LEARNED_SPARSE_ETL_KEY);
   });
 });

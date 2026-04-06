@@ -26,6 +26,7 @@ import {
   detectQueryIntent,
   EXACT_ANCHOR_CONFIDENCE,
 } from './planner-intent-detection.js';
+import { analyzeQueryDecomposition } from './decomposition-detector.js';
 import { extractAllPairingConstraints } from './pairing-extractor.js';
 
 /** Current planner version. */
@@ -206,6 +207,7 @@ export class Planner {
       requires_constraint_evidence: constraints.hard.length > 0,
       requires_anchor_evidence: route === 'mixed' && anchors.length > 0,
     };
+    const decompositionHint = analyzeQueryDecomposition(query).hint;
 
     return {
       rawQuery: query,
@@ -226,6 +228,7 @@ export class Planner {
       admission_context,
       ...(context?.session !== undefined && { sessionContext: context.session }),
       queryBudget: budget,
+      ...(decompositionHint.strategy !== 'none' ? { decompositionHint } : {}),
       ...(targetEntityType !== undefined && { targetEntityType }),
     };
   }

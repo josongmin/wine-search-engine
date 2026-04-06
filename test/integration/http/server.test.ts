@@ -312,3 +312,63 @@ describe('HTTP server route registration', () => {
     }
   });
 });
+
+describe('HTTP debug mode (X-Debug-Key)', () => {
+  const debugSecret = 'integration-test-debug-key';
+
+  it('does not set X-Debug-Active when secret is not configured', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { 'x-debug-key': debugSecret },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-debug-active']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not set X-Debug-Active when X-Debug-Key is wrong', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      httpDebugSecret: debugSecret,
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { 'x-debug-key': 'wrong-key-not-matching' },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-debug-active']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('sets X-Debug-Active when X-Debug-Key matches HTTP_DEBUG_SECRET', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      httpDebugSecret: debugSecret,
+    });
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { 'x-debug-key': debugSecret },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-debug-active']).toBe('1');
+    } finally {
+      await app.close();
+    }
+  });
+});

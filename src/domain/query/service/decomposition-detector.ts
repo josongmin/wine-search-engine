@@ -9,6 +9,11 @@
  *  - Korean: "X와 Y", "X랑 Y 비교", "X 또는 Y"
  */
 
+import {
+  toQueryDecompositionHint,
+  type QueryDecompositionHint,
+} from '../model/query-decomposition.js';
+
 export interface DecompositionResult {
   readonly decomposed: false;
 }
@@ -20,6 +25,11 @@ export interface SuccessfulDecomposition {
 }
 
 export type DecompositionOutcome = DecompositionResult | SuccessfulDecomposition;
+
+export interface QueryDecompositionAnalysis {
+  readonly outcome: DecompositionOutcome;
+  readonly hint: QueryDecompositionHint;
+}
 
 /**
  * Regex patterns for detecting decomposable comparison queries.
@@ -65,6 +75,14 @@ export function detectDecomposition(query: string): DecompositionOutcome {
   }
 
   return { decomposed: false };
+}
+
+export function analyzeQueryDecomposition(query: string): QueryDecompositionAnalysis {
+  const outcome = detectDecomposition(query);
+  return {
+    outcome,
+    hint: toQueryDecompositionHint(outcome),
+  };
 }
 
 /**

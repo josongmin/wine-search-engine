@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectDecomposition } from '../decomposition-detector.js';
+import { analyzeQueryDecomposition, detectDecomposition } from '../decomposition-detector.js';
 
 describe('detectDecomposition', () => {
   it('"Opus One vs Screaming Eagle" → decomposed', () => {
@@ -33,5 +33,12 @@ describe('detectDecomposition', () => {
   it('single entity query → not decomposed', () => {
     const result = detectDecomposition('Chateau Lafite Rothschild 2015');
     expect(result.decomposed).toBe(false);
+  });
+
+  it('returns a decomposition hint that matches the detected outcome', () => {
+    const analysis = analyzeQueryDecomposition('Opus One vs Screaming Eagle');
+    expect(analysis.outcome.decomposed).toBe(true);
+    expect(analysis.hint.strategy).toBe('comparison');
+    expect(analysis.hint.subQueryCount).toBe(2);
   });
 });

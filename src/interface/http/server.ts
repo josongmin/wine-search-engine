@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { type Span, SpanStatusCode, type Tracer } from '@opentelemetry/api';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
+import { registerHttpDebugMode } from './middleware/http-debug-mode.js';
 import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
@@ -57,6 +58,11 @@ export interface ServerOptions {
   readonly bodyLimitBytes?: number;
   /** Register `@fastify/helmet` (CSP disabled for JSON API). @default true */
   readonly enableSecurityHeaders?: boolean;
+  /**
+   * When set, requests with matching `X-Debug-Key` get per-request log level `debug`.
+   * @see registerHttpDebugMode
+   */
+  readonly httpDebugSecret?: string | undefined;
 }
 
 async function registerCorsSupport(
@@ -87,8 +93,14 @@ async function registerCorsSupport(
       callback(null, originList.includes(origin));
     },
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id', 'X-Correlation-Id'],
-    exposedHeaders: ['X-Request-Id', 'Retry-After'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Request-Id',
+      'X-Correlation-Id',
+      'X-Debug-Key',
+    ],
+    exposedHeaders: ['X-Request-Id', 'X-Debug-Active', 'Retry-After'],
     maxAge: 86400,
     strictPreflight: false,
   });
@@ -166,7 +178,8 @@ export async function createServer(
     await registerCorsSupport(app, { nodeEnv, allowedOrigins });
   }
 
-  // Register middleware
+  // Register middleware (debug mode first so request_start uses per-request log level)
+  registerHttpDebugMode(app, { secret: options?.httpDebugSecret });
   registerRequestContext(app);
 
   if (options?.enableTelemetry ?? true) {

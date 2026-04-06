@@ -7,6 +7,10 @@ declare module 'fastify' {
   interface FastifyRequest {
     requestId: string;
     startTime: number;
+    /**
+     * True when `HTTP_DEBUG_SECRET` is set and `X-Debug-Key` matched (see `registerHttpDebugMode`).
+     */
+    debugRequest: boolean;
   }
 }
 

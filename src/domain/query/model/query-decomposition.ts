@@ -5,15 +5,6 @@
  * should be decomposed into sub-queries for parallel execution.
  */
 
-/**
- * Decomposition strategy — how the query is split into sub-queries.
- *
- * - 'comparison'    — "A vs B" style: two named entities to compare
- * - 'multi_intent'  — multiple independent intents in one query
- * - 'anchor_relative' — anchor + relative expression ("cheaper than X")
- * - 'pairing'       — food/occasion pairing ("wine for steak")
- * - 'none'          — no decomposition needed; single-query execution
- */
 export type DecompositionStrategy =
   | 'comparison'
   | 'multi_intent'
@@ -21,29 +12,43 @@ export type DecompositionStrategy =
   | 'pairing'
   | 'none';
 
-/**
- * Hint populated by the Planner when a query should be decomposed.
- * Consumed by ExecutionCompiler and downstream routing logic.
- *
- * This is a planning hint, not a binding execution decision.
- * Execution may override (e.g. if decomposition is disabled by kill-switch).
- */
 export interface QueryDecompositionHint {
-  /** Which decomposition strategy applies. */
   readonly strategy: DecompositionStrategy;
-
-  /**
-   * Expected number of sub-queries after decomposition.
-   * 0 means no decomposition (strategy === 'none').
-   */
   readonly subQueryCount: number;
-
-  /**
-   * Confidence in the decomposition decision (0–1).
-   * Below 0.5 the engine may fall back to single-query execution.
-   */
   readonly confidence: number;
-
-  /** Human-readable reason for debug/trace. */
   readonly reason?: string;
+}
+
+export interface DetectableDecompositionOutcome {
+  readonly decomposed: boolean;
+  readonly subQueries?: readonly [string, string] | undefined;
+  readonly comparisonIntent?: 'compare' | 'recommend_one' | 'list_both' | undefined;
+}
+
+export function toQueryDecompositionHint(
+  outcome: DetectableDecompositionOutcome,
+): QueryDecompositionHint {
+  if (!outcome.decomposed) {
+    return {
+      strategy: 'none',
+      subQueryCount: 0,
+      confidence: 0,
+      reason: 'no_decomposition_detected',
+    };
+  }
+
+  const [left, right] = outcome.subQueries ?? ['', ''];
+  const nonEmptyCount = [left, right].filter((value) => value.trim().length > 0).length;
+  const strategy =
+    outcome.comparisonIntent !== undefined ? 'comparison' : 'multi_intent';
+
+  return {
+    strategy,
+    subQueryCount: nonEmptyCount,
+    confidence: nonEmptyCount === 2 ? 0.9 : 0.4,
+    reason:
+      outcome.comparisonIntent !== undefined
+        ? `comparison:${outcome.comparisonIntent}`
+        : 'generic_multi_intent',
+  };
 }

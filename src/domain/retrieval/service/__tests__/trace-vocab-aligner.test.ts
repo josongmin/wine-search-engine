@@ -3,8 +3,11 @@ import {
   traceToEvalSlice,
   validateTraceVocab,
   candidatesToEvalSlices,
+  rankedResultToEvalSlice,
+  rankedResultsToEvalSlices,
 } from '../trace-vocab-aligner.js';
 import type { CandidateEnvelope } from '../../model/candidate-envelope.js';
+import type { RankedResult } from '../../../ranking/model/ranked-result.js';
 
 // ---------------------------------------------------------------------------
 // Fixture factory
@@ -33,6 +36,34 @@ function makeCandidate(
       fusedScore: 0.8,
       retrievalTrace: { channels: ['sparse'], queryViews: [] },
     },
+  };
+}
+
+function makeRankedResult(
+  entityId: string,
+  overrides: Partial<RankedResult> = {},
+): RankedResult {
+  return {
+    entityId,
+    canonicalLabel: entityId,
+    finalScore: 0.8,
+    rank: 1,
+    componentScores: {
+      entityIntegrity: 1,
+      semantic: 0.8,
+      hardConstraintPass: true,
+      softConstraint: 0.2,
+      attributeAlignment: 0.1,
+      preferenceAlignment: 0.1,
+      popularity: 0.1,
+      availability: 1,
+      uncertaintyPenalty: 0.05,
+    },
+    evidenceItems: [],
+    matchedConstraints: [],
+    unmetConstraints: [],
+    inferredConstraints: [],
+    ...overrides,
   };
 }
 
@@ -147,5 +178,38 @@ describe('candidatesToEvalSlices', () => {
     expect(ids).toContain('e1');
     expect(ids).toContain('e3');
     expect(ids).not.toContain('e2');
+  });
+});
+
+describe('rankedResultToEvalSlice', () => {
+  it('maps ranked result provenance directly', () => {
+    const result = makeRankedResult('e1', {
+      retrievalProvenance: makeCandidate('e1', {
+        channels: ['dense_semantic', 'anchor_similarity'],
+        channelScores: [
+          { channel: 'dense_semantic', rawScore: 0.7, rank: 2, rrfContribution: 0.01 },
+          { channel: 'anchor_similarity', rawScore: 0.9, rank: 1, rrfContribution: 0.02 },
+        ],
+        anchorConditioned: true,
+      }).provenance,
+    });
+
+    const slice = rankedResultToEvalSlice('q2', result);
+    expect(slice).toEqual(expect.objectContaining({
+      candidateEntityId: 'e1',
+      topChannel: 'anchor_similarity',
+      anchorConditioned: true,
+      rank: 1,
+    }));
+  });
+
+  it('converts ranked result lists with stable ranks', () => {
+    const slices = rankedResultsToEvalSlices('q3', [
+      makeRankedResult('e1', { rank: 1, retrievalProvenance: makeCandidate('e1').provenance }),
+      makeRankedResult('e2', { rank: 2, retrievalProvenance: makeCandidate('e2').provenance }),
+    ]);
+
+    expect(slices.map((slice) => slice.rank)).toEqual([1, 2]);
+    expect(slices.map((slice) => slice.candidateEntityId)).toEqual(['e1', 'e2']);
   });
 });

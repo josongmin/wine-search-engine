@@ -1,5 +1,6 @@
 import type { DecisionOutput } from '../../decision/model/decision-output.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EngineDecision } from '../model/engine-decision.js';
 import type { ResultItem } from '../model/result-item.js';
 import type { ClarificationPayload } from '../model/clarification.js';
@@ -27,6 +28,9 @@ export interface ResponseBuildParams {
 
   /** Optional counterfactual rejects for transparency. */
   readonly counterfactuals?: readonly CounterfactualReject[] | undefined;
+
+  /** Optional canonical provenance slices to preserve runtime/eval SSOT. */
+  readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[] | undefined;
 
   /** Caller-supplied request ID for correlation. */
   readonly requestId?: string | undefined;
@@ -121,6 +125,9 @@ export class ResponseBuilder {
       blockingEligible: contract.blockingEligible,
       ...(contract.degradationReasons.length > 0
         ? { degradationReasons: contract.degradationReasons }
+        : {}),
+      ...(params.retrievalProvenanceSlices !== undefined && params.retrievalProvenanceSlices.length > 0
+        ? { retrievalProvenanceSlices: params.retrievalProvenanceSlices }
         : {}),
     };
 

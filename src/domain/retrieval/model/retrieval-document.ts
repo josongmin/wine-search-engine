@@ -1,6 +1,18 @@
 import type { EntityId } from '../../shared/types/index.js';
 
 /**
+ * SPLADE-style learned sparse weights for one document.
+ * Mirrors {@link LearnedSparseVector} from the ETL spec (learned-sparse-spec.ts)
+ * without creating a cross-layer import.
+ */
+export interface DocumentSparseVector {
+  readonly entries: readonly { readonly token: string; readonly weight: number }[];
+  readonly weightSum: number;
+  readonly modelId: string;
+  readonly schemaVersion: number;
+}
+
+/**
  * Projection schema for a document stored in the search index (RFC-012 S11).
  *
  * This represents the complete set of fields that the retrieval layer
@@ -138,4 +150,7 @@ export interface RetrievalDocument {
 
   /** Producer archetype (e.g. "château", "domaine", "estate", "winery", "négociant"). */
   readonly producerType?: string | undefined;
+
+  /** SPLADE-style learned sparse weights (T4.2). Absent until the offline model runs. */
+  readonly learnedSparseWeights?: DocumentSparseVector | undefined;
 }

@@ -77,7 +77,8 @@
     "etl:transliteration": "tsx scripts/etl/generate-transliteration-aliases.ts",
     "prepare": "husky",
     "git:prepush": "npm run typecheck && npm run test:unit && npm run verify:http-contracts",
-    "git:prepush:quick": "npm run typecheck && npm run test:unit"
+    "git:prepush:quick": "npm run typecheck && npm run test:unit",
+    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"REDIS_URL=redis://localhost:6380 PORT=4000 npm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev\""
   },
   "lint-staged": {
     "*.{ts,tsx}": [

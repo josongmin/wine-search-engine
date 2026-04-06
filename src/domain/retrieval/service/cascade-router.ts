@@ -1,12 +1,60 @@
+/**
+ * T4.1: Cascade router — channel-aware phases.
+ *
+ * RetrievalPhase is now typed against RetrievalChannel where applicable.
+ * The difficulty estimation is unchanged; phase list is now expressed
+ * in terms of channel vocabulary rather than legacy ad-hoc strings.
+ */
+
 import type { QueryClass } from '../../shared/types/index.js';
+import type { RetrievalChannel } from '../model/retrieval-channel.js';
 
 /**
  * A named phase in the retrieval cascade.
+ *
+ * T4.1: Renamed 'anchor_neighborhood' → channel-aware name.
+ * 'anchor_neighborhood' is kept as an alias for backward compat.
+ * T4.3: Added 'learned_sparse' phase for SPLADE-style sparse retrieval.
+ * T4.5: Added 'relative' phase for anchor-conditioned relative filter path.
  */
-export type RetrievalPhase = 'sparse' | 'dense' | 'anchor_neighborhood' | 'rerank';
+export type RetrievalPhase =
+  | 'sparse'
+  | 'learned_sparse'
+  | 'dense'
+  | 'anchor_neighborhood'
+  | 'relative'
+  | 'rerank';
+
+/**
+ * T4.1: Channel-phase mapping.
+ * Maps cascade phases to their canonical RetrievalChannel equivalents.
+ * T4.3: 'learned_sparse' phase maps to the 'learned_sparse' lexical channel.
+ * T4.5: 'relative' phase maps to the 'relative_filter' structural channel.
+ */
+export const PHASE_TO_CHANNEL: Readonly<Record<RetrievalPhase, RetrievalChannel | null>> = {
+  sparse: 'sparse_bm25',
+  learned_sparse: 'learned_sparse',
+  dense: 'dense_semantic',
+  anchor_neighborhood: 'anchor_similarity',
+  relative: 'relative_filter',
+  rerank: null,
+} as const;
+
+/**
+ * T4.1: Phase dispatch decision.
+ * Records which phases are executed, skipped, and their channel mappings.
+ */
+export interface PhaseDispatchDecision {
+  readonly difficulty: 'easy' | 'medium' | 'hard';
+  readonly phasesToExecute: readonly RetrievalPhase[];
+  readonly channelsToActivate: readonly RetrievalChannel[];
+  readonly skippedPhases: readonly RetrievalPhase[];
+}
 
 /**
  * Implements the cascade routing logic from RFC-012 S9.4.
+ *
+ * T4.1: Extended to return PhaseDispatchDecision with channel vocabulary.
  *
  * The cascade router estimates query difficulty and determines which
  * retrieval phases to execute. Easier queries skip expensive phases
@@ -33,12 +81,10 @@ export class CascadeRouter {
     aliasMatchStrength: number,
     constraintCount: number,
   ): 'easy' | 'medium' | 'hard' {
-    // Direct entity lookups with a strong alias match are easy
     if (queryClass === 'short_entity' && aliasMatchStrength >= 0.9) {
       return 'easy';
     }
 
-    // Anchor-bearing queries with high confidence and few constraints are medium
     if (
       queryClass === 'anchored_similarity' &&
       anchorConfidence >= 0.8 &&
@@ -47,22 +93,18 @@ export class CascadeRouter {
       return 'medium';
     }
 
-    // Ambiguous short forms always need the full pipeline
     if (queryClass === 'ambiguous_short_form') {
       return 'hard';
     }
 
-    // Semantic preference queries need dense search at minimum
     if (queryClass === 'semantic_preference' || queryClass === 'comparison_query') {
       return 'hard';
     }
 
-    // Pure constraint queries with few constraints can be medium
     if (queryClass === 'pure_constraint' && constraintCount <= 3) {
       return 'medium';
     }
 
-    // Many constraints or unknown class => hard
     if (constraintCount > 3 || queryClass === 'unknown') {
       return 'hard';
     }
@@ -85,5 +127,46 @@ export class CascadeRouter {
       case 'hard':
         return ['sparse', 'dense', 'anchor_neighborhood', 'rerank'] as const;
     }
+  }
+
+  /**
+   * T4.1: Full phase dispatch decision — phases + channel vocabulary.
+   *
+   * Returns which phases to execute plus the canonical RetrievalChannel
+   * names for trace/observability.
+   */
+  getDispatchDecision(
+    queryClass: QueryClass,
+    anchorConfidence: number,
+    aliasMatchStrength: number,
+    constraintCount: number,
+  ): PhaseDispatchDecision {
+    const difficulty = this.estimateDifficulty(
+      queryClass,
+      anchorConfidence,
+      aliasMatchStrength,
+      constraintCount,
+    );
+    const allPhases: readonly RetrievalPhase[] = [
+      'sparse',
+      'learned_sparse',
+      'dense',
+      'anchor_neighborhood',
+      'relative',
+      'rerank',
+    ];
+    const phasesToExecute = this.getPhases(difficulty);
+    const phaseSet = new Set<RetrievalPhase>(phasesToExecute);
+    const skippedPhases = allPhases.filter((p) => !phaseSet.has(p));
+
+    const channelsToActivate: RetrievalChannel[] = [];
+    for (const phase of phasesToExecute) {
+      const channel = PHASE_TO_CHANNEL[phase];
+      if (channel !== null) {
+        channelsToActivate.push(channel);
+      }
+    }
+
+    return { difficulty, phasesToExecute, channelsToActivate, skippedPhases };
   }
 }

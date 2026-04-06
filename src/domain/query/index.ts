@@ -21,6 +21,12 @@ export { type NormalizedQueryViews } from './model/query-views.js';
 export { type QueryLookupProvenance } from './model/query-lookup-provenance.js';
 export { type QueryPlanV1, type QueryPlanV2, planV2ToUnderstandingSnapshot } from './model/query-plan.js';
 export { type QueryUnderstandingSnapshot } from './model/query-understanding-snapshot.js';
+export {
+  type DecompositionStrategy,
+  type QueryDecompositionHint,
+  type DetectableDecompositionOutcome,
+  toQueryDecompositionHint,
+} from './model/query-decomposition.js';
 
 // Ports
 export { type ThresholdStore } from './port/threshold-store.port.js';

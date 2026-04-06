@@ -27,6 +27,11 @@ const envSchema = z.object({
   /** Max JSON body size in bytes (Fastify `bodyLimit`). Default 1 MiB. */
   HTTP_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(32 * 1024 * 1024).default(1_048_576),
 
+  /**
+   * When set (≥16 chars), clients may send `X-Debug-Key: <same value>` for per-request log level `debug`.
+   */
+  HTTP_DEBUG_SECRET: z.string().min(16).optional(),
+
   /** Register `@fastify/helmet` security headers (recommended on in production). */
   HTTP_SECURITY_HEADERS: z
     .enum(['true', 'false'])
@@ -168,6 +173,7 @@ function buildConfig(parsed: EnvVars) {
       trustProxy: parsed.HTTP_TRUST_PROXY,
       bodyLimitBytes: parsed.HTTP_BODY_LIMIT_BYTES,
       securityHeaders: parsed.HTTP_SECURITY_HEADERS,
+      debugSecret: parsed.HTTP_DEBUG_SECRET,
     },
 
     /** CORS allowed origins. Empty string means allow all in dev, none in production. */

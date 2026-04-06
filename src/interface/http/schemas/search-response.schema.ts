@@ -161,6 +161,17 @@ export const SearchResponseMetaSchema = z.object({
     .optional(),
   blocking_eligible: z.boolean().optional(),
   degradation_reasons: z.array(z.string()).optional(),
+  retrieval_provenance_slices: z.array(z.object({
+    query_id: z.string().min(1),
+    candidate_entity_id: z.string().min(1),
+    channels: z.array(z.string().min(1)),
+    top_channel: z.string().min(1),
+    anchor_conditioned: z.boolean(),
+    protected: z.boolean(),
+    protected_reason: z.string().min(1).optional(),
+    fusion_score: z.number(),
+    rank: z.number().int().positive(),
+  }).strict()).optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({
@@ -224,10 +235,12 @@ const NormalizedQueryViewsSchema = z.object({
   collapsed_whitespace: z.string().min(1),
   punctuation_stripped: z.string().min(1),
   compact: z.string().min(1),
+  phonetic_normalized: z.string().min(1).optional(),
   phonetic_compact: z.string().min(1).optional(),
   vintage_canonicalized: z.string().min(1),
   vintage_stripped: z.string().min(1),
   transliterated: z.string().min(1).optional(),
+  reordered: z.array(z.string().min(1)).optional(),
   lookup_variants: z.array(z.string().min(1)),
 }).strict();
 

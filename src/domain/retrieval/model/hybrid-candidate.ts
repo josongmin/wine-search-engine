@@ -1,4 +1,5 @@
 import type { EntityId } from '../../shared/types/index.js';
+import type { CandidateProvenance } from './candidate-envelope.js';
 import type { RetrievalTrace } from './retrieval-trace.js';
 
 /**
@@ -127,4 +128,7 @@ export interface HybridCandidate {
 
   /** Diagnostic trace for observability and debugging. */
   readonly retrievalTrace: RetrievalTrace;
+
+  /** Canonical retrieval provenance preserved for downstream ranking/eval. */
+  readonly retrievalProvenance?: CandidateProvenance | undefined;
 }
