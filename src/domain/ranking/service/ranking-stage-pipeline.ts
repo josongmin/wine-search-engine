@@ -24,15 +24,6 @@ import type { RankingPolicyPort, PolicyContext } from '../port/ranking-policy.po
 import { computeFunnelMetrics } from './funnel-metrics.js';
 
 /**
- * RankingFunnelResult — output of the stage-aware pipeline.
- * Extends the existing RankedResult[] with a funnel trace.
- */
-export interface RankingFunnelResult {
-  readonly results: readonly RankedResult[];
-  readonly funnelTrace: RankingFunnelTrace;
-}
-
-/**
  * Options for constructing a {@link RankingStagePipeline}.
  */
 export interface RankingStagePipelineOptions {
@@ -60,8 +51,8 @@ export interface RankingStagePipelineOptions {
 export class RankingStagePipeline {
   private readonly ranker: Ranker;
   private readonly policy: RankingPolicyPort | undefined;
-  /** Funnel metrics from the most recent rank() call. Null until first call. */
   private _lastFunnelMetrics: FunnelMetrics | undefined = undefined;
+  private _lastFunnelTrace: RankingFunnelTrace | undefined = undefined;
 
   constructor(ranker: Ranker, options: RankingStagePipelineOptions = {}) {
     this.ranker = ranker;
@@ -76,7 +67,11 @@ export class RankingStagePipeline {
     return this._lastFunnelMetrics;
   }
 
-  async rank(input: RankingInput): Promise<RankingFunnelResult> {
+  getLastFunnelTrace(): RankingFunnelTrace | undefined {
+    return this._lastFunnelTrace;
+  }
+
+  async rank(input: RankingInput): Promise<readonly RankedResult[]> {
     const wallStart = Date.now();
     const stageTraces: RankingStageTrace[] = [];
 
@@ -193,12 +188,11 @@ export class RankingStagePipeline {
     // Cache metrics so callers can retrieve them via getLastFunnelMetrics().
     this._lastFunnelMetrics = metrics;
 
-    return {
-      results: finalResults,
-      funnelTrace: {
-        ...partialTrace,
-        metrics,
-      },
+    this._lastFunnelTrace = {
+      ...partialTrace,
+      metrics,
     };
+
+    return finalResults;
   }
 }

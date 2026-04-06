@@ -11,7 +11,6 @@ import type {
   EntityResolverPort,
   RankingPort,
 } from './port/search-pipeline-deps.port.js';
-import { applyLtrRerankIfAvailable } from './search-usecase-ltr-rerank.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
 import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
@@ -100,7 +99,7 @@ export async function runHybridRankingPipeline(
   plan: QueryPlanV1,
   candidates: readonly HybridCandidate[],
   ranker: RankingPort,
-  ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
+  _ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
 ): Promise<SearchRouteExecutionResult> {
   const rankingInput: RankingInput = {
     queryPlan: plan,
@@ -108,27 +107,11 @@ export async function runHybridRankingPipeline(
     constraints: plan.constraints,
   };
 
-  let rankedResults = await ranker.rank(rankingInput);
-
-  // T5.6: Capture funnel metrics immediately after rank() returns (no async gap).
-  // Only available when the ranker is a RankingStagePipeline (duck-type check).
-  const funnelMetrics = typeof ranker.getLastFunnelMetrics === 'function'
-    ? ranker.getLastFunnelMetrics()
-    : undefined;
-
-  rankedResults = applyLtrRerankIfAvailable(
-    rankedResults,
-    plan.queryClass,
-    ltrModels,
-  );
+  const rankedResults = await ranker.rank(rankingInput);
 
   const resolveResult: EntityResolveResult = buildHybridRouteResolveResult(plan, rankedResults);
 
-  return {
-    resolveResult,
-    rankedResults,
-    ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
-  };
+  return { resolveResult, rankedResults };
 }
 
 /**

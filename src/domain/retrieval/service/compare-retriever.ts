@@ -27,11 +27,11 @@ export class CompareRetriever {
     return hits.map((hit, index) => {
       const summary = hit.summary;
       const trace: RetrievalTrace = {
-        retrievalProfile: 'compare_candidates',
+        retrievalProfile: 'compare_default',
         lexicalQueriesUsed: lexicalQueries,
         semanticQueriesUsed: [],
         filtersApplied: [...filtersApplied],
-        candidateSources: ['sparse', 'anchor'],
+        candidateSources: ['sparse_bm25', 'compare_anchor'],
       };
       return {
         entityId: hit.entityId,

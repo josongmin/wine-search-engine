@@ -5,6 +5,7 @@ import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
+import type { QueryClassWeights } from '../index.js';
 import { resolveWeights, resolveChannelAwareWeights } from '../model/scoring-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
@@ -13,6 +14,8 @@ import { type EvidenceMapper } from './evidence-mapper.js';
 import { WineAttributeEncoders } from './wine-attribute-encoder.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { evaluateRerankGate } from './rerank-gate.js';
+import { LTRRanker } from './ltr-ranker.js';
+import { extractLTRFeatures } from './ltr-feature-extractor.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -85,6 +88,48 @@ function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
 }
 
+function applyLearnedLtrRerank(
+  rankedResults: readonly RankedResult[],
+  queryClass: QueryClass,
+  ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
+): RankedResult[] {
+  const ltrModel = ltrModels?.get(queryClass);
+  if (!ltrModel || rankedResults.length === 0) {
+    return [...rankedResults];
+  }
+
+  const rankableDocuments = rankedResults.map((doc, idx) => ({
+    entityId: doc.entityId,
+    retrievalScore: doc.finalScore,
+    features: extractLTRFeatures({
+      semantic: doc.componentScores.semantic,
+      popularity: doc.componentScores.popularity,
+      attributeAlignment: doc.componentScores.attributeAlignment,
+      preferenceAlignment: doc.componentScores.preferenceAlignment,
+    }),
+    originalRank: idx + 1,
+  }));
+
+  const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
+  const originalByEntity = new Map(
+    rankedResults.map((result) => [String(result.entityId), result]),
+  );
+
+  return rerankedDocs
+    .map((reranked) => {
+      const original = originalByEntity.get(String(reranked.entityId));
+      if (original === undefined) {
+        return undefined;
+      }
+      return {
+        ...original,
+        finalScore: reranked.ltrScore,
+        rank: reranked.finalRank,
+      };
+    })
+    .filter((result): result is RankedResult => result !== undefined);
+}
+
 function buildConstraintState(
   input: RankingInput,
   candidate: HybridCandidate,
@@ -128,6 +173,7 @@ export type RankerOptions = {
   readonly rerankThreshold?: number;
   readonly attributeEncoder?: WineAttributeEncoderPort;
   readonly reranker?: RerankerPort;
+  readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
 };
 
 /**
@@ -160,6 +206,7 @@ export class Ranker {
   private readonly attributeEncoder: WineAttributeEncoderPort;
   private readonly rerankTopK: number;
   private readonly rerankBlendScale: number;
+  private readonly ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined;
 
   /**
    * @param signalComputer - Computes individual signal scores.
@@ -180,6 +227,7 @@ export class Ranker {
     this.attributeEncoder = options.attributeEncoder ?? WineAttributeEncoders;
     this.rerankTopK = options.rerankTopK ?? DEFAULT_RERANK_TOP_K;
     this.rerankBlendScale = options.rerankBlendScale ?? 1;
+    this.ltrModels = options.ltrModels;
   }
 
   /**
@@ -341,7 +389,8 @@ export class Ranker {
 
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
-    if (this.reranker !== undefined) {
+    const hasLearnedRerank = this.ltrModels?.has(queryPlan.queryClass) ?? false;
+    if (this.reranker !== undefined || hasLearnedRerank) {
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
         queryClass: queryPlan.queryClass,
@@ -354,26 +403,28 @@ export class Ranker {
 
       if (gateDecision.shouldRerank) {
         const effectiveTopK = gateDecision.topKOverride ?? this.rerankTopK;
-        try {
-          finalOrder = await this.applyReranking(
-            queryPlan.normalizedQuery,
-            viable,
-            queryPlan.queryClass,
-            effectiveTopK,
-          );
-          this._lastRerankExecuted = true;
-        } catch (err) {
-          bootstrapLogger.warn(
-            {
-              err: err instanceof Error ? err.message : String(err),
-              queryClass: queryPlan.queryClass,
-              viableCount: viable.length,
-              rerankTopK: effectiveTopK,
-              gateReason: gateDecision.reason,
-            },
-            '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
-          );
-          finalOrder = viable;
+        if (this.reranker !== undefined) {
+          try {
+            finalOrder = await this.applyReranking(
+              queryPlan.normalizedQuery,
+              viable,
+              queryPlan.queryClass,
+              effectiveTopK,
+            );
+            this._lastRerankExecuted = true;
+          } catch (err) {
+            bootstrapLogger.warn(
+              {
+                err: err instanceof Error ? err.message : String(err),
+                queryClass: queryPlan.queryClass,
+                viableCount: viable.length,
+                rerankTopK: effectiveTopK,
+                gateReason: gateDecision.reason,
+              },
+              '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
+            );
+            finalOrder = viable;
+          }
         }
       }
     }
@@ -381,7 +432,7 @@ export class Ranker {
     // Step 7 & 8: Map to RankedResult with evidence items and assign ranks.
     // T5.2: coarsePruneMeta is attached to every retained candidate.
     // Pruned candidates never appear here (they were filtered out in step 4).
-    const results: RankedResult[] = finalOrder.map((entry, index) => {
+    let results: RankedResult[] = finalOrder.map((entry, index) => {
       const evidenceItems = this.evidenceMapper.mapToEvidence(
         entry.componentScores,
       );
@@ -434,6 +485,24 @@ export class Ranker {
         ...(entry.countryEnc !== undefined ? { countryEnc: entry.countryEnc } : {}),
       };
     });
+
+    if (this._lastRerankGateReason !== undefined && hasLearnedRerank) {
+      const gateDecision = evaluateRerankGate({
+        candidateCount: viable.length,
+        queryClass: queryPlan.queryClass,
+        effectiveRoute: queryPlan.route,
+        hasAnchor: anchorProfile !== undefined,
+        ...(input.rerankForced !== undefined ? { rerankForced: input.rerankForced } : {}),
+      });
+      if (gateDecision.shouldRerank) {
+        results = applyLtrRerankIfAvailable(
+          results,
+          queryPlan.queryClass,
+          this.ltrModels,
+        );
+        this._lastRerankExecuted = true;
+      }
+    }
 
     return results;
   }

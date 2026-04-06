@@ -11,7 +11,18 @@
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
+import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
 import { type WineToolExecutor } from './tool-executor.js';
+
+/**
+ * All possible tool results including the V2 machine format (T6.3).
+ */
+type AnyToolResult =
+  | SearchResponseV1
+  | SearchResponseV2Machine
+  | ComparisonSearchResponse
+  | DrinkingWindowBlock
+  | { error: string };
 
 /**
  * Result from executeWithFallback, includes fallback tracking.
@@ -63,10 +74,8 @@ export class AdaptiveToolExecutor {
     toolName: string,
     input: unknown,
     requestId: string,
-  ): Promise<
-    AdaptiveToolResult<SearchResponseV1 | ComparisonSearchResponse | DrinkingWindowBlock | { error: string }>
-  > {
-    // Execute base tool
+  ): Promise<AdaptiveToolResult<AnyToolResult>> {
+    // Execute base tool (no v2Options — V1 path)
     const result = await this.baseExecutor.execute(toolName, input, requestId);
 
     // Check if we should apply fallback
@@ -116,9 +125,7 @@ export class AdaptiveToolExecutor {
    * @param result - Tool result to check
    * @returns true if result is empty
    */
-  private isEmptyResult(
-    result: SearchResponseV1 | ComparisonSearchResponse | DrinkingWindowBlock | { error: string },
-  ): boolean {
+  private isEmptyResult(result: AnyToolResult): boolean {
     // Check if it's a SearchResponseV1
     if ('queryType' in result && result.queryType === 'search') {
       const searchResult: SearchResponseV1 = result;

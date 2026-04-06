@@ -16,6 +16,9 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
+import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
+import { buildMachineResponseV2 } from '../../domain/response/service/machine-response-builder-v2.js';
 
 /**
  * Zod schema for search_wines tool input.
@@ -75,6 +78,27 @@ export type WineToolInput =
   | ({ toolName: 'compare_wines' } & CompareWinesInput);
 
 /**
+ * T6.3: Options for machine V2 response format migration seam.
+ *
+ * When useV2MachineFormat is true, the executor returns a
+ * SearchResponseV2Machine envelope (structured provenance/evidence)
+ * instead of the V1 format. The caller must supply rankedResults —
+ * the pre-ranked result list from the search pipeline — so the V2 builder
+ * can access ComponentScores and retrievalProvenance that are not present
+ * in the V1 ResultItem model.
+ *
+ * queryId identifies the query for the V2 envelope (defaults to requestId).
+ */
+export interface ToolExecutionV2Options {
+  /** When true, format search_wines results as SearchResponseV2Machine. */
+  readonly useV2MachineFormat: true;
+  /** Pre-ranked results from the search pipeline. */
+  readonly rankedResults: readonly RankedResult[];
+  /** Query identifier for the V2 envelope. Falls back to requestId when omitted. */
+  readonly queryId?: string | undefined;
+}
+
+/**
  * Dependencies for WineToolExecutor.
  */
 /**
@@ -100,12 +124,17 @@ export interface WineToolExecutorDeps {
  * Tool executor for wine search engine.
  *
  * Dispatches Claude tool calls to appropriate use cases:
- * - search_wines → SearchUseCase.execute(request, requestId)
- * - get_food_pairings → SearchUseCase with dynamic query
- * - check_drinking_window → DrinkingWindowUseCase.check()
- * - compare_wines → DecomposedSearchUseCase.execute([queryA, queryB], 'compare', ...)
+ * - search_wines -> SearchUseCase.execute(request, requestId)
+ * - get_food_pairings -> SearchUseCase with dynamic query
+ * - check_drinking_window -> DrinkingWindowUseCase.check()
+ * - compare_wines -> DecomposedSearchUseCase.execute([queryA, queryB], 'compare', ...)
  *
  * All operations propagate requestId for request tracking.
+ *
+ * T6.3: The execute method accepts an optional ToolExecutionV2Options argument.
+ * When useV2MachineFormat: true, the search_wines result is projected to
+ * SearchResponseV2Machine via buildMachineResponseV2. V1 behaviour is
+ * unchanged when the option is absent.
  */
 export class WineToolExecutor {
   constructor(private readonly deps: WineToolExecutorDeps) {}
@@ -119,7 +148,8 @@ export class WineToolExecutor {
    * @param toolName - Name of the tool to execute
    * @param input - Raw input (will be validated against schema)
    * @param requestId - Parent request ID for tracking
-   * @returns Tool result (SearchResponseV1, ComparisonSearchResponse, or DrinkingWindowBlock)
+   * @param v2Options - Optional V2 machine format migration seam (T6.3)
+   * @returns Tool result
    * @throws ZodError if input validation fails
    * @throws Error if tool execution fails
    */
@@ -127,9 +157,20 @@ export class WineToolExecutor {
     toolName: string,
     input: unknown,
     requestId: string,
-  ): Promise<SearchResponseV1 | ComparisonSearchResponse | DrinkingWindowBlock | { error: string }> {
+    v2Options?: ToolExecutionV2Options | undefined,
+  ): Promise<SearchResponseV1 | SearchResponseV2Machine | ComparisonSearchResponse | DrinkingWindowBlock | { error: string }> {
     switch (toolName) {
       case 'search_wines': {
+        // T6.3: When useV2MachineFormat is set, bypass the V1 use case and
+        // build the V2 machine response directly from the caller-supplied
+        // ranked results.  V1 path is unchanged when v2Options is absent.
+        if (v2Options !== undefined) {
+          const queryId = v2Options.queryId ?? requestId;
+          return buildMachineResponseV2({
+            queryId,
+            results: v2Options.rankedResults,
+          });
+        }
         return this.executeSearchWines(input, requestId);
       }
 

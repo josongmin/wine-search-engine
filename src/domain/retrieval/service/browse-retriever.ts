@@ -31,7 +31,10 @@ function sparseHitsToBrowseCandidates(
       lexicalQueriesUsed: lexicalQueries,
       semanticQueriesUsed: [],
       filtersApplied: [...filtersApplied],
-      candidateSources: ['sparse'],
+      candidateSources: [
+        'sparse_bm25',
+        profile === 'producer_browse' ? 'browse_producer' : 'browse_region',
+      ],
     };
     return {
       entityId: hit.entityId,

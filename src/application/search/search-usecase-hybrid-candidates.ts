@@ -60,6 +60,7 @@ export interface HybridCandidateRetrievalPorts {
 export function buildHybridRetrievalInputForPlan(
   plan: QueryPlanV1,
   route: HybridRetrievalInput['route'] = 'hybrid',
+  anchorEntityId?: string,
 ): HybridRetrievalInput {
   return {
     queryPlan: plan,
@@ -68,6 +69,7 @@ export function buildHybridRetrievalInputForPlan(
     semanticQueries: [plan.rawQuery],
     hardConstraints: plan.constraints.hard,
     softConstraints: plan.constraints.soft,
+    ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
   };
 }
 
@@ -80,6 +82,7 @@ export async function retrieveHybridCandidatesForPlan(
   resolveEntity: (p: QueryPlanV1) => Promise<EntityResolveResult>,
 ): Promise<readonly HybridCandidate[]> {
   const limit = SPECIALIZED_HYBRID_RETRIEVAL_LIMIT;
+  let fallbackAnchorEntityId = plan.anchors[0]?.candidateEntityIds[0];
 
   switch (plan.retrievalMode) {
     case 'producer_browse': {
@@ -115,6 +118,7 @@ export async function retrieveHybridCandidatesForPlan(
         const anchorResolution = await resolveEntity(plan);
         const anchorEntityId = anchorResolution.topEntity?.entityId
           ?? plan.anchors[0]?.candidateEntityIds[0];
+        fallbackAnchorEntityId = anchorEntityId;
         if (anchorEntityId !== undefined) {
           const candidates = await ports.compareRetriever.compareAgainstAnchor(
             anchorEntityId,
@@ -132,7 +136,11 @@ export async function retrieveHybridCandidatesForPlan(
       break;
   }
 
-  const retrievalInput = buildHybridRetrievalInputForPlan(plan, 'hybrid');
+  const retrievalInput = buildHybridRetrievalInputForPlan(
+    plan,
+    'hybrid',
+    fallbackAnchorEntityId,
+  );
 
   return ports.candidatePool.generate(retrievalInput);
 }
