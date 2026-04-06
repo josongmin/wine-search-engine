@@ -29,18 +29,18 @@ export function WineCard({ item, decisionStatus, rank, actions }: WineCardProps)
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               {rank !== undefined && (
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-xs font-semibold text-neutral-600">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
                   {rank}
                 </span>
               )}
               <Link
                 href={detailHref}
-                className="text-lg font-semibold text-neutral-900 hover:text-rose-700 transition-colors line-clamp-1"
+                className="text-lg font-semibold text-foreground hover:text-rose-600 dark:hover:text-rose-400 transition-colors line-clamp-1"
               >
                 {entity.canonical_label}
               </Link>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-500">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
               {entity.region && (
                 <span className="flex items-center gap-1">
                   <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
@@ -70,7 +70,7 @@ export function WineCard({ item, decisionStatus, rank, actions }: WineCardProps)
           <div className="flex shrink-0 flex-col items-end gap-1">
             <DecisionBadge status={decisionStatus} score={relevance_score} />
             {entity.price_range && (
-              <span className="text-sm font-medium text-neutral-600">
+              <span className="text-sm font-medium text-muted-foreground">
                 {priceBand(entity.price_range)}
               </span>
             )}
@@ -94,7 +94,7 @@ export function WineCard({ item, decisionStatus, rank, actions }: WineCardProps)
           {actions}
           <Link
             href={detailHref}
-            className="text-sm font-medium text-rose-600 hover:text-rose-800 transition-colors"
+            className="text-sm font-medium text-rose-600 hover:text-rose-800 dark:text-rose-400 dark:hover:text-rose-300 transition-colors"
           >
             상세보기 →
           </Link>

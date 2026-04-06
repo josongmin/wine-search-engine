@@ -81,6 +81,9 @@ const normalizePhoneticSkeleton = (value: string): string => {
   return normalized;
 };
 
+const phoneticNormalized = (value: string): string =>
+  hasLatinCharacters(value) ? normalizePhoneticSkeleton(value) : '';
+
 const phoneticCompact = (value: string): string =>
   hasLatinCharacters(value) ? normalizePhoneticSkeleton(value).replace(LATIN_VOWEL_RE, '') : '';
 
@@ -154,6 +157,36 @@ const buildTransliterationVariants = (value: string): readonly string[] =>
   ]);
 
 /**
+ * Generates all unique token orderings for a whitespace-delimited query.
+ * Only generates permutations for queries with 2-4 tokens to avoid explosion.
+ * Returns an empty array for single-token or >4-token queries.
+ */
+const buildReorderedVariants = (value: string): readonly string[] => {
+  const tokens = value.trim().split(/\s+/);
+  if (tokens.length < 2 || tokens.length > 4) {
+    return [];
+  }
+  const permutations: string[] = [];
+  const permute = (arr: string[], current: string[]): void => {
+    if (arr.length === 0) {
+      permutations.push(current.join(' '));
+      return;
+    }
+    for (let i = 0; i < arr.length; i++) {
+      const token = arr[i];
+      if (token === undefined) continue;
+      permute(
+        [...arr.slice(0, i), ...arr.slice(i + 1)],
+        [...current, token],
+      );
+    }
+  };
+  permute(tokens, []);
+  // Skip the first permutation (it's the original order, already in lookupVariants)
+  return dedupeVariants(permutations.slice(1));
+};
+
+/**
  * Produces a multi-view representation of a query for entity lookup.
  *
  * The views intentionally keep different normalization strengths so callers
@@ -173,6 +206,10 @@ export class QueryNormalizer {
     const transliteratedVariants = buildTransliterationVariants(vintageStripped);
     const transliterated = transliteratedVariants[0];
     const transliteratedCompacts = transliteratedVariants.map((value) => compact(value));
+
+    // phoneticNormalized: phonetic rules applied (no vowel removal) — separate from compact
+    const phoneticNormalizedView = phoneticNormalized(accentless);
+
     const phoneticVariants = dedupeVariants([
       phoneticCompact(punctuationStripped),
       phoneticCompact(vintageCanonicalized),
@@ -181,6 +218,9 @@ export class QueryNormalizer {
     ]);
     const phoneticCompactView = phoneticVariants[0] ?? '';
 
+    // reordered: alternate token orderings for multi-word queries
+    const reorderedVariants = buildReorderedVariants(vintageStripped);
+
     return {
       raw,
       strict,
@@ -188,10 +228,12 @@ export class QueryNormalizer {
       collapsedWhitespace,
       punctuationStripped,
       compact: compactView,
+      ...(phoneticNormalizedView.length > 0 ? { phoneticNormalized: phoneticNormalizedView } : {}),
       ...(phoneticCompactView.length > 0 ? { phoneticCompact: phoneticCompactView } : {}),
       vintageCanonicalized,
       vintageStripped,
-      transliterated,
+      ...(transliterated !== undefined ? { transliterated } : {}),
+      ...(reorderedVariants.length > 0 ? { reordered: reorderedVariants } : {}),
       lookupVariants: dedupeVariants([
         strict,
         accentless,
@@ -202,7 +244,9 @@ export class QueryNormalizer {
         vintageStripped,
         ...transliteratedVariants,
         ...transliteratedCompacts,
+        ...(phoneticNormalizedView.length > 0 ? [phoneticNormalizedView] : []),
         ...phoneticVariants,
+        ...reorderedVariants,
       ]),
     };
   }

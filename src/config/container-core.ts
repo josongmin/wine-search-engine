@@ -1,4 +1,6 @@
-import type { Planner } from '../domain/query/service/planner.js';
+import type { QueryPlannerPort } from '../application/search/port/search-pipeline-deps.port.js';
+import { PlannerV1Adapter } from './planner-v1-adapter.js';
+import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
 import type { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
 import type { Ranker } from '../domain/ranking/service/ranker.js';
@@ -33,7 +35,10 @@ import {
 } from './container-core-builders.js';
 
 export interface CoreContainerServices {
-  readonly queryPlanner: Planner;
+  // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
+  // T1.5 will update the port to QueryPlanV2.
+  readonly queryPlanner: QueryPlannerPort;
+  readonly chatLlm?: ChatLlmPort;
   readonly entityResolver: Resolver;
   readonly candidatePool: CandidatePoolService;
   readonly ranker: Ranker;
@@ -58,7 +63,12 @@ export async function buildCoreContainerServices(
   const support = await buildRuntimeSupportServices(config, runtime);
   const adapters = buildCoreAdapterServices(config, runtime.pool);
 
-  const queryPlanner = await buildQueryPlanner(adapters, runtime.pool);
+  // T1.2: Wrap the concrete Planner (returns QueryPlanV2) in the V1 adapter so
+  // existing consumers continue to receive QueryPlanV1-shaped objects.
+  // T1.5 will remove this adapter once all consumers migrate to QueryPlanV2.
+  const queryPlanner: QueryPlannerPort = new PlannerV1Adapter(
+    await buildQueryPlanner(adapters, runtime.pool),
+  );
   const entityResolver = buildEntityResolver(adapters, config);
   const candidatePool = buildCandidatePool(adapters, support, config);
   const browseRetriever = buildBrowseRetriever(adapters);

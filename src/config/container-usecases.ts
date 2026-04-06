@@ -4,6 +4,7 @@ import { InterpretUseCase } from '../application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../application/search/resolve.usecase.js';
 import { HybridUseCase } from '../application/search/hybrid.usecase.js';
 import { DecomposedSearchUseCase } from '../application/search/decomposed-search.usecase.js';
+import { DecomposedSearchAdapter } from '../application/search/decomposed-search-adapter.js';
 import { DrinkingWindowUseCase } from '../application/drinking-window/drinking-window.usecase.js';
 import { BatchSearchUseCase } from '../application/search/batch-search.usecase.js';
 import { getQueryEntrySecurityMetricsCollector } from '../infrastructure/observability/query-entry-security-metrics.js';
@@ -13,7 +14,6 @@ import type {
 import type { SearchExecutorPort } from '../application/search/port/search-executor.port.js';
 import type {
   BatchSearchUseCasePort,
-  DecomposedSearchParentContext,
   DecomposedSearchUseCasePort,
   HybridUseCasePort,
   InterpretUseCasePort,
@@ -41,9 +41,10 @@ export function buildUseCaseContainerServices(
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
   const queryEntrySecurityObserver = getQueryEntrySecurityMetricsCollector();
 
-  // Use a deferred reference to break the circular dependency:
-  // SearchUseCase needs decomposedSearch, but DecomposedSearchUseCase needs SearchUseCase.
-  const deferredDecomposed: { ref?: DecomposedSearchUseCasePort } = {};
+  // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.
+  // SearchUseCase needs decomposedSearch; DecomposedSearchUseCase needs SearchUseCase.
+  // The adapter holds a delegate ref that is set after both are constructed.
+  const decomposedAdapter = new DecomposedSearchAdapter();
 
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
@@ -64,27 +65,11 @@ export function buildUseCaseContainerServices(
     drinkingWindow: drinkingWindowUseCase,
     cacheService: core.cacheService,
     ltrModels: core.ltrModels,
-    decomposedSearch: {
-      execute: (
-        subQueries: [string, string],
-        comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
-        originalQuery: string,
-        requestId: string,
-        startTime: number,
-        parentContext: DecomposedSearchParentContext | undefined,
-      ) => deferredDecomposed.ref!.execute(
-        subQueries,
-        comparisonIntent,
-        originalQuery,
-        requestId,
-        startTime,
-        parentContext,
-      ),
-    },
+    decomposedSearch: decomposedAdapter,
   });
 
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  deferredDecomposed.ref = decomposedSearchUseCase;
+  decomposedAdapter.setDelegate(decomposedSearchUseCase);
 
   return {
     searchUseCase,
@@ -126,23 +111,7 @@ export function buildUseCaseContainerServices(
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
       queryEntrySecurityObserver,
       cacheService: core.cacheService,
-      decomposedSearch: {
-        execute: (
-          subQueries: [string, string],
-          comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
-          originalQuery: string,
-          requestId: string,
-          startTime: number,
-          parentContext?: DecomposedSearchParentContext,
-        ) => deferredDecomposed.ref!.execute(
-          subQueries,
-          comparisonIntent,
-          originalQuery,
-          requestId,
-          startTime,
-          parentContext,
-        ),
-      },
+      decomposedSearch: decomposedAdapter,
     }),
     decomposedSearchUseCase,
     drinkingWindowUseCase,

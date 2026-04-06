@@ -22,7 +22,7 @@
 
 ## 2. 검색 엔진 중심부
 
-검색 엔진의 실질적 허브는 [search.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/search.usecase.ts) 와 [src/application/search](/Users/songmin/wine-search-engine/src/application/search) 폴더다.
+검색 엔진의 실질적 허브는 [search.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/search.usecase.ts)와 [src/application/search](/Users/songmin/wine-search-engine/src/application/search) 폴더다.
 
 현재 흐름:
 
@@ -89,6 +89,16 @@ request
 - public API 변경은 내부 리팩터링 부산물이 아니라 별도 설계 대상이다.
 - schema drift를 허용하는 접근은 이 레포와 맞지 않는다.
 
+### 4.1 현재 LLM / tool surface
+
+이 레포는 이미 human-only 검색 엔진은 아니다.
+
+- [claude-tools.route.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/claude-tools.route.ts)
+- [tool-executor.ts](/Users/songmin/wine-search-engine/src/interface/claude-tools/tool-executor.ts)
+
+기준으로 tool/agent surface가 이미 존재한다.  
+다만 현재는 human search response와 machine/tool response가 충분히 분리돼 있지 않아서, Epic 6의 `human vs machine/LLM result contract split`이 현재 구조와 직접 맞닿아 있다.
+
 ---
 
 ## 5. Index / ETL / Vespa 구조
@@ -136,15 +146,14 @@ request
 
 주의:
 
-- `test:e2e:fast`는 현재 `test:e2e:runtime` alias다.  
-  그런데 CLAUDE.md에서는 `test:e2e:fast`를 “Main in-memory fast e2e lane”이라고 설명한다.  
-  **이름(`fast`/`inmemory`)과 실제 target(`runtime`)이 모순**이므로 에픽에서 테스트 레인을 언급할 때는 반드시 실제 스크립트 이름을 기준으로 적어야 한다.
+- 문서에서 `fast lane`, `runtime lane`, `smoke lane` 같은 별칭만 쓰지 않는다. 항상 `npm run test:e2e:contract`, `npm run test:e2e:inmemory`, `npm run test:e2e:runtime`처럼 실제 실행 스크립트명을 적는다.
 - `test:e2e:inmemory`(`e2e.config.ts`)와 `test:e2e:runtime`(`e2e.runtime.config.ts`)은 서로 다른 config를 사용하며, 커버 범위가 다르다.
 
 설계 함의:
 
 - 각 epic는 최소한 unit + relevant integration + contract parity 검증 계획을 가져야 한다.
 - projection/API epic는 e2e와 ingest contract까지 같이 봐야 한다.
+- 문서에서 `fast lane`, `smoke lane` 같은 별칭만 쓰면 drift가 발생한다. 반드시 `npm run ...` 실 스크립트명을 적는다.
 
 ---
 
@@ -154,6 +163,18 @@ request
 2. 검색 스택이 장난감이 아니라 실제 운영 가능한 수준이다.
 3. offline eval / noisy entity eval / LTR / reranker / Vespa lane이 있다.
 4. bugbash hardening을 거치며 determinism, contracts, watchlist, replay가 강화됐다.
+
+### 7.1 Repo Fit Matrix
+
+| Epic | 현재 레포 적합성 | 이유 |
+|---|---|---|
+| Epic 1 | highest risk | `QueryPlanV1`가 runtime currency라 blast radius가 가장 큼 |
+| Epic 2 | moderate | query domain 자산은 좋지만 planner/compiler 결합을 함께 건드려야 함 |
+| Epic 3 | strongest fit | candidate-pool seam이 현재 레포에서 가장 잘 드러남 |
+| Epic 4 | strongest fit | Vespa + retrieval layer가 이미 있어 채널 확장이 현실적 |
+| Epic 5 | moderate | ranking scaffold는 좋지만 full policy layer는 아직 약함 |
+| Epic 6 | moderate | HTTP 계약은 강하지만 migration story를 명시해야 함 |
+| Epic 7 | strongest fit | 늦게 가는 게 맞고, highest-radius migration으로 잘 정의 가능 |
 
 ---
 

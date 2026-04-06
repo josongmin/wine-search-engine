@@ -3,7 +3,7 @@ import type {
   ConstraintBundle,
   NormalizedConstraint,
 } from '../../shared/types/index.js';
-import type { QueryPlanV1 } from '../model/query-plan.js';
+import type { QueryPlanV2 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';
 import type { RetrievalMode } from '../model/retrieval-mode.js';
@@ -18,7 +18,6 @@ import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
-import { PolicyCompiler } from './policy-compiler.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
@@ -72,13 +71,12 @@ export interface PlannerContext {
  *
  * Orchestrates query normalization, anchor extraction, intent detection,
  * routing, constraint parsing, expansion building, uncertainty assessment,
- * and policy compilation into a single immutable {@link QueryPlanV1}.
+ * and policy compilation into a single immutable {@link QueryPlanV2}.
  *
  * Deterministic: the same input query, planner version, and policy rule
  * version always produce the same plan.
  */
 export class Planner {
-  private readonly policyCompiler = new PolicyCompiler();
   private readonly queryNormalizer = new QueryNormalizer();
 
   constructor(
@@ -108,7 +106,7 @@ export class Planner {
    * @param context - Optional planner context (locale, session, budget).
    * @returns An immutable query plan.
    */
-  async plan(query: string, context?: PlannerContext): Promise<QueryPlanV1> {
+  async plan(query: string, context?: PlannerContext): Promise<QueryPlanV2> {
     // 1. Normalize.
     const queryViews = this.queryNormalizer.normalize(query);
     const normalizedQuery = queryViews.accentless;
@@ -177,14 +175,6 @@ export class Planner {
       constraints,
     );
 
-    // 9. Compile policy.
-    const policy = this.policyCompiler.compile(
-      intent,
-      queryClass,
-      anchors,
-      uncertainty,
-    );
-
     const budget = context?.budget ?? DEFAULT_QUERY_BUDGET;
 
     // 10. Infer target entity type for result grouping (Epic 8).
@@ -223,13 +213,12 @@ export class Planner {
       normalizedQueryViews: queryViews,
       intent,
       ...(secondaryIntents !== undefined && { secondaryIntents }),
-      route,
-      retrievalMode,
+      suggestedRoute: route,
+      suggestedRetrievalMode: retrievalMode,
       queryClass,
       anchors,
       constraints,
       expansions,
-      policy,
       uncertainty,
       plannerVersion: PLANNER_VERSION,
       policyRuleVersion: POLICY_RULE_VERSION,

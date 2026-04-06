@@ -10,6 +10,7 @@ import type { SessionContext } from './session-context.js';
 import type { QueryBudget } from './query-budget.js';
 import type { QueryTargetType } from './query-target-type.js';
 import type { NormalizedQueryViews } from './query-views.js';
+import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -96,4 +97,67 @@ export interface QueryPlanV1 {
 
   /** Inferred target entity type for result grouping (Epic 8). */
   readonly targetEntityType?: QueryTargetType | undefined;
+}
+
+/**
+ * Version 2 of the Query Plan.
+ *
+ * Planner-only output. Does NOT include execution decisions (route, retrievalMode).
+ * Those are compiled by ExecutionCompiler into EngineExecutionContract.
+ *
+ * QueryPlanV2 = QueryUnderstandingSnapshot + admission_context + planner suggestions
+ */
+export interface QueryPlanV2 {
+  // --- Understanding fields (same as QueryUnderstandingSnapshot) ---
+  readonly rawQuery: string;
+  readonly normalizedQuery: string;
+  readonly normalizedQueryViews?: NormalizedQueryViews;
+  readonly intent: QueryIntent;
+  readonly secondaryIntents?: readonly QueryIntent[];
+  readonly anchors: readonly AnchorCandidate[];
+  readonly constraints: ConstraintBundle;
+  readonly expansions: ExpansionBundle;
+  readonly uncertainty: QueryUncertainty;
+  readonly queryClass: QueryClass;
+  readonly targetEntityType?: QueryTargetType;
+  readonly plannerVersion: string;
+  readonly policyRuleVersion: string;
+  readonly thresholdProfileId: string;
+  readonly sessionContext?: SessionContext;
+  readonly queryBudget?: QueryBudget;
+
+  // --- Admission context (planner still populates this) ---
+  readonly admission_context?: {
+    readonly requires_identity_seal: boolean;
+    readonly requires_constraint_evidence: boolean;
+    readonly requires_anchor_evidence: boolean;
+  };
+
+  // --- Planner suggestions (hints for compiler, NOT binding execution) ---
+  /** Planner's suggested route — compiler may override. */
+  readonly suggestedRoute: QueryRoute;
+  /** Planner's suggested retrieval mode — compiler may override. */
+  readonly suggestedRetrievalMode: RetrievalMode;
+}
+
+/** Convert QueryPlanV2 to QueryUnderstandingSnapshot (drops suggestions and admission_context). */
+export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstandingSnapshot {
+  return {
+    rawQuery: plan.rawQuery,
+    normalizedQuery: plan.normalizedQuery,
+    ...(plan.normalizedQueryViews !== undefined && { normalizedQueryViews: plan.normalizedQueryViews }),
+    intent: plan.intent,
+    ...(plan.secondaryIntents !== undefined && { secondaryIntents: plan.secondaryIntents }),
+    anchors: plan.anchors,
+    constraints: plan.constraints,
+    expansions: plan.expansions,
+    uncertainty: plan.uncertainty,
+    queryClass: plan.queryClass,
+    ...(plan.targetEntityType !== undefined && { targetEntityType: plan.targetEntityType }),
+    plannerVersion: plan.plannerVersion,
+    policyRuleVersion: plan.policyRuleVersion,
+    thresholdProfileId: plan.thresholdProfileId,
+    ...(plan.sessionContext !== undefined && { sessionContext: plan.sessionContext }),
+    ...(plan.queryBudget !== undefined && { queryBudget: plan.queryBudget }),
+  };
 }

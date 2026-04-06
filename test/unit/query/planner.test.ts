@@ -131,51 +131,51 @@ describe('Planner – plannerVersion', () => {
 // ── Route determination ────────────────────────────────────────────────────────
 
 describe('Planner – route determination', () => {
-  it('query with "같은" → route is "mixed"', async () => {
+  it('query with "같은" → suggestedRoute is "mixed"', async () => {
     // Anchor present so Korean mixed markers trigger mixed_query intent
     const entries = new Map([['오푸스원', makeMatchResult('오푸스원', 0.9)]]);
     const planner = makePlanner(entries);
     const plan = await planner.plan('오푸스원 같은 10만원 와인');
-    expect(plan.route).toBe('mixed');
+    expect(plan.suggestedRoute).toBe('mixed');
   });
 
-  it('query with "비슷한" → route is "mixed"', async () => {
+  it('query with "비슷한" → suggestedRoute is "mixed"', async () => {
     const entries = new Map([['마고', makeMatchResult('마고', 0.9)]]);
     const planner = makePlanner(entries);
     const plan = await planner.plan('마고 비슷한 와인');
-    expect(plan.route).toBe('mixed');
+    expect(plan.suggestedRoute).toBe('mixed');
   });
 
-  it('pure entity name with high-confidence anchor → route is "entity"', async () => {
+  it('pure entity name with high-confidence anchor → suggestedRoute is "entity"', async () => {
     const entries = new Map([['opus one', makeMatchResult('Opus One', 0.95)]]);
     const planner = makePlanner(entries);
     // No attribute/constraint words → entity_exact → entity
     const plan = await planner.plan('Opus One');
-    expect(plan.route).toBe('entity');
+    expect(plan.suggestedRoute).toBe('entity');
   });
 
-  it('attribute-heavy query without entity anchors → route is "hybrid"', async () => {
+  it('attribute-heavy query without entity anchors → suggestedRoute is "hybrid"', async () => {
     // No alias matches → no anchors; constraint keyword present → facet_search → hybrid
     const planner = makePlanner(new Map());
     const plan = await planner.plan('풀바디 레드 와인');
-    expect(plan.route).toBe('hybrid');
+    expect(plan.suggestedRoute).toBe('hybrid');
   });
 });
 
 // ── Retrieval mode (Epic 7: producer_browse / region_browse) ───────────────────
 
 describe('Planner – retrieval mode', () => {
-  it('strong anchor + "best wines" → producer_browse', async () => {
+  it('strong anchor + "best wines" → suggestedRetrievalMode is producer_browse', async () => {
     const entries = new Map([['opus one', makeMatchResult('Opus One', 0.95)]]);
     const planner = makePlanner(entries);
     const plan = await planner.plan('Opus One best wines');
-    expect(plan.retrievalMode).toBe('producer_browse');
+    expect(plan.suggestedRetrievalMode).toBe('producer_browse');
   });
 
-  it('facet query with hierarchical path (≥2 slashes) → region_browse', async () => {
+  it('facet query with hierarchical path (≥2 slashes) → suggestedRetrievalMode is region_browse', async () => {
     const planner = makePlanner(new Map());
     const plan = await planner.plan('red wine from france / bordeaux / medoc');
     expect(plan.intent).toBe('facet_search');
-    expect(plan.retrievalMode).toBe('region_browse');
+    expect(plan.suggestedRetrievalMode).toBe('region_browse');
   });
 });

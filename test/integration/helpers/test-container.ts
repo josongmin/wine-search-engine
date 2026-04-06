@@ -55,6 +55,7 @@ import {
   InMemorySimilarRetrieval,
   InMemoryCandidateAttributes,
 } from './in-memory-adapters.js';
+import { PlannerV1Adapter } from '../../../src/config/planner-v1-adapter.js';
 import {
   MIXED_NEIGHBORHOOD_FIXTURES,
   TEST_ALIASES,
@@ -130,7 +131,10 @@ export function createTestContainer(): TestContainerParts {
     getCurrentVersion: async () => 'v1',
   };
   const nlMapper = new NLMapper(noOpMappingTable);
-  const queryPlanner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper);
+  // T1.2: wrap concrete Planner (returns QueryPlanV2) in V1 adapter for backward compat.
+  const queryPlanner = new PlannerV1Adapter(
+    new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper),
+  );
 
   // Domain services — entity resolution
   const blocker = new Blocker(blockingAdapter);

@@ -1,6 +1,8 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
+import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
+import { RelativeQueryExtractor } from './relative-query-extractor.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -57,7 +59,17 @@ const COMPARISON_MARKERS: readonly RegExp[] = [
  * Combines alias-based matching with heuristic pattern detection for
  * Korean mixed-query markers ("같은", "비슷한", "말고", "대신", "vs", "보다").
  */
+/** Combined result of {@link AnchorExtractor.extractWithRelative}. */
+export interface AnchorExtractionWithRelative {
+  /** Anchor candidates from alias matching, ordered by confidence descending. */
+  readonly anchors: readonly AnchorCandidate[];
+  /** Structured relative/similarity query, or null if none detected. */
+  readonly relativeQuery: AnchorConditionedQuery | null;
+}
+
 export class AnchorExtractor {
+  private readonly relativeQueryExtractor = new RelativeQueryExtractor();
+
   constructor(private readonly aliasMatcher: AliasMatcher) {}
 
   /**
@@ -89,6 +101,30 @@ export class AnchorExtractor {
     candidates.sort((a, b) => b.confidence - a.confidence);
 
     return candidates;
+  }
+
+  /**
+   * Extracts anchor candidates AND a relative/similarity query expression in
+   * a single pass.
+   *
+   * The existing {@link extract} method is unchanged; this method augments its
+   * output with structured relative-query information from
+   * {@link RelativeQueryExtractor}.
+   *
+   * @param normalizedQuery - Lowercased, accent-stripped query string.
+   * @param queryViews - Optional multi-view lookup variants.
+   * @returns An object with `anchors` and `relativeQuery` fields.
+   */
+  async extractWithRelative(
+    normalizedQuery: string,
+    queryViews?: NormalizedQueryViews,
+  ): Promise<AnchorExtractionWithRelative> {
+    const [anchors, relativeQuery] = await Promise.all([
+      this.extract(normalizedQuery, queryViews),
+      Promise.resolve(this.relativeQueryExtractor.extract(normalizedQuery)),
+    ]);
+
+    return { anchors, relativeQuery };
   }
 
   private async lookupAliasMatches(

@@ -2,6 +2,7 @@
 node_modules/
 dist/
 coverage/
+.next/
 .turbo/
 *.tsbuildinfo
 .tsbuildinfo.build
@@ -37,6 +38,7 @@ Thumbs.db
 
 # Claude Code — personal overrides (team shares .claude/settings.json)
 .claude/settings.local.json
+.claude/worktrees/
 CLAUDE.local.md
 
 # Codex — optional local overrides next to project config

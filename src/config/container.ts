@@ -29,8 +29,11 @@ import type {
 } from '../application/search/port/search-pipeline-deps.port.js';
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
+import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 
 export interface Container extends LearningContainerServices {
+  /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
+  readonly chatLlm?: ChatLlmPort;
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly candidatePool: CandidatePoolPort;
@@ -69,6 +72,7 @@ export async function createContainer(
   return {
     ...learning,
     feedbackIngestEnabled,
+    ...(core.chatLlm !== undefined ? { chatLlm: core.chatLlm } : {}),
     queryPlanner: core.queryPlanner,
     entityResolver: core.entityResolver,
     candidatePool: core.candidatePool,

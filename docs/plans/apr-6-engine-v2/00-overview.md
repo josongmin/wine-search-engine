@@ -1,9 +1,10 @@
-# Wine Engine v2 — 100점 설계 리팩토링 플랜
+# Wine Engine v2 — Current-Engine-Compatible Core Plan
 
 **날짜:** 2026-04-06  
 **범위:** 현재 레포를 “잘 동작하는 검색 서비스”에서 “대형 retrieval/ranking 리팩토링을 안정적으로 흡수하는 엔진”으로 끌어올린다.  
 **전제:** 브레이킹 체인지 허용. 단, 한 번에 모든 축을 뒤엎는 빅뱅 마이그레이션은 금지한다.  
-**목표 상태:** query contract, retrieval contract, ranking funnel, API contract, index projection이 서로 명시적 인터페이스로 분리되고, 각 계층이 독립적으로 진화 가능하다.
+**목표 상태:** query contract, retrieval contract, ranking funnel, API contract, index projection이 서로 명시적 인터페이스로 분리되고, 각 계층이 독립적으로 진화 가능하다.  
+**범위 선언:** 이 문서는 `ROI 무관 최강 엔진`의 전체 완성본이 아니라, **현재 엔진과 호환되며 실제 구현 가능한 v2 core**를 정의한다.
 
 ---
 
@@ -29,7 +30,37 @@
 > “retrieval / ranking / API / index를 축별로 재설계 가능한 엔진”으로 바꾸는 것
 
 현재 프로젝트 맥락 요약은 [appendix-a-current-project-context.md](/Users/songmin/wine-search-engine/docs/plans/apr-6-engine-v2/appendix-a-current-project-context.md)에 압축해 두었다.  
-이 문서는 설계 판단 시 수시로 참조하는 부속 문서이며, container wiring, HTTP 계약, 테스트 레인, ETL/Vespa coupling을 함께 요약한다.
+이 문서는 설계 판단 시 수시로 참조하는 부속 문서이며, container wiring, HTTP 계약, 테스트 레인, ETL/Vespa coupling, 현재 LLM/tool surface를 함께 요약한다.
+
+v2 core 밖의 `strongest-engine backlog`는 [appendix-b-sota-gap-and-post-v2-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-6-engine-v2/appendix-b-sota-gap-and-post-v2-backlog.md)에 정리한다.  
+여기에는 selective late interaction, `VISION_LABEL`, multimodal label/OCR, behavior/personalization, richer offer/merchant graph, pairing/co-mention graph를 포함한다.
+
+---
+
+## v2 Core vs Post-v2 Backlog
+
+이 문서의 기준은 `Core+Backlog`다.
+
+- **v2 core:** 현재 레포 위에서 실제로 구현 가능한 strongest-implementable engine
+- **post-v2 backlog:** 방향상 맞고 SOTA++에도 중요하지만, 현재 레포에서 바로 넣으면 반경이 너무 크거나 선행 자산이 부족한 항목
+
+v2 core가 포함하는 것:
+
+- query understanding 강화
+- provenance-rich candidate pool
+- learned sparse
+- channel-aware retrieval
+- stage-based ranking
+- human/LLM dual result contract
+- projection boundary 재설계
+
+post-v2 backlog로 분리하는 것:
+
+- selective late interaction
+- `VISION_LABEL` / OCR / multimodal label retrieval
+- behavior/personalization serving
+- richer offer/merchant graph
+- pairing / co-mention graph
 
 ---
 
@@ -73,6 +104,7 @@
 3. `application/search`의 orchestration 부담을 줄이는 것이 목표이지, 다른 거대 허브를 새로 만들면 안 된다.
 4. `RetrievalDocument` 또는 public response를 바꾸는 epic는 fixtures / scripts / docs까지 같은 change set에서 정리한다.
 5. 브레이킹 surface는 반드시 문서의 별도 섹션으로 기록한다.
+6. **Epics 1–5에서는 public HTTP adapter compatibility를 유지한다.** public request/response breaking change는 Epic 6에서만 공식 도입한다.
 
 ---
 
@@ -87,6 +119,12 @@
 | 5 | Ranking Funnel Redesign | must | high |
 | 6 | API / Result Contract Redesign | should | medium |
 | 7 | Index Projection Migration | should | last |
+
+추가 메모:
+
+- **Epics 1–5:** internal contract migration
+- **Epic 6:** public HTTP surface migration
+- **Epic 7:** entity-only current engine에서 offer-aware future engine으로 가는 bridge
 
 ---
 
@@ -136,6 +174,8 @@ Epic 5 -> Epic 6 -> Epic 7
 
 runtime core가 안정화된 뒤 public result contract와 index projection migration을 진행한다.
 
+이후 strongest-engine 방향은 별도 backlog로 넘긴다.
+
 ---
 
 ## 의존성 그래프
@@ -167,6 +207,22 @@ flowchart LR
 - Vespa projection 변경이 query/runtime/API 변경과 분리돼 수행 가능하다.
 - eval / observability / regression gate가 각 epic 승격을 막아준다.
 
+## LLM Implementation Readiness Rules
+
+이 문서 세트는 사람 리뷰어뿐 아니라 implementation agent가 바로 작업을 시작할 수 있어야 한다.  
+따라서 각 task 문서는 아래 네 가지를 반드시 포함해야 한다.
+
+1. `닫는 기준`
+   무엇이 더 이상 기존 계약을 직접 읽지 않아야 하는지, 어떤 adapter가 유지돼야 하는지 명시한다.
+2. `Must change / must not change`
+   특히 Epics 1–5 동안 public HTTP surface를 건드리지 않는 규칙을 task 단위로 다시 적는다.
+3. `필수 신규 테스트`
+   기존 명령만 적지 말고, 어떤 테스트 파일/케이스를 추가 또는 갱신해야 하는지 적는다.
+4. `Stage gate`
+   다음 phase로 넘어가기 전에 통과해야 하는 검증 명령과 회귀 금지 조건을 적는다.
+
+세부 implementation-ready 규칙은 [task-dag.md](/Users/songmin/wine-search-engine/docs/plans/apr-6-engine-v2/task-dag.md)의 Wave 1 task notes를 SSOT로 둔다.
+
 ### 비목표
 
 - Decision authority 경계를 바꾸지 않는다.
@@ -174,6 +230,7 @@ flowchart LR
 - personalization, full multimodal, late interaction은 이 v2의 필수 종료 조건이 아니다.
 - real-time user signal(click, dwell, purchase) 기반 feedback loop는 이 v2에서 도입하지 않는다.
 - online A/B interleaving infrastructure는 이 v2 scope 밖이다 (단, Epic 5에서 offline counterfactual eval은 포함한다).
+- post-v2 backlog 항목은 방향상 중요하지만, 이 문서의 완료 게이트에는 포함하지 않는다.
 
 ---
 
@@ -183,6 +240,8 @@ flowchart LR
 docs/plans/apr-6-engine-v2/
 ├── 00-overview.md
 ├── appendix-a-current-project-context.md
+├── appendix-b-sota-gap-and-post-v2-backlog.md
+├── task-dag.md
 ├── epic-1-query-contract-overhaul.md
 ├── epic-2-query-understanding-upgrade.md
 ├── epic-3-candidate-pool-provenance-rewrite.md
@@ -191,3 +250,5 @@ docs/plans/apr-6-engine-v2/
 ├── epic-6-api-result-contract-redesign.md
 └── epic-7-index-projection-migration.md
 ```
+
+Task-level DAG(병렬 실행 가능 단위, 크리티컬 패스, 교차 의존)는 [task-dag.md](/Users/songmin/wine-search-engine/docs/plans/apr-6-engine-v2/task-dag.md)에 정리돼 있다.

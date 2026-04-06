@@ -159,7 +159,7 @@ function makeBronzeFixtures(): BronzeRow[] {
           structure: {
             acidity: 4,
             fizziness: 0,
-            intensity: 5,
+            intensity: 3,
             sweetness: 1,
             tannin: 4,
           },

@@ -21,7 +21,7 @@ const BARS = [
 export function TasteProfileBar({ scores }: TasteProfileBarProps) {
   return (
     <div className="space-y-1.5">
-      <p className="text-xs font-medium text-neutral-500 uppercase tracking-wider">
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
         Score Components
       </p>
       {BARS.map(({ key, label, color }) => {
@@ -30,16 +30,16 @@ export function TasteProfileBar({ scores }: TasteProfileBarProps) {
         const width = Math.min(value * 100, 100);
         return (
           <div key={key} className="flex items-center gap-2">
-            <span className="w-20 text-xs text-neutral-500 shrink-0 text-right">
+            <span className="w-20 text-xs text-muted-foreground shrink-0 text-right">
               {label}
             </span>
-            <div className="h-2 flex-1 rounded-full bg-neutral-100">
+            <div className="h-2 flex-1 rounded-full bg-muted">
               <div
                 className={cn('h-2 rounded-full transition-all', color)}
                 style={{ width: `${width}%` }}
               />
             </div>
-            <span className="w-8 text-xs text-neutral-400 tabular-nums">
+            <span className="w-8 text-xs text-muted-foreground tabular-nums">
               {value.toFixed(2)}
             </span>
           </div>

@@ -20,24 +20,19 @@
 - relative / anchor / compare / browse 의도가 first-class query family가 된다.
 - domain ontology 정규화가 retrieval 전에 끝난다.
 
+### Public surface rule
+
+이 epic은 query 해석 내부를 강화하는 단계다.  
+public HTTP request/response contract는 Epic 6 전까지 adapter-compatible하게 유지한다.
+
 ---
 
 ## 레포에서 건드리는 축
 
-- [src/domain/query/service/query-normalizer.ts](/Users/songmin/wine-search-engine/src/domain/query/service/query-normalizer.ts)
-- [src/domain/query/model/query-views.ts](/Users/songmin/wine-search-engine/src/domain/query/model/query-views.ts)
-- [src/domain/query/service/anchor-extractor.ts](/Users/songmin/wine-search-engine/src/domain/query/service/anchor-extractor.ts)
-- [src/domain/query/service/planner.ts](/Users/songmin/wine-search-engine/src/domain/query/service/planner.ts)
-- [src/domain/query/service/planner-intent-detection.ts](/Users/songmin/wine-search-engine/src/domain/query/service/planner-intent-detection.ts)
-- [src/domain/query/service/rule-based-constraint-extractor.ts](/Users/songmin/wine-search-engine/src/domain/query/service/rule-based-constraint-extractor.ts)
-- [src/domain/query/service/expansion-builder.ts](/Users/songmin/wine-search-engine/src/domain/query/service/expansion-builder.ts)
-- [src/domain/query/service/decomposition-detector.ts](/Users/songmin/wine-search-engine/src/domain/query/service/decomposition-detector.ts)
-- [src/domain/query/service/pairing-extractor.ts](/Users/songmin/wine-search-engine/src/domain/query/service/pairing-extractor.ts)
-- [src/domain/attribute/service/nl-mapper.ts](/Users/songmin/wine-search-engine/src/domain/attribute/service/nl-mapper.ts)
-- [src/domain/attribute/service/attribute-inferrer.ts](/Users/songmin/wine-search-engine/src/domain/attribute/service/attribute-inferrer.ts)
-- [src/domain/mixed/service/mixed-solver.ts](/Users/songmin/wine-search-engine/src/domain/mixed/service/mixed-solver.ts)
-- [src/domain/mixed/service/anchor-profiler.ts](/Users/songmin/wine-search-engine/src/domain/mixed/service/anchor-profiler.ts)
-- [src/application/search/search-usecase-hybrid-candidates.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-hybrid-candidates.ts)
+- [src/application/search](/Users/songmin/wine-search-engine/src/application/search)
+- [src/domain/query](/Users/songmin/wine-search-engine/src/domain/query)
+- [src/domain/mixed](/Users/songmin/wine-search-engine/src/domain/mixed)
+- [search-usecase-hybrid-candidates.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-hybrid-candidates.ts)
 
 ---
 
@@ -75,9 +70,15 @@ grape, region, style, body, sweetness, pairing, producer prestige, price-relativ
 
 현재 decomposition과 mixed logic이 분산된 부분을 query understanding contract 안에서 더 일관되게 정리한다.
 
+현재 [search-usecase-pre-route-phase.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-pre-route-phase.ts)에는 planner 이전의 decomposition shortcut이 있다.  
+Wave 1 종료 시점엔 이 경로가 별도 의미 체계를 갖는 것이 아니라, query understanding 결과를 소비하는 compatibility adapter가 되어야 한다.
+
 ### Step 5. Query understanding observability
 
 query family, rewrite id, ambiguity class, anchor/relative extraction 결과를 runtime logs와 offline eval slice vocabulary로 맞춘다.
+
+이 단계는 기존 [search-log-schema.ts](/Users/songmin/wine-search-engine/src/observability/search-log-schema.ts)를 무작정 확장하는 것으로 끝내지 않는다.  
+현재 search log는 execution meta 중심이라 query understanding payload와 retrieval provenance payload를 분리해 설계하는 것이 맞다.
 
 ---
 
@@ -103,3 +104,4 @@ query family, rewrite id, ambiguity class, anchor/relative extraction 결과를 
 - planner interpretation contract tests
 - noisy entity / mixed / relative query eval slices
 - interpret route regression tests
+- query understanding log schema / payload tests

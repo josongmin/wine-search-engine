@@ -8,6 +8,8 @@ import { FileMappingTableAdapter } from '../infrastructure/adapter/file-mapping-
 import { HttpLearnedMatcherAdapter } from '../infrastructure/adapter/http-learned-matcher.js';
 import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
+import { OpenAiChatLlm } from '../infrastructure/ai/openai-chat-llm.js';
+import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-service.js';
 import { HttpEmbeddingService } from '../infrastructure/vespa/embedding-service.js';
 import { HttpCrossEncoderReranker } from '../infrastructure/vespa/reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
@@ -22,6 +24,7 @@ import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-diction
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type { SearchIndexPort } from '../domain/retrieval/port/search-index.port.js';
+import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { EmbeddingServicePort } from '../domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../domain/query/port/threshold-store.port.js';
 import type { AliasMatcher } from '../domain/query/service/anchor-extractor.js';
@@ -45,6 +48,8 @@ import {
 export interface CoreAdapterServices {
   readonly searchIndex: SearchIndexPort;
   readonly embeddingService: EmbeddingServicePort;
+  /** Present when `OPENAI_API_KEY` is set. */
+  readonly chatLlm?: ChatLlmPort;
   readonly reranker: RerankerPort;
   readonly blockingPort: BlockingPort;
   readonly calibrationStore: CalibrationStore;
@@ -109,11 +114,38 @@ export function buildCoreAdapterServices(
       })
     : baseSearchIndex;
 
+  const embeddingService: EmbeddingServicePort = (() => {
+    if (config.killSwitch.denseRetrieval) {
+      return new StubEmbeddingService();
+    }
+    if (
+      config.openai.apiKey !== undefined &&
+      config.openai.embeddingModel !== undefined
+    ) {
+      return new OpenAiEmbeddingService({
+        baseUrl: config.openai.baseUrl,
+        apiKey: config.openai.apiKey,
+        model: config.openai.embeddingModel,
+        httpTimeoutMs: config.openai.httpTimeoutMs,
+      });
+    }
+    return new HttpEmbeddingService();
+  })();
+
+  const chatLlm: ChatLlmPort | undefined =
+    config.openai.apiKey !== undefined
+      ? new OpenAiChatLlm({
+          baseUrl: config.openai.baseUrl,
+          apiKey: config.openai.apiKey,
+          defaultModel: config.openai.chatModel,
+          httpTimeoutMs: config.openai.httpTimeoutMs,
+        })
+      : undefined;
+
   return {
     searchIndex,
-    embeddingService: config.killSwitch.denseRetrieval
-      ? new StubEmbeddingService()
-      : new HttpEmbeddingService(),
+    embeddingService,
+    ...(chatLlm !== undefined ? { chatLlm } : {}),
     reranker: new HttpCrossEncoderReranker(),
     blockingPort: pool ? new PgBlockingAdapter(pool) : new StubBlockingPort(),
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),

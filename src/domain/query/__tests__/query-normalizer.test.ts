@@ -64,4 +64,71 @@ describe('QueryNormalizer', () => {
     expect(views.vintageCanonicalized).toBe('10만원 이하 오푸스원 2019');
     expect(views.vintageStripped).toBe('10만원 이하 오푸스원');
   });
+
+  it('produces phoneticNormalized for accented wine names without vowel removal', () => {
+    const views = normalizer.normalize('Château');
+
+    // phoneticNormalized applies phonetic rules (no vowel removal)
+    expect(views.phoneticNormalized).toBeDefined();
+    // phoneticCompact strips vowels further
+    expect(views.phoneticCompact).toBeDefined();
+    // phoneticNormalized is longer (or equal) to phoneticCompact — vowels not removed
+    expect((views.phoneticNormalized?.length ?? 0)).toBeGreaterThanOrEqual(
+      views.phoneticCompact?.length ?? 0,
+    );
+    // phoneticNormalized should not be identical to phoneticCompact for vowel-containing words
+    expect(views.phoneticNormalized).not.toBe(views.phoneticCompact);
+  });
+
+  it('lookupVariants has no duplicates', () => {
+    const views = normalizer.normalize('Château Margaux 2015');
+
+    const seen = new Set<string>();
+    for (const v of views.lookupVariants) {
+      expect(seen.has(v)).toBe(false);
+      seen.add(v);
+    }
+  });
+
+  it('lookupVariants is ordered conservative-first (strict before compact before phoneticCompact)', () => {
+    const views = normalizer.normalize('Opus One 2018');
+
+    const variants = views.lookupVariants;
+    const strictIdx = variants.indexOf('opus one 2018');
+    const compactIdx = variants.indexOf('opusone2018');
+    const phoneticCompactVal = views.phoneticCompact;
+
+    expect(strictIdx).toBeGreaterThanOrEqual(0);
+    expect(compactIdx).toBeGreaterThanOrEqual(0);
+    expect(strictIdx).toBeLessThan(compactIdx);
+
+    if (phoneticCompactVal !== undefined) {
+      const phoneticIdx = variants.indexOf(phoneticCompactVal);
+      expect(phoneticIdx).toBeGreaterThan(compactIdx);
+    }
+  });
+
+  it('Korean query produces transliterated view in lookupVariants', () => {
+    const views = normalizer.normalize('샤토 마고');
+
+    expect(views.transliterated).toBeDefined();
+    expect(views.lookupVariants).toContain(views.transliterated);
+  });
+
+  it('vintage query: vintageCanonicalized differs from vintageStripped', () => {
+    const views = normalizer.normalize('Margaux 2015');
+
+    expect(views.vintageCanonicalized).toContain('2015');
+    expect(views.vintageStripped).not.toContain('2015');
+    expect(views.vintageCanonicalized).not.toBe(views.vintageStripped);
+  });
+
+  it('reordered variants for multi-word query tries alternate token orderings', () => {
+    const views = normalizer.normalize('Margaux Chateau');
+
+    expect(views.reordered).toBeDefined();
+    expect(views.reordered).toContain('chateau margaux');
+    // Original ordering should not be in reordered (it's already in lookupVariants via vintageStripped)
+    expect(views.reordered).not.toContain('margaux chateau');
+  });
 });

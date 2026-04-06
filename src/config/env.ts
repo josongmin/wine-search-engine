@@ -77,6 +77,18 @@ const envSchema = z.object({
   /** Per-request HTTP timeout for learned matcher API calls (AbortSignal). */
   LEARNED_MATCHER_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
+  // OpenAI API (optional — hexagonal ChatLlmPort + optional OpenAiEmbeddingService)
+  OPENAI_API_KEY: z.string().optional(),
+  /** Must include `/v1` for official API, e.g. `https://api.openai.com/v1` */
+  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
+  OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
+  /**
+   * When set together with OPENAI_API_KEY, dense retrieval uses OpenAI embeddings
+   * instead of EMBEDDING_SERVICE_URL (HttpEmbeddingService).
+   */
+  OPENAI_EMBEDDING_MODEL: z.string().min(1).optional(),
+  OPENAI_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
   /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
@@ -207,6 +219,15 @@ function buildConfig(parsed: EnvVars) {
     learnedMatcher: {
       url: parsed.LEARNED_MATCHER_SERVICE_URL,
       httpTimeoutMs: parsed.LEARNED_MATCHER_HTTP_TIMEOUT_MS,
+    },
+
+    /** OpenAI API settings (optional chat + optional embeddings override). */
+    openai: {
+      apiKey: parsed.OPENAI_API_KEY,
+      baseUrl: parsed.OPENAI_BASE_URL,
+      chatModel: parsed.OPENAI_CHAT_MODEL,
+      embeddingModel: parsed.OPENAI_EMBEDDING_MODEL,
+      httpTimeoutMs: parsed.OPENAI_HTTP_TIMEOUT_MS,
     },
 
     /** Anthropic API settings (optional, for LLM-based security features). */

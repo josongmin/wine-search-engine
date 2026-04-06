@@ -8,6 +8,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { DecisionEngine } from '../domain/decision/service/decision-engine.js';
 import { ResponseBuilder } from '../domain/response/service/response-builder.js';
 import { Planner } from '../domain/query/service/planner.js';
+import { PlannerV1Adapter } from '../config/planner-v1-adapter.js';
 import { AnchorExtractor } from '../domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../domain/query/service/expansion-builder.js';
 import { FusionService } from '../domain/retrieval/service/fusion.js';
@@ -308,7 +309,10 @@ function buildContainer() {
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
   const nlMapper = new NLMapper(new StubMappingTable());
-  const planner = new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper);
+  // T1.2: wrap concrete Planner (returns QueryPlanV2) in V1 adapter for backward compat.
+  const planner = new PlannerV1Adapter(
+    new Planner(ambiguityDict, anchorExtractor, expansionBuilder, nlMapper),
+  );
   const fusionService = new FusionService();
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();

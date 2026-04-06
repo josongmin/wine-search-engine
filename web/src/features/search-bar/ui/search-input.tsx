@@ -49,7 +49,7 @@ export function SearchInput({
     <form onSubmit={handleSubmit} className={cn('relative w-full', className)} role="search">
       <div
         className={cn(
-          'flex items-center gap-3 rounded-2xl border border-neutral-200 bg-white px-4 shadow-sm transition-all focus-within:border-rose-300 focus-within:ring-4 focus-within:ring-rose-100',
+          'flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 shadow-sm transition-all focus-within:border-rose-300 focus-within:ring-4 focus-within:ring-rose-100/50',
           isLg ? 'py-4 text-lg' : 'py-2.5 text-base',
         )}
       >
@@ -64,7 +64,7 @@ export function SearchInput({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="와인, 무엇이든 물어보세요..."
-          className="flex-1 bg-transparent outline-none placeholder:text-neutral-400"
+          className="flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
           autoComplete="off"
           spellCheck={false}
           aria-label="와인 검색"

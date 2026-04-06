@@ -8,49 +8,11 @@
 
 import { config } from '../../config/env.js';
 import type { EmbeddingServicePort } from '../../domain/retrieval/port/embedding-service.port.js';
+import { embeddingsFromOpenAiResponse } from '../ai/openai-json.js';
 import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
-
-// ---------------------------------------------------------------------------
-// Response shape
-// ---------------------------------------------------------------------------
-
-interface EmbeddingObject {
-  readonly object: string;
-  readonly index: number;
-  readonly embedding: number[];
-}
-
-interface EmbeddingApiResponse {
-  readonly object: string;
-  readonly data: readonly EmbeddingObject[];
-  readonly model: string;
-}
-
-// ---------------------------------------------------------------------------
-// Type guards
-// ---------------------------------------------------------------------------
-
-function isNumberArray(v: unknown): v is number[] {
-  return Array.isArray(v) && v.every((x) => typeof x === 'number');
-}
-
-function isEmbeddingObject(v: unknown): v is EmbeddingObject {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
-  return isNumberArray(obj['embedding']) && typeof obj['index'] === 'number';
-}
-
-function isEmbeddingApiResponse(v: unknown): v is EmbeddingApiResponse {
-  if (typeof v !== 'object' || v === null) return false;
-  const obj = v as Record<string, unknown>;
-  return (
-    Array.isArray(obj['data']) &&
-    (obj['data'] as unknown[]).every(isEmbeddingObject)
-  );
-}
 
 // ---------------------------------------------------------------------------
 // HttpEmbeddingService
@@ -165,15 +127,6 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
     }
 
     const data: unknown = await response.json();
-
-    if (!isEmbeddingApiResponse(data)) {
-      throw new Error(
-        `Embedding service: unexpected response shape — ${JSON.stringify(data).slice(0, 200)}`,
-      );
-    }
-
-    // Sort by index to guarantee input ordering.
-    const sorted = [...data.data].sort((a, b) => a.index - b.index);
-    return sorted.map((item) => item.embedding as readonly number[]);
+    return embeddingsFromOpenAiResponse(data);
   }
 }

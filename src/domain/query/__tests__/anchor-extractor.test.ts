@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { AnchorExtractor, type AliasMatcher, type AliasMatchResult } from '../service/anchor-extractor.js';
+import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import { QueryNormalizer } from '../service/query-normalizer.js';
 import { createEntityId } from '../../shared/types/index.js';
 
@@ -198,6 +199,42 @@ describe('AnchorExtractor', () => {
       const extractor = new AnchorExtractor(aliasMatcher);
       const anchors = await extractor.extract('오푸스원');
       expect(anchors[0]?.candidateEntityIds).toContain(entityId);
+    });
+  });
+
+  describe('extractWithRelative', () => {
+    // Test 11: "오퍼스 원 같은" returns both anchors and relativeQuery
+    it('11. "오퍼스 원 같은" returns anchor candidates and relativeQuery', async () => {
+      const aliasMatcher = new StubAliasMatcher(
+        new Map([['오퍼스 원', [makeMatchResult('오퍼스 원', ['entity-opus-one'], 0.9)]]]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const result = await extractor.extractWithRelative('오퍼스 원 같은');
+
+      // Should have anchor candidate from alias matcher
+      expect(result.anchors).toHaveLength(1);
+      expect(result.anchors[0]?.surfaceForm).toBe('오퍼스 원');
+
+      // Should have relative query
+      expect(result.relativeQuery).not.toBeNull();
+      const relativeQuery: AnchorConditionedQuery = result.relativeQuery!;
+      expect(relativeQuery.isSimilarityQuery).toBe(true);
+      expect(relativeQuery.relativeExpressions[0]?.operator).toBe('similar_to');
+      expect(relativeQuery.relativeExpressions[0]?.anchorSurfaceForm).toBe('오퍼스 원');
+    });
+
+    // Test 12: plain entity query returns relativeQuery: null
+    it('12. plain entity query returns relativeQuery: null', async () => {
+      const aliasMatcher = new StubAliasMatcher(
+        new Map([['보르도', [makeMatchResult('보르도', ['entity-bordeaux'], 0.9)]]]),
+      );
+      const extractor = new AnchorExtractor(aliasMatcher);
+
+      const result = await extractor.extractWithRelative('보르도 와인');
+
+      // relativeQuery should be null — no relative pattern
+      expect(result.relativeQuery).toBeNull();
     });
   });
 

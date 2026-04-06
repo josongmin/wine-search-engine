@@ -7,9 +7,9 @@ const iconButtonVariants = cva(
   {
     variants: {
       variant: {
-        ghost: 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600',
-        positive: 'text-neutral-400 hover:bg-emerald-50 hover:text-emerald-600',
-        negative: 'text-neutral-400 hover:bg-red-50 hover:text-red-600',
+        ghost: 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        positive: 'text-muted-foreground hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-950 dark:hover:text-emerald-400',
+        negative: 'text-muted-foreground hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400',
       },
       size: {
         sm: 'h-7 w-7',
@@ -21,9 +21,9 @@ const iconButtonVariants = cva(
       },
     },
     compoundVariants: [
-      { variant: 'positive', active: true, className: 'bg-emerald-100 text-emerald-600' },
-      { variant: 'negative', active: true, className: 'bg-red-100 text-red-600' },
-      { variant: 'ghost', active: true, className: 'bg-neutral-200 text-neutral-800' },
+      { variant: 'positive', active: true, className: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400' },
+      { variant: 'negative', active: true, className: 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-400' },
+      { variant: 'ghost', active: true, className: 'bg-muted text-foreground' },
     ],
     defaultVariants: { variant: 'ghost', size: 'sm', active: false },
   },
