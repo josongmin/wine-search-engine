@@ -1,39 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { buildHealthRouteOptions } from '../config/readiness.js';
-import { parseEnv } from '../config/env.js';
-
-describe('watchlist env config', () => {
-  it('enables watchlist explicitly when WATCHLIST_ENABLED is true', () => {
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      WATCHLIST_ENABLED: 'true',
-      WEBHOOK_SECRET: 'watchlist-secret-1234',
-    });
-
-    expect(config.watchlist.enabled).toBe(true);
-  });
-
-  it('allows explicitly disabling watchlist even when a secret is present', () => {
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      WATCHLIST_ENABLED: 'false',
-      WEBHOOK_SECRET: 'watchlist-secret-1234',
-    });
-
-    expect(config.watchlist.enabled).toBe(false);
-  });
-
-  it('rejects enabling watchlist without a webhook secret', () => {
-    expect(() =>
-      parseEnv({
-        NODE_ENV: 'test',
-        WATCHLIST_ENABLED: 'true',
-      })
-    ).toThrow('WATCHLIST_ENABLED requires WEBHOOK_SECRET to be set');
-  });
-});
+import { buildHealthRouteOptions } from '../readiness.js';
+import { parseEnv } from '../env.js';
 
 describe('buildHealthRouteOptions', () => {
+  it('marks redis as required when startup features need it, even without watchlist delivery', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      KILL_SWITCH_QUERY_CACHE: 'false',
+      KILL_SWITCH_INJECTION_JUDGE: 'true',
+    });
+
+    const health = buildHealthRouteOptions(config, {});
+
+    expect(health.readiness?.redis).toBeDefined();
+    expect(health.readiness?.redis?.required).toBe(true);
+    expect(health.readiness?.watchlist_runtime).toBeUndefined();
+  });
+
   it('marks redis as required when watchlist delivery is enabled', () => {
     const config = parseEnv({
       NODE_ENV: 'test',

@@ -10,7 +10,6 @@ import type {
   SearchPipelineOutput,
 } from '../../domain/evaluation/service/eval-runner.js';
 import type { QueryClass, DecisionStatus } from '../../domain/shared/types/index.js';
-import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
 
 /**
@@ -36,7 +35,7 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
     const startMs = Date.now();
 
     try {
-      const response: SearchResponseV1 = await this.searchUseCase.execute(
+      const rawResponse = await this.searchUseCase.execute(
         {
           query,
           context: {
@@ -48,6 +47,25 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       );
 
       const latencyMs = Date.now() - startMs;
+
+      // Evaluation always targets standard search queries
+      if (rawResponse.queryType !== 'search') {
+        return {
+          predictedStatus: 'failed',
+          decisionConfidence: 0,
+          evidenceItems: [],
+          latencyMs,
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1',
+            threshold_profile_id: 'default',
+            planner_version: '1',
+            feature_flags: {},
+          },
+        };
+      }
+      const response = rawResponse;
 
       // Extract decision and entity from response
       const decision = response.engineDecision;

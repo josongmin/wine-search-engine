@@ -10,6 +10,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
+import {
+  parseErrorResponse,
+  parseInterpretResponse,
+  parseSearchResponse,
+  postJson,
+} from './helpers/http-transport.js';
 
 let server: TestServer;
 
@@ -25,26 +31,8 @@ afterAll(async () => {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface InjectResponse {
-  statusCode: number;
-  headers: Record<string, string | string[]>;
-  body: string;
-  json: () => unknown;
-}
-
-async function post(path: string, body: unknown): Promise<InjectResponse> {
-  const response = await server.app.inject({
-    method: 'POST',
-    url: path,
-    headers: { 'content-type': 'application/json' },
-    payload: JSON.stringify(body),
-  });
-  return {
-    statusCode: response.statusCode,
-    headers: response.headers as Record<string, string | string[]>,
-    body: response.body,
-    json: () => JSON.parse(response.body) as unknown,
-  };
+async function post(path: string, body: unknown) {
+  return postJson(server.app, path, body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,9 +61,9 @@ describe('Group 1: Unicode and special character queries', () => {
   it('XSS payload in query — sanitized, no 500', async () => {
     const res = await post('/v1/search', { query: '<script>alert("xss")</script>' });
     expect(res.statusCode).not.toBe(500);
-    expect([200, 400]).toContain(res.statusCode);
+    expect([200, 400, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
-      const bodyStr = JSON.stringify(res.json());
+      const bodyStr = JSON.stringify(parseSearchResponse(res));
       expect(bodyStr).not.toContain('<script>');
       expect(bodyStr).not.toContain('alert(');
     }
@@ -84,9 +72,9 @@ describe('Group 1: Unicode and special character queries', () => {
   it('SQL injection payload — no 500', async () => {
     const res = await post('/v1/search', { query: "'; DROP TABLE entities; --" });
     expect(res.statusCode).not.toBe(500);
-    expect([200, 400]).toContain(res.statusCode);
+    expect([200, 400, 403]).toContain(res.statusCode);
     if (res.statusCode === 200) {
-      const bodyStr = JSON.stringify(res.json());
+      const bodyStr = JSON.stringify(parseSearchResponse(res));
       expect(bodyStr).not.toContain('DROP TABLE');
       expect(bodyStr).not.toContain("'; ");
     }
@@ -139,9 +127,8 @@ describe('Group 1: Unicode and special character queries', () => {
     const nfdQuery = 'Chateau\u0300 Margaux';
     const res = await post('/v1/search', { query: nfdQuery });
     expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
-    expect(decision['decisionStatus']).not.toBe('failed');
+    const decision = parseSearchResponse(res).engine_decision;
+    expect(decision.decision_status).not.toBe('failed');
   });
 });
 
@@ -388,8 +375,8 @@ describe('Group 5: Concurrency and isolation', () => {
 
     for (const response of responses) {
       expect(response.statusCode).toBe(200);
-      const body = JSON.parse(response.body) as Record<string, unknown>;
-      expect(body).toHaveProperty('engineDecision');
+      const body = parseSearchResponse(response);
+      expect(body).toHaveProperty('engine_decision');
       expect(body).toHaveProperty('results');
     }
 
@@ -479,13 +466,12 @@ describe('Group 5: Concurrency and isolation', () => {
     expect(mismatchedRes.statusCode).toBe(409);
 
     // Ensure results don't bleed between requests
-    const matchingBody = JSON.parse(matchingRes.body) as Record<string, unknown>;
-    const mismatchedBody = JSON.parse(mismatchedRes.body) as Record<string, unknown>;
+    const matchingBody = parseSearchResponse(matchingRes);
+    const mismatchedBody = parseErrorResponse(mismatchedRes);
 
-    expect(matchingBody).toHaveProperty('engineDecision');
+    expect(matchingBody).toHaveProperty('engine_decision');
     expect(mismatchedBody).toHaveProperty('error');
-    const error = mismatchedBody['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
+    expect(mismatchedBody.error.code).toBe('SNAPSHOT_MISMATCH');
   });
 });
 
@@ -550,19 +536,19 @@ describe('Group 7: Interpret endpoint edge cases', () => {
     const res = await post('/v1/search/interpret', { query });
 
     expect(res.statusCode).toBe(200);
-    const plan = res.json() as Record<string, unknown>;
-    expect(plan['rawQuery']).toBe(query);
-    expect(plan['normalizedQuery']).toBeTruthy();
-    expect(['entity', 'hybrid', 'mixed']).toContain(plan['route']);
+    const plan = parseInterpretResponse(res);
+    expect(plan.raw_query).toBe(query);
+    expect(plan.normalized_query).toBeTruthy();
+    expect(['entity', 'hybrid', 'mixed']).toContain(plan.route);
   });
 
   it('plannerVersion is semver-like string (starts with X.Y)', async () => {
     const res = await post('/v1/search/interpret', { query: 'Opus One' });
 
     expect(res.statusCode).toBe(200);
-    const plan = res.json() as Record<string, unknown>;
-    expect(typeof plan['plannerVersion']).toBe('string');
-    expect(plan['plannerVersion'] as string).toMatch(/^\d+\.\d+/);
+    const plan = parseInterpretResponse(res);
+    expect(typeof plan.planner_version).toBe('string');
+    expect(plan.planner_version).toMatch(/^\d+\.\d+/);
   });
 
   it('constraints is always an object (not null/undefined)', async () => {

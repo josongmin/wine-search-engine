@@ -10,6 +10,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
+import {
+  parseInterpretResponse,
+  parseSearchResponse,
+  postJson,
+  getSearchDecisionStatus,
+} from './helpers/http-transport.js';
 
 let server: TestServer;
 
@@ -33,18 +39,7 @@ interface InjectResponse {
 }
 
 async function post(path: string, body: unknown): Promise<InjectResponse> {
-  const response = await server.app.inject({
-    method: 'POST',
-    url: path,
-    headers: { 'content-type': 'application/json' },
-    payload: JSON.stringify(body),
-  });
-  return {
-    statusCode: response.statusCode,
-    headers: response.headers as Record<string, string | string[]>,
-    body: response.body,
-    json: () => JSON.parse(response.body) as unknown,
-  };
+  return postJson(server.app, path, body);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,10 +54,9 @@ describe('Korean entity resolution', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
+    const body = parseSearchResponse(res);
     // '오푸스원' is a pre-registered alias for opus-one-2018 — must resolve or be ambiguous
-    expect(decision['decisionStatus']).toMatch(/^(resolved|ambiguous)$/);
+    expect(getSearchDecisionStatus(body)).toMatch(/^(resolved|ambiguous)$/);
   });
 
   it("'샤토 마고' entity mode → 200", async () => {
@@ -89,8 +83,8 @@ describe('Korean entity resolution', () => {
     const res = await post('/v1/search/interpret', { query: '오푸스원' });
 
     expect(res.statusCode).toBe(200);
-    const plan = res.json() as Record<string, unknown>;
-    const normalized = plan['normalizedQuery'] as string;
+    const plan = parseInterpretResponse(res);
+    const normalized = plan.normalized_query;
     // The raw JSON string must not contain \u-escaped codepoints for Korean characters
     // (i.e. the JSON serializer must emit the characters directly, not as \uXXXX)
     expect(res.body).not.toMatch(/\\u[0-9a-fA-F]{4}/);
@@ -106,9 +100,8 @@ describe('Korean entity resolution', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
-    expect(decision['decisionStatus']).not.toBe('failed');
+    const body = parseSearchResponse(res);
+    expect(getSearchDecisionStatus(body)).not.toBe('failed');
   });
 });
 
@@ -375,8 +368,8 @@ describe('Snapshot field mismatch (RFC-015)', () => {
     });
 
     expect(res.statusCode).toBe(200);
-    const body = res.json() as Record<string, unknown>;
-    expect(body).toHaveProperty('engineDecision');
+    const body = parseSearchResponse(res);
+    expect(body).toHaveProperty('engine_decision');
     expect(body).toHaveProperty('results');
   });
 });

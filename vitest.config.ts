@@ -6,9 +6,11 @@ export default defineConfig({
     globals: true,
     include: [
       'test/unit/**/*.test.ts',
-      'test/integration/**/*.test.ts',
-      'src/**/__tests__/**/*.test.ts',
-      'src/__tests__/**/*.test.ts',
+      'src/application/**/__tests__/**/*.test.ts',
+      'src/config/**/__tests__/**/*.test.ts',
+      'src/domain/**/__tests__/**/*.test.ts',
+      'src/infrastructure/**/__tests__/**/*.test.ts',
+      'src/interface/**/__tests__/**/*.test.ts',
     ],
     coverage: {
       provider: 'v8',

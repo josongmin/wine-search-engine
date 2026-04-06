@@ -55,5 +55,6 @@ describe('ResolveUseCase', () => {
     const result = await useCase.execute({ query: 'Opus One 2018', requestId: 'req-123' });
 
     expect(result.decision_trace_ref).toContain('req-123');
+    expect(result.request_id).toBe('req-123');
   });
 });

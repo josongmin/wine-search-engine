@@ -1,12 +1,16 @@
 import type { Planner } from '../domain/query/service/planner.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
-import { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
-import { Ranker } from '../domain/ranking/service/ranker.js';
-import { DecisionEngine } from '../domain/decision/service/decision-engine.js';
-import { ResponseBuilder } from '../domain/response/service/response-builder.js';
-import { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
+import type { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
+import type { Ranker } from '../domain/ranking/service/ranker.js';
+import type { DecisionEngine } from '../domain/decision/service/decision-engine.js';
+import type { ResponseBuilder } from '../domain/response/service/response-builder.js';
+import type { MixedSolver } from '../domain/mixed/service/mixed-solver.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
+import type {
+  BrowseRetrieverPort,
+  CompareRetrieverPort,
+} from '../application/search/port/search-pipeline-deps.port.js';
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { buildCoreAdapterServices } from './container-adapters.js';
@@ -16,6 +20,8 @@ import {
 } from './container-runtime-support.js';
 import {
   buildCandidatePool,
+  buildBrowseRetriever,
+  buildCompareRetriever,
   buildEntityResolver,
   buildQueryPlanner,
   buildRanker,
@@ -33,6 +39,8 @@ export interface CoreContainerServices {
   readonly decisionEngine: DecisionEngine;
   readonly responseBuilder: ResponseBuilder;
   readonly mixedSolver: MixedSolver;
+  readonly browseRetriever: BrowseRetrieverPort;
+  readonly compareRetriever: CompareRetrieverPort;
   readonly snapshotVersions: SnapshotVersions;
   readonly querySanitizer: RuntimeSupportServices['querySanitizer'];
   readonly injectionJudge?: RuntimeSupportServices['injectionJudge'];
@@ -51,12 +59,16 @@ export async function buildCoreContainerServices(
   const queryPlanner = buildQueryPlanner(adapters);
   const entityResolver = buildEntityResolver(adapters);
   const candidatePool = buildCandidatePool(adapters, support, config);
+  const browseRetriever = buildBrowseRetriever(adapters);
+  const compareRetriever = buildCompareRetriever(adapters);
   const ranker = buildRanker(adapters, config);
 
   return {
     queryPlanner,
     entityResolver,
     candidatePool,
+    browseRetriever,
+    compareRetriever,
     ranker,
     decisionEngine: buildDecisionEngine(adapters, config),
     responseBuilder: buildResponseBuilder(),

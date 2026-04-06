@@ -32,4 +32,6 @@ export interface SearchRequest {
   readonly sessionContext?: SearchSessionContext | undefined;
   readonly queryBudget?: SearchQueryBudget | undefined;
   readonly options?: SearchOptions | undefined;
+  /** Top-level retrieval mode override. 'auto' defers to the planner. */
+  readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
 }

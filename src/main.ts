@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   let redisClient: RuntimeHandles['redisClient'] | null = null;
   if (expectsRedisAtStartup(config)) {
     try {
-      redisClient = (await connectRedisClient(config.redis)) ?? null;
+      redisClient = await connectRedisClient(config.redis);
     } catch (err) {
       if (isWatchlistEnabled(config)) {
         throw new Error(

@@ -64,7 +64,7 @@ function resolvePool(runtime?: Pool | RuntimeHandles): Pool | undefined {
   }
 
   if ('totalCount' in runtime) {
-    return runtime as Pool;
+    return runtime;
   }
 
   return runtime.pool;
@@ -76,7 +76,7 @@ function resolveRuntimeHandles(runtime?: Pool | RuntimeHandles): RuntimeHandles 
   }
 
   if ('totalCount' in runtime) {
-    return { pool: runtime as Pool };
+    return { pool: runtime };
   }
 
   return runtime;

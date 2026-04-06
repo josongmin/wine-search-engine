@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { QuerySanitizer } from '../service/query-sanitizer.js';
+import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 
 describe('QuerySanitizer', () => {
   const sanitizer = new QuerySanitizer();
@@ -9,8 +10,8 @@ describe('QuerySanitizer', () => {
   // ──────────────────────────────────────────────────────────────────────────
 
   describe('Length validation', () => {
-    it('rejects queries exceeding 500 chars', () => {
-      const longQuery = 'a'.repeat(501);
+    it('rejects queries exceeding the configured max length', () => {
+      const longQuery = 'a'.repeat(MAX_QUERY_LENGTH + 1);
       const result = sanitizer.sanitize(longQuery);
       expect(result.safe).toBe(false);
       if (!result.safe) {
@@ -18,8 +19,9 @@ describe('QuerySanitizer', () => {
       }
     });
 
-    it('accepts queries exactly 500 chars', () => {
-      const maxQuery = 'find a wine ' + 'x'.repeat(488);
+    it('accepts queries exactly at the configured max length', () => {
+      const prefix = 'find a wine ';
+      const maxQuery = prefix + 'x'.repeat(MAX_QUERY_LENGTH - prefix.length);
       const result = sanitizer.sanitize(maxQuery);
       expect(result.safe).toBe(true);
     });

@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { z } from 'zod';
+import { type z } from 'zod';
 import type { HttpRouteContract } from './route-contracts.js';
 import { deepKeysToSnake } from '../middleware/snake-case-hook.js';
 
@@ -45,7 +45,7 @@ export function parseContractBody<TContract extends { readonly body: z.ZodTypeAn
   request: FastifyRequest,
   contract: TContract,
 ): z.output<TContract['body']> {
-  return contract.body.parse(request.body);
+  return contract.body.parse(request.body) as z.output<TContract['body']>;
 }
 
 export function sendRouteContractResponse(
@@ -73,5 +73,11 @@ export function sendRouteContractResponse(
     return;
   }
 
-  sendContractResponse(request, reply, statusCode, schema, deepKeysToSnake(payload));
+  sendContractResponse(
+    request,
+    reply,
+    statusCode,
+    schema as z.ZodType<unknown>,
+    deepKeysToSnake(payload),
+  );
 }

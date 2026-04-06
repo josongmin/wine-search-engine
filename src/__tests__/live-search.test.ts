@@ -7,6 +7,42 @@ import { createTestContainer } from '../../test/integration/helpers/test-contain
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+type WineRecord = {
+  sourceId: string;
+  canonicalLabel: string;
+  aliases?: {
+    identitySafeProjection?: string[];
+    noisyRecallProjection?: string[];
+  };
+  producer?: string;
+  region?: string;
+  grapes?: string[];
+  searchTextEn?: string;
+  body?: number;
+  sweetness?: number;
+  wineType?: string;
+  priceBand?: string;
+  pairingTags?: string[];
+  popularityScore?: number;
+  vintageYear?: number;
+  acidity?: number;
+  tannin?: number;
+  grapePrimary?: string;
+  country?: string;
+  appellation?: string;
+  priceUsd?: string | number;
+  flavorProfiles?: string[];
+  drinkingWindow?: {
+    drinkingWindowStart?: string;
+    drinkingWindowEnd?: string;
+  };
+};
+
+const parseWineRecord = (line: string): WineRecord => {
+  const parsed: unknown = JSON.parse(line);
+  return parsed as WineRecord;
+};
+
 describe('Live Search — silver-docquery.ndjson', () => {
   let container: ReturnType<typeof createTestContainer>['container'];
   let searchIndex: ReturnType<typeof createTestContainer>['searchIndex'];
@@ -23,8 +59,8 @@ describe('Live Search — silver-docquery.ndjson', () => {
       .split('\n')
       .filter((line) => line.trim());
 
-    const wines = lines.map((line) => JSON.parse(line));
-    console.log(`\n📦 Loaded ${wines.length} wines`);
+    const wines = lines.map(parseWineRecord);
+    console.error(`\n📦 Loaded ${wines.length} wines`);
 
     // Index first 100 wines for test
     const entityIds: string[] = [];
@@ -67,7 +103,7 @@ describe('Live Search — silver-docquery.ndjson', () => {
 
     // Register entities with blocking adapter
     blockingAdapter.addEntityIds(entityIds);
-    console.log('✅ Indexed 100 wines\n');
+    console.error('✅ Indexed 100 wines\n');
   });
 
   it('should find Napa Cabernet', async () => {
@@ -83,13 +119,13 @@ describe('Live Search — silver-docquery.ndjson', () => {
       'test-napa',
     );
 
-    console.log(`\n🔍 "Napa Cabernet under $100"`);
-    console.log(`   Decision: ${result.engineDecision.decisionStatus}`);
-    console.log(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
-    console.log(`   Results: ${result.results.length}`);
+    console.error(`\n🔍 "Napa Cabernet under $100"`);
+    console.error(`   Decision: ${result.engineDecision.decisionStatus}`);
+    console.error(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
+    console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.log(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -108,13 +144,13 @@ describe('Live Search — silver-docquery.ndjson', () => {
       'test-burgundy',
     );
 
-    console.log(`\n🔍 "French Burgundy Pinot Noir premium"`);
-    console.log(`   Decision: ${result.engineDecision.decisionStatus}`);
-    console.log(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
-    console.log(`   Results: ${result.results.length}`);
+    console.error(`\n🔍 "French Burgundy Pinot Noir premium"`);
+    console.error(`   Decision: ${result.engineDecision.decisionStatus}`);
+    console.error(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
+    console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.log(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -133,13 +169,13 @@ describe('Live Search — silver-docquery.ndjson', () => {
       'test-spanish',
     );
 
-    console.log(`\n🔍 "Spanish Tempranillo Ribiera del Duero"`);
-    console.log(`   Decision: ${result.engineDecision.decisionStatus}`);
-    console.log(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
-    console.log(`   Results: ${result.results.length}`);
+    console.error(`\n🔍 "Spanish Tempranillo Ribiera del Duero"`);
+    console.error(`   Decision: ${result.engineDecision.decisionStatus}`);
+    console.error(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
+    console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.log(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -158,13 +194,13 @@ describe('Live Search — silver-docquery.ndjson', () => {
       'test-sweet-white',
     );
 
-    console.log(`\n🔍 "sweet white wine under $30"`);
-    console.log(`   Decision: ${result.engineDecision.decisionStatus}`);
-    console.log(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
-    console.log(`   Results: ${result.results.length}`);
+    console.error(`\n🔍 "sweet white wine under $30"`);
+    console.error(`   Decision: ${result.engineDecision.decisionStatus}`);
+    console.error(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
+    console.error(`   Results: ${result.results.length}`);
 
     if (result.results.length > 0) {
-      console.log(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
+      console.error(`   Top: ${result.results[0].entityId} (${result.results[0].score.toFixed(2)})`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();
@@ -183,14 +219,14 @@ describe('Live Search — silver-docquery.ndjson', () => {
       'test-red-wine',
     );
 
-    console.log(`\n🔍 "red wine" (with clarification)`);
-    console.log(`   Decision: ${result.engineDecision.decisionStatus}`);
-    console.log(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
-    console.log(`   Results: ${result.results.length}`);
-    console.log(`   Action: ${result.engineDecision.nextAction}`);
+    console.error(`\n🔍 "red wine" (with clarification)`);
+    console.error(`   Decision: ${result.engineDecision.decisionStatus}`);
+    console.error(`   Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
+    console.error(`   Results: ${result.results.length}`);
+    console.error(`   Action: ${result.engineDecision.nextAction}`);
 
     if (result.clarification) {
-      console.log(`   Clarification needed: ${result.clarification.type}`);
+      console.error(`   Clarification needed: ${result.clarification.type}`);
     }
 
     expect(result.engineDecision.decisionStatus).toBeDefined();

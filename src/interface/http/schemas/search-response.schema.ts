@@ -274,6 +274,7 @@ export const ResolveResponseSchema = z.object({
   candidates: z.array(ResolveCandidateSchema),
   top_entity: ResolveTopEntitySchema.optional(),
   decision_trace_ref: z.string().min(1),
+  request_id: z.string().min(1).optional(),
 }).strict();
 
 export type ResolveResponseBody = z.infer<typeof ResolveResponseSchema>;

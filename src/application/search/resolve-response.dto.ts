@@ -5,4 +5,5 @@ export interface ResolveResponse {
   readonly candidates: EntityResolveResult['candidates'];
   readonly topEntity: EntityResolveResult['topEntity'];
   readonly decision_trace_ref: string;
+  readonly request_id?: string | undefined;
 }

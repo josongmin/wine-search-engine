@@ -13,6 +13,18 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
+import {
+  getHeader,
+  getSearchDecision,
+  getSearchDecisionStatus,
+  getSearchDecisionSnapshot,
+  getSearchEntityIds,
+  getSearchMeta,
+  getSearchRequestId,
+  parseErrorResponse,
+  parseSearchResponse,
+  postJson,
+} from './helpers/http-transport.js';
 
 /** Snapshot that matches the ReplayUseCase default runtime snapshot. */
 const MATCHING_SNAPSHOT = {
@@ -192,21 +204,12 @@ describe('Group 2: Request ID Correctness', () => {
   });
 
   it('meta.requestId in response body matches X-Request-Id header exactly', async () => {
-    const r = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ query: 'Opus One 2018' }),
-    });
+    const r = await postJson(server.app, '/v1/search', { query: 'Opus One 2018' });
     expect(r.statusCode).toBe(200);
 
-    const val = r.headers['x-request-id'];
-    const headerId = Array.isArray(val) ? (val[0] ?? '') : (val ?? '');
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const meta = body['meta'] as Record<string, unknown>;
-
+    const headerId = getHeader(r, 'x-request-id');
     expect(headerId).toBeTruthy();
-    expect(meta['requestId']).toBe(headerId);
+    expect(getSearchRequestId(parseSearchResponse(r))).toBe(headerId);
   });
 
   it('error.request_id in error body matches X-Request-Id header exactly', async () => {
@@ -267,18 +270,16 @@ describe('Group 2: Request ID Correctness', () => {
 
     expect(r.statusCode).toBe(200);
 
-    const val = r.headers['x-request-id'];
-    const serverIdStr = Array.isArray(val) ? (val[0] ?? '') : (val ?? '');
+    const serverIdStr = getHeader(r, 'x-request-id');
 
     // The server must set its own ID — it must not echo the client-provided one.
     expect(serverIdStr).not.toBe(clientId);
     expect(serverIdStr).toBeTruthy();
 
     // The body requestId must match the server-generated header, not the client id.
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const meta = body['meta'] as Record<string, unknown>;
-    expect(meta['requestId']).toBe(serverIdStr);
-    expect(meta['requestId']).not.toBe(clientId);
+    const bodyRequestId = getSearchRequestId(parseSearchResponse(r));
+    expect(bodyRequestId).toBe(serverIdStr);
+    expect(bodyRequestId).not.toBe(clientId);
   });
 });
 
@@ -328,23 +329,30 @@ describe('Group 3: Snapshot Determinism', () => {
     expect(r2.statusCode).toBe(200);
     expect(r3.statusCode).toBe(200);
 
-    const b1 = JSON.parse(r1.body) as Record<string, unknown>;
-    const b2 = JSON.parse(r2.body) as Record<string, unknown>;
-    const b3 = JSON.parse(r3.body) as Record<string, unknown>;
+    const b1 = parseSearchResponse({
+      statusCode: r1.statusCode,
+      headers: r1.headers as Record<string, string | string[]>,
+      body: r1.body,
+      json: () => JSON.parse(r1.body) as unknown,
+    });
+    const b2 = parseSearchResponse({
+      statusCode: r2.statusCode,
+      headers: r2.headers as Record<string, string | string[]>,
+      body: r2.body,
+      json: () => JSON.parse(r2.body) as unknown,
+    });
+    const b3 = parseSearchResponse({
+      statusCode: r3.statusCode,
+      headers: r3.headers as Record<string, string | string[]>,
+      body: r3.body,
+      json: () => JSON.parse(r3.body) as unknown,
+    });
 
-    const getStatus = (b: Record<string, unknown>) =>
-      (b['engineDecision'] as Record<string, unknown>)['decisionStatus'];
+    expect(getSearchDecisionStatus(b1)).toBe(getSearchDecisionStatus(b2));
+    expect(getSearchDecisionStatus(b2)).toBe(getSearchDecisionStatus(b3));
 
-    const getEntityIds = (b: Record<string, unknown>) =>
-      (b['results'] as Array<Record<string, unknown>>).map(
-        (r) => (r['entity'] as Record<string, unknown>)['entityId'],
-      );
-
-    expect(getStatus(b1)).toBe(getStatus(b2));
-    expect(getStatus(b2)).toBe(getStatus(b3));
-
-    expect(getEntityIds(b1)).toEqual(getEntityIds(b2));
-    expect(getEntityIds(b2)).toEqual(getEntityIds(b3));
+    expect(getSearchEntityIds(b1)).toEqual(getSearchEntityIds(b2));
+    expect(getSearchEntityIds(b2)).toEqual(getSearchEntityIds(b3));
   });
 
   it('different queries return different results (not all queries return same entity)', async () => {
@@ -373,10 +381,20 @@ describe('Group 3: Snapshot Determinism', () => {
     expect(margaux.statusCode).toBe(200);
 
     // At least one must be non-failed (if both fail, something is broken).
-    const opusDecision = (JSON.parse(opus.body) as Record<string, unknown>)['engineDecision'] as Record<string, unknown>;
-    const margauxDecision = (JSON.parse(margaux.body) as Record<string, unknown>)['engineDecision'] as Record<string, unknown>;
-
-    const statuses = [opusDecision['decisionStatus'], margauxDecision['decisionStatus']];
+    const statuses = [
+      getSearchDecisionStatus(parseSearchResponse({
+        statusCode: opus.statusCode,
+        headers: opus.headers as Record<string, string | string[]>,
+        body: opus.body,
+        json: () => JSON.parse(opus.body) as unknown,
+      })),
+      getSearchDecisionStatus(parseSearchResponse({
+        statusCode: margaux.statusCode,
+        headers: margaux.headers as Record<string, string | string[]>,
+        body: margaux.body,
+        json: () => JSON.parse(margaux.body) as unknown,
+      })),
+    ];
     const nonFailed = statuses.filter((s) => s !== 'failed');
     expect(nonFailed.length).toBeGreaterThan(0);
   });
@@ -393,9 +411,12 @@ describe('Group 3: Snapshot Determinism', () => {
     });
 
     expect(r.statusCode).toBe(409);
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['retryable']).toBe(false);
+    expect(parseErrorResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    }).error.retryable).toBe(false);
   });
 
   it('policy_rule_version mismatch → 409 with SNAPSHOT_MISMATCH code', async () => {
@@ -410,11 +431,15 @@ describe('Group 3: Snapshot Determinism', () => {
     });
 
     expect(r.statusCode).toBe(409);
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-    expect(typeof error['message']).toBe('string');
-    expect((error['message'] as string).length).toBeGreaterThan(0);
+    const error = parseErrorResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    }).error;
+    expect(error.code).toBe('SNAPSHOT_MISMATCH');
+    expect(typeof error.message).toBe('string');
+    expect(error.message.length).toBeGreaterThan(0);
   });
 });
 
@@ -487,11 +512,15 @@ describe('Group 4: Concurrent Request Isolation', () => {
 
     // Each response must have a valid shape (no cross-contamination of error bodies).
     for (const r of [entityRes, hybridRes, margauxRes]) {
-      const body = JSON.parse(r.body) as Record<string, unknown>;
-      expect(body).toHaveProperty('engineDecision');
-      expect(body).toHaveProperty('results');
-      expect(body).toHaveProperty('meta');
-      expect(Array.isArray(body['results'])).toBe(true);
+      const body = parseSearchResponse({
+        statusCode: r.statusCode,
+        headers: r.headers as Record<string, string | string[]>,
+        body: r.body,
+        json: () => JSON.parse(r.body) as unknown,
+      });
+      expect(body.engine_decision).toBeDefined();
+      expect(Array.isArray(body.results)).toBe(true);
+      expect(body.meta).toBeDefined();
     }
   });
 
@@ -512,8 +541,12 @@ describe('Group 4: Concurrent Request Isolation', () => {
 
     const statuses = responses.map((r) => {
       expect(r.statusCode).toBe(200);
-      const body = JSON.parse(r.body) as Record<string, unknown>;
-      return (body['engineDecision'] as Record<string, unknown>)['decisionStatus'];
+      return getSearchDecisionStatus(parseSearchResponse({
+        statusCode: r.statusCode,
+        headers: r.headers as Record<string, string | string[]>,
+        body: r.body,
+        json: () => JSON.parse(r.body) as unknown,
+      }));
     });
 
     // All 20 must share the same decisionStatus.
@@ -672,10 +705,15 @@ describe('Group 6: Response Envelope Completeness', () => {
     });
     expect(r.statusCode).toBe(200);
 
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    expect(body).toHaveProperty('results');
-    expect(body).toHaveProperty('engineDecision');
-    expect(body).toHaveProperty('meta');
+    const body = parseSearchResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    });
+    expect(body.results).toBeDefined();
+    expect(body.engine_decision).toBeDefined();
+    expect(body.meta).toBeDefined();
   });
 
   it('meta has requestId (string), queryTimeMs (non-negative integer), engine_schema_version', async () => {
@@ -687,17 +725,19 @@ describe('Group 6: Response Envelope Completeness', () => {
     });
     expect(r.statusCode).toBe(200);
 
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const meta = body['meta'] as Record<string, unknown>;
+    const meta = getSearchMeta(parseSearchResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    }));
 
-    expect(typeof meta['requestId']).toBe('string');
-    expect((meta['requestId'] as string).length).toBeGreaterThan(0);
-
-    expect(typeof meta['queryTimeMs']).toBe('number');
-    expect(Number.isInteger(meta['queryTimeMs'])).toBe(true);
-    expect(meta['queryTimeMs'] as number).toBeGreaterThanOrEqual(0);
-
-    expect(meta['engine_schema_version']).toBe('search_response_v1');
+    expect(typeof meta.request_id).toBe('string');
+    expect(meta.request_id!.length).toBeGreaterThan(0);
+    expect(typeof meta.query_time_ms).toBe('number');
+    expect(Number.isInteger(meta.query_time_ms)).toBe(true);
+    expect(meta.query_time_ms).toBeGreaterThanOrEqual(0);
+    expect(meta.engine_schema_version).toBe('search_response_v1');
   });
 
   it('engineDecision has decisionStatus (one of 3 values), decisionSnapshot (non-null object), route (string)', async () => {
@@ -709,16 +749,18 @@ describe('Group 6: Response Envelope Completeness', () => {
     });
     expect(r.statusCode).toBe(200);
 
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
+    const decision = getSearchDecision(parseSearchResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    }));
 
-    expect(['resolved', 'ambiguous', 'failed']).toContain(decision['decisionStatus']);
-
-    expect(typeof decision['decisionSnapshot']).toBe('object');
-    expect(decision['decisionSnapshot']).not.toBeNull();
-
-    expect(typeof decision['route']).toBe('string');
-    expect((decision['route'] as string).length).toBeGreaterThan(0);
+    expect(['resolved', 'ambiguous', 'failed']).toContain(decision.decision_status);
+    expect(typeof decision.decision_snapshot).toBe('object');
+    expect(decision.decision_snapshot).not.toBeNull();
+    expect(typeof decision.route).toBe('string');
+    expect(decision.route.length).toBeGreaterThan(0);
   });
 
   it('decisionSnapshot has all 6 RFC-015 fields', async () => {
@@ -730,10 +772,12 @@ describe('Group 6: Response Envelope Completeness', () => {
     });
     expect(r.statusCode).toBe(200);
 
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const snapshot = (body['engineDecision'] as Record<string, unknown>)[
-      'decisionSnapshot'
-    ] as Record<string, unknown>;
+    const snapshot = getSearchDecisionSnapshot(parseSearchResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    }));
 
     expect(snapshot).toHaveProperty('model_versions');
     expect(typeof snapshot['model_versions']).toBe('object');
@@ -773,15 +817,14 @@ describe('Group 6: Response Envelope Completeness', () => {
     });
     expect(r.statusCode).toBe(200);
 
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    const decision = body['engineDecision'] as Record<string, unknown>;
-    // In the in-memory setup the blocking adapter returns all 10 entities for every
-    // query, so the engine cannot determine a single winner → ambiguous or failed.
-    expect(['ambiguous', 'failed']).toContain(decision['decisionStatus']);
-
-    // results must always be an array (never undefined/null).
-    const results = body['results'] as unknown[];
-    expect(Array.isArray(results)).toBe(true);
+    const body = parseSearchResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    });
+    expect(['ambiguous', 'failed']).toContain(body.engine_decision.decision_status);
+    expect(Array.isArray(body.results)).toBe(true);
   });
 
   it('results array is ALWAYS present and is an array (even when decisionStatus=failed)', async () => {
@@ -796,8 +839,13 @@ describe('Group 6: Response Envelope Completeness', () => {
     });
     expect(r.statusCode).toBe(200);
 
-    const body = JSON.parse(r.body) as Record<string, unknown>;
-    expect(Array.isArray(body['results'])).toBe(true);
+    const body = parseSearchResponse({
+      statusCode: r.statusCode,
+      headers: r.headers as Record<string, string | string[]>,
+      body: r.body,
+      json: () => JSON.parse(r.body) as unknown,
+    });
+    expect(Array.isArray(body.results)).toBe(true);
   });
 });
 

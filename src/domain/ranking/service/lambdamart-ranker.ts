@@ -125,18 +125,21 @@ export function trainLambdaMARTModel(
         const lambda = labelDiff * stableSigmoid(-scoreDiff);
 
         for (let j = 0; j < 8; j++) {
-          const fname = featureNames[j] as keyof RankingFeatures;
-          const featureDiff =
-            (example.features1[fname] ?? 0) - (example.features2[fname] ?? 0);
-          gradients[j] = (gradients[j] ?? 0) + lambda * featureDiff;
+          const fname = (featureNames[j] ?? featureNames[0]) as keyof RankingFeatures;
+          const featureDiff = example.features1[fname] - example.features2[fname];
+          const currentGradient = gradients[j] ?? 0;
+          gradients[j] = currentGradient + lambda * featureDiff;
         }
         biasMeanDelta += lambda;
       }
 
       for (let j = 0; j < 8; j++) {
-        const gradient = (gradients[j] ?? 0) / batch.length;
-        weights[j] = (weights[j] ?? 0) + learningRate * gradient - regularization * (weights[j] ?? 0);
-        weights[j] = Math.max(-1, Math.min(1, weights[j] ?? 0));
+        const currentWeight = weights[j] ?? 0;
+        const currentGradient = gradients[j] ?? 0;
+        const gradient = currentGradient / batch.length;
+        const nextWeight =
+          currentWeight + learningRate * gradient - regularization * currentWeight;
+        weights[j] = Math.max(-1, Math.min(1, nextWeight));
       }
 
       bias = bias + learningRate * (biasMeanDelta / batch.length);
@@ -226,18 +229,16 @@ function computeValidationNdcg(
     const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 5);
 
     let dcg = 0;
-    for (let i = 0; i < ranked.length; i++) {
-      const item = ranked[i];
-      if (item) {
-        const gain = Math.pow(2, item.label) - 1;
-        const discount = 1 / Math.log2(i + 2);
-        dcg += gain * discount;
-      }
+    for (const [i, item] of ranked.entries()) {
+      const gain = Math.pow(2, item.label) - 1;
+      const discount = 1 / Math.log2(i + 2);
+      dcg += gain * discount;
     }
 
-    const idcg = Array(Math.min(5, exs.length))
-      .fill(3)
-      .reduce((sum, _, i) => sum + (Math.pow(2, 3) - 1) / Math.log2(i + 2), 0);
+    const idcg = Array.from(
+      { length: Math.min(5, exs.length) },
+      (_, i) => (Math.pow(2, 3) - 1) / Math.log2(i + 2),
+    ).reduce((sum, value) => sum + value, 0);
 
     const queryNdcg = idcg > 0 ? dcg / idcg : 0;
     totalNdcg += queryNdcg;

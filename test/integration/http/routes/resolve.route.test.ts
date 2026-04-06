@@ -25,6 +25,7 @@ describe('POST /v1/entity/resolve', () => {
             calibratedScore: 0.99,
           },
           decision_trace_ref: 'resolve:test-request:entity_lookup',
+          request_id: 'test-request',
         }),
       },
     };
@@ -43,6 +44,9 @@ describe('POST /v1/entity/resolve', () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual(expect.objectContaining({
+      request_id: expect.any(String),
+    }));
     expect(mockDeps.resolveUseCase.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         query: 'Opus One 2018',

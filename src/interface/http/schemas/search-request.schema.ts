@@ -5,6 +5,7 @@ import {
   QueryBudgetSchema,
   QueryStringSchema,
   SearchContextSchema,
+  SearchModeSchema,
   SearchOptionsSchema,
   SessionContextSchema,
 } from './search-shared.schema.js';
@@ -15,6 +16,7 @@ export const SearchRequestSchema = z.object({
   sessionContext: SessionContextSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),
   options: SearchOptionsSchema.optional(),
+  retrieval_mode: SearchModeSchema.optional(),
 }).strict();
 
 export type SearchRequestBody = z.infer<typeof SearchRequestSchema>;

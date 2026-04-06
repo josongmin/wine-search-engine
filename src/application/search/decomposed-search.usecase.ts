@@ -33,7 +33,7 @@ export class DecomposedSearchUseCase {
     };
 
     // Execute both sub-queries in parallel
-    const [resultA, resultB] = await Promise.all([
+    const [rawResultA, rawResultB] = await Promise.all([
       this.searchUseCase.execute(
         { ...baseRequest, query: subQueries[0] },
         `${requestId}-a`,
@@ -43,6 +43,13 @@ export class DecomposedSearchUseCase {
         `${requestId}-b`,
       ),
     ]);
+
+    // Sub-queries should never themselves be comparison queries; narrow via discriminant
+    if (rawResultA.queryType !== 'search' || rawResultB.queryType !== 'search') {
+      throw new Error('Decomposed sub-query returned unexpected comparison response');
+    }
+    const resultA = rawResultA;
+    const resultB = rawResultB;
 
     // Build comparison entities from SearchResponseV1 results
     const entityA: ComparisonEntity = {

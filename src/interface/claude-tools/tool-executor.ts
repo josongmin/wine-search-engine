@@ -146,7 +146,7 @@ export class WineToolExecutor {
    * @param requestId - Parent request ID
    * @returns SearchResponseV1
    */
-  private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1> {
+  private async executeSearchWines(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse> {
     const validated = SearchToolInputSchema.parse(input);
 
     const request: SearchRequest = {
@@ -173,7 +173,7 @@ export class WineToolExecutor {
    * @param requestId - Parent request ID
    * @returns SearchResponseV1 with paired wines
    */
-  private async executeFoodPairings(input: unknown, requestId: string): Promise<SearchResponseV1> {
+  private async executeFoodPairings(input: unknown, requestId: string): Promise<SearchResponseV1 | ComparisonSearchResponse> {
     const validated = FoodPairingInputSchema.parse(input);
 
     // Build dynamic query from food + optional color + price

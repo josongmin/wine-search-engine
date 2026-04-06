@@ -44,6 +44,7 @@ export function buildHealthRouteOptions(
 ): HealthRouteOptions {
   const expectsRedis = expectsRedisAtStartup(config);
   const watchlistEnabled = isWatchlistEnabled(config);
+  const redisRequired = expectsRedis;
 
   return {
     readiness: {
@@ -51,10 +52,10 @@ export function buildHealthRouteOptions(
         ? {
             postgres: {
               required: true,
-              check: async (): Promise<ReadinessStatus> => {
+              check: (): Promise<ReadinessStatus> => {
                 const pool = runtime.pool;
                 if (pool === undefined) {
-                  return 'down';
+                  return Promise.resolve('down');
                 }
                 return probePostgres(pool);
               },
@@ -64,8 +65,8 @@ export function buildHealthRouteOptions(
       ...(expectsRedis
         ? {
             redis: {
-              required: watchlistEnabled,
-              check: async (): Promise<ReadinessStatus> => probeRedis(runtime.redisClient),
+              required: redisRequired,
+              check: (): Promise<ReadinessStatus> => probeRedis(runtime.redisClient),
             },
           }
         : {}),
@@ -73,8 +74,8 @@ export function buildHealthRouteOptions(
         ? {
             watchlist_runtime: {
               required: true,
-              check: async (): Promise<ReadinessStatus> =>
-                watchlistRuntime?.isRunning() === true ? 'up' : 'down',
+              check: (): Promise<ReadinessStatus> =>
+                Promise.resolve(watchlistRuntime?.isRunning() === true ? 'up' : 'down'),
             },
           }
         : {}),

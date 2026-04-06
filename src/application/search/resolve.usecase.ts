@@ -78,6 +78,7 @@ export class ResolveUseCase {
       candidates: result.candidates,
       topEntity: result.topEntity,
       decision_trace_ref: traceRef,
+      ...(request.requestId !== undefined ? { request_id: request.requestId } : {}),
     };
   }
 }

@@ -19,8 +19,7 @@ describe('Watchlist Routes', () => {
     app = Fastify();
     const store = new InMemoryWatchlistStore();
     watchlistService = new WatchlistService({
-      watchlistRepository: store,
-      deliveryLogRepository: store,
+      storage: store,
       idGenerator: randomUUID,
     });
 

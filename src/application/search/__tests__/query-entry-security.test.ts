@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer.js';
-import { DomainError } from '../../../domain/shared/error/domain-error.js';
+import { type DomainError } from '../../../domain/shared/error/domain-error.js';
 import {
   POLICY_BLOCKED_CODE,
   POLICY_BLOCKED_MESSAGE,

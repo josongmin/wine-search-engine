@@ -7,6 +7,8 @@ import { CandidateScorer } from '../domain/resolver/service/candidate-scorer.js'
 import { AmbiguityClassifier } from '../domain/resolver/service/ambiguity-classifier.js';
 import { Calibrator } from '../domain/resolver/service/calibrator.js';
 import { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
+import { BrowseRetriever } from '../domain/retrieval/service/browse-retriever.js';
+import { CompareRetriever } from '../domain/retrieval/service/compare-retriever.js';
 import { FusionService } from '../domain/retrieval/service/fusion.js';
 import { Ranker } from '../domain/ranking/service/ranker.js';
 import { SignalComputer } from '../domain/ranking/service/signal-computer.js';
@@ -24,6 +26,10 @@ import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
 import type { RuntimeSupportServices } from './container-runtime-support.js';
+import type {
+  BrowseRetrieverPort,
+  CompareRetrieverPort,
+} from '../application/search/port/search-pipeline-deps.port.js';
 
 export function buildSnapshotVersions(config: Config): SnapshotVersions {
   return {
@@ -63,6 +69,22 @@ export function buildCandidatePool(
     support.cacheService,
     config.embedding.model,
   );
+}
+
+export function buildBrowseRetriever(adapters: CoreAdapterServices): BrowseRetrieverPort {
+  void adapters;
+  return new BrowseRetriever();
+}
+
+export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRetrieverPort {
+  void adapters;
+  const retriever = new CompareRetriever();
+  return {
+    compareAgainstAnchor(_anchorEntityId, _constraints, _limit) {
+      void retriever;
+      return Promise.resolve([]);
+    },
+  };
 }
 
 export function buildRanker(

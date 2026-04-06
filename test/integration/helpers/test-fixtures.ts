@@ -8,6 +8,10 @@
 import { createEntityId, type EntityId } from '../../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
 import type { Alias } from '../../../src/domain/alias/model/alias.js';
+import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
+import type { RetrievalTrace } from '../../../src/domain/retrieval/model/retrieval-trace.js';
+import type { AnchorEntityData } from '../../../src/domain/mixed/service/anchor-profiler.js';
+import type { SimilarityCandidate } from '../../../src/domain/mixed/service/similarity-scorer.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entity IDs (stable, deterministic)
@@ -174,6 +178,247 @@ export const ALL_TEST_FIXTURES = [
   BAROLO_GIACOMO,
   MASI_AMARONE,
 ];
+
+/**
+ * Shared mixed-query fixture topology.
+ *
+ * The mixed solver needs three pieces of in-memory state:
+ * - anchor entity resolution
+ * - a neighborhood of similar candidates per anchor
+ * - candidate attributes for overlay / preservation checks
+ *
+ * The neighborhoods below are intentionally small but real-world shaped.
+ */
+export interface MixedNeighborhoodFixture {
+  readonly anchorId: EntityId;
+  readonly candidateIds: readonly EntityId[];
+}
+
+export const MIXED_NEIGHBORHOOD_FIXTURES: readonly MixedNeighborhoodFixture[] = [
+  {
+    anchorId: OPUS_ONE_ID,
+    candidateIds: [
+      OPUS_ONE_ID,
+      CHATEAU_MARGAUX_ID,
+      SASSICAIA_ID,
+      PENFOLDS_GRANGE_ID,
+      BAROLO_GIACOMO_ID,
+      MASI_AMARONE_ID,
+    ],
+  },
+  {
+    anchorId: CHATEAU_MARGAUX_ID,
+    candidateIds: [
+      CHATEAU_MARGAUX_ID,
+      OPUS_ONE_ID,
+      SASSICAIA_ID,
+      PENFOLDS_GRANGE_ID,
+      BAROLO_GIACOMO_ID,
+      MASI_AMARONE_ID,
+    ],
+  },
+  {
+    anchorId: ROMANEE_CONTI_ID,
+    candidateIds: [
+      ROMANEE_CONTI_ID,
+      OPUS_ONE_ID,
+      CHATEAU_MARGAUX_ID,
+      SASSICAIA_ID,
+      PENFOLDS_GRANGE_ID,
+      BAROLO_GIACOMO_ID,
+      MASI_AMARONE_ID,
+    ],
+  },
+  {
+    anchorId: SASSICAIA_ID,
+    candidateIds: [
+      SASSICAIA_ID,
+      OPUS_ONE_ID,
+      CHATEAU_MARGAUX_ID,
+      PENFOLDS_GRANGE_ID,
+      BAROLO_GIACOMO_ID,
+      MASI_AMARONE_ID,
+    ],
+  },
+  {
+    anchorId: PENFOLDS_GRANGE_ID,
+    candidateIds: [
+      PENFOLDS_GRANGE_ID,
+      OPUS_ONE_ID,
+      CHATEAU_MARGAUX_ID,
+      SASSICAIA_ID,
+      BAROLO_GIACOMO_ID,
+      MASI_AMARONE_ID,
+    ],
+  },
+  {
+    anchorId: CLOUDY_BAY_ID,
+    candidateIds: [
+      CLOUDY_BAY_ID,
+      SAUTERNES_ID,
+      MOET_BRUT_ID,
+    ],
+  },
+  {
+    anchorId: SAUTERNES_ID,
+    candidateIds: [
+      SAUTERNES_ID,
+      CLOUDY_BAY_ID,
+      MOET_BRUT_ID,
+    ],
+  },
+  {
+    anchorId: MOET_BRUT_ID,
+    candidateIds: [
+      MOET_BRUT_ID,
+      CLOUDY_BAY_ID,
+      SAUTERNES_ID,
+    ],
+  },
+  {
+    anchorId: BAROLO_GIACOMO_ID,
+    candidateIds: [
+      BAROLO_GIACOMO_ID,
+      OPUS_ONE_ID,
+      CHATEAU_MARGAUX_ID,
+      SASSICAIA_ID,
+      PENFOLDS_GRANGE_ID,
+      MASI_AMARONE_ID,
+    ],
+  },
+  {
+    anchorId: MASI_AMARONE_ID,
+    candidateIds: [
+      MASI_AMARONE_ID,
+      OPUS_ONE_ID,
+      CHATEAU_MARGAUX_ID,
+      SASSICAIA_ID,
+      PENFOLDS_GRANGE_ID,
+      BAROLO_GIACOMO_ID,
+    ],
+  },
+];
+
+function makeEmbedding(entityId: string, dim = 16): readonly number[] {
+  const vec = new Array<number>(dim).fill(0);
+  for (let i = 0; i < entityId.length; i++) {
+    const code = entityId.charCodeAt(i);
+    const idx = (code * (i + 1)) % dim;
+    vec[idx] = ((vec[idx] ?? 0) + code / 255) % 1;
+  }
+  const norm = Math.sqrt(vec.reduce((sum, value) => sum + value * value, 0)) || 1;
+  return vec.map((value) => value / norm);
+}
+
+function inferWineType(style: string): string {
+  if (style.includes('sparkling')) return 'sparkling';
+  if (style.includes('white')) return 'white';
+  return 'red';
+}
+
+function inferColor(style: string): string {
+  if (style.includes('sparkling')) return 'white';
+  if (style.includes('white')) return 'white';
+  return 'red';
+}
+
+function inferCountry(region: string): string {
+  const lower = region.toLowerCase();
+  if (lower.includes('napa') || lower.includes('california')) return 'United States';
+  if (lower.includes('bordeaux') || lower.includes('burgundy') || lower.includes('champagne')) return 'France';
+  if (lower.includes('tuscany') || lower.includes('piedmont') || lower.includes('veneto')) return 'Italy';
+  if (lower.includes('barossa')) return 'Australia';
+  if (lower.includes('marlborough')) return 'New Zealand';
+  return 'Unknown';
+}
+
+export function toAnchorEntityData(doc: RetrievalDocument): AnchorEntityData {
+  return {
+    entityId: doc.entityId,
+    canonicalLabel: doc.canonicalLabel,
+    region: doc.region,
+    grapes: [...doc.grapes],
+    body: doc.body,
+    sweetness: doc.sweetness,
+    style: doc.style,
+    embedding: makeEmbedding(String(doc.entityId)),
+  };
+}
+
+export function toSimilarityCandidate(doc: RetrievalDocument): SimilarityCandidate {
+  return {
+    region: doc.region,
+    grapes: [...doc.grapes],
+    body: doc.body,
+    sweetness: doc.sweetness,
+    style: doc.style,
+    embedding: makeEmbedding(String(doc.entityId)),
+  };
+}
+
+export function toCandidateAttributes(doc: RetrievalDocument): Readonly<Record<string, unknown>> {
+  const wineType = doc.wineType ?? inferWineType(doc.style);
+  const color = inferColor(doc.style);
+  const country = doc.country ?? inferCountry(doc.region);
+  const grapePrimary = doc.grapePrimary ?? doc.grapes[0] ?? '';
+
+  return {
+    ...doc,
+    wineType,
+    wine_type: wineType,
+    color,
+    country,
+    grapePrimary,
+    grape_primary: grapePrimary,
+    appellation: doc.appellation ?? doc.region,
+    producerType: doc.producerType ?? 'winery',
+    producer_type: doc.producerType ?? 'winery',
+    price_band: doc.priceBand,
+    body: doc.body,
+    sweetness: doc.sweetness,
+    style: doc.style,
+    region: doc.region,
+    producer: doc.producer,
+  };
+}
+
+export function toHybridCandidate(
+  doc: RetrievalDocument,
+  rank: number,
+  candidateSources: readonly string[],
+  retrievalProfile = 'test-mixed-neighborhood',
+): HybridCandidate {
+  const anchorRank = Math.max(1, rank);
+  const retrievalFusionScore = Math.max(0.01, 0.25 - (anchorRank - 1) * 0.02);
+
+  return {
+    entityId: doc.entityId,
+    canonicalLabel: doc.canonicalLabel,
+    producer: doc.producer,
+    region: doc.region,
+    searchTextEn: doc.searchTextEn,
+    grapePrimary: doc.grapePrimary ?? doc.grapes[0],
+    vintageYear: doc.vintageYear,
+    body: doc.body,
+    tannin: doc.tannin,
+    acidity: doc.acidity,
+    sweetness: doc.sweetness,
+    country: doc.country,
+    appellation: doc.appellation ?? doc.region,
+    sparseRank: anchorRank,
+    denseRank: anchorRank,
+    anchorRank,
+    retrievalFusionScore,
+    matchedConstraints: [],
+    retrievalTrace: {
+      retrievalProfile,
+      lexicalQueriesUsed: [],
+      semanticQueriesUsed: [],
+      filtersApplied: [],
+      candidateSources: [...candidateSources],
+    } satisfies RetrievalTrace,
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Alias definitions

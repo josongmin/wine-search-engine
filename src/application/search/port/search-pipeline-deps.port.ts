@@ -8,7 +8,11 @@ import type { RankingInput } from '../../../domain/ranking/model/ranking-input.j
 import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import type { DecisionInput } from '../../../domain/decision/model/decision-input.js';
 import type { DecisionOutput } from '../../../domain/decision/model/decision-output.js';
-import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
+import type {
+  ConstraintBundle,
+  DecisionSnapshot,
+  EntityId,
+} from '../../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../../domain/response/service/response-builder.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { MixedQueryResult } from '../../../domain/mixed/model/mixed-query-result.js';
@@ -23,6 +27,28 @@ export interface EntityResolverPort {
 
 export interface CandidatePoolPort {
   generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
+}
+
+export interface BrowseRetrieverPort {
+  browseProducer(
+    producerName: string,
+    constraints: ConstraintBundle,
+    limit: number,
+  ): Promise<readonly HybridCandidate[]>;
+
+  browseRegion(
+    regionName: string,
+    constraints: ConstraintBundle,
+    limit: number,
+  ): Promise<readonly HybridCandidate[]>;
+}
+
+export interface CompareRetrieverPort {
+  compareAgainstAnchor(
+    anchorEntityId: EntityId,
+    constraints: ConstraintBundle,
+    limit: number,
+  ): Promise<readonly HybridCandidate[]>;
 }
 
 export interface RankingPort {

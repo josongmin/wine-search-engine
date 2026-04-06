@@ -35,10 +35,17 @@ export function buildUseCaseContainerServices(
   core: CoreContainerServices,
 ): UseCaseContainerServices {
   const drinkingWindowUseCase = new DrinkingWindowUseCase(core.drinkingWindowPredictor);
+
+  // Use a deferred reference to break the circular dependency:
+  // SearchUseCase needs decomposedSearch, but DecomposedSearchUseCase needs SearchUseCase.
+  const deferredDecomposed: { ref?: DecomposedSearchUseCasePort } = {};
+
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
     entityResolver: core.entityResolver,
     candidatePool: core.candidatePool,
+    browseRetriever: core.browseRetriever,
+    compareRetriever: core.compareRetriever,
     ranker: core.ranker,
     decisionEngine: core.decisionEngine,
     responseBuilder: core.responseBuilder,
@@ -49,8 +56,19 @@ export function buildUseCaseContainerServices(
     drinkingWindow: drinkingWindowUseCase,
     cacheService: core.cacheService,
     ltrModels: core.ltrModels,
+    decomposedSearch: {
+      execute: (
+        subQueries: [string, string],
+        comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
+        originalQuery: string,
+        requestId: string,
+        startTime: number,
+      ) => deferredDecomposed.ref!.execute(subQueries, comparisonIntent, originalQuery, requestId, startTime),
+    },
   });
+
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
+  deferredDecomposed.ref = decomposedSearchUseCase;
 
   return {
     searchUseCase,

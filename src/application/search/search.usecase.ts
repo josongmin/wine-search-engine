@@ -2,9 +2,13 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { PlannerContext } from '../../domain/query/service/planner.js';
 import type { ResolverInput } from '../../domain/resolver/service/resolver.js';
 import type { DecisionInput, EvidenceSummary } from '../../domain/decision/model/decision-input.js';
+import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
+import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
+import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { DecisionSnapshot, SignalSet } from '../../domain/shared/types/index.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
+import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { DrinkingWindowBlock, ResultItem } from '../../domain/response/model/result-item.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -20,10 +24,16 @@ import type { SearchResponseCachePort } from '../../domain/performance/port/sear
 import { LTRRanker } from '../../domain/ranking/service/ltr-ranker.js';
 import { extractLTRFeatures } from '../../domain/ranking/service/ltr-feature-extractor.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
+import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
+import { detectDecomposition, isValidDecomposition } from '../../domain/query/service/decomposition-detector.js';
+import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
+import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type {
+  BrowseRetrieverPort,
   CandidatePoolPort,
+  CompareRetrieverPort,
   DecisionEnginePort,
   EntityResolverPort,
   MixedSolverPort,
@@ -52,6 +62,8 @@ export interface SearchUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly candidatePool: CandidatePoolPort;
+  readonly browseRetriever?: BrowseRetrieverPort | undefined;
+  readonly compareRetriever?: CompareRetrieverPort | undefined;
   readonly ranker: RankingPort;
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
@@ -64,10 +76,14 @@ export interface SearchUseCaseDeps {
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). Optional. */
   readonly injectionJudge?: InjectionJudgePort | undefined;
+  readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   /** Unified cache service for query/embedding/result caching (Wave 4, Phase 3). Optional. */
   readonly cacheService?: SearchResponseCachePort | undefined;
   /** Epic 4: Per-query-class LambdaMART models for LTR reranking. Optional. */
   readonly ltrModels?: ReadonlyMap<string, QueryClassWeights> | undefined;
+  /** Epic 14: Decomposed search for "A vs B" comparison queries. Optional. */
+  readonly decomposedSearch?: DecomposedSearchUseCasePort | undefined;
 }
 
 /**
@@ -83,6 +99,10 @@ export interface SearchUseCaseDeps {
  * 7. Track request_id, latency, route throughout
  */
 export class SearchUseCase {
+  private static readonly SPECIALIZED_RETRIEVAL_LIMIT = 20;
+  private readonly abstainPolicy = new AbstainPolicy();
+  private readonly constraintSAT = new ConstraintSAT();
+
   constructor(private readonly deps: SearchUseCaseDeps) {}
 
   // DISABLED: Caching infrastructure is incomplete; skip for now (Wave 4 backlog)
@@ -110,13 +130,29 @@ export class SearchUseCase {
   async execute(
     request: SearchRequest,
     requestId: string,
-  ): Promise<SearchResponseV1> {
+  ): Promise<SearchResponseV1 | ComparisonSearchResponse> {
     const startTime = Date.now();
     const securityGate = new QueryEntrySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
+      judgeFailureMode: this.deps.judgeFailureMode,
+      observer: this.deps.queryEntrySecurityObserver,
     });
     const sanitizedQuery = await securityGate.getSafeQueryOrThrow(request.query);
+
+    // Epic 14: Detect "A vs B" decomposable comparison queries
+    if (this.deps.decomposedSearch) {
+      const decomposed = detectDecomposition(sanitizedQuery);
+      if (isValidDecomposition(decomposed)) {
+        return this.deps.decomposedSearch.execute(
+          decomposed.subQueries,
+          decomposed.comparisonIntent,
+          sanitizedQuery,
+          requestId,
+          startTime,
+        );
+      }
+    }
 
     // Step 1: Plan the query
     const plannerContext: PlannerContext = {
@@ -137,6 +173,59 @@ export class SearchUseCase {
     };
 
     const plan = await this.deps.queryPlanner.plan(sanitizedQuery, plannerContext);
+
+    // Step 1a: Constraint contradiction check (Epic 13, RFC-006 §4.2)
+    // Detect logically impossible constraint combinations before any retrieval.
+    const satResult = this.constraintSAT.check(plan.constraints);
+    if (satResult.contradicted) {
+      const conflictDesc = satResult.conflictPairs
+        .map(([a, b]) => `${a.attribute}: ${String(a.value)} vs ${String(b.value)}`)
+        .join('; ');
+
+      return this.deps.responseBuilder.build({
+        queryPlan: plan,
+        resolveResult: {
+          status: 'failed',
+          candidates: [],
+          decisionConfidenceC: 0,
+          decisionTrace: {
+            queryClass: plan.queryClass,
+            top1CalibratedScore: 0,
+            top2CalibratedScore: 0,
+            calibratedGap: 0,
+            decisionConfidenceC: 0,
+            ambiguityDetected: false,
+            ambiguityTypes: [],
+            appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+            outcomeReasonCodes: ['HARD_CONSTRAINT_VIOLATION'],
+          },
+          conformalSetSize: 0,
+        },
+        rankedResults: [],
+        decisionOutput: {
+          decisionStatus: 'failed',
+          nextAction: 'refine',
+          decisionConfidence: 0,
+          failureReason: `Contradictory constraints: ${conflictDesc}`,
+          rulesApplied: ['CONSTRAINT_SAT'],
+          decisionTrace: {
+            inputs: {
+              queryClass: plan.queryClass,
+              decisionConfidenceC: 0,
+              conformalSetSize: 0,
+              signals: { bm25: 0, semantic: 0, popularity: 0, availability: 0, attributeAlignment: 0, entityIntegrity: 0, uncertaintyPenalty: 0, softConstraint: 0, preferenceAlignment: 0, anchorSimilarity: 0 },
+            },
+            rulesApplied: ['CONSTRAINT_SAT'],
+            outcome: 'failed',
+            outcomeReason: `Contradictory constraints detected: ${conflictDesc}`,
+          },
+        },
+        requestId,
+        queryTimeMs: Date.now() - startTime,
+        snapshot: this.buildSnapshot(plan),
+        route: 'hybrid',
+      });
+    }
 
     // Step 1b: Query cache check (Wave 4, Phase 3)
     // Cache hit avoids resolution, retrieval, ranking, decision engine
@@ -169,8 +258,15 @@ export class SearchUseCase {
       }
     }
 
-    // Step 2: Determine effective route
-    const effectiveRoute = this.resolveRoute(plan, request.options?.mode);
+    // Step 2: Determine effective route (top-level retrieval_mode takes precedence)
+    const apiOverrideMode = request.retrieval_mode !== undefined && request.retrieval_mode !== 'auto'
+      ? request.retrieval_mode
+      : undefined;
+    const effectiveRoute = apiOverrideMode ?? this.resolveRoute(plan, request.options?.mode);
+    const plannerSuggestedMode = plan.route;
+    const retrievalModeSource: 'planner' | 'api_override' = apiOverrideMode !== undefined
+      ? 'api_override'
+      : 'planner';
 
     // Step 3: Execute based on route
     let resolveResult: EntityResolveResult;
@@ -213,6 +309,81 @@ export class SearchUseCase {
       }
     }
 
+    // Step 3b: Entropy-based abstain check (RFC-013 S3)
+    // When normalized Shannon entropy over top-K scores is too high, the query
+    // is ambiguous and we request clarification instead of returning noisy results.
+    const topScores = rankedResults.slice(0, 10).map((r) => r.finalScore);
+    const abstainDecision = this.abstainPolicy.shouldAbstain(topScores);
+
+    if (abstainDecision.abstain) {
+      const queryTimeMs = Date.now() - startTime;
+      const snapshot = this.buildSnapshot(plan);
+      const syntheticDecisionOutput: DecisionOutput = {
+        decisionStatus: 'ambiguous',
+        nextAction: 'clarify',
+        decisionConfidence: 0,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        signalSet: {
+          entity_integrity_score: 0,
+          hard_constraint_pass: 0,
+          soft_constraint_score: 0,
+          semantic_relevance_score: 0,
+          preference_alignment_score: 0,
+          popularity_score: 0,
+          availability_score: 0,
+          uncertainty_penalty: 0,
+        },
+        evidenceItems: [],
+        decisionTraceRef: `entropy-abstain:${requestId}`,
+        decisionSnapshot: snapshot,
+        decisionTrace: {
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+          inputs: {
+            queryClass: plan.queryClass,
+            policy: plan.policy as unknown as Readonly<Record<string, unknown>>,
+          },
+          signals: {
+            decisionConfidence: 0,
+            calibratedGap: 0,
+            ambiguity: true,
+          },
+          thresholds: {
+            resolveThreshold: 0,
+            gapThreshold: 0,
+          },
+          versions: {
+            policyRuleVersion: plan.policyRuleVersion,
+            thresholdProfileId: plan.thresholdProfileId,
+            plannerVersion: plan.plannerVersion,
+          },
+          rulesApplied: ['ENTROPY_ABSTAIN'],
+          finalReason: `Normalized entropy ${abstainDecision.entropy.toFixed(4)} exceeds threshold; query is ambiguous`,
+        },
+      };
+
+      const results = await this.mapRankedToResultItems(rankedResults);
+      return this.deps.responseBuilder.build({
+        queryPlan: plan,
+        decisionOutput: syntheticDecisionOutput,
+        results,
+        clarification: {
+          reason: `Query is ambiguous (entropy=${abstainDecision.entropy.toFixed(3)}). Please refine your search.`,
+          candidates: rankedResults.slice(0, 3).map((r) => ({
+            entityId: r.entityId,
+            label: r.canonicalLabel,
+            distinguishingFeatures: [],
+          })),
+          suggestionType: 'disambiguation',
+        },
+        requestId,
+        queryTimeMs,
+        route: effectiveRoute,
+        retrievalModeSource,
+        plannerSuggestedMode,
+      });
+    }
+
     // Step 4: Build DecisionInput (wire ranking signals + evidence per RFC-007)
     const decisionInput = this.buildDecisionInput(plan, resolveResult, rankedResults);
 
@@ -233,6 +404,8 @@ export class SearchUseCase {
       requestId,
       queryTimeMs,
       route: effectiveRoute,
+      retrievalModeSource,
+      plannerSuggestedMode,
     });
 
     // Step 7: Cache response (Wave 4, Phase 3)
@@ -268,6 +441,14 @@ export class SearchUseCase {
     mode?: 'auto' | 'entity' | 'hybrid' | 'mixed',
   ): QueryRoute {
     if (mode === undefined || mode === 'auto') {
+      if (
+        plan.retrievalMode === 'producer_browse' ||
+        plan.retrievalMode === 'region_browse' ||
+        plan.retrievalMode === 'compare_candidates' ||
+        plan.retrievalMode === 'recommendation'
+      ) {
+        return 'hybrid';
+      }
       return plan.route;
     }
     return mode;
@@ -298,17 +479,7 @@ export class SearchUseCase {
   private async executeHybridRoute(
     plan: QueryPlanV1,
   ): Promise<{ resolveResult: EntityResolveResult; rankedResults: readonly RankedResult[] }> {
-    // Build retrieval input from the plan
-    const retrievalInput: HybridRetrievalInput = {
-      queryPlan: plan,
-      route: 'hybrid',
-      lexicalQueries: [plan.normalizedQuery],
-      semanticQueries: [plan.rawQuery],
-      hardConstraints: plan.constraints.hard,
-      softConstraints: plan.constraints.soft,
-    };
-
-    const candidates = await this.deps.candidatePool.generate(retrievalInput);
+    const candidates = await this.retrieveHybridCandidates(plan);
 
     // Rank the candidates
     const rankingInput: RankingInput = {
@@ -390,6 +561,104 @@ export class SearchUseCase {
     };
 
     return { resolveResult, rankedResults };
+  }
+
+  private async retrieveHybridCandidates(
+    plan: QueryPlanV1,
+  ): Promise<readonly HybridCandidate[]> {
+    switch (plan.retrievalMode) {
+      case 'producer_browse': {
+        const producerName = this.extractProducerBrowseSeed(plan);
+        if (producerName !== undefined && this.deps.browseRetriever !== undefined) {
+          const candidates = await this.deps.browseRetriever.browseProducer(
+            producerName,
+            plan.constraints,
+            SearchUseCase.SPECIALIZED_RETRIEVAL_LIMIT,
+          );
+          if (candidates.length > 0) {
+            return candidates;
+          }
+        }
+        break;
+      }
+      case 'region_browse': {
+        const regionName = this.extractRegionBrowseSeed(plan);
+        if (regionName !== undefined && this.deps.browseRetriever !== undefined) {
+          const candidates = await this.deps.browseRetriever.browseRegion(
+            regionName,
+            plan.constraints,
+            SearchUseCase.SPECIALIZED_RETRIEVAL_LIMIT,
+          );
+          if (candidates.length > 0) {
+            return candidates;
+          }
+        }
+        break;
+      }
+      case 'compare_candidates': {
+        if (this.deps.compareRetriever !== undefined) {
+          const anchorResolution = await this.executeEntityRoute(plan);
+          const anchorEntityId = anchorResolution.topEntity?.entityId
+            ?? plan.anchors[0]?.candidateEntityIds[0];
+          if (anchorEntityId !== undefined) {
+            const candidates = await this.deps.compareRetriever.compareAgainstAnchor(
+              anchorEntityId,
+              plan.constraints,
+              SearchUseCase.SPECIALIZED_RETRIEVAL_LIMIT,
+            );
+            if (candidates.length > 0) {
+              return candidates;
+            }
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
+
+    const retrievalInput: HybridRetrievalInput = {
+      queryPlan: plan,
+      route: 'hybrid',
+      lexicalQueries: [plan.normalizedQuery],
+      semanticQueries: [plan.rawQuery],
+      hardConstraints: plan.constraints.hard,
+      softConstraints: plan.constraints.soft,
+    };
+
+    return this.deps.candidatePool.generate(retrievalInput);
+  }
+
+  private extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined {
+    const strongestAnchor = [...plan.anchors].sort((left, right) => right.confidence - left.confidence)[0];
+    const candidate = strongestAnchor?.surfaceForm.trim() ?? strongestAnchor?.normalizedForm.trim();
+    return candidate !== undefined && candidate.length > 0 ? candidate : undefined;
+  }
+
+  private extractRegionBrowseSeed(plan: QueryPlanV1): string | undefined {
+    const regionConstraint = [...plan.constraints.hard, ...plan.constraints.soft, ...plan.constraints.inferred].find(
+      (constraint) =>
+        constraint.attribute === 'region' ||
+        constraint.attribute === 'appellation' ||
+        constraint.attribute === 'country',
+    );
+
+    if (regionConstraint !== undefined) {
+      if (typeof regionConstraint.value === 'string' && regionConstraint.value.trim().length > 0) {
+        return regionConstraint.value.trim();
+      }
+      if (Array.isArray(regionConstraint.value) && regionConstraint.value[0] !== undefined) {
+        const [firstValue] = regionConstraint.value as readonly unknown[];
+        return typeof firstValue === 'string' ? firstValue : undefined;
+      }
+    }
+
+    const compact = plan.normalizedQuery
+      .replace(/\b(?:wine|wines|show|browse|from|region|appellation)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return compact.length > 0 ? compact : undefined;
   }
 
   /**

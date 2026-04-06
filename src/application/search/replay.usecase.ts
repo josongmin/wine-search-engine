@@ -88,7 +88,13 @@ export class ReplayUseCase {
       options: request.options,
     };
 
-    const response = await this.deps.searchUseCase.execute(searchRequest, requestId);
+    const rawResponse = await this.deps.searchUseCase.execute(searchRequest, requestId);
+
+    // Replay always targets a standard search, never a comparison
+    if (rawResponse.queryType !== 'search') {
+      throw new Error('Replay returned unexpected comparison response');
+    }
+    const response = rawResponse;
 
     // Step 5: Determinism gate (RFC-009 §8 / RFC-015)
     // If the caller supplied an expected_response_hash, validate it against

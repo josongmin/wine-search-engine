@@ -106,7 +106,7 @@ function matchesNewVintage(minVintage: number, event: WatchlistChangeEvent): boo
 
 function matchesPriceDrop(
   threshold: number,
-  baselinePrice: number,
+  _baselinePrice: number,
   event: WatchlistChangeEvent,
 ): boolean {
   if (event.type !== 'price_updated') {
@@ -118,7 +118,7 @@ function matchesPriceDrop(
     return true;
   }
 
-  const referencePrice = typedEvent.data.oldPrice ?? baselinePrice;
+  const referencePrice = typedEvent.data.oldPrice;
   if (referencePrice <= 0 || typedEvent.data.newPrice >= referencePrice) {
     return false;
   }

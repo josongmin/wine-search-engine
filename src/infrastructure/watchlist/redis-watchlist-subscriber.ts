@@ -28,16 +28,21 @@ export interface WatchlistSubscriberPort {
   isRunning(): boolean;
 }
 
+type RedisSubscriberClient = ReturnType<typeof createClient>;
+type RedisSubscriberFactory = (redisConfig: RedisConfig) => RedisSubscriberClient;
+
 /**
  * Subscribes to watchlist event channels using pattern matching.
  * Maintains a DEDICATED subscriber connection for Redis pub/sub.
  */
 export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
-  private subscriber: ReturnType<typeof createClient> | null = null;
+  private subscriber: RedisSubscriberClient | null = null;
   private running: boolean = false;
 
   constructor(
     private readonly redisConfig: RedisConfig = config.redis,
+    private readonly createSubscriber: RedisSubscriberFactory = (redisConfig) =>
+      createClient({ url: redisConfig.url }),
   ) {}
 
   /**
@@ -54,7 +59,7 @@ export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
     }
 
     // Create a dedicated subscriber connection
-    this.subscriber = createClient({ url: this.redisConfig.url });
+    this.subscriber = this.createSubscriber(this.redisConfig);
     this.subscriber.on('error', (err: Error) => {
       console.error('Redis Subscriber Error', err);
     });

@@ -17,3 +17,11 @@ export function expectsRedisAtStartup(config: Config): boolean {
     || (config.anthropic.apiKey !== undefined && !config.killSwitch.injectionJudge)
     || isWatchlistEnabled(config);
 }
+
+export function canUseInMemoryWatchlistStore(config: Config): boolean {
+  return config.nodeEnv !== 'production';
+}
+
+export function requiresPersistentWatchlistStore(config: Config): boolean {
+  return isWatchlistEnabled(config) && !canUseInMemoryWatchlistStore(config);
+}

@@ -1,5 +1,6 @@
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
+import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
 import {
   PolicyBlockedError,
 } from '../../domain/shared/error/policy-blocked.js';
@@ -19,6 +20,8 @@ export interface QueryEntrySecurityResult {
 export interface QueryEntrySecurityDeps {
   readonly querySanitizer: QuerySanitizer;
   readonly injectionJudge?: InjectionJudgePort | undefined;
+  readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
+  readonly observer?: QueryEntrySecurityObserver | undefined;
 }
 
 export function createPolicyBlockedDomainError(): PolicyBlockedError {
@@ -31,6 +34,7 @@ export async function evaluateQueryEntrySecurity(
 ): Promise<QueryEntrySecurityResult> {
   const sanitizationResult = deps.querySanitizer.sanitize(query);
   if (!sanitizationResult.safe) {
+    deps.observer?.onLayer1Blocked(sanitizationResult.reason);
     return {
       sanitizedQuery: query.trim(),
       rejection: {
@@ -42,10 +46,12 @@ export async function evaluateQueryEntrySecurity(
 
   const sanitizedQuery = sanitizationResult.sanitizedQuery;
   const judge = deps.injectionJudge;
+  const judgeFailureMode = deps.judgeFailureMode ?? 'fail_open';
   if (judge !== undefined) {
     try {
       const isInjection = await judge.judge(sanitizedQuery);
       if (isInjection) {
+        deps.observer?.onLayer2Blocked('LLM_JUDGE_REJECTION');
         return {
           sanitizedQuery,
           rejection: {
@@ -56,6 +62,18 @@ export async function evaluateQueryEntrySecurity(
       }
     } catch (err) {
       console.error('[QueryEntrySecurity] LLM judge error:', err);
+      deps.observer?.onJudgeError(err, judgeFailureMode);
+      if (judgeFailureMode === 'fail_closed') {
+        deps.observer?.onFailClosedBlock();
+        return {
+          sanitizedQuery,
+          rejection: {
+            layer: 'LAYER_2_BLOCKED',
+            reason: 'LLM_JUDGE_ERROR_FAIL_CLOSED',
+          },
+        };
+      }
+      deps.observer?.onFailOpenBypass();
     }
   }
 

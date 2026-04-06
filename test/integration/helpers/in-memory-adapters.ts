@@ -75,14 +75,16 @@ export class InMemoryAmbiguityDictionary implements AmbiguityDictionary {
  * Returns all stored entity IDs as candidates (100% recall, used in tests).
  */
 export class InMemoryBlockingAdapter implements BlockingPort {
-  private readonly entityIds: EntityId[] = [];
+  private readonly entityIds = new Set<EntityId>();
 
   addEntityId(id: EntityId): void {
-    this.entityIds.push(id);
+    this.entityIds.add(id);
   }
 
   addEntityIds(ids: readonly EntityId[]): void {
-    this.entityIds.push(...ids);
+    for (const id of ids) {
+      this.entityIds.add(id);
+    }
   }
 
   async block(
@@ -90,7 +92,7 @@ export class InMemoryBlockingAdapter implements BlockingPort {
     _normalizedQuery: string,
     limit?: number,
   ): Promise<readonly EntityId[]> {
-    const result = this.entityIds.slice();
+    const result = Array.from(this.entityIds);
     return limit != null ? result.slice(0, limit) : result;
   }
 }
@@ -306,6 +308,16 @@ export class InMemoryAliasMatcher implements AliasMatcher {
   addAlias(surfaceForm: string, entityId: EntityId, confidence = 0.95): void {
     const normalized = this.normalize(surfaceForm);
     const existing = this.aliases.get(normalized) ?? [];
+    if (
+      existing.some(
+        (entry) =>
+          entry.surfaceForm === surfaceForm &&
+          entry.entityId === entityId &&
+          entry.confidence === confidence,
+      )
+    ) {
+      return;
+    }
     existing.push({ entityId, surfaceForm, confidence });
     this.aliases.set(normalized, existing);
   }

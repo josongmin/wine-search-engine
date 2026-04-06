@@ -29,71 +29,72 @@ export interface RankedDocument extends RankableDocument {
 /**
  * LTR Ranker: applies learned models to rerank documents.
  */
-export namespace LTRRanker {
-  /**
-   * Reranks documents using learned LTR model.
-   */
-  export function rerank(
-    documents: readonly RankableDocument[],
-    _queryClass: QueryClass,
-    model?: QueryClassWeights,
-  ): readonly RankedDocument[] {
-    if (!model) {
-      return documents.map((doc, idx) => ({
-        ...doc,
-        ltrScore: doc.retrievalScore,
-        finalRank: idx + 1,
-      }));
-    }
-
-    const scored = documents.map((doc) => ({
+export function rerank(
+  documents: readonly RankableDocument[],
+  _queryClass: QueryClass,
+  model?: QueryClassWeights,
+): readonly RankedDocument[] {
+  if (!model) {
+    return documents.map((doc, idx) => ({
       ...doc,
-      ltrScore: scoreDocument(doc.features, model),
-    }));
-
-    const sorted = [...scored].sort((a, b) => {
-      if (b.ltrScore !== a.ltrScore) {
-        return b.ltrScore - a.ltrScore;
-      }
-      return b.retrievalScore - a.retrievalScore;
-    });
-
-    return sorted.map((doc, idx) => ({
-      ...doc,
+      ltrScore: doc.retrievalScore,
       finalRank: idx + 1,
     }));
   }
 
-  /**
-   * Computes blended score combining retrieval + LTR.
-   */
-  export function blendScores(
-    retrievalScore: number,
-    ltrScore: number,
-    alpha: number = 0.5,
-  ): number {
-    return (1 - alpha) * retrievalScore + alpha * ltrScore;
-  }
+  const scored = documents.map((doc) => ({
+    ...doc,
+    ltrScore: scoreDocument(doc.features, model),
+  }));
 
-  /**
-   * Detects significant reranking to monitor for quality regressions.
-   */
-  export function measureRerankingShift(
-    beforeRerank: readonly (string | number)[],
-    afterRerank: readonly (string | number)[],
-  ): number {
-    let totalShift = 0;
-    let count = 0;
-
-    const beforePos = new Map(beforeRerank.map((id, idx) => [id, idx]));
-    const afterPos = new Map(afterRerank.map((id, idx) => [id, idx]));
-
-    for (const [docId, beforeIdx] of beforePos.entries()) {
-      const afterIdx = afterPos.get(docId) ?? beforeRerank.length;
-      totalShift += Math.abs(afterIdx - beforeIdx);
-      count++;
+  const sorted = [...scored].sort((a, b) => {
+    if (b.ltrScore !== a.ltrScore) {
+      return b.ltrScore - a.ltrScore;
     }
+    return b.retrievalScore - a.retrievalScore;
+  });
 
-    return count > 0 ? totalShift / count : 0;
-  }
+  return sorted.map((doc, idx) => ({
+    ...doc,
+    finalRank: idx + 1,
+  }));
 }
+
+/**
+ * Computes blended score combining retrieval + LTR.
+ */
+export function blendScores(
+  retrievalScore: number,
+  ltrScore: number,
+  alpha: number = 0.5,
+): number {
+  return (1 - alpha) * retrievalScore + alpha * ltrScore;
+}
+
+/**
+ * Detects significant reranking to monitor for quality regressions.
+ */
+export function measureRerankingShift(
+  beforeRerank: readonly (string | number)[],
+  afterRerank: readonly (string | number)[],
+): number {
+  let totalShift = 0;
+  let count = 0;
+
+  const beforePos = new Map(beforeRerank.map((id, idx) => [id, idx]));
+  const afterPos = new Map(afterRerank.map((id, idx) => [id, idx]));
+
+  for (const [docId, beforeIdx] of beforePos.entries()) {
+    const afterIdx = afterPos.get(docId) ?? beforeRerank.length;
+    totalShift += Math.abs(afterIdx - beforeIdx);
+    count++;
+  }
+
+  return count > 0 ? totalShift / count : 0;
+}
+
+export const LTRRanker = {
+  rerank,
+  blendScores,
+  measureRerankingShift,
+} as const;

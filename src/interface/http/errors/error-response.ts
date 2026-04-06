@@ -6,7 +6,7 @@ import {
 } from '../schemas/search-response.schema.js';
 
 export function getErrorRequestId(request: FastifyRequest): string {
-  return request.requestId ?? request.id;
+  return request.requestId;
 }
 
 export function buildSearchErrorResponse(

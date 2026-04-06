@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify';
-import { detectDecomposition, isValidDecomposition } from '../../../domain/query/service/decomposition-detector.js';
 import type { SearchRouteDeps } from './route-deps.js';
 import {
   parseContractBody,
@@ -12,6 +11,10 @@ import { toSearchRequest } from './search-request-mappers.js';
 /**
  * POST /v1/search — main search endpoint.
  * Handles both regular search and "A vs B" comparison queries.
+ *
+ * Epic 14: Decomposition detection is handled inside SearchUseCase.execute().
+ * If the query matches an "A vs B" pattern, it delegates to DecomposedSearchUseCase
+ * and returns a ComparisonSearchResponse.
  */
 export function registerSearchRoute(
   app: FastifyInstance,
@@ -23,24 +26,8 @@ export function registerSearchRoute(
     contract: SearchRouteContract,
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, SearchRouteContract);
-      const startTime = Date.now();
       const searchRequest = toSearchRequest(parsed);
 
-      // Epic 14: Check for decomposable "A vs B" queries before routing to SearchUseCase
-      const decompositionResult = detectDecomposition(searchRequest.query);
-      if (isValidDecomposition(decompositionResult)) {
-        const response = await deps.decomposedSearchUseCase.execute(
-          decompositionResult.subQueries,
-          decompositionResult.comparisonIntent,
-          searchRequest.query,
-          request.requestId,
-          startTime,
-        );
-        sendRouteContractResponse(request, reply, SearchRouteContract, 200, response);
-        return;
-      }
-
-      // Regular search
       const response = await deps.searchUseCase.execute(searchRequest, request.requestId);
 
       sendRouteContractResponse(request, reply, SearchRouteContract, 200, response);

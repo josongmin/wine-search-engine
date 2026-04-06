@@ -39,6 +39,76 @@ function defineRouteContract<T extends HttpRouteContract>(contract: T): T {
   return Object.freeze(contract);
 }
 
+const HealthResponseSchema = z.object({
+  status: z.enum(['ok', 'degraded']),
+  timestamp: z.string(),
+  uptime: z.number(),
+});
+
+const ReadyResponseSchema = z.object({
+  ready: z.boolean(),
+  timestamp: z.string(),
+  checks: z.record(z.object({
+    status: z.enum(['up', 'down', 'skipped']),
+    required: z.boolean(),
+  })),
+});
+
+const ClaudeToolsExecuteRequestSchema = z.object({
+  tool_name: z.string().min(1),
+  tool_input: z.record(z.unknown()).optional().default({}),
+  request_id: z.string().optional(),
+});
+
+const ClaudeToolsExecuteResponseSchema = z.object({
+  tool_name: z.string(),
+  tool_result: z.unknown(),
+  fallback_applied: z.string().optional(),
+  request_id: z.string(),
+});
+
+const ClaudeToolsErrorResponseSchema = z.object({
+  error: z.string(),
+  message: z.string(),
+  request_id: z.string(),
+});
+
+const ClaudeToolsListResponseSchema = z.object({
+  tools: z.array(z.unknown()),
+  request_id: z.string(),
+});
+
+export const HealthRouteContract = defineRouteContract({
+  operationId: 'system.health',
+  responses: {
+    200: HealthResponseSchema,
+  },
+});
+
+export const ReadyRouteContract = defineRouteContract({
+  operationId: 'system.ready',
+  responses: {
+    200: ReadyResponseSchema,
+    503: ReadyResponseSchema,
+  },
+});
+
+export const ClaudeToolsExecuteRouteContract = defineRouteContract({
+  operationId: 'tools.execute',
+  body: ClaudeToolsExecuteRequestSchema,
+  responses: {
+    200: ClaudeToolsExecuteResponseSchema,
+    400: ClaudeToolsErrorResponseSchema,
+  },
+});
+
+export const ClaudeToolsListRouteContract = defineRouteContract({
+  operationId: 'tools.list',
+  responses: {
+    200: ClaudeToolsListResponseSchema,
+  },
+});
+
 export const SearchRouteContract = defineRouteContract({
   operationId: 'search.execute',
   body: SearchRequestSchema,

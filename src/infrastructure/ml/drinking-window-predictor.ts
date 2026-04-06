@@ -14,7 +14,7 @@
  * Format: v{major}.{minor}-enc{YYYYMMDD}
  * enc version pins the label encoders (grape, region, country).
  */
-export const DRINKING_WINDOW_MODEL_VERSION = 'v1.0-enc20260405';
+export const DRINKING_WINDOW_MODEL_VERSION = 'heuristic-v1.0-enc20260405';
 
 /**
  * Feature input for drinking window prediction.
@@ -54,43 +54,23 @@ export interface DrinkingWindowPrediction {
  *            tannin×acidity, body×tannin]
  */
 export class DrinkingWindowPredictor {
-  private initialized = false;
-
   /**
-   * Loads ONNX models from disk.
-   * In production: const { InferenceSession } = await import('onnxruntime-node');
+   * Loads predictor resources.
+   *
+   * ONNX runtime is not wired in this repository yet, so loading is a no-op
+   * that makes the fallback state explicit instead of pretending models are active.
    */
   load(modelDir: string): Promise<void> {
-    try {
-      // TODO: Uncomment when onnxruntime-node is available
-      // const { InferenceSession } = await import('onnxruntime-node');
-      // const sessionStart = await InferenceSession.create(`${modelDir}/window_start.onnx`);
-      // const sessionEnd = await InferenceSession.create(`${modelDir}/window_end.onnx`);
-      console.warn(
-        `[DrinkingWindowPredictor] Loading models from ${modelDir} (stub mode)`,
-      );
-    } catch (error: unknown) {
-      const errorMsg =
-        error instanceof Error ? error.message : String(error);
-      throw new Error(
-        `Failed to load drinking window ONNX models from ${modelDir}: ${errorMsg}`,
-      );
-    }
-    this.initialized = true;
+    console.warn(
+      `[DrinkingWindowPredictor] ONNX runtime is not wired yet; using heuristic fallback for ${modelDir}`,
+    );
     return Promise.resolve();
   }
 
   /**
-   * Predicts drinking window for a wine using LightGBM model.
-   *
-   * Real implementation: runs ONNX inference on feature array.
-   * Stub implementation: uses feature-weighted heuristic.
+   * Predicts drinking window for a wine using the deterministic heuristic fallback.
    */
   predict(input: DrinkingWindowInput): DrinkingWindowPrediction {
-    if (!this.initialized) {
-      throw new Error('DrinkingWindowPredictor not loaded — call load() first');
-    }
-
     // ─── Feature engineering ───────────────────────────────────────────
     const vintage = input.vintage;
     const body = input.body; // 1–5
@@ -101,9 +81,7 @@ export class DrinkingWindowPredictor {
     // Interaction terms (for future ONNX model compatibility)
     const tanninAcidity = tannin * acidity;
 
-    // ─── LightGBM prediction stub ───────────────────────────────────────
-    // In production: featureArray → sessionStart.run() → offset
-    // For now: weighted sum approximating LGB decision tree output
+    // ─── Heuristic fallback prediction ──────────────────────────────────
 
     const startOffsetRaw =
       tannin * 0.8 + acidity * 0.5 + (criticScore / 100) * 3 - body * 0.2;

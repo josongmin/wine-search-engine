@@ -103,7 +103,7 @@ async function loadGoldenQueries(
       try {
         const query: GoldenQuery = JSON.parse(line);
         queries.set(query.qid, query);
-      } catch (error) {
+      } catch {
         console.warn(`Failed to parse golden query line: ${line.slice(0, 100)}`);
       }
     });
@@ -133,7 +133,7 @@ async function loadWineDocuments(
       try {
         const wine: WineDocument = JSON.parse(line);
         wines.set(wine.sourceId, wine);
-      } catch (error) {
+      } catch {
         console.warn(`Failed to parse wine document line: ${line.slice(0, 100)}`);
       }
     });
@@ -187,51 +187,6 @@ function createSemanticSummary(wine: WineDocument): string {
 }
 
 /**
- * Extracts hard negatives: wines retrieved but semantically wrong.
- * For this dataset, hard negatives are wines with similar characteristics
- * but different origin/producer/type.
- */
-function extractHardNegatives(
-  positiveWine: WineDocument,
-  allWines: Map<string, WineDocument>,
-  count: number = 3,
-): WineDocument[] {
-  const hardNegatives: WineDocument[] = [];
-
-  // Criteria for hard negatives:
-  // - Same country/region (similar geography)
-  // - Same wine type (red, white, etc.)
-  // - Different producer
-  // - Similar price band
-  // But NOT the same wine
-
-  const candidates = Array.from(allWines.values()).filter((w) => {
-    if (w.sourceId === positiveWine.sourceId) return false; // exclude positive itself
-    if (w.wineType !== positiveWine.wineType) return false; // same type
-
-    // Same country yields good hard negatives
-    if (
-      w.country === positiveWine.country &&
-      w.producer !== positiveWine.producer
-    ) {
-      return true;
-    }
-
-    return false;
-  });
-
-  // Sort by price proximity (easier to confuse wines at similar price points)
-  const positivePrice = parseFloat(positiveWine.priceUsd);
-  candidates.sort(
-    (a, b) =>
-      Math.abs(parseFloat(a.priceUsd) - positivePrice) -
-      Math.abs(parseFloat(b.priceUsd) - positivePrice),
-  );
-
-  return candidates.slice(0, count);
-}
-
-/**
  * Creates balanced triplet dataset: mix of easy, medium, and hard negatives.
  */
 function createTriplets(
@@ -254,9 +209,6 @@ function createTriplets(
 
     // Create semantic summary for positive wine
     const positiveSummary = createSemanticSummary(positiveWine);
-
-    // Extract hard negatives (wines that would confuse the model)
-    const hardNegatives = extractHardNegatives(positiveWine, wines, 2);
 
     // Extract easy negatives (random wines from different countries)
     const easyNegatives = Array.from(wines.values())

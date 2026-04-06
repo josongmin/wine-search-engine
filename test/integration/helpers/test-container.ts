@@ -14,6 +14,8 @@ import { CandidateScorer } from '../../../src/domain/resolver/service/candidate-
 import { AmbiguityClassifier } from '../../../src/domain/resolver/service/ambiguity-classifier.js';
 import { Calibrator } from '../../../src/domain/resolver/service/calibrator.js';
 import { CandidatePoolService } from '../../../src/domain/retrieval/service/candidate-pool.js';
+import { BrowseRetriever } from '../../../src/domain/retrieval/service/browse-retriever.js';
+import { CompareRetriever } from '../../../src/domain/retrieval/service/compare-retriever.js';
 import { FusionService } from '../../../src/domain/retrieval/service/fusion.js';
 import { Ranker } from '../../../src/domain/ranking/service/ranker.js';
 import { SignalComputer } from '../../../src/domain/ranking/service/signal-computer.js';
@@ -35,10 +37,12 @@ import { ReplayUseCase } from '../../../src/application/search/replay.usecase.js
 import { InterpretUseCase } from '../../../src/application/search/interpret.usecase.js';
 import { ResolveUseCase } from '../../../src/application/search/resolve.usecase.js';
 import { HybridUseCase } from '../../../src/application/search/hybrid.usecase.js';
+import { WatchlistService } from '../../../src/application/watchlist/watchlist.service.js';
 import type { Container } from '../../../src/config/container.js';
 import type { SnapshotVersions } from '../../../src/application/search/search.usecase.js';
 import { AdaptiveToolExecutor } from '../../../src/interface/claude-tools/adaptive-tool-executor.js';
 import { WineToolExecutor } from '../../../src/interface/claude-tools/tool-executor.js';
+import { InMemoryWatchlistStore } from '../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -51,6 +55,15 @@ import {
   InMemorySimilarRetrieval,
   InMemoryCandidateAttributes,
 } from './in-memory-adapters.js';
+import {
+  MIXED_NEIGHBORHOOD_FIXTURES,
+  TEST_ALIASES,
+  TEST_DOCUMENTS,
+  toAnchorEntityData,
+  toCandidateAttributes,
+  toHybridCandidate,
+  toSimilarityCandidate,
+} from './test-fixtures.js';
 
 export interface TestContainerParts {
   container: Container;
@@ -78,6 +91,33 @@ export function createTestContainer(): TestContainerParts {
   const anchorResolver = new InMemoryAnchorResolver();
   const similarRetrieval = new InMemorySimilarRetrieval();
   const candidateAttributes = new InMemoryCandidateAttributes();
+  const watchlistStore = new InMemoryWatchlistStore();
+
+  for (const alias of TEST_ALIASES) {
+    aliasMatcher.addAlias(alias.surfaceForm, alias.entityId, alias.confidence);
+  }
+
+  for (const doc of TEST_DOCUMENTS) {
+    searchIndex.upsertDoc(doc);
+    anchorResolver.addEntity(doc.entityId, toAnchorEntityData(doc));
+    candidateAttributes.setAttribute(doc.entityId, toCandidateAttributes(doc));
+    candidateAttributes.setSimilarity(doc.entityId, toSimilarityCandidate(doc));
+  }
+
+  const uniqueIds = new Set(TEST_ALIASES.map((alias) => alias.entityId));
+  blockingAdapter.addEntityIds(Array.from(uniqueIds));
+
+  for (const neighborhood of MIXED_NEIGHBORHOOD_FIXTURES) {
+    const docs = neighborhood.candidateIds
+      .map((entityId) => TEST_DOCUMENTS.find((doc) => doc.entityId === entityId))
+      .filter((doc): doc is (typeof TEST_DOCUMENTS)[number] => doc !== undefined);
+
+    const candidates = docs.map((doc, index) =>
+      toHybridCandidate(doc, index + 1, ['anchor', 'dense', 'sparse']),
+    );
+
+    similarRetrieval.setResults(neighborhood.anchorId, candidates);
+  }
 
   // Domain services — query planning
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
@@ -100,6 +140,8 @@ export function createTestContainer(): TestContainerParts {
   // Domain services — retrieval
   const fusionService = new FusionService();
   const candidatePool = new CandidatePoolService(searchIndex, embeddingService, fusionService);
+  const browseRetriever = new BrowseRetriever(searchIndex);
+  const compareRetriever = new CompareRetriever(searchIndex);
 
   // Domain services — ranking
   const signalComputer = new SignalComputer();
@@ -140,6 +182,8 @@ export function createTestContainer(): TestContainerParts {
     queryPlanner,
     entityResolver,
     candidatePool,
+    browseRetriever,
+    compareRetriever,
     ranker,
     decisionEngine,
     responseBuilder,
@@ -171,6 +215,9 @@ export function createTestContainer(): TestContainerParts {
     drinkingWindowUseCase,
   });
   const adaptiveToolExecutor = new AdaptiveToolExecutor(wineToolExecutor);
+  const watchlistService = new WatchlistService({
+    storage: watchlistStore,
+  });
   const container: Container = {
     queryPlanner,
     entityResolver,
@@ -188,6 +235,8 @@ export function createTestContainer(): TestContainerParts {
     drinkingWindowUseCase,
     batchSearchUseCase,
     adaptiveToolExecutor,
+    watchlistService,
+    watchlistRuntime: null,
     evalRunner: null,
   };
 

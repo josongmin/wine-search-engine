@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import { createTestContainer, type TestContainerParts } from './helpers/test-container.js';
 import {
   TEST_ALIASES,
@@ -129,10 +130,10 @@ describe('Search Pipeline Integration', () => {
     });
 
     it('"스파클링 와인" — search index returns Moët Brut', async () => {
-      const response = await parts.container.searchUseCase.execute(
+      const response = (await parts.container.searchUseCase.execute(
         makeRequest('스파클링 와인', { options: { mode: 'hybrid', explain: false, clarification: false } }),
         'req-hybrid-3',
-      );
+      )) as SearchResponseV1;
 
       expect(response.meta.route).toBe('hybrid');
       // If results are present, Moët should be among them (sparkling keyword)
@@ -143,10 +144,10 @@ describe('Search Pipeline Integration', () => {
     });
 
     it('"달달한 와인" — search index returns Sauternes', async () => {
-      const response = await parts.container.searchUseCase.execute(
+      const response = (await parts.container.searchUseCase.execute(
         makeRequest('달달한 와인', { options: { mode: 'hybrid', explain: false, clarification: false } }),
         'req-hybrid-4',
-      );
+      )) as SearchResponseV1;
 
       expect(response.meta.route).toBe('hybrid');
       if (response.results.length > 0) {

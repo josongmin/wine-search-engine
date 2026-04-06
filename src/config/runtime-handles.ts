@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { NodeSDK } from '@opentelemetry/sdk-node';
+import type { WatchlistStoragePort } from '../domain/watchlist/port/watchlist-repository.port.js';
 import type { WatchlistPublisherPort } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
 import type { WatchlistSubscriberPort } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { closePgPool } from '../infrastructure/db/pg-pool.js';
@@ -8,6 +9,7 @@ import { closeRedisClient, type RedisClient } from '../infrastructure/db/redis-c
 export interface RuntimeHandles {
   readonly pool?: Pool;
   readonly redisClient?: RedisClient;
+  readonly createWatchlistStore?: () => WatchlistStoragePort;
   readonly createWatchlistPublisher?: () => WatchlistPublisherPort;
   readonly createWatchlistSubscriber?: () => WatchlistSubscriberPort;
 }
@@ -37,9 +39,12 @@ export function createManagedRuntimeHandles(
           options?.telemetrySdk?.shutdown() ?? Promise.resolve(),
         ]);
 
-        const failures = results.flatMap((result) =>
-          result.status === 'rejected' ? [result.reason] : [],
-        );
+        const failures: unknown[] = [];
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            failures.push(result.reason);
+          }
+        }
         if (failures.length > 0) {
           throw new AggregateError(failures, 'Failed to close runtime handles cleanly');
         }

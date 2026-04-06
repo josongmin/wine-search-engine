@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { type z } from 'zod';
 import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
 import type { ReplayRequest } from '../../../application/search/replay-request.dto.js';
 import type {
@@ -12,25 +12,24 @@ import type {
 import type { InterpretRequest } from '../../../application/search/interpret-request.dto.js';
 import type { ResolveRequest } from '../../../application/search/resolve-request.dto.js';
 import {
-  HybridRequestSchema,
-  InterpretRequestSchema,
-  ReplayRequestSchema,
-  ResolveRequestSchema,
-  SearchRequestSchema,
+  type HybridRequestSchema,
+  type InterpretRequestSchema,
+  type ReplayRequestSchema,
+  type ResolveRequestSchema,
+  type SearchRequestSchema,
 } from '../schemas/search-request.schema.js';
 
 function normalizeSearchOptions(
-  options: z.output<typeof SearchRequestSchema>['options']
-    | z.output<typeof ReplayRequestSchema>['options'],
+  options: z.output<typeof SearchRequestSchema>['options'],
 ): SearchOptions | undefined {
   if (options === undefined) {
     return undefined;
   }
 
   return {
-    mode: options.mode ?? 'auto',
-    explain: options.explain ?? false,
-    clarification: options.clarification ?? true,
+    mode: options.mode,
+    explain: options.explain,
+    clarification: options.clarification,
   };
 }
 
@@ -42,8 +41,8 @@ function normalizeHybridOptions(
   }
 
   return {
-    explain: options.explain ?? false,
-    clarification: options.clarification ?? true,
+    explain: options.explain,
+    clarification: options.clarification,
   };
 }
 
@@ -55,6 +54,7 @@ export function toSearchRequest(body: z.output<typeof SearchRequestSchema>): Sea
     ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
     ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
     ...(options !== undefined ? { options } : {}),
+    ...(body.retrieval_mode !== undefined ? { retrieval_mode: body.retrieval_mode } : {}),
   };
 }
 

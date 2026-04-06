@@ -42,6 +42,10 @@
 
 ## Phase 구조
 
+### Upstream anchor
+
+This plan builds on the IR core in v0.1, especially Epic 4 (LTR): [docs/plans/apr-5-v0.1/epic-4-ltr.md](/Users/songmin/wine-search-engine/docs/plans/apr-5-v0.1/epic-4-ltr.md).
+
 ### Phase 4 — Data & Query Intelligence
 
 데이터 갭과 쿼리 이해 갭을 동시에 닫는다.

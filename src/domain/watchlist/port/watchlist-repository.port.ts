@@ -14,6 +14,9 @@ export interface WatchlistRepositoryPort {
 export interface WatchlistDeliveryLogRepositoryPort {
   listByWatchlistId(watchlistId: string): Promise<readonly WatchlistDeliveryLogEntry[]>;
   append(log: WatchlistDeliveryLogEntry): Promise<void>;
-  deleteByWatchlistId(watchlistId: string): Promise<void>;
   clear(): Promise<void>;
 }
+
+export interface WatchlistStoragePort extends
+  WatchlistRepositoryPort,
+  WatchlistDeliveryLogRepositoryPort {}

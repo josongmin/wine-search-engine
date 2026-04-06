@@ -35,6 +35,12 @@ export interface ResponseBuildParams {
   /** Execution route label. */
   readonly route: string;
 
+  /** Whether the retrieval mode was determined by the planner or overridden via the API. */
+  readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
+
+  /** The retrieval mode the planner originally suggested, before any API override. */
+  readonly plannerSuggestedMode?: string | undefined;
+
   /** Response format version (defaults to "1.0.0"). */
   readonly version?: string | undefined;
 }
@@ -59,7 +65,12 @@ export class ResponseBuilder {
    * @returns A fully assembled, immutable search response.
    */
   build(params: ResponseBuildParams): SearchResponseV1 {
-    const engineDecision = this.mapDecision(params.decisionOutput, params.route);
+    const engineDecision = this.mapDecision(
+      params.decisionOutput,
+      params.route,
+      params.retrievalModeSource,
+      params.plannerSuggestedMode,
+    );
     const validatedResults = this.enforceEvidence(params.results);
     const enrichedResults = this.enrichResults(validatedResults);
 
@@ -119,7 +130,15 @@ export class ResponseBuilder {
   /**
    * Map internal {@link DecisionOutput} to the external-facing {@link EngineDecision}.
    */
-  private mapDecision(output: DecisionOutput, route: string): EngineDecision {
+  private mapDecision(
+    output: DecisionOutput,
+    route: string,
+    retrievalModeSource?: 'planner' | 'api_override',
+    plannerSuggestedMode?: string,
+  ): EngineDecision {
+    void retrievalModeSource;
+    void plannerSuggestedMode;
+
     return {
       decisionStatus: output.decisionStatus,
       nextAction: output.nextAction,

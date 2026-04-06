@@ -23,6 +23,42 @@ import { join } from 'path';
 import type { SearchUseCase } from '../application/search/search.usecase.js';
 import type { Container } from '../config/container.js';
 
+type WineRecord = {
+  sourceId: string;
+  canonicalLabel: string;
+  aliases?: {
+    identitySafeProjection?: string[];
+    noisyRecallProjection?: string[];
+  };
+  producer?: string;
+  region?: string;
+  grapes?: string[];
+  searchTextEn?: string;
+  body?: number;
+  sweetness?: number;
+  wineType?: string;
+  priceBand?: string;
+  pairingTags?: string[];
+  popularityScore?: number;
+  vintageYear?: number;
+  acidity?: number;
+  tannin?: number;
+  grapePrimary?: string;
+  country?: string;
+  appellation?: string;
+  priceUsd?: string | number;
+  flavorProfiles?: string[];
+  drinkingWindow?: {
+    drinkingWindowStart?: string;
+    drinkingWindowEnd?: string;
+  };
+};
+
+const parseWineRecord = (line: string): WineRecord => {
+  const parsed: unknown = JSON.parse(line);
+  return parsed as WineRecord;
+};
+
 describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
   let container: Container;
   let blockingAdapter: ReturnType<typeof createTestContainer>['blockingAdapter'];
@@ -43,7 +79,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       .split('\n')
       .filter((line) => line.trim());
 
-    const wines = lines.map((line) => JSON.parse(line));
+    const wines = lines.map(parseWineRecord);
 
     // Index 100 wines
     const entityIds: string[] = [];
@@ -84,7 +120,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     }
 
     blockingAdapter.addEntityIds(entityIds);
-    console.log(`\n📦 Root Cause Trace Setup: indexed 100 wines, registered with blocking adapter\n`);
+    console.error(`\n📦 Root Cause Trace Setup: indexed 100 wines, registered with blocking adapter\n`);
   });
 
   afterAll(() => {
@@ -99,28 +135,28 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
    * - Anchors extracted
    */
   it('[STEP 1] Planner generates valid QueryPlanV1', async () => {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[STEP 1] PLANNER`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`Input query: "${QUERY}"`);
+    console.error(`\n${'='.repeat(80)}`);
+    console.error(`[STEP 1] PLANNER`);
+    console.error('='.repeat(80));
+    console.error(`Input query: "${QUERY}"`);
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
-    console.log(`\nPlanner Output:`);
-    console.log(`  rawQuery: ${plan.rawQuery}`);
-    console.log(`  normalizedQuery: ${plan.normalizedQuery}`);
-    console.log(`  queryClass: ${plan.queryClass} ${plan.queryClass ? '✅' : '❌'}`);
-    console.log(`  intent: ${plan.intent}`);
-    console.log(`  route: ${plan.route}`);
-    console.log(`  retrievalMode: ${plan.retrievalMode}`);
-    console.log(`  anchors: ${plan.anchors.length} extracted`);
+    console.error(`\nPlanner Output:`);
+    console.error(`  rawQuery: ${plan.rawQuery}`);
+    console.error(`  normalizedQuery: ${plan.normalizedQuery}`);
+    console.error(`  queryClass: ${plan.queryClass} ${plan.queryClass ? '✅' : '❌'}`);
+    console.error(`  intent: ${plan.intent}`);
+    console.error(`  route: ${plan.route}`);
+    console.error(`  retrievalMode: ${plan.retrievalMode}`);
+    console.error(`  anchors: ${plan.anchors.length} extracted`);
     if (plan.anchors.length > 0) {
       plan.anchors.forEach((a, i) => {
-        console.log(`    [${i}] ${a.value} (confidence: ${a.confidence.toFixed(3)})`);
+        console.error(`    [${i}] ${a.value} (confidence: ${a.confidence.toFixed(3)})`);
       });
     }
-    console.log(`  constraints.hard: ${plan.constraints.hard.length}`);
-    console.log(`  constraints.soft: ${plan.constraints.soft.length}`);
+    console.error(`  constraints.hard: ${plan.constraints.hard.length}`);
+    console.error(`  constraints.soft: ${plan.constraints.soft.length}`);
 
     // Assertions
     expect(plan.queryClass).toBeDefined();
@@ -140,9 +176,9 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
    * - Fused candidates count
    */
   it('[STEP 2] CandidatePool generates HybridCandidate[]', async () => {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[STEP 2] CANDIDATE POOL`);
-    console.log(`${'='.repeat(80)}`);
+    console.error(`\n${'='.repeat(80)}`);
+    console.error(`[STEP 2] CANDIDATE POOL`);
+    console.error('='.repeat(80));
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
@@ -155,27 +191,27 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       softConstraints: plan.constraints.soft,
     };
 
-    console.log(`\nRetrieval Input:`);
-    console.log(`  lexicalQueries: [${retrievalInput.lexicalQueries.join(', ')}]`);
-    console.log(`  semanticQueries: [${retrievalInput.semanticQueries.join(', ')}]`);
-    console.log(`  hardConstraints: ${retrievalInput.hardConstraints.length}`);
-    console.log(`  softConstraints: ${retrievalInput.softConstraints.length}`);
+    console.error(`\nRetrieval Input:`);
+    console.error(`  lexicalQueries: [${retrievalInput.lexicalQueries.join(', ')}]`);
+    console.error(`  semanticQueries: [${retrievalInput.semanticQueries.join(', ')}]`);
+    console.error(`  hardConstraints: ${retrievalInput.hardConstraints.length}`);
+    console.error(`  softConstraints: ${retrievalInput.softConstraints.length}`);
 
     const candidates = await container.candidatePool.generate(retrievalInput);
 
-    console.log(`\nCandidate Pool Output:`);
-    console.log(`  Total candidates: ${candidates.length}`);
+    console.error(`\nCandidate Pool Output:`);
+    console.error(`  Total candidates: ${candidates.length}`);
     if (candidates.length === 0) {
-      console.log(`  ❌ NO CANDIDATES RETURNED`);
+      console.error(`  ❌ NO CANDIDATES RETURNED`);
     } else {
       candidates.slice(0, 5).forEach((c, i) => {
-        console.log(`  [${i}] ${c.entityId} (${c.canonicalLabel})`);
-        console.log(`      BM25 Score: ${c.bm25Score?.toFixed(3) ?? 'N/A'}`);
-        console.log(`      Dense Score: ${c.denseScore?.toFixed(3) ?? 'N/A'}`);
-        console.log(`      Fusion Score: ${c.fusionScore?.toFixed(3) ?? 'N/A'}`);
+        console.error(`  [${i}] ${c.entityId} (${c.canonicalLabel})`);
+        console.error(`      BM25 Score: ${c.bm25Score?.toFixed(3) ?? 'N/A'}`);
+        console.error(`      Dense Score: ${c.denseScore?.toFixed(3) ?? 'N/A'}`);
+        console.error(`      Fusion Score: ${c.fusionScore?.toFixed(3) ?? 'N/A'}`);
       });
       if (candidates.length > 5) {
-        console.log(`  ... and ${candidates.length - 5} more`);
+        console.error(`  ... and ${candidates.length - 5} more`);
       }
     }
 
@@ -187,7 +223,7 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     const davidArthurFound = candidates.some((c) =>
       c.canonicalLabel.toLowerCase().includes('david arthur'),
     );
-    console.log(`\n  David Arthur found in candidates: ${davidArthurFound ? '✅' : '❌'}`);
+    console.error(`\n  David Arthur found in candidates: ${davidArthurFound ? '✅' : '❌'}`);
 
     return candidates;
   });
@@ -200,9 +236,9 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
    * - Ranking order
    */
   it('[STEP 3] Ranker scores and ranks candidates', async () => {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[STEP 3] RANKER`);
-    console.log(`${'='.repeat(80)}`);
+    console.error(`\n${'='.repeat(80)}`);
+    console.error(`[STEP 3] RANKER`);
+    console.error('='.repeat(80));
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
@@ -223,26 +259,26 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       constraints: plan.constraints,
     };
 
-    console.log(`\nRanking Input:`);
-    console.log(`  Candidates to rank: ${rankingInput.candidates.length}`);
-    console.log(`  Query class: ${rankingInput.queryPlan.queryClass}`);
+    console.error(`\nRanking Input:`);
+    console.error(`  Candidates to rank: ${rankingInput.candidates.length}`);
+    console.error(`  Query class: ${rankingInput.queryPlan.queryClass}`);
 
     const rankedResults = await container.ranker.rank(rankingInput);
 
-    console.log(`\nRanker Output:`);
-    console.log(`  Total ranked results: ${rankedResults.length}`);
+    console.error(`\nRanker Output:`);
+    console.error(`  Total ranked results: ${rankedResults.length}`);
     if (rankedResults.length === 0) {
-      console.log(`  ❌ NO RANKED RESULTS`);
+      console.error(`  ❌ NO RANKED RESULTS`);
     } else {
       rankedResults.slice(0, 5).forEach((r, i) => {
-        console.log(`  [${i}] ${r.entityId} (${r.canonicalLabel})`);
-        console.log(`      Final Score: ${r.finalScore.toFixed(4)}`);
-        console.log(`      Semantic: ${r.componentScores.semantic.toFixed(3)}`);
-        console.log(`      Hard Constraint: ${r.componentScores.hardConstraintPass ? '✅' : '❌'}`);
-        console.log(`      Uncertainty Penalty: ${r.componentScores.uncertaintyPenalty.toFixed(3)}`);
+        console.error(`  [${i}] ${r.entityId} (${r.canonicalLabel})`);
+        console.error(`      Final Score: ${r.finalScore.toFixed(4)}`);
+        console.error(`      Semantic: ${r.componentScores.semantic.toFixed(3)}`);
+        console.error(`      Hard Constraint: ${r.componentScores.hardConstraintPass ? '✅' : '❌'}`);
+        console.error(`      Uncertainty Penalty: ${r.componentScores.uncertaintyPenalty.toFixed(3)}`);
       });
       if (rankedResults.length > 5) {
-        console.log(`  ... and ${rankedResults.length - 5} more`);
+        console.error(`  ... and ${rankedResults.length - 5} more`);
       }
     }
 
@@ -253,10 +289,10 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     const davidArthurRanked = rankedResults.find((r) =>
       r.canonicalLabel.toLowerCase().includes('david arthur'),
     );
-    console.log(`\n  David Arthur ranked: ${davidArthurRanked ? '✅' : '❌'}`);
+    console.error(`\n  David Arthur ranked: ${davidArthurRanked ? '✅' : '❌'}`);
     if (davidArthurRanked) {
-      console.log(`    Final Score: ${davidArthurRanked.finalScore.toFixed(4)}`);
-      console.log(`    Rank: ${davidArthurRanked.rank}`);
+      console.error(`    Final Score: ${davidArthurRanked.finalScore.toFixed(4)}`);
+      console.error(`    Rank: ${davidArthurRanked.rank}`);
     }
 
     return rankedResults;
@@ -270,9 +306,9 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
    * - Produces decision status + confidence
    */
   it('[STEP 4] DecisionEngine makes decision', async () => {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[STEP 4] DECISION ENGINE`);
-    console.log(`${'='.repeat(80)}`);
+    console.error(`\n${'='.repeat(80)}`);
+    console.error(`[STEP 4] DECISION ENGINE`);
+    console.error('='.repeat(80));
 
     const plan = await container.queryPlanner.plan(QUERY, {});
 
@@ -328,14 +364,14 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       conformalSetSize: 1,
     };
 
-    console.log(`\nResolver Result (synthetic for hybrid):`);
-    console.log(`  Status: ${resolveResult.status}`);
-    console.log(`  Candidates count: ${resolveResult.candidates.length}`);
-    console.log(`  Decision Confidence C: ${resolveResult.decisionConfidenceC.toFixed(4)}`);
-    console.log(`  Top1 Score: ${resolveResult.decisionTrace.top1CalibratedScore.toFixed(4)}`);
-    console.log(`  Top2 Score: ${resolveResult.decisionTrace.top2CalibratedScore.toFixed(4)}`);
-    console.log(`  Calibrated Gap: ${resolveResult.decisionTrace.calibratedGap.toFixed(4)}`);
-    console.log(`  Ambiguity Detected: ${resolveResult.decisionTrace.ambiguityDetected}`);
+    console.error(`\nResolver Result (synthetic for hybrid):`);
+    console.error(`  Status: ${resolveResult.status}`);
+    console.error(`  Candidates count: ${resolveResult.candidates.length}`);
+    console.error(`  Decision Confidence C: ${resolveResult.decisionConfidenceC.toFixed(4)}`);
+    console.error(`  Top1 Score: ${resolveResult.decisionTrace.top1CalibratedScore.toFixed(4)}`);
+    console.error(`  Top2 Score: ${resolveResult.decisionTrace.top2CalibratedScore.toFixed(4)}`);
+    console.error(`  Calibrated Gap: ${resolveResult.decisionTrace.calibratedGap.toFixed(4)}`);
+    console.error(`  Ambiguity Detected: ${resolveResult.decisionTrace.ambiguityDetected}`);
 
     // Build decision input (topResult already defined above)
     // const topResult = rankedResults[0];
@@ -375,14 +411,14 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       conformalSetSize: resolveResult.conformalSetSize,
     };
 
-    console.log(`\nDecision Input:`);
-    console.log(`  Policy fallback mode: ${decisionInput.policy.fallbackMode}`);
-    console.log(`  Uncertainty decision effect: ${decisionInput.uncertainty.decisionEffect ?? 'none'}`);
-    console.log(`  Identity evidence present: ${decisionInput.evidenceSummary.identityEvidencePresent}`);
-    console.log(`  Ranking signals present: ${rankingSignals !== undefined ? '✅' : '❌'}`);
+    console.error(`\nDecision Input:`);
+    console.error(`  Policy fallback mode: ${decisionInput.policy.fallbackMode}`);
+    console.error(`  Uncertainty decision effect: ${decisionInput.uncertainty.decisionEffect ?? 'none'}`);
+    console.error(`  Identity evidence present: ${decisionInput.evidenceSummary.identityEvidencePresent}`);
+    console.error(`  Ranking signals present: ${rankingSignals !== undefined ? '✅' : '❌'}`);
     if (rankingSignals) {
-      console.log(`    semantic_relevance_score: ${rankingSignals.semantic_relevance_score.toFixed(3)}`);
-      console.log(`    hard_constraint_pass: ${rankingSignals.hard_constraint_pass}`);
+      console.error(`    semantic_relevance_score: ${rankingSignals.semantic_relevance_score.toFixed(3)}`);
+      console.error(`    hard_constraint_pass: ${rankingSignals.hard_constraint_pass}`);
     }
 
     // Run decision engine
@@ -397,16 +433,16 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     const decisionOutput = await container.decisionEngine.decide(decisionInput, snapshot);
 
-    console.log(`\nDecision Engine Output:`);
-    console.log(`  Decision Status: ${decisionOutput.decisionStatus}`);
-    console.log(`  Decision Confidence: ${decisionOutput.decisionConfidence.toFixed(4)}`);
-    console.log(`  Confidence Semantics: ${decisionOutput.confidenceSemantics}`);
-    console.log(`  Next Action: ${decisionOutput.nextAction}`);
-    console.log(`  Route: ${decisionOutput.route}`);
-    console.log(`  Failure Reason: ${decisionOutput.failure_reason ?? 'N/A'}`);
-    console.log(`\n  Rules Applied:`);
+    console.error(`\nDecision Engine Output:`);
+    console.error(`  Decision Status: ${decisionOutput.decisionStatus}`);
+    console.error(`  Decision Confidence: ${decisionOutput.decisionConfidence.toFixed(4)}`);
+    console.error(`  Confidence Semantics: ${decisionOutput.confidenceSemantics}`);
+    console.error(`  Next Action: ${decisionOutput.nextAction}`);
+    console.error(`  Route: ${decisionOutput.route}`);
+    console.error(`  Failure Reason: ${decisionOutput.failure_reason ?? 'N/A'}`);
+    console.error(`\n  Rules Applied:`);
     decisionOutput.decisionTrace.rulesApplied.forEach((rule) => {
-      console.log(`    - ${rule}`);
+      console.error(`    - ${rule}`);
     });
 
     // Assertions
@@ -421,11 +457,11 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
    * Run the complete SearchUseCase and examine the response.
    */
   it('[STEP 5] SearchUseCase.execute() — Full Pipeline', async () => {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[STEP 5] FULL PIPELINE — SearchUseCase.execute()`);
-    console.log(`${'='.repeat(80)}`);
-    console.log(`Query: "${QUERY}"`);
-    console.log(`Request ID: ${REQUEST_ID}`);
+    console.error(`\n${'='.repeat(80)}`);
+    console.error(`[STEP 5] FULL PIPELINE — SearchUseCase.execute()`);
+    console.error('='.repeat(80));
+    console.error(`Query: "${QUERY}"`);
+    console.error(`Request ID: ${REQUEST_ID}`);
 
     const response = await container.searchUseCase.execute(
       {
@@ -439,36 +475,36 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       REQUEST_ID,
     );
 
-    console.log(`\nSearchResponse Output:`);
-    console.log(`  Decision Status: ${response.engineDecision.decisionStatus}`);
-    console.log(`  Decision Confidence: ${response.engineDecision.decisionConfidence.toFixed(4)}`);
-    console.log(`  Confidence Semantics: ${response.engineDecision.confidenceSemantics}`);
-    console.log(`  Route: ${response.engineDecision.route}`);
-    console.log(`  Failure Reason: ${response.engineDecision.failure_reason ?? 'N/A'}`);
-    console.log(`  Results Count: ${response.results.length} ${response.results.length > 0 ? '✅' : '❌'}`);
+    console.error(`\nSearchResponse Output:`);
+    console.error(`  Decision Status: ${response.engineDecision.decisionStatus}`);
+    console.error(`  Decision Confidence: ${response.engineDecision.decisionConfidence.toFixed(4)}`);
+    console.error(`  Confidence Semantics: ${response.engineDecision.confidenceSemantics}`);
+    console.error(`  Route: ${response.engineDecision.route}`);
+    console.error(`  Failure Reason: ${response.engineDecision.failure_reason ?? 'N/A'}`);
+    console.error(`  Results Count: ${response.results.length} ${response.results.length > 0 ? '✅' : '❌'}`);
 
     if (response.results.length > 0) {
-      console.log(`\n  Top 5 Results:`);
+      console.error(`\n  Top 5 Results:`);
       response.results.slice(0, 5).forEach((r, i) => {
-        console.log(`    [${i}] ${r.entity.entityId} (${r.entity.canonicalLabel})`);
-        console.log(`        Score: ${r.relevanceScore.toFixed(4)}`);
+        console.error(`    [${i}] ${r.entity.entityId} (${r.entity.canonicalLabel})`);
+        console.error(`        Score: ${r.relevanceScore.toFixed(4)}`);
       });
     }
 
-    console.log(`\n  Decision Trace:`);
+    console.error(`\n  Decision Trace:`);
     if (response.engineDecision.decisionTrace) {
       const trace = response.engineDecision.decisionTrace;
-      console.log(`    Query Class: ${trace.queryClass}`);
-      console.log(`    Top1 Score: ${trace.top1CalibratedScore?.toFixed(4) ?? 'N/A'}`);
-      console.log(`    Calibrated Gap: ${trace.calibratedGap?.toFixed(4) ?? 'N/A'}`);
-      console.log(`    Ambiguity Detected: ${trace.ambiguityDetected ?? 'N/A'}`);
-      console.log(`    Rules Applied: ${trace.rulesApplied?.join(', ') ?? 'N/A'}`);
+      console.error(`    Query Class: ${trace.queryClass}`);
+      console.error(`    Top1 Score: ${trace.top1CalibratedScore?.toFixed(4) ?? 'N/A'}`);
+      console.error(`    Calibrated Gap: ${trace.calibratedGap?.toFixed(4) ?? 'N/A'}`);
+      console.error(`    Ambiguity Detected: ${trace.ambiguityDetected ?? 'N/A'}`);
+      console.error(`    Rules Applied: ${trace.rulesApplied?.join(', ') ?? 'N/A'}`);
     }
 
-    console.log(`\n  Metadata:`);
-    console.log(`    Request ID: ${response.meta.requestId}`);
-    console.log(`    Query Time Ms: ${response.meta.queryTimeMs}`);
-    console.log(`    Route: ${response.meta.route}`);
+    console.error(`\n  Metadata:`);
+    console.error(`    Request ID: ${response.meta.requestId}`);
+    console.error(`    Query Time Ms: ${response.meta.queryTimeMs}`);
+    console.error(`    Route: ${response.meta.route}`);
 
     // Assertions
     expect(response).toBeDefined();
@@ -476,16 +512,16 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
     expect(response.meta).toBeDefined();
 
     const davidArthurFound = response.results.some((r) =>
-      r.entity.canonicalLabel.toLowerCase().includes('david arthur'),
+      String(r.entity.canonicalLabel).toLowerCase().includes('david arthur'),
     );
-    console.log(`\n  David Arthur in results: ${davidArthurFound ? '✅' : '❌'}`);
+    console.error(`\n  David Arthur in results: ${davidArthurFound ? '✅' : '❌'}`);
 
     // DIAGNOSTIC: Log why status is not resolved
     if (response.engineDecision.decisionStatus !== 'resolved') {
-      console.log(`\n  ⚠️ DIAGNOSTIC: Decision Status is NOT 'resolved'`);
-      console.log(`     Confidence: ${response.engineDecision.decisionConfidence.toFixed(4)}`);
-      console.log(`     Expected confidence threshold: >= 0.60 (approx)`);
-      console.log(`     This indicates the pipeline found candidates but confidence was too low.`);
+      console.error(`\n  ⚠️ DIAGNOSTIC: Decision Status is NOT 'resolved'`);
+      console.error(`     Confidence: ${response.engineDecision.decisionConfidence.toFixed(4)}`);
+      console.error(`     Expected confidence threshold: >= 0.60 (approx)`);
+      console.error(`     This indicates the pipeline found candidates but confidence was too low.`);
     }
 
     return response;
@@ -495,9 +531,9 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
    * SUMMARY: Pinpoint the exact failure mode
    */
   it('[SUMMARY] Root Cause Analysis', async () => {
-    console.log(`\n${'='.repeat(80)}`);
-    console.log(`[SUMMARY] ROOT CAUSE ANALYSIS`);
-    console.log(`${'='.repeat(80)}`);
+    console.error(`\n${'='.repeat(80)}`);
+    console.error(`[SUMMARY] ROOT CAUSE ANALYSIS`);
+    console.error('='.repeat(80));
 
     const response = await container.searchUseCase.execute(
       {
@@ -523,9 +559,9 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
 
     const candidates = await container.candidatePool.generate(retrievalInput);
 
-    console.log(`\nTrace Summary:`);
-    console.log(`  1. Planner produces queryClass: ${plan.queryClass} ✅`);
-    console.log(`  2. CandidatePool finds: ${candidates.length} candidates ${candidates.length > 0 ? '✅' : '❌'}`);
+    console.error(`\nTrace Summary:`);
+    console.error(`  1. Planner produces queryClass: ${plan.queryClass} ✅`);
+    console.error(`  2. CandidatePool finds: ${candidates.length} candidates ${candidates.length > 0 ? '✅' : '❌'}`);
 
     if (candidates.length > 0) {
       const rankingInput = {
@@ -535,21 +571,21 @@ describe('Root Cause Trace: "David Arthur Cabernet 2014"', () => {
       };
       const rankedResults = await container.ranker.rank(rankingInput);
 
-      console.log(`  3. Ranker produces: ${rankedResults.length} ranked results ${rankedResults.length > 0 ? '✅' : '❌'}`);
+      console.error(`  3. Ranker produces: ${rankedResults.length} ranked results ${rankedResults.length > 0 ? '✅' : '❌'}`);
 
       if (rankedResults.length > 0) {
         const topScore = rankedResults[0]?.finalScore ?? 0;
-        console.log(`  4. Top result score: ${topScore.toFixed(4)}`);
-        console.log(`  5. Final response: ${response.engineDecision.decisionStatus} (confidence: ${response.engineDecision.decisionConfidence.toFixed(4)})`);
+        console.error(`  4. Top result score: ${topScore.toFixed(4)}`);
+        console.error(`  5. Final response: ${response.engineDecision.decisionStatus} (confidence: ${response.engineDecision.decisionConfidence.toFixed(4)})`);
       }
     }
 
-    console.log(`\n${response.results.length === 0 ? '❌' : '✅'} Final Result: ${response.results.length} items returned`);
+    console.error(`\n${response.results.length === 0 ? '❌' : '✅'} Final Result: ${response.results.length} items returned`);
 
     if (response.results.length === 0) {
-      console.log(`\nROOT CAUSE: ${response.engineDecision.failure_reason ?? response.engineDecision.decisionStatus}`);
-      console.log(`  Decision Confidence: ${response.engineDecision.decisionConfidence.toFixed(4)}`);
-      console.log(`  This suggests: ${
+      console.error(`\nROOT CAUSE: ${response.engineDecision.failure_reason ?? response.engineDecision.decisionStatus}`);
+      console.error(`  Decision Confidence: ${response.engineDecision.decisionConfidence.toFixed(4)}`);
+      console.error(`  This suggests: ${
         response.engineDecision.decisionStatus === 'ambiguous'
           ? 'Decision engine downgraded to AMBIGUOUS (confidence too low, gap threshold, or policy)'
           : response.engineDecision.decisionStatus === 'failed'

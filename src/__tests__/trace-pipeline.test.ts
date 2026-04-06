@@ -7,6 +7,42 @@ import { createTestContainer } from '../../test/integration/helpers/test-contain
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+type WineRecord = {
+  sourceId: string;
+  canonicalLabel: string;
+  aliases?: {
+    identitySafeProjection?: string[];
+    noisyRecallProjection?: string[];
+  };
+  producer?: string;
+  region?: string;
+  grapes?: string[];
+  searchTextEn?: string;
+  body?: number;
+  sweetness?: number;
+  wineType?: string;
+  priceBand?: string;
+  pairingTags?: string[];
+  popularityScore?: number;
+  vintageYear?: number;
+  acidity?: number;
+  tannin?: number;
+  grapePrimary?: string;
+  country?: string;
+  appellation?: string;
+  priceUsd?: string | number;
+  flavorProfiles?: string[];
+  drinkingWindow?: {
+    drinkingWindowStart?: string;
+    drinkingWindowEnd?: string;
+  };
+};
+
+const parseWineRecord = (line: string): WineRecord => {
+  const parsed: unknown = JSON.parse(line);
+  return parsed as WineRecord;
+};
+
 describe('Pipeline Tracing', () => {
   let container: ReturnType<typeof createTestContainer>['container'];
   let searchIndex: ReturnType<typeof createTestContainer>['searchIndex'];
@@ -23,8 +59,8 @@ describe('Pipeline Tracing', () => {
       .split('\n')
       .filter((line) => line.trim());
 
-    const wines = lines.map((line) => JSON.parse(line));
-    console.log(`\n📦 Loaded ${wines.length} wines`);
+    const wines = lines.map(parseWineRecord);
+    console.error(`\n📦 Loaded ${wines.length} wines`);
 
     const entityIds: string[] = [];
     for (const wine of wines.slice(0, 20)) {
@@ -63,58 +99,58 @@ describe('Pipeline Tracing', () => {
       });
     }
     blockingAdapter.addEntityIds(entityIds);
-    console.log(`✅ Indexed 20 wines, registered ${entityIds.length} entity IDs\n`);
+    console.error(`✅ Indexed 20 wines, registered ${entityIds.length} entity IDs\n`);
   });
 
   it('should trace "David Arthur Cabernet"', async () => {
     const query = 'David Arthur Cabernet 2014';
-    console.log(`\n🔍 Query: "${query}"`);
+    console.error(`\n🔍 Query: "${query}"`);
 
     try {
       // Step 1: Plan
-      console.log('\n📋 Step 1: Query Planning');
+      console.error('\n📋 Step 1: Query Planning');
       const plan = await container.queryPlanner.plan(query);
-      console.log(`  plan exists: ${plan !== null && plan !== undefined}`);
-      console.log(`  queryClass: ${plan?.queryClass}`);
-      console.log(`  query_class (snake): ${(plan as any)?.query_class}`);
-      console.log(`  All fields: ${Object.keys(plan || {}).join(', ')}`);
-      console.log(`  policy: ${plan?.policy}`);
-      console.log(`  constraints.hard: ${plan?.constraints?.hard?.length || 0}`);
-      console.log(`  constraints.soft: ${plan?.constraints?.soft?.length || 0}`);
+      console.error(`  plan exists: ${plan !== null && plan !== undefined}`);
+      console.error(`  queryClass: ${plan?.queryClass}`);
+      console.error(`  query_class (snake): ${(plan as any)?.query_class}`);
+      console.error(`  All fields: ${Object.keys(plan || {}).join(', ')}`);
+      console.error('  policy:', JSON.stringify(plan?.policy) ?? 'undefined');
+      console.error(`  constraints.hard: ${plan?.constraints?.hard?.length || 0}`);
+      console.error(`  constraints.soft: ${plan?.constraints?.soft?.length || 0}`);
 
       // Step 2: Candidate pool (sparse search)
-      console.log('\n🔎 Step 2: Candidate Pool');
+      console.error('\n🔎 Step 2: Candidate Pool');
       const candidates = await container.candidatePool.generate(plan);
-      console.log(`  Total candidates from pool: ${candidates.length}`);
+      console.error(`  Total candidates from pool: ${candidates.length}`);
       if (candidates.length > 0) {
-        console.log(`  Top 3:`);
+        console.error(`  Top 3:`);
         for (const cand of candidates.slice(0, 3)) {
-          console.log(`    - ${cand.entityId.substring(0, 20)} (score: ${cand.score.toFixed(2)})`);
+          console.error(`    - ${cand.entityId.substring(0, 20)} (score: ${cand.score.toFixed(2)})`);
         }
       }
 
       // Step 3: Resolve
-      console.log('\n🎯 Step 3: Entity Resolver');
+      console.error('\n🎯 Step 3: Entity Resolver');
       const resolved = await container.entityResolver.resolve(candidates, plan);
-      console.log(`  selectedEntity: ${resolved.selectedEntity?.entityId || 'none'}`);
-      console.log(`  confidenceC: ${resolved.calibratedConfidenceC.toFixed(2)}`);
-      console.log(`  ambiguityFlag: ${resolved.ambiguityFlag}`);
-      console.log(`  candidates returned: ${resolved.candidates.length}`);
+      console.error(`  selectedEntity: ${resolved.selectedEntity?.entityId || 'none'}`);
+      console.error(`  confidenceC: ${resolved.calibratedConfidenceC.toFixed(2)}`);
+      console.error(`  ambiguityFlag: ${resolved.ambiguityFlag}`);
+      console.error(`  candidates returned: ${resolved.candidates.length}`);
 
       // Step 4: Ranking
-      console.log('\n⭐ Step 4: Ranking');
+      console.error('\n⭐ Step 4: Ranking');
       if (resolved.candidates.length > 0) {
         const ranked = await container.ranker.rank(resolved.candidates);
-        console.log(`  Ranked: ${ranked.length} items`);
+        console.error(`  Ranked: ${ranked.length} items`);
         for (const item of ranked.slice(0, 3)) {
-          console.log(`    - ${item.entityId.substring(0, 20)} (score: ${item.score.toFixed(2)})`);
+          console.error(`    - ${item.entityId.substring(0, 20)} (score: ${item.score.toFixed(2)})`);
         }
       } else {
-        console.log(`  No candidates to rank`);
+        console.error(`  No candidates to rank`);
       }
 
       // Full execute
-      console.log('\n🚀 Full Pipeline Execute');
+      console.error('\n🚀 Full Pipeline Execute');
       const result = await container.searchUseCase.execute(
         {
           query,
@@ -127,17 +163,17 @@ describe('Pipeline Tracing', () => {
         `trace-${Date.now()}`,
       );
 
-      console.log(`  Decision: ${result.engineDecision.decisionStatus}`);
-      console.log(`  Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
-      console.log(`  Results: ${result.results.length}`);
-      console.log(`  Next action: ${result.engineDecision.nextAction}`);
+      console.error(`  Decision: ${result.engineDecision.decisionStatus}`);
+      console.error(`  Confidence: ${result.engineDecision.decisionConfidence.toFixed(2)}`);
+      console.error(`  Results: ${result.results.length}`);
+      console.error(`  Next action: ${result.engineDecision.nextAction}`);
       if (result.engineDecision.failureReason) {
-        console.log(`  Failure reason: ${result.engineDecision.failureReason}`);
+        console.error(`  Failure reason: ${result.engineDecision.failureReason}`);
       }
     } catch (err) {
-      console.log(`\n❌ Error: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`\n❌ Error: ${err instanceof Error ? err.message : String(err)}`);
       if (err instanceof Error && err.stack) {
-        console.log(err.stack.split('\n').slice(0, 5).join('\n'));
+        console.error(err.stack.split('\n').slice(0, 5).join('\n'));
       }
     }
   });

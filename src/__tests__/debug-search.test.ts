@@ -7,6 +7,42 @@ import { createTestContainer } from '../../test/integration/helpers/test-contain
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
+type WineRecord = {
+  sourceId: string;
+  canonicalLabel: string;
+  aliases?: {
+    identitySafeProjection?: string[];
+    noisyRecallProjection?: string[];
+  };
+  producer?: string;
+  region?: string;
+  grapes?: string[];
+  searchTextEn?: string;
+  body?: number;
+  sweetness?: number;
+  wineType?: string;
+  priceBand?: string;
+  pairingTags?: string[];
+  popularityScore?: number;
+  vintageYear?: number;
+  acidity?: number;
+  tannin?: number;
+  grapePrimary?: string;
+  country?: string;
+  appellation?: string;
+  priceUsd?: string | number;
+  flavorProfiles?: string[];
+  drinkingWindow?: {
+    drinkingWindowStart?: string;
+    drinkingWindowEnd?: string;
+  };
+};
+
+const parseWineRecord = (line: string): WineRecord => {
+  const parsed: unknown = JSON.parse(line);
+  return parsed as WineRecord;
+};
+
 describe('Debug Search Index', () => {
   let searchIndex: ReturnType<typeof createTestContainer>['searchIndex'];
 
@@ -19,8 +55,8 @@ describe('Debug Search Index', () => {
       .split('\n')
       .filter((line) => line.trim());
 
-    const wines = lines.map((line) => JSON.parse(line));
-    console.log(`\n📦 Loaded ${wines.length} wines`);
+    const wines = lines.map(parseWineRecord);
+    console.error(`\n📦 Loaded ${wines.length} wines`);
 
     // Index first 10 wines
     for (const wine of wines.slice(0, 10)) {
@@ -56,17 +92,17 @@ describe('Debug Search Index', () => {
         drinkingWindowStart: wine.drinkingWindow?.drinkingWindowStart,
         drinkingWindowEnd: wine.drinkingWindow?.drinkingWindowEnd,
       });
-      console.log(`  Indexed: ${wine.canonicalLabel.substring(0, 40)}`);
+      console.error(`  Indexed: ${wine.canonicalLabel.substring(0, 40)}`);
     }
-    console.log('✅ Indexed 10 wines\n');
+    console.error('✅ Indexed 10 wines\n');
   });
 
   it('should find wines with sparse search', async () => {
-    console.log('🔍 Testing sparse search...');
+    console.error('🔍 Testing sparse search...');
     const hits = await searchIndex.sparseSearch(['Napa', 'Cabernet'], undefined, 10);
-    console.log(`Found ${hits.length} hits for ["Napa", "Cabernet"]`);
+    console.error(`Found ${hits.length} hits for ["Napa", "Cabernet"]`);
     for (const hit of hits) {
-      console.log(
+      console.error(
         `  - ID: ${hit.entityId.substring(0, 20)} (score: ${hit.score.toFixed(2)}, rank: ${hit.rank})`,
       );
     }
@@ -74,18 +110,18 @@ describe('Debug Search Index', () => {
   });
 
   it('should find wines with single term', async () => {
-    console.log('\n🔍 Testing single term search...');
+    console.error('\n🔍 Testing single term search...');
     const hits = await searchIndex.sparseSearch(['wine'], undefined, 10);
-    console.log(`Found ${hits.length} hits for ["wine"]`);
+    console.error(`Found ${hits.length} hits for ["wine"]`);
     expect(hits.length).toBeGreaterThan(0);
   });
 
   it('should find Serafin wine', async () => {
-    console.log('\n🔍 Testing Serafin search...');
+    console.error('\n🔍 Testing Serafin search...');
     const hits = await searchIndex.sparseSearch(['Serafin'], undefined, 10);
-    console.log(`Found ${hits.length} hits for ["Serafin"]`);
+    console.error(`Found ${hits.length} hits for ["Serafin"]`);
     for (const hit of hits) {
-      console.log(
+      console.error(
         `  - ID: ${hit.entityId.substring(0, 20)} (score: ${hit.score.toFixed(2)}, rank: ${hit.rank})`,
       );
     }

@@ -9,9 +9,15 @@ import type { WatchlistChangeEvent } from '../domain/watchlist/model/watchlist-e
 
 describe('RedisWatchlistPublisher', () => {
   let publisher: RedisWatchlistPublisher;
+  let publish: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    publisher = new RedisWatchlistPublisher();
+    publish = vi.fn(async () => 1);
+    publisher = new RedisWatchlistPublisher({
+      client: {
+        publish,
+      } as any,
+    });
     vi.clearAllMocks();
   });
 
@@ -28,13 +34,9 @@ describe('RedisWatchlistPublisher', () => {
         occurredAt: '2025-04-06T10:00:00Z',
       };
 
-      // Note: Full integration test would require a live Redis instance
-      // This test verifies the service structure; actual Redis communication
-      // is tested in integration tests
       await publisher.publishUpdate(entityId, event);
 
-      // Service should not throw
-      expect(true).toBe(true);
+      expect(publish).toHaveBeenCalledWith(`watchlist:${entityId}`, JSON.stringify(event));
     });
 
     it('should construct correct channel name', async () => {
@@ -48,9 +50,8 @@ describe('RedisWatchlistPublisher', () => {
         occurredAt: new Date().toISOString(),
       };
 
-      // Channel should be "watchlist:{entityId}"
       await publisher.publishUpdate(entityId, event);
-      expect(true).toBe(true);
+      expect(publish).toHaveBeenCalledWith('watchlist:test-entity', JSON.stringify(event));
     });
 
     it('should serialize event as JSON', async () => {

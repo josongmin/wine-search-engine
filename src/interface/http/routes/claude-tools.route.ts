@@ -19,32 +19,21 @@
  * }
  */
 
-import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { z } from 'zod';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import type { ClaudeToolsRouteDeps } from './route-deps.js';
-
-/**
- * Schema for tool call request.
- */
-const ClaudeToolCallRequestSchema = z.object({
-  tool_name: z.string().min(1, 'tool_name required'),
-  tool_input: z.record(z.unknown()).optional().default({}),
-  request_id: z.string().optional(),
-});
-
-/**
- * Successful tool call response body.
- */
-interface ClaudeToolCallResponse {
-  readonly tool_name: string;
-  readonly tool_result: unknown;
-  readonly fallback_applied?: string;
-  readonly request_id: string;
-}
+import {
+  parseContractBody,
+  sendRouteContractResponse,
+} from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
+import {
+  ClaudeToolsExecuteRouteContract,
+  ClaudeToolsListRouteContract,
+} from './route-contracts.js';
 
 function getRequestId(request: FastifyRequest): string {
-  return request.requestId ?? request.id;
+  return request.requestId;
 }
 
 /**
@@ -57,54 +46,47 @@ function getRequestId(request: FastifyRequest): string {
  * @param deps - Narrow route dependencies with tool executors
  */
 export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeToolsRouteDeps): void {
-  /**
-   * POST /v1/claude-tools
-   *
-   * Execute a Claude tool call.
-   */
-  app.post('/v1/claude-tools', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const parsed = ClaudeToolCallRequestSchema.parse(request.body);
-
+  registerContractRoute(app, {
+    method: 'POST',
+    url: '/v1/claude-tools',
+    contract: ClaudeToolsExecuteRouteContract,
+    handler: async (request, reply) => {
+      try {
+        const parsed = parseContractBody(request, ClaudeToolsExecuteRouteContract);
       const requestId = parsed.request_id ?? getRequestId(request);
-
-      // Execute tool with adaptive fallback
       const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
         parsed.tool_name,
         parsed.tool_input,
         requestId,
       );
-
-      // Build response
-      const response: ClaudeToolCallResponse = {
+      sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 200, {
         tool_name: parsed.tool_name,
         tool_result: executionResult.result,
         request_id: requestId,
         ...(executionResult.fallbackApplied !== undefined
           ? { fallback_applied: executionResult.fallbackApplied }
           : {}),
-      };
-
-      void reply.status(200).send(response);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      void reply.status(400).send({
+      });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 400, {
         error: 'TOOL_EXECUTION_FAILED',
         message,
         request_id: getRequestId(request),
-      });
-    }
+        });
+      }
+    },
   });
 
-  /**
-   * GET /v1/claude-tools
-   *
-   * Return available tool definitions (for Claude API tools parameter).
-   */
-  app.get('/v1/claude-tools', async (request: FastifyRequest, reply: FastifyReply) => {
-    void reply.status(200).send({
-      tools: WINE_SEARCH_TOOLS,
-      request_id: getRequestId(request),
-    });
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/v1/claude-tools',
+    contract: ClaudeToolsListRouteContract,
+    handler: async (request, reply) => {
+      sendRouteContractResponse(request, reply, ClaudeToolsListRouteContract, 200, {
+        tools: WINE_SEARCH_TOOLS,
+        request_id: getRequestId(request),
+      });
+    },
   });
 }

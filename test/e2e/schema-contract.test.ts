@@ -6,11 +6,18 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
-import { DecisionSnapshotSchema } from '../../src/interface/http/schemas/search-request.schema.js';
 import {
   ErrorResponseSchema,
   SearchResponseSchema,
 } from '../../src/interface/http/schemas/search-response.schema.js';
+import {
+  getSearchDecision,
+  getSearchDecisionSnapshot,
+  getSearchRequestId,
+  parseErrorResponse,
+  parseSearchResponse,
+  postJson,
+} from './helpers/http-transport.js';
 
 let server: TestServer;
 
@@ -31,15 +38,10 @@ async function searchPost(body: unknown): Promise<{
   json: unknown;
   headers: Record<string, string>;
 }> {
-  const response = await server.app.inject({
-    method: 'POST',
-    url: '/v1/search',
-    headers: { 'content-type': 'application/json' },
-    payload: JSON.stringify(body),
-  });
+  const response = await postJson(server.app, '/v1/search', body);
   return {
     statusCode: response.statusCode,
-    json: JSON.parse(response.body) as unknown,
+    json: response.json(),
     headers: response.headers as Record<string, string>,
   };
 }
@@ -89,23 +91,21 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('engineDecision.decisionStatus is one of the valid statuses', async () => {
-    const { statusCode, json } = await searchPost({ query: 'Château Margaux 2015' });
+    const res = await postJson(server.app, '/v1/search', { query: 'Château Margaux 2015' });
 
-    expect(statusCode).toBe(200);
-    const body = json as Record<string, unknown>;
-    expect(body['engine_decision']).toBeDefined();
-    const decision = body['engine_decision'] as Record<string, unknown>;
-    expect(decision['decision_status']).toMatch(/^(resolved|ambiguous|failed)$/);
+    expect(res.statusCode).toBe(200);
+    expect(getSearchDecision(parseSearchResponse(res)).decision_status).toMatch(
+      /^(resolved|ambiguous|failed)$/,
+    );
   });
 
   it('meta.requestId is truthy in all successful responses', async () => {
-    const { statusCode, json } = await searchPost({ query: 'Opus One 2018' });
+    const res = await postJson(server.app, '/v1/search', { query: 'Opus One 2018' });
 
-    expect(statusCode).toBe(200);
-    const body = json as Record<string, unknown>;
-    const meta = body['meta'] as Record<string, unknown>;
-    expect(meta['request_id']).toBeTruthy();
-    expect(typeof meta['request_id']).toBe('string');
+    expect(res.statusCode).toBe(200);
+    const requestId = getSearchRequestId(parseSearchResponse(res));
+    expect(requestId).toBeTruthy();
+    expect(typeof requestId).toBe('string');
   });
 
   it('meta.engineSchemaVersion is present and set correctly', async () => {
@@ -125,17 +125,19 @@ describe('SearchResponseV1 Schema Contract', () => {
     });
 
     expect(statusCode).toBe(200);
-    const body = json as Record<string, unknown>;
-    const results = body['results'] as unknown[];
-    expect(results.length).toBeGreaterThan(0);
-    for (const result of results) {
-      const r = result as Record<string, unknown>;
-      const evidenceItems = r['evidence_items'] as unknown[];
+    const body = parseSearchResponse(await postJson(server.app, '/v1/search', {
+      query: '풀바디 레드 와인',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    }));
+
+    expect(body.results.length).toBeGreaterThan(0);
+    for (const result of body.results) {
+      const evidenceItems = result.evidence_items;
       expect(evidenceItems.length).toBeGreaterThan(0);
 
       // Filter out synthetic fallback evidence (type === 'no_evidence_available')
       const realEvidence = evidenceItems.filter(
-        (e) => (e as Record<string, unknown>)['type'] !== 'no_evidence_available'
+        (e) => e.type !== 'no_evidence_available',
       );
       // At least some REAL evidence must exist
       expect(realEvidence.length).toBeGreaterThan(0);
@@ -143,12 +145,10 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('decisionSnapshot in engineDecision has all required fields', async () => {
-    const { statusCode, json } = await searchPost({ query: 'Opus One 2018' });
+    const res = await postJson(server.app, '/v1/search', { query: 'Opus One 2018' });
 
-    expect(statusCode).toBe(200);
-    const body = json as Record<string, unknown>;
-    const decision = body['engine_decision'] as Record<string, unknown>;
-    const snapshot = decision['decision_snapshot'] as Record<string, unknown>;
+    expect(res.statusCode).toBe(200);
+    const snapshot = getSearchDecisionSnapshot(parseSearchResponse(res));
 
     expect(snapshot).toHaveProperty('model_versions');
     expect(snapshot).toHaveProperty('index_versions');
@@ -159,12 +159,11 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('confidenceSemantics is always calibrated_decision_confidence', async () => {
-    const { statusCode, json } = await searchPost({ query: 'Château Margaux' });
+    const res = await postJson(server.app, '/v1/search', { query: 'Château Margaux' });
 
-    expect(statusCode).toBe(200);
-    const body = json as Record<string, unknown>;
-    const decision = body['engine_decision'] as Record<string, unknown>;
-    expect(decision['confidence_semantics']).toBe('calibrated_decision_confidence');
+    expect(res.statusCode).toBe(200);
+    expect(getSearchDecision(parseSearchResponse(res)).confidence_semantics)
+      .toBe('calibrated_decision_confidence');
   });
 });
 
@@ -174,16 +173,10 @@ describe('SearchResponseV1 Schema Contract', () => {
 
 describe('Error Response Schema Contract (RFC-014 §5)', () => {
   it('error response matches RFC-014 error contract', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({}),
-    });
+    const response = await postJson(server.app, '/v1/search', {});
 
     expect(response.statusCode).toBe(400);
-    const body = JSON.parse(response.body) as unknown;
-    const result = ErrorResponseSchema.safeParse(body);
+    const result = ErrorResponseSchema.safeParse(response.json());
     if (!result.success) {
       console.error('Error schema validation failed:', JSON.stringify(result.error.issues, null, 2));
     }
@@ -191,73 +184,46 @@ describe('Error Response Schema Contract (RFC-014 §5)', () => {
   });
 
   it('error.code is truthy in all error responses', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ query: '' }),
-    });
+    const response = await postJson(server.app, '/v1/search', { query: '' });
 
     expect(response.statusCode).toBe(400);
-    const body = JSON.parse(response.body) as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBeTruthy();
+    expect(parseErrorResponse(response).error.code).toBeTruthy();
   });
 
   it('error.request_id is truthy in all error responses', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({ query: '' }),
-    });
+    const response = await postJson(server.app, '/v1/search', { query: '' });
 
-    const body = JSON.parse(response.body) as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['request_id']).toBeTruthy();
+    expect(parseErrorResponse(response).error.request_id).toBeTruthy();
   });
 
   it('error.failure_reason is null or string', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({}),
-    });
+    const response = await postJson(server.app, '/v1/search', {});
 
-    const body = JSON.parse(response.body) as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['failure_reason'] === null || typeof error['failure_reason'] === 'string').toBe(true);
+    const error = parseErrorResponse(response).error;
+    expect(error.failure_reason === null || typeof error.failure_reason === 'string').toBe(true);
   });
 
   it('409 SNAPSHOT_MISMATCH has correct error shape', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search/replay',
-      headers: { 'content-type': 'application/json' },
-      payload: JSON.stringify({
-        query: 'Opus One 2018',
-        decision_snapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '99.0.0',
-          threshold_profile_id: 'wrong',
-          planner_version: '99.0.0',
-          feature_flags: {},
-        },
-      }),
+    const response = await postJson(server.app, '/v1/search/replay', {
+      query: 'Opus One 2018',
+      decision_snapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '99.0.0',
+        threshold_profile_id: 'wrong',
+        planner_version: '99.0.0',
+        feature_flags: {},
+      },
     });
 
     expect(response.statusCode).toBe(409);
-    const body = JSON.parse(response.body) as Record<string, unknown>;
-    const result = ErrorResponseSchema.safeParse(body);
+    const result = ErrorResponseSchema.safeParse(response.json());
     expect(result.success).toBe(true);
 
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-    expect(error['request_id']).toBeTruthy();
-    // SNAPSHOT_MISMATCH errors must not be retryable (fail-closed per RFC-014 §4.3)
-    expect(error['retryable']).toBe(false);
+    const error = parseErrorResponse(response).error;
+    expect(error.code).toBe('SNAPSHOT_MISMATCH');
+    expect(error.request_id).toBeTruthy();
+    expect(error.retryable).toBe(false);
   });
 });
 

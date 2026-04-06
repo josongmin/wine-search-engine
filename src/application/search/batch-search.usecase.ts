@@ -224,10 +224,20 @@ export class BatchSearchUseCase {
       };
 
       // Execute with timeout
-      const response = await Promise.race([
+      const rawResponse = await Promise.race([
         this.searchUseCase.execute(searchRequest, requestId),
         this.createTimeoutPromise(timeoutMs),
       ]);
+
+      // Batch items are always standard search queries, not comparisons
+      if (rawResponse.queryType !== 'search') {
+        return {
+          id: req.id,
+          status: 'failed',
+          error: { code: 'INTERNAL_ERROR', message: 'Batch item returned comparison response' },
+        };
+      }
+      const response = rawResponse;
 
       // G-15: Search responses can legitimately complete with a failed decision
       // (for example no match). Only treat explicit policy/admission blocks as

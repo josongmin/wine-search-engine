@@ -80,7 +80,7 @@ describe('policy-blocked HTTP helper', () => {
       payload: {},
     });
 
-    const body = response.json() as { error: { request_id: string } };
+    const body = response.json();
     expect(body.error.request_id).toBeTruthy();
   });
 });

@@ -89,6 +89,48 @@ export type WatchlistChangeEvent =
   | StockChangedEvent
   | CriticScoreUpdatedEvent;
 
+export function parseWatchlistTrigger(input: unknown): WatchlistTrigger | null {
+  if (!isRecord(input) || typeof input.type !== 'string') {
+    return null;
+  }
+
+  switch (input.type) {
+    case 'new_vintage':
+      return isFiniteNumber(input.minVintage)
+        ? { type: input.type, minVintage: input.minVintage }
+        : null;
+    case 'price_drop':
+      return isFiniteNumber(input.threshold) && isFiniteNumber(input.baselinePrice)
+        ? {
+            type: input.type,
+            threshold: input.threshold,
+            baselinePrice: input.baselinePrice,
+          }
+        : null;
+    case 'stock_available':
+      return isFiniteNumber(input.minQty)
+        ? { type: input.type, minQty: input.minQty }
+        : null;
+    case 'critic_score_above':
+      return isFiniteNumber(input.threshold)
+        ? { type: input.type, threshold: input.threshold }
+        : null;
+    default:
+      return null;
+  }
+}
+
+export function parseWatchlistTriggers(input: unknown): readonly WatchlistTrigger[] | null {
+  if (!Array.isArray(input)) {
+    return null;
+  }
+
+  const parsed = input.map(parseWatchlistTrigger);
+  return parsed.every((trigger): trigger is WatchlistTrigger => trigger !== null)
+    ? parsed
+    : null;
+}
+
 export function parseWatchlistChangeEvent(input: unknown): WatchlistChangeEvent | null {
   if (!isRecord(input) || !isIsoTimestamp(input.occurredAt)) {
     return null;

@@ -1,4 +1,12 @@
 import type { FastifyInstance } from 'fastify';
+import {
+  sendRouteContractResponse,
+} from './contract-response.js';
+import { registerContractRoute } from './register-contract-route.js';
+import {
+  HealthRouteContract,
+  ReadyRouteContract,
+} from './route-contracts.js';
 
 export type ReadinessStatus = 'up' | 'down' | 'skipped';
 
@@ -56,46 +64,60 @@ export function registerHealthRoutes(
   app: FastifyInstance,
   options?: HealthRouteOptions,
 ): void {
-  app.get('/health', async (_request, reply) => {
-    const body: HealthResponse = {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-    };
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/health',
+    contract: HealthRouteContract,
+    handler: async (request, reply) => {
+      const body: HealthResponse = {
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+      };
 
-    reply.status(200);
-    return body;
+      sendRouteContractResponse(request, reply, HealthRouteContract, 200, body);
+    },
   });
 
-  app.get('/ready', async (_request, reply) => {
-    const readinessChecks = options?.readiness ?? {};
-    const checkNames = Array.from(
-      new Set<string>([
-        ...DEFAULT_READINESS_CHECKS,
-        ...Object.keys(readinessChecks),
-      ]),
-    );
-    const checks = Object.fromEntries(
-      await Promise.all(
-        checkNames.map(async (checkName) => {
-          const readinessCheck = readinessChecks[checkName];
-          const status = await resolveStatus(readinessCheck);
-          return [checkName, {
-            status,
-            required: readinessCheck?.required ?? false,
-          }];
-        }),
-      ),
-    ) as ReadyResponse['checks'];
-    const ready = Object.values(checks).every((check) => !check.required || check.status !== 'down');
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/ready',
+    contract: ReadyRouteContract,
+    handler: async (request, reply) => {
+      const readinessChecks = options?.readiness ?? {};
+      const checkNames = Array.from(
+        new Set<string>([
+          ...DEFAULT_READINESS_CHECKS,
+          ...Object.keys(readinessChecks),
+        ]),
+      );
+      const checks = Object.fromEntries(
+        await Promise.all(
+          checkNames.map(async (checkName) => {
+            const readinessCheck = readinessChecks[checkName];
+            const status = await resolveStatus(readinessCheck);
+            return [checkName, {
+              status,
+              required: readinessCheck?.required ?? false,
+            }];
+          }),
+        ),
+      ) as ReadyResponse['checks'];
+      const ready = Object.values(checks).every((check) => !check.required || check.status !== 'down');
 
-    const body: ReadyResponse = {
-      ready,
-      timestamp: new Date().toISOString(),
-      checks,
-    };
+      const body: ReadyResponse = {
+        ready,
+        timestamp: new Date().toISOString(),
+        checks,
+      };
 
-    reply.status(ready ? 200 : 503);
-    return body;
+      sendRouteContractResponse(
+        request,
+        reply,
+        ReadyRouteContract,
+        ready ? 200 : 503,
+        body,
+      );
+    },
   });
 }

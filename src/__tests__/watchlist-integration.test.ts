@@ -16,17 +16,46 @@ import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watch
 import { RedisWatchlistSubscriber, type WatchlistEventHandler } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { WebhookDelivery, type WebhookPayload } from '../infrastructure/watchlist/webhook-delivery.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../domain/watchlist/model/watchlist-entry.js';
+import type { RedisClientType } from 'redis';
 
 const WEBHOOK_SECRET = 'test-secret-min-16-characters!!!!';
+type RedisSubscriberStub = Pick<
+  RedisClientType,
+  'isOpen' | 'on' | 'connect' | 'pSubscribe' | 'quit'
+>;
 
 describe('Watchlist Integration', () => {
   let publisher: RedisWatchlistPublisher;
   let subscriber: RedisWatchlistSubscriber;
   let webhookDelivery: WebhookDelivery;
+  let subscribedHandler:
+    | ((payload: string, channel: string) => void)
+    | null;
 
   beforeEach(() => {
-    publisher = new RedisWatchlistPublisher();
-    subscriber = new RedisWatchlistSubscriber();
+    subscribedHandler = null;
+    publisher = new RedisWatchlistPublisher({
+      client: {
+        publish: vi.fn(async (channel: string, payload: string) => {
+          subscribedHandler?.(payload, channel);
+          return 1;
+        }),
+      } as any,
+    });
+    subscriber = new RedisWatchlistSubscriber(
+      { url: 'redis://test' },
+      (): RedisSubscriberStub => ({
+        isOpen: true,
+        on: vi.fn(),
+        connect: vi.fn(async () => {}),
+        pSubscribe: vi.fn(async (_pattern: string, handler: (payload: string, channel: string) => void) => {
+          subscribedHandler = handler;
+        }),
+        quit: vi.fn(async function quit(this: { isOpen: boolean }) {
+          this.isOpen = false;
+        }),
+      }) as RedisClientType,
+    );
     webhookDelivery = new WebhookDelivery(WEBHOOK_SECRET);
     vi.clearAllMocks();
   });
@@ -60,9 +89,7 @@ describe('Watchlist Integration', () => {
       // Wait for async processing
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Note: In a real test with live Redis, handlerSpy would be called
-      // This test structure validates the pub/sub architecture
-      expect(subscriber.isRunning()).toBe(true);
+      expect(handlerSpy).toHaveBeenCalledWith(entityId, event);
     });
 
     it('should stop subscriber cleanly', async () => {

@@ -52,4 +52,16 @@ export interface EngineDecision {
    * or if ambiguity was hard-constraint-related.
    */
   readonly abstainReason?: string | undefined;
+
+  /**
+   * Indicates whether the retrieval mode was determined by the planner or
+   * overridden via the top-level `retrieval_mode` API parameter.
+   */
+  readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
+
+  /**
+   * The retrieval mode the planner originally suggested, before any
+   * API-level override was applied.
+   */
+  readonly plannerSuggestedMode?: string | undefined;
 }

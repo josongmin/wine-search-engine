@@ -3,52 +3,55 @@ import type {
   WatchlistEntry,
 } from '../../domain/watchlist/model/watchlist-entry.js';
 import type {
-  WatchlistDeliveryLogRepositoryPort,
-  WatchlistRepositoryPort,
+  WatchlistStoragePort,
 } from '../../domain/watchlist/port/watchlist-repository.port.js';
 
-export class InMemoryWatchlistStore
-implements WatchlistRepositoryPort, WatchlistDeliveryLogRepositoryPort {
+export class InMemoryWatchlistStore implements WatchlistStoragePort {
   private readonly watchlists = new Map<string, WatchlistEntry>();
   private readonly deliveryLogs = new Map<string, WatchlistDeliveryLogEntry[]>();
 
-  async save(entry: WatchlistEntry): Promise<void> {
+  save(entry: WatchlistEntry): Promise<void> {
     this.watchlists.set(entry.id, entry);
     if (!this.deliveryLogs.has(entry.id)) {
       this.deliveryLogs.set(entry.id, []);
     }
+    return Promise.resolve();
   }
 
-  async findById(id: string): Promise<WatchlistEntry | null> {
-    return this.watchlists.get(id) ?? null;
+  findById(id: string): Promise<WatchlistEntry | null> {
+    return Promise.resolve(this.watchlists.get(id) ?? null);
   }
 
-  async findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
-    return [...this.watchlists.values()].filter((entry) => entry.entityId === entityId);
+  findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
+    return Promise.resolve(
+      [...this.watchlists.values()].filter((entry) => entry.entityId === entityId),
+    );
   }
 
-  async delete(id: string): Promise<boolean> {
-    return this.watchlists.delete(id);
+  delete(id: string): Promise<boolean> {
+    const deleted = this.watchlists.delete(id);
+    if (deleted) {
+      this.deliveryLogs.delete(id);
+    }
+    return Promise.resolve(deleted);
   }
 
-  async listByWatchlistId(
+  listByWatchlistId(
     watchlistId: string,
   ): Promise<readonly WatchlistDeliveryLogEntry[]> {
-    return this.deliveryLogs.get(watchlistId) ?? [];
+    return Promise.resolve(this.deliveryLogs.get(watchlistId) ?? []);
   }
 
-  async append(log: WatchlistDeliveryLogEntry): Promise<void> {
+  append(log: WatchlistDeliveryLogEntry): Promise<void> {
     const logs = this.deliveryLogs.get(log.watchlistId) ?? [];
     logs.push(log);
     this.deliveryLogs.set(log.watchlistId, logs);
+    return Promise.resolve();
   }
 
-  async deleteByWatchlistId(watchlistId: string): Promise<void> {
-    this.deliveryLogs.delete(watchlistId);
-  }
-
-  async clear(): Promise<void> {
+  clear(): Promise<void> {
     this.watchlists.clear();
     this.deliveryLogs.clear();
+    return Promise.resolve();
   }
 }
