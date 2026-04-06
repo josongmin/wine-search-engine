@@ -221,6 +221,24 @@ describe('CacheService', () => {
       expect(result.isStale).toBe(true);
       expect(result.reason).toBe('version_mismatch');
     });
+
+    it('should invalidate stale entries when threshold profile changes', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const currentSnapshot = {
+        ...createMockSnapshot(),
+        threshold_profile_id: 'threshold-v2',
+      } satisfies DecisionSnapshot;
+      const mockResponse = createMockResponse();
+
+      await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), mockResponse, 3600);
+
+      const result = await cacheService.getSearchResponse(mockPlan, mockRequest, currentSnapshot);
+
+      expect(result.hit).toBe(false);
+      expect(result.isStale).toBe(true);
+      expect(result.reason).toBe('version_mismatch');
+    });
   });
 
   describe('Embedding cache', () => {
@@ -301,6 +319,30 @@ describe('CacheService', () => {
   });
 
   describe('Circuit breaker', () => {
+    it('should not open the circuit breaker before the configured threshold', async () => {
+      const failingCache: QueryCachePort = {
+        get: async () => {
+          throw new Error('Persistent error');
+        },
+        set: async () => {
+          throw new Error('Persistent error');
+        },
+        delete: async () => {},
+        deletePattern: async () => 0,
+        getStats: emptyCacheStats,
+        clear: async () => 0,
+      };
+
+      const cacheServiceWithBreaker = new CacheService(failingCache, undefined, 2, 100);
+      const result = await cacheServiceWithBreaker.getSearchResponse(
+        createMockPlan(),
+        {},
+        createMockSnapshot(),
+      );
+
+      expect(result.reason).toContain('error:Persistent error');
+    });
+
     it('should open circuit breaker after threshold errors', async () => {
       const failingCache: QueryCachePort = {
         get: async () => {

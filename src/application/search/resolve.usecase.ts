@@ -1,6 +1,4 @@
 import type { ResolverInput } from '../../domain/resolver/service/resolver.js';
-import type { PlannerContext } from '../../domain/query/service/planner.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
 import type {
@@ -10,8 +8,9 @@ import type {
 } from './port/search-pipeline-deps.port.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
 import type { ResolveResponse } from './resolve-response.dto.js';
-import { QueryEntrySecurityGate } from './query-entry-security.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
+import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
+import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 
 export type { ResolveRequest } from './resolve-request.dto.js';
 export type { ResolveResponse } from './resolve-response.dto.js';
@@ -38,24 +37,20 @@ export class ResolveUseCase {
   constructor(private readonly deps: ResolveUseCaseDeps) {}
 
   async execute(request: ResolveRequest): Promise<ResolveResponse> {
-    const securityGate = new QueryEntrySecurityGate({
+    const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
-    // Plan the query to extract anchors and context
-    const plannerContext: PlannerContext = {
-      locale: request.context?.locale,
-      session: request.sessionContext
-        ? {
-            sessionId: request.sessionContext.sessionId,
-            previousEntities: request.sessionContext.previousEntities as EntityId[],
-          }
-        : undefined,
-    };
-
-    const plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
+    const plan = await this.deps.queryPlanner.plan(
+      effectiveQuery,
+      buildPlannerContextFromSearchRequest({
+        query: effectiveQuery,
+        context: request.context,
+        sessionContext: request.sessionContext,
+      }),
+    );
 
     // Build resolver input
     const candidateEntities = await buildResolverCandidatesFromPlan(

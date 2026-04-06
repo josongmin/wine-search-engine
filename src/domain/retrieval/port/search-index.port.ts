@@ -76,10 +76,15 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
 
 export type RetrievalHitSummaryKey = (typeof RETRIEVAL_HIT_SUMMARY_KEYS)[number];
 
+export interface RetrievalSummaryCarrier {
+  readonly entityId: EntityId;
+  readonly summary?: RetrievalHitSummary;
+}
+
 /**
  * A single hit from the sparse (BM25 / lexical) retrieval pass.
  */
-export interface SparseHit {
+export interface SparseHit extends RetrievalSummaryCarrier {
   /** Entity identifier. */
   readonly entityId: EntityId;
 
@@ -99,7 +104,7 @@ export interface SparseHit {
 /**
  * A single hit from the dense (embedding / ANN) retrieval pass.
  */
-export interface DenseHit {
+export interface DenseHit extends RetrievalSummaryCarrier {
   /** Entity identifier. */
   readonly entityId: EntityId;
 

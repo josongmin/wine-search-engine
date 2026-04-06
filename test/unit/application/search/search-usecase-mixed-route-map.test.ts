@@ -73,6 +73,11 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
       canonicalLabel: 'Result Wine',
       calibratedScore: 0.64,
     });
+    expect(out.decisionContext?.mixedAnchor).toEqual({
+      entityId: eid,
+      canonicalLabel: 'Wine',
+      confidence: 0.88,
+    });
     expect(out.resolveResult.decisionTrace.outcomeReasonCodes).toContain('MIXED_ROUTE');
   });
 });

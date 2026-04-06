@@ -152,12 +152,12 @@ export class CacheService implements SearchResponseCachePort {
         };
       }
 
+      this.recordCacheSuccess();
       return {
         hit: true,
         data: cached,
         durationMs: Date.now() - startTime,
       };
-      
     } catch (err) {
       this.recordCacheError(err);
       return {

@@ -33,15 +33,16 @@ export function buildRankedRouteResolveResult(
           calibratedScore: top1Score,
         }
       : undefined);
-  const candidates = topResult !== undefined
-    ? [{
-        entityId: topResult.entityId,
-        canonicalLabel: topResult.canonicalLabel,
-        calibratedScore: top1Score,
-        rank: 1,
-        evidenceRefs: topResult.evidenceItems.map((item) => item.type),
-      }]
-    : [];
+  const candidates = rankedResults.map((result, index) => ({
+    entityId: result.entityId,
+    canonicalLabel: result.canonicalLabel,
+    calibratedScore: clamp01(result.finalScore),
+    rank: index + 1,
+    // Synthetic ranked-route resolve results do not carry resolver
+    // identity refs. Decision-input assembly derives identity semantics
+    // from ranked-route alignment instead of reusing ranking evidence.
+    evidenceRefs: [],
+  }));
 
   return {
     status: rankedResults.length > 0 ? 'resolved' : 'failed',

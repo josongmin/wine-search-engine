@@ -2,7 +2,7 @@ import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE, computeDynamicGapThreshold } from '../../query/model/threshold-profile.js';
-import { hasIdentityEvidence, type DecisionInput } from '../model/decision-input.js';
+import { hasExactMatchCandidate, type DecisionInput } from '../model/decision-input.js';
 import type { DecisionOutput } from '../model/decision-output.js';
 import type { DecisionTrace } from '../model/decision-trace.js';
 import { EvidenceGate, type EvidenceGateResult } from './evidence-gate.js';
@@ -397,16 +397,10 @@ export class DecisionEngine {
     state: DecisionState,
     rulesApplied: string[],
   ): DecisionState {
-    // require_exact: if resolved but no exact canonical match, downgrade
+    // require_exact: if resolved but the richer identity trail does not
+    // support an exact match, downgrade
     if (input.policy.requireExact && state.status === 'resolved') {
-      const topCandidate = input.resolverResult.candidates[0];
-      const exactIdentityEvidence =
-        input.evidenceSummary?.identityEvidence?.exactMatchCandidatePresent;
-      const hasExactMatch = exactIdentityEvidence ?? (
-        topCandidate !== undefined &&
-        topCandidate.calibratedScore >= 0.99 &&
-        hasIdentityEvidence(input.evidenceSummary)
-      );
+      const hasExactMatch = hasExactMatchCandidate(input.evidenceSummary);
 
       if (!hasExactMatch) {
         rulesApplied.push('POLICY_REQUIRE_EXACT_DOWNGRADE');
@@ -514,10 +508,10 @@ export class DecisionEngine {
     const effectiveProfile = profile ?? DEFAULT_THRESHOLD_PROFILE;
 
     const queryClass = input.queryPlan.queryClass;
-    const baseThreshold = effectiveProfile.perQueryClass[queryClass]
-      ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass[queryClass]
-      ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass.unknown;
-    if (effectiveProfile.perQueryClass[queryClass] === undefined) {
+    const thresholdMap = effectiveProfile.perQueryClass as Partial<typeof effectiveProfile.perQueryClass>;
+    const profileThreshold = thresholdMap[queryClass];
+    const baseThreshold = profileThreshold ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass[queryClass];
+    if (profileThreshold === undefined) {
       bootstrapLogger.warn(
         {
           profileId: effectiveProfile.id,

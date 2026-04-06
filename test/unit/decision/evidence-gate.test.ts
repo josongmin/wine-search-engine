@@ -17,6 +17,22 @@ describe('EvidenceGate', () => {
       const result = gate.check('resolved', evidence);
       expect(result.downgradeTo).toBeUndefined();
     });
+
+    it('passes when ranked evidence agrees with resolver identity even without ranked evidence items', () => {
+      const evidence: EvidenceSummary = {
+        identityEvidencePresent: true,
+        identityEvidence: {
+          topEntityPresent: true,
+          resolverTopCandidateMatchesTopEntity: true,
+          resolverEvidenceRefCount: 1,
+          rankedTopResultPresent: true,
+          rankedTopResultMatchesTopEntity: true,
+          rankedEvidenceItemCount: 0,
+        },
+      };
+      const result = gate.check('resolved', evidence);
+      expect(result.passed).toBe(true);
+    });
   });
 
   describe('resolved + NO identity evidence → downgrade to ambiguous', () => {
@@ -147,6 +163,25 @@ describe('EvidenceGate', () => {
           rankedTopResultPresent: true,
           rankedTopResultMatchesTopEntity: true,
           rankedSignalPresent: false,
+        },
+      };
+      const result = gate.check('resolved', evidence, false, true);
+      expect(result.passed).toBe(false);
+      expect(result.downgradeTo).toBe('ambiguous');
+    });
+
+    it('fails when mixed-route anchor resolution is missing even if ranked anchor signal exists', () => {
+      const evidence: EvidenceSummary = {
+        identityEvidencePresent: true,
+        anchorEvidencePresent: true,
+        anchorResolution: {
+          anchorEntityPresent: false,
+        },
+        anchorEvidence: {
+          topEntityPresent: true,
+          rankedTopResultPresent: true,
+          rankedTopResultMatchesTopEntity: true,
+          rankedSignalPresent: true,
         },
       };
       const result = gate.check('resolved', evidence, false, true);

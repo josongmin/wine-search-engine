@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createEntityId } from '../../shared/types/index.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
-import type { RetrievalHitSummary } from '../port/search-index.port.js';
+import type {
+  RetrievalHitSummary,
+  RetrievalSummaryCarrier,
+} from '../port/search-index.port.js';
 import {
+  findRetrievalHitSummaryForEntity,
   mergeRetrievalHitSummaries,
+  mergeRetrievalHitSummariesForEntity,
   normalizeRetrievalHitSummary,
   normalizeSummarySearchText,
   retrievalDocumentToHitSummary,
@@ -110,6 +115,58 @@ describe('hybrid candidate summary helpers', () => {
     });
   });
 
+  it('merges carrier hits through the shared entity helper with the full summary contract', () => {
+    const entityId = createEntityId('summary-carrier-test');
+    const sparse: RetrievalSummaryCarrier[] = [
+      {
+        entityId,
+        summary: {
+          canonicalLabel: '  Carrier Wine  ',
+          producer: '  Carrier Producer  ',
+          pairing: [],
+          sweetness: 0.2,
+        },
+      },
+    ];
+    const dense: RetrievalSummaryCarrier[] = [
+      {
+        entityId,
+        summary: {
+          pairing: ['game', 'mushroom'],
+          producerPrestige: 0.94,
+          country: '  Italy ',
+          drinkingWindowStart: 2029,
+          drinkingWindowEnd: 2044,
+        },
+      },
+    ];
+    const anchor: RetrievalSummaryCarrier[] = [
+      {
+        entityId,
+        summary: {
+          drinkingWindowModelVersion: '  dw-anchor-v7  ',
+          occasion: [],
+          certifications: [],
+          soilType: ' limestone ',
+        },
+      },
+    ];
+
+    expect(mergeRetrievalHitSummariesForEntity(entityId, sparse, dense, anchor)).toEqual({
+      canonicalLabel: 'Carrier Wine',
+      producer: 'Carrier Producer',
+      pairing: ['game', 'mushroom'],
+      sweetness: 0.2,
+      producerPrestige: 0.94,
+      country: 'Italy',
+      drinkingWindowStart: 2029,
+      drinkingWindowEnd: 2044,
+      drinkingWindowModelVersion: 'dw-anchor-v7',
+      certifications: [],
+      soilType: 'limestone',
+    });
+  });
+
   it('normalizes retrieval documents through the shared transport shape', () => {
     const summary = retrievalDocumentToHitSummary(
       makeDocument({
@@ -143,11 +200,33 @@ describe('hybrid candidate summary helpers', () => {
       normalizeRetrievalHitSummary({
         canonicalLabel: 'Normalized Wine',
         producer: undefined,
+        pairing: [],
+        occasion: [],
+        certifications: [],
         drinkingWindowModelVersion: 'dw-v5',
       }),
     ).toEqual({
       canonicalLabel: 'Normalized Wine',
+      certifications: [],
       drinkingWindowModelVersion: 'dw-v5',
+    });
+  });
+
+  it('normalizes hit-carried summaries before returning them for an entity', () => {
+    const entityId = createEntityId('summary-hit-find-test');
+    const hits: RetrievalSummaryCarrier[] = [
+      {
+        entityId,
+        summary: {
+          producer: '  Find Producer  ',
+          searchTextEn: ` ${'C'.repeat(810)} `,
+        },
+      },
+    ];
+
+    expect(findRetrievalHitSummaryForEntity(hits, entityId)).toEqual({
+      producer: 'Find Producer',
+      searchTextEn: 'C'.repeat(800),
     });
   });
 

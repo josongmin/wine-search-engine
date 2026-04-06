@@ -4,9 +4,14 @@ import {
   RETRIEVAL_HIT_SUMMARY_KEYS,
   type RetrievalHitSummary,
   type RetrievalHitSummaryKey,
+  type RetrievalSummaryCarrier,
 } from '../port/search-index.port.js';
+import type { EntityId } from '../../shared/types/index.js';
 
 type HybridCandidateSummaryFields = Pick<HybridCandidate, RetrievalHitSummaryKey>;
+type NormalizableRetrievalHitSummary = {
+  [Key in RetrievalHitSummaryKey]?: RetrievalHitSummary[Key] | undefined;
+};
 
 const RERANK_SUMMARY_SEARCH_TEXT_MAX = 800;
 
@@ -22,8 +27,62 @@ export function normalizeSummarySearchText(value: string | undefined): string | 
     : trimmed;
 }
 
+function normalizeSummaryStringList(
+  value: readonly string[] | undefined,
+  options: { readonly allowEmpty: boolean },
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+
+  const normalized = value
+    .map((entry) => (typeof entry === 'string' ? trimNonEmptySummaryValue(entry) : undefined))
+    .filter((entry): entry is string => entry !== undefined);
+  if (!options.allowEmpty && normalized.length === 0) return undefined;
+  return normalized;
+}
+
+function normalizeRetrievalHitSummaryValue(
+  key: RetrievalHitSummaryKey,
+  value: RetrievalHitSummary[RetrievalHitSummaryKey] | undefined,
+): RetrievalHitSummary[RetrievalHitSummaryKey] | undefined {
+  switch (key) {
+    case 'canonicalLabel':
+    case 'producer':
+    case 'region':
+    case 'grapePrimary':
+    case 'style':
+    case 'priceBand':
+    case 'wineType':
+    case 'country':
+    case 'appellation':
+    case 'classification':
+    case 'drinkingWindowModelVersion':
+    case 'soilType':
+    case 'producerType':
+      return trimNonEmptySummaryValue(
+        typeof value === 'string' ? value : undefined,
+      ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
+    case 'searchTextEn':
+      return normalizeSummarySearchText(
+        typeof value === 'string' ? value : undefined,
+      ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
+    case 'pairing':
+    case 'occasion':
+      return normalizeSummaryStringList(
+        Array.isArray(value) ? value : undefined,
+        { allowEmpty: false },
+      ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
+    case 'certifications':
+      return normalizeSummaryStringList(
+        Array.isArray(value) ? value : undefined,
+        { allowEmpty: true },
+      ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
+    default:
+      return value;
+  }
+}
+
 export function normalizeRetrievalHitSummary(
-  summary: Partial<RetrievalHitSummary> | undefined,
+  summary: NormalizableRetrievalHitSummary | undefined,
 ): RetrievalHitSummary | undefined {
   if (summary === undefined) return undefined;
 
@@ -31,7 +90,7 @@ export function normalizeRetrievalHitSummary(
   const normalizedRecord = normalized as Record<RetrievalHitSummaryKey, unknown>;
 
   for (const key of RETRIEVAL_HIT_SUMMARY_KEYS) {
-    const value = summary[key];
+    const value = normalizeRetrievalHitSummaryValue(key, summary[key]);
     if (value !== undefined) {
       normalizedRecord[key] = value;
     }
@@ -61,6 +120,25 @@ export function mergeRetrievalHitSummaries(
   return normalizeRetrievalHitSummary(merged);
 }
 
+export function findRetrievalHitSummaryForEntity(
+  hits: readonly RetrievalSummaryCarrier[],
+  entityId: EntityId,
+): RetrievalHitSummary | undefined {
+  for (const hit of hits) {
+    if (hit.entityId === entityId) return normalizeRetrievalHitSummary(hit.summary);
+  }
+  return undefined;
+}
+
+export function mergeRetrievalHitSummariesForEntity(
+  entityId: EntityId,
+  ...hitLists: readonly (readonly RetrievalSummaryCarrier[])[]
+): RetrievalHitSummary | undefined {
+  return mergeRetrievalHitSummaries(
+    ...hitLists.map((hits) => findRetrievalHitSummaryForEntity(hits, entityId)),
+  );
+}
+
 /**
  * Maps index-hit summary fields onto the HybridCandidate surface so every
  * retrieval mode propagates the same candidate metadata contract.
@@ -72,54 +150,40 @@ export function summaryToHybridCandidateFields(
 }
 
 export function retrievalDocumentToHitSummary(doc: RetrievalDocument): RetrievalHitSummary {
-  const truncatedSearchTextEn = normalizeSummarySearchText(doc.searchTextEn);
   const grapePrimary = trimNonEmptySummaryValue(doc.grapePrimary)
     ?? doc.grapes
       .map((grape) => trimNonEmptySummaryValue(grape))
       .find((grape): grape is string => grape !== undefined);
-  const producer = trimNonEmptySummaryValue(doc.producer);
-  const region = trimNonEmptySummaryValue(doc.region);
-  const style = trimNonEmptySummaryValue(doc.style);
-  const priceBand = trimNonEmptySummaryValue(doc.priceBand);
-  const wineType = trimNonEmptySummaryValue(doc.wineType);
-  const country = trimNonEmptySummaryValue(doc.country);
-  const appellation = trimNonEmptySummaryValue(doc.appellation);
-  const classification = trimNonEmptySummaryValue(doc.classification);
-  const drinkingWindowModelVersion = trimNonEmptySummaryValue(doc.drinkingWindowModelVersion);
-  const soilType = trimNonEmptySummaryValue(doc.soilType);
-  const producerType = trimNonEmptySummaryValue(doc.producerType);
 
   return normalizeRetrievalHitSummary({
     canonicalLabel: doc.canonicalLabel,
-    ...(producer !== undefined ? { producer } : {}),
-    ...(region !== undefined ? { region } : {}),
-    ...(truncatedSearchTextEn !== undefined ? { searchTextEn: truncatedSearchTextEn } : {}),
-    ...(grapePrimary !== undefined ? { grapePrimary } : {}),
-    ...(style !== undefined ? { style } : {}),
-    ...(priceBand !== undefined ? { priceBand } : {}),
-    ...(doc.pairing.length > 0 ? { pairing: [...doc.pairing] } : {}),
-    ...(doc.occasion.length > 0 ? { occasion: [...doc.occasion] } : {}),
-    ...(doc.vintageYear !== undefined ? { vintageYear: doc.vintageYear } : {}),
+    producer: doc.producer,
+    region: doc.region,
+    searchTextEn: doc.searchTextEn,
+    grapePrimary,
+    style: doc.style,
+    priceBand: doc.priceBand,
+    pairing: doc.pairing,
+    occasion: doc.occasion,
+    vintageYear: doc.vintageYear,
     body: doc.body,
-    ...(doc.tannin !== undefined ? { tannin: doc.tannin } : {}),
-    ...(doc.acidity !== undefined ? { acidity: doc.acidity } : {}),
+    tannin: doc.tannin,
+    acidity: doc.acidity,
     sweetness: doc.sweetness,
-    ...(doc.finishLength !== undefined ? { finishLength: doc.finishLength } : {}),
-    ...(wineType !== undefined ? { wineType } : {}),
-    ...(doc.criticScoreNormalized !== undefined
-      ? { criticScoreNormalized: doc.criticScoreNormalized }
-      : {}),
-    ...(doc.producerPrestige !== undefined ? { producerPrestige: doc.producerPrestige } : {}),
-    ...(country !== undefined ? { country } : {}),
-    ...(appellation !== undefined ? { appellation } : {}),
-    ...(classification !== undefined ? { classification } : {}),
-    ...(doc.alcoholPct !== undefined ? { alcoholPct: doc.alcoholPct } : {}),
-    ...(doc.drinkingWindowStart !== undefined ? { drinkingWindowStart: doc.drinkingWindowStart } : {}),
-    ...(doc.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: doc.drinkingWindowEnd } : {}),
-    ...(drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion } : {}),
-    ...(doc.priceUsd !== undefined ? { priceUsd: doc.priceUsd } : {}),
-    ...(doc.certifications !== undefined ? { certifications: [...doc.certifications] } : {}),
-    ...(soilType !== undefined ? { soilType } : {}),
-    ...(producerType !== undefined ? { producerType } : {}),
+    finishLength: doc.finishLength,
+    wineType: doc.wineType,
+    criticScoreNormalized: doc.criticScoreNormalized,
+    producerPrestige: doc.producerPrestige,
+    country: doc.country,
+    appellation: doc.appellation,
+    classification: doc.classification,
+    alcoholPct: doc.alcoholPct,
+    drinkingWindowStart: doc.drinkingWindowStart,
+    drinkingWindowEnd: doc.drinkingWindowEnd,
+    drinkingWindowModelVersion: doc.drinkingWindowModelVersion,
+    priceUsd: doc.priceUsd,
+    certifications: doc.certifications,
+    soilType: doc.soilType,
+    producerType: doc.producerType,
   }) ?? { canonicalLabel: doc.canonicalLabel };
 }

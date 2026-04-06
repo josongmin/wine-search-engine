@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runSearchPostRoutePhase } from '../../../../src/application/search/search-usecase-post-route-phase.js';
+import {
+  runRankedRouteDecisionPhase,
+  runSearchPostRoutePhase,
+} from '../../../../src/application/search/search-usecase-post-route-phase.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
@@ -236,9 +239,143 @@ describe('runSearchPostRoutePhase', () => {
     });
 
     const decisionInput = decisionEngine.decide.mock.calls[0]?.[0];
+    const responseParams = responseBuilder.build.mock.calls[0]?.[0];
     expect(decisionInput?.evidenceSummary?.identityEvidencePresent).toBe(false);
     expect(decisionInput?.evidenceSummary?.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(
       false,
     );
+    expect(responseParams?.retrievalModeSource).toBe('planner');
+    expect(responseParams?.plannerSuggestedMode).toBe('hybrid');
+  });
+
+  it('keeps the shared ranked-route decision phase aligned with the main post-route response shape', async () => {
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const rankedResults = [{
+      entityId: createEntityId('entity-ranked'),
+      canonicalLabel: 'Ranked Wine',
+      finalScore: 0.91,
+      rank: 1,
+      componentScores: {
+        entityIntegrity: 1,
+        semantic: 0.82,
+        hardConstraintPass: true,
+        softConstraint: 0.2,
+        attributeAlignment: 0.1,
+        preferenceAlignment: 0.1,
+        popularity: 0.4,
+        availability: 1,
+        uncertaintyPenalty: 0,
+      },
+      matchedConstraints: [],
+      unmetConstraints: [],
+      inferredConstraints: [],
+      evidenceItems: [{
+        type: 'semantic_relevance',
+        source: 'ranker',
+        contribution: '+0.82',
+        strength: 'high' as const,
+        provenance: 'semantic match',
+      }],
+    }] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const resolveResult = {
+      status: 'resolved' as const,
+      topEntity: {
+        entityId: createEntityId('entity-ranked'),
+        canonicalLabel: 'Ranked Wine',
+        calibratedScore: 0.94,
+      },
+      candidates: [{
+        entityId: createEntityId('entity-ranked'),
+        canonicalLabel: 'Ranked Wine',
+        calibratedScore: 0.94,
+        rank: 1,
+        evidenceRefs: ['alias:ranked'],
+      }],
+      decisionTrace: {
+        queryClass: 'unknown' as const,
+        top1CalibratedScore: 0.94,
+        top2CalibratedScore: 0.52,
+        calibratedGap: 0.42,
+        decisionConfidenceC: 0.94,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+        outcomeReasonCodes: [],
+      },
+      conformalSetSize: 1,
+    };
+    const decisionOutput = {
+      decisionStatus: 'resolved' as const,
+      nextAction: 'respond' as const,
+      route: 'hybrid' as const,
+      decisionConfidence: 0.94,
+      confidenceSemantics: 'calibrated_decision_confidence' as const,
+      decisionTraceRef: 'trace-1',
+      decisionSnapshot: {
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: '1',
+        threshold_profile_id: 'default',
+        planner_version: '1',
+        feature_flags: {},
+      },
+    };
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+    const decisionEngine = { decide: vi.fn().mockResolvedValue(decisionOutput) };
+    const abstainPolicy = { shouldAbstain: vi.fn(() => ({ abstain: false, entropy: 0.1 })) };
+    const startTime = 1_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1_010);
+
+    const rankedRouteResponse = await runRankedRouteDecisionPhase({
+      plan,
+      requestId: 'req-ranked',
+      startTime,
+      resolveResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+      },
+      decisionEngine: decisionEngine as never,
+      responseBuilder: responseBuilder as never,
+      drinkingWindow: undefined,
+      includeCounterfactuals: false,
+    });
+
+    const mainRouteResponse = await runSearchPostRoutePhase({
+      plan,
+      request,
+      requestId: 'req-ranked',
+      startTime,
+      resolveResult,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      plannerSuggestedMode: 'hybrid',
+      retrievalModeSource: 'planner',
+      abstainPolicy: abstainPolicy as never,
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+      },
+      decisionEngine: decisionEngine as never,
+      responseBuilder: responseBuilder as never,
+      drinkingWindow: undefined,
+      cacheService: undefined,
+    });
+
+    nowSpy.mockRestore();
+
+    const {
+      retrievalModeSource: _retrievalModeSource,
+      plannerSuggestedMode: _plannerSuggestedMode,
+      counterfactuals: _counterfactuals,
+      ...sharedMainRouteResponse
+    } = mainRouteResponse as Record<string, unknown>;
+
+    expect(rankedRouteResponse).toEqual(sharedMainRouteResponse);
+    expect(responseBuilder.build).toHaveBeenCalledTimes(2);
+    expect(decisionEngine.decide).toHaveBeenCalledTimes(2);
   });
 });

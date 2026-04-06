@@ -13,7 +13,7 @@
     "test:watch": "vitest --config config/vitest/unit.config.ts",
     "test:unit": "vitest run --config config/vitest/unit.config.ts",
     "test:network": "vitest run --config config/vitest/network.config.ts",
-    "test:coverage": "vitest run --config config/vitest/unit.config.ts --coverage",
+    "test:coverage": "mkdir -p coverage/.tmp && vitest run --config config/vitest/unit.config.ts --coverage",
     "test:integration": "vitest run --config config/vitest/integration.config.ts",
     "test:watchlist": "vitest run --config config/vitest/watchlist.config.ts",
     "test:watchlist:pg": "vitest run test/integration/watchlist/pg-watchlist-store.integration.test.ts",

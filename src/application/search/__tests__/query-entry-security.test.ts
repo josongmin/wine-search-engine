@@ -11,6 +11,7 @@ import { ResolveUseCase } from '../resolve.usecase.js';
 import { HybridUseCase } from '../hybrid.usecase.js';
 import { QueryEntrySecurityGate } from '../query-entry-security.js';
 import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 describe('public query entry use cases enforce Layer 1 security consistently', () => {
   const sanitizer = new QuerySanitizer();
@@ -43,7 +44,7 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
 
   it('shared QueryEntrySecurityGate fail-opens when Layer 2 judge throws', async () => {
     const judge = vi.fn().mockRejectedValue(new Error('classifier offline'));
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(bootstrapLogger, 'warn').mockImplementation(() => bootstrapLogger);
     const gate = new QueryEntrySecurityGate({
       querySanitizer: sanitizer,
       injectionJudge: { judge } as never,
@@ -52,11 +53,14 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
 
     await expect(gate.getSafeQueryOrThrow('  Chateau Margaux 2015  ')).resolves.toBe('Chateau Margaux 2015');
     expect(judge).toHaveBeenCalledWith('Chateau Margaux 2015');
-    expect(errorSpy).toHaveBeenCalledWith(
-      '[QueryEntrySecurity] LLM judge error:',
-      expect.any(Error),
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        err: 'classifier offline',
+        judgeFailureMode: 'fail_open',
+      }),
+      '[QueryEntrySecurity] LLM judge error',
     );
-    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it('shared QueryEntrySecurityGate does not call Layer 2 when Layer 1 blocks', async () => {

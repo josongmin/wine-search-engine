@@ -100,7 +100,9 @@ function expectNoWrongResolve(
     return;
   }
 
-  expect(body.engine_decision.decision_status).toBe('ambiguous');
+  // Entity-route search can safely resolve from resolver evidence without
+  // materializing ranked result rows in the /v1/search payload.
+  expect(body.engine_decision.route).toBe('entity');
 }
 
 describe.skipIf(!HAS_REACHABLE_VESPA)('Vespa E2E — Search Quality', () => {

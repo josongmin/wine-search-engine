@@ -17,6 +17,7 @@
 
 import 'dotenv/config';
 import fs from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
 import {
@@ -221,22 +222,45 @@ interface SearchResult {
   readonly decision: DecisionOutcome;
 }
 
-async function executeSearch(query: string, timeoutMs: number): Promise<SearchResult> {
+interface EvalSearchRequestBody {
+  readonly query: string;
+  readonly options: {
+    readonly mode: 'auto' | 'entity' | 'hybrid' | 'mixed';
+    readonly explain: false;
+    readonly clarification: false;
+  };
+  readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
+}
+
+export function buildEvalSearchRequestBody(query: GoldenQuery): EvalSearchRequestBody {
+  const mode = query.retrieval_mode === 'similar_items' ? 'mixed' : 'hybrid';
+
+  return {
+    query: query.query,
+    options: {
+      mode,
+      explain: false as const,
+      clarification: false as const,
+    },
+    // Golden-query retrieval modes are internal evaluation labels, not a
+    // 1:1 match for the public API's top-level route override. The public
+    // eval harness executes the closest route family the search endpoint can
+    // express: similar-items rows use `mixed`, everything else uses the
+    // ranked-search family (`hybrid`).
+    retrieval_mode: mode,
+  };
+}
+
+async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promise<SearchResult> {
   // Call the running search API
   const apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
+  const requestBody = buildEvalSearchRequestBody(goldenQuery);
 
   try {
     const response = await fetch(`${apiUrl}/v1/search`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query,
-        options: {
-          mode: 'hybrid',
-          explain: false,
-          clarification: false,
-        },
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(timeoutMs),
     });
 
@@ -577,7 +601,7 @@ async function run(): Promise<void> {
     evalQueries,
     concurrency,
     async (q) => {
-      const { ranked, decision } = await executeSearch(q.query, timeoutMs);
+      const { ranked, decision } = await executeSearch(q, timeoutMs);
       const truth = queryToGroundTruth(q);
       return { query: q, ranked, decision, truth };
     },
@@ -952,8 +976,19 @@ function decisionUtilityScore(
   return total / outcomes.length;
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) {
+    return false;
+  }
+
+  return import.meta.url === pathToFileURL(entry).href;
+}
+
+if (isMainModule()) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

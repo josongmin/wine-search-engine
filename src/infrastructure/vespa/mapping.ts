@@ -6,6 +6,11 @@
  */
 
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import {
+  RETRIEVAL_HIT_SUMMARY_KEYS,
+  type RetrievalHitSummary,
+  type RetrievalHitSummaryKey,
+} from '../../domain/retrieval/port/search-index.port.js';
 import { createEntityId } from '../../domain/shared/types/entity-id.js';
 
 // ---------------------------------------------------------------------------
@@ -92,6 +97,101 @@ function getOptionalString(
   return isString(v) ? v : undefined;
 }
 
+type RetrievalSummaryFieldKind = 'string' | 'number' | 'string_array';
+type VespaRetrievalSummaryFieldSpec = {
+  readonly vespaField: string;
+  readonly kind: RetrievalSummaryFieldKind;
+};
+type RetrievalDocumentSummaryKey = Extract<RetrievalHitSummaryKey, keyof RetrievalDocument>;
+type RawRetrievalHitSummary = {
+  [Key in RetrievalHitSummaryKey]?: RetrievalHitSummary[Key] | undefined;
+};
+
+export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
+  canonicalLabel: { vespaField: 'canonical_label', kind: 'string' },
+  producer: { vespaField: 'producer', kind: 'string' },
+  region: { vespaField: 'region', kind: 'string' },
+  searchTextEn: { vespaField: 'search_text_en', kind: 'string' },
+  grapePrimary: { vespaField: 'grape_primary', kind: 'string' },
+  style: { vespaField: 'style', kind: 'string' },
+  priceBand: { vespaField: 'price_band', kind: 'string' },
+  pairing: { vespaField: 'pairing', kind: 'string_array' },
+  occasion: { vespaField: 'occasion', kind: 'string_array' },
+  vintageYear: { vespaField: 'vintage_year', kind: 'number' },
+  body: { vespaField: 'body', kind: 'number' },
+  tannin: { vespaField: 'tannin', kind: 'number' },
+  acidity: { vespaField: 'acidity', kind: 'number' },
+  sweetness: { vespaField: 'sweetness', kind: 'number' },
+  finishLength: { vespaField: 'finish_length', kind: 'number' },
+  wineType: { vespaField: 'wine_type', kind: 'string' },
+  criticScoreNormalized: { vespaField: 'critic_score_normalized', kind: 'number' },
+  producerPrestige: { vespaField: 'producer_prestige', kind: 'number' },
+  country: { vespaField: 'country', kind: 'string' },
+  appellation: { vespaField: 'appellation', kind: 'string' },
+  classification: { vespaField: 'classification', kind: 'string' },
+  alcoholPct: { vespaField: 'alcohol_pct', kind: 'number' },
+  drinkingWindowStart: { vespaField: 'drinking_window_start', kind: 'number' },
+  drinkingWindowEnd: { vespaField: 'drinking_window_end', kind: 'number' },
+  drinkingWindowModelVersion: { vespaField: 'drinking_window_model_version', kind: 'string' },
+  priceUsd: { vespaField: 'price_usd', kind: 'number' },
+  certifications: { vespaField: 'certifications', kind: 'string_array' },
+  soilType: { vespaField: 'soil_type', kind: 'string' },
+  producerType: { vespaField: 'producer_type', kind: 'string' },
+} as const satisfies Record<RetrievalHitSummaryKey, VespaRetrievalSummaryFieldSpec>;
+
+function readRawVespaRetrievalSummaryField(
+  fields: Record<string, unknown>,
+  spec: VespaRetrievalSummaryFieldSpec,
+): RetrievalHitSummary[RetrievalHitSummaryKey] | undefined {
+  switch (spec.kind) {
+    case 'string':
+      return getOptionalString(fields, spec.vespaField);
+    case 'number':
+      return getOptionalNumber(fields, spec.vespaField);
+    case 'string_array': {
+      const value = fields[spec.vespaField];
+      return isStringArray(value) ? value : undefined;
+    }
+  }
+}
+
+export function readRawVespaRetrievalSummary(
+  fields: Record<string, unknown>,
+): RawRetrievalHitSummary {
+  const summary: RawRetrievalHitSummary = {};
+  const summaryRecord = summary as Record<RetrievalHitSummaryKey, unknown>;
+
+  for (const key of RETRIEVAL_HIT_SUMMARY_KEYS) {
+    const value = readRawVespaRetrievalSummaryField(
+      fields,
+      VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS[key],
+    );
+    if (value !== undefined) {
+      summaryRecord[key] = value;
+    }
+  }
+
+  return summary;
+}
+
+export function writeVespaRetrievalSummaryFields(
+  target: Record<string, unknown>,
+  source: Pick<RetrievalDocument, RetrievalDocumentSummaryKey>,
+): void {
+  for (const key of RETRIEVAL_HIT_SUMMARY_KEYS) {
+    const spec = VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS[key];
+    const value = source[key as RetrievalDocumentSummaryKey];
+    if (value === undefined) continue;
+
+    if (spec.kind === 'string_array') {
+      target[spec.vespaField] = [...(value as readonly string[])];
+      continue;
+    }
+
+    target[spec.vespaField] = value;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Domain → Vespa
 // ---------------------------------------------------------------------------
@@ -109,57 +209,25 @@ export function toVespaFields(
   const fields: Record<string, unknown> = {
     entity_id: doc.entityId,
     entity_type: doc.entityType,
-    canonical_label: doc.canonicalLabel,
     aliases_identity_safe: [...doc.aliasesIdentitySafe],
     aliases_noisy_recall: [...doc.aliasesNoisyRecall],
-    producer: doc.producer,
-    region: doc.region,
     grapes: [...doc.grapes],
     search_text_ko: doc.searchTextKo,
-    search_text_en: doc.searchTextEn,
     semantic_summary: doc.semanticSummary,
-    body: doc.body,
-    sweetness: doc.sweetness,
-    style: doc.style,
-    price_band: doc.priceBand,
-    pairing: [...doc.pairing],
-    occasion: [...doc.occasion],
     availability: doc.availability,
     popularity_score: doc.popularityScore,
   };
+
+  writeVespaRetrievalSummaryFields(fields, doc);
 
   if (doc.embedding !== undefined) {
     // Vespa dense tensor format: { values: number[] }
     fields['embedding'] = { values: [...doc.embedding] };
   }
 
-  // New wine-domain fields — omit key entirely when value is absent so that
-  // exactOptionalPropertyTypes semantics are preserved end-to-end.
-  if (doc.vintageYear !== undefined) fields['vintage_year'] = doc.vintageYear;
-  if (doc.acidity !== undefined) fields['acidity'] = doc.acidity;
-  if (doc.tannin !== undefined) fields['tannin'] = doc.tannin;
-  if (doc.finishLength !== undefined) fields['finish_length'] = doc.finishLength;
-  if (doc.wineType !== undefined) fields['wine_type'] = doc.wineType;
-  if (doc.grapePrimary !== undefined) fields['grape_primary'] = doc.grapePrimary;
-  if (doc.country !== undefined) fields['country'] = doc.country;
-  if (doc.appellation !== undefined) fields['appellation'] = doc.appellation;
-  if (doc.producerPrestige !== undefined) fields['producer_prestige'] = doc.producerPrestige;
-  if (doc.criticScoreNormalized !== undefined) fields['critic_score_normalized'] = doc.criticScoreNormalized;
-  if (doc.priceUsd !== undefined) fields['price_usd'] = doc.priceUsd;
-
   // SOTA++ taxonomy fields
   if (doc.flavorProfiles !== undefined) fields['flavor_profiles'] = [...doc.flavorProfiles];
-  if (doc.classification !== undefined) fields['classification'] = doc.classification;
-  if (doc.alcoholPct !== undefined) fields['alcohol_pct'] = doc.alcoholPct;
-  if (doc.drinkingWindowStart !== undefined) fields['drinking_window_start'] = doc.drinkingWindowStart;
-  if (doc.drinkingWindowEnd !== undefined) fields['drinking_window_end'] = doc.drinkingWindowEnd;
-  if (doc.drinkingWindowModelVersion !== undefined) {
-    fields['drinking_window_model_version'] = doc.drinkingWindowModelVersion;
-  }
   if (doc.oakTreatment !== undefined) fields['oak_treatment'] = doc.oakTreatment;
-  if (doc.certifications !== undefined) fields['certifications'] = [...doc.certifications];
-  if (doc.soilType !== undefined) fields['soil_type'] = doc.soilType;
-  if (doc.producerType !== undefined) fields['producer_type'] = doc.producerType;
 
   return fields;
 }
@@ -196,81 +264,61 @@ export function fromVespaFields(
     }
   }
 
-  // Resolve optional wine-domain fields using narrowing helpers.
-  // getOptionalNumber / getOptionalString return the narrowed value or
-  // undefined, allowing clean conditional spreads that satisfy
-  // exactOptionalPropertyTypes without redundant `as` casts.
-  const vintageYear = getOptionalNumber(fields, 'vintage_year');
-  const acidity = getOptionalNumber(fields, 'acidity');
-  const tannin = getOptionalNumber(fields, 'tannin');
-  const finishLength = getOptionalNumber(fields, 'finish_length');
-  const wineType = getOptionalString(fields, 'wine_type');
-  const grapePrimary = getOptionalString(fields, 'grape_primary');
-  const country = getOptionalString(fields, 'country');
-  const appellation = getOptionalString(fields, 'appellation');
-  const producerPrestige = getOptionalNumber(fields, 'producer_prestige');
-  const criticScoreNormalized = getOptionalNumber(fields, 'critic_score_normalized');
-  const priceUsd = getOptionalNumber(fields, 'price_usd');
+  const summary = readRawVespaRetrievalSummary(fields);
 
   // SOTA++ taxonomy fields
   const flavorProfilesRaw = fields['flavor_profiles'];
   const flavorProfiles = isStringArray(flavorProfilesRaw) ? flavorProfilesRaw : undefined;
-  const classification = getOptionalString(fields, 'classification');
-  const alcoholPct = getOptionalNumber(fields, 'alcohol_pct');
-  const drinkingWindowStart = getOptionalNumber(fields, 'drinking_window_start');
-  const drinkingWindowEnd = getOptionalNumber(fields, 'drinking_window_end');
-  const drinkingWindowModelVersion = getOptionalString(fields, 'drinking_window_model_version');
   const oakTreatment = getOptionalString(fields, 'oak_treatment');
-  const certificationsRaw = fields['certifications'];
-  const certifications = isStringArray(certificationsRaw) ? certificationsRaw : undefined;
-  const soilType = getOptionalString(fields, 'soil_type');
-  const producerType = getOptionalString(fields, 'producer_type');
 
   return {
     entityId: createEntityId(getString(fields, 'entity_id')),
     entityType: getString(fields, 'entity_type'),
-    canonicalLabel: getString(fields, 'canonical_label'),
+    canonicalLabel: summary.canonicalLabel ?? '',
     aliasesIdentitySafe: getStringArray(fields, 'aliases_identity_safe'),
     aliasesNoisyRecall: getStringArray(fields, 'aliases_noisy_recall'),
-    producer: getString(fields, 'producer'),
-    region: getString(fields, 'region'),
+    producer: summary.producer ?? '',
+    region: summary.region ?? '',
     grapes: getStringArray(fields, 'grapes'),
     searchTextKo: getString(fields, 'search_text_ko'),
-    searchTextEn: getString(fields, 'search_text_en'),
+    searchTextEn: summary.searchTextEn ?? '',
     semanticSummary: getString(fields, 'semantic_summary'),
-    body: getNumber(fields, 'body'),
-    sweetness: getNumber(fields, 'sweetness'),
-    style: getString(fields, 'style'),
-    priceBand: getString(fields, 'price_band'),
-    pairing: getStringArray(fields, 'pairing'),
-    occasion: getStringArray(fields, 'occasion'),
+    body: summary.body ?? 0,
+    sweetness: summary.sweetness ?? 0,
+    style: summary.style ?? '',
+    priceBand: summary.priceBand ?? '',
+    pairing: summary.pairing !== undefined ? [...summary.pairing] : [],
+    occasion: summary.occasion !== undefined ? [...summary.occasion] : [],
     availability: getBoolean(fields, 'availability'),
     popularityScore: getNumber(fields, 'popularity_score'),
     ...(embedding !== undefined && { embedding }),
     // New wine-domain optional fields — key is omitted (not set to undefined)
     // when the value is absent, satisfying exactOptionalPropertyTypes.
-    ...(vintageYear !== undefined && { vintageYear }),
-    ...(acidity !== undefined && { acidity }),
-    ...(tannin !== undefined && { tannin }),
-    ...(finishLength !== undefined && { finishLength }),
-    ...(wineType !== undefined && { wineType }),
-    ...(grapePrimary !== undefined && { grapePrimary }),
-    ...(country !== undefined && { country }),
-    ...(appellation !== undefined && { appellation }),
-    ...(producerPrestige !== undefined && { producerPrestige }),
-    ...(criticScoreNormalized !== undefined && { criticScoreNormalized }),
-    ...(priceUsd !== undefined && { priceUsd }),
+    ...(summary.vintageYear !== undefined && { vintageYear: summary.vintageYear }),
+    ...(summary.acidity !== undefined && { acidity: summary.acidity }),
+    ...(summary.tannin !== undefined && { tannin: summary.tannin }),
+    ...(summary.finishLength !== undefined && { finishLength: summary.finishLength }),
+    ...(summary.wineType !== undefined && { wineType: summary.wineType }),
+    ...(summary.grapePrimary !== undefined && { grapePrimary: summary.grapePrimary }),
+    ...(summary.country !== undefined && { country: summary.country }),
+    ...(summary.appellation !== undefined && { appellation: summary.appellation }),
+    ...(summary.producerPrestige !== undefined && { producerPrestige: summary.producerPrestige }),
+    ...(summary.criticScoreNormalized !== undefined
+      && { criticScoreNormalized: summary.criticScoreNormalized }),
+    ...(summary.priceUsd !== undefined && { priceUsd: summary.priceUsd }),
     // SOTA++ taxonomy fields
     ...(flavorProfiles !== undefined && { flavorProfiles }),
-    ...(classification !== undefined && { classification }),
-    ...(alcoholPct !== undefined && { alcoholPct }),
-    ...(drinkingWindowStart !== undefined && { drinkingWindowStart }),
-    ...(drinkingWindowEnd !== undefined && { drinkingWindowEnd }),
-    ...(drinkingWindowModelVersion !== undefined && { drinkingWindowModelVersion }),
+    ...(summary.classification !== undefined && { classification: summary.classification }),
+    ...(summary.alcoholPct !== undefined && { alcoholPct: summary.alcoholPct }),
+    ...(summary.drinkingWindowStart !== undefined
+      && { drinkingWindowStart: summary.drinkingWindowStart }),
+    ...(summary.drinkingWindowEnd !== undefined && { drinkingWindowEnd: summary.drinkingWindowEnd }),
+    ...(summary.drinkingWindowModelVersion !== undefined
+      && { drinkingWindowModelVersion: summary.drinkingWindowModelVersion }),
     ...(oakTreatment !== undefined && { oakTreatment }),
-    ...(certifications !== undefined && { certifications }),
-    ...(soilType !== undefined && { soilType }),
-    ...(producerType !== undefined && { producerType }),
+    ...(summary.certifications !== undefined && { certifications: [...summary.certifications] }),
+    ...(summary.soilType !== undefined && { soilType: summary.soilType }),
+    ...(summary.producerType !== undefined && { producerType: summary.producerType }),
   };
 }
 

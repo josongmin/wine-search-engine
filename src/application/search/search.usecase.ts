@@ -135,7 +135,7 @@ export class SearchUseCase {
     } = buildSearchRouteResolutionContext(plan, request);
 
     // Step 3: Execute based on route
-    const { resolveResult, rankedResults } = await dispatchSearchRouteExecution(
+    const { resolveResult, rankedResults, decisionContext } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
         executeEntity: () => this.executeEntityRoute(plan),
@@ -155,6 +155,7 @@ export class SearchUseCase {
       startTime,
       resolveResult,
       rankedResults,
+      decisionContext,
       effectiveRoute,
       plannerSuggestedMode,
       retrievalModeSource,

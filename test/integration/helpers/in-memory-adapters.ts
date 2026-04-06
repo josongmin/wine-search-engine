@@ -14,7 +14,6 @@ import type {
   SearchIndexPort,
   SparseHit,
   DenseHit,
-  RetrievalHitSummary,
 } from '../../../src/domain/retrieval/port/search-index.port.js';
 import type { EmbeddingServicePort } from '../../../src/domain/retrieval/port/embedding-service.port.js';
 import type { ThresholdStore } from '../../../src/domain/query/port/threshold-store.port.js';
@@ -118,10 +117,6 @@ export class InMemoryCalibrationStore implements CalibrationStore {
 // InMemorySearchIndex
 // ─────────────────────────────────────────────────────────────────────────────
 
-function hitSummaryFromDoc(doc: RetrievalDocument): RetrievalHitSummary {
-  return retrievalDocumentToHitSummary(doc);
-}
-
 /**
  * Stores RetrievalDocuments and returns configurable hits.
  * sparseSearch matches by canonicalLabel / aliases text.
@@ -167,7 +162,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
           score,
           rank: 0, // will be assigned after sort
           matchedFields: ['searchText'],
-          summary: hitSummaryFromDoc(doc),
+          summary: retrievalDocumentToHitSummary(doc),
         });
       }
     }
@@ -192,7 +187,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
       score: doc.popularityScore,
       rank: i + 1,
       similarity: doc.popularityScore,
-      summary: hitSummaryFromDoc(doc),
+      summary: retrievalDocumentToHitSummary(doc),
     }));
   }
 

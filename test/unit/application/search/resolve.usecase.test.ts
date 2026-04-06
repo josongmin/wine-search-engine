@@ -7,6 +7,72 @@ import type {
 } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 
 describe('ResolveUseCase', () => {
+  it('reuses the shared planner context mapping for locale and session', async () => {
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'Opus One',
+        normalizedQuery: 'opus one',
+        intent: 'known_item',
+        route: 'entity',
+        retrievalMode: 'entity_lookup',
+        queryClass: 'known-item',
+        anchors: [],
+        constraints: { hard: [], soft: [], inferred: [] },
+        expansions: { lexical: [], semantic: [] },
+        policy: {},
+        uncertainty: {},
+        plannerVersion: '1',
+        policyRuleVersion: '1',
+        thresholdProfileId: 'default',
+      }),
+    };
+
+    const entityResolver: EntityResolverPort = {
+      resolve: vi.fn().mockResolvedValue({
+        status: 'resolved',
+        candidates: [],
+        topEntity: undefined,
+        decisionTrace: {
+          queryClass: 'known-item',
+          top1CalibratedScore: 1,
+          top2CalibratedScore: 0,
+          calibratedGap: 1,
+          decisionConfidenceC: 1,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 },
+          outcomeReasonCodes: [],
+        },
+        conformalSetSize: 1,
+      }),
+    };
+
+    const previousEntity = createEntityId('prev');
+    const useCase = new ResolveUseCase({
+      queryPlanner,
+      entityResolver,
+      querySanitizer: { sanitize: vi.fn().mockReturnValue({ safe: true, sanitizedQuery: 'Opus One' }) },
+    });
+
+    await useCase.execute({
+      query: '  Opus One  ',
+      context: { locale: 'en-US', currency: 'USD' },
+      sessionContext: {
+        sessionId: 'session-42',
+        previousEntities: [previousEntity],
+      },
+    });
+
+    expect(queryPlanner.plan).toHaveBeenCalledWith('Opus One', {
+      locale: 'en-US',
+      session: {
+        sessionId: 'session-42',
+        previousEntities: [previousEntity],
+      },
+      budget: undefined,
+    });
+  });
+
   it('includes requestId in decision_trace_ref when provided', async () => {
     const queryPlanner: QueryPlannerPort = {
       plan: vi.fn().mockResolvedValue({

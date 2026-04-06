@@ -319,6 +319,35 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
     const policy = new ConfidenceRefusalPolicy(0.45);
     const gate = new AdmissionGate(policy);
 
+    it('uses admissionContext instead of raw hard-constraint presence for constraint evidence obligations', () => {
+      const input = makeInput({
+        queryPlan: {
+          ...makeQueryPlan(),
+          constraints: {
+            hard: [{
+              attribute: 'country',
+              operator: '=',
+              value: 'france',
+              source_phrase: 'france',
+              confidence: 0.9,
+            }],
+            soft: [],
+            inferred: [],
+          },
+        },
+        admissionContext: {
+          requires_identity_seal: true,
+          requires_constraint_evidence: false,
+          requires_anchor_evidence: false,
+        },
+        evidenceSummary: {
+          identityEvidencePresent: true,
+        },
+      });
+      const result = gate.check(input, TEST_SNAPSHOT);
+      expect(result.admitted).toBe(true);
+    });
+
     it('other failures take precedence (no identity evidence)', () => {
       const input = makeInput({
         resolverResult: makeResolverResult(0.3, 0.3), // C < 0.45

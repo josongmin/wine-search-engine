@@ -21,11 +21,10 @@ import {
   fromVespaFields,
   buildSparseFilters,
   buildDenseFilters,
+  readRawVespaRetrievalSummary,
 } from './mapping.js';
 import {
   normalizeRetrievalHitSummary,
-  normalizeSummarySearchText,
-  trimNonEmptySummaryValue,
 } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 
 // ---------------------------------------------------------------------------
@@ -106,95 +105,12 @@ function normaliseSimilarity(score: number): number {
   return Math.max(0, Math.min(1, score));
 }
 
-function trimHitSummaryText(v: unknown): string | undefined {
-  return isString(v) ? trimNonEmptySummaryValue(v) : undefined;
-}
-
 /**
  * Pulls summary fields from a Vespa hit for hybrid reranking passages
  * and wine attribute enrichment (Epic 15).
  */
 function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary | undefined {
-  const canonicalLabel = trimHitSummaryText(fields['canonical_label']);
-  const producer = trimHitSummaryText(fields['producer']);
-  const region = trimHitSummaryText(fields['region']);
-  const searchTextEn = isString(fields['search_text_en'])
-    ? normalizeSummarySearchText(fields['search_text_en'])
-    : undefined;
-
-  const grapePrimary = trimHitSummaryText(fields['grape_primary']);
-  const style = trimHitSummaryText(fields['style']);
-  const priceBand = trimHitSummaryText(fields['price_band']);
-  const pairing = Array.isArray(fields['pairing'])
-    ? fields['pairing'].filter((value): value is string => typeof value === 'string')
-    : undefined;
-  const occasion = Array.isArray(fields['occasion'])
-    ? fields['occasion'].filter((value): value is string => typeof value === 'string')
-    : undefined;
-
-  // Epic 15: Wine attributes
-  const vintageYear = typeof fields['vintage_year'] === 'number' ? fields['vintage_year'] : undefined;
-  const body = typeof fields['body'] === 'number' ? fields['body'] : undefined;
-  const tannin = typeof fields['tannin'] === 'number' ? fields['tannin'] : undefined;
-  const acidity = typeof fields['acidity'] === 'number' ? fields['acidity'] : undefined;
-  const sweetness = typeof fields['sweetness'] === 'number' ? fields['sweetness'] : undefined;
-  const finishLength = typeof fields['finish_length'] === 'number' ? fields['finish_length'] : undefined;
-  const wineType = trimHitSummaryText(fields['wine_type']);
-  const criticScoreNormalized = typeof fields['critic_score_normalized'] === 'number'
-    ? fields['critic_score_normalized']
-    : undefined;
-  const producerPrestige = typeof fields['producer_prestige'] === 'number'
-    ? fields['producer_prestige']
-    : undefined;
-  const country = trimHitSummaryText(fields['country']);
-  const appellation = trimHitSummaryText(fields['appellation']);
-  const classification = trimHitSummaryText(fields['classification']);
-  const alcoholPct = typeof fields['alcohol_pct'] === 'number' ? fields['alcohol_pct'] : undefined;
-  const drinkingWindowStart = typeof fields['drinking_window_start'] === 'number'
-    ? fields['drinking_window_start']
-    : undefined;
-  const drinkingWindowEnd = typeof fields['drinking_window_end'] === 'number'
-    ? fields['drinking_window_end']
-    : undefined;
-  const drinkingWindowModelVersion = trimHitSummaryText(fields['drinking_window_model_version']);
-  const priceUsd = typeof fields['price_usd'] === 'number' ? fields['price_usd'] : undefined;
-  const certifications = Array.isArray(fields['certifications'])
-    ? fields['certifications'].filter((value): value is string => typeof value === 'string')
-    : undefined;
-  const soilType = trimHitSummaryText(fields['soil_type']);
-  const producerType = trimHitSummaryText(fields['producer_type']);
-
-  return normalizeRetrievalHitSummary({
-    ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
-    ...(producer !== undefined ? { producer } : {}),
-    ...(region !== undefined ? { region } : {}),
-    ...(searchTextEn !== undefined ? { searchTextEn } : {}),
-    ...(grapePrimary !== undefined ? { grapePrimary } : {}),
-    ...(style !== undefined ? { style } : {}),
-    ...(priceBand !== undefined ? { priceBand } : {}),
-    ...(pairing !== undefined ? { pairing } : {}),
-    ...(occasion !== undefined ? { occasion } : {}),
-    ...(vintageYear !== undefined ? { vintageYear } : {}),
-    ...(body !== undefined ? { body } : {}),
-    ...(tannin !== undefined ? { tannin } : {}),
-    ...(acidity !== undefined ? { acidity } : {}),
-    ...(sweetness !== undefined ? { sweetness } : {}),
-    ...(finishLength !== undefined ? { finishLength } : {}),
-    ...(wineType !== undefined ? { wineType } : {}),
-    ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
-    ...(producerPrestige !== undefined ? { producerPrestige } : {}),
-    ...(country !== undefined ? { country } : {}),
-    ...(appellation !== undefined ? { appellation } : {}),
-    ...(classification !== undefined ? { classification } : {}),
-    ...(alcoholPct !== undefined ? { alcoholPct } : {}),
-    ...(drinkingWindowStart !== undefined ? { drinkingWindowStart } : {}),
-    ...(drinkingWindowEnd !== undefined ? { drinkingWindowEnd } : {}),
-    ...(drinkingWindowModelVersion !== undefined ? { drinkingWindowModelVersion } : {}),
-    ...(priceUsd !== undefined ? { priceUsd } : {}),
-    ...(certifications !== undefined ? { certifications } : {}),
-    ...(soilType !== undefined ? { soilType } : {}),
-    ...(producerType !== undefined ? { producerType } : {}),
-  });
+  return normalizeRetrievalHitSummary(readRawVespaRetrievalSummary(fields));
 }
 
 // ---------------------------------------------------------------------------

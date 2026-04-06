@@ -21,6 +21,32 @@ class StubThresholdStore implements ThresholdStore {
   async save(_profile: ThresholdProfileV1): Promise<void> {}
 }
 
+class ThrowingThresholdStore implements ThresholdStore {
+  async getProfile(_id: string): Promise<ThresholdProfileV1 | null> {
+    throw new Error('threshold store offline');
+  }
+  async getDefault(): Promise<ThresholdProfileV1> {
+    return DEFAULT_THRESHOLD_PROFILE;
+  }
+  async save(_profile: ThresholdProfileV1): Promise<void> {}
+}
+
+class PartialThresholdStore implements ThresholdStore {
+  async getProfile(_id: string): Promise<ThresholdProfileV1 | null> {
+    return {
+      ...DEFAULT_THRESHOLD_PROFILE,
+      id: 'partial-profile',
+      perQueryClass: {
+        semantic_preference: DEFAULT_THRESHOLD_PROFILE.perQueryClass.semantic_preference,
+      } as ThresholdProfileV1['perQueryClass'],
+    };
+  }
+  async getDefault(): Promise<ThresholdProfileV1> {
+    return DEFAULT_THRESHOLD_PROFILE;
+  }
+  async save(_profile: ThresholdProfileV1): Promise<void> {}
+}
+
 // ── Fixed snapshot used in all tests ─────────────────────────────────────────
 const TEST_SNAPSHOT: DecisionSnapshot = {
   model_versions: { embedding: 'bge-m3-v1' },
@@ -141,6 +167,28 @@ describe('DecisionEngine', () => {
 
   beforeEach(() => {
     engine = new DecisionEngine(new StubThresholdStore());
+  });
+
+  describe('threshold loading hardening', () => {
+    it('falls back to default thresholds when the threshold store throws', async () => {
+      const fallbackEngine = new DecisionEngine(new ThrowingThresholdStore());
+
+      const output = await fallbackEngine.decide(makeInput(), TEST_SNAPSHOT);
+
+      expect(output.decisionTrace.thresholds.resolveThreshold).toBe(
+        DEFAULT_THRESHOLD_PROFILE.perQueryClass.short_entity.resolveTau,
+      );
+    });
+
+    it('falls back to default threshold entry when a custom profile omits the query class', async () => {
+      const fallbackEngine = new DecisionEngine(new PartialThresholdStore());
+
+      const output = await fallbackEngine.decide(makeInput(), TEST_SNAPSHOT);
+
+      expect(output.decisionTrace.thresholds.resolveThreshold).toBe(
+        DEFAULT_THRESHOLD_PROFILE.perQueryClass.short_entity.resolveTau,
+      );
+    });
   });
 
   describe('resolved status', () => {
@@ -442,9 +490,9 @@ describe('DecisionEngine', () => {
       expect(output.decisionTrace.rulesApplied).toContain('UNCERTAINTY_FORCE_CLARIFY');
     });
 
-    it('requireExact=true and top candidate score < 0.99 → downgrade to ambiguous', async () => {
+    it('requireExact=true and no exact evidence → downgrade to ambiguous even with a strong score', async () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.85, 0.20, false),
+        resolverResult: makeResolverResult(0.995, 0.20, false),
         policy: {
           requireExact: true,
           allowApproximate: false,
@@ -452,14 +500,22 @@ describe('DecisionEngine', () => {
           fallbackMode: 'clarify',
           policyReasonCodes: [],
         },
-        evidenceSummary: { identityEvidencePresent: true },
+        evidenceSummary: {
+          identityEvidencePresent: true,
+          identityEvidence: {
+            topEntityPresent: true,
+            resolverTopCandidateMatchesTopEntity: true,
+            resolverEvidenceRefCount: 1,
+            exactMatchCandidatePresent: false,
+          },
+        },
       });
       const output = await engine.decide(input, TEST_SNAPSHOT);
       expect(output.decisionStatus).toBe('ambiguous');
       expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_DOWNGRADE');
     });
 
-    it('requireExact=true and ranked evidence disagrees with resolver identity → downgrade to ambiguous', async () => {
+    it('requireExact=true and ranked evidence agrees with resolver identity → resolves', async () => {
       const input = makeInput({
         resolverResult: makeResolverResult(0.995, 0.20, false),
         policy: {
@@ -476,15 +532,41 @@ describe('DecisionEngine', () => {
             resolverTopCandidateMatchesTopEntity: true,
             resolverEvidenceRefCount: 1,
             rankedTopResultPresent: true,
-            rankedTopResultMatchesTopEntity: false,
+            rankedTopResultMatchesTopEntity: true,
             rankedEvidenceItemCount: 3,
-            exactMatchCandidatePresent: true,
           },
         },
       });
       const output = await engine.decide(input, TEST_SNAPSHOT);
-      expect(output.decisionStatus).toBe('ambiguous');
-      expect(output.decisionTrace.rulesApplied).toContain('EVIDENCE_GATE_DOWNGRADE');
+      expect(output.decisionStatus).toBe('resolved');
+      expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_SATISFIED');
+    });
+
+    it('requireExact=true does not require ranked evidence item count when ranked identity agrees', async () => {
+      const input = makeInput({
+        resolverResult: makeResolverResult(0.995, 0.20, false),
+        policy: {
+          requireExact: true,
+          allowApproximate: false,
+          requireClarification: false,
+          fallbackMode: 'clarify',
+          policyReasonCodes: [],
+        },
+        evidenceSummary: {
+          identityEvidencePresent: true,
+          identityEvidence: {
+            topEntityPresent: true,
+            resolverTopCandidateMatchesTopEntity: true,
+            resolverEvidenceRefCount: 1,
+            rankedTopResultPresent: true,
+            rankedTopResultMatchesTopEntity: true,
+            rankedEvidenceItemCount: 0,
+          },
+        },
+      });
+      const output = await engine.decide(input, TEST_SNAPSHOT);
+      expect(output.decisionStatus).toBe('resolved');
+      expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_EXACT_SATISFIED');
     });
 
     it('allowApproximate=false switches nextAction from hybrid_search to clarify', async () => {

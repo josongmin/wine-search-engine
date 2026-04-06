@@ -218,9 +218,11 @@ export function createTestContainer(): TestContainerParts {
     ranker,
     decisionEngine,
     responseBuilder,
+    snapshotVersions,
     drinkingWindow: drinkingWindowUseCase,
     querySanitizer,
     injectionJudge,
+    judgeFailureMode: 'fail_closed',
   });
 
   const wineToolExecutor = new WineToolExecutor({

@@ -60,8 +60,10 @@ import { PgAmbiguityDictionary } from '../../../../src/infrastructure/adapter/pg
 import { PgBlockingAdapter } from '../../../../src/infrastructure/adapter/pg-blocking-adapter.js';
 import { PgCalibrationStore } from '../../../../src/infrastructure/adapter/pg-calibration-store.js';
 import { PgThresholdStore } from '../../../../src/infrastructure/adapter/pg-threshold-store.js';
+import { PgLtrModelRegistry } from '../../../../src/infrastructure/adapter/pg-ltr-model-registry.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../../../src/domain/query/model/threshold-profile.js';
 import { InMemoryWatchlistStore } from '../../../../src/infrastructure/watchlist/in-memory-watchlist-store.js';
+import type { QueryClassWeights } from '../../../../src/domain/ranking/index.js';
 import {
   InMemoryAmbiguityDictionary,
   InMemoryBlockingAdapter,
@@ -181,6 +183,10 @@ export async function createVespaTestContainer(
   const candidateAttributes = new InMemoryCandidateAttributes();
   const querySanitizer = new QuerySanitizer();
   const injectionJudge = { judge: async () => false };
+  let ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined;
+  if (pool !== null) {
+    ltrModels = await new PgLtrModelRegistry(pool).getAllModels();
+  }
 
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
@@ -278,6 +284,7 @@ export async function createVespaTestContainer(
     snapshotVersions,
     querySanitizer,
     injectionJudge,
+    ltrModels,
   });
 
   const replayUseCase = new ReplayUseCase({ searchUseCase });
@@ -303,8 +310,10 @@ export async function createVespaTestContainer(
     responseBuilder,
     snapshotVersions,
     drinkingWindow: drinkingWindowUseCase,
+    ltrModels,
     querySanitizer,
     injectionJudge,
+    judgeFailureMode: 'fail_closed',
   });
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);

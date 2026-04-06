@@ -42,6 +42,9 @@ export interface EvidenceSummary {
    * booleans remain valid.
    */
   readonly identityEvidence?: {
+    /** Canonical source that supplied the identity trail. */
+    readonly source?: 'resolver' | 'ranked_synthetic' | undefined;
+
     /** Resolver emitted a topEntity reference. */
     readonly topEntityPresent: boolean;
 
@@ -50,6 +53,12 @@ export interface EvidenceSummary {
 
     /** Count of resolver evidence refs for the top candidate identity trail. */
     readonly resolverEvidenceRefCount: number;
+
+    /**
+     * Whether the resolver output was synthesized from ranked-route results
+     * rather than emitted by the entity resolver.
+     */
+    readonly syntheticRankedRoute?: boolean | undefined;
 
     /** Whether a ranked top result was available for the same decision. */
     readonly rankedTopResultPresent?: boolean | undefined;
@@ -61,10 +70,21 @@ export interface EvidenceSummary {
     readonly rankedEvidenceItemCount?: number | undefined;
 
     /**
+     * Count of positive ranked corroboration items aligned with the resolver's
+     * chosen entity. This is trace/debug detail and does not mint identity on
+     * its own.
+     */
+    readonly rankedCorroborationItemCount?: number | undefined;
+
+    /** Ranked evidence types that corroborated the resolver-selected entity. */
+    readonly rankedCorroborationTypes?: readonly string[] | undefined;
+
+    /**
      * Whether the resolver top candidate satisfies exact-match expectations.
      *
-     * This currently mirrors the resolver's calibrated exact-match heuristic
-     * used by the policy overlay.
+     * When present, this is the canonical exact-match signal for ranked
+     * routes. It should be derived from the richer identity evidence trail,
+     * not from score thresholds.
      */
     readonly exactMatchCandidatePresent?: boolean | undefined;
   };
@@ -85,14 +105,35 @@ export interface EvidenceSummary {
 
     /** Inferred attributes represented on the ranked result for trace/debugging. */
     readonly inferredAttributes: readonly string[];
+
+    /** Count of required attributes explicitly matched by the ranked result. */
+    readonly matchedRequiredAttributeCount?: number | undefined;
+
+    /** Count of required attributes still unmet on the ranked result. */
+    readonly unmetRequiredAttributeCount?: number | undefined;
   };
 
   /** Whether anchor evidence (similarity to anchor entity) is present. */
   readonly anchorEvidencePresent?: boolean;
 
+  /** Anchor-resolution details kept separate from the selected result entity. */
+  readonly anchorResolution?: {
+    /** Whether the mixed-route anchor entity was explicitly resolved. */
+    readonly anchorEntityPresent: boolean;
+
+    /** The resolved anchor entity identifier, when available. */
+    readonly anchorEntityId?: string | undefined;
+
+    /** Canonical label for the resolved anchor entity, when available. */
+    readonly anchorCanonicalLabel?: string | undefined;
+
+    /** Confidence assigned to the resolved anchor entity. */
+    readonly anchorConfidence?: number | undefined;
+  };
+
   /** Richer anchor evidence details for ranked mixed routes. */
   readonly anchorEvidence?: {
-    /** Resolver emitted a topEntity for the anchored route. */
+    /** Ranked-route selection produced a candidate to validate. */
     readonly topEntityPresent: boolean;
 
     /** Whether a ranked top result was available for anchor validation. */
@@ -103,6 +144,12 @@ export interface EvidenceSummary {
 
     /** Whether the ranked evidence trail contains an anchor signal. */
     readonly rankedSignalPresent?: boolean | undefined;
+
+    /** Count of ranked anchor-signal evidence items, when available. */
+    readonly rankedSignalItemCount?: number | undefined;
+
+    /** Ranked evidence types that contributed anchor support. */
+    readonly rankedSignalTypes?: readonly string[] | undefined;
   };
 
   /** Total count of evidence references across all candidates. */
@@ -118,25 +165,54 @@ export interface EvidenceSummary {
 export function hasIdentityEvidence(summary?: EvidenceSummary): boolean {
   if (summary?.identityEvidence !== undefined) {
     const detail = summary.identityEvidence;
-    if (
-      !detail.topEntityPresent ||
-      !detail.resolverTopCandidateMatchesTopEntity ||
-      detail.resolverEvidenceRefCount <= 0
-    ) {
+    if (detail.source === 'ranked_synthetic') {
+      return hasSyntheticRankedIdentityTrail(detail);
+    }
+
+    if (!hasResolverIdentityTrail(detail)) {
       return false;
     }
 
-    if (detail.rankedTopResultPresent === true) {
-      return (
-        detail.rankedTopResultMatchesTopEntity === true &&
-        (detail.rankedEvidenceItemCount ?? 0) > 0
-      );
-    }
-
-    return true;
+    return !rankedResultContradictsResolver(detail);
   }
 
   return summary?.identityEvidencePresent === true;
+}
+
+/**
+ * Returns whether the identity trail supports an exact match.
+ *
+ * Unlike {@link hasIdentityEvidence}, this helper intentionally does not
+ * fall back to the coarse boolean because exact-match policy on ranked
+ * routes should only pass when richer evidence is available.
+ */
+export function hasExactMatchCandidate(summary?: EvidenceSummary): boolean {
+  const detail = summary?.identityEvidence;
+  if (detail === undefined) {
+    return false;
+  }
+
+  if (detail.exactMatchCandidatePresent !== undefined) {
+    if (detail.source === 'ranked_synthetic') {
+      return detail.exactMatchCandidatePresent && hasSyntheticRankedIdentityTrail(detail);
+    }
+
+    return (
+      detail.exactMatchCandidatePresent &&
+      hasResolverIdentityTrail(detail) &&
+      !rankedResultContradictsResolver(detail)
+    );
+  }
+
+  if (detail.source === 'ranked_synthetic') {
+    return false;
+  }
+
+  if (!hasResolverIdentityTrail(detail)) {
+    return false;
+  }
+
+  return !rankedResultContradictsResolver(detail);
 }
 
 /**
@@ -162,6 +238,11 @@ export function hasConstraintEvidence(summary?: EvidenceSummary): boolean {
 export function hasAnchorEvidence(summary?: EvidenceSummary): boolean {
   if (summary?.anchorEvidence !== undefined) {
     const detail = summary.anchorEvidence;
+    const anchorResolution = summary.anchorResolution;
+    if (anchorResolution?.anchorEntityPresent === false) {
+      return false;
+    }
+
     if (!detail.topEntityPresent) {
       return false;
     }
@@ -177,6 +258,39 @@ export function hasAnchorEvidence(summary?: EvidenceSummary): boolean {
   }
 
   return summary?.anchorEvidencePresent === true;
+}
+
+function hasResolverIdentityTrail(
+  detail: NonNullable<EvidenceSummary['identityEvidence']>,
+): boolean {
+  if (!detail.topEntityPresent || !detail.resolverTopCandidateMatchesTopEntity) {
+    return false;
+  }
+
+  if (detail.syntheticRankedRoute === true) {
+    return true;
+  }
+
+  return (
+    detail.resolverEvidenceRefCount > 0
+  );
+}
+
+function rankedResultContradictsResolver(
+  detail: NonNullable<EvidenceSummary['identityEvidence']>,
+): boolean {
+  return detail.rankedTopResultPresent === true && detail.rankedTopResultMatchesTopEntity !== true;
+}
+
+function hasSyntheticRankedIdentityTrail(
+  detail: NonNullable<EvidenceSummary['identityEvidence']>,
+): boolean {
+  return (
+    detail.topEntityPresent &&
+    detail.rankedTopResultPresent === true &&
+    detail.rankedTopResultMatchesTopEntity === true &&
+    (detail.rankedCorroborationItemCount ?? 0) > 0
+  );
 }
 
 /**

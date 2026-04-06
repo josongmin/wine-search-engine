@@ -9,10 +9,21 @@ import {
 } from '../../domain/decision/model/decision-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
-import type { SignalSet } from '../../domain/shared/types/index.js';
+import type { EvidenceItem, SignalSet } from '../../domain/shared/types/index.js';
+import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
+}
+
+function isPositiveEvidenceItem(item: EvidenceItem): boolean {
+  return item.contribution.startsWith('+');
+}
+
+function isSyntheticRankedRouteResolve(result: EntityResolveResult): boolean {
+  return result.decisionTrace.outcomeReasonCodes.some(
+    (code) => code === 'HYBRID_ROUTE' || code === 'MIXED_ROUTE',
+  );
 }
 
 /**
@@ -24,10 +35,12 @@ export function buildSearchDecisionInput(
   resolverResult: EntityResolveResult,
   rankedResults?: readonly RankedResult[],
   effectiveRoute: QueryRoute = plan.route,
+  decisionContext?: SearchRouteDecisionContext,
 ): DecisionInput {
   const topResult = rankedResults?.[0];
   const topEntity = resolverResult.topEntity;
   const resolverTopCandidate = resolverResult.candidates[0];
+  const syntheticRankedRoute = isSyntheticRankedRouteResolve(resolverResult);
 
   const rankingSignals: SignalSet | undefined =
     topResult !== undefined
@@ -53,6 +66,22 @@ export function buildSearchDecisionInput(
     topResult !== undefined &&
     topEntity !== undefined &&
     topResult.entityId === topEntity.entityId;
+  const rankedCorroborationItems =
+    topResult !== undefined && rankedTopResultMatchesTopEntity
+      ? topResult.evidenceItems.filter(isPositiveEvidenceItem)
+      : [];
+  const rankedCorroborationTypes =
+    rankedCorroborationItems.length > 0
+      ? unique(rankedCorroborationItems.map((item) => item.type))
+      : [];
+  const resolverIdentityTrailPresent =
+    resolverTopCandidateMatchesTopEntity &&
+    (syntheticRankedRoute || resolverEvidenceRefCount > 0);
+  const exactMatchCandidatePresent =
+    resolverIdentityTrailPresent &&
+    (topResult === undefined
+      ? true
+      : rankedTopResultMatchesTopEntity);
   const requiredConstraintAttributes = unique(
     plan.constraints.hard.map((constraint) => constraint.attribute),
   );
@@ -72,19 +101,35 @@ export function buildSearchDecisionInput(
           ),
         )
       : [];
+  const anchorSignalItems =
+    topResult !== undefined && rankedTopResultMatchesTopEntity
+      ? topResult.evidenceItems.filter(
+          (item) => item.type === 'anchor_similarity' && isPositiveEvidenceItem(item),
+        )
+      : [];
+  const anchorSignalTypes =
+    anchorSignalItems.length > 0
+      ? unique(anchorSignalItems.map((item) => item.type))
+      : [];
 
   const identityEvidence: NonNullable<EvidenceSummary['identityEvidence']> = {
+    ...(syntheticRankedRoute ? { source: 'ranked_synthetic' as const } : {}),
     topEntityPresent: topEntity !== undefined,
     resolverTopCandidateMatchesTopEntity,
     resolverEvidenceRefCount,
+    ...(syntheticRankedRoute ? { syntheticRankedRoute: true } : {}),
     ...(topResult !== undefined ? { rankedTopResultPresent: true } : {}),
     ...(topResult !== undefined && topEntity !== undefined
       ? { rankedTopResultMatchesTopEntity }
       : {}),
     ...(topResult !== undefined ? { rankedEvidenceItemCount: topResult.evidenceItems.length } : {}),
-    ...(resolverTopCandidateMatchesTopEntity
-      ? { exactMatchCandidatePresent: resolverTopCandidate.calibratedScore >= 0.99 }
+    ...(rankedCorroborationTypes.length > 0
+      ? {
+          rankedCorroborationItemCount: rankedCorroborationItems.length,
+          rankedCorroborationTypes,
+        }
       : {}),
+    ...(exactMatchCandidatePresent ? { exactMatchCandidatePresent: true } : {}),
   };
 
   const constraintEvidence =
@@ -94,10 +139,13 @@ export function buildSearchDecisionInput(
           matchedRequiredAttributes,
           unmetRequiredAttributes,
           inferredAttributes: unique(topResult.inferredConstraints),
+          matchedRequiredAttributeCount: matchedRequiredAttributes.length,
+          unmetRequiredAttributeCount: unmetRequiredAttributes.length,
         }
       : undefined;
 
   const anchorEvidenceRequired = effectiveRoute === 'mixed' && plan.anchors.length > 0;
+  const mixedAnchor = decisionContext?.mixedAnchor;
   const anchorEvidence = anchorEvidenceRequired
     ? {
         topEntityPresent: topEntity !== undefined,
@@ -109,7 +157,25 @@ export function buildSearchDecisionInput(
           ? {
               rankedSignalPresent:
                 (topResult.componentScores.anchorSimilarity ?? 0) > 0 ||
-                topResult.evidenceItems.some((item) => item.type === 'anchor_similarity'),
+                anchorSignalTypes.length > 0,
+              ...(anchorSignalTypes.length > 0
+                ? {
+                    rankedSignalItemCount: anchorSignalItems.length,
+                    rankedSignalTypes: anchorSignalTypes,
+                  }
+                : {}),
+            }
+          : {}),
+      }
+    : undefined;
+  const anchorResolution = anchorEvidenceRequired
+    ? {
+        anchorEntityPresent: mixedAnchor !== undefined,
+        ...(mixedAnchor !== undefined
+          ? {
+              anchorEntityId: mixedAnchor.entityId,
+              anchorCanonicalLabel: mixedAnchor.canonicalLabel,
+              anchorConfidence: mixedAnchor.confidence,
             }
           : {}),
       }
@@ -127,6 +193,7 @@ export function buildSearchDecisionInput(
     identityEvidencePresent: false,
     identityEvidence,
     ...(constraintEvidence !== undefined ? { constraintEvidence } : {}),
+    ...(anchorResolution !== undefined ? { anchorResolution } : {}),
     ...(anchorEvidence !== undefined ? { anchorEvidence } : {}),
     ...((resolverEvidenceRefCount > 0 || topResult !== undefined)
       ? {

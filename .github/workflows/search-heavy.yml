@@ -1,0 +1,80 @@
+name: Search Heavy
+on:
+  workflow_dispatch:
+    inputs:
+      run_vespa_verification:
+        description: 'Run the Vespa-heavy verification lane'
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'config/vitest/e2e.vespa.config.ts'
+      - 'config/vitest/quality.config.ts'
+      - 'config/vitest/quality.vespa.config.ts'
+      - 'src/application/search/**'
+      - 'src/domain/mixed/**'
+      - 'src/domain/ranking/**'
+      - 'src/domain/retrieval/**'
+      - 'src/infrastructure/vespa/**'
+      - 'test/e2e/golden-set.test.ts'
+      - 'test/e2e/specialized-modes-quality.test.ts'
+      - 'test/e2e/vespa/**'
+      - 'scripts/eval/**'
+      - 'scripts/run-vespa-*.sh'
+      - 'scripts/seed-vespa-test-data.ts'
+      - 'scripts/setup-vespa-test.sh'
+      - 'scripts/teardown-vespa-test.sh'
+      - '.github/workflows/search-heavy.yml'
+
+concurrency:
+  group: search-heavy-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  search-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Search quality gate
+        run: npm run test:quality
+      - name: Offline eval smoke baseline
+        run: npm run eval:offline:smoke:assert-baseline
+      - name: Search-heavy summary
+        if: always()
+        run: |
+          {
+            echo "## Search-Heavy Verification"
+            echo ""
+            echo "- Typecheck: \`npm run typecheck\`"
+            echo "- Quality gate: \`npm run test:quality\`"
+            echo "- Offline eval smoke: \`npm run eval:offline:smoke:assert-baseline\`"
+            echo "- Optional Vespa-heavy lane: manual dispatch with \`run_vespa_verification=true\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  vespa-verification:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_vespa_verification }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [search-quality]
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Vespa-heavy verification
+        run: npm run test:verification:vespa
+      - name: Vespa summary
+        if: always()
+        run: |
+          {
+            echo "## Vespa-Heavy Verification"
+            echo ""
+            echo "- Vespa verification: \`npm run test:verification:vespa\`"
+            echo "- Includes: Vespa e2e, network-services lane, Vespa quality lane"
+          } >> "$GITHUB_STEP_SUMMARY"

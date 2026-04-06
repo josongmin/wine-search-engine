@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config';
 import os from 'node:os';
 import { vitestResolveAliases } from './aliases.js';
 
+const isCoverageRun = process.argv.includes('--coverage') || process.env.VITEST_COVERAGE === '1';
+
 const maxUnitThreads = (() => {
   const parsed = Number.parseInt(process.env.VITEST_MAX_THREADS ?? '8', 10);
   const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
@@ -28,20 +30,32 @@ export default defineConfig({
       'src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts',
       'src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts',
     ],
-    pool: 'threads',
-    poolOptions: {
-      threads: {
-        maxThreads: maxUnitThreads,
-        minThreads: 1,
-        useAtomics: true,
+    pool: isCoverageRun ? 'forks' : 'threads',
+    poolOptions: isCoverageRun
+      ? {
+        forks: {
+          singleFork: true,
+        },
+      }
+      : {
+        threads: {
+          maxThreads: maxUnitThreads,
+          minThreads: 1,
+          useAtomics: true,
+        },
       },
-    },
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
       exclude: ['**/*.test.ts', '**/__tests__/**', 'src/main.ts'],
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
+      thresholds: {
+        statements: 60,
+        lines: 60,
+        branches: 80,
+        functions: 79,
+      },
     },
   },
   resolve: {

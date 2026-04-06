@@ -1,11 +1,10 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
-import type { PlannerContext } from '../../domain/query/service/planner.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { InterpretRequest } from './interpret-request.dto.js';
-import { QueryEntrySecurityGate } from './query-entry-security.js';
+import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
+import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 
 export type { InterpretRequest } from './interpret-request.dto.js';
 
@@ -30,29 +29,20 @@ export class InterpretUseCase {
   constructor(private readonly deps: InterpretUseCaseDeps) {}
 
   async execute(request: InterpretRequest): Promise<QueryPlanV1> {
-    const securityGate = new QueryEntrySecurityGate({
+    const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
-    const plannerContext: PlannerContext = {
-      locale: request.context?.locale,
-      session: request.sessionContext
-        ? {
-            sessionId: request.sessionContext.sessionId,
-            previousEntities: request.sessionContext.previousEntities as EntityId[],
-          }
-        : undefined,
-      budget: request.queryBudget
-        ? {
-            maxLatencyMs: request.queryBudget.maxLatencyMs,
-            maxCandidates: request.queryBudget.maxCandidates,
-            rerankLimit: request.queryBudget.rerankLimit,
-          }
-        : undefined,
-    };
-
-    return this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
+    return this.deps.queryPlanner.plan(
+      effectiveQuery,
+      buildPlannerContextFromSearchRequest({
+        query: effectiveQuery,
+        context: request.context,
+        sessionContext: request.sessionContext,
+        queryBudget: request.queryBudget,
+      }),
+    );
   }
 }

@@ -15,6 +15,13 @@ export function buildMixedRouteResolveResult(
 ): EntityResolveResult {
   return buildRankedRouteResolveResult(plan, rankedResults, {
     outcomeReasonCode: 'MIXED_ROUTE',
+    topEntity: rankedResults[0] === undefined
+      ? undefined
+      : {
+          entityId: rankedResults[0].entityId,
+          canonicalLabel: rankedResults[0].canonicalLabel,
+          calibratedScore: Math.max(0, Math.min(1, rankedResults[0].finalScore)),
+        },
   });
 }
 
@@ -29,5 +36,12 @@ export function mixedQueryResultToSearchRouteExecution(
   return {
     resolveResult: buildMixedRouteResolveResult(plan, rankedResults, mixedResult),
     rankedResults,
+    decisionContext: {
+      mixedAnchor: {
+        entityId: mixedResult.anchor.entityId,
+        canonicalLabel: mixedResult.anchor.canonicalLabel,
+        confidence: mixedResult.anchor.anchorConfidence,
+      },
+    },
   };
 }

@@ -2,6 +2,7 @@ import type { SimilarRetrievalPort } from '../../domain/mixed/service/mixed-solv
 import type { AnchorProfile } from '../../domain/mixed/model/anchor-profile.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
+import { summaryToHybridCandidateFields } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
 
 /**
  * Reciprocal Rank Fusion smoothing constant (standard value).
@@ -56,17 +57,7 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
           filtersApplied: [],
           candidateSources: ['dense'],
         },
-        ...(hit.summary?.canonicalLabel !== undefined
-          ? { canonicalLabel: hit.summary.canonicalLabel }
-          : {}),
-        ...(hit.summary?.producer !== undefined ? { producer: hit.summary.producer } : {}),
-        ...(hit.summary?.region !== undefined ? { region: hit.summary.region } : {}),
-        ...(hit.summary?.searchTextEn !== undefined
-          ? { searchTextEn: hit.summary.searchTextEn }
-          : {}),
-        ...(hit.summary?.grapePrimary !== undefined
-          ? { grapePrimary: hit.summary.grapePrimary }
-          : {}),
+        ...summaryToHybridCandidateFields(hit.summary),
       }),
     );
   }

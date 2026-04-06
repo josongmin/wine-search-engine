@@ -59,10 +59,12 @@ function registerCorsSupport(
   app.addHook('preHandler', (request, reply, done) => {
     const origin = request.headers.origin ?? '';
     if (options.nodeEnv !== 'production') {
-      reply.header('Access-Control-Allow-Origin', origin || '*');
+      reply.header('Access-Control-Allow-Origin', origin.length > 0 ? origin : '*');
     } else if (options.allowedOrigins.length > 0) {
       const originList = options.allowedOrigins.split(',').map((o) => o.trim());
       if (originList.includes(origin)) {
+        // nosemgrep
+        // Production only echoes origins that matched the configured allowlist.
         reply.header('Access-Control-Allow-Origin', origin);
       }
     }
@@ -126,7 +128,8 @@ export async function createServer(
   });
 
   // CORS headers (G-46).
-  // In development: allow all origins. In production: restrict to CORS_ALLOWED_ORIGINS env var.
+  // In development/test: allow all origins, echoing the request origin when present.
+  // In production: restrict to CORS_ALLOWED_ORIGINS env var.
   // Uses a manual hook instead of @fastify/cors to avoid an extra dependency.
   const nodeEnv = options?.nodeEnv ?? 'development';
   const allowedOrigins = options?.corsAllowedOrigins ?? '';

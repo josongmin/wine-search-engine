@@ -1,36 +1,12 @@
 import type { EntityId } from '../../shared/types/index.js';
 import { rrfFuse } from '../../shared/utils/rrf.js';
-import type {
-  SparseHit,
-  DenseHit,
-  RetrievalHitSummary,
-} from '../port/search-index.port.js';
+import type { SparseHit, DenseHit } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import {
-  mergeRetrievalHitSummaries,
+  mergeRetrievalHitSummariesForEntity,
   summaryToHybridCandidateFields,
 } from './hybrid-candidate-summary.js';
-
-function summaryFromSparseHits(
-  hits: readonly SparseHit[],
-  entityId: string,
-): RetrievalHitSummary | undefined {
-  for (const h of hits) {
-    if (h.entityId === entityId) return h.summary;
-  }
-  return undefined;
-}
-
-function summaryFromDenseHits(
-  hits: readonly DenseHit[],
-  entityId: string,
-): RetrievalHitSummary | undefined {
-  for (const h of hits) {
-    if (h.entityId === entityId) return h.summary;
-  }
-  return undefined;
-}
 
 /**
  * Fuses results from sparse, dense, and anchor retrieval passes using
@@ -119,12 +95,11 @@ export class FusionService {
         candidateSources,
       };
 
-      const merged = mergeRetrievalHitSummaries(
-        summaryFromSparseHits(sparseHits, entityId),
-        summaryFromDenseHits(denseHits, entityId),
-        anchorHits !== undefined
-          ? summaryFromDenseHits(anchorHits, entityId)
-          : undefined,
+      const merged = mergeRetrievalHitSummariesForEntity(
+        entityId as EntityId,
+        sparseHits,
+        denseHits,
+        anchorHits ?? [],
       );
 
       candidates.push({

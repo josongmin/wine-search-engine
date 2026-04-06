@@ -127,22 +127,21 @@ export class AdmissionGate {
 
     // ── (b) Evidence sufficiency ─────────────────────────────────────────────
     //
-    // A resolved decision must be backed by identity evidence.  The boolean
-    // `identityEvidencePresent` is the canonical signal set by the EvidenceGate
-    // earlier in the pipeline.  If the summary is absent or the flag is false,
-    // the decision lacks substantiation.
+    // A resolved decision must be backed by identity evidence. When richer
+    // evidence detail is present, hasIdentityEvidence() evaluates that trail
+    // instead of trusting the coarse boolean alone, so ranked-route drift
+    // cannot silently admit a weak identity claim.
     if (!hasIdentityEvidence(input.evidenceSummary)) {
       return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
     }
 
     // ── (c) Hard-constraint compliance ───────────────────────────────────────
     //
-    // When hard constraints are present in the query plan, constraint evidence
-    // must have been gathered.  Absence of constraint evidence while hard
-    // constraints exist means the entity was admitted without verifying
-    // compliance with mandatory filters.
-    const hasHardConstraints = input.queryPlan.constraints.hard.length > 0;
-    if (hasHardConstraints && !hasConstraintEvidence(input.evidenceSummary)) {
+    // Constraint obligations follow the effective admission context rather
+    // than raw plan shape alone. This keeps ranked-route and hybrid-route
+    // flows aligned when orchestration explicitly relaxes or requires
+    // constraint evidence for a specific execution path.
+    if (admissionContext.requires_constraint_evidence && !hasConstraintEvidence(input.evidenceSummary)) {
       return this.reject('HARD_CONSTRAINT_VIOLATION', input, snapshot);
     }
 
