@@ -140,6 +140,56 @@ describe('ReplayUseCase', () => {
         code: 'SNAPSHOT_MISMATCH',
       });
     });
+
+    it('accepts structurally equal nested feature_flags', () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCase(inner);
+      const expected = {
+        ...VALID_SNAPSHOT,
+        feature_flags: {
+          reranker: {
+            enabled: true,
+            cohorts: ['control', 'treatment'],
+          },
+        },
+      } satisfies DecisionSnapshot;
+      const actual = {
+        ...VALID_SNAPSHOT,
+        feature_flags: {
+          reranker: {
+            enabled: true,
+            cohorts: ['control', 'treatment'],
+          },
+        },
+      } satisfies DecisionSnapshot;
+
+      expect((useCase as any).snapshotsMatch(expected, actual)).toBe(true);
+    });
+
+    it('rejects nested feature_flags mismatches', () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCase(inner);
+      const expected = {
+        ...VALID_SNAPSHOT,
+        feature_flags: {
+          reranker: {
+            enabled: true,
+            cohorts: ['control', 'treatment'],
+          },
+        },
+      } satisfies DecisionSnapshot;
+      const actual = {
+        ...VALID_SNAPSHOT,
+        feature_flags: {
+          reranker: {
+            enabled: true,
+            cohorts: ['control'],
+          },
+        },
+      } satisfies DecisionSnapshot;
+
+      expect((useCase as any).snapshotsMatch(expected, actual)).toBe(false);
+    });
   });
 
   describe('error properties', () => {

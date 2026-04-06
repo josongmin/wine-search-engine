@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
 import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
@@ -27,6 +28,8 @@ const SearchToolInputSchema = z.object({
 });
 
 export type SearchToolInput = z.infer<typeof SearchToolInputSchema>;
+
+const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
 
 /**
  * Zod schema for get_food_pairings tool input.
@@ -247,8 +250,14 @@ export class WineToolExecutor {
       return { error: `Entity ${validated.entity_id} has no vintage year — cannot predict drinking window.` };
     }
 
-    console.warn(
-      `[WineToolExecutor] check_drinking_window: entity_id=${validated.entity_id}, vintage=${doc.vintageYear}, target_year=${targetYear}, requestId=${requestId}`,
+    toolLog.debug(
+      {
+        entityId: validated.entity_id,
+        vintage: doc.vintageYear,
+        targetYear,
+        requestId,
+      },
+      'check_drinking_window',
     );
 
     const tannin01 = doc.tannin !== undefined ? doc.tannin : 0.5;

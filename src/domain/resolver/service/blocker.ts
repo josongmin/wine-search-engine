@@ -1,5 +1,8 @@
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { EntityId } from '../../shared/types/index.js';
 import type { BlockingPort } from '../port/blocking.port.js';
+
+const blockerLog = bootstrapLogger.child({ component: 'Blocker' });
 
 /** Default maximum number of candidates returned by the blocker. */
 const DEFAULT_BLOCKING_LIMIT = 100;
@@ -57,18 +60,13 @@ export class Blocker {
       // the blocking adapter is a stub, the index is empty, or the query
       // failed to match anything. Downstream resolution will produce no
       // results. Emit a structured warning so operators can triage.
-      console.warn(
-        JSON.stringify({
-          level: 'warn',
-          component: 'Blocker',
+      blockerLog.warn(
+        {
           event: 'blocking_zero_candidates',
           elapsedMs,
-          message:
-            'Blocking returned 0 candidates. Resolver will produce no results. ' +
-            'Check that the blocking adapter is not a stub and the index is populated.',
-        }),
+        },
+        'blocking returned 0 candidates; resolver will produce no results (check adapter and index)',
       );
     }
-    void elapsedMs;
   }
 }

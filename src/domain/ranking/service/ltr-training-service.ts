@@ -4,8 +4,11 @@
  * Epic 4: LambdaMART learning-to-rank training pipeline
  */
 
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { EvalResult } from '../../evaluation/model/eval-result.js';
 import type { EvalCase } from '../../evaluation/model/eval-case.js';
+
+const ltrLog = bootstrapLogger.child({ component: 'LTRTrainingService' });
 import type { RankingFeatures, LambdaMARTExample, QueryClassWeights } from './lambdamart-ranker.js';
 import { trainLambdaMARTModel } from './lambdamart-ranker.js';
 import { extractLTRFeatures } from './ltr-feature-extractor.js';
@@ -122,8 +125,10 @@ export function trainAllModels(
   const models = new Map<string, QueryClassWeights>();
   const queryClasses = Array.from(new Set(examples.map((ex) => ex.queryClass)));
 
-  console.warn(`Training LambdaMART models for ${queryClasses.length} query classes`);
-  console.warn(`Total training examples: ${examples.length}`);
+  ltrLog.info(
+    { queryClassCount: queryClasses.length, exampleCount: examples.length },
+    'training LambdaMART models',
+  );
 
   for (const queryClass of queryClasses) {
     const classExamples = examples.filter((ex) => ex.queryClass === queryClass);
@@ -131,9 +136,13 @@ export function trainAllModels(
 
     models.set(queryClass, weights);
 
-    console.warn(
-      `✓ ${queryClass}: trained on ${classExamples.length} examples, ` +
-      `NDCG@5=${weights.ndcg5ValidationScore.toFixed(3)}`,
+    ltrLog.info(
+      {
+        queryClass,
+        exampleCount: classExamples.length,
+        ndcg5: weights.ndcg5ValidationScore,
+      },
+      'query class model trained',
     );
   }
 

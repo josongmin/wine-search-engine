@@ -96,7 +96,7 @@ flowchart TB
 - **Decomposed / Resolve**: 부모 `context` / `sessionContext` / `queryBudget` 전달과 `Resolve` Constraint SAT fail-fast는 반영됨.
 - **스냅샷** (`search-usecase-decision-snapshot.ts`): 런타임 기본 vs 플랜 오버레이 의미 정리는 여전히 **RC-A**.
 - **`throw new Error`**: 프로덕션 `src/application/search/**/*.ts` 기준 **매치 없음**.
-- **`plan.policy as unknown as`**: `search-usecase-execute-builders.ts` **2곳**.
+- **Decision trace policy cast**: 제거됨. trace 전용 policy 타입으로 정리됨.
 
 ---
 
@@ -113,7 +113,7 @@ flowchart TB
 
 | 패턴 | 위치 |
 |------|------|
-| `plan.policy as unknown as …` | `search-usecase-execute-builders.ts` (2곳) |
+| `plan.policy as unknown as …` | **매치 없음** |
 | `throw new Error` | **매치 없음** |
 | ` as any` | **테스트만**: `__tests__/search-injection-defense.test.ts` |
 
@@ -162,7 +162,7 @@ flowchart TB
 
 **한 방향 액션**: (1) 비교에 쓰는 스냅샷을 **한 빌더·한 스키마**로 고정하거나 (2) “어떤 필드는 비교 제외”를 **문서·계약**으로 고정. 그 다음에 필요하면 deep compare 등 **구현 한 번**.
 
-**부수**: `plan.policy as unknown as …` (`search-usecase-execute-builders.ts`)는 “트레이스 입력 타입이 없어서” 생긴 것 — 타입 정식화와 **같은 PR에서** 정리하는 게 patch-on-patch를 막는다.
+**부수**: decision trace policy 입력은 전용 타입으로 정리됐고, 남은 핵심은 snapshot comparison semantics 쪽이다.
 
 ---
 

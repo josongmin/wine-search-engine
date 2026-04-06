@@ -1,3 +1,7 @@
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+
+const finetuneLog = bootstrapLogger.child({ component: 'BgeM3Finetuner' });
+
 /**
  * BGE-M3 Fine-tuning Service
  *
@@ -216,18 +220,22 @@ export async function finetune(
   let bestValidationMetrics: ValidationMetrics | null = null;
   let finalMetrics: ValidationMetrics | null = null;
 
-  console.warn(`🚀 Fine-tuning BGE-M3 (Text-based similarity proxy)`);
-  console.warn(`   Training triplets: ${triplets.length}`);
-  console.warn(`   Validation triplets: ${validationTriplets?.length ?? 0}`);
-  console.warn(`   Learning rate: ${config.learningRate}`);
-  console.warn(`   Triplet margin: ${config.tripletMargin}`);
+  finetuneLog.info(
+    {
+      trainingTriplets: triplets.length,
+      validationTriplets: validationTriplets?.length ?? 0,
+      learningRate: config.learningRate,
+      tripletMargin: config.tripletMargin,
+    },
+    'starting BGE-M3 fine-tune (text similarity proxy)',
+  );
 
   for (let epoch = 0; epoch < config.numEpochs; epoch++) {
     const epochStartTime = Date.now();
     const numBatches = Math.ceil(triplets.length / config.batchSize);
     const tokensPerExample = 150;
 
-    console.warn(`\n   Epoch ${epoch + 1}/${config.numEpochs}`);
+    finetuneLog.info({ epoch: epoch + 1, totalEpochs: config.numEpochs }, 'epoch');
 
     let epochLoss = 0;
     for (let batchIdx = 0; batchIdx < numBatches; batchIdx++) {
@@ -251,17 +259,19 @@ export async function finetune(
     }
 
     const avgEpochLoss = epochLoss / numBatches;
-    console.warn(`\n     Avg Loss: ${avgEpochLoss.toFixed(4)}`);
+    finetuneLog.info({ avgLoss: avgEpochLoss }, 'epoch average loss');
 
     if (validationTriplets && validationTriplets.length > 0) {
       const metrics = computeValidationMetrics(validationTriplets, epoch, avgEpochLoss);
 
-      console.warn(`     Validation NDCG@10: ${metrics.ndcg10.toFixed(4)}`);
-      console.warn(`     Validation MRR@10: ${metrics.mrr10.toFixed(4)}`);
+      finetuneLog.info(
+        { ndcg10: metrics.ndcg10, mrr10: metrics.mrr10 },
+        'validation metrics',
+      );
 
       if (!bestValidationMetrics || metrics.ndcg10 > bestValidationMetrics.ndcg10) {
         bestValidationMetrics = metrics;
-        console.warn(`     ✨ New best validation score!`);
+        finetuneLog.info('new best validation score');
       }
 
       finalMetrics = metrics;
@@ -269,8 +279,12 @@ export async function finetune(
 
     const epochTimeMs = Date.now() - epochStartTime;
     const tokensPerSecond = (config.batchSize * numBatches * tokensPerExample) / (epochTimeMs / 1000);
-    console.warn(
-      `     Time: ${(epochTimeMs / 1000).toFixed(1)}s, Speed: ${(tokensPerSecond / 1000).toFixed(0)}k tokens/s`,
+    finetuneLog.info(
+      {
+        epochSeconds: epochTimeMs / 1000,
+        tokensPerSecondK: tokensPerSecond / 1000,
+      },
+      'epoch timing',
     );
   }
 
@@ -285,8 +299,13 @@ export async function finetune(
       improvementPercent: 14,
     };
 
-  console.warn(`\n✅ Fine-tuning complete (${elapsedSeconds.toFixed(1)}s)`);
-  console.warn(`   Total tokens processed: ${(totalTokensProcessed / 1e6).toFixed(1)}M`);
+  finetuneLog.info(
+    {
+      elapsedSeconds,
+      totalTokensProcessedM: totalTokensProcessed / 1e6,
+    },
+    'fine-tuning complete',
+  );
 
   return {
     modelId: `bge-m3-wine-${Date.now()}`,
