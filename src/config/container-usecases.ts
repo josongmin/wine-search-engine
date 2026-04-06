@@ -126,6 +126,23 @@ export function buildUseCaseContainerServices(
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,
       queryEntrySecurityObserver,
       cacheService: core.cacheService,
+      decomposedSearch: {
+        execute: (
+          subQueries: [string, string],
+          comparisonIntent: 'compare' | 'recommend_one' | 'list_both',
+          originalQuery: string,
+          requestId: string,
+          startTime: number,
+          parentContext?: DecomposedSearchParentContext,
+        ) => deferredDecomposed.ref!.execute(
+          subQueries,
+          comparisonIntent,
+          originalQuery,
+          requestId,
+          startTime,
+          parentContext,
+        ),
+      },
     }),
     decomposedSearchUseCase,
     drinkingWindowUseCase,

@@ -1,3 +1,4 @@
+import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { SnapshotVersions } from './search.usecase.js';
@@ -20,6 +21,7 @@ import type {
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
 import type { HybridSearchRequest } from './hybrid-request.dto.js';
+import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
 import {
   executeHybridRouteRankingPipeline,
   resolveEntityRouteForPlan,
@@ -53,6 +55,7 @@ export interface HybridUseCaseDeps {
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
   readonly cacheService?: SearchResponseCachePort | undefined;
+  readonly decomposedSearch?: DecomposedSearchUseCasePort | undefined;
 }
 
 /**
@@ -71,7 +74,7 @@ export class HybridUseCase {
   async execute(
     request: HybridSearchRequest,
     requestId: string,
-  ): Promise<SearchResponseV1> {
+  ): Promise<SearchResponseV1 | ComparisonSearchResponse> {
     const startTime = Date.now();
     const searchRequest = toSearchRequest(request);
     const preRoute = await runSearchPreRoutePhase({
@@ -89,10 +92,11 @@ export class HybridUseCase {
       responseBuilder: this.deps.responseBuilder,
       constraintSAT: this.constraintSAT,
       cacheService: this.deps.cacheService,
+      decomposedSearch: this.deps.decomposedSearch,
     });
 
     if (preRoute.outcome === 'return') {
-      return preRoute.response as SearchResponseV1;
+      return preRoute.response;
     }
 
     const { plan } = preRoute;

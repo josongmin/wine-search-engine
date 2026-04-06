@@ -1,5 +1,8 @@
-import type { QueryClass, ConstraintBundle } from '../../shared/types/index.js';
-import type { NormalizedConstraint } from '../../shared/types/index.js';
+import type {
+  QueryClass,
+  ConstraintBundle,
+  NormalizedConstraint,
+} from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../model/query-plan.js';
 import type { QueryIntent } from '../model/query-intent.js';
 import type { QueryRoute } from '../model/query-route.js';

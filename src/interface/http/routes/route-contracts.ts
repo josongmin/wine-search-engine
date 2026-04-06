@@ -130,7 +130,7 @@ export const HybridRouteContract = defineRouteContract({
   operationId: 'search.hybrid',
   body: HybridRequestSchema,
   responses: {
-    200: SearchResponseSchema,
+    200: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
     400: ErrorResponseSchema,
     403: ErrorResponseSchema,
     429: ErrorResponseSchema,

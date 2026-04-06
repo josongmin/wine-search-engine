@@ -83,26 +83,19 @@ describe('DecomposedSearchUseCase', () => {
 
     const useCase = new DecomposedSearchUseCase(searchUseCase);
 
-    await expect(
-      useCase.execute(
+    try {
+      await useCase.execute(
         ['Opus One', 'Screaming Eagle'],
         'compare',
         'Opus One vs Screaming Eagle',
         'req-compare',
         100,
-      ),
-    ).rejects.toBeInstanceOf(UnexpectedDecomposedResponseError);
-
-    await expect(
-      useCase.execute(
-        ['Opus One', 'Screaming Eagle'],
-        'compare',
-        'Opus One vs Screaming Eagle',
-        'req-compare',
-        100,
-      ),
-    ).rejects.toMatchObject({
-      code: 'UNEXPECTED_DECOMPOSED_RESPONSE',
-    });
+      );
+      expect.fail('Expected UnexpectedDecomposedResponseError to be thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnexpectedDecomposedResponseError);
+      const typed = err as UnexpectedDecomposedResponseError;
+      expect(typed.code).toBe('UNEXPECTED_DECOMPOSED_RESPONSE');
+    }
   });
 });

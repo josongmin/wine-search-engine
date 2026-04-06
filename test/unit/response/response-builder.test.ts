@@ -48,7 +48,12 @@ function makeDecisionOutput(overrides?: Partial<DecisionOutput>): DecisionOutput
       nextAction: 'return_result',
       inputs: {
         queryClass: 'short_entity',
-        policy: {},
+        policy: {
+          requireExact: false,
+          allowApproximate: true,
+          requireClarification: false,
+          fallbackMode: 'hybrid',
+        },
       },
       signals: {
         decisionConfidence: 0.9,

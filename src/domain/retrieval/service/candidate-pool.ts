@@ -10,6 +10,7 @@ import { ConstraintFilter } from './constraint-filter.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import type { CacheService } from '../../performance/index.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Orchestrates the full hybrid retrieval pipeline (RFC-012).
@@ -93,13 +94,23 @@ export class CandidatePoolService {
         : await this.embeddingService.embedBatch(input.semanticQueries);
 
       const primaryEmbedding = embeddings[0];
-      if (primaryEmbedding) {
-        denseHits = await this.searchIndex.denseSearch(
-          primaryEmbedding,
-          filters.length > 0 ? filters : undefined,
-          profile.denseTopN,
+      if (!primaryEmbedding) {
+        bootstrapLogger.error(
+          {
+            queryClass: input.queryPlan.queryClass,
+            semanticQueryCount: input.semanticQueries.length,
+            embeddingModelId: this.embeddingModelId,
+          },
+          '[CandidatePool] Dense retrieval expected an embedding but received none',
         );
+        throw new Error('Dense retrieval failed: embedding service returned no primary embedding');
       }
+
+      denseHits = await this.searchIndex.denseSearch(
+        primaryEmbedding,
+        filters.length > 0 ? filters : undefined,
+        profile.denseTopN,
+      );
     }
 
     // Step 3: Anchor neighbourhood search

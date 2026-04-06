@@ -131,6 +131,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error('Fatal error during startup:', err);
+  bootstrapLogger.fatal({ err }, 'fatal error during startup');
   process.exit(1);
 });

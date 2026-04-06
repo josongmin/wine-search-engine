@@ -1,3 +1,4 @@
+import { config } from '../../config/env.js';
 import type {
   LearnedMatcherContext,
   LearnedMatcherPort,
@@ -5,6 +6,10 @@ import type {
 } from '../../domain/resolver/port/learned-matcher.port.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
+import {
+  fetchWithTimeout,
+  isAbortError,
+} from '../http/fetch-with-timeout.js';
 
 // ---------------------------------------------------------------------------
 // API shapes
@@ -70,7 +75,26 @@ function isMatchApiResponse(v: unknown): v is MatchApiResponse {
  *   Response: { results: [{ entity_id, match_probability, model_id, model_version }] }
  */
 export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
-  constructor(private readonly url: string) {}
+  private readonly url: string;
+  private readonly httpTimeoutMs: number;
+
+  /**
+   * @param urlOrOptions - Service base URL, or `{ url, httpTimeoutMs? }` (defaults from `config.learnedMatcher`).
+   */
+  constructor(
+    urlOrOptions:
+      | string
+      | { readonly url: string; readonly httpTimeoutMs?: number },
+  ) {
+    if (typeof urlOrOptions === 'string') {
+      this.url = urlOrOptions;
+      this.httpTimeoutMs = config.learnedMatcher.httpTimeoutMs;
+    } else {
+      this.url = urlOrOptions.url;
+      this.httpTimeoutMs =
+        urlOrOptions.httpTimeoutMs ?? config.learnedMatcher.httpTimeoutMs;
+    }
+  }
 
   async match(
     query: string,
@@ -84,15 +108,32 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
       canonical_label: c.canonicalLabel,
     }));
 
-    const response = await fetch(`${this.url}/match`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query,
-        candidates: apiCandidates,
-        ...(context !== undefined ? { context: toApiContext(context) } : {}),
-      }),
+    const endpoint = `${this.url}/match`;
+    const body = JSON.stringify({
+      query,
+      candidates: apiCandidates,
+      ...(context !== undefined ? { context: toApiContext(context) } : {}),
     });
+
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        },
+        this.httpTimeoutMs,
+      );
+    } catch (err) {
+      if (isAbortError(err)) {
+        throw new Error(
+          `LearnedMatcher service: request timed out after ${this.httpTimeoutMs}ms`,
+        );
+      }
+      throw err;
+    }
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');

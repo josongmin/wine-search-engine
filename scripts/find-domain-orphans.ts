@@ -12,7 +12,9 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, normalize, relative, resolve } from 'node:path';
 
-const SRC_ROOT = join(import.meta.dirname, '../src');
+const REPO_ROOT = join(import.meta.dirname, '..');
+const SRC_ROOT = join(REPO_ROOT, 'src');
+const SCRIPTS_ROOT = join(REPO_ROOT, 'scripts');
 
 function walkTsFiles(dir: string, out: string[]): void {
   for (const name of readdirSync(dir)) {
@@ -67,6 +69,9 @@ function collectResolvedImports(importerAbs: string, content: string): Set<strin
 function main(): void {
   const allFiles: string[] = [];
   walkTsFiles(SRC_ROOT, allFiles);
+  if (existsSync(SCRIPTS_ROOT)) {
+    walkTsFiles(SCRIPTS_ROOT, allFiles);
+  }
 
   const domainFiles = allFiles
     .map((abs) => relative(SRC_ROOT, abs).replaceAll('\\', '/'))

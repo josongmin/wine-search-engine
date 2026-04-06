@@ -10,6 +10,7 @@ import { createTestServer, closeTestServer, type TestServer } from './helpers/te
 import {
   getHeader,
   getJson,
+  parseComparisonResponse,
   getSearchDecision,
   getSearchMeta,
   getSearchRequestId,
@@ -366,6 +367,18 @@ describe('POST /v1/search/hybrid', () => {
 
     expect(res.statusCode).toBe(200);
     expect(getSearchDecision(parseSearchResponse(res)).route).toBe('hybrid');
+  });
+
+  it('compare query reuses decomposition and returns comparison response', async () => {
+    const res = await postJson(server.app, '/v1/search/hybrid', {
+      query: 'Opus One vs Screaming Eagle',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseComparisonResponse(res);
+    expect(body.query_type).toBe('comparison');
+    expect(body.comparison_intent).toBe('compare');
+    expect(body.original_query).toBe('Opus One vs Screaming Eagle');
   });
 
   it('missing query returns 400', async () => {

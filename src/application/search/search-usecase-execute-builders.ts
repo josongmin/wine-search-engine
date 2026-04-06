@@ -52,7 +52,7 @@ export function buildConstraintContradictionResponseParams(options: {
       nextAction: 'fail',
       inputs: {
         queryClass: plan.queryClass,
-        policy: plan.policy as unknown as Readonly<Record<string, unknown>>,
+        policy: plan.policy,
       },
       signals: {
         decisionConfidence: 0,
@@ -137,7 +137,7 @@ export function buildEntropyAbstainResponseParams(options: {
       nextAction: 'clarify',
       inputs: {
         queryClass: plan.queryClass,
-        policy: plan.policy as unknown as Readonly<Record<string, unknown>>,
+        policy: plan.policy,
       },
       signals: {
         decisionConfidence: 0,

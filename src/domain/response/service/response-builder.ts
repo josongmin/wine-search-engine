@@ -226,7 +226,7 @@ export class ResponseBuilder {
   private computeResultType(
     results: readonly ResultItem[],
     decisionStatus: string,
-    queryPlan?: QueryPlanV1 | undefined,
+    queryPlan?: QueryPlanV1,
   ): SearchResponseV1['resultType'] {
     // No match case
     if (results.length === 0 || decisionStatus === 'failed') {

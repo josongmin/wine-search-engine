@@ -239,6 +239,24 @@ describe('CacheService', () => {
       expect(result.isStale).toBe(true);
       expect(result.reason).toBe('version_mismatch');
     });
+
+    it('should invalidate stale entries when feature flags change', async () => {
+      const mockPlan = createMockPlan();
+      const mockRequest = {};
+      const currentSnapshot = {
+        ...createMockSnapshot(),
+        feature_flags: { killSwitchDenseRetrieval: true },
+      } satisfies DecisionSnapshot;
+      const mockResponse = createMockResponse();
+
+      await queryCache.set(buildPlanCacheKey(mockPlan, mockRequest), mockResponse, 3600);
+
+      const result = await cacheService.getSearchResponse(mockPlan, mockRequest, currentSnapshot);
+
+      expect(result.hit).toBe(false);
+      expect(result.isStale).toBe(true);
+      expect(result.reason).toBe('version_mismatch');
+    });
   });
 
   describe('Embedding cache', () => {

@@ -70,6 +70,7 @@ describe('runSearchPostRoutePhase', () => {
       snapshotVersions: {
         modelVersions: {},
         indexVersions: {},
+        featureFlags: {},
       },
       decisionEngine: {
         decide: vi.fn(),

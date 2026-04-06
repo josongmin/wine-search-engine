@@ -102,4 +102,31 @@ describe('HttpCrossEncoderReranker', () => {
       reranker.rerank('wine', [makeCandidate('wine-opus-one', 'Opus One 2018')], 1),
     ).rejects.toThrow('Reranker service: unexpected response shape');
   });
+
+  it('throws when the HTTP request exceeds the configured timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          const sig = init?.signal;
+          if (sig?.aborted) {
+            reject(new DOMException('Aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      }),
+    );
+
+    const reranker = new HttpCrossEncoderReranker({
+      url: 'http://reranker.local',
+      httpTimeoutMs: 5,
+    });
+
+    await expect(
+      reranker.rerank('wine', [makeCandidate('wine-opus-one', 'Opus One 2018')], 1),
+    ).rejects.toThrow('Reranker service: request timed out after 5ms');
+  });
 });

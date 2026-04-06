@@ -74,6 +74,8 @@ const envSchema = z.object({
 
   // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
   LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
+  /** Per-request HTTP timeout for learned matcher API calls (AbortSignal). */
+  LEARNED_MATCHER_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -204,6 +206,7 @@ function buildConfig(parsed: EnvVars) {
     /** Learned matcher service settings (optional). */
     learnedMatcher: {
       url: parsed.LEARNED_MATCHER_SERVICE_URL,
+      httpTimeoutMs: parsed.LEARNED_MATCHER_HTTP_TIMEOUT_MS,
     },
 
     /** Anthropic API settings (optional, for LLM-based security features). */

@@ -18,6 +18,8 @@ import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-k
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
+const log = bootstrapLogger.child({ component: 'CacheService' });
+
 function constraintValueString(value: unknown): string {
   if (value === null || value === undefined) {
     return '';
@@ -142,7 +144,7 @@ export class CacheService implements SearchResponseCachePort {
         try {
           await this.queryCache.delete(cacheKey);
         } catch (err) {
-          console.warn('[CacheService] Failed to delete stale entry:', err);
+          log.warn({ err }, 'failed to delete stale entry');
         }
         return {
           hit: false,
@@ -270,7 +272,7 @@ export class CacheService implements SearchResponseCachePort {
             const text = texts[idx];
             if (text) {
               this.storeEmbeddingInCache(text, modelId, embedding).catch((err: unknown) => {
-                console.warn('[CacheService] Failed to cache embedding:', err);
+                log.warn({ err }, 'failed to cache embedding');
               });
             }
           }
@@ -296,7 +298,7 @@ export class CacheService implements SearchResponseCachePort {
     try {
       await this.embeddingCache?.deleteByModel(modelId);
     } catch (err) {
-      console.error('[CacheService] Failed to invalidate by model:', err);
+      log.error({ err }, 'failed to invalidate by model');
     }
   }
 
@@ -307,7 +309,7 @@ export class CacheService implements SearchResponseCachePort {
     try {
       await this.queryCache?.deletePattern('query:*');
     } catch (err) {
-      console.error('[CacheService] Failed to invalidate query cache:', err);
+      log.error({ err }, 'failed to invalidate query cache');
     }
   }
 
@@ -414,13 +416,13 @@ export class CacheService implements SearchResponseCachePort {
    */
   private recordCacheError(err: unknown): void {
     this.consecutiveErrorCount += 1;
-    bootstrapLogger.warn(
+    log.warn(
       {
         err: err instanceof Error ? err.message : String(err),
         consecutiveErrorCount: this.consecutiveErrorCount,
         circuitBreakerThreshold: this.circuitBreakerThreshold,
       },
-      '[CacheService] Cache operation failed',
+      'cache operation failed',
     );
 
     if (this.consecutiveErrorCount < this.circuitBreakerThreshold) {
@@ -429,12 +431,12 @@ export class CacheService implements SearchResponseCachePort {
 
     this.circuitBreakerOpen = true;
     this.circuitBreakerResetTime = Date.now() + this.circuitBreakerResetMs;
-    bootstrapLogger.warn(
+    log.warn(
       {
         consecutiveErrorCount: this.consecutiveErrorCount,
         circuitBreakerResetMs: this.circuitBreakerResetMs,
       },
-      '[CacheService] Circuit breaker opened after repeated cache failures',
+      'circuit breaker opened after repeated cache failures',
     );
   }
 

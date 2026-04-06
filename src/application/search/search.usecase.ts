@@ -45,6 +45,8 @@ export interface SnapshotVersions {
   readonly modelVersions: Readonly<Record<string, string>>;
   /** Search index version identifiers, e.g. { wine_content: "2026-04-01" }. */
   readonly indexVersions: Readonly<Record<string, string>>;
+  /** Feature flags / kill switches active at runtime. */
+  readonly featureFlags: Readonly<Record<string, boolean>>;
 }
 
 /**

@@ -3,6 +3,8 @@ export type { RankingInput, UserContext } from './model/ranking-input.js';
 export type { RankedResult, ComponentScores } from './model/ranked-result.js';
 export type { ScoringWeights } from './model/scoring-weights.js';
 export { DEFAULT_WEIGHTS, resolveWeights } from './model/scoring-weights.js';
+export type { ModeWeightProfile } from './model/mode-weights.js';
+export { getModeWeights, DEFAULT_WEIGHTS as DEFAULT_MODE_WEIGHTS } from './model/mode-weights.js';
 
 // ── Ports ───────────────────────────────────────────────────────────────────
 export type {

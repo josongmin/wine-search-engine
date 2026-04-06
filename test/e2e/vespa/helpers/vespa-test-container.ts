@@ -300,6 +300,7 @@ export async function createVespaTestContainer(
     querySanitizer,
     injectionJudge,
   });
+  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const hybridUseCase = new HybridUseCase({
     queryPlanner,
     candidatePool,
@@ -314,8 +315,8 @@ export async function createVespaTestContainer(
     querySanitizer,
     injectionJudge,
     judgeFailureMode: 'fail_closed',
+    decomposedSearch: decomposedSearchUseCase,
   });
-  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
   const adaptiveToolExecutor = new AdaptiveToolExecutor(
     new WineToolExecutor({

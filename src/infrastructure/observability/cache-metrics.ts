@@ -5,6 +5,10 @@
  * Enables production monitoring and performance analysis.
  */
 
+/** Rough heuristic for dashboard “estimated savings” (not wall-clock measured). */
+const ESTIMATED_MS_SAVED_PER_QUERY_CACHE_HIT = 200;
+const ESTIMATED_MS_SAVED_PER_EMBEDDING_CACHE_HIT = 80;
+
 export interface CacheMetrics {
   readonly queryCache: {
     readonly hits: number;
@@ -130,9 +134,10 @@ export class CacheMetricsCollector {
         ? this.embeddingCacheLatencies.reduce((a, b) => a + b, 0) / this.embeddingCacheLatencies.length
         : 0;
 
-    // Estimate: query cache hit saves ~200ms, embedding cache hit saves ~80ms
-    const estimatedQuerySavingsMs = this.queryCacheHits * 200;
-    const estimatedEmbeddingSavingsMs = this.embeddingCacheHits * 80;
+    const estimatedQuerySavingsMs =
+      this.queryCacheHits * ESTIMATED_MS_SAVED_PER_QUERY_CACHE_HIT;
+    const estimatedEmbeddingSavingsMs =
+      this.embeddingCacheHits * ESTIMATED_MS_SAVED_PER_EMBEDDING_CACHE_HIT;
     const totalEstimatedSavingsMs = estimatedQuerySavingsMs + estimatedEmbeddingSavingsMs;
 
     // Build object with proper optional handling for exactOptionalPropertyTypes

@@ -39,6 +39,14 @@ export function buildSnapshotVersions(config: Config): SnapshotVersions {
   return {
     modelVersions: { embedding: config.embedding.model },
     indexVersions: { wine_content: config.vespa.contentCluster },
+    featureFlags: {
+      killSwitchAliasOverlay: config.killSwitch.aliasOverlay,
+      killSwitchLearning: config.killSwitch.learning,
+      killSwitchDenseRetrieval: config.killSwitch.denseRetrieval,
+      killSwitchInjectionJudge: config.killSwitch.injectionJudge,
+      killSwitchQueryCache: config.killSwitch.queryCache,
+      watchlistEnabled: config.watchlist.enabled,
+    },
   };
 }
 

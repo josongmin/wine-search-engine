@@ -22,8 +22,11 @@ import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
-import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
+import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
+
+const serverLog = bootstrapLogger.child({ component: 'HttpServer' });
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -234,21 +237,28 @@ export async function createServer(
       const evalRunnerRef: EvalRunnerContract = deps.evalRunner;
       app.addHook('onReady', () => {
         const evalStart = Date.now();
-        console.warn('[Server] Starting background evaluation per EVAL_RUN_AT_STARTUP...');
+        serverLog.warn('starting background evaluation per EVAL_RUN_AT_STARTUP');
         void runEvaluation(evalRunnerRef, { verbose: true }).then(
           (result) => {
             const durationMs = Date.now() - evalStart;
-            console.warn(`[Server] Background evaluation completed in ${durationMs}ms: ${result.message}`);
+            serverLog.warn(
+              { durationMs, message: result.message },
+              'background evaluation completed',
+            );
           },
           (err: unknown) => {
             const durationMs = Date.now() - evalStart;
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[Server] Background evaluation FAILED after ${durationMs}ms: ${msg}`);
+            serverLog.error(
+              { err, durationMs },
+              'background evaluation failed',
+            );
           },
         );
       });
     } else {
-      console.warn('[Server] EVAL_RUN_AT_STARTUP=true but evalRunner not available; skipping');
+      serverLog.warn(
+        'EVAL_RUN_AT_STARTUP=true but evalRunner not available; skipping',
+      );
     }
   }
 

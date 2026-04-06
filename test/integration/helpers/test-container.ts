@@ -223,6 +223,7 @@ export function createTestContainer(): TestContainerParts {
     querySanitizer,
     injectionJudge,
     judgeFailureMode: 'fail_closed',
+    decomposedSearch: decomposedSearchUseCase,
   });
 
   const wineToolExecutor = new WineToolExecutor({

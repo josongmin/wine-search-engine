@@ -127,4 +127,30 @@ describe('CandidatePoolService sparse filter tokens', () => {
     expect(out.map((candidate) => candidate.entityId)).toEqual(['wine-red']);
     expect(out[0]?.matchedConstraints).toContain('wine_type');
   });
+
+  it('fails fast when dense retrieval receives no primary embedding', async () => {
+    const searchIndex: SearchIndexPort = {
+      sparseSearch: vi.fn(async () => []),
+      denseSearch: vi.fn(async () => []),
+      getDocument: vi.fn(async () => null),
+      upsertDocument: vi.fn(async () => {}),
+      bulkUpsert: vi.fn(async () => {}),
+    };
+
+    const embeddingService: EmbeddingServicePort = {
+      embed: vi.fn(async (): Promise<readonly number[]> => [0.1]),
+      embedBatch: vi.fn(async () => []),
+    };
+
+    const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
+
+    await expect(pool.generate({
+      queryPlan: minimalPlan(),
+      route: 'hybrid',
+      lexicalQueries: ['red wine'],
+      semanticQueries: ['red wine'],
+      hardConstraints: [],
+      softConstraints: [],
+    })).rejects.toThrow('Dense retrieval failed: embedding service returned no primary embedding');
+  });
 });

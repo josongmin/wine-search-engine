@@ -38,6 +38,7 @@
     "semgrep": "semgrep scan --metrics=off --config=semgrep/wine-rules.yml --config=p/ci --config=p/typescript --config=p/nodejs --config=p/secrets --error --exclude='**/node_modules/**' --exclude='**/dist/**' --exclude='**/.claude/**' src",
     "typecheck": "tsc --noEmit",
     "domain:orphans": "tsx scripts/find-domain-orphans.ts",
+    "feedback:prune-ttl": "tsx scripts/prune-feedback-ttl.ts",
     "contracts:http": "tsx scripts/export-http-contract-manifest.ts",
     "contracts:http:openapi-bridge": "tsx scripts/export-http-openapi-bridge.ts",
     "verify:http-contracts": "vitest run --config config/vitest/unit.config.ts test/unit/interface/http/http-route-catalog-openapi-parity.test.ts",

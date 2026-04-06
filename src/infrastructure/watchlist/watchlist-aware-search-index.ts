@@ -1,7 +1,10 @@
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
-import type { WatchlistPublisherPort } from './redis-watchlist-publisher.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
+import type { WatchlistPublisherPort } from './redis-watchlist-publisher.js';
+
+const log = bootstrapLogger.child({ component: 'WatchlistAwareSearchIndex' });
 
 interface WatchlistAwareSearchIndexDeps {
   readonly inner: SearchIndexPort;
@@ -65,9 +68,13 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
 
     for (const [index, result] of results.entries()) {
       if (result.status === 'rejected') {
-        console.error(
-          `[WatchlistAwareSearchIndex] Failed to publish ${events[index]?.type ?? 'unknown'} for ${next.entityId}:`,
-          result.reason,
+        log.error(
+          {
+            err: result.reason,
+            entityId: next.entityId,
+            eventType: events[index]?.type ?? 'unknown',
+          },
+          'watchlist publish failed',
         );
       }
     }

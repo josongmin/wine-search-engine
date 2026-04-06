@@ -141,7 +141,7 @@ export class ReplayUseCase {
       expected.planner_version === actual.planner_version &&
       this.recordsMatch(expected.model_versions, actual.model_versions) &&
       this.recordsMatch(expected.index_versions, actual.index_versions) &&
-      this.recordsMatch(
+      this.deepEqualUnknown(
         expected.feature_flags as Readonly<Record<string, unknown>>,
         actual.feature_flags as Readonly<Record<string, unknown>>,
       )
@@ -166,5 +166,42 @@ export class ReplayUseCase {
       if (a[ak] !== b[bk]) return false;
     }
     return true;
+  }
+
+  /**
+   * Deep structural equality for snapshot feature flags.
+   */
+  private deepEqualUnknown(a: unknown, b: unknown): boolean {
+    if (Object.is(a, b)) return true;
+
+    if (Array.isArray(a) || Array.isArray(b)) {
+      if (!Array.isArray(a) || !Array.isArray(b)) return false;
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!this.deepEqualUnknown(a[i], b[i])) return false;
+      }
+      return true;
+    }
+
+    if (this.isPlainRecord(a) || this.isPlainRecord(b)) {
+      if (!this.isPlainRecord(a) || !this.isPlainRecord(b)) return false;
+      const aKeys = Object.keys(a).sort();
+      const bKeys = Object.keys(b).sort();
+      if (aKeys.length !== bKeys.length) return false;
+      for (let i = 0; i < aKeys.length; i++) {
+        const ak = aKeys[i];
+        const bk = bKeys[i];
+        if (ak === undefined || bk === undefined) return false;
+        if (ak !== bk) return false;
+        if (!this.deepEqualUnknown(a[ak], b[bk])) return false;
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  private isPlainRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }

@@ -1,4 +1,5 @@
 import type { QueryLookupProvenance } from '../../query/model/query-lookup-provenance.js';
+import type { QueryPolicy } from '../../query/model/query-policy.js';
 
 /**
  * Query-side provenance preserved in decision traces for noisy lookup debugging.
@@ -7,6 +8,17 @@ import type { QueryLookupProvenance } from '../../query/model/query-lookup-prove
  * for RFC-007 wording and call-site clarity.
  */
 export type DecisionQueryProvenance = QueryLookupProvenance;
+
+/**
+ * Policy shape preserved in traces. It intentionally captures the stable
+ * planner-compiled directives without forcing a generic record cast.
+ */
+export type DecisionTracePolicy = Pick<
+  QueryPolicy,
+  'requireExact' | 'allowApproximate' | 'requireClarification' | 'fallbackMode'
+> & {
+  readonly policyReasonCodes?: readonly string[] | undefined;
+};
 
 /**
  * A complete diagnostic trace of a decision, per RFC-007 §9.
@@ -29,7 +41,7 @@ export interface DecisionTrace {
     /** The route that actually executed after API overrides. */
     readonly effectiveRoute?: string | undefined;
     /** Policy directives active during decision-making. */
-    readonly policy: Readonly<Record<string, unknown>>;
+    readonly policy: DecisionTracePolicy;
   };
 
   /** Numeric signals that fed into the decision gates. */

@@ -6,7 +6,11 @@ import { buildSearchCacheRequestContext } from './search-usecase-cache-context.j
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 
 export type SnapshotVersionInjection =
-  | { readonly modelVersions: Readonly<Record<string, string>>; readonly indexVersions: Readonly<Record<string, string>> }
+  | {
+      readonly modelVersions: Readonly<Record<string, string>>;
+      readonly indexVersions: Readonly<Record<string, string>>;
+      readonly featureFlags: Readonly<Record<string, boolean>>;
+    }
   | undefined;
 
 /**

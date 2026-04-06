@@ -11,6 +11,8 @@ import { getRequestId } from '../request-id.js';
 
 /**
  * POST /v1/search/hybrid — force hybrid search route.
+ * Compare-style queries still reuse the shared decomposition path and may
+ * therefore return a ComparisonSearchResponse.
  */
 export function registerHybridRoute(
   app: FastifyInstance,

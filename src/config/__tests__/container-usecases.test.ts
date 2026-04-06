@@ -27,7 +27,7 @@ describe('buildUseCaseContainerServices', () => {
       decisionEngine: { decide: vi.fn() },
       responseBuilder: { build: vi.fn() },
       mixedSolver: { solve: vi.fn() },
-      snapshotVersions: { modelVersions: {}, indexVersions: {} },
+      snapshotVersions: { modelVersions: {}, indexVersions: {}, featureFlags: {} },
       querySanitizer,
       injectionJudge,
       cacheService: { getSearchResponse: vi.fn(), setSearchResponse: vi.fn() },

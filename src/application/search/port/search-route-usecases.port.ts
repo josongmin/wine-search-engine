@@ -51,5 +51,8 @@ export interface ResolveUseCasePort {
 }
 
 export interface HybridUseCasePort {
-  execute(request: HybridSearchRequest, requestId: string): Promise<SearchResponseV1>;
+  execute(
+    request: HybridSearchRequest,
+    requestId: string,
+  ): Promise<SearchResponseV1 | ComparisonSearchResponse>;
 }

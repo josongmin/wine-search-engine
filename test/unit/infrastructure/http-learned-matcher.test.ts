@@ -106,4 +106,31 @@ describe('HttpLearnedMatcherAdapter', () => {
       }),
     );
   });
+
+  it('throws when the HTTP request exceeds the configured timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          const sig = init?.signal;
+          if (sig?.aborted) {
+            reject(new DOMException('Aborted', 'AbortError'));
+            return;
+          }
+          sig?.addEventListener('abort', () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+      }),
+    );
+
+    const adapter = new HttpLearnedMatcherAdapter({
+      url: 'http://matcher.local',
+      httpTimeoutMs: 5,
+    });
+
+    await expect(
+      adapter.match('q', [makeCandidate('entity-opus-one', 'Opus One 2018')]),
+    ).rejects.toThrow('LearnedMatcher service: request timed out after 5ms');
+  });
 });

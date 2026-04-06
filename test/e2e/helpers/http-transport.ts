@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z, type ZodType } from 'zod';
 import {
+  ComparisonSearchResponseSchema,
   ErrorResponseSchema,
   InterpretResponseSchema,
   ResolveResponseSchema,
   SearchResponseSchema,
+  type ComparisonSearchResponseBody,
   type ErrorResponseBody,
   type InterpretResponseBody,
   type ResolveResponseBody,
@@ -105,6 +107,10 @@ function parseWithSchema<T>(
 
 export function parseSearchResponse(response: JsonHttpResponse): SearchResponseBody {
   return parseWithSchema(response, SearchResponseSchema, 'search response');
+}
+
+export function parseComparisonResponse(response: JsonHttpResponse): ComparisonSearchResponseBody {
+  return parseWithSchema(response, ComparisonSearchResponseSchema, 'comparison response');
 }
 
 export function parseErrorResponse(response: JsonHttpResponse): ErrorResponseBody {

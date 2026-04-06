@@ -1,6 +1,9 @@
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
 import type { InjectionJudgePort } from '../port/injection-judge.port.js';
+
+const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
 
 /**
  * LLM-as-Judge for borderline prompt injection detection.
@@ -77,8 +80,7 @@ export class LLMInjectionJudge implements InjectionJudgePort {
       }
     } catch (err) {
       // Redis error — log and continue to LLM query
-      // In production, you might want stricter error handling here
-      console.warn('[LLMInjectionJudge] Redis cache miss (error):', err);
+      log.warn({ err }, 'redis cache get error (treating as miss)');
     }
 
     // Cache miss: query the LLM-backed classifier
@@ -88,16 +90,13 @@ export class LLMInjectionJudge implements InjectionJudgePort {
     } catch (err) {
       // Propagate classifier failures so the query-entry security layer can
       // apply the configured fail-open/fail-closed policy consistently.
-      console.warn(
-        '[LLMInjectionJudge] LLM classifier error:',
-        err instanceof Error ? err.message : String(err),
-      );
+      log.warn({ err }, 'LLM classifier error');
       throw err;
     }
 
     // Store result in Redis (non-blocking)
     this.storeCacheAsync(cacheKey, isInjection).catch((err: unknown) => {
-      console.warn('[LLMInjectionJudge] Redis store error:', err);
+      log.warn({ err }, 'redis cache store error');
       // Swallow error — cache failure should not break the main flow
     });
 

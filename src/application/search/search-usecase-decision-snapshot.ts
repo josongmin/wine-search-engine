@@ -19,7 +19,7 @@ export function buildDecisionSnapshotFromRuntimeVersions(
     policy_rule_version: DEFAULT_POLICY_RULE_VERSION,
     threshold_profile_id: DEFAULT_THRESHOLD_PROFILE_ID,
     planner_version: DEFAULT_PLANNER_VERSION,
-    feature_flags: {},
+    feature_flags: versions?.featureFlags ?? {},
   };
 }
 
@@ -28,7 +28,7 @@ export function buildDecisionSnapshotFromRuntimeVersions(
  */
 export function buildDecisionSnapshotFromPlan(
   plan: QueryPlanV1,
-  versions?: { readonly modelVersions: Readonly<Record<string, string>>; readonly indexVersions: Readonly<Record<string, string>> },
+  versions?: SnapshotVersions,
 ): DecisionSnapshot {
   const runtimeSnapshot = buildDecisionSnapshotFromRuntimeVersions(versions);
 

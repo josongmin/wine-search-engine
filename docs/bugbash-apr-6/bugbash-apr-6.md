@@ -91,11 +91,11 @@ flowchart TB
 ### 이번 실행에서 확인한 것 (요약)
 
 - **51개** `.ts` 유지; `TODO` / `FIXME` / `console.*` 프로덕션 매치 **없음** (grep).
-- **`hybrid.usecase.ts`**: `decomposedSearch` 문자열/참조 **없음** → **RC-B** (라우트 조합 불일치) 여전히 해당.
+- **`hybrid.usecase.ts`**: shared `decomposedSearch` wiring 반영; `/v1/search/hybrid`도 compare query에서 `ComparisonSearchResponse`를 반환할 수 있도록 contract 포함 정렬됨.
 - **Replay** (`replay.usecase.ts`): `currentSnapshot = buildDecisionSnapshotFromRuntimeVersions(...)`; 비검색 응답은 **`UnexpectedReplayResponseError`** (DomainError).
 - **Decomposed / Resolve**: 부모 `context` / `sessionContext` / `queryBudget` 전달과 `Resolve` Constraint SAT fail-fast는 반영됨.
 - **스냅샷** (`search-usecase-decision-snapshot.ts`): 런타임 기본 vs 플랜 오버레이 의미 정리는 여전히 **RC-A**.
-- **`throw new Error`**: 프로덕션 **`decomposed-search.usecase.ts` 1곳**만.
+- **`throw new Error`**: 프로덕션 `src/application/search/**/*.ts` 기준 **매치 없음**.
 - **`plan.policy as unknown as`**: `search-usecase-execute-builders.ts` **2곳**.
 
 ---
@@ -114,7 +114,7 @@ flowchart TB
 | 패턴 | 위치 |
 |------|------|
 | `plan.policy as unknown as …` | `search-usecase-execute-builders.ts` (2곳) |
-| `throw new Error` | **`decomposed-search.usecase.ts` (1곳)** — replay는 DomainError로 대체됨 |
+| `throw new Error` | **매치 없음** |
 | ` as any` | **테스트만**: `__tests__/search-injection-defense.test.ts` |
 
 ### 1.2 파일 인벤토리 (51)
@@ -172,22 +172,21 @@ flowchart TB
 
 | 증상 | 정리 |
 |------|------|
-| Hybrid | `HybridUseCase` pre-route에 **`decomposedSearch` 없음** → 메인과 “비교 분해” 불일치 가능. |
 | Interpret | Constraint SAT·캐시 **없음** — “플래너만”이면 의도적일 수 있음. |
 
 **한 방향 액션**: “검색 패밀리”에 대한 **기능 매트릭스**(어떤 라우트에 어떤 게 들어가는지)를 한 번 정하고, 코드는 그 표에 맞춰 **한 번에** wiring·OpenAPI·RFC를 맞춘다.
 
 ---
 
-### RC-C — **예외·에러 계약**이 도메인 계층까지 내려오지 않음
+### RC-C — **검색 패밀리 비정상 응답 에러 계약**
 
-**원인**: 비정상 분기가 plain `Error`로 남으면 HTTP 매핑·로깅·클라이언트 처리가 **라우트마다 달라지기 쉽다.**
+이 축은 현재 search 영역 기준으로는 대부분 닫혔다.
 
-| 증상 | 정리 |
-|------|------|
-| Decomposed | `decomposed-search.usecase.ts`에 **`throw new Error(...)` 1곳** 남음 — Replay 쪽은 이미 DomainError로 정리됨. |
+- Replay: `UnexpectedReplayResponseError`
+- Decomposed: `UnexpectedDecomposedResponseError`
+- 프로덕션 `src/application/search/**/*.ts` 기준 plain `Error` 매치 없음
 
-**한 방향 액션**: “검색 파이프라인 비정상 응답”에 대한 **소수의 DomainError 코드**를 정하고, 한 번에 승격.
+남은 일은 “새 비정상 응답 분기 추가 시 DomainError를 기본값으로 유지”하는 정도의 운영 규율이다.
 
 ---
 

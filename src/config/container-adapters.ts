@@ -129,7 +129,10 @@ export function buildCoreAdapterServices(
     candidateAttributes: new VespaCandidateAttributes(searchIndex),
     learnedMatcher:
       config.learnedMatcher.url !== undefined
-        ? new HttpLearnedMatcherAdapter(config.learnedMatcher.url)
+        ? new HttpLearnedMatcherAdapter({
+            url: config.learnedMatcher.url,
+            httpTimeoutMs: config.learnedMatcher.httpTimeoutMs,
+          })
         : undefined,
   };
 }

@@ -255,6 +255,74 @@ describe('HybridUseCase', () => {
     expect(response.meta.requestId).toBe('req-cached');
   });
 
+  it('reuses shared decomposition for compare-style hybrid queries before planning', async () => {
+    const decomposedSearch = {
+      execute: vi.fn().mockResolvedValue({
+        queryType: 'comparison',
+        originalQuery: 'Opus One vs Screaming Eagle',
+        comparisonIntent: 'compare',
+        entities: [
+          {
+            subQuery: 'Opus One',
+            topResult: null,
+            resultCount: 0,
+            resolutionStatus: 'failed',
+            allResults: [],
+          },
+          {
+            subQuery: 'Screaming Eagle',
+            topResult: null,
+            resultCount: 0,
+            resolutionStatus: 'failed',
+            allResults: [],
+          },
+        ],
+        overallStatus: 'failed',
+        requestId: 'req-hybrid-compare',
+        executionTimeMs: 3,
+      }),
+    };
+    const queryPlanner = { plan: vi.fn() };
+    const useCase = new HybridUseCase({
+      queryPlanner: queryPlanner as never,
+      candidatePool: { generate: vi.fn() } as never,
+      ranker: { rank: vi.fn() } as never,
+      decisionEngine: { decide: vi.fn() } as never,
+      responseBuilder: createResponseBuilder() as never,
+      querySanitizer: safeSanitizer as never,
+      decomposedSearch: decomposedSearch as never,
+    });
+
+    const response = await useCase.execute(
+      {
+        query: 'Opus One vs Screaming Eagle',
+        context: { locale: 'en-US', currency: 'USD' },
+        sessionContext: { sessionId: 'session-2', previousEntities: [createEntityId('prev')] },
+        queryBudget: { maxLatencyMs: 700, maxCandidates: 10, rerankLimit: 5 },
+      },
+      'req-hybrid-compare',
+    );
+
+    expect(response).toMatchObject({
+      queryType: 'comparison',
+      comparisonIntent: 'compare',
+      originalQuery: 'Opus One vs Screaming Eagle',
+    });
+    expect(decomposedSearch.execute).toHaveBeenCalledWith(
+      ['Opus One', 'Screaming Eagle'],
+      'compare',
+      'Opus One vs Screaming Eagle',
+      'req-hybrid-compare',
+      expect.any(Number),
+      {
+        context: { locale: 'en-US', currency: 'USD' },
+        sessionContext: { sessionId: 'session-2', previousEntities: [expect.any(String)] },
+        queryBudget: { maxLatencyMs: 700, maxCandidates: 10, rerankLimit: 5 },
+      },
+    );
+    expect(queryPlanner.plan).not.toHaveBeenCalled();
+  });
+
   it('uses the shared entity-route fallback before specialized compare retrieval', async () => {
     const anchorEntityId = createEntityId('anchor');
     const comparedEntityId = createEntityId('peer');
