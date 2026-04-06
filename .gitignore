@@ -46,6 +46,14 @@ CLAUDE.local.md
 test-results/
 playwright-report/
 
+# Archives & local snapshots (do not commit dumps)
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
 # Misc
 *.pem
 *.key
