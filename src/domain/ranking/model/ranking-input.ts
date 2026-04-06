@@ -1,6 +1,7 @@
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
+import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
 import type { ConstraintBundle, EntityId } from '../../shared/types/index.js';
 
 /**
@@ -41,4 +42,17 @@ export interface RankingInput {
 
   /** Optional user context for preference-based signals. */
   readonly userContext?: UserContext | undefined;
+
+  /**
+   * T5.3: Active retrieval channels for this ranking pass.
+   * Used for logging and tracing only — per-candidate channel-aware weight
+   * adjustment reads channel information from each candidate's retrievalTrace.
+   */
+  readonly activeChannels?: readonly RetrievalChannel[] | undefined;
+
+  /**
+   * T5.4: When true, forces precision reranking regardless of gate conditions.
+   * Intended for testing and operator overrides only.
+   */
+  readonly rerankForced?: boolean;
 }

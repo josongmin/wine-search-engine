@@ -64,7 +64,7 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.apiKey}`,
           },
-          body: JSON.stringify({ model: this.model, input }),
+          body: JSON.stringify({ model: this.model, input, dimensions: 128 }),
         },
         this.httpTimeoutMs,
       );

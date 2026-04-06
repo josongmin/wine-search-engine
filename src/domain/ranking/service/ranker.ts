@@ -5,13 +5,14 @@ import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
-import { resolveWeights } from '../model/scoring-weights.js';
+import { resolveWeights, resolveChannelAwareWeights } from '../model/scoring-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
 import { type EvidenceMapper } from './evidence-mapper.js';
 import { WineAttributeEncoders } from './wine-attribute-encoder.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { evaluateRerankGate } from './rerank-gate.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -45,11 +46,6 @@ function buildWineText(entry: ScoredEntry): string {
   }
   return passage;
 }
-
-/**
- * Minimum candidate count to justify the cost of cross-encoder reranking.
- */
-const RERANK_THRESHOLD = 5;
 
 /**
  * Internal intermediate representation during ranking.
@@ -154,6 +150,7 @@ export type RankerOptions = {
 export class Ranker {
   private _lastCoarsePruneSummary: CoarsePruneStageSummary | undefined;
   private _lastRerankExecuted = false;
+  private _lastRerankGateReason: string | undefined;
   private readonly signalComputer: SignalComputer;
   private readonly scoreAggregator: ScoreAggregator;
   private readonly evidenceMapper: EvidenceMapper;
@@ -161,7 +158,6 @@ export class Ranker {
   private readonly attributeEncoder: WineAttributeEncoderPort;
   private readonly rerankTopK: number;
   private readonly rerankBlendScale: number;
-  private readonly rerankThreshold: number;
 
   /**
    * @param signalComputer - Computes individual signal scores.
@@ -182,7 +178,6 @@ export class Ranker {
     this.attributeEncoder = options.attributeEncoder ?? WineAttributeEncoders;
     this.rerankTopK = options.rerankTopK ?? DEFAULT_RERANK_TOP_K;
     this.rerankBlendScale = options.rerankBlendScale ?? 1;
-    this.rerankThreshold = options.rerankThreshold ?? RERANK_THRESHOLD;
   }
 
   /**
@@ -202,6 +197,14 @@ export class Ranker {
   }
 
   /**
+   * T5.4: Returns the gate decision reason from the most recent rank() call.
+   * Populated by evaluateRerankGate() — useful for pipeline trace notes.
+   */
+  getLastRerankGateReason(): string | undefined {
+    return this._lastRerankGateReason;
+  }
+
+  /**
    * Ranks candidates according to the scoring formula and returns
    * ordered results with evidence trails.
    *
@@ -212,6 +215,7 @@ export class Ranker {
     const { queryPlan, candidates, anchorProfile, constraints } = input;
 
     this._lastRerankExecuted = false;
+    this._lastRerankGateReason = undefined;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -228,10 +232,16 @@ export class Ranker {
       );
       const constraintState = buildConstraintState(input, candidate);
 
-      // Step 3: Aggregate signals into final score
+      // Step 3: Aggregate signals into final score.
+      // T5.3: Adjust weights based on which retrieval channels contributed
+      // to this specific candidate, then normalise proportionally.
+      const candidateWeights = resolveChannelAwareWeights(
+        candidate.retrievalTrace.candidateSources,
+        weights,
+      );
       const finalScore = this.scoreAggregator.aggregate(
         componentScores,
-        weights,
+        candidateWeights,
       );
 
       scored.push({
@@ -313,30 +323,42 @@ export class Ranker {
     // Step 5: Sort by finalScore descending
     viable.sort((a, b) => b.finalScore - a.finalScore);
 
-    // Step 6: Optionally rerank top-K via cross-encoder
+    // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
-    if (
-      this.reranker !== undefined &&
-      viable.length > this.rerankThreshold
-    ) {
-      try {
-        finalOrder = await this.applyReranking(
-          queryPlan.normalizedQuery,
-          viable,
-          queryPlan.queryClass,
-        );
-        this._lastRerankExecuted = true;
-      } catch (err) {
-        bootstrapLogger.warn(
-          {
-            err: err instanceof Error ? err.message : String(err),
-            queryClass: queryPlan.queryClass,
-            viableCount: viable.length,
-            rerankTopK: this.rerankTopK,
-          },
-          '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
-        );
-        finalOrder = viable;
+    if (this.reranker !== undefined) {
+      const gateDecision = evaluateRerankGate({
+        candidateCount: viable.length,
+        queryClass: queryPlan.queryClass,
+        effectiveRoute: queryPlan.route,
+        hasAnchor: anchorProfile !== undefined,
+        ...(input.rerankForced !== undefined ? { rerankForced: input.rerankForced } : {}),
+      });
+
+      this._lastRerankGateReason = gateDecision.reason;
+
+      if (gateDecision.shouldRerank) {
+        const effectiveTopK = gateDecision.topKOverride ?? this.rerankTopK;
+        try {
+          finalOrder = await this.applyReranking(
+            queryPlan.normalizedQuery,
+            viable,
+            queryPlan.queryClass,
+            effectiveTopK,
+          );
+          this._lastRerankExecuted = true;
+        } catch (err) {
+          bootstrapLogger.warn(
+            {
+              err: err instanceof Error ? err.message : String(err),
+              queryClass: queryPlan.queryClass,
+              viableCount: viable.length,
+              rerankTopK: effectiveTopK,
+              gateReason: gateDecision.reason,
+            },
+            '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
+          );
+          finalOrder = viable;
+        }
       }
     }
 
@@ -411,9 +433,10 @@ export class Ranker {
     query: string,
     viable: readonly ScoredEntry[],
     queryClass: QueryClass,
+    topKLimit: number = this.rerankTopK,
   ): Promise<readonly ScoredEntry[]> {
-    const topK = viable.slice(0, this.rerankTopK);
-    const rest = viable.slice(this.rerankTopK);
+    const topK = viable.slice(0, topKLimit);
+    const rest = viable.slice(topKLimit);
 
     // Build wine-aware passage text for the cross-encoder (RFC-017 §5.2).
     const rerankCandidates: RerankCandidate[] = topK.map((entry) => ({
@@ -428,7 +451,7 @@ export class Ranker {
     const rerankResults = await reranker.rerank(
       query,
       rerankCandidates,
-      this.rerankTopK,
+      topKLimit,
     );
 
     // Build lookups

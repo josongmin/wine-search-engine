@@ -36,6 +36,13 @@ function makeCandidate(id: string): HybridCandidate {
     retrievalFusionScore: 0.5,
     matchedConstraints: [],
     unmetHardConstraints: [],
+    retrievalTrace: {
+      retrievalProfile: 'default',
+      lexicalQueriesUsed: [],
+      semanticQueriesUsed: [],
+      filtersApplied: [],
+      candidateSources: [],
+    },
   } as unknown as HybridCandidate;
 }
 

@@ -57,7 +57,7 @@ describe('SearchPipelineEvaluator', () => {
     ]);
   });
 
-  it('derives retrieval provenance slices from result items when direct slices are absent', async () => {
+  it('reuses runtime-produced response meta provenance slices when direct slices are absent', async () => {
     const searchUseCase = {
       execute: vi.fn(async () => ({
         queryType: 'search' as const,
@@ -78,6 +78,16 @@ describe('SearchPipelineEvaluator', () => {
           route: 'hybrid',
           version: '1.0.0',
           engine_schema_version: 'search_response_v1',
+          retrievalProvenanceSlices: [{
+            queryId: 'eval-derived',
+            candidateEntityId: 'wine-1',
+            channels: ['dense_anchor', 'dense_semantic'],
+            topChannel: 'dense_anchor',
+            anchorConditioned: true,
+            protected: false,
+            fusionScore: 0.88,
+            rank: 1,
+          }],
         },
         results: [
           {
@@ -131,7 +141,7 @@ describe('SearchPipelineEvaluator', () => {
     expect(output.retrievalProvenanceSlices).toEqual([
       expect.objectContaining({
         candidateEntityId: 'wine-1',
-        topChannel: 'anchor_similarity',
+        topChannel: 'dense_anchor',
       }),
     ]);
   });

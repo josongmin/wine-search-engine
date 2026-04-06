@@ -34,12 +34,17 @@ query views
 ## 레포에서 건드리는 축
 
 - [candidate-pool.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/candidate-pool.ts)
+- [candidate-assembly.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/candidate-assembly.ts)
+- [evidence-accumulator.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/evidence-accumulator.ts)
+- [trace-vocab-aligner.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/trace-vocab-aligner.ts)
 - [retrieval-input.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/model/retrieval-input.ts)
 - [hybrid-candidate.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/model/hybrid-candidate.ts)
 - [retrieval-trace.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/model/retrieval-trace.ts)
 - [fusion.ts](/Users/songmin/wine-search-engine/src/domain/retrieval/service/fusion.ts)
-- [pg-eval-result-store.ts](/Users/songmin/wine-search-engine/src/infrastructure/adapter/pg-eval-result-store.ts)
-- [eval-runner.ts](/Users/songmin/wine-search-engine/src/domain/evaluation/service/eval-runner.ts)
+- [search-usecase-post-route-phase.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-post-route-phase.ts)
+- [search-usecase-eval-provenance.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-eval-provenance.ts)
+- [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts)
+- [search-pipeline-evaluator.ts](/Users/songmin/wine-search-engine/src/infrastructure/adapter/search-pipeline-evaluator.ts)
 - [scripts/eval](/Users/songmin/wine-search-engine/scripts/eval)
 
 ---
@@ -90,14 +95,32 @@ RRF만으로 끝내지 않고:
 
 를 보장하는 assembly를 도입한다.
 
+실제 runtime closure 기준은 아래와 같다.
+
+- assembly 순서는 `hard filter -> dedupe -> sort -> protection -> quota`로 고정한다.
+- hard constraint 실패 후보는 어떤 보호 정책으로도 복권하지 않는다.
+- 같은 entity에서 높은 점수 후보가 invalid이고 낮은 점수 후보가 valid여도 valid 후보가 살아남아야 한다.
+
 ### Step 3. Dedupe / merge semantics 재정의
 
 동일 entity가 여러 채널에서 들어왔을 때 단순 overwrite가 아니라 multi-source evidence를 누적해야 한다.
 
+실제 merge output은 `canonicalEnvelope`만 남기는 것으로 끝내지 않는다. downstream에 전달되는 SSOT는 `mergedEnvelope`이며, 최소한 아래 provenance를 deterministic하게 유지해야 한다.
+
+- `channels`: union + stable order
+- `matchedFilterConstraints`: union + stable order
+- `failedHardConstraints`: union + stable order
+- `anchorConditioned`: any-true
+- `protectedInclusionReason`: highest-priority single reason
+- `queryViewMatches`: `(viewName, matchedText, channel)` 기준 dedup
+- `channelScores`: channel별 winner 하나만 유지
+
 ### Step 4. Trace / observability alignment
 
 runtime 로그와 offline eval이 같은 provenance vocabulary를 쓰게 맞춘다.  
-`retrieval-trace.ts`만 바꾸는 작업이 아니라, evaluation store / eval runner / quality scripts가 같은 vocabulary를 읽도록 정렬하는 작업으로 정의한다.
+`retrieval-trace.ts`만 바꾸는 작업이 아니라, response meta / evaluator / quality scripts가 같은 vocabulary를 읽도록 정렬하는 작업으로 정의한다.
+
+Wave 1 closure 기준에서 evaluator는 result items를 다시 해석해 provenance를 추론하지 않는다. runtime이 만든 `response.meta.retrievalProvenanceSlices`를 재사용해야 한다.
 
 중요한 점은, 이 단계가 query understanding observability를 흡수하는 작업은 아니라는 것이다.  
 Wave 1에서는 query payload와 retrieval provenance payload를 분리해 유지한다.
@@ -123,6 +146,7 @@ known-item, exact alias, anchor-conditioned, hard-constraint-compatible 후보�
 - candidate merge가 overwrite가 아니라 evidence accumulation 기반이 된다.
 - pool assembly가 query family에 따라 정책적으로 달라질 수 있다.
 - ranking은 candidate provenance를 잃지 않고 입력받는다.
+- response meta가 canonical retrieval provenance slices를 가지며 evaluator가 같은 slices를 그대로 사용한다.
 - Wave 1 gate의 closure seam으로서 candidate envelope contract와 assembly integration test가 안정화된다.
 
 ## 검증 전략

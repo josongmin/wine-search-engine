@@ -73,12 +73,17 @@ grape, region, style, body, sweetness, pairing, producer prestige, price-relativ
 현재 [search-usecase-pre-route-phase.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-pre-route-phase.ts)에는 planner 이전의 decomposition shortcut이 있다.  
 Wave 1 종료 시점엔 이 경로가 별도 의미 체계를 갖는 것이 아니라, query understanding 결과를 소비하는 compatibility adapter가 되어야 한다.
 
+구체적으로는 pre-route early detection과 planner path가 같은 decomposition helper를 공유해야 한다.  
+comparison decomposition은 계속 `comparison` family로 분류하고, non-comparison decomposition만 `multi_intent`로 승격한다.
+
 ### Step 5. Query understanding observability
 
 query family, rewrite id, ambiguity class, anchor/relative extraction 결과를 runtime logs와 offline eval slice vocabulary로 맞춘다.
 
 이 단계는 기존 [search-log-schema.ts](/Users/songmin/wine-search-engine/src/observability/search-log-schema.ts)를 무작정 확장하는 것으로 끝내지 않는다.  
 현재 search log는 execution meta 중심이라 query understanding payload와 retrieval provenance payload를 분리해 설계하는 것이 맞다.
+
+Wave 1 closure 기준에서 `ambiguous`, `comparison`, `multi_intent` 우선순위는 pre-route early log와 planner output observability slice에서 같아야 한다.
 
 ---
 
@@ -97,6 +102,7 @@ query family, rewrite id, ambiguity class, anchor/relative extraction 결과를 
 - anchor/relative/compare류가 명시적 query family로 구분된다.
 - ontology normalization 결과가 candidate generation과 ranking에 직접 사용된다.
 - query understanding 변경이 runtime logs/eval slices로 관측 가능하다.
+- decomposition strategy와 query family classification이 pre-route / planner / runtime log에서 같은 의미를 가진다.
 
 ## 검증 전략
 

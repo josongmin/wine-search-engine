@@ -1,4 +1,5 @@
 import type { QueryClass } from '../../shared/types/index.js';
+import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
 
 /**
  * Weight configuration for the score aggregation formula.
@@ -149,3 +150,114 @@ export function resolveWeights(queryClass: QueryClass): ScoringWeights {
 }
 
 export { DEFAULT_WEIGHTS };
+
+/**
+ * Adjusts scoring weights based on which retrieval channels contributed to a
+ * specific candidate. The adjusted weights are then normalized proportionally
+ * so the total weight sum is preserved — preventing calibration drift while
+ * still shifting relative emphasis toward the signals that channels make more
+ * precise.
+ *
+ * Rules (applied in order, adjustments are multiplicative on base weights):
+ *  - `anchor_similarity` or `compare_anchor` → boost `anchorSimilarity` × 1.3,
+ *    reduce `semantic` by the reciprocal factor (÷ 1.3).
+ *  - `learned_sparse` → boost `semantic` × 1.1 (learned sparse improves precision).
+ *  - `relative_filter` → boost `softConstraint` × 1.2.
+ *  - Only `sparse_bm25` (no dense channel) → boost `attributeAlignment` × 1.2.
+ *
+ * After all adjustments the non-gate weights are normalised proportionally so
+ * they sum to the same total as the input weights — preserving ranking
+ * calibration across query classes.
+ *
+ * Gate-only fields (`entityIntegrityThreshold`) are never adjusted.
+ *
+ * @param channels - Retrieval channels that contributed to this candidate.
+ * @param baseWeights - Query-class-resolved weights (output of {@link resolveWeights}).
+ * @returns Channel-adjusted, proportionally-normalised weights.
+ */
+export function resolveChannelAwareWeights(
+  channels: readonly (RetrievalChannel | string)[],
+  baseWeights: ScoringWeights,
+): ScoringWeights {
+  const channelSet = new Set(channels);
+
+  const hasAnchorChannel =
+    channelSet.has('anchor_similarity') || channelSet.has('compare_anchor');
+  const hasLearnedSparse = channelSet.has('learned_sparse');
+  const hasRelativeFilter = channelSet.has('relative_filter');
+
+  // "Only sparse_bm25, no dense" — none of the dense/semantic family is present.
+  const hasDenseChannel =
+    channelSet.has('dense_semantic') ||
+    channelSet.has('dense_anchor') ||
+    channelSet.has('anchor_similarity') ||
+    channelSet.has('compare_anchor');
+  const onlySparseBm25 = channelSet.has('sparse_bm25') && !hasDenseChannel;
+
+  // Start from base weights (mutable copy of the numeric knobs).
+  let anchorSimilarity = baseWeights.anchorSimilarity;
+  let semantic = baseWeights.semantic;
+  let softConstraint = baseWeights.softConstraint;
+  let attributeAlignment = baseWeights.attributeAlignment;
+  const entityIntegrity = baseWeights.entityIntegrity;
+  const preferenceAlignment = baseWeights.preferenceAlignment;
+  const popularity = baseWeights.popularity;
+  const availability = baseWeights.availability;
+  const uncertaintyPenalty = baseWeights.uncertaintyPenalty;
+
+  if (hasAnchorChannel) {
+    anchorSimilarity *= 1.3;
+    semantic /= 1.3;
+  }
+  if (hasLearnedSparse) {
+    semantic *= 1.1;
+  }
+  if (hasRelativeFilter) {
+    softConstraint *= 1.2;
+  }
+  if (onlySparseBm25) {
+    attributeAlignment *= 1.2;
+  }
+
+  // Proportional normalisation — preserve total of non-gate, non-penalty weights.
+  // Penalty (uncertaintyPenalty) is excluded from the normalisation pool because
+  // it is subtracted in the aggregator; we normalise it separately.
+  const baseNonPenaltySum =
+    baseWeights.entityIntegrity +
+    baseWeights.anchorSimilarity +
+    baseWeights.semantic +
+    baseWeights.softConstraint +
+    baseWeights.attributeAlignment +
+    baseWeights.preferenceAlignment +
+    baseWeights.popularity +
+    baseWeights.availability;
+
+  const adjustedNonPenaltySum =
+    entityIntegrity +
+    anchorSimilarity +
+    semantic +
+    softConstraint +
+    attributeAlignment +
+    preferenceAlignment +
+    popularity +
+    availability;
+
+  // Guard: if there is nothing to normalise (all weights are zero) return as-is.
+  const normFactor =
+    adjustedNonPenaltySum > 0
+      ? baseNonPenaltySum / adjustedNonPenaltySum
+      : 1;
+
+  return {
+    entityIntegrity: entityIntegrity * normFactor,
+    anchorSimilarity: anchorSimilarity * normFactor,
+    semantic: semantic * normFactor,
+    softConstraint: softConstraint * normFactor,
+    attributeAlignment: attributeAlignment * normFactor,
+    preferenceAlignment: preferenceAlignment * normFactor,
+    popularity: popularity * normFactor,
+    availability: availability * normFactor,
+    uncertaintyPenalty,
+    entityIntegrityThreshold: baseWeights.entityIntegrityThreshold,
+  };
+}

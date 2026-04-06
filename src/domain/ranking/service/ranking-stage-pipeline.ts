@@ -91,6 +91,7 @@ export class RankingStagePipeline {
     // The heuristic is unreliable: blended scores can remain in descending order
     // even after reranking if the blend weight is low.
     const precisionRerankExecuted = this.ranker.getLastRerankExecuted();
+    const rerankGateReason = this.ranker.getLastRerankGateReason();
     stageTraces.push({
       stage: 'precision_rerank',
       inputCount: results.length,
@@ -101,6 +102,7 @@ export class RankingStagePipeline {
         status: precisionRerankExecuted
           ? 'executed_latency_bundled_with_primary_rank'
           : 'skipped',
+        ...(rerankGateReason !== undefined ? { rerankGateReason } : {}),
       },
     });
 

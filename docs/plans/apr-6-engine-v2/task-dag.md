@@ -216,6 +216,8 @@ flowchart TD
 
 - candidate envelope contract integration test 통과
 - provenance vocabulary가 runtime logs와 eval slices에서 동일하게 사용됨
+- candidate-pool output, `response.meta.retrievalProvenanceSlices`, evaluator output이 같은 provenance SSOT를 재사용하고 heuristic 재구성이 없음
+- pre-route early decomposition log와 planner-path query observability slice가 같은 `decompositionStrategy`를 사용함
 - `npm run test:integration` 통과
 - `npm run test:integration:search-pipeline` 통과
 - `npm run test:e2e:contract` 통과
@@ -288,7 +290,7 @@ flowchart TD
 | T2.2 | M | `src/domain/attribute/service/*`, `src/domain/query/service/rule-based-constraint-extractor.ts` | ontology normalization | internal query/attribute | `npm run test:unit` |
 | T2.3 | M | `src/domain/query/service/anchor-extractor.ts`, `src/domain/mixed/service/anchor-profiler.ts` | anchor/relative understanding | internal query/mixed | `npm run test:unit`, `npm run test:integration` |
 | T2.4 | M | `src/domain/query/service/decomposition-detector.ts`, `src/application/search/search-usecase-pre-route-phase.ts`, `src/domain/mixed/service/mixed-solver.ts` | decomposition semantics 통합 | internal runtime | `npm run test:integration`, `npm run test:e2e:contract` |
-| T2.5 | S | `src/application/search/search-usecase-pre-route-phase.ts`, `src/application/search/search-usecase-planner-context.ts`, `src/observability/*`, `scripts/eval/*` | query observability vocabulary를 planner/runtime/eval slice에 공통 반영 | logs/eval only | `npm run test:quality`, `npm run eval:noisy:validate` |
+| T2.5 | S | `src/domain/query/model/query-observability-vocab.ts`, `src/domain/query/model/query-plan.ts`, `src/domain/query/model/query-understanding-snapshot.ts`, `src/domain/query/service/decomposition-detector.ts`, `src/domain/query/service/planner.ts`, `src/application/search/search-usecase-pre-route-phase.ts`, `src/observability/search-log-schema.ts`, `scripts/eval/*` | query observability vocabulary와 decomposition semantics를 planner/runtime/eval slice에 공통 반영 | logs/eval only | `npm run test:quality`, `npm run eval:noisy:validate` |
 
 ### Epic 3
 
@@ -296,10 +298,10 @@ flowchart TD
 |---|---|---|---|---|---|
 | T3.1 | S | `src/domain/retrieval/model/hybrid-candidate.ts`, `src/domain/retrieval/model/candidate-envelope.ts` | candidate envelope 정의 | internal retrieval model | `npm run typecheck`, `npm run test:unit` |
 | T3.2 | S | `src/domain/retrieval/model/retrieval-trace.ts`, `src/domain/retrieval/model/provenance.ts` | provenance vocabulary 타입 정의 | internal trace/eval | `npm run typecheck`, `npm run test:unit` |
-| T3.3 | M | `src/domain/retrieval/service/candidate-pool.ts`, `src/domain/retrieval/service/fusion.ts` | structured assembly layer | internal retrieval runtime | `npm run test:integration`, `npm run test:quality` |
-| T3.4 | M | `src/domain/retrieval/service/candidate-pool.ts`, `src/domain/retrieval/service/fusion.ts` | dedupe/merge evidence accumulation | internal retrieval runtime | `npm run test:integration`, `npm run test:quality` |
+| T3.3 | M | `src/domain/retrieval/service/candidate-assembly.ts`, `src/domain/retrieval/service/candidate-pool.ts`, `src/domain/retrieval/model/candidate-envelope.ts` | structured assembly layer | internal retrieval runtime | `npm run test:integration`, `npm run test:quality` |
+| T3.4 | M | `src/domain/retrieval/service/evidence-accumulator.ts`, `src/domain/retrieval/service/candidate-pool.ts`, `src/domain/retrieval/model/hybrid-candidate.ts`, `src/domain/retrieval/model/candidate-envelope.ts` | dedupe/merge evidence accumulation | internal retrieval runtime | `npm run test:integration`, `npm run test:quality` |
 | T3.5 | S | `src/domain/retrieval/service/candidate-pool.ts` | protected recall policy | internal retrieval policy | `npm run test:integration`, `npm run test:quality` |
-| T3.6 | S | `src/domain/retrieval/model/retrieval-trace.ts`, `src/observability/search-log-schema.ts`, `src/infrastructure/adapter/pg-eval-result-store.ts`, `src/domain/evaluation/service/eval-runner.ts`, `scripts/eval/*` | trace/observability vocabulary를 runtime storage와 offline eval에 동일하게 반영 | logs/eval only | `npm run test:quality`, `npm run eval:noisy:validate` |
+| T3.6 | S | `src/domain/retrieval/service/trace-vocab-aligner.ts`, `src/application/search/search-usecase-eval-provenance.ts`, `src/application/search/search-usecase-post-route-phase.ts`, `src/application/search/search.usecase.ts`, `src/domain/response/model/counterfactual.ts`, `src/domain/response/service/response-builder.ts`, `src/interface/http/schemas/search-response.schema.ts`, `src/infrastructure/adapter/search-pipeline-evaluator.ts` | trace/observability vocabulary를 response/evaluator까지 같은 provenance SSOT로 반영 | logs/eval only | `npm run test:quality`, `npm run eval:noisy:validate` |
 
 ---
 
@@ -640,6 +642,8 @@ Must not change:
 닫는 기준:
 - planner/runtime logs와 offline eval slices가 같은 query vocabulary를 사용
 - query understanding observability가 retrieval trace vocabulary와 별도 payload/schema로 존재
+- ambiguous / comparison / multi-intent 분류 우선순위가 pre-route early log와 planner output observability slice에서 동일함
+- decomposition detector가 만든 strategy가 pre-route early return path와 planner path에서 같은 helper로 계산됨
 
 Must not change:
 - retrieval trace vocabulary
@@ -649,6 +653,8 @@ Must not change:
 - observability payload snapshot tests
 - eval slice serialization tests
 - query understanding log schema unit tests
+- planner / pre-route decomposition parity tests
+- decomposition 기반 `multi_intent` classification tests
 
 #### `T3.1 Candidate envelope contract 정의`
 
@@ -670,19 +676,25 @@ Must not change:
 
 닫는 기준:
 - candidate pool이 단순 fuse 결과가 아니라 structured assembly policy를 적용
+- assembly 순서가 `hard filter -> dedupe -> sort -> protection -> quota`로 고정됨
+- hard-constraint 실패 후보가 더 높은 fused score를 갖더라도, 같은 entity의 valid lower-score 후보를 제거하지 않음
 
 필수 신규 테스트:
 - candidate pool integration test for channel quota/diversity
 - assembly policy quality regression
+- invalid high-score duplicate + valid lower-score duplicate regression test
 
 #### `T3.4 Dedupe/merge evidence accumulation`
 
 닫는 기준:
 - 동일 entity merge가 overwrite가 아니라 evidence accumulation으로 동작
+- merged provenance가 `mergedEnvelope`를 통해 실제 assembled output으로 전달됨
+- `channels`, `matchedFilterConstraints`, `failedHardConstraints`, `queryViewMatches`, `channelScores`, `anchorConditioned`, `protectedInclusionReason` merge 규칙이 deterministic하게 고정됨
 
 필수 신규 테스트:
 - duplicate entity merge unit tests
 - evidence accumulation integration tests
+- candidate-pool output candidate가 merged provenance를 실제로 carry-forward 하는지 검증
 
 #### `T3.5 Protected recall policy`
 
@@ -696,17 +708,19 @@ Must not change:
 #### `T3.6 Trace/observability alignment`
 
 닫는 기준:
-- runtime trace, persisted eval result, offline eval script가 같은 provenance vocabulary를 읽고 씀
+- runtime trace, response meta, evaluator output, offline eval script가 같은 provenance vocabulary를 읽고 씀
 - retrieval provenance observability가 query understanding payload와 다른 schema/field namespace를 가짐
+- evaluator가 result-item heuristic reconstruction 없이 `response.meta.retrievalProvenanceSlices` 또는 same-source runtime slices만 재사용함
 
 Must not change:
 - candidate envelope semantics
 - query understanding observability payload
 
 필수 신규 테스트:
-- runtime trace -> eval storage roundtrip tests
+- runtime trace -> response meta -> evaluator roundtrip tests
 - eval script compatibility tests
 - retrieval provenance log schema tests
+- ranked result provenance slice determinism tests
 
 ### Epic 4
 

@@ -127,6 +127,12 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
     }
 
     const data: unknown = await response.json();
-    return embeddingsFromOpenAiResponse(data);
+    try {
+      return embeddingsFromOpenAiResponse(data);
+    } catch (error) {
+      throw new Error(
+        `Embedding service: unexpected response shape${error instanceof Error ? ` (${error.message})` : ''}`,
+      );
+    }
   }
 }
