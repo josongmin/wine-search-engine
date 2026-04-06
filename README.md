@@ -251,7 +251,7 @@ Evaluates **entity resolution under noisy queries** using `data/noisy-entity-ben
 
 ### How coverage is measured
 
-- **Config:** `vitest.unit.config.ts` (also the **default** `vitest.config.ts` re-export).
+- **Config:** `config/vitest/unit.config.ts` (also the **default** `vitest.config.ts` re-export).
 - **Provider:** `@vitest/coverage-v8` with **`coverage.include`** = `src/**/*.ts` and excludes `**/*.test.ts`, `**/__tests__/**`, and `src/main.ts`.
 - **Outputs:** `coverage/lcov.info` + terminal text (`coverage.reporter`: `text`, `lcov`).
 - **Run:** `npm run test:coverage` (unit lane only — integration/e2e Vespa lanes are separate configs).
@@ -262,13 +262,13 @@ Coverage is **line-oriented on `src/`**; it does **not** automatically include H
 
 | Config | `npm run …` | What runs |
 |--------|-------------|-----------|
-| `vitest.unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + selected `src/__tests__` |
-| `vitest.integration.config.ts` | `test:integration` | Explicit list: HTTP server, error handler, public query security, resolve route, contract registry, interpret schema, … |
-| `vitest.e2e.config.ts` | `test:e2e:fast`, `test:e2e` | `test/e2e/**/*.test.ts` **except** `test/e2e/vespa/**` (in-memory harness, `singleFork`) |
-| `vitest.e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **Tiny** PR smoke: `search-api`, `schema-contract`, `batch-search-api`, `server-protocol` only |
-| `vitest.e2e.vespa.config.ts` | `test:e2e:vespa` (via `scripts/run-vespa-e2e.sh`) | All `test/e2e/vespa/**/*.test.ts`; sets `VESPA_URL` (default `http://localhost:18080` in config) |
-| `vitest.watchlist.config.ts` | `test:watchlist` | Watchlist domain + HTTP + Redis/webhook + contract manifest overlap |
-| `vitest.quality.config.ts` | `test:quality` | Golden set, user journeys, decision utility, learning flywheel, eval unit tests, … |
+| `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + selected `src/__tests__` |
+| `config/vitest/integration.config.ts` | `test:integration` | Explicit list: HTTP server, error handler, public query security, resolve route, contract registry, interpret schema, … |
+| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e` | `test/e2e/**/*.test.ts` **except** `test/e2e/vespa/**` (in-memory harness, `singleFork`) |
+| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **Tiny** PR smoke: `search-api`, `schema-contract`, `batch-search-api`, `server-protocol` only |
+| `config/vitest/e2e.vespa.config.ts` | `test:e2e:vespa` (via `scripts/run-vespa-e2e.sh`) | All `test/e2e/vespa/**/*.test.ts`; sets `VESPA_URL` (default `http://localhost:18080` in config) |
+| `config/vitest/watchlist.config.ts` | `test:watchlist` | Watchlist domain + HTTP + Redis/webhook + contract manifest overlap |
+| `config/vitest/quality.config.ts` | `test:quality` | Golden set, user journeys, decision utility, learning flywheel, eval unit tests, … |
 
 ### In-memory E2E (`test/e2e/*.test.ts`, `test:e2e:fast`)
 
@@ -289,7 +289,7 @@ Uses **`createTestServer()`** + Fastify **`inject()`** (no real TCP port). Typic
 | **`watchlist-api.test.ts`** | Watchlist CRUD / deliveries |
 | **`infrastructure.test.ts`** | Infra-level checks wired to the test harness |
 
-**Quality lane:** `test:quality` adds **`golden-set.test.ts`** + **`user-journeys.test.ts`** together with integration/unit eval tests (see `vitest.quality.config.ts`).
+**Quality lane:** `test:quality` adds **`golden-set.test.ts`** + **`user-journeys.test.ts`** together with integration/unit eval tests (see `config/vitest/quality.config.ts`).
 
 ### Vespa-backed E2E (`test/e2e/vespa/**`, `test:e2e:vespa`)
 
@@ -408,7 +408,7 @@ See **Test coverage & E2E scenarios** (earlier in this document) for Vitest lane
 | `test/unit/` | Focused unit suites |
 | `test/integration/` | Server, HTTP contracts, schemas, selected policy tests |
 | `test/e2e/` | In-memory HTTP e2e (`inject`) + `vespa/` for live retrieval |
-| `vitest.*.config.ts` | Split configs: unit, integration, e2e, smoke, Vespa, watchlist, quality |
+| `config/vitest/*.config.ts` | Split configs: unit, integration, e2e, smoke, Vespa, watchlist, quality |
 
 ---
 

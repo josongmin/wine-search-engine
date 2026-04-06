@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
-import path from 'node:path';
 import os from 'node:os';
+import { vitestResolveAliases } from './aliases.js';
 
 export default defineConfig({
   test: {
@@ -10,8 +10,6 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     pool: 'forks',
-    // Parallel test files; each suite uses its own Fastify inject server.
-    // maxForks caps memory on large CI runners; override with VITEST_MAX_FORKS if needed.
     poolOptions: {
       forks: {
         singleFork: false,
@@ -25,13 +23,6 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      '@shared': path.resolve(__dirname, 'src/domain/shared'),
-      '@domain': path.resolve(__dirname, 'src/domain'),
-      '@app': path.resolve(__dirname, 'src/application'),
-      '@infra': path.resolve(__dirname, 'src/infrastructure'),
-      '@interface': path.resolve(__dirname, 'src/interface'),
-      '@config': path.resolve(__dirname, 'src/config'),
-    },
+    alias: vitestResolveAliases(),
   },
 });

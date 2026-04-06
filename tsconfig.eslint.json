@@ -10,7 +10,7 @@
     "tools/**/*.ts",
     "scripts/**/*.ts",
     "vitest.config.ts",
-    "vitest.*.config.ts"
+    "config/vitest/**/*.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

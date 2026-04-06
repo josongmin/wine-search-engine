@@ -24,7 +24,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/**/*.ts', 'tools/**/*.ts', '*.config.ts', '*.config.*.ts'],
+    files: ['scripts/**/*.ts', 'tools/**/*.ts', 'config/**/*.ts', '*.config.ts', '*.config.*.ts'],
     ...tseslint.configs.disableTypeChecked,
   },
   {

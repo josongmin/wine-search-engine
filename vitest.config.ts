@@ -1,5 +1,5 @@
 /**
  * Default Vitest config — unified unit + co-located specs under `src` (see `__tests__` folders).
- * E2E / integration / Vespa lanes use their own `vitest.*.config.ts` files.
+ * E2E / integration / Vespa lanes live under `config/vitest/`.
  */
-export { default } from './vitest.unit.config.js';
+export { default } from './config/vitest/unit.config.js';

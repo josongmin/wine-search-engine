@@ -1,5 +1,13 @@
 import { defineConfig } from 'vitest/config';
-import path from 'node:path';
+import os from 'node:os';
+import { vitestResolveAliases } from './aliases.js';
+
+const maxUnitThreads = (() => {
+  const parsed = Number.parseInt(process.env.VITEST_MAX_THREADS ?? '8', 10);
+  const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
+  const cpus = os.availableParallelism?.() ?? os.cpus().length;
+  return Math.min(cap, Math.max(2, cpus));
+})();
 
 const testInclude = [
   'test/unit/**/*.test.ts',
@@ -15,26 +23,23 @@ export default defineConfig({
   test: {
     globals: true,
     include: [...testInclude],
+    pool: 'threads',
+    poolOptions: {
+      threads: {
+        maxThreads: maxUnitThreads,
+        minThreads: 1,
+        useAtomics: true,
+      },
+    },
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      exclude: [
-        '**/*.test.ts',
-        '**/__tests__/**',
-        'src/main.ts',
-      ],
+      exclude: ['**/*.test.ts', '**/__tests__/**', 'src/main.ts'],
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
     },
   },
   resolve: {
-    alias: {
-      '@shared': path.resolve(__dirname, 'src/domain/shared'),
-      '@domain': path.resolve(__dirname, 'src/domain'),
-      '@app': path.resolve(__dirname, 'src/application'),
-      '@infra': path.resolve(__dirname, 'src/infrastructure'),
-      '@interface': path.resolve(__dirname, 'src/interface'),
-      '@config': path.resolve(__dirname, 'src/config'),
-    },
+    alias: vitestResolveAliases(),
   },
 });
