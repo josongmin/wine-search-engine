@@ -15,8 +15,15 @@
  *    default JSON serialization behaviour is preserved
  */
 
-/** Fast camelCase → snake_case converter (optimized for most keys, no regex). */
-function camelToSnake(key: string): string {
+/** LRU-style cache for camelCase → snake_case conversions (bounded to prevent memory leak). */
+const snakeCaseCache = new Map<string, string>();
+const SNAKE_CASE_CACHE_MAX = 512;
+
+/** Fast camelCase → snake_case converter with caching. */
+export function camelToSnake(key: string): string {
+  const cached = snakeCaseCache.get(key);
+  if (cached !== undefined) return cached;
+
   let result = '';
   for (let i = 0; i < key.length; i++) {
     const ch = key.charAt(i);
@@ -27,6 +34,13 @@ function camelToSnake(key: string): string {
       result += ch;
     }
   }
+
+  if (snakeCaseCache.size >= SNAKE_CASE_CACHE_MAX) {
+    // Evict oldest entry
+    const firstKey = snakeCaseCache.keys().next().value as string;
+    snakeCaseCache.delete(firstKey);
+  }
+  snakeCaseCache.set(key, result);
   return result;
 }
 
@@ -62,6 +76,7 @@ export function deepKeysToSnake(value: unknown): unknown {
     const result: Record<string, unknown> = {};
 
     for (const k of Object.keys(obj)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
       result[camelToSnake(k)] = deepKeysToSnake(obj[k]);
     }
 

@@ -30,8 +30,11 @@ export function temperatureScaling(logits: number[], temperature: number): numbe
     throw new Error('Logits array must not be empty');
   }
 
-  // Subtract max for numerical stability
-  const maxLogit = Math.max(...logits);
+  // Subtract max for numerical stability (loop avoids stack overflow on large arrays)
+  let maxLogit = -Infinity;
+  for (const l of logits) {
+    if (l > maxLogit) maxLogit = l;
+  }
   const scaled = logits.map((l) => Math.exp((l - maxLogit) / temperature));
   const sumScaled = scaled.reduce((acc, v) => acc + v, 0);
 

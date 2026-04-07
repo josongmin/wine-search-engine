@@ -18,6 +18,8 @@ export interface OpenAiEmbeddingServiceOptions {
   readonly apiKey: string;
   readonly model: string;
   readonly httpTimeoutMs: number;
+  /** Requested embedding dimension. Defaults to 1024 (BGE-M3 / Vespa schema). */
+  readonly dimensions?: number;
 }
 
 function trimTrailingSlash(url: string): string {
@@ -29,12 +31,14 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly httpTimeoutMs: number;
+  private readonly dimensions: number;
 
   constructor(options: OpenAiEmbeddingServiceOptions) {
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/embeddings`;
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.httpTimeoutMs = options.httpTimeoutMs;
+    this.dimensions = options.dimensions ?? 1024;
   }
 
   async embed(text: string): Promise<readonly number[]> {
@@ -69,7 +73,7 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${this.apiKey}`,
           },
-          body: JSON.stringify({ model: this.model, input, dimensions: 128 }),
+          body: JSON.stringify({ model: this.model, input, dimensions: this.dimensions }),
         },
         this.httpTimeoutMs,
       );
@@ -116,13 +120,23 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
       );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `OpenAI embeddings failed [HTTP ${status}]: ${text}`,
+        `OpenAI embeddings failed [HTTP ${status}]: ${text.slice(0, 200)}`,
       );
     }
 
     const data: unknown = await response.json();
     try {
       const vectors = embeddingsFromOpenAiResponse(data);
+      for (const vec of vectors) {
+        if (vec.length !== this.dimensions) {
+          throw new Error(
+            `OpenAI embedding dimension mismatch: expected ${this.dimensions}, got ${vec.length}`,
+          );
+        }
+        if (!vec.every(Number.isFinite)) {
+          throw new Error('OpenAI embedding contains non-finite values');
+        }
+      }
       pipelineDebug(
         {
           step: PipelineDebugStep.HTTP_EMBEDDING_OK,

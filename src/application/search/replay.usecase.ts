@@ -98,6 +98,7 @@ export class ReplayUseCase {
   async execute(
     request: ReplayRequest,
     requestId: string,
+    options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<SearchResponseV1> {
     // Runtime guard: tests cast null through unknown to exercise MissingSnapshotError.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see replay-usecase.test.ts
@@ -107,9 +108,9 @@ export class ReplayUseCase {
 
     const searchRequest: SearchRequest = {
       query: request.query,
-      context: request.context,
-      sessionContext: request.sessionContext,
-      queryBudget: request.queryBudget,
+      ...(request.context !== undefined ? { context: request.context } : {}),
+      ...(request.sessionContext !== undefined ? { sessionContext: request.sessionContext } : {}),
+      ...(request.queryBudget !== undefined ? { queryBudget: request.queryBudget } : {}),
       // Mode neutralization trade-off:
       //   - When NO expected_response_hash is present, force mode:'auto' so the
       //     compiled route from planWithCompiled governs execution, preventing a
@@ -125,7 +126,9 @@ export class ReplayUseCase {
           : undefined,
     };
 
-    const rawResponse = await this.deps.searchUseCase.execute(searchRequest, requestId);
+    const rawResponse = await this.deps.searchUseCase.execute(searchRequest, requestId, {
+      ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+    });
 
     // Replay always targets a standard search, never a comparison
     if (rawResponse.queryType !== 'search') {

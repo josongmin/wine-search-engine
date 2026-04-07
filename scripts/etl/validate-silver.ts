@@ -12,6 +12,7 @@ import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, SilverQualityReport } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFile } from './etl-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -229,11 +230,10 @@ export async function run(): Promise<void> {
 
   const report = validateSilverRecords(records);
 
-  // Write report
-  await fs.writeFile(
+  // Write report (atomic)
+  await atomicWriteFile(
     REPORT_OUTPUT,
     JSON.stringify(report, null, 2) + '\n',
-    'utf8',
   );
   console.log(`  Report written to: ${REPORT_OUTPUT}`);
 

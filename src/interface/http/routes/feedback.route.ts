@@ -14,12 +14,14 @@ import type { DecisionSnapshot } from '../../../domain/shared/types/decision-sna
 import { getRequestId } from '../request-id.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from '../../../application/search/search-usecase-decision-snapshot.js';
 
-const DEFAULT_DECISION_SNAPSHOT: DecisionSnapshot = {
-  ...buildDecisionSnapshotFromRuntimeVersions(),
-  policy_rule_version: 'http-feedback-ingest-v1',
-  planner_version: 'unknown',
-  snapshot_id: 'default:unknown:http-feedback-ingest-v1::',
-};
+function buildFeedbackDecisionSnapshot(): DecisionSnapshot {
+  return {
+    ...buildDecisionSnapshotFromRuntimeVersions(),
+    policy_rule_version: 'http-feedback-ingest-v1',
+    planner_version: 'unknown',
+    snapshot_id: 'default:unknown:http-feedback-ingest-v1::',
+  };
+}
 
 function mapSignal(
   signalType: 'click' | 'purchase' | 'dismiss',
@@ -102,10 +104,30 @@ export function registerFeedbackRoute(
         isPositive,
         timestamp: new Date(),
         sessionId: body.session_id,
-        decisionSnapshot: DEFAULT_DECISION_SNAPSHOT,
+        decisionSnapshot: buildFeedbackDecisionSnapshot(),
       };
 
-      await deps.feedbackStore.saveFeedback(signal);
+      try {
+        await deps.feedbackStore.saveFeedback(signal);
+      } catch (err: unknown) {
+        request.log.error({ err, requestId }, 'feedback_save_failed');
+        sendRouteContractResponse(
+          request,
+          reply,
+          FeedbackSubmitRouteContract,
+          500,
+          ErrorResponseSchema.parse({
+            error: {
+              request_id: requestId,
+              code: 'INTERNAL_ERROR',
+              message: 'Failed to persist feedback signal.',
+              failure_reason: null,
+              retryable: true,
+            },
+          }),
+        );
+        return;
+      }
 
       sendRouteContractResponse(request, reply, FeedbackSubmitRouteContract, 201, {
         signal_id: signal.signalId,

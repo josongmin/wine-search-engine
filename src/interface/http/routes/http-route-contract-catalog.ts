@@ -5,14 +5,11 @@ import {
   ClaudeToolsListRouteContract,
   HealthRouteContract,
   HybridRouteContract,
-  HybridV2RouteContract,
   InterpretRouteContract,
-  InterpretV2RouteContract,
   ReadyRouteContract,
   ReplayRouteContract,
   ResolveRouteContract,
   SearchRouteContract,
-  SearchV2RouteContract,
   WatchlistListRouteContract,
   WatchlistCreateRouteContract,
   WatchlistDeleteRouteContract,
@@ -45,9 +42,6 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'DELETE', url: '/v1/watchlist/:id', contract: WatchlistDeleteRouteContract },
   { method: 'GET', url: '/v1/watchlist/:id/deliveries', contract: WatchlistDeliveriesRouteContract },
   { method: 'POST', url: '/v1/feedback', contract: FeedbackSubmitRouteContract },
-  { method: 'POST', url: '/v2/search', contract: SearchV2RouteContract },
-  { method: 'POST', url: '/v2/search/hybrid', contract: HybridV2RouteContract },
-  { method: 'POST', url: '/v2/search/interpret', contract: InterpretV2RouteContract },
 ] as const;
 
 function compareContracts(

@@ -9,9 +9,74 @@ import { AUTHENTICATED_SUBJECT_HEADER } from '../authenticated-subject.js';
 
 const WatchlistIdSchema = z.string().uuid();
 const AuthenticatedSubjectSchema = z.string().min(1).max(128);
+/**
+ * Rejects callback URLs that target private/reserved networks (SSRF prevention).
+ * Blocks: localhost, 127.x, 10.x, 172.16-31.x, 192.168.x, 169.254.x (link-local),
+ * [::1], and cloud metadata endpoints.
+ */
+function isPrivateOrReservedHost(urlString: string): boolean {
+  let hostname: string;
+  try {
+    hostname = new URL(urlString).hostname.toLowerCase();
+  } catch {
+    return true;
+  }
+
+  if (
+    hostname === 'localhost' ||
+    hostname === '[::1]' ||
+    hostname === '::1' ||
+    hostname === '0.0.0.0'
+  ) {
+    return true;
+  }
+
+  // Strip brackets for IPv6 analysis
+  const stripped = hostname.replace(/^\[/, '').replace(/]$/, '');
+
+  // IPv6-mapped IPv4 (e.g. ::ffff:127.0.0.1, [::ffff:10.0.0.1])
+  const mappedMatch = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i.exec(stripped);
+  if (mappedMatch) {
+    // Recursively check the embedded IPv4 address
+    return isPrivateOrReservedHost(`https://${mappedMatch[1]}/`);
+  }
+
+  // IPv6 private/reserved ranges
+  const lowerStripped = stripped.toLowerCase();
+  if (
+    lowerStripped.startsWith('fc') || lowerStripped.startsWith('fd') || // fc00::/7 unique local
+    lowerStripped.startsWith('fe8') || lowerStripped.startsWith('fe9') || // fe80::/10 link-local
+    lowerStripped.startsWith('fea') || lowerStripped.startsWith('feb') ||
+    lowerStripped === '::' // unspecified address
+  ) {
+    return true;
+  }
+
+  // IPv4 private/reserved ranges
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number);
+    if (
+      a === 127 ||                        // 127.0.0.0/8 loopback
+      a === 10 ||                          // 10.0.0.0/8 private
+      (a === 172 && b! >= 16 && b! <= 31) || // 172.16.0.0/12 private
+      (a === 192 && b === 168) ||          // 192.168.0.0/16 private
+      (a === 169 && b === 254) ||          // 169.254.0.0/16 link-local / cloud metadata
+      a === 0                              // 0.0.0.0/8
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 const HttpsUrlSchema = z.string().url().max(2048).refine(
   (value) => value.startsWith('https://'),
   'callback_url must use https',
+).refine(
+  (value) => !isPrivateOrReservedHost(value),
+  'callback_url must not target private or reserved network addresses',
 );
 const FutureDateTimeSchema = z.string().datetime().refine(
   (value) => new Date(value).getTime() > Date.now(),
@@ -35,7 +100,7 @@ const NewVintageTriggerRequestSchema = z.union([
 const PriceDropTriggerRequestSchema = z.union([
   z.object({
     type: z.literal('price_drop'),
-    threshold: z.number().min(0).max(100),
+    threshold: z.number().min(1).max(100),
     baseline_price: z.number().positive(),
   }).strict().transform((value) => ({
     type: value.type,
@@ -44,7 +109,7 @@ const PriceDropTriggerRequestSchema = z.union([
   })),
   z.object({
     type: z.literal('price_drop'),
-    threshold: z.number().min(0).max(100),
+    threshold: z.number().min(1).max(100),
     baselinePrice: z.number().positive(),
   }).strict(),
 ]);
@@ -82,7 +147,7 @@ export const WatchlistTriggerResponseSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     type: z.literal('price_drop'),
-    threshold: z.number().min(0).max(100),
+    threshold: z.number().min(1).max(100),
     baseline_price: z.number().positive(),
   }).strict(),
   z.object({
@@ -91,7 +156,7 @@ export const WatchlistTriggerResponseSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     type: z.literal('critic_score_above'),
-    threshold: z.number().min(0).max(100),
+    threshold: z.number().min(1).max(100),
   }).strict(),
 ]);
 
@@ -148,7 +213,7 @@ export const DeliveryLogEntrySchema = z.object({
   id: WatchlistIdSchema,
   watchlist_id: WatchlistIdSchema,
   attempt: z.number().int().min(1).max(4),
-  status_code: z.number().int().min(0).nullable(),
+  status_code: z.number().int().min(100).max(599).nullable(),
   error_message: z.string().nullable(),
   delivered_at: z.string().datetime(),
 }).strict();
@@ -167,6 +232,8 @@ export const WatchlistErrorResponseSchema = z.object({
     code: z.string(),
     message: z.string(),
     request_id: z.string().optional(),
+    failure_reason: z.string().nullable().optional(),
+    retryable: z.boolean().optional(),
   }).strict(),
 }).strict();
 

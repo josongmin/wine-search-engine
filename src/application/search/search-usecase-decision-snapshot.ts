@@ -107,7 +107,15 @@ export function decisionSnapshotsMatch(
 export function readDecisionSnapshotFromSearchResponse(
   response: SearchResponseV1,
 ): DecisionSnapshot {
-  return response.meta.decisionSnapshot ?? response.engineDecision.decisionSnapshot;
+  const snapshot = response.meta.decisionSnapshot ?? response.engineDecision.decisionSnapshot;
+  // Runtime guard: both locations can be undefined when consuming older or
+  // partially-serialized responses. Fail explicitly instead of propagating
+  // undefined through a non-optional return type.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive runtime guard
+  if (snapshot == null) {
+    throw new Error('DecisionSnapshot missing from both meta and engineDecision');
+  }
+  return snapshot;
 }
 
 /**

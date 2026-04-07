@@ -183,7 +183,7 @@ describe('POST /v1/entity/resolve', () => {
     expect(body.request_id).toBe(clientRequestId);
     expect(body.decision_trace_ref).toBeTruthy();
     expect(body.authority_trace_ref).toBe(body.decision_trace_ref);
-    expect(decodeAuthorityTraceRefDetailed(body.authority_trace_ref!)).toEqual(
+    expect(decodeAuthorityTraceRefDetailed(body.authority_trace_ref)).toEqual(
       expect.objectContaining({ ok: true }),
     );
   });

@@ -40,12 +40,18 @@ export class StubCalibrationStore implements CalibrationStore {
 }
 
 export class StubEmbeddingService implements EmbeddingServicePort {
+  private readonly dimension: number;
+
+  constructor(dimension = 1024) {
+    this.dimension = dimension;
+  }
+
   embed(_text: string): Promise<readonly number[]> {
-    return Promise.resolve(new Array<number>(128).fill(0));
+    return Promise.resolve(new Array<number>(this.dimension).fill(0));
   }
 
   embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
-    return Promise.resolve(texts.map(() => new Array<number>(128).fill(0)));
+    return Promise.resolve(texts.map(() => new Array<number>(this.dimension).fill(0)));
   }
 }
 

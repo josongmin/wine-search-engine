@@ -4,6 +4,7 @@ import type {
 } from '../../domain/watchlist/model/watchlist-entry.js';
 import type {
   WatchlistStoragePort,
+  TransactionalWatchlistStore,
 } from '../../domain/watchlist/port/watchlist-repository.port.js';
 
 export class InMemoryWatchlistStore implements WatchlistStoragePort {
@@ -59,5 +60,15 @@ export class InMemoryWatchlistStore implements WatchlistStoragePort {
     this.watchlists.clear();
     this.deliveryLogs.clear();
     return Promise.resolve();
+  }
+
+  findByIdForUpdate(id: string): Promise<WatchlistEntry | null> {
+    // In-memory: no locking needed, same as findById
+    return this.findById(id);
+  }
+
+  async withTransaction<T>(fn: (tx: TransactionalWatchlistStore) => Promise<T>): Promise<T> {
+    // In-memory: no real transaction needed; pass self as the transactional store
+    return fn(this);
   }
 }

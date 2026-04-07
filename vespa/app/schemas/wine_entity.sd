@@ -282,7 +282,7 @@ schema wine_entity {
     }
 
     # -------------------------------------------------------------------------
-    # Dense embedding — 128-dim float tensor, HNSW ANN retrieval.
+    # Dense embedding — 1024-dim float tensor (BGE-M3), HNSW ANN retrieval.
     #
     # HNSW parameters (BGE-M3 / BEIR validated):
     #   max-links-per-node: 32   — M=32, optimal recall/latency trade-off
@@ -292,7 +292,7 @@ schema wine_entity {
     # closeness(field, embedding) returns values in [0,1] (1 = identical).
     # -------------------------------------------------------------------------
 
-    field embedding type tensor<float>(x[128]) {
+    field embedding type tensor<float>(x[1024]) {
       indexing: summary | attribute | index
       attribute {
         distance-metric: angular
@@ -303,6 +303,10 @@ schema wine_entity {
           neighbors-to-explore-at-insert: 400
         }
       }
+    }
+
+    field learned_sparse_weights type tensor<float>(token{}) {
+      indexing: summary | attribute
     }
 
   }  # end document wine_entity
@@ -325,6 +329,59 @@ schema wine_entity {
     summary producer {}
     summary wine_type {}
     summary vintage_year {}
+  }
+
+  # hit_summary — all fields consumed by readRawVespaRetrievalSummary()
+  # Must list every key in RETRIEVAL_HIT_SUMMARY_KEYS plus entity_id.
+  document-summary hit_summary {
+    summary entity_id {}
+    summary canonical_label {}
+    summary producer {}
+    summary region {}
+    summary appellation {}
+    summary grape_primary {}
+    summary vintage_year {}
+    summary search_text_en {}
+    summary search_text_ko {}
+    summary producer_prestige {}
+    summary style {}
+    summary price_band {}
+    summary pairing {}
+    summary occasion {}
+    summary body {}
+    summary tannin {}
+    summary acidity {}
+    summary sweetness {}
+    summary finish_length {}
+    summary wine_type {}
+    summary critic_score_normalized {}
+    summary country {}
+    summary classification {}
+    summary alcohol_pct {}
+    summary drinking_window_start {}
+    summary drinking_window_end {}
+    summary drinking_window_model_version {}
+    summary price_usd {}
+    summary certifications {}
+    summary soil_type {}
+    summary producer_type {}
+    summary oak_treatment {}
+    summary grape_family {}
+    summary region_hierarchy {}
+    summary price_band_numeric {}
+  }
+
+  # feature_summary — ranking / ML features only.
+  document-summary feature_summary {
+    summary entity_id {}
+    summary body {}
+    summary tannin {}
+    summary acidity {}
+    summary sweetness {}
+    summary critic_score_normalized {}
+    summary drinking_window_start {}
+    summary drinking_window_end {}
+    summary drinking_window_model_version {}
   }
 
   document-summary full {
@@ -447,7 +504,7 @@ schema wine_entity {
   # --- semantic: pure ANN, style / description queries ---------------------
   rank-profile semantic inherits default {
     inputs {
-      query(query_embedding) tensor<float>(x[128])
+      query(query_embedding) tensor<float>(x[1024])
     }
     first-phase {
       expression: closeness(field, embedding)
@@ -470,7 +527,7 @@ schema wine_entity {
   #   bm25_wine=100 → 0.800
   rank-profile hybrid inherits lexical {
     inputs {
-      query(query_embedding) tensor<float>(x[128])
+      query(query_embedding) tensor<float>(x[1024])
     }
 
     function bm25_normalized() {
@@ -510,7 +567,7 @@ schema wine_entity {
   # over-boosting unavailable or niche wines that happen to have high scores.
   rank-profile wine_aware inherits hybrid {
     inputs {
-      query(query_embedding) tensor<float>(x[128])
+      query(query_embedding) tensor<float>(x[1024])
       query(current_year) double: 2024
     }
 
@@ -527,7 +584,7 @@ schema wine_entity {
       expression {
         firstPhase
         + 0.05 * if(attribute(availability), 1.0, 0.0)
-        + 0.05 * attribute(critic_score_normalized)
+        + 0.05 * if(isNan(attribute(critic_score_normalized)), 0, attribute(critic_score_normalized))
         + 0.03 * if(
             attribute(vintage_year) > 0,
             max(0.0, 1.0 - (2024.0 - attribute(vintage_year)) / 30.0),
@@ -568,10 +625,36 @@ schema wine_entity {
     }
   }
 
-  # --- learned_sparse: fallback to BM25 (no SPLADE model in dev) -----------
-  rank-profile learned_sparse inherits lexical {
+  # --- learned_sparse: SPLADE-style sparse tensor retrieval -----------------
+  rank-profile learned_sparse inherits default {
+    inputs {
+      query(sparse_query_embedding) tensor<float>(token{})
+    }
     first-phase {
-      expression: bm25_wine
+      expression: dotProduct(learned_sparse_weights, sparse_query_embedding)
+    }
+  }
+
+  # --- prestige_hybrid: for producer_browse / region_browse / compare modes --
+  # BM25 is Laplace-normalised (K=25) to [0,1] before blending so it doesn't
+  # dwarf the [0,1]-bounded critic and prestige signals.
+  rank-profile prestige_hybrid inherits hybrid {
+    inputs {
+      query(query_embedding) tensor<float>(x[1024])
+    }
+    first-phase {
+      expression {
+        0.40 * (0.5 * bm25_normalized + 0.5 * closeness(field, embedding))
+        + 0.35 * if(isNan(attribute(critic_score_normalized)), 0, attribute(critic_score_normalized))
+        + 0.25 * if(isNan(attribute(producer_prestige)), 0, attribute(producer_prestige))
+      }
+    }
+  }
+
+  # --- popularity_native: popularity_score + BM25 tiebreaker ----------------
+  rank-profile popularity_native inherits lexical {
+    first-phase {
+      expression: attribute(popularity_score) + 0.05 * (bm25_wine / (bm25_wine + 25))
     }
   }
 

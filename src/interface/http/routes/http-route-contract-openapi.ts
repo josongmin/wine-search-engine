@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 import { z } from 'zod';
 import { DeclaredHttpRouteContractCatalog } from './http-route-contract-catalog.js';
+import { camelToSnake } from '../middleware/snake-case-hook.js';
 
 export interface OpenApiBridgeOperation {
   readonly operationId: string;
@@ -371,9 +372,14 @@ function zodToOpenApiSchema(schema: z.ZodTypeAny): OpenApiBridgeSchema {
     const required: string[] = [];
 
     for (const [key, value] of getObjectEntries(current)) {
-      properties[key] = zodToOpenApiSchema(value);
+      // Convert camelCase schema keys to snake_case so the OpenAPI spec
+      // matches the actual wire format (preSerialization hook applies
+      // deepKeysToSnake to all outbound payloads).  Already-snake_case
+      // keys pass through unchanged (camelToSnake is idempotent).
+      const wireKey = camelToSnake(key);
+      properties[wireKey] = zodToOpenApiSchema(value);
       if (!isOptionalSchema(value)) {
-        required.push(key);
+        required.push(wireKey);
       }
     }
 

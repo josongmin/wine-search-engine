@@ -75,11 +75,15 @@ describe('extractRegionBrowseSeed', () => {
     expect(extractRegionBrowseSeed(plan)).toBe('Burgundy');
   });
 
-  it('falls back to compacted normalized query', () => {
+  it('returns undefined when no region constraint and no slash hierarchy', () => {
+    // A generic query like "show wines from napa valley" has no explicit region
+    // constraint — using it as a region seed would cause incorrect region_browse
+    // execution. The correct behaviour is to return undefined and fall back to
+    // the candidate pool.
     const plan = minimalPlan({
       normalizedQuery: 'show wines from napa valley',
     });
-    expect(extractRegionBrowseSeed(plan)).toContain('napa');
+    expect(extractRegionBrowseSeed(plan)).toBeUndefined();
   });
 
   it('joins hierarchical path segments when ≥2 slashes and no region constraint', () => {

@@ -134,6 +134,18 @@ schema wine_entity {
     field oak_treatment type string {
       indexing: summary | attribute
     }
+
+    # ── Taxonomy enrichment fields (Epic 12 / Task 5) ─────────────────────────
+
+    field grape_family type string {
+      indexing: summary | attribute
+    }
+    field region_hierarchy type array<string> {
+      indexing: summary | attribute
+    }
+    field price_band_numeric type int {
+      indexing: summary | attribute
+    }
   }
 
   fieldset default {
@@ -225,6 +237,10 @@ schema wine_entity {
     summary certifications {}
     summary soil_type {}
     summary producer_type {}
+    summary oak_treatment {}
+    summary grape_family {}
+    summary region_hierarchy {}
+    summary price_band_numeric {}
   }
 
   document-summary feature_summary {

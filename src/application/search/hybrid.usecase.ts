@@ -33,6 +33,7 @@ import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { buildInternalErrorAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
 
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
 
@@ -135,6 +136,11 @@ export class HybridUseCase {
         compiled,
       );
     } catch (err) {
+      // Propagate domain errors and abort signals to the global error handler
+      // so they receive the correct HTTP status (e.g. 403 for POLICY_BLOCKED).
+      if (err instanceof DomainError) throw err;
+      if (err instanceof Error && err.name === 'AbortError') throw err;
+
       const errorMessage = err instanceof Error ? err.message : String(err);
       bootstrapLogger.error(
         { err: errorMessage, requestId },

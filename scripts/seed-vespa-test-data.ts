@@ -25,9 +25,9 @@ const APP_NAME = 'wine_entity';
 
 // ── Deterministic pseudo-random embedding generator ───────────────────────────
 // Seeded LCG so vectors are stable across runs without a dependency on a
-// crypto library.  Dimension must match the Vespa schema (x[128]).
+// crypto library.  Dimension must match the Vespa schema (x[1024]).
 
-const EMBEDDING_DIM = 128;
+const EMBEDDING_DIM = 1024;
 
 function seededEmbedding(seed: number): readonly number[] {
   const vec: number[] = new Array(EMBEDDING_DIM) as number[];

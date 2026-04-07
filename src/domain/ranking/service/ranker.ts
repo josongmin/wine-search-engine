@@ -341,10 +341,16 @@ export class Ranker {
   async rank(input: RankingInput): Promise<readonly RankedResult[]> {
     const { queryPlan, candidates, anchorProfile, constraints } = input;
 
-    this._lastRerankExecuted = false;
-    this._lastRerankGateReason = undefined;
-    this._lastRuntimeSignal = undefined;
-    this._lastPreRerankTop5 = [];
+    // Collect metadata in local variables to avoid races when concurrent
+    // requests share this Ranker instance (the await inside applyReranking
+    // yields to the event loop, so another request could reset instance
+    // fields mid-execution).  Instance fields are flushed atomically at the
+    // end, right before returning.
+    let localRerankExecuted = false;
+    let localRerankGateReason: string | undefined;
+    let localRuntimeSignal: RankerRuntimeSignal | undefined;
+    let localPreRerankTop5: readonly string[] = [];
+    let localCoarsePruneSummary: CoarsePruneStageSummary | undefined;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -490,7 +496,7 @@ export class Ranker {
 
     // T5.2: Expose coarse prune summary — RankingStagePipeline reads this via
     // getLastCoarsePruneSummary() to populate the coarse_prune stage trace.
-    this._lastCoarsePruneSummary = {
+    localCoarsePruneSummary = {
       inputCount: scored.length,
       retainedCount: viable.length,
       prunedCount: scored.length - viable.length,
@@ -498,12 +504,29 @@ export class Ranker {
       entityIntegrityFailCount,
     };
 
-    // Step 5: Sort by finalScore descending
-    viable.sort((a, b) => b.finalScore - a.finalScore);
+    if (scored.length > 0 && viable.length === 0) {
+      bootstrapLogger.warn(
+        {
+          queryClass: queryPlan.queryClass,
+          inputCount: scored.length,
+          hardConstraintFailCount,
+          entityIntegrityFailCount,
+        },
+        '[Ranker] Coarse prune dropped ALL candidates — returning empty results',
+      );
+    }
+
+    // Step 5: Sort by finalScore descending, tie-break by entityId ascending
+    // for deterministic ordering (RFC-009/015 determinism gate).
+    viable.sort((a, b) => {
+      const scoreDiff = b.finalScore - a.finalScore;
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+    });
 
     // T5.6: Capture top-5 entity IDs after primary sort, before any reranking.
     // RankingStagePipeline reads this snapshot to compute rerankChangedTopK.
-    this._lastPreRerankTop5 = viable.slice(0, 5).map((e) => String(e.entityId));
+    localPreRerankTop5 = viable.slice(0, 5).map((e) => String(e.entityId));
 
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
@@ -524,7 +547,7 @@ export class Ranker {
         ...(input.rerankForced !== undefined ? { rerankForced: input.rerankForced } : {}),
       });
 
-      this._lastRerankGateReason = gateDecision.reason;
+      localRerankGateReason = gateDecision.reason;
 
       if (gateDecision.shouldRerank) {
         const effectiveTopK = gateDecision.topKOverride ?? this.rerankTopK;
@@ -536,8 +559,8 @@ export class Ranker {
               queryPlan.queryClass,
               effectiveTopK,
             );
-            this._lastRerankExecuted = true;
-            this._lastRuntimeSignal = { rerankerStatus: 'executed' };
+            localRerankExecuted = true;
+            localRuntimeSignal = { rerankerStatus: 'executed' };
           } catch (err) {
             const rerankerFailureReason = classifyRerankerFailureReason(err);
             bootstrapLogger.warn(
@@ -552,7 +575,7 @@ export class Ranker {
               '[Ranker] Cross-encoder reranking failed; falling back to aggregated ranking',
             );
             finalOrder = viable;
-            this._lastRuntimeSignal = {
+            localRuntimeSignal = {
               rerankerStatus: 'failed',
               rerankerFailureReason,
               degradation: {
@@ -563,7 +586,7 @@ export class Ranker {
           }
         }
         if (hasLearnedRerank) {
-          this._lastRerankExecuted = true;
+          localRerankExecuted = true;
           shouldApplyLearnedRerank = true;
         }
       }
@@ -634,7 +657,7 @@ export class Ranker {
       );
       results = ltrOutcome.results;
       if (ltrOutcome.skippedDueToDimensionMismatch) {
-        this._lastRuntimeSignal = {
+        localRuntimeSignal = {
           rerankerStatus: 'skipped',
           degradation: {
             executionMode: 'degraded',
@@ -643,6 +666,14 @@ export class Ranker {
         };
       }
     }
+
+    // Flush collected metadata to instance fields atomically (no await between
+    // here and the return, so no interleaving is possible).
+    this._lastCoarsePruneSummary = localCoarsePruneSummary;
+    this._lastRerankExecuted = localRerankExecuted;
+    this._lastRerankGateReason = localRerankGateReason;
+    this._lastRuntimeSignal = localRuntimeSignal;
+    this._lastPreRerankTop5 = localPreRerankTop5;
 
     return results;
   }
@@ -699,7 +730,7 @@ export class Ranker {
     const rawRange = maxRaw - minRaw;
 
     function normalizeRerankScore(raw: number): number {
-      if (rawRange < 1e-8) return 0.5; // all scores equal → neutral
+      if (!Number.isFinite(raw) || !Number.isFinite(rawRange) || rawRange < 1e-8) return 0.5;
       // Min-max within batch: maps to [0, 1] preserving relative order.
       // Sigmoid compression is unnecessary when min-max already bounds the range.
       return (raw - minRaw) / rawRange;

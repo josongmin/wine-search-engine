@@ -159,7 +159,7 @@ export async function mapRankedResultsToResultItems(
         inferred: inferredConstraints,
       },
       uncertainty: {
-        uncertaintyConfidence: 1 - r.componentScores.uncertaintyPenalty,
+        uncertaintyConfidence: Math.max(0, Math.min(1, 1 - r.componentScores.uncertaintyPenalty)),
         missingInfo: [],
         approximationUsed: false,
       },
@@ -169,7 +169,8 @@ export async function mapRankedResultsToResultItems(
     return {
       ...baseItem,
       ...(drinkingWindowBlock !== undefined ? { drinkingWindow: drinkingWindowBlock } : {}),
-      ...(unmetConstraints.length > 0 ? { violatedConstraints: unmetConstraints } : {}),
+      // violatedConstraints is derived from constraints.unmet by ResponseBuilder.enrichResults()
+      // — do not set it here to avoid duplicate/divergent sources.
     };
   });
 }

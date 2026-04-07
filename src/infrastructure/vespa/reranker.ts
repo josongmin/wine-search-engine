@@ -159,7 +159,7 @@ export class HttpCrossEncoderReranker implements RerankerPort {
       );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `Reranker service call failed [HTTP ${status}]: ${text}`,
+        `Reranker service call failed [HTTP ${status}]: ${text.slice(0, 200)}`,
       );
     }
 
@@ -193,13 +193,38 @@ export class HttpCrossEncoderReranker implements RerankerPort {
 
     // Pair scores with entity IDs via index, then sort by score descending.
     const scored: Array<{ entityId: EntityId; score: number }> = [];
+    let droppedCount = 0;
 
     for (const result of apiResults) {
       const candidate = candidates[result.index];
-      if (candidate === undefined) continue;
+      if (candidate === undefined) {
+        droppedCount++;
+        continue;
+      }
       // Validate the entityId at runtime (branded type safety).
-      if (!isEntityId(candidate.entityId)) continue;
+      if (!isEntityId(candidate.entityId)) {
+        droppedCount++;
+        continue;
+      }
+      // Guard against non-finite scores from the reranker API — NaN/Infinity
+      // would corrupt the downstream sort and blend with original scores.
+      if (!Number.isFinite(result.score)) {
+        droppedCount++;
+        continue;
+      }
       scored.push({ entityId: candidate.entityId, score: result.score });
+    }
+
+    if (droppedCount > 0) {
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.HTTP_RERANKER_OK,
+          reranker_dropped_count: droppedCount,
+          api_result_count: apiResults.length,
+          candidate_count: candidates.length,
+        },
+        'pipeline reranker dropped results due to out-of-bounds index or invalid entityId',
+      );
     }
 
     scored.sort((a, b) => b.score - a.score);

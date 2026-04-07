@@ -15,11 +15,6 @@ import { registerInterpretRoute } from './routes/interpret.route.js';
 import { registerResolveRoute } from './routes/resolve.route.js';
 import { registerHybridRoute } from './routes/hybrid.route.js';
 import {
-  registerSearchV2Route,
-  registerHybridV2Route,
-  registerInterpretV2Route,
-} from './routes/search-v2.route.js';
-import {
   registerHealthRoutes,
   startEventLoopHeartbeat,
   type HealthRouteOptions,
@@ -30,6 +25,7 @@ import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
+import { getAuthenticatedSubject } from './authenticated-subject.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
@@ -39,6 +35,9 @@ const serverLog = bootstrapLogger.child({ component: 'HttpServer' });
 declare module 'fastify' {
   interface FastifyRequest {
     otelSpan?: Span;
+  }
+  interface FastifyReply {
+    snakeCaseApplied?: boolean;
   }
 }
 
@@ -121,7 +120,7 @@ async function registerCorsSupport(
     ],
     exposedHeaders: ['X-Request-Id', 'X-Debug-Active', 'Retry-After'],
     maxAge: 86400,
-    strictPreflight: false,
+    strictPreflight: true,
   });
 }
 
@@ -239,12 +238,15 @@ export async function createServer(
       max: options?.rateLimitMax ?? 100,
       timeWindow: '1 minute',
       keyGenerator(request) {
-        const subject = request.headers['x-authenticated-subject'];
-        const subjectStr = Array.isArray(subject) ? subject[0] : subject;
-        if (subjectStr !== undefined && subjectStr.trim().length > 0) {
-          return `subject:${subjectStr.trim()}`;
+        // Only trust X-Authenticated-Subject for rate-limit keying when a
+        // trusted reverse proxy is in front (trustProxy=true). Without a proxy
+        // the header is client-supplied and trivially forgeable.
+        if (options?.trustProxy === true) {
+          const subject = getAuthenticatedSubject(request);
+          if (subject !== null) {
+            return `subject:${subject}`;
+          }
         }
-        // Fall back to IP (works with trustProxy: the right IP is already resolved).
         return request.ip;
       },
     });
@@ -285,7 +287,12 @@ export async function createServer(
   // Convert all response body keys from camelCase to snake_case (RFC-014 §4.2).
   // Applied once at the serialization boundary so domain objects can use
   // TypeScript-idiomatic camelCase while external consumers receive snake_case.
-  app.addHook('preSerialization', async (_request, _reply, payload) => {
+  // Skips payloads already converted by sendRouteContractResponse to avoid
+  // redundant traversals.
+  app.addHook('preSerialization', async (_request, reply, payload) => {
+    if (reply.snakeCaseApplied) {
+      return payload;
+    }
     return deepKeysToSnake(payload);
   });
 
@@ -311,9 +318,6 @@ export async function createServer(
   registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
-  registerSearchV2Route(app, deps);
-  registerHybridV2Route(app, deps);
-  registerInterpretV2Route(app, deps);
   registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)

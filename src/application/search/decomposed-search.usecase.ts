@@ -66,7 +66,9 @@ export class DecomposedSearchUseCase {
     };
 
     // Reuse the main search seam for both sub-queries while honoring caller cancellation.
-    const [rawResultA, rawResultB] = await Promise.all([
+    // Use Promise.allSettled to avoid unhandled rejection when one sub-query fails
+    // while the other is still in flight (the classic Promise.all double-rejection issue).
+    const [settledA, settledB] = await Promise.allSettled([
       this.searchUseCase.execute(
         { ...baseRequest, query: subQueries[0] },
         `${requestId}-a`,
@@ -78,6 +80,10 @@ export class DecomposedSearchUseCase {
         { abortSignal: options?.abortSignal },
       ),
     ]);
+    if (settledA.status === 'rejected') throw settledA.reason as Error;
+    if (settledB.status === 'rejected') throw settledB.reason as Error;
+    const rawResultA = settledA.value;
+    const rawResultB = settledB.value;
 
     throwIfAborted(options?.abortSignal);
 

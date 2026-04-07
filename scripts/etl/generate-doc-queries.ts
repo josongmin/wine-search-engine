@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFile } from './etl-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -235,7 +236,7 @@ async function run(): Promise<void> {
   console.log(`  Records with doc-queries: ${withQueries}/${enriched.length}`);
 
   const lines = enriched.map((r) => JSON.stringify(r)).join('\n');
-  await fs.writeFile(args.output, lines + '\n', 'utf8');
+  await atomicWriteFile(args.output, lines + '\n');
   console.log(`  Written to: ${args.output}`);
 }
 

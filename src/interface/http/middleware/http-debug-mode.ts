@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 
 export interface HttpDebugModeOptions {
@@ -8,12 +8,15 @@ export interface HttpDebugModeOptions {
   readonly secret?: string | undefined;
 }
 
+/**
+ * Constant-time comparison that does not leak the length of `secret`.
+ * Both inputs are HMAC-hashed to a fixed 32-byte digest before comparison,
+ * so timing is independent of input lengths.
+ */
 function headerKeysEqualConstantTime(headerValue: string, secret: string): boolean {
-  const a = Buffer.from(headerValue, 'utf8');
-  const b = Buffer.from(secret, 'utf8');
-  if (a.length !== b.length) {
-    return false;
-  }
+  const hmacKey = 'debug-key-compare';
+  const a = createHmac('sha256', hmacKey).update(headerValue).digest();
+  const b = createHmac('sha256', hmacKey).update(secret).digest();
   return timingSafeEqual(a, b);
 }
 

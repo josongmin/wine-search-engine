@@ -10,6 +10,9 @@ import type { ReplayRouteDeps } from '../../../../src/interface/http/routes/rout
 import { registerReplayRoute } from '../../../../src/interface/http/routes/replay.route.js';
 import { ErrorResponseSchema } from '../../../../src/interface/http/schemas/search-response.schema.js';
 
+const CANONICAL_ENTITY_TRACE_REF =
+  'decision:v1:entity:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
 function buildReplaySnapshot() {
   return {
     snapshot_id: 'snap-1',
@@ -42,7 +45,7 @@ describe('POST /v1/search/replay', () => {
             route: 'entity',
             decision_confidence: 0.99,
             confidence_semantics: 'calibrated_decision_confidence',
-            decision_trace_ref: 'trace-1',
+            decision_trace_ref: CANONICAL_ENTITY_TRACE_REF,
             decision_snapshot: buildReplaySnapshot(),
           },
           results: [],
@@ -71,7 +74,7 @@ describe('POST /v1/search/replay', () => {
         route: 'entity',
         decision_confidence: 0.99,
         confidence_semantics: 'calibrated_decision_confidence',
-        decision_trace_ref: 'trace-1',
+        decision_trace_ref: CANONICAL_ENTITY_TRACE_REF,
         decision_snapshot: buildReplaySnapshot(),
       },
       results: [],
@@ -157,7 +160,7 @@ describe('POST /v1/search/replay', () => {
         route: 'entity',
         decision_confidence: 0.99,
         confidence_semantics: 'calibrated_decision_confidence',
-        decision_trace_ref: 'trace-1',
+        decision_trace_ref: CANONICAL_ENTITY_TRACE_REF,
         execution_mode: 'heuristic',
         blocking_eligible: false,
         degradation_reasons: ['heuristic_drinking_window'],

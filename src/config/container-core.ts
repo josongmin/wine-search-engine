@@ -76,7 +76,13 @@ export async function buildCoreContainerServices(
   // existing consumers continue to receive QueryPlanV1-shaped objects.
   // T1.5 will remove this adapter once all consumers migrate to QueryPlanV2.
   const queryPlanner: QueryPlannerPort = new PlannerV1Adapter(
-    await buildQueryPlanner(adapters, runtime.pool),
+    await buildQueryPlanner(
+      adapters,
+      runtime.pool,
+      adapters.chatLlm,
+      config.openai.llmQueryInterpreter,
+      config.openai.llmQueryInterpreterTimeoutMs,
+    ),
   );
   const entityResolver = buildEntityResolver(adapters, config);
   const candidatePool = buildCandidatePool(adapters, support, config);

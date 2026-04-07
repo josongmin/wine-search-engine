@@ -523,12 +523,13 @@ describe('Ranker', () => {
 
       expect(spy).toHaveBeenCalledOnce();
       const rerankCandidates = spy.mock.calls[0]![1] as readonly RerankCandidate[];
-      const topText = rerankCandidates[0]?.text ?? '';
-      expect(topText).toContain('Brunello 2013');
-      expect(topText).toContain('Poggio Salvi');
-      expect(topText).toContain('Montalcino');
-      expect(topText).toContain('cherry');
-      expect(topText).toContain('Sangiovese');
+      // Find the rich candidate by content (sort order may vary due to tie-breaking)
+      const richText = rerankCandidates.find((c) => c.text.includes('Brunello 2013'))?.text ?? '';
+      expect(richText).toContain('Brunello 2013');
+      expect(richText).toContain('Poggio Salvi');
+      expect(richText).toContain('Montalcino');
+      expect(richText).toContain('cherry');
+      expect(richText).toContain('Sangiovese');
     });
 
     it('no reranker provided + 10 candidates → rerank never called', async () => {

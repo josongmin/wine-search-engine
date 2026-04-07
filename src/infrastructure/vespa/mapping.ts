@@ -517,7 +517,7 @@ export function parseFeatureSummary(raw: Record<string, unknown>): RetrievalFeat
   const drinkingWindowModelVersion = getOptionalString(raw, 'drinking_window_model_version');
 
   return {
-    ...(isString(entityIdRaw) ? { entityId: createEntityId(entityIdRaw) } : {}),
+    ...(isString(entityIdRaw) && entityIdRaw.length > 0 ? { entityId: createEntityId(entityIdRaw) } : {}),
     ...(body !== undefined ? { body } : {}),
     ...(tannin !== undefined ? { tannin } : {}),
     ...(acidity !== undefined ? { acidity } : {}),
@@ -739,7 +739,17 @@ export function buildSparseFilters(filters: readonly string[]): string {
       }
 
       default:
-        // Unrecognised tokens are silently skipped to avoid breaking queries.
+        // Multi-value IN tokens: key ends with _in, value is pipe-delimited.
+        // Produces a Vespa OR clause: (field contains "a" OR field contains "b").
+        if (key.endsWith('_in')) {
+          const field = key.slice(0, -3); // strip '_in' suffix
+          const vals = value.split('|').filter((v) => v.length > 0);
+          if (vals.length > 0) {
+            const disjuncts = vals.map((v) => `${field} contains ${yqlString(v)}`);
+            clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
+          }
+        }
+        // Other unrecognised tokens are silently skipped to avoid breaking queries.
         break;
     }
   }

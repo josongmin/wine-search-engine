@@ -16,17 +16,6 @@ export class DomainError extends Error {
 }
 
 /**
- * The most severe failure type: the engine resolved to the wrong entity.
- * This indicates a critical defect in the resolution pipeline.
- */
-export class WrongResolveError extends DomainError {
-  constructor(message: string) {
-    super('WRONG_RESOLVE', message);
-    this.name = 'WrongResolveError';
-  }
-}
-
-/**
  * Thrown when an attempt is made to return a resolved result without
  * the required evidence trail. Every resolution must be explainable.
  */

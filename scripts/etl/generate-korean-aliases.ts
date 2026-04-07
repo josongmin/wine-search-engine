@@ -19,6 +19,7 @@ import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, ProposedAlias } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFile } from './etl-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -293,7 +294,7 @@ async function run(): Promise<void> {
 
   // Write
   const lines = enriched.map((r) => JSON.stringify(r)).join('\n');
-  await fs.writeFile(args.output, lines + '\n', 'utf8');
+  await atomicWriteFile(args.output, lines + '\n');
   console.log(`  Written to: ${args.output}`);
 }
 

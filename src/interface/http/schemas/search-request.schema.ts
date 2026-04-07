@@ -12,7 +12,7 @@ import {
 
 const SessionContextSnakeSchema = z.object({
   session_id: z.string().min(1),
-  previous_entities: z.array(z.string().max(256)).max(50),
+  previous_entities: z.array(z.string().min(1).max(256)).max(50),
 }).strict().transform((value) => ({
   sessionContext: {
     sessionId: value.session_id,
@@ -21,9 +21,9 @@ const SessionContextSnakeSchema = z.object({
 }));
 
 const QueryBudgetSnakeSchema = z.object({
-  max_latency_ms: z.number().int().positive(),
-  max_candidates: z.number().int().positive(),
-  rerank_limit: z.number().int().positive(),
+  max_latency_ms: z.number().int().positive().max(30_000),
+  max_candidates: z.number().int().positive().max(1_000),
+  rerank_limit: z.number().int().positive().max(500),
 }).strict().transform((value) => ({
   queryBudget: {
     maxLatencyMs: value.max_latency_ms,
@@ -96,7 +96,7 @@ export const ReplayRequestSchema = withRequestAliases({
   expected_response_hash: z.string().min(1).optional(),
   preflight_honesty_contract: z.object({
     execution_mode: z.enum(['authoritative', 'degraded', 'heuristic', 'advisory']),
-    degradation_reasons: z.array(z.string()),
+    degradation_reasons: z.array(z.string().min(1)),
     blocking_eligible: z.boolean().optional(),
   }).strict().optional(),
 });

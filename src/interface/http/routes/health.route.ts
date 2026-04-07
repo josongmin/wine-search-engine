@@ -136,6 +136,10 @@ export function registerHealthRoutes(
           }),
         ),
       ) as ReadyResponse['checks'];
+      // A required check blocks readiness only when its checker actively
+      // reports 'down'. 'skipped' means no checker was registered — treat it
+      // the same as 'up' so environments that omit optional infra (e.g. tests)
+      // don't fail readiness unnecessarily.
       const ready = Object.values(checks).every((check) => !check.required || check.status !== 'down');
 
       const body: ReadyResponse = {

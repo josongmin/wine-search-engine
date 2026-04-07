@@ -112,6 +112,14 @@ describe('index-to-vespa bridge', () => {
     expect(fields).not.toHaveProperty('flavor_profiles');
     expect(fields).not.toHaveProperty('critic_score_normalized');
   });
+
+  it('deterministicEmbedding produces 1024-dim vectors matching Vespa schema', () => {
+    const embedding = deterministicEmbedding(0.5, 0.3, 0.6, 0.8);
+    expect(embedding).toHaveLength(1024);
+    // Verify L2-normalized (unit vector)
+    const norm = Math.sqrt(embedding.reduce((s, x) => s + x * x, 0));
+    expect(norm).toBeCloseTo(1.0, 5);
+  });
 });
 
 describe('taxonomy field ingest contract', () => {

@@ -84,8 +84,8 @@ function makeEmbedding(
     body, sweetness, acidity, tannin,
     1 - body, 1 - sweetness, 1 - acidity, 1 - tannin,
   ];
-  const embedding = new Array<number>(128).fill(0);
-  for (let i = 0; i < 128; i++) {
+  const embedding = new Array<number>(1024).fill(0);
+  for (let i = 0; i < 1024; i++) {
     const f = features[i % features.length]!;
     const k = Math.floor(i / features.length);
     embedding[i] = f * Math.cos(k * Math.PI / 8) + (1 - f) * Math.sin(k * Math.PI / 8);

@@ -36,5 +36,5 @@ export interface DrinkingWindowPrediction {
  */
 export interface DrinkingWindowPredictorPort {
   readonly modelVersion: string;
-  predict(input: DrinkingWindowInput): DrinkingWindowPrediction;
+  predict(input: DrinkingWindowInput): DrinkingWindowPrediction | Promise<DrinkingWindowPrediction>;
 }

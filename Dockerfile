@@ -5,7 +5,8 @@ COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN npm run build
+# Skip `npm run build` (artifacts:link + tsc): Alpine has no bash; link script is for local dev paths.
+RUN npx tsc --project tsconfig.build.json
 
 # Stage 2: production
 FROM node:22-alpine AS runner

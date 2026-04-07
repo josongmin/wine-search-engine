@@ -33,6 +33,19 @@ export type QueryFamilyLabel = (typeof QUERY_FAMILY_LABELS)[number];
 
 type PlanLike = QueryPlanV1 | QueryPlanV2;
 
+/** Constraint extraction provenance — tracks rule vs LLM hit rates. */
+export interface ConstraintExtractionObservability {
+  readonly candidatePhraseCount: number;
+  readonly ruleTableHitCount: number;
+  readonly llmHitCount: number;
+  readonly llmSkippedCount: number;
+  readonly fallbackTriggered: boolean;
+  readonly source: 'rule_only' | 'llm_only' | 'hybrid' | 'fallback';
+  readonly llmLatencyMs: number | null;
+  readonly cacheHit: boolean;
+  readonly missedPhrases: readonly string[];
+}
+
 export interface QueryObservabilitySlice {
   readonly queryId: string;
   readonly rawQuery: string;
@@ -51,6 +64,8 @@ export interface QueryObservabilitySlice {
   readonly thresholdProfileId: string;
   readonly decompositionStrategy?: string | undefined;
   readonly decompositionConfidence?: number | undefined;
+  /** Constraint extraction provenance (populated when LlmNLMapper is active). */
+  readonly constraintExtraction?: ConstraintExtractionObservability | undefined;
 }
 
 function getSuggestedRoute(plan: PlanLike): string {

@@ -96,6 +96,7 @@ describe('HTTP server route registration', () => {
             check: async () => 'down',
           },
           redis: {
+            required: false,
             check: async () => 'down',
           },
         },
@@ -129,6 +130,7 @@ describe('HTTP server route registration', () => {
       health: {
         readiness: {
           redis: {
+            required: false,
             check: async () => 'down',
           },
         },
@@ -146,7 +148,7 @@ describe('HTTP server route registration', () => {
       expect(res.json()).toMatchObject({
         ready: true,
         checks: {
-          postgres: { status: 'skipped', required: false },
+          postgres: { status: 'skipped', required: true },
           redis: { status: 'down', required: false },
         },
       });
@@ -252,8 +254,8 @@ describe('HTTP server route registration', () => {
       expect(res.json()).toMatchObject({
         ready: true,
         checks: {
-          postgres: { status: 'skipped', required: false },
-          redis: { status: 'skipped', required: false },
+          postgres: { status: 'skipped', required: true },
+          redis: { status: 'skipped', required: true },
           vespa: { status: 'up', required: true },
           reranker: { status: 'down', required: false },
         },

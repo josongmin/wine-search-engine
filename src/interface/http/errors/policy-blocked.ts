@@ -10,6 +10,7 @@ import {
 } from './error-response.js';
 import type { ErrorResponseBody } from '../schemas/search-response.schema.js';
 import { getRequestId } from '../request-id.js';
+import { getAuthenticatedSubject } from '../authenticated-subject.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 const securityAuditLog = bootstrapLogger.child({ component: 'security_audit' });
@@ -49,8 +50,7 @@ export function sendPolicyBlockedResponse(
   //   - method / url: identify the targeted endpoint
   const rawBody = request.body as Record<string, unknown> | undefined;
   const rawQuery = typeof rawBody?.['query'] === 'string' ? rawBody['query'] : '';
-  const subjectHeader = request.headers['x-authenticated-subject'];
-  const subject = Array.isArray(subjectHeader) ? (subjectHeader[0] ?? '') : (subjectHeader ?? '');
+  const subject = getAuthenticatedSubject(request) ?? '';
 
   securityAuditLog.warn({
     event: 'query_blocked_policy',

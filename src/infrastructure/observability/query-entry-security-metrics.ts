@@ -11,6 +11,8 @@ export interface QueryEntrySecurityMetrics {
   readonly judgeErrors: number;
   readonly failClosedBlocks: number;
   readonly failOpenBypasses: number;
+  readonly lastJudgeErrorTimestamp?: number;
+  readonly lastJudgeErrorMode?: 'fail_open' | 'fail_closed';
 }
 
 export interface QueryEntrySecurityObserver {
@@ -27,6 +29,7 @@ export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObs
   private judgeErrors = 0;
   private failClosedBlocks = 0;
   private failOpenBypasses = 0;
+  private lastJudgeError: { error: unknown; mode: 'fail_open' | 'fail_closed'; timestamp: number } | undefined;
 
   onLayer1Blocked(_reason: string): void {
     this.layer1Blocks++;
@@ -36,8 +39,9 @@ export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObs
     this.layer2Blocks++;
   }
 
-  onJudgeError(_error: unknown, _mode: 'fail_open' | 'fail_closed'): void {
+  onJudgeError(error: unknown, mode: 'fail_open' | 'fail_closed'): void {
     this.judgeErrors++;
+    this.lastJudgeError = { error, mode, timestamp: Date.now() };
   }
 
   onFailClosedBlock(): void {
@@ -55,6 +59,9 @@ export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObs
       judgeErrors: this.judgeErrors,
       failClosedBlocks: this.failClosedBlocks,
       failOpenBypasses: this.failOpenBypasses,
+      ...(this.lastJudgeError !== undefined
+        ? { lastJudgeErrorTimestamp: this.lastJudgeError.timestamp, lastJudgeErrorMode: this.lastJudgeError.mode }
+        : {}),
     };
   }
 
@@ -64,6 +71,7 @@ export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObs
     this.judgeErrors = 0;
     this.failClosedBlocks = 0;
     this.failOpenBypasses = 0;
+    this.lastJudgeError = undefined;
   }
 }
 

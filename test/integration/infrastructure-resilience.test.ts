@@ -152,7 +152,8 @@ describe('VespaClient — error-handling paths', () => {
   describe('Test 1 — VespaNetworkError wrapping', () => {
     it('wraps a fetch TypeError in VespaNetworkError (not raw Error)', async () => {
       const networkFailure = new TypeError('Failed to fetch');
-      vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(networkFailure);
+      // query() wraps fetch in withRetry — a single rejected call would succeed on retry against real Vespa.
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(networkFailure);
 
       await expect(client.query('select * from sources * where true')).rejects.toSatisfy(
         (err: unknown) => err instanceof VespaNetworkError,
@@ -161,7 +162,7 @@ describe('VespaClient — error-handling paths', () => {
 
     it('VespaNetworkError preserves the original cause error message', async () => {
       const networkFailure = new TypeError('ECONNREFUSED');
-      vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(networkFailure);
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(networkFailure);
 
       let caught: unknown;
       try {
@@ -176,7 +177,7 @@ describe('VespaClient — error-handling paths', () => {
     });
 
     it('does NOT throw a raw Error on transport failure', async () => {
-      vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new TypeError('socket hang up'));
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('socket hang up'));
 
       await expect(client.query('select * from sources * where true')).rejects.not.toBeInstanceOf(
         TypeError,
@@ -209,7 +210,7 @@ describe('VespaClient — error-handling paths', () => {
       expect(httpErr.isRateLimited).toBe(true);
     });
 
-    it('VespaHttpError on 429 carries isClientError=true', async () => {
+    it('VespaHttpError on 429 keeps isClientError=false (rate-limit ≠ malformed 4xx)', async () => {
       mockFetchSequence(
         makeMockResponse(429, 'rate limited'),
         makeMockResponse(429, 'rate limited'),
@@ -218,7 +219,9 @@ describe('VespaClient — error-handling paths', () => {
 
       await expect(client.query('select * from sources * where true')).rejects.toSatisfy(
         (err: unknown) =>
-          err instanceof VespaHttpError && err.isClientError,
+          err instanceof VespaHttpError &&
+          err.isRateLimited &&
+          !err.isClientError,
       );
     });
   });

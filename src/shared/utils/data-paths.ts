@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
 
 const HOME_DATA_DIR = resolve(homedir(), '.wine-search-engine', 'data');
 const REPO_DATA_DIR = resolve(process.cwd(), 'data');
@@ -23,10 +23,16 @@ export function resolveDataPath(pathLike: string): string {
     return pathLike;
   }
 
+  const dataDir = getWineDataDir();
   const normalized = pathLike.startsWith('data/') ? pathLike.slice('data/'.length) : pathLike;
-  return resolve(getWineDataDir(), normalized);
-}
+  const resolved = resolve(dataDir, normalized);
 
-export function getDefaultWineDataDir(): string {
-  return HOME_DATA_DIR;
+  // Path containment check: prevent "../" traversal escaping the data directory
+  if (!resolved.startsWith(dataDir + sep) && resolved !== dataDir) {
+    throw new Error(
+      `Path traversal blocked: "${pathLike}" resolves outside data directory "${dataDir}"`,
+    );
+  }
+
+  return resolved;
 }

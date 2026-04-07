@@ -16,6 +16,9 @@ import type {
 } from '../../../../src/interface/http/routes/route-deps.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 
+const CANONICAL_HYBRID_TRACE_REF =
+  'decision:v1:hybrid:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
 function buildNonPolicyFailureResponse(): SearchResponseV1 {
   return {
     queryType: 'search',
@@ -25,7 +28,7 @@ function buildNonPolicyFailureResponse(): SearchResponseV1 {
       route: 'hybrid',
       decisionConfidence: 0,
       confidenceSemantics: 'calibrated_decision_confidence',
-      decisionTraceRef: 'trace-2',
+      decisionTraceRef: CANONICAL_HYBRID_TRACE_REF,
       decisionSnapshot: {
         snapshot_id: 'snap-2',
         model_versions: {},

@@ -55,12 +55,15 @@ export class InterpretUseCase {
 
   async execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
+    options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<QueryPlanV1>;
   async execute(
     request: InterpretRequest & { readonly buildV2: true; readonly requestId?: string | undefined },
+    options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<InterpretResultWithV2>;
   async execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
+    _options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<QueryPlanV1 | InterpretResultWithV2> {
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,

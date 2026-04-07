@@ -196,7 +196,7 @@ export interface SilverWineRecord {
   readonly ratingAvg: number | null;
   /** Vivino ratings count (raw). */
   readonly ratingsCount: number;
-  /** Price in USD (simplified: non-USD assumed 1:1 for now). */
+  /** Price in USD (converted from source currency using approximate FX rates). */
   readonly priceUsd: number | null;
   /** Price band derived from priceUsd. */
   readonly priceBand: PriceBand;
@@ -388,6 +388,12 @@ export interface IndexableWineRecord {
   readonly finishLength?: number | undefined;
   /** Oak aging regime (e.g. "new French oak 18 months", "unoaked stainless"). */
   readonly oakTreatment?: string | undefined;
+  /** Grape variety family grouping (e.g. "Cabernet", "Pinot"). */
+  readonly grapeFamily?: string | undefined;
+  /** Region hierarchy path for hierarchical matching. */
+  readonly regionHierarchy?: readonly string[] | undefined;
+  /** Numeric encoding of price band for range queries (1=value, 2=mid, 3=premium, 4=luxury). */
+  readonly priceBandNumeric?: number | undefined;
 }
 
 // ---------------------------------------------------------------------------

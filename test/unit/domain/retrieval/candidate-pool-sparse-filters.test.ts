@@ -133,7 +133,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
     expect(out[0]?.matchedConstraints).toContain('wine_type');
   });
 
-  it('fails fast when dense retrieval receives no primary embedding', async () => {
+  it('degrades to sparse-only when dense retrieval receives no primary embedding', async () => {
     const searchIndex: SearchIndexPort = {
       sparseSearch: vi.fn(async () => []),
       denseSearch: vi.fn(async () => []),
@@ -150,14 +150,17 @@ describe('CandidatePoolService sparse filter tokens', () => {
 
     const pool = new CandidatePoolService(searchIndex, embeddingService, new FusionService());
 
-    await expect(pool.generate({
+    // Dense retrieval degrades gracefully — returns empty candidates instead of throwing.
+    const results = await pool.generate({
       queryPlan: minimalPlan(),
       route: 'hybrid',
       lexicalQueries: ['red wine'],
       semanticQueries: ['red wine'],
       hardConstraints: [],
       softConstraints: [],
-    })).rejects.toThrow('Dense retrieval failed: embedding service returned no primary embedding');
+    });
+    expect(results).toEqual([]);
+    expect(searchIndex.denseSearch).not.toHaveBeenCalled();
   });
 
   it('executes learned sparse on the live path when the profile activates that channel', async () => {

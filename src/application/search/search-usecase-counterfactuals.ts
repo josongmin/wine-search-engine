@@ -46,7 +46,7 @@ export function buildSearchCounterfactuals(
         entityId: candidate.entityId,
         canonicalLabel: candidate.canonicalLabel,
         rejectedReason:
-          `Calibrated score ${candidate.calibratedScore.toFixed(3)} below top candidate` +
+          `Calibrated score ${Number.isFinite(candidate.calibratedScore) ? candidate.calibratedScore.toFixed(3) : 'N/A'} below top candidate` +
           (topEntityId !== undefined
             ? ` (rank ${candidate.rank} of ${resolverResult.candidates.length})`
             : ''),
@@ -69,7 +69,7 @@ export function buildSearchCounterfactuals(
         canonicalLabel: result.canonicalLabel,
         rejectedReason:
           `Lower ranking (rank ${result.rank}/${rankedResults.length}); ` +
-          `final_score=${result.finalScore.toFixed(3)}, ` +
+          `final_score=${Number.isFinite(result.finalScore) ? result.finalScore.toFixed(3) : 'below_threshold'}, ` +
           `hard_constraint_pass=${String(result.componentScores.hardConstraintPass)}`,
       });
       emittedEntityIds.add(String(result.entityId));

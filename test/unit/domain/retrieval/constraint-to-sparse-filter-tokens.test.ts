@@ -45,10 +45,10 @@ describe('hardConstraintsToSparseFilterTokens', () => {
     expect(tokens).toEqual([]);
   });
 
-  it('does not corrupt multi-value in constraints into ANDed sparse filters', () => {
+  it('emits pipe-delimited _in token for multi-value in constraints', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       c({ attribute: 'country', operator: 'in', value: ['France', 'Italy'] }),
     ]);
-    expect(tokens).toEqual([]);
+    expect(tokens).toEqual(['country_in:France|Italy']);
   });
 });

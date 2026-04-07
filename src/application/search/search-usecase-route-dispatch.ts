@@ -89,5 +89,9 @@ export async function dispatchSearchRouteExecution(
       );
       return mixedResult;
     }
+    default: {
+      const _exhaustive: never = effectiveRoute;
+      throw new Error(`Unhandled search route: ${String(_exhaustive)}`);
+    }
   }
 }

@@ -81,7 +81,8 @@ export async function normalizePairings(
     throw new Error('No text response from Claude');
   }
 
-  const jsonMatch = textContent.text.match(/\{[\s\S]*\}/);
+  // Non-greedy match: extract the first complete JSON object
+  const jsonMatch = textContent.text.match(/\{[\s\S]*?\}/);
   if (!jsonMatch) {
     throw new Error(`Failed to extract JSON from response: ${textContent.text}`);
   }

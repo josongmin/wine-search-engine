@@ -1,10 +1,22 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type {
   WatchlistDeliveryLogEntry,
   WatchlistEntry,
 } from '../../domain/watchlist/model/watchlist-entry.js';
 import { parseWatchlistTriggers } from '../../domain/watchlist/model/watchlist-entry.js';
-import type { WatchlistStoragePort } from '../../domain/watchlist/port/watchlist-repository.port.js';
+import type {
+  WatchlistStoragePort,
+  TransactionalWatchlistStore,
+} from '../../domain/watchlist/port/watchlist-repository.port.js';
+
+/** Minimal query interface shared by Pool and PoolClient. */
+interface QueryExecutor {
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters, @typescript-eslint/no-explicit-any
+  query<T = any>(
+    text: string,
+    values?: unknown[],
+  ): Promise<{ rows: T[]; rowCount: number | null }>;
+}
 
 interface WatchlistRow {
   watchlist_id: string;
@@ -53,11 +65,21 @@ function rowToDeliveryLogEntry(row: WatchlistDeliveryLogRow): WatchlistDeliveryL
   };
 }
 
-export class PgWatchlistStore implements WatchlistStoragePort {
-  constructor(private readonly pool: Pool) {}
+export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatchlistStore {
+  private readonly executor: QueryExecutor;
+  private readonly pool: Pool | null;
+
+  constructor(poolOrClient: Pool | PoolClient) {
+    this.executor = poolOrClient;
+    // Only a Pool can create transactions; PoolClient is already inside one.
+    // Pool has `connect()` method; PoolClient does not.
+    this.pool = 'connect' in poolOrClient && typeof (poolOrClient as Pool).connect === 'function'
+      ? (poolOrClient as Pool)
+      : null;
+  }
 
   async save(entry: WatchlistEntry): Promise<void> {
-    await this.pool.query(
+    await this.executor.query(
       `INSERT INTO watchlists (
         watchlist_id,
         user_id,
@@ -87,7 +109,7 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   }
 
   async findById(id: string): Promise<WatchlistEntry | null> {
-    const result = await this.pool.query<WatchlistRow>(
+    const result = await this.executor.query<WatchlistRow>(
       `SELECT * FROM watchlists WHERE watchlist_id = $1`,
       [id],
     );
@@ -96,7 +118,7 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   }
 
   async findByUserId(userId: string): Promise<readonly WatchlistEntry[]> {
-    const result = await this.pool.query<WatchlistRow>(
+    const result = await this.executor.query<WatchlistRow>(
       `SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at ASC`,
       [userId],
     );
@@ -104,7 +126,7 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   }
 
   async findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
-    const result = await this.pool.query<WatchlistRow>(
+    const result = await this.executor.query<WatchlistRow>(
       `SELECT * FROM watchlists WHERE entity_id = $1 ORDER BY created_at ASC`,
       [entityId],
     );
@@ -112,7 +134,7 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   }
 
   async delete(id: string): Promise<boolean> {
-    const result = await this.pool.query<{ watchlist_id: string }>(
+    const result = await this.executor.query<{ watchlist_id: string }>(
       `DELETE FROM watchlists WHERE watchlist_id = $1 RETURNING watchlist_id`,
       [id],
     );
@@ -122,7 +144,7 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   async listByWatchlistId(
     watchlistId: string,
   ): Promise<readonly WatchlistDeliveryLogEntry[]> {
-    const result = await this.pool.query<WatchlistDeliveryLogRow>(
+    const result = await this.executor.query<WatchlistDeliveryLogRow>(
       `SELECT * FROM watchlist_delivery_logs
        WHERE watchlist_id = $1
        ORDER BY delivered_at ASC, attempt ASC`,
@@ -132,7 +154,7 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   }
 
   async append(log: WatchlistDeliveryLogEntry): Promise<void> {
-    await this.pool.query(
+    await this.executor.query(
       `INSERT INTO watchlist_delivery_logs (
         delivery_log_id,
         watchlist_id,
@@ -154,6 +176,34 @@ export class PgWatchlistStore implements WatchlistStoragePort {
   }
 
   async clear(): Promise<void> {
-    await this.pool.query('TRUNCATE TABLE watchlist_delivery_logs, watchlists RESTART IDENTITY');
+    await this.executor.query('TRUNCATE TABLE watchlist_delivery_logs, watchlists RESTART IDENTITY');
+  }
+
+  async findByIdForUpdate(id: string): Promise<WatchlistEntry | null> {
+    const result = await this.executor.query<WatchlistRow>(
+      `SELECT * FROM watchlists WHERE watchlist_id = $1 FOR UPDATE`,
+      [id],
+    );
+    const row = result.rows[0];
+    return row !== undefined ? rowToWatchlistEntry(row) : null;
+  }
+
+  async withTransaction<T>(fn: (tx: TransactionalWatchlistStore) => Promise<T>): Promise<T> {
+    if (this.pool === null) {
+      throw new Error('withTransaction requires a Pool, not a PoolClient (already in a transaction)');
+    }
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const txStore = new PgWatchlistStore(client);
+      const result = await fn(txStore);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 }

@@ -3,15 +3,15 @@ import {
   DecisionSnapshotSchema,
 } from './search-shared.schema.js';
 
-const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
+export const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
   /^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{64}$/;
 
 export const ErrorResponseSchema = z.object({
   error: z.object({
-    request_id: z.string(),
-    code: z.string(),
-    message: z.string(),
-    failure_reason: z.string().nullable(),
+    request_id: z.string().max(256),
+    code: z.string().max(128),
+    message: z.string().max(4096),
+    failure_reason: z.string().max(1024).nullable(),
     retryable: z.boolean(),
   }).strict(),
 }).strict();
@@ -24,7 +24,10 @@ export const EvidenceItemSchema = z.object({
   contribution: z.string().min(1),
   strength: z.enum(['low', 'medium', 'high']),
   provenance: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).refine(
+    (obj) => Object.keys(obj).length <= 50,
+    'metadata must have at most 50 keys',
+  ).optional(),
 }).strict();
 
 export const EntitySummarySchema = z.object({
@@ -67,15 +70,18 @@ export const UncertaintyBlockSchema = z.object({
 }).strict();
 
 export const DrinkingWindowSchema = z.object({
-  drinking_window_start: z.number().int(),
-  drinking_window_end: z.number().int(),
-  peak_year: z.number().int().optional(),
+  drinking_window_start: z.number().int().min(1900).max(2200),
+  drinking_window_end: z.number().int().min(1900).max(2200),
+  peak_year: z.number().int().min(1900).max(2200).optional(),
   currently_drinkable: z.boolean(),
   confidence: z.enum(['high', 'medium', 'low']),
   evidence_level: z.enum(['learned', 'heuristic']).optional(),
   blocking_eligible: z.boolean().optional(),
   model_version: z.string().min(1).optional(),
-}).strict();
+}).strict().refine(
+  (w) => w.drinking_window_start <= w.drinking_window_end,
+  'drinking_window_start must be <= drinking_window_end',
+);
 
 export const ResultItemSchema = z.object({
   entity: EntitySummarySchema,
@@ -125,11 +131,11 @@ export const EngineDecisionSchema = z.object({
     .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
     .optional(),
   blocking_eligible: z.boolean().optional(),
-  degradation_reasons: z.array(z.string()).optional(),
+  degradation_reasons: z.array(z.string().min(1)).optional(),
   decision_snapshot: DecisionSnapshotSchema,
-  failure_reason: z.string().optional(),
+  failure_reason: z.string().min(1).optional(),
   admission_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
-  abstain_reason: z.string().optional(),
+  abstain_reason: z.string().min(1).optional(),
   retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
   planner_suggested_mode: z.string().min(1).optional(),
 }).strict();
@@ -163,7 +169,7 @@ export const SearchResponseMetaSchema = z.object({
     .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
     .optional(),
   blocking_eligible: z.boolean().optional(),
-  degradation_reasons: z.array(z.string()).optional(),
+  degradation_reasons: z.array(z.string().min(1)).optional(),
   specialized_route_requested: z
     .enum(['producer_browse', 'region_browse', 'compare_candidates'])
     .nullable()
@@ -334,15 +340,15 @@ const NormalizedQueryViewsSchema = z.object({
 
 const SessionContextTransportSchema = z.object({
   session_id: z.string().min(1),
-  previous_entities: z.array(z.string().max(256)).max(50),
+  previous_entities: z.array(z.string().min(1).max(256)).max(50),
 }).strict();
 
 const QueryBudgetTransportSchema = z.object({
-  max_latency_ms: z.number().int().positive(),
-  max_candidates: z.number().int().positive(),
-  rerank_limit: z.number().int().positive(),
-  max_dense_calls: z.number().int().positive().optional(),
-});
+  max_latency_ms: z.number().int().positive().max(30_000),
+  max_candidates: z.number().int().positive().max(1_000),
+  rerank_limit: z.number().int().positive().max(500),
+  max_dense_calls: z.number().int().positive().max(100).optional(),
+}).strict();
 
 export const InterpretResponseSchema = z.object({
   raw_query: z.string().min(1),
@@ -387,7 +393,10 @@ export const ResolveCandidateSchema = z.object({
   calibrated_score: z.number().min(0).max(1),
   evidence_refs: z.array(z.string().min(1)).optional(),
   match_reasons: z.array(z.string()).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).refine(
+    (obj) => Object.keys(obj).length <= 50,
+    'metadata must have at most 50 keys',
+  ).optional(),
 }).strict();
 
 export const ResolveTopEntitySchema = z.object({

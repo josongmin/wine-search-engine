@@ -9,9 +9,9 @@ export const PostFeedbackRequestSchema = z.object({
   signal_type: z.enum(['click', 'purchase', 'dismiss']),
   session_id: z.string().min(1).max(256),
   query_class: z.enum(queryClassValues).optional(),
-});
+}).strict();
 
 export const PostFeedbackResponseSchema = z.object({
-  signal_id: z.string(),
+  signal_id: z.string().min(1),
   accepted: z.literal(true),
-});
+}).strict();

@@ -4,7 +4,6 @@ import { ExpansionBuilder } from '../domain/query/service/expansion-builder.js';
 import type { Pool } from 'pg';
 import { FuzzyMatcher } from '../domain/query/service/fuzzy-matcher.js';
 import type { FuzzyMatcherPort } from '../domain/query/port/fuzzy-matcher.port.js';
-import { CharNgramIndex } from '../domain/alias/service/char-ngram-index.js';
 import { Resolver } from '../domain/resolver/service/resolver.js';
 import { Blocker } from '../domain/resolver/service/blocker.js';
 import { CandidateScorer } from '../domain/resolver/service/candidate-scorer.js';
@@ -28,6 +27,8 @@ import { AnchorProfiler } from '../domain/mixed/service/anchor-profiler.js';
 import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
 import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
+import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
+import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
@@ -53,27 +54,12 @@ export function buildSnapshotVersions(config: Config): SnapshotVersions {
   };
 }
 
-export async function buildCharNgramIndex(pool?: Pool): Promise<CharNgramIndex | undefined> {
-  if (pool === undefined) return undefined;
-  try {
-    const { rows } = await pool.query<{ surface_form: string }>(
-      'SELECT DISTINCT surface_form FROM aliases WHERE is_suppressed = FALSE',
-    );
-    const terms = rows.map((r) => r.surface_form);
-    if (terms.length > 0) {
-      const index = new CharNgramIndex();
-      index.initialize(terms);
-      return index;
-    }
-  } catch {
-    // Alias table may not exist yet; proceed without char n-gram index.
-  }
-  return undefined;
-}
-
 export async function buildQueryPlanner(
   adapters: CoreAdapterServices,
   pool?: Pool,
+  chatLlm?: ChatLlmPort,
+  llmQueryInterpreter?: boolean,
+  llmQueryInterpreterTimeoutMs?: number,
 ): Promise<Planner> {
   let fuzzyMatcher: FuzzyMatcherPort | undefined;
 
@@ -93,11 +79,15 @@ export async function buildQueryPlanner(
     }
   }
 
+  const nlMapper = llmQueryInterpreter && chatLlm !== undefined
+    ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs)
+    : new NLMapper(adapters.mappingTable);
+
   return new Planner(
     adapters.ambiguityDict,
     new AnchorExtractor(adapters.aliasMatcher),
     new ExpansionBuilder(),
-    new NLMapper(adapters.mappingTable),
+    nlMapper,
     fuzzyMatcher,
   );
 }

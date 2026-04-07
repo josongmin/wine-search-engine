@@ -21,6 +21,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
+import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import type { ClaudeToolsRouteDeps } from './route-deps.js';
 import {
@@ -67,7 +68,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
             : {}),
         });
       } catch (err) {
-        if (err instanceof ZodError) {
+        if (err instanceof ZodError || err instanceof DomainError) {
           throw err;
         }
         request.log.error({ err, requestId }, 'claude_tools_execution_failed');

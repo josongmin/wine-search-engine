@@ -4,12 +4,6 @@ import type { HttpRouteContract } from './route-contracts.js';
 import { deepKeysToSnake } from '../middleware/snake-case-hook.js';
 import { getRequestId } from '../request-id.js';
 
-function formatIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
-    .join('; ');
-}
-
 export function validateContractResponse<T>(
   request: FastifyRequest,
   schema: z.ZodType<T>,
@@ -28,7 +22,7 @@ export function validateContractResponse<T>(
     'http_response_contract_violation',
   );
 
-  throw new Error(`HTTP response contract violation: ${formatIssues(parsed.error)}`);
+  throw new Error('HTTP response contract violation: outbound payload failed schema validation');
 }
 
 export function sendContractResponse<T>(
@@ -74,11 +68,14 @@ export function sendRouteContractResponse(
     return;
   }
 
+  const snakePayload = deepKeysToSnake(payload);
+  // Mark reply so the preSerialization hook skips the redundant conversion.
+  reply.snakeCaseApplied = true;
   sendContractResponse(
     request,
     reply,
     statusCode,
     schema as z.ZodType<unknown>,
-    deepKeysToSnake(payload),
+    snakePayload,
   );
 }

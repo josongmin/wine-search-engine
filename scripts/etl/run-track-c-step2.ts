@@ -3,77 +3,97 @@
 /**
  * Track C Step 2: Enrich Certifications
  *
- * Reads silver-docquery.ndjson with critic proxies, enriches with
- * organic/biodynamic/vegan/natural certification data via Wikidata SPARQL + LLM fallback.
+ * SOTA++ improvements: idempotent (skips already-enriched), atomic writes,
+ * dead-letter queue for failures, periodic checkpoint flush.
  *
  * Usage: npx tsx --env-file=.env scripts/etl/run-track-c-step2.ts
- *
- * Input: data/silver-docquery.ndjson (with criticProxy field)
- * Output: data/silver-docquery.ndjson (with certifications field added)
- * Error handling: LLM fallback for SPARQL failures, continues processing
  */
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import { parseNdjson } from './ndjson';
-import { enrichWineCertificationsBatch } from './enrich-certifications';
+import { parseNdjson } from './ndjson.js';
+import { enrichWineCertificationsBatch } from './enrich-certifications.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFileSync, appendDeadLetter } from './etl-utils.js';
 
 interface SilverRecord {
+  readonly sourceId?: string;
   readonly externalId: string;
   readonly producer: string;
   readonly searchTextEn: string;
   [key: string]: unknown;
 }
 
+interface CertificationResult {
+  readonly organic: boolean;
+  readonly biodynamic: boolean;
+  readonly vegan: boolean;
+  readonly naturalWine: boolean;
+  readonly certificationSource: string;
+  readonly certificationConfidence: string;
+}
+
 interface EnrichedRecord extends SilverRecord {
-  readonly certifications?: {
-    readonly organic: boolean;
-    readonly biodynamic: boolean;
-    readonly vegan: boolean;
-    readonly naturalWine: boolean;
-    readonly certificationSource: string;
-    readonly certificationConfidence: string;
-  };
+  readonly certifications?: CertificationResult;
 }
 
 const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
+const DEAD_LETTER_FILE = resolveDataPath('.dead-letter-step2.ndjson');
 const BATCH_SIZE = 100;
+const FLUSH_INTERVAL = 5;
 
 async function main() {
-  console.log('🍷 Track C Step 2: Enrich Certifications (Wikidata + LLM)');
-  console.log(`📄 Input: ${DATA_FILE}`);
+  console.log('Track C Step 2: Enrich Certifications (Wikidata + LLM)');
+  console.log(`  Input: ${DATA_FILE}`);
 
-  // Load data
   if (!fs.existsSync(DATA_FILE)) {
-    console.error(`❌ File not found: ${DATA_FILE}`);
+    console.error(`  File not found: ${DATA_FILE}`);
     process.exit(1);
   }
 
   const content = fs.readFileSync(DATA_FILE, 'utf-8');
   const { records, skipped } = parseNdjson<SilverRecord>(content, DATA_FILE);
 
-  console.log(`📊 Loaded: ${records.length} records (${skipped} malformed lines)`);
+  console.log(`  Loaded: ${records.length} records (${skipped} malformed lines)`);
 
-  // Process in batches
+  const alreadyDone = records.filter((r) => (r as EnrichedRecord).certifications != null).length;
+  if (alreadyDone > 0) {
+    console.log(`  Idempotency: ${alreadyDone} records already have certifications, skipping those`);
+  }
+
   let processed = 0;
   let failed = 0;
+  let skippedIdempotent = 0;
   const enrichedRecords: EnrichedRecord[] = [];
 
-  let wikidata_count = 0;
-  let llm_inferred_count = 0;
-  let none_count = 0;
+  let wikidataCount = 0;
+  let llmInferredCount = 0;
+  let noneCount = 0;
 
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
     const batch = records.slice(i, i + BATCH_SIZE);
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     const totalBatches = Math.ceil(records.length / BATCH_SIZE);
 
-    console.log(`\n⏳ Batch ${batchNum}/${totalBatches} (${batch.length} wines)...`);
+    const toDo: SilverRecord[] = [];
+    const done: EnrichedRecord[] = [];
+    for (const r of batch) {
+      if ((r as EnrichedRecord).certifications != null) {
+        done.push(r as EnrichedRecord);
+        skippedIdempotent++;
+      } else {
+        toDo.push(r);
+      }
+    }
 
-    // Enrich certifications for batch
+    enrichedRecords.push(...done);
+
+    if (toDo.length === 0) continue;
+
+    console.log(`\n  Batch ${batchNum}/${totalBatches} (${toDo.length} to process)...`);
+
     const certMap = await enrichWineCertificationsBatch(
-      batch.map((r) => ({
+      toDo.map((r) => ({
         entityId: r.externalId,
         producer: r.producer,
         searchTextEn: r.searchTextEn,
@@ -81,8 +101,7 @@ async function main() {
       10,
     );
 
-    // Merge results back
-    for (const record of batch) {
+    for (const record of toDo) {
       const cert = certMap.get(record.externalId);
       if (cert) {
         enrichedRecords.push({
@@ -97,50 +116,52 @@ async function main() {
           },
         });
 
-        if (cert.certificationSource === 'wikidata') {
-          wikidata_count++;
-        } else if (cert.certificationSource === 'llm_inferred') {
-          llm_inferred_count++;
-        } else {
-          none_count++;
-        }
+        if (cert.certificationSource === 'wikidata') wikidataCount++;
+        else if (cert.certificationSource === 'llm_inferred') llmInferredCount++;
+        else noneCount++;
         processed++;
       } else {
         enrichedRecords.push(record);
         failed++;
-        console.warn(`  ⚠️  No certifications for: ${record.externalId}`);
+        const id = record.sourceId ?? record.externalId;
+        await appendDeadLetter(DEAD_LETTER_FILE, {
+          sourceId: id,
+          step: 'certifications',
+          error: 'No certification result',
+        });
       }
     }
 
-    // Progress
-    const pct = Math.round((processed + failed) / records.length * 100);
+    if (batchNum % FLUSH_INTERVAL === 0) {
+      const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+      atomicWriteFileSync(DATA_FILE, output);
+      console.log(`  [checkpoint] Flushed ${enrichedRecords.length} records to disk`);
+    }
+
+    const pct = Math.round(enrichedRecords.length / records.length * 100);
     console.log(
-      `  ✓ Processed: ${processed}/${records.length} (${pct}%) | Failed: ${failed}`,
+      `  Processed: ${processed}/${records.length} (${pct}%) | Failed: ${failed}`,
     );
   }
 
-  // Write back
-  const output = enrichedRecords
-    .map((r) => JSON.stringify(r))
-    .join('\n');
+  const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  atomicWriteFileSync(DATA_FILE, output);
 
-  fs.writeFileSync(DATA_FILE, output, 'utf-8');
-
-  // Report
   console.log('\n' + '='.repeat(60));
-  console.log('✅ Step 2 Complete: Certification Enrichment');
+  console.log('Step 2 Complete: Certification Enrichment');
   console.log('='.repeat(60));
   console.log(`Total records: ${enrichedRecords.length}`);
-  console.log(`Successfully enriched: ${processed}`);
-  console.log(`  - Wikidata: ${wikidata_count}`);
-  console.log(`  - LLM inferred: ${llm_inferred_count}`);
-  console.log(`  - None found: ${none_count}`);
+  console.log(`New enrichments: ${processed}`);
+  console.log(`  - Wikidata: ${wikidataCount}`);
+  console.log(`  - LLM inferred: ${llmInferredCount}`);
+  console.log(`  - None found: ${noneCount}`);
+  console.log(`Already had certifications: ${skippedIdempotent}`);
   console.log(`Failed: ${failed}`);
-  console.log(`New field: certifications (added to ${processed} records)`);
+  if (failed > 0) console.log(`Dead-letter log: ${DEAD_LETTER_FILE}`);
   console.log(`Output: ${DATA_FILE}`);
 }
 
 main().catch((error) => {
-  console.error('❌ Error:', error);
+  console.error('Error:', error);
   process.exit(1);
 });

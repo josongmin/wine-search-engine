@@ -150,13 +150,13 @@ describe('errorHandler policy-blocked contract', () => {
     });
   });
 
-  it('marks BLOCKING_MISS domain errors as retryable', async () => {
+  it('maps BLOCKING_MISS to 503 (retryable) — transient pipeline constraint, not generic 500', async () => {
     const response = await app.inject({
       method: 'GET',
       url: '/blocking-miss',
     });
 
-    expect(response.statusCode).toBe(500);
+    expect(response.statusCode).toBe(503);
     const body = response.json();
     expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
     expect(body).toMatchObject({

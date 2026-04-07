@@ -34,4 +34,6 @@ export interface SearchRequest {
   readonly options?: SearchOptions | undefined;
   /** Top-level retrieval mode override. 'auto' defers to the planner. */
   readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
+  /** Maximum number of result items to return (batch / caller-specified cap). */
+  readonly limit?: number | undefined;
 }

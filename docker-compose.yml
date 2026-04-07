@@ -5,7 +5,8 @@ name: wine-search-dev
 services:
   app:
     build: .
-    ports: ["3000:3000"]
+    # Override host port when 3000 is taken: `APP_HOST_PORT=3001 docker compose up -d app`
+    ports: ["${APP_HOST_PORT:-3000}:3000"]
     env_file: .env
     depends_on:
       postgres: { condition: service_healthy }
@@ -43,6 +44,8 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Cap RSS for dev; evict keys when full (query/embedding cache are safe to drop).
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
     ports: ["6379:6379"]
     volumes:
       - redis_data:/data
@@ -67,6 +70,14 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  # Noop placeholder: some Docker Desktop “Compose applications” still reference a
+  # `reranker` service by name after it was removed from the stack. This satisfies
+  # `docker compose start reranker` without running a cross-encoder server here.
+  # Configure real reranking via `RERANKER_SERVICE_URL` / Cohere in `.env` (optional).
+  reranker:
+    image: alpine:3.20
+    command: ["sleep", "infinity"]
 
 volumes:
   pg_data:

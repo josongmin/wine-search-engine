@@ -20,4 +20,22 @@ export interface WatchlistDeliveryLogRepositoryPort {
 
 export interface WatchlistStoragePort extends
   WatchlistRepositoryPort,
-  WatchlistDeliveryLogRepositoryPort {}
+  WatchlistDeliveryLogRepositoryPort {
+
+  /**
+   * Executes `fn` within a database transaction.
+   * The transactional store passed to `fn` uses the same connection and
+   * supports `findByIdForUpdate` for row-level locking.
+   *
+   * Commits on success, rolls back on error.
+   */
+  withTransaction<T>(fn: (tx: TransactionalWatchlistStore) => Promise<T>): Promise<T>;
+}
+
+/**
+ * Extended store interface available inside a transaction.
+ * Adds `findByIdForUpdate` for SELECT ... FOR UPDATE row locking.
+ */
+export interface TransactionalWatchlistStore extends WatchlistStoragePort {
+  findByIdForUpdate(id: string): Promise<WatchlistEntry | null>;
+}

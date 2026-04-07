@@ -14,6 +14,7 @@ import { buildEntropyAbstainResponseParams } from './search-usecase-execute-buil
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import { EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
 import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
 import { deriveQueryFamily } from '../../domain/query/model/query-observability-vocab.js';
@@ -255,6 +256,9 @@ export async function runRankedRouteDecisionPhase(
           : {}),
       });
     } catch (buildErr) {
+      if (buildErr instanceof EvidenceObligationError) {
+        throw buildErr;
+      }
       bootstrapLogger.error(
         { requestId: ctx.requestId, err: buildErr },
         '[runRankedRouteDecisionPhase] responseBuilder.build() threw in decision-failed fallback; returning bare safe response',
@@ -367,6 +371,9 @@ export async function runRankedRouteDecisionPhase(
         : {}),
     });
   } catch (buildErr) {
+    if (buildErr instanceof EvidenceObligationError) {
+      throw buildErr;
+    }
     bootstrapLogger.error(
       { requestId: ctx.requestId, err: buildErr },
       '[runRankedRouteDecisionPhase] responseBuilder.build() threw; returning bare safe response',
@@ -447,8 +454,20 @@ export async function runSearchPostRoutePhase(
   );
 
   const cacheRequestContext = buildSearchCacheRequestContext(ctx.request);
+
+  // Compute snapshot and degradation once — shared by both abstain and ranked paths.
+  const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
+  const mergedRouteDegradation = mergeRouteDegradation(
+    snapshot,
+    ctx.effectiveRoute,
+    ctx.routeDegradation,
+    ctx.resolveResult,
+  );
+
   const topScores = topKFinalScores(ctx.rankedResults);
   const abstainDecision = ctx.abstainPolicy.shouldAbstain(topScores);
+
+  let response: SearchResponseV1;
 
   if (abstainDecision.abstain) {
     pipelineDebug(
@@ -460,13 +479,6 @@ export async function runSearchPostRoutePhase(
       },
       'pipeline entropy abstain',
     );
-    const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
-    const mergedRouteDegradation = mergeRouteDegradation(
-      snapshot,
-      ctx.effectiveRoute,
-      ctx.routeDegradation,
-      ctx.resolveResult,
-    );
     const results = await mapRankedResultsToResultItems(
       ctx.rankedResults,
       ctx.drinkingWindow,
@@ -475,8 +487,9 @@ export async function runSearchPostRoutePhase(
       ctx.requestId,
       ctx.rankedResults,
     );
-    let response: SearchResponseV1;
     try {
+      // Fix D: buildEntropyAbstainResponseParams already includes compiled conditionally —
+      // do not spread it again outside to avoid silent override if the builder ever transforms it.
       response = ctx.responseBuilder.build(
         {
           ...buildEntropyAbstainResponseParams({
@@ -493,7 +506,6 @@ export async function runSearchPostRoutePhase(
             rankedResults: ctx.rankedResults,
             ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
           }),
-          ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
           ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
           ...(ctx.specializedRouteObservability !== undefined
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
@@ -501,6 +513,9 @@ export async function runSearchPostRoutePhase(
         },
       );
     } catch (buildErr) {
+      if (buildErr instanceof EvidenceObligationError) {
+        throw buildErr;
+      }
       bootstrapLogger.error(
         { requestId: ctx.requestId, err: buildErr },
         '[runSearchPostRoutePhase] responseBuilder.build() threw in entropy-abstain path; returning bare safe response',
@@ -543,77 +558,50 @@ export async function runSearchPostRoutePhase(
         },
       };
     }
-    const entropyEngineDecision = response.engineDecision as
-      | SearchResponseV1['engineDecision']
-      | undefined;
-    const entropySnapshot = entropyEngineDecision?.decisionSnapshot;
-    if (entropySnapshot !== undefined) {
-      logSearchEvent({
-        ...(response.meta.authorityTraceRef !== undefined
-          ? { authority_trace_ref: response.meta.authorityTraceRef }
-          : {}),
-        runtime_correlation_ref: response.meta.runtimeCorrelationRef ?? ctx.requestId,
-        ...(response.meta.executionMode !== undefined
-          ? { execution_mode: response.meta.executionMode }
-          : {}),
-        ...(response.meta.degradationReasons !== undefined
-          ? { degradation_reasons: response.meta.degradationReasons }
-          : {}),
-        ...toSpecializedRouteMeta(ctx.specializedRouteObservability),
-        route_name: ctx.effectiveRoute,
-        model_versions: { ...entropySnapshot.model_versions },
-        kill_switch_state: { ...entropySnapshot.feature_flags },
-      });
-    }
-    if (ctx.cacheService) {
-      try {
-        const stored = await ctx.cacheService.setSearchResponse(
-          ctx.plan,
-          cacheRequestContext,
-          response,
-          ctx.compiled,
-        );
-        if (!stored) {
-          pipelineDebug(
-            { step: 'cache.set_skipped', reason: 'entropy_abstain' },
-            '[Search] setSearchResponse skipped for entropy abstain response',
-          );
-        }
-      } catch (cacheErr) {
-        bootstrapLogger.warn(
-          { requestId: ctx.requestId, err: cacheErr },
-          '[runSearchPostRoutePhase] cacheService.setSearchResponse() threw in entropy-abstain path; continuing without cache write',
-        );
-      }
-    }
-    return response;
-  }
-
-  const rankedSnapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
-  const mergedRouteDegradation = mergeRouteDegradation(
-    rankedSnapshot,
-    ctx.effectiveRoute,
-    ctx.routeDegradation,
-    ctx.resolveResult,
-  );
-  const response = await runRankedRouteDecisionPhase({
-    plan: ctx.plan,
-    ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
-    requestId: ctx.requestId,
-    startTime: ctx.startTime,
+  } else {
+    response = await runRankedRouteDecisionPhase({
+      plan: ctx.plan,
+      ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+      requestId: ctx.requestId,
+      startTime: ctx.startTime,
       resolveResult: ctx.resolveResult,
       rankedResults: ctx.rankedResults,
       decisionContext: ctx.decisionContext,
       effectiveRoute: ctx.effectiveRoute,
-    snapshotVersions: ctx.snapshotVersions,
-    drinkingWindow: ctx.drinkingWindow,
-    decisionEngine: ctx.decisionEngine,
-    responseBuilder: ctx.responseBuilder,
-    retrievalModeSource: ctx.retrievalModeSource,
-    plannerSuggestedMode: ctx.plannerSuggestedMode,
-    routeDegradation: mergedRouteDegradation,
-    specializedRouteObservability: ctx.specializedRouteObservability,
-  });
+      snapshotVersions: ctx.snapshotVersions,
+      drinkingWindow: ctx.drinkingWindow,
+      decisionEngine: ctx.decisionEngine,
+      responseBuilder: ctx.responseBuilder,
+      retrievalModeSource: ctx.retrievalModeSource,
+      plannerSuggestedMode: ctx.plannerSuggestedMode,
+      routeDegradation: mergedRouteDegradation,
+      specializedRouteObservability: ctx.specializedRouteObservability,
+    });
+  }
+
+  // Shared structured log + cache write for both paths.
+  const engineDecision = response.engineDecision as
+    | SearchResponseV1['engineDecision']
+    | undefined;
+  const responseSnapshot = engineDecision?.decisionSnapshot;
+  if (responseSnapshot !== undefined) {
+    logSearchEvent({
+      ...(response.meta.authorityTraceRef !== undefined
+        ? { authority_trace_ref: response.meta.authorityTraceRef }
+        : {}),
+      runtime_correlation_ref: response.meta.runtimeCorrelationRef ?? ctx.requestId,
+      ...(response.meta.executionMode !== undefined
+        ? { execution_mode: response.meta.executionMode }
+        : {}),
+      ...(response.meta.degradationReasons !== undefined
+        ? { degradation_reasons: response.meta.degradationReasons }
+        : {}),
+      ...toSpecializedRouteMeta(ctx.specializedRouteObservability),
+      route_name: ctx.effectiveRoute,
+      model_versions: { ...responseSnapshot.model_versions },
+      kill_switch_state: { ...responseSnapshot.feature_flags },
+    });
+  }
 
   if (ctx.cacheService) {
     try {
@@ -625,8 +613,8 @@ export async function runSearchPostRoutePhase(
       );
       if (!stored) {
         pipelineDebug(
-          { step: 'cache.set_skipped', reason: 'ineligible_or_breaker' },
-          '[Search] setSearchResponse skipped (ineligible mode, circuit breaker, or policy)',
+          { step: 'cache.set_skipped', reason: abstainDecision.abstain ? 'entropy_abstain' : 'ineligible_or_breaker' },
+          '[Search] setSearchResponse skipped',
         );
       }
     } catch (cacheErr) {

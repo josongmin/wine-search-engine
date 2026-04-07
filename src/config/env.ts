@@ -67,6 +67,8 @@ const envSchema = z.object({
   // Embedding Service
   EMBEDDING_SERVICE_URL: z.string().url().default('http://localhost:8081'),
   EMBEDDING_MODEL: z.string().min(1).default('bge-m3'),
+  /** Expected embedding vector dimension. When set, vectors with mismatched dimensions are rejected. */
+  EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
   /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
   EMBEDDING_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
@@ -98,6 +100,13 @@ const envSchema = z.object({
    */
   OPENAI_EMBEDDING_MODEL: z.string().min(1).optional(),
   OPENAI_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  /** Enable LLM-backed query constraint extraction (requires OPENAI_API_KEY). */
+  LLM_QUERY_INTERPRETER: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+  /** Timeout for LLM query interpreter calls (ms). */
+  LLM_QUERY_INTERPRETER_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -216,6 +225,7 @@ function buildConfig(parsed: EnvVars) {
     embedding: {
       url: parsed.EMBEDDING_SERVICE_URL,
       model: parsed.EMBEDDING_MODEL,
+      dimension: parsed.EMBEDDING_DIMENSION,
       httpTimeoutMs: parsed.EMBEDDING_HTTP_TIMEOUT_MS,
     },
 
@@ -246,6 +256,8 @@ function buildConfig(parsed: EnvVars) {
       chatModel: parsed.OPENAI_CHAT_MODEL,
       embeddingModel: parsed.OPENAI_EMBEDDING_MODEL,
       httpTimeoutMs: parsed.OPENAI_HTTP_TIMEOUT_MS,
+      llmQueryInterpreter: parsed.LLM_QUERY_INTERPRETER,
+      llmQueryInterpreterTimeoutMs: parsed.LLM_QUERY_INTERPRETER_TIMEOUT_MS,
     },
 
     /** Anthropic API settings (optional, for LLM-based security features). */
@@ -299,7 +311,8 @@ export function loadConfig(options?: {
   readonly loadDotenv?: boolean;
 }): Config {
   if (options?.loadDotenv ?? true) {
-    dotenv.config();
+    dotenv.config({ path: '.env.local', override: false });
+    dotenv.config({ override: false });
   }
 
   return parseEnv(options?.env ?? process.env);

@@ -1,4 +1,4 @@
-import type { SearchIndexPort, DenseHit } from '../port/search-index.port.js';
+import type { SearchIndexPort, DenseHit, SparseHit } from '../port/search-index.port.js';
 import type { EmbeddingServicePort } from '../port/embedding-service.port.js';
 import type { HybridRetrievalInput } from '../model/retrieval-input.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
@@ -114,54 +114,97 @@ export class CandidatePoolService {
     const vespaRankProfile = resolveVespaRankProfile(retrievalMode);
 
     // Step 1: Sparse search
-    const sparseHits = activeChannels.has('sparse_bm25')
-      ? await this.searchIndex.sparseSearch(
+    // Degrade to empty rather than crashing the pipeline — dense/anchor
+    // channels may still return results for the query.
+    let sparseHits: readonly SparseHit[] = [];
+    let sparseDegraded = false;
+    if (activeChannels.has('sparse_bm25')) {
+      try {
+        sparseHits = await this.searchIndex.sparseSearch(
           input.lexicalQueries,
           filters.length > 0 ? filters : undefined,
           profile.sparseTopN,
           vespaRankProfile,
-        )
-      : [];
+        );
+      } catch (sparseErr) {
+        bootstrapLogger.warn(
+          {
+            err: sparseErr,
+            queryClass: input.queryPlan.queryClass,
+          },
+          '[CandidatePool] Sparse search failed — degrading to dense-only retrieval',
+        );
+        sparseDegraded = true;
+      }
+    }
 
     // Step 1b: Learned sparse search
-    const learnedSparseHits = activeChannels.has('learned_sparse')
-      ? await this.searchIndex.searchLearnedSparse(
+    let learnedSparseHits: readonly DenseHit[] = [];
+    if (activeChannels.has('learned_sparse')) {
+      try {
+        learnedSparseHits = await this.searchIndex.searchLearnedSparse(
           buildLearnedSparseQueryWeights(input),
           filters.length > 0 ? filters : undefined,
           profile.sparseTopN,
-        )
-      : [];
+        );
+      } catch (learnedErr) {
+        bootstrapLogger.warn(
+          {
+            err: learnedErr,
+            queryClass: input.queryPlan.queryClass,
+          },
+          '[CandidatePool] Learned sparse search failed — continuing without learned sparse',
+        );
+      }
+    }
 
     // Step 2: Dense search (with embedding cache via CacheService when wired)
+    // Degrading to sparse-only (rather than throwing) when the embedding call
+    // fails prevents a transient embedding service outage from blocking the
+    // entire search. The sparse + learned sparse results are still returned;
+    // the dense signal is simply absent for this request.
     let denseHits: readonly DenseHit[] = [];
+    let denseDegraded = false;
     if (activeChannels.has('dense_semantic') && input.semanticQueries.length > 0) {
-      const embeddings = this.cacheService
-        ? await this.cacheService.getOrEmbedBatch(
-            input.semanticQueries,
-            this.embeddingModelId,
-            this.embeddingService,
-          )
-        : await this.embeddingService.embedBatch(input.semanticQueries);
+      try {
+        const embeddings = this.cacheService
+          ? await this.cacheService.getOrEmbedBatch(
+              input.semanticQueries,
+              this.embeddingModelId,
+              this.embeddingService,
+            )
+          : await this.embeddingService.embedBatch(input.semanticQueries);
 
-      const primaryEmbedding = embeddings[0];
-      if (!primaryEmbedding) {
-        bootstrapLogger.error(
+        const primaryEmbedding = embeddings[0];
+        if (!primaryEmbedding) {
+          bootstrapLogger.error(
+            {
+              queryClass: input.queryPlan.queryClass,
+              semanticQueryCount: input.semanticQueries.length,
+              embeddingModelId: this.embeddingModelId,
+            },
+            '[CandidatePool] Dense retrieval expected an embedding but received none',
+          );
+          denseDegraded = true;
+        } else {
+          denseHits = await this.searchIndex.denseSearch(
+            primaryEmbedding,
+            filters.length > 0 ? filters : undefined,
+            profile.denseTopN,
+            vespaRankProfile,
+          );
+        }
+      } catch (denseErr) {
+        bootstrapLogger.warn(
           {
+            err: denseErr,
             queryClass: input.queryPlan.queryClass,
-            semanticQueryCount: input.semanticQueries.length,
             embeddingModelId: this.embeddingModelId,
           },
-          '[CandidatePool] Dense retrieval expected an embedding but received none',
+          '[CandidatePool] Dense retrieval failed — degrading to sparse-only retrieval',
         );
-        throw new Error('Dense retrieval failed: embedding service returned no primary embedding');
+        denseDegraded = true;
       }
-
-      denseHits = await this.searchIndex.denseSearch(
-        primaryEmbedding,
-        filters.length > 0 ? filters : undefined,
-        profile.denseTopN,
-        vespaRankProfile,
-      );
     }
 
     // Step 3: Anchor neighbourhood search
@@ -204,6 +247,11 @@ export class CandidatePoolService {
     );
 
     // Enrich traces with pipeline context
+    const effectiveSkippedPhases = [
+      ...skippedPhases,
+      ...(sparseDegraded ? ['sparse' as RetrievalPhase] : []),
+      ...(denseDegraded ? ['dense' as RetrievalPhase] : []),
+    ];
     candidates = candidates.map((c) => ({
       ...c,
       retrievalTrace: {
@@ -212,7 +260,7 @@ export class CandidatePoolService {
         lexicalQueriesUsed: [...input.lexicalQueries],
         semanticQueriesUsed: [...input.semanticQueries],
         filtersApplied: filters,
-        skippedPhases,
+        skippedPhases: effectiveSkippedPhases,
       } satisfies RetrievalTrace,
     }));
 
@@ -413,6 +461,7 @@ function buildAssemblyPolicy(maxTotal: number): AssemblyPolicy {
 }
 
 function reciprocalRankContribution(rank: number, fusionK: number): number {
+  if (rank <= 0 || !Number.isFinite(rank)) return 0;
   return 1 / (fusionK + rank);
 }
 

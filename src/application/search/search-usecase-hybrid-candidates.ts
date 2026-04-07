@@ -24,6 +24,7 @@ export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined
 }
 
 export function extractRegionBrowseSeed(plan: QueryPlanV1): string | undefined {
+  // Primary: explicit region/appellation/country constraint — most reliable signal.
   const regionConstraint = [...plan.constraints.hard, ...plan.constraints.soft, ...plan.constraints.inferred].find(
     (constraint) =>
       constraint.attribute === 'region' ||
@@ -41,6 +42,8 @@ export function extractRegionBrowseSeed(plan: QueryPlanV1): string | undefined {
     }
   }
 
+  // Secondary: hierarchical slash-notation queries (e.g. "Burgundy / Pinot Noir").
+  // Only treat as a region seed when the query is clearly structured this way.
   const hierarchy = plan.normalizedQuery
     .split('/')
     .map((s) => s.trim())
@@ -49,12 +52,9 @@ export function extractRegionBrowseSeed(plan: QueryPlanV1): string | undefined {
     return hierarchy.join(' / ');
   }
 
-  const compact = plan.normalizedQuery
-    .replace(/\b(?:wine|wines|show|browse|from|region|appellation)\b/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return compact.length > 0 ? compact : undefined;
+  // No reliable region signal — return undefined rather than guessing from
+  // the full query text. A false seed produces a wrong region_browse execution.
+  return undefined;
 }
 
 export interface HybridCandidateRetrievalPorts {
@@ -197,8 +197,11 @@ export async function retrieveHybridCandidatesForPlan(
     case 'compare_candidates': {
       if (ports.compareRetriever !== undefined) {
         const anchorResolution = await resolveEntity(plan);
-        const anchorEntityId = anchorResolution.topEntity?.entityId
-          ?? plan.anchors[0]?.candidateEntityIds[0];
+        // Only use a resolver-validated entity as anchor — never fall back to
+        // unverified raw planner candidateEntityIds, which can produce wrong compares
+        // and would be mislabelled as 'compare_candidates_fallback' instead of
+        // 'compare_anchor_resolution_failed'.
+        const anchorEntityId = anchorResolution.topEntity?.entityId;
         fallbackAnchorEntityId = anchorEntityId;
         if (anchorEntityId !== undefined) {
           const candidates = await ports.compareRetriever.compareAgainstAnchor(
@@ -225,6 +228,7 @@ export async function retrieveHybridCandidatesForPlan(
           }
           degradationReasons.add('compare_candidates_fallback');
         } else {
+          // Resolver returned no validated entity — label correctly and fall through.
           degradationReasons.add('compare_anchor_resolution_failed');
         }
       } else {

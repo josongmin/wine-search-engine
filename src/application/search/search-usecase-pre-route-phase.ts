@@ -85,12 +85,22 @@ export async function runSearchPreRoutePhase(
         }
         throw err;
       });
-      const decomposedResponse = await Promise.race([
-        decomposedSearchPromise,
-        timeoutPromise,
-      ]);
-      if (timeoutHandle !== undefined) {
-        clearTimeout(timeoutHandle);
+      let decomposedResponse: typeof timeoutSignal | ComparisonSearchResponse;
+      try {
+        decomposedResponse = await Promise.race([
+          decomposedSearchPromise,
+          timeoutPromise,
+        ]) as typeof timeoutSignal | ComparisonSearchResponse;
+      } finally {
+        // Always clear the timeout handle — prevents timer leak when
+        // decomposedSearchPromise rejects before the timeout fires.
+        if (timeoutHandle !== undefined) {
+          clearTimeout(timeoutHandle);
+        }
+        // Abort any in-flight sub-search work (network requests, sub-use-case
+        // execution) so it does not continue running after we have moved on.
+        // Calling abort() on an already-aborted or completed controller is a no-op.
+        abortController.abort();
       }
       if (decomposedResponse === timeoutSignal) {
         pipelineDebug(

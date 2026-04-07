@@ -11,7 +11,7 @@ export interface FakeMlService extends TestHttpServer {
 
 function buildEmbeddingVector(seed: string): number[] {
   const normalized = seed.toLowerCase();
-  return Array.from({ length: 128 }, (_, index) => {
+  return Array.from({ length: 1024 }, (_, index) => {
     const codePoint = normalized.codePointAt(index % Math.max(normalized.length, 1)) ?? 0;
     const base = ((codePoint % 97) + 1) / 100;
     return Number((base + index / 10_000).toFixed(6));

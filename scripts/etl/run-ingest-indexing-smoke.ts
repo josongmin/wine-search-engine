@@ -13,6 +13,7 @@ import {
   type SilverQualityGateThresholds,
 } from './validate-silver.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
+import { atomicWriteFile } from './etl-utils.js';
 import { VespaSearchIndex } from '../../src/infrastructure/vespa/vespa-search-index.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 
@@ -230,10 +231,9 @@ async function run(): Promise<void> {
       throw new Error(`Expected 2 deduped silver records, got ${silver.length}`);
     }
 
-    await fs.writeFile(
+    await atomicWriteFile(
       silverPath,
       `${silver.map((record) => JSON.stringify(record)).join('\n')}\n`,
-      'utf8',
     );
 
     const silverContent = await fs.readFile(silverPath, 'utf8');
@@ -243,10 +243,9 @@ async function run(): Promise<void> {
       aliases: generateAliases(record),
     }));
 
-    await fs.writeFile(
+    await atomicWriteFile(
       enrichedPath,
       `${enriched.map((record) => JSON.stringify(record)).join('\n')}\n`,
-      'utf8',
     );
 
     const enrichedContent = await fs.readFile(enrichedPath, 'utf8');

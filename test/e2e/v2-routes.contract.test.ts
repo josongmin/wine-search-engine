@@ -1,13 +1,13 @@
 /**
- * V2 route parity contract tests.
+ * Content negotiation contract tests.
  *
- * Verifies that:
- * - /v2/search returns { version: '2', responseType: 'human', queryType: 'search', results: [...] }
- *   or queryType: 'comparison' for Epic 14 decomposed "vs" queries
- * - /v2/search/hybrid returns { version: '2', responseType: 'human', results: [...] }
- * - /v2/search/interpret returns { version: '2', responseType: 'interpret' }
- * - V1 routes still return V1 shape (no top-level version / responseType fields)
- * - /v1/claude-tools endpoint is unchanged
+ * Verifies that V1 routes return the human-oriented response shape when the
+ * client sends `Accept: application/vnd.cuvee.human+json` (RFC 7231 §5.3.2).
+ *
+ * - POST /v1/search + Accept human → { version: '2', responseType: 'human', ... }
+ * - POST /v1/search/hybrid + Accept human → same
+ * - POST /v1/search/interpret + Accept human → { version: '2', responseType: 'interpret', ... }
+ * - V1 routes with default Accept still return V1 shape
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -19,6 +19,7 @@ import {
 } from '../../src/interface/http/schemas/search-response-v2.schema.js';
 import { SearchResponseSchema } from '../../src/interface/http/schemas/search-response.schema.js';
 import { decodeAuthorityTraceRefDetailed } from '../../src/domain/decision/service/id-schema-decoder.js';
+import { MEDIA_TYPE_HUMAN } from '../../src/interface/http/content-negotiation.js';
 
 let server: TestServer;
 
@@ -30,16 +31,18 @@ afterAll(async () => {
   await closeTestServer(server);
 });
 
-function postV2Search(body: unknown) {
-  return postJson(server.app, '/v2/search', body);
+const ACCEPT_HUMAN = { accept: MEDIA_TYPE_HUMAN };
+
+function postHumanSearch(body: unknown, extraHeaders?: Record<string, string>) {
+  return postJson(server.app, '/v1/search', body, { ...ACCEPT_HUMAN, ...extraHeaders });
 }
 
-function postV2Hybrid(body: unknown) {
-  return postJson(server.app, '/v2/search/hybrid', body);
+function postHumanHybrid(body: unknown, extraHeaders?: Record<string, string>) {
+  return postJson(server.app, '/v1/search/hybrid', body, { ...ACCEPT_HUMAN, ...extraHeaders });
 }
 
-function postV2Interpret(body: unknown) {
-  return postJson(server.app, '/v2/search/interpret', body);
+function postHumanInterpret(body: unknown, extraHeaders?: Record<string, string>) {
+  return postJson(server.app, '/v1/search/interpret', body, { ...ACCEPT_HUMAN, ...extraHeaders });
 }
 
 function injectTextPlain(url: string, body: unknown) {
@@ -61,9 +64,9 @@ function expectRequestIdErrorShape(body: Record<string, unknown>) {
 // V2 search
 // ---------------------------------------------------------------------------
 
-describe('POST /v2/search — V2 human response shape', () => {
+describe('POST /v1/search + Accept human — V2 human response shape', () => {
   it('returns 200 with version=2 and responseType=human', async () => {
-    const res = await postV2Search({
+    const res = await postHumanSearch({
       query: 'Opus One 2018',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -80,7 +83,7 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it('response validates against SearchResponseV2HumanSchema (camelCase pre-serialization)', async () => {
-    const res = await postV2Search({
+    const res = await postHumanSearch({
       query: 'Château Margaux',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -94,7 +97,7 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it('returns comparison envelope for decomposed "vs" queries', async () => {
-    const res = await postV2Search({
+    const res = await postHumanSearch({
       query: 'Opus One vs Château Margaux',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -115,12 +118,12 @@ describe('POST /v2/search — V2 human response shape', () => {
   it('surfaces canonical authority/runtime metadata for comparison responses', async () => {
     const res = await postJson(
       server.app,
-      '/v2/search',
+      '/v1/search',
       {
         query: 'Opus One vs Château Margaux',
         options: { mode: 'entity', explain: false, clarification: false },
       },
-      { 'x-request-id': 'req-v2-search-compare-123' },
+      { ...ACCEPT_HUMAN, 'x-request-id': 'req-v2-search-compare-123' },
     );
 
     expect(res.statusCode).toBe(200);
@@ -134,7 +137,7 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it('each result item has version=2 and responseType=human', async () => {
-    const res = await postV2Search({
+    const res = await postHumanSearch({
       query: 'Opus One 2018',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -155,10 +158,10 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it.each([
-    ['missing required query field', () => postV2Search({ options: { mode: 'entity', explain: false, clarification: false } }), 400],
-    ['empty body', () => postV2Search({}), 400],
-    ['empty string query', () => postV2Search({ query: '' }), 400],
-    ['text/plain body', () => injectTextPlain('/v2/search', { query: 'test' }), 415],
+    ['missing required query field', () => postHumanSearch({ options: { mode: 'entity', explain: false, clarification: false } }), 400],
+    ['empty body', () => postHumanSearch({}), 400],
+    ['empty string query', () => postHumanSearch({ query: '' }), 400],
+    ['text/plain body', () => injectTextPlain('/v1/search', { query: 'test' }), 415],
   ])('rejects %s', async (_label, runRequest, expectedStatus) => {
     const response = await runRequest();
     expect(response.statusCode).toBe(expectedStatus);
@@ -172,9 +175,9 @@ describe('POST /v2/search — V2 human response shape', () => {
 // V2 hybrid
 // ---------------------------------------------------------------------------
 
-describe('POST /v2/search/hybrid — V2 human response shape', () => {
+describe('POST /v1/search/hybrid + Accept human — V2 human response shape', () => {
   it('returns 200 with version=2 and responseType=human', async () => {
-    const res = await postV2Hybrid({
+    const res = await postHumanHybrid({
       query: 'full bodied red wine',
     });
 
@@ -190,8 +193,8 @@ describe('POST /v2/search/hybrid — V2 human response shape', () => {
   });
 
   it.each([
-    ['missing required query field', () => postV2Hybrid({}), 400],
-    ['text/plain body', () => injectTextPlain('/v2/search/hybrid', { query: 'test' }), 415],
+    ['missing required query field', () => postHumanHybrid({}), 400],
+    ['text/plain body', () => injectTextPlain('/v1/search/hybrid', { query: 'test' }), 415],
   ])('rejects %s', async (_label, runRequest, expectedStatus) => {
     const response = await runRequest();
     expect(response.statusCode).toBe(expectedStatus);
@@ -203,9 +206,9 @@ describe('POST /v2/search/hybrid — V2 human response shape', () => {
   it('surfaces canonical authority/runtime metadata for hybrid comparison responses', async () => {
     const res = await postJson(
       server.app,
-      '/v2/search/hybrid',
+      '/v1/search/hybrid',
       { query: 'Opus One vs Screaming Eagle' },
-      { 'x-request-id': 'req-v2-hybrid-compare-123' },
+      { ...ACCEPT_HUMAN, 'x-request-id': 'req-v2-hybrid-compare-123' },
     );
 
     expect(res.statusCode).toBe(200);
@@ -224,9 +227,9 @@ describe('POST /v2/search/hybrid — V2 human response shape', () => {
 // V2 interpret
 // ---------------------------------------------------------------------------
 
-describe('POST /v2/search/interpret — V2 interpret response shape', () => {
+describe('POST /v1/search/interpret + Accept human — V2 interpret response shape', () => {
   it('returns 200 with version=2 and responseType=interpret', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'Opus One 2018',
     });
 
@@ -248,9 +251,9 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   it('reuses X-Request-Id as the surfaced query_id for correlation', async () => {
     const res = await postJson(
       server.app,
-      '/v2/search/interpret',
+      '/v1/search/interpret',
       { query: 'Opus One 2018' },
-      { 'x-request-id': 'req-v2-interpret-123' },
+      { ...ACCEPT_HUMAN, 'x-request-id': 'req-v2-interpret-123' },
     );
 
     expect(res.statusCode).toBe(200);
@@ -259,9 +262,9 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it.each([
-    ['missing required query field', () => postV2Interpret({}), 400],
-    ['unknown request fields', () => postV2Interpret({ query: 'Opus One 2018', futureFlag: true }), 400],
-    ['text/plain body', () => injectTextPlain('/v2/search/interpret', { query: 'test' }), 415],
+    ['missing required query field', () => postHumanInterpret({}), 400],
+    ['unknown request fields', () => postHumanInterpret({ query: 'Opus One 2018', futureFlag: true }), 400],
+    ['text/plain body', () => injectTextPlain('/v1/search/interpret', { query: 'test' }), 415],
   ])('rejects %s', async (_label, runRequest, expectedStatus) => {
     const response = await runRequest();
     expect(response.statusCode).toBe(expectedStatus);
@@ -271,7 +274,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces canonical non-anchor channels for plain comparison queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'Barolo vs Amarone',
     });
 
@@ -296,7 +299,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces compare_anchor for side-by-side candidate comparison queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'opus one vs napa cabs',
     });
 
@@ -313,7 +316,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces browse_region for hierarchical region browse queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'Bordeaux/Medoc/Pauillac',
     });
 
@@ -329,7 +332,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces anchor_similarity for recommendation queries anchored on a reference wine', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'wines cheaper than Opus One',
     });
 
@@ -345,7 +348,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces canonical activeChannels for recommendation queries without leaking legacy aliases', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'wines like Sassicaia',
     });
 
@@ -366,7 +369,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces decomposition strategy for comparison queries without leaking V1 planner fields', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'Barolo vs Amarone',
     });
 
@@ -381,7 +384,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces attribute-level hard constraints instead of count labels', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'red wine from france',
     });
 
@@ -392,7 +395,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces attribute-level soft constraints for budget-style queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'Chardonnay under 50 dollars',
     });
 
@@ -402,7 +405,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces compare_anchor for anchor-vs-catalog comparison queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'opus one vs napa cabs',
     });
 
@@ -419,7 +422,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces browse_region for region-browse queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'Bordeaux/Medoc/Pauillac',
     });
 
@@ -434,7 +437,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces anchor_similarity for anchor-conditioned recommendation queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'wines cheaper than Opus One',
     });
 
@@ -450,7 +453,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces anchor_similarity for English relative-anchor recommendation queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: 'cheaper than Chateau Margaux',
     });
 
@@ -466,7 +469,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces anchor_similarity for Korean relative-anchor recommendation queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: '샤토 마고보다 저렴한 와인',
     });
 
@@ -482,7 +485,7 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   });
 
   it('surfaces anchor_similarity for Korean similarity-anchor recommendation queries', async () => {
-    const res = await postV2Interpret({
+    const res = await postHumanInterpret({
       query: '오퍼스 원 같은 와인',
     });
 

@@ -13,10 +13,10 @@ describe('DrinkingWindowPredictor', () => {
     avgCriticProxyScore: 95,
   } as const;
 
-  it('predicts safely without a prior load()', () => {
+  it('predicts safely without a prior load()', async () => {
     const predictor = new DrinkingWindowPredictor();
 
-    const prediction = predictor.predict(input);
+    const prediction = await predictor.predict(input);
 
     expect(prediction.drinkingWindowStart).toBeGreaterThanOrEqual(2015);
     expect(prediction.drinkingWindowEnd).toBeGreaterThan(
@@ -34,9 +34,9 @@ describe('DrinkingWindowPredictor', () => {
     expect(predictor.modelVersion).toContain('heuristic');
   });
 
-  it('throws when heuristic is disabled and ONNX is not loaded', () => {
+  it('throws when heuristic is disabled and ONNX is not loaded', async () => {
     const predictor = new DrinkingWindowPredictor({ allowHeuristicFallback: false });
 
-    expect(() => predictor.predict(input)).toThrow(/ONNX required/);
+    await expect(predictor.predict(input)).rejects.toThrow(/ONNX required/);
   });
 });

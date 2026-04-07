@@ -57,5 +57,13 @@ export function resolveRequestId(
   explicitRequestId?: string | null,
 ): string {
   const trimmed = explicitRequestId?.trim();
-  return trimmed !== undefined && trimmed.length > 0 ? trimmed : getRequestId(request);
+  if (
+    trimmed !== undefined &&
+    trimmed.length > 0 &&
+    trimmed.length <= INCOMING_REQUEST_ID_MAX_LEN &&
+    INCOMING_REQUEST_ID_PATTERN.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return getRequestId(request);
 }

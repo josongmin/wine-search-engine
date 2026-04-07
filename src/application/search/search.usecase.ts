@@ -4,7 +4,6 @@ import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
@@ -39,14 +38,13 @@ import type {
   RankingPort,
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
-import { runHybridRankingPipeline } from './search-usecase-hybrid-ranking-pipeline.js';
+import { executeHybridRouteRankingPipeline } from './search-usecase-hybrid-ranking-pipeline.js';
 import {
   buildFailedMixedRouteExecution,
   mixedQueryResultToSearchRouteExecution,
 } from './search-usecase-mixed-route.js';
 import { buildSearchRouteResolutionContext } from './search-usecase-route-resolution.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
-import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import {
@@ -154,9 +152,17 @@ export class SearchUseCase {
         options,
       );
     } catch (err) {
-      // Known domain errors (PolicyBlockedError, WrongResolveError, etc.) are deliberate
-      // pipeline signals — propagate them so the caller can handle them correctly.
       if (err instanceof DomainError) {
+        // Evidence-obligation and wrong-resolve errors indicate upstream defects —
+        // log at error level before propagating so request_id is captured in the trace.
+        // Policy-blocked and snapshot errors are deliberate pipeline signals and need no log here.
+        const defectCodes = new Set(['EVIDENCE_OBLIGATION', 'WRONG_RESOLVE', 'BLOCKING_MISS']);
+        if (defectCodes.has(err.code)) {
+          bootstrapLogger.error(
+            { requestId, code: err.code, err: err.message },
+            '[SearchUseCase] Pipeline defect DomainError — propagating to HTTP error handler',
+          );
+        }
         throw err;
       }
       if (err instanceof Error && err.name === 'AbortError') {
@@ -429,61 +435,22 @@ export class SearchUseCase {
   }
 
   /**
-   * Hybrid route: CandidatePool -> Ranker -> build resolve result.
+   * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
     compiled?: CompiledWineQuery,
-  ): Promise<{
-    resolveResult: EntityResolveResult;
-    rankedResults: readonly RankedResult[];
-    routeDegradation?: SearchRouteExecutionResult['routeDegradation'];
-    funnelMetrics?: SearchRouteExecutionResult['funnelMetrics'];
-    specializedRouteObservability?: SearchRouteExecutionResult['specializedRouteObservability'];
-  }> {
-    const retrieval = await retrieveHybridCandidatesForPlan(
+  ): Promise<SearchRouteExecutionResult> {
+    return executeHybridRouteRankingPipeline(
       plan,
       {
         candidatePool: this.deps.candidatePool,
         browseRetriever: this.deps.browseRetriever,
         compareRetriever: this.deps.compareRetriever,
+        ranker: this.deps.ranker,
       },
       (p) => this.executeEntityRoute(p),
       compiled,
     );
-
-    const ranked = await runHybridRankingPipeline(
-      plan,
-      retrieval.candidates,
-      this.deps.ranker,
-      compiled,
-    );
-
-    if (retrieval.routeDegradation === undefined) {
-      return {
-        ...ranked,
-        ...(retrieval.specializedRouteObservability !== undefined
-          ? { specializedRouteObservability: retrieval.specializedRouteObservability }
-          : {}),
-      };
-    }
-
-    return {
-      ...ranked,
-      routeDegradation: ranked.routeDegradation === undefined
-        ? retrieval.routeDegradation
-        : {
-            executionMode: 'degraded',
-            degradationReasons: [
-              ...new Set([
-                ...ranked.routeDegradation.degradationReasons,
-                ...retrieval.routeDegradation.degradationReasons,
-              ]),
-            ],
-          },
-      ...(retrieval.specializedRouteObservability !== undefined
-        ? { specializedRouteObservability: retrieval.specializedRouteObservability }
-        : {}),
-    };
   }
 }

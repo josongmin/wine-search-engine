@@ -314,6 +314,7 @@ describe('ReplayUseCase', () => {
       expect(inner.execute).toHaveBeenCalledWith(
         expect.objectContaining({ query: 'Opus One 2018' }),
         requestId,
+        expect.objectContaining({}),
       );
     });
   });

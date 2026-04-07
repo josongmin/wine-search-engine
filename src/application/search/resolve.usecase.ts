@@ -48,7 +48,10 @@ export class ResolveUseCase {
 
   constructor(private readonly deps: ResolveUseCaseDeps) {}
 
-  async execute(request: ResolveRequest): Promise<ResolveResponse> {
+  async execute(
+    request: ResolveRequest,
+    _options?: { readonly abortSignal?: AbortSignal | undefined },
+  ): Promise<ResolveResponse> {
     pipelineDebug(
       {
         step: 'resolve.use_case.start',

@@ -13,14 +13,24 @@ import type {
   ReadinessStatus,
 } from '../interface/http/routes/health.route.js';
 
+const PROBE_TIMEOUT_MS = 3_000;
+
 async function probePostgres(
   pool: NonNullable<RuntimeHandles['pool']>,
 ): Promise<ReadinessStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await pool.query('SELECT 1');
+    await Promise.race([
+      pool.query('SELECT 1'),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('pg probe timeout')); }, PROBE_TIMEOUT_MS);
+      }),
+    ]);
     return 'up';
   } catch {
     return 'down';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 

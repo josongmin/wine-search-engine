@@ -31,15 +31,18 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
   private readonly url: string;
   private readonly model: string;
   private readonly httpTimeoutMs: number;
+  private readonly expectedDimension: number | undefined;
 
   constructor(options?: {
     readonly url?: string;
     readonly model?: string;
     readonly httpTimeoutMs?: number;
+    readonly expectedDimension?: number;
   }) {
     this.url = options?.url ?? config.embedding.url;
     this.model = options?.model ?? config.embedding.model;
     this.httpTimeoutMs = options?.httpTimeoutMs ?? config.embedding.httpTimeoutMs;
+    this.expectedDimension = options?.expectedDimension ?? config.embedding.dimension;
   }
 
   // -------------------------------------------------------------------------
@@ -157,13 +160,37 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
       );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `Embedding service call failed [HTTP ${status}]: ${text}`,
+        `Embedding service call failed [HTTP ${status}]: ${text.slice(0, 200)}`,
       );
     }
 
     const data: unknown = await response.json();
     try {
       const vectors = embeddingsFromOpenAiResponse(data);
+
+      // Validate embedding vectors before returning:
+      // 1. Non-finite values (NaN, ±Infinity) in vectors cause Vespa ANN to produce
+      //    silent wrong results — typeof NaN === 'number' passes the OpenAI response
+      //    parser, so we must check finiteness explicitly here.
+      // 2. Dimension mismatch indicates a model swap or corrupted response.
+      for (const vec of vectors) {
+        if (vec.length === 0) {
+          throw new Error(
+            'Embedding vector is empty (0 dimensions)',
+          );
+        }
+        if (!vec.every(Number.isFinite)) {
+          throw new Error(
+            'Embedding contains non-finite values (NaN or Infinity)',
+          );
+        }
+        if (this.expectedDimension !== undefined && vec.length !== this.expectedDimension) {
+          throw new Error(
+            `Embedding dimension mismatch: expected ${this.expectedDimension}, got ${vec.length}`,
+          );
+        }
+      }
+
       pipelineDebug(
         {
           step: PipelineDebugStep.HTTP_EMBEDDING_OK,

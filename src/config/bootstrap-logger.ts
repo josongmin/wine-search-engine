@@ -5,5 +5,5 @@ import pino from 'pino';
  */
 export const bootstrapLogger = pino({
   name: 'wine-engine',
-  level: process.env['LOG_LEVEL'] ?? 'warn',
+  level: process.env['LOG_LEVEL'] ?? 'info',
 });

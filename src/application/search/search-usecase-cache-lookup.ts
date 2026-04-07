@@ -35,13 +35,22 @@ export async function tryGetCachedSearchResponse(
   snapshotVersions: SnapshotVersionInjection,
   runtimeState?: CacheLookupRuntimeState,
 ): Promise<SearchResponseV1 | undefined> {
-  const cacheResult = await cacheService.getSearchResponse(
-    plan,
-    buildSearchCacheRequestContext(request),
-    buildDecisionSnapshotFromPlan(plan, snapshotVersions),
-    runtimeState,
-    compiled,
-  );
+  let cacheResult;
+  try {
+    cacheResult = await cacheService.getSearchResponse(
+      plan,
+      buildSearchCacheRequestContext(request),
+      buildDecisionSnapshotFromPlan(plan, snapshotVersions),
+      runtimeState,
+      compiled,
+    );
+  } catch (err: unknown) {
+    bootstrapLogger.warn(
+      { err, rawQuery: plan.rawQuery.slice(0, 100) },
+      '[CacheLookup] Cache read failed — treating as miss',
+    );
+    return undefined;
+  }
   if (cacheResult.hit && cacheResult.data) {
     if (!isCachedResponseValid(cacheResult.data)) {
       bootstrapLogger.warn(

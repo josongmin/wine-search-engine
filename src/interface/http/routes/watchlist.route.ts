@@ -100,10 +100,19 @@ export function registerWatchlistRoute(
       }
 
       try {
-        const entries = await deps.watchlistService.listByUserId(subject);
+        const allEntries = await deps.watchlistService.listByUserId(subject);
+        const queryParams = request.query as Record<string, unknown>;
+        const limitParam = queryParams['limit'];
+        const offsetParam = queryParams['offset'];
+        const limit = Math.min(
+          Math.max(1, Number(limitParam) || 50),
+          200,
+        );
+        const offset = Math.max(0, Number(offsetParam) || 0);
+        const entries = allEntries.slice(offset, offset + limit);
         const response = ListWatchlistResponseSchema.parse({
           entries: entries.map(toWatchlistEntryResponse),
-          total: entries.length,
+          total: allEntries.length,
         });
 
         sendRouteContractResponse(request, reply, WatchlistListRouteContract, 200, response);
@@ -223,7 +232,7 @@ export function registerWatchlistRoute(
             createErrorResponse(
               getRequestId(request),
               'NOT_FOUND',
-              `Watchlist entry ${id} not found`,
+              'Watchlist entry not found',
             ),
           );
           return;
@@ -295,7 +304,7 @@ export function registerWatchlistRoute(
             createErrorResponse(
               getRequestId(request),
               'NOT_FOUND',
-              `Watchlist entry ${id} not found`,
+              'Watchlist entry not found',
             ),
           );
           return;
@@ -361,14 +370,20 @@ export function registerWatchlistRoute(
             createErrorResponse(
               getRequestId(request),
               'NOT_FOUND',
-              `Watchlist entry ${id} not found`,
+              'Watchlist entry not found',
             ),
           );
           return;
         }
 
+        const dQueryParams = request.query as Record<string, unknown>;
+        const dLimitParam = dQueryParams['limit'];
+        const dOffsetParam = dQueryParams['offset'];
+        const dLimit = Math.min(Math.max(1, Number(dLimitParam) || 50), 200);
+        const dOffset = Math.max(0, Number(dOffsetParam) || 0);
+        const pagedDeliveries = deliveries.slice(dOffset, dOffset + dLimit);
         const response = ListDeliveriesResponseSchema.parse({
-          deliveries: deliveries.map((log: WatchlistDeliveryLogEntry) => ({
+          deliveries: pagedDeliveries.map((log: WatchlistDeliveryLogEntry) => ({
             id: log.id,
             watchlist_id: log.watchlistId,
             attempt: log.attempt,

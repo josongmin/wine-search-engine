@@ -10,7 +10,7 @@ import { SearchResponseSchema } from './search-response.schema.js';
 
 const BatchSessionContextSnakeSchema = z.object({
   session_id: z.string().min(1),
-  previous_entities: z.array(z.string().max(256)).max(50),
+  previous_entities: z.array(z.string().min(1).max(256)).max(50),
 }).strict().transform((value) => ({
   sessionContext: {
     sessionId: value.session_id,
@@ -19,9 +19,9 @@ const BatchSessionContextSnakeSchema = z.object({
 }));
 
 const BatchQueryBudgetSnakeSchema = z.object({
-  max_latency_ms: z.number().int().positive(),
-  max_candidates: z.number().int().positive(),
-  rerank_limit: z.number().int().positive(),
+  max_latency_ms: z.number().int().positive().max(30_000),
+  max_candidates: z.number().int().positive().max(1_000),
+  rerank_limit: z.number().int().positive().max(500),
 }).strict().transform((value) => ({
   queryBudget: {
     maxLatencyMs: value.max_latency_ms,

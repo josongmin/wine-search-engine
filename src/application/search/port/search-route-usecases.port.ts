@@ -44,21 +44,35 @@ export interface BatchSearchUseCasePort {
   ): Promise<BatchSearchResponse>;
 }
 
+export interface ReplayExecutionOptions {
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
 export interface ReplayUseCasePort {
-  execute(request: ReplayRequest, requestId: string): Promise<SearchResponseV1>;
+  execute(request: ReplayRequest, requestId: string, options?: ReplayExecutionOptions): Promise<SearchResponseV1>;
+}
+
+export interface InterpretExecutionOptions {
+  readonly abortSignal?: AbortSignal | undefined;
 }
 
 export interface InterpretUseCasePort {
   execute(
     request: InterpretRequest & { readonly buildV2: true; readonly requestId?: string | undefined },
+    options?: InterpretExecutionOptions,
   ): Promise<InterpretResultWithV2>;
   execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
+    options?: InterpretExecutionOptions,
   ): Promise<QueryPlanV1 | InterpretResultWithV2>;
 }
 
+export interface ResolveExecutionOptions {
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
 export interface ResolveUseCasePort {
-  execute(request: ResolveRequest): Promise<ResolveResponse>;
+  execute(request: ResolveRequest, options?: ResolveExecutionOptions): Promise<ResolveResponse>;
 }
 
 export interface HybridUseCasePort {

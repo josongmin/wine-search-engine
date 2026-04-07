@@ -19,6 +19,7 @@ import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
+import type { ConstraintExtractionTrace } from '../../attribute/service/llm-nl-mapper.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import {
@@ -87,6 +88,15 @@ export class Planner {
     private readonly nlMapper: NLMapper,
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
   ) {}
+
+  /**
+   * Returns the constraint extraction trace from the most recent plan() call,
+   * if the injected NLMapper supports it (i.e. {@link LlmNLMapper}).
+   */
+  getLastConstraintExtractionTrace(): ConstraintExtractionTrace | undefined {
+    return (this.nlMapper as { getLastExtractionTrace?: () => ConstraintExtractionTrace | undefined })
+      .getLastExtractionTrace?.();
+  }
 
   /**
    * Plans a query by executing the full planning pipeline.

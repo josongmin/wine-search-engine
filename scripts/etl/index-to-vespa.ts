@@ -81,7 +81,18 @@ async function embedBatchHttp(
     parsed.push({ index: o['index'], embedding: o['embedding'] });
   }
   parsed.sort((a, b) => a.index - b.index);
-  return parsed.map((p) => p.embedding);
+  const result = parsed.map((p) => p.embedding);
+
+  // Validate embedding dimensions match schema
+  for (let i = 0; i < result.length; i++) {
+    if (result[i]!.length !== EMBEDDING_DIM) {
+      throw new Error(
+        `Embedding dimension mismatch at index ${i}: expected ${EMBEDDING_DIM}, got ${result[i]!.length}`,
+      );
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +124,9 @@ function parseArgs(argv: string[]): Args {
 // Deterministic embedding fallback (same formula as seed-wines-real.ts)
 // ---------------------------------------------------------------------------
 
+/** Embedding dimension — must match Vespa schema tensor<float>(x[DIM]). */
+const EMBEDDING_DIM = 1024;
+
 export function deterministicEmbedding(
   body: number,
   sweetness: number,
@@ -123,8 +137,8 @@ export function deterministicEmbedding(
     body, sweetness, acidity, tannin,
     1 - body, 1 - sweetness, 1 - acidity, 1 - tannin,
   ];
-  const embedding = new Array<number>(128).fill(0);
-  for (let i = 0; i < 128; i++) {
+  const embedding = new Array<number>(EMBEDDING_DIM).fill(0);
+  for (let i = 0; i < EMBEDDING_DIM; i++) {
     const f = features[i % features.length]!;
     const k = Math.floor(i / features.length);
     embedding[i] =
@@ -591,21 +605,27 @@ export async function run(): Promise<void> {
   const chunks = chunkArray(records, BATCH_SIZE);
   let indexed = 0;
   let failures = 0;
-  let httpEmbedFailed = false;
+  let httpEmbedFailures = 0;
+  const MAX_HTTP_FAILURES = 3; // switch to deterministic after N consecutive failures
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const chunk = chunks[ci]!;
 
-    // Generate embeddings
+    // Generate embeddings — retry per-batch rather than giving up globally
     let embeddings: readonly (readonly number[])[];
-    if (embedUrl && !httpEmbedFailed) {
+    if (embedUrl && httpEmbedFailures < MAX_HTTP_FAILURES) {
       try {
         const texts = chunk.map(buildEmbedText);
         embeddings = await embedBatchHttp(texts);
+        httpEmbedFailures = 0; // reset on success
       } catch (e) {
-        httpEmbedFailed = true;
+        httpEmbedFailures++;
         const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`  Embedding HTTP failed (${msg}) — switching to deterministic for remaining batches`);
+        if (httpEmbedFailures >= MAX_HTTP_FAILURES) {
+          console.warn(`  Embedding HTTP failed ${httpEmbedFailures}x (${msg}) — switching to deterministic for remaining batches`);
+        } else {
+          console.warn(`  Embedding HTTP failed (${msg}) — using deterministic for this batch (failure ${httpEmbedFailures}/${MAX_HTTP_FAILURES})`);
+        }
         embeddings = chunk.map((r) =>
           deterministicEmbedding(r.body, r.sweetness, r.acidity, r.tannin),
         );
@@ -632,7 +652,6 @@ export async function run(): Promise<void> {
       const embedding = embeddings[i] ?? deterministicEmbedding(rec.body, rec.sweetness, rec.acidity, rec.tannin);
       const retrievalDoc = silverToRetrievalDoc(rec, embedding);
       docs.push({
-        // Document v1 path: /document/v1/{namespace}/{type}/docid/{userKey} — user key only (see vespa-search-index.bulkUpsert).
         id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),
       });

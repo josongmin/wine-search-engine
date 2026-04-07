@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import { createEntityId } from '../../shared/types/index.js';
 import { rrfFuse } from '../../shared/utils/rrf.js';
 import type { SparseHit, DenseHit } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
@@ -114,7 +114,7 @@ export class FusionService {
       };
 
       const merged = mergeRetrievalHitSummariesForEntity(
-        entityId as EntityId,
+        createEntityId(entityId),
         sparseHits,
         denseHits,
         learnedSparseHits,
@@ -122,7 +122,7 @@ export class FusionService {
       );
 
       candidates.push({
-        entityId: entityId as EntityId,
+        entityId: createEntityId(entityId),
         sparseRank,
         denseRank,
         learnedSparseRank,

@@ -131,7 +131,7 @@ export class CohereReranker implements RerankerPort {
         'pipeline Cohere reranker HTTP',
       );
       const text = await response.text().catch(() => '');
-      throw new Error(`Cohere reranker failed [HTTP ${status}]: ${text}`);
+      throw new Error(`Cohere reranker failed [HTTP ${status}]: ${text.slice(0, 200)}`);
     }
 
     const data: unknown = await response.json();
@@ -167,8 +167,11 @@ export class CohereReranker implements RerankerPort {
     for (const item of data.results) {
       const candidate = candidates[item.index];
       if (candidate === undefined || !isEntityId(candidate.entityId)) continue;
+      if (!Number.isFinite(item.relevance_score)) continue;
       scored.push({ entityId: candidate.entityId, score: item.relevance_score });
     }
+
+    scored.sort((a, b) => b.score - a.score);
 
     return scored.map((item, index) => ({
       entityId: item.entityId,

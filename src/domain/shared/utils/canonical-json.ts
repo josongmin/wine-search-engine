@@ -24,6 +24,12 @@ function canonicalize(value: unknown): CanonicalValue {
   }
 
   if (typeof value === 'object') {
+    const proto = Object.getPrototypeOf(value) as unknown;
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(
+        `Non-plain object is not allowed in canonical JSON: ${value.constructor.name}`,
+      );
+    }
     const input = value as Record<string, unknown>;
     const output: Record<string, CanonicalValue> = {};
     for (const key of Object.keys(input).sort()) {

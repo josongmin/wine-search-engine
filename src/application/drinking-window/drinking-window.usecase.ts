@@ -27,7 +27,7 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
   /**
    * Predicts drinking window for a wine and checks if currently drinkable.
    */
-  check(request: DrinkingWindowCheckRequest): Promise<DrinkingWindowBlock> {
+  async check(request: DrinkingWindowCheckRequest): Promise<DrinkingWindowBlock> {
     // Use predictor to get drinking window
     const predictionInput: DrinkingWindowInput = {
       vintage: request.vintage,
@@ -40,9 +40,9 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
       sweetness: request.sweetness,
       avgCriticProxyScore: request.avgCriticProxyScore,
     };
-    const prediction = this.predictor.predict(predictionInput);
+    const prediction = await this.predictor.predict(predictionInput);
 
-    return Promise.resolve({
+    return {
       drinkingWindowStart: prediction.drinkingWindowStart,
       drinkingWindowEnd: prediction.drinkingWindowEnd,
       peakYear: prediction.peakYear,
@@ -53,6 +53,6 @@ export class DrinkingWindowUseCase implements DrinkingWindowUseCasePort {
       evidenceLevel: inferDrinkingWindowEvidenceLevel(prediction.modelVersion),
       blockingEligible: inferDrinkingWindowBlockingEligibility(prediction.modelVersion),
       modelVersion: prediction.modelVersion,
-    });
+    };
   }
 }

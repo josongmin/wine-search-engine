@@ -17,20 +17,20 @@ import { parseRetryAfterSecondsFromRateLimitMessage } from '../retry-after-from-
 const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
   WRONG_RESOLVE: 500,
   EVIDENCE_OBLIGATION: 500,
-  BLOCKING_MISS: 500,
+  BLOCKING_MISS: 503,
   SNAPSHOT_MISMATCH: 409,
   MISSING_SNAPSHOT: 400,
   DETERMINISM_VIOLATION: 409,
   [POLICY_BLOCKED_CODE]: 403,
 };
 
+const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set(['BLOCKING_MISS']);
+
 /**
  * Determines whether a domain error is retryable.
  */
 function isDomainErrorRetryable(code: string): boolean {
-  // Transient errors that could succeed on retry
-  const retryableCodes = new Set(['BLOCKING_MISS']);
-  return retryableCodes.has(code);
+  return RETRYABLE_DOMAIN_CODES.has(code);
 }
 
 /**
@@ -56,37 +56,43 @@ export function errorHandler(
   // Request timeout — 503 Service Unavailable
   // Fastify throws FST_ERR_HANDLER_TIMEOUT (statusCode=503) when a route
   // handler exceeds the configured requestTimeout option.
-  if (
-    fastifyError.code === 'FST_ERR_HANDLER_TIMEOUT' ||
-    fastifyError.statusCode === 503
-  ) {
+  // Only match the specific timeout code; other 503 errors fall through to
+  // the generic handler at the bottom.
+  if (fastifyError.code === 'FST_ERR_HANDLER_TIMEOUT') {
     request.log.warn({ requestId }, 'request_timeout');
-    reply.code(503).send({
-      error: 'RequestTimeout',
-      message: 'Request timed out',
-      statusCode: 503,
-    });
+
+    // Reset snakeCaseApplied so the preSerialization hook correctly converts
+    // this response (it may have been set by a prior sendRouteContractResponse
+    // call that failed before sending).
+    reply.snakeCaseApplied = false;
+
+    const body = buildSearchErrorResponse(
+      requestId,
+      'REQUEST_TIMEOUT',
+      'Request timed out',
+      null,
+      true,
+    );
+    sendSearchErrorResponse(request, reply, 503, body);
     return;
   }
 
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
   // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the
   // limit is exceeded (without a custom errorResponseBuilder).
+  reply.snakeCaseApplied = false;
   if (fastifyError.statusCode === 429) {
-    const message = fastifyError.message ?? 'Rate limit exceeded.';
-    // Extract the "retry in X" portion from the default message to satisfy the
-    // "Retry after" assertion in the tests.
-    const retryPart = message.replace('Rate limit exceeded, retry in', 'Retry after');
+    const rawMessage = fastifyError.message ?? '';
 
     request.log.warn({ requestId }, 'rate_limit_exceeded');
 
-    const retrySeconds = parseRetryAfterSecondsFromRateLimitMessage(message);
+    const retrySeconds = parseRetryAfterSecondsFromRateLimitMessage(rawMessage);
     reply.header('Retry-After', String(retrySeconds));
 
     const body = buildSearchErrorResponse(
       requestId,
       'RATE_LIMIT_EXCEEDED',
-      retryPart,
+      `Retry after ${String(retrySeconds)} seconds`,
       null,
       true,
     );

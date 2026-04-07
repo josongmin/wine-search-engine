@@ -12,11 +12,11 @@
  */
 
 import 'dotenv/config';
-import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import type { PoolConfig } from 'pg';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFile } from './etl-utils.js';
 import type {
   BronzeRow,
   VivinoPayload,
@@ -24,6 +24,32 @@ import type {
   WineType,
   PriceBand,
 } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Approximate FX rates for non-USD currency normalisation.
+// Updated periodically — good enough for price band classification.
+// ---------------------------------------------------------------------------
+
+const FX_TO_USD: Record<string, number> = {
+  USD: 1.0,
+  EUR: 1.08,
+  GBP: 1.27,
+  AUD: 0.66,
+  CAD: 0.74,
+  CHF: 1.13,
+  JPY: 0.0067,
+  KRW: 0.00075,
+  SEK: 0.096,
+  DKK: 0.145,
+  NOK: 0.094,
+  NZD: 0.61,
+  ZAR: 0.055,
+  BRL: 0.20,
+  ARS: 0.0012,
+  CLP: 0.0011,
+  MXN: 0.058,
+  CNY: 0.14,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -187,9 +213,13 @@ export function normalizeLabel(
   return label;
 }
 
-/** Vivino 1–5 (or 0–5) → [0, 1]. */
-function normalizeScale(score: number | undefined | null, max = 5): number {
-  if (score === undefined || score === null || !isFinite(score)) return 0.5;
+/**
+ * Vivino 1–5 (or 0–5) → [0, 1].
+ * Returns null when the score is missing so callers can distinguish
+ * "no data" from a measured mid-range value.
+ */
+function normalizeScale(score: number | undefined | null, max = 5): number | null {
+  if (score === undefined || score === null || !isFinite(score)) return null;
   return Math.max(0, Math.min(1, score / max));
 }
 
@@ -230,8 +260,8 @@ export function parseAlcohol(raw: string | undefined): number | null {
   const match = raw.match(/(\d+(?:\.\d+)?)\s*%/);
   if (!match || !match[1]) return null;
   const val = parseFloat(match[1]);
-  // Sanity range: 0–25% ABV
-  return isFinite(val) && val >= 0 && val <= 25 ? val : null;
+  // Sanity range: 0–25% ABV (covers fortified wines like Port ~20%, some Amarone ~17%)
+  return isFinite(val) && val > 0 && val <= 25 ? val : null;
 }
 
 /**
@@ -290,35 +320,72 @@ export function cleanRegion(
 }
 
 /**
+ * Converts a price from its source currency to USD using approximate FX rates.
+ * Returns null for unknown currencies to avoid silently corrupting price data.
+ */
+function toUsd(price: number, currency: string): number | null {
+  const upper = currency.toUpperCase();
+  const rate = FX_TO_USD[upper];
+  if (rate === undefined) return null;
+  return price * rate;
+}
+
+/**
+ * Computes the median of a sorted numeric array.
+ * Assumes `sorted` is already in ascending order.
+ */
+function median(sorted: readonly number[]): number | null {
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid]!;
+  return (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
  * Extracts the best available price in USD from a Bronze row.
  *
  * Priority:
- *   1. payload.merchant_prices — find the lowest 750ml-equivalent USD price
- *   2. row.price — top-level price (may be non-750ml, currency unknown)
+ *   1. payload.merchant_prices — convert all to USD, take median of 750ml-equivalent
+ *   2. row.price — top-level price; normalize magnum to 750ml equivalent
  */
 export function extractPriceUsd(
   rowPrice: number | null,
+  rowCurrency: string | null,
   merchantPrices: VivinoPayload['merchant_prices'],
   bottleMl: number | undefined,
 ): number | null {
-  // From merchant_prices, use the median USD price (min is susceptible to loss-leader outliers)
+  // From merchant_prices: convert all currencies to USD, take median
   if (merchantPrices && merchantPrices.length > 0) {
-    const stdPrices = merchantPrices
-      .filter((mp) => (mp.currency ?? 'USD') === 'USD' && mp.price !== undefined && mp.price > 0)
-      .map((mp) => mp.price as number)
-      .sort((a, b) => a - b);
-    if (stdPrices.length > 0) {
-      const mid = Math.floor(stdPrices.length / 2);
-      return stdPrices.length % 2 === 1
-        ? (stdPrices[mid] ?? null)
-        : ((stdPrices[mid - 1]! + stdPrices[mid]!) / 2);
+    const usdPrices: number[] = [];
+    for (const mp of merchantPrices) {
+      if (mp.price === undefined || mp.price <= 0) continue;
+      const currency = mp.currency ?? 'USD';
+      const converted = toUsd(mp.price, currency);
+      if (converted === null) continue; // skip unknown currencies
+      let price = converted;
+      // Normalize magnum prices to 750ml equivalent
+      if (bottleMl !== undefined && bottleMl > 800) {
+        price = price * (750 / bottleMl);
+      }
+      usdPrices.push(price);
     }
+    usdPrices.sort((a, b) => a - b);
+
+    const med = median(usdPrices);
+    if (med !== null) return Math.round(med * 100) / 100;
   }
 
-  // Fallback: top-level price; skip if the bottle is clearly non-standard (>750ml)
+  // Fallback: top-level price with currency conversion (guard against negative/zero)
   if (rowPrice !== null && rowPrice > 0) {
-    if (bottleMl !== undefined && bottleMl > 800) return null; // magnum+ skewed price
-    return rowPrice;
+    const currency = rowCurrency ?? 'USD';
+    const converted = toUsd(rowPrice, currency);
+    if (converted === null) return null; // unknown currency → no price
+    let price = converted;
+    // Normalize magnum prices to 750ml equivalent instead of dropping them
+    if (bottleMl !== undefined && bottleMl > 800) {
+      price = price * (750 / bottleMl);
+    }
+    return Math.round(price * 100) / 100;
   }
 
   return null;
@@ -457,16 +524,17 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     return 0.1; // dry
   })();
 
-  // Use taste_profile fallback only when structure fields are truly absent (not just 0)
-  const rawBody = taste?.intensity !== undefined && taste.intensity > 0
+  // Use taste_profile fallback only when structure fields are truly absent.
+  // Note: normalizeScale returns null for missing data, 0 is a valid score.
+  const rawBody = taste?.intensity !== undefined
     ? normalizeScale(taste.intensity, 5)
     : null;
-  const rawSweetness = taste?.sweetness !== undefined && taste.sweetness > 0
+  const rawSweetness = taste?.sweetness !== undefined
     ? normalizeScale(taste.sweetness, 5)
     : null;
 
-  // SOTA++: best price from merchant_prices
-  const priceUsd = extractPriceUsd(row.price, payload?.merchant_prices, payload?.bottle_ml);
+  // SOTA++: best price from merchant_prices (with FX conversion)
+  const priceUsd = extractPriceUsd(row.price, row.currency, payload?.merchant_prices, payload?.bottle_ml);
 
   // SOTA++: producer_prestige from winery_rating (1–5 → 0–1)
   const producerPrestige =
@@ -495,10 +563,10 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     wineType: detectedWineType,
     grapePrimary,
     grapes,
-    body: rawBody !== null ? rawBody : bodyFallback,
-    sweetness: rawSweetness !== null ? rawSweetness : sweetnessFallback,
-    acidity: normalizeScale(taste?.acidity, 5),
-    tannin: normalizeScale(taste?.tannin, 5),
+    body: rawBody ?? bodyFallback,
+    sweetness: rawSweetness ?? sweetnessFallback,
+    acidity: normalizeScale(taste?.acidity, 5) ?? 0.5,
+    tannin: normalizeScale(taste?.tannin, 5) ?? 0.5,
     pairingTags: extractPairings(payload),
     flavorProfiles: extractFlavorProfiles(payload),
     searchTextEn: buildSearchText(row, payload),
@@ -589,14 +657,22 @@ export function dedup(records: PreSilver[]): PreSilver[] {
 // ---------------------------------------------------------------------------
 
 export function normalizePopularity(records: PreSilver[]): SilverWineRecord[] {
+  if (records.length === 0) return [];
+
   const maxCount = records.reduce(
     (mx, r) => Math.max(mx, r.ratingsCount),
-    1,
+    0,
   );
+
+  // When all records have 0 ratings, give uniform popularity
+  const denominator = Math.log1p(maxCount);
+  if (denominator === 0) {
+    return records.map((r) => ({ ...r, popularityScore: 0 }));
+  }
 
   return records.map((r) => ({
     ...r,
-    popularityScore: Math.log1p(r.ratingsCount) / Math.log1p(maxCount),
+    popularityScore: Math.min(1.0, Math.log1p(r.ratingsCount) / denominator),
   }));
 }
 
@@ -611,7 +687,12 @@ export async function run(): Promise<void> {
   try {
     console.log('Fetching Bronze rows from wine_pdp_snapshot …');
 
-    const limitClause = args.limit > 0 ? `LIMIT ${args.limit}` : '';
+    const params: Array<string | number> = [SOURCE_ID];
+    let limitClause = '';
+    if (args.limit > 0) {
+      params.push(args.limit);
+      limitClause = `LIMIT $${params.length}`;
+    }
     const query = `
       SELECT
         id, external_id, display_name, producer, vintage_year,
@@ -623,7 +704,7 @@ export async function run(): Promise<void> {
       ${limitClause}
     `;
 
-    const result = await pool.query<BronzeRow>(query, [SOURCE_ID]);
+    const result = await pool.query<BronzeRow>(query, params);
     console.log(`  Bronze rows fetched: ${result.rows.length}`);
 
     // Transform with drop reason tracking
@@ -662,9 +743,9 @@ export async function run(): Promise<void> {
     // Popularity normalization
     const silver = normalizePopularity(deduped);
 
-    // Write NDJSON
+    // Write NDJSON (atomic: tmp + rename to prevent corruption on crash)
     const lines = silver.map((r) => JSON.stringify(r)).join('\n');
-    await fs.writeFile(args.output, lines + '\n', 'utf8');
+    await atomicWriteFile(args.output, lines + '\n');
     console.log(`  Written to: ${args.output}`);
 
     // Summary stats

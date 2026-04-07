@@ -5,6 +5,8 @@
  * Enables production monitoring and performance analysis.
  */
 
+import { CircularLatencyBuffer } from './circular-latency-buffer.js';
+
 /** Rough heuristic for dashboard “estimated savings” (not wall-clock measured). */
 const ESTIMATED_MS_SAVED_PER_QUERY_CACHE_HIT = 200;
 const ESTIMATED_MS_SAVED_PER_EMBEDDING_CACHE_HIT = 80;
@@ -44,18 +46,16 @@ export class CacheMetricsCollector {
   private queryCacheHits = 0;
   private queryCacheMisses = 0;
   private queryCacheErrors = 0;
-  private queryCacheLatencies: number[] = [];
+  private readonly queryCacheLatencies = new CircularLatencyBuffer(1000);
 
   private embeddingCacheHits = 0;
   private embeddingCacheMisses = 0;
   private embeddingCacheErrors = 0;
-  private embeddingCacheLatencies: number[] = [];
+  private readonly embeddingCacheLatencies = new CircularLatencyBuffer(1000);
 
   private circuitBreakerOpen = false;
   private circuitBreakerErrors = 0;
   private circuitBreakerLastError: number | undefined;
-
-  private readonly maxHistorySize = 1000;
 
   /**
    * Record query cache operation.
@@ -70,9 +70,6 @@ export class CacheMetricsCollector {
     }
 
     this.queryCacheLatencies.push(latencyMs);
-    if (this.queryCacheLatencies.length > this.maxHistorySize) {
-      this.queryCacheLatencies.shift();
-    }
   }
 
   /**
@@ -88,9 +85,6 @@ export class CacheMetricsCollector {
     }
 
     this.embeddingCacheLatencies.push(latencyMs);
-    if (this.embeddingCacheLatencies.length > this.maxHistorySize) {
-      this.embeddingCacheLatencies.shift();
-    }
   }
 
   /**
@@ -114,25 +108,18 @@ export class CacheMetricsCollector {
    * Get current metrics snapshot.
    */
   getMetrics(): CacheMetrics {
-    const queryHitRate =
-      this.queryCacheHits + this.queryCacheMisses > 0
-        ? this.queryCacheHits / (this.queryCacheHits + this.queryCacheMisses)
-        : 0;
+    const queryTotal = this.queryCacheHits + this.queryCacheMisses + this.queryCacheErrors;
+    const queryHitRate = queryTotal > 0
+      ? this.queryCacheHits / queryTotal
+      : 0;
 
-    const embeddingHitRate =
-      this.embeddingCacheHits + this.embeddingCacheMisses > 0
-        ? this.embeddingCacheHits / (this.embeddingCacheHits + this.embeddingCacheMisses)
-        : 0;
+    const embeddingTotal = this.embeddingCacheHits + this.embeddingCacheMisses + this.embeddingCacheErrors;
+    const embeddingHitRate = embeddingTotal > 0
+      ? this.embeddingCacheHits / embeddingTotal
+      : 0;
 
-    const queryAvgLatency =
-      this.queryCacheLatencies.length > 0
-        ? this.queryCacheLatencies.reduce((a, b) => a + b, 0) / this.queryCacheLatencies.length
-        : 0;
-
-    const embeddingAvgLatency =
-      this.embeddingCacheLatencies.length > 0
-        ? this.embeddingCacheLatencies.reduce((a, b) => a + b, 0) / this.embeddingCacheLatencies.length
-        : 0;
+    const queryAvgLatency = this.queryCacheLatencies.average();
+    const embeddingAvgLatency = this.embeddingCacheLatencies.average();
 
     const estimatedQuerySavingsMs =
       this.queryCacheHits * ESTIMATED_MS_SAVED_PER_QUERY_CACHE_HIT;
@@ -164,7 +151,10 @@ export class CacheMetricsCollector {
       },
       circuitBreaker: circuitBreakerMetrics,
       overall: {
-        avgLatencySavedMs: (queryAvgLatency * queryHitRate + embeddingAvgLatency * embeddingHitRate) / 2,
+        avgLatencySavedMs:
+          this.queryCacheHits + this.embeddingCacheHits > 0
+            ? totalEstimatedSavingsMs / (this.queryCacheHits + this.embeddingCacheHits)
+            : 0,
         estimatedQueriesSavedMs: totalEstimatedSavingsMs,
       },
     };
@@ -177,12 +167,12 @@ export class CacheMetricsCollector {
     this.queryCacheHits = 0;
     this.queryCacheMisses = 0;
     this.queryCacheErrors = 0;
-    this.queryCacheLatencies = [];
+    this.queryCacheLatencies.reset();
 
     this.embeddingCacheHits = 0;
     this.embeddingCacheMisses = 0;
     this.embeddingCacheErrors = 0;
-    this.embeddingCacheLatencies = [];
+    this.embeddingCacheLatencies.reset();
 
     this.circuitBreakerOpen = false;
     this.circuitBreakerErrors = 0;

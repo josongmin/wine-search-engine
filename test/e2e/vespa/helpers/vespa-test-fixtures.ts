@@ -89,11 +89,9 @@ export const VESPA_TEST_ALIASES: readonly VespaTestAlias[] = [
 
 /**
  * Deterministic embedding vector based on entity ID hash.
- * Produces a normalised 128-dim vector so it can be stored as a Vespa tensor.
- * The dimension is kept small to avoid payload bloat in E2E tests; the
- * production schema uses 768-dim but tests only need structural correctness.
+ * Produces a normalised 1024-dim vector matching the Vespa schema tensor<float>(x[1024]).
  */
-function makeEmbedding(entityId: string, dim = 128): readonly number[] {
+function makeEmbedding(entityId: string, dim = 1024): readonly number[] {
   const vec = new Array<number>(dim).fill(0);
   for (let i = 0; i < entityId.length; i++) {
     const code = entityId.charCodeAt(i);

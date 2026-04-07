@@ -2,16 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import type { SearchRouteDeps } from './route-deps.js';
 import {
   parseContractBody,
+  sendContractResponse,
   sendRouteContractResponse,
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import { SearchRouteContract } from './route-contracts.js';
 import { toSearchRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
+import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
+import { projectToHumanResponse } from './search-human-projection.js';
+import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
 
 /**
  * POST /v1/search — main search endpoint.
- * Handles both regular search and "A vs B" comparison queries.
+ *
+ * Content negotiation (RFC 7231 §5.3.2):
+ *   Accept: application/json                        → engine response (default)
+ *   Accept: application/vnd.cuvee.human+json        → human-oriented summary
  *
  * Epic 14: Decomposition detection is handled inside SearchUseCase.execute().
  * If the query matches an "A vs B" pattern, it delegates to DecomposedSearchUseCase
@@ -28,8 +35,20 @@ export function registerSearchRoute(
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, SearchRouteContract);
       const searchRequest = toSearchRequest(parsed);
+      const requestId = getRequestId(request);
 
-      const response = await deps.searchUseCase.execute(searchRequest, getRequestId(request));
+      const response = await deps.searchUseCase.execute(searchRequest, requestId);
+
+      // RFC 7234 §4.1: Vary must list headers that influence representation selection.
+      void reply.header('Vary', 'Accept');
+
+      if (wantsHumanResponse(request.headers.accept)) {
+        const humanResponse = projectToHumanResponse(response, requestId);
+        void reply.header('Content-Type', MEDIA_TYPE_HUMAN);
+
+        sendContractResponse(request, reply, 200, SearchResponseV2HumanSchema, humanResponse);
+        return;
+      }
 
       sendRouteContractResponse(request, reply, SearchRouteContract, 200, response);
     },

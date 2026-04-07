@@ -10,11 +10,15 @@
  *
  * @param content - Raw NDJSON string (newline-delimited JSON).
  * @param label - Label for error messages (e.g. file path).
+ * @param validator - Optional per-record validator. Returns true if the record
+ *                    conforms to expected shape. Failing records are counted as
+ *                    skipped and logged.
  * @returns Parsed records and count of skipped lines.
  */
 export function parseNdjson<T>(
   content: string,
   label = 'ndjson',
+  validator?: (record: unknown) => record is T,
 ): { records: T[]; skipped: number } {
   const records: T[] = [];
   let skipped = 0;
@@ -24,38 +28,40 @@ export function parseNdjson<T>(
     return { records, skipped };
   }
 
-  let lineStart = 0;
-  let lineNumber = 1;
+  const lines = trimmed.split('\n');
 
-  while (lineStart <= trimmed.length) {
-    let lineEnd = trimmed.indexOf('\n', lineStart);
-    if (lineEnd === -1) {
-      lineEnd = trimmed.length;
-    }
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]!.replace(/\r$/, '').trim();
 
-    const rawLine = trimmed.slice(lineStart, lineEnd);
+    // Skip empty lines — increment line number but don't count as malformed
+    if (rawLine.length === 0) continue;
+
     try {
-      if (rawLine.length > 0) {
-        records.push(JSON.parse(rawLine.replace(/\r$/, '')) as T);
+      const parsed: unknown = JSON.parse(rawLine);
+
+      // If a validator is provided, check the parsed record's shape
+      if (validator) {
+        if (!validator(parsed)) {
+          skipped++;
+          if (skipped <= 5) {
+            console.warn(`  Warning: schema mismatch at ${label}:${i + 1}, skipping`);
+          }
+          continue;
+        }
+        records.push(parsed);
+      } else {
+        records.push(parsed as T);
       }
     } catch {
       skipped++;
       if (skipped <= 5) {
-        console.warn(`  Warning: malformed JSON at ${label}:${lineNumber}, skipping`);
+        console.warn(`  Warning: malformed JSON at ${label}:${i + 1}, skipping`);
       }
     }
-
-    if (rawLine.length > 0) {
-      lineNumber += 1;
-    }
-    if (lineEnd === trimmed.length) {
-      break;
-    }
-    lineStart = lineEnd + 1;
   }
 
   if (skipped > 5) {
-    console.warn(`  Warning: ${skipped} total malformed lines in ${label}`);
+    console.warn(`  Warning: ${skipped} total malformed/invalid lines in ${label}`);
   }
 
   return { records, skipped };

@@ -226,7 +226,7 @@ export class InMemorySearchIndex implements SearchIndexPort {
  * Returns deterministic hash-based fake vectors — always the same for the same text.
  */
 export class InMemoryEmbeddingService implements EmbeddingServicePort {
-  private readonly DIM = 128;
+  private readonly DIM = 1024;
 
   private hashText(text: string): readonly number[] {
     const vec = new Array<number>(this.DIM).fill(0);

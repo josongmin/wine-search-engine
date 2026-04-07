@@ -362,8 +362,8 @@ export class PgAliasMatcher implements AliasMatcher {
                  LIKE '%' || gram || '%'
          )
        ORDER BY confidence DESC
-       LIMIT ${MAX_FUZZY_CANDIDATES}`,
-      [fuzzyGrams],
+       LIMIT $2`,
+      [fuzzyGrams, MAX_FUZZY_CANDIDATES],
     );
 
     const fuzzyRows: FuzzyAliasRow[] = fuzzyCandidates.rows

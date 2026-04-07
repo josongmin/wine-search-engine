@@ -82,9 +82,14 @@ const ReadyResponseSchema = z.object({
 });
 
 const ClaudeToolsExecuteRequestSchema = z.object({
-  tool_name: z.string().min(1),
+  tool_name: z.enum([
+    'search_wines',
+    'get_food_pairings',
+    'check_drinking_window',
+    'compare_wines',
+  ]),
   tool_input: z.record(z.unknown()).optional().default({}),
-  request_id: z.string().optional(),
+  request_id: z.string().max(128).regex(/^[a-zA-Z0-9._-]+$/).optional(),
 });
 
 const ClaudeToolsExecuteResponseSchema = z.object({
@@ -243,6 +248,7 @@ export const WatchlistListRouteContract = defineRouteContract({
   responses: {
     200: ListWatchlistResponseSchema,
     401: WatchlistErrorResponseSchema,
+    429: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
 });
@@ -255,6 +261,7 @@ export const WatchlistCreateRouteContract = defineRouteContract({
     201: CreateWatchlistResponseSchema,
     400: WatchlistErrorResponseSchema,
     401: WatchlistErrorResponseSchema,
+    429: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
 });
@@ -268,6 +275,7 @@ export const WatchlistGetRouteContract = defineRouteContract({
     400: WatchlistErrorResponseSchema,
     401: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
+    429: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
 });
@@ -281,6 +289,7 @@ export const WatchlistDeleteRouteContract = defineRouteContract({
     400: WatchlistErrorResponseSchema,
     401: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
+    429: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
 });
@@ -294,6 +303,7 @@ export const WatchlistDeliveriesRouteContract = defineRouteContract({
     400: WatchlistErrorResponseSchema,
     401: WatchlistErrorResponseSchema,
     404: WatchlistErrorResponseSchema,
+    429: WatchlistErrorResponseSchema,
     500: WatchlistErrorResponseSchema,
   },
 });
@@ -304,6 +314,8 @@ export const FeedbackSubmitRouteContract = defineRouteContract({
   responses: {
     201: PostFeedbackResponseSchema,
     400: ErrorResponseSchema,
+    429: ErrorResponseSchema,
+    500: ErrorResponseSchema,
     503: ErrorResponseSchema,
   },
 });

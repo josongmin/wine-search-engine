@@ -28,7 +28,11 @@ function constraintToSparseFilterTokens(
     }
     if (operator === 'in' && Array.isArray(value)) {
       const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-      return normalized.length === 1 ? [`${key}:${normalized[0]}`] : [];
+      if (normalized.length === 1) return [`${key}:${normalized[0]}`];
+      // Multi-value IN: emit pipe-delimited token so buildSparseFilters can
+      // produce a Vespa OR clause instead of silently dropping the constraint.
+      if (normalized.length > 1) return [`${key}_in:${normalized.join('|')}`];
+      return [];
     }
     return [];
   };
@@ -162,5 +166,8 @@ function isNumericRange(
     return false;
   }
   const rec = x as { min: unknown; max: unknown };
-  return typeof rec.min === 'number' && typeof rec.max === 'number';
+  return (
+    typeof rec.min === 'number' && Number.isFinite(rec.min) &&
+    typeof rec.max === 'number' && Number.isFinite(rec.max)
+  );
 }

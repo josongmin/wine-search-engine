@@ -231,7 +231,13 @@ describe('runSearchPostRoutePhase', () => {
           availability: 1,
           uncertaintyPenalty: 0,
         },
-        evidenceItems: [],
+        evidenceItems: [{
+          type: 'semantic_relevance',
+          source: 'ranker',
+          contribution: '+0.50',
+          strength: 'medium' as const,
+          provenance: 'ranked evidence for abstain path',
+        }],
       }),
     ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
 
@@ -270,6 +276,13 @@ describe('runSearchPostRoutePhase', () => {
 
     expect(out).toBe(built);
     expect(responseBuilder.build).toHaveBeenCalledOnce();
+    expect(responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionOutput: expect.objectContaining({
+          evidenceItems: rankedResults[0]!.evidenceItems,
+        }),
+      }),
+    );
     expect(decisionEngine.decide).not.toHaveBeenCalled();
   });
 
@@ -660,6 +673,70 @@ describe('runSearchPostRoutePhase', () => {
       response.engineDecision.decisionTraceRef,
     );
     expect(response.meta.authorityTraceRef).toBe(response.engineDecision.decisionTraceRef);
+  });
+
+  it('carries top-ranked evidence into degraded failed decision output when the decision engine throws', async () => {
+    const rankedResults = [
+      makeRankedResult({
+        evidenceItems: [{
+          type: 'semantic_relevance',
+          source: 'ranker',
+          contribution: '+0.82',
+          strength: 'high' as const,
+          provenance: 'semantic match',
+        }],
+      }),
+    ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const responseBuilder = makeResponseBuilder({
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        route: 'hybrid',
+        decisionConfidence: 0,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: 'trace',
+        authorityTraceRef: 'trace',
+        decisionSnapshot: makeDecisionSnapshot(),
+        executionMode: 'degraded',
+        blockingEligible: false,
+      },
+      results: [],
+      clarification: null,
+      meta: {
+        requestId: 'req-decision-throw',
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+        engine_schema_version: 'search_response_v1',
+        decisionSnapshot: makeDecisionSnapshot(),
+        authorityTraceRef: 'trace',
+        executionMode: 'degraded',
+        blockingEligible: false,
+      },
+    } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1);
+
+    await runRankedRouteDecisionPhase({
+      plan: minimalPlan(),
+      requestId: 'req-decision-throw',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      decisionEngine: {
+        decide: vi.fn().mockRejectedValue(new Error('decision exploded')),
+      } as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    expect(responseBuilder.build).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decisionOutput: expect.objectContaining({
+          decisionStatus: 'failed',
+          evidenceItems: rankedResults[0]!.evidenceItems,
+        }),
+      }),
+    );
   });
 
   it('does not include comparison counterfactuals unless explicitly requested', async () => {

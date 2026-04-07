@@ -178,6 +178,7 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
         },
         body,
         signal: controller.signal,
+        redirect: 'error',
       });
 
       const statusCode = response.status;

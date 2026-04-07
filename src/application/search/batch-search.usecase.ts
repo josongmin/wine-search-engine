@@ -314,9 +314,10 @@ export class BatchSearchUseCase {
       // Build SearchRequest from batch item
       const searchRequest: SearchRequest = {
         query: req.query,
-        context: req.context,
-        sessionContext: req.sessionContext,
-        queryBudget: req.queryBudget,
+        ...(req.context !== undefined ? { context: req.context } : {}),
+        ...(req.sessionContext !== undefined ? { sessionContext: req.sessionContext } : {}),
+        ...(req.queryBudget !== undefined ? { queryBudget: req.queryBudget } : {}),
+        ...(req.limit !== undefined ? { limit: req.limit } : {}),
         options: {
           mode: req.retrieval_mode ?? 'auto',
           explain: false,

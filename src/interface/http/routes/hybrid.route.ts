@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   parseContractBody,
+  sendContractResponse,
   sendRouteContractResponse,
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
@@ -8,11 +9,16 @@ import type { HybridRouteDeps } from './route-deps.js';
 import { HybridRouteContract } from './route-contracts.js';
 import { toHybridSearchRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
+import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
+import { projectToHumanResponse } from './search-human-projection.js';
+import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
 
 /**
  * POST /v1/search/hybrid — force hybrid search route.
- * Compare-style queries still reuse the shared decomposition path and may
- * therefore return a ComparisonSearchResponse.
+ *
+ * Content negotiation (RFC 7231 §5.3.2):
+ *   Accept: application/json                        → engine response (default)
+ *   Accept: application/vnd.cuvee.human+json        → human-oriented summary
  */
 export function registerHybridRoute(
   app: FastifyInstance,
@@ -25,8 +31,19 @@ export function registerHybridRoute(
     handler: async (request, reply) => {
       const parsed = parseContractBody(request, HybridRouteContract);
       const hybridRequest = toHybridSearchRequest(parsed);
+      const requestId = getRequestId(request);
 
-      const response = await deps.hybridUseCase.execute(hybridRequest, getRequestId(request));
+      const response = await deps.hybridUseCase.execute(hybridRequest, requestId);
+
+      void reply.header('Vary', 'Accept');
+
+      if (wantsHumanResponse(request.headers.accept)) {
+        const humanResponse = projectToHumanResponse(response, requestId);
+        void reply.header('Content-Type', MEDIA_TYPE_HUMAN);
+
+        sendContractResponse(request, reply, 200, SearchResponseV2HumanSchema, humanResponse);
+        return;
+      }
 
       sendRouteContractResponse(request, reply, HybridRouteContract, 200, response);
     },

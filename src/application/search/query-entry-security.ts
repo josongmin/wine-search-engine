@@ -38,7 +38,7 @@ export async function evaluateQueryEntrySecurity(
   if (!sanitizationResult.safe) {
     deps.observer?.onLayer1Blocked(sanitizationResult.reason);
     return {
-      sanitizedQuery: query.trim(),
+      sanitizedQuery: '',
       rejection: {
         layer: 'LAYER_1_BLOCKED',
         reason: sanitizationResult.reason,

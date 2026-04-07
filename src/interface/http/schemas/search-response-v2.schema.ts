@@ -26,18 +26,19 @@
  */
 
 import { z } from 'zod';
-
-const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
-  /^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{64}$/;
+import { CANONICAL_AUTHORITY_TRACE_REF_PATTERN } from './search-response.schema.js';
 
 // ---------------------------------------------------------------------------
 // V2 shared sub-schemas
 // ---------------------------------------------------------------------------
 
 const DrinkingWindowV2Schema = z.object({
-  start: z.number().int().optional(),
-  end: z.number().int().optional(),
-}).strict();
+  start: z.number().int().min(1900).max(2200).optional(),
+  end: z.number().int().min(1900).max(2200).optional(),
+}).strict().refine(
+  (w) => w.start === undefined || w.end === undefined || w.start <= w.end,
+  'drinking window start must be <= end',
+);
 
 const EvidenceItemV2Schema = z.object({
   signal: z.string().min(1),

@@ -429,23 +429,16 @@ export class ResponseBuilder {
   private extractAbstainReason(
     output: DecisionOutput,
   ): string | undefined {
-    // Only extract for ambiguous decisions
     if (output.decisionStatus !== 'ambiguous') {
       return undefined;
     }
 
-    // Check if ambiguity is due to hard constraint violation (skip those)
-    // Hard constraint violation would be indicated in the trace's finalReason
-    const trace = output.decisionTrace;
-    const finalReason = trace.finalReason;
-
-    // If hard constraints appear to be the issue, don't return abstain reason
-    if (finalReason.toLowerCase().includes('hard constraint') ||
-        finalReason.toLowerCase().includes('constraint violation')) {
+    // Use structured failureReason field — never rely on free-text finalReason substring matching.
+    if (output.failureReason === 'HARD_CONSTRAINT_VIOLATION') {
       return undefined;
     }
 
-    // Return the final reason as the abstain reason
+    const finalReason = output.decisionTrace.finalReason;
     return finalReason.length > 0 ? finalReason : undefined;
   }
 

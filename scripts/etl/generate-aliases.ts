@@ -20,6 +20,7 @@ import type {
 } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFile } from './etl-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -73,6 +74,8 @@ function removeAccents(text: string): string {
 const CHATEAU_PREFIXES = [
   'château', 'chateau', 'domaine', 'domain', 'maison',
   'tenuta', 'cantina', 'bodega', 'weingut', 'cave',
+  'villa', 'clos', 'quinta', 'casa', 'fattoria', 'azienda',
+  'bodegas', 'viña', 'vina',
 ];
 
 /**
@@ -92,7 +95,7 @@ function extractShortName(producer: string): string | null {
   }
 
   // Remove trailing "Winery", "Vineyards", etc.
-  const suffixes = /\s+(winery|vineyards?|cellars?|estate|wines?|vini)$/i;
+  const suffixes = /\s+(winery|vineyards?|cellars?|estate|wines?|vini|vinicola|cooperative|s\.?a\.?)$/i;
   const stripped = producer.replace(suffixes, '').trim();
   if (stripped.length > 0 && stripped !== producer) return stripped;
 
@@ -164,10 +167,14 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
     });
   }
 
-  // 6. Label without vintage (for vintage-agnostic search)
+  // 6. Label without vintage (for vintage-agnostic search).
+  //    Use word-boundary regex to avoid matching the year as a substring
+  //    (e.g. "2015" in "20150" or similar edge cases).
   if (record.vintageYear !== null) {
+    const yearPattern = new RegExp(`\\b${record.vintageYear}\\b`, 'g');
     const noVintage = record.canonicalLabel
-      .replace(String(record.vintageYear), '')
+      .replace(yearPattern, '')
+      .replace(/\s{2,}/g, ' ')
       .trim();
     if (noVintage.length > 0 && noVintage !== record.producer) {
       proposed.push({
@@ -191,14 +198,18 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
     });
   }
 
-  // Build projections from proposed aliases
-  const identitySafeProjection = proposed
-    .filter((a) => a.confidencePrior >= IDENTITY_SAFE_THRESHOLD && !a.needsReview)
-    .map((a) => a.value);
+  // Build projections from proposed aliases (deduplicated)
+  const identitySafeProjection = [...new Set(
+    proposed
+      .filter((a) => a.confidencePrior >= IDENTITY_SAFE_THRESHOLD && !a.needsReview)
+      .map((a) => a.value),
+  )];
 
-  const noisyRecallProjection = proposed
-    .filter((a) => a.confidencePrior < IDENTITY_SAFE_THRESHOLD || a.needsReview)
-    .map((a) => a.value);
+  const noisyRecallProjection = [...new Set(
+    proposed
+      .filter((a) => a.confidencePrior < IDENTITY_SAFE_THRESHOLD || a.needsReview)
+      .map((a) => a.value),
+  )];
 
   return { proposed, identitySafeProjection, noisyRecallProjection };
 }
@@ -227,7 +238,7 @@ export async function run(): Promise<void> {
     (sum, r) => sum + r.aliases.proposed.length,
     0,
   );
-  const meanAliases = totalAliases / enriched.length;
+  const meanAliases = enriched.length > 0 ? totalAliases / enriched.length : 0;
   const needsReview = enriched.reduce(
     (sum, r) => sum + r.aliases.proposed.filter((a) => a.needsReview).length,
     0,
@@ -237,7 +248,7 @@ export async function run(): Promise<void> {
   console.log(`  Needs review: ${needsReview}`);
 
   const lines = enriched.map((r) => JSON.stringify(r)).join('\n');
-  await fs.writeFile(args.output, lines + '\n', 'utf8');
+  await atomicWriteFile(args.output, lines + '\n');
   console.log(`  Written to: ${args.output}`);
 }
 

@@ -21,14 +21,29 @@ export interface KillSwitchPolicyRow {
  */
 export const KILL_SWITCH_POLICY: readonly KillSwitchPolicyRow[] = [
   {
+    key: 'KILL_SWITCH_ALIAS_OVERLAY',
+    effect: 'degraded_only',
+    reason: 'alias overlay disabled; fuzzy/alias matching falls back to base index',
+  },
+  {
     key: 'KILL_SWITCH_LEARNING',
     effect: 'degraded_only',
     reason: 'learned ranking/matching disabled',
   },
   {
+    key: 'KILL_SWITCH_DENSE_RETRIEVAL',
+    effect: 'degraded_only',
+    reason: 'dense/embedding retrieval channel disabled; sparse-only retrieval',
+  },
+  {
     key: 'KILL_SWITCH_INJECTION_JUDGE',
     effect: 'request_fail',
     reason: 'security path disabled when injection judge is unavailable',
+  },
+  {
+    key: 'KILL_SWITCH_QUERY_CACHE',
+    effect: 'degraded_only',
+    reason: 'query/embedding cache disabled; every request hits retrieval layer',
   },
   {
     key: 'ALLOW_HEURISTIC_DRINKING_WINDOW',
@@ -39,10 +54,16 @@ export const KILL_SWITCH_POLICY: readonly KillSwitchPolicyRow[] = [
 
 function resolveRowActive(row: KillSwitchPolicyRow, config: Config): boolean | undefined {
   switch (row.key) {
+    case 'KILL_SWITCH_ALIAS_OVERLAY':
+      return config.killSwitch.aliasOverlay;
     case 'KILL_SWITCH_LEARNING':
       return config.killSwitch.learning;
+    case 'KILL_SWITCH_DENSE_RETRIEVAL':
+      return config.killSwitch.denseRetrieval;
     case 'KILL_SWITCH_INJECTION_JUDGE':
       return config.killSwitch.injectionJudge;
+    case 'KILL_SWITCH_QUERY_CACHE':
+      return config.killSwitch.queryCache;
     case 'ALLOW_HEURISTIC_DRINKING_WINDOW':
       return config.drinkingWindow.allowHeuristicInProduction;
     default:

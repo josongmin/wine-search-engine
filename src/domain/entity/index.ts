@@ -16,12 +16,6 @@ export {
 
 // ── Ports ───────────────────────────────────────────────────────────────────
 export type { EntityRepository } from './port/entity-repository.port.js';
-export type {
-  EntityEventPort,
-  EntityMergedEvent,
-  EntitySplitEvent,
-  EntityCreatedEvent,
-} from './port/entity-event.port.js';
 
 // ── Services ────────────────────────────────────────────────────────────────
 export {

@@ -126,7 +126,7 @@ export class DrinkingWindowPredictor {
    * Predicts drinking window: ONNX when loaded; otherwise rule-based heuristic
    * if {@link DrinkingWindowPredictorOptions.allowHeuristicFallback} is true (default).
    */
-  predict(input: DrinkingWindowInput): DrinkingWindowPrediction {
+  async predict(input: DrinkingWindowInput): Promise<DrinkingWindowPrediction> {
     if (this.isOnnxReady()) {
       return this.predictWithOnnx(
         input,
@@ -194,30 +194,25 @@ export class DrinkingWindowPredictor {
     };
   }
 
-  private predictWithOnnx(
+  private async predictWithOnnx(
     input: DrinkingWindowInput,
     sessionStart: OrtSession,
     sessionEnd: OrtSession,
     TensorCtor: OrtModule['Tensor'],
-  ): DrinkingWindowPrediction {
+  ): Promise<DrinkingWindowPrediction> {
     const features = this.toFeatureArray(input);
     const tensor = new TensorCtor('float32', features, [1, features.length]);
 
     const ONNX_SLOW_INFERENCE_WARN_MS = 500;
 
-    const runSync = (session: OrtSession): number => {
-      if (session.runSync === undefined) {
-        throw new Error(
-          `DrinkingWindowPredictor loaded ${this.modelVersion}, but the ONNX runtime does not expose runSync().`,
-        );
-      }
+    const runAsync = async (session: OrtSession): Promise<number> => {
       const t0 = performance.now();
-      const result = session.runSync({ input: tensor });
+      const result = await session.run({ input: tensor });
       const elapsed = performance.now() - t0;
       if (elapsed > ONNX_SLOW_INFERENCE_WARN_MS) {
         bootstrapLogger.warn(
           { elapsedMs: Math.round(elapsed), modelVersion: this.modelVersion },
-          '[DrinkingWindowPredictor] ONNX runSync exceeded slow-inference threshold — consider async migration',
+          '[DrinkingWindowPredictor] ONNX inference exceeded slow threshold',
         );
       }
       const first = Object.values(result)[0];
@@ -227,8 +222,10 @@ export class DrinkingWindowPredictor {
       return first.data[0];
     };
 
-    const startOffset = runSync(sessionStart);
-    const endOffset = runSync(sessionEnd);
+    const [startOffset, endOffset] = await Promise.all([
+      runAsync(sessionStart),
+      runAsync(sessionEnd),
+    ]);
 
     const drinkingWindowStart = Math.round(input.vintage + Math.max(0, startOffset));
     const drinkingWindowEnd = Math.round(

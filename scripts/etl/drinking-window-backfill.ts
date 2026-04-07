@@ -3,25 +3,27 @@
 /**
  * Track C Step 4: Drinking Window Backfill
  *
- * Reads silver-docquery.ndjson with all enrichments and generates
- * drinking window predictions using DrinkingWindowPredictor with
- * feature engineering (grape, region, vintage, sensory attributes, critic score).
+ * Predicts optimal drinking windows using feature-weighted heuristic model.
+ *
+ * SOTA++ improvements:
+ * - Idempotent: skips records that already have drinkingWindow
+ * - Atomic writes
+ * - Confidence thresholds use normalised [0,1] scores (not raw Vivino 1-5)
+ * - Documented that this is a heuristic stub — not a real LightGBM model
  *
  * Usage: npx tsx --env-file=.env scripts/etl/drinking-window-backfill.ts
- *
- * Input: data/silver-docquery.ndjson (with all enrichments)
- * Output: data/silver-docquery.ndjson (with drinkingWindow field added)
- * Error handling: Skip wines with missing critical attributes, continue processing
  */
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import { parseNdjson } from './ndjson';
+import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFileSync } from './etl-utils.js';
 
 /**
- * Label encoders for categorical variables (hardcoded stub).
- * In production: loaded from trained model artifacts.
+ * Label encoders for categorical variables.
+ * NOTE: These are hardcoded stubs. In production, load from trained model artifacts.
+ * OOV (out-of-vocabulary) entries return 999.
  */
 const GRAPE_ENCODERS: Record<string, number> = {
   'Cabernet Sauvignon': 0,
@@ -85,6 +87,7 @@ interface DrinkingWindowPrediction {
 }
 
 interface SilverRecord {
+  readonly sourceId?: string;
   readonly vintageYear?: number | null;
   readonly grapePrimary?: string | null;
   readonly region?: string;
@@ -96,6 +99,7 @@ interface SilverRecord {
   readonly criticProxy?: {
     readonly proxyScore?: number;
   };
+  readonly drinkingWindow?: DrinkingWindowPrediction;
   [key: string]: unknown;
 }
 
@@ -103,11 +107,17 @@ interface EnrichedRecord extends SilverRecord {
   readonly drinkingWindow?: DrinkingWindowPrediction;
 }
 
-const MODEL_VERSION = 'v1.0-enc20260405';
+const MODEL_VERSION = 'v1.0-heuristic-20260405';
 
 /**
- * Stub LightGBM prediction using feature-weighted heuristic.
- * Mimics the actual DrinkingWindowPredictor logic.
+ * Heuristic prediction for drinking window.
+ *
+ * NOTE: This is NOT a real LightGBM model — it's a feature-weighted heuristic
+ * that produces reasonable estimates. Replace with actual ONNX model loading
+ * when trained model artifacts are available.
+ *
+ * All sensory inputs (body, tannin, acidity) are in [0, 1] normalised range.
+ * criticScore is the raw LLM proxy score (0-100 scale).
  */
 function predictDrinkingWindow(input: DrinkingWindowInput): DrinkingWindowPrediction {
   const vintage = input.vintage;
@@ -136,11 +146,11 @@ function predictDrinkingWindow(input: DrinkingWindowInput): DrinkingWindowPredic
     vintage + startOffset + (endOffset - startOffset) / 2,
   );
 
+  // Confidence: criticScore is 0-100 scale (LLM proxy), tannin/acidity are [0,1] normalised
   let confidence: 'high' | 'medium' | 'low' = 'medium';
-
-  if (criticScore >= 90 && (tannin >= 3 || acidity >= 4)) {
+  if (criticScore >= 90 && (tannin >= 0.6 || acidity >= 0.8)) {
     confidence = 'high';
-  } else if (criticScore < 75 || (tannin < 1.5 && body < 2)) {
+  } else if (criticScore < 75 || (tannin < 0.3 && body < 0.4)) {
     confidence = 'low';
   }
 
@@ -153,23 +163,13 @@ function predictDrinkingWindow(input: DrinkingWindowInput): DrinkingWindowPredic
   };
 }
 
-/**
- * Encode categorical variable to integer.
- * OOV (out-of-vocabulary) returns 999.
- */
-function encodeCategory(value: string | null, encoders: Record<string, number>): number {
+function encodeCategory(value: string | null | undefined, encoders: Record<string, number>): number {
   if (!value) return 999;
   const encoded = encoders[value];
   return encoded !== undefined ? encoded : 999;
 }
 
-/**
- * Extract numeric features from a wine record.
- * Returns null if critical numeric attributes are missing.
- * Categorical attributes can be OOV encoded.
- */
 function extractFeatures(record: SilverRecord): DrinkingWindowInput | null {
-  // Check critical numeric attributes
   if (
     !record.vintageYear ||
     record.body === undefined ||
@@ -180,7 +180,6 @@ function extractFeatures(record: SilverRecord): DrinkingWindowInput | null {
     return null;
   }
 
-  // Extract critic score with fallback
   const criticScore = record.criticProxy?.proxyScore ?? 0;
 
   return {
@@ -197,28 +196,33 @@ function extractFeatures(record: SilverRecord): DrinkingWindowInput | null {
 }
 
 async function main() {
-  console.log('🍷 Track C Step 4: Drinking Window Backfill');
-  console.log(`📄 Input: ${DATA_FILE}`);
+  console.log('Track C Step 4: Drinking Window Backfill');
+  console.log(`  Input: ${DATA_FILE}`);
 
-  // Load data
   if (!fs.existsSync(DATA_FILE)) {
-    console.error(`❌ File not found: ${DATA_FILE}`);
+    console.error(`  File not found: ${DATA_FILE}`);
     process.exit(1);
   }
 
   const content = fs.readFileSync(DATA_FILE, 'utf-8');
   const { records, skipped } = parseNdjson<SilverRecord>(content, DATA_FILE);
 
-  console.log(`📊 Loaded: ${records.length} records (${skipped} malformed lines)`);
+  console.log(`  Loaded: ${records.length} records (${skipped} malformed lines)`);
 
-  // Process all records
+  // Idempotency: skip records that already have drinking window
+  const alreadyDone = records.filter((r) => r.drinkingWindow != null).length;
+  if (alreadyDone > 0) {
+    console.log(`  Idempotency: ${alreadyDone} records already have drinkingWindow, skipping those`);
+  }
+
   let processed = 0;
   let failed = 0;
+  let skippedIdempotent = 0;
   const enrichedRecords: EnrichedRecord[] = [];
 
-  let high_confidence = 0;
-  let medium_confidence = 0;
-  let low_confidence = 0;
+  let highConfidence = 0;
+  let mediumConfidence = 0;
+  let lowConfidence = 0;
 
   const BATCH_SIZE = 500;
 
@@ -227,25 +231,24 @@ async function main() {
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     const totalBatches = Math.ceil(records.length / BATCH_SIZE);
 
-    console.log(`\n⏳ Batch ${batchNum}/${totalBatches} (${batch.length} wines)...`);
+    console.log(`\n  Batch ${batchNum}/${totalBatches} (${batch.length} wines)...`);
 
     for (const record of batch) {
-      const features = extractFeatures(record);
+      // Idempotency: skip already-enriched
+      if (record.drinkingWindow != null) {
+        enrichedRecords.push(record);
+        skippedIdempotent++;
+        continue;
+      }
 
+      const features = extractFeatures(record);
       if (features) {
         const prediction = predictDrinkingWindow(features);
-        enrichedRecords.push({
-          ...record,
-          drinkingWindow: prediction,
-        });
+        enrichedRecords.push({ ...record, drinkingWindow: prediction });
 
-        if (prediction.confidence === 'high') {
-          high_confidence++;
-        } else if (prediction.confidence === 'medium') {
-          medium_confidence++;
-        } else {
-          low_confidence++;
-        }
+        if (prediction.confidence === 'high') highConfidence++;
+        else if (prediction.confidence === 'medium') mediumConfidence++;
+        else lowConfidence++;
         processed++;
       } else {
         enrichedRecords.push(record);
@@ -253,39 +256,31 @@ async function main() {
       }
     }
 
-    const pct = Math.round((processed + failed) / records.length * 100);
+    const pct = Math.round(enrichedRecords.length / records.length * 100);
     console.log(
-      `  ✓ Processed: ${processed}/${records.length} (${pct}%) | Skipped: ${failed}`,
+      `  Processed: ${processed}/${records.length} (${pct}%) | Skipped: ${failed + skippedIdempotent}`,
     );
   }
 
-  // Write back
-  const output = enrichedRecords
-    .map((r) => JSON.stringify(r))
-    .join('\n');
+  // Atomic write
+  const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  atomicWriteFileSync(DATA_FILE, output);
 
-  fs.writeFileSync(DATA_FILE, output, 'utf-8');
-
-  // Report
   console.log('\n' + '='.repeat(60));
-  console.log('✅ Step 4 Complete: Drinking Window Backfill');
+  console.log('Step 4 Complete: Drinking Window Backfill');
   console.log('='.repeat(60));
   console.log(`Total records: ${enrichedRecords.length}`);
-  console.log(`Successfully predicted: ${processed}`);
-  console.log(`  - High confidence: ${high_confidence}`);
-  console.log(`  - Medium confidence: ${medium_confidence}`);
-  console.log(`  - Low confidence: ${low_confidence}`);
+  console.log(`New predictions: ${processed}`);
+  console.log(`  - High confidence: ${highConfidence}`);
+  console.log(`  - Medium confidence: ${mediumConfidence}`);
+  console.log(`  - Low confidence: ${lowConfidence}`);
+  console.log(`Already had drinkingWindow: ${skippedIdempotent}`);
   console.log(`Skipped (missing attributes): ${failed}`);
-  console.log(`New field: drinkingWindow (added to ${processed} records)`);
-  console.log(`  - drinkingWindowStart`);
-  console.log(`  - drinkingWindowEnd`);
-  console.log(`  - peakYear`);
-  console.log(`  - confidence`);
-  console.log(`Model version: ${MODEL_VERSION}`);
+  console.log(`Model version: ${MODEL_VERSION} (heuristic — not ML model)`);
   console.log(`Output: ${DATA_FILE}`);
 }
 
 main().catch((error) => {
-  console.error('❌ Error:', error);
+  console.error('Error:', error);
   process.exit(1);
 });

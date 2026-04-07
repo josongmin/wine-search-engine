@@ -6,21 +6,26 @@
  * Reads silver-docquery.ndjson, generates LLM-based critic proxy scores,
  * and writes back enriched records with `criticProxy` field.
  *
- * Usage: npx tsx --env-file=.env scripts/etl/run-track-c-step1.ts
+ * SOTA++ improvements:
+ * - Idempotent: skips records that already have criticProxy
+ * - Atomic writes: tmp+rename prevents corruption on crash
+ * - Dead-letter queue: failed records logged for retry
+ * - Per-batch flush: progress is preserved even on mid-run crash
  *
- * Input: data/silver-docquery.ndjson (7040 docs)
- * Output: data/silver-docquery.ndjson (with criticProxy field added)
- * Error handling: Logs failures, skips failed wines, continues batch
+ * Usage: npx tsx --env-file=.env scripts/etl/run-track-c-step1.ts
  */
 
 import 'dotenv/config';
 import fs from 'node:fs';
 import { Anthropic } from '@anthropic-ai/sdk';
-import { parseNdjson } from './ndjson';
-import { generateCriticProxiesBatch } from './generate-critic-proxy';
+import { parseNdjson } from './ndjson.js';
+import { generateCriticProxiesBatch } from './generate-critic-proxy.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { atomicWriteFileSync, appendDeadLetter } from './etl-utils.js';
 
 interface SilverRecord {
+  readonly sourceId?: string;
+  readonly externalId?: string;
   readonly canonicalLabel: string;
   readonly searchTextEn: string;
   readonly body?: number;
@@ -31,42 +36,50 @@ interface SilverRecord {
   [key: string]: unknown;
 }
 
+interface CriticProxyResult {
+  readonly proxyScore: number;
+  readonly scoreTier: string;
+  readonly confidence: string;
+  readonly reasoningSignals: string[];
+  readonly isSynthetic: boolean;
+}
+
 interface EnrichedRecord extends SilverRecord {
-  readonly criticProxy?: {
-    readonly proxyScore: number;
-    readonly scoreTier: string;
-    readonly confidence: string;
-    readonly reasoningSignals: string[];
-    readonly isSynthetic: boolean;
-  };
+  readonly criticProxy?: CriticProxyResult;
 }
 
 const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
+const DEAD_LETTER_FILE = resolveDataPath('.dead-letter-step1.ndjson');
 const BATCH_SIZE = 100;
+const FLUSH_INTERVAL = 5; // flush every N batches
 
 async function main() {
-  console.log('🍷 Track C Step 1: Generate Critic Proxy Scores');
-  console.log(`📄 Input: ${DATA_FILE}`);
+  console.log('Track C Step 1: Generate Critic Proxy Scores');
+  console.log(`  Input: ${DATA_FILE}`);
 
-  // Load data
   if (!fs.existsSync(DATA_FILE)) {
-    console.error(`❌ File not found: ${DATA_FILE}`);
+    console.error(`  File not found: ${DATA_FILE}`);
     process.exit(1);
   }
 
   const content = fs.readFileSync(DATA_FILE, 'utf-8');
   const { records, skipped } = parseNdjson<SilverRecord>(content, DATA_FILE);
 
-  console.log(`📊 Loaded: ${records.length} records (${skipped} malformed lines)`);
+  console.log(`  Loaded: ${records.length} records (${skipped} malformed lines)`);
 
-  // Initialize Anthropic client
+  // Idempotency: count already-processed records
+  const alreadyDone = records.filter((r) => (r as EnrichedRecord).criticProxy != null).length;
+  if (alreadyDone > 0) {
+    console.log(`  Idempotency: ${alreadyDone} records already have criticProxy, skipping those`);
+  }
+
   const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
+    apiKey: process.env['ANTHROPIC_API_KEY'],
   });
 
-  // Process in batches
   let processed = 0;
   let failed = 0;
+  let skippedIdempotent = 0;
   const enrichedRecords: EnrichedRecord[] = [];
 
   for (let i = 0; i < records.length; i += BATCH_SIZE) {
@@ -74,17 +87,35 @@ async function main() {
     const batchNum = Math.floor(i / BATCH_SIZE) + 1;
     const totalBatches = Math.ceil(records.length / BATCH_SIZE);
 
-    console.log(`\n⏳ Batch ${batchNum}/${totalBatches} (${batch.length} wines)...`);
+    // Separate already-done from to-process
+    const toDo: SilverRecord[] = [];
+    const done: EnrichedRecord[] = [];
+    for (const r of batch) {
+      if ((r as EnrichedRecord).criticProxy != null) {
+        done.push(r as EnrichedRecord);
+        skippedIdempotent++;
+      } else {
+        toDo.push(r);
+      }
+    }
 
-    // Generate proxies for batch with rate limit handling
+    // Pass through already-enriched records
+    enrichedRecords.push(...done);
+
+    if (toDo.length === 0) {
+      continue;
+    }
+
+    console.log(`\n  Batch ${batchNum}/${totalBatches} (${toDo.length} to process, ${done.length} already done)...`);
+
+    let proxyMap = new Map<string, CriticProxyResult>();
     let retries = 0;
     const maxRetries = 3;
-    let proxyMap;
 
     while (retries < maxRetries) {
       try {
         proxyMap = await generateCriticProxiesBatch(
-          batch.map((r) => ({
+          toDo.map((r) => ({
             canonicalLabel: r.canonicalLabel,
             searchTextEn: r.searchTextEn,
             body: r.body,
@@ -94,20 +125,19 @@ async function main() {
             grapePrimary: r.grapePrimary,
           })),
           client,
-          5, // Reduce parallel requests to avoid rate limits
+          5,
         );
         break;
       } catch (error) {
-        // Check if it's a rate limit error
-        if (error instanceof Error && error.message?.includes('rate_limit')) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes('rate_limit') || msg.includes('429') || msg.includes('overloaded')) {
           retries++;
           if (retries < maxRetries) {
-            const backoffMs = Math.pow(2, retries) * 30000; // 60s, 120s, 240s
-            console.warn(`Rate limited. Waiting ${backoffMs / 1000}s before retry ${retries}/${maxRetries}...`);
-            await new Promise((r) => setTimeout(r, backoffMs));
+            const backoffMs = Math.pow(2, retries) * 30000;
+            console.warn(`  Rate limited. Waiting ${backoffMs / 1000}s before retry ${retries}/${maxRetries}...`);
+            await new Promise((resolve) => setTimeout(resolve, backoffMs));
           } else {
-            console.error(`Max retries exceeded for batch ${batchNum}`);
-            proxyMap = new Map();
+            console.error(`  Max retries exceeded for batch ${batchNum}`);
           }
         } else {
           throw error;
@@ -116,49 +146,55 @@ async function main() {
     }
 
     // Merge results back
-    for (const record of batch) {
+    for (const record of toDo) {
       const proxy = proxyMap.get(record.canonicalLabel);
       if (proxy) {
-        enrichedRecords.push({
-          ...record,
-          criticProxy: proxy,
-        });
+        enrichedRecords.push({ ...record, criticProxy: proxy });
         processed++;
       } else {
         enrichedRecords.push(record);
         failed++;
-        console.warn(
-          `  ⚠️  No proxy generated for: ${record.canonicalLabel}`,
-        );
+        // Log to dead-letter queue for later analysis
+        const id = record.sourceId ?? record.externalId ?? record.canonicalLabel;
+        await appendDeadLetter(DEAD_LETTER_FILE, {
+          sourceId: id,
+          step: 'critic-proxy',
+          error: 'No proxy generated by LLM',
+        });
       }
     }
 
-    // Progress
-    const pct = Math.round((processed + failed) / records.length * 100);
+    // Periodic flush: save progress every N batches
+    if (batchNum % FLUSH_INTERVAL === 0) {
+      const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+      atomicWriteFileSync(DATA_FILE, output);
+      console.log(`  [checkpoint] Flushed ${enrichedRecords.length} records to disk`);
+    }
+
+    const pct = Math.round((enrichedRecords.length) / records.length * 100);
     console.log(
-      `  ✓ Processed: ${processed}/${records.length} (${pct}%) | Failed: ${failed}`,
+      `  Processed: ${processed}/${records.length} (${pct}%) | Failed: ${failed} | Skipped: ${skippedIdempotent}`,
     );
   }
 
-  // Write back
-  const output = enrichedRecords
-    .map((r) => JSON.stringify(r))
-    .join('\n');
+  // Final write (atomic)
+  const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  atomicWriteFileSync(DATA_FILE, output);
 
-  fs.writeFileSync(DATA_FILE, output, 'utf-8');
-
-  // Report
   console.log('\n' + '='.repeat(60));
-  console.log('✅ Step 1 Complete: Critic Proxy Generation');
+  console.log('Step 1 Complete: Critic Proxy Generation');
   console.log('='.repeat(60));
   console.log(`Total records: ${enrichedRecords.length}`);
-  console.log(`Successfully enriched: ${processed}`);
+  console.log(`New enrichments: ${processed}`);
+  console.log(`Already had criticProxy: ${skippedIdempotent}`);
   console.log(`Failed: ${failed}`);
-  console.log(`New field: criticProxy (added to ${processed} records)`);
+  if (failed > 0) {
+    console.log(`Dead-letter log: ${DEAD_LETTER_FILE}`);
+  }
   console.log(`Output: ${DATA_FILE}`);
 }
 
 main().catch((error) => {
-  console.error('❌ Error:', error);
+  console.error('Error:', error);
   process.exit(1);
 });

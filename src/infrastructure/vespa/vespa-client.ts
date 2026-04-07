@@ -149,7 +149,7 @@ function handleHttpError(
       `Vespa ${operation} rate-limited [HTTP 429]${retryAfter !== null ? `; Retry-After: ${retryAfter}` : ''}: ${body}`,
       429,
       true,
-      true,
+      false, // 429 is a transient rate-limit, not a client error
     );
   }
 

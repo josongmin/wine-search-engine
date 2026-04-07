@@ -14,5 +14,8 @@ export function getAuthenticatedSubject(
 ): string | null {
   const raw = firstHeaderValue(request.headers[AUTHENTICATED_SUBJECT_HEADER]);
   const subject = raw?.trim();
-  return subject !== undefined && subject.length > 0 ? subject : null;
+  if (subject === undefined || subject.length === 0 || subject.length > 128) {
+    return null;
+  }
+  return subject;
 }

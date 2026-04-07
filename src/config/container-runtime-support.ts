@@ -30,14 +30,26 @@ class RedisJudgmentCacheAdapter implements JudgmentCachePort {
 }
 
 class InMemoryJudgmentCacheAdapter implements JudgmentCachePort {
-  private readonly store = new Map<string, string>();
+  private static readonly MAX_ENTRIES = 2_000;
+  private readonly store = new Map<string, { value: string; expiresAt: number }>();
 
   get(key: string): Promise<string | null> {
-    return Promise.resolve(this.store.get(key) ?? null);
+    const entry = this.store.get(key);
+    if (entry === undefined) return Promise.resolve(null);
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return Promise.resolve(null);
+    }
+    return Promise.resolve(entry.value);
   }
 
-  setEx(key: string, _ttlSeconds: number, value: string): Promise<void> {
-    this.store.set(key, value);
+  setEx(key: string, ttlSeconds: number, value: string): Promise<void> {
+    // Evict oldest entry when at capacity
+    if (this.store.size >= InMemoryJudgmentCacheAdapter.MAX_ENTRIES && !this.store.has(key)) {
+      const firstKey = this.store.keys().next().value as string;
+      this.store.delete(firstKey);
+    }
+    this.store.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1_000 });
     return Promise.resolve();
   }
 }
@@ -87,7 +99,7 @@ export async function buildRuntimeSupportServices(
         5,
         60000,
       );
-      bootstrapLogger.warn('[Container] Cache infrastructure initialized');
+      bootstrapLogger.info('[Container] Cache infrastructure initialized');
     } else {
       bootstrapLogger.warn(
         '[Container] Redis unavailable; continuing without cache infrastructure',
@@ -102,7 +114,7 @@ export async function buildRuntimeSupportServices(
       try {
         ltrModels = await ltrRegistry.getAllModels();
         if (ltrModels.size > 0) {
-          bootstrapLogger.warn(
+          bootstrapLogger.info(
             { ltrModelCount: ltrModels.size },
             '[Container] Loaded LTR models from registry',
           );
@@ -128,7 +140,7 @@ export async function buildRuntimeSupportServices(
   const drinkingWindowPredictor = new DrinkingWindowPredictor({ allowHeuristicFallback });
   if (config.drinkingWindow.modelDir !== undefined) {
     await drinkingWindowPredictor.load(config.drinkingWindow.modelDir);
-    bootstrapLogger.warn(
+    bootstrapLogger.info(
       { modelVersion: drinkingWindowPredictor.modelVersion },
       '[Container] Drinking-window predictor loaded',
     );

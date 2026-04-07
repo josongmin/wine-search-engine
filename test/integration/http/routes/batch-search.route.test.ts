@@ -19,6 +19,10 @@ import { errorHandler } from '../../../../src/interface/http/middleware/error-ha
  * - Error response structure
  */
 
+/** Matches SearchResponseSchema / EngineDecisionSchema canonical trace ref regex. */
+const CANONICAL_HYBRID_TRACE_REF =
+  'decision:v1:hybrid:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
 function makeSearchResponse(overrides: Record<string, unknown> = {}) {
   return {
     query_type: 'search',
@@ -28,7 +32,7 @@ function makeSearchResponse(overrides: Record<string, unknown> = {}) {
       route: 'hybrid',
       decision_confidence: 0.95,
       confidence_semantics: 'calibrated_decision_confidence',
-      decision_trace_ref: 'trace-1',
+      decision_trace_ref: CANONICAL_HYBRID_TRACE_REF,
       decision_snapshot: {
         snapshot_id: 'snap-1',
         model_versions: {},
