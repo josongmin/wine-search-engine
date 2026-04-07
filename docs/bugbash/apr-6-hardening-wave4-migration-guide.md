@@ -119,6 +119,15 @@ Wave 4 local eval lanes는 deprecated-field migration 상태와 직접 연결되
 - real serving target repro:
   - `npm run eval:offline:with-splits`
 
+## Retired Historical Consumers
+
+아래 consumer는 active deprecated-field removal gate에서 제외된다. `migration_status = retired`로 inventory에 고정.
+
+- [apr-6-hardening-wave3.md](/Users/songmin/wine-search-engine/docs/bugbash/apr-6-hardening-wave3.md)
+  — historical archive/reference consumer; deprecated co-exposure 서술이 남아 있지만 active removal gate에서는 제외.
+
+이 목록은 inventory의 deprecated consumer row가 모두 `complete` 또는 explicit `retired` 상태임을 확인한 이후 closed 상태로 유지한다.
+
 ## Decision Rule
 
 `decision_trace_ref` 제거 여부는 “필드가 optional인지”가 아니라 아래를 모두 만족하는지로 판단한다.

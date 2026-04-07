@@ -1,5 +1,7 @@
 {
   "name": "ambiguous-vintage",
+  "endpoint": "/v1/search/replay",
+  "execution_lane": "self_contained",
   "replay_request": {
     "query": "Opus One vintage ambiguity",
     "decision_snapshot": {

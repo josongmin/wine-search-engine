@@ -74,6 +74,28 @@ export class PgAliasRepository implements AliasRepository {
     return result.rows.map(rowToAlias);
   }
 
+  findFuzzyCandidates: AliasRepository['findFuzzyCandidates'] = async (
+    normalized,
+    scope,
+  ) => {
+    const prefixLength = Math.max(1, Math.ceil(normalized.length / 2));
+    const prefix = normalized.slice(0, prefixLength);
+
+    let query = `SELECT * FROM aliases
+                 WHERE normalized_value LIKE $1 AND is_suppressed = FALSE`;
+    const params: unknown[] = [`${prefix}%`];
+
+    if (scope != null) {
+      query += ' AND alias_scope = $2';
+      params.push(scope);
+    }
+
+    query += ' ORDER BY confidence DESC LIMIT 50';
+
+    const result = await this.pool.query<AliasRow>(query, params);
+    return result.rows.map(rowToAlias);
+  };
+
   async save(alias: Alias): Promise<void> {
     await this.pool.query(
       `INSERT INTO aliases (

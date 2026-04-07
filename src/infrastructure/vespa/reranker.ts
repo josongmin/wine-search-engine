@@ -72,7 +72,11 @@ export class HttpCrossEncoderReranker implements RerankerPort {
     readonly url?: string;
     readonly httpTimeoutMs?: number;
   }) {
-    this.url = options?.url ?? config.reranker.url;
+    const resolvedUrl = options?.url ?? config.reranker.url;
+    if (resolvedUrl === undefined) {
+      throw new Error('HttpCrossEncoderReranker requires a configured reranker URL');
+    }
+    this.url = resolvedUrl;
     this.httpTimeoutMs = options?.httpTimeoutMs ?? config.reranker.httpTimeoutMs;
   }
 

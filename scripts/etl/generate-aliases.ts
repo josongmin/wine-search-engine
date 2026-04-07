@@ -19,13 +19,14 @@ import type {
   AliasBundle,
 } from './types.js';
 import { parseNdjson } from './ndjson.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = 'data/silver.ndjson';
-export const DEFAULT_OUTPUT = 'data/silver-aliases.ndjson';
+export const DEFAULT_INPUT = resolveDataPath('data/silver.ndjson');
+export const DEFAULT_OUTPUT = resolveDataPath('data/silver-aliases.ndjson');
 
 /** Confidence thresholds for projection decisions. */
 const IDENTITY_SAFE_THRESHOLD = 0.80;

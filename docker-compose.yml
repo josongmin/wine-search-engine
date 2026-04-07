@@ -1,4 +1,4 @@
-# Local full stack: API + Postgres + Redis + Vespa + reranker.
+# Local full stack: API + Postgres + Redis + Vespa.
 # Project name isolates this from docker-compose.test.yml (`wine-search-test`).
 name: wine-search-dev
 
@@ -11,7 +11,6 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       vespa: { condition: service_healthy }
-      reranker: { condition: service_healthy }
     environment:
       NODE_ENV: development
       # Override host-relative defaults from .env so the container reaches sibling services.
@@ -22,7 +21,6 @@ services:
       PG_PASSWORD: wine_dev
       REDIS_URL: redis://redis:6379
       VESPA_URL: http://vespa:8080
-      RERANKER_SERVICE_URL: http://reranker:8081
       # No embedding container in this compose; point at a service on the host if you run one.
       EMBEDDING_SERVICE_URL: http://host.docker.internal:8081
     extra_hosts:
@@ -69,24 +67,6 @@ services:
       timeout: 10s
       retries: 10
       start_period: 60s
-
-  reranker:
-    build: ./services/reranker
-    ports: ["8081:8081"]
-    environment:
-      - MODEL_NAME=BAAI/bge-reranker-v2-m3
-      - DEVICE=cpu
-    healthcheck:
-      # python:3.12-slim has no curl; model download can exceed 120s on first boot.
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8081/health\")" || exit 1',
-        ]
-      interval: 15s
-      timeout: 10s
-      retries: 8
-      start_period: 300s
 
 volumes:
   pg_data:

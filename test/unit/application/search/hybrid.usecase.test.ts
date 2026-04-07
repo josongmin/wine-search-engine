@@ -691,7 +691,7 @@ describe('HybridUseCase', () => {
           unmetConstraints: [],
           inferredConstraints: [],
           evidenceItems: [],
-          vintage: 2019,
+          vintageYear: 2019,
           grapePrimaryEnc: 11,
           regionEnc: 22,
           countryEnc: 33,

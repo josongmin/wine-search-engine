@@ -114,6 +114,18 @@ export function computeConformalSetSize(
   alpha: number,
   k: number,
 ): number {
+  if (alpha <= 0 || alpha > 0.5) {
+    throw new RangeError(`computeConformalSetSize: alpha must be in (0, 0.5], got ${alpha}`);
+  }
+  if (k < 0) {
+    throw new RangeError(`computeConformalSetSize: k must be >= 0, got ${k}`);
+  }
+  if (!Number.isFinite(calibratedScore) || calibratedScore < 0 || calibratedScore > 1) {
+    throw new RangeError(
+      `computeConformalSetSize: calibratedScore must be finite and in [0, 1], got ${calibratedScore}`,
+    );
+  }
+
   if (calibratedScore >= 1 - alpha) {
     return 1;
   }

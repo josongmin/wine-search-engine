@@ -54,3 +54,11 @@ The OpenAPI bridge is generated from route contracts and projects Zod schemas
 into a conservative JSON-schema-like form. It is useful for contract drift
 detection and tooling bootstrap, but it is not yet a full Swagger UI stack or
 a richly annotated hand-authored API spec.
+
+## Replay Contract Note
+
+`POST /v1/search/replay` now accepts an optional
+`preflight_honesty_contract` request field. This is a replay-only extension
+used by live-snapshot fixture lanes so replay cannot surface a more optimistic
+`execution_mode` / `degradation_reasons` contract than the preflight
+`/v1/search` response that produced the snapshot.

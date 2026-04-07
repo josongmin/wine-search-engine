@@ -108,6 +108,15 @@ export interface HybridCandidate {
   /** Producer archetype. */
   readonly producerType?: string | undefined;
 
+  /** Primary grape family (e.g. "Pinot", "Cabernet"). */
+  readonly grapeFamily?: string | undefined;
+
+  /** Region breadcrumb hierarchy. */
+  readonly regionHierarchy?: readonly string[] | undefined;
+
+  /** Numeric price band: 1=value, 2=mid, 3=premium, 4=luxury. */
+  readonly priceBandNumeric?: number | undefined;
+
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
 

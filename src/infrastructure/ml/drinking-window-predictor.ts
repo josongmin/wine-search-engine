@@ -1,5 +1,6 @@
 import { access } from 'node:fs/promises';
 import path from 'node:path';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 /**
  * Epic 15, Step 15.3: Drinking Window Predictor (ONNX Runtime)
@@ -164,10 +165,12 @@ export class DrinkingWindowPredictor {
     const tanninBonus = Math.max(0, (tannin - 2) * 1.5);
     const acidityBonus = Math.max(0, (acidity - 2) * 1.0);
     const criticBonus = score >= 95 ? 5 : score >= 90 ? 3 : score >= 85 ? 1 : 0;
+    // sweetness > 3 (sweet/dessert wines) acts as a preservative and extends aging potential
+    const sweetnessBonus = Math.max(0, (input.sweetness - 3) * 1.5);
 
     const totalWindow = Math.min(
       25,
-      baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus,
+      baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus + sweetnessBonus,
     );
 
     const drinkingWindowStart = vintage + 2;
@@ -200,13 +203,23 @@ export class DrinkingWindowPredictor {
     const features = this.toFeatureArray(input);
     const tensor = new TensorCtor('float32', features, [1, features.length]);
 
+    const ONNX_SLOW_INFERENCE_WARN_MS = 500;
+
     const runSync = (session: OrtSession): number => {
       if (session.runSync === undefined) {
         throw new Error(
           `DrinkingWindowPredictor loaded ${this.modelVersion}, but the ONNX runtime does not expose runSync().`,
         );
       }
+      const t0 = performance.now();
       const result = session.runSync({ input: tensor });
+      const elapsed = performance.now() - t0;
+      if (elapsed > ONNX_SLOW_INFERENCE_WARN_MS) {
+        bootstrapLogger.warn(
+          { elapsedMs: Math.round(elapsed), modelVersion: this.modelVersion },
+          '[DrinkingWindowPredictor] ONNX runSync exceeded slow-inference threshold — consider async migration',
+        );
+      }
       const first = Object.values(result)[0];
       if (first === undefined || first.data[0] === undefined) {
         throw new Error('DrinkingWindowPredictor ONNX output was empty.');

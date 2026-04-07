@@ -1,3 +1,5 @@
+import type { HybridCandidate } from './hybrid-candidate.js';
+
 /**
  * Channel sources for candidate provenance tracking.
  * Each value identifies which retrieval channel contributed the candidate.
@@ -95,5 +97,5 @@ export interface CandidateEnvelope {
    * Snapshot of the existing HybridCandidate for backward compatibility
    * during Epic 3 migration. Will be removed in Epic 4.
    */
-  readonly legacyCandidate: import('./hybrid-candidate.js').HybridCandidate;
+  readonly legacyCandidate: HybridCandidate;
 }

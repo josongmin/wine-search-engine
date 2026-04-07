@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
   DeterminismViolationError,
@@ -10,11 +10,24 @@ import type { ReplayRouteDeps } from '../../../../src/interface/http/routes/rout
 import { registerReplayRoute } from '../../../../src/interface/http/routes/replay.route.js';
 import { ErrorResponseSchema } from '../../../../src/interface/http/schemas/search-response.schema.js';
 
+function buildReplaySnapshot() {
+  return {
+    snapshot_id: 'snap-1',
+    model_versions: {},
+    index_versions: {},
+    policy_rule_version: '1.0.0',
+    threshold_profile_id: 'default',
+    planner_version: '1.0.0',
+    feature_flags: {},
+    response_contract_version: 'search_response_v1',
+  };
+}
+
 describe('POST /v1/search/replay', () => {
   let app: FastifyInstance;
   let mockDeps: ReplayRouteDeps;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     app = Fastify();
     registerRequestContext(app);
     app.setErrorHandler(errorHandler);
@@ -22,38 +35,24 @@ describe('POST /v1/search/replay', () => {
     mockDeps = {
       replayUseCase: {
         execute: vi.fn().mockResolvedValue({
-          queryType: 'search',
-          engineDecision: {
-            decisionStatus: 'resolved',
-            nextAction: 'respond',
+          query_type: 'search',
+          engine_decision: {
+            decision_status: 'resolved',
+            next_action: 'return_result',
             route: 'entity',
-            decisionConfidence: 0.99,
-            confidenceSemantics: 'calibrated_decision_confidence',
-            decisionTraceRef: 'trace-1',
-            decisionSnapshot: {
-              model_versions: {},
-              index_versions: {},
-              policy_rule_version: '1.0.0',
-              threshold_profile_id: 'default',
-              planner_version: '1.0.0',
-              feature_flags: {},
-            },
+            decision_confidence: 0.99,
+            confidence_semantics: 'calibrated_decision_confidence',
+            decision_trace_ref: 'trace-1',
+            decision_snapshot: buildReplaySnapshot(),
           },
           results: [],
           meta: {
-            requestId: 'test-request',
-            queryTimeMs: 1,
+            request_id: 'test-request',
+            query_time_ms: 1,
             route: 'entity',
             version: '1.0.0',
             engine_schema_version: 'search_response_v1',
-            decisionSnapshot: {
-              model_versions: {},
-              index_versions: {},
-              policy_rule_version: '1.0.0',
-              threshold_profile_id: 'default',
-              planner_version: '1.0.0',
-              feature_flags: {},
-            },
+            decision_snapshot: buildReplaySnapshot(),
             response_hash: 'actual-hash',
           },
         }),
@@ -61,6 +60,35 @@ describe('POST /v1/search/replay', () => {
     };
 
     registerReplayRoute(app, mockDeps);
+  });
+
+  beforeEach(() => {
+    mockDeps.replayUseCase.execute = vi.fn().mockResolvedValue({
+      query_type: 'search',
+      engine_decision: {
+        decision_status: 'resolved',
+        next_action: 'return_result',
+        route: 'entity',
+        decision_confidence: 0.99,
+        confidence_semantics: 'calibrated_decision_confidence',
+        decision_trace_ref: 'trace-1',
+        decision_snapshot: buildReplaySnapshot(),
+      },
+      results: [],
+      meta: {
+        request_id: 'test-request',
+        query_time_ms: 1,
+        route: 'entity',
+        version: '1.0.0',
+        engine_schema_version: 'search_response_v1',
+        decision_snapshot: buildReplaySnapshot(),
+        response_hash: 'actual-hash',
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
   });
 
   it('maps DeterminismViolationError to 409 with the RFC-014 error contract', async () => {
@@ -74,14 +102,7 @@ describe('POST /v1/search/replay', () => {
       headers: { 'content-type': 'application/json' },
       payload: {
         query: 'Opus One 2018',
-        decision_snapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1.0.0',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
+        decision_snapshot: buildReplaySnapshot(),
         expected_response_hash: 'expected-hash',
       },
     });
@@ -112,14 +133,7 @@ describe('POST /v1/search/replay', () => {
       headers: { 'content-type': 'application/json' },
       payload: {
         query: 'Opus One 2018',
-        decision_snapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1.0.0',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
+        decision_snapshot: buildReplaySnapshot(),
         expected_response_hash: 'actual-hash',
       },
     });
@@ -134,6 +148,66 @@ describe('POST /v1/search/replay', () => {
     );
   });
 
+  it('passes preflight_honesty_contract through to the replay use case', async () => {
+    const execute = vi.fn().mockResolvedValue({
+      query_type: 'search',
+      engine_decision: {
+        decision_status: 'resolved',
+        next_action: 'return_result',
+        route: 'entity',
+        decision_confidence: 0.99,
+        confidence_semantics: 'calibrated_decision_confidence',
+        decision_trace_ref: 'trace-1',
+        execution_mode: 'heuristic',
+        blocking_eligible: false,
+        degradation_reasons: ['heuristic_drinking_window'],
+        decision_snapshot: buildReplaySnapshot(),
+      },
+      results: [],
+      meta: {
+        request_id: 'test-request',
+        query_time_ms: 1,
+        route: 'entity',
+        version: '1.0.0',
+        engine_schema_version: 'search_response_v1',
+        decision_snapshot: buildReplaySnapshot(),
+        execution_mode: 'heuristic',
+        blocking_eligible: false,
+        degradation_reasons: ['heuristic_drinking_window'],
+        response_hash: 'actual-hash',
+      },
+    });
+    mockDeps.replayUseCase.execute = execute;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/search/replay',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: 'Opus One 2018',
+        decision_snapshot: buildReplaySnapshot(),
+        preflight_honesty_contract: {
+          execution_mode: 'heuristic',
+          degradation_reasons: ['heuristic_drinking_window'],
+          blocking_eligible: false,
+        },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'Opus One 2018',
+        preflight_honesty_contract: {
+          execution_mode: 'heuristic',
+          degradation_reasons: ['heuristic_drinking_window'],
+          blocking_eligible: false,
+        },
+      }),
+      expect.any(String),
+    );
+  });
+
   it('maps UnexpectedReplayResponseError to 500 with the RFC-014 error contract', async () => {
     mockDeps.replayUseCase.execute = vi.fn().mockRejectedValue(new UnexpectedReplayResponseError());
 
@@ -143,14 +217,7 @@ describe('POST /v1/search/replay', () => {
       headers: { 'content-type': 'application/json' },
       payload: {
         query: 'Opus One 2018',
-        decision_snapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1.0.0',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
+        decision_snapshot: buildReplaySnapshot(),
       },
     });
 

@@ -17,6 +17,7 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import { z } from 'zod';
 import { parseNdjson } from '../etl/ndjson.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -137,9 +138,9 @@ export interface NoisyEntityBenchmarkReport {
   readonly evaluated_at: string;
 }
 
-const DEFAULT_INPUT = 'data/noisy-entity-benchmark.jsonl';
-const DEFAULT_OUTPUT = 'data/noisy-entity-eval-results.json';
-const DEFAULT_SMOKE_PREDICTIONS = 'data/noisy-entity-predictions-smoke.jsonl';
+const DEFAULT_INPUT = resolveDataPath('data/noisy-entity-benchmark.jsonl');
+const DEFAULT_OUTPUT = resolveDataPath('data/noisy-entity-eval-results.json');
+const DEFAULT_SMOKE_PREDICTIONS = resolveDataPath('data/noisy-entity-predictions-smoke.jsonl');
 
 interface CliArgs {
   input: string;
@@ -163,7 +164,7 @@ function parseArgs(argv: string[]): CliArgs {
     predictions: null,
     mode: 'hybrid',
     timeoutMs: 60_000,
-    concurrency: 8,
+    concurrency: 4,
     minRecallAt3: undefined,
     minResolutionMatchRate: undefined,
     minProvenanceMatchRate: undefined,
@@ -193,7 +194,7 @@ function parseArgs(argv: string[]): CliArgs {
     } else if (arg === '--concurrency') {
       const value = Number.parseInt(argv[++i] ?? '', 10);
       if (Number.isFinite(value) && value >= 1) {
-        args.concurrency = Math.min(32, value);
+        args.concurrency = Math.min(16, value);
       }
     } else if (arg === '--min-recall-at-3') {
       const value = Number.parseFloat(argv[++i] ?? '');
@@ -359,7 +360,7 @@ function reciprocalRank(rankedEntityIds: readonly string[], expectedEntityId: st
   return rank >= 0 ? 1 / (rank + 1) : 0;
 }
 
-function average(values: readonly number[]): number {
+function _average(values: readonly number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
@@ -388,131 +389,169 @@ function scoreRows(
   rows: readonly NoisyEntityBenchmarkCase[],
   rankedByBenchmarkId: ReadonlyMap<string, readonly RankedEntityLike[] | RankedPrediction>,
 ): NoisyEntityBenchmarkReport {
-  const scored = rows.map((row) => {
+  const categoryAccumulators = new Map<string, {
+    queryCount: number;
+    recallAt1Total: number;
+    recallAt3Total: number;
+    mrrTotal: number;
+  }>();
+  const languageAccumulators = new Map<string, {
+    queryCount: number;
+    recallAt1Total: number;
+    recallAt3Total: number;
+    mrrTotal: number;
+  }>();
+
+  const byCategory: Record<string, NoisyEntitySliceMetrics> = {};
+  const byLanguage: Record<string, NoisyEntitySliceMetrics> = {};
+  const misses: NoisyEntityBenchmarkReport['misses'] = [];
+  const provenanceMisses: NoisyEntityBenchmarkReport['provenance_misses'] = [];
+  const resolutionMisses: NoisyEntityBenchmarkReport['resolution_misses'] = [];
+
+  let queryCount = 0;
+  let totalRecallAt1 = 0;
+  let totalRecallAt3 = 0;
+  let totalMrr = 0;
+  let provenanceCheckedCount = 0;
+  let provenanceMatchCount = 0;
+  let resolutionCheckedCount = 0;
+  let resolutionMatchCount = 0;
+  let ambiguousExpectedCount = 0;
+  let falseExactCount = 0;
+
+  for (const row of rows) {
     const prediction = normalizeRankedPrediction(rankedByBenchmarkId.get(row.benchmark_id));
     const rankedEntities = prediction.rankedEntities;
     const rankedEntityIds = rankedEntities.map((item) => item.entity_id);
     const rank = rankedEntityIds.indexOf(row.expected_entity_id);
     const topEntity = rankedEntities[0] ?? null;
     const predictedResolution = prediction.decisionStatus ?? (rankedEntityIds.length > 0 ? 'resolved' : 'failed');
+    const recallAt1 = recallAtK(rankedEntityIds, row.expected_entity_id, 1);
+    const recallAt3 = recallAtK(rankedEntityIds, row.expected_entity_id, 3);
+    const reciprocal = reciprocalRank(rankedEntityIds, row.expected_entity_id);
 
-    return {
-      row,
-      rankedEntityIds,
-      rankedEntities,
-      recallAt1: recallAtK(rankedEntityIds, row.expected_entity_id, 1),
-      recallAt3: recallAtK(rankedEntityIds, row.expected_entity_id, 3),
-      reciprocalRank: reciprocalRank(rankedEntityIds, row.expected_entity_id),
-      topEntityId: topEntity?.entity_id ?? null,
-      topProvenanceStage: topEntity?.provenance_stage ?? null,
-      topProvenanceSource: topEntity?.provenance_source ?? null,
-      predictedResolution,
-      top3: rankedEntityIds.slice(0, 3),
-      foundRank: rank >= 0 ? rank + 1 : null,
+    queryCount += 1;
+    totalRecallAt1 += recallAt1;
+    totalRecallAt3 += recallAt3;
+    totalMrr += reciprocal;
+
+    const categoryAccumulator = categoryAccumulators.get(row.category) ?? {
+      queryCount: 0,
+      recallAt1Total: 0,
+      recallAt3Total: 0,
+      mrrTotal: 0,
     };
-  });
+    categoryAccumulator.queryCount += 1;
+    categoryAccumulator.recallAt1Total += recallAt1;
+    categoryAccumulator.recallAt3Total += recallAt3;
+    categoryAccumulator.mrrTotal += reciprocal;
+    categoryAccumulators.set(row.category, categoryAccumulator);
 
-  const sliceMetrics = (
-    subset: readonly (typeof scored)[number][],
-  ): NoisyEntitySliceMetrics => ({
-    query_count: subset.length,
-    recall_at_1: average(subset.map((item) => item.recallAt1)),
-    recall_at_3: average(subset.map((item) => item.recallAt3)),
-    mrr: average(subset.map((item) => item.reciprocalRank)),
-  });
+    const languageAccumulator = languageAccumulators.get(row.language) ?? {
+      queryCount: 0,
+      recallAt1Total: 0,
+      recallAt3Total: 0,
+      mrrTotal: 0,
+    };
+    languageAccumulator.queryCount += 1;
+    languageAccumulator.recallAt1Total += recallAt1;
+    languageAccumulator.recallAt3Total += recallAt3;
+    languageAccumulator.mrrTotal += reciprocal;
+    languageAccumulators.set(row.language, languageAccumulator);
 
-  const byCategory: Record<string, NoisyEntitySliceMetrics> = {};
-  const categoryGroups = new Map<string, typeof scored>();
-  for (const item of scored) {
-    const existing = categoryGroups.get(item.row.category);
-    if (existing) {
-      existing.push(item);
-    } else {
-      categoryGroups.set(item.row.category, [item]);
+    if (rank === -1 && misses.length < 25) {
+      misses.push({
+        benchmark_id: row.benchmark_id,
+        query: row.query,
+        expected_entity_id: row.expected_entity_id,
+        category: row.category,
+        language: row.language,
+        top_entity_id: topEntity?.entity_id ?? null,
+        top_3: rankedEntityIds.slice(0, 3),
+      });
+    }
+
+    if (row.expected_provenance_stage !== undefined) {
+      provenanceCheckedCount += 1;
+      const provenanceMatch =
+        topEntity?.provenance_stage === row.expected_provenance_stage &&
+        (row.expected_provenance_source === undefined ||
+          topEntity?.provenance_source === row.expected_provenance_source);
+      if (provenanceMatch) {
+        provenanceMatchCount += 1;
+      } else if (provenanceMisses.length < 25) {
+        provenanceMisses.push({
+          benchmark_id: row.benchmark_id,
+          query: row.query,
+          expected_stage: row.expected_provenance_stage,
+          actual_stage: topEntity?.provenance_stage ?? null,
+          expected_source: row.expected_provenance_source ?? null,
+          actual_source: topEntity?.provenance_source ?? null,
+        });
+      }
+    }
+
+    if (row.expected_resolution !== undefined) {
+      resolutionCheckedCount += 1;
+      if (row.expected_resolution === 'ambiguous') {
+        ambiguousExpectedCount += 1;
+      }
+      if (row.expected_resolution === predictedResolution) {
+        resolutionMatchCount += 1;
+      } else if (row.expected_resolution === 'ambiguous' && predictedResolution === 'resolved') {
+        falseExactCount += 1;
+        if (resolutionMisses.length < 25) {
+          resolutionMisses.push({
+            benchmark_id: row.benchmark_id,
+            query: row.query,
+            expected_resolution: row.expected_resolution,
+            actual_resolution: predictedResolution,
+          });
+        }
+      } else if (resolutionMisses.length < 25) {
+        resolutionMisses.push({
+          benchmark_id: row.benchmark_id,
+          query: row.query,
+          expected_resolution: row.expected_resolution,
+          actual_resolution: predictedResolution,
+        });
+      }
     }
   }
-  for (const [category, group] of categoryGroups) {
-    byCategory[category] = sliceMetrics(group);
+
+  for (const [category, accumulator] of categoryAccumulators) {
+    byCategory[category] = {
+      query_count: accumulator.queryCount,
+      recall_at_1: accumulator.queryCount === 0 ? 0 : accumulator.recallAt1Total / accumulator.queryCount,
+      recall_at_3: accumulator.queryCount === 0 ? 0 : accumulator.recallAt3Total / accumulator.queryCount,
+      mrr: accumulator.queryCount === 0 ? 0 : accumulator.mrrTotal / accumulator.queryCount,
+    };
   }
 
-  const byLanguage: Record<string, NoisyEntitySliceMetrics> = {};
-  const languageGroups = new Map<string, typeof scored>();
-  for (const item of scored) {
-    const existing = languageGroups.get(item.row.language);
-    if (existing) {
-      existing.push(item);
-    } else {
-      languageGroups.set(item.row.language, [item]);
-    }
+  for (const [language, accumulator] of languageAccumulators) {
+    byLanguage[language] = {
+      query_count: accumulator.queryCount,
+      recall_at_1: accumulator.queryCount === 0 ? 0 : accumulator.recallAt1Total / accumulator.queryCount,
+      recall_at_3: accumulator.queryCount === 0 ? 0 : accumulator.recallAt3Total / accumulator.queryCount,
+      mrr: accumulator.queryCount === 0 ? 0 : accumulator.mrrTotal / accumulator.queryCount,
+    };
   }
-  for (const [language, group] of languageGroups) {
-    byLanguage[language] = sliceMetrics(group);
-  }
-
-  const misses = scored
-    .filter((item) => item.foundRank === null)
-    .slice(0, 25)
-    .map((item) => ({
-      benchmark_id: item.row.benchmark_id,
-      query: item.row.query,
-      expected_entity_id: item.row.expected_entity_id,
-      category: item.row.category,
-      language: item.row.language,
-      top_entity_id: item.topEntityId,
-      top_3: item.top3,
-    }));
-
-  const provenanceRelevant = scored.filter((item) => item.row.expected_provenance_stage !== undefined);
-  const provenanceMatches = provenanceRelevant.filter((item) => {
-    return item.topProvenanceStage === item.row.expected_provenance_stage
-      && (
-        item.row.expected_provenance_source === undefined ||
-        item.topProvenanceSource === item.row.expected_provenance_source
-      );
-  });
-  const provenanceMisses = provenanceRelevant
-    .filter((item) => !provenanceMatches.includes(item))
-    .slice(0, 25)
-    .map((item) => ({
-      benchmark_id: item.row.benchmark_id,
-      query: item.row.query,
-      expected_stage: item.row.expected_provenance_stage!,
-      actual_stage: item.topProvenanceStage,
-      expected_source: item.row.expected_provenance_source ?? null,
-      actual_source: item.topProvenanceSource,
-    }));
-
-  const resolutionRelevant = scored.filter((item) => item.row.expected_resolution !== undefined);
-  const resolutionMatches = resolutionRelevant.filter(
-    (item) => item.row.expected_resolution === item.predictedResolution,
-  );
-  const ambiguousExpected = resolutionRelevant.filter((item) => item.row.expected_resolution === 'ambiguous');
-  const falseExactMatches = ambiguousExpected.filter((item) => item.predictedResolution === 'resolved');
-  const resolutionMisses = resolutionRelevant
-    .filter((item) => item.row.expected_resolution !== item.predictedResolution)
-    .slice(0, 25)
-    .map((item) => ({
-      benchmark_id: item.row.benchmark_id,
-      query: item.row.query,
-      expected_resolution: item.row.expected_resolution!,
-      actual_resolution: item.predictedResolution,
-    }));
 
   return {
     benchmark: 'noisy-entity-benchmark',
-    query_count: scored.length,
-    recall_at_1: average(scored.map((item) => item.recallAt1)),
-    recall_at_3: average(scored.map((item) => item.recallAt3)),
-    mrr: average(scored.map((item) => item.reciprocalRank)),
+    query_count: queryCount,
+    recall_at_1: queryCount === 0 ? 0 : totalRecallAt1 / queryCount,
+    recall_at_3: queryCount === 0 ? 0 : totalRecallAt3 / queryCount,
+    mrr: queryCount === 0 ? 0 : totalMrr / queryCount,
     by_category: byCategory,
     by_language: byLanguage,
     misses,
-    provenance_checked_count: provenanceRelevant.length,
-    provenance_match_rate: provenanceRelevant.length === 0 ? null : provenanceMatches.length / provenanceRelevant.length,
+    provenance_checked_count: provenanceCheckedCount,
+    provenance_match_rate: provenanceCheckedCount === 0 ? null : provenanceMatchCount / provenanceCheckedCount,
     provenance_misses: provenanceMisses,
-    resolution_checked_count: resolutionRelevant.length,
-    resolution_match_rate: resolutionRelevant.length === 0 ? null : resolutionMatches.length / resolutionRelevant.length,
-    false_exact_rate: ambiguousExpected.length === 0 ? null : falseExactMatches.length / ambiguousExpected.length,
+    resolution_checked_count: resolutionCheckedCount,
+    resolution_match_rate: resolutionCheckedCount === 0 ? null : resolutionMatchCount / resolutionCheckedCount,
+    false_exact_rate: ambiguousExpectedCount === 0 ? null : falseExactCount / ambiguousExpectedCount,
     resolution_misses: resolutionMisses,
     source: 'predictions',
     evaluated_at: new Date().toISOString(),

@@ -17,15 +17,16 @@
 import fs from 'node:fs/promises';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/golden-queries-bronze.jsonl';
-const OUTPUT_TRAIN = 'data/splits/train.jsonl';
-const OUTPUT_VAL = 'data/splits/val.jsonl';
-const OUTPUT_GATE = 'data/splits/gate.jsonl';
+const DEFAULT_INPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
+const OUTPUT_TRAIN = resolveDataPath('data/splits/train.jsonl');
+const OUTPUT_VAL = resolveDataPath('data/splits/val.jsonl');
+const OUTPUT_GATE = resolveDataPath('data/splits/gate.jsonl');
 
 /** Target split ratios. */
 const TRAIN_RATIO = 0.70;
@@ -165,7 +166,7 @@ async function run(): Promise<void> {
   console.log(`  Train: ${splits.train.length}  Val: ${splits.val.length}  Gate: ${splits.gate.length}`);
 
   // Write
-  await fs.mkdir('data/splits', { recursive: true });
+  await fs.mkdir(resolveDataPath('data/splits'), { recursive: true });
 
   await fs.writeFile(
     OUTPUT_TRAIN,

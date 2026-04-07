@@ -49,8 +49,14 @@ export async function evaluateQueryEntrySecurity(
   const judge = deps.injectionJudge;
   const judgeFailureMode = deps.judgeFailureMode ?? 'fail_closed';
   if (judge !== undefined) {
+    const JUDGE_TIMEOUT_MS = 5_000;
     try {
-      const isInjection = await judge.judge(sanitizedQuery);
+      const isInjection = await Promise.race([
+        judge.judge(sanitizedQuery),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => { reject(new Error('injection_judge_timeout')); }, JUDGE_TIMEOUT_MS)
+        ),
+      ]);
       if (isInjection) {
         deps.observer?.onLayer2Blocked('LLM_JUDGE_REJECTION');
         return {
@@ -62,15 +68,19 @@ export async function evaluateQueryEntrySecurity(
         };
       }
     } catch (err) {
+      const isTimeout = err instanceof Error && err.message === 'injection_judge_timeout';
       bootstrapLogger.warn(
         {
           err: err instanceof Error ? err.message : String(err),
           judgeFailureMode,
+          ...(isTimeout ? { timeout_ms: JUDGE_TIMEOUT_MS } : {}),
         },
-        '[QueryEntrySecurity] LLM judge error',
+        isTimeout
+          ? '[QueryEntrySecurity] LLM judge timed out — failing open'
+          : '[QueryEntrySecurity] LLM judge error',
       );
       deps.observer?.onJudgeError(err, judgeFailureMode);
-      if (judgeFailureMode === 'fail_closed') {
+      if (!isTimeout && judgeFailureMode === 'fail_closed') {
         deps.observer?.onFailClosedBlock();
         return {
           sanitizedQuery,

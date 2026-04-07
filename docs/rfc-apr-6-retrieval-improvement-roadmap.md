@@ -1029,6 +1029,10 @@ anchor similarity의 한 축으로 behavioral similarity는 유용하다.
 
 ### 13.1 Wave 3 — 레포·권위 결정론 클로저 (구현 반영)
 
+- 후속 운영 클로저:
+  - `docs/bugbash/apr-6-hardening-wave4.md`
+  - `docs/bugbash/apr-7-dockerized-full-runtime-replay-wave5.md`
+
 본 절의 Phase 0~6은 **검색 스택 대형 마이그레이션** 시간축이다. 그와 별도로, “문서·스크립트·권위 id·HTTP 계약이 한 줄로 맞는다”는 **레포 운영 클로저**를 Wave 3로 문서화·구현했다.
 
 | 축 | 내용 | 코드·문서 |

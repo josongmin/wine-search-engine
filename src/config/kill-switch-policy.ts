@@ -65,7 +65,7 @@ export function logKillSwitchPolicyAtStartup(config: Config, log: { info: (o: ob
   }
 }
 
-function rerankerRuntimeUnavailable(signal?: RankerRuntimeSignal | undefined): boolean {
+function rerankerRuntimeUnavailable(signal?: RankerRuntimeSignal): boolean {
   const reasons = signal?.degradation?.degradationReasons ?? [];
   return reasons.some((reason) =>
     reason === 'reranker_timeout' || reason === 'reranker_unavailable');
@@ -73,11 +73,11 @@ function rerankerRuntimeUnavailable(signal?: RankerRuntimeSignal | undefined): b
 
 export function buildCacheReadRuntimeState(
   config: Config,
-  signal?: RankerRuntimeSignal | undefined,
+  signal?: RankerRuntimeSignal,
 ): CacheReadRuntimeState {
   const learningKillSwitchEnabled = config.killSwitch.learning;
   const denseRetrievalEnabled = !config.killSwitch.denseRetrieval;
-  const rerankerConfigured = config.reranker.url.trim().length > 0;
+  const rerankerConfigured = (config.reranker.url?.trim().length ?? 0) > 0;
   const rerankerAvailable = rerankerConfigured && !rerankerRuntimeUnavailable(signal);
   const runtimeDegraded =
     learningKillSwitchEnabled
@@ -95,7 +95,7 @@ export function buildCacheReadRuntimeState(
 
 export function buildCacheReadRuntimeStateProvider(
   config: Config,
-  ranker?: Pick<RankingPort, 'getLastRuntimeSignal'> | undefined,
+  ranker?: Pick<RankingPort, 'getLastRuntimeSignal'>,
 ): () => CacheReadRuntimeState {
   return () => buildCacheReadRuntimeState(config, ranker?.getLastRuntimeSignal?.());
 }

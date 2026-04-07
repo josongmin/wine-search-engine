@@ -16,8 +16,8 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import path from 'node:path';
 import { parseNdjson } from './ndjson';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 /**
  * Label encoders for categorical variables (hardcoded stub).
@@ -62,6 +62,8 @@ const COUNTRY_ENCODERS: Record<string, number> = {
   'Portugal': 9,
 };
 
+const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
+
 interface DrinkingWindowInput {
   readonly vintage: number;
   readonly grapePrimaryEnc: number;
@@ -101,7 +103,6 @@ interface EnrichedRecord extends SilverRecord {
   readonly drinkingWindow?: DrinkingWindowPrediction;
 }
 
-const DATA_FILE = path.resolve('./data/silver-docquery.ndjson');
 const MODEL_VERSION = 'v1.0-enc20260405';
 
 /**

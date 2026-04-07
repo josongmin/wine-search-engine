@@ -68,6 +68,16 @@ export interface ServerOptions {
    * @see registerHttpDebugMode
    */
   readonly httpDebugSecret?: string | undefined;
+  /**
+   * Maximum time (ms) to wait for a TCP connection to be established before closing it.
+   * @default 10000
+   */
+  readonly connectionTimeout?: number;
+  /**
+   * Maximum time (ms) to process a request before responding with a 503.
+   * @default 30000
+   */
+  readonly requestTimeout?: number;
 }
 
 async function registerCorsSupport(
@@ -181,6 +191,12 @@ export async function createServer(
     // kill.  'idle' only affects connections with no in-flight request;
     // connections that are mid-request are drained normally.
     forceCloseConnections: 'idle',
+    // TCP connection handshake timeout — prevents slow-connect attacks from
+    // holding sockets open indefinitely.
+    connectionTimeout: options?.connectionTimeout ?? 10_000,
+    // Per-request processing deadline — returns 503 if a route handler takes
+    // longer than this to reply, preventing runaway requests from accumulating.
+    requestTimeout: options?.requestTimeout ?? 30_000,
   });
 
   if (options?.enableSecurityHeaders ?? true) {

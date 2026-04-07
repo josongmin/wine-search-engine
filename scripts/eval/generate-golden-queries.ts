@@ -24,13 +24,14 @@ import type {
   Scenario,
   RelevanceJudgment,
 } from '../etl/types.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
-const DEFAULT_OUTPUT = 'data/golden-queries-bronze.jsonl';
+const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
+const DEFAULT_OUTPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
 const RUN_ID = `run-${new Date().toISOString().slice(0, 10)}-001`;
 
 // Scenario targets (total = 500)

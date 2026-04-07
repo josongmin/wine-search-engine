@@ -230,7 +230,7 @@ describe('offline eval reporting helpers', () => {
       makeCaseResult({
         decision: {
           decision_status: 'resolved',
-          top_entity_id: 'wine-1',
+          top_entity_id: 'wine-x',
           decision_confidence: 0.7,
           execution_mode: 'degraded',
         },
@@ -239,8 +239,13 @@ describe('offline eval reporting helpers', () => {
     ]);
 
     expect(slices.authoritative?.query_count).toBe(1);
+    expect(slices.authoritative?.ndcg_at_10).toBeCloseTo(1);
+    expect(slices.authoritative?.wrong_top1_rate).toBe(0);
     expect(slices.degraded?.query_count).toBe(1);
+    expect(slices.degraded?.wrong_top1_rate).toBe(1);
+    expect(slices.degraded?.decision_utility).toBe(-1.5);
     expect(slices.unknown?.query_count).toBe(1);
+    expect(slices.unknown?.ndcg_at_10).toBeCloseTo(1);
   });
 
   it('builds blocking-eligible slices from surfaced contract', () => {
@@ -265,7 +270,9 @@ describe('offline eval reporting helpers', () => {
     ]);
 
     expect(slices.blocking_eligible?.query_count).toBe(1);
+    expect(slices.blocking_eligible?.decision_utility).toBeCloseTo(1);
     expect(slices.non_blocking_eligible?.query_count).toBe(1);
+    expect(slices.non_blocking_eligible?.wrong_top1_rate).toBe(0);
     expect(slices.unknown?.query_count).toBe(1);
   });
 

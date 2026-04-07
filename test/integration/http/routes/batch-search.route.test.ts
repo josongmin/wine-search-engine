@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerBatchSearchRoute } from '../../../../src/interface/http/routes/batch-search.route.js';
 import type { BatchSearchRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
 import type { BatchSearchResponse } from '../../../../src/application/search/batch-search.usecase.js';
-import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 import type { BatchSearchUseCase } from '../../../../src/application/search/batch-search.usecase.js';
 import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
 
@@ -20,40 +19,44 @@ import { errorHandler } from '../../../../src/interface/http/middleware/error-ha
  * - Error response structure
  */
 
-function makeSearchResponse(overrides: Partial<SearchResponseV1> = {}): SearchResponseV1 {
+function makeSearchResponse(overrides: Record<string, unknown> = {}) {
   return {
-    queryType: 'search',
-    engineDecision: {
-      decisionStatus: 'resolved',
-      nextAction: 'return_result',
+    query_type: 'search',
+    engine_decision: {
+      decision_status: 'resolved',
+      next_action: 'return_result',
       route: 'hybrid',
-      decisionConfidence: 0.95,
-      confidenceSemantics: 'calibrated_decision_confidence',
-      decisionTraceRef: 'trace-1',
-      decisionSnapshot: {
+      decision_confidence: 0.95,
+      confidence_semantics: 'calibrated_decision_confidence',
+      decision_trace_ref: 'trace-1',
+      decision_snapshot: {
+        snapshot_id: 'snap-1',
         model_versions: {},
         index_versions: {},
         policy_rule_version: '1',
         threshold_profile_id: 'default',
         planner_version: '1',
         feature_flags: {},
+        response_contract_version: 'search_response_v1',
       },
     },
     results: [],
     clarification: null,
     meta: {
-      requestId: 'req-1',
-      queryTimeMs: 100,
+      request_id: 'req-1',
+      query_time_ms: 100,
       route: 'hybrid',
       version: '1.0.0',
       engine_schema_version: 'search_response_v1',
-      decisionSnapshot: {
+      decision_snapshot: {
+        snapshot_id: 'snap-1',
         model_versions: {},
         index_versions: {},
         policy_rule_version: '1',
         threshold_profile_id: 'default',
         planner_version: '1',
         feature_flags: {},
+        response_contract_version: 'search_response_v1',
       },
       response_hash: 'abc123',
     },
@@ -66,7 +69,7 @@ describe('POST /v1/batch-search', () => {
   let mockBatchSearchUseCase: BatchSearchUseCase;
   let mockDeps: BatchSearchRouteDeps;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     app = Fastify();
 
     mockBatchSearchUseCase = {
@@ -83,6 +86,14 @@ describe('POST /v1/batch-search', () => {
     registerBatchSearchRoute(app, mockDeps);
   });
 
+  beforeEach(() => {
+    vi.mocked(mockBatchSearchUseCase.execute).mockReset();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
   describe('HTTP 200 OK', () => {
     it('should return 200 when all requests succeed', async () => {
       const mockResponse = makeSearchResponse();
@@ -92,6 +103,7 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        not_executed: 0,
         batch_status: 'succeeded',
         has_failures: false,
         results: [
@@ -139,6 +151,7 @@ describe('POST /v1/batch-search', () => {
         total: 2,
         succeeded: 1,
         failed: 1,
+        not_executed: 0,
         batch_status: 'partial_failure',
         has_failures: true,
         results: [
@@ -188,6 +201,7 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 0,
         failed: 1,
+        not_executed: 0,
         batch_status: 'failed',
         has_failures: true,
         results: [
@@ -242,6 +256,7 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        not_executed: 0,
         batch_status: 'succeeded',
         has_failures: false,
         results: [
@@ -407,6 +422,7 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        not_executed: 0,
         results: [
           {
             id: '1',
@@ -415,11 +431,13 @@ describe('POST /v1/batch-search', () => {
               ...makeSearchResponse(),
               meta: {
                 ...makeSearchResponse().meta,
-                queryTimeMs: 50,
+                query_time_ms: 50,
               },
             },
           },
         ],
+        batch_status: 'succeeded',
+        has_failures: false,
         processing_time_ms: 52,
       };
 
@@ -453,6 +471,7 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 0,
         failed: 1,
+        not_executed: 0,
         results: [
           {
             id: '1',
@@ -463,6 +482,8 @@ describe('POST /v1/batch-search', () => {
             },
           },
         ],
+        batch_status: 'failed',
+        has_failures: true,
         processing_time_ms: 10,
       };
 
@@ -496,6 +517,9 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        not_executed: 0,
+        batch_status: 'succeeded',
+        has_failures: false,
         results: [
           {
             id: '1',
@@ -534,6 +558,9 @@ describe('POST /v1/batch-search', () => {
         total: 1,
         succeeded: 1,
         failed: 0,
+        not_executed: 0,
+        batch_status: 'succeeded',
+        has_failures: false,
         results: [
           {
             id: '1',

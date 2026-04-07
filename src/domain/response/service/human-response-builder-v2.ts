@@ -120,6 +120,7 @@ export function buildHumanResponseV2(params: HumanResponseBuildParamsV2): Search
   const confidences = normaliseConfidences(results);
 
   const mappedResults: ResultItemV2Human[] = results.map((result, index) => {
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     const vintage = result.vintageYear ?? result.vintage;
     const confidence = confidences[index] ?? 1.0;
 

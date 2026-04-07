@@ -1,5 +1,6 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 /**
  * Tags golden query set with retrieval_mode field.
@@ -172,8 +173,8 @@ async function tagQueriesWithRetrievalMode(
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const inputPath = 'data/golden-queries-bronze.jsonl';
-  const outputPath = 'data/golden-queries-bronze-tagged.jsonl';
+  const inputPath = resolveDataPath('data/golden-queries-bronze.jsonl');
+  const outputPath = resolveDataPath('data/golden-queries-bronze-tagged.jsonl');
 
   console.log(`Tagging queries: ${inputPath} → ${outputPath}`);
   await tagQueriesWithRetrievalMode(inputPath, outputPath);

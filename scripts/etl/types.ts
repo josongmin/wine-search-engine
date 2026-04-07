@@ -223,6 +223,9 @@ export interface SilverWineRecord {
    * Used to boost popularity_score and producer_prestige during indexing.
    */
   readonly isTopRated: boolean;
+
+  /** Finish length in [0, 1] normalized ordinal. Added by LLM enrichment step. */
+  readonly finishLength?: number | undefined;
 }
 
 // ---------------------------------------------------------------------------

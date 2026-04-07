@@ -28,6 +28,9 @@ import { MixedSolver } from '../../../src/domain/mixed/service/mixed-solver.js';
 import { AnchorProfiler } from '../../../src/domain/mixed/service/anchor-profiler.js';
 import { SimilarityScorer } from '../../../src/domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../../../src/domain/mixed/service/constraint-overlay.js';
+import type { DrinkingWindowPredictorPort } from '../../../src/domain/drinking-window/port/drinking-window-predictor.port.js';
+import type { RerankerPort } from '../../../src/domain/ranking/port/reranker.port.js';
+import type { LearnedMatcherPort } from '../../../src/domain/resolver/port/learned-matcher.port.js';
 import { DrinkingWindowPredictor } from '../../../src/infrastructure/ml/drinking-window-predictor.js';
 import { DrinkingWindowUseCase } from '../../../src/application/drinking-window/drinking-window.usecase.js';
 import { SearchUseCase } from '../../../src/application/search/search.usecase.js';
@@ -72,6 +75,7 @@ export interface TestContainerParts {
   ambiguityDict: InMemoryAmbiguityDictionary;
   blockingAdapter: InMemoryBlockingAdapter;
   searchIndex: InMemorySearchIndex;
+  fixtureDocuments: readonly (typeof TEST_DOCUMENTS)[number][];
   browseRetriever: BrowseRetriever;
   compareRetriever: CompareRetriever;
   aliasMatcher: InMemoryAliasMatcher;
@@ -80,10 +84,20 @@ export interface TestContainerParts {
   candidateAttributes: InMemoryCandidateAttributes;
 }
 
+export interface TestContainerOptions {
+  readonly snapshotVersions?: SnapshotVersions;
+  readonly reranker?: RerankerPort;
+  readonly learnedMatcher?: LearnedMatcherPort;
+  readonly drinkingWindowPredictor?: DrinkingWindowPredictorPort;
+  readonly rerankThreshold?: number;
+  readonly stripCachedDrinkingWindow?: boolean;
+  readonly drinkingWindowModelVersionOverride?: string;
+}
+
 /**
  * Creates a fully wired DI container backed by in-memory adapters.
  */
-export function createTestContainer(): TestContainerParts {
+export function createTestContainer(options: TestContainerOptions = {}): TestContainerParts {
   // Infrastructure ports (in-memory)
   const ambiguityDict = new InMemoryAmbiguityDictionary();
   const blockingAdapter = new InMemoryBlockingAdapter();
@@ -101,7 +115,29 @@ export function createTestContainer(): TestContainerParts {
     aliasMatcher.addAlias(alias.surfaceForm, alias.entityId, alias.confidence);
   }
 
-  for (const doc of TEST_DOCUMENTS) {
+  const materializedDocuments = TEST_DOCUMENTS.map((doc) => {
+    const baseDoc = options.stripCachedDrinkingWindow === true
+      ? {
+        ...doc,
+        drinkingWindowStart: undefined,
+        drinkingWindowEnd: undefined,
+        drinkingWindowModelVersion: undefined,
+      }
+      : { ...doc };
+
+    if (options.drinkingWindowModelVersionOverride === undefined) {
+      return baseDoc;
+    }
+
+    return {
+      ...baseDoc,
+      drinkingWindowStart: baseDoc.drinkingWindowStart ?? 2024,
+      drinkingWindowEnd: baseDoc.drinkingWindowEnd ?? 2032,
+      drinkingWindowModelVersion: options.drinkingWindowModelVersionOverride,
+    };
+  });
+
+  for (const doc of materializedDocuments) {
     searchIndex.upsertDoc(doc);
     anchorResolver.addEntity(doc.entityId, toAnchorEntityData(doc));
     candidateAttributes.setAttribute(doc.entityId, toCandidateAttributes(doc));
@@ -113,7 +149,7 @@ export function createTestContainer(): TestContainerParts {
 
   for (const neighborhood of MIXED_NEIGHBORHOOD_FIXTURES) {
     const docs = neighborhood.candidateIds
-      .map((entityId) => TEST_DOCUMENTS.find((doc) => doc.entityId === entityId))
+      .map((entityId) => materializedDocuments.find((doc) => doc.entityId === entityId))
       .filter((doc): doc is (typeof TEST_DOCUMENTS)[number] => doc !== undefined);
 
     const candidates = docs.map((doc, index) =>
@@ -142,7 +178,13 @@ export function createTestContainer(): TestContainerParts {
   const candidateScorer = new CandidateScorer();
   const ambiguityClassifier = new AmbiguityClassifier();
   const calibrator = new Calibrator(calibrationStore);
-  const entityResolver = new Resolver(blocker, candidateScorer, ambiguityClassifier, calibrator);
+  const entityResolver = new Resolver(
+    blocker,
+    candidateScorer,
+    ambiguityClassifier,
+    calibrator,
+    options.learnedMatcher,
+  );
 
   // Domain services — retrieval
   const fusionService = new FusionService();
@@ -154,14 +196,20 @@ export function createTestContainer(): TestContainerParts {
   const signalComputer = new SignalComputer();
   const scoreAggregator = new ScoreAggregator();
   const evidenceMapper = new EvidenceMapper();
-  const ranker = new Ranker(signalComputer, scoreAggregator, evidenceMapper);
+  const ranker = new Ranker(
+    signalComputer,
+    scoreAggregator,
+    evidenceMapper,
+    options.reranker,
+    options.rerankThreshold,
+  );
 
   // Domain services — decision, response, mixed, security
   const decisionEngine = new DecisionEngine(thresholdStore);
   const responseBuilder = new ResponseBuilder();
   const querySanitizer = new QuerySanitizer();
   const injectionJudge = { judge: async () => false };
-  const drinkingWindowPredictor = new DrinkingWindowPredictor();
+  const drinkingWindowPredictor = options.drinkingWindowPredictor ?? new DrinkingWindowPredictor();
   const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
   const anchorProfiler = new AnchorProfiler();
   const similarityScorer = new SimilarityScorer();
@@ -179,7 +227,7 @@ export function createTestContainer(): TestContainerParts {
 
   // RFC-015 snapshot version info for test containers.
   // Provides stable, meaningful version strings so snapshots are not empty.
-  const snapshotVersions: SnapshotVersions = {
+  const snapshotVersions: SnapshotVersions = options.snapshotVersions ?? {
     modelVersions: { embedding: 'text-embedding-3-small-v1' },
     indexVersions: { wine_content: 'wine_content_v1' },
     featureFlags: {},
@@ -203,6 +251,7 @@ export function createTestContainer(): TestContainerParts {
     injectionJudge,
     snapshotVersions,
     decomposedSearch: decomposedAdapter,
+    ...(options.drinkingWindowPredictor !== undefined ? { drinkingWindow: drinkingWindowUseCase } : {}),
   });
 
   const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
@@ -281,6 +330,7 @@ export function createTestContainer(): TestContainerParts {
     ambiguityDict,
     blockingAdapter,
     searchIndex,
+    fixtureDocuments: materializedDocuments,
     browseRetriever,
     compareRetriever,
     aliasMatcher,

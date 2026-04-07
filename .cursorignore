@@ -1,7 +1,51 @@
 # Large / generated — keep Cursor index fast
+node_modules
 node_modules/
+web/node_modules
+web/node_modules/
+dist
 dist/
+coverage
 coverage/
+.next/
+web/.next/
 .turbo/
 .cache/
 *.tsbuildinfo
+next-env.d.ts
+test-results
+playwright-report
+
+# Cursor / Codex / Claude Code — local caches & generated (not source)
+.cursor/cache/
+.cursor/debug/
+.cursor/browser-logs/
+.codex/cache/
+.codex/sessions/
+.claude/debug/
+.claude/cache/
+.claude/sessions/
+.claude/worktrees/
+.claude/settings.local.json
+
+# Heavy docs / datasets that rarely help editor indexing
+docs/archive/
+docs/sessions/
+docs/plans/
+data/**/*.ndjson
+data/**/*.jsonl
+data/**/*.json
+models/
+*.tar.gz
+*.tar
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# Local env / OS noise
+.env
+.env.*
+!.env.example
+!web/.env.example
+.DS_Store

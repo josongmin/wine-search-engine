@@ -1,5 +1,7 @@
 {
   "name": "noisy-entity",
+  "endpoint": "/v1/search",
+  "execution_lane": "self_contained",
   "request": {
     "query": "Opus One 2018!!!",
     "options": {

@@ -15,6 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { getWineDataDir } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -345,7 +346,7 @@ function exportToJsonl(
 async function main(): Promise<void> {
   console.warn('🚀 Fine-tuning Data Preparation (Task 6)\n');
 
-  const dataDir = path.resolve(process.cwd(), 'data');
+  const dataDir = getWineDataDir();
   const outputDir = path.resolve(dataDir, 'fine-tune-dataset');
 
   try {

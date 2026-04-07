@@ -106,7 +106,7 @@ function matchesNewVintage(minVintage: number, event: WatchlistChangeEvent): boo
 
 function matchesPriceDrop(
   threshold: number,
-  _baselinePrice: number,
+  baselinePrice: number,
   event: WatchlistChangeEvent,
 ): boolean {
   if (event.type !== 'price_updated') {
@@ -114,16 +114,11 @@ function matchesPriceDrop(
   }
 
   const typedEvent: PriceUpdatedEvent = event;
-  if (typedEvent.data.percentageDrop >= threshold) {
-    return true;
-  }
-
-  const referencePrice = typedEvent.data.oldPrice;
-  if (referencePrice <= 0 || typedEvent.data.newPrice >= referencePrice) {
+  if (baselinePrice <= 0 || typedEvent.data.newPrice >= baselinePrice) {
     return false;
   }
 
-  return ((referencePrice - typedEvent.data.newPrice) / referencePrice) * 100 >= threshold;
+  return ((baselinePrice - typedEvent.data.newPrice) / baselinePrice) * 100 >= threshold;
 }
 
 function matchesStockAvailable(minQty: number, event: WatchlistChangeEvent): boolean {

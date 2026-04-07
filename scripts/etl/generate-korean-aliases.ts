@@ -18,13 +18,14 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, ProposedAlias } from './types.js';
 import { parseNdjson } from './ndjson.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-aliases.ndjson';
-const DEFAULT_OUTPUT = 'data/silver-ko.ndjson';
+const DEFAULT_INPUT = resolveDataPath('data/silver-aliases.ndjson');
+const DEFAULT_OUTPUT = resolveDataPath('data/silver-ko.ndjson');
 const BATCH_SIZE = 20;
 const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5-20251001';

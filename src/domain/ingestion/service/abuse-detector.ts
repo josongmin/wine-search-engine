@@ -26,6 +26,9 @@ const DEFAULT_ANOMALY_THRESHOLD = 0.3;
 /** Default mass registration threshold (records per window). */
 const DEFAULT_MASS_REGISTRATION_LIMIT = 1000;
 
+/** Default sustained rate limit (records per hour). Burst attacks that stay below the count limit are caught here. */
+const DEFAULT_RATE_LIMIT_PER_HOUR = 1000;
+
 /**
  * Detects various forms of abuse in ingested wine catalog data.
  */
@@ -94,10 +97,14 @@ export class AbuseDetector {
     }
 
     const ratePerHour = recentCount / windowHours;
+    const exceedsCount = recentCount > DEFAULT_MASS_REGISTRATION_LIMIT;
+    const exceedsRate = ratePerHour > DEFAULT_RATE_LIMIT_PER_HOUR;
 
-    if (recentCount > DEFAULT_MASS_REGISTRATION_LIMIT) {
+    if (exceedsCount || exceedsRate) {
       const severity: AbuseSeverity =
-        recentCount > DEFAULT_MASS_REGISTRATION_LIMIT * 5 ? 'high' : 'medium';
+        recentCount > DEFAULT_MASS_REGISTRATION_LIMIT * 5 || ratePerHour > DEFAULT_RATE_LIMIT_PER_HOUR * 5
+          ? 'high'
+          : 'medium';
 
       return {
         flagged: true,

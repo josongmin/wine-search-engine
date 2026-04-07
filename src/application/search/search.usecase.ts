@@ -12,6 +12,9 @@ import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
+import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
@@ -134,6 +137,70 @@ export class SearchUseCase {
     includeEvalProvenance: boolean,
   ): Promise<SearchExecutorEvaluationResult> {
     const startTime = Date.now();
+    try {
+      return await this.executeInternalUnsafe(request, requestId, includeEvalProvenance, startTime);
+    } catch (err) {
+      // Known domain errors (PolicyBlockedError, WrongResolveError, etc.) are deliberate
+      // pipeline signals — propagate them so the caller can handle them correctly.
+      if (err instanceof DomainError) {
+        throw err;
+      }
+
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      bootstrapLogger.error(
+        { err: errorMessage, requestId },
+        '[SearchUseCase] Unexpected error in execute pipeline; returning structured failure response',
+      );
+      pipelineDebug(
+        {
+          step: 'search.execute.unexpected_error',
+          error: errorMessage,
+        },
+        'pipeline search.execute error',
+      );
+
+      const snapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
+      const errorTraceRef = `decision:error:${requestId}`;
+
+      const response: SearchResponseV1 = {
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route: 'error',
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: errorTraceRef,
+          decisionSnapshot: snapshot,
+          executionMode: 'degraded',
+          blockingEligible: false,
+          failure_reason: 'INTERNAL_INCONSISTENCY',
+        },
+        results: [],
+        meta: {
+          requestId,
+          queryTimeMs: Date.now() - startTime,
+          route: 'error',
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+          decisionSnapshot: snapshot,
+          authorityTraceRef: errorTraceRef,
+          runtimeCorrelationRef: requestId,
+          executionMode: 'degraded',
+          blockingEligible: false,
+        },
+      };
+
+      return { response };
+    }
+  }
+
+  private async executeInternalUnsafe(
+    request: SearchRequest,
+    requestId: string,
+    includeEvalProvenance: boolean,
+    startTime: number,
+  ): Promise<SearchExecutorEvaluationResult> {
 
     pipelineDebug(
       {

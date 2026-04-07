@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerResolveRoute } from '../../../../src/interface/http/routes/resolve.route.js';
 import type { ResolveRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
@@ -9,7 +9,7 @@ describe('POST /v1/entity/resolve', () => {
   let app: FastifyInstance;
   let mockDeps: ResolveRouteDeps;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     app = Fastify();
     registerRequestContext(app);
     app.setErrorHandler(errorHandler);
@@ -31,6 +31,24 @@ describe('POST /v1/entity/resolve', () => {
     };
 
     registerResolveRoute(app, mockDeps);
+  });
+
+  beforeEach(() => {
+    mockDeps.resolveUseCase.execute = vi.fn().mockResolvedValue({
+      status: 'resolved',
+      candidates: [],
+      topEntity: {
+        entityId: 'wine-opus-one-2018',
+        canonicalLabel: 'Opus One 2018',
+        calibratedScore: 0.99,
+      },
+      decision_trace_ref: 'resolve:test-request:entity_lookup',
+      request_id: 'test-request',
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
   });
 
   it('passes requestId through to the resolve use case', async () => {

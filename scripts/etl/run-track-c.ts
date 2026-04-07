@@ -20,8 +20,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
-const DATA_FILE = path.resolve('./data/silver-docquery.ndjson');
+const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
 
 function getFileSize(filePath: string): string {
   const stats = fs.statSync(filePath);

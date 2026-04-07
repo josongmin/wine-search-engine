@@ -9,10 +9,11 @@ import {
   validateNoisyEntityBenchmark,
   type NoisyEntityBenchmarkCase,
 } from '../../../scripts/eval/run-noisy-entity-eval.ts';
+import { resolveDataPath } from '../../../src/shared/utils/data-paths.js';
 
 describe('noisy entity benchmark eval', () => {
   it('loads the benchmark artifact with the expected category coverage', async () => {
-    const cases = await loadNoisyEntityBenchmark('data/noisy-entity-benchmark.jsonl');
+    const cases = await loadNoisyEntityBenchmark(resolveDataPath('data/noisy-entity-benchmark.jsonl'));
 
     expect(cases).toHaveLength(100);
 
@@ -98,9 +99,9 @@ describe('noisy entity benchmark eval', () => {
   });
 
   it('loads the smoke predictions fixture and produces a perfect benchmark run', async () => {
-    const cases = await loadNoisyEntityBenchmark('data/noisy-entity-benchmark.jsonl');
+    const cases = await loadNoisyEntityBenchmark(resolveDataPath('data/noisy-entity-benchmark.jsonl'));
     const predictions = await loadNoisyEntityPredictions(
-      'data/noisy-entity-predictions-smoke.jsonl',
+      resolveDataPath('data/noisy-entity-predictions-smoke.jsonl'),
       new Set(cases.map((item) => item.benchmark_id)),
     );
 

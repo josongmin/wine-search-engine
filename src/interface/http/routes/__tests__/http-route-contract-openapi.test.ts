@@ -74,5 +74,25 @@ describe('HTTP contract OpenAPI bridge', () => {
       operationId: 'entity.resolve',
       'x-search-capabilities': ['security', 'planner', 'SAT', 'resolver_only'],
     }));
+    expect(
+      document.paths['/v1/search/replay']?.post?.requestBody?.content['application/json'].schema,
+    ).toEqual(
+      expect.objectContaining({
+        type: 'object',
+        properties: expect.objectContaining({
+          query: expect.objectContaining({ type: 'string' }),
+          decision_snapshot: expect.objectContaining({ type: 'object' }),
+          preflight_honesty_contract: expect.objectContaining({
+            type: 'object',
+            properties: expect.objectContaining({
+              execution_mode: expect.objectContaining({
+                enum: ['authoritative', 'degraded', 'heuristic', 'advisory'],
+              }),
+              degradation_reasons: expect.objectContaining({ type: 'array' }),
+            }),
+          }),
+        }),
+      }),
+    );
   });
 });

@@ -8,6 +8,7 @@ describe('BatchSearchResponseSchema', () => {
       total: 1,
       succeeded: 1,
       failed: 0,
+      not_executed: 0,
       batch_status: 'succeeded',
       has_failures: false,
       results: [
@@ -69,6 +70,7 @@ describe('BatchSearchResponseSchema', () => {
       total: 2,
       succeeded: 1,
       failed: 1,
+      not_executed: 0,
       batch_status: 'succeeded',
       has_failures: false,
       results: [

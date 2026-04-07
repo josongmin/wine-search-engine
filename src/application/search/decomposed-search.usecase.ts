@@ -118,6 +118,9 @@ export class DecomposedSearchUseCase {
     if (statusA === 'resolved' && statusB === 'resolved') {
       return 'resolved';
     }
+    if (statusA === 'failed' || statusB === 'failed') {
+      return 'failed';
+    }
     if (statusA === 'ambiguous' || statusB === 'ambiguous') {
       return 'ambiguous';
     }

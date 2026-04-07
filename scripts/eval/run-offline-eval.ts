@@ -26,12 +26,6 @@ import {
   recall,
   classifyDecision,
   queryUtility,
-  wrongTop1Rate,
-  safeAbstainRate,
-  avoidableAbstainRate,
-  aurc,
-  excessAurc,
-  ece,
   setDiversityScore,
   anchorPreservationScore,
   producerVariety,
@@ -65,13 +59,14 @@ import {
   inferResolvedEntityType,
 } from './entity-type.js';
 import { verifyDefaultGoldenSplits } from './split-integrity.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/golden-queries-bronze.jsonl';
-const DEFAULT_OUTPUT = 'data/eval-results.json';
+const DEFAULT_INPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
+const DEFAULT_OUTPUT = resolveDataPath('data/eval-results.json');
 
 /** Release gate thresholds (RFC-017 §3.2). */
 const RELEASE_GATES = {
@@ -169,6 +164,8 @@ interface Args {
   baselineReport?: string;
   /** When true, run `verify-splits` logic before any search (fail-fast on leakage). */
   verifySplits: boolean;
+  /** When true, persist per-query diagnostics arrays in the output report. */
+  includeDiagnostics: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -178,6 +175,7 @@ function parseArgs(argv: string[]): Args {
     tier: 'bronze',
     baselineReport: undefined,
     verifySplits: false,
+    includeDiagnostics: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -189,6 +187,8 @@ function parseArgs(argv: string[]): Args {
       if (t === 'bronze' || t === 'silver' || t === 'gate') out.tier = t;
     } else if (a === '--verify-splits') {
       out.verifySplits = true;
+    } else if (a === '--include-diagnostics') {
+      out.includeDiagnostics = true;
     }
   }
   return out;
@@ -208,15 +208,15 @@ function evalSearchTimeoutMs(): number {
 function evalSearchConcurrency(): number {
   const raw = process.env['EVAL_SEARCH_CONCURRENCY'];
   const n = raw === undefined ? NaN : Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 1) return 12;
-  return Math.min(64, n);
+  if (!Number.isFinite(n) || n < 1) return 4;
+  return Math.min(16, n);
 }
 
 function shouldSkipEmbeddingValidation(): boolean {
   return process.env['EVAL_SKIP_EMBEDDING_VALIDATION'] === 'true';
 }
 
-async function mapPool<T, R>(
+async function _mapPool<T, R>(
   items: readonly T[],
   concurrency: number,
   fn: (item: T, index: number) => Promise<R>,
@@ -240,6 +240,54 @@ async function mapPool<T, R>(
   const n = Math.max(1, Math.min(concurrency, items.length));
   await Promise.all(Array.from({ length: n }, () => worker()));
   return results;
+}
+
+async function _consumePool<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<void>,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<void> {
+  let next = 0;
+  let completed = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      await fn(items[i]!, i);
+      completed += 1;
+      onProgress?.(completed, items.length);
+    }
+  }
+
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+}
+
+async function forEachPool<T>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<void>,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<void> {
+  let next = 0;
+  let completed = 0;
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next;
+      next += 1;
+      if (i >= items.length) return;
+      await fn(items[i]!, i);
+      completed += 1;
+      onProgress?.(completed, items.length);
+    }
+  }
+
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
 }
 
 interface SearchResult {
@@ -917,19 +965,26 @@ function computeSlice(
     };
   }
 
-  const ndcgValues = results.map((r) => ndcg(r.ranked, r.truth.relevant, 10));
-  const mrrValues = results.map((r) => reciprocalRank(r.ranked, r.truth.relevant, 10));
-  const decisions = results.map((r) => r.decision);
-  const truths = results.map((r) => r.truth);
+  let ndcgTotal = 0;
+  let mrrTotal = 0;
+  let wrongTop1Count = 0;
+  let decisionUtilityTotal = 0;
+
+  for (const result of results) {
+    ndcgTotal += ndcg(result.ranked, result.truth.relevant, 10);
+    mrrTotal += reciprocalRank(result.ranked, result.truth.relevant, 10);
+    if (classifyDecision(result.decision, result.truth) === 'wrong_resolve') {
+      wrongTop1Count += 1;
+    }
+    decisionUtilityTotal += queryUtility(result.decision, result.truth);
+  }
 
   return {
     query_count: results.length,
-    ndcg_at_10: ndcgValues.reduce((a, b) => a + b, 0) / ndcgValues.length,
-    mrr_at_10: mrrValues.reduce((a, b) => a + b, 0) / mrrValues.length,
-    wrong_top1_rate: wrongTop1Rate(decisions, truths),
-    decision_utility:
-      decisions.reduce((sum, d, i) => sum + queryUtility(d, truths[i]!), 0) /
-      decisions.length,
+    ndcg_at_10: ndcgTotal / results.length,
+    mrr_at_10: mrrTotal / results.length,
+    wrong_top1_rate: wrongTop1Count / results.length,
+    decision_utility: decisionUtilityTotal / results.length,
   };
 }
 
@@ -937,7 +992,7 @@ function computeSlice(
 // Mode-specific metrics (Epic 11)
 // ---------------------------------------------------------------------------
 
-function computeModeMetrics(
+function _computeModeMetrics(
   results: readonly { ranked: RankedHit[]; decision: DecisionOutcome; truth: GroundTruth }[],
   mode: RetrievalMode,
 ): ModeMetrics {
@@ -953,22 +1008,30 @@ function computeModeMetrics(
     };
   }
 
-  const ndcgValues = results.map((r) => ndcg(r.ranked, r.truth.relevant, 10));
-  const mrrValues = results.map((r) => reciprocalRank(r.ranked, r.truth.relevant, 10));
-  const recallValues = results.map((r) => recall(r.ranked, r.truth.relevant, 10));
-  const decisions = results.map((r) => r.decision);
-  const truths = results.map((r) => r.truth);
+  let ndcgTotal = 0;
+  let mrrTotal = 0;
+  let recallTotal = 0;
+  let wrongTop1Count = 0;
+  let decisionUtilityTotal = 0;
+
+  for (const result of results) {
+    ndcgTotal += ndcg(result.ranked, result.truth.relevant, 10);
+    mrrTotal += reciprocalRank(result.ranked, result.truth.relevant, 10);
+    recallTotal += recall(result.ranked, result.truth.relevant, 10);
+    if (classifyDecision(result.decision, result.truth) === 'wrong_resolve') {
+      wrongTop1Count += 1;
+    }
+    decisionUtilityTotal += queryUtility(result.decision, result.truth);
+  }
 
   const baseMetrics = {
     retrieval_mode: mode,
     query_count: results.length,
-    ndcg_at_10: ndcgValues.reduce((a, b) => a + b, 0) / ndcgValues.length,
-    mrr_at_10: mrrValues.reduce((a, b) => a + b, 0) / mrrValues.length,
-    recall_at_10: recallValues.reduce((a, b) => a + b, 0) / recallValues.length,
-    wrong_top1_rate: wrongTop1Rate(decisions, truths),
-    decision_utility:
-      decisions.reduce((sum, d, i) => sum + queryUtility(d, truths[i]!), 0) /
-      decisions.length,
+    ndcg_at_10: ndcgTotal / results.length,
+    mrr_at_10: mrrTotal / results.length,
+    recall_at_10: recallTotal / results.length,
+    wrong_top1_rate: wrongTop1Count / results.length,
+    decision_utility: decisionUtilityTotal / results.length,
   };
 
   // Build mode-specific metrics conditionally
@@ -1047,7 +1110,7 @@ function computeModeMetrics(
  * Compute entity type confusion matrix for a result set.
  * Tracks what target type results actually resolved to.
  */
-function computeEntityTypeMetrics(
+function _computeEntityTypeMetrics(
   results: readonly { query: GoldenQuery; ranked: RankedHit[]; decision: DecisionOutcome }[],
   targetType: EntityTargetType,
 ): EntityTypeMetrics {
@@ -1148,6 +1211,462 @@ export function computeSpecializedFallbackMetrics(
   };
 }
 
+interface SpecializedFallbackAccumulator {
+  requestedCounts: Record<'producer_browse' | 'region_browse' | 'compare_candidates', number>;
+  fallbackCounts: Record<'producer_browse' | 'region_browse' | 'compare_candidates', number>;
+  histogram: Map<string, number>;
+}
+
+function _createSpecializedFallbackAccumulator(): SpecializedFallbackAccumulator {
+  return {
+    requestedCounts: {
+      producer_browse: 0,
+      region_browse: 0,
+      compare_candidates: 0,
+    },
+    fallbackCounts: {
+      producer_browse: 0,
+      region_browse: 0,
+      compare_candidates: 0,
+    },
+    histogram: new Map<string, number>(),
+  };
+}
+
+function _addToSpecializedFallbackAccumulator(
+  accumulator: SpecializedFallbackAccumulator,
+  decision: DecisionOutcome,
+): void {
+  const requestedMode = decision.specialized_route_requested;
+  if (
+    requestedMode !== 'producer_browse'
+    && requestedMode !== 'region_browse'
+    && requestedMode !== 'compare_candidates'
+  ) {
+    return;
+  }
+
+  accumulator.requestedCounts[requestedMode] += 1;
+  if (decision.fallback_applied === true) {
+    accumulator.fallbackCounts[requestedMode] += 1;
+    if (
+      typeof decision.fallback_reason === 'string'
+      && SPECIALIZED_FALLBACK_REASONS.has(decision.fallback_reason)
+    ) {
+      accumulator.histogram.set(
+        decision.fallback_reason,
+        (accumulator.histogram.get(decision.fallback_reason) ?? 0) + 1,
+      );
+    }
+  }
+}
+
+function _finalizeSpecializedFallbackAccumulator(
+  accumulator: SpecializedFallbackAccumulator,
+): SpecializedFallbackMetrics {
+  return {
+    fallback_rate: {
+      producer_browse: {
+        requested_count: accumulator.requestedCounts.producer_browse,
+        fallback_rate: accumulator.requestedCounts.producer_browse === 0
+          ? null
+          : accumulator.fallbackCounts.producer_browse / accumulator.requestedCounts.producer_browse,
+      },
+      region_browse: {
+        requested_count: accumulator.requestedCounts.region_browse,
+        fallback_rate: accumulator.requestedCounts.region_browse === 0
+          ? null
+          : accumulator.fallbackCounts.region_browse / accumulator.requestedCounts.region_browse,
+      },
+      compare_candidates: {
+        requested_count: accumulator.requestedCounts.compare_candidates,
+        fallback_rate: accumulator.requestedCounts.compare_candidates === 0
+          ? null
+          : accumulator.fallbackCounts.compare_candidates / accumulator.requestedCounts.compare_candidates,
+      },
+    },
+    ...(accumulator.histogram.size > 0
+      ? { fallback_reason_histogram: Object.fromEntries(accumulator.histogram) }
+      : {}),
+  };
+}
+
+interface SliceAccumulator {
+  queryCount: number;
+  ndcgTotal: number;
+  mrrTotal: number;
+  wrongTop1Count: number;
+  decisionUtilityTotal: number;
+}
+
+function createSliceAccumulator(): SliceAccumulator {
+  return {
+    queryCount: 0,
+    ndcgTotal: 0,
+    mrrTotal: 0,
+    wrongTop1Count: 0,
+    decisionUtilityTotal: 0,
+  };
+}
+
+function addToSliceAccumulator(
+  accumulator: SliceAccumulator,
+  result: { ranked: RankedHit[]; decision: DecisionOutcome; truth: GroundTruth },
+): void {
+  accumulator.queryCount += 1;
+  accumulator.ndcgTotal += ndcg(result.ranked, result.truth.relevant, 10);
+  accumulator.mrrTotal += reciprocalRank(result.ranked, result.truth.relevant, 10);
+  if (classifyDecision(result.decision, result.truth) === 'wrong_resolve') {
+    accumulator.wrongTop1Count += 1;
+  }
+  accumulator.decisionUtilityTotal += queryUtility(result.decision, result.truth);
+}
+
+function finalizeSliceAccumulator(accumulator: SliceAccumulator): ScenarioSlice {
+  if (accumulator.queryCount === 0) {
+    return {
+      query_count: 0,
+      ndcg_at_10: 0,
+      mrr_at_10: 0,
+      wrong_top1_rate: 0,
+      decision_utility: 0,
+    };
+  }
+
+  return {
+    query_count: accumulator.queryCount,
+    ndcg_at_10: accumulator.ndcgTotal / accumulator.queryCount,
+    mrr_at_10: accumulator.mrrTotal / accumulator.queryCount,
+    wrong_top1_rate: accumulator.wrongTop1Count / accumulator.queryCount,
+    decision_utility: accumulator.decisionUtilityTotal / accumulator.queryCount,
+  };
+}
+
+interface ModeAccumulator extends SliceAccumulator {
+  recallAt10Total: number;
+  diversityScoreTotal: number;
+  producerVarietyTotal: number;
+  setCoverageTotal: number;
+  browseLineDiversityAt10Total: number;
+  prestigeMeanAt10Total: number;
+  grapeVarietyAt10Total: number;
+  anchorPreservationScoreTotal: number;
+  seedExclusionRateTotal: number;
+  attributeCoverageTotal: number;
+}
+
+function createModeAccumulator(): ModeAccumulator {
+  return {
+    ...createSliceAccumulator(),
+    recallAt10Total: 0,
+    diversityScoreTotal: 0,
+    producerVarietyTotal: 0,
+    setCoverageTotal: 0,
+    browseLineDiversityAt10Total: 0,
+    prestigeMeanAt10Total: 0,
+    grapeVarietyAt10Total: 0,
+    anchorPreservationScoreTotal: 0,
+    seedExclusionRateTotal: 0,
+    attributeCoverageTotal: 0,
+  };
+}
+
+function addToModeAccumulator(
+  accumulator: ModeAccumulator,
+  result: OfflineEvalCaseResult,
+  mode: RetrievalMode,
+): void {
+  addToSliceAccumulator(accumulator, result);
+  accumulator.recallAt10Total += recall(result.ranked, result.truth.relevant, 10);
+
+  if (mode === 'producer_browse' || mode === 'region_browse') {
+    accumulator.diversityScoreTotal += setDiversityScore(result.ranked);
+    accumulator.producerVarietyTotal += producerVariety(result.ranked);
+    accumulator.setCoverageTotal += setCoverage(
+      new Set(result.ranked.slice(0, 10).map((hit) => hit.entity_id)),
+      result.truth.relevant,
+      2,
+    );
+    accumulator.browseLineDiversityAt10Total += browseLineDiversityAtK(result.ranked, 10);
+    accumulator.prestigeMeanAt10Total += prestigeMeanAtK(result.ranked, 10);
+
+    if (mode === 'region_browse') {
+      accumulator.grapeVarietyAt10Total += grapeVarietyAtK(result.ranked, 10);
+    }
+  }
+
+  if (mode === 'similar_items') {
+    accumulator.anchorPreservationScoreTotal += anchorPreservationScore(
+      result.truth.expected_entity_id ?? '',
+      result.ranked,
+    );
+    accumulator.seedExclusionRateTotal += (() => {
+      const anchorId = result.truth.expected_entity_id;
+      if (anchorId === undefined || result.ranked.length === 0) {
+        return 1;
+      }
+      return result.ranked.some((hit) => hit.entity_id === anchorId) ? 0 : 1;
+    })();
+  }
+
+  if (mode === 'compare_candidates') {
+    accumulator.attributeCoverageTotal += (() => {
+      if (result.ranked.length === 0) {
+        return 0;
+      }
+      const covered = result.ranked.filter(
+        (hit) => hit.producer !== undefined || hit.region !== undefined || (hit.grapes?.length ?? 0) > 0,
+      ).length;
+      return covered / result.ranked.length;
+    })();
+  }
+}
+
+function finalizeModeAccumulator(
+  accumulator: ModeAccumulator,
+  mode: RetrievalMode,
+): ModeMetrics {
+  if (accumulator.queryCount === 0) {
+    return {
+      retrieval_mode: mode,
+      query_count: 0,
+      ndcg_at_10: 0,
+      mrr_at_10: 0,
+      recall_at_10: 0,
+      wrong_top1_rate: 0,
+      decision_utility: 0,
+    };
+  }
+
+  const metrics: ModeMetrics = {
+    retrieval_mode: mode,
+    query_count: accumulator.queryCount,
+    ndcg_at_10: accumulator.ndcgTotal / accumulator.queryCount,
+    mrr_at_10: accumulator.mrrTotal / accumulator.queryCount,
+    recall_at_10: accumulator.recallAt10Total / accumulator.queryCount,
+    wrong_top1_rate: accumulator.wrongTop1Count / accumulator.queryCount,
+    decision_utility: accumulator.decisionUtilityTotal / accumulator.queryCount,
+  };
+
+  if (mode === 'producer_browse' || mode === 'region_browse') {
+    metrics.diversity_score = accumulator.diversityScoreTotal / accumulator.queryCount;
+    metrics.producer_variety = accumulator.producerVarietyTotal / accumulator.queryCount;
+    metrics.set_coverage = accumulator.setCoverageTotal / accumulator.queryCount;
+    metrics.browse_line_diversity_at_10 =
+      accumulator.browseLineDiversityAt10Total / accumulator.queryCount;
+    metrics.prestige_mean_at_10 = accumulator.prestigeMeanAt10Total / accumulator.queryCount;
+
+    if (mode === 'region_browse') {
+      metrics.grape_variety_at_10 = accumulator.grapeVarietyAt10Total / accumulator.queryCount;
+    }
+  }
+
+  if (mode === 'similar_items') {
+    metrics.anchor_preservation_score =
+      accumulator.anchorPreservationScoreTotal / accumulator.queryCount;
+    metrics.seed_exclusion_rate = accumulator.seedExclusionRateTotal / accumulator.queryCount;
+  }
+
+  if (mode === 'compare_candidates') {
+    metrics.attribute_coverage = accumulator.attributeCoverageTotal / accumulator.queryCount;
+  }
+
+  return metrics;
+}
+
+interface EntityTypeAccumulator {
+  queryCount: number;
+  correctCount: number;
+  confusion: Record<EntityTargetType, number>;
+}
+
+function createEntityTypeAccumulator(): EntityTypeAccumulator {
+  return {
+    queryCount: 0,
+    correctCount: 0,
+    confusion: {
+      wine: 0,
+      producer: 0,
+      region: 0,
+      unknown: 0,
+    },
+  };
+}
+
+function addToEntityTypeAccumulator(
+  accumulator: EntityTypeAccumulator,
+  result: OfflineEvalCaseResult,
+  targetType: EntityTargetType,
+): void {
+  accumulator.queryCount += 1;
+  const resolvedType = result.decision.decision_status === 'resolved'
+    ? inferResolvedEntityType(result.ranked[0])
+    : 'unknown';
+  if (resolvedType === targetType) {
+    accumulator.correctCount += 1;
+  }
+  accumulator.confusion[resolvedType] += 1;
+}
+
+function finalizeEntityTypeAccumulator(
+  accumulator: EntityTypeAccumulator,
+  targetType: EntityTargetType,
+): EntityTypeMetrics {
+  return {
+    target_type: targetType,
+    query_count: accumulator.queryCount,
+    correct_type_rate: accumulator.queryCount === 0 ? 0 : accumulator.correctCount / accumulator.queryCount,
+    confusion_matrix: accumulator.confusion,
+  };
+}
+
+interface CountBucket {
+  query_count: number;
+}
+
+function incrementCountBucket<K>(map: Map<K, CountBucket>, key: K): void {
+  const bucket = map.get(key) ?? { query_count: 0 };
+  bucket.query_count += 1;
+  map.set(key, bucket);
+}
+
+interface AurcPoint {
+  confidence: number;
+  wrong: boolean;
+}
+
+interface EceBucketAccumulator {
+  totalConf: number;
+  totalCorrect: number;
+  count: number;
+}
+
+interface GlobalDecisionAccumulator {
+  queryCount: number;
+  decisionUtilityTotal: number;
+  wrongTop1Count: number;
+  safeAbstainCount: number;
+  avoidableAbstainCount: number;
+  aurcPoints: AurcPoint[];
+  eceBuckets: EceBucketAccumulator[];
+  resolvedCount: number;
+}
+
+function createGlobalDecisionAccumulator(bins = 10): GlobalDecisionAccumulator {
+  return {
+    queryCount: 0,
+    decisionUtilityTotal: 0,
+    wrongTop1Count: 0,
+    safeAbstainCount: 0,
+    avoidableAbstainCount: 0,
+    aurcPoints: [],
+    eceBuckets: Array.from({ length: bins }, () => ({
+      totalConf: 0,
+      totalCorrect: 0,
+      count: 0,
+    })),
+    resolvedCount: 0,
+  };
+}
+
+function addToGlobalDecisionAccumulator(
+  accumulator: GlobalDecisionAccumulator,
+  decision: DecisionOutcome,
+  truth: GroundTruth,
+): void {
+  accumulator.queryCount += 1;
+  const category = classifyDecision(decision, truth);
+  accumulator.decisionUtilityTotal += queryUtility(decision, truth);
+
+  if (category === 'wrong_resolve') {
+    accumulator.wrongTop1Count += 1;
+  } else if (category === 'safe_abstain') {
+    accumulator.safeAbstainCount += 1;
+  } else if (category === 'avoidable_abstain') {
+    accumulator.avoidableAbstainCount += 1;
+  }
+
+  accumulator.aurcPoints.push({
+    confidence: decision.decision_confidence,
+    wrong: category === 'wrong_resolve',
+  });
+
+  if (decision.decision_status === 'resolved') {
+    accumulator.resolvedCount += 1;
+    const bins = accumulator.eceBuckets.length;
+    const binIndex = Math.min(Math.floor(decision.decision_confidence * bins), bins - 1);
+    const bucket = accumulator.eceBuckets[binIndex]!;
+    bucket.totalConf += decision.decision_confidence;
+    bucket.totalCorrect += category === 'correct_resolve' ? 1 : 0;
+    bucket.count += 1;
+  }
+}
+
+function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulator): {
+  decisionUtility: number;
+  wrongTop1Rate: number;
+  safeAbstainRate: number;
+  avoidableAbstainRate: number;
+  aurc: number;
+  excessAurc: number;
+  ece: number;
+} {
+  const queryCount = accumulator.queryCount;
+  if (queryCount === 0) {
+    return {
+      decisionUtility: 0,
+      wrongTop1Rate: 0,
+      safeAbstainRate: 0,
+      avoidableAbstainRate: 0,
+      aurc: 0,
+      excessAurc: 0,
+      ece: 0,
+    };
+  }
+
+  const sortedPoints = [...accumulator.aurcPoints].sort(
+    (left, right) => right.confidence - left.confidence,
+  );
+  let wrongSoFar = 0;
+  let aurcArea = 0;
+  for (let i = 0; i < sortedPoints.length; i++) {
+    if (sortedPoints[i]!.wrong) {
+      wrongSoFar += 1;
+    }
+    aurcArea += (wrongSoFar / (i + 1)) * (1 / sortedPoints.length);
+  }
+
+  const wrongTotal = accumulator.wrongTop1Count;
+  const correctCount = queryCount - wrongTotal;
+  let optimalAurcArea = 0;
+  for (let i = 0; i < queryCount; i++) {
+    const risk = i < correctCount ? 0 : (i - correctCount + 1) / (i + 1);
+    optimalAurcArea += risk / queryCount;
+  }
+
+  let totalEce = 0;
+  if (accumulator.resolvedCount > 0) {
+    for (const bucket of accumulator.eceBuckets) {
+      if (bucket.count === 0) {
+        continue;
+      }
+      const avgConf = bucket.totalConf / bucket.count;
+      const avgAcc = bucket.totalCorrect / bucket.count;
+      totalEce += (bucket.count / accumulator.resolvedCount) * Math.abs(avgConf - avgAcc);
+    }
+  }
+
+  return {
+    decisionUtility: accumulator.decisionUtilityTotal / queryCount,
+    wrongTop1Rate: accumulator.wrongTop1Count / queryCount,
+    safeAbstainRate: accumulator.safeAbstainCount / queryCount,
+    avoidableAbstainRate: accumulator.avoidableAbstainCount / queryCount,
+    aurc: aurcArea,
+    excessAurc: aurcArea - optimalAurcArea,
+    ece: totalEce,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -1226,6 +1745,8 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
+  const EVAL_JOB_TIMEOUT_MS = Number.parseInt(process.env['EVAL_JOB_TIMEOUT_MS'] ?? '0', 10) || 30 * 60 * 1000; // 30 min default
+
   const timeoutMs = evalSearchTimeoutMs();
   const concurrency = evalSearchConcurrency();
   console.log(
@@ -1233,126 +1754,314 @@ async function run(): Promise<void> {
   );
 
   let lastLogged = 0;
-  const allResults = await mapPool(
-    evalQueries,
-    concurrency,
-    async (q) => {
-      const { ranked, decision } = await executeSearch(q, timeoutMs);
-      const truth = queryToGroundTruth(q);
-      return { query: q, ranked, decision, truth };
-    },
-    (done, total) => {
-      if (done % 50 === 0 || done === total) {
-        if (done !== lastLogged) {
-          lastLogged = done;
-          console.log(`  Progress: ${done}/${total}`);
-        }
-      }
-    },
+
+  const jobTimeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(
+      () => reject(new Error(`Eval job timed out after ${EVAL_JOB_TIMEOUT_MS}ms`)),
+      EVAL_JOB_TIMEOUT_MS,
+    ),
   );
 
-  // Compute global metrics
+  const needsPerQueryMetrics = args.includeDiagnostics || args.baselineReport !== undefined;
+  const perQueryMetrics = needsPerQueryMetrics
+    ? {
+        ndcg_at_10: [] as number[],
+        mrr_at_10: [] as number[],
+        recall_at_3: [] as number[],
+        recall_at_100: [] as number[],
+        decision_utility: [] as number[],
+        non_wrong_top1_rate: [] as number[],
+      }
+    : undefined;
+
+  const globalDecisionAccumulator = createGlobalDecisionAccumulator();
+  let globalNdcg = 0;
+  let globalMrr = 0;
+  let globalRecallAt3 = 0;
+  let globalRecall = 0;
+  let failedQueryCount = 0;
+  let succeededNdcgTotal = 0;
+  let succeededQueryCount = 0;
+  const scenarioAccumulators = new Map<string, SliceAccumulator>();
+  const languageAccumulators = new Map<string, SliceAccumulator>();
+  const modeAccumulators = new Map<RetrievalMode, ModeAccumulator>();
+  const targetTypeAccumulators = new Map<EntityTargetType, EntityTypeAccumulator>();
+  const executionModeAccumulators = new Map<EvalExecutionModeBucket, SliceAccumulator>();
+  const blockingEligibleAccumulators = new Map<EvalBlockingEligibleBucket, SliceAccumulator>();
+  const executionModeCounts = new Map<EvalExecutionModeBucket, CountBucket>();
+  const blockingEligibleCounts = new Map<EvalBlockingEligibleBucket, CountBucket>();
+  const executionModeBlockingEligibleCounts = new Map<EvalExecutionModeBucket, Map<EvalBlockingEligibleBucket, number>>();
+  const degradationReasonHistogramMap = new Map<string, number>();
+  const specializedRequestedCounts = {
+    producer_browse: 0,
+    region_browse: 0,
+    compare_candidates: 0,
+  };
+  const specializedFallbackCounts = {
+    producer_browse: 0,
+    region_browse: 0,
+    compare_candidates: 0,
+  };
+  const specializedFallbackHistogram = new Map<string, number>();
+
+  await Promise.race([
+    forEachPool(
+      evalQueries,
+      concurrency,
+      async (q) => {
+        let ranked: RankedHit[];
+        let decision: DecisionOutcome;
+        try {
+          ({ ranked, decision } = await executeSearch(q, timeoutMs));
+        } catch (err) {
+          console.error(`[eval] query "${q.query}" (qid=${q.qid}) threw — recording as error:`, err);
+          ranked = [];
+          decision = {
+            decision_status: 'failed',
+            top_entity_id: null,
+            decision_confidence: 0,
+          };
+        }
+
+        const truth = queryToGroundTruth(q);
+        const result = { query: q, ranked, decision, truth } satisfies OfflineEvalCaseResult;
+
+        const ndcgAt10 = ndcg(ranked, truth.relevant, 10);
+        const mrrAt10 = reciprocalRank(ranked, truth.relevant, 10);
+        const recallAt3 = recall(ranked, truth.relevant, 3);
+        const recallAt100 = recall(ranked, truth.relevant, 100);
+        const decisionUtilityValue = queryUtility(decision, truth);
+        const nonWrongTop1RateValue = classifyDecision(decision, truth) === 'wrong_resolve' ? 0 : 1;
+
+        globalNdcg += ndcgAt10;
+        globalMrr += mrrAt10;
+        globalRecallAt3 += recallAt3;
+        globalRecall += recallAt100;
+        addToGlobalDecisionAccumulator(globalDecisionAccumulator, decision, truth);
+
+        if (decision.decision_status === 'failed' || (decision.decision_status as string) === 'error') {
+          failedQueryCount += 1;
+        } else {
+          succeededNdcgTotal += ndcgAt10;
+          succeededQueryCount += 1;
+        }
+
+        if (perQueryMetrics) {
+          perQueryMetrics.ndcg_at_10.push(ndcgAt10);
+          perQueryMetrics.mrr_at_10.push(mrrAt10);
+          perQueryMetrics.recall_at_3.push(recallAt3);
+          perQueryMetrics.recall_at_100.push(recallAt100);
+          perQueryMetrics.decision_utility.push(decisionUtilityValue);
+          perQueryMetrics.non_wrong_top1_rate.push(nonWrongTop1RateValue);
+        }
+
+        const scenarioAccumulator =
+          scenarioAccumulators.get(result.query.scenario) ?? createSliceAccumulator();
+        addToSliceAccumulator(scenarioAccumulator, result);
+        scenarioAccumulators.set(result.query.scenario, scenarioAccumulator);
+
+        const languageAccumulator =
+          languageAccumulators.get(result.query.language) ?? createSliceAccumulator();
+        addToSliceAccumulator(languageAccumulator, result);
+        languageAccumulators.set(result.query.language, languageAccumulator);
+
+        const mode = result.query.retrieval_mode ?? 'entity_lookup';
+        const modeAccumulator = modeAccumulators.get(mode) ?? createModeAccumulator();
+        addToModeAccumulator(modeAccumulator, result, mode);
+        modeAccumulators.set(mode, modeAccumulator);
+
+        const targetType = inferEntityTargetTypeFromQuery({
+          retrieval_mode: result.query.retrieval_mode,
+          query_class: result.query.query_class,
+          scenario: result.query.scenario,
+        });
+        const targetTypeAccumulator =
+          targetTypeAccumulators.get(targetType) ?? createEntityTypeAccumulator();
+        addToEntityTypeAccumulator(targetTypeAccumulator, result, targetType);
+        targetTypeAccumulators.set(targetType, targetTypeAccumulator);
+
+        const executionModeBucket = toExecutionModeBucket(decision);
+        const blockingEligibleBucket = toBlockingEligibleBucket(decision);
+        incrementCountBucket(executionModeCounts, executionModeBucket);
+        incrementCountBucket(blockingEligibleCounts, blockingEligibleBucket);
+
+        const executionModeAccumulator =
+          executionModeAccumulators.get(executionModeBucket) ?? createSliceAccumulator();
+        addToSliceAccumulator(executionModeAccumulator, result);
+        executionModeAccumulators.set(executionModeBucket, executionModeAccumulator);
+
+        const blockingEligibleAccumulator =
+          blockingEligibleAccumulators.get(blockingEligibleBucket) ?? createSliceAccumulator();
+        addToSliceAccumulator(blockingEligibleAccumulator, result);
+        blockingEligibleAccumulators.set(blockingEligibleBucket, blockingEligibleAccumulator);
+
+        const matrixRow =
+          executionModeBlockingEligibleCounts.get(executionModeBucket) ?? new Map<EvalBlockingEligibleBucket, number>();
+        matrixRow.set(
+          blockingEligibleBucket,
+          (matrixRow.get(blockingEligibleBucket) ?? 0) + 1,
+        );
+        executionModeBlockingEligibleCounts.set(executionModeBucket, matrixRow);
+
+        for (const reason of decision.degradation_reasons ?? []) {
+          degradationReasonHistogramMap.set(reason, (degradationReasonHistogramMap.get(reason) ?? 0) + 1);
+        }
+
+        const requestedMode = decision.specialized_route_requested;
+        if (
+          requestedMode === 'producer_browse'
+          || requestedMode === 'region_browse'
+          || requestedMode === 'compare_candidates'
+        ) {
+          specializedRequestedCounts[requestedMode] += 1;
+          if (decision.fallback_applied === true) {
+            specializedFallbackCounts[requestedMode] += 1;
+            if (
+              typeof decision.fallback_reason === 'string'
+              && SPECIALIZED_FALLBACK_REASONS.has(decision.fallback_reason)
+            ) {
+              specializedFallbackHistogram.set(
+                decision.fallback_reason,
+                (specializedFallbackHistogram.get(decision.fallback_reason) ?? 0) + 1,
+              );
+            }
+          }
+        }
+      },
+      (done, total) => {
+        if (done % 50 === 0 || done === total) {
+          if (done !== lastLogged) {
+            lastLogged = done;
+            console.log(`  Progress: ${done}/${total}`);
+          }
+        }
+      },
+    ),
+    jobTimeoutPromise,
+  ]);
+
   console.log('\nComputing metrics …');
-  const decisions = allResults.map((r) => r.decision);
-  const truths = allResults.map((r) => r.truth);
-  const perQueryMetrics = buildOfflinePerQueryMetrics(allResults);
+  const queryCount = Math.max(1, evalQueries.length);
+  globalNdcg /= queryCount;
+  globalMrr /= queryCount;
+  globalRecallAt3 /= queryCount;
+  globalRecall /= queryCount;
 
-  const globalNdcg = perQueryMetrics.ndcg_at_10.reduce((a, b) => a + b, 0) / allResults.length;
-  const globalMrr = perQueryMetrics.mrr_at_10.reduce((a, b) => a + b, 0) / allResults.length;
-  const globalRecallAt3 = perQueryMetrics.recall_at_3.reduce((a, b) => a + b, 0) / allResults.length;
-  const globalRecall = perQueryMetrics.recall_at_100.reduce((a, b) => a + b, 0) / allResults.length;
-
-  // Scenario slices
-  const byScenario: Record<string, ScenarioSlice> = {};
-  const scenarioGroups = new Map<string, typeof allResults>();
-  for (const r of allResults) {
-    const key = r.query.scenario;
-    const existing = scenarioGroups.get(key);
-    if (existing) {
-      existing.push(r);
-    } else {
-      scenarioGroups.set(key, [r]);
-    }
-  }
-  for (const [scenario, group] of scenarioGroups) {
-    byScenario[scenario] = computeSlice(group);
+  // Warn when >5% of queries failed (network/timeout errors in eval execution)
+  const failedFraction = failedQueryCount / queryCount;
+  if (failedFraction > 0.05) {
+    console.warn(
+      `[eval] WARNING: ${failedQueryCount}/${evalQueries.length} queries failed (${(failedFraction * 100).toFixed(1)}% > 5% threshold). ` +
+      'Metrics may be unreliable. Check SEARCH_API_URL and network connectivity.',
+      { failedCount: failedQueryCount, totalCount: evalQueries.length, failedFraction },
+    );
   }
 
-  // Language slices
-  const byLanguage: Record<string, ScenarioSlice> = {};
-  const langGroups = new Map<string, typeof allResults>();
-  for (const r of allResults) {
-    const key = r.query.language;
-    const existing = langGroups.get(key);
-    if (existing) {
-      existing.push(r);
-    } else {
-      langGroups.set(key, [r]);
-    }
-  }
-  for (const [lang, group] of langGroups) {
-    byLanguage[lang] = computeSlice(group);
-  }
+  const ndcgSucceededOnly = succeededQueryCount > 0 ? succeededNdcgTotal / succeededQueryCount : 0;
 
-  // Epic 11: Mode-specific slices
+  const byScenario = Object.fromEntries(
+    [...scenarioAccumulators.entries()].map(([scenario, accumulator]) => [
+      scenario,
+      finalizeSliceAccumulator(accumulator),
+    ]),
+  ) as Record<string, ScenarioSlice>;
+
+  const byLanguage = Object.fromEntries(
+    [...languageAccumulators.entries()].map(([language, accumulator]) => [
+      language,
+      finalizeSliceAccumulator(accumulator),
+    ]),
+  ) as Record<string, ScenarioSlice>;
+
   const byModeEntries: [RetrievalMode, ModeMetrics][] = [];
-  const modeGroups = new Map<RetrievalMode, typeof allResults>();
-  for (const r of allResults) {
-    const mode = r.query.retrieval_mode ?? 'entity_lookup';
-    const existing = modeGroups.get(mode);
-    if (existing) {
-      existing.push(r);
-    } else {
-      modeGroups.set(mode, [r]);
-    }
-  }
   for (const mode of ALL_RETRIEVAL_MODES) {
-    const group = modeGroups.get(mode);
-    if (group && group.length > 0) {
-      byModeEntries.push([mode, computeModeMetrics(group, mode)]);
+    const accumulator = modeAccumulators.get(mode);
+    if (accumulator && accumulator.queryCount > 0) {
+      byModeEntries.push([mode, finalizeModeAccumulator(accumulator, mode)]);
     }
   }
   const byMode = Object.fromEntries(byModeEntries) as Record<RetrievalMode, ModeMetrics>;
 
-  // Epic 11: Entity target type slices
-  const byTargetTypeEntries: [EntityTargetType, EntityTypeMetrics][] = [];
-  const typeGroups = new Map<EntityTargetType, typeof allResults>();
-  for (const r of allResults) {
-    const targetType = inferEntityTargetTypeFromQuery({
-      retrieval_mode: r.query.retrieval_mode,
-      query_class: r.query.query_class,
-      scenario: r.query.scenario,
-    });
-    const existing = typeGroups.get(targetType);
-    if (existing) {
-      existing.push(r);
-    } else {
-      typeGroups.set(targetType, [r]);
-    }
-  }
-  for (const [targetType, group] of typeGroups) {
-    byTargetTypeEntries.push([targetType, computeEntityTypeMetrics(group, targetType)]);
-  }
-  const byTargetType = Object.fromEntries(byTargetTypeEntries) as Record<EntityTargetType, EntityTypeMetrics>;
-  const byExecutionMode = computeExecutionModeSlices(allResults);
-  const byBlockingEligible = computeBlockingEligibleSlices(allResults);
-  const degradationReasonHistogram = computeDegradationReasonHistogram(allResults);
-  const executionModeBlockingEligible = computeExecutionModeBlockingEligibleMatrix(allResults);
+  const byTargetType = Object.fromEntries(
+    [...targetTypeAccumulators.entries()].map(([targetType, accumulator]) => [
+      targetType,
+      finalizeEntityTypeAccumulator(accumulator, targetType),
+    ]),
+  ) as Record<EntityTargetType, EntityTypeMetrics>;
+  const byExecutionMode = Object.fromEntries(
+    [...executionModeAccumulators.entries()].map(([bucket, accumulator]) => [
+      bucket,
+      finalizeSliceAccumulator(accumulator),
+    ]),
+  ) as Record<EvalExecutionModeBucket, ScenarioSlice>;
+  const byBlockingEligible = Object.fromEntries(
+    [...blockingEligibleAccumulators.entries()].map(([bucket, accumulator]) => [
+      bucket,
+      finalizeSliceAccumulator(accumulator),
+    ]),
+  ) as Record<EvalBlockingEligibleBucket, ScenarioSlice>;
+  const degradationReasonHistogram = Object.fromEntries(
+    [...degradationReasonHistogramMap.entries()].sort(([left], [right]) => left.localeCompare(right)),
+  );
+  const executionModeBlockingEligible = Object.fromEntries(
+    [...executionModeBlockingEligibleCounts.entries()].map(([modeBucket, row]) => [
+      modeBucket,
+      Object.fromEntries(
+        [...row.entries()].map(([blockingBucket, count]) => [
+          blockingBucket,
+          {
+            query_count: count,
+            share: count / queryCount,
+          },
+        ]),
+      ),
+    ]),
+  ) as Record<EvalExecutionModeBucket, Partial<Record<EvalBlockingEligibleBucket, EvalCountShareBucket>>>;
+  const specializedFallback: SpecializedFallbackMetrics = {
+    fallback_rate: {
+      producer_browse: {
+        requested_count: specializedRequestedCounts.producer_browse,
+        fallback_rate:
+          specializedRequestedCounts.producer_browse === 0
+            ? null
+            : specializedFallbackCounts.producer_browse / specializedRequestedCounts.producer_browse,
+      },
+      region_browse: {
+        requested_count: specializedRequestedCounts.region_browse,
+        fallback_rate:
+          specializedRequestedCounts.region_browse === 0
+            ? null
+            : specializedFallbackCounts.region_browse / specializedRequestedCounts.region_browse,
+      },
+      compare_candidates: {
+        requested_count: specializedRequestedCounts.compare_candidates,
+        fallback_rate:
+          specializedRequestedCounts.compare_candidates === 0
+            ? null
+            : specializedFallbackCounts.compare_candidates / specializedRequestedCounts.compare_candidates,
+      },
+    },
+    ...(specializedFallbackHistogram.size > 0
+      ? { fallback_reason_histogram: Object.fromEntries(specializedFallbackHistogram) }
+      : {}),
+  };
+  const globalDecisionMetrics = finalizeGlobalDecisionAccumulator(globalDecisionAccumulator);
 
   const evalResult: EvalResult = {
     dataset_tier: args.tier,
-    query_count: allResults.length,
+    query_count: evalQueries.length,
     ndcg_at_10: globalNdcg,
+    ndcg_succeeded_only: ndcgSucceededOnly,
     mrr_at_10: globalMrr,
     recall_at_3: globalRecallAt3,
     recall_at_100: globalRecall,
-    decision_utility: decisionUtilityScore(decisions, truths),
-    wrong_top1_rate: wrongTop1Rate(decisions, truths),
-    safe_abstain_rate: safeAbstainRate(decisions, truths),
-    avoidable_abstain_rate: avoidableAbstainRate(decisions, truths),
-    aurc: aurc(decisions, truths),
-    e_aurc: excessAurc(decisions, truths),
-    ece: ece(decisions, truths),
+    decision_utility: globalDecisionMetrics.decisionUtility,
+    wrong_top1_rate: globalDecisionMetrics.wrongTop1Rate,
+    safe_abstain_rate: globalDecisionMetrics.safeAbstainRate,
+    avoidable_abstain_rate: globalDecisionMetrics.avoidableAbstainRate,
+    aurc: globalDecisionMetrics.aurc,
+    e_aurc: globalDecisionMetrics.excessAurc,
+    ece: globalDecisionMetrics.ece,
     by_scenario: byScenario,
     by_language: byLanguage,
     by_execution_mode: byExecutionMode,
@@ -1365,16 +2074,18 @@ async function run(): Promise<void> {
   if (Object.keys(byMode).length > 0) {
     evalResult.by_mode = byMode;
   }
-  evalResult.specialized_fallback = computeSpecializedFallbackMetrics(allResults);
+  evalResult.specialized_fallback = specializedFallback;
   if (Object.keys(byTargetType).length > 0) {
     evalResult.by_target_type = byTargetType;
   }
   evalResult.release_report = buildDegradationAwareReleaseReport(evalResult);
   evalResult.metric_policy = buildEvalMetricPolicySummary();
   evalResult.non_blocking_metrics = evalResult.metric_policy.advisory_metrics;
-  evalResult.diagnostics = {
-    per_query_metrics: perQueryMetrics,
-  };
+  if (args.includeDiagnostics) {
+    evalResult.diagnostics = {
+      per_query_metrics: perQueryMetrics,
+    };
+  }
 
   if (args.baselineReport) {
     const baselineRaw = await fs.readFile(args.baselineReport, 'utf8');
@@ -1383,7 +2094,7 @@ async function run(): Promise<void> {
       args.baselineReport,
       evalResult,
       baseline,
-      perQueryMetrics,
+      perQueryMetrics!,
     );
   }
 
@@ -1737,18 +2448,6 @@ async function run(): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     console.warn(`⚠️  Could not run embedding validation: ${msg}`);
   }
-}
-
-function decisionUtilityScore(
-  outcomes: readonly DecisionOutcome[],
-  truths: readonly GroundTruth[],
-): number {
-  if (outcomes.length === 0) return 0;
-  let total = 0;
-  for (let i = 0; i < outcomes.length; i++) {
-    total += queryUtility(outcomes[i]!, truths[i]!);
-  }
-  return total / outcomes.length;
 }
 
 function isMainModule(): boolean {

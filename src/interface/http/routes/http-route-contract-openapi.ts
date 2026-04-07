@@ -92,6 +92,10 @@ interface ZodIntersectionDef {
   readonly right: z.ZodTypeAny;
 }
 
+interface ZodTupleDef {
+  readonly items: readonly z.ZodTypeAny[];
+}
+
 interface ZodDiscriminatedUnionDef {
   readonly options: readonly z.ZodDiscriminatedUnionOption<string>[];
 }
@@ -344,6 +348,17 @@ function zodToOpenApiSchema(schema: z.ZodTypeAny): OpenApiBridgeSchema {
     };
   }
 
+  if (current instanceof z.ZodTuple) {
+    const tupleItems = getTupleItems(current);
+    // OpenAPI 3.1 tuple representation: fixed-length array with prefixItems.
+    return {
+      type: 'array',
+      prefixItems: tupleItems.map((item) => zodToOpenApiSchema(item)),
+      minItems: tupleItems.length,
+      maxItems: tupleItems.length,
+    } as OpenApiBridgeSchema;
+  }
+
   if (current instanceof z.ZodRecord) {
     return {
       type: 'object',
@@ -445,4 +460,8 @@ function getDiscriminatedUnionOptions(
 function getObjectEntries(schema: z.ZodObject<z.ZodRawShape>): [string, z.ZodTypeAny][] {
   const shape = schema.shape as Record<string, z.ZodTypeAny>;
   return Object.entries(shape);
+}
+
+function getTupleItems(schema: z.ZodTuple): readonly z.ZodTypeAny[] {
+  return (schema._def as unknown as ZodTupleDef).items;
 }

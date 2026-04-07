@@ -1,0 +1,21 @@
+{
+  "name": "exact-entity-replay",
+  "endpoint": "/v1/search/replay",
+  "execution_lane": "self_contained",
+  "replay_request": {
+    "query": "Opus One 2018",
+    "decision_snapshot": {
+      "snapshot_id": "snapshot:v1:default:1.0.0:1.0.0:placeholder",
+      "model_versions": {},
+      "index_versions": {},
+      "policy_rule_version": "1.0.0",
+      "threshold_profile_id": "default",
+      "planner_version": "1.0.0",
+      "feature_flags": {},
+      "response_contract_version": "search_response_v1"
+    }
+  },
+  "expected": {
+    "error_code": "SNAPSHOT_MISMATCH"
+  }
+}

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 const OfflineEvalSchema = z.object({
   dataset_tier: z.string().min(1),
@@ -80,7 +81,7 @@ export interface RegressionViolation {
   readonly message: string;
 }
 
-const DEFAULT_MANIFEST = 'data/eval-baselines/manifest.json';
+const DEFAULT_MANIFEST = resolveDataPath('data/eval-baselines/manifest.json');
 
 interface CliArgs {
   kind: 'offline' | 'noisy';

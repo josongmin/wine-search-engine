@@ -12,8 +12,13 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 | `npm run build` | Production `tsc` (excludes `**/*.test.ts` and `__tests__` via `tsconfig.build.json`) |
 | `npm run start` | Run `dist/` entry |
 | `npm run lint` / `npm run lint:fix` | ESLint (type-checked rules for `src/`) |
+| `npm run check:dev` | Everyday local check: typecheck + lightweight test lane |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run test` | Vitest |
+| `npm run test` | Lightweight everyday Vitest lane |
+| `npm run test:meta` | Meta/parity lane for fixture/workflow/route consistency checks |
+| `npm run test:unit` | Fuller unit regression lane |
+| `npm run test:watchlist` | Watchlist-only lane |
+| `npm run test:heavy` | Expensive search regression lane |
 | `npm run test:e2e:contract` | Contract-only HTTP surface checks |
 | `npm run test:e2e:fast` | Main in-memory fast e2e lane used in CI |
 | `npm run test:e2e:inmemory` | Alias for `test:e2e:fast` |
@@ -24,6 +29,7 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 | `npm run verify:http-contracts` | OpenAPI/catalog parity (runs on `git:prepush`) |
 | `npm run git:prepush` | Husky pre-push: typecheck + unit + `verify:http-contracts` |
 | `npm run git:prepush:quick` | typecheck + unit only (skip HTTP contract check) |
+| `npm run git:prepush:heavy` | Extended pre-push: `git:prepush` + heavy test lane |
 
 ## Architecture (short)
 

@@ -157,7 +157,7 @@ export class WineToolExecutor {
     toolName: string,
     input: unknown,
     requestId: string,
-    v2Options?: ToolExecutionV2Options | undefined,
+    v2Options?: ToolExecutionV2Options,
   ): Promise<SearchResponseV1 | SearchResponseV2Machine | ComparisonSearchResponse | DrinkingWindowBlock | { error: string }> {
     switch (toolName) {
       case 'search_wines': {
@@ -166,7 +166,7 @@ export class WineToolExecutor {
         // caller-supplied ranked results. V1 path is unchanged otherwise.
         // Guard on the flag value itself (not just presence) so an accidental
         // falsy v2Options does not silently fall through to V2 projection.
-        if (v2Options !== undefined && v2Options.useV2MachineFormat === true) {
+        if (v2Options !== undefined) {
           const queryId = v2Options.queryId ?? requestId;
           return buildMachineResponseV2({
             queryId,

@@ -3,6 +3,8 @@ import type { SearchResponseV1 } from '../../domain/response/model/search-respon
 import type { SnapshotVersions } from './search.usecase.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
@@ -115,25 +117,73 @@ export class HybridUseCase {
     }
 
     const { plan } = preRoute;
+    let hybridPipelineResult: Awaited<ReturnType<typeof executeHybridRouteRankingPipeline>>;
+    try {
+      hybridPipelineResult = await executeHybridRouteRankingPipeline(
+        plan,
+        {
+          candidatePool: this.deps.candidatePool,
+          browseRetriever: this.deps.browseRetriever,
+          compareRetriever: this.deps.compareRetriever,
+          ranker: this.deps.ranker,
+        },
+        (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
+          entityResolver: this.deps.entityResolver,
+          entityLookup: this.deps.entityLookup,
+        }),
+      );
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      bootstrapLogger.error(
+        { err: errorMessage, requestId },
+        '[HybridUseCase] Unexpected error in hybrid ranking pipeline; returning structured failure response',
+      );
+      pipelineDebug(
+        {
+          step: 'hybrid.execute.pipeline_error',
+          error: errorMessage,
+        },
+        'pipeline hybrid ranking error',
+      );
+      const snapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
+      const errorTraceRef = `decision:error:${requestId}`;
+      const degradedResponse: SearchResponseV1 = {
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route: 'error',
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: errorTraceRef,
+          decisionSnapshot: snapshot,
+          executionMode: 'degraded',
+          blockingEligible: false,
+          failure_reason: 'INTERNAL_INCONSISTENCY',
+        },
+        results: [],
+        meta: {
+          requestId,
+          queryTimeMs: Date.now() - startTime,
+          route: 'error',
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+          decisionSnapshot: snapshot,
+          authorityTraceRef: errorTraceRef,
+          runtimeCorrelationRef: requestId,
+          executionMode: 'degraded',
+          blockingEligible: false,
+        },
+      };
+      return degradedResponse;
+    }
     const {
       resolveResult,
       rankedResults,
       decisionContext,
       routeDegradation,
       specializedRouteObservability,
-    } = await executeHybridRouteRankingPipeline(
-      plan,
-      {
-        candidatePool: this.deps.candidatePool,
-        browseRetriever: this.deps.browseRetriever,
-        compareRetriever: this.deps.compareRetriever,
-        ranker: this.deps.ranker,
-      },
-      (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
-        entityResolver: this.deps.entityResolver,
-        entityLookup: this.deps.entityLookup,
-      }),
-    );
+    } = hybridPipelineResult;
 
     pipelineDebug(
       {

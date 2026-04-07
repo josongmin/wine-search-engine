@@ -46,6 +46,9 @@ export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entit
   readonly certifications?: readonly string[] | undefined;
   readonly soilType?: string | undefined;
   readonly producerType?: string | undefined;
+  readonly grapeFamily?: string | undefined;
+  readonly regionHierarchy?: readonly string[] | undefined;
+  readonly priceBandNumeric?: number | undefined;
 }
 
 export const RETRIEVAL_HIT_SUMMARY_KEYS = [
@@ -79,6 +82,9 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'certifications',
   'soilType',
   'producerType',
+  'grapeFamily',
+  'regionHierarchy',
+  'priceBandNumeric',
 ] as const satisfies readonly (keyof RetrievalHitSummary)[];
 
 export type RetrievalHitSummaryKey = (typeof RETRIEVAL_HIT_SUMMARY_KEYS)[number];

@@ -11,6 +11,7 @@ import type {
   RankingPort,
 } from './port/search-pipeline-deps.port.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
 import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
@@ -61,7 +62,7 @@ export async function resolveEntityRouteForPlan(
 ): Promise<EntityResolveResult> {
   if (deps.entityResolver === undefined) {
     pipelineDebug(
-      { step: 'resolver.anchor.missing', query_class: plan.queryClass },
+      { step: PipelineDebugStep.RESOLVER_ANCHOR_MISSING, query_class: plan.queryClass },
       'pipeline hybrid anchor resolver unavailable',
     );
     return buildMissingEntityResolverResult(plan);
@@ -74,7 +75,7 @@ export async function resolveEntityRouteForPlan(
 
   pipelineDebug(
     {
-      step: 'resolver.anchor.start',
+      step: PipelineDebugStep.RESOLVER_ANCHOR_START,
       query_class: plan.queryClass,
       resolver_candidate_count: candidateEntities.length,
     },
@@ -96,7 +97,7 @@ export async function resolveEntityRouteForPlan(
 
   pipelineDebug(
     {
-      step: 'resolver.anchor.done',
+      step: PipelineDebugStep.RESOLVER_ANCHOR_DONE,
       resolve_status: resolved.status,
       candidate_count: resolved.candidates.length,
     },
@@ -136,7 +137,7 @@ export async function runHybridRankingPipeline(
 
   pipelineDebug(
     {
-      step: 'ranking.hybrid.complete',
+      step: PipelineDebugStep.RANKING_HYBRID_COMPLETE,
       query_class: plan.queryClass,
       input_candidates: candidates.length,
       ranked_count: rankedResults.length,

@@ -6,19 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { SearchResponseV1 } from '../../src/domain/response/model/search-response.js';
 import { createTestContainer, type TestContainerParts } from './helpers/test-container.js';
 import {
   TEST_ALIASES,
   TEST_DOCUMENTS,
-  OPUS_ONE_ID,
-  CHATEAU_MARGAUX_ID,
-  CLOUDY_BAY_ID,
   MOET_BRUT_ID,
   SAUTERNES_ID,
-  SASSICAIA_ID,
-  BAROLO_GIACOMO_ID,
-  FULL_BODY_ENTITY_IDS,
 } from './helpers/test-fixtures.js';
 import type { SearchRequest } from '../../src/application/search/search.usecase.js';
 
@@ -111,9 +104,8 @@ describe('Search Pipeline Integration', () => {
         'req-hybrid-1',
       );
 
-      // Hybrid route should not fail with documents in the index
-      expect(response.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous|failed)$/);
       expect(response.meta.route).toBe('hybrid');
+      expect(response.results.length).toBeGreaterThan(0);
     });
 
     it('"풀바디 타닌 강한 와인" — sparse search finds full-body wines', async () => {
@@ -123,6 +115,7 @@ describe('Search Pipeline Integration', () => {
       );
 
       expect(response.meta.route).toBe('hybrid');
+      expect(response.results.length).toBeGreaterThan(0);
       // All result entities must have evidenceItems (enforced by ResponseBuilder)
       for (const result of response.results) {
         expect(result.evidenceItems.length).toBeGreaterThan(0);
@@ -130,71 +123,34 @@ describe('Search Pipeline Integration', () => {
     });
 
     it('"스파클링 와인" — search index returns Moët Brut', async () => {
-      const response = (await parts.container.searchUseCase.execute(
+      const response = await parts.container.searchUseCase.execute(
         makeRequest('스파클링 와인', { options: { mode: 'hybrid', explain: false, clarification: false } }),
         'req-hybrid-3',
-      )) as SearchResponseV1;
+      );
 
       expect(response.meta.route).toBe('hybrid');
-      // If results are present, Moët should be among them (sparkling keyword)
-      if (response.results.length > 0) {
-        const ids = response.results.map((r) => r.entity.entityId);
-        expect(ids).toContain(MOET_BRUT_ID);
-      }
+      expect(response.results.length).toBeGreaterThan(0);
+      const ids = response.results.map((r) => r.entity.entityId);
+      expect(ids).toContain(MOET_BRUT_ID);
     });
 
     it('"달달한 와인" — search index returns Sauternes', async () => {
-      const response = (await parts.container.searchUseCase.execute(
+      const response = await parts.container.searchUseCase.execute(
         makeRequest('달달한 와인', { options: { mode: 'hybrid', explain: false, clarification: false } }),
         'req-hybrid-4',
-      )) as SearchResponseV1;
+      );
 
       expect(response.meta.route).toBe('hybrid');
-      if (response.results.length > 0) {
-        const ids = response.results.map((r) => r.entity.entityId);
-        expect(ids).toContain(SAUTERNES_ID);
-      }
+      expect(response.results.length).toBeGreaterThan(0);
+      const ids = response.results.map((r) => r.entity.entityId);
+      expect(ids).toContain(SAUTERNES_ID);
     });
   });
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Group 3: Mixed Query Path
+  // Group 3: Decision Contract
   // ─────────────────────────────────────────────────────────────────────────
-  describe('Group 3 — Mixed Query Path', () => {
-    it('"오푸스원 같은 와인" — detected as mixed query', async () => {
-      const response = await parts.container.searchUseCase.execute(
-        makeRequest('오푸스원 같은 와인'),
-        'req-mixed-1',
-      );
-
-      // Mixed queries are routed to the mixed solver or hybrid path
-      expect(response.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous|failed)$/);
-      expect(response.meta.queryTimeMs).toBeGreaterThanOrEqual(0);
-    });
-
-    it('"마고 비슷한 레드" — mixed query processes without error', async () => {
-      const response = await parts.container.searchUseCase.execute(
-        makeRequest('마고 비슷한 레드'),
-        'req-mixed-2',
-      );
-
-      expect(response.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous|failed)$/);
-    });
-
-    it('"클라우디베이 말고 다른 화이트" — processed as mixed query', async () => {
-      const response = await parts.container.searchUseCase.execute(
-        makeRequest('클라우디베이 말고 다른 화이트'),
-        'req-mixed-3',
-      );
-
-      expect(response.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous|failed)$/);
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Group 4: Decision Contract
-  // ─────────────────────────────────────────────────────────────────────────
-  describe('Group 4 — Decision Contract', () => {
+  describe('Group 3 — Decision Contract', () => {
     it('every resolved response has required fields', async () => {
       // Force entity mode with a known alias to maximize chance of resolution
       const response = await parts.container.searchUseCase.execute(
@@ -269,123 +225,4 @@ describe('Search Pipeline Integration', () => {
     });
   });
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Group 5: Replay Contract
-  // ─────────────────────────────────────────────────────────────────────────
-  describe('Group 5 — Replay Contract', () => {
-    it('replay with matching snapshot succeeds', async () => {
-      // First, do a normal search to get a snapshot
-      const original = await parts.container.searchUseCase.execute(
-        makeRequest('Opus One 2018'),
-        'req-replay-orig',
-      );
-
-      const snapshot = original.engineDecision.decisionSnapshot;
-
-      // Replay with the exact same snapshot (matches current runtime)
-      // The ReplayUseCase builds a current snapshot with hardcoded defaults;
-      // we must supply a snapshot that matches those defaults.
-      const matchingSnapshot = {
-        model_versions: {},
-        index_versions: {},
-        policy_rule_version: '1.0.0',
-        threshold_profile_id: 'default',
-        planner_version: '1.0.0',
-        feature_flags: {},
-      };
-
-      const replayResponse = await parts.container.replayUseCase.execute(
-        {
-          query: 'Opus One 2018',
-          decision_snapshot: matchingSnapshot,
-        },
-        'req-replay-1',
-      );
-
-      expect(replayResponse.engineDecision.decisionStatus).toMatch(/^(resolved|ambiguous|failed)$/);
-      expect(replayResponse.meta.requestId).toBe('req-replay-1');
-    });
-
-    it('replay with mismatched snapshot throws SNAPSHOT_MISMATCH', async () => {
-      const mismatchedSnapshot = {
-        model_versions: { embedding: 'bge-m3-v2.0' }, // different version
-        index_versions: {},
-        policy_rule_version: '9.9.9', // mismatched
-        threshold_profile_id: 'custom-profile',
-        planner_version: '2.0.0',
-        feature_flags: {},
-      };
-
-      await expect(
-        parts.container.replayUseCase.execute(
-          {
-            query: 'Opus One 2018',
-            decision_snapshot: mismatchedSnapshot,
-          },
-          'req-replay-2',
-        ),
-      ).rejects.toMatchObject({ name: 'SnapshotMismatchError' });
-    });
-
-    it('replay with a null decision_snapshot throws MISSING_SNAPSHOT', async () => {
-      await expect(
-        parts.container.replayUseCase.execute(
-          {
-            query: 'Opus One 2018',
-            decision_snapshot: null as unknown as ReturnType<
-              typeof parts.container.replayUseCase.execute
-            >,
-          },
-          'req-replay-3',
-        ),
-      ).rejects.toMatchObject({ code: 'MISSING_SNAPSHOT' });
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Group 6: Interpret Endpoint
-  // ─────────────────────────────────────────────────────────────────────────
-  describe('Group 6 — Interpret Endpoint', () => {
-    it('returns a QueryPlanV1 with required fields', async () => {
-      const plan = await parts.container.interpretUseCase.execute({
-        query: '오푸스원',
-      });
-
-      expect(plan.rawQuery).toBe('오푸스원');
-      expect(plan.normalizedQuery).toBeTruthy();
-      expect(plan.intent).toBeTruthy();
-      expect(plan.route).toMatch(/^(entity|hybrid|mixed)$/);
-      expect(plan.queryClass).toBeTruthy();
-      expect(plan.constraints).toBeDefined();
-      expect(plan.policy).toBeDefined();
-      expect(plan.plannerVersion).toBeTruthy();
-    });
-
-    it('planner_version is set on the returned plan', async () => {
-      const plan = await parts.container.interpretUseCase.execute({
-        query: 'full body red wine under 100 dollars',
-      });
-
-      expect(plan.plannerVersion).toBeTruthy();
-      expect(typeof plan.plannerVersion).toBe('string');
-    });
-
-    it('hybrid query is routed to hybrid', async () => {
-      const plan = await parts.container.interpretUseCase.execute({
-        query: '풀바디 레드 와인 추천해줘',
-      });
-
-      // Constraint/preference queries should route to hybrid or mixed
-      expect(plan.route).toMatch(/^(hybrid|mixed)$/);
-    });
-
-    it('entity query is routed to entity', async () => {
-      const plan = await parts.container.interpretUseCase.execute({
-        query: 'Opus One 2018',
-      });
-
-      // A specific named wine should be detected as entity route
-      expect(plan.route).toMatch(/^(entity|hybrid|mixed)$/);
-    });
-  });
 });

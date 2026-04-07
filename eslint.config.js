@@ -9,6 +9,8 @@ export default tseslint.config(
       'coverage/**',
       'eslint.config.js',
       '.claude/**',
+      'web/**',
+      'debug-vespa-fields.ts',
     ],
   },
   eslint.configs.recommended,

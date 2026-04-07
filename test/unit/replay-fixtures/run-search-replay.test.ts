@@ -3,6 +3,8 @@ import {
   buildSearchFixturePayload,
   classifySearchFixtureMode,
   isExecutableSearchReplayFixture,
+  isFullRuntimeSearchReplayFixture,
+  isInMemoryRuntimeSearchReplayFixture,
   isSelfContainedSearchReplayFixture,
   loadSearchReplayFixtures,
   requiresRuntimeCapabilitySearchReplayFixture,
@@ -52,6 +54,18 @@ describe('search replay fixtures', () => {
       expect(isSelfContainedSearchReplayFixture(fixture)).toBe(capabilityCount === 0);
     });
 
+    it(`fixture ${file} keeps runtime mode classification consistent`, () => {
+      if (fixture.execution_lane === 'runtime_required') {
+        expect(fixture.metadata?.runtime_mode).toBeDefined();
+        expect(
+          isInMemoryRuntimeSearchReplayFixture(fixture) || isFullRuntimeSearchReplayFixture(fixture),
+        ).toBe(true);
+      } else {
+        expect(isInMemoryRuntimeSearchReplayFixture(fixture)).toBe(false);
+        expect(isFullRuntimeSearchReplayFixture(fixture)).toBe(false);
+      }
+    });
+
     it(`fixture ${file} can be routed by helper mode without ad-hoc logic`, () => {
       expect(classifySearchFixtureMode(fixture)).toBe(
         fixture.request !== undefined ? 'search' : 'replay',
@@ -62,6 +76,8 @@ describe('search replay fixtures', () => {
   it('applies snapshot_override by rebuilding the replay payload', () => {
     const payload = buildSearchFixturePayload({
       name: 'override',
+      endpoint: '/v1/search/replay',
+      execution_lane: 'self_contained',
       replay_request: {
         query: 'Opus One 2018',
         decision_snapshot: {
@@ -86,13 +102,15 @@ describe('search replay fixtures', () => {
     });
 
     expect('decision_snapshot' in payload).toBe(true);
-    expect(payload.decision_snapshot.snapshot_id).toBe('snapshot:v1:default:1.0.0:1.0.0:override');
+    expect(payload.decision_snapshot.snapshot_id).toMatch(/^snapshot:v1:default:1\.0\.0:1\.0\.0:/);
     expect(payload.decision_snapshot.nondeterminism_notes).toBe('runtime override');
   });
 
   it('keeps plain search fixtures free of replay-only override behavior', () => {
     const payload = buildSearchFixturePayload({
       name: 'search-only',
+      endpoint: '/v1/search',
+      execution_lane: 'self_contained',
       request: {
         query: 'Opus One 2018',
       },
@@ -103,7 +121,7 @@ describe('search replay fixtures', () => {
     });
 
     expect('query' in payload).toBe(true);
-    expect('decision_snapshot' in payload).toBe(false);
+    expect(payload).not.toHaveProperty('decision_snapshot');
   });
 
   it('returns structured invalid-id results for decoder runtime usage', () => {

@@ -5,6 +5,9 @@
  * Uses native `fetch` — no external SDK dependency.
  */
 
+import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
+import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -32,6 +35,33 @@ export interface BulkFeedResult {
   readonly successCount: number;
   readonly failureCount: number;
   readonly errors: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// VespaNetworkError
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when a low-level network or transport error occurs while communicating
+ * with Vespa (e.g. connection refused, DNS resolution failure, request aborted
+ * by the AbortController timeout, or any other `fetch` rejection that is not an
+ * HTTP error).
+ *
+ * Distinguishing network errors from HTTP errors (which carry a status code and
+ * a response body) lets callers apply the right retry / circuit-breaker policy:
+ * - Network errors are typically transient and safe to retry immediately.
+ * - HTTP errors (4xx / 5xx) usually indicate a logic or data issue that may not
+ *   resolve on retry.
+ */
+export class VespaNetworkError extends Error {
+  /** The original error from `fetch` (always an `Error` in practice). */
+  override readonly cause: Error;
+
+  constructor(message: string, cause: Error) {
+    super(message);
+    this.name = 'VespaNetworkError';
+    this.cause = cause;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -64,9 +94,6 @@ function extractErrorMessage(body: unknown): string {
   return String(body);
 }
 
-import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
-import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
-
 // ---------------------------------------------------------------------------
 // VespaClient
 // ---------------------------------------------------------------------------
@@ -90,8 +117,14 @@ export class VespaClient {
 
   /**
    * Wraps `fetch` with an AbortController-based timeout.
-   * The request is aborted and an error thrown if it takes longer than
-   * `timeoutMs` milliseconds.
+   *
+   * The request is aborted and a `VespaNetworkError` thrown if it takes longer
+   * than `timeoutMs` milliseconds, or if the underlying TCP/TLS connection
+   * fails for any other reason (`fetch` rejection).
+   *
+   * Callers can distinguish transport failures (`VespaNetworkError`) from Vespa
+   * application errors (non-2xx `response.ok === false`) to apply different
+   * retry / circuit-breaker policies.
    */
   private async fetchWithTimeout(
     url: string,
@@ -102,6 +135,17 @@ export class VespaClient {
     const id = setTimeout(() => { controller.abort(); }, timeoutMs);
     try {
       return await fetch(url, { ...options, signal: controller.signal });
+    } catch (err) {
+      // `fetch` rejects with a TypeError (or DOMException for abort) when the
+      // request cannot be sent at the network/transport layer — not for HTTP
+      // error responses.  Wrap these in VespaNetworkError so callers can
+      // distinguish transport failures from Vespa application errors.
+      const cause = err instanceof Error ? err : new Error(String(err));
+      const aborted = controller.signal.aborted;
+      const message = aborted
+        ? `Vespa request timed out after ${timeoutMs}ms (${url})`
+        : `Vespa network error (${url}): ${cause.message}`;
+      throw new VespaNetworkError(message, cause);
     } finally {
       clearTimeout(id);
     }
@@ -117,6 +161,7 @@ export class VespaClient {
    * @param yql - The YQL query string.
    * @param params - Additional query parameters merged into the request body.
    * @returns The parsed Vespa query response.
+   * @throws {VespaNetworkError} On transport-level failure (timeout, connection refused, etc.).
    * @throws {Error} On non-2xx HTTP status or malformed response.
    */
   async query(
@@ -217,6 +262,7 @@ export class VespaClient {
    *
    * @param docId - The document identifier (used as the docid path segment).
    * @param fields - The document fields to store.
+   * @throws {VespaNetworkError} On transport-level failure.
    * @throws {Error} On non-2xx HTTP status.
    */
   async put(docId: string, fields: Record<string, unknown>): Promise<void> {
@@ -229,6 +275,7 @@ export class VespaClient {
    *
    * @param docId - The document identifier.
    * @param fields - The fields to update (partial update semantics).
+   * @throws {VespaNetworkError} On transport-level failure.
    * @throws {Error} On non-2xx HTTP status.
    */
   async update(docId: string, fields: Record<string, unknown>): Promise<void> {
@@ -262,6 +309,7 @@ export class VespaClient {
    * Deletes a document from the index.
    *
    * @param docId - The document identifier.
+   * @throws {VespaNetworkError} On transport-level failure.
    * @throws {Error} On non-2xx HTTP status (404 is tolerated as a no-op).
    */
   async delete(docId: string): Promise<void> {
@@ -282,6 +330,7 @@ export class VespaClient {
    *
    * @param docId - The document identifier.
    * @returns The document fields, or `null` if the document was not found.
+   * @throws {VespaNetworkError} On transport-level failure.
    * @throws {Error} On non-2xx / non-404 HTTP status.
    */
   async get(docId: string): Promise<Record<string, unknown> | null> {

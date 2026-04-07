@@ -19,6 +19,7 @@ import path from 'node:path';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { parseNdjson } from './ndjson';
 import { normalizePairingsBatch } from './generate-pairings';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 interface SilverRecord {
   readonly canonicalLabel: string;
@@ -31,7 +32,7 @@ interface EnrichedRecord extends SilverRecord {
   readonly pairingTags: readonly string[];
 }
 
-const DATA_FILE = path.resolve('./data/silver-docquery.ndjson');
+const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
 const BATCH_SIZE = 100;
 
 async function main() {

@@ -43,13 +43,13 @@ function xorshift32(state: { value: number }): number {
  * Deterministic Fisher-Yates shuffle that mutates `arr` in-place.
  * Uses xorshift32 seeded from the provided seed value.
  */
-function deterministicShuffle<T>(arr: T[], seed: number): void {
+function deterministicShuffle(arr: unknown[], seed: number): void {
   const rng = { value: (seed >>> 0) || 1 };
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(xorshift32(rng) * (i + 1));
     const tmp = arr[i];
-    arr[i] = arr[j] as T;
-    arr[j] = tmp as T;
+    arr[i] = arr[j];
+    arr[j] = tmp;
   }
 }
 
@@ -171,6 +171,14 @@ export function trainLambdaMARTModel(
           gradients[j] = currentGradient + lambda * featureDiff;
         }
         biasMeanDelta += lambda;
+      }
+
+      // Invariant: batch is always non-empty (batchSize = max(1, ...) guarantees this)
+      if (batch.length === 0) {
+        throw new Error(
+          `LambdaMART invariant violation: batch.length === 0 at iteration ${iter} for queryClass '${queryClass}'. ` +
+          'batchSize is computed as Math.max(1, ...) so this should never occur.',
+        );
       }
 
       for (let j = 0; j < 8; j++) {

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { createTestServer, closeTestServer } from '../../test/e2e/helpers/test-server.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 interface Args {
   input?: string;
@@ -28,9 +29,10 @@ function parseArgs(argv: readonly string[]): Args {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const selectedInput = args.input ?? 'data/golden-queries-bronze.jsonl';
+  const defaultInput = resolveDataPath('data/golden-queries-bronze.jsonl');
+  const selectedInput = args.input ?? defaultInput;
 
-  if (selectedInput === 'data/golden-queries-bronze.jsonl' && !args.allowFullDataset) {
+  if (selectedInput === defaultInput && !args.allowFullDataset) {
     console.error(
       [
         'Refusing to run local full offline eval against the in-memory test server.',

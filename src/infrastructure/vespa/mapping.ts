@@ -176,6 +176,9 @@ export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   certifications: { vespaField: 'certifications', kind: 'string_array' },
   soilType: { vespaField: 'soil_type', kind: 'string' },
   producerType: { vespaField: 'producer_type', kind: 'string' },
+  grapeFamily: { vespaField: 'grape_family', kind: 'string' },
+  regionHierarchy: { vespaField: 'region_hierarchy', kind: 'string_array' },
+  priceBandNumeric: { vespaField: 'price_band_numeric', kind: 'number' },
   searchTextKo: { vespaField: 'search_text_ko', kind: 'string' },
 } as const satisfies Record<RetrievalHitSummaryKey, VespaRetrievalSummaryFieldSpec>;
 
@@ -387,6 +390,9 @@ export function fromVespaFields(
     ...(summary.certifications !== undefined && { certifications: [...summary.certifications] }),
     ...(summary.soilType !== undefined && { soilType: summary.soilType }),
     ...(summary.producerType !== undefined && { producerType: summary.producerType }),
+    ...(summary.grapeFamily !== undefined && { grapeFamily: summary.grapeFamily }),
+    ...(summary.regionHierarchy !== undefined && { regionHierarchy: [...summary.regionHierarchy] }),
+    ...(summary.priceBandNumeric !== undefined && { priceBandNumeric: summary.priceBandNumeric }),
     ...(learnedSparseWeights !== undefined && { learnedSparseWeights }),
   };
 }
@@ -408,12 +414,12 @@ export function toRetrievalHitProjection(doc: RetrievalDocument): RetrievalHitPr
   };
   return {
     ...base,
-    ...(doc.producer !== undefined && doc.producer !== '' ? { producer: doc.producer } : {}),
-    ...(doc.region !== undefined && doc.region !== '' ? { region: doc.region } : {}),
+    ...(doc.producer !== '' ? { producer: doc.producer } : {}),
+    ...(doc.region !== '' ? { region: doc.region } : {}),
     ...(doc.appellation !== undefined ? { appellation: doc.appellation } : {}),
     ...(doc.grapePrimary !== undefined ? { grapePrimary: doc.grapePrimary } : {}),
     ...(doc.vintageYear !== undefined ? { vintageYear: doc.vintageYear } : {}),
-    ...(doc.searchTextEn !== undefined && doc.searchTextEn !== ''
+    ...(doc.searchTextEn !== ''
       ? { searchTextEn: doc.searchTextEn }
       : {}),
     ...(doc.producerPrestige !== undefined ? { producerPrestige: doc.producerPrestige } : {}),
@@ -431,10 +437,10 @@ export function toRetrievalFeatureProjection(doc: RetrievalDocument): RetrievalF
   };
   return {
     ...base,
-    ...(doc.body !== undefined && doc.body !== 0 ? { body: doc.body } : {}),
+    ...(doc.body !== 0 ? { body: doc.body } : {}),
     ...(doc.tannin !== undefined ? { tannin: doc.tannin } : {}),
     ...(doc.acidity !== undefined ? { acidity: doc.acidity } : {}),
-    ...(doc.sweetness !== undefined && doc.sweetness !== 0 ? { sweetness: doc.sweetness } : {}),
+    ...(doc.sweetness !== 0 ? { sweetness: doc.sweetness } : {}),
     ...(doc.criticScoreNormalized !== undefined
       ? { criticScoreNormalized: doc.criticScoreNormalized }
       : {}),

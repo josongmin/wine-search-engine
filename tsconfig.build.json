@@ -5,8 +5,11 @@
     "noUnusedParameters": false,
     "incremental": true,
     "tsBuildInfoFile": ".tsbuildinfo.build",
-    "rootDir": "src"
+    "rootDir": "src",
+    "declaration": false,
+    "sourceMap": false,
+    "declarationMap": false
   },
-  "include": ["src/**/*.ts"],
+  "files": ["src/main.ts"],
   "exclude": ["node_modules", "dist", "test", "**/__tests__/**", "**/*.test.ts", "**/lambdamart-ranker.ts", "**/ltr-ranker.ts", "**/ltr-training-service.ts"]
 }

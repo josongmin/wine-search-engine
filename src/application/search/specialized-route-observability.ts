@@ -16,7 +16,7 @@ export interface SpecializedRouteObservability {
 }
 
 export function toSpecializedRouteMeta(
-  observability?: SpecializedRouteObservability | undefined,
+  observability?: SpecializedRouteObservability,
 ): {
   readonly specializedRouteRequested: SpecializedRouteName | null;
   readonly specializedRouteExecuted: SpecializedRouteName | null;

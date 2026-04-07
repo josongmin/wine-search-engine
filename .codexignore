@@ -1,0 +1,79 @@
+# Keep Codex focused on source, not bulky local artifacts or generated outputs.
+
+# Dependencies / builds
+node_modules
+node_modules/
+web/node_modules
+web/node_modules/
+dist
+dist/
+coverage
+coverage/
+.next/
+web/.next/
+.turbo/
+.cache/
+.tmp/
+tmp/
+temp/
+*.tsbuildinfo
+next-env.d.ts
+test-results
+test-results/
+playwright-report
+playwright-report/
+*.log
+
+# Large local snapshots / archives
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+
+# Local AI tooling state
+.cursor/cache/
+.cursor/debug/
+.cursor/browser-logs/
+.cursor/mcp.json.local
+.codex/cache/
+.codex/sessions/
+.claude/cache/
+.claude/debug/
+.claude/sessions/
+.claude/worktrees/
+.claude/settings.local.json
+.husky/_/
+
+# VCS internals / editor noise
+.git/
+.DS_Store
+.env
+.env.*
+!.env.example
+!web/.env.example
+
+# Python / native-tool caches
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Heavy generated or archival docs
+docs/archive/
+docs/sessions/
+docs/plans/
+
+# Large generated datasets / eval artifacts
+data/**/*.ndjson
+data/**/*.jsonl
+data/**/*.json
+
+# Optional local model or service artifacts
+models/
+models/**/*.bin
+models/**/*.pt
+models/**/*.onnx
+models/**/*.ckpt

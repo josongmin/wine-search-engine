@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { MappingTablePort } from '../../domain/attribute/port/mapping-table.port.js';
 import type { NLMapping } from '../../domain/attribute/model/nl-mapping.js';
+import { resolveDataPath } from '../../shared/utils/data-paths.js';
 
 interface MappingTableFile {
   readonly version: string;
@@ -27,7 +27,7 @@ export class FileMappingTableAdapter implements MappingTablePort {
   private readonly version: string;
 
   constructor(filePath?: string) {
-    const path = filePath ?? resolve(process.cwd(), 'data/nl-mappings.json');
+    const path = filePath ?? resolveDataPath('data/nl-mappings.json');
     try {
       const raw = readFileSync(path, 'utf8');
       const parsed = JSON.parse(raw) as Partial<MappingTableFile>;

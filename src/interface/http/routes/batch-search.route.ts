@@ -27,9 +27,11 @@ function normalizeBatchResponse(
 ): BatchSearchResponse {
   const succeeded = response.succeeded;
   const failed = response.failed;
+  const not_executed = response.not_executed;
+  const anyFailures = failed > 0 || not_executed > 0;
   const batch_status = response.batch_status
-    ?? (failed === 0 ? 'succeeded' : succeeded === 0 ? 'failed' : 'partial_failure');
-  const has_failures = response.has_failures ?? failed > 0;
+    ?? (!anyFailures ? 'succeeded' : succeeded === 0 ? 'failed' : 'partial_failure');
+  const has_failures = response.has_failures ?? anyFailures;
 
   return {
     ...response,

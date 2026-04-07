@@ -299,10 +299,11 @@ export function resolveChannelAwareWeights(
     multilingualScore;
 
   // Guard: if there is nothing to normalise (all weights are zero) return as-is.
-  const normFactor =
+  const rawNormFactor =
     adjustedNonPenaltySum > 0
       ? baseNonPenaltySum / adjustedNonPenaltySum
       : 1;
+  const normFactor = Number.isFinite(rawNormFactor) ? rawNormFactor : 1;
 
   return {
     entityIntegrity: entityIntegrity * normFactor,

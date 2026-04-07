@@ -89,6 +89,69 @@ describe('ReplayUseCase', () => {
       const result = await useCase.execute(makeRequest(requestSnapshot), 'req-001b');
       expect(result).toEqual(STUB_RESPONSE);
     });
+
+    it('applies a preflight heuristic honesty floor when replay response is more optimistic', async () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCase(inner);
+
+      const result = await useCase.execute({
+        ...makeRequest(),
+        preflight_honesty_contract: {
+          execution_mode: 'heuristic',
+          degradation_reasons: ['heuristic_drinking_window'],
+          blocking_eligible: false,
+        },
+      }, 'req-001c');
+
+      expect(result.engineDecision.executionMode).toBe('heuristic');
+      expect(result.meta.executionMode).toBe('heuristic');
+      expect(result.engineDecision.degradationReasons).toEqual(['heuristic_drinking_window']);
+      expect(result.meta.degradationReasons).toEqual(['heuristic_drinking_window']);
+      expect(result.engineDecision.blockingEligible).toBe(false);
+      expect(result.meta.blockingEligible).toBe(false);
+    });
+
+    it('keeps stricter actual replay degradation when preflight floor is weaker', async () => {
+      const degradedResponse: SearchResponseV1 = {
+        ...STUB_RESPONSE,
+        engineDecision: {
+          ...STUB_RESPONSE.engineDecision,
+          executionMode: 'degraded',
+          blockingEligible: false,
+          degradationReasons: ['reranker_timeout'],
+        },
+        meta: {
+          ...STUB_RESPONSE.meta,
+          executionMode: 'degraded',
+          blockingEligible: false,
+          degradationReasons: ['reranker_timeout'],
+        },
+      };
+      const inner = {
+        execute: vi.fn().mockResolvedValue(degradedResponse),
+      } as unknown as SearchUseCase;
+      const useCase = makeReplayUseCase(inner);
+
+      const result = await useCase.execute({
+        ...makeRequest(),
+        preflight_honesty_contract: {
+          execution_mode: 'heuristic',
+          degradation_reasons: ['heuristic_drinking_window'],
+          blocking_eligible: false,
+        },
+      }, 'req-001d');
+
+      expect(result.engineDecision.executionMode).toBe('degraded');
+      expect(result.meta.executionMode).toBe('degraded');
+      expect(result.engineDecision.degradationReasons).toEqual([
+        'reranker_timeout',
+        'heuristic_drinking_window',
+      ]);
+      expect(result.meta.degradationReasons).toEqual([
+        'reranker_timeout',
+        'heuristic_drinking_window',
+      ]);
+    });
   });
 
   describe('snapshot mismatch', () => {

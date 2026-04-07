@@ -15,6 +15,7 @@ export interface SearchLogSchema {
   snapshot_schema_version?: string;
   invalid_snapshot_id_reason?: string;
   execution_mode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+  blocking_eligible?: boolean;
   degradation_reasons?: readonly string[];
   route_name?: string;
   specialized_route_requested?: SpecializedRouteName | null;

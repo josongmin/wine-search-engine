@@ -16,13 +16,14 @@
 import fs from 'node:fs/promises';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { EnrichedSilverRecord } from '../etl/types.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
-const DEFAULT_OUTPUT = 'data/hard-negatives.jsonl';
+const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
+const DEFAULT_OUTPUT = resolveDataPath('data/hard-negatives.jsonl');
 
 // ---------------------------------------------------------------------------
 // Types

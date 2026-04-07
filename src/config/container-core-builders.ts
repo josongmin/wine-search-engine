@@ -32,6 +32,7 @@ import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
 import type { RuntimeSupportServices } from './container-runtime-support.js';
+import { bootstrapLogger } from './bootstrap-logger.js';
 import type {
   BrowseRetrieverPort,
   CompareRetrieverPort,
@@ -141,12 +142,18 @@ export function buildRanker(
   config: Config,
   support?: RuntimeSupportServices,
 ): Ranker {
+  if (support?.ltrModels === undefined) {
+    bootstrapLogger.warn('[Ranker] ltrModels not configured — LTR reranking disabled for all query classes');
+  } else if (support.ltrModels.size === 0) {
+    bootstrapLogger.warn('[Ranker] ltrModels is an empty Map — LTR reranking will be skipped for all query classes');
+  }
+
   return new Ranker(
     new SignalComputer(),
     new ScoreAggregator(),
     new EvidenceMapper(),
     {
-      reranker: adapters.reranker,
+      ...(adapters.reranker !== undefined ? { reranker: adapters.reranker } : {}),
       rerankBlendScale: config.reranker.blendScale,
       ltrModels: support?.ltrModels,
     },

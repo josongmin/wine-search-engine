@@ -662,6 +662,8 @@ export interface EvalResult {
 
   // Global metrics
   readonly ndcg_at_10: number;
+  /** NDCG@10 computed only over queries that did NOT have decision_status 'failed' or 'error'. */
+  readonly ndcg_succeeded_only: number;
   readonly mrr_at_10: number;
   readonly recall_at_3: number;
   readonly recall_at_100: number;

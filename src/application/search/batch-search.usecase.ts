@@ -21,6 +21,7 @@ export type {
   BatchSearchResponse,
   BatchSearchResultFailure,
   BatchSearchResultItem,
+  BatchSearchResultNotExecuted,
   BatchSearchResultSuccess,
 } from './batch-search.dto.js';
 
@@ -46,6 +47,9 @@ export type {
 export class BatchSearchUseCase {
   /** Maximum requests per batch. */
   private static readonly MAX_BATCH_SIZE = 20;
+
+  /** Maximum concurrent searches within a partial (non-fail-fast) batch execution. */
+  private static readonly BATCH_CONCURRENCY_LIMIT = 5;
 
   /** Default timeout per request (milliseconds). */
   private static readonly DEFAULT_TIMEOUT_MS = 5000;
@@ -86,6 +90,7 @@ export class BatchSearchUseCase {
         total: 0,
         succeeded: 0,
         failed: 0,
+        not_executed: 0,
         batch_status: 'succeeded',
         has_failures: false,
         results: [],
@@ -99,11 +104,12 @@ export class BatchSearchUseCase {
         total: requests.length,
         succeeded: 0,
         failed: requests.length,
+        not_executed: 0,
         batch_status: 'failed',
         has_failures: true,
         results: requests.map((req) => ({
           id: req.id,
-          status: 'failed',
+          status: 'failed' as const,
           error: {
             code: 'INTERNAL_ERROR' as const,
             message: `Batch size ${requests.length} exceeds maximum of ${BatchSearchUseCase.MAX_BATCH_SIZE}`,
@@ -111,6 +117,32 @@ export class BatchSearchUseCase {
         })),
         processing_time_ms: Date.now() - startTime,
       };
+    }
+
+    // Validate duplicate item IDs — duplicate IDs break caller correlation and idempotency
+    const seenIds = new Set<string>();
+    for (const req of requests) {
+      if (seenIds.has(req.id)) {
+        return {
+          batch_id: actualBatchId,
+          total: requests.length,
+          succeeded: 0,
+          failed: requests.length,
+          not_executed: 0,
+          batch_status: 'failed',
+          has_failures: true,
+          results: requests.map((r) => ({
+            id: r.id,
+            status: 'failed' as const,
+            error: {
+              code: 'INTERNAL_ERROR' as const,
+              message: `Duplicate item id: ${req.id}`,
+            },
+          })),
+          processing_time_ms: Date.now() - startTime,
+        };
+      }
+      seenIds.add(req.id);
     }
 
     // Determine execution strategy
@@ -138,9 +170,11 @@ export class BatchSearchUseCase {
 
     // Aggregate results
     const succeeded = results.filter((r) => r.status === 'succeeded').length;
-    const failed = results.length - succeeded;
+    const notExecuted = results.filter((r) => r.status === 'not_executed').length;
+    const failed = results.length - succeeded - notExecuted;
+    const anyFailures = failed > 0 || notExecuted > 0;
     const batchStatus =
-      failed === 0
+      !anyFailures
         ? 'succeeded'
         : succeeded === 0
           ? 'failed'
@@ -151,8 +185,9 @@ export class BatchSearchUseCase {
       total: requests.length,
       succeeded,
       failed,
+      not_executed: notExecuted,
       batch_status: batchStatus,
-      has_failures: failed > 0,
+      has_failures: anyFailures,
       results,
       processing_time_ms: Date.now() - startTime,
     };
@@ -173,11 +208,17 @@ export class BatchSearchUseCase {
     batchId: string,
     timeoutMs: number,
   ): Promise<readonly BatchSearchResultItem[]> {
-    const promises = requests.map((req) =>
-      this.executeSingle(req, batchId, timeoutMs),
-    );
+    const results: BatchSearchResultItem[] = [];
+    const limit = BatchSearchUseCase.BATCH_CONCURRENCY_LIMIT;
 
-    const results = await Promise.all(promises);
+    for (let i = 0; i < requests.length; i += limit) {
+      const chunk = requests.slice(i, i + limit);
+      const chunkResults = await Promise.all(
+        chunk.map((req) => this.executeSingle(req, batchId, timeoutMs)),
+      );
+      results.push(...chunkResults);
+    }
+
     return results;
   }
 
@@ -203,6 +244,8 @@ export class BatchSearchUseCase {
       results.push(result);
 
       if (result.status === 'failed') {
+        // Aborted items are surfaced as failures so the batch cardinality is
+        // preserved and the caller can distinguish which items were skipped.
         for (const remainingReq of requests.slice(index + 1)) {
           results.push({
             id: remainingReq.id,

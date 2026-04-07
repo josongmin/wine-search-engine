@@ -39,17 +39,37 @@ export interface BatchSearchResultSuccess {
 
 export interface BatchSearchResultFailure {
   readonly id: string;
+  /**
+   * `failed` — the item ran but threw an error (e.g. timeout, network issue,
+   * policy block, query parse error).
+   */
   readonly status: 'failed';
   readonly error: BatchSearchError;
 }
 
-export type BatchSearchResultItem = BatchSearchResultSuccess | BatchSearchResultFailure;
+export interface BatchSearchResultNotExecuted {
+  readonly id: string;
+  /**
+   * `not_executed` — the item was never started (e.g. an earlier item failed in
+   * fail_fast mode, or the batch was aborted before this item was reached).
+   */
+  readonly status: 'not_executed';
+  readonly error: BatchSearchError;
+}
+
+export type BatchSearchResultItem =
+  | BatchSearchResultSuccess
+  | BatchSearchResultFailure
+  | BatchSearchResultNotExecuted;
 
 export interface BatchSearchResponse {
   readonly batch_id: string;
   readonly total: number;
   readonly succeeded: number;
+  /** Items that ran but threw an error. */
   readonly failed: number;
+  /** Items that were never started (fail_fast abort or pre-run skip). */
+  readonly not_executed: number;
   readonly batch_status: 'succeeded' | 'partial_failure' | 'failed';
   readonly has_failures: boolean;
   readonly results: readonly BatchSearchResultItem[];

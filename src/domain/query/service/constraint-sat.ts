@@ -44,6 +44,21 @@ export class ConstraintSAT {
       const range = a.value as { min: number; max: number };
       return Number(b.value) < range.min;
     }
+    // Symmetric: >= vs range, <= vs range
+    if (a.operator === '>=' && b.operator === 'range') {
+      const range = b.value as { min: number; max: number };
+      return Number(a.value) > range.max;
+    }
+    if (a.operator === '<=' && b.operator === 'range') {
+      const range = b.value as { min: number; max: number };
+      return Number(a.value) < range.min;
+    }
+    // range vs range: disjoint when the two intervals do not overlap
+    if (a.operator === 'range' && b.operator === 'range') {
+      const ra = a.value as { min: number; max: number };
+      const rb = b.value as { min: number; max: number };
+      return ra.max < rb.min || rb.max < ra.min;
+    }
     return false;
   }
 

@@ -11,6 +11,8 @@ import {
   decodeAuthorityTraceRefDetailed,
   decodeSnapshotIdDetailed,
 } from '../../../src/domain/decision/service/id-schema-decoder.js';
+import { buildDecisionSnapshotId } from '../../../src/application/search/search-usecase-decision-snapshot.js';
+
 
 const SearchReplayFixtureSuccessExpectationSchema = z.object({
   execution_mode: z.string().min(1),
@@ -21,51 +23,87 @@ const SearchReplayFixtureErrorExpectationSchema = z.object({
   error_code: z.string().min(1),
 }).strict();
 
-const SearchReplayFixtureSchema = z.object({
+const SearchReplayFixtureMetadataSchema = z.object({
+  use_live_snapshot: z.boolean().optional(),
+  runtime_mode: z.enum(['inmemory', 'full_runtime']).optional(),
+}).strict();
+
+const SearchReplayFixtureCommonFieldsSchema = z.object({
   name: z.string().min(1),
-  request: SearchRequestSchema.optional(),
-  replay_request: ReplayRequestSchema.optional(),
+  endpoint: z.enum(['/v1/search', '/v1/search/replay']),
+  execution_lane: z.enum(['self_contained', 'runtime_required']),
   expected: z.union([
     SearchReplayFixtureSuccessExpectationSchema,
     SearchReplayFixtureErrorExpectationSchema,
   ]),
-  snapshot_override: z.record(z.string(), z.unknown()).optional(),
   requires_runtime_capability: z.array(z.string().min(1)).optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-}).strict().superRefine((fixture, ctx) => {
-  const presentCount = Number(fixture.request !== undefined) + Number(fixture.replay_request !== undefined);
-  if (presentCount !== 1) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'Exactly one of request or replay_request must be present',
-      path: ['request'],
-    });
-  }
-  if (fixture.snapshot_override !== undefined && fixture.replay_request === undefined) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'snapshot_override requires replay_request',
-      path: ['snapshot_override'],
-    });
-  }
-});
+  metadata: SearchReplayFixtureMetadataSchema.optional(),
+}).strict();
 
-export type SearchReplayFixtureFile = {
-  readonly name: string;
-  readonly request?: SearchRequestBody;
-  readonly replay_request?: ReplayRequestBody;
-  readonly expected:
-    | {
-      readonly execution_mode: string;
-      readonly degradation_reasons: readonly string[];
-    }
-    | {
-      readonly error_code: string;
-    };
-  readonly snapshot_override?: Readonly<Record<string, unknown>>;
-  readonly requires_runtime_capability?: readonly string[];
-  readonly metadata?: Readonly<Record<string, unknown>>;
-};
+function addExecutionLaneInvariant(
+  fixture: {
+    readonly execution_lane: 'self_contained' | 'runtime_required';
+    readonly requires_runtime_capability?: readonly string[] | undefined;
+    readonly metadata?: {
+      readonly use_live_snapshot?: boolean | undefined;
+      readonly runtime_mode?: 'inmemory' | 'full_runtime' | undefined;
+    } | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const capabilityCount = fixture.requires_runtime_capability?.length ?? 0;
+  if (fixture.execution_lane === 'self_contained' && capabilityCount > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'self_contained fixtures must not declare runtime capabilities',
+      path: ['execution_lane'],
+    });
+  }
+  if (fixture.execution_lane === 'runtime_required' && capabilityCount === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'runtime_required fixtures must declare at least one runtime capability',
+      path: ['execution_lane'],
+    });
+  }
+  if (fixture.execution_lane === 'runtime_required' && fixture.metadata?.runtime_mode === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'runtime_required fixtures must declare metadata.runtime_mode',
+      path: ['metadata', 'runtime_mode'],
+    });
+  }
+  if (
+    fixture.execution_lane === 'runtime_required'
+    && fixture.metadata?.runtime_mode === 'full_runtime'
+    && fixture.metadata.use_live_snapshot !== true
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'full_runtime fixtures must set metadata.use_live_snapshot=true',
+      path: ['metadata', 'use_live_snapshot'],
+    });
+  }
+}
+
+const SearchFixtureSchema = SearchReplayFixtureCommonFieldsSchema.extend({
+  endpoint: z.literal('/v1/search'),
+  request: SearchRequestSchema,
+}).strict();
+
+const ReplayFixtureSchema = SearchReplayFixtureCommonFieldsSchema.extend({
+  endpoint: z.literal('/v1/search/replay'),
+  replay_request: ReplayRequestSchema,
+  snapshot_override: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+
+const SearchReplayFixtureSchema = z
+  .discriminatedUnion('endpoint', [SearchFixtureSchema, ReplayFixtureSchema])
+  .superRefine(addExecutionLaneInvariant);
+
+export type SearchReplayFixtureFile = z.infer<typeof SearchReplayFixtureSchema>;
+export type SearchHttpFixtureFile = z.infer<typeof SearchFixtureSchema>;
+export type ReplayHttpFixtureFile = z.infer<typeof ReplayFixtureSchema>;
 
 export function loadSearchReplayFixtures(
   dir: string = path.join(process.cwd(), 'test/replay-fixtures/search'),
@@ -82,7 +120,7 @@ export function loadSearchReplayFixtures(
       const raw = fs.readFileSync(path.join(dir, file), 'utf8');
       return {
         file,
-        fixture: SearchReplayFixtureSchema.parse(JSON.parse(raw)) as SearchReplayFixtureFile,
+        fixture: SearchReplayFixtureSchema.parse(JSON.parse(raw)),
       };
     });
 }
@@ -90,7 +128,7 @@ export function loadSearchReplayFixtures(
 export function isSelfContainedSearchReplayFixture(
   fixture: SearchReplayFixtureFile,
 ): boolean {
-  return (fixture.requires_runtime_capability?.length ?? 0) === 0;
+  return fixture.execution_lane === 'self_contained';
 }
 
 export function isExecutableSearchReplayFixture(fixture: SearchReplayFixtureFile): boolean {
@@ -100,37 +138,152 @@ export function isExecutableSearchReplayFixture(fixture: SearchReplayFixtureFile
 export function requiresRuntimeCapabilitySearchReplayFixture(
   fixture: SearchReplayFixtureFile,
 ): boolean {
-  return !isSelfContainedSearchReplayFixture(fixture);
+  return fixture.execution_lane === 'runtime_required';
+}
+
+export function isInMemoryRuntimeSearchReplayFixture(
+  fixture: SearchReplayFixtureFile,
+): boolean {
+  return fixture.execution_lane === 'runtime_required'
+    && fixture.metadata?.runtime_mode === 'inmemory';
+}
+
+export function isFullRuntimeSearchReplayFixture(
+  fixture: SearchReplayFixtureFile,
+): boolean {
+  return fixture.execution_lane === 'runtime_required'
+    && fixture.metadata?.runtime_mode === 'full_runtime';
+}
+
+export function isSearchHttpFixture(
+  fixture: SearchReplayFixtureFile,
+): fixture is SearchHttpFixtureFile {
+  return fixture.endpoint === '/v1/search';
+}
+
+export function isReplayHttpFixture(
+  fixture: SearchReplayFixtureFile,
+): fixture is ReplayHttpFixtureFile {
+  return fixture.endpoint === '/v1/search/replay';
 }
 
 export function classifySearchFixtureMode(
   fixture: SearchReplayFixtureFile,
 ): 'search' | 'replay' {
-  return fixture.request !== undefined ? 'search' : 'replay';
+  return fixture.endpoint === '/v1/search' ? 'search' : 'replay';
 }
 
 export function buildSearchFixturePayload(
   fixture: SearchReplayFixtureFile,
 ): SearchRequestBody | ReplayRequestBody {
-  if (fixture.request !== undefined) {
+  if (fixture.endpoint === '/v1/search') {
     return fixture.request;
   }
 
-  if (fixture.replay_request === undefined) {
-    throw new Error('search replay fixture is missing replay_request');
+  const replayRequest = fixture.snapshot_override === undefined
+    ? fixture.replay_request
+    : {
+      ...fixture.replay_request,
+      decision_snapshot: {
+        ...fixture.replay_request.decision_snapshot,
+        ...fixture.snapshot_override,
+      },
+    };
+
+  if ('error_code' in fixture.expected) {
+    return ReplayRequestSchema.parse(replayRequest);
   }
 
-  if (fixture.snapshot_override === undefined) {
-    return fixture.replay_request;
-  }
+  const snapshot = replayRequest.decision_snapshot;
+  const rebuiltSnapshot = {
+    ...snapshot,
+    snapshot_id: buildDecisionSnapshotId({
+      threshold_profile_id: snapshot.threshold_profile_id,
+      planner_version: snapshot.planner_version,
+      policy_rule_version: snapshot.policy_rule_version,
+      model_versions: snapshot.model_versions,
+      index_versions: snapshot.index_versions,
+      feature_flags: snapshot.feature_flags,
+      response_contract_version: snapshot.response_contract_version,
+      ...(snapshot.nondeterminism_notes !== undefined
+        ? { nondeterminism_notes: snapshot.nondeterminism_notes }
+        : {}),
+    }),
+  };
+
+  return ReplayRequestSchema.parse({
+    ...replayRequest,
+    decision_snapshot: rebuiltSnapshot,
+  });
+}
+
+async function buildLiveSnapshotReplayPayload(
+  fixture: ReplayHttpFixtureFile,
+  app: FastifyInstance,
+): Promise<ReplayRequestBody> {
+  const searchPayload = SearchRequestSchema.parse({
+    query: fixture.replay_request.query,
+    ...(fixture.replay_request.context !== undefined
+      ? { context: fixture.replay_request.context }
+      : {}),
+    ...(fixture.replay_request.sessionContext !== undefined
+      ? { sessionContext: fixture.replay_request.sessionContext }
+      : {}),
+    ...(fixture.replay_request.queryBudget !== undefined
+      ? { queryBudget: fixture.replay_request.queryBudget }
+      : {}),
+    ...(fixture.replay_request.options !== undefined
+      ? { options: fixture.replay_request.options }
+      : {}),
+  });
+
+  const preflightResponse = parseSearchResponse(
+    await postJson(app, '/v1/search', searchPayload),
+  );
 
   return ReplayRequestSchema.parse({
     ...fixture.replay_request,
     decision_snapshot: {
-      ...fixture.replay_request.decision_snapshot,
-      ...fixture.snapshot_override,
+      ...preflightResponse.meta.decision_snapshot,
     },
-  }) as ReplayRequestBody;
+    preflight_honesty_contract: {
+      execution_mode:
+        preflightResponse.engine_decision.execution_mode
+        ?? preflightResponse.meta.execution_mode
+        ?? 'authoritative',
+      degradation_reasons:
+        preflightResponse.engine_decision.degradation_reasons
+        ?? preflightResponse.meta.degradation_reasons
+        ?? [],
+      ...(
+        (
+          preflightResponse.engine_decision.blocking_eligible
+          ?? preflightResponse.meta.blocking_eligible
+        ) !== undefined
+          ? {
+              blocking_eligible:
+                preflightResponse.engine_decision.blocking_eligible
+                ?? preflightResponse.meta.blocking_eligible,
+            }
+          : {}
+      ),
+    },
+  });
+}
+
+async function buildExecutableReplayFixturePayload(
+  fixture: SearchReplayFixtureFile,
+  app: FastifyInstance,
+): Promise<SearchRequestBody | ReplayRequestBody> {
+  if (
+    !isReplayHttpFixture(fixture)
+    || fixture.metadata?.['use_live_snapshot'] !== true
+    || 'error_code' in fixture.expected
+  ) {
+    return buildSearchFixturePayload(fixture);
+  }
+
+  return buildLiveSnapshotReplayPayload(fixture, app);
 }
 
 export async function runSearchFixture(
@@ -141,6 +294,8 @@ export async function runSearchFixture(
   readonly error?: ErrorResponseBody;
   readonly assertionSummary: {
     readonly endpoint: '/v1/search' | '/v1/search/replay';
+    readonly runtimeMode?: 'inmemory' | 'full_runtime' | undefined;
+    readonly usedLiveSnapshot: boolean;
     readonly skipped: boolean;
     readonly assertedFields: readonly string[];
     readonly executionMode?: string;
@@ -154,11 +309,14 @@ export async function runSearchFixture(
   readonly mode: 'search' | 'replay';
 }> {
   const mode = classifySearchFixtureMode(fixture);
-  const endpoint = mode === 'search' ? '/v1/search' : '/v1/search/replay';
+  const endpoint = fixture.endpoint;
+  const usedLiveSnapshot = isReplayHttpFixture(fixture)
+    && fixture.metadata?.use_live_snapshot === true
+    && !('error_code' in fixture.expected);
   const httpResponse = await postJson(
     options.app,
     endpoint,
-    buildSearchFixturePayload(fixture),
+    await buildExecutableReplayFixturePayload(fixture, options.app),
   );
   if ('error_code' in fixture.expected) {
     const error = parseErrorResponse(httpResponse);
@@ -171,6 +329,8 @@ export async function runSearchFixture(
       error,
       assertionSummary: {
         endpoint,
+        runtimeMode: fixture.metadata?.runtime_mode,
+        usedLiveSnapshot,
         skipped: false,
         assertedFields: ['error.code'],
         errorCode: fixture.expected.error_code,
@@ -204,6 +364,8 @@ export async function runSearchFixture(
     response,
     assertionSummary: {
       endpoint,
+      runtimeMode: fixture.metadata?.runtime_mode,
+      usedLiveSnapshot,
       skipped: false,
       assertedFields: [
         'execution_mode',

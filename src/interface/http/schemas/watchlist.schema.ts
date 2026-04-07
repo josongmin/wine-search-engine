@@ -147,7 +147,7 @@ export type ListWatchlistResponse = z.infer<typeof ListWatchlistResponseSchema>;
 export const DeliveryLogEntrySchema = z.object({
   id: WatchlistIdSchema,
   watchlist_id: WatchlistIdSchema,
-  attempt: z.number().int().min(1).max(3),
+  attempt: z.number().int().min(1).max(4),
   status_code: z.number().int().min(0).nullable(),
   error_message: z.string().nullable(),
   delivered_at: z.string().datetime(),

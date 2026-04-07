@@ -17,6 +17,7 @@ import {
   MixedRouteDegradationError,
   type MixedFallbackReason,
 } from '../model/mixed-degradation.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 export type {
   AnchorResolverPort,
   SimilarRetrievalPort,
@@ -143,22 +144,43 @@ export class MixedSolver {
     };
 
     // Step 5: Rank with anchor-aware weights
-    const rankedResults = await this.ranker.rank({
-      queryPlan,
-      candidates,
-      anchorProfile: retrievalAnchorProfile,
-      constraints: queryPlan.constraints,
-    });
+    let rankedResults: readonly RankedResult[];
+    try {
+      rankedResults = await this.ranker.rank({
+        queryPlan,
+        candidates,
+        anchorProfile: retrievalAnchorProfile,
+        constraints: queryPlan.constraints,
+      });
+    } catch (err) {
+      bootstrapLogger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        '[MixedSolver] ranker.rank() failed; degrading gracefully',
+      );
+      throw new MixedRouteDegradationError(
+        'mixed_ranker_unavailable',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
 
     // Step 6: Apply constraint overlay
     const entityIds = rankedResults.map((r) => r.entityId);
     const attrMap = await this.candidateAttributes.loadAttributes(entityIds);
 
-    const overlayedResults = this.constraintOverlay.apply(
-      rankedResults,
-      queryPlan.constraints,
-      attrMap,
-    );
+    let overlayedResults: readonly RankedResult[];
+    try {
+      overlayedResults = this.constraintOverlay.apply(
+        rankedResults,
+        queryPlan.constraints,
+        attrMap,
+      );
+    } catch (err) {
+      bootstrapLogger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        '[MixedSolver] constraintOverlay.apply() failed; returning candidates without overlay',
+      );
+      overlayedResults = rankedResults;
+    }
 
     // Step 7: Compute anchor preservation rate
     const preservationRate = await this.computePreservationRate(
@@ -167,20 +189,14 @@ export class MixedSolver {
     );
     const runtimeSignal = this.ranker.getLastRuntimeSignal();
     const runtimeDegradation = runtimeSignal?.degradation;
-    const combinedDegradationReasons = fallbackReason === undefined
-      ? runtimeDegradation?.degradationReasons
-      : [
-          ...new Set([
-            ...(runtimeDegradation?.degradationReasons ?? []),
-            fallbackReason,
-          ]),
-        ];
-    const routeDegradation = combinedDegradationReasons === undefined
-      ? undefined
-      : {
-          executionMode: runtimeDegradation?.executionMode ?? 'degraded' as const,
-          degradationReasons: combinedDegradationReasons,
-        };
+    // When retrieval produced no candidates (fallbackReason set), the route-level
+    // degradation takes precedence — report only the retrieval fallback reason and
+    // escalate execution mode to 'degraded' regardless of the ranker signal.
+    const routeDegradation = fallbackReason !== undefined
+      ? { executionMode: 'degraded' as const, degradationReasons: [fallbackReason] }
+      : runtimeDegradation !== undefined
+        ? { executionMode: runtimeDegradation.executionMode, degradationReasons: runtimeDegradation.degradationReasons }
+        : undefined;
 
     return {
       anchor: anchorProfile,
@@ -192,7 +208,7 @@ export class MixedSolver {
         ? { fallbackReason }
         : {}),
       ...(this.ranker.getLastFunnelMetrics?.() !== undefined
-        ? { funnelMetrics: this.ranker.getLastFunnelMetrics?.() }
+        ? { funnelMetrics: this.ranker.getLastFunnelMetrics() }
         : {}),
     };
   }
@@ -216,10 +232,17 @@ export class MixedSolver {
     // Step 1: Exclude the anchor entity itself
     let filtered = candidates.filter((c) => c.entityId !== anchorEntityId);
 
-    // Step 2: Apply producer diversity (max 2 per producer)
-    const producerMap = new Map<string | undefined, HybridCandidate[]>();
+    // Step 2: Apply producer diversity (max 2 per producer).
+    // Candidates with no producer metadata bypass the slot check — lack of
+    // metadata should never penalize a candidate (mirrors DefaultRankingPolicy).
+    const producerMap = new Map<string, HybridCandidate[]>();
+    const noProducer: HybridCandidate[] = [];
     for (const candidate of filtered) {
       const key = candidate.producer;
+      if (key === undefined || key === '') {
+        noProducer.push(candidate);
+        continue;
+      }
       if (!producerMap.has(key)) {
         producerMap.set(key, []);
       }
@@ -229,7 +252,7 @@ export class MixedSolver {
       }
     }
 
-    filtered = Array.from(producerMap.values()).flat();
+    filtered = [...Array.from(producerMap.values()).flat(), ...noProducer];
 
     // Step 3: Re-sort by retrieval fusion score (proxy for embedding similarity)
     // Higher retrieval score = more similar to anchor

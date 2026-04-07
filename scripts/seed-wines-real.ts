@@ -14,6 +14,7 @@ import { VespaSearchIndex } from '../src/infrastructure/vespa/vespa-search-index
 import { HttpEmbeddingService } from '../src/infrastructure/vespa/embedding-service.js';
 import { createEntityId } from '../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../src/domain/retrieval/model/retrieval-document.js';
+import { pathToFileURL } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -36,6 +37,8 @@ const USE_REAL_EMBEDDINGS =
       ? false
       : process.env['EMBEDDING_SERVICE_URL'] !== undefined &&
         process.env['EMBEDDING_SERVICE_URL'] !== '';
+const DEFAULT_LEARNED_DRINKING_WINDOW_MODEL_VERSION =
+  process.env['SEED_DRINKING_WINDOW_MODEL_VERSION'] ?? 'learned-v1.0-seeded';
 
 // ---------------------------------------------------------------------------
 // Deterministic embedding from sensory profile
@@ -78,11 +81,30 @@ function priceBand(priceUsd: number): string {
   return 'value';
 }
 
+export function applyDefaultDrinkingWindowModelVersion(
+  docs: readonly RetrievalDocument[],
+): readonly RetrievalDocument[] {
+  return docs.map((doc) => {
+    if (
+      doc.drinkingWindowStart === undefined
+      || doc.drinkingWindowEnd === undefined
+      || doc.drinkingWindowModelVersion !== undefined
+    ) {
+      return doc;
+    }
+
+    return {
+      ...doc,
+      drinkingWindowModelVersion: DEFAULT_LEARNED_DRINKING_WINDOW_MODEL_VERSION,
+    };
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Catalog
 // ---------------------------------------------------------------------------
 
-const WINES: readonly RetrievalDocument[] = [
+export const WINES: readonly RetrievalDocument[] = [
 
   // ══════════════════════════════════════════════════════════════════════════
   // FRANCE — BORDEAUX
@@ -3090,7 +3112,7 @@ async function main(): Promise<void> {
   const client = new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE);
   const index = new VespaSearchIndex(client);
 
-  let wines: readonly RetrievalDocument[] = WINES;
+  let wines: readonly RetrievalDocument[] = applyDefaultDrinkingWindowModelVersion(WINES);
 
   // Enrich with real embeddings when an embedding service is available.
   if (USE_REAL_EMBEDDINGS) {
@@ -3110,7 +3132,7 @@ async function main(): Promise<void> {
       );
     }
 
-    wines = WINES.map((w, i) => ({
+    wines = applyDefaultDrinkingWindowModelVersion(WINES).map((w, i) => ({
       ...w,
       embedding: allEmbeddings[i] ?? w.embedding,
     }));
@@ -3128,7 +3150,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+const isDirectExecution =
+  process.argv[1] !== undefined
+  && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectExecution) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

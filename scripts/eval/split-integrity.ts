@@ -6,11 +6,12 @@
 import fs from 'node:fs/promises';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 export const DEFAULT_SPLIT_PATHS = {
-  train: 'data/splits/train.jsonl',
-  val: 'data/splits/val.jsonl',
-  gate: 'data/splits/gate.jsonl',
+  train: resolveDataPath('data/splits/train.jsonl'),
+  val: resolveDataPath('data/splits/val.jsonl'),
+  gate: resolveDataPath('data/splits/gate.jsonl'),
 } as const;
 
 export interface SplitIntegrityResult {

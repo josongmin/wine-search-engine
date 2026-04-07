@@ -19,6 +19,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -49,8 +50,8 @@ interface Triplet {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const INPUT_FILE = 'data/golden-queries-bronze.jsonl';
-const OUTPUT_FILE = 'data/triplets-train.jsonl';
+const INPUT_FILE = resolveDataPath('data/golden-queries-bronze.jsonl');
+const OUTPUT_FILE = resolveDataPath('data/triplets-train.jsonl');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities

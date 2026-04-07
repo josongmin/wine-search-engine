@@ -10,6 +10,7 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
 import { Pool } from 'pg';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 interface GoldenQuery {
   qid: string;
@@ -242,7 +243,7 @@ async function loadEvalCases(
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const inputPath = 'data/golden-queries-bronze.jsonl';
+  const inputPath = resolveDataPath('data/golden-queries-bronze.jsonl');
   const connectionString = process.env.DATABASE_URL || 'postgresql://localhost/wine-search';
 
   console.log(`Loading eval cases from: ${inputPath}`);

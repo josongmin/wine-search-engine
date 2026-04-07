@@ -22,12 +22,13 @@ import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createEntityId } from '../../src/domain/shared/types/entity-id.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
+export const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
 const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
@@ -268,6 +269,48 @@ export interface IndexableValidationResult {
 }
 
 /**
+ * Derives a grape family shortname from a primary grape variety.
+ * e.g. "Cabernet Sauvignon" → "Cabernet", "Pinot Noir" → "Pinot"
+ */
+function deriveGrapeFamily(grapePrimary: string | null | undefined): string | undefined {
+  if (!grapePrimary) return undefined;
+  return grapePrimary.split(/[\s/,]/)[0] ?? undefined;
+}
+
+/**
+ * Parses a region string into a breadcrumb hierarchy.
+ * Handles " / "-separated strings, deduplicates, and trims.
+ */
+function deriveRegionHierarchy(region: string | null | undefined): readonly string[] | undefined {
+  if (!region) return undefined;
+  const parts = region
+    .split(' / ')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Deduplicate while preserving order
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const part of parts) {
+    if (!seen.has(part)) {
+      seen.add(part);
+      unique.push(part);
+    }
+  }
+  return unique.length > 0 ? unique : undefined;
+}
+
+/** Maps price band label to ordinal: value=1, mid=2, premium=3, luxury=4. */
+function priceBandToNumeric(band: string): number {
+  switch (band) {
+    case 'value': return 1;
+    case 'mid': return 2;
+    case 'premium': return 3;
+    case 'luxury': return 4;
+    default: return 2; // fallback to mid
+  }
+}
+
+/**
  * Maps an {@link EnrichedSilverRecord} to an {@link IndexableWineRecord}.
  *
  * This is the explicit, auditable mapping layer between the Silver tier and
@@ -283,7 +326,7 @@ export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecor
     if (gold.criticProxy?.proxyScore != null) {
       return Math.max(0, Math.min(1, gold.criticProxy.proxyScore / 100));
     }
-    if (gold.ratingAvg != null) return gold.ratingAvg / 5;
+    if (gold.ratingAvg != null) return Math.max(0, Math.min(1, gold.ratingAvg / 5));
     return undefined;
   })();
 
@@ -334,6 +377,10 @@ export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecor
     ...(rec.wineType ? { wineType: rec.wineType } : {}),
     ...(rec.country ? { country: rec.country } : {}),
     ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
+    grapeFamily: deriveGrapeFamily(rec.grapePrimary),
+    regionHierarchy: deriveRegionHierarchy(rec.region),
+    priceBandNumeric: priceBandToNumeric(rec.priceBand),
+    ...(rec.finishLength !== undefined && rec.finishLength > 0 ? { finishLength: rec.finishLength } : {}),
     ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
     ...(gold.alcoholPct != null ? { alcoholPct: gold.alcoholPct } : {}),
     ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
@@ -394,6 +441,29 @@ export function validateIndexableRecord(rec: IndexableWineRecord): IndexableVali
   }
   if (rec.popularityScore < 0 || rec.popularityScore > 1) {
     errors.push(`popularityScore must be in [0, 1], got ${rec.popularityScore}`);
+  }
+
+  // alcoholPct range [5.5, 22]
+  if (rec.alcoholPct !== undefined) {
+    if (rec.alcoholPct < 5.5 || rec.alcoholPct > 22) {
+      errors.push(`alcoholPct must be in [5.5, 22], got ${rec.alcoholPct}`);
+    }
+  }
+
+  // avgCriticProxyScore range [0, 1]
+  if (rec.avgCriticProxyScore !== undefined) {
+    if (rec.avgCriticProxyScore < 0 || rec.avgCriticProxyScore > 1) {
+      errors.push(`avgCriticProxyScore must be in [0, 1], got ${rec.avgCriticProxyScore}`);
+    }
+  }
+
+  // drinkingWindow start must not exceed end
+  if (rec.drinkingWindowStart !== undefined && rec.drinkingWindowEnd !== undefined) {
+    if (rec.drinkingWindowStart > rec.drinkingWindowEnd) {
+      errors.push(
+        `drinkingWindowStart (${rec.drinkingWindowStart}) must be <= drinkingWindowEnd (${rec.drinkingWindowEnd})`,
+      );
+    }
   }
 
   return { valid: errors.length === 0, errors };
@@ -461,6 +531,9 @@ export function silverToRetrievalDoc(
     ...(indexable.soilType !== undefined ? { soilType: indexable.soilType } : {}),
     ...(indexable.producerType !== undefined ? { producerType: indexable.producerType } : {}),
     ...(indexable.oakTreatment !== undefined ? { oakTreatment: indexable.oakTreatment } : {}),
+    ...(indexable.grapeFamily !== undefined ? { grapeFamily: indexable.grapeFamily } : {}),
+    ...(indexable.regionHierarchy !== undefined ? { regionHierarchy: [...indexable.regionHierarchy] } : {}),
+    ...(indexable.priceBandNumeric !== undefined ? { priceBandNumeric: indexable.priceBandNumeric } : {}),
   };
   return doc;
 }
@@ -543,16 +616,27 @@ export async function run(): Promise<void> {
       );
     }
 
-    // Convert to Vespa documents and feed
-    const docs = chunk.map((rec, i) => {
+    // Convert to Vespa documents and feed; validate each record before converting
+    const docs: { id: string; fields: Record<string, unknown> }[] = [];
+    for (let i = 0; i < chunk.length; i++) {
+      const rec = chunk[i]!;
+      const indexable = silverToIndexable(rec);
+      const validation = validateIndexableRecord(indexable);
+      if (!validation.valid) {
+        failures += 1;
+        console.error(
+          `  Validation failed for ${rec.sourceId}: ${validation.errors.join('; ')}`,
+        );
+        continue;
+      }
       const embedding = embeddings[i] ?? deterministicEmbedding(rec.body, rec.sweetness, rec.acidity, rec.tannin);
       const retrievalDoc = silverToRetrievalDoc(rec, embedding);
-      return {
+      docs.push({
         // Document v1 path: /document/v1/{namespace}/{type}/docid/{userKey} — user key only (see vespa-search-index.bulkUpsert).
         id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),
-      };
-    });
+      });
+    }
 
     const result = await vespa.bulkFeed(docs);
     indexed += result.successCount;

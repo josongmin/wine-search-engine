@@ -134,8 +134,13 @@ export class FusionService {
       });
     }
 
-    // Sort descending by retrievalFusionScore
-    candidates.sort((a, b) => b.retrievalFusionScore - a.retrievalFusionScore);
+    // Sort descending by retrievalFusionScore; break ties by entityId (lexicographic ascending)
+    // for deterministic output ordering.
+    candidates.sort((a, b) => {
+      const scoreDiff = b.retrievalFusionScore - a.retrievalFusionScore;
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+    });
 
     return candidates;
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   BatchSearchUseCase,
   type BatchSearchRequestItem,
@@ -67,12 +67,19 @@ describe('BatchSearchUseCase', () => {
   let useCase: BatchSearchUseCase;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+
     // Mock SearchUseCase
     mockSearchUseCase = {
       execute: vi.fn(),
     } as unknown as SearchUseCase;
 
     useCase = new BatchSearchUseCase(mockSearchUseCase);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('validate batch size', () => {
@@ -315,7 +322,7 @@ describe('BatchSearchUseCase', () => {
         }),
       );
 
-      const response = await useCase.execute(requests, { timeout_ms: 100 });
+      const response = await useCase.execute(requests, { timeout_ms: 10 });
 
       expect(response.succeeded).toBe(0);
       expect(response.failed).toBe(1);
@@ -495,6 +502,7 @@ describe('BatchSearchUseCase', () => {
         { id: '1', query: 'Test' },
       ];
 
+      vi.useFakeTimers();
       vi.mocked(mockSearchUseCase.execute).mockImplementation(
         () =>
           new Promise((resolve) => {
@@ -504,7 +512,9 @@ describe('BatchSearchUseCase', () => {
           }),
       );
 
-      const response = await useCase.execute(requests);
+      const responsePromise = useCase.execute(requests);
+      await vi.advanceTimersByTimeAsync(50);
+      const response = await responsePromise;
 
       // Processing time should be at least ~50ms
       expect(response.processing_time_ms).toBeGreaterThanOrEqual(50);

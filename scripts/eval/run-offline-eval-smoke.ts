@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { createTestServer, closeTestServer } from '../../test/e2e/helpers/test-server.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 interface Args {
   input: string;
@@ -13,8 +14,8 @@ interface Args {
 
 function parseArgs(argv: readonly string[]): Args {
   const out: Args = {
-    input: 'data/eval-smoke-queries.jsonl',
-    output: 'data/eval-results-smoke.json',
+    input: resolveDataPath('data/eval-smoke-queries.jsonl'),
+    output: resolveDataPath('data/eval-results-smoke.json'),
     tier: 'bronze',
     baselineReport: undefined,
   };

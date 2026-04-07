@@ -1,7 +1,14 @@
 {
   "name": "reranker-timeout",
+  "endpoint": "/v1/search/replay",
+  "execution_lane": "runtime_required",
   "replay_request": {
-    "query": "best napa cabernet under 200",
+    "query": "샴페인 와인 추천",
+    "options": {
+      "mode": "hybrid",
+      "explain": false,
+      "clarification": false
+    },
     "decision_snapshot": {
       "snapshot_id": "default:1.0.0:1.0.0::",
       "model_versions": {
@@ -18,6 +25,10 @@
   "expected": {
     "execution_mode": "degraded",
     "degradation_reasons": ["reranker_timeout"]
+  },
+  "metadata": {
+    "use_live_snapshot": true,
+    "runtime_mode": "full_runtime"
   },
   "requires_runtime_capability": ["replay_route", "reranker_runtime"]
 }

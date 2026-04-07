@@ -6,14 +6,18 @@
     "node": ">=22"
   },
   "scripts": {
+    "artifacts:link": "bash scripts/build/link-external-artifacts.sh",
     "dev": "tsx watch src/main.ts",
-    "build": "tsc --project tsconfig.build.json",
+    "build": "npm run artifacts:link && tsc --project tsconfig.build.json",
     "start": "node dist/main.js",
-    "test": "vitest run --config config/vitest/unit.config.ts",
-    "test:watch": "vitest --config config/vitest/unit.config.ts",
+    "test": "vitest run --config config/vitest/dev.config.ts",
+    "test:watch": "vitest --config config/vitest/dev.config.ts",
+    "test:dev": "vitest run --config config/vitest/dev.config.ts",
+    "test:meta": "vitest run --config config/vitest/meta.config.ts",
     "test:unit": "vitest run --config config/vitest/unit.config.ts",
+    "test:heavy": "vitest run --config config/vitest/heavy.config.ts",
     "test:network": "vitest run --config config/vitest/network.config.ts",
-    "test:coverage": "mkdir -p coverage/.tmp && vitest run --config config/vitest/unit.config.ts --coverage",
+    "test:coverage": "npm run artifacts:link && mkdir -p coverage/.tmp && vitest run --config config/vitest/unit.config.ts --coverage",
     "test:integration": "vitest run --config config/vitest/integration.config.ts",
     "test:integration:search-pipeline": "vitest run --config config/vitest/integration.search-pipeline.config.ts",
     "test:watchlist": "vitest run --config config/vitest/watchlist.config.ts",
@@ -26,7 +30,9 @@
     "test:e2e:smoke": "npm run test:e2e:contract",
     "test:e2e:full": "npm run test:e2e:contract && npm run test:e2e:runtime && npm run test:e2e:inmemory",
     "test:e2e:replay:fixtures:self-contained": "vitest run --config config/vitest/e2e.replay.config.ts",
-    "test:replay:fixtures:runtime-required:audit": "vitest run test/unit/replay-fixtures/run-search-replay.test.ts --config config/vitest/unit.config.ts",
+    "test:e2e:replay:fixtures:runtime-required": "vitest run test/e2e/search-replay-runtime-required-fixtures.test.ts --config config/vitest/e2e.replay.config.ts",
+    "test:e2e:replay:fixtures:full-runtime": "bash scripts/run-vespa-test-lane.sh npx vitest run test/e2e/vespa/search-replay-full-runtime-fixtures.test.ts --config config/vitest/e2e.vespa.config.ts",
+    "test:e2e:replay:fixtures:full-runtime:debug": "bash scripts/run-vespa-test-lane.sh npx vitest run test/e2e/vespa/search-replay-full-runtime-fixtures.test.ts --config config/vitest/e2e.vespa.config.ts --reporter=verbose",
     "test:e2e:vespa": "npm run test:e2e:vespa:full",
     "test:e2e:vespa:smoke": "bash scripts/run-vespa-test-lane.sh npx vitest run --config config/vitest/e2e.vespa.smoke.config.ts --reporter=verbose",
     "test:e2e:vespa:smoke:dev": "VESPA_URL=http://localhost:8080 npx vitest run --config config/vitest/e2e.vespa.smoke.config.ts --reporter=verbose",
@@ -45,7 +51,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "semgrep": "semgrep scan --metrics=off --config=semgrep/wine-rules.yml --config=p/ci --config=p/typescript --config=p/nodejs --config=p/secrets --error --exclude='**/node_modules/**' --exclude='**/dist/**' --exclude='**/.claude/**' src",
-    "typecheck": "tsc --noEmit",
+    "check:dev": "npm run typecheck && npm run test",
+    "typecheck": "npm run artifacts:link && tsc --noEmit",
     "domain:orphans": "tsx scripts/find-domain-orphans.ts",
     "feedback:prune-ttl": "tsx scripts/prune-feedback-ttl.ts",
     "contracts:http": "tsx scripts/export-http-contract-manifest.ts",
@@ -89,7 +96,8 @@
     "prepare": "husky",
     "git:prepush": "npm run typecheck && npm run test:unit && npm run verify:http-contracts",
     "git:prepush:quick": "npm run typecheck && npm run test:unit",
-    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"REDIS_URL=redis://localhost:6380 PORT=4000 npm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev\""
+    "git:prepush:heavy": "npm run typecheck && npm run test:unit && npm run verify:http-contracts && npm run test:heavy",
+    "dev:full": "concurrently --names \"api,web\" --prefix-colors \"magenta,cyan\" \"REDIS_URL=redis://localhost:6379 PORT=4000 npm run dev\" \"cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev\""
   },
   "lint-staged": {
     "*.{ts,tsx}": [

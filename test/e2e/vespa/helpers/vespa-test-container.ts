@@ -13,7 +13,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
+import type { DrinkingWindowPredictorPort } from '../../../../src/domain/drinking-window/port/drinking-window-predictor.port.js';
 import { Planner } from '../../../../src/domain/query/service/planner.js';
+import { PlannerV1Adapter } from '../../../../src/config/planner-v1-adapter.js';
 import { AnchorExtractor } from '../../../../src/domain/query/service/anchor-extractor.js';
 import { ExpansionBuilder } from '../../../../src/domain/query/service/expansion-builder.js';
 import { normalizeQueryStrict } from '../../../../src/domain/query/service/query-normalizer.js';
@@ -143,6 +145,10 @@ export interface VespaTestContainerParts {
 export interface VespaTestContainerOptions {
   readonly mlServiceBaseUrl?: string;
   readonly rerankThreshold?: number;
+  readonly mlServiceHttpTimeoutMs?: number;
+  readonly killSwitchLearning?: boolean;
+  readonly disableDrinkingWindow?: boolean;
+  readonly drinkingWindowPredictor?: DrinkingWindowPredictorPort;
 }
 
 export async function createVespaTestContainer(
@@ -196,11 +202,13 @@ export async function createVespaTestContainer(
     getCurrentVersion: () => Promise.resolve('v1'),
   };
   const nlMapper = new NLMapper(noOpMappingTable);
-  const queryPlanner = new Planner(
-    ambiguityDict,
-    anchorExtractor,
-    expansionBuilder,
-    nlMapper,
+  const queryPlanner = new PlannerV1Adapter(
+    new Planner(
+      ambiguityDict,
+      anchorExtractor,
+      expansionBuilder,
+      nlMapper,
+    ),
   );
 
   const blocker = new Blocker(blockingAdapter);
@@ -213,7 +221,12 @@ export async function createVespaTestContainer(
     ambiguityClassifier,
     calibrator,
     options.mlServiceBaseUrl !== undefined
-      ? new HttpLearnedMatcherAdapter(options.mlServiceBaseUrl)
+      ? new HttpLearnedMatcherAdapter({
+          url: options.mlServiceBaseUrl,
+          ...(options.mlServiceHttpTimeoutMs !== undefined
+            ? { httpTimeoutMs: options.mlServiceHttpTimeoutMs }
+            : {}),
+        })
       : undefined,
   );
 
@@ -222,6 +235,9 @@ export async function createVespaTestContainer(
     vespaSearchIndex,
     embeddingService,
     fusionService,
+    undefined,
+    undefined,
+    options.killSwitchLearning ?? false,
   );
 
   const signalComputer = new SignalComputer();
@@ -232,6 +248,9 @@ export async function createVespaTestContainer(
       ? {
           reranker: new HttpCrossEncoderReranker({
             url: options.mlServiceBaseUrl,
+            ...(options.mlServiceHttpTimeoutMs !== undefined
+              ? { httpTimeoutMs: options.mlServiceHttpTimeoutMs }
+              : {}),
           }),
         }
       : {}),
@@ -261,7 +280,7 @@ export async function createVespaTestContainer(
     indexVersions: { wine_content: 'vespa-e2e-test' },
     featureFlags: {},
   };
-  const drinkingWindowPredictor = {
+  const defaultDrinkingWindowPredictor = {
     modelVersion: 'vespa-test',
     predict: () => ({
       drinkingWindowStart: 2020,
@@ -271,7 +290,11 @@ export async function createVespaTestContainer(
       modelVersion: 'vespa-test',
     }),
   };
-  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
+  const drinkingWindowPredictor =
+    options.drinkingWindowPredictor ?? defaultDrinkingWindowPredictor;
+  const drinkingWindowUseCase = options.disableDrinkingWindow === true
+    ? undefined
+    : new DrinkingWindowUseCase(drinkingWindowPredictor);
 
   const searchUseCase = new SearchUseCase({
     queryPlanner,
@@ -283,12 +306,16 @@ export async function createVespaTestContainer(
     responseBuilder,
     mixedSolver,
     snapshotVersions,
+    ...(drinkingWindowUseCase !== undefined ? { drinkingWindow: drinkingWindowUseCase } : {}),
     querySanitizer,
     injectionJudge,
     ltrModels,
   });
 
-  const replayUseCase = new ReplayUseCase({ searchUseCase });
+  const replayUseCase = new ReplayUseCase({
+    searchUseCase,
+    snapshotVersions,
+  });
   const interpretUseCase = new InterpretUseCase({
     queryPlanner,
     querySanitizer,

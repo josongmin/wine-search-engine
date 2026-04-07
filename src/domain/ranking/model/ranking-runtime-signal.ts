@@ -10,7 +10,7 @@ export interface RankingDegradationSignal {
 }
 
 export interface RankerRuntimeSignal {
-  readonly rerankerStatus: 'executed' | 'failed';
+  readonly rerankerStatus: 'executed' | 'failed' | 'skipped';
   readonly rerankerFailureReason?: RerankerFailureReason | undefined;
   readonly degradation?: RankingDegradationSignal | undefined;
 }

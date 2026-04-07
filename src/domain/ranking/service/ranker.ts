@@ -103,10 +103,16 @@ function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
   ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
-): RankedResult[] {
+): { results: RankedResult[]; skippedDueToDimensionMismatch: boolean } {
   const ltrModel = ltrModels?.get(queryClass);
   if (!ltrModel || rankedResults.length === 0) {
-    return [...rankedResults];
+    return { results: [...rankedResults], skippedDueToDimensionMismatch: false };
+  }
+
+  const EXPECTED_FEATURE_DIM = 8;
+  if (ltrModel.weights.length !== EXPECTED_FEATURE_DIM) {
+    bootstrapLogger.warn({ queryClass, modelWeightDim: ltrModel.weights.length, expectedDim: EXPECTED_FEATURE_DIM }, '[Ranker] LTR model dimension mismatch — skipping LTR rerank');
+    return { results: [...rankedResults], skippedDueToDimensionMismatch: true };
   }
 
   const rankableDocuments = rankedResults.map((doc, idx) => ({
@@ -139,7 +145,7 @@ function applyLearnedLtrRerank(
     rankedResults.map((result) => [result.entityId, result]),
   );
 
-  return rerankedDocs
+  const results = rerankedDocs
     .map((reranked) => {
       const original = originalByEntity.get(reranked.entityId);
       if (original === undefined) {
@@ -152,6 +158,7 @@ function applyLearnedLtrRerank(
       };
     })
     .filter((result): result is RankedResult => result !== undefined);
+  return { results, skippedDueToDimensionMismatch: false };
 }
 
 function buildConstraintState(
@@ -584,11 +591,21 @@ export class Ranker {
     });
 
     if (shouldApplyLearnedRerank) {
-      results = applyLearnedLtrRerank(
+      const ltrOutcome = applyLearnedLtrRerank(
         results,
         queryPlan.queryClass,
         this.ltrModels,
       );
+      results = ltrOutcome.results;
+      if (ltrOutcome.skippedDueToDimensionMismatch) {
+        this._lastRuntimeSignal = {
+          rerankerStatus: 'skipped',
+          degradation: {
+            executionMode: 'degraded',
+            degradationReasons: ['ltr_dimension_mismatch'],
+          },
+        };
+      }
     }
 
     return results;

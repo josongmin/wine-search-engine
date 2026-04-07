@@ -20,10 +20,16 @@ alwaysApply: true
 - `npm run build` — production compile (`tsconfig.build.json`, excludes tests).
 - `npm run start` — run compiled server.
 - `npm run lint` / `npm run lint:fix` — ESLint (flat config + `typescript-eslint` type-aware rules).
+- `npm run check:dev` — everyday local check: typecheck + lightweight test lane.
 - `npm run typecheck` — `tsc --noEmit` (default `tsconfig.json`: `src/`).
-- `npm run test` — Vitest.
+- `npm run test` — lightweight everyday Vitest lane.
+- `npm run test:meta` — meta/parity lane for workflow, fixture, and route consistency checks.
+- `npm run test:unit` — fuller unit regression lane.
+- `npm run test:watchlist` — watchlist-only lane.
+- `npm run test:heavy` — expensive search regression lane.
 - `npm run verify:http-contracts` — OpenAPI/catalog parity (also in `git:prepush`).
 - `npm run git:prepush:quick` — typecheck + unit without contract check.
+- `npm run git:prepush:heavy` — typecheck + unit + HTTP contract check + heavy test lane.
 
 ## Conventions
 

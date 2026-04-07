@@ -62,19 +62,19 @@ export function registerContractRoute(
 
   const rawHandler = options.handler;
 
-  const wrappedHandler: RouteHandlerMethod = async function routeWithPipelineDebug(
+  const wrappedHandler: RouteHandlerMethod = function routeWithPipelineDebug(
     this: FastifyInstance,
     request,
     reply,
   ) {
-    const requestId = request.requestId ?? request.id;
+    const requestId = request.requestId;
     return runWithRequestPipelineDebug(
       {
         requestId,
         debugRequest: request.debugRequest,
         requestLog: request.log,
       },
-      async () => Reflect.apply(
+      () => Reflect.apply(
         rawHandler as (...args: unknown[]) => unknown,
         this,
         [request, reply],

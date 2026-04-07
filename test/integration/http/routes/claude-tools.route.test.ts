@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerClaudeToolsRoute } from '../../../../src/interface/http/routes/claude-tools.route.js';
@@ -8,9 +8,8 @@ describe('Claude tools HTTP route', () => {
   let app: FastifyInstance | undefined;
   const executeWithFallback = vi.fn();
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     app = Fastify();
-    executeWithFallback.mockReset();
 
     const deps: ClaudeToolsRouteDeps = {
       adaptiveToolExecutor: {
@@ -22,7 +21,11 @@ describe('Claude tools HTTP route', () => {
     await app.ready();
   });
 
-  afterEach(async () => {
+  beforeEach(() => {
+    executeWithFallback.mockReset();
+  });
+
+  afterAll(async () => {
     if (app !== undefined) {
       await app.close();
     }

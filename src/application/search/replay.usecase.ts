@@ -146,7 +146,7 @@ export class ReplayUseCase {
       }
     }
 
-    return response;
+    return applyPreflightHonestyFloor(response, request.preflight_honesty_contract);
   }
 
   /**
@@ -159,4 +159,70 @@ export class ReplayUseCase {
   ): boolean {
     return decisionSnapshotsMatch(expected, actual);
   }
+}
+
+const EXECUTION_MODE_SEVERITY: Record<
+  NonNullable<SearchResponseV1['meta']['executionMode']>,
+  number
+> = {
+  authoritative: 0,
+  advisory: 1,
+  heuristic: 2,
+  degraded: 3,
+};
+
+function chooseStricterExecutionMode(
+  actual: SearchResponseV1['meta']['executionMode'] | SearchResponseV1['engineDecision']['executionMode'],
+  floor: NonNullable<ReplayRequest['preflight_honesty_contract']>['execution_mode'],
+): NonNullable<SearchResponseV1['meta']['executionMode']> {
+  const normalizedActual = actual ?? 'authoritative';
+  return EXECUTION_MODE_SEVERITY[normalizedActual] >= EXECUTION_MODE_SEVERITY[floor]
+    ? normalizedActual
+    : floor;
+}
+
+function applyPreflightHonestyFloor(
+  response: SearchResponseV1,
+  preflightHonestyContract: ReplayRequest['preflight_honesty_contract'],
+): SearchResponseV1 {
+  if (preflightHonestyContract === undefined) {
+    return response;
+  }
+
+  const actualExecutionMode = response.engineDecision.executionMode ?? response.meta.executionMode;
+  const mergedExecutionMode = chooseStricterExecutionMode(
+    actualExecutionMode,
+    preflightHonestyContract.execution_mode,
+  );
+  const actualReasons = new Set([
+    ...(response.engineDecision.degradationReasons ?? response.meta.degradationReasons ?? []),
+  ]);
+  for (const reason of preflightHonestyContract.degradation_reasons) {
+    actualReasons.add(reason);
+  }
+
+  const mergedBlockingEligible = (
+    response.engineDecision.blockingEligible
+    ?? response.meta.blockingEligible
+    ?? true
+  )
+    && (preflightHonestyContract.blocking_eligible ?? true)
+    && mergedExecutionMode !== 'heuristic'
+    && mergedExecutionMode !== 'advisory';
+
+  return {
+    ...response,
+    engineDecision: {
+      ...response.engineDecision,
+      executionMode: mergedExecutionMode,
+      blockingEligible: mergedBlockingEligible,
+      ...(actualReasons.size > 0 ? { degradationReasons: [...actualReasons] } : {}),
+    },
+    meta: {
+      ...response.meta,
+      executionMode: mergedExecutionMode,
+      blockingEligible: mergedBlockingEligible,
+      ...(actualReasons.size > 0 ? { degradationReasons: [...actualReasons] } : {}),
+    },
+  };
 }

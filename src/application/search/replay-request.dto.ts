@@ -19,4 +19,15 @@ export interface ReplayRequest {
    * Omit this field to perform a snapshot-only replay without hash validation.
    */
   readonly expected_response_hash?: string | undefined;
+  /**
+   * Optional honesty floor observed during live-snapshot preflight.
+   *
+   * When present, replay must not surface a more optimistic execution contract
+   * than the preflight search that produced the snapshot.
+   */
+  readonly preflight_honesty_contract?: {
+    readonly execution_mode: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
+    readonly degradation_reasons: readonly string[];
+    readonly blocking_eligible?: boolean | undefined;
+  } | undefined;
 }

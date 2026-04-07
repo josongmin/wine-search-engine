@@ -123,14 +123,18 @@ export function buildHealthRouteOptions(
             },
           }
         : {}),
-      reranker: {
-        required: false,
-        check: async (): Promise<ReadinessStatus> =>
-          probeJsonPostEndpoint(`${config.reranker.url}/rerank`, {
-            query: '__healthcheck__',
-            texts: ['__healthcheck__'],
-          }),
-      },
+      ...(config.reranker.url !== undefined
+        ? {
+            reranker: {
+              required: false,
+              check: async (): Promise<ReadinessStatus> =>
+                probeJsonPostEndpoint(`${config.reranker.url}/rerank`, {
+                  query: '__healthcheck__',
+                  texts: ['__healthcheck__'],
+                }),
+            },
+          }
+        : {}),
     },
   };
 }

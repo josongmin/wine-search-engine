@@ -18,7 +18,8 @@ const drinkingWindowLogger = bootstrapLogger.child({
 function needsDrinkingWindowPrediction(r: RankedResult): boolean {
   return (
     r.drinkingWindowStart === undefined &&
-    r.vintage !== undefined &&
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    (r.vintageYear ?? r.vintage) !== undefined &&
     r.body !== undefined &&
     r.tannin !== undefined &&
     r.acidity !== undefined &&
@@ -44,7 +45,8 @@ export async function mapRankedResultsToResultItems(
   const predictions = await Promise.allSettled(
     resultsPendingPrediction.map((r) =>
       drinkingWindow!.check({
-        vintage: r.vintage!,
+        // eslint-disable-next-line @typescript-eslint/no-deprecated
+        vintage: (r.vintageYear ?? r.vintage)!,
         grapePrimaryEnc: r.grapePrimaryEnc!,
         regionEnc: r.regionEnc!,
         countryEnc: r.countryEnc!,
@@ -112,7 +114,8 @@ export async function mapRankedResultsToResultItems(
         ...(r.region !== undefined ? { region: r.region } : {}),
         ...(r.appellation !== undefined ? { appellation: r.appellation } : {}),
         ...(r.grapePrimary !== undefined ? { grapes: [r.grapePrimary] } : {}),
-        ...(r.vintage !== undefined ? { vintage: r.vintage } : {}),
+        // eslint-disable-next-line @typescript-eslint/no-deprecated
+        ...((r.vintageYear ?? r.vintage) !== undefined ? { vintage: r.vintageYear ?? r.vintage } : {}),
         ...(r.producerPrestige !== undefined ? { producerPrestige: r.producerPrestige } : {}),
       },
       relevanceScore: r.finalScore,

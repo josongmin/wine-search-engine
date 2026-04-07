@@ -58,6 +58,14 @@ export class CacheService implements SearchResponseCachePort {
   private circuitBreakerOpen = false;
   private circuitBreakerResetTime = 0;
   private consecutiveErrorCount = 0;
+  /**
+   * Monotonically-increasing counter incremented on every state transition
+   * (open → closed, closed → open).  Concurrent async paths that captured a
+   * stale snapshot can compare against the current version to detect that the
+   * circuit breaker was mutated between their read and write, and bail out
+   * instead of clobbering the newer state.
+   */
+  private _circuitBreakerVersion = 0;
 
   constructor(
     private readonly queryCache: QueryCachePort | undefined,
@@ -141,14 +149,10 @@ export class CacheService implements SearchResponseCachePort {
         cachedExecutionMode:
           cached.meta.executionMode ?? cached.engineDecision.executionMode ?? 'authoritative',
         ...(cachedBlockingEligible !== undefined ? { cachedBlockingEligible } : {}),
-        ...(cachedSnapshot !== undefined
-          ? {
-              cachedSnapshotId: cachedSnapshot.snapshot_id,
-              cachedModelVersions: cachedSnapshot.model_versions,
-            }
-          : {}),
+        cachedSnapshotId: cachedSnapshot.snapshot_id,
+        cachedModelVersions: cachedSnapshot.model_versions,
         cachedContractVersion:
-          cachedSnapshot?.response_contract_version ?? cached.meta.engine_schema_version,
+          cachedSnapshot.response_contract_version,
         currentSnapshotId: currentSnapshot.snapshot_id,
         currentContractVersion: currentSnapshot.response_contract_version,
         currentModelVersions: currentSnapshot.model_versions,
@@ -211,7 +215,7 @@ export class CacheService implements SearchResponseCachePort {
     const snapshot = response.meta.decisionSnapshot ?? response.engineDecision.decisionSnapshot;
     const policy = decideResponseCachePolicy({
       executionMode: response.meta.executionMode ?? response.engineDecision.executionMode ?? 'authoritative',
-      ...(snapshot !== undefined ? { snapshotId: buildSnapshotCachePolicyRef(snapshot) } : {}),
+      snapshotId: buildSnapshotCachePolicyRef(snapshot),
       ...(
         response.meta.blockingEligible !== undefined || response.engineDecision.blockingEligible !== undefined
           ? {
@@ -408,8 +412,13 @@ export class CacheService implements SearchResponseCachePort {
 
     const now = Date.now();
     if (now > this.circuitBreakerResetTime) {
+      // Atomically transition open → closed and reset the error counter in the
+      // same synchronous operation.  Because JavaScript is single-threaded,
+      // no await intervenes here, so no concurrent path can observe a
+      // half-transitioned state (open=false but errorCount still > 0).
       this.circuitBreakerOpen = false;
       this.consecutiveErrorCount = 0;
+      this._circuitBreakerVersion += 1;
       return false;
     }
 
@@ -420,6 +429,15 @@ export class CacheService implements SearchResponseCachePort {
    * Record cache error and update circuit breaker.
    */
   private recordCacheError(err: unknown): void {
+    // Idempotency guard: if the circuit is already open, further errors from
+    // in-flight requests that slipped through before the breaker tripped must
+    // not keep inflating the counter.  The counter is reset atomically when the
+    // breaker closes (see isCircuitBreakerOpen), so we must not overwrite that
+    // reset with a stale increment.
+    if (this.circuitBreakerOpen) {
+      return;
+    }
+
     this.consecutiveErrorCount += 1;
     log.warn(
       {
@@ -436,6 +454,7 @@ export class CacheService implements SearchResponseCachePort {
 
     this.circuitBreakerOpen = true;
     this.circuitBreakerResetTime = Date.now() + this.circuitBreakerResetMs;
+    this._circuitBreakerVersion += 1;
     log.warn(
       {
         consecutiveErrorCount: this.consecutiveErrorCount,

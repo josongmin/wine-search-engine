@@ -606,6 +606,7 @@ export class SignalComputer {
  * Clamps a numeric value to the [0, 1] range.
  */
 function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
 }
 

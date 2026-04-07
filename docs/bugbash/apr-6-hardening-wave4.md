@@ -36,13 +36,13 @@ Wave 4에서 닫아야 하는 것은 다음이다.
 | Cache read fail-closed | 완료 | `cache-policy.ts`, `kill-switch-policy.ts`, `CacheService.getSearchResponse`, integration tests |
 | Hybrid route degradation surfacing | 완료 | reranker / learned matcher / specialized fallback reason까지 surface |
 | Mixed route degradation parity | 완료 | mixed가 `routeDegradation` / `fallbackReason` / `funnelMetrics`를 hybrid parity semantics로 surface |
-| Replay fixture executable subset | 완료 | self-contained fixture는 `/v1/search` HTTP 실행 가능 |
-| Full replay HTTP/runtime matrix | 부분 완료 | self-contained replay fixture lane CI 완료; runtime-required 쪽은 opt-in routing audit lane까지 반영 |
+| Replay fixture executable subset | 완료 | `endpoint` discriminator 기준으로 self-contained `/v1/search` + `/v1/search/replay` fixture 모두 HTTP 실행 가능 |
+| Full replay HTTP/runtime matrix | 완료 | `execution_lane` 기준 self-contained + runtime-required replay fixture를 capability-aware in-memory HTTP lane에서 실행하고 CI에 고정 |
 | Eval metric policy SSOT | 완료 | `eval-metric-policy.ts`, `run-offline-eval.ts` |
 | Eval execution-mode segmentation | 완료 | `by_execution_mode`, `by_blocking_eligible`, degradation histogram, release report, baseline mix delta |
 | ID schema version decoder | 완료 | authority / batch / snapshot v1/v2 parser |
 | Decoder를 replay/audit runtime에서 실제 활용 | 완료 | replay helper + observability log enrichment에서 structured decode path 사용 |
-| Deprecated `decision_trace_ref` consumer migration | 완료 | consumer inventory + migration guide + ops runbook linked deliverables 반영 |
+| Deprecated `decision_trace_ref` active-gate consumer migration | 완료 | active repo/runtime/docs canonical surface 완료; historical Wave 3 doc consumer는 `retired` historical reference로 gate에서 제외 |
 
 ## Current Exit Posture
 
@@ -899,7 +899,7 @@ flowchart TD
   - `migration_status`
 - repo 내부 consumer는 `rg` 결과로 근거를 남기고, 외부/downstream consumer는 “known external” 섹션으로 분리
 - `decision_trace_ref` 의존 consumer와 새 contract consumer를 명시적으로 구분
-- `migration_status`는 최소 `not_started | partial | complete | unknown`으로 고정한다
+- `migration_status`는 최소 `not_started | partial | complete | retired | unknown`으로 고정한다
 - 각 row에 optional `owner`, `last_verified_at`, `notes`를 둘 수 있지만, core columns는 생략하지 않는다
 - repo 내부 consumer는 최소 하나의 file reference 또는 command evidence를 남기고, “추정”만으로 row를 만들지 않는다
 - 비범위:

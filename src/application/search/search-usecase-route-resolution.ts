@@ -1,6 +1,26 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
-import type { QueryRoute } from '../../domain/query/model/query-route.js';
+import { QUERY_ROUTES, type QueryRoute } from '../../domain/query/model/query-route.js';
+import { RETRIEVAL_MODES, retrievalModeToRoute } from '../../domain/query/model/retrieval-mode.js';
 import type { SearchRequest } from './search-request.dto.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+function isQueryRoute(value: unknown): value is QueryRoute {
+  return typeof value === 'string' && QUERY_ROUTES.includes(value as QueryRoute);
+}
+
+function resolvePlannerSuggestedRoute(plan: QueryPlanV1): QueryRoute {
+  if (isQueryRoute(plan.route)) {
+    return plan.route;
+  }
+  if (RETRIEVAL_MODES.includes(plan.retrievalMode)) {
+    return retrievalModeToRoute(plan.retrievalMode);
+  }
+  bootstrapLogger.warn(
+    { planRoute: plan.route, retrievalMode: plan.retrievalMode },
+    '[RouteResolution] Invalid route from planner; falling back to hybrid',
+  );
+  return 'hybrid';
+}
 
 /**
  * Effective route when the client passes `options.mode` (not top-level `retrieval_mode`).
@@ -18,7 +38,7 @@ export function resolveRouteFromPlanAndOptionMode(
     ) {
       return 'hybrid';
     }
-    return plan.route;
+    return resolvePlannerSuggestedRoute(plan);
   }
   return mode;
 }
@@ -45,10 +65,11 @@ export function buildSearchRouteResolutionContext(
     apiOverrideMode ?? resolveRouteFromPlanAndOptionMode(plan, request.options?.mode);
   const retrievalModeSource: 'planner' | 'api_override' =
     apiOverrideMode !== undefined ? 'api_override' : 'planner';
+  const plannerSuggestedMode = resolvePlannerSuggestedRoute(plan);
   return {
     apiOverrideMode,
     effectiveRoute,
     retrievalModeSource,
-    plannerSuggestedMode: plan.route,
+    plannerSuggestedMode,
   };
 }

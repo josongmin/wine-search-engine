@@ -1,15 +1,10 @@
 import { defineConfig } from 'vitest/config';
-import os from 'node:os';
 import { vitestResolveAliases } from './aliases.js';
+import { resolveMaxThreads } from './parallelism.js';
 
 const isCoverageRun = process.argv.includes('--coverage') || process.env.VITEST_COVERAGE === '1';
 
-const maxUnitThreads = (() => {
-  const parsed = Number.parseInt(process.env.VITEST_MAX_THREADS ?? '8', 10);
-  const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
-  const cpus = os.availableParallelism?.() ?? os.cpus().length;
-  return Math.min(cap, Math.max(2, cpus));
-})();
+const maxUnitThreads = resolveMaxThreads();
 
 const testInclude = [
   'test/unit/**/*.test.ts',
@@ -23,11 +18,30 @@ const testInclude = [
   'src/__tests__/**/*.test.ts',
 ] as const;
 
+const heavyTestExclude = [
+  'src/__tests__/integration/cache-service.integration.test.ts',
+] as const;
+
+const watchlistTestExclude = [
+  'src/__tests__/container-watchlist.test.ts',
+  'src/__tests__/watchlist-routes.test.ts',
+  'src/__tests__/watchlist-integration.test.ts',
+  'src/__tests__/watchlist-delivery-runtime.test.ts',
+  'src/__tests__/watchlist-policy.test.ts',
+  'src/__tests__/watchlist-aware-search-index.test.ts',
+  'src/__tests__/pg-watchlist-store.test.ts',
+  'src/config/__tests__/readiness.test.ts',
+  'src/__tests__/redis-watchlist-publisher.test.ts',
+  'src/__tests__/webhook-delivery.test.ts',
+] as const;
+
 export default defineConfig({
   test: {
     globals: true,
     include: [...testInclude],
     exclude: [
+      ...heavyTestExclude,
+      ...watchlistTestExclude,
       'test/unit/infrastructure/http-adapters.network.test.ts',
       'src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts',
       'src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts',

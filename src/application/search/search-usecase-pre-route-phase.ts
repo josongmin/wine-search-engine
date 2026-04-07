@@ -50,32 +50,52 @@ export async function runSearchPreRoutePhase(
   if (ctx.decomposedSearch) {
     const decomposition = analyzeQueryDecomposition(sanitizedQuery);
     if (isValidDecomposition(decomposition.outcome)) {
-      const response = await ctx.decomposedSearch.execute(
-        decomposition.outcome.subQueries,
-        decomposition.outcome.comparisonIntent,
-        sanitizedQuery,
-        ctx.requestId,
-        ctx.startTime,
-        {
-          ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
-          ...(ctx.request.sessionContext !== undefined
-            ? { sessionContext: ctx.request.sessionContext }
-            : {}),
-          ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
-        },
-      );
-      logSearchEvent({
-        runtime_correlation_ref: ctx.requestId,
-        decomposition_strategy: decomposition.hint.strategy,
+      const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
+      const timeoutSignal = Symbol('timeout');
+      const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
+        setTimeout(() => { resolve(timeoutSignal); }, DECOMPOSED_SEARCH_TIMEOUT_MS);
       });
-      pipelineDebug(
-        {
-          step: 'pre_route.decomposed_comparison',
+      const decomposedResponse = await Promise.race([
+        ctx.decomposedSearch.execute(
+          decomposition.outcome.subQueries,
+          decomposition.outcome.comparisonIntent,
+          sanitizedQuery,
+          ctx.requestId,
+          ctx.startTime,
+          {
+            ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
+            ...(ctx.request.sessionContext !== undefined
+              ? { sessionContext: ctx.request.sessionContext }
+              : {}),
+            ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+          },
+        ),
+        timeoutPromise,
+      ]);
+      if (decomposedResponse === timeoutSignal) {
+        pipelineDebug(
+          {
+            step: 'pre_route.decomposed_comparison',
+            decomposition_strategy: decomposition.hint.strategy,
+            timed_out: true,
+          },
+          'pipeline pre_route decomposed search timed out — continuing without decomposition',
+        );
+      } else {
+        const response = decomposedResponse;
+        logSearchEvent({
+          runtime_correlation_ref: ctx.requestId,
           decomposition_strategy: decomposition.hint.strategy,
-        },
-        'pipeline pre_route comparison branch',
-      );
-      return { outcome: 'return', response };
+        });
+        pipelineDebug(
+          {
+            step: 'pre_route.decomposed_comparison',
+            decomposition_strategy: decomposition.hint.strategy,
+          },
+          'pipeline pre_route comparison branch',
+        );
+        return { outcome: 'return', response };
+      }
     }
   }
 

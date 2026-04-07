@@ -7,9 +7,11 @@
 
 import type { FastifyInstance } from 'fastify';
 import { createServer } from '../../../src/interface/http/server.js';
-import { createTestContainer } from '../../integration/helpers/test-container.js';
 import {
-  TEST_ALIASES,
+  createTestContainer,
+  type TestContainerOptions,
+} from '../../integration/helpers/test-container.js';
+import {
   TEST_DOCUMENTS,
 } from '../../integration/helpers/test-fixtures.js';
 import { SimilarityScorer } from '../../../src/domain/mixed/service/similarity-scorer.js';
@@ -20,6 +22,10 @@ import type { SimilarityCandidate } from '../../../src/domain/mixed/service/simi
 
 export interface TestServer {
   readonly app: FastifyInstance;
+}
+
+export interface TestServerOptions {
+  readonly containerOptions?: TestContainerOptions;
 }
 
 type FixtureDoc = (typeof TEST_DOCUMENTS)[number];
@@ -134,8 +140,10 @@ function computeMixedRetrievalScore(
   return Math.max(0.001, Math.min(1, similarity * 0.75 + popularityScore * 0.25));
 }
 
-function seedMixedHarness(parts: ReturnType<typeof createTestContainer>): void {
-  const docs = TEST_DOCUMENTS;
+function seedMixedHarness(
+  parts: ReturnType<typeof createTestContainer>,
+  docs: readonly FixtureDoc[],
+): void {
 
   for (const doc of docs) {
     parts.anchorResolver.addEntity(doc.entityId, buildAnchorEntityData(doc));
@@ -170,25 +178,18 @@ function seedMixedHarness(parts: ReturnType<typeof createTestContainer>): void {
  * Loads the 10 test fixtures (aliases + documents) automatically.
  * Returns the Fastify instance for use with app.inject().
  */
-export async function createTestServer(): Promise<TestServer> {
-  const parts = createTestContainer();
+export async function createTestServer(options: TestServerOptions = {}): Promise<TestServer> {
+  const parts = createTestContainer(options.containerOptions);
+  const docs = parts.fixtureDocuments;
 
-  // Load test fixtures into in-memory adapters
-  for (const alias of TEST_ALIASES) {
-    parts.aliasMatcher.addAlias(alias.surfaceForm, alias.entityId, alias.confidence);
-  }
-  for (const doc of TEST_DOCUMENTS) {
-    parts.searchIndex.upsertDoc(doc);
-  }
-  const uniqueIds = new Set(TEST_ALIASES.map((a) => a.entityId));
-  parts.blockingAdapter.addEntityIds(Array.from(uniqueIds));
-
-  // Mark "마고" as ambiguous for ambiguity-related tests
+  // createTestContainer already seeds aliases, search docs, blocking ids,
+  // and runtime-shaped fixture documents. Only the ambiguity marker and
+  // mixed harness enrichment happen here.
   parts.ambiguityDict.setAmbiguous('마고', ['region', 'entity'], 'medium');
 
-  // Seed the mixed-query harness so anchor-based queries can resolve
-  // and produce non-empty similar-item results in E2E.
-  seedMixedHarness(parts);
+  // Seed the mixed-query harness against the materialized fixture docs so
+  // containerOptions like stripCachedDrinkingWindow remain effective in E2E.
+  seedMixedHarness(parts, docs);
 
   // createServer is now async (registers rate-limit plugin etc.)
   const app = await createServer(parts.container, {

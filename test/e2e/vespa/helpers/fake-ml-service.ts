@@ -5,6 +5,8 @@ export interface FakeMlService extends TestHttpServer {
   clearRequests(): void;
   setFailure(pathname: string, statusCode: number, body?: Record<string, unknown>): void;
   clearFailures(): void;
+  setDelay(pathname: string, durationMs: number): void;
+  clearDelays(): void;
 }
 
 function buildEmbeddingVector(seed: string): number[] {
@@ -22,7 +24,13 @@ function toStringInput(value: unknown, fallback: string): string {
 
 export async function startFakeMlService(): Promise<FakeMlService> {
   const failures = new Map<string, { statusCode: number; body: Record<string, unknown> }>();
-  const server = await startJsonTestServer((request, response) => {
+  const delays = new Map<string, number>();
+  const server = await startJsonTestServer(async (request, response) => {
+    const configuredDelay = delays.get(request.url);
+    if (configuredDelay !== undefined && configuredDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, configuredDelay));
+    }
+
     const configuredFailure = failures.get(request.url);
     if (configuredFailure !== undefined) {
       response.statusCode = configuredFailure.statusCode;
@@ -108,6 +116,12 @@ export async function startFakeMlService(): Promise<FakeMlService> {
     },
     clearFailures(): void {
       failures.clear();
+    },
+    setDelay(pathname: string, durationMs: number): void {
+      delays.set(pathname, durationMs);
+    },
+    clearDelays(): void {
+      delays.clear();
     },
   };
 }

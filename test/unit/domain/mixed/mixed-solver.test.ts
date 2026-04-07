@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { MixedSolver } from '../../../../src/domain/mixed/service/mixed-solver.js';
 import type {
   AnchorResolverPort,
@@ -89,7 +89,11 @@ function buildSolver(runtimeSignal?: RankerRuntimeSignal): MixedSolver {
 }
 
 describe('MixedSolver', () => {
-  it('reuses ranker degradation reasons without adding mixed-only labels', async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns early with mixed_similar_retrieval_fallback when candidates are empty', async () => {
     const solver = buildSolver({
       rerankerStatus: 'failed',
       rerankerFailureReason: 'timeout',
@@ -103,16 +107,14 @@ describe('MixedSolver', () => {
 
     expect(result.routeDegradation).toEqual({
       executionMode: 'degraded',
-      degradationReasons: [
-        'reranker_timeout',
-        'mixed_similar_retrieval_fallback',
-      ],
+      degradationReasons: ['mixed_similar_retrieval_fallback'],
     });
     expect(result.fallbackReason).toBe('mixed_similar_retrieval_fallback');
+    expect(result.rankedResults).toHaveLength(0);
     expect(result.routeDegradation?.degradationReasons).not.toContain('mixed_ranker_unavailable');
   });
 
-  it('preserves non-degraded ranker execution modes on the mixed route', async () => {
+  it('returns early without calling ranker when candidates are empty', async () => {
     const solver = buildSolver({
       rerankerStatus: 'failed',
       rerankerFailureReason: 'unknown',
@@ -125,11 +127,10 @@ describe('MixedSolver', () => {
     const result = await solver.solve(minimalPlan());
 
     expect(result.routeDegradation).toEqual({
-      executionMode: 'advisory',
-      degradationReasons: [
-        'reranker_skipped',
-        'mixed_similar_retrieval_fallback',
-      ],
+      executionMode: 'degraded',
+      degradationReasons: ['mixed_similar_retrieval_fallback'],
     });
+    expect(result.fallbackReason).toBe('mixed_similar_retrieval_fallback');
+    expect(result.rankedResults).toHaveLength(0);
   });
 });

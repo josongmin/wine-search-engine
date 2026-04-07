@@ -264,6 +264,24 @@ export class DecisionEngine {
     const A = resolverTrace.ambiguityDetected;
     const conformalSetSize = input.conformalSetSize ?? 1;
 
+    if (conformalSetSize === 0) {
+      rulesApplied.push('NUMERIC_GATE_EMPTY_SET');
+      bootstrapLogger.warn(
+        {
+          conformalSetSize,
+          queryClass: input.queryPlan.queryClass,
+          candidateCount: input.resolverResult.candidates.length,
+        },
+        '[DecisionEngine] conformalSetSize=0 — empty conformal set for numeric gate',
+      );
+      return {
+        status: 'failed',
+        nextAction: 'fail',
+        rulesApplied: [...rulesApplied],
+        finalReason: 'Conformal set size is 0; no candidates to evaluate.',
+      };
+    }
+
     const cMeetsThreshold = C >= thresholds.resolveTau;
     // Use dynamic gap threshold based on query class (RFC-009 §5.3)
     const dynamicGapThreshold = computeDynamicGapThreshold(input.queryPlan.queryClass, C);

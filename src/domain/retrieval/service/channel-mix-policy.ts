@@ -13,7 +13,7 @@
  */
 
 import type { RetrievalChannel } from '../model/retrieval-channel.js';
-import { QUERY_FAMILY_LABELS } from '../../query/model/query-observability-vocab.js';
+import type { QUERY_FAMILY_LABELS } from '../../query/model/query-observability-vocab.js';
 
 // ---------------------------------------------------------------------------
 // Types

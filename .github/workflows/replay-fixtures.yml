@@ -7,8 +7,12 @@ on:
       - 'package-lock.json'
       - 'config/vitest/e2e.config.ts'
       - 'config/vitest/e2e.replay.config.ts'
+      - 'config/vitest/e2e.vespa.config.ts'
       - 'config/vitest/unit.config.ts'
       - 'test/e2e/search-replay-fixtures.test.ts'
+      - 'test/e2e/search-replay-runtime-required-fixtures.test.ts'
+      - 'test/e2e/vespa/search-replay-full-runtime-fixtures.test.ts'
+      - 'test/e2e/vespa/helpers/**'
       - 'test/replay-fixtures/search/**'
       - 'test/unit/replay-fixtures/**'
       - 'src/application/search/replay.usecase.ts'
@@ -19,12 +23,6 @@ on:
       - '.github/workflows/replay-fixtures.yml'
   merge_group:
   workflow_dispatch:
-    inputs:
-      run_runtime_required_lane:
-        description: 'Run the runtime-required replay routing audit lane'
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: replay-fixtures-${{ github.workflow }}-${{ github.ref }}
@@ -48,25 +46,87 @@ jobs:
             echo ""
             echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:self-contained\`"
             echo "- Fixture routing source of truth: \`test/replay-fixtures/search/run-search-fixture.ts\`"
-            echo "- Selection rule: fixtures with empty/absent \`requires_runtime_capability\`"
+            echo "- Selection rule: fixtures with \`execution_lane='self_contained'\`"
+            echo "- Invariant: self-contained fixtures must not declare \`requires_runtime_capability\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  runtime-required-replay-routing-audit:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_required_lane }}
+  runtime-required-replay-inmemory:
     runs-on: ubuntu-latest
     needs: [self-contained-replay]
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - name: Runtime-required replay routing audit
-        run: npm run test:replay:fixtures:runtime-required:audit
-      - name: Runtime-required replay audit summary
+      - name: Runtime-required replay execution lane
+        run: npm run test:e2e:replay:fixtures:runtime-required
+      - name: Runtime-required replay summary
         if: always()
         run: |
           {
-            echo "## Runtime-Required Replay Routing Audit"
+            echo "## Runtime-Required Replay In-Memory Lane"
             echo ""
-            echo "- Opt-in audit: \`npm run test:replay:fixtures:runtime-required:audit\`"
-            echo "- Gate: manual workflow_dispatch with \`run_runtime_required_lane=true\`"
-            echo "- Scope: validates classification and helper routing for fixtures with non-empty \`requires_runtime_capability\`"
-            echo "- Not a full runtime-required fixture execution lane"
+            echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:runtime-required\`"
+            echo "- Scope: executes fixtures with \`execution_lane='runtime_required'\` and \`metadata.runtime_mode='inmemory'\` against capability-aware in-memory runtime wiring"
+            echo "- Fixture count: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -l '\"runtime_mode\"\\s*:\\s*\"inmemory\"' | wc -l | tr -d ' ')"
+            echo "- Invariant: runtime-required fixtures must declare at least one \`requires_runtime_capability\` tag"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  runtime-required-replay-full-runtime:
+    runs-on: ubuntu-latest
+    needs: [runtime-required-replay-inmemory]
+    steps:
+      - uses: ./.github/actions/setup-node-ci
+      - name: Runtime-required replay full-runtime lane
+        env:
+          REPLAY_FULL_RUNTIME_REPORT_PATH: /tmp/replay-fixtures-artifacts/full-runtime-report.json
+        run: npm run test:e2e:replay:fixtures:full-runtime
+      - name: Runtime-required replay full-runtime summary
+        if: always()
+        run: |
+          {
+            echo "## Runtime-Required Replay Full-Runtime Lane"
+            echo ""
+            echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:full-runtime\`"
+            echo "- Scope: executes fixtures with \`metadata.runtime_mode='full_runtime'\` against real Vespa + real HTTP ML adapters"
+            echo "- Docker stack: \`docker-compose.test.yml\` via \`bash scripts/run-vespa-test-lane.sh\`"
+            echo "- Fixture count: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -l '\"runtime_mode\"\\s*:\\s*\"full_runtime\"' | wc -l | tr -d ' ')"
+            echo "- Capability tags: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -o '\"[a-z_]+_runtime\"' | tr -d '\"' | sort -u | tr '\n' ',' | sed 's/,$//')"
+            echo "- Surfaced degradation reasons (fixture SSOT): $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -o '\"[a-z_]+\"' | tr -d '\"' | rg '(_timeout|heuristic_drinking_window|learned_matcher_timeout|reranker_timeout)$' | sort -u | tr '\n' ',' | sed 's/,$//')"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Append full-runtime fixture report to summary
+        if: always()
+        run: |
+          if [ -f /tmp/replay-fixtures-artifacts/full-runtime-report.json ]; then
+            node - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+            const fs = require('fs');
+            const report = JSON.parse(fs.readFileSync('/tmp/replay-fixtures-artifacts/full-runtime-report.json', 'utf8'));
+            console.log('');
+            console.log('### Full-Runtime Fixture Results');
+            console.log('');
+            for (const fixture of report.fixtures ?? []) {
+              console.log(`- \`${fixture.fixture}\` → \`${fixture.executionMode}\` / \`${(fixture.degradationReasons ?? []).join(',') || 'none'}\``);
+            }
+            EOF
+          else
+            {
+              echo ""
+              echo "### Full-Runtime Fixture Results"
+              echo ""
+              echo "- report missing: \`/tmp/replay-fixtures-artifacts/full-runtime-report.json\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Capture Dockerized replay logs
+        if: always()
+        run: |
+          mkdir -p /tmp/replay-fixtures-artifacts
+          docker compose -f docker-compose.test.yml logs --no-color > /tmp/replay-fixtures-artifacts/full-runtime-docker.log
+      - name: Upload full-runtime replay logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-full-runtime-logs
+          path: /tmp/replay-fixtures-artifacts/full-runtime-docker.log
+      - name: Upload full-runtime replay report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-full-runtime-report
+          path: /tmp/replay-fixtures-artifacts/full-runtime-report.json

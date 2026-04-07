@@ -51,10 +51,27 @@ export function errorHandler(
 ): void {
   const requestId = getRequestId(request);
 
+  const fastifyError = error as { code?: string; statusCode?: number; message?: string };
+
+  // Request timeout — 503 Service Unavailable
+  // Fastify throws FST_ERR_HANDLER_TIMEOUT (statusCode=503) when a route
+  // handler exceeds the configured requestTimeout option.
+  if (
+    fastifyError.code === 'FST_ERR_HANDLER_TIMEOUT' ||
+    fastifyError.statusCode === 503
+  ) {
+    request.log.warn({ requestId }, 'request_timeout');
+    reply.code(503).send({
+      error: 'RequestTimeout',
+      message: 'Request timed out',
+      statusCode: 503,
+    });
+    return;
+  }
+
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
   // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the
   // limit is exceeded (without a custom errorResponseBuilder).
-  const fastifyError = error as { statusCode?: number; message?: string };
   if (fastifyError.statusCode === 429) {
     const message = fastifyError.message ?? 'Rate limit exceeded.';
     // Extract the "retry in X" portion from the default message to satisfy the

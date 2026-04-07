@@ -1,0 +1,67 @@
+# Exclude generated artifacts and local agent state from generic search/indexers.
+
+# Dependencies & builds
+node_modules
+node_modules/
+web/node_modules
+web/node_modules/
+dist
+dist/
+coverage
+coverage/
+.next/
+web/.next/
+.turbo/
+*.tsbuildinfo
+.tsbuildinfo.build
+next-env.d.ts
+
+# Logs & caches
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.cache/
+.parcel-cache/
+.eslintcache
+
+# Test artifacts
+test-results
+test-results/
+playwright-report
+playwright-report/
+
+# Local AI tooling state and duplicated worktrees
+.claude/worktrees/
+.claude/debug/
+.claude/cache/
+.claude/sessions/
+.cursor/cache/
+.cursor/debug/
+.cursor/browser-logs/
+.codex/cache/
+.codex/sessions/
+
+# VCS internals
+.git/
+.DS_Store
+.env
+.env.*
+!.env.example
+!web/.env.example
+
+# Heavy docs / generated datasets / local archives
+docs/archive/
+docs/sessions/
+docs/plans/
+data/**/*.ndjson
+data/**/*.jsonl
+data/**/*.json
+models/
+*.tar.gz
+*.tar
+*.tgz
+*.zip
+*.7z
+*.rar

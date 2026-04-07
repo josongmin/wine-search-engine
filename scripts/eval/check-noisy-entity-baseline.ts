@@ -14,9 +14,10 @@ import {
   loadNoisyEntityPredictions,
   scoreNoisyEntityBenchmark,
 } from './run-noisy-entity-eval.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
-const DEFAULT_PREDICTIONS = 'data/noisy-entity-predictions-smoke.jsonl';
-const DEFAULT_BASELINE = 'data/noisy-entity-baseline.json';
+const DEFAULT_PREDICTIONS = resolveDataPath('data/noisy-entity-predictions-smoke.jsonl');
+const DEFAULT_BASELINE = resolveDataPath('data/noisy-entity-baseline.json');
 
 interface BaselineFixture {
   readonly version: string;

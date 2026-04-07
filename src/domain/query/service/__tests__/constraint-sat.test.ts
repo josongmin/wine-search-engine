@@ -58,4 +58,61 @@ describe('ConstraintSAT', () => {
     const result = sat.check(bundle);
     expect(result.contradicted).toBe(false);
   });
+
+  // range vs range
+  it('vintage range 2000-2010 AND 2015-2020 → contradicted (disjoint)', () => {
+    const bundle = makeBundle([
+      constraint('vintage', 'range', { min: 2000, max: 2010 }),
+      constraint('vintage', 'range', { min: 2015, max: 2020 }),
+    ]);
+    const result = sat.check(bundle);
+    expect(result.contradicted).toBe(true);
+  });
+
+  it('vintage range 2000-2015 AND 2010-2020 → not contradicted (overlapping)', () => {
+    const bundle = makeBundle([
+      constraint('vintage', 'range', { min: 2000, max: 2015 }),
+      constraint('vintage', 'range', { min: 2010, max: 2020 }),
+    ]);
+    const result = sat.check(bundle);
+    expect(result.contradicted).toBe(false);
+  });
+
+  // symmetric: >= vs range
+  it('vintage >= 2021 AND vintage range 2000-2010 → contradicted (>= vs range, b has range)', () => {
+    const bundle = makeBundle([
+      constraint('vintage', '>=', 2021),
+      constraint('vintage', 'range', { min: 2000, max: 2010 }),
+    ]);
+    const result = sat.check(bundle);
+    expect(result.contradicted).toBe(true);
+  });
+
+  it('vintage >= 2005 AND vintage range 2000-2010 → not contradicted (>= within range)', () => {
+    const bundle = makeBundle([
+      constraint('vintage', '>=', 2005),
+      constraint('vintage', 'range', { min: 2000, max: 2010 }),
+    ]);
+    const result = sat.check(bundle);
+    expect(result.contradicted).toBe(false);
+  });
+
+  // symmetric: <= vs range
+  it('vintage <= 1999 AND vintage range 2000-2010 → contradicted (<= vs range, b has range)', () => {
+    const bundle = makeBundle([
+      constraint('vintage', '<=', 1999),
+      constraint('vintage', 'range', { min: 2000, max: 2010 }),
+    ]);
+    const result = sat.check(bundle);
+    expect(result.contradicted).toBe(true);
+  });
+
+  it('vintage <= 2008 AND vintage range 2000-2010 → not contradicted (<= within range)', () => {
+    const bundle = makeBundle([
+      constraint('vintage', '<=', 2008),
+      constraint('vintage', 'range', { min: 2000, max: 2010 }),
+    ]);
+    const result = sat.check(bundle);
+    expect(result.contradicted).toBe(false);
+  });
 });

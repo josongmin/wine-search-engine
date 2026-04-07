@@ -274,7 +274,8 @@ const QueryBudgetTransportSchema = z.object({
   max_latency_ms: z.number().int().positive(),
   max_candidates: z.number().int().positive(),
   rerank_limit: z.number().int().positive(),
-}).strict();
+  max_dense_calls: z.number().int().positive().optional(),
+});
 
 export const InterpretResponseSchema = z.object({
   raw_query: z.string().min(1),
@@ -332,6 +333,7 @@ export const ResolveResponseSchema = z.object({
   candidates: z.array(ResolveCandidateSchema),
   top_entity: ResolveTopEntitySchema.optional(),
   decision_trace_ref: z.string().min(1),
+  authority_trace_ref: z.string().min(1).optional(),
   request_id: z.string().min(1).optional(),
 }).strict();
 

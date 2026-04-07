@@ -16,19 +16,42 @@ export function parseNdjson<T>(
   content: string,
   label = 'ndjson',
 ): { records: T[]; skipped: number } {
-  const lines = content.trim().split('\n').filter((line) => line.length > 0);
   const records: T[] = [];
   let skipped = 0;
+  const trimmed = content.trim();
 
-  for (let i = 0; i < lines.length; i++) {
+  if (trimmed.length === 0) {
+    return { records, skipped };
+  }
+
+  let lineStart = 0;
+  let lineNumber = 1;
+
+  while (lineStart <= trimmed.length) {
+    let lineEnd = trimmed.indexOf('\n', lineStart);
+    if (lineEnd === -1) {
+      lineEnd = trimmed.length;
+    }
+
+    const rawLine = trimmed.slice(lineStart, lineEnd);
     try {
-      records.push(JSON.parse(lines[i]!) as T);
+      if (rawLine.length > 0) {
+        records.push(JSON.parse(rawLine.replace(/\r$/, '')) as T);
+      }
     } catch {
       skipped++;
       if (skipped <= 5) {
-        console.warn(`  Warning: malformed JSON at ${label}:${i + 1}, skipping`);
+        console.warn(`  Warning: malformed JSON at ${label}:${lineNumber}, skipping`);
       }
     }
+
+    if (rawLine.length > 0) {
+      lineNumber += 1;
+    }
+    if (lineEnd === trimmed.length) {
+      break;
+    }
+    lineStart = lineEnd + 1;
   }
 
   if (skipped > 5) {

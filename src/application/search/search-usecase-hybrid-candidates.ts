@@ -11,7 +11,7 @@ import type {
 } from './port/search-pipeline-deps.port.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { SpecializedFallbackReason } from './specialized-fallback-reason.js';
-import type { SpecializedRouteName, SpecializedRouteObservability } from './specialized-route-observability.js';
+import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
@@ -93,14 +93,14 @@ export async function retrieveHybridCandidatesForPlan(
   resolveEntity: (p: QueryPlanV1) => Promise<EntityResolveResult>,
 ): Promise<HybridCandidateRetrievalResult> {
   const limit = SPECIALIZED_HYBRID_RETRIEVAL_LIMIT;
-  let fallbackAnchorEntityId = plan.anchors[0]?.candidateEntityIds[0];
+  let fallbackAnchorEntityId: EntityId | undefined;
   const degradationReasons = new Set<SpecializedFallbackReason>();
   const requestedRoute = (
     plan.retrievalMode === 'producer_browse' ||
     plan.retrievalMode === 'region_browse' ||
     plan.retrievalMode === 'compare_candidates'
   )
-    ? plan.retrievalMode as SpecializedRouteName
+    ? plan.retrievalMode
     : null;
 
   pipelineDebug(

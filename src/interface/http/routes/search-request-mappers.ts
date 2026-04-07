@@ -119,5 +119,16 @@ export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): Rep
     ...(body.expected_response_hash !== undefined
       ? { expected_response_hash: body.expected_response_hash }
       : {}),
+    ...(body.preflight_honesty_contract !== undefined
+      ? {
+          preflight_honesty_contract: {
+            execution_mode: body.preflight_honesty_contract.execution_mode,
+            degradation_reasons: body.preflight_honesty_contract.degradation_reasons,
+            ...(body.preflight_honesty_contract.blocking_eligible !== undefined
+              ? { blocking_eligible: body.preflight_honesty_contract.blocking_eligible }
+              : {}),
+          },
+        }
+      : {}),
   };
 }

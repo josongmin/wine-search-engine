@@ -46,7 +46,7 @@ describe('buildEntityResolverInputFromPlan', () => {
 
 describe('tryGetCachedSearchResponse', () => {
   it('returns data on cache hit', async () => {
-    const cached = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
+    const cached = { queryType: 'search' as const, engineDecision: {} as any, results: [], meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
     const getSearchResponse = vi.fn(async () => ({
       hit: true,
       data: cached,

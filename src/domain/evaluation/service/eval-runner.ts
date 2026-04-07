@@ -212,7 +212,16 @@ export class EvalRunner {
     // Step 2 & 3: Run each case and score
     const results: EvalResult[] = [];
     for (const evalCase of cases) {
-      const result = await this.evaluateCase(evalCase);
+      let result: EvalResult;
+      try {
+        result = await this.evaluateCase(evalCase);
+      } catch (err) {
+        console.error(
+          `[EvalRunner] case ${evalCase.caseId} threw — recording as error result:`,
+          err,
+        );
+        result = this.buildErrorResult(evalCase);
+      }
       results.push(result);
 
       // Persist each result for historical tracking
@@ -242,6 +251,35 @@ export class EvalRunner {
       releaseGateResult,
       caseCount: cases.length,
       evaluatedAt: new Date(),
+    };
+  }
+
+  /**
+   * Builds a zero-score error result for a case that threw during evaluation.
+   * Keeps the run alive so one bad query does not crash the whole eval pass.
+   */
+  private buildErrorResult(evalCase: EvalCase): EvalResult {
+    return {
+      caseId: evalCase.caseId,
+      predictedStatus: 'failed',
+      decisionConfidence: 0,
+      utilityScore: 0,
+      isCorrectResolve: false,
+      isWrongResolve: false,
+      isSafeAbstain: false,
+      isAvoidableAbstain: false,
+      evidenceItems: [],
+      latencyMs: 0,
+      decisionSnapshot: {
+        snapshot_id: 'error',
+        model_versions: {},
+        index_versions: {},
+        policy_rule_version: 'error',
+        threshold_profile_id: 'error',
+        planner_version: 'error',
+        feature_flags: {},
+        response_contract_version: 'error',
+      },
     };
   }
 

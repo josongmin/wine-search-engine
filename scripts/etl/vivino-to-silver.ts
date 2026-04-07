@@ -16,6 +16,7 @@ import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import type { PoolConfig } from 'pg';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import type {
   BronzeRow,
   VivinoPayload,
@@ -29,7 +30,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const SOURCE_ID = 'vivino';
-export const DEFAULT_OUTPUT = 'data/silver.ndjson';
+export const DEFAULT_OUTPUT = resolveDataPath('data/silver.ndjson');
 
 const VIVINO_STYLE_MAP: Record<string, WineType> = {
   'red wine': 'red',

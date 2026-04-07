@@ -1,13 +1,8 @@
 import { defineConfig } from 'vitest/config';
-import os from 'node:os';
 import { vitestResolveAliases } from './aliases.js';
+import { resolveMaxThreads } from './parallelism.js';
 
-const maxWatchlistThreads = (() => {
-  const parsed = Number.parseInt(process.env.VITEST_MAX_THREADS ?? '8', 10);
-  const cap = Number.isFinite(parsed) && parsed > 0 ? parsed : 8;
-  const cpus = os.availableParallelism?.() ?? os.cpus().length;
-  return Math.min(cap, Math.max(2, cpus));
-})();
+const maxWatchlistThreads = resolveMaxThreads(1);
 
 export default defineConfig({
   test: {

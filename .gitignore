@@ -1,6 +1,10 @@
 # Dependencies & build
+node_modules
 node_modules/
+web/node_modules
+dist
 dist/
+coverage
 coverage/
 .next/
 .turbo/
@@ -44,9 +48,25 @@ CLAUDE.local.md
 # Codex — optional local overrides next to project config
 .codex/config.local.toml
 
+# AI tooling — caches / generated dirs (Cursor, Codex, Claude Code)
+.cursor/cache/
+.cursor/debug/
+.cursor/browser-logs/
+.codex/cache/
+.codex/sessions/
+.claude/debug/
+.claude/cache/
+.claude/sessions/
+
 # Vitest / test artifacts
+test-results
 test-results/
+playwright-report
 playwright-report/
+
+# Linked build outputs in nested workspaces
+web/.next
+web/next-env.d.ts
 
 # Archives & local snapshots (do not commit dumps)
 *.tar
@@ -55,6 +75,14 @@ playwright-report/
 *.zip
 *.7z
 *.rar
+
+# Large local/generated datasets
+data/silver-phase*.ndjson
+data/silver-final.ndjson
+data/eval-results.json
+data/eval-with-reranker-bronze.json
+data/noisy-entity-eval-smoke-results.json
+data/silver-quality-report.json
 
 # Misc
 *.pem

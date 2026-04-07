@@ -10,6 +10,7 @@ import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
 import { OpenAiChatLlm } from '../infrastructure/ai/openai-chat-llm.js';
 import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-service.js';
+import { CohereReranker } from '../infrastructure/ai/cohere-reranker.js';
 import { HttpEmbeddingService } from '../infrastructure/vespa/embedding-service.js';
 import { HttpCrossEncoderReranker } from '../infrastructure/vespa/reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
@@ -50,7 +51,7 @@ export interface CoreAdapterServices {
   readonly embeddingService: EmbeddingServicePort;
   /** Present when `OPENAI_API_KEY` is set. */
   readonly chatLlm?: ChatLlmPort;
-  readonly reranker: RerankerPort;
+  readonly reranker?: RerankerPort;
   readonly blockingPort: BlockingPort;
   readonly calibrationStore: CalibrationStore;
   readonly ambiguityDict: AmbiguityDictionary;
@@ -146,7 +147,18 @@ export function buildCoreAdapterServices(
     searchIndex,
     embeddingService,
     ...(chatLlm !== undefined ? { chatLlm } : {}),
-    reranker: new HttpCrossEncoderReranker(),
+    ...(config.cohere.apiKey !== undefined
+      ? {
+          reranker: new CohereReranker({
+            apiKey: config.cohere.apiKey,
+            baseUrl: config.cohere.baseUrl,
+            model: config.cohere.rerankModel,
+            httpTimeoutMs: config.reranker.httpTimeoutMs,
+          }),
+        }
+      : config.reranker.url !== undefined
+      ? { reranker: new HttpCrossEncoderReranker() }
+      : {}),
     blockingPort: pool ? new PgBlockingAdapter(pool) : new StubBlockingPort(),
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
     ambiguityDict: pool ? new PgAmbiguityDictionary(pool) : new StubAmbiguityDictionary(),

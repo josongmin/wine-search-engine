@@ -61,6 +61,10 @@ function makeEnrichedRecord(
       identitySafeProjection: ['Opus One 2018', 'Opus One'],
       noisyRecallProjection: ['Opus One', '오푸스원'],
     },
+    finishLength: 0.75,
+    alcoholPct: 14.0,
+    producerPrestige: null,
+    isTopRated: false,
     ...overrides,
   };
 }
@@ -107,6 +111,80 @@ describe('index-to-vespa bridge', () => {
     expect(fields).not.toHaveProperty('price_usd');
     expect(fields).not.toHaveProperty('flavor_profiles');
     expect(fields).not.toHaveProperty('critic_score_normalized');
+  });
+});
+
+describe('taxonomy field ingest contract', () => {
+  it('derives grape_family from grapePrimary and writes it to Vespa', () => {
+    const record = makeEnrichedRecord({ grapePrimary: 'Cabernet Sauvignon' });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.grapeFamily).toBe('Cabernet');
+    expect(fields['grape_family']).toBe('Cabernet');
+  });
+
+  it('omits grape_family when grapePrimary is null', () => {
+    const record = makeEnrichedRecord({ grapePrimary: null });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.grapeFamily).toBeUndefined();
+    expect(fields).not.toHaveProperty('grape_family');
+  });
+
+  it('parses region into region_hierarchy, deduplicating segments', () => {
+    const record = makeEnrichedRecord({
+      region: 'Spain / Ribera del Duero / Spain / Castilla y León / Ribera del Duero',
+    });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.regionHierarchy).toEqual(['Spain', 'Ribera del Duero', 'Castilla y León']);
+    expect(fields['region_hierarchy']).toEqual(['Spain', 'Ribera del Duero', 'Castilla y León']);
+  });
+
+  it('maps priceBand label to price_band_numeric ordinal', () => {
+    const cases: Array<[EnrichedSilverRecord['priceBand'], number]> = [
+      ['value', 1],
+      ['mid', 2],
+      ['premium', 3],
+      ['luxury', 4],
+    ];
+    for (const [band, expected] of cases) {
+      const record = makeEnrichedRecord({ priceBand: band });
+      const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+      const fields = toVespaFields(doc);
+
+      expect(doc.priceBandNumeric).toBe(expected);
+      expect(fields['price_band_numeric']).toBe(expected);
+    }
+  });
+
+  it('propagates finishLength from silver record to Vespa finish_length', () => {
+    const record = makeEnrichedRecord({ finishLength: 0.85 });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.finishLength).toBe(0.85);
+    expect(fields['finish_length']).toBe(0.85);
+  });
+
+  it('omits finish_length when finishLength is 0 or absent', () => {
+    const record = makeEnrichedRecord({ finishLength: 0 });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.finishLength).toBeUndefined();
+    expect(fields).not.toHaveProperty('finish_length');
+  });
+
+  it('toVespaFields never writes an empty-string key', () => {
+    const record = makeEnrichedRecord();
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(Object.keys(fields)).not.toContain('');
   });
 });
 

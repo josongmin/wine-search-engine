@@ -56,7 +56,7 @@ describe('Watchlist Integration', () => {
         }),
       }) as RedisClientType,
     );
-    webhookDelivery = new WebhookDelivery(WEBHOOK_SECRET);
+    webhookDelivery = new WebhookDelivery(WEBHOOK_SECRET, async () => {});
     vi.clearAllMocks();
   });
 
@@ -85,9 +85,6 @@ describe('Watchlist Integration', () => {
       };
 
       await publisher.publishUpdate(entityId, event);
-
-      // Wait for async processing
-      await new Promise((resolve) => setTimeout(resolve, 100));
 
       expect(handlerSpy).toHaveBeenCalledWith(entityId, event);
     });
@@ -263,7 +260,7 @@ describe('Watchlist Integration', () => {
   describe('Retry Logic', () => {
     it(
       'should retry with 1s, 5s, 30s backoff',
-      { timeout: 40000 },
+      { timeout: 5000 },
       async () => {
       const entry: WatchlistEntry = {
         id: randomUUID(),
@@ -287,24 +284,20 @@ describe('Watchlist Integration', () => {
       const fetchSpy = vi.fn()
         .mockResolvedValueOnce(new Response('{}', { status: 500 }))
         .mockResolvedValueOnce(new Response('{}', { status: 500 }))
+        .mockResolvedValueOnce(new Response('{}', { status: 500 }))
         .mockResolvedValueOnce(new Response('{}', { status: 500 }));
       global.fetch = fetchSpy as any;
 
-      const startTime = Date.now();
       const result = await webhookDelivery.deliver(entry, event);
-      const elapsed = Date.now() - startTime;
 
       expect(result).toBe(false);
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
-      // Total backoff should be ~36 seconds (1 + 5 + 30)
-      // But we won't assert exact timing due to test environment variance
-      expect(elapsed).toBeGreaterThan(0);
+      expect(fetchSpy).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
       },
     );
 
     it(
       'should return true on successful retry',
-      { timeout: 10000 },
+      { timeout: 5000 },
       async () => {
       const entry: WatchlistEntry = {
         id: randomUUID(),

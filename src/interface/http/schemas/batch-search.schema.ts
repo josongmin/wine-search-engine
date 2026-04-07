@@ -97,7 +97,14 @@ export const BatchSearchResultItemSchema = z.discriminatedUnion('status', [
   }).strict(),
   z.object({
     id: z.string().min(1),
+    /** Item ran but threw an error. */
     status: z.literal('failed'),
+    error: BatchSearchErrorSchema,
+  }).strict(),
+  z.object({
+    id: z.string().min(1),
+    /** Item was never started (fail_fast abort or pre-run skip). */
+    status: z.literal('not_executed'),
     error: BatchSearchErrorSchema,
   }).strict(),
 ]);
@@ -106,16 +113,19 @@ export const BatchSearchResponseSchema = z.object({
   batch_id: z.string().min(1),
   total: z.number().int().nonnegative(),
   succeeded: z.number().int().nonnegative(),
+  /** Items that ran but threw an error. */
   failed: z.number().int().nonnegative(),
+  /** Items that were never started (fail_fast abort or pre-run skip). */
+  not_executed: z.number().int().nonnegative(),
   batch_status: z.enum(['succeeded', 'partial_failure', 'failed']),
   has_failures: z.boolean(),
   results: z.array(BatchSearchResultItemSchema),
   processing_time_ms: z.number().int().nonnegative(),
 }).strict().superRefine((value, ctx) => {
-  if (value.succeeded + value.failed !== value.total) {
+  if (value.succeeded + value.failed + value.not_executed !== value.total) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'succeeded + failed must equal total',
+      message: 'succeeded + failed + not_executed must equal total',
       path: ['total'],
     });
   }
@@ -128,8 +138,9 @@ export const BatchSearchResponseSchema = z.object({
     });
   }
 
+  const anyFailures = value.failed > 0 || value.not_executed > 0;
   const expectedStatus =
-    value.failed === 0
+    !anyFailures
       ? 'succeeded'
       : value.succeeded === 0
         ? 'failed'
@@ -137,15 +148,15 @@ export const BatchSearchResponseSchema = z.object({
   if (value.batch_status !== expectedStatus) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'batch_status must match succeeded/failed counts',
+      message: 'batch_status must match succeeded/failed/not_executed counts',
       path: ['batch_status'],
     });
   }
 
-  if (value.has_failures !== (value.failed > 0)) {
+  if (value.has_failures !== anyFailures) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: 'has_failures must match failed count',
+      message: 'has_failures must be true when failed > 0 or not_executed > 0',
       path: ['has_failures'],
     });
   }

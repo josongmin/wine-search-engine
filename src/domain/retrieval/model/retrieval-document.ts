@@ -211,6 +211,15 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Producer archetype (e.g. "château", "domaine", "estate", "winery", "négociant"). */
   readonly producerType?: string | undefined;
 
+  /** Broad grape taxonomy group (e.g. "cabernet_family", "pinot_family"). */
+  readonly grapeFamily?: string | undefined;
+
+  /** Canonical region lineage from coarse to fine (e.g. ["France", "Bordeaux", "Pauillac"]). */
+  readonly regionHierarchy?: readonly string[] | undefined;
+
+  /** Numericized price-band bucket for ranking and filtering. */
+  readonly priceBandNumeric?: number | undefined;
+
   /** SPLADE-style learned sparse weights (T4.2). Absent until the offline model runs. */
   readonly learnedSparseWeights?: DocumentSparseVector | undefined;
 }

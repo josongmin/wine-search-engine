@@ -70,12 +70,17 @@ const envSchema = z.object({
   /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
   EMBEDDING_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 
-  // Reranker Service
-  RERANKER_SERVICE_URL: z.string().url().default('http://localhost:8082'),
+  // Reranker Service (optional external HTTP API)
+  RERANKER_SERVICE_URL: z.string().url().optional(),
   /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
   RERANK_BLEND_SCALE: z.coerce.number().min(0).max(1).default(0.7),
   /** Per-request HTTP timeout for reranker API calls (AbortSignal). */
   RERANKER_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
+  // Cohere reranker (preferred managed reranking)
+  COHERE_API_KEY: z.string().optional(),
+  COHERE_RERANK_MODEL: z.string().min(1).default('rerank-v4.0-pro'),
+  COHERE_BASE_URL: z.string().url().default('https://api.cohere.ai/v2'),
 
   // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
   LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
@@ -219,6 +224,13 @@ function buildConfig(parsed: EnvVars) {
       url: parsed.RERANKER_SERVICE_URL,
       blendScale: parsed.RERANK_BLEND_SCALE,
       httpTimeoutMs: parsed.RERANKER_HTTP_TIMEOUT_MS,
+    },
+
+    /** Cohere managed reranker settings (optional). */
+    cohere: {
+      apiKey: parsed.COHERE_API_KEY,
+      rerankModel: parsed.COHERE_RERANK_MODEL,
+      baseUrl: parsed.COHERE_BASE_URL,
     },
 
     /** Learned matcher service settings (optional). */

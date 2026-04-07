@@ -24,9 +24,9 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('forced');
     });
 
-    it('forces rerank even for known_item query class', () => {
+    it('forces rerank even for short_entity query class', () => {
       const decision = evaluateRerankGate(
-        makeInput({ rerankForced: true, queryClass: 'known_item' }),
+        makeInput({ rerankForced: true, queryClass: 'short_entity' }),
       );
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('forced');

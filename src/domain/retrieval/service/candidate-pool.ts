@@ -158,17 +158,33 @@ export class CandidatePoolService {
     }
 
     // Step 3: Anchor neighbourhood search
+    // Degrading to no-anchor (rather than throwing) when the embedding call
+    // fails prevents a transient embedding service outage from blocking the
+    // entire search.  The sparse + dense results are still returned; the
+    // neighbourhood signal is simply absent for this request.
     let anchorHits: readonly DenseHit[] | undefined;
     if (activeChannels.has('anchor_similarity') && anchorProfile !== undefined) {
-      const anchorEmbedding = anchorProfile.embedding
-        ?? await this.embeddingService.embed(anchorProfile.semanticSummary);
+      try {
+        const anchorEmbedding = anchorProfile.embedding
+          ?? await this.embeddingService.embed(anchorProfile.semanticSummary);
 
-      anchorHits = await this.searchIndex.denseSearch(
-        anchorEmbedding,
-        filters.length > 0 ? filters : undefined,
-        profile.denseTopN,
-        vespaRankProfile,
-      );
+        anchorHits = await this.searchIndex.denseSearch(
+          anchorEmbedding,
+          filters.length > 0 ? filters : undefined,
+          profile.denseTopN,
+          vespaRankProfile,
+        );
+      } catch (anchorErr) {
+        bootstrapLogger.warn(
+          {
+            err: anchorErr,
+            anchorConfidence,
+            queryClass: input.queryPlan.queryClass,
+          },
+          '[CandidatePool] Anchor embedding failed — degrading to no-anchor retrieval',
+        );
+        // anchorHits remains undefined; pipeline continues without anchor channel.
+      }
     }
 
     // Step 4: Fuse via RRF

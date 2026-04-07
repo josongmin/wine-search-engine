@@ -207,9 +207,8 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
   /**
    * Default sleep implementation (real timer).  Replaced in tests via constructor injection.
    */
-  private defaultSleep(ms: number): Promise<void> {
-    return new Promise((resolve) => {
+  private readonly defaultSleep = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
       setTimeout(resolve, ms);
     });
-  }
 }

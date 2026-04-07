@@ -5,6 +5,8 @@ import type { SearchResponseCachePort } from '../../domain/performance/port/sear
 import type { SearchRequest } from './search-request.dto.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
 
 export type SnapshotVersionInjection =
   | {
@@ -14,7 +16,7 @@ export type SnapshotVersionInjection =
     }
   | undefined;
 
-export interface CacheLookupRuntimeState extends CacheReadRuntimeState {}
+export type CacheLookupRuntimeState = CacheReadRuntimeState;
 
 /**
  * Wave 4 cache read — returns cached body on hit, otherwise `undefined`.
@@ -33,7 +35,25 @@ export async function tryGetCachedSearchResponse(
     runtimeState,
   );
   if (cacheResult.hit && cacheResult.data) {
-    return cacheResult.data;
+    const data = cacheResult.data;
+    // Minimal runtime shape check — guard against corrupt or stale cached values
+    // that are missing fields required by SearchResponseV1.
+    const isValidShape =
+      data !== null &&
+      typeof data === 'object' &&
+      'engineDecision' in data &&
+      'results' in data &&
+      'meta' in data;
+
+    if (!isValidShape) {
+      bootstrapLogger.warn(
+        { rawQuery: plan.rawQuery },
+        'cache_hit_shape_invalid: required fields missing (engineDecision, results, meta); treating as cache miss',
+      );
+      return undefined;
+    }
+
+    return data;
   }
   return undefined;
 }

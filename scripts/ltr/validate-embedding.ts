@@ -29,6 +29,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import {
   ndcg,
   recall,
@@ -74,8 +75,8 @@ interface ComparisonResult {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_INPUT = 'data/golden-queries-bronze.jsonl';
-const DEFAULT_BASELINE = 'data/eval-baseline-bronze.json';
+const DEFAULT_INPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
+const DEFAULT_BASELINE = resolveDataPath('data/eval-baseline-bronze.json');
 const DEFAULT_SAMPLE_SIZE = 100;
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseNdjson } from './ndjson';
 import { enrichWineCertificationsBatch } from './enrich-certifications';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 interface SilverRecord {
   readonly externalId: string;
@@ -37,7 +38,7 @@ interface EnrichedRecord extends SilverRecord {
   };
 }
 
-const DATA_FILE = path.resolve('./data/silver-docquery.ndjson');
+const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
 const BATCH_SIZE = 100;
 
 async function main() {

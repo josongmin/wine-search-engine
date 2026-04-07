@@ -22,7 +22,12 @@ npm ci
 npm run typecheck
 npm run build
 npm run verify:http-contracts
+# Replay lane contract:
+# - executable subset is selected by execution_lane='self_contained'
+# - self-contained fixtures must not declare requires_runtime_capability
+# - runtime-required fixtures execute in the dedicated capability-aware lane
 npm run test:e2e:replay:fixtures:self-contained
+npm run test:e2e:replay:fixtures:runtime-required
 if [ "${SKIP_MIGRATE:-}" = "1" ]; then
   echo "SKIP_MIGRATE=1 — skipping npm run migrate (set PG_* in .env for local full smoke)"
 else

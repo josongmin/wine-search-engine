@@ -20,6 +20,7 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
 import { finetune, createWineTriplets } from '../../src/domain/embedding/index.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 /**
  * Loads wine-domain data for fine-tuning.
@@ -29,7 +30,7 @@ async function loadWineData(): Promise<{
   documents: Map<string, string>;
 }> {
   // Load golden queries
-  const queryPath = 'data/golden-queries-bronze.jsonl';
+  const queryPath = resolveDataPath('data/golden-queries-bronze.jsonl');
   const queryStream = await fs.open(queryPath, 'r');
   const queries: Array<{ query: string; expectedEntityId: string; domain: string }> = [];
 
@@ -56,7 +57,7 @@ async function loadWineData(): Promise<{
   await queryStream.close();
 
   // Load wine documents (from silver doc query data)
-  const docPath = 'data/silver-docquery.ndjson';
+  const docPath = resolveDataPath('data/silver-docquery.ndjson');
   const docStream = await fs.open(docPath, 'r');
   const documents = new Map<string, string>();
 

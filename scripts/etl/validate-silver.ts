@@ -11,13 +11,14 @@
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, SilverQualityReport } from './types.js';
 import { parseNdjson } from './ndjson.js';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = 'data/silver-docquery.ndjson';
-export const REPORT_OUTPUT = 'data/silver-quality-report.json';
+export const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
+export const REPORT_OUTPUT = resolveDataPath('data/silver-quality-report.json');
 
 /**
  * Quality gate thresholds (Epic 1 + SOTA++ extension).
