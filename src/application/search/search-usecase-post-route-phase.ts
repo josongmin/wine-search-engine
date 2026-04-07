@@ -26,11 +26,17 @@ import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js'
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
-import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
 import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
 } from './specialized-route-observability.js';
+
+function deriveDecisionEvidenceItems(
+  rankedResults: readonly RankedResult[],
+): readonly EvidenceItem[] {
+  return rankedResults[0]?.evidenceItems ?? [];
+}
 
 function mergeRouteDegradation(
   snapshot: DecisionSnapshot,
@@ -191,7 +197,7 @@ export async function runRankedRouteDecisionPhase(
         availability_score: 0,
         uncertainty_penalty: 0,
       },
-      evidenceItems: [],
+      evidenceItems: deriveDecisionEvidenceItems(ctx.rankedResults),
       decisionTraceRef: buildAuthorityTraceRef({
         queryPlan: ctx.plan,
         snapshot,

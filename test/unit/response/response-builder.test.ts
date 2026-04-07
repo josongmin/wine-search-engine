@@ -211,41 +211,23 @@ describe('ResponseBuilder', () => {
       expect(response.results[0]!.evidenceItems[0]).toEqual(existingEvidence);
     });
 
-    it('result with empty evidenceItems [] → gets synthetic item with type="no_evidence_available"', () => {
+    it('result with empty evidenceItems [] → throws an evidence obligation error', () => {
       const result = makeResultItem([]);
       const params = makeBaseParams({ results: [result] });
 
-      const response = builder.build(params);
-
-      expect(response.results[0]!.evidenceItems).toHaveLength(1);
-      expect(response.results[0]!.evidenceItems[0]!.type).toBe('no_evidence_available');
+      expect(() => builder.build(params)).toThrowError(
+        /reached response assembly without evidenceItems/,
+      );
     });
 
-    it('synthetic item has source="response_builder" and strength="low"', () => {
-      const result = makeResultItem([]);
-      const params = makeBaseParams({ results: [result] });
-
-      const response = builder.build(params);
-
-      const synthetic = response.results[0]!.evidenceItems[0]!;
-      expect(synthetic.source).toBe('response_builder');
-      expect(synthetic.strength).toBe('low');
-    });
-
-    it('mix of 2 results: one with evidence, one without → each handled independently', () => {
+    it('mix of 2 results: one with evidence, one without → throws instead of injecting placeholder evidence', () => {
       const withEvidence = makeResultItem([makeEvidenceItem()]);
       const withoutEvidence = makeResultItem([]);
       const params = makeBaseParams({ results: [withEvidence, withoutEvidence] });
 
-      const response = builder.build(params);
-
-      // First result keeps its original evidence
-      expect(response.results[0]!.evidenceItems).toHaveLength(1);
-      expect(response.results[0]!.evidenceItems[0]!.type).toBe('semantic_relevance');
-
-      // Second result gets the synthetic item
-      expect(response.results[1]!.evidenceItems).toHaveLength(1);
-      expect(response.results[1]!.evidenceItems[0]!.type).toBe('no_evidence_available');
+      expect(() => builder.build(params)).toThrowError(
+        /reached response assembly without evidenceItems/,
+      );
     });
   });
 

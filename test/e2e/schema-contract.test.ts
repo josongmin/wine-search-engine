@@ -133,12 +133,9 @@ describe('SearchResponseV1 Schema Contract', () => {
       const evidenceItems = result.evidence_items;
       expect(evidenceItems.length).toBeGreaterThan(0);
 
-      // Filter out synthetic fallback evidence (type === 'no_evidence_available')
-      const realEvidence = evidenceItems.filter(
-        (e) => e.type !== 'no_evidence_available',
-      );
-      // At least some REAL evidence must exist
-      expect(realEvidence.length).toBeGreaterThan(0);
+      // ResponseBuilder now fails closed on missing evidence, so every returned
+      // item must already carry upstream-produced evidence.
+      expect(evidenceItems.every((e) => e.type.trim().length > 0)).toBe(true);
     }
   });
 

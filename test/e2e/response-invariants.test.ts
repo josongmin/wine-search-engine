@@ -65,8 +65,7 @@ describe('Evidence obligation invariant', () => {
         expect(Array.isArray(evidenceItems)).toBe(true);
         expect(evidenceItems.length).toBeGreaterThan(0);
 
-        const realEvidence = evidenceItems.filter((e) => e.type !== 'no_evidence_available');
-        expect(realEvidence.length).toBeGreaterThan(0);
+        expect(evidenceItems.every((e) => e.type.trim().length > 0)).toBe(true);
       }
     });
   }

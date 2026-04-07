@@ -1,12 +1,18 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
-import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
+import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import type { EvalProvenanceSlice } from '../../domain/retrieval/model/provenance.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { ResultItem } from '../../domain/response/model/result-item.js';
+
+function deriveDecisionEvidenceItems(
+  rankedResults?: readonly RankedResult[],
+): readonly EvidenceItem[] {
+  return rankedResults?.[0]?.evidenceItems ?? [];
+}
 /**
  * Builds the {@link ResponseBuildParams} for a constraint-SAT contradiction (failed decision).
  */
@@ -48,7 +54,7 @@ export function buildConstraintContradictionResponseParams(options: {
       availability_score: 0,
       uncertainty_penalty: 0,
     },
-    evidenceItems: [],
+    evidenceItems: deriveDecisionEvidenceItems(),
     decisionTraceRef: buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot,
@@ -149,7 +155,7 @@ export function buildEntropyAbstainResponseParams(options: {
       availability_score: 0,
       uncertainty_penalty: 0,
     },
-    evidenceItems: [],
+    evidenceItems: deriveDecisionEvidenceItems(rankedResults),
     decisionTraceRef: buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot,

@@ -37,6 +37,7 @@ import { ResultGrouper } from './result-grouper.js';
 import { deterministicHash } from '../../shared/utils/hash.js';
 import type { SpecializedRouteObservability } from '../model/specialized-route.js';
 import { toSpecializedRouteMeta } from '../model/specialized-route.js';
+import { EvidenceObligationError } from '../../shared/error/domain-error.js';
 
 /**
  * Parameters required by {@link ResponseBuilder.build}.
@@ -98,15 +99,12 @@ export interface ResponseBuildParams {
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
 }
 
-/** Reason code attached when a result has no evidence items. */
-const NO_EVIDENCE_REASON = 'no_evidence_available';
-
 /**
  * Assembles a complete {@link SearchResponseV1} from domain outputs.
  *
  * Responsibilities:
  * - Maps the internal {@link DecisionOutput} to the external {@link EngineDecision}.
- * - Enforces the invariant that every result carries evidence items (or a reason code).
+ * - Enforces the invariant that every result carries real evidence items.
  * - Extracts retrieval mode, result type, and constraints for LLM envelope (Epic 9).
  * - Attaches response-level metadata.
  */
@@ -278,27 +276,18 @@ export class ResponseBuilder {
 
   /**
    * Enforce the invariant that every result must carry at least one evidence item.
-   * Results without evidence receive a synthetic evidence item with a reason code.
+   * Placeholder evidence is not permitted at the response boundary because it
+   * would mask an upstream evidence-production defect.
    */
   private enforceEvidence(results: readonly ResultItem[]): readonly ResultItem[] {
-    return results.map((result) => {
-      if (result.evidenceItems.length > 0) {
-        return result;
-      }
+    const missingEvidenceResult = results.find((result) => result.evidenceItems.length === 0);
+    if (missingEvidenceResult !== undefined) {
+      throw new EvidenceObligationError(
+        `Result ${missingEvidenceResult.entity.entityId} reached response assembly without evidenceItems`,
+      );
+    }
 
-      return {
-        ...result,
-        evidenceItems: [
-          {
-            type: NO_EVIDENCE_REASON,
-            source: 'response_builder',
-            contribution: '+0.00',
-            strength: 'low' as const,
-            provenance: 'No evidence was produced by upstream stages for this result.',
-          },
-        ],
-      };
-    });
+    return results;
   }
 
   /**

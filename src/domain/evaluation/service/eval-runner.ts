@@ -49,7 +49,7 @@ import { EvidenceAuditor } from './evidence-auditor.js';
  *   executionMode                     SearchResponse.engineDecision.executionMode
  *   blockingEligible                  SearchResponse.engineDecision.blockingEligible
  *   degradationReasons                SearchResponse.engineDecision.degradationReasons
- *   evidenceItems                     SearchResponse.engineDecision.evidenceItems
+ *   evidenceItems                     SearchResponse.results[0].evidenceItems
  *   latencyMs                         SearchResponse / pipeline latency
  *   decisionSnapshot                  SearchResponse.decisionSnapshot
  *   admissionViolationDetected        Adapter-detected RFC-016 invariant breach

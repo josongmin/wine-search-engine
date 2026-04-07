@@ -111,8 +111,8 @@ export interface UncertaintyBlock {
  * A single item in the search response result list.
  *
  * Every result carries at least one {@link EvidenceItem} explaining
- * why it was selected. If evidence is absent the response builder
- * must attach a reason code.
+ * why it was selected. Missing evidence is an invariant violation and
+ * must be rejected before the response leaves the domain boundary.
  */
 export interface ResultItem {
   /** Compact entity summary. */
