@@ -183,7 +183,7 @@ describe('RankingStagePipeline (T5.1)', () => {
       const candidates = makeCandidates(3, 'wine-0');
       const pipeline = makePipeline(makeScoreAggregatorSequence([0.9, 0.7, -Infinity]));
 
-      const results = await pipeline.rank(makeInput(candidates));
+      const { results } = await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
 
       const pruneStage = funnelTrace.stages.find((stage) => stage.stage === 'coarse_prune');
@@ -291,7 +291,7 @@ describe('RankingStagePipeline (T5.1)', () => {
 
       expect(output).toBeDefined();
       expect(funnelTrace).toBeDefined();
-      expect(Array.isArray(output)).toBe(true);
+      expect(Array.isArray(output.results)).toBe(true);
     });
 
     it('totalLatencyMs is non-negative', async () => {
@@ -354,7 +354,7 @@ describe('RankingStagePipeline (T5.1)', () => {
       const candidates = makeCandidates(2, 'wine-00');
       const pipeline = makePipeline(makeScoreAggregator(0.7));
 
-      const results = await pipeline.rank(makeInput(candidates));
+      const { results } = await pipeline.rank(makeInput(candidates));
 
       for (const result of results) {
         expect(result.coarsePruneMeta).toBeDefined();

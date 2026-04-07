@@ -3,6 +3,8 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { AnchorCandidate } from '../../domain/query/model/anchor-candidate.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-set.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
+import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from './port/search-pipeline-deps.port.js';
 
 const ZERO_SIGNALS: MatchSignalSet = {
@@ -76,22 +78,41 @@ export async function buildResolverCandidatesFromPlan(
     return [];
   }
 
-  const seen = new Set<string>();
+  // Collect all unique entity IDs across anchors
+  const allEntityIds = new Set<EntityId>();
+  for (const anchor of plan.anchors) {
+    for (const id of anchor.candidateEntityIds) {
+      allEntityIds.add(id);
+    }
+  }
+
+  // Fetch all documents in parallel (eliminates N+1 sequential latency)
+  const docEntries = await Promise.all(
+    [...allEntityIds].map(async (id) => {
+      const doc = await entityLookup.getDocument(id);
+      return [id, doc] as const;
+    }),
+  );
+  const docMap = new Map(
+    docEntries.filter((entry): entry is [EntityId, RetrievalDocument] => entry[1] != null),
+  );
+
+  // Build candidates from the pre-fetched map (synchronous)
+  const seen = new Set<EntityId>();
   const candidates: ResolverCandidate[] = [];
 
   for (const anchor of plan.anchors) {
     for (const entityId of anchor.candidateEntityIds) {
-      const entityKey = String(entityId);
-      if (seen.has(entityKey)) {
+      if (seen.has(entityId)) {
         continue;
       }
 
-      const doc = await entityLookup.getDocument(entityId);
+      const doc = docMap.get(entityId);
       if (doc == null) {
         continue;
       }
 
-      seen.add(entityKey);
+      seen.add(entityId);
       candidates.push({
         entityId,
         entityType: doc.entityType,

@@ -4,6 +4,7 @@ import type { CandidateProvenance } from '../../retrieval/model/candidate-envelo
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RankerRuntimeSignal, RerankerFailureReason } from '../model/ranking-runtime-signal.js';
+import type { RankingMetadata, RankingOutput } from '../port/ranker.port.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import type { QueryClassWeights } from '../index.js';
@@ -257,12 +258,6 @@ export class Ranker {
   //
   // applyLearnedLtrRerank() is the SSOT for LTR reranking.
   // search-usecase-ltr-rerank.ts is dead code and must not be called.
-  private _lastCoarsePruneSummary: CoarsePruneStageSummary | undefined;
-  private _lastRerankExecuted = false;
-  private _lastRerankGateReason: string | undefined;
-  private _lastRuntimeSignal: RankerRuntimeSignal | undefined;
-  /** T5.6: Top-5 entityIds captured immediately after primary sort, before rerank. */
-  private _lastPreRerankTop5: readonly string[] = [];
   private readonly signalComputer: SignalComputer;
   private readonly scoreAggregator: ScoreAggregator;
   private readonly evidenceMapper: EvidenceMapper;
@@ -295,62 +290,21 @@ export class Ranker {
   }
 
   /**
-   * T5.2: Returns the coarse prune summary from the most recent rank() call.
-   * Consumed by RankingStagePipeline to populate the coarse_prune stage trace.
-   */
-  getLastCoarsePruneSummary(): CoarsePruneStageSummary | undefined {
-    return this._lastCoarsePruneSummary;
-  }
-
-  /**
-   * T5.1: Returns whether precision reranking was executed in the most recent rank() call.
-   * Authoritative flag — reliable even when blended scores remain in descending order.
-   */
-  getLastRerankExecuted(): boolean {
-    return this._lastRerankExecuted;
-  }
-
-  /**
-   * T5.4: Returns the gate decision reason from the most recent rank() call.
-   * Populated by evaluateRerankGate() — useful for pipeline trace notes.
-   */
-  getLastRerankGateReason(): string | undefined {
-    return this._lastRerankGateReason;
-  }
-
-  getLastRuntimeSignal(): RankerRuntimeSignal | undefined {
-    return this._lastRuntimeSignal;
-  }
-
-  /**
-   * T5.6: Returns the top-5 entityIds captured immediately after primary_rank
-   * sort but before precision rerank ran. Used by RankingStagePipeline to
-   * compute the `rerankChangedTopK` funnel metric.
-   */
-  getLastPreRerankTop5(): readonly string[] {
-    return this._lastPreRerankTop5;
-  }
-
-  /**
    * Ranks candidates according to the scoring formula and returns
    * ordered results with evidence trails.
    *
    * @param input - The ranking input containing query plan, candidates, constraints.
    * @returns Ranked results sorted by final score descending.
    */
-  async rank(input: RankingInput): Promise<readonly RankedResult[]> {
+  async rank(input: RankingInput): Promise<RankingOutput> {
     const { queryPlan, candidates, anchorProfile, constraints } = input;
 
-    // Collect metadata in local variables to avoid races when concurrent
-    // requests share this Ranker instance (the await inside applyReranking
-    // yields to the event loop, so another request could reset instance
-    // fields mid-execution).  Instance fields are flushed atomically at the
-    // end, right before returning.
+    // Collect metadata in local variables; returned alongside results
+    // in RankingOutput (no mutable instance fields).
     let localRerankExecuted = false;
     let localRerankGateReason: string | undefined;
     let localRuntimeSignal: RankerRuntimeSignal | undefined;
     let localPreRerankTop5: readonly string[] = [];
-    let localCoarsePruneSummary: CoarsePruneStageSummary | undefined;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -494,9 +448,9 @@ export class Ranker {
       return false;
     });
 
-    // T5.2: Expose coarse prune summary — RankingStagePipeline reads this via
-    // getLastCoarsePruneSummary() to populate the coarse_prune stage trace.
-    localCoarsePruneSummary = {
+    // T5.2: Coarse prune summary — returned via RankingMetadata so
+    // RankingStagePipeline can populate the coarse_prune stage trace.
+    const localCoarsePruneSummary: CoarsePruneStageSummary = {
       inputCount: scored.length,
       retainedCount: viable.length,
       prunedCount: scored.length - viable.length,
@@ -667,15 +621,15 @@ export class Ranker {
       }
     }
 
-    // Flush collected metadata to instance fields atomically (no await between
-    // here and the return, so no interleaving is possible).
-    this._lastCoarsePruneSummary = localCoarsePruneSummary;
-    this._lastRerankExecuted = localRerankExecuted;
-    this._lastRerankGateReason = localRerankGateReason;
-    this._lastRuntimeSignal = localRuntimeSignal;
-    this._lastPreRerankTop5 = localPreRerankTop5;
+    const metadata: RankingMetadata = {
+      coarsePruneSummary: localCoarsePruneSummary,
+      rerankExecuted: localRerankExecuted,
+      rerankGateReason: localRerankGateReason,
+      runtimeSignal: localRuntimeSignal,
+      preRerankTop5: localPreRerankTop5,
+    };
 
-    return results;
+    return { results, metadata };
   }
 
   /**
@@ -724,9 +678,12 @@ export class Ranker {
     // a sigmoid squashes them to a comparable [0, 1] range, and min-max
     // within the batch preserves the relative ordering while ensuring scale
     // compatibility with the original aggregated score (also [0, 1]).
-    const rawScores = rerankResults.map((r) => r.score);
-    const minRaw = Math.min(...rawScores);
-    const maxRaw = Math.max(...rawScores);
+    let minRaw = Infinity;
+    let maxRaw = -Infinity;
+    for (const r of rerankResults) {
+      if (r.score < minRaw) minRaw = r.score;
+      if (r.score > maxRaw) maxRaw = r.score;
+    }
     const rawRange = maxRaw - minRaw;
 
     function normalizeRerankScore(raw: number): number {

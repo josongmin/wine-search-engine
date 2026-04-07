@@ -156,7 +156,7 @@ export const WatchlistTriggerResponseSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     type: z.literal('critic_score_above'),
-    threshold: z.number().min(1).max(100),
+    threshold: z.number().min(0).max(100),
   }).strict(),
 ]);
 

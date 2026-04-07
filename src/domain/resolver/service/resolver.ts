@@ -413,7 +413,7 @@ export class Resolver {
         // For candidates beyond top-2, estimate by proportional scaling
         const top1Raw = scored[0]?.rawScore ?? 1;
         const ratio = top1Raw > 0 ? entry.rawScore / top1Raw : 0;
-        calibratedScore = calibrated.top1CalibratedScore * ratio;
+        calibratedScore = Math.max(0, calibrated.top1CalibratedScore * ratio);
       }
 
       return {

@@ -130,8 +130,14 @@ export class CacheService implements SearchResponseCachePort {
       const cacheKey = this.queryCacheKeyBuilder.build(
         plan.normalizedQuery,
         effectiveRetrievalMode,
-        plan.constraints.hard.map((c) => [c.attribute, c.operator, constraintValueString(c.value)] as const),
-        [...plan.expansions.lexical, ...plan.expansions.semantic],
+        [
+          ...plan.constraints.hard.map((c) => [c.attribute, c.operator, constraintValueString(c.value)] as const),
+          ...plan.constraints.soft.map((c) => [`soft:${c.attribute}`, c.operator, constraintValueString(c.value)] as const),
+        ],
+        [
+          ...plan.expansions.lexical.map((t) => `L:${t}`),
+          ...plan.expansions.semantic.map((t) => `S:${t}`),
+        ],
         request.sessionContext?.sessionId,
         request.context?.locale,
       );
@@ -243,8 +249,14 @@ export class CacheService implements SearchResponseCachePort {
       const cacheKey = this.queryCacheKeyBuilder.build(
         plan.normalizedQuery,
         effectiveRetrievalMode,
-        plan.constraints.hard.map((c) => [c.attribute, c.operator, constraintValueString(c.value)] as const),
-        [...plan.expansions.lexical, ...plan.expansions.semantic],
+        [
+          ...plan.constraints.hard.map((c) => [c.attribute, c.operator, constraintValueString(c.value)] as const),
+          ...plan.constraints.soft.map((c) => [`soft:${c.attribute}`, c.operator, constraintValueString(c.value)] as const),
+        ],
+        [
+          ...plan.expansions.lexical.map((t) => `L:${t}`),
+          ...plan.expansions.semantic.map((t) => `S:${t}`),
+        ],
         request.sessionContext?.sessionId,
         request.context?.locale,
       );

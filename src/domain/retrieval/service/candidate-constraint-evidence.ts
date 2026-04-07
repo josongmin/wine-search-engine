@@ -181,6 +181,11 @@ function evaluateOperator(
       }
       return attrValue !== constraintValue;
     }
+    default: {
+      // Exhaustiveness check: if a new operator is added, TypeScript will error here.
+      operator satisfies never;
+      return false;
+    }
   }
 }
 

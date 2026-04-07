@@ -16,6 +16,7 @@ import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js'
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
 import type { RankerPort } from '../../ranking/port/ranker.port.js';
+import type { RankerRuntimeSignal } from '../../ranking/model/ranking-runtime-signal.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
 import type {
   AnchorResolverPort,
@@ -159,8 +160,9 @@ export class MixedSolver {
 
     // Step 5: Rank with anchor-aware weights
     let rankedResults: readonly RankedResult[];
+    let rankingRuntimeSignal: RankerRuntimeSignal | undefined;
     try {
-      rankedResults = await this.ranker.rank({
+      const rankOutput = await this.ranker.rank({
         queryPlan,
         candidates,
         anchorProfile: retrievalAnchorProfile,
@@ -169,6 +171,8 @@ export class MixedSolver {
         // rerank gate use compiled.effectiveRoute/effectiveRetrievalMode (E6-U4)
         ...(compiled !== undefined ? { compiled } : {}),
       });
+      rankedResults = rankOutput.results;
+      rankingRuntimeSignal = rankOutput.metadata.runtimeSignal;
     } catch (err) {
       bootstrapLogger.warn(
         { err: err instanceof Error ? err.message : String(err) },
@@ -204,8 +208,7 @@ export class MixedSolver {
       overlayedResults,
       anchorProfile,
     );
-    const runtimeSignal = this.ranker.getLastRuntimeSignal();
-    const runtimeDegradation = runtimeSignal?.degradation;
+    const runtimeDegradation = rankingRuntimeSignal?.degradation;
     // When retrieval produced no candidates (fallbackReason set), the route-level
     // degradation takes precedence — report only the retrieval fallback reason and
     // escalate execution mode to 'degraded' regardless of the ranker signal.

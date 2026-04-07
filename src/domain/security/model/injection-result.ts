@@ -11,6 +11,7 @@ export type InjectionResult =
  * Machine-readable codes for logging and analytics.
  */
 export type InjectionReason =
+  | 'EMPTY_QUERY'
   | 'COMMAND_INJECTION'
   | 'SYSTEM_PROMPT_INJECTION'
   | 'JAILBREAK_ATTEMPT'

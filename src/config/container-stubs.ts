@@ -46,12 +46,25 @@ export class StubEmbeddingService implements EmbeddingServicePort {
     this.dimension = dimension;
   }
 
-  embed(_text: string): Promise<readonly number[]> {
-    return Promise.resolve(new Array<number>(this.dimension).fill(0));
+  private hashToVector(text: string): readonly number[] {
+    const vec = new Array<number>(this.dimension);
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+    }
+    for (let i = 0; i < this.dimension; i++) {
+      hash = ((hash << 5) - hash + i) | 0;
+      vec[i] = ((hash & 0xffff) / 0xffff) * 2 - 1;
+    }
+    return vec;
+  }
+
+  embed(text: string): Promise<readonly number[]> {
+    return Promise.resolve(this.hashToVector(text));
   }
 
   embedBatch(texts: readonly string[]): Promise<readonly (readonly number[])[]> {
-    return Promise.resolve(texts.map(() => new Array<number>(this.dimension).fill(0)));
+    return Promise.resolve(texts.map((t) => this.hashToVector(t)));
   }
 }
 

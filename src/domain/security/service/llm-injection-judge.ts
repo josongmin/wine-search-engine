@@ -81,8 +81,12 @@ export class LLMInjectionJudge implements InjectionJudgePort {
     try {
       const cached = await this.cache.get(cacheKey);
       if (cached !== null) {
-        const parsed = JSON.parse(cached) as { is_injection: boolean };
-        return parsed.is_injection;
+        const parsed: unknown = JSON.parse(cached);
+        if (typeof parsed === 'object' && parsed !== null && 'is_injection' in parsed && typeof (parsed as Record<string, unknown>)['is_injection'] === 'boolean') {
+          return (parsed as Record<string, unknown>)['is_injection'] as boolean;
+        }
+        // Corrupted cache entry — treat as cache miss, not as "safe"
+        log.warn('injection judge cache entry has unexpected shape, treating as miss');
       }
     } catch (err) {
       // Redis error — log and continue to LLM query

@@ -58,6 +58,8 @@
     "test:quality": "vitest run --config config/vitest/quality.config.ts && npm run eval:noisy:validate",
     "test:quality:nightly": "npm run test:quality && npm run eval:noisy:assert-baseline:current",
     "test:quality:vespa": "bash scripts/run-vespa-test-lane.sh npx vitest run --config config/vitest/quality.vespa.config.ts",
+    "bench:agent": "npx tsx test/benchmark/agent/runner.ts",
+    "bench:agent:tier": "npx tsx test/benchmark/agent/runner.ts --tier",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:watchlist && npm run test:meta && npm run test:e2e:contract && npm run test:ingest:contract && npm run test:quality",
     "test:all:full": "npm run test:all && npm run test:heavy && npm run test:e2e:runtime",
     "test:verification:vespa": "bash scripts/run-vespa-verification.sh",

@@ -101,7 +101,7 @@ export class OpenAiChatLlm implements ChatLlmPort {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(`OpenAI chat failed [HTTP ${response.status}]: ${text}`);
+      throw new Error(`OpenAI chat failed [HTTP ${response.status}]: ${text.slice(0, 200)}`);
     }
 
     const data: unknown = await response.json();

@@ -48,11 +48,11 @@ export const MatchDetailSchema = z.object({
   anchor_used: z.boolean().optional(),
   matched_alias: z.string().min(1).optional(),
   score_components: z.object({
-    lexical: z.number(),
-    semantic: z.number(),
-    attribute: z.number(),
-    popularity: z.number(),
-    preference_alignment: z.number(),
+    lexical: z.number().finite(),
+    semantic: z.number().finite(),
+    attribute: z.number().finite(),
+    popularity: z.number().finite(),
+    preference_alignment: z.number().finite(),
   }).strict(),
 }).strict();
 
@@ -63,7 +63,7 @@ export const ConstraintEvaluationSchema = z.object({
 }).strict();
 
 export const UncertaintyBlockSchema = z.object({
-  uncertainty_confidence: z.number(),
+  uncertainty_confidence: z.number().min(0).max(1),
   missing_info: z.array(z.string()),
   approximation_used: z.boolean(),
   ambiguity_flags: z.array(z.string()).optional(),
@@ -359,11 +359,11 @@ export const InterpretResponseSchema = z.object({
   route: z.enum(['entity', 'hybrid', 'mixed']),
   retrieval_mode: z.string().min(1),
   query_class: z.string().min(1),
-  anchors: z.array(z.unknown()),
+  anchors: z.array(z.record(z.unknown())),
   constraints: z.object({
-    hard: z.array(z.unknown()),
-    soft: z.array(z.unknown()),
-    inferred: z.array(z.unknown()),
+    hard: z.array(z.record(z.unknown())),
+    soft: z.array(z.record(z.unknown())),
+    inferred: z.array(z.record(z.unknown())),
   }).strict(),
   expansions: z.object({
     lexical: z.array(z.string()),

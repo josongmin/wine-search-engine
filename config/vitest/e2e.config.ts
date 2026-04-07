@@ -23,6 +23,7 @@ export default defineConfig({
       'test/e2e/edge-cases.input.test.ts',
       'test/e2e/edge-cases.protocol.test.ts',
       'test/e2e/hard-scenarios.test.ts',
+      'test/e2e/agent-api.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,

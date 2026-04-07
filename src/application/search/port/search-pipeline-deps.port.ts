@@ -6,9 +6,9 @@ import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retri
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
-import type { RankedResult } from '../../../domain/ranking/model/ranked-result.js';
 import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
 import type { RankerRuntimeSignal } from '../../../domain/ranking/model/ranking-runtime-signal.js';
+import type { RankingOutput } from '../../../domain/ranking/port/ranker.port.js';
 import type { DecisionInput } from '../../../domain/decision/model/decision-input.js';
 import type { DecisionOutput } from '../../../domain/decision/model/decision-output.js';
 import type {
@@ -77,7 +77,7 @@ export interface CompareRetrieverPort {
 }
 
 export interface RankingPort {
-  rank(input: RankingInput): Promise<readonly RankedResult[]>;
+  rank(input: RankingInput): Promise<RankingOutput>;
   /**
    * Returns the funnel metrics computed during the most recent rank() call.
    * Only implemented by stage-aware pipeline wrappers (e.g. RankingStagePipeline).

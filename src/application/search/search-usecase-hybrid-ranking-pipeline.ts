@@ -134,8 +134,8 @@ export async function runHybridRankingPipeline(
     ...(compiled !== undefined ? { compiled } : {}),
   };
 
-  const rankedResults = await ranker.rank(rankingInput);
-  const rankerDegradation = ranker.getLastRuntimeSignal?.()?.degradation;
+  const { results: rankedResults, metadata: rankingMetadata } = await ranker.rank(rankingInput);
+  const rankerDegradation = rankingMetadata.runtimeSignal?.degradation ?? ranker.getLastRuntimeSignal?.()?.degradation;
   const funnelMetrics = ranker.getLastFunnelMetrics?.();
 
   if (ranker.getLastFunnelMetrics === undefined) {

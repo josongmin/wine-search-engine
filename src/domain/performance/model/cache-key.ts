@@ -111,7 +111,8 @@ export class QueryCacheKeyBuilder {
   ): QueryCacheKey {
     // Hash constraints deterministically (sorted tuples)
     const sortedConstraints = Array.from(constraintTuples)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a1, a2, a3], [b1, b2, b3]) =>
+        a1.localeCompare(b1) || a2.localeCompare(b2) || a3.localeCompare(b3))
       .map((t) => t.join('|'))
       .join('||');
     const constraintSignature = hashDeterministic(sortedConstraints);
@@ -219,8 +220,10 @@ export class EmbeddingCacheKeyBuilder {
     modelId: string,
     instructionPrefix?: string,
   ): EmbeddingCacheKey {
-    // Redis key from model + text hash (instructions part of instructions param)
-    const redisKey = ['embedding', modelId, hashDeterministic(text)].join(':');
+    // Redis key from model + instruction prefix + text hash.
+    // instructionPrefix distinguishes "Search: " vs "Passage: " embeddings.
+    const hashInput = instructionPrefix !== undefined ? `${instructionPrefix}${text}` : text;
+    const redisKey = ['embedding', modelId, hashDeterministic(hashInput)].join(':');
 
     return {
       text,

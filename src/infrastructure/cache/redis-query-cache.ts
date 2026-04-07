@@ -30,8 +30,8 @@ const log = bootstrapLogger.child({ component: 'RedisQueryCache' });
 
 export class RedisQueryCache implements QueryCachePort {
   private readonly redis: RedisClient;
-  private readonly statsKeyHits = 'query:cache:stats:hits';
-  private readonly statsKeyMisses = 'query:cache:stats:misses';
+  private readonly statsKeyHits = 'cache:stats:query:hits';
+  private readonly statsKeyMisses = 'cache:stats:query:misses';
 
   constructor(redis: RedisClient) {
     this.redis = redis;

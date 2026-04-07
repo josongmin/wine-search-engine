@@ -41,7 +41,6 @@ export class Transliterator {
     ['au', '오'],
     ['eau', '오'],
     ['eux', '외'],
-    ['eux', '외'],
     ['ain', '앙'],
     ['ein', '앙'],
     ['on', '옹'],
@@ -216,7 +215,6 @@ export class Transliterator {
     ['ch', '츠'],
     ['ck', '크'],
     ['ng', '이'],
-    ['tion', '션'],
     ['tion', '션'],
     ['igh', '아이'],
     ['ou', '아우'],
@@ -478,6 +476,8 @@ export class Transliterator {
     canonicalLabel: string,
     sourceLang: string,
   ): readonly TransliterationResult[] {
+    const VALID_LANGS: ReadonlySet<string> = new Set(['fr', 'it', 'es', 'en']);
+    if (!VALID_LANGS.has(sourceLang)) return [];
     const lang = sourceLang as SourceLang;
     const results: TransliterationResult[] = [];
 

@@ -80,6 +80,7 @@ export interface PlannerContext {
  */
 export class Planner {
   private readonly queryNormalizer = new QueryNormalizer();
+  private _lastConstraintExtractionTrace: ConstraintExtractionTrace | undefined;
 
   constructor(
     private readonly ambiguityDict: AmbiguityDictionary,
@@ -92,10 +93,10 @@ export class Planner {
   /**
    * Returns the constraint extraction trace from the most recent plan() call,
    * if the injected NLMapper supports it (i.e. {@link LlmNLMapper}).
+   * Captured immediately after parseConstraints() to prevent interleaving.
    */
   getLastConstraintExtractionTrace(): ConstraintExtractionTrace | undefined {
-    return (this.nlMapper as { getLastExtractionTrace?: () => ConstraintExtractionTrace | undefined })
-      .getLastExtractionTrace?.();
+    return this._lastConstraintExtractionTrace;
   }
 
   /**
@@ -118,8 +119,11 @@ export class Planner {
    * @returns An immutable query plan.
    */
   async plan(query: string, context?: PlannerContext): Promise<QueryPlanV2> {
+    // Defense-in-depth: cap query length to prevent ReDoS in downstream regex extractors.
+    const safeQuery = query.length > 500 ? query.slice(0, 500) : query;
+
     // 1. Normalize.
-    const queryViews = this.queryNormalizer.normalize(query);
+    const queryViews = this.queryNormalizer.normalize(safeQuery);
     const normalizedQuery = queryViews.accentless;
 
     // 2. Extract anchors.
@@ -162,6 +166,10 @@ export class Planner {
       await this.parseConstraints(normalizedQuery),
       normalizedQuery,
     );
+    // Capture extraction trace immediately — before any other await yields control.
+    this._lastConstraintExtractionTrace =
+      (this.nlMapper as { getLastExtractionTrace?: () => ConstraintExtractionTrace | undefined })
+        .getLastExtractionTrace?.();
 
     // 7. Build expansions.
     const baseExpansions = this.expansionBuilder.build(

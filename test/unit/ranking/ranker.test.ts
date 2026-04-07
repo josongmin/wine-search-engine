@@ -283,7 +283,7 @@ describe('Ranker', () => {
     it('empty candidates → returns []', async () => {
       const ranker = makeRanker(makeScoreAggregator(0.9));
 
-      const results = await ranker.rank(makeInput([]));
+      const { results } = await ranker.rank(makeInput([]));
 
       expect(results).toEqual([]);
     });
@@ -292,7 +292,7 @@ describe('Ranker', () => {
       const candidate = makeCandidate('wine-001');
       const ranker = makeRanker(makeScoreAggregator(0.9), { evidenceItems: [STUB_EVIDENCE] });
 
-      const results = await ranker.rank(makeInput([candidate]));
+      const { results } = await ranker.rank(makeInput([candidate]));
 
       expect(results).toHaveLength(1);
       expect(results[0]!.rank).toBe(1);
@@ -320,7 +320,7 @@ describe('Ranker', () => {
       const candidates = makeCandidates(scores.length, 'wine-00');
       const ranker = makeRanker(makeScoreAggregatorSequence(scores));
 
-      const results = await ranker.rank(makeInput(candidates));
+      const { results } = await ranker.rank(makeInput(candidates));
 
       expect(results).toHaveLength(expectedScores.length);
       expect(results.map((result) => result.finalScore)).toEqual(expectedScores);
@@ -385,7 +385,7 @@ describe('Ranker', () => {
 
       const ranker = makeRanker(makeScoreAggregator(0.9), { evidenceItems: [STUB_EVIDENCE] });
 
-      const [result] = await ranker.rank(input);
+      const { results: [result] } = await ranker.rank(input);
 
       expect(result?.matchedConstraints).toEqual(['country', 'price_band']);
       expect(result?.unmetConstraints).toEqual(['wine_type', 'appellation']);
@@ -469,7 +469,7 @@ describe('Ranker', () => {
         { signalScores: makeComponentScores({ hardConstraintPass: false }) },
       );
 
-      const results = await ranker.rank(makeInput(candidates));
+      const { results } = await ranker.rank(makeInput(candidates));
 
       expect(results).toEqual([]);
     });
@@ -479,7 +479,7 @@ describe('Ranker', () => {
 
       const ranker = makeRanker(makeScoreAggregatorSequence([0.9, -Infinity, 0.5]));
 
-      const results = await ranker.rank(makeInput(candidates));
+      const { results } = await ranker.rank(makeInput(candidates));
 
       expect(results).toHaveLength(2);
       expect(results.every((r) => Number.isFinite(r.finalScore))).toBe(true);
@@ -538,7 +538,7 @@ describe('Ranker', () => {
       // No reranker passed — just verify the pipeline completes without error
       const ranker = makeRanker(makeScoreAggregator(0.5));
 
-      const results = await ranker.rank(makeInput(candidates));
+      const { results } = await ranker.rank(makeInput(candidates));
 
       expect(results).toHaveLength(10);
     });
@@ -548,13 +548,13 @@ describe('Ranker', () => {
       const { port, spy } = makeReranker(makeDescendingRerankResults(candidates));
       const ranker = makeRanker(makeScoreAggregator(0.5), { reranker: port });
 
-      await ranker.rank(makeInputWithOverrides(candidates, {
+      const { metadata } = await ranker.rank(makeInputWithOverrides(candidates, {
         anchorProfile: { anchorEntityId: createEntityId('anchor-1') } as never,
       }));
 
       expect(spy).toHaveBeenCalledOnce();
-      expect(ranker.getLastRerankGateReason()).toBe('has_anchor');
-      expect(ranker.getLastRerankExecuted()).toBe(true);
+      expect(metadata.rerankGateReason).toBe('has_anchor');
+      expect(metadata.rerankExecuted).toBe(true);
     });
 
     it('uses already_precise gate reason and skips reranking for entity route', async () => {
@@ -562,15 +562,15 @@ describe('Ranker', () => {
       const { port, spy } = makeReranker([]);
       const ranker = makeRanker(makeScoreAggregator(0.5), { reranker: port });
 
-      await ranker.rank(makeInputWithOverrides(candidates, {
+      const { metadata } = await ranker.rank(makeInputWithOverrides(candidates, {
         queryPlan: {
           route: 'entity',
         },
       }));
 
       expect(spy).not.toHaveBeenCalled();
-      expect(ranker.getLastRerankGateReason()).toBe('already_precise');
-      expect(ranker.getLastRerankExecuted()).toBe(false);
+      expect(metadata.rerankGateReason).toBe('already_precise');
+      expect(metadata.rerankExecuted).toBe(false);
     });
 
     it('learned LTR rerank is skipped when gate returns shouldRerank=false (too_few_candidates)', async () => {
@@ -585,11 +585,11 @@ describe('Ranker', () => {
 
       const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });
 
-      const results = await ranker.rank(makeInput(candidates));
+      const { results, metadata } = await ranker.rank(makeInput(candidates));
 
       // Gate returns too_few_candidates (< 5), so LTR rerank must NOT run.
-      expect(ranker.getLastRerankExecuted()).toBe(false);
-      expect(ranker.getLastRerankGateReason()).toBe('too_few_candidates');
+      expect(metadata.rerankExecuted).toBe(false);
+      expect(metadata.rerankGateReason).toBe('too_few_candidates');
 
       // Original ordering must be preserved (LTR rerank did not run).
       expect(results).toHaveLength(3);
@@ -609,10 +609,10 @@ describe('Ranker', () => {
       const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });
 
       // rerankForced bypasses the too_few_candidates gate rule.
-      const results = await ranker.rank(makeInput(candidates, true));
+      const { results, metadata } = await ranker.rank(makeInput(candidates, true));
 
       // LTR rerank must have executed.
-      expect(ranker.getLastRerankExecuted()).toBe(true);
+      expect(metadata.rerankExecuted).toBe(true);
       expect(results).toHaveLength(3);
     });
   });
@@ -636,7 +636,7 @@ describe('Ranker', () => {
       const { port } = makeReranker(rerankResults);
       const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { reranker: port });
 
-      const results = await ranker.rank(makeInput(candidates, true));
+      const { results } = await ranker.rank(makeInput(candidates, true));
 
       // Find result for first candidate
       const firstResult = results.find((r) => r.entityId === firstEntityId);
@@ -672,7 +672,7 @@ describe('Ranker', () => {
         rerankTopK: 3,
       });
 
-      const results = await ranker.rank(makeInput(candidates, true));
+      const { results } = await ranker.rank(makeInput(candidates, true));
 
       // Reranker should have been called with exactly 3 candidates
       expect(rerankSpy).toHaveBeenCalledOnce();
@@ -704,7 +704,7 @@ describe('Ranker', () => {
 
       const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { reranker });
 
-      const results = await ranker.rank(makeInput(candidates, true));
+      const { results } = await ranker.rank(makeInput(candidates, true));
 
       // Verify results are sorted descending by blended score
       for (let i = 0; i < results.length - 1; i++) {
@@ -725,9 +725,9 @@ describe('Ranker', () => {
         { reranker },
       );
 
-      await ranker.rank(makeInput(candidates, true));
+      const { metadata } = await ranker.rank(makeInput(candidates, true));
 
-      expect(ranker.getLastRuntimeSignal()).toEqual({
+      expect(metadata.runtimeSignal).toEqual({
         rerankerStatus: 'failed',
         rerankerFailureReason: 'timeout',
         degradation: {

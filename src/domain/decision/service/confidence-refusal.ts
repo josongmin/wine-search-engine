@@ -40,6 +40,8 @@ export class ConfidenceRefusalPolicy {
    * @returns true if C < threshold (refusal recommended), false otherwise.
    */
   shouldRefuse(decisionConfidenceC: number): boolean {
+    // NaN confidence is treated as zero confidence → refuse.
+    if (!Number.isFinite(decisionConfidenceC)) return true;
     return decisionConfidenceC < this.threshold;
   }
 

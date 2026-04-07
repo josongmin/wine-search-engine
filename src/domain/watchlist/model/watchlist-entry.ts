@@ -96,11 +96,12 @@ export function parseWatchlistTrigger(input: unknown): WatchlistTrigger | null {
 
   switch (input.type) {
     case 'new_vintage':
-      return isFiniteNumber(input.minVintage)
+      return isFiniteNumber(input.minVintage) && input.minVintage > 0
         ? { type: input.type, minVintage: input.minVintage }
         : null;
     case 'price_drop':
-      return isFiniteNumber(input.threshold) && isFiniteNumber(input.baselinePrice)
+      return isFiniteNumber(input.threshold) && input.threshold > 0
+        && isFiniteNumber(input.baselinePrice) && input.baselinePrice > 0
         ? {
             type: input.type,
             threshold: input.threshold,
@@ -108,11 +109,11 @@ export function parseWatchlistTrigger(input: unknown): WatchlistTrigger | null {
           }
         : null;
     case 'stock_available':
-      return isFiniteNumber(input.minQty)
+      return isFiniteNumber(input.minQty) && input.minQty > 0
         ? { type: input.type, minQty: input.minQty }
         : null;
     case 'critic_score_above':
-      return isFiniteNumber(input.threshold)
+      return isFiniteNumber(input.threshold) && input.threshold >= 0
         ? { type: input.type, threshold: input.threshold }
         : null;
     default:
@@ -194,8 +195,10 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+const ISO_8601_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+
 function isIsoTimestamp(value: unknown): value is string {
-  return typeof value === 'string' && !Number.isNaN(Date.parse(value));
+  return typeof value === 'string' && ISO_8601_RE.test(value);
 }
 
 function isVintageReleasedEventData(

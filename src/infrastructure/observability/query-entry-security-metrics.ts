@@ -41,7 +41,9 @@ export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObs
 
   onJudgeError(error: unknown, mode: 'fail_open' | 'fail_closed'): void {
     this.judgeErrors++;
-    this.lastJudgeError = { error, mode, timestamp: Date.now() };
+    // Store only the error message to prevent retaining large Error objects / closures.
+    const message = error instanceof Error ? error.message : String(error);
+    this.lastJudgeError = { error: message, mode, timestamp: Date.now() };
   }
 
   onFailClosedBlock(): void {

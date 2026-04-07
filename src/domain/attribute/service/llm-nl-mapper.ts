@@ -20,10 +20,9 @@
  */
 
 import type { NormalizedConstraint } from '../../shared/types/index.js';
-import type { NLMapping } from '../model/nl-mapping.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
-import { NLMapper } from './nl-mapper.js';
+import { NLMapper, toNormalizedConstraint } from './nl-mapper.js';
 import {
   LlmConstraintResponseSchema,
   LLM_ALLOWED_ATTRIBUTES,
@@ -102,21 +101,23 @@ export class LlmNLMapper extends NLMapper {
     for (const phrase of phrases) {
       const mapping = await this.mapPhrase(phrase);
       if (mapping !== null) {
-        ruleResults.push(toNormalizedConstraintFromMapping(mapping));
+        ruleResults.push(toNormalizedConstraint(mapping));
       } else {
         missedPhrases.push(phrase);
       }
     }
 
-    // Step 2: LLM for missed phrases
+    // Step 2: LLM for missed phrases (cap to prevent token/cost explosion)
+    const MAX_LLM_PHRASES = 20;
     let llmResults: NormalizedConstraint[] = [];
     let llmSkippedCount = 0;
     let llmLatencyMs: number | null = null;
+    const llmPhrases = missedPhrases.slice(0, MAX_LLM_PHRASES);
 
-    if (missedPhrases.length > 0) {
+    if (llmPhrases.length > 0) {
       const llmStart = Date.now();
       try {
-        const rawItems = await this.callLlm(missedPhrases);
+        const rawItems = await this.callLlm(llmPhrases);
         llmLatencyMs = Date.now() - llmStart;
 
         for (const item of rawItems) {
@@ -245,23 +246,4 @@ function llmItemToConstraint(item: LlmConstraintItem): NormalizedConstraint {
   };
 }
 
-function toNormalizedConstraintFromMapping(mapping: NLMapping): NormalizedConstraint {
-  let constraintValue: NormalizedConstraint['value'];
-  if (mapping.operator === 'range' && Array.isArray(mapping.value)) {
-    const [min, max] = mapping.value as readonly [number, number];
-    constraintValue = { min, max };
-  } else if (mapping.operator === 'in' && typeof mapping.value === 'string') {
-    constraintValue = [mapping.value];
-  } else {
-    constraintValue = mapping.value as string | number;
-  }
-
-  return {
-    attribute: mapping.mappedAttribute,
-    operator: mapping.operator,
-    value: constraintValue,
-    source_phrase: mapping.phrase,
-    confidence: mapping.mappingConfidence,
-    mapping_version: mapping.mappingVersion,
-  };
-}
+// Removed — uses toNormalizedConstraint from nl-mapper.ts

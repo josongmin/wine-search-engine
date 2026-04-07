@@ -80,8 +80,12 @@ export class DecomposedSearchUseCase {
         { abortSignal: options?.abortSignal },
       ),
     ]);
-    if (settledA.status === 'rejected') throw settledA.reason as Error;
-    if (settledB.status === 'rejected') throw settledB.reason as Error;
+    if (settledA.status === 'rejected') {
+      throw settledA.reason instanceof Error ? settledA.reason : new Error(String(settledA.reason));
+    }
+    if (settledB.status === 'rejected') {
+      throw settledB.reason instanceof Error ? settledB.reason : new Error(String(settledB.reason));
+    }
     const rawResultA = settledA.value;
     const rawResultB = settledB.value;
 

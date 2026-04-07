@@ -22,6 +22,7 @@ import {
 import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
+import { registerAgentRoute } from './routes/agent.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
@@ -318,6 +319,9 @@ export async function createServer(
   registerHybridRoute(app, deps);
   registerWatchlistRoute(app, deps);
   registerFeedbackRoute(app, deps);
+  if (deps.agentOrchestrator !== undefined) {
+    registerAgentRoute(app, { agentOrchestrator: deps.agentOrchestrator });
+  }
   registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)

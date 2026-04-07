@@ -192,6 +192,7 @@ if (changedFiles.length === 0) {
   }
   console.log(`[${label}] No changed files detected; falling back to check:quick.`);
   npmRun('check:quick');
+  process.exit(0);
 }
 
 if (changedFiles.every(isDocLike)) {

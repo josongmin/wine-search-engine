@@ -26,7 +26,8 @@ export class AbstainPolicy {
   }
 
   private normalizedEntropy(scores: readonly number[]): number {
-    const maxScore = Math.max(...scores);
+    let maxScore = -Infinity;
+    for (const s of scores) { if (s > maxScore) maxScore = s; }
     const expScores = scores.map((s) => Math.exp(s - maxScore));
     const sumExp = expScores.reduce((a, b) => a + b, 0);
     const probs = expScores.map((e) => e / sumExp);

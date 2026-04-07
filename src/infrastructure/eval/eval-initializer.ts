@@ -53,7 +53,7 @@ export async function runEvaluation(
           }
         : undefined;
 
-    log.warn('starting evaluation run');
+    log.info('starting evaluation run');
     const report = await evalRunner.run(filter);
 
     if (options?.verbose) {
@@ -81,7 +81,7 @@ export async function runEvaluation(
       ? `✓ Evaluation passed (${report.caseCount} cases)`
       : `✗ Evaluation failed: release gates did not pass`;
 
-    log.warn({ message, passed }, 'evaluation finished');
+    log.info({ message, passed }, 'evaluation finished');
 
     return {
       success: passed,

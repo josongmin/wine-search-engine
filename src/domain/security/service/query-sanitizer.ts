@@ -24,7 +24,8 @@ export class QuerySanitizer {
   private static readonly INJECTION_PATTERNS = {
     // System prompt / instruction hijacking
     system_prompt: [
-      /\bignore\s+/i,  // Simple: if starts with "ignore", likely injection
+      /\bignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any)\s+/i,
+      /\bignore\s+instructions\b/i,
       /\b(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/i,
       /(?:system|assistant|admin)\s+mode/i,
       /\b(?:system|admin)\s+override\b/i,
@@ -71,7 +72,7 @@ export class QuerySanitizer {
     // were never evaluated (dead code) — only backticks/$(…)  and "; && together"
     // were checked via inline code in Layer 1g.
     command_injection: [
-      /\b(?:bash|sh|cmd|powershell|zsh)\b/i,   // removed duplicate 'bash'
+      /\b(?:bash|\/bin\/sh|cmd\.exe|powershell|zsh)\b/i,
       /\b(?:exec|system|eval|spawn)\s*\(/i,
       /`[^`]*`/,                        // Backticks
       /\$\([^)]*\)/,                    // Command substitution
@@ -105,7 +106,7 @@ export class QuerySanitizer {
     if (!rawQuery || rawQuery.trim().length === 0) {
       return {
         safe: false,
-        reason: 'COMMAND_INJECTION', // Treat empty as potential attack
+        reason: 'EMPTY_QUERY',
       };
     }
 
@@ -204,6 +205,9 @@ export class QuerySanitizer {
    * Non-destructive — does not remove semantic content.
    */
   private normalizeWhitespace(query: string): string {
-    return query.trim().replace(/\s+/g, ' ');
+    return query
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+      .trim()
+      .replace(/\s+/g, ' ');
   }
 }

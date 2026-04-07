@@ -252,7 +252,7 @@ function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
   return new HybridUseCase({
     queryPlanner: { plan: vi.fn().mockResolvedValue(createPlan()) } as never,
     candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
-    ranker: { rank: vi.fn().mockResolvedValue([]) } as never,
+    ranker: { rank: vi.fn().mockResolvedValue({ results: [], metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] } }) } as never,
     decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
     responseBuilder: createResponseBuilder() as never,
     querySanitizer: safeSanitizer as never,
@@ -358,7 +358,7 @@ describe('HybridUseCase', () => {
       browseRegion: vi.fn(),
     };
     const candidatePool = { generate: vi.fn() };
-    const ranker = { rank: vi.fn().mockResolvedValue([]) };
+    const ranker = { rank: vi.fn().mockResolvedValue({ results: [], metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] } }) };
     const decisionEngine = { decide: vi.fn().mockResolvedValue(createDecisionOutput()) };
     const responseBuilder = createResponseBuilder();
     const useCase = makeHybridUseCase({
@@ -574,60 +574,63 @@ describe('HybridUseCase', () => {
     const secondEntityId = createEntityId();
     const plan = createPlan();
     const ranker = {
-      rank: vi.fn().mockResolvedValue([
-        createRankedResult(
-          firstEntityId,
-          'Alpha',
-          0.82,
-          1,
-          [{
-            type: 'alpha',
-            source: 'ranker',
-            contribution: '+0.10',
-            strength: 'medium' as const,
-            provenance: 'alpha evidence',
-          }],
-          {
-            componentScores: {
-              entityIntegrity: 1,
-              semantic: 0.9,
-              hardConstraintPass: true,
-              softConstraint: 0.2,
-              attributeAlignment: 0.1,
-              preferenceAlignment: 0.1,
-              popularity: 0.1,
-              availability: 1,
-              uncertaintyPenalty: 0.05,
+      rank: vi.fn().mockResolvedValue({
+        results: [
+          createRankedResult(
+            firstEntityId,
+            'Alpha',
+            0.82,
+            1,
+            [{
+              type: 'alpha',
+              source: 'ranker',
+              contribution: '+0.10',
+              strength: 'medium' as const,
+              provenance: 'alpha evidence',
+            }],
+            {
+              componentScores: {
+                entityIntegrity: 1,
+                semantic: 0.9,
+                hardConstraintPass: true,
+                softConstraint: 0.2,
+                attributeAlignment: 0.1,
+                preferenceAlignment: 0.1,
+                popularity: 0.1,
+                availability: 1,
+                uncertaintyPenalty: 0.05,
+              },
             },
-          },
-        ),
-        createRankedResult(
-          secondEntityId,
-          'Beta',
-          0.79,
-          2,
-          [{
-            type: 'beta',
-            source: 'ranker',
-            contribution: '+0.20',
-            strength: 'high' as const,
-            provenance: 'beta evidence',
-          }],
-          {
-            componentScores: {
-              entityIntegrity: 1,
-              semantic: 0.2,
-              hardConstraintPass: true,
-              softConstraint: 0.2,
-              attributeAlignment: 0.1,
-              preferenceAlignment: 0.1,
-              popularity: 0.95,
-              availability: 1,
-              uncertaintyPenalty: 0.05,
+          ),
+          createRankedResult(
+            secondEntityId,
+            'Beta',
+            0.79,
+            2,
+            [{
+              type: 'beta',
+              source: 'ranker',
+              contribution: '+0.20',
+              strength: 'high' as const,
+              provenance: 'beta evidence',
+            }],
+            {
+              componentScores: {
+                entityIntegrity: 1,
+                semantic: 0.2,
+                hardConstraintPass: true,
+                softConstraint: 0.2,
+                attributeAlignment: 0.1,
+                preferenceAlignment: 0.1,
+                popularity: 0.95,
+                availability: 1,
+                uncertaintyPenalty: 0.05,
+              },
             },
-          },
-        ),
-      ]),
+          ),
+        ],
+        metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] },
+      }),
     };
     const decisionEngine = { decide: vi.fn().mockResolvedValue(createDecisionOutput()) };
     const responseBuilder = createResponseBuilder();
@@ -687,18 +690,21 @@ describe('HybridUseCase', () => {
     const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       ranker: {
-        rank: vi.fn().mockResolvedValue([
-          createRankedResult(entityId, 'Window Wine', 0.77, 1, [], {
-            vintageYear: 2019,
-            grapePrimaryEnc: 11,
-            regionEnc: 22,
-            countryEnc: 33,
-            body: 3,
-            tannin: 2,
-            acidity: 4,
-            sweetness: 1,
-          }),
-        ]),
+        rank: vi.fn().mockResolvedValue({
+          results: [
+            createRankedResult(entityId, 'Window Wine', 0.77, 1, [], {
+              vintageYear: 2019,
+              grapePrimaryEnc: 11,
+              regionEnc: 22,
+              countryEnc: 33,
+              body: 3,
+              tannin: 2,
+              acidity: 4,
+              sweetness: 1,
+            }),
+          ],
+          metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] },
+        }),
       } as never,
       responseBuilder: responseBuilder as never,
       drinkingWindow: drinkingWindow as never,

@@ -12,6 +12,7 @@ export type {
   RerankCandidate,
   RerankResult,
 } from './port/reranker.port.js';
+export type { RankingMetadata, RankingOutput, RankerPort } from './port/ranker.port.js';
 
 // ── Services ────────────────────────────────────────────────────────────────
 export { SignalComputer } from './service/signal-computer.js';

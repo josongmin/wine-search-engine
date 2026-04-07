@@ -123,6 +123,7 @@ export function planToObservabilitySlice(
   queryId: string,
   plan: PlanLike,
   compiled?: CompiledWineQuery,
+  constraintExtraction?: ConstraintExtractionObservability,
 ): QueryObservabilitySlice {
   // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
   const decompositionHint = plan.decompositionHint;
@@ -157,5 +158,6 @@ export function planToObservabilitySlice(
           decompositionConfidence: decompositionHint.confidence,
         }
       : {}),
+    ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
   };
 }

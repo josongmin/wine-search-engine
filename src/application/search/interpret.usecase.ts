@@ -16,6 +16,14 @@ import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/reques
 
 const retrievalProfileService = new RetrievalProfileService();
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    const error = new Error('Interpret use case aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
+
 export type { InterpretRequest } from './interpret-request.dto.js';
 
 /**
@@ -63,8 +71,10 @@ export class InterpretUseCase {
   ): Promise<InterpretResultWithV2>;
   async execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
-    _options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<QueryPlanV1 | InterpretResultWithV2> {
+    throwIfAborted(options?.abortSignal);
+
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
       injectionJudge: this.deps.injectionJudge,
@@ -72,6 +82,8 @@ export class InterpretUseCase {
       queryEntrySecurityObserver: this.deps.queryEntrySecurityObserver,
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
+
+    throwIfAborted(options?.abortSignal);
 
     const plannerContext = buildPlannerContextFromSearchRequest({
       query: effectiveQuery,
@@ -92,6 +104,8 @@ export class InterpretUseCase {
         compiled = compileFromLegacyPlan(plan);
       }
     }
+
+    throwIfAborted(options?.abortSignal);
 
     pipelineDebug(
       {

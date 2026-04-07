@@ -55,15 +55,17 @@ export async function normalizePairings(
   wine: WineForPairing,
   client: Anthropic,
 ): Promise<PairingNormalizationResult> {
+  // Single-pass template substitution to prevent double-substitution
+  // when user data contains template tokens.
+  const templateVars: Record<string, string> = {
+    canonicalLabel: wine.canonicalLabel,
+    searchTextEn: wine.searchTextEn.substring(0, 300),
+    foodPairings: wine.foodPairings?.join(', ') ?? '(none provided)',
+  };
   const prompt = PAIRING_NORMALIZATION_PROMPT.replace(
-    '{canonicalLabel}',
-    wine.canonicalLabel,
-  )
-    .replace('{searchTextEn}', wine.searchTextEn.substring(0, 300))
-    .replace(
-      '{foodPairings}',
-      wine.foodPairings?.join(', ') ?? '(none provided)',
-    );
+    /\{(\w+)\}/g,
+    (_, key: string) => templateVars[key] ?? '',
+  );
 
   const response = await client.messages.create({
     model: 'claude-opus-4-6',
@@ -81,13 +83,23 @@ export async function normalizePairings(
     throw new Error('No text response from Claude');
   }
 
-  // Non-greedy match: extract the first complete JSON object
-  const jsonMatch = textContent.text.match(/\{[\s\S]*?\}/);
-  if (!jsonMatch) {
-    throw new Error(`Failed to extract JSON from response: ${textContent.text}`);
+  // Bracket-balanced extraction to handle nested objects/arrays
+  const responseText = textContent.text;
+  const startIdx = responseText.indexOf('{');
+  if (startIdx === -1) {
+    throw new Error(`Failed to extract JSON from response: ${responseText}`);
+  }
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = startIdx; i < responseText.length; i++) {
+    if (responseText[i] === '{') depth++;
+    else if (responseText[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+  }
+  if (endIdx === -1) {
+    throw new Error(`Unbalanced JSON braces in response: ${responseText.slice(0, 200)}`);
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = JSON.parse(responseText.slice(startIdx, endIdx + 1));
 
   return {
     tags: parsed.tags as PairingTag[],

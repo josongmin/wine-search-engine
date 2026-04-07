@@ -6,6 +6,10 @@ interface CandidateRow {
   entity_id: string;
 }
 
+function escapeLikePattern(input: string): string {
+  return input.replace(/[%_\\]/g, '\\$&');
+}
+
 export class PgBlockingAdapter implements BlockingPort {
   private static readonly DEFAULT_LIMIT = 50;
 
@@ -60,8 +64,8 @@ export class PgBlockingAdapter implements BlockingPort {
       LIMIT $4`,
       [
         normalizedQuery,
-        `${normalizedQuery}%`,
-        `%${query}%`,
+        `${escapeLikePattern(normalizedQuery)}%`,
+        `%${escapeLikePattern(query)}%`,
         limit,
       ],
     );

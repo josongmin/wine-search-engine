@@ -30,8 +30,8 @@ const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
  */
 export class RedisEmbeddingCache implements EmbeddingCachePort {
   private readonly redis: RedisClient;
-  private readonly statsKeyHits = 'embedding:cache:stats:hits';
-  private readonly statsKeyMisses = 'embedding:cache:stats:misses';
+  private readonly statsKeyHits = 'cache:stats:embedding:hits';
+  private readonly statsKeyMisses = 'cache:stats:embedding:misses';
 
   constructor(redis: RedisClient) {
     this.redis = redis;

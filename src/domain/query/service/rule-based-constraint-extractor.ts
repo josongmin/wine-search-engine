@@ -18,7 +18,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   const wineTypeRules: [RegExp, string][] = [
     [/\b(?:red|rouge|레드|적포도주)\b/i, 'red'],
     [/\b(?:white|blanc|화이트|백포도주)\b/i, 'white'],
-    [/\bros[eé]|로제\b/i, 'rosé'],
+    [/\b(?:ros[eé]|로제)\b/i, 'rosé'],
     [/\b(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)\b/i, 'sparkling'],
     [/\b(?:natural wine|내추럴 와인|내추럴)\b/i, 'natural'],
     [/\b(?:dessert wine|디저트 와인|sauternes|icewine)\b/i, 'dessert'],

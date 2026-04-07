@@ -34,30 +34,45 @@ export class ConstraintSAT {
   }
 
   private rangesDisjoint(a: NormalizedConstraint, b: NormalizedConstraint): boolean {
-    if (a.operator === '<=' && b.operator === '>=') return Number(a.value) < Number(b.value);
-    if (a.operator === '>=' && b.operator === '<=') return Number(a.value) > Number(b.value);
+    const numVal = (c: NormalizedConstraint): number | undefined => {
+      const n = typeof c.value === 'number' ? c.value : Number(c.value);
+      return Number.isFinite(n) ? n : undefined;
+    };
+    const rangeVal = (c: NormalizedConstraint): { min: number; max: number } | undefined => {
+      const v: unknown = c.value;
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined;
+      const r = v as Record<string, unknown>;
+      if (typeof r['min'] !== 'number' || typeof r['max'] !== 'number') return undefined;
+      return { min: r['min'], max: r['max'] };
+    };
+
+    if (a.operator === '<=' && b.operator === '>=') {
+      const av = numVal(a), bv = numVal(b);
+      return av !== undefined && bv !== undefined && av < bv;
+    }
+    if (a.operator === '>=' && b.operator === '<=') {
+      const av = numVal(a), bv = numVal(b);
+      return av !== undefined && bv !== undefined && av > bv;
+    }
     if (a.operator === 'range' && b.operator === '>=') {
-      const range = a.value as { min: number; max: number };
-      return Number(b.value) > range.max;
+      const range = rangeVal(a), bv = numVal(b);
+      return range !== undefined && bv !== undefined && bv > range.max;
     }
     if (a.operator === 'range' && b.operator === '<=') {
-      const range = a.value as { min: number; max: number };
-      return Number(b.value) < range.min;
+      const range = rangeVal(a), bv = numVal(b);
+      return range !== undefined && bv !== undefined && bv < range.min;
     }
-    // Symmetric: >= vs range, <= vs range
     if (a.operator === '>=' && b.operator === 'range') {
-      const range = b.value as { min: number; max: number };
-      return Number(a.value) > range.max;
+      const av = numVal(a), range = rangeVal(b);
+      return av !== undefined && range !== undefined && av > range.max;
     }
     if (a.operator === '<=' && b.operator === 'range') {
-      const range = b.value as { min: number; max: number };
-      return Number(a.value) < range.min;
+      const av = numVal(a), range = rangeVal(b);
+      return av !== undefined && range !== undefined && av < range.min;
     }
-    // range vs range: disjoint when the two intervals do not overlap
     if (a.operator === 'range' && b.operator === 'range') {
-      const ra = a.value as { min: number; max: number };
-      const rb = b.value as { min: number; max: number };
-      return ra.max < rb.min || rb.max < ra.min;
+      const ra = rangeVal(a), rb = rangeVal(b);
+      return ra !== undefined && rb !== undefined && (ra.max < rb.min || rb.max < ra.min);
     }
     return false;
   }
@@ -67,6 +82,7 @@ export class ConstraintSAT {
     const MUTUALLY_EXCLUSIVE: Record<string, string[][]> = {
       sweetness: [['dry', 'brut'], ['sweet', 'demi-sec', 'doux', 'dolce']],
       color: [['red'], ['white'], ['rosé', 'rose']],
+      wine_type: [['red'], ['white'], ['rosé', 'rose'], ['sparkling'], ['fortified'], ['dessert']],
     };
     const groups = MUTUALLY_EXCLUSIVE[a.attribute];
     if (!groups) return false;

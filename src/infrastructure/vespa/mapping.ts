@@ -517,7 +517,9 @@ export function parseFeatureSummary(raw: Record<string, unknown>): RetrievalFeat
   const drinkingWindowModelVersion = getOptionalString(raw, 'drinking_window_model_version');
 
   return {
-    ...(isString(entityIdRaw) && entityIdRaw.length > 0 ? { entityId: createEntityId(entityIdRaw) } : {}),
+    entityId: isString(entityIdRaw) && entityIdRaw.length > 0
+      ? createEntityId(entityIdRaw)
+      : (() => { throw new Error('parseFeatureSummary: missing or empty entity_id'); })(),
     ...(body !== undefined ? { body } : {}),
     ...(tannin !== undefined ? { tannin } : {}),
     ...(acidity !== undefined ? { acidity } : {}),
@@ -620,6 +622,7 @@ export function buildSparseFilters(filters: readonly string[]): string {
 
   for (const token of filters) {
     const { key, value } = parseFilterToken(token);
+    if (value === '') continue; // skip empty filter values
     switch (key) {
       // Original filters
       case 'price_band':
@@ -738,11 +741,18 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       }
 
-      default:
+      default: {
         // Multi-value IN tokens: key ends with _in, value is pipe-delimited.
         // Produces a Vespa OR clause: (field contains "a" OR field contains "b").
+        // Field name is validated against a whitelist to prevent YQL injection.
+        const ALLOWED_IN_FIELDS: ReadonlySet<string> = new Set([
+          'wine_type', 'country', 'appellation', 'grape_primary', 'style',
+          'price_band', 'flavor_profile', 'classification', 'certification',
+          'soil_type', 'producer_type',
+        ]);
         if (key.endsWith('_in')) {
           const field = key.slice(0, -3); // strip '_in' suffix
+          if (!ALLOWED_IN_FIELDS.has(field)) break;
           const vals = value.split('|').filter((v) => v.length > 0);
           if (vals.length > 0) {
             const disjuncts = vals.map((v) => `${field} contains ${yqlString(v)}`);
@@ -751,6 +761,7 @@ export function buildSparseFilters(filters: readonly string[]): string {
         }
         // Other unrecognised tokens are silently skipped to avoid breaking queries.
         break;
+      }
     }
   }
 

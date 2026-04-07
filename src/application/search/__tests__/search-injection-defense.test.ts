@@ -80,7 +80,7 @@ describe('SearchUseCase with Injection Defense', () => {
         generate: vi.fn().mockResolvedValue([]),
       } as any,
       ranker: {
-        rank: vi.fn().mockResolvedValue([]),
+        rank: vi.fn().mockResolvedValue({ results: [], metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] } }),
       } as any,
       decisionEngine: {
         decide: vi.fn().mockResolvedValue({

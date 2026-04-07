@@ -108,6 +108,16 @@ const envSchema = z.object({
   /** Timeout for LLM query interpreter calls (ms). */
   LLM_QUERY_INTERPRETER_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
+  // Agent
+  /** Enable agentic multi-step search (requires OPENAI_API_KEY). */
+  AGENT_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+  AGENT_MAX_STEPS: z.coerce.number().int().min(1).max(10).default(5),
+  AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  AGENT_PER_STEP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
   /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
@@ -287,6 +297,14 @@ function buildConfig(parsed: EnvVars) {
     drinkingWindow: {
       allowHeuristicInProduction: parsed.ALLOW_HEURISTIC_DRINKING_WINDOW,
       modelDir: parsed.DRINKING_WINDOW_MODEL_DIR,
+    },
+
+    /** Agent configuration. */
+    agent: {
+      enabled: parsed.AGENT_ENABLED,
+      maxSteps: parsed.AGENT_MAX_STEPS,
+      agentTimeoutMs: parsed.AGENT_TIMEOUT_MS,
+      perStepTimeoutMs: parsed.AGENT_PER_STEP_TIMEOUT_MS,
     },
 
     /** Kill switches for feature flags / circuit breakers. */

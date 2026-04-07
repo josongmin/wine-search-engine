@@ -20,6 +20,7 @@ import type { RankedResult } from '../model/ranked-result.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { FunnelMetrics, RankingFunnelTrace, RankingStageTrace } from '../model/ranking-stage.js';
 import type { RankerRuntimeSignal } from '../model/ranking-runtime-signal.js';
+import type { RankingOutput } from '../port/ranker.port.js';
 import type { Ranker } from './ranker.js';
 import type { RankingPolicyPort, PolicyContext } from '../port/ranking-policy.port.js';
 import { computeFunnelMetrics } from './funnel-metrics.js';
@@ -65,6 +66,7 @@ export class RankingStagePipeline {
   private readonly policy: RankingPolicyPort | undefined;
   private _lastFunnelMetrics: FunnelMetrics | undefined = undefined;
   private _lastFunnelTrace: RankingFunnelTrace | undefined = undefined;
+  private _lastRuntimeSignal: RankerRuntimeSignal | undefined = undefined;
 
   constructor(ranker: Ranker, options: RankingStagePipelineOptions = {}) {
     this.ranker = ranker;
@@ -84,15 +86,16 @@ export class RankingStagePipeline {
   }
 
   getLastRuntimeSignal(): RankerRuntimeSignal | undefined {
-    return this.ranker.getLastRuntimeSignal();
+    return this._lastRuntimeSignal;
   }
 
-  async rank(input: RankingInput): Promise<readonly RankedResult[]> {
+  async rank(input: RankingInput): Promise<RankingOutput> {
     // Reset cached metrics/trace at the start of every call so that a
     // caller who catches a thrown error and reads getLastFunnelMetrics()
     // does not see stale values from the previous successful request.
     this._lastFunnelMetrics = undefined;
     this._lastFunnelTrace = undefined;
+    this._lastRuntimeSignal = undefined;
 
     const wallStart = Date.now();
     const stageTraces: RankingStageTrace[] = [];
@@ -102,13 +105,16 @@ export class RankingStagePipeline {
     // --- Stage A + B + C: delegated to Ranker ---
     // The Ranker internally executes coarse_prune, primary_rank, and
     // optionally precision_rerank. We measure the full ranker call wall-clock
-    // and attribute coarse_prune separately using the summary it exposes.
+    // and attribute coarse_prune separately using the metadata it returns.
     const rankStart = Date.now();
-    const results = await this.ranker.rank(input);
+    const { results, metadata: rankingMetadata } = await this.ranker.rank(input);
     const rankLatencyMs = Date.now() - rankStart;
 
+    // Cache the runtime signal so callers can retrieve it via getLastRuntimeSignal().
+    this._lastRuntimeSignal = rankingMetadata.runtimeSignal;
+
     // Retrieve the authoritative coarse prune summary produced during rank().
-    const pruneSummary = this.ranker.getLastCoarsePruneSummary();
+    const pruneSummary = rankingMetadata.coarsePruneSummary;
     const retainedCount = pruneSummary?.retainedCount ?? results.length;
 
     // --- Stage A: Coarse prune ---
@@ -140,10 +146,10 @@ export class RankingStagePipeline {
     // Use the authoritative flag from the Ranker rather than a score-order heuristic.
     // The heuristic is unreliable: blended scores can remain in descending order
     // even after reranking if the blend weight is low.
-    const precisionRerankExecuted = this.ranker.getLastRerankExecuted();
-    const rerankGateReason = this.ranker.getLastRerankGateReason();
+    const precisionRerankExecuted = rankingMetadata.rerankExecuted;
+    const rerankGateReason = rankingMetadata.rerankGateReason;
     // T5.6: Retrieve the pre-rerank top-5 snapshot for rerankChangedTopK metric.
-    const preRerankTop5 = this.ranker.getLastPreRerankTop5();
+    const preRerankTop5 = rankingMetadata.preRerankTop5;
     stageTraces.push({
       stage: 'precision_rerank',
       inputCount: results.length,
@@ -216,6 +222,8 @@ export class RankingStagePipeline {
       metrics,
     };
 
-    return finalResults;
+    // The pipeline re-packages the inner ranker's metadata alongside its own
+    // policy-applied results so that callers get a consistent RankingOutput.
+    return { results: finalResults, metadata: rankingMetadata };
   }
 }

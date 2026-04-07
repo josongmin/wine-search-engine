@@ -126,7 +126,10 @@ describe('SearchUseCase specialized retrieval routing', () => {
         compareAgainstAnchor: vi.fn(),
       },
       ranker: {
-        rank: vi.fn().mockResolvedValue([makeRankedResult('wine-1', 'Opus One 2018')]),
+        rank: vi.fn().mockResolvedValue({
+          results: [makeRankedResult('wine-1', 'Opus One 2018')],
+          metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] },
+        }),
       },
       decisionEngine: {
         decide: vi.fn().mockResolvedValue({

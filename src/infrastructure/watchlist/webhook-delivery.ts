@@ -161,6 +161,17 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
     watchlistId: string,
     payload: WebhookPayload,
   ): Promise<WebhookAttemptResult> {
+    // Defense-in-depth SSRF check at delivery time (DNS rebinding mitigation).
+    // Schema validation runs at creation time; re-check here because DNS can change.
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'https:') {
+        return { statusCode: null, errorMessage: 'Callback URL must use https', succeeded: false };
+      }
+    } catch {
+      return { statusCode: null, errorMessage: 'Invalid callback URL', succeeded: false };
+    }
+
     const body = JSON.stringify(payload);
     const signature = this.computeSignature(watchlistId, body);
 

@@ -68,13 +68,21 @@ export async function generateCriticProxy(
   client: Anthropic,
 ): Promise<CriticProxyResult> {
   // Prepare prompt with wine data
-  const prompt = CRITIC_PROXY_PROMPT.replace('{canonicalLabel}', wine.canonicalLabel)
-    .replace('{searchTextEn}', wine.searchTextEn)
-    .replace('{body}', wine.body ?? 'unknown')
-    .replace('{acidity}', wine.acidity ?? 'unknown')
-    .replace('{tannin}', wine.tannin ?? 'unknown')
-    .replace('{region}', wine.region ?? 'unknown')
-    .replace('{grapePrimary}', wine.grapePrimary ?? 'unknown');
+  // Single-pass template substitution to avoid chained .replace() double-substitution
+  // when user data contains template tokens like {region}.
+  const templateVars: Record<string, string> = {
+    canonicalLabel: wine.canonicalLabel,
+    searchTextEn: wine.searchTextEn,
+    body: wine.body ?? 'unknown',
+    acidity: wine.acidity ?? 'unknown',
+    tannin: wine.tannin ?? 'unknown',
+    region: wine.region ?? 'unknown',
+    grapePrimary: wine.grapePrimary ?? 'unknown',
+  };
+  const prompt = CRITIC_PROXY_PROMPT.replace(
+    /\{(\w+)\}/g,
+    (_, key: string) => templateVars[key] ?? '',
+  );
 
   const response = await client.messages.create({
     model: 'claude-opus-4-6',
@@ -93,14 +101,23 @@ export async function generateCriticProxy(
     throw new Error('No text response from Claude');
   }
 
-  // Parse JSON
-  // Non-greedy match: extract the first complete JSON object, not the span between first { and last }
-  const jsonMatch = textContent.text.match(/\{[\s\S]*?\}/);
-  if (!jsonMatch) {
-    throw new Error(`Failed to extract JSON from response: ${textContent.text}`);
+  // Parse JSON — bracket-balanced extraction to handle nested objects/arrays
+  const responseText = textContent.text;
+  const startIdx = responseText.indexOf('{');
+  if (startIdx === -1) {
+    throw new Error(`Failed to extract JSON from response: ${responseText}`);
+  }
+  let depth = 0;
+  let endIdx = -1;
+  for (let i = startIdx; i < responseText.length; i++) {
+    if (responseText[i] === '{') depth++;
+    else if (responseText[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+  }
+  if (endIdx === -1) {
+    throw new Error(`Unbalanced JSON braces in response: ${responseText.slice(0, 200)}`);
   }
 
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = JSON.parse(responseText.slice(startIdx, endIdx + 1));
 
   return {
     proxyScore: parsed.proxy_score,

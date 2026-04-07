@@ -263,7 +263,7 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
 /**
  * Converts an {@link NLMapping} to a {@link NormalizedConstraint}.
  */
-function toNormalizedConstraint(mapping: NLMapping): NormalizedConstraint {
+export function toNormalizedConstraint(mapping: NLMapping): NormalizedConstraint {
   let constraintValue: NormalizedConstraint['value'];
 
   if (mapping.operator === 'range' && Array.isArray(mapping.value)) {

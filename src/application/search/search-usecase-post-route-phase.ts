@@ -467,6 +467,11 @@ export async function runSearchPostRoutePhase(
   const topScores = topKFinalScores(ctx.rankedResults);
   const abstainDecision = ctx.abstainPolicy.shouldAbstain(topScores);
 
+  // Apply caller-specified result limit after ranking + abstain check (both need the full set).
+  const limitedRankedResults = ctx.request.limit !== undefined
+    ? ctx.rankedResults.slice(0, ctx.request.limit)
+    : ctx.rankedResults;
+
   let response: SearchResponseV1;
 
   if (abstainDecision.abstain) {
@@ -480,12 +485,12 @@ export async function runSearchPostRoutePhase(
       'pipeline entropy abstain',
     );
     const results = await mapRankedResultsToResultItems(
-      ctx.rankedResults,
+      limitedRankedResults,
       ctx.drinkingWindow,
     );
     const retrievalProvenanceSlices = rankedResultsToEvalProvenanceSlices(
       ctx.requestId,
-      ctx.rankedResults,
+      limitedRankedResults,
     );
     try {
       // Fix D: buildEntropyAbstainResponseParams already includes compiled conditionally —
@@ -503,7 +508,7 @@ export async function runSearchPostRoutePhase(
             plannerSuggestedMode: ctx.plannerSuggestedMode,
             entropy: abstainDecision.entropy,
             results,
-            rankedResults: ctx.rankedResults,
+            rankedResults: limitedRankedResults,
             ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
           }),
           ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
@@ -565,7 +570,7 @@ export async function runSearchPostRoutePhase(
       requestId: ctx.requestId,
       startTime: ctx.startTime,
       resolveResult: ctx.resolveResult,
-      rankedResults: ctx.rankedResults,
+      rankedResults: limitedRankedResults,
       decisionContext: ctx.decisionContext,
       effectiveRoute: ctx.effectiveRoute,
       snapshotVersions: ctx.snapshotVersions,

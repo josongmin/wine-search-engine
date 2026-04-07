@@ -248,11 +248,15 @@ export class ConstraintOverlay {
 
       case 'range': {
         if (typeof value !== 'number') return false;
-        const range = constraint.value as { min: number; max: number };
-        return value >= range.min && value <= range.max;
+        const rv: unknown = constraint.value;
+        if (typeof rv !== 'object' || rv === null || Array.isArray(rv)) return false;
+        const range = rv as Record<string, unknown>;
+        if (typeof range['min'] !== 'number' || typeof range['max'] !== 'number') return false;
+        return value >= range['min'] && value <= range['max'];
       }
 
       case 'in': {
+        if (!Array.isArray(constraint.value)) return false;
         const allowed = constraint.value as readonly string[];
         return allowed.some(
           (a) =>

@@ -31,6 +31,7 @@ import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
+import { AgentOrchestrator } from '../application/agent/agent-orchestrator.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
@@ -58,6 +59,8 @@ export interface Container extends LearningContainerServices {
   /** True when Postgres feedback store is wired and learning kill-switch is off. */
   readonly feedbackIngestEnabled: boolean;
   readonly calibrationStore: CalibrationStore;
+  /** Agentic orchestrator — present when AGENT_ENABLED=true and ChatLlmPort available. */
+  readonly agentOrchestrator?: AgentOrchestrator | undefined;
 }
 
 export async function createContainer(
@@ -86,5 +89,23 @@ export async function createContainer(
     drinkingWindowPredictor: core.drinkingWindowPredictor,
     calibrationStore: core.calibrationStore,
     ...watchlist,
+    ...(config.agent.enabled && core.chatLlm !== undefined
+      ? {
+          agentOrchestrator: new AgentOrchestrator(
+            {
+              chatLlm: core.chatLlm,
+              toolDeps: {
+                searchUseCase: features.searchUseCase,
+              },
+            },
+            {
+              maxSteps: config.agent.maxSteps,
+              agentTimeoutMs: config.agent.agentTimeoutMs,
+              perStepTimeoutMs: config.agent.perStepTimeoutMs,
+              maxContextChars: 8_000,
+            },
+          ),
+        }
+      : {}),
   };
 }

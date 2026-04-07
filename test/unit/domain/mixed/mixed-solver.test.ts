@@ -72,8 +72,16 @@ function buildSolver(runtimeSignal?: RankerRuntimeSignal): MixedSolver {
     apply: (rankedResults) => [...rankedResults],
   } as ConstraintOverlay;
   const ranker: RankerPort = {
-    rank: async () => [],
-    getLastRuntimeSignal: () => runtimeSignal,
+    rank: async () => ({
+      results: [],
+      metadata: {
+        coarsePruneSummary: undefined,
+        rerankExecuted: false,
+        rerankGateReason: undefined,
+        runtimeSignal,
+        preRerankTop5: [],
+      },
+    }),
     getLastFunnelMetrics: () => undefined,
   };
 

@@ -134,6 +134,15 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
+process.on('unhandledRejection', (reason: unknown) => {
+  bootstrapLogger.error({ err: reason }, 'unhandled promise rejection');
+});
+
+process.on('uncaughtException', (err: Error) => {
+  bootstrapLogger.fatal({ err }, 'uncaught exception — shutting down');
+  process.exit(1);
+});
+
 main().catch((err: unknown) => {
   bootstrapLogger.fatal({ err }, 'fatal error during startup');
   process.exit(1);

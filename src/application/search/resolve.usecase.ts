@@ -38,6 +38,14 @@ export interface ResolveUseCaseDeps {
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
 }
 
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    const error = new Error('Resolve use case aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
+
 /**
  * Entity resolve use case — runs only entity resolution (no ranking/decision).
  *
@@ -50,8 +58,10 @@ export class ResolveUseCase {
 
   async execute(
     request: ResolveRequest,
-    _options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: { readonly abortSignal?: AbortSignal | undefined },
   ): Promise<ResolveResponse> {
+    throwIfAborted(options?.abortSignal);
+
     pipelineDebug(
       {
         step: 'resolve.use_case.start',
@@ -69,6 +79,8 @@ export class ResolveUseCase {
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
+    throwIfAborted(options?.abortSignal);
+
     const plan = await this.deps.queryPlanner.plan(
       effectiveQuery,
       buildPlannerContextFromSearchRequest({
@@ -78,6 +90,8 @@ export class ResolveUseCase {
         queryBudget: request.queryBudget,
       }),
     );
+
+    throwIfAborted(options?.abortSignal);
 
     const satResult = this.constraintSAT.check(plan.constraints);
     if (satResult.contradicted) {
@@ -108,6 +122,8 @@ export class ResolveUseCase {
       };
     }
 
+    throwIfAborted(options?.abortSignal);
+
     // Build resolver input
     const candidateEntities = await buildResolverCandidatesFromPlan(
       plan,
@@ -126,6 +142,8 @@ export class ResolveUseCase {
       uncertainty: plan.uncertainty,
       candidateEntities,
     };
+
+    throwIfAborted(options?.abortSignal);
 
     // Run entity resolver
     const result = await this.deps.entityResolver.resolve(resolverInput);

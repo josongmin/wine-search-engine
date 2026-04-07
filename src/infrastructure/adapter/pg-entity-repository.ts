@@ -221,7 +221,7 @@ export class PgEntityRepository implements EntityRepository {
     // Retrieve all per-entity snapshots for this snapshotId
     const snapResult = await this.pool.query<SnapshotRow>(
       `SELECT * FROM entity_snapshots WHERE snapshot_id LIKE $1 ORDER BY created_at ASC`,
-      [`${snapshotId}:%`],
+      [`${snapshotId.replace(/[%_\\]/g, '\\$&')}:%`],
     );
 
     if (snapResult.rows.length === 0) {
