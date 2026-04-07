@@ -13,6 +13,7 @@ import type {
   DecomposedSearchExecutionOptions,
   DecomposedSearchParentContext,
 } from './port/search-route-usecases.port.js';
+import { buildComparisonAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
@@ -109,6 +110,17 @@ export class DecomposedSearchUseCase {
       resultA.engineDecision.decisionStatus,
       resultB.engineDecision.decisionStatus,
     );
+    const leftAuthorityTraceRef =
+      resultA.engineDecision.authorityTraceRef ?? resultA.engineDecision.decisionTraceRef;
+    const rightAuthorityTraceRef =
+      resultB.engineDecision.authorityTraceRef ?? resultB.engineDecision.decisionTraceRef;
+    const authorityTraceRef = buildComparisonAuthorityTraceRef({
+      originalQuery,
+      comparisonIntent,
+      overallStatus,
+      leftAuthorityTraceRef,
+      rightAuthorityTraceRef,
+    });
 
     const executionTimeMs = Date.now() - startTime;
 
@@ -120,6 +132,8 @@ export class DecomposedSearchUseCase {
       overallStatus,
       requestId,
       executionTimeMs,
+      authorityTraceRef,
+      runtimeCorrelationRef: requestId,
     };
   }
 

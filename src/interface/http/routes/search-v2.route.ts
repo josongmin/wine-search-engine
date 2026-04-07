@@ -108,6 +108,19 @@ function projectV1SearchToV2HumanSearch(
     queryType: 'search',
     results,
     totalCandidates,
+    ...(v1Response.engineDecision.authorityTraceRef ?? v1Response.meta.authorityTraceRef
+      ? {
+          authorityTraceRef:
+            v1Response.engineDecision.authorityTraceRef ?? v1Response.meta.authorityTraceRef,
+        }
+      : {}),
+    ...(v1Response.engineDecision.runtimeCorrelationRef ?? v1Response.meta.runtimeCorrelationRef
+      ? {
+          runtimeCorrelationRef:
+            v1Response.engineDecision.runtimeCorrelationRef
+            ?? v1Response.meta.runtimeCorrelationRef,
+        }
+      : {}),
     version: '2',
     responseType: 'human',
   };
@@ -147,6 +160,12 @@ function projectComparisonToV2Human(
     overallStatus: comparison.overallStatus,
     entities,
     totalCandidates: entities[0].resultCount + entities[1].resultCount,
+    ...(comparison.authorityTraceRef !== undefined
+      ? { authorityTraceRef: comparison.authorityTraceRef }
+      : {}),
+    ...(comparison.runtimeCorrelationRef !== undefined
+      ? { runtimeCorrelationRef: comparison.runtimeCorrelationRef }
+      : {}),
     version: '2',
     responseType: 'human',
   };

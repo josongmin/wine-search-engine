@@ -27,6 +27,9 @@
 
 import { z } from 'zod';
 
+const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
+  /^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{64}$/;
+
 // ---------------------------------------------------------------------------
 // V2 shared sub-schemas
 // ---------------------------------------------------------------------------
@@ -100,19 +103,34 @@ export const ComparisonEntityV2HumanSchema = z.object({
 /**
  * Standard ranked-search payload (discriminator {@link queryType} = {@code search}).
  */
-export const SearchResponseV2HumanSearchSchema = z.object({
+const SearchResponseV2HumanSearchSchemaBase = z.object({
   queryId: z.string().min(1),
   queryType: z.literal('search'),
   results: z.array(ResultItemV2HumanSchema),
   totalCandidates: z.number().int().nonnegative(),
+  authorityTraceRef: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
+  runtimeCorrelationRef: z.string().min(1).optional(),
   version: z.literal('2'),
   responseType: z.literal('human'),
 }).strict();
 
+export const SearchResponseV2HumanSearchSchema = SearchResponseV2HumanSearchSchemaBase.superRefine((value, ctx) => {
+  if (
+    value.runtimeCorrelationRef !== undefined
+    && value.runtimeCorrelationRef !== value.queryId
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'runtimeCorrelationRef must equal queryId on V2 human search responses',
+      path: ['runtimeCorrelationRef'],
+    });
+  }
+});
+
 /**
  * Decomposed comparison payload (discriminator {@link queryType} = {@code comparison}).
  */
-export const SearchResponseV2HumanComparisonSchema = z.object({
+const SearchResponseV2HumanComparisonSchemaBase = z.object({
   queryId: z.string().min(1),
   queryType: z.literal('comparison'),
   originalQuery: z.string().min(1),
@@ -120,9 +138,24 @@ export const SearchResponseV2HumanComparisonSchema = z.object({
   overallStatus: z.enum(DECISION_STATUS_V2),
   entities: z.tuple([ComparisonEntityV2HumanSchema, ComparisonEntityV2HumanSchema]),
   totalCandidates: z.number().int().nonnegative(),
+  authorityTraceRef: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
+  runtimeCorrelationRef: z.string().min(1).optional(),
   version: z.literal('2'),
   responseType: z.literal('human'),
 }).strict();
+
+export const SearchResponseV2HumanComparisonSchema = SearchResponseV2HumanComparisonSchemaBase.superRefine((value, ctx) => {
+  if (
+    value.runtimeCorrelationRef !== undefined
+    && value.runtimeCorrelationRef !== value.queryId
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'runtimeCorrelationRef must equal queryId on V2 human comparison responses',
+      path: ['runtimeCorrelationRef'],
+    });
+  }
+});
 
 /**
  * V2 human-readable search response envelope.
@@ -131,7 +164,7 @@ export const SearchResponseV2HumanComparisonSchema = z.object({
  * Discriminated union: {@code queryType} is {@code search} for normal ranked results,
  * or {@code comparison} for Epic 14 "A vs B" decomposition responses.
  */
-export const SearchResponseV2HumanSchema = z.discriminatedUnion('queryType', [
+export const SearchResponseV2HumanSchema = z.union([
   SearchResponseV2HumanSearchSchema,
   SearchResponseV2HumanComparisonSchema,
 ]);

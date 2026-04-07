@@ -1,6 +1,9 @@
 import { Anthropic } from '@anthropic-ai/sdk';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import type { LLMInjectionClassifierPort } from '../../domain/security/port/llm-injection-classifier.port.js';
+import type {
+  LLMInjectionClassifierOptions,
+  LLMInjectionClassifierPort,
+} from '../../domain/security/port/llm-injection-classifier.port.js';
 
 /** Snapshot IDs retire; keep aligned with scripts that call Anthropic (e.g. ETL). Override via ANTHROPIC_INJECTION_MODEL. */
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -78,15 +81,18 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
     });
   }
 
-  async classify(query: string): Promise<boolean> {
+  async classify(query: string, options?: LLMInjectionClassifierOptions): Promise<boolean> {
     const maxAttempts = 3;
     let lastError: unknown;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await this.classifyOnce(query);
+        return await this.classifyOnce(query, options);
       } catch (err) {
         lastError = err;
+        if (err instanceof Error && err.name === 'AbortError') {
+          break;
+        }
         if (attempt < maxAttempts && isRetriableAnthropicError(err)) {
           const backoffMs = 400 * 2 ** (attempt - 1);
           bootstrapLogger.warn(
@@ -114,18 +120,24 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
     throw lastError;
   }
 
-  private async classifyOnce(query: string): Promise<boolean> {
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 50,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: query,
-        },
-      ],
-    });
+  private async classifyOnce(
+    query: string,
+    options?: LLMInjectionClassifierOptions,
+  ): Promise<boolean> {
+    const response = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: 50,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: query,
+          },
+        ],
+      },
+      options?.abortSignal !== undefined ? { signal: options.abortSignal } : undefined,
+    );
 
     const textBlock = response.content.find((block) => block.type === 'text') as
       | { type: 'text'; text: string }

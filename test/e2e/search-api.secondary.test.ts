@@ -20,6 +20,7 @@ import {
   postReplayJson,
 } from './helpers/http-transport.js';
 import { fetchReplaySnapshot, makeReplaySnapshot } from './helpers/replay-snapshot.js';
+import { decodeAuthorityTraceRefDetailed } from '../../src/domain/decision/service/id-schema-decoder.js';
 
 let server: TestServer;
 
@@ -182,6 +183,9 @@ describe('POST /v1/entity/resolve', () => {
     expect(body.request_id).toBe(clientRequestId);
     expect(body.decision_trace_ref).toBeTruthy();
     expect(body.authority_trace_ref).toBe(body.decision_trace_ref);
+    expect(decodeAuthorityTraceRefDetailed(body.authority_trace_ref!)).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
   });
 
   it.each([
@@ -378,6 +382,11 @@ describe('POST /v1/search/hybrid', () => {
     const body = parseComparisonResponse(res);
     expect(body.request_id).toBe(clientRequestId);
     expect(body.query_type).toBe('comparison');
+    expect(body.runtime_correlation_ref).toBe(clientRequestId);
+    expect(body.authority_trace_ref).toMatch(/^decision:v1:comparison_query:[a-f0-9]{64}$/);
+    expect(decodeAuthorityTraceRefDetailed(body.authority_trace_ref!)).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
   });
 
   it.each([

@@ -24,6 +24,8 @@ function makeValidComparisonResponse() {
     ],
     overall_status: 'resolved',
     request_id: 'req-123',
+    authority_trace_ref: 'decision:v1:comparison_query:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    runtime_correlation_ref: 'req-123',
     execution_time_ms: 42,
   };
 }
@@ -75,6 +77,24 @@ describe('ComparisonSearchResponseSchema', () => {
           all_results: [],
         },
       ],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects non-canonical authority trace identifiers when surfaced on comparison responses', () => {
+    const parsed = ComparisonSearchResponseSchema.safeParse({
+      ...makeValidComparisonResponse(),
+      authority_trace_ref: 'comparison:req-123',
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects mismatched request_id/runtime_correlation_ref on comparison responses', () => {
+    const parsed = ComparisonSearchResponseSchema.safeParse({
+      ...makeValidComparisonResponse(),
+      runtime_correlation_ref: 'different-request-id',
     });
 
     expect(parsed.success).toBe(false);

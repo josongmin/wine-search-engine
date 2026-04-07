@@ -29,6 +29,8 @@ const validSearchResponseV2Human = {
   queryType: 'search' as const,
   results: [validResultItemV2Human],
   totalCandidates: 42,
+  authorityTraceRef: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  runtimeCorrelationRef: 'qid-abc-123',
   version: '2' as const,
   responseType: 'human' as const,
 };
@@ -54,6 +56,8 @@ const validSearchResponseV2HumanComparison = {
     },
   ] as const,
   totalCandidates: 1,
+  authorityTraceRef: 'decision:v1:comparison_query:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+  runtimeCorrelationRef: 'qid-cmp-001',
   version: '2' as const,
   responseType: 'human' as const,
 };
@@ -188,6 +192,22 @@ describe('SearchResponseV2HumanSchema', () => {
         scoreGapRank1Rank2: 0.12,
         producerDiversity: 5,
       },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects non-canonical authority traces on V2 human search responses', () => {
+    const result = SearchResponseV2HumanSchema.safeParse({
+      ...validSearchResponseV2Human,
+      authorityTraceRef: 'trace-1',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects mismatched runtimeCorrelationRef/queryId on V2 human responses', () => {
+    const result = SearchResponseV2HumanSchema.safeParse({
+      ...validSearchResponseV2HumanComparison,
+      runtimeCorrelationRef: 'different-query-id',
     });
     expect(result.success).toBe(false);
   });

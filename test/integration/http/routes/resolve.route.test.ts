@@ -24,7 +24,8 @@ describe('POST /v1/entity/resolve', () => {
             canonicalLabel: 'Opus One 2018',
             calibratedScore: 0.99,
           },
-          decision_trace_ref: 'resolve:test-request:entity_lookup',
+          decision_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
           request_id: 'test-request',
         }),
       },
@@ -42,7 +43,8 @@ describe('POST /v1/entity/resolve', () => {
         canonicalLabel: 'Opus One 2018',
         calibratedScore: 0.99,
       },
-      decision_trace_ref: 'resolve:test-request:entity_lookup',
+      decision_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       request_id: 'test-request',
     });
   });

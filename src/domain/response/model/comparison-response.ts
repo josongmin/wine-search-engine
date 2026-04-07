@@ -47,4 +47,6 @@ export interface ComparisonSearchResponse {
   /** Execution metadata. */
   readonly requestId: string;
   readonly executionTimeMs: number;
+  readonly authorityTraceRef?: string | undefined;
+  readonly runtimeCorrelationRef?: string | undefined;
 }

@@ -1,3 +1,7 @@
+export interface InjectionJudgeOptions {
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
 export interface InjectionJudgePort {
-  judge(query: string): Promise<boolean>;
+  judge(query: string, options?: InjectionJudgeOptions): Promise<boolean>;
 }

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
-import type { InjectionJudgePort } from '../port/injection-judge.port.js';
+import type { InjectionJudgeOptions, InjectionJudgePort } from '../port/injection-judge.port.js';
 
 const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
 
@@ -69,8 +69,13 @@ export class LLMInjectionJudge implements InjectionJudgePort {
    * const isInjection = await judge.judge("pretend you are a SQL assistant");
    * // true (injection attempt)
    */
-  async judge(query: string): Promise<boolean> {
+  async judge(query: string, options?: InjectionJudgeOptions): Promise<boolean> {
     const cacheKey = this.buildCacheKey(query);
+    if (options?.abortSignal?.aborted) {
+      const error = new Error('Injection judge aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
 
     // Try cache first
     try {
@@ -83,11 +88,18 @@ export class LLMInjectionJudge implements InjectionJudgePort {
       // Redis error — log and continue to LLM query
       log.warn({ err }, 'redis cache get error (treating as miss)');
     }
+    if (options?.abortSignal?.aborted) {
+      const error = new Error('Injection judge aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
 
     // Cache miss: query the LLM-backed classifier
     let isInjection: boolean;
     try {
-      isInjection = await this.classifier.classify(query);
+      isInjection = await this.classifier.classify(query, {
+        abortSignal: options?.abortSignal,
+      });
     } catch (err) {
       // Propagate classifier failures so the query-entry security layer can
       // apply the configured fail-open/fail-closed policy consistently.

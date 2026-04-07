@@ -18,6 +18,7 @@ import {
   InterpretResponseV2Schema,
 } from '../../src/interface/http/schemas/search-response-v2.schema.js';
 import { SearchResponseSchema } from '../../src/interface/http/schemas/search-response.schema.js';
+import { decodeAuthorityTraceRefDetailed } from '../../src/domain/decision/service/id-schema-decoder.js';
 
 let server: TestServer;
 
@@ -111,6 +112,27 @@ describe('POST /v2/search — V2 human response shape', () => {
     expect(body['response_type']).toBe('human');
   });
 
+  it('surfaces canonical authority/runtime metadata for comparison responses', async () => {
+    const res = await postJson(
+      server.app,
+      '/v2/search',
+      {
+        query: 'Opus One vs Château Margaux',
+        options: { mode: 'entity', explain: false, clarification: false },
+      },
+      { 'x-request-id': 'req-v2-search-compare-123' },
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['query_id']).toBe('req-v2-search-compare-123');
+    expect(body['runtime_correlation_ref']).toBe('req-v2-search-compare-123');
+    expect(typeof body['authority_trace_ref']).toBe('string');
+    expect(decodeAuthorityTraceRefDetailed(String(body['authority_trace_ref']))).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
+  });
+
   it('each result item has version=2 and responseType=human', async () => {
     const res = await postV2Search({
       query: 'Opus One 2018',
@@ -176,6 +198,25 @@ describe('POST /v2/search/hybrid — V2 human response shape', () => {
     if (expectedStatus === 400) {
       expectRequestIdErrorShape(response.json() as Record<string, unknown>);
     }
+  });
+
+  it('surfaces canonical authority/runtime metadata for hybrid comparison responses', async () => {
+    const res = await postJson(
+      server.app,
+      '/v2/search/hybrid',
+      { query: 'Opus One vs Screaming Eagle' },
+      { 'x-request-id': 'req-v2-hybrid-compare-123' },
+    );
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['query_type']).toBe('comparison');
+    expect(body['query_id']).toBe('req-v2-hybrid-compare-123');
+    expect(body['runtime_correlation_ref']).toBe('req-v2-hybrid-compare-123');
+    expect(typeof body['authority_trace_ref']).toBe('string');
+    expect(decodeAuthorityTraceRefDetailed(String(body['authority_trace_ref']))).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
   });
 });
 

@@ -68,3 +68,22 @@ export function buildInternalErrorAuthorityTraceRef(input: {
 
   return `decision:${AUTHORITY_TRACE_SCHEMA_VERSION}:internal_error:${digest}`;
 }
+
+export function buildComparisonAuthorityTraceRef(input: {
+  originalQuery: string;
+  comparisonIntent: 'compare' | 'recommend_one' | 'list_both';
+  overallStatus: 'resolved' | 'ambiguous' | 'failed';
+  leftAuthorityTraceRef: string;
+  rightAuthorityTraceRef: string;
+}): string {
+  const digest = deterministicHash({
+    queryClass: 'comparison_query',
+    originalQuery: input.originalQuery,
+    comparisonIntent: input.comparisonIntent,
+    overallStatus: input.overallStatus,
+    leftAuthorityTraceRef: input.leftAuthorityTraceRef,
+    rightAuthorityTraceRef: input.rightAuthorityTraceRef,
+  });
+
+  return `decision:${AUTHORITY_TRACE_SCHEMA_VERSION}:comparison_query:${digest}`;
+}

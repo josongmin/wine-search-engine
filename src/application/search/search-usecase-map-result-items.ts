@@ -17,6 +17,26 @@ const drinkingWindowLogger = bootstrapLogger.child({
 
 const DRINKING_WINDOW_CHECK_TIMEOUT_MS = 2_000;
 
+async function withDrinkingWindowTimeout(
+  predictionPromise: Promise<DrinkingWindowBlock>,
+): Promise<DrinkingWindowBlock> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      predictionPromise,
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error('drinking_window_timeout'));
+        }, DRINKING_WINDOW_CHECK_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
+  }
+}
+
 function needsDrinkingWindowPrediction(r: RankedResult): boolean {
   return (
     r.drinkingWindowStart === undefined &&
@@ -46,7 +66,7 @@ export async function mapRankedResultsToResultItems(
 
   const predictions = await Promise.allSettled(
     resultsPendingPrediction.map((r) =>
-      Promise.race([
+      withDrinkingWindowTimeout(
         drinkingWindow!.check({
           // eslint-disable-next-line @typescript-eslint/no-deprecated
           vintage: (r.vintageYear ?? r.vintage)!,
@@ -61,13 +81,7 @@ export async function mapRankedResultsToResultItems(
             r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
           targetYear,
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => { reject(new Error('drinking_window_timeout')); },
-            DRINKING_WINDOW_CHECK_TIMEOUT_MS,
-          ),
-        ),
-      ]),
+      ),
     ),
   );
 

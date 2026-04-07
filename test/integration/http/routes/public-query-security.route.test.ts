@@ -393,7 +393,39 @@ describe('public query route security semantics', () => {
             canonical_label: 'Opus One 2018',
             calibrated_score: 0.97,
           },
-          decision_trace_ref: 'decision:v1:known_item:abc123',
+          decision_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          request_id: 'req-123',
+        }),
+      },
+    };
+
+    registerResolveRoute(app, deps);
+
+    const response = await post(app, '/v1/entity/resolve', { query: 'Opus One 2018' });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'INTERNAL_ERROR',
+        retryable: false,
+      },
+    });
+  });
+
+  it('/v1/entity/resolve fails closed when a non-canonical authority trace leaks into the V1 route', async () => {
+    const deps: ResolveRouteDeps = {
+      resolveUseCase: {
+        execute: vi.fn().mockResolvedValue({
+          status: 'resolved',
+          candidates: [],
+          top_entity: {
+            entity_id: 'wine:opus-one-2018',
+            canonical_label: 'Opus One 2018',
+            calibrated_score: 0.97,
+          },
+          decision_trace_ref: 'resolve:req-123:known_item',
+          authority_trace_ref: 'resolve:req-123:known_item',
           request_id: 'req-123',
         }),
       },

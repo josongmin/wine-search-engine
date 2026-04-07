@@ -82,6 +82,7 @@ describe('AnthropicLLMInjectionClassifier', () => {
     );
     expect(anthropicMocks.messagesCreate).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'claude-haiku-4-5-20251001' }),
+      undefined,
     );
     expect(anthropicMocks.messagesCreate).toHaveBeenCalledTimes(1);
   });
@@ -139,6 +140,22 @@ describe('AnthropicLLMInjectionClassifier', () => {
 
     expect(anthropicMocks.messagesCreate).toHaveBeenCalledWith(
       expect.objectContaining({ model: 'claude-3-5-haiku-20241022' }),
+      undefined,
+    );
+  });
+
+  it('forwards abort signals to the Anthropic SDK request options', async () => {
+    anthropicMocks.messagesCreate.mockResolvedValueOnce({
+      content: [{ type: 'text' as const, text: JSON.stringify({ is_injection: false }) }],
+    });
+
+    const controller = new AbortController();
+    const classifier = new AnthropicLLMInjectionClassifier('sk-test');
+    await classifier.classify('find wine', { abortSignal: controller.signal });
+
+    expect(anthropicMocks.messagesCreate).toHaveBeenCalledWith(
+      expect.any(Object),
+      { signal: controller.signal },
     );
   });
 });

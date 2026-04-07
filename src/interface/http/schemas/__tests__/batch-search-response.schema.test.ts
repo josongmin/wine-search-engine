@@ -23,7 +23,9 @@ describe('BatchSearchResponseSchema', () => {
               route: 'hybrid',
               decision_confidence: 0.9,
               confidence_semantics: 'calibrated_decision_confidence',
-              decision_trace_ref: 'trace-1',
+              decision_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              runtime_correlation_ref: 'req-1',
               decision_snapshot: {
                 snapshot_id: 'snap-1',
                 model_versions: {},
@@ -43,6 +45,8 @@ describe('BatchSearchResponseSchema', () => {
               route: 'hybrid',
               version: '1.0.0',
               engine_schema_version: 'search_response_v1',
+              authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              runtime_correlation_ref: 'req-1',
               decision_snapshot: {
                 snapshot_id: 'snap-1',
                 model_versions: {},
@@ -85,7 +89,9 @@ describe('BatchSearchResponseSchema', () => {
               route: 'hybrid',
               decision_confidence: 0.9,
               confidence_semantics: 'calibrated_decision_confidence',
-              decision_trace_ref: 'trace-1',
+              decision_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              runtime_correlation_ref: 'req-1',
               decision_snapshot: {
                 snapshot_id: 'snap-2',
                 model_versions: {},
@@ -105,6 +111,8 @@ describe('BatchSearchResponseSchema', () => {
               route: 'hybrid',
               version: '1.0.0',
               engine_schema_version: 'search_response_v1',
+              authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+              runtime_correlation_ref: 'req-1',
               decision_snapshot: {
                 snapshot_id: 'snap-2',
                 model_versions: {},

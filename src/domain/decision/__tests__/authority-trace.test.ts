@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildAuthorityTraceRef,
   buildAdmissionAuthorityTraceRef,
+  buildComparisonAuthorityTraceRef,
   buildInternalErrorAuthorityTraceRef,
 } from '../service/authority-trace.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
@@ -192,5 +193,17 @@ describe('authority trace refs', () => {
     });
 
     expect(ref).toMatch(/^decision:v1:internal_error:[a-f0-9]{64}$/);
+  });
+
+  it('builds a decodable comparison authority ref', () => {
+    const ref = buildComparisonAuthorityTraceRef({
+      originalQuery: 'Opus One vs Screaming Eagle',
+      comparisonIntent: 'compare',
+      overallStatus: 'resolved',
+      leftAuthorityTraceRef: 'decision:v1:short_entity:1111111111111111111111111111111111111111111111111111111111111111',
+      rightAuthorityTraceRef: 'decision:v1:short_entity:2222222222222222222222222222222222222222222222222222222222222222',
+    });
+
+    expect(ref).toMatch(/^decision:v1:comparison_query:[a-f0-9]{64}$/);
   });
 });

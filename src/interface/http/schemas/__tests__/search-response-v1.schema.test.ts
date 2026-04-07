@@ -10,7 +10,9 @@ function makeValidV1SearchResponse() {
       route: 'entity',
       decision_confidence: 0.92,
       confidence_semantics: 'calibrated_decision_confidence',
-      decision_trace_ref: 'decision:v1:short_entity:abc123',
+      decision_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      authority_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      runtime_correlation_ref: 'req-123',
       decision_snapshot: {
         snapshot_id: 'snap-123',
         model_versions: {},
@@ -24,10 +26,13 @@ function makeValidV1SearchResponse() {
     },
     results: [],
     meta: {
+      request_id: 'req-123',
       query_time_ms: 12,
       route: 'entity',
       version: '1.0.0',
       engine_schema_version: 'search_response_v1',
+      authority_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      runtime_correlation_ref: 'req-123',
     },
   };
 }
@@ -68,6 +73,42 @@ describe('SearchResponseSchema', () => {
           responseType: 'human',
         },
       ],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects non-canonical authority trace identifiers on the V1 search contract', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      engine_decision: {
+        ...makeValidV1SearchResponse().engine_decision,
+        decision_trace_ref: 'trace-1',
+        authority_trace_ref: 'trace-1',
+      },
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        authority_trace_ref: 'trace-1',
+      },
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects mismatched authority/runtime correlation fields on the V1 search contract', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      engine_decision: {
+        ...makeValidV1SearchResponse().engine_decision,
+        authority_trace_ref: 'decision:v1:short_entity:1111111111111111111111111111111111111111111111111111111111111111',
+        runtime_correlation_ref: 'req-engine',
+      },
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        authority_trace_ref: 'decision:v1:short_entity:2222222222222222222222222222222222222222222222222222222222222222',
+        runtime_correlation_ref: 'req-meta',
+        request_id: 'req-body',
+      },
     });
 
     expect(parsed.success).toBe(false);

@@ -14,6 +14,10 @@ import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candi
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
+import type { SnapshotVersions } from './search.usecase.js';
+import type { DecisionStatus, NextAction } from '../../domain/shared/types/index.js';
 
 export type { ResolveRequest } from './resolve-request.dto.js';
 export type { ResolveResponse } from './resolve-response.dto.js';
@@ -25,6 +29,7 @@ export interface ResolveUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
+  readonly snapshotVersions?: SnapshotVersions | undefined;
   /** Shared public query entry guard: Layer 1 sanitizer is required. */
   readonly querySanitizer: QuerySanitizer;
   /** Layer 2: LLM-based injection judge for borderline queries (Epic 16.1). */
@@ -80,9 +85,15 @@ export class ResolveUseCase {
         },
         'pipeline resolve-only early exit',
       );
-      const traceRef = request.requestId !== undefined
-        ? `resolve:${request.requestId}:${plan.queryClass}:constraint-sat`
-        : `resolve:${plan.queryClass}:constraint-sat`;
+      const snapshot = buildDecisionSnapshotFromPlan(plan, this.deps.snapshotVersions);
+      const traceRef = buildAuthorityTraceRef({
+        queryPlan: plan,
+        snapshot,
+        route: 'entity',
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        failureReason: 'HARD_CONSTRAINT_VIOLATION',
+      });
 
       return {
         status: 'failed',
@@ -126,10 +137,17 @@ export class ResolveUseCase {
       'pipeline resolve-only',
     );
 
-    // Build trace ref
-    const traceRef = request.requestId !== undefined
-      ? `resolve:${request.requestId}:${plan.queryClass}`
-      : `resolve:${plan.queryClass}`;
+    const snapshot = buildDecisionSnapshotFromPlan(plan, this.deps.snapshotVersions);
+    const decisionStatus = result.status;
+    const nextAction = mapResolveStatusToNextAction(decisionStatus);
+    const traceRef = buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot,
+      ...(result.topEntity !== undefined ? { chosenEntityId: result.topEntity.entityId } : {}),
+      route: 'entity',
+      decisionStatus,
+      nextAction,
+    });
 
     return {
       status: result.status,
@@ -139,5 +157,17 @@ export class ResolveUseCase {
       authority_trace_ref: traceRef,
       ...(request.requestId !== undefined ? { request_id: request.requestId } : {}),
     };
+  }
+}
+
+function mapResolveStatusToNextAction(status: DecisionStatus): NextAction {
+  switch (status) {
+    case 'resolved':
+      return 'return_result';
+    case 'ambiguous':
+      return 'clarify';
+    case 'failed':
+    default:
+      return 'fail';
   }
 }

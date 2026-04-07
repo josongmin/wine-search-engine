@@ -170,6 +170,18 @@ describe('LLMInjectionJudge', () => {
 
       await expect(judge.judge('find wine')).rejects.toThrow('classifier down');
     });
+
+    it('passes abort signals through to the classifier', async () => {
+      const controller = new AbortController();
+      mockClassifier.queueResponse(false);
+
+      await judge.judge('find wine', { abortSignal: controller.signal });
+
+      expect(mockClassifier.classify).toHaveBeenCalledWith(
+        'find wine',
+        { abortSignal: controller.signal },
+      );
+    });
   });
 
   describe('Cache miss and store', () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ResolveUseCase } from '../../../../src/application/search/resolve.usecase.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import { decodeAuthorityTraceRefDetailed } from '../../../../src/domain/decision/service/id-schema-decoder.js';
 import type {
   EntityResolverPort,
   QueryPlannerPort,
@@ -130,9 +131,12 @@ describe('ResolveUseCase', () => {
 
     const result = await useCase.execute({ query: 'Opus One 2018', requestId: 'req-123' });
 
-    expect(result.decision_trace_ref).toContain('req-123');
+    expect(result.decision_trace_ref).toMatch(/^decision:v1:known-item:[a-f0-9]{64}$/);
     expect(result.authority_trace_ref).toBe(result.decision_trace_ref);
     expect(result.request_id).toBe('req-123');
+    expect(decodeAuthorityTraceRefDetailed(result.authority_trace_ref)).toEqual(
+      expect.objectContaining({ ok: true }),
+    );
   });
 
   it('hydrates anchor candidates into resolver candidateEntities when entityLookup is available', async () => {
@@ -257,8 +261,8 @@ describe('ResolveUseCase', () => {
       status: 'failed',
       candidates: [],
       topEntity: undefined,
-      decision_trace_ref: 'resolve:req-constraint:constraint_heavy:constraint-sat',
-      authority_trace_ref: 'resolve:req-constraint:constraint_heavy:constraint-sat',
+      decision_trace_ref: expect.stringMatching(/^decision:v1:constraint_heavy:[a-f0-9]{64}$/),
+      authority_trace_ref: expect.stringMatching(/^decision:v1:constraint_heavy:[a-f0-9]{64}$/),
       request_id: 'req-constraint',
     });
     expect(entityResolver.resolve).not.toHaveBeenCalled();

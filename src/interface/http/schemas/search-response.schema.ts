@@ -3,6 +3,9 @@ import {
   DecisionSnapshotSchema,
 } from './search-shared.schema.js';
 
+const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
+  /^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{64}$/;
+
 export const ErrorResponseSchema = z.object({
   error: z.object({
     request_id: z.string(),
@@ -114,9 +117,9 @@ export const EngineDecisionSchema = z.object({
   confidence_semantics: z.literal('calibrated_decision_confidence'),
   decision_trace_ref: z
     .string()
-    .min(1)
+    .regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN)
     .describe('Deprecated in favor of authority_trace_ref; kept for Phase A migration'),
-  authority_trace_ref: z.string().min(1).optional(),
+  authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtime_correlation_ref: z.string().min(1).optional(),
   execution_mode: z
     .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
@@ -125,7 +128,7 @@ export const EngineDecisionSchema = z.object({
   degradation_reasons: z.array(z.string()).optional(),
   decision_snapshot: DecisionSnapshotSchema,
   failure_reason: z.string().optional(),
-  admission_trace_ref: z.string().optional(),
+  admission_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   abstain_reason: z.string().optional(),
   retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
   planner_suggested_mode: z.string().min(1).optional(),
@@ -154,7 +157,7 @@ export const SearchResponseMetaSchema = z.object({
   decision_snapshot: DecisionSnapshotSchema.optional(),
   debug_refs: z.array(z.string()).optional(),
   response_hash: z.string().min(1).optional(),
-  authority_trace_ref: z.string().min(1).optional(),
+  authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtime_correlation_ref: z.string().min(1).optional(),
   execution_mode: z
     .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
@@ -225,7 +228,58 @@ export const SearchResponseSchema = z.object({
     'wine_set',
   ]).optional(),
   parsed_constraints: ParsedConstraintsExternSchema.optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  const expectedAuthorityTraceRef =
+    value.engine_decision.authority_trace_ref ?? value.engine_decision.decision_trace_ref;
+
+  if (
+    value.engine_decision.authority_trace_ref !== undefined
+    && value.engine_decision.authority_trace_ref !== value.engine_decision.decision_trace_ref
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'engine_decision.authority_trace_ref must equal engine_decision.decision_trace_ref',
+      path: ['engine_decision', 'authority_trace_ref'],
+    });
+  }
+
+  if (
+    value.meta.authority_trace_ref !== undefined
+    && value.meta.authority_trace_ref !== expectedAuthorityTraceRef
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'meta.authority_trace_ref must match engine authority trace',
+      path: ['meta', 'authority_trace_ref'],
+    });
+  }
+
+  if (
+    value.engine_decision.runtime_correlation_ref !== undefined
+    && value.meta.runtime_correlation_ref !== undefined
+    && value.engine_decision.runtime_correlation_ref !== value.meta.runtime_correlation_ref
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'meta.runtime_correlation_ref must match engine_decision.runtime_correlation_ref',
+      path: ['meta', 'runtime_correlation_ref'],
+    });
+  }
+
+  const expectedRuntimeCorrelationRef =
+    value.engine_decision.runtime_correlation_ref ?? value.meta.runtime_correlation_ref;
+  if (
+    value.meta.request_id !== undefined
+    && expectedRuntimeCorrelationRef !== undefined
+    && value.meta.request_id !== expectedRuntimeCorrelationRef
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'meta.request_id must match runtime correlation reference',
+      path: ['meta', 'request_id'],
+    });
+  }
+});
 
 export type SearchResponseBody = z.infer<typeof SearchResponseSchema>;
 
@@ -244,8 +298,21 @@ export const ComparisonSearchResponseSchema = z.object({
   entities: z.tuple([ComparisonEntitySchema, ComparisonEntitySchema]),
   overall_status: z.enum(['resolved', 'ambiguous', 'failed']),
   request_id: z.string().min(1),
+  authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
+  runtime_correlation_ref: z.string().min(1).optional(),
   execution_time_ms: z.number().min(0),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (
+    value.runtime_correlation_ref !== undefined
+    && value.runtime_correlation_ref !== value.request_id
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'runtime_correlation_ref must equal request_id on comparison responses',
+      path: ['runtime_correlation_ref'],
+    });
+  }
+});
 
 export type ComparisonSearchResponseBody = z.infer<typeof ComparisonSearchResponseSchema>;
 
@@ -333,9 +400,17 @@ export const ResolveResponseSchema = z.object({
   status: z.enum(['resolved', 'ambiguous', 'failed']),
   candidates: z.array(ResolveCandidateSchema),
   top_entity: ResolveTopEntitySchema.optional(),
-  decision_trace_ref: z.string().min(1),
-  authority_trace_ref: z.string().min(1).optional(),
+  decision_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN),
+  authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN),
   request_id: z.string().min(1).optional(),
-}).strict();
+}).strict().superRefine((value, ctx) => {
+  if (value.authority_trace_ref !== value.decision_trace_ref) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'authority_trace_ref must equal decision_trace_ref on resolve responses',
+      path: ['authority_trace_ref'],
+    });
+  }
+});
 
 export type ResolveResponseBody = z.infer<typeof ResolveResponseSchema>;

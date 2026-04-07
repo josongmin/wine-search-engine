@@ -18,7 +18,8 @@ function makeValidResolveResponse() {
       canonical_label: 'Opus One 2018',
       calibrated_score: 0.97,
     },
-    decision_trace_ref: 'decision:v1:short_entity:abc123',
+    decision_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+    authority_trace_ref: 'decision:v1:short_entity:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     request_id: 'req-123',
   };
 }
@@ -86,6 +87,25 @@ describe('ResolveResponseSchema', () => {
           version: '2',
         },
       ],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects non-canonical authority trace identifiers on the V1 resolve contract', () => {
+    const parsed = ResolveResponseSchema.safeParse({
+      ...makeValidResolveResponse(),
+      decision_trace_ref: 'resolve:req-123:short_entity',
+      authority_trace_ref: 'resolve:req-123:short_entity',
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it('rejects mismatched decision and authority trace refs on the V1 resolve contract', () => {
+    const parsed = ResolveResponseSchema.safeParse({
+      ...makeValidResolveResponse(),
+      authority_trace_ref: 'decision:v1:short_entity:1111111111111111111111111111111111111111111111111111111111111111',
     });
 
     expect(parsed.success).toBe(false);
