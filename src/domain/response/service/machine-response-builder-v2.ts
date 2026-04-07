@@ -1,4 +1,10 @@
 /**
+ * E4-U2: Machine Response Builder V2 — Machine/Tool Sidecar Surface
+ * Exposed only via /v1/claude-tools route. NOT wired into /v2/search/* handlers.
+ * See response-builder.ts (E4-U1) for the main runtime surface.
+ */
+
+/**
  * T6.3: Machine Response Builder V2
  *
  * Builds a structured provenance/evidence envelope for machine/LLM consumers.

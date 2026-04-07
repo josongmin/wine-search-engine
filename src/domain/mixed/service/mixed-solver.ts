@@ -1,3 +1,16 @@
+/**
+ * E6-U4: Substitute/Grouped Fallback Reuse Map (lock)
+ *
+ * The substitute/grouped fallback path is a REUSE family — not a new runtime:
+ *   - Mixed solver (this file): resolves anchor + substitute candidates
+ *   - Grouped result: domain/response/service/result-grouper.ts
+ *   - Fallback routing: application/search/search-usecase-mixed-route.ts
+ *
+ * Do NOT create a substitute engine or a grouped-fallback engine as a
+ * parallel runtime. Substitute queries must flow through the existing mixed
+ * route (search-usecase-mixed-route.ts) with this solver as the inner strategy.
+ * New substitute strategies extend this solver — they do NOT fork the path.
+ */
 import type { EntityId } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
@@ -10,6 +23,7 @@ import type {
   CandidateAttributePort,
 } from '../port/mixed-query.port.js';
 import type { MixedQueryResult } from '../model/mixed-query-result.js';
+import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 import type { AnchorProfiler } from './anchor-profiler.js';
 import type { SimilarityScorer } from './similarity-scorer.js';
 import type { ConstraintOverlay } from './constraint-overlay.js';
@@ -86,7 +100,7 @@ export class MixedSolver {
    * @returns The mixed query result with ranked wines and diagnostics.
    * @throws {Error} If the anchor entity cannot be resolved.
    */
-  async solve(queryPlan: QueryPlanV1): Promise<MixedQueryResult> {
+  async solve(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): Promise<MixedQueryResult> {
     // Step 1: Resolve anchor entity
     const anchorCandidate = queryPlan.anchors[0];
     if (anchorCandidate === undefined) {
@@ -151,6 +165,9 @@ export class MixedSolver {
         candidates,
         anchorProfile: retrievalAnchorProfile,
         constraints: queryPlan.constraints,
+        // compiled-first: thread V2 execution contract so getModeWeights and
+        // rerank gate use compiled.effectiveRoute/effectiveRetrievalMode (E6-U4)
+        ...(compiled !== undefined ? { compiled } : {}),
       });
     } catch (err) {
       bootstrapLogger.warn(

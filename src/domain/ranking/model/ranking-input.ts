@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
@@ -55,4 +56,11 @@ export interface RankingInput {
    * Intended for testing and operator overrides only.
    */
   readonly rerankForced?: boolean;
+
+  /**
+   * E3-U5: Compiled execution contract hint.
+   * When present, Ranker uses compiled.execution.effectiveRetrievalMode for
+   * getModeWeights() instead of queryPlan.retrievalMode (V1 fallback).
+   */
+  readonly compiled?: CompiledWineQuery | undefined;
 }

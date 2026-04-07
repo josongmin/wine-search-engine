@@ -15,6 +15,8 @@ const drinkingWindowLogger = bootstrapLogger.child({
   component: 'search-result-drinking-window',
 });
 
+const DRINKING_WINDOW_CHECK_TIMEOUT_MS = 2_000;
+
 function needsDrinkingWindowPrediction(r: RankedResult): boolean {
   return (
     r.drinkingWindowStart === undefined &&
@@ -44,20 +46,28 @@ export async function mapRankedResultsToResultItems(
 
   const predictions = await Promise.allSettled(
     resultsPendingPrediction.map((r) =>
-      drinkingWindow!.check({
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        vintage: (r.vintageYear ?? r.vintage)!,
-        grapePrimaryEnc: r.grapePrimaryEnc!,
-        regionEnc: r.regionEnc!,
-        countryEnc: r.countryEnc!,
-        body: r.body!,
-        tannin: r.tannin!,
-        acidity: r.acidity!,
-        sweetness: r.sweetness!,
-        avgCriticProxyScore:
-          r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
-        targetYear,
-      }),
+      Promise.race([
+        drinkingWindow!.check({
+          // eslint-disable-next-line @typescript-eslint/no-deprecated
+          vintage: (r.vintageYear ?? r.vintage)!,
+          grapePrimaryEnc: r.grapePrimaryEnc!,
+          regionEnc: r.regionEnc!,
+          countryEnc: r.countryEnc!,
+          body: r.body!,
+          tannin: r.tannin!,
+          acidity: r.acidity!,
+          sweetness: r.sweetness!,
+          avgCriticProxyScore:
+            r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
+          targetYear,
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => { reject(new Error('drinking_window_timeout')); },
+            DRINKING_WINDOW_CHECK_TIMEOUT_MS,
+          ),
+        ),
+      ]),
     ),
   );
 

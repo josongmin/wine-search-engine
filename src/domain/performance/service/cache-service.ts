@@ -8,6 +8,7 @@
  */
 
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { QueryCachePort } from '../port/query-cache.port.js';
@@ -100,6 +101,7 @@ export class CacheService implements SearchResponseCachePort {
     },
     currentSnapshot: DecisionSnapshot,
     runtimeState?: CacheReadRuntimeState,
+    compiled?: CompiledWineQuery,
   ): Promise<CacheResult<SearchResponseV1>> {
     const startTime = Date.now();
 
@@ -113,20 +115,21 @@ export class CacheService implements SearchResponseCachePort {
     }
 
     // Check eligibility
-    const eligibility = this.eligibilityAnalyzer.analyze(plan);
+    const eligibility = this.eligibilityAnalyzer.analyze(plan, compiled);
     if (!eligibility.isCacheable || !this.queryCache) {
       return {
         hit: false,
-        reason: `not_cacheable:${plan.retrievalMode}`,
+        reason: `not_cacheable:${compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode}`,
         durationMs: Date.now() - startTime,
       };
     }
 
     try {
+      const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
       // Build cache key
       const cacheKey = this.queryCacheKeyBuilder.build(
         plan.normalizedQuery,
-        plan.retrievalMode,
+        effectiveRetrievalMode,
         plan.constraints.hard.map((c) => [c.attribute, c.operator, constraintValueString(c.value)] as const),
         [...plan.expansions.lexical, ...plan.expansions.semantic],
         request.sessionContext?.sessionId,
@@ -206,8 +209,9 @@ export class CacheService implements SearchResponseCachePort {
       context?: { locale: string };
     },
     response: SearchResponseV1,
+    compiled?: CompiledWineQuery,
   ): Promise<boolean> {
-    const eligibility = this.eligibilityAnalyzer.analyze(plan);
+    const eligibility = this.eligibilityAnalyzer.analyze(plan, compiled);
     if (!eligibility.isCacheable || !this.queryCache) {
       return false;
     }
@@ -235,9 +239,10 @@ export class CacheService implements SearchResponseCachePort {
     }
 
     try {
+      const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
       const cacheKey = this.queryCacheKeyBuilder.build(
         plan.normalizedQuery,
-        plan.retrievalMode,
+        effectiveRetrievalMode,
         plan.constraints.hard.map((c) => [c.attribute, c.operator, constraintValueString(c.value)] as const),
         [...plan.expansions.lexical, ...plan.expansions.semantic],
         request.sessionContext?.sessionId,

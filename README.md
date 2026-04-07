@@ -271,9 +271,9 @@ flowchart TD
 |------|-------------|-----------|
 | `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + 선택 `src/__tests__` |
 | `config/vitest/integration.config.ts` | `test:integration` | 명시 목록: HTTP 서버, 에러 핸들러, 공개 쿼리 보안, resolve 라우트, 계약 레지스트리, interpret 스키마 등 |
-| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e`, `test:e2e:inmemory` | 핵심 인메모리 E2E 회귀군: HTTP 계약, watchlist, infrastructure, edge/hard scenario, mixed-search 등 |
+| `config/vitest/e2e.config.ts` | `test:e2e:fast`, `test:e2e`, `test:e2e:inmemory` | 핵심 인메모리 E2E 회귀군: search-api search/secondary/ops, watchlist, infrastructure invariants/contracts, edge/hard scenario, mixed-search 등 |
 | `config/vitest/e2e.runtime.config.ts` | `test:e2e:runtime` | 런타임/품질 성격이 강한 `user-journeys`, `golden-set`, `specialized-modes-quality` |
-| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **초소형** PR 스모크: `search-api`, `schema-contract`, `batch-search-api`, `server-protocol`만 |
+| `config/vitest/e2e.smoke.config.ts` | `test:e2e:contract`, `test:e2e:smoke` | **초소형** PR 스모크: `search-api.search`, `search-api.secondary`, `search-api.ops`, `schema-contract`, `batch-search-api`, `server-protocol`만 |
 | `config/vitest/e2e.vespa.config.ts` | `test:e2e:vespa` (`scripts/run-vespa-e2e.sh`) | 전체 `test/e2e/vespa/**/*.test.ts`; `VESPA_URL` 설정(기본 `http://localhost:18080`) |
 | `config/vitest/watchlist.config.ts` | `test:watchlist` | 워치리스트 도메인 + HTTP + Redis/웹훅 + 계약 매니페스트 겹침 |
 | `config/vitest/quality.config.ts` | `test:quality` | 골든 세트, 사용자 여정, specialized quality, 의사결정 유틸, 학습 플라이휠, eval 단위 테스트 등 |
@@ -284,18 +284,20 @@ flowchart TD
 
 | 스위트 파일 | 시나리오(요약) |
 |-------------|----------------|
-| **`search-api.test.ts`** | RFC-014 **HTTP 계약** `POST /v1/search`: entity/hybrid 해피 경로, `explain` / `clarification`, 오류, 정책 차단, interpret/resolve 보조 |
+| **`search-api.search.test.ts`** + **`search-api.secondary.test.ts`** | RFC-014 **핵심 검색 계약**: `POST /v1/search` 본체와 `interpret`/`resolve`/`replay`/`hybrid` |
+| **`search-api.ops.test.ts`** | `/health`, `/ready` ops endpoint 계약 |
 | **`batch-search-api.test.ts`** | 배치 검색 요청·응답 형태, 부분 실패 |
 | **`schema-contract.test.ts`** | 요청·응답 **Zod** 형태 vs 픽스처 |
 | **`server-protocol.test.ts`** | 전역 프로토콜(CORS 훅, content-type 등) |
 | **`golden-set.test.ts`** | **검색 품질** — 지명 와인에 대해 top-k에 기대 `entity_id`(EN/KO), 순서는 완화 |
 | **`user-journeys.test.ts`** | **엔드투엔드 여정**: 다국어 동일 엔터티, 악센트 변형, 모호성, mixed 경로, 리플레이, 실패 처리 |
 | **`mixed-search.test.ts`** | mixed 경로 **크래시 없음**; 시드 하네스에서 비어 있지 않은 결과 |
-| **`realistic-scenarios.test.ts`**, **`edge-cases.test.ts`**, **`hard-scenarios.test.ts`** | 넓은 쿼리 형태·엣지 |
+| **`realistic-scenarios.test.ts`**, **`edge-cases.input.test.ts`**, **`edge-cases.protocol.test.ts`**, **`hard-scenarios.test.ts`** | 넓은 쿼리 형태·엣지 |
 | **`response-invariants.test.ts`** | 응답 필드·불변식 |
 | **`claude-tools-api.test.ts`** | Claude 도구 나열/실행 HTTP |
 | **`watchlist-api.test.ts`** | 워치리스트 CRUD / 전달 |
-| **`infrastructure.test.ts`** | 테스트 하네스에 연결된 인프라 점검 |
+| **`infrastructure.invariants.test.ts`** | rate-limit, request-id, replay determinism, concurrent isolation |
+| **`infrastructure.contracts.test.ts`** | content-type, success envelope, RFC-014 / RFC-015 error contract |
 
 **런타임 보강 레인:** `test:e2e:runtime`는 **`golden-set.test.ts`**, **`user-journeys.test.ts`**, **`specialized-modes-quality.test.ts`**를 별도로 묶어 돌립니다.
 
@@ -317,9 +319,27 @@ flowchart TD
 
 ### 로컬에서 무엇을 돌릴지
 
+#### 추천 기본 루프
+
+| 상황 | 명령 |
+|------|------|
+| 작업 중 기본 확인 | `npm run check:smart` |
+| source 파일 하나 기준으로 좁게 확인 | `npm run check:smart src/domain/foo.ts` |
+| 테스트 파일 하나만 바로 실행 | `npm run test:file -- test/unit/foo.test.ts` |
+| 변경 파일 관련 테스트만 실행 | `npm run test:related -- src/domain/foo.ts` |
+| changed-file lint만 빠르게 | `npm run lint:smart` |
+| 커밋 직전 staged 범위만 확인 | `npm run check:staged` |
+| 커밋 직전 staged lint만 확인 | `npm run lint:staged` |
+| push 직전 브랜치 diff 기준 스마트 게이트 | `npm run git:prepush:smart` |
+
+`check:smart` / `check:staged`는 현재 변경 범위를 보고 가능한 한 **가장 좁은 lane**으로 내려갑니다. docs-only 변경은 스킵하고, test-only 변경은 `typecheck`를 생략하며, source/config 변경은 필요한 `typecheck`와 changed-file lint를 먼저 실행합니다.
+
 | 목표 | 명령 |
 |------|------|
 | 기본 단위 | `npm run test` |
+| 스마트 기본 확인 | `npm run check:smart` |
+| 스마트 staged 확인 | `npm run check:staged` |
+| changed-file lint | `npm run lint:smart` |
 | CI에 가까운 단위 | `npm run test:unit` |
 | HTTP + 통합 | `npm run test:integration` |
 | 전체 인메모리 e2e | `npm run test:e2e:fast` |
@@ -329,6 +349,7 @@ flowchart TD
 | 품질 + eval 단위 | `npm run test:quality` |
 | 커버리지 리포트 | `npm run test:coverage` |
 | Vespa(Docker 기동) | `npm run test:e2e:vespa` |
+| 스마트 pre-push 게이트 | `npm run git:prepush:smart` |
 
 ---
 

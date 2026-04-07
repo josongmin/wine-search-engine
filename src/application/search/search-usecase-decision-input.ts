@@ -29,6 +29,12 @@ function isSyntheticRankedRouteResolve(result: EntityResolveResult): boolean {
 /**
  * Assembles {@link DecisionInput} from planner output, resolver output, and optional ranking.
  * RFC-007 §4 — ranking signals and evidence wiring for the Decision Engine.
+ *
+ * doc_guard E3-U6: Calibrator insertion point is NOT here.
+ * Score calibration for ranked routes must be applied in
+ * search-usecase-ranked-route-resolve.ts (buildRankedRouteResolveResult),
+ * before decisionTrace/confidence scores are emitted. This function receives
+ * already-calibrated resolver output and must not re-calibrate or adjust scores.
  */
 export function buildSearchDecisionInput(
   plan: QueryPlanV1,
@@ -41,6 +47,7 @@ export function buildSearchDecisionInput(
     readonly routeHealthy?: boolean | undefined;
     readonly blockingRequested?: boolean | undefined;
   },
+  effectiveRetrievalMode?: string,
 ): DecisionInput {
   const topResult = rankedResults?.[0];
   const topEntity = resolverResult.topEntity;
@@ -228,6 +235,7 @@ export function buildSearchDecisionInput(
   return {
     queryPlan: plan,
     effectiveRoute,
+    ...(effectiveRetrievalMode !== undefined ? { effectiveRetrievalMode } : {}),
     resolverResult,
     policy: plan.policy,
     uncertainty: plan.uncertainty,

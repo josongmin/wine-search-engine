@@ -4,7 +4,7 @@
 **범위:** 와인 검색 엔진을 업계/학계 상한선 기준으로 재정의하고, 현재 레포가 어디까지 와 있는지 위에서부터 다시 설계한다.  
 **전제:** `hybrid 1차 + gated rerank 2차`는 유지하되, 검색기를 하나 더 붙이는 수준이 아니라 query understanding, retrieval lanes, ranking funnel, calibration, explanation, eval/train loop까지 하나의 시스템으로 본다.  
 **목표 상태:** 현재 엔진을 `검색 기능 모음`에서 `intent-aware retrieval and ranking platform`으로 끌어올린다.  
-**문서 역할:** 이 문서는 최종 목표 아키텍처와 단계별 로드맵을 정의한다. 현재 레포의 구현 현황과 갭 분석은 [appendix-a-current-state.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-a-current-state.md), 이 방향의 근거는 [appendix-b-evidence-and-benchmarks.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-b-evidence-and-benchmarks.md), 앞으로의 SOTA 업데이트를 건강하게 흡수하는 구조 원칙은 [appendix-c-evolutionary-architecture.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-c-evolutionary-architecture.md), 정량 목표와 승격 기준은 [appendix-d-metrics-and-promotion-gates.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-d-metrics-and-promotion-gates.md), 운영 리스크와 롤백 원칙은 [appendix-e-risk-and-rollback.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-e-risk-and-rollback.md), 더 공격적인 상한선 구조는 [appendix-f-adaptive-retrieval-os.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-f-adaptive-retrieval-os.md), LLM의 고ROI 활용과 MVP/확장 원칙은 [appendix-g-llm-roi-and-abstention.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-g-llm-roi-and-abstention.md), 코드 기준 구현 순서와 교체 지점은 [appendix-h-implementation-map.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-h-implementation-map.md), **실제로 어떤 순서가 가장 높은 확률로 SOTA++ quality uplift를 내는지**는 [appendix-i-performance-first-roadmap.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-i-performance-first-roadmap.md), 그리고 **중복개발을 막기 위한 기존 자산 분류표**는 [appendix-j-existing-asset-registry.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-j-existing-asset-registry.md)에 정리한다.
+**문서 역할:** 이 문서는 최종 목표 아키텍처와 상위 방향을 정의한다. 실제 구현 착수 순서와 PR-sized backlog는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 authoritative execution backlog로 두고, **LLM이 바로 집어들 수 있는 unit-level handoff spec**은 [02-execution-unit-cards.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/02-execution-unit-cards.md)를 따른다. 실제 worker 상태/DAG 진행 현황은 [03-execution-status-board.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/03-execution-status-board.md)에 기록한다. unit 품질 평가는 `02`의 `100점 기준`, `작업 전 30초 채점`, `리뷰어용 빠른 판정`을 기준으로 본다. 현재 레포의 구현 현황과 갭 분석은 [appendix-a-current-state.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-a-current-state.md), 이 방향의 근거는 [appendix-b-evidence-and-benchmarks.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-b-evidence-and-benchmarks.md), 앞으로의 SOTA 업데이트를 건강하게 흡수하는 구조 원칙은 [appendix-c-evolutionary-architecture.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-c-evolutionary-architecture.md), 정량 목표와 승격 기준은 [appendix-d-metrics-and-promotion-gates.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-d-metrics-and-promotion-gates.md), 운영 리스크와 롤백 원칙은 [appendix-e-risk-and-rollback.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-e-risk-and-rollback.md), 더 공격적인 상한선 구조는 [appendix-f-adaptive-retrieval-os.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-f-adaptive-retrieval-os.md), LLM의 고ROI 활용과 MVP/확장 원칙은 [appendix-g-llm-roi-and-abstention.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-g-llm-roi-and-abstention.md), 코드 기준 교체 지점과 중복방지 가드는 [appendix-h-implementation-map.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-h-implementation-map.md), **성능 레버 우선순위의 rationale**은 [appendix-i-performance-first-roadmap.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-i-performance-first-roadmap.md), 그리고 **중복개발을 막기 위한 기존 자산 분류표**는 [appendix-j-existing-asset-registry.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-j-existing-asset-registry.md)에 정리한다.
 
 ---
 
@@ -444,7 +444,13 @@ OFF 조건의 대표 예:
 
 지금 당장 가장 중요한 건 “최고 성능 retrieval 모델을 하나 더 붙이는 것”이 아니다.
 
-우선순위는 아래 순서다.
+주의:
+
+- 이 섹션은 **상위 아키텍처 우선순위**를 말한다.
+- 실제 구현 착수 순서와 태스크 dependency는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 따른다.
+- execution unit별 touchpoint / acceptance / no-touch boundary / start-finish gate / primary unlocks는 [02-execution-unit-cards.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/02-execution-unit-cards.md)를 따른다.
+
+아키텍처 관점 우선순위는 아래 순서다.
 
 1. taxonomy와 query contract를 SSOT로 만든다
 2. 현재 채널/프로필/게이트/예산의 분산 상태를 하나의 policy table로 통합한다
@@ -488,6 +494,8 @@ LLM은 검색 코어를 대체하는 엔진이 아니라, 이해/보정/설명/�
 ```text
 docs/plans/apr-7-v0.4/
 ├── 00-overview.md
+├── 01-epic-task-backlog.md
+├── 02-execution-unit-cards.md
 ├── appendix-a-current-state.md
 ├── appendix-b-evidence-and-benchmarks.md
 ├── appendix-c-evolutionary-architecture.md
@@ -495,7 +503,9 @@ docs/plans/apr-7-v0.4/
 ├── appendix-e-risk-and-rollback.md
 ├── appendix-f-adaptive-retrieval-os.md
 ├── appendix-g-llm-roi-and-abstention.md
-└── appendix-h-implementation-map.md
+├── appendix-h-implementation-map.md
+├── appendix-i-performance-first-roadmap.md
+└── appendix-j-existing-asset-registry.md
 ```
 
 이 문서 세트의 출발점은 **최종 목표 아키텍처를 먼저 고정하고, 그 다음 현재 엔진을 그 목표에 매핑하는 것**이다.

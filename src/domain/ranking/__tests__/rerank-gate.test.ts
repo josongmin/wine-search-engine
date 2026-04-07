@@ -32,9 +32,9 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('forced');
     });
 
-    it('forces rerank even for exact_lookup route', () => {
+    it('forces rerank even for entity route', () => {
       const decision = evaluateRerankGate(
-        makeInput({ rerankForced: true, effectiveRoute: 'exact_lookup' }),
+        makeInput({ rerankForced: true, effectiveRoute: 'entity' }),
       );
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('forced');
@@ -62,7 +62,19 @@ describe('evaluateRerankGate', () => {
     });
   });
 
-  describe('short_entity / exact_lookup — skip (already precise)', () => {
+  describe('mixed route — does not suppress', () => {
+    it('does not suppress reranking for mixed route', () => {
+      // 'mixed' is not 'entity', so the already_precise rule must NOT fire.
+      // With semantic_preference and sufficient candidates, reranking proceeds normally.
+      const decision = evaluateRerankGate(
+        makeInput({ effectiveRoute: 'mixed', candidateCount: 10, queryClass: 'semantic_preference' }),
+      );
+      expect(decision.reason).not.toBe('already_precise');
+      expect(decision.shouldRerank).toBe(true);
+    });
+  });
+
+  describe('short_entity / entity route — skip (already precise)', () => {
     it('skips for queryClass short_entity with sufficient candidates', () => {
       const decision = evaluateRerankGate(
         makeInput({ queryClass: 'short_entity', candidateCount: 25 }),
@@ -71,9 +83,9 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('already_precise');
     });
 
-    it('skips for effectiveRoute exact_lookup with sufficient candidates', () => {
+    it('skips for effectiveRoute entity with sufficient candidates', () => {
       const decision = evaluateRerankGate(
-        makeInput({ effectiveRoute: 'exact_lookup', candidateCount: 25 }),
+        makeInput({ effectiveRoute: 'entity', candidateCount: 25 }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('already_precise');
@@ -209,7 +221,7 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('edge cases', () => {
-    it('empty string effectiveRoute does not match exact_lookup (pure_constraint falls to default_skip)', () => {
+    it('empty string effectiveRoute does not match entity route (pure_constraint falls to default_skip)', () => {
       // effectiveRoute='' must NOT trigger already_precise; falls through to default_skip.
       // Use pure_constraint so semantic_preference rule does not fire.
       const decision = evaluateRerankGate(

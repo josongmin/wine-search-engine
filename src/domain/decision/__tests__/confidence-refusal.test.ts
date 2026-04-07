@@ -12,57 +12,37 @@ import { createEntityId } from '../../shared/types/index.js';
 
 describe('ConfidenceRefusalPolicy', () => {
   describe('initialization', () => {
-    it('creates with default threshold 0.45', () => {
-      const policy = new ConfidenceRefusalPolicy();
-      expect(policy.getThreshold()).toBe(0.45);
+    it.each([
+      ['creates with default threshold 0.45', undefined, 0.45],
+      ['creates with custom threshold', 0.6, 0.6],
+      ['accepts boundary thresholds 0', 0, 0],
+      ['accepts boundary thresholds 1', 1, 1],
+    ])('%s', (_label, threshold, expected) => {
+      const policy = threshold === undefined ? new ConfidenceRefusalPolicy() : new ConfidenceRefusalPolicy(threshold);
+      expect(policy.getThreshold()).toBe(expected);
     });
 
-    it('creates with custom threshold', () => {
-      const policy = new ConfidenceRefusalPolicy(0.6);
-      expect(policy.getThreshold()).toBe(0.6);
-    });
-
-    it('throws on invalid threshold < 0', () => {
-      expect(() => new ConfidenceRefusalPolicy(-0.1)).toThrow();
-    });
-
-    it('throws on invalid threshold > 1', () => {
-      expect(() => new ConfidenceRefusalPolicy(1.1)).toThrow();
-    });
-
-    it('accepts boundary thresholds 0 and 1', () => {
-      const policy0 = new ConfidenceRefusalPolicy(0);
-      const policy1 = new ConfidenceRefusalPolicy(1);
-      expect(policy0.getThreshold()).toBe(0);
-      expect(policy1.getThreshold()).toBe(1);
+    it.each([
+      ['throws on invalid threshold < 0', -0.1],
+      ['throws on invalid threshold > 1', 1.1],
+    ])('%s', (_label, threshold) => {
+      expect(() => new ConfidenceRefusalPolicy(threshold)).toThrow();
     });
   });
 
   describe('shouldRefuse', () => {
     const policy = new ConfidenceRefusalPolicy(0.5);
 
-    it('refuses when C < threshold', () => {
-      expect(policy.shouldRefuse(0.3)).toBe(true);
-      expect(policy.shouldRefuse(0.49)).toBe(true);
-    });
-
-    it('admits when C >= threshold', () => {
-      expect(policy.shouldRefuse(0.5)).toBe(false);
-      expect(policy.shouldRefuse(0.51)).toBe(false);
-      expect(policy.shouldRefuse(1.0)).toBe(false);
-    });
-
-    it('handles edge case C = 0', () => {
-      expect(policy.shouldRefuse(0.0)).toBe(true);
-    });
-
-    it('handles edge case C = 1', () => {
-      expect(policy.shouldRefuse(1.0)).toBe(false);
-    });
-
-    it('correctly implements strict less-than comparison', () => {
-      // At exactly the threshold, should NOT refuse
-      expect(policy.shouldRefuse(0.5)).toBe(false);
+    it.each([
+      ['refuses when C < threshold', 0.3, true],
+      ['refuses when C < threshold (edge below)', 0.49, true],
+      ['admits when C >= threshold', 0.5, false],
+      ['admits when C >= threshold (edge above)', 0.51, false],
+      ['handles edge case C = 0', 0.0, true],
+      ['handles edge case C = 1', 1.0, false],
+      ['strict less-than comparison at threshold', 0.5, false],
+    ])('%s', (_label, C, expected) => {
+      expect(policy.shouldRefuse(C)).toBe(expected);
     });
   });
 
@@ -222,39 +202,17 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
     const policy = new ConfidenceRefusalPolicy(0.45);
     const gate = new AdmissionGate(policy);
 
-    it('admits resolved decisions when C >= threshold', () => {
+    it.each([
+      ['admits resolved decisions when C >= threshold', 0.5, true],
+      ['refuses resolved decisions when C < threshold', 0.4, false],
+      ['correctly compares at boundary C = threshold', 0.45, true],
+      ['refuses C just below threshold', 0.449, false],
+    ])('%s', (_label, C, admitted) => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.5, 0.3),
+        resolverResult: makeResolverResult(C, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
-      expect(result.admitted).toBe(true);
-    });
-
-    it('refuses resolved decisions when C < threshold', () => {
-      const input = makeInput({
-        resolverResult: makeResolverResult(0.4, 0.3),
-      });
-      const result = gate.check(input, TEST_SNAPSHOT);
-      expect(result.admitted).toBe(false);
-      if (!result.admitted) {
-        expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');
-      }
-    });
-
-    it('correctly compares at boundary C = threshold', () => {
-      const input = makeInput({
-        resolverResult: makeResolverResult(0.45, 0.3),
-      });
-      const result = gate.check(input, TEST_SNAPSHOT);
-      expect(result.admitted).toBe(true); // C >= threshold is true
-    });
-
-    it('refuses C just below threshold', () => {
-      const input = makeInput({
-        resolverResult: makeResolverResult(0.449, 0.3),
-      });
-      const result = gate.check(input, TEST_SNAPSHOT);
-      expect(result.admitted).toBe(false);
+      expect(result.admitted).toBe(admitted);
       if (!result.admitted) {
         expect(result.reason).toBe('CONFIDENCE_BELOW_THRESHOLD');
       }
@@ -404,24 +362,17 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
   });
 
   describe('different threshold values', () => {
-    it('threshold 0.0 admits all decisions', () => {
-      const policy = new ConfidenceRefusalPolicy(0.0);
+    it.each([
+      ['threshold 0.0 admits all decisions', 0.0, 0.0, true],
+      ['threshold 1.0 refuses all decisions with C < 1.0', 1.0, 0.99, false],
+    ])('%s', (_label, threshold, C, admitted) => {
+      const policy = new ConfidenceRefusalPolicy(threshold);
       const gate = new AdmissionGate(policy);
       const input = makeInput({
-        resolverResult: makeResolverResult(0.0, 0.3),
+        resolverResult: makeResolverResult(C, 0.3),
       });
       const result = gate.check(input, TEST_SNAPSHOT);
-      expect(result.admitted).toBe(true);
-    });
-
-    it('threshold 1.0 refuses all decisions with C < 1.0', () => {
-      const policy = new ConfidenceRefusalPolicy(1.0);
-      const gate = new AdmissionGate(policy);
-      const input = makeInput({
-        resolverResult: makeResolverResult(0.99, 0.3),
-      });
-      const result = gate.check(input, TEST_SNAPSHOT);
-      expect(result.admitted).toBe(false);
+      expect(result.admitted).toBe(admitted);
     });
 
     it('threshold 0.5 correctly splits at midpoint', () => {

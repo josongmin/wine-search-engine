@@ -11,10 +11,13 @@ export function buildAuthorityTraceRef(input: {
   decisionStatus: string;
   nextAction: string;
   failureReason?: FailureReason;
+  retrievalMode?: string;
+  route?: string;
 }): string {
   const digest = deterministicHash({
     queryClass: input.queryPlan.queryClass,
-    retrievalMode: input.queryPlan.retrievalMode,
+    route: input.route ?? input.queryPlan.route,
+    retrievalMode: input.retrievalMode ?? input.queryPlan.retrievalMode,
     threshold_profile_id: input.snapshot.threshold_profile_id,
     planner_version: input.snapshot.planner_version,
     policy_rule_version: input.snapshot.policy_rule_version,
@@ -31,9 +34,13 @@ export function buildAdmissionAuthorityTraceRef(input: {
   queryPlan: QueryPlanV1;
   snapshot: DecisionSnapshot;
   reason: FailureReason;
+  retrievalMode?: string;
+  route?: string;
 }): string {
   const digest = deterministicHash({
     queryClass: input.queryPlan.queryClass,
+    route: input.route ?? input.queryPlan.route,
+    retrievalMode: input.retrievalMode ?? input.queryPlan.retrievalMode,
     threshold_profile_id: input.snapshot.threshold_profile_id,
     planner_version: input.snapshot.planner_version,
     policy_rule_version: input.snapshot.policy_rule_version,
@@ -41,4 +48,23 @@ export function buildAdmissionAuthorityTraceRef(input: {
   });
 
   return `admission:${AUTHORITY_TRACE_SCHEMA_VERSION}:${input.queryPlan.queryClass}:${digest}`;
+}
+
+export function buildInternalErrorAuthorityTraceRef(input: {
+  snapshot: DecisionSnapshot;
+  requestId: string;
+  failureReason?: FailureReason | 'INTERNAL_INCONSISTENCY';
+}): string {
+  const digest = deterministicHash({
+    queryClass: 'internal_error',
+    route: 'error',
+    retrievalMode: 'internal_error',
+    threshold_profile_id: input.snapshot.threshold_profile_id,
+    planner_version: input.snapshot.planner_version,
+    policy_rule_version: input.snapshot.policy_rule_version,
+    requestId: input.requestId,
+    failureReason: input.failureReason ?? 'INTERNAL_INCONSISTENCY',
+  });
+
+  return `decision:${AUTHORITY_TRACE_SCHEMA_VERSION}:internal_error:${digest}`;
 }

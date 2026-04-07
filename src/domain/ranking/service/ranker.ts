@@ -99,6 +99,8 @@ function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values)];
 }
 
+const MODEL_STALENESS_THRESHOLD_DAYS = 30;
+
 function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
@@ -107,6 +109,19 @@ function applyLearnedLtrRerank(
   const ltrModel = ltrModels?.get(queryClass);
   if (!ltrModel || rankedResults.length === 0) {
     return { results: [...rankedResults], skippedDueToDimensionMismatch: false };
+  }
+
+  const modelAgeMs = Date.now() - ltrModel.trainedAt.getTime();
+  const modelAgeDays = modelAgeMs / (1000 * 60 * 60 * 24);
+  if (modelAgeDays > MODEL_STALENESS_THRESHOLD_DAYS) {
+    bootstrapLogger.warn(
+      {
+        queryClass,
+        modelAgeDays: Math.floor(modelAgeDays),
+        threshold: MODEL_STALENESS_THRESHOLD_DAYS,
+      },
+      '[Ranker] LTR model is stale — consider retraining',
+    );
   }
 
   const EXPECTED_FEATURE_DIM = 8;
@@ -225,6 +240,23 @@ export type RankerOptions = {
  * ranked results is NOT a calibrated confidence C.
  */
 export class Ranker {
+  // doc_guard E3-U2: Ranker responsibility map
+  //
+  // Ranker is the authoritative ranking service for the search pipeline.
+  //
+  // Owns:
+  //   - signal computation (via SignalComputer)
+  //   - LTR reranking (via applyLearnedLtrRerank)
+  //   - hard constraint filtering (coarse prune, step 4)
+  //
+  // Does NOT own:
+  //   - retrieval          → HybridCandidateService / Vespa adapters
+  //   - query planning     → ExecutionCompiler / PlannerV1
+  //   - route resolution   → search-usecase-route-resolution.ts
+  //   - calibration        → see E3-U6 (search-usecase-ranked-route-resolve.ts)
+  //
+  // applyLearnedLtrRerank() is the SSOT for LTR reranking.
+  // search-usecase-ltr-rerank.ts is dead code and must not be called.
   private _lastCoarsePruneSummary: CoarsePruneStageSummary | undefined;
   private _lastRerankExecuted = false;
   private _lastRerankGateReason: string | undefined;
@@ -319,8 +351,10 @@ export class Ranker {
 
     // Step 2: Select weights based on query class, then overlay retrieval-mode
     // specific boosts from mode-weights.ts (producer prestige, recency, geo).
+    // E3-U5: compiled-first — use ExecutionCompiler's resolved mode when available.
+    const effectiveRetrievalMode = input.compiled?.execution.effectiveRetrievalMode ?? queryPlan.retrievalMode;
     const baseWeights = resolveWeights(queryPlan.queryClass);
-    const modeProfile = getModeWeights(queryPlan.retrievalMode);
+    const modeProfile = getModeWeights(effectiveRetrievalMode);
     // Mode overlay: max(queryClass base, mode boost).
     // DEFAULT_WEIGHTS are all 0.0 (no-op) so neutral/undefined modes preserve base.
     // Explicit modes (producer_browse etc.) can only raise a signal, never suppress.
@@ -480,10 +514,12 @@ export class Ranker {
     // rules and run LTR on every query regardless of quality signals.
     let shouldApplyLearnedRerank = false;
     if (this.reranker !== undefined || hasLearnedRerank) {
+      // E3-U5: compiled-first route for gate — falls back to V1 plan.route
+      const gateEffectiveRoute = input.compiled?.execution.effectiveRoute ?? queryPlan.route;
       const gateDecision = evaluateRerankGate({
         candidateCount: viable.length,
         queryClass: queryPlan.queryClass,
-        effectiveRoute: queryPlan.route,
+        effectiveRoute: gateEffectiveRoute,
         hasAnchor: anchorProfile !== undefined,
         ...(input.rerankForced !== undefined ? { rerankForced: input.rerankForced } : {}),
       });

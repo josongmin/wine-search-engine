@@ -67,10 +67,13 @@
 
 ### HTTP / Contract Consumers
 
-- [search-api.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.test.ts)
+- [search-api.search.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.search.test.ts)
+- [search-api.secondary.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.secondary.test.ts)
+- [search-api.ops.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.ops.test.ts)
   - Phase A co-exposure assertion 유지 가능
   - 새 assertion은 `authority_trace_ref`, `runtime_correlation_ref`, `execution_mode`, `blocking_eligible`, `degradation_reasons` 기준으로 확장
-- [edge-cases.test.ts](/Users/songmin/wine-search-engine/test/e2e/edge-cases.test.ts)
+- [edge-cases.input.test.ts](/Users/songmin/wine-search-engine/test/e2e/edge-cases.input.test.ts)
+- [edge-cases.protocol.test.ts](/Users/songmin/wine-search-engine/test/e2e/edge-cases.protocol.test.ts)
   - `decision_trace_ref` 단독 assertion 제거 필요
 - [search-response.schema.ts](/Users/songmin/wine-search-engine/src/interface/http/schemas/search-response.schema.ts)
   - deprecated description 유지
@@ -102,12 +105,15 @@
 ## Current Status Summary
 
 - `partial`
-  - [search-api.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.test.ts)
+  - [search-api.search.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.search.test.ts)
+  - [search-api.secondary.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.secondary.test.ts)
+  - [search-api.ops.test.ts](/Users/songmin/wine-search-engine/test/e2e/search-api.ops.test.ts)
   - [search-response.schema.ts](/Users/songmin/wine-search-engine/src/interface/http/schemas/search-response.schema.ts)
   - [docs/RFC-014.md](/Users/songmin/wine-search-engine/docs/RFC-014.md)
   - [docs/RFC-008.md](/Users/songmin/wine-search-engine/docs/RFC-008.md)
 - `not_started`
-  - [edge-cases.test.ts](/Users/songmin/wine-search-engine/test/e2e/edge-cases.test.ts)
+  - [edge-cases.input.test.ts](/Users/songmin/wine-search-engine/test/e2e/edge-cases.input.test.ts)
+  - [edge-cases.protocol.test.ts](/Users/songmin/wine-search-engine/test/e2e/edge-cases.protocol.test.ts)
   - [resolve-response.dto.ts](/Users/songmin/wine-search-engine/src/application/search/resolve-response.dto.ts)
 
 ## Operational Note

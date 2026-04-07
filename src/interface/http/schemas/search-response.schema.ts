@@ -318,9 +318,10 @@ export const ResolveCandidateSchema = z.object({
   canonical_label: z.string().min(1),
   rank: z.number().int().positive(),
   calibrated_score: z.number().min(0).max(1),
+  evidence_refs: z.array(z.string().min(1)).optional(),
   match_reasons: z.array(z.string()).optional(),
   metadata: z.record(z.unknown()).optional(),
-}).passthrough();
+}).strict();
 
 export const ResolveTopEntitySchema = z.object({
   entity_id: z.string().min(1),

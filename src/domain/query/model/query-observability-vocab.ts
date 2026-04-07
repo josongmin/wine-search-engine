@@ -1,4 +1,5 @@
 import type { QueryPlanV1, QueryPlanV2 } from './query-plan.js';
+import type { CompiledWineQuery } from './compiled-wine-query.js';
 
 /**
  * Type guard that distinguishes a QueryPlanV2 from a QueryPlanV1.
@@ -60,8 +61,21 @@ function getSuggestedRetrievalMode(plan: PlanLike): string {
   return isQueryPlanV2(plan) ? plan.suggestedRetrievalMode : plan.retrievalMode;
 }
 
-export function deriveQueryFamily(plan: PlanLike): QueryFamilyLabel {
-  const mode = getSuggestedRetrievalMode(plan);
+function getObservabilityRoute(plan: PlanLike, compiled?: CompiledWineQuery): string {
+  return compiled !== undefined ? compiled.execution.effectiveRoute : getSuggestedRoute(plan);
+}
+
+function getObservabilityRetrievalMode(plan: PlanLike, compiled?: CompiledWineQuery): string {
+  return compiled !== undefined
+    ? compiled.execution.effectiveRetrievalMode
+    : getSuggestedRetrievalMode(plan);
+}
+
+export function deriveQueryFamily(
+  plan: PlanLike,
+  compiled?: CompiledWineQuery,
+): QueryFamilyLabel {
+  const mode = getObservabilityRetrievalMode(plan, compiled);
   const intent = plan.intent;
   // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
   const decompositionHint = plan.decompositionHint;
@@ -93,6 +107,7 @@ export function deriveQueryFamily(plan: PlanLike): QueryFamilyLabel {
 export function planToObservabilitySlice(
   queryId: string,
   plan: PlanLike,
+  compiled?: CompiledWineQuery,
 ): QueryObservabilitySlice {
   // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
   const decompositionHint = plan.decompositionHint;
@@ -108,11 +123,11 @@ export function planToObservabilitySlice(
   return {
     queryId,
     rawQuery: plan.rawQuery.slice(0, 200),
-    queryFamily: deriveQueryFamily(plan),
+    queryFamily: deriveQueryFamily(plan, compiled),
     intent: plan.intent,
     queryClass: plan.queryClass,
-    suggestedRetrievalMode: getSuggestedRetrievalMode(plan),
-    suggestedRoute: getSuggestedRoute(plan),
+    suggestedRetrievalMode: getObservabilityRetrievalMode(plan, compiled),
+    suggestedRoute: getObservabilityRoute(plan, compiled),
     anchorCount: plan.anchors.length,
     hardConstraintCount: plan.constraints.hard.length,
     softConstraintCount: plan.constraints.soft.length,

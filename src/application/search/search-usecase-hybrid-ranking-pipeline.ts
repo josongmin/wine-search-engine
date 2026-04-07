@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -124,16 +125,29 @@ export async function runHybridRankingPipeline(
   plan: QueryPlanV1,
   candidates: readonly HybridCandidate[],
   ranker: RankingPort,
+  compiled?: CompiledWineQuery,
 ): Promise<SearchRouteExecutionResult> {
   const rankingInput: RankingInput = {
     queryPlan: plan,
     candidates,
     constraints: plan.constraints,
+    ...(compiled !== undefined ? { compiled } : {}),
   };
 
   const rankedResults = await ranker.rank(rankingInput);
   const rankerDegradation = ranker.getLastRuntimeSignal?.()?.degradation;
   const funnelMetrics = ranker.getLastFunnelMetrics?.();
+
+  if (ranker.getLastFunnelMetrics === undefined) {
+    pipelineDebug(
+      {
+        step: PipelineDebugStep.RANKING_HYBRID_COMPLETE,
+        query_class: plan.queryClass,
+        warning: 'ranker lacks getLastFunnelMetrics — stage D (policy_apply) will be skipped; inject RankingStagePipeline for full funnel observability',
+      },
+      'pipeline hybrid ranking: bare ranker injected, funnel metrics unavailable',
+    );
+  }
 
   pipelineDebug(
     {
@@ -164,6 +178,7 @@ export async function executeHybridRouteRankingPipeline(
   plan: QueryPlanV1,
   deps: HybridRankingRouteDeps,
   resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
+  compiled?: CompiledWineQuery,
 ): Promise<SearchRouteExecutionResult> {
   const retrieval = await retrieveHybridCandidatesForPlan(
     plan,
@@ -173,8 +188,9 @@ export async function executeHybridRouteRankingPipeline(
       compareRetriever: deps.compareRetriever,
     },
     resolveEntity,
+    compiled,
   );
-  const ranked = await runHybridRankingPipeline(plan, retrieval.candidates, deps.ranker);
+  const ranked = await runHybridRankingPipeline(plan, retrieval.candidates, deps.ranker, compiled);
   if (retrieval.routeDegradation === undefined) {
     return {
       ...ranked,

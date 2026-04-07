@@ -8,6 +8,28 @@ import {
 } from './search-shared.schema.js';
 import { SearchResponseSchema } from './search-response.schema.js';
 
+const BatchSessionContextSnakeSchema = z.object({
+  session_id: z.string().min(1),
+  previous_entities: z.array(z.string().max(256)).max(50),
+}).strict().transform((value) => ({
+  sessionContext: {
+    sessionId: value.session_id,
+    previousEntities: value.previous_entities,
+  },
+}));
+
+const BatchQueryBudgetSnakeSchema = z.object({
+  max_latency_ms: z.number().int().positive(),
+  max_candidates: z.number().int().positive(),
+  rerank_limit: z.number().int().positive(),
+}).strict().transform((value) => ({
+  queryBudget: {
+    maxLatencyMs: value.max_latency_ms,
+    maxCandidates: value.max_candidates,
+    rerankLimit: value.rerank_limit,
+  },
+}));
+
 /**
  * Batch search request item schema.
  *
@@ -25,8 +47,46 @@ export const BatchSearchRequestItemSchema = z.object({
   retrieval_mode: SearchModeSchema.optional(),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),
+  session_context: BatchSessionContextSnakeSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),
-}).strict();
+  query_budget: BatchQueryBudgetSnakeSchema.optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.sessionContext !== undefined && value.session_context !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Use either sessionContext or session_context, not both.',
+      path: ['session_context'],
+    });
+  }
+  if (value.queryBudget !== undefined && value.query_budget !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Use either queryBudget or query_budget, not both.',
+      path: ['query_budget'],
+    });
+  }
+}).transform((value) => {
+  const {
+    sessionContext,
+    session_context,
+    queryBudget,
+    query_budget,
+    ...rest
+  } = value;
+  return {
+    ...rest,
+    ...(sessionContext !== undefined
+      ? { sessionContext }
+      : session_context !== undefined
+        ? session_context
+        : {}),
+    ...(queryBudget !== undefined
+      ? { queryBudget }
+      : query_budget !== undefined
+        ? query_budget
+        : {}),
+  };
+});
 
 /**
  * Batch search options schema.

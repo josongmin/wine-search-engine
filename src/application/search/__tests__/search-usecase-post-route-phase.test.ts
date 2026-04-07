@@ -88,6 +88,7 @@ describe('runSearchPostRoutePhase', () => {
       expect.objectContaining({ normalizedQuery: 'find bordeaux' }),
       {},
       response,
+      undefined,
     );
   });
 });

@@ -8,6 +8,27 @@ import {
   ReadyRouteContract,
 } from './route-contracts.js';
 
+/**
+ * Tracks the last time the event loop was responsive.
+ * Updated by startEventLoopHeartbeat(); checked by the /health handler.
+ */
+let lastHeartbeatMs: number = Date.now();
+
+/** Maximum allowed event-loop silence before /health returns 503 (ms). */
+const HEARTBEAT_STALE_THRESHOLD_MS = 30_000;
+
+/**
+ * Starts a 1-second interval that updates lastHeartbeatMs.
+ * Returns the interval handle so callers can clear it on shutdown.
+ * Safe to call multiple times — each call starts an independent interval,
+ * so callers should store and clear the handle when appropriate.
+ */
+export function startEventLoopHeartbeat(): ReturnType<typeof setInterval> {
+  return setInterval(() => {
+    lastHeartbeatMs = Date.now();
+  }, 1_000);
+}
+
 export type ReadinessStatus = 'up' | 'down' | 'skipped';
 
 export interface ReadinessCheck {
@@ -69,13 +90,22 @@ export function registerHealthRoutes(
     url: '/health',
     contract: HealthRouteContract,
     handler: async (request, reply) => {
+      const heartbeatAgeMs = Date.now() - lastHeartbeatMs;
+      const isStuck = heartbeatAgeMs > HEARTBEAT_STALE_THRESHOLD_MS;
+
       const body: HealthResponse = {
-        status: 'ok',
+        status: isStuck ? 'degraded' : 'ok',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
       };
 
-      sendRouteContractResponse(request, reply, HealthRouteContract, 200, body);
+      sendRouteContractResponse(
+        request,
+        reply,
+        HealthRouteContract,
+        isStuck ? 503 : 200,
+        body,
+      );
     },
   });
 
@@ -96,9 +126,12 @@ export function registerHealthRoutes(
           checkNames.map(async (checkName) => {
             const readinessCheck = readinessChecks[checkName];
             const status = await resolveStatus(readinessCheck);
+            // Default-required checks (postgres, redis) are required unless the
+            // caller explicitly opts them out via required:false in the readiness map.
+            const isDefaultCheck = (DEFAULT_READINESS_CHECKS as readonly string[]).includes(checkName);
             return [checkName, {
               status,
-              required: readinessCheck?.required ?? false,
+              required: readinessCheck?.required ?? isDefaultCheck,
             }];
           }),
         ),

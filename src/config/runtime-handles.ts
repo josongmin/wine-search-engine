@@ -1,3 +1,13 @@
+/**
+ * E5-U4: Rollout-Governor Scope
+ *
+ * RuntimeHandles is the rollout governor — it controls feature flag activation
+ * for eval, LTR, calibration.
+ *
+ * All gating decisions MUST go through RuntimeHandles; do NOT add feature flags
+ * in domain services directly.
+ */
+
 import type { Pool } from 'pg';
 import type { NodeSDK } from '@opentelemetry/sdk-node';
 import type { WatchlistStoragePort } from '../domain/watchlist/port/watchlist-repository.port.js';

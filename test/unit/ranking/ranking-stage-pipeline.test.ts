@@ -48,6 +48,10 @@ function makeCandidate(id: string): HybridCandidate {
   } as unknown as HybridCandidate;
 }
 
+function makeCandidates(count: number, prefix = 'wine'): HybridCandidate[] {
+  return Array.from({ length: count }, (_, i) => makeCandidate(`${prefix}-${i}`));
+}
+
 function makeQueryPlan(): QueryPlanV1 {
   return {
     rawQuery: 'test wine',
@@ -133,16 +137,24 @@ function readFunnelTrace(pipeline: RankingStagePipeline) {
   return funnelTrace!;
 }
 
+function makePipeline(
+  aggregator: ScoreAggregator,
+  reranker?: RerankerPort,
+) {
+  const ranker = new Ranker(
+    makeSignalComputer(makeComponentScores()),
+    aggregator,
+    makeEvidenceMapper(),
+    reranker !== undefined ? { reranker } : undefined,
+  );
+  return new RankingStagePipeline(ranker);
+}
+
 describe('RankingStagePipeline (T5.1)', () => {
   describe('funnel trace always has all 4 stages', () => {
     it('returns exactly 4 stages in the correct order', async () => {
-      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-0${i}`));
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.7),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(3, 'wine-0');
+      const pipeline = makePipeline(makeScoreAggregator(0.7));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -152,13 +164,8 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('emits all 4 stages even when no reranker is configured', async () => {
-      const candidates = [makeCandidate('wine-001')];
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(1, 'wine-00');
+      const pipeline = makePipeline(makeScoreAggregator(0.9));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -173,13 +180,8 @@ describe('RankingStagePipeline (T5.1)', () => {
 
   describe('stage inputCount/outputCount', () => {
     it('coarse_prune outputCount equals retained count when some are pruned', async () => {
-      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-0${i}`));
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.9, 0.7, -Infinity]),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(3, 'wine-0');
+      const pipeline = makePipeline(makeScoreAggregatorSequence([0.9, 0.7, -Infinity]));
 
       const results = await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -192,13 +194,8 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('primary_rank inputCount equals retained count after prune', async () => {
-      const candidates = Array.from({ length: 4 }, (_, i) => makeCandidate(`wine-0${i}`));
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.9, 0.8, -Infinity, -Infinity]),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(4, 'wine-0');
+      const pipeline = makePipeline(makeScoreAggregatorSequence([0.9, 0.8, -Infinity, -Infinity]));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -210,13 +207,8 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('all stages have non-negative latencyMs', async () => {
-      const candidates = [makeCandidate('wine-001'), makeCandidate('wine-002')];
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(2, 'wine-00');
+      const pipeline = makePipeline(makeScoreAggregator(0.5));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -229,13 +221,8 @@ describe('RankingStagePipeline (T5.1)', () => {
 
   describe('precisionRerankExecuted flag', () => {
     it('is false when no reranker is configured', async () => {
-      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-0${i}`));
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(3, 'wine-0');
+      const pipeline = makePipeline(makeScoreAggregator(0.5));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -244,15 +231,9 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('is false when candidate count is at or below the rerank threshold', async () => {
-      const candidates = Array.from({ length: 4 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(4, 'wine-0');
       const { port } = makeReranker([]);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const pipeline = makePipeline(makeScoreAggregator(0.5), port);
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -261,20 +242,14 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('is true when reranker is configured and rerankForced is set', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(6, 'wine-0');
       const rerankResults: RerankResult[] = candidates.map((candidate, index) => ({
         entityId: candidate.entityId,
         score: 0.9 - index * 0.05,
         rank: index + 1,
       }));
       const { port } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const pipeline = makePipeline(makeScoreAggregator(0.5), port);
 
       await pipeline.rank(makeInput(candidates, true));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -283,7 +258,7 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('is true even when reranking preserves descending score order', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(6, 'wine-0');
       const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
 
       const reranker: RerankerPort = {
@@ -297,13 +272,7 @@ describe('RankingStagePipeline (T5.1)', () => {
           ),
       };
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence(aggregatorScores),
-        makeEvidenceMapper(),
-        { reranker },
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const pipeline = makePipeline(makeScoreAggregatorSequence(aggregatorScores), reranker);
 
       await pipeline.rank(makeInput(candidates, true));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -314,13 +283,8 @@ describe('RankingStagePipeline (T5.1)', () => {
 
   describe('RankingStagePipeline contract', () => {
     it('returns ranked results and caches funnelTrace separately', async () => {
-      const candidates = [makeCandidate('wine-001')];
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(1, 'wine-00');
+      const pipeline = makePipeline(makeScoreAggregator(0.9));
 
       const output = await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -331,13 +295,8 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('totalLatencyMs is non-negative', async () => {
-      const candidates = [makeCandidate('wine-001')];
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(1, 'wine-00');
+      const pipeline = makePipeline(makeScoreAggregator(0.9));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -346,13 +305,8 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('policyApplied is false (identity seam)', async () => {
-      const candidates = [makeCandidate('wine-001')];
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(1, 'wine-00');
+      const pipeline = makePipeline(makeScoreAggregator(0.9));
 
       await pipeline.rank(makeInput(candidates));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -361,20 +315,14 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('reports rerankChangedTopK=false when rerank executes but preserves order', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-stable-${i}`));
+      const candidates = makeCandidates(6, 'wine-stable');
       const rerankResults: RerankResult[] = candidates.map((candidate, index) => ({
         entityId: candidate.entityId,
         score: 1 - index * 0.1,
         rank: index + 1,
       }));
       const { port } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const pipeline = makePipeline(makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]), port);
 
       await pipeline.rank(makeInput(candidates, true));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -384,20 +332,14 @@ describe('RankingStagePipeline (T5.1)', () => {
     });
 
     it('reports rerankChangedTopK=true when rerank reorders the top-5', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-flip-${i}`));
+      const candidates = makeCandidates(6, 'wine-flip');
       const rerankResults: RerankResult[] = [...candidates].reverse().map((candidate, index) => ({
         entityId: candidate.entityId,
         score: 1 - index * 0.1,
         rank: index + 1,
       }));
       const { port } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.600, 0.599, 0.598, 0.597, 0.596, 0.595]),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const pipeline = makePipeline(makeScoreAggregatorSequence([0.600, 0.599, 0.598, 0.597, 0.596, 0.595]), port);
 
       await pipeline.rank(makeInput(candidates, true));
       const funnelTrace = readFunnelTrace(pipeline);
@@ -409,13 +351,8 @@ describe('RankingStagePipeline (T5.1)', () => {
 
   describe('coarsePruneMeta on retained candidates (T5.2)', () => {
     it('every result has coarsePruneMeta set', async () => {
-      const candidates = [makeCandidate('wine-001'), makeCandidate('wine-002')];
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.7),
-        makeEvidenceMapper(),
-      );
-      const pipeline = new RankingStagePipeline(ranker);
+      const candidates = makeCandidates(2, 'wine-00');
+      const pipeline = makePipeline(makeScoreAggregator(0.7));
 
       const results = await pipeline.rank(makeInput(candidates));
 

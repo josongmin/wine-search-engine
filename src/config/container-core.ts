@@ -1,6 +1,7 @@
 import type { QueryPlannerPort, RankingPort } from '../application/search/port/search-pipeline-deps.port.js';
 import { PlannerV1Adapter } from './planner-v1-adapter.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
+import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type { Resolver } from '../domain/resolver/service/resolver.js';
 import type { CandidatePoolService } from '../domain/retrieval/service/candidate-pool.js';
 import type { DecisionEngine } from '../domain/decision/service/decision-engine.js';
@@ -61,6 +62,7 @@ export interface CoreContainerServices {
   readonly cacheLookupRuntimeStateProvider: () => CacheLookupRuntimeState;
   readonly ltrModels?: RuntimeSupportServices['ltrModels'];
   readonly drinkingWindowPredictor: DrinkingWindowPredictorPort;
+  readonly calibrationStore: CalibrationStore;
 }
 
 export async function buildCoreContainerServices(
@@ -97,6 +99,7 @@ export async function buildCoreContainerServices(
     snapshotVersions: buildSnapshotVersions(config),
     cacheLookupRuntimeState: buildCacheReadRuntimeState(config),
     cacheLookupRuntimeStateProvider: buildCacheReadRuntimeStateProvider(config, ranker),
+    calibrationStore: adapters.calibrationStore,
     ...support,
   };
 }

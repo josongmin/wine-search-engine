@@ -48,6 +48,7 @@ describe('DecomposedSearchUseCase', () => {
         options: { mode: 'auto', explain: false, clarification: false },
       },
       'req-compare-a',
+      { abortSignal: undefined },
     );
     expect(searchUseCase.execute).toHaveBeenNthCalledWith(
       2,
@@ -59,6 +60,7 @@ describe('DecomposedSearchUseCase', () => {
         options: { mode: 'auto', explain: false, clarification: false },
       },
       'req-compare-b',
+      { abortSignal: undefined },
     );
   });
 

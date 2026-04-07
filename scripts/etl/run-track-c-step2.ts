@@ -15,7 +15,6 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import path from 'node:path';
 import { parseNdjson } from './ndjson';
 import { enrichWineCertificationsBatch } from './enrich-certifications';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';

@@ -30,6 +30,7 @@ import type {
 import type { EvalRunnerContract } from './container-eval-contracts.js';
 import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
+import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
@@ -56,6 +57,7 @@ export interface Container extends LearningContainerServices {
   readonly evalRunner: EvalRunnerContract | null;
   /** True when Postgres feedback store is wired and learning kill-switch is off. */
   readonly feedbackIngestEnabled: boolean;
+  readonly calibrationStore: CalibrationStore;
 }
 
 export async function createContainer(
@@ -82,6 +84,7 @@ export async function createContainer(
     mixedSolver: core.mixedSolver,
     ...features,
     drinkingWindowPredictor: core.drinkingWindowPredictor,
+    calibrationStore: core.calibrationStore,
     ...watchlist,
   };
 }

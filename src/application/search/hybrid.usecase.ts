@@ -32,6 +32,7 @@ import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import { buildInternalErrorAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
 
@@ -116,7 +117,7 @@ export class HybridUseCase {
       return preRoute.response;
     }
 
-    const { plan } = preRoute;
+    const { plan, compiled } = preRoute;
     let hybridPipelineResult: Awaited<ReturnType<typeof executeHybridRouteRankingPipeline>>;
     try {
       hybridPipelineResult = await executeHybridRouteRankingPipeline(
@@ -131,6 +132,7 @@ export class HybridUseCase {
           entityResolver: this.deps.entityResolver,
           entityLookup: this.deps.entityLookup,
         }),
+        compiled,
       );
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -146,7 +148,11 @@ export class HybridUseCase {
         'pipeline hybrid ranking error',
       );
       const snapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
-      const errorTraceRef = `decision:error:${requestId}`;
+      const errorTraceRef = buildInternalErrorAuthorityTraceRef({
+        snapshot,
+        requestId,
+        failureReason: 'INTERNAL_INCONSISTENCY',
+      });
       const degradedResponse: SearchResponseV1 = {
         queryType: 'search',
         engineDecision: {
@@ -197,14 +203,16 @@ export class HybridUseCase {
 
     return runSearchPostRoutePhase({
       plan,
+      compiled,
       request: searchRequest,
       requestId,
       startTime,
       resolveResult,
       rankedResults,
       decisionContext,
+      // HybridUseCase always forces hybrid route — this is an API-level override.
       effectiveRoute: 'hybrid',
-      plannerSuggestedMode: plan.route,
+      plannerSuggestedMode: compiled.execution.effectiveRetrievalMode,
       retrievalModeSource: 'api_override',
       abstainPolicy: this.abstainPolicy,
       snapshotVersions: this.deps.snapshotVersions,

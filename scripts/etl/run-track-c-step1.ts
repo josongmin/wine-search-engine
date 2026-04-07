@@ -15,7 +15,6 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
-import path from 'node:path';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { parseNdjson } from './ndjson';
 import { generateCriticProxiesBatch } from './generate-critic-proxy';

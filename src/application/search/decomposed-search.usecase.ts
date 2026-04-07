@@ -1,15 +1,26 @@
 /**
  * Epic 14: Decomposed Search Use Case
  *
- * Handles "A vs B" comparison queries by decomposing them into
- * parallel entity resolution + merging results.
+ * Handles "A vs B" comparison queries by reusing the standard search seam
+ * for each sub-query and merging the two responses.
  */
 
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { ComparisonSearchResponse, ComparisonEntity } from '../../domain/response/model/comparison-response.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
-import type { DecomposedSearchParentContext } from './port/search-route-usecases.port.js';
+import type {
+  DecomposedSearchExecutionOptions,
+  DecomposedSearchParentContext,
+} from './port/search-route-usecases.port.js';
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    const error = new Error('Decomposed search aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
 
 export class UnexpectedDecomposedResponseError extends DomainError {
   constructor() {
@@ -25,7 +36,7 @@ export class DecomposedSearchUseCase {
   constructor(private readonly searchUseCase: SearchExecutorPort) {}
 
   /**
-   * Executes parallel search for two sub-queries from a decomposed comparison.
+   * Executes two reused searches for a decomposed comparison.
    *
    * @param subQueries - [queryA, queryB]
    * @param comparisonIntent - 'compare' | 'recommend_one' | 'list_both'
@@ -40,7 +51,10 @@ export class DecomposedSearchUseCase {
     requestId: string,
     startTime: number,
     parentContext?: DecomposedSearchParentContext,
+    options?: DecomposedSearchExecutionOptions,
   ): Promise<ComparisonSearchResponse> {
+    throwIfAborted(options?.abortSignal);
+
     const baseRequest: Omit<SearchRequest, 'query'> = {
       options: { mode: 'auto', explain: false, clarification: false },
       ...(parentContext?.context !== undefined ? { context: parentContext.context } : {}),
@@ -50,17 +64,21 @@ export class DecomposedSearchUseCase {
       ...(parentContext?.queryBudget !== undefined ? { queryBudget: parentContext.queryBudget } : {}),
     };
 
-    // Execute both sub-queries in parallel
+    // Reuse the main search seam for both sub-queries while honoring caller cancellation.
     const [rawResultA, rawResultB] = await Promise.all([
       this.searchUseCase.execute(
         { ...baseRequest, query: subQueries[0] },
         `${requestId}-a`,
+        { abortSignal: options?.abortSignal },
       ),
       this.searchUseCase.execute(
         { ...baseRequest, query: subQueries[1] },
         `${requestId}-b`,
+        { abortSignal: options?.abortSignal },
       ),
     ]);
+
+    throwIfAborted(options?.abortSignal);
 
     // Sub-queries should never themselves be comparison queries; narrow via discriminant
     if (rawResultA.queryType !== 'search' || rawResultB.queryType !== 'search') {

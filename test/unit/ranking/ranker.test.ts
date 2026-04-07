@@ -49,6 +49,10 @@ function makeCandidate(id: string): HybridCandidate {
   } as unknown as HybridCandidate;
 }
 
+function makeCandidates(count: number, prefix = 'wine'): HybridCandidate[] {
+  return Array.from({ length: count }, (_, i) => makeCandidate(`${prefix}-${i}`));
+}
+
 /** Minimal valid QueryPlanV1. */
 function makeQueryPlan(): QueryPlanV1 {
   return {
@@ -206,16 +210,78 @@ function makeReranker(results: RerankResult[]): {
   return { port: { rerank: spy }, spy };
 }
 
+function makeRanker(
+  aggregator: ScoreAggregator,
+  options: {
+    signalScores?: ComponentScores;
+    evidenceItems?: EvidenceItem[];
+    reranker?: RerankerPort;
+    rerankTopK?: number;
+    ltrModels?: Map<string, QueryClassWeights>;
+  } = {},
+) {
+  return new Ranker(
+    makeSignalComputer(options.signalScores ?? makeComponentScores()),
+    aggregator,
+    makeEvidenceMapper(options.evidenceItems),
+    options.reranker || options.rerankTopK !== undefined || options.ltrModels
+      ? {
+          ...(options.reranker ? { reranker: options.reranker } : {}),
+          ...(options.rerankTopK !== undefined ? { rerankTopK: options.rerankTopK } : {}),
+          ...(options.ltrModels ? { ltrModels: options.ltrModels } : {}),
+        }
+      : undefined,
+  );
+}
+
+function makeLtrModel(
+  weights: number[],
+  overrides: Partial<QueryClassWeights> = {},
+): QueryClassWeights {
+  return {
+    queryClass: 'semantic_preference',
+    weights,
+    bias: 0.5,
+    trainingExampleCount: 10,
+    ndcg5ValidationScore: 0.8,
+    trainedAt: new Date(),
+    ...overrides,
+  };
+}
+
+function makeDescendingRerankResults(candidates: readonly HybridCandidate[]): RerankResult[] {
+  return candidates.map((candidate, index) => ({
+    entityId: candidate.entityId,
+    score: 0.9 - index * 0.05,
+    rank: index + 1,
+  }));
+}
+
+function makeRichCandidate(id = 'wine-rich'): HybridCandidate {
+  return {
+    ...makeCandidate(id),
+    canonicalLabel: 'Brunello 2013',
+    producer: 'Poggio Salvi',
+    region: 'Montalcino',
+    searchTextEn: 'Structured red with cherry notes.',
+    grapePrimary: 'Sangiovese',
+  };
+}
+
+function makeUniformSemanticPreferenceLtrModel(): QueryClassWeights {
+  return makeLtrModel([0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125]);
+}
+
+function makeBm25DominantLtrModel(): QueryClassWeights {
+  return makeLtrModel([1.0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('Ranker', () => {
   describe('empty and single-candidate cases', () => {
     it('empty candidates → returns []', async () => {
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper(),
-      );
+      const ranker = makeRanker(makeScoreAggregator(0.9));
 
       const results = await ranker.rank(makeInput([]));
 
@@ -224,11 +290,7 @@ describe('Ranker', () => {
 
     it('single candidate with finalScore=0.9 → rank=1, evidenceItems populated', async () => {
       const candidate = makeCandidate('wine-001');
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper([STUB_EVIDENCE]),
-      );
+      const ranker = makeRanker(makeScoreAggregator(0.9), { evidenceItems: [STUB_EVIDENCE] });
 
       const results = await ranker.rank(makeInput([candidate]));
 
@@ -243,40 +305,28 @@ describe('Ranker', () => {
   });
 
   describe('sorting', () => {
-    it('three candidates with scores 0.9, 0.7, 0.5 → returned in descending order', async () => {
-      const candidates = [
-        makeCandidate('wine-001'),
-        makeCandidate('wine-002'),
-        makeCandidate('wine-003'),
-      ];
-
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.9, 0.7, 0.5]),
-        makeEvidenceMapper(),
-      );
-
-      const results = await ranker.rank(makeInput(candidates));
-
-      expect(results).toHaveLength(3);
-      expect(results[0]!.finalScore).toBe(0.9);
-      expect(results[1]!.finalScore).toBe(0.7);
-      expect(results[2]!.finalScore).toBe(0.5);
-    });
-
-    it('rank is 1-indexed: first result has rank=1', async () => {
-      const candidates = [makeCandidate('wine-001'), makeCandidate('wine-002')];
-
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.9, 0.5]),
-        makeEvidenceMapper(),
-      );
+    it.each([
+      [
+        'three candidates with scores 0.9, 0.7, 0.5 → returned in descending order',
+        [0.9, 0.7, 0.5],
+        [0.9, 0.7, 0.5],
+      ],
+      [
+        'rank is 1-indexed: first result has rank=1',
+        [0.9, 0.5],
+        [0.9, 0.5],
+      ],
+    ])('%s', async (_label, scores, expectedScores) => {
+      const candidates = makeCandidates(scores.length, 'wine-00');
+      const ranker = makeRanker(makeScoreAggregatorSequence(scores));
 
       const results = await ranker.rank(makeInput(candidates));
 
-      expect(results[0]!.rank).toBe(1);
-      expect(results[1]!.rank).toBe(2);
+      expect(results).toHaveLength(expectedScores.length);
+      expect(results.map((result) => result.finalScore)).toEqual(expectedScores);
+      expect(results.map((result) => result.rank)).toEqual(
+        Array.from({ length: expectedScores.length }, (_, index) => index + 1),
+      );
     });
   });
 
@@ -333,11 +383,7 @@ describe('Ranker', () => {
         constraints: sharedConstraints,
       };
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.9),
-        makeEvidenceMapper([STUB_EVIDENCE]),
-      );
+      const ranker = makeRanker(makeScoreAggregator(0.9), { evidenceItems: [STUB_EVIDENCE] });
 
       const [result] = await ranker.rank(input);
 
@@ -361,11 +407,7 @@ describe('Ranker', () => {
       } as HybridCandidate;
       const aggregate = vi.fn().mockReturnValue(0.8);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        aggregator,
-        makeEvidenceMapper(),
-      );
+      const ranker = makeRanker(aggregator);
 
       const input = makeInput([candidate]);
       await ranker.rank(input);
@@ -401,11 +443,7 @@ describe('Ranker', () => {
         .mockReturnValueOnce(0.7)
         .mockReturnValueOnce(0.6);
       const aggregator = { aggregate } as unknown as ScoreAggregator;
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        aggregator,
-        makeEvidenceMapper(),
-      );
+      const ranker = makeRanker(aggregator);
 
       const input = makeInput([sparseCandidate, relativeCandidate]);
       await ranker.rank(input);
@@ -424,12 +462,11 @@ describe('Ranker', () => {
 
   describe('-Infinity filtering', () => {
     it('all -Infinity scores → returns []', async () => {
-      const candidates = [makeCandidate('wine-001'), makeCandidate('wine-002')];
+      const candidates = makeCandidates(2, 'wine-00');
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores({ hardConstraintPass: false })),
+      const ranker = makeRanker(
         makeScoreAggregatorSequence([-Infinity, -Infinity]),
-        makeEvidenceMapper(),
+        { signalScores: makeComponentScores({ hardConstraintPass: false }) },
       );
 
       const results = await ranker.rank(makeInput(candidates));
@@ -438,17 +475,9 @@ describe('Ranker', () => {
     });
 
     it('mixed: 2 finite (0.9, 0.5) + 1 -Infinity → returns only 2 results', async () => {
-      const candidates = [
-        makeCandidate('wine-001'),
-        makeCandidate('wine-002'),
-        makeCandidate('wine-003'),
-      ];
+      const candidates = makeCandidates(3, 'wine-00');
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence([0.9, -Infinity, 0.5]),
-        makeEvidenceMapper(),
-      );
+      const ranker = makeRanker(makeScoreAggregatorSequence([0.9, -Infinity, 0.5]));
 
       const results = await ranker.rank(makeInput(candidates));
 
@@ -458,54 +487,36 @@ describe('Ranker', () => {
   });
 
   describe('reranking threshold', () => {
-    it('reranker provided + 6 candidates + rerankForced → reranker.rerank() is called', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-00${i}`));
+    it.each([
+      [
+        'reranker provided + 6 candidates + rerankForced → reranker.rerank() is called',
+        { count: 6, rerankForced: true, expectsCall: true },
+      ],
+      [
+        'reranker provided + 4 candidates (≤ RERANK_THRESHOLD) → reranker.rerank() NOT called',
+        { count: 4, rerankForced: false, expectsCall: false },
+      ],
+    ])('%s', async (_label, scenario) => {
+      const candidates = makeCandidates(scenario.count, 'wine-00');
+      const { port, spy } = makeReranker(makeDescendingRerankResults(candidates));
+      const ranker = makeRanker(makeScoreAggregator(0.5), { reranker: port });
 
-      // rerankForced bypasses the gate regardless of candidate count
-      const rerankResults: RerankResult[] = candidates.map((c, i) => ({
-        entityId: c.entityId,
-        score: 0.9 - i * 0.05,
-        rank: i + 1,
-      }));
+      await ranker.rank(makeInput(candidates, scenario.rerankForced));
 
-      const { port, spy } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
-
-      await ranker.rank(makeInput(candidates, true));
-
-      expect(spy).toHaveBeenCalledOnce();
+      if (scenario.expectsCall) {
+        expect(spy).toHaveBeenCalledOnce();
+      } else {
+        expect(spy).not.toHaveBeenCalled();
+      }
     });
 
     it('reranker receives rich passage when candidate has producer/region/searchTextEn/grapePrimary', async () => {
-      const rich: HybridCandidate = {
-        ...makeCandidate('wine-rich'),
-        canonicalLabel: 'Brunello 2013',
-        producer: 'Poggio Salvi',
-        region: 'Montalcino',
-        searchTextEn: 'Structured red with cherry notes.',
-        grapePrimary: 'Sangiovese',
-      };
+      const rich = makeRichCandidate();
       const filler = Array.from({ length: 5 }, (_, i) => makeCandidate(`wine-fill-${i}`));
       const candidates = [rich, ...filler];
 
-      const rerankResults: RerankResult[] = candidates.map((c, i) => ({
-        entityId: c.entityId,
-        score: 0.9 - i * 0.05,
-        rank: i + 1,
-      }));
-
-      const { port, spy } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.85),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
+      const { port, spy } = makeReranker(makeDescendingRerankResults(candidates));
+      const ranker = makeRanker(makeScoreAggregator(0.85), { reranker: port });
 
       // rerankForced bypasses the gate for this passage-building test
       await ranker.rank(makeInput(candidates, true));
@@ -520,33 +531,11 @@ describe('Ranker', () => {
       expect(topText).toContain('Sangiovese');
     });
 
-    it('reranker provided + 4 candidates (≤ RERANK_THRESHOLD) → reranker.rerank() NOT called', async () => {
-      const candidates = Array.from({ length: 4 }, (_, i) => makeCandidate(`wine-00${i}`));
-
-      const { port, spy } = makeReranker([]);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
-
-      await ranker.rank(makeInput(candidates));
-
-      expect(spy).not.toHaveBeenCalled();
-    });
-
     it('no reranker provided + 10 candidates → rerank never called', async () => {
-      const candidates = Array.from({ length: 10 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(10, 'wine-0');
 
       // No reranker passed — just verify the pipeline completes without error
-      const signalComputer = makeSignalComputer(makeComponentScores());
-      const ranker = new Ranker(
-        signalComputer,
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        // reranker intentionally omitted
-      );
+      const ranker = makeRanker(makeScoreAggregator(0.5));
 
       const results = await ranker.rank(makeInput(candidates));
 
@@ -554,19 +543,9 @@ describe('Ranker', () => {
     });
 
     it('uses has_anchor gate reason and executes reranking when anchor profile is present', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-anchor-${i}`));
-      const rerankResults: RerankResult[] = candidates.map((candidate, index) => ({
-        entityId: candidate.entityId,
-        score: 0.9 - index * 0.05,
-        rank: index + 1,
-      }));
-      const { port, spy } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
+      const candidates = makeCandidates(6, 'wine-anchor');
+      const { port, spy } = makeReranker(makeDescendingRerankResults(candidates));
+      const ranker = makeRanker(makeScoreAggregator(0.5), { reranker: port });
 
       await ranker.rank(makeInputWithOverrides(candidates, {
         anchorProfile: { anchorEntityId: createEntityId('anchor-1') } as never,
@@ -577,19 +556,14 @@ describe('Ranker', () => {
       expect(ranker.getLastRerankExecuted()).toBe(true);
     });
 
-    it('uses already_precise gate reason and skips reranking for exact_lookup route', async () => {
-      const candidates = Array.from({ length: 8 }, (_, i) => makeCandidate(`wine-exact-${i}`));
+    it('uses already_precise gate reason and skips reranking for entity route', async () => {
+      const candidates = makeCandidates(8, 'wine-exact');
       const { port, spy } = makeReranker([]);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregator(0.5),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
+      const ranker = makeRanker(makeScoreAggregator(0.5), { reranker: port });
 
       await ranker.rank(makeInputWithOverrides(candidates, {
         queryPlan: {
-          route: 'exact_lookup',
+          route: 'entity',
         },
       }));
 
@@ -603,26 +577,12 @@ describe('Ranker', () => {
       // to fire even when gateDecision.shouldRerank === false (gate was bypassed).
       // With <5 candidates the gate always returns shouldRerank=false (too_few_candidates).
       // The learned LTR rerank must NOT execute in this case.
-      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-gate-${i}`));
+      const candidates = makeCandidates(3, 'wine-gate');
       const aggregatorScores = [0.9, 0.7, 0.5];
 
-      // A minimal LTR model for 'semantic_preference' with neutral uniform weights.
-      const ltrModel: QueryClassWeights = {
-        queryClass: 'semantic_preference',
-        weights: [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125],
-        bias: 0.5,
-        trainingExampleCount: 10,
-        ndcg5ValidationScore: 0.8,
-        trainedAt: new Date(),
-      };
-      const ltrModels = new Map([['semantic_preference', ltrModel]]);
+      const ltrModels = new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]);
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence(aggregatorScores),
-        makeEvidenceMapper(),
-        { ltrModels },
-      );
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });
 
       const results = await ranker.rank(makeInput(candidates));
 
@@ -640,29 +600,12 @@ describe('Ranker', () => {
     it('learned LTR rerank executes when gate returns shouldRerank=true (rerankForced)', async () => {
       // Companion test: with rerankForced=true and an LTR model, the learned
       // rerank must fire. Verifies the gate-pass path works after the bug fix.
-      const candidates = Array.from({ length: 3 }, (_, i) => makeCandidate(`wine-ltr-${i}`));
+      const candidates = makeCandidates(3, 'wine-ltr');
       const aggregatorScores = [0.9, 0.5, 0.3];
 
-      const ltrModel: QueryClassWeights = {
-        queryClass: 'semantic_preference',
-        // Weights that heavily favour bm25Score (feature[0]); all features
-        // are 0.0 in extractLTRFeatures (bm25 sentinel), so scores collapse
-        // to bias=0.5. This still exercises the LTR path without needing real
-        // feature data.
-        weights: [1.0, 0, 0, 0, 0, 0, 0, 0],
-        bias: 0.5,
-        trainingExampleCount: 10,
-        ndcg5ValidationScore: 0.8,
-        trainedAt: new Date(),
-      };
-      const ltrModels = new Map([['semantic_preference', ltrModel]]);
+      const ltrModels = new Map([['semantic_preference', makeBm25DominantLtrModel()]]);
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence(aggregatorScores),
-        makeEvidenceMapper(),
-        { ltrModels },
-      );
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });
 
       // rerankForced bypasses the too_few_candidates gate rule.
       const results = await ranker.rank(makeInput(candidates, true));
@@ -676,7 +619,7 @@ describe('Ranker', () => {
   describe('score blending', () => {
     it('originalScore=0.8, rerankerScore=0.6 → min-max norm + semantic_preference blend (w=0.18)', async () => {
       // Use rerankForced to trigger reranking regardless of gate conditions
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(6, 'wine-0');
 
       // Give the first candidate originalScore=0.8, others lower so first stays first
       const aggregatorScores = [0.8, 0.6, 0.6, 0.6, 0.6, 0.6];
@@ -690,12 +633,7 @@ describe('Ranker', () => {
       }));
 
       const { port } = makeReranker(rerankResults);
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence(aggregatorScores),
-        makeEvidenceMapper(),
-        { reranker: port },
-      );
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { reranker: port });
 
       const results = await ranker.rank(makeInput(candidates, true));
 
@@ -710,7 +648,7 @@ describe('Ranker', () => {
 
   describe('rerankTopK', () => {
     it('rerankTopK=3 with 8 candidates: top-3 sent to reranker, remaining 5 appended', async () => {
-      const candidates = Array.from({ length: 8 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(8, 'wine-0');
 
       // All viable, sorted so top-3 by score are candidates 0,1,2
       const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2];
@@ -728,12 +666,10 @@ describe('Ranker', () => {
       );
       const reranker: RerankerPort = { rerank: rerankSpy };
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence(aggregatorScores),
-        makeEvidenceMapper(),
-        { reranker, rerankTopK: 3 },
-      );
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), {
+        reranker,
+        rerankTopK: 3,
+      });
 
       const results = await ranker.rank(makeInput(candidates, true));
 
@@ -748,7 +684,7 @@ describe('Ranker', () => {
 
     it('after reranking, results are re-sorted by blended score descending', async () => {
       // Use rerankForced to trigger reranking with a small set
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(6, 'wine-0');
 
       // Original scores (sorted: [0.9, 0.8, 0.7, 0.6, 0.5, 0.4])
       const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
@@ -765,12 +701,7 @@ describe('Ranker', () => {
           ),
       };
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
-        makeScoreAggregatorSequence(aggregatorScores),
-        makeEvidenceMapper(),
-        { reranker },
-      );
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { reranker });
 
       const results = await ranker.rank(makeInput(candidates, true));
 
@@ -781,17 +712,15 @@ describe('Ranker', () => {
     });
 
     it('surfaces reranker timeout fallback as a degraded runtime signal', async () => {
-      const candidates = Array.from({ length: 6 }, (_, i) => makeCandidate(`wine-0${i}`));
+      const candidates = makeCandidates(6, 'wine-0');
       const reranker: RerankerPort = {
         rerank: async () => {
           throw new Error('Reranker service: request timed out after 30000ms');
         },
       };
 
-      const ranker = new Ranker(
-        makeSignalComputer(makeComponentScores()),
+      const ranker = makeRanker(
         makeScoreAggregatorSequence([0.9, 0.8, 0.7, 0.6, 0.5, 0.4]),
-        makeEvidenceMapper(),
         { reranker },
       );
 

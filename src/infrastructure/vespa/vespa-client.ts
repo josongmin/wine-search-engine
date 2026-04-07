@@ -5,8 +5,11 @@
  * Uses native `fetch` — no external SDK dependency.
  */
 
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+
+const vespaLog = bootstrapLogger.child({ component: 'VespaClient' });
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -35,6 +38,33 @@ export interface BulkFeedResult {
   readonly successCount: number;
   readonly failureCount: number;
   readonly errors: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// VespaHttpError
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when Vespa returns a non-2xx HTTP response.
+ *
+ * Carries the HTTP status code and convenience flags so callers can apply
+ * the right retry / circuit-breaker policy without parsing error messages:
+ * - `isRateLimited` (HTTP 429): the caller should back off and retry later.
+ * - `isClientError` (HTTP 4xx): the request itself is malformed; retrying
+ *   without fixing the request will not help.
+ * - 5xx errors are neither `isRateLimited` nor `isClientError`; they are
+ *   transient server-side failures that are safe to retry.
+ */
+export class VespaHttpError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+    public readonly isRateLimited: boolean,
+    public readonly isClientError: boolean,
+  ) {
+    super(message);
+    this.name = 'VespaHttpError';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +122,97 @@ function extractErrorMessage(body: unknown): string {
     return JSON.stringify(b);
   }
   return String(body);
+}
+
+/**
+ * Logs the HTTP error response with appropriate severity based on status code,
+ * then throws an error with a descriptive message.
+ *
+ * - 429 Too Many Requests: logged as warn (transient rate-limit, include Retry-After).
+ * - 5xx Server Error:      logged as warn (transient server-side issue, include status).
+ * - 4xx Client Error:      logged as error (bad query / caller logic issue).
+ */
+function handleHttpError(
+  response: Response,
+  operation: string,
+  body: string,
+): never {
+  const status = response.status;
+
+  if (status === 429) {
+    const retryAfter = response.headers.get('Retry-After');
+    vespaLog.warn(
+      { status, operation, ...(retryAfter !== null ? { retryAfter } : {}) },
+      `Vespa rate-limited (429) during ${operation}${retryAfter !== null ? `; Retry-After: ${retryAfter}` : ''}`,
+    );
+    throw new VespaHttpError(
+      `Vespa ${operation} rate-limited [HTTP 429]${retryAfter !== null ? `; Retry-After: ${retryAfter}` : ''}: ${body}`,
+      429,
+      true,
+      true,
+    );
+  }
+
+  if (status >= 500) {
+    vespaLog.warn(
+      { status, operation },
+      `Vespa server error (${status}) during ${operation}`,
+    );
+    throw new VespaHttpError(
+      `Vespa ${operation} failed [HTTP ${status}]: ${body}`,
+      status,
+      false,
+      false,
+    );
+  }
+
+  // 4xx client error (non-429) — bad query or caller logic issue
+  vespaLog.error(
+    { status, operation },
+    `Vespa client error (${status}) during ${operation}`,
+  );
+  throw new VespaHttpError(
+    `Vespa ${operation} failed [HTTP ${status}]: ${body}`,
+    status,
+    false,
+    true,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Retry helper
+// ---------------------------------------------------------------------------
+
+const VESPA_RETRY_CONFIG = {
+  maxRetries: 2,
+  baseDelayMs: 200,
+  maxDelayMs: 2_000,
+} as const;
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  config = VESPA_RETRY_CONFIG,
+): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      // Don't retry client errors (4xx) except rate limits
+      if (err instanceof VespaHttpError && err.isClientError && !err.isRateLimited) {
+        throw err;
+      }
+      if (attempt < config.maxRetries) {
+        const delay = Math.min(
+          config.baseDelayMs * 2 ** attempt,
+          config.maxDelayMs,
+        );
+        await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
+      }
+    }
+  }
+  throw lastErr;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,48 +289,48 @@ export class VespaClient {
     yql: string,
     params?: Record<string, unknown>,
   ): Promise<VespaQueryResponse> {
-    const url = `${this.baseUrl}/search/`;
-    const body: Record<string, unknown> = { yql, ...params };
+    return withRetry(async () => {
+      const url = `${this.baseUrl}/search/`;
+      const body: Record<string, unknown> = { yql, ...params };
 
-    const response = await this.fetchWithTimeout(
-      url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      },
-      30_000,
-    );
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(
-        `Vespa query failed [HTTP ${response.status}]: ${text}`,
+      const response = await this.fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        30_000,
       );
-    }
 
-    const data: unknown = await response.json();
-    assertObject(data, 'query response');
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        handleHttpError(response, 'query', text);
+      }
 
-    // Minimal structural validation before casting.
-    if (!('root' in data)) {
-      throw new Error('Vespa: query response missing "root" field');
-    }
+      const data: unknown = await response.json();
+      assertObject(data, 'query response');
 
-    const parsed = data as unknown as VespaQueryResponse;
-    const hitCount = parsed.root.children?.length ?? 0;
-    const totalCount = parsed.root.fields?.totalCount;
-    pipelineDebug(
-      {
-        step: PipelineDebugStep.VESPA_QUERY,
-        yql_length: yql.length,
-        hit_count: hitCount,
-        ...(totalCount !== undefined ? { total_count: totalCount } : {}),
-      },
-      'pipeline vespa query',
-    );
+      // Minimal structural validation before casting.
+      if (!('root' in data)) {
+        throw new Error('Vespa: query response missing "root" field');
+      }
 
-    return parsed;
+      const parsed = data as unknown as VespaQueryResponse;
+      const hitCount = parsed.root.children?.length ?? 0;
+      const totalCount = parsed.root.fields?.totalCount;
+      pipelineDebug(
+        {
+          step: PipelineDebugStep.VESPA_QUERY,
+          yql_length: yql.length,
+          hit_count: hitCount,
+          ...(totalCount !== undefined ? { total_count: totalCount } : {}),
+        },
+        'pipeline vespa query',
+      );
+
+      return parsed;
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -244,9 +365,7 @@ export class VespaClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(
-        `Vespa document ${method} failed [HTTP ${response.status}]: ${text}`,
-      );
+      handleHttpError(response, `document ${method}`, text);
     }
   }
 
@@ -299,9 +418,7 @@ export class VespaClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(
-        `Vespa document UPDATE failed [HTTP ${response.status}]: ${text}`,
-      );
+      handleHttpError(response, 'document UPDATE', text);
     }
   }
 
@@ -319,9 +436,7 @@ export class VespaClient {
     // 404 is acceptable — the document simply did not exist.
     if (!response.ok && response.status !== 404) {
       const text = await response.text().catch(() => '');
-      throw new Error(
-        `Vespa document DELETE failed [HTTP ${response.status}]: ${text}`,
-      );
+      handleHttpError(response, 'document DELETE', text);
     }
   }
 
@@ -341,9 +456,7 @@ export class VespaClient {
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(
-        `Vespa document GET failed [HTTP ${response.status}]: ${text}`,
-      );
+      handleHttpError(response, 'document GET', text);
     }
 
     const data: unknown = await response.json();

@@ -1,7 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { RetrievalProfileService } from '../retrieval-profile.js';
 import { resolveChannelMix } from '../channel-mix-policy.js';
 import { QUERY_FAMILY_LABELS } from '../../../query/model/query-observability-vocab.js';
+import { bootstrapLogger } from '../../../../config/bootstrap-logger.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('RetrievalProfileService (T4.1)', () => {
   const service = new RetrievalProfileService();
@@ -60,6 +65,33 @@ describe('RetrievalProfileService (T4.1)', () => {
     expect(profile.channelMix).not.toContain('dense_semantic');
     expect(profile.denseWeight).toBe(0);
     expect(profile.sparseWeight).toBe(1.0);
+  });
+
+  it.each([
+    ['entity_lookup', 'exact_safe_fallback'],
+    ['entity_resolution', 'exact_safe_fallback'],
+    ['attribute_search', 'hybrid_default'],
+    ['constraint_filter', 'hybrid_default'],
+    ['similar_items', 'mixed_anchor'],
+    ['no_match_detection', 'hybrid_default'],
+    ['semantic_hybrid', 'hybrid_default'],
+    ['hybrid_search', 'hybrid_default'],
+  ] as const)('does not warn for canonical retrieval mode %s', (mode, expectedProfile) => {
+    const warnSpy = vi.spyOn(bootstrapLogger, 'warn').mockImplementation(() => bootstrapLogger);
+
+    const profile = service.getProfile('pure_constraint', 'hybrid', mode);
+
+    expect(profile.name).toBe(expectedProfile);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('warns for truly unknown retrieval modes only', () => {
+    const warnSpy = vi.spyOn(bootstrapLogger, 'warn').mockImplementation(() => bootstrapLogger);
+
+    const profile = service.getProfile('pure_constraint', 'hybrid', 'totally_unknown_mode');
+
+    expect(profile.name).toBe('hybrid_default');
+    expect(warnSpy).toHaveBeenCalledOnce();
   });
 });
 

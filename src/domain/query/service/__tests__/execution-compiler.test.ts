@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ExecutionCompiler } from '../execution-compiler.js';
 import type { QueryPlanV2 } from '../../model/query-plan.js';
 import type { RetrievalMode } from '../../model/retrieval-mode.js';
 import type { QueryRoute } from '../../model/query-route.js';
+import { bootstrapLogger } from '../../../../config/bootstrap-logger.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 // ---------------------------------------------------------------------------
 // Minimal QueryPlanV2 fixture factory
@@ -288,4 +293,21 @@ describe('ExecutionCompiler', () => {
     expect(result.execution.budget.maxCandidates).toBe(20);
     expect(result.execution.budget.enablePrecisionRerank).toBe(false);
   });
+
+  it.each(['semantic_hybrid', 'hybrid_search'] as const)(
+    'normalizes legacy retrieval mode alias %s without warning',
+    (legacyMode) => {
+      const warnSpy = vi.spyOn(bootstrapLogger, 'warn').mockImplementation(() => bootstrapLogger);
+      const plan = makeMinimalPlan({
+        suggestedRoute: 'hybrid',
+        suggestedRetrievalMode: legacyMode as RetrievalMode,
+      });
+
+      const result = compiler.compile({ plan });
+
+      expect(result.execution.effectiveRetrievalMode).toBe('attribute_search');
+      expect(result.execution.budget.maxCandidates).toBe(50);
+      expect(warnSpy).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -1,3 +1,14 @@
+/**
+ * E5-U7: Promotion Acceptance Gate — Persistence Layer
+ *
+ * pg-threshold-store is the persistence layer for promotion thresholds;
+ * PromotionGate reads from this store to evaluate whether a candidate model
+ * or weight set meets the bar for promotion to production traffic.
+ *
+ * Threshold updates MUST go through PromotionGate.evaluate(); direct store
+ * writes are forbidden outside of initial seeding.
+ */
+
 import type { Pool } from 'pg';
 import type { ThresholdStore } from '../../domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../domain/query/model/threshold-profile.js';

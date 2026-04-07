@@ -12,6 +12,7 @@
 import type { QueryClass } from '../../shared/types/index.js';
 import type { RetrievalChannel } from '../model/retrieval-channel.js';
 import { resolveChannelMix, type QueryFamily } from './channel-mix-policy.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Configuration profile that governs retrieval behaviour for a given
@@ -178,9 +179,60 @@ const RELATIVE_FILTER: RetrievalProfile = {
   finalTopK: 80,
 } as const;
 
+function isLegacyHeuristicRetrievalMode(retrievalMode: string): boolean {
+  return retrievalMode === 'semantic_hybrid' || retrievalMode === 'hybrid_search';
+}
+
 // ---------------------------------------------------------------------------
 // Profile service
 // ---------------------------------------------------------------------------
+
+/**
+ * E2-U1 Lane Capability Inventory
+ *
+ * RetrievalProfileService.getProfile() decision inputs (highest → lowest priority):
+ *
+ *  1. retrievalMode   — explicit execution-contract signal (from EngineExecutionContract)
+ *                       covers: learned_sparse, producer_browse, region_browse,
+ *                       compare_candidates, relative, recommendation
+ *  2. queryFamily     — semantic classification from QueryObservabilityVocab
+ *                       covers: comparison, recommendation, pairing, entity_exact,
+ *                       producer_browse, region_browse, entity_resolution, …
+ *  3. route+queryClass — legacy heuristic fallback
+ *                       covers: mixed → MIXED_ANCHOR, short_entity/ambiguous → EXACT_SAFE_FALLBACK
+ *
+ * Decision outputs (per lane):
+ *  - channelMix       — ordered list of active retrieval channels
+ *  - sparseWeight / denseWeight / anchorWeight  — fusion blend weights
+ *  - sparseTopN / denseTopN  — per-channel candidate budget
+ *  - finalTopK        — post-fusion candidate ceiling
+ *
+ * Specialised path hints (not in profile, driven by retrievalMode):
+ *  - producer_browse  → BrowseRetrieverPort.browseProducer()
+ *  - region_browse    → BrowseRetrieverPort.browseRegion()
+ *  - compare_candidates → CompareRetrieverPort.compareAgainstAnchor()
+ */
+
+/**
+ * E2-U2 Lane Policy Table Skeleton
+ *
+ * Structured output from a lane policy decision.
+ * Combines profile selection, specialised path hint, and default budget.
+ * Produced by getDecisionOutput(); consumed by retrieval input assembly.
+ */
+export interface LaneDecisionOutput {
+  /** The resolved retrieval profile for channel dispatch and fusion. */
+  readonly profile: RetrievalProfile;
+
+  /**
+   * Specialised retrieval path hint when retrieval mode implies a dedicated retriever.
+   * - 'producer_browse' → call BrowseRetrieverPort.browseProducer()
+   * - 'region_browse'   → call BrowseRetrieverPort.browseRegion()
+   * - 'compare_candidates' → call CompareRetrieverPort.compareAgainstAnchor()
+   * - undefined         → use standard CandidatePoolPort.generate()
+   */
+  readonly specializedPathHint?: 'producer_browse' | 'region_browse' | 'compare_candidates' | undefined;
+}
 
 /**
  * Selects the appropriate {@link RetrievalProfile} based on query class,
@@ -228,21 +280,49 @@ export class RetrievalProfileService {
     }
 
     // Mode-aware selection (T4.1 / T4.3 / T4.5)
+    // retrievalMode can be an ExecutionRetrievalMode string OR the internal runtime
+    // value 'relative', which CandidatePoolService.resolveRuntimeRetrievalMode() emits
+    // when compare_candidates + an anchor entity are both present.
+    // NOTE: 'learned_sparse' is a RetrievalChannel string, NOT a valid ExecutionRetrievalMode
+    // or runtime mode value — LEARNED_SPARSE_HYBRID is reached only via the
+    // queryClass === 'semantic_preference' branch below, or via queryFamily policy.
     if (retrievalMode !== undefined) {
-      if (retrievalMode === 'learned_sparse') {
-        return LEARNED_SPARSE_HYBRID;
-      }
-      if (retrievalMode === 'producer_browse') {
+      const useLegacyHeuristics = isLegacyHeuristicRetrievalMode(retrievalMode);
+      const normalizedRetrievalMode =
+        useLegacyHeuristics ? undefined : retrievalMode;
+      if (normalizedRetrievalMode === undefined) {
+        // Legacy V1 aliases like semantic_hybrid/hybrid_search intentionally
+        // fall through to the queryClass/route heuristics below.
+      } else
+      if (normalizedRetrievalMode === 'entity_lookup' || normalizedRetrievalMode === 'entity_resolution') {
+        return EXACT_SAFE_FALLBACK;
+      } else if (normalizedRetrievalMode === 'attribute_search' || normalizedRetrievalMode === 'constraint_filter') {
+        return HYBRID_DEFAULT;
+      } else if (normalizedRetrievalMode === 'producer_browse') {
         return BROWSE_DEFAULT;
-      }
-      if (retrievalMode === 'region_browse') {
+      } else if (normalizedRetrievalMode === 'region_browse') {
         return REGION_BROWSE;
-      }
-      if (retrievalMode === 'compare_candidates') {
+      } else if (normalizedRetrievalMode === 'compare_candidates') {
         return COMPARE_DEFAULT;
-      }
-      if (retrievalMode === 'relative') {
+      // 'relative' is an internal runtime mode emitted by CandidatePoolService when
+      // compare_candidates has an anchor entity; routes to the sparse-only post-filter path.
+      } else if (normalizedRetrievalMode === 'relative') {
         return RELATIVE_FILTER;
+      // recommendation mode uses anchor_similarity channel (aligns with FAMILY_POLICY mapping)
+      } else if (normalizedRetrievalMode === 'recommendation') {
+        return MIXED_ANCHOR;
+      } else if (normalizedRetrievalMode === 'similar_items') {
+        return MIXED_ANCHOR;
+      } else if (normalizedRetrievalMode === 'no_match_detection') {
+        return HYBRID_DEFAULT;
+      }
+
+      // If none of the above matched, log to catch unrecognized modes
+      if (!useLegacyHeuristics) {
+        bootstrapLogger.warn(
+          { retrievalMode },
+          '[RetrievalProfileService] Unrecognized retrievalMode; falling through to queryClass heuristics',
+        );
       }
     }
 
@@ -276,5 +356,29 @@ export class RetrievalProfileService {
     queryFamily?: QueryFamily,
   ): readonly RetrievalChannel[] {
     return this.getProfile(queryClass, route, retrievalMode, queryFamily).channelMix;
+  }
+
+  /**
+   * E2-U2: Return the full lane decision output — profile + specialised path hint.
+   * This is the authoritative single call for retrieval input assembly:
+   * callers get both the profile (for channel dispatch / fusion) and
+   * any specialised path hint (for dedicated retriever dispatch).
+   */
+  getDecisionOutput(
+    queryClass: QueryClass,
+    route: string,
+    retrievalMode?: string,
+    queryFamily?: QueryFamily,
+  ): LaneDecisionOutput {
+    const profile = this.getProfile(queryClass, route, retrievalMode, queryFamily);
+    const specializedPathHint =
+      retrievalMode === 'producer_browse' ? 'producer_browse'
+      : retrievalMode === 'region_browse' ? 'region_browse'
+      : retrievalMode === 'compare_candidates' ? 'compare_candidates'
+      : undefined;
+    return {
+      profile,
+      ...(specializedPathHint !== undefined ? { specializedPathHint } : {}),
+    };
   }
 }

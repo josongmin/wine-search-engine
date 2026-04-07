@@ -12,10 +12,19 @@ export interface SearchExecutorEvaluationResult {
   readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
+export interface SearchExecutionOptions {
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
 export interface SearchExecutorPort {
-  execute(request: SearchRequest, requestId: string): Promise<SearchExecutorResult>;
+  execute(
+    request: SearchRequest,
+    requestId: string,
+    options?: SearchExecutionOptions,
+  ): Promise<SearchExecutorResult>;
   executeForEvaluation?(
     request: SearchRequest,
     requestId: string,
+    options?: SearchExecutionOptions,
   ): Promise<SearchExecutorEvaluationResult>;
 }

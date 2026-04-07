@@ -2,6 +2,20 @@ import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 
 /**
+ * E3-U5: Calibrator feature source contract.
+ *
+ * A future ranked-route calibrator MUST read its input features exclusively from:
+ *   1. {@link RankedResult}  — finalScore, rank, componentScores (semantic,
+ *      popularity, attributeAlignment, preferenceAlignment, anchorSimilarity)
+ *   2. {@link FunnelMetrics} — retentionRate, rerankChangedTopK, stageLatencies
+ *   3. QueryPlanV1.queryClass + CompiledWineQuery.execution.effectiveRoute
+ *
+ * The calibrator MUST NOT read Ranker-internal private state (e.g. ScoredEntry,
+ * coarsePruneCount pre-aggregation) or call any Ranker method directly.
+ * All calibrator-relevant signals are observable from ranked results + plan alone.
+ */
+
+/**
  * Breakdown of individual scoring components for a ranked candidate.
  *
  * Each component corresponds to a signal defined in RFC-000 section 6.

@@ -1,6 +1,7 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { EntityId } from '../../shared/types/index.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 
 /**
  * Profile of the anchor entity used for similarity-based retrieval.
@@ -21,6 +22,10 @@ export interface AnchorProfile {
  * Input contract for the hybrid retrieval pipeline (RFC-012).
  *
  * Produced by the query planner and consumed by {@link CandidatePoolService}.
+ *
+ * E2-U3: compiled hint fields allow retrieval to use ExecutionCompiler decisions
+ * without re-deriving route/mode from QueryPlanV1. When present, consumers should
+ * prefer compiledRetrievalMode over queryPlan.retrievalMode.
  */
 export interface HybridRetrievalInput {
   /** The full query plan driving this retrieval. */
@@ -28,6 +33,13 @@ export interface HybridRetrievalInput {
 
   /** Execution route — determines retrieval profile selection. */
   readonly route: 'hybrid' | 'mixed';
+
+  /**
+   * E2-U3: Compiled retrieval mode from EngineExecutionContract.
+   * When present, this is the authoritative mode for profile selection and
+   * specialised path dispatch. Absent for legacy callers using V1-only path.
+   */
+  readonly compiledRetrievalMode?: ExecutionRetrievalMode | undefined;
 
   /** Lexical query strings for sparse (BM25) retrieval. */
   readonly lexicalQueries: readonly string[];

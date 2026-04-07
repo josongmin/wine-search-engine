@@ -2,10 +2,10 @@
  * E2E hard/edge-case scenarios for the Wine Search Engine.
  *
  * Covers Korean entity resolution, semantic/hybrid modes, mixed-intent queries,
- * Content-Type enforcement, X-Request-Id uniqueness under concurrency, and
- * fine-grained snapshot-mismatch scenarios per RFC-015.
+ * parser/content-type edge behavior, and fine-grained snapshot-mismatch scenarios per RFC-015.
  *
- * Does NOT duplicate tests already in search-api.test.ts.
+ * Does NOT duplicate tests already owned by search-api.search/search-api.secondary,
+ * search-api.ops, or infrastructure invariants/contracts.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -16,6 +16,7 @@ import {
   postJson,
   getSearchDecisionStatus,
 } from './helpers/http-transport.js';
+import { fetchReplaySnapshot, makeReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 
@@ -179,29 +180,6 @@ describe('Mixed-mode / natural-language queries', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Content-Type enforcement', () => {
-  it('POST with content-type: text/plain → 415', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'text/plain' },
-      payload: JSON.stringify({ query: 'Opus One' }),
-    });
-
-    expect(response.statusCode).toBe(415);
-  });
-
-  it('POST with no content-type header → 400 or 415 (not 200)', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      // Deliberately omit content-type
-      payload: JSON.stringify({ query: 'Opus One' }),
-    });
-
-    expect(response.statusCode).not.toBe(200);
-    expect([400, 415]).toContain(response.statusCode);
-  });
-
   it('POST with content-type: application/json; charset=utf-8 → 200', async () => {
     const response = await server.app.inject({
       method: 'POST',
@@ -212,73 +190,6 @@ describe('Content-Type enforcement', () => {
 
     expect(response.statusCode).toBe(200);
   });
-
-  it('POST with uppercase APPLICATION/JSON → handled (Fastify is case-sensitive for content-type)', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      headers: { 'content-type': 'APPLICATION/JSON' },
-      payload: JSON.stringify({ query: 'Opus One' }),
-    });
-
-    // Fastify's content-type parser is case-sensitive: uppercase APPLICATION/JSON
-    // is treated as an unsupported media type → 415
-    // Note: HTTP spec (RFC 7231) specifies content-type is case-insensitive, but
-    // Fastify's default parser only registers lowercase 'application/json'.
-    expect([200, 415]).toContain(response.statusCode);
-  });
-
-  it('POST with no Content-Type → 415 with UNSUPPORTED_MEDIA_TYPE code', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v1/search',
-      // Deliberately omit content-type
-      payload: JSON.stringify({ query: 'Opus One' }),
-    });
-
-    // Must reject (not 200)
-    expect(response.statusCode).not.toBe(200);
-    expect([400, 415]).toContain(response.statusCode);
-
-    // When 415, must have UNSUPPORTED_MEDIA_TYPE error code
-    if (response.statusCode === 415) {
-      const body = JSON.parse(response.body) as Record<string, unknown>;
-      const error = body['error'] as Record<string, unknown>;
-      expect(error['code']).toBe('UNSUPPORTED_MEDIA_TYPE');
-    }
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// X-Request-Id uniqueness under concurrency
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('X-Request-Id uniqueness under concurrency', () => {
-  it('10 concurrent POST /v1/search requests → all X-Request-Id values are unique', async () => {
-    const requests = Array.from({ length: 10 }, () =>
-      server.app.inject({
-        method: 'POST',
-        url: '/v1/search',
-        headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({ query: 'Opus One 2018' }),
-      }),
-    );
-
-    const responses = await Promise.all(requests);
-    const requestIds = responses.map((r) => {
-      const val = r.headers['x-request-id'];
-      return Array.isArray(val) ? (val[0] ?? '') : (val ?? '');
-    });
-
-    // All IDs must be non-empty
-    for (const id of requestIds) {
-      expect(id).toBeTruthy();
-    }
-
-    // All IDs must be unique
-    const uniqueIds = new Set(requestIds);
-    expect(uniqueIds.size).toBe(10);
-  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -286,73 +197,18 @@ describe('X-Request-Id uniqueness under concurrency', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('Snapshot field mismatch (RFC-015)', () => {
-  const MATCHING_SNAPSHOT = {
-    model_versions: {},
-    index_versions: {},
-    policy_rule_version: '1.0.0',
-    threshold_profile_id: 'default',
-    planner_version: '1.0.0',
-    feature_flags: {},
-  };
+  const MATCHING_SNAPSHOT = makeReplaySnapshot();
 
-  it('policy_rule_version mismatch → 409 SNAPSHOT_MISMATCH', async () => {
+  it.each([
+    ['policy_rule_version mismatch', { ...MATCHING_SNAPSHOT, policy_rule_version: '9.9.9' }],
+    ['threshold_profile_id mismatch', { ...MATCHING_SNAPSHOT, threshold_profile_id: 'custom-profile' }],
+    ['planner_version mismatch', { ...MATCHING_SNAPSHOT, planner_version: '2.0.0' }],
+    ['model_versions mismatch', { ...MATCHING_SNAPSHOT, model_versions: { embedding: 'bge-m3-v2' } }],
+    ['feature_flags mismatch (extra flag)', { ...MATCHING_SNAPSHOT, feature_flags: { experimental: true } }],
+  ])('%s → 409 SNAPSHOT_MISMATCH', async (_label, decision_snapshot) => {
     const res = await post('/v1/search/replay', {
       query: 'Opus One 2018',
-      decision_snapshot: { ...MATCHING_SNAPSHOT, policy_rule_version: '9.9.9' },
-    });
-
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-  });
-
-  it('threshold_profile_id mismatch → 409 SNAPSHOT_MISMATCH', async () => {
-    const res = await post('/v1/search/replay', {
-      query: 'Opus One 2018',
-      decision_snapshot: { ...MATCHING_SNAPSHOT, threshold_profile_id: 'custom-profile' },
-    });
-
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-  });
-
-  it('planner_version mismatch → 409 SNAPSHOT_MISMATCH', async () => {
-    const res = await post('/v1/search/replay', {
-      query: 'Opus One 2018',
-      decision_snapshot: { ...MATCHING_SNAPSHOT, planner_version: '2.0.0' },
-    });
-
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-  });
-
-  it('model_versions mismatch → 409 SNAPSHOT_MISMATCH', async () => {
-    const res = await post('/v1/search/replay', {
-      query: 'Opus One 2018',
-      decision_snapshot: {
-        ...MATCHING_SNAPSHOT,
-        model_versions: { embedding: 'bge-m3-v2' },
-      },
-    });
-
-    expect(res.statusCode).toBe(409);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(error['code']).toBe('SNAPSHOT_MISMATCH');
-  });
-
-  it('feature_flags mismatch (extra flag) → 409 SNAPSHOT_MISMATCH', async () => {
-    const res = await post('/v1/search/replay', {
-      query: 'Opus One 2018',
-      decision_snapshot: {
-        ...MATCHING_SNAPSHOT,
-        feature_flags: { experimental: true },
-      },
+      decision_snapshot,
     });
 
     expect(res.statusCode).toBe(409);
@@ -362,9 +218,12 @@ describe('Snapshot field mismatch (RFC-015)', () => {
   });
 
   it('exact matching snapshot → 200 (control case)', async () => {
+    const matchingSnapshot = await fetchReplaySnapshot(server.app, {
+      query: 'Opus One 2018',
+    });
     const res = await post('/v1/search/replay', {
       query: 'Opus One 2018',
-      decision_snapshot: MATCHING_SNAPSHOT,
+      decision_snapshot: matchingSnapshot,
     });
 
     expect(res.statusCode).toBe(200);

@@ -1,4 +1,15 @@
 /**
+ * E5-U6: Shadow-First Path Definition
+ *
+ * New ranking models/weights MUST run in shadow mode (observe-only) before
+ * promotion. Shadow execution passes through this evaluator so results can be
+ * recorded for offline analysis without affecting live callers.
+ *
+ * Shadow results are logged but NOT returned to callers; promotion gate (E5-U7)
+ * controls graduation from shadow mode to production traffic.
+ */
+
+/**
  * SearchPipelinePort adapter for connecting evaluation runner to search use case.
  *
  * Wraps SearchUseCase and converts search responses to evaluation format,

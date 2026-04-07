@@ -37,6 +37,16 @@ export interface RankingStagePipelineOptions {
 }
 
 /**
+ * E3-U1: RankingStagePipeline is the **authoritative outer seam** for all
+ * ranking execution. Route-specific callers (search.usecase, hybrid.usecase,
+ * batch-search) MUST go through this pipeline — not directly through Ranker.
+ *
+ * Stage ownership:
+ *   Stage A (coarse_prune)   — hard-constraint / integrity gate, delegated to Ranker
+ *   Stage B (primary_rank)   — signal aggregation + sort, delegated to Ranker
+ *   Stage C (precision_rerank) — cross-encoder/LTR, delegated to Ranker
+ *   Stage D (policy_apply)   — policy insertion seam (T5.5a), owned here
+ *
  * T5.1: Stage-aware ranking pipeline wrapper.
  *
  * Delegates actual scoring to the existing Ranker but wraps
@@ -156,7 +166,8 @@ export class RankingStagePipeline {
     if (this.policy !== undefined) {
       const policyContext: PolicyContext = {
         queryClass: input.queryPlan.queryClass,
-        effectiveRoute: input.queryPlan.route,
+        // compiled-first: use compiled execution contract when available (E3-U1)
+        effectiveRoute: input.compiled?.execution.effectiveRoute ?? input.queryPlan.route,
       };
       const policyOutput = this.policy.apply(results, policyContext);
       // policyApplied = true only when the policy actually changed something:

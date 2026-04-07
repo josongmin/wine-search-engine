@@ -136,10 +136,14 @@ export class FusionService {
 
     // Sort descending by retrievalFusionScore; break ties by entityId (lexicographic ascending)
     // for deterministic output ordering.
+    // NaN guard: treat non-finite scores as 0 so the comparator always returns a
+    // well-defined numeric value and the sort remains deterministic.
     candidates.sort((a, b) => {
-      const scoreDiff = b.retrievalFusionScore - a.retrievalFusionScore;
-      if (scoreDiff !== 0) return scoreDiff;
-      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+      const aScore = Number.isFinite(a.retrievalFusionScore) ? a.retrievalFusionScore : 0;
+      const bScore = Number.isFinite(b.retrievalFusionScore) ? b.retrievalFusionScore : 0;
+      const diff = bScore - aScore;
+      if (diff !== 0) return diff;
+      return String(a.entityId).localeCompare(String(b.entityId));
     });
 
     return candidates;

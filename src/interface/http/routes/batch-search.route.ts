@@ -88,6 +88,7 @@ function normalizeBatchResponse(
  * Error codes:
  * - POLICY_BLOCKED: Query blocked by policy
  * - QUERY_PARSE_ERROR: Query validation failed
+ * - QUERY_PARSE_ERROR: Comparison-style queries are not supported in batch items
  * - RETRIEVAL_TIMEOUT: Request exceeded timeout
  * - INTERNAL_ERROR: Unexpected server error
  *

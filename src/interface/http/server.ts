@@ -21,6 +21,7 @@ import {
 } from './routes/search-v2.route.js';
 import {
   registerHealthRoutes,
+  startEventLoopHeartbeat,
   type HealthRouteOptions,
 } from './routes/health.route.js';
 import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
@@ -290,6 +291,14 @@ export async function createServer(
 
   // Register global error handler
   app.setErrorHandler(errorHandler);
+
+  // Start event-loop heartbeat for /health liveness check.
+  // The interval is cleared when the server closes so the process can exit cleanly.
+  const heartbeatInterval = startEventLoopHeartbeat();
+  app.addHook('onClose', (_instance, done) => {
+    clearInterval(heartbeatInterval);
+    done();
+  });
 
   // Register routes
   registerHealthRoutes(app, options?.health);

@@ -26,6 +26,11 @@ export function rrfFuse(
 
   for (const ranking of rankings) {
     for (const [entityId, rank] of ranking) {
+      // rank must be a positive integer (1-based). A rank of 0 or negative
+      // would make 1/(k+rank) produce Infinity (when rank == -k) or a
+      // negative score (when rank < -k), corrupting the fused ranking.
+      // Skip such entries defensively rather than propagating bad values.
+      if (rank <= 0) continue;
       const current = fused.get(entityId) ?? 0;
       fused.set(entityId, current + 1 / (k + rank));
     }

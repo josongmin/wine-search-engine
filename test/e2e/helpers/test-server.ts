@@ -6,7 +6,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { createServer } from '../../../src/interface/http/server.js';
+import { createServer, type ServerOptions } from '../../../src/interface/http/server.js';
 import {
   createTestContainer,
   type TestContainerOptions,
@@ -26,6 +26,7 @@ export interface TestServer {
 
 export interface TestServerOptions {
   readonly containerOptions?: TestContainerOptions;
+  readonly serverOptions?: Pick<ServerOptions, 'rateLimitMax'>;
 }
 
 type FixtureDoc = (typeof TEST_DOCUMENTS)[number];
@@ -195,6 +196,7 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
   const app = await createServer(parts.container, {
     logLevel: 'silent',
     nodeEnv: 'test',
+    ...options.serverOptions,
   });
 
   // Initialize Fastify (registers routes, plugins, etc.)

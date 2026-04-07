@@ -246,7 +246,14 @@ export function registerInterpretV2Route(
       const parsed = parseContractBody(request, InterpretV2RouteContract);
       const interpretRequest = toInterpretRequest(parsed);
 
-      const result = await deps.interpretUseCase.execute({ ...interpretRequest, buildV2: true });
+      const result = await deps.interpretUseCase.execute({
+        ...interpretRequest,
+        buildV2: true,
+        requestId: getRequestId(request),
+      });
+      // NOTE: result.compiled (CompiledWineQuery) is available here but not currently used.
+      // E1-U4 intent: callers can use compiled.execution.effectiveRoute for route-gating decisions.
+      // If explain-mode or route-conditional response shaping is needed, read compiled here.
       const v2Response = result.v2Explain;
 
       sendContractResponse(request, reply, 200, InterpretResponseV2Schema, v2Response);

@@ -1,6 +1,6 @@
 # Appendix H: Code-Level Implementation Map
 
-이 appendix는 `apr-7-v0.4`를 실제 코드 변경 순서로 내린 문서다.  
+이 appendix는 `apr-7-v0.4`의 실제 코드 변경 순서를 판단하기 위한 code-level 근거 문서다.  
 핵심 질문은 아래다.
 
 1. 지금 런타임의 실제 currency는 무엇인가
@@ -8,6 +8,12 @@
 3. 어떤 파일부터 어떤 순서로 바꿔야 blast radius를 통제할 수 있는가
 
 이번 정리는 추상 설계가 아니라, 실제 코드 스캔을 바탕으로 작성한다.
+
+주의:
+
+- 실제 구현 착수 순서와 PR-sized backlog는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 authoritative execution backlog로 둔다.
+- 이 문서는 backlog 자체가 아니라, **어디가 유지할 seam이고 어디가 교체 지점인지**를 설명하는 code-level map이다.
+- 두 문서가 충돌하면 `01-epic-task-backlog.md`를 우선한다.
 
 ---
 
@@ -366,7 +372,7 @@ SearchUseCase
   현재 profile chooser -> lane policy table engine으로 승격
 
 - [human-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/human-response-builder-v2.ts)
-  현재 보조 builder -> 실제 search response contract 후보로 승격
+  현재 보조 builder -> human-oriented V2 sidecar / adapter surface로 승격
 
 ### 3.3 접거나 통합
 
@@ -440,7 +446,7 @@ SearchUseCase
 
 | Planned area | Tag | Rule |
 | --- | --- | --- |
-| V2 human/machine response 연결 | `promote` | [human-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/human-response-builder-v2.ts), [machine-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/machine-response-builder-v2.ts)를 실제 runtime contract로 승격한다 |
+| V2 human/machine response 연결 | `promote` | [human-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/human-response-builder-v2.ts), [machine-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/machine-response-builder-v2.ts)를 sidecar / adapter surface로 승격하되, 초기 메인 runtime contract는 [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts)를 유지한다 |
 | V1-centric mapping | `thin_adapter` | [search-usecase-map-result-items.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-map-result-items.ts), [search-v2.route.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/search-v2.route.ts)는 호환용 얇은 레이어로 축소한다 |
 | explanation / transparency surface | `reuse` | [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts), [clarification.ts](/Users/songmin/wine-search-engine/src/domain/response/model/clarification.ts), [counterfactual.ts](/Users/songmin/wine-search-engine/src/domain/response/model/counterfactual.ts), [interpret-explain-adapter-v2.ts](/Users/songmin/wine-search-engine/src/application/search/interpret-explain-adapter-v2.ts)를 재사용한다 |
 | tool / contract surface | `reuse` | [http-route-contract-catalog.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/http-route-contract-catalog.ts), [route-contracts.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/route-contracts.ts), [claude-tools.route.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/claude-tools.route.ts), [tool-schemas.ts](/Users/songmin/wine-search-engine/src/interface/claude-tools/tool-schemas.ts)를 source of truth로 유지한다 |
@@ -464,29 +470,36 @@ SearchUseCase
 
 ---
 
-## 4. implementation sequence: 파일 단위 우선순위
+## 4. implementation sequence: 코드 hotspot reference
+
+주의:
+
+- 이 섹션은 authoritative backlog가 아니라, wave별로 어떤 파일이 hotspot인지 보여주는 reference다.
+- 실제 task 순서, 선행조건, 병렬화는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 따른다.
+- 아래 hotspot 목록은 “여기를 먼저 보라”는 뜻이지, 초기 에픽에서 포트 시그니처를 바로 바꾸라는 뜻이 아니다.
 
 ### Wave 1. Query contract migration
 
 #### 목표
 
-- `QueryPlanV1` 중심 실행을 끝낸다
-- canonical query schema + execution contract를 runtime SSOT로 만든다
+- `QueryPlanV1`을 즉시 제거하지 않고 dual-currency bridge를 먼저 만든다
+- canonical query schema + execution contract를 runtime SSOT로 병행 진입시킨다
 
 #### 먼저 바꿀 파일
 
-1. [search-pipeline-deps.port.ts](/Users/songmin/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts)
-2. [container-core.ts](/Users/songmin/wine-search-engine/src/config/container-core.ts)
-3. [planner-v1-adapter.ts](/Users/songmin/wine-search-engine/src/config/planner-v1-adapter.ts)
-4. [execution-compiler.ts](/Users/songmin/wine-search-engine/src/domain/query/service/execution-compiler.ts)
-5. [search.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/search.usecase.ts)
+1. [execution-compiler.ts](/Users/songmin/wine-search-engine/src/domain/query/service/execution-compiler.ts)
+2. [search.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/search.usecase.ts)
+3. [search-usecase-route-resolution.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-route-resolution.ts)
+4. [search-usecase-decision-snapshot.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-decision-snapshot.ts)
+5. [planner-v1-adapter.ts](/Users/songmin/wine-search-engine/src/config/planner-v1-adapter.ts)
 6. [interpret.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/interpret.usecase.ts)
 
 #### 결과
 
-- planner는 understanding을 반환
-- compiler가 execution contract를 붙인다
-- usecase는 compiled query를 소비한다
+- planner 포트는 초기 에픽에서 유지된다
+- compiler가 planner 결과 옆에 execution contract를 붙인다
+- usecase는 compiled summary를 우선 소비하되 `QueryPlanV1`은 compatibility surface로 남긴다
+- [search-pipeline-deps.port.ts](/Users/songmin/wine-search-engine/src/application/search/port/search-pipeline-deps.port.ts)와 `QueryPlannerPort`는 초기 에픽에서 thin adapter로 유지하고, 조기 포트 migration은 하지 않는다
 - [search.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/search.usecase.ts)와 [hybrid.usecase.ts](/Users/songmin/wine-search-engine/src/application/search/hybrid.usecase.ts)의 shared pre/post-route seam 위에서 먼저 바꾸고, entrypoint별 fork를 만들지 않는다
 - [constraint-sat.ts](/Users/songmin/wine-search-engine/src/domain/query/service/constraint-sat.ts), [planner.ts](/Users/songmin/wine-search-engine/src/domain/query/service/planner.ts), [policy-compiler.ts](/Users/songmin/wine-search-engine/src/domain/query/service/policy-compiler.ts), [decision-engine.ts](/Users/songmin/wine-search-engine/src/domain/decision/service/decision-engine.ts)의 existing contradiction/uncertainty/policy spine을 그대로 재사용하고, taxonomy/difficulty SSOT의 feature source로 승격한다
 - [search-usecase-planner-context.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-planner-context.ts), [query-budget.ts](/Users/songmin/wine-search-engine/src/domain/query/model/query-budget.ts)의 existing session/budget carry-through seam를 재사용하고, 새 session/budget DTO stack은 만들지 않는다
@@ -556,7 +569,7 @@ SearchUseCase
 - CE gated narrow application
 - uncertainty / difficulty / value-aware gate
 - [decision-engine.ts](/Users/songmin/wine-search-engine/src/domain/decision/service/decision-engine.ts), [abstain-policy.ts](/Users/songmin/wine-search-engine/src/domain/query/service/abstain-policy.ts), [admission-gate.ts](/Users/songmin/wine-search-engine/src/domain/decision/service/admission-gate.ts)의 existing safety spine 위에 retrieval/rerank policy를 연결한다
-- [search-usecase-ranked-route-resolve.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-ranked-route-resolve.ts)의 synthetic ranked-route confidence를 대체할 ranked-route calibrator를 도입한다
+- [search-usecase-ranked-route-resolve.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-ranked-route-resolve.ts)의 synthetic ranked-route confidence를 대체할 future ranked-route calibrator의 insertion point와 feature contract를 준비한다. 실제 activation은 eval/governance wiring 이후로 미룬다
 - quality-enriched result policy는 [drinking-window-predictor.ts](/Users/songmin/wine-search-engine/src/infrastructure/ml/drinking-window-predictor.ts), [drinking-window-confidence.ts](/Users/songmin/wine-search-engine/src/application/search/drinking-window-confidence.ts), [search-usecase-map-result-items.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-map-result-items.ts)의 existing model/evidence/blocking seam를 재사용한다
 - [ranking-stage-pipeline.ts](/Users/songmin/wine-search-engine/src/domain/ranking/service/ranking-stage-pipeline.ts), [funnel-metrics.ts](/Users/songmin/wine-search-engine/src/domain/ranking/service/funnel-metrics.ts), [ranking-runtime-signal.ts](/Users/songmin/wine-search-engine/src/domain/ranking/model/ranking-runtime-signal.ts)의 existing stage/funnel observability contract를 유지한 채, 내부 책임만 [ranker.ts](/Users/songmin/wine-search-engine/src/domain/ranking/service/ranker.ts)에서 분리한다
 - [default-ranking-policy.ts](/Users/songmin/wine-search-engine/src/domain/ranking/service/default-ranking-policy.ts)의 existing producer-diversity/truncation hook를 새 policy engine의 초기 구현 기반으로 재사용한다
@@ -566,20 +579,22 @@ SearchUseCase
 #### 목표
 
 - query-family별 explanation obligation 도입
-- human/machine result contract를 실제 search route에 연결
+- 새 response builder를 만들지 않고 V1/V2 bridge와 sidecar surface를 정리
 
 #### 먼저 바꿀 파일
 
-1. [human-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/human-response-builder-v2.ts)
+1. [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts)
 2. [machine-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/machine-response-builder-v2.ts)
-3. [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts)
+3. [human-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/human-response-builder-v2.ts)
 4. [search-v2.route.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/search-v2.route.ts)
 5. [search-usecase-map-result-items.ts](/Users/songmin/wine-search-engine/src/application/search/search-usecase-map-result-items.ts)
 
 #### 결과
 
-- V1 projection 중심 구조에서 벗어난다
+- [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts)는 초기/중기 메인 runtime contract로 유지한다
+- V2 human/machine builder는 sidecar / adapter 승격 대상으로 정렬한다
 - explanation이 evidence contract 위에서 작동한다
+- 새 response/explanation builder stack은 만들지 않는다
 - [result-item.ts](/Users/songmin/wine-search-engine/src/domain/response/model/result-item.ts), [clarification.ts](/Users/songmin/wine-search-engine/src/domain/response/model/clarification.ts), [response-builder.ts](/Users/songmin/wine-search-engine/src/domain/response/service/response-builder.ts), [interpret-explain-adapter-v2.ts](/Users/songmin/wine-search-engine/src/application/search/interpret-explain-adapter-v2.ts)의 existing response surface를 승격한다
 - [search-response.ts](/Users/songmin/wine-search-engine/src/domain/response/model/search-response.ts), [counterfactual.ts](/Users/songmin/wine-search-engine/src/domain/response/model/counterfactual.ts), [specialized-route-observability.ts](/Users/songmin/wine-search-engine/src/application/search/specialized-route-observability.ts)의 parsedConstraints / retrieval provenance / fallback transparency contract를 그대로 재사용한다
 - [search-v2.route.ts](/Users/songmin/wine-search-engine/src/interface/http/routes/search-v2.route.ts), [machine-response-builder-v2.ts](/Users/songmin/wine-search-engine/src/domain/response/service/machine-response-builder-v2.ts), [tool-executor.ts](/Users/songmin/wine-search-engine/src/interface/claude-tools/tool-executor.ts)의 existing human/machine/explain V2 seam를 버리지 않고 정렬한다
@@ -846,8 +861,11 @@ CE, LTR, late interaction이 계속 한 파일에 쌓인다.
 3. query taxonomy를 observability label로만 두는 방식
 runtime policy SSOT가 따로 생겨 또 분산된다.
 
-4. response contract를 마지막까지 V1 projection으로 두는 방식
-explanation/evidence 설계가 계속 왜곡된다.
+4. `human-response-builder-v2`를 초기 메인 runtime contract로 간주하는 방식
+response contract가 이중화되고 `ResponseBuilder`와의 책임 경계가 흐려진다.
+
+5. ranked-route calibrator를 eval wiring 전에 먼저 넣는 방식
+confidence semantics를 고정하기 전에 calibration을 붙여 다시 synthetic path를 만들 위험이 있다.
 
 ---
 

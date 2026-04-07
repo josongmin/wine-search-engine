@@ -88,46 +88,71 @@ function makeRankedResult(overrides?: Partial<RankedResult>): RankedResult {
   };
 }
 
+function buildSingleResultResponse(overrides?: Partial<RankedResult>) {
+  return buildMachineResponseV2({
+    queryId: 'q-test',
+    results: [makeRankedResult(overrides)],
+  });
+}
+
 // ── buildMachineResponseV2 ──────────────────────────────────────────────────
 
 describe('buildMachineResponseV2', () => {
-  it('returns version "2" and responseType "machine" in envelope', () => {
+  it.each([
+    ['version', (response: ReturnType<typeof buildSingleResultResponse>) => response.version, '2'],
+    [
+      'responseType',
+      (response: ReturnType<typeof buildSingleResultResponse>) => response.responseType,
+      'machine',
+    ],
+    [
+      'queryId',
+      (response: ReturnType<typeof buildSingleResultResponse>) => response.queryId,
+      'q-abc-123',
+    ],
+  ])('maps envelope %s', (_field, read, expected) => {
     const params: MachineResponseBuildParamsV2 = {
       queryId: 'q-abc-123',
       results: [makeRankedResult()],
     };
     const response = buildMachineResponseV2(params);
-    expect(response.version).toBe('2');
-    expect(response.responseType).toBe('machine');
-    expect(response.queryId).toBe('q-abc-123');
+    expect(read(response)).toBe(expected);
   });
 
-  it('sets version "2" and responseType "machine" on each result item', () => {
-    const params: MachineResponseBuildParamsV2 = {
-      queryId: 'q-001',
-      results: [makeRankedResult()],
-    };
-    const response = buildMachineResponseV2(params);
-    const item = response.results[0];
+  it.each([
+    ['version', (item: NonNullable<ReturnType<typeof buildSingleResultResponse>['results'][number]>) => item.version, '2'],
+    [
+      'responseType',
+      (item: NonNullable<ReturnType<typeof buildSingleResultResponse>['results'][number]>) => item.responseType,
+      'machine',
+    ],
+  ])('maps item %s', (_field, read, expected) => {
+    const item = buildSingleResultResponse().results[0];
     expect(item).toBeDefined();
-    expect(item!.version).toBe('2');
-    expect(item!.responseType).toBe('machine');
+    expect(read(item!)).toBe(expected);
   });
 
-  it('maps entityId, canonicalLabel, rank, and finalScore', () => {
-    const ranked = makeRankedResult({ rank: 3, finalScore: 0.77 });
-    const response = buildMachineResponseV2({ queryId: 'q-002', results: [ranked] });
-    const item = response.results[0];
-    expect(item!.entityId).toBe('wine-001');
-    expect(item!.canonicalLabel).toBe('Opus One 2018');
-    expect(item!.rank).toBe(3);
-    expect(item!.finalScore).toBe(0.77);
+  it.each([
+    ['entityId', (item: NonNullable<ReturnType<typeof buildSingleResultResponse>['results'][number]>) => item.entityId, 'wine-001'],
+    [
+      'canonicalLabel',
+      (item: NonNullable<ReturnType<typeof buildSingleResultResponse>['results'][number]>) => item.canonicalLabel,
+      'Opus One 2018',
+    ],
+    ['rank', (item: NonNullable<ReturnType<typeof buildSingleResultResponse>['results'][number]>) => item.rank, 3],
+    [
+      'finalScore',
+      (item: NonNullable<ReturnType<typeof buildSingleResultResponse>['results'][number]>) => item.finalScore,
+      0.77,
+    ],
+  ])('maps result %s', (_field, read, expected) => {
+    const item = buildSingleResultResponse({ rank: 3, finalScore: 0.77 }).results[0];
+    expect(read(item!)).toBe(expected);
   });
 
   it('serialises full ComponentScores object (all required numeric fields present)', () => {
     const scores = makeComponentScores({ anchorSimilarity: 0.61 });
-    const ranked = makeRankedResult({ componentScores: scores });
-    const response = buildMachineResponseV2({ queryId: 'q-003', results: [ranked] });
+    const response = buildSingleResultResponse({ componentScores: scores });
     const cs = response.results[0]!.componentScores;
     expect(cs.entityIntegrity).toBe(0.95);
     expect(cs.anchorSimilarity).toBe(0.61);
@@ -142,16 +167,13 @@ describe('buildMachineResponseV2', () => {
   });
 
   it('omits anchorSimilarity from componentScores when undefined', () => {
-    const scores = makeComponentScores();
-    // anchorSimilarity is not set, so it should be absent
-    const ranked = makeRankedResult({ componentScores: scores });
-    const response = buildMachineResponseV2({ queryId: 'q-004', results: [ranked] });
+    const response = buildSingleResultResponse({ componentScores: makeComponentScores() });
     const cs = response.results[0]!.componentScores;
     expect('anchorSimilarity' in cs).toBe(false);
   });
 
   it('maps evidenceItems to structured { signal, value, weight } objects', () => {
-    const response = buildMachineResponseV2({ queryId: 'q-005', results: [makeRankedResult()] });
+    const response = buildSingleResultResponse();
     const items = response.results[0]!.evidenceItems;
     expect(items).toHaveLength(3);
 
@@ -175,9 +197,7 @@ describe('buildMachineResponseV2', () => {
   });
 
   it('includes retrievalProvenance string when RankedResult has it', () => {
-    const provenance = makeCandidateProvenance();
-    const ranked = makeRankedResult({ retrievalProvenance: provenance });
-    const response = buildMachineResponseV2({ queryId: 'q-006', results: [ranked] });
+    const response = buildSingleResultResponse({ retrievalProvenance: makeCandidateProvenance() });
     const item = response.results[0]!;
     expect(item.retrievalProvenance).toBeDefined();
     expect(typeof item.retrievalProvenance).toBe('string');
@@ -188,20 +208,18 @@ describe('buildMachineResponseV2', () => {
   });
 
   it('serializes retrieval provenance with repeated anchor_similarity labels only once', () => {
-    const ranked = makeRankedResult({
+    const response = buildSingleResultResponse({
       retrievalProvenance: {
         ...makeCandidateProvenance(),
         channels: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],
       },
     });
-    const response = buildMachineResponseV2({ queryId: 'q-006b', results: [ranked] });
     const item = response.results[0]!;
     expect(item.retrievalProvenance).toContain('anchor_similarity,dense_semantic');
   });
 
   it('omits retrievalProvenance when RankedResult has none', () => {
-    const ranked = makeRankedResult({ retrievalProvenance: undefined });
-    const response = buildMachineResponseV2({ queryId: 'q-007', results: [ranked] });
+    const response = buildSingleResultResponse({ retrievalProvenance: undefined });
     const item = response.results[0]!;
     expect('retrievalProvenance' in item).toBe(false);
   });
@@ -225,8 +243,7 @@ describe('buildMachineResponseV2', () => {
   });
 
   it('output validates against SearchResponseV2MachineSchema (Zod)', () => {
-    const ranked = makeRankedResult({ retrievalProvenance: makeCandidateProvenance() });
-    const response = buildMachineResponseV2({ queryId: 'q-zod', results: [ranked] });
+    const response = buildSingleResultResponse({ retrievalProvenance: makeCandidateProvenance() });
     const result = SearchResponseV2MachineSchema.safeParse(response);
     expect(result.success).toBe(true);
   });
@@ -254,50 +271,55 @@ describe('WineToolExecutor — V2 migration seam (T6.3)', () => {
     };
   }
 
-  it('returns V1 SearchResponseV1 when v2Options is absent', async () => {
+  it.each([
+    {
+      name: 'returns V1 SearchResponseV1 when v2Options is absent',
+      requestId: 'req-001',
+      v2Options: undefined,
+      assertDeps: (deps: WineToolExecutorDeps) => {
+        expect(deps.searchUseCase.execute).toHaveBeenCalledOnce();
+      },
+      assertResult: (result: unknown) => {
+        expect(result).toMatchObject({ queryType: 'search' });
+      },
+    },
+    {
+      name: 'returns SearchResponseV2Machine when useV2MachineFormat is true',
+      requestId: 'req-v2',
+      v2Options: {
+        useV2MachineFormat: true,
+        rankedResults: [makeRankedResult()],
+        queryId: 'q-v2-001',
+      } satisfies ToolExecutionV2Options,
+      assertDeps: (deps: WineToolExecutorDeps) => {
+        expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+      },
+      assertResult: (result: unknown) => {
+        expect(result).toMatchObject({
+          version: '2',
+          responseType: 'machine',
+          queryId: 'q-v2-001',
+        });
+      },
+    },
+    {
+      name: 'falls back to requestId as queryId when v2Options.queryId is omitted',
+      requestId: 'fallback-req-id',
+      v2Options: {
+        useV2MachineFormat: true,
+        rankedResults: [makeRankedResult()],
+      } satisfies ToolExecutionV2Options,
+      assertDeps: () => undefined,
+      assertResult: (result: unknown) => {
+        expect(result).toMatchObject({ queryId: 'fallback-req-id' });
+      },
+    },
+  ])('$name', async ({ requestId, v2Options, assertDeps, assertResult }) => {
     const deps = makeDeps();
     const executor = new WineToolExecutor(deps);
-    const result = await executor.execute('search_wines', { query: 'Opus One' }, 'req-001');
-    // V1 path: searchUseCase.execute was called
-    expect(deps.searchUseCase.execute).toHaveBeenCalledOnce();
-    expect(result).toMatchObject({ queryType: 'search' });
-  });
-
-  it('returns SearchResponseV2Machine when useV2MachineFormat is true', async () => {
-    const deps = makeDeps();
-    const executor = new WineToolExecutor(deps);
-
-    const ranked = makeRankedResult();
-    const v2Options: ToolExecutionV2Options = {
-      useV2MachineFormat: true,
-      rankedResults: [ranked],
-      queryId: 'q-v2-001',
-    };
-
-    const result = await executor.execute('search_wines', { query: 'Opus One' }, 'req-v2', v2Options);
-
-    // V1 use case must NOT have been called
-    expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
-
-    // Result must be a V2 machine envelope
-    expect(result).toMatchObject({
-      version: '2',
-      responseType: 'machine',
-      queryId: 'q-v2-001',
-    });
-  });
-
-  it('falls back to requestId as queryId when v2Options.queryId is omitted', async () => {
-    const deps = makeDeps();
-    const executor = new WineToolExecutor(deps);
-
-    const v2Options: ToolExecutionV2Options = {
-      useV2MachineFormat: true,
-      rankedResults: [makeRankedResult()],
-    };
-
-    const result = await executor.execute('search_wines', { query: 'Opus One' }, 'fallback-req-id', v2Options);
-    expect(result).toMatchObject({ queryId: 'fallback-req-id' });
+    const result = await executor.execute('search_wines', { query: 'Opus One' }, requestId, v2Options);
+    assertDeps(deps);
+    assertResult(result);
   });
 
   it('v2Options does not affect non-search_wines tools', async () => {

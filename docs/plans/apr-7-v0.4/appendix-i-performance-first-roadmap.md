@@ -17,6 +17,12 @@
 이 문서는 [appendix-b-evidence-and-benchmarks.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-b-evidence-and-benchmarks.md)의 근거와,  
 [appendix-a-current-state.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-a-current-state.md), [appendix-h-implementation-map.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-h-implementation-map.md)의 코드 스캔 결과를 합쳐서 작성한다.
 
+주의:
+
+- 이 문서는 **performance-first prioritization lens**다.
+- 실제 구현 착수 순서와 PR-sized backlog는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 따른다.
+- 두 문서가 충돌하면 `01-epic-task-backlog.md`를 우선한다.
+
 ---
 
 ## 1. 성능 “보장 라인”의 의미
@@ -167,7 +173,8 @@
 
 ### E. Learning / rollout loop
 
-이건 마지막이 아니라, 앞 wave들과 병렬로 깔아야 하는 control plane이다.
+이건 성능 관점에서는 마지막이 아니라, 앞 wave들과 함께 미리 고려해야 하는 control plane이다.  
+다만 실제 execution backlog에서는 dependency order에 맞춰 뒤 에픽으로 배치될 수 있다.
 
 핵심 재사용 자산:
 
@@ -354,10 +361,11 @@ retrieval/ranking core는 deterministic하게 유지하는 게 맞다.
 
 ---
 
-## 5. 추천 roadmap: 실제 wave 재배치
+## 5. 추천 roadmap: performance wave lens
 
 현재 코드 상태를 기준으로,  
-앞으로의 roadmap은 아래처럼 두 층으로 보는 게 맞다.
+성능 관점에서는 아래처럼 두 층으로 보는 게 맞다.  
+이 섹션은 authoritative execution backlog가 아니라, **quality uplift likelihood 기준의 wave lens**다.
 
 ### Foundation wave
 
@@ -433,7 +441,8 @@ continuous optimization loop.
 ## 7. 한 줄 결론
 
 코드 기준으로 봤을 때,  
-앞으로의 roadmap은 아래 라인으로 고정하는 게 맞다.
+성능 관점의 우선 적용 라인은 아래처럼 보는 게 맞다.  
+실제 execution order와 dependency는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 따른다.
 
 1. `compiled execution contract + taxonomy/difficulty SSOT`
 2. `learned sparse promotion + retrieval input wiring + budget table`

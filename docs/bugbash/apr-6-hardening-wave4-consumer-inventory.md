@@ -6,8 +6,8 @@
 
 | consumer_name | location | surface | reads_decision_trace_ref | reads_authority_trace_ref | reads_runtime_correlation_ref | reads_execution_mode | reads_blocking_eligible | reads_degradation_reasons | migration_status | owner | notes |
 |---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|
-| Search API e2e contract | `test/e2e/search-api.test.ts` | http | yes | yes | yes | yes | yes | yes | partial | engine | Phase A co-exposure still asserted. |
-| Edge-case HTTP contract | `test/e2e/edge-cases.test.ts` | http | yes | no | no | no | no | no | not_started | engine | Still checks deprecated `decision_trace_ref` directly. |
+| Search API e2e contract | `test/e2e/search-api.search.test.ts` + `test/e2e/search-api.secondary.test.ts` + `test/e2e/search-api.ops.test.ts` | http | yes | yes | yes | yes | yes | yes | partial | engine | Phase A co-exposure still asserted. |
+| Edge-case HTTP contract | `test/e2e/edge-cases.input.test.ts` + `test/e2e/edge-cases.protocol.test.ts` | http | yes | no | no | no | no | no | not_started | engine | Resolve-edge contract still checks deprecated `decision_trace_ref` directly. |
 | Search response Zod schema | `src/interface/http/schemas/search-response.schema.ts` | http | yes | yes | yes | yes | yes | yes | partial | engine | Deprecated `decision_trace_ref` retained in schema. |
 | Replay fixture HTTP subset | `test/e2e/search-replay-fixtures.test.ts` | eval | no | yes | yes | yes | no | yes | partial | engine | Self-contained lane asserts `authority_trace_ref` / `runtime_correlation_ref` presence through fixture helper; runtime-required lane lives in a dedicated suite. |
 | Replay fixture loader | `test/replay-fixtures/search/run-search-fixture.ts` | eval | no | no | no | yes | no | yes | complete | engine | Wave 4 fixture v2 contract. |

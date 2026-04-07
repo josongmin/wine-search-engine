@@ -97,7 +97,7 @@ export class SignalComputer {
     }
 
     // Rank-based similarity: 1/(1 + log(rank))
-    const rankSimilarity = 1 / (1 + Math.log(anchorRank));
+    const rankSimilarity = 1 / (1 + (anchorRank > 0 ? Math.log(anchorRank) : 0));
 
     // Scale by anchor confidence — less confident anchor means less
     // reliable similarity signal
@@ -263,7 +263,7 @@ export class SignalComputer {
     }
 
     // log-decay: 1 / (1 + log(rank))
-    return clamp01(1 / (1 + Math.log(sparseRank)));
+    return clamp01(1 / (1 + (sparseRank > 0 ? Math.log(sparseRank) : 0)));
   }
 
   /**

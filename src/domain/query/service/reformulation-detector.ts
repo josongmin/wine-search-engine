@@ -1,6 +1,14 @@
 import type { SessionContext } from '../model/session-context.js';
 
 /**
+ * E6-U1: Session Signal Scope — Reformulation Detector
+ * This detector is the SSOT for reformulation type classification.
+ * High-value signals produced here: reformulationType, priorContextCarry, ambiguityCarryForward.
+ * Do NOT add low-signal session fields (raw timestamps, scroll position, etc.) to this detector.
+ * See session-context.ts for the SessionContext model contract.
+ */
+
+/**
  * Classification of how the current query relates to the previous query
  * in a multi-turn session, per RFC-005 section 8.4.1.
  *

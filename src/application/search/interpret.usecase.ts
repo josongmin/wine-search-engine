@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
 import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
@@ -7,6 +8,7 @@ import type { InterpretRequest } from './interpret-request.dto.js';
 import type { InterpretResponseV2 } from '../../domain/response/model/result-item-v2.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
+import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { buildInterpretResponseV2 } from './interpret-explain-adapter-v2.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
@@ -35,6 +37,8 @@ export interface InterpretUseCaseDeps {
 export interface InterpretResultWithV2 {
   readonly v1Plan: QueryPlanV1;
   readonly v2Explain: InterpretResponseV2;
+  /** Compiled execution contract for callers that need route/mode decisions (E1-U4). */
+  readonly compiled: CompiledWineQuery;
 }
 
 /**
@@ -49,10 +53,14 @@ export interface InterpretResultWithV2 {
 export class InterpretUseCase {
   constructor(private readonly deps: InterpretUseCaseDeps) {}
 
-  async execute(request: InterpretRequest & { readonly buildV2?: boolean | undefined }): Promise<QueryPlanV1>;
-  async execute(request: InterpretRequest & { readonly buildV2: true }): Promise<InterpretResultWithV2>;
   async execute(
-    request: InterpretRequest & { readonly buildV2?: boolean | undefined },
+    request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
+  ): Promise<QueryPlanV1>;
+  async execute(
+    request: InterpretRequest & { readonly buildV2: true; readonly requestId?: string | undefined },
+  ): Promise<InterpretResultWithV2>;
+  async execute(
+    request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
   ): Promise<QueryPlanV1 | InterpretResultWithV2> {
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
@@ -62,15 +70,25 @@ export class InterpretUseCase {
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
-    const plan = await this.deps.queryPlanner.plan(
-      effectiveQuery,
-      buildPlannerContextFromSearchRequest({
-        query: effectiveQuery,
-        context: request.context,
-        sessionContext: request.sessionContext,
-        queryBudget: request.queryBudget,
-      }),
-    );
+    const plannerContext = buildPlannerContextFromSearchRequest({
+      query: effectiveQuery,
+      context: request.context,
+      sessionContext: request.sessionContext,
+      queryBudget: request.queryBudget,
+    });
+
+    let plan: QueryPlanV1;
+    let compiled: CompiledWineQuery | undefined;
+    if (this.deps.queryPlanner.planWithCompiled !== undefined) {
+      const result = await this.deps.queryPlanner.planWithCompiled(effectiveQuery, plannerContext);
+      plan = result.v1;
+      compiled = result.compiled;
+    } else {
+      plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
+      if (request.buildV2 === true) {
+        compiled = compileFromLegacyPlan(plan);
+      }
+    }
 
     pipelineDebug(
       {
@@ -78,6 +96,12 @@ export class InterpretUseCase {
         query_class: plan.queryClass,
         route: plan.route,
         retrieval_mode: plan.retrievalMode,
+        ...(compiled !== undefined
+          ? {
+              compiled_route: compiled.execution.effectiveRoute,
+              compiled_mode: compiled.execution.effectiveRetrievalMode,
+            }
+          : {}),
         query_preview: sanitizeQueryForDebug(effectiveQuery),
         build_v2: request.buildV2 === true,
       },
@@ -88,12 +112,16 @@ export class InterpretUseCase {
       return plan;
     }
 
-    const queryId = `interpret-${Date.now()}`;
-    const observabilitySlice = planToObservabilitySlice(queryId, plan);
+    if (compiled === undefined) {
+      compiled = compileFromLegacyPlan(plan);
+    }
+
+    const queryId = request.requestId?.trim() || `interpret-${Date.now()}`;
+    const observabilitySlice = planToObservabilitySlice(queryId, plan, compiled);
     const activeChannels = retrievalProfileService.getChannelMix(
       plan.queryClass,
-      plan.route,
-      plan.retrievalMode,
+      compiled.execution.effectiveRoute,
+      compiled.execution.effectiveRetrievalMode,
       observabilitySlice.queryFamily,
     );
 
@@ -107,6 +135,6 @@ export class InterpretUseCase {
       softConstraints: plan.constraints.soft,
     });
 
-    return { v1Plan: plan, v2Explain };
+    return { v1Plan: plan, v2Explain, compiled };
   }
 }

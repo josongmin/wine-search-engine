@@ -131,6 +131,7 @@ describe('ResolveUseCase', () => {
     const result = await useCase.execute({ query: 'Opus One 2018', requestId: 'req-123' });
 
     expect(result.decision_trace_ref).toContain('req-123');
+    expect(result.authority_trace_ref).toBe(result.decision_trace_ref);
     expect(result.request_id).toBe('req-123');
   });
 
@@ -257,6 +258,7 @@ describe('ResolveUseCase', () => {
       candidates: [],
       topEntity: undefined,
       decision_trace_ref: 'resolve:req-constraint:constraint_heavy:constraint-sat',
+      authority_trace_ref: 'resolve:req-constraint:constraint_heavy:constraint-sat',
       request_id: 'req-constraint',
     });
     expect(entityResolver.resolve).not.toHaveBeenCalled();

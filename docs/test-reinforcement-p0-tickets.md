@@ -78,7 +78,9 @@ Why:
 Files:
 
 - `test/e2e/helpers/`
-- `test/e2e/search-api.test.ts`
+- `test/e2e/search-api.search.test.ts`
+- `test/e2e/search-api.secondary.test.ts`
+- `test/e2e/search-api.ops.test.ts`
 - `test/e2e/schema-contract.test.ts`
 - `src/interface/http/schemas/search-response.schema.ts`
 
@@ -114,9 +116,11 @@ Why:
 
 Files:
 
-- `test/e2e/infrastructure.test.ts`
+- `test/e2e/infrastructure.invariants.test.ts`
+- `test/e2e/infrastructure.contracts.test.ts`
 - `test/e2e/response-invariants.test.ts`
-- `test/e2e/edge-cases.test.ts`
+- `test/e2e/edge-cases.input.test.ts`
+- `test/e2e/edge-cases.protocol.test.ts`
 - `test/e2e/user-journeys.test.ts`
 - `test/e2e/realistic-scenarios.test.ts`
 - `test/e2e/golden-set.test.ts`
@@ -132,10 +136,14 @@ Tasks:
 Definition of done:
 
 - no failing assertion is caused by camelCase vs snake_case drift
-- `test/e2e/search-api.test.ts`
+- `test/e2e/search-api.search.test.ts`
+- `test/e2e/search-api.secondary.test.ts`
+- `test/e2e/search-api.ops.test.ts`
 - `test/e2e/schema-contract.test.ts`
-- `test/e2e/infrastructure.test.ts`
-- `test/e2e/edge-cases.test.ts`
+- `test/e2e/infrastructure.invariants.test.ts`
+- `test/e2e/infrastructure.contracts.test.ts`
+- `test/e2e/edge-cases.input.test.ts`
+- `test/e2e/edge-cases.protocol.test.ts`
   are transport-correct and stable
 
 Depends on:

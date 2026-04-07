@@ -309,6 +309,36 @@ describe('InterpretResponseV2Schema', () => {
     const result = InterpretResponseV2Schema.safeParse(v1Shape);
     expect(result.success).toBe(false);
   });
+
+  it('rejects snake_case wire-format V2 interpret payloads on the camelCase schema', () => {
+    const snakeCaseWireShape = {
+      query_id: 'qid-interp-789',
+      query_text: 'full-bodied red under $50',
+      detected_intent: 'attribute_search',
+      decomposition_strategy: 'single',
+      active_channels: ['dense_semantic'],
+      applied_constraints: ['soft:price_band'],
+      ranking_signals: ['semantic_similarity'],
+      confidence: 0.88,
+      version: '2',
+      response_type: 'interpret',
+    };
+
+    const result = InterpretResponseV2Schema.safeParse(snakeCaseWireShape);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects mixed V1/V2 interpret payloads that combine planner fields with V2 explain fields', () => {
+    const mixedShape = {
+      ...validInterpretResponseV2,
+      raw_query: 'full-bodied red under $50',
+      route: 'hybrid',
+      retrieval_mode: 'attribute_search',
+    };
+
+    const result = InterpretResponseV2Schema.safeParse(mixedShape);
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('V1/V2 schema independence', () => {

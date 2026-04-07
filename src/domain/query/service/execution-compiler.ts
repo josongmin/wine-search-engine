@@ -7,6 +7,7 @@ import type {
 } from '../model/engine-execution-contract.js';
 import type { QueryPlanV2 } from '../model/query-plan.js';
 import { planV2ToUnderstandingSnapshot as toQueryUnderstandingSnapshot } from '../model/query-plan.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Input to the ExecutionCompiler.
@@ -64,6 +65,16 @@ const HYBRID_FORCED_MODES = new Set<ExecutionRetrievalMode>([
   'recommendation',
 ]);
 
+function normalizeLegacyRetrievalMode(rawMode: string): ExecutionRetrievalMode | undefined {
+  switch (rawMode) {
+    case 'semantic_hybrid':
+    case 'hybrid_search':
+      return 'attribute_search';
+    default:
+      return undefined;
+  }
+}
+
 /**
  * ExecutionCompiler — converts a QueryPlanV2 into a CompiledWineQuery.
  *
@@ -92,8 +103,23 @@ export class ExecutionCompiler {
     const query = toQueryUnderstandingSnapshot(plan);
 
     // 2. Map RetrievalMode → ExecutionRetrievalMode (1:1 same string values).
-    const effectiveRetrievalMode =
-      plan.suggestedRetrievalMode as ExecutionRetrievalMode;
+    // Guard: if the incoming mode is not a recognised ExecutionRetrievalMode
+    // (e.g. legacy V1 strings like 'semantic_hybrid' or 'hybrid_search' coming
+    // through the V1→V2 shim), fall back to 'attribute_search' so the compiler
+    // never crashes on an unknown mode.
+    const rawMode = plan.suggestedRetrievalMode as string;
+    const aliasedMode = normalizeLegacyRetrievalMode(rawMode);
+    const effectiveRetrievalMode: ExecutionRetrievalMode =
+      (rawMode in DEFAULT_BUDGETS)
+        ? (rawMode as ExecutionRetrievalMode)
+        : aliasedMode ?? 'attribute_search';
+
+    if (!(rawMode in DEFAULT_BUDGETS) && aliasedMode === undefined) {
+      bootstrapLogger.warn(
+        { rawMode, query: plan.rawQuery },
+        '[ExecutionCompiler] Unknown retrievalMode; falling back to attribute_search defaults',
+      );
+    }
 
     // 3. Determine effective route + route source.
     //    Priority: API override > special-mode forcing > planner suggestion.
@@ -108,6 +134,12 @@ export class ExecutionCompiler {
       // Certain modes always execute on the hybrid route.
       effectiveRoute = 'hybrid';
       routeSource = 'planner';
+      if (effectiveRoute !== plan.suggestedRoute) {
+        bootstrapLogger.debug(
+          { suggestedRoute: plan.suggestedRoute, effectiveRoute, retrievalMode: plan.suggestedRetrievalMode },
+          '[ExecutionCompiler] HYBRID_FORCED_MODES override: planner suggested route was overridden',
+        );
+      }
     } else {
       // Use the planner's suggestion.
       effectiveRoute = plan.suggestedRoute;

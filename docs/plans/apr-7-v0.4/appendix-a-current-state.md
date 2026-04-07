@@ -1075,7 +1075,7 @@ offline eval과 learning-loop promotion도 생각보다 더 운영형에 가깝�
 
 1. 새 발견이 나와도 전체 결론을 뒤집지 않는다
 2. [appendix-j-existing-asset-registry.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/appendix-j-existing-asset-registry.md)에만 `reuse/promote/thin_adapter/remove_later`로 흡수한다
-3. 구현 우선순위는 계속 아래 4개에 고정한다
+3. 상위 구조 우선순위는 계속 아래 4개에 고정한다
 
 - runtime SSOT 전환
 - lane policy table
@@ -1695,7 +1695,8 @@ response V2도 한 덩어리로 없는 것이 아니라, human과 machine이 다
 
 ## 12. 바로 다음 단계의 정리 포인트
 
-이 상태에서 우선순위는 명확하다.
+이 상태에서 상위 정리 포인트는 명확하다.  
+실제 구현 착수 순서와 태스크 dependency는 [01-epic-task-backlog.md](/Users/songmin/wine-search-engine/docs/plans/apr-7-v0.4/01-epic-task-backlog.md)를 따른다.
 
 1. `taxonomy SSOT`
 Q1~Q7 또는 동급 taxonomy를 공식 계약으로 올린다.

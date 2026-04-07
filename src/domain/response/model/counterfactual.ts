@@ -2,10 +2,8 @@ import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EntityId, DecisionSnapshot } from '../../shared/types/index.js';
 import type {
   SpecializedFallbackReason,
-} from '../../../application/search/specialized-fallback-reason.js';
-import type {
   SpecializedRouteName,
-} from '../../../application/search/specialized-route-observability.js';
+} from './specialized-route.js';
 
 /**
  * A candidate that was considered but ultimately rejected, with the reason.

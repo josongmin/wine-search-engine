@@ -19,9 +19,27 @@ import type {
 import type { ResponseBuildParams } from '../../../domain/response/service/response-builder.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { MixedQueryResult } from '../../../domain/mixed/model/mixed-query-result.js';
+import type { CompiledWineQuery } from '../../../domain/query/model/compiled-wine-query.js';
+
+/**
+ * Combined plan + compiled result for implementations that can produce both in one call.
+ * Avoids the V2-is-discarded problem in PlannerV1Adapter by exposing compiled alongside V1.
+ */
+export interface PlanWithCompiledResult {
+  readonly v1: QueryPlanV1;
+  readonly compiled: CompiledWineQuery;
+}
 
 export interface QueryPlannerPort {
   plan(query: string, context?: PlannerContext): Promise<QueryPlanV1>;
+
+  /**
+   * Optional extension: plan and compile in one call.
+   * When available, consumers should prefer this over `plan()` to get the
+   * ExecutionCompiler-produced CompiledWineQuery without re-deriving it downstream.
+   * Falls back to `plan()` + local compilation when not implemented.
+   */
+  planWithCompiled?(query: string, context?: PlannerContext): Promise<PlanWithCompiledResult>;
 }
 
 export interface EntityResolverPort {
@@ -78,5 +96,5 @@ export interface ResponseBuilderPort {
 }
 
 export interface MixedSolverPort {
-  solve(queryPlan: QueryPlanV1): Promise<MixedQueryResult>;
+  solve(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): Promise<MixedQueryResult>;
 }

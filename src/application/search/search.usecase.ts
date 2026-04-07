@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -15,10 +16,14 @@ import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/reques
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
+import { buildInternalErrorAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
-import type { SearchExecutorEvaluationResult } from './port/search-executor.port.js';
+import type {
+  SearchExecutionOptions,
+  SearchExecutorEvaluationResult,
+} from './port/search-executor.port.js';
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
@@ -119,30 +124,42 @@ export class SearchUseCase {
   async execute(
     request: SearchRequest,
     requestId: string,
+    options?: SearchExecutionOptions,
   ): Promise<SearchResponseV1 | ComparisonSearchResponse> {
-    const execution = await this.executeInternal(request, requestId, false);
+    const execution = await this.executeInternal(request, requestId, false, options);
     return execution.response;
   }
 
   async executeForEvaluation(
     request: SearchRequest,
     requestId: string,
+    options?: SearchExecutionOptions,
   ): Promise<SearchExecutorEvaluationResult> {
-    return this.executeInternal(request, requestId, true);
+    return this.executeInternal(request, requestId, true, options);
   }
 
   private async executeInternal(
     request: SearchRequest,
     requestId: string,
     includeEvalProvenance: boolean,
+    options?: SearchExecutionOptions,
   ): Promise<SearchExecutorEvaluationResult> {
     const startTime = Date.now();
     try {
-      return await this.executeInternalUnsafe(request, requestId, includeEvalProvenance, startTime);
+      return await this.executeInternalUnsafe(
+        request,
+        requestId,
+        includeEvalProvenance,
+        startTime,
+        options,
+      );
     } catch (err) {
       // Known domain errors (PolicyBlockedError, WrongResolveError, etc.) are deliberate
       // pipeline signals — propagate them so the caller can handle them correctly.
       if (err instanceof DomainError) {
+        throw err;
+      }
+      if (err instanceof Error && err.name === 'AbortError') {
         throw err;
       }
 
@@ -160,7 +177,11 @@ export class SearchUseCase {
       );
 
       const snapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
-      const errorTraceRef = `decision:error:${requestId}`;
+      const errorTraceRef = buildInternalErrorAuthorityTraceRef({
+        snapshot,
+        requestId,
+        failureReason: 'INTERNAL_INCONSISTENCY',
+      });
 
       const response: SearchResponseV1 = {
         queryType: 'search',
@@ -200,7 +221,13 @@ export class SearchUseCase {
     requestId: string,
     includeEvalProvenance: boolean,
     startTime: number,
+    options?: SearchExecutionOptions,
   ): Promise<SearchExecutorEvaluationResult> {
+    if (options?.abortSignal?.aborted) {
+      const error = new Error('Search execution aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
 
     pipelineDebug(
       {
@@ -233,6 +260,12 @@ export class SearchUseCase {
       decomposedSearch: this.deps.decomposedSearch,
     });
 
+    if (options?.abortSignal?.aborted) {
+      const error = new Error('Search execution aborted');
+      error.name = 'AbortError';
+      throw error;
+    }
+
     if (preRoute.outcome === 'return') {
       pipelineDebug(
         {
@@ -252,23 +285,25 @@ export class SearchUseCase {
       return { response };
     }
 
-    const { plan } = preRoute;
+    const { plan, compiled } = preRoute;
 
-    // Step 2: Determine effective route (top-level retrieval_mode takes precedence)
+    // Step 2: Determine effective route.
+    // compiled.execution is the authoritative source (ExecutionCompiler-resolved).
+    // buildSearchRouteResolutionContext provides the plannerSuggestedMode and source metadata.
     const {
       effectiveRoute,
       plannerSuggestedMode,
       retrievalModeSource,
-    } = buildSearchRouteResolutionContext(plan, request);
+    } = buildSearchRouteResolutionContext(plan, request, compiled);
 
     pipelineDebug(
       {
         step: 'search.route_resolution',
         query_class: plan.queryClass,
         effective_route: effectiveRoute,
+        compiled_retrieval_mode: compiled.execution.effectiveRetrievalMode,
         planner_suggested_mode: plannerSuggestedMode,
         retrieval_mode_source: retrievalModeSource,
-        plan_route: plan.route,
       },
       'pipeline route context',
     );
@@ -285,10 +320,10 @@ export class SearchUseCase {
       effectiveRoute,
       {
         executeEntity: () => this.executeEntityRoute(plan),
-        executeHybrid: () => this.executeHybridRoute(plan),
+        executeHybrid: () => this.executeHybridRoute(plan, compiled),
         executeMixed: async () => {
           try {
-            const mixedResult = await this.deps.mixedSolver.solve(plan);
+            const mixedResult = await this.deps.mixedSolver.solve(plan, compiled);
             return mixedQueryResultToSearchRouteExecution(plan, mixedResult);
           } catch (error) {
             if (error instanceof MixedRouteDegradationError) {
@@ -300,9 +335,13 @@ export class SearchUseCase {
       },
     );
 
+    // TODO: options.explain and options.clarification are not yet implemented in the main search path.
+    // When implemented, they should be forwarded to ResponseBuilder.build() and/or the DecisionEngine.
+
     // Steps 3b–7: Entropy abstain (RFC-013) → DecisionEngine → response → cache write
     const response = await runSearchPostRoutePhase({
       plan,
+      compiled,
       request,
       requestId,
       startTime,
@@ -347,6 +386,10 @@ export class SearchUseCase {
   /**
    * Entity-only route: run EntityResolver directly.
    */
+  // NOTE: compiled (CompiledWineQuery) is intentionally not passed to the entity route.
+  // Entity resolution uses QueryPlanV1 policy fields directly (requireExact, allowApproximate).
+  // compiled.execution.budget and provenancePolicy are NOT applied to entity queries.
+  // To extend compiled-first semantics to entity route, thread compiled through EntityResolver.
   private async executeEntityRoute(plan: QueryPlanV1): Promise<EntityResolveResult> {
     const candidateEntities = await buildResolverCandidatesFromPlan(plan, this.deps.entityLookup);
 
@@ -390,6 +433,7 @@ export class SearchUseCase {
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
+    compiled?: CompiledWineQuery,
   ): Promise<{
     resolveResult: EntityResolveResult;
     rankedResults: readonly RankedResult[];
@@ -405,12 +449,14 @@ export class SearchUseCase {
         compareRetriever: this.deps.compareRetriever,
       },
       (p) => this.executeEntityRoute(p),
+      compiled,
     );
 
     const ranked = await runHybridRankingPipeline(
       plan,
       retrieval.candidates,
       this.deps.ranker,
+      compiled,
     );
 
     if (retrieval.routeDegradation === undefined) {

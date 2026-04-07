@@ -1,5 +1,6 @@
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
 import type { SearchRequest } from './search-request.dto.js';
 import { buildConstraintContradictionResponseParams } from './search-usecase-execute-builders.js';
@@ -18,10 +19,12 @@ export function buildConstraintContradictionExitParams(
   startTime: number,
   snapshotVersions: SnapshotVersionInjection,
   conflictPairs: ReadonlyArray<readonly [NormalizedConstraint, NormalizedConstraint]>,
+  compiled?: CompiledWineQuery,
 ): ResponseBuildParams {
-  const routeCtx = buildSearchRouteResolutionContext(plan, request);
+  const routeCtx = buildSearchRouteResolutionContext(plan, request, compiled);
   return buildConstraintContradictionResponseParams({
     plan,
+    ...(compiled !== undefined ? { compiled } : {}),
     snapshot: buildDecisionSnapshotFromPlan(plan, snapshotVersions),
     requestId,
     startTime,

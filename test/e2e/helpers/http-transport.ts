@@ -48,6 +48,14 @@ export async function postJson(
   };
 }
 
+export async function postReplayJson(
+  app: FastifyInstance,
+  body: unknown,
+  headers?: Record<string, string>,
+): Promise<JsonHttpResponse> {
+  return postJson(app, '/v1/search/replay', body, headers);
+}
+
 export async function getJson(
   app: FastifyInstance,
   path: string,

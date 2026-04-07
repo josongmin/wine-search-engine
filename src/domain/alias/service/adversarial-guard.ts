@@ -72,8 +72,11 @@ const HOMOGLYPH_MAP: ReadonlyMap<string, string> = new Map([
 
 /**
  * Normalizes a string by replacing known homoglyphs with their ASCII equivalents.
+ *
+ * Exported so callers can perform targeted alias lookups on the deconfused form
+ * before passing existing aliases to {@link AdversarialGuard.checkHomoglyph}.
  */
-function deconfuse(value: string): string {
+export function deconfuse(value: string): string {
   let result = '';
   for (const char of value) {
     const replacement = HOMOGLYPH_MAP.get(char);

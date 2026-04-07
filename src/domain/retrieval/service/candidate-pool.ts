@@ -70,12 +70,19 @@ export class CandidatePoolService {
   async generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
     const queryFamily = deriveQueryFamily(input.queryPlan);
     const retrievalMode = this.resolveRuntimeRetrievalMode(input);
-    const profile = this.profileService.getProfile(
+    // E2-U2: Use getDecisionOutput() as the canonical lane policy entry point.
+    // Returns { profile, specializedPathHint } in one call instead of getProfile() alone.
+    // TODO: specializedPathHint is returned but not yet consumed here.
+    // Specialized routing (BrowseRetrieverPort, CompareRetrieverPort) is currently
+    // handled upstream in search-usecase-hybrid-candidates.ts via compiled.execution.effectiveRetrievalMode.
+    // To use the hint here, read laneDecision.specializedPathHint and dispatch accordingly.
+    const laneDecision = this.profileService.getDecisionOutput(
       input.queryPlan.queryClass,
       input.route,
       retrievalMode,
       queryFamily,
     );
+    const profile = laneDecision.profile;
 
     const anchorConfidence = input.anchorProfile?.anchorConfidence ?? 0;
     const aliasMatchStrength = this.estimateAliasStrength(input);
@@ -276,13 +283,12 @@ export class CandidatePoolService {
   }
 
   private resolveRuntimeRetrievalMode(input: HybridRetrievalInput): string | undefined {
-    if (
-      input.queryPlan.retrievalMode === 'compare_candidates'
-      && input.anchorEntityId !== undefined
-    ) {
+    // E2-U3: compiled-first — prefer compiledRetrievalMode from ExecutionContract
+    const baseMode = input.compiledRetrievalMode ?? input.queryPlan.retrievalMode;
+    if (baseMode === 'compare_candidates' && input.anchorEntityId !== undefined) {
       return 'relative';
     }
-    return input.queryPlan.retrievalMode;
+    return baseMode;
   }
 
   private resolveActiveChannels(

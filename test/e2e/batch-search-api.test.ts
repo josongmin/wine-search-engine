@@ -141,6 +141,68 @@ describe('POST /v1/batch-search', () => {
     expect(failure.error.message).toBe('Query blocked by security policy.');
   });
 
+  it('returns QUERY_PARSE_ERROR for comparison-style batch items instead of surfacing an internal error', async () => {
+    const res = await post('/v1/batch-search', {
+      batch_id: 'batch-compare',
+      requests: [
+        {
+          id: 'compare',
+          query: 'Opus One vs Sassicaia',
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    const parsed = BatchSearchResponseSchema.safeParse(parseJson(res.body));
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+
+    const body = parsed.data;
+    expect(body.batch_id).toBe('batch-compare');
+    expect(body.total).toBe(1);
+    expect(body.succeeded).toBe(0);
+    expect(body.failed).toBe(1);
+    expect(body.batch_status).toBe('failed');
+
+    const [first] = body.results;
+    expect(first.status).toBe('failed');
+    if (first.status !== 'failed') {
+      throw new Error('Expected failed batch item');
+    }
+
+    expect(first.error.code).toBe('QUERY_PARSE_ERROR');
+    expect(first.error.message).toContain('does not support comparison-style queries');
+  });
+
+  it('accepts snake_case aliases inside batch items', async () => {
+    const res = await post('/v1/batch-search', {
+      batch_id: 'batch-snake',
+      requests: [
+        {
+          id: 'snake',
+          query: '풀바디 레드 와인',
+          session_context: {
+            session_id: 'batch-session-1',
+            previous_entities: ['wine:opus-one-2018'],
+          },
+          query_budget: {
+            max_latency_ms: 1000,
+            max_candidates: 10,
+            rerank_limit: 5,
+          },
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(200);
+
+    const parsed = BatchSearchResponseSchema.safeParse(parseJson(res.body));
+    expect(parsed.success).toBe(true);
+  });
+
   it('returns 400 with the RFC-014 error contract for invalid payloads', async () => {
     const res = await post('/v1/batch-search', {
       batch_id: 'batch-789',

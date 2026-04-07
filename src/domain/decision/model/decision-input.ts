@@ -309,6 +309,14 @@ export interface DecisionInput {
    */
   readonly effectiveRoute?: QueryRoute | undefined;
 
+  /**
+   * The retrieval mode that actually executed after compilation / route policy.
+   *
+   * This can differ from `queryPlan.retrievalMode` when compiled execution
+   * semantics override planner-era V1 compatibility fields.
+   */
+  readonly effectiveRetrievalMode?: string | undefined;
+
   /** The resolver's result including its suggested status. */
   readonly resolverResult: EntityResolveResult;
 

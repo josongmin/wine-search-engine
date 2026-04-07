@@ -33,10 +33,14 @@ Own:
 Files:
 
 - `test/e2e/helpers/`
-- `test/e2e/infrastructure.test.ts`
+- `test/e2e/infrastructure.invariants.test.ts`
+- `test/e2e/infrastructure.contracts.test.ts`
 - `test/e2e/response-invariants.test.ts`
-- `test/e2e/edge-cases.test.ts`
-- `test/e2e/search-api.test.ts`
+- `test/e2e/edge-cases.input.test.ts`
+- `test/e2e/edge-cases.protocol.test.ts`
+- `test/e2e/search-api.search.test.ts`
+- `test/e2e/search-api.secondary.test.ts`
+- `test/e2e/search-api.ops.test.ts`
 - `test/e2e/schema-contract.test.ts`
 
 Do not touch:
@@ -192,8 +196,10 @@ Low conflict:
 Medium conflict:
 
 - `test/e2e/helpers/`
-- `test/e2e/edge-cases.test.ts`
-- `test/e2e/infrastructure.test.ts`
+- `test/e2e/edge-cases.input.test.ts`
+- `test/e2e/edge-cases.protocol.test.ts`
+- `test/e2e/infrastructure.invariants.test.ts`
+- `test/e2e/infrastructure.contracts.test.ts`
 
 High conflict:
 

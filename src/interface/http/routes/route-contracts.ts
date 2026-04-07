@@ -109,6 +109,7 @@ export const HealthRouteContract = defineRouteContract({
   operationId: 'system.health',
   responses: {
     200: HealthResponseSchema,
+    503: HealthResponseSchema,
   },
 });
 

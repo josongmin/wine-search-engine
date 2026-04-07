@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -11,7 +12,11 @@ import type { SearchRequest } from './search-request.dto.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
+import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
+import { deriveQueryFamily } from '../../domain/query/model/query-observability-vocab.js';
 import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
@@ -60,6 +65,9 @@ function mergeRouteDegradation(
  */
 export interface SearchPostRouteExecutionContext {
   readonly plan: QueryPlanV1;
+  /** Compiled execution contract from ExecutionCompiler (E1-U3 carrier). When present,
+   *  downstream phases read route/mode decisions from here rather than re-deriving from V1. */
+  readonly compiled?: CompiledWineQuery | undefined;
   readonly request: SearchRequest;
   readonly requestId: string;
   readonly startTime: number;
@@ -67,7 +75,7 @@ export interface SearchPostRouteExecutionContext {
   readonly rankedResults: readonly RankedResult[];
   readonly decisionContext?: SearchRouteDecisionContext | undefined;
   readonly effectiveRoute: QueryRoute;
-  readonly plannerSuggestedMode: QueryRoute;
+  readonly plannerSuggestedMode: string;
   readonly retrievalModeSource: 'planner' | 'api_override';
   readonly abstainPolicy: AbstainPolicy;
   readonly snapshotVersions: SnapshotVersionInjection;
@@ -81,6 +89,8 @@ export interface SearchPostRouteExecutionContext {
 
 export interface RankedRouteDecisionPhaseContext {
   readonly plan: QueryPlanV1;
+  /** Compiled execution contract (E1-U3 carrier). When present, passed to ResponseBuilder for effectiveRetrievalMode. */
+  readonly compiled?: CompiledWineQuery | undefined;
   readonly requestId: string;
   readonly startTime: number;
   readonly resolveResult: EntityResolveResult;
@@ -92,7 +102,7 @@ export interface RankedRouteDecisionPhaseContext {
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
-  readonly plannerSuggestedMode?: QueryRoute | undefined;
+  readonly plannerSuggestedMode?: string | undefined;
   readonly includeCounterfactuals?: boolean | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
@@ -148,6 +158,7 @@ export async function runRankedRouteDecisionPhase(
     ctx.effectiveRoute,
     ctx.decisionContext,
     toAdmissionHonestyContract(mergedRouteDegradation),
+    ctx.compiled?.execution.effectiveRetrievalMode,
   );
   pipelineDebug(
     {
@@ -157,7 +168,129 @@ export async function runRankedRouteDecisionPhase(
     'pipeline decision engine request',
   );
 
-  const decisionOutput = await ctx.decisionEngine.decide(decisionInput, snapshot);
+  let decisionOutput: Awaited<ReturnType<typeof ctx.decisionEngine.decide>>;
+  try {
+    decisionOutput = await ctx.decisionEngine.decide(decisionInput, snapshot);
+  } catch (err) {
+    bootstrapLogger.error(
+      { requestId: ctx.requestId, err },
+      '[runRankedRouteDecisionPhase] decisionEngine.decide() threw unexpectedly; returning degraded failed response',
+    );
+    const failedDecisionOutput = {
+      decisionStatus: 'failed' as const,
+      nextAction: 'fail' as const,
+      decisionConfidence: 0,
+      confidenceSemantics: 'calibrated_decision_confidence' as const,
+      signalSet: {
+        entity_integrity_score: 0,
+        hard_constraint_pass: 0,
+        soft_constraint_score: 0,
+        semantic_relevance_score: 0,
+        preference_alignment_score: 0,
+        popularity_score: 0,
+        availability_score: 0,
+        uncertainty_penalty: 0,
+      },
+      evidenceItems: [],
+      decisionTraceRef: buildAuthorityTraceRef({
+        queryPlan: ctx.plan,
+        snapshot,
+        route: ctx.effectiveRoute,
+        ...(ctx.compiled !== undefined
+          ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
+          : {}),
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        failureReason: 'INTERNAL_INCONSISTENCY',
+      }),
+      decisionSnapshot: snapshot,
+      failureReason: 'INTERNAL_INCONSISTENCY' as const,
+      decisionTrace: {
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        inputs: {
+          queryClass: ctx.plan.queryClass,
+          policy: ctx.plan.policy,
+        },
+        signals: {
+          decisionConfidence: 0,
+          calibratedGap: 0,
+          ambiguity: false,
+        },
+        thresholds: {
+          resolveThreshold: 0,
+          gapThreshold: 0,
+        },
+        versions: {
+          plannerVersion: ctx.plan.plannerVersion,
+          policyRuleVersion: ctx.plan.policyRuleVersion,
+          thresholdProfileId: ctx.plan.thresholdProfileId,
+        },
+        rulesApplied: ['INTERNAL_INCONSISTENCY'],
+        finalReason: `Decision engine threw an unexpected error: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      candidates: [],
+    };
+    const queryTimeMs = Date.now() - ctx.startTime;
+    try {
+      return ctx.responseBuilder.build({
+        queryPlan: ctx.plan,
+        ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+        decisionOutput: failedDecisionOutput,
+        results: [],
+        requestId: ctx.requestId,
+        queryTimeMs,
+        route: ctx.effectiveRoute,
+        ...(ctx.retrievalModeSource !== undefined
+          ? { retrievalModeSource: ctx.retrievalModeSource }
+          : {}),
+        ...(ctx.plannerSuggestedMode !== undefined
+          ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
+          : {}),
+      });
+    } catch (buildErr) {
+      bootstrapLogger.error(
+        { requestId: ctx.requestId, err: buildErr },
+        '[runRankedRouteDecisionPhase] responseBuilder.build() threw in decision-failed fallback; returning bare safe response',
+      );
+      const safeTraceRef = buildAuthorityTraceRef({
+        queryPlan: ctx.plan,
+        snapshot,
+        route: ctx.effectiveRoute,
+        ...(ctx.compiled !== undefined
+          ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
+          : {}),
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        failureReason: 'INTERNAL_INCONSISTENCY',
+      });
+      return {
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route: ctx.effectiveRoute,
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: safeTraceRef,
+          authorityTraceRef: safeTraceRef,
+          decisionSnapshot: snapshot,
+        },
+        results: [],
+        meta: {
+          requestId: ctx.requestId,
+          queryTimeMs,
+          route: ctx.effectiveRoute,
+          version: '1',
+          engine_schema_version: 'search_response_v1',
+          authorityTraceRef: safeTraceRef,
+          runtimeCorrelationRef: ctx.requestId,
+          executionMode: 'degraded',
+          blockingEligible: false,
+        },
+      };
+    }
+  }
 
   pipelineDebug(
     {
@@ -181,33 +314,94 @@ export async function runRankedRouteDecisionPhase(
     ctx.requestId,
     ctx.rankedResults,
   );
-  const counterfactuals = ctx.includeCounterfactuals === false
-    ? []
-    : buildSearchCounterfactuals(
-      ctx.resolveResult,
-      ctx.rankedResults,
-    );
+  // E4-U5: Consult explanation obligation map for the query family.
+  // - If obligation.requiresCounterfactual: counterfactuals MUST be included
+  //   (override even if ctx.includeCounterfactuals is false).
+  // - If !obligation.requiresCounterfactual: respect ctx.includeCounterfactuals
+  //   (default true — backward compatible; caller can explicitly suppress with false).
+  const queryFamily = deriveQueryFamily(ctx.plan, ctx.compiled);
+  const obligation = getExplanationObligation(queryFamily);
+  const shouldIncludeCounterfactuals =
+    queryFamily === 'comparison'
+      ? ctx.includeCounterfactuals === true
+      : obligation.requiresCounterfactual || ctx.includeCounterfactuals !== false;
+  const counterfactuals = shouldIncludeCounterfactuals
+    ? buildSearchCounterfactuals(ctx.resolveResult, ctx.rankedResults)
+    : [];
 
-  const built = ctx.responseBuilder.build({
-    queryPlan: ctx.plan,
-    decisionOutput,
-    results,
-    ...(counterfactuals.length > 0 ? { counterfactuals } : {}),
-    ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
-    requestId: ctx.requestId,
-    queryTimeMs,
-    route: ctx.effectiveRoute,
-    ...(ctx.retrievalModeSource !== undefined
-      ? { retrievalModeSource: ctx.retrievalModeSource }
-      : {}),
-    ...(ctx.plannerSuggestedMode !== undefined
-      ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
-      : {}),
-    ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
-    ...(ctx.specializedRouteObservability !== undefined
-      ? { specializedRouteObservability: ctx.specializedRouteObservability }
-      : {}),
-  });
+  /**
+   * E6-U2: Quality Gate Wiring — compiled fields forwarded to quality gate
+   * Fields from SearchPostRouteExecutionContext forwarded to EvidenceGate:
+   *   - evidenceQuality (from decision input)
+   *   - rerank suppression flag (from RerankGateDecision)
+   * Do NOT pass raw scores or internal ranker state to the quality gate.
+   * compiled.execution.effectiveRoute/effectiveRetrievalMode are forwarded via ResponseBuildParams.
+   */
+  let built: SearchResponseV1;
+  try {
+    built = ctx.responseBuilder.build({
+      queryPlan: ctx.plan,
+      ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+      decisionOutput,
+      results,
+      ...(counterfactuals.length > 0 ? { counterfactuals } : {}),
+      ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+      requestId: ctx.requestId,
+      queryTimeMs,
+      route: ctx.effectiveRoute,
+      ...(ctx.retrievalModeSource !== undefined
+        ? { retrievalModeSource: ctx.retrievalModeSource }
+        : {}),
+      ...(ctx.plannerSuggestedMode !== undefined
+        ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
+        : {}),
+      ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
+      ...(ctx.specializedRouteObservability !== undefined
+        ? { specializedRouteObservability: ctx.specializedRouteObservability }
+        : {}),
+    });
+  } catch (buildErr) {
+    bootstrapLogger.error(
+      { requestId: ctx.requestId, err: buildErr },
+      '[runRankedRouteDecisionPhase] responseBuilder.build() threw; returning bare safe response',
+    );
+    const safeTraceRef = buildAuthorityTraceRef({
+      queryPlan: ctx.plan,
+      snapshot,
+      route: ctx.effectiveRoute,
+      ...(ctx.compiled !== undefined
+        ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
+        : {}),
+      decisionStatus: 'failed',
+      nextAction: 'fail',
+      failureReason: 'INTERNAL_INCONSISTENCY',
+    });
+    return {
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        route: ctx.effectiveRoute,
+        decisionConfidence: 0,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: safeTraceRef,
+        authorityTraceRef: safeTraceRef,
+        decisionSnapshot: snapshot,
+      },
+      results: [],
+      meta: {
+        requestId: ctx.requestId,
+        queryTimeMs,
+        route: ctx.effectiveRoute,
+        version: '1',
+        engine_schema_version: 'search_response_v1',
+        authorityTraceRef: safeTraceRef,
+        runtimeCorrelationRef: ctx.requestId,
+        executionMode: 'degraded',
+        blockingEligible: false,
+      },
+    };
+  }
   /* Unit tests may stub partial SearchResponseV1; skip structured log when snapshot missing. */
   const engineDecision = built.engineDecision as SearchResponseV1['engineDecision'] | undefined;
   const decisionSnapshot = engineDecision?.decisionSnapshot;
@@ -275,27 +469,74 @@ export async function runSearchPostRoutePhase(
       ctx.requestId,
       ctx.rankedResults,
     );
-    const response = ctx.responseBuilder.build(
-      {
-        ...buildEntropyAbstainResponseParams({
-          plan: ctx.plan,
-          snapshot,
-          requestId: ctx.requestId,
-          startTime: ctx.startTime,
-          effectiveRoute: ctx.effectiveRoute,
-          retrievalModeSource: ctx.retrievalModeSource,
-          plannerSuggestedMode: ctx.plannerSuggestedMode,
-          entropy: abstainDecision.entropy,
-          results,
-          rankedResults: ctx.rankedResults,
-          ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
-        }),
-        ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
-        ...(ctx.specializedRouteObservability !== undefined
-          ? { specializedRouteObservability: ctx.specializedRouteObservability }
+    let response: SearchResponseV1;
+    try {
+      response = ctx.responseBuilder.build(
+        {
+          ...buildEntropyAbstainResponseParams({
+            plan: ctx.plan,
+            ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+            snapshot,
+            requestId: ctx.requestId,
+            startTime: ctx.startTime,
+            effectiveRoute: ctx.effectiveRoute,
+            retrievalModeSource: ctx.retrievalModeSource,
+            plannerSuggestedMode: ctx.plannerSuggestedMode,
+            entropy: abstainDecision.entropy,
+            results,
+            rankedResults: ctx.rankedResults,
+            ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
+          }),
+          ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
+          ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
+          ...(ctx.specializedRouteObservability !== undefined
+            ? { specializedRouteObservability: ctx.specializedRouteObservability }
+            : {}),
+        },
+      );
+    } catch (buildErr) {
+      bootstrapLogger.error(
+        { requestId: ctx.requestId, err: buildErr },
+        '[runSearchPostRoutePhase] responseBuilder.build() threw in entropy-abstain path; returning bare safe response',
+      );
+      const queryTimeMs = Date.now() - ctx.startTime;
+      const safeTraceRef = buildAuthorityTraceRef({
+        queryPlan: ctx.plan,
+        snapshot,
+        route: ctx.effectiveRoute,
+        ...(ctx.compiled !== undefined
+          ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
           : {}),
-      },
-    );
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        failureReason: 'INTERNAL_INCONSISTENCY',
+      });
+      return {
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route: ctx.effectiveRoute,
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: safeTraceRef,
+          authorityTraceRef: safeTraceRef,
+          decisionSnapshot: snapshot,
+        },
+        results: [],
+        meta: {
+          requestId: ctx.requestId,
+          queryTimeMs,
+          route: ctx.effectiveRoute,
+          version: '1',
+          engine_schema_version: 'search_response_v1',
+          authorityTraceRef: safeTraceRef,
+          runtimeCorrelationRef: ctx.requestId,
+          executionMode: 'degraded',
+          blockingEligible: false,
+        },
+      };
+    }
     const entropyEngineDecision = response.engineDecision as
       | SearchResponseV1['engineDecision']
       | undefined;
@@ -319,15 +560,23 @@ export async function runSearchPostRoutePhase(
       });
     }
     if (ctx.cacheService) {
-      const stored = await ctx.cacheService.setSearchResponse(
-        ctx.plan,
-        cacheRequestContext,
-        response,
-      );
-      if (!stored) {
-        pipelineDebug(
-          { step: 'cache.set_skipped', reason: 'entropy_abstain' },
-          '[Search] setSearchResponse skipped for entropy abstain response',
+      try {
+        const stored = await ctx.cacheService.setSearchResponse(
+          ctx.plan,
+          cacheRequestContext,
+          response,
+          ctx.compiled,
+        );
+        if (!stored) {
+          pipelineDebug(
+            { step: 'cache.set_skipped', reason: 'entropy_abstain' },
+            '[Search] setSearchResponse skipped for entropy abstain response',
+          );
+        }
+      } catch (cacheErr) {
+        bootstrapLogger.warn(
+          { requestId: ctx.requestId, err: cacheErr },
+          '[runSearchPostRoutePhase] cacheService.setSearchResponse() threw in entropy-abstain path; continuing without cache write',
         );
       }
     }
@@ -343,6 +592,7 @@ export async function runSearchPostRoutePhase(
   );
   const response = await runRankedRouteDecisionPhase({
     plan: ctx.plan,
+    ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
     requestId: ctx.requestId,
     startTime: ctx.startTime,
       resolveResult: ctx.resolveResult,
@@ -360,15 +610,23 @@ export async function runSearchPostRoutePhase(
   });
 
   if (ctx.cacheService) {
-    const stored = await ctx.cacheService.setSearchResponse(
-      ctx.plan,
-      cacheRequestContext,
-      response,
-    );
-    if (!stored) {
-      pipelineDebug(
-        { step: 'cache.set_skipped', reason: 'ineligible_or_breaker' },
-        '[Search] setSearchResponse skipped (ineligible mode, circuit breaker, or policy)',
+    try {
+      const stored = await ctx.cacheService.setSearchResponse(
+        ctx.plan,
+        cacheRequestContext,
+        response,
+        ctx.compiled,
+      );
+      if (!stored) {
+        pipelineDebug(
+          { step: 'cache.set_skipped', reason: 'ineligible_or_breaker' },
+          '[Search] setSearchResponse skipped (ineligible mode, circuit breaker, or policy)',
+        );
+      }
+    } catch (cacheErr) {
+      bootstrapLogger.warn(
+        { requestId: ctx.requestId, err: cacheErr },
+        '[runSearchPostRoutePhase] cacheService.setSearchResponse() threw; continuing without cache write',
       );
     }
   }

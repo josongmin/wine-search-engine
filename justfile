@@ -94,6 +94,9 @@ verify-http-contracts:
 prepush:
     npm run git:prepush
 
+prepush-smart:
+    npm run git:prepush:smart
+
 prepush-quick:
     npm run git:prepush:quick
 

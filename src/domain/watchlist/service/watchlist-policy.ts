@@ -1,3 +1,15 @@
+/**
+ * E6-U5: Operational Seam Lock
+ *
+ * WatchlistPolicy is part of the operational seam (watchlist + runtime-handles +
+ * side-effect plane). This seam is REUSE-ONLY:
+ *   - Do NOT redesign watchlist runtime, side-effect plane, or runtime-handle lifecycle
+ *   - Do NOT use this seam as a reason to open a parallel runtime or new coordinator
+ *   - Policy logic changes are permitted; infrastructure redesign is NOT
+ *
+ * If a new operational behavior is needed, extend the existing seam rather
+ * than creating a new service surface beside it.
+ */
 import type {
   CriticScoreUpdatedEvent,
   PriceUpdatedEvent,

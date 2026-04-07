@@ -110,7 +110,19 @@ export class ReplayUseCase {
       context: request.context,
       sessionContext: request.sessionContext,
       queryBudget: request.queryBudget,
-      options: request.options,
+      // Mode neutralization trade-off:
+      //   - When NO expected_response_hash is present, force mode:'auto' so the
+      //     compiled route from planWithCompiled governs execution, preventing a
+      //     stale or mismatched caller mode from altering the execution path.
+      //   - When expected_response_hash IS present, preserve the original mode so
+      //     the execution path matches the one that produced the hash. Forcing
+      //     'auto' here would change the route for hybrid/entity-mode requests,
+      //     producing a different response hash and a false DeterminismViolationError.
+      options: request.expected_response_hash !== undefined
+        ? request.options  // preserve mode for deterministic hash comparison
+        : request.options !== undefined
+          ? { ...request.options, mode: 'auto' as const }
+          : undefined,
     };
 
     const rawResponse = await this.deps.searchUseCase.execute(searchRequest, requestId);
@@ -172,7 +184,7 @@ const EXECUTION_MODE_SEVERITY: Record<
 };
 
 function chooseStricterExecutionMode(
-  actual: SearchResponseV1['meta']['executionMode'] | SearchResponseV1['engineDecision']['executionMode'],
+  actual: SearchResponseV1['meta']['executionMode'],
   floor: NonNullable<ReplayRequest['preflight_honesty_contract']>['execution_mode'],
 ): NonNullable<SearchResponseV1['meta']['executionMode']> {
   const normalizedActual = actual ?? 'authoritative';

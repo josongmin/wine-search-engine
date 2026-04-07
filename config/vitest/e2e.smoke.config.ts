@@ -6,7 +6,9 @@ export default defineConfig({
   test: {
     globals: true,
     include: [
-      'test/e2e/search-api.test.ts',
+      'test/e2e/search-api.search.test.ts',
+      'test/e2e/search-api.secondary.test.ts',
+      'test/e2e/search-api.ops.test.ts',
       'test/e2e/search-replay-fixtures.test.ts',
       'test/e2e/schema-contract.test.ts',
       'test/e2e/batch-search-api.test.ts',

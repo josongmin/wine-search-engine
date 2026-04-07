@@ -19,7 +19,7 @@ const testInclude = [
 ] as const;
 
 const heavyTestExclude = [
-  'src/__tests__/integration/cache-service.integration.test.ts',
+  'src/__tests__/integration/cache-service*.integration.test.ts',
 ] as const;
 
 const watchlistTestExclude = [

@@ -199,6 +199,9 @@ export class AdmissionGate {
       ambiguityHigh: input.ambiguitySummary?.severity === 'high',
       routeHealthy: input.routeHealthy ?? true,
       executionMode: input.executionMode ?? 'authoritative',
+      ...(input.effectiveRetrievalMode !== undefined
+        ? { effectiveRetrievalMode: input.effectiveRetrievalMode }
+        : {}),
       ...(input.blockingRequested !== undefined
         ? { blockingRequested: input.blockingRequested }
         : {}),
@@ -231,6 +234,12 @@ export class AdmissionGate {
       queryPlan: input.queryPlan,
       snapshot,
       reason,
+      ...(input.effectiveRoute !== undefined
+        ? { route: input.effectiveRoute }
+        : {}),
+      ...(input.effectiveRetrievalMode !== undefined
+        ? { retrievalMode: input.effectiveRetrievalMode }
+        : {}),
     });
     return { admitted: false, reason, traceRef };
   }

@@ -8,6 +8,17 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 - Start with the narrowest lane that matches the change.
 - Only escalate to heavier lanes when the changed code actually touches those paths.
 
+## Smart inner-loop rules
+
+- Prefer `npm run check:smart` as the default local verifier.
+- Prefer `npm run check:staged` right before commit when the staged set is much smaller than the worktree.
+- Prefer `npm run lint:smart` when you only want lint feedback on changed files.
+- Prefer `npm run lint:staged` right before commit when you want lint only for staged files.
+- Prefer `npm run test:file` when you already know the exact test file.
+- Prefer `npm run test:related` when you changed a source file and want the narrowest useful regression set.
+- Only jump to `check:dev`, `test:unit`, `test:integration`, `test:e2e`, or `test:heavy` when the change actually needs broader coverage.
+- Do **not** default to broad `npm run test` / `npm run test:unit` / `npm run lint` when a smart or file-scoped command will do.
+
 ## Lane map
 
 ### Fast/default lanes
@@ -24,16 +35,84 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
   - Recommended everyday check before or during local iteration.
   - Runs `typecheck + npm test`.
 
+- `npm run check:quick`
+  - Fastest default local check.
+  - Runs the lightweight everyday lane only.
+  - Use this for tight edit-test loops when full typecheck is unnecessary.
+
+- `npm run check:smart [changed-file...]`
+  - Smart local check for everyday development.
+  - If you pass files, it chooses the narrowest useful lane automatically.
+  - If you pass nothing, it inspects the current worktree:
+    - docs-only changes are skipped
+    - test-only changes skip `typecheck`
+    - source/config/script changes run `typecheck` before the selected lane
+    - lintable changed files run changed-file lint before the selected lane
+    - broad config/test-lane changes fall back to a safer broad sweep: `check:dev + test:meta`, and add `test:heavy` when search-pipeline-sensitive code changed
+    - explicit test files use the matching `*:file` entrypoint
+    - source files use `test:related`
+    - response/schema/HTTP-contract-sensitive source changes also run `test:meta`
+    - search-pipeline-sensitive source changes also run `test:heavy`
+  - Treat this as the default agent command unless a broader lane is clearly required.
+
+- `npm run check:staged`
+  - Smart staged-only variant of `check:smart`.
+  - Uses only staged files to choose the narrowest useful checks.
+  - If nothing is staged, it skips instead of falling back to a broad test run.
+
+- `npm run lint:file -- <file...>`
+  - Runs ESLint only on the given files.
+  - Uses a small local cache for repeated inner-loop runs.
+
+- `npm run lint:smart [changed-file...]`
+  - Lints only changed lintable files.
+  - Docs-only changes are skipped.
+  - Large changed sets fall back to full `npm run lint`.
+  - Prefer this over full `npm run lint` during normal iteration.
+
+- `npm run lint:staged`
+  - Lints only staged lintable files.
+  - If nothing is staged, it skips.
+  - Prefer this right before commit when the worktree is noisy but the staged set is small.
+
+- `npm run check:related -- <changed-file...>`
+  - Fastest changed-scope check when you know which files you touched.
+  - Runs Vitest `related` against the lightweight everyday lane.
+  - Good for tight loops before escalating to `check:quick` or `check:dev`.
+
+- `npm run test:file -- <test-file...>`
+  - Runs one or more explicit files inside the lightweight everyday lane.
+  - Use this when you already know the exact test file you want.
+  - Also supports extra Vitest args like `--testNamePattern`.
+
+- `npm run test:related -- <changed-file...>`
+  - Runs tests related to the given source or test files in the lightweight everyday lane.
+  - Preferred over broad `npm test` when iterating on a narrow change.
+
 - `npm run test:unit`
   - Fuller unit regression lane.
   - Uses `config/vitest/unit.config.ts`.
   - Excludes heavy search regression coverage on purpose.
   - Also excludes watchlist/search-specific suites that already have dedicated lanes.
 
+- `npm run test:unit:file -- <test-file...>`
+  - Explicit-file entrypoint for the fuller unit lane.
+  - Also supports extra Vitest args like `--testNamePattern`.
+
+- `npm run test:unit:related -- <changed-file...>`
+  - Related-test entrypoint for the fuller unit lane.
+
 - `npm run test:integration`
   - General integration lane from `test/integration/**/*.test.ts`.
   - Excludes `test/integration/search-pipeline.test.ts`, which is treated as heavy.
   - Also includes `src/__tests__/integration/**/*.integration.test.ts`.
+
+- `npm run test:integration:file -- <test-file...>`
+  - Explicit-file entrypoint for integration-only checks.
+  - Also supports extra Vitest args like `--testNamePattern`.
+
+- `npm run test:integration:related -- <changed-file...>`
+  - Related-test entrypoint for integration work.
 
 - `npm run test:watchlist`
   - Watchlist-focused lane only.
@@ -42,6 +121,16 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 - `npm run test:meta`
   - Meta/parity lane for workflow, fixture-lane, and route-contract consistency checks.
   - Kept out of the everyday dev lane because these are important but not part of the core inner loop.
+  - Also owns response/schema contract tests like:
+    - `src/domain/response/__tests__/human-response-builder-v2.test.ts`
+    - `src/interface/http/schemas/__tests__/search-response-v2.schema.test.ts`
+    - `src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts`
+    - `src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts`
+
+- `npm run test:eval`
+  - Eval/reporting-focused unit lane.
+  - Includes offline/noisy eval reporting tests that are useful but not part of the normal inner loop.
+  - Kept out of `npm test` so everyday development spends less time on evaluation-only coverage.
 
 ### Heavy lane
 
@@ -61,6 +150,18 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 - `npm run test:e2e:contract`
   - HTTP contract lane.
 
+- `npm run test:e2e`
+  - Default lightweight e2e entrypoint.
+  - Uses the contract/smoke lane by default.
+  - Prefer this as the pyramid-friendly baseline e2e check.
+
+- `npm run test:e2e:file -- <test-file...>`
+  - Explicit-file entrypoint for the in-memory e2e lane.
+  - Also supports extra Vitest args like `--testNamePattern`.
+
+- `npm run test:e2e:related -- <changed-file...>`
+  - Related-test entrypoint for the in-memory e2e lane.
+
 - `npm run test:e2e:runtime`
   - Runtime/quality-heavy e2e lane.
 
@@ -73,11 +174,32 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 - `npm run test:quality`
   - Quality regression lane.
 
+- `npm run test:all`
+  - Project-wide non-runtime aggregate lane.
+  - Includes `unit + integration + watchlist + meta + e2e:contract + ingest:contract + quality`.
+
+- `npm run test:all:full`
+  - Expanded aggregate lane.
+  - Adds `test:heavy` and `test:e2e:runtime` on top of `test:all`.
+
 ## Pre-push profiles
 
 - `npm run git:prepush:quick`
   - `typecheck + test:unit`
   - Use for quick local iteration.
+
+- `npm run git:prepush:smart`
+  - Smart branch-diff pre-push gate.
+  - Uses `git diff <upstream>...HEAD` to find changed files.
+  - Runs `check:smart` on that branch diff, then adds:
+    - `verify:http-contracts` for HTTP-contract-sensitive changes
+    - `test:heavy` for search-pipeline-sensitive changes
+  - Falls back to full `git:prepush` if:
+    - there is no upstream branch
+    - the branch diff is too large
+  - The fallback is heavy-aware:
+    - if the changed set touches search-pipeline-sensitive code, it falls back to `git:prepush:heavy`
+    - otherwise it falls back to `git:prepush`
 
 - `npm run git:prepush`
   - `typecheck + test:unit + verify:http-contracts`
@@ -86,6 +208,12 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 - `npm run git:prepush:heavy`
   - `git:prepush + test:heavy`
   - Use before pushing changes that touch search pipeline logic or replay/snapshot behavior.
+
+## Pre-commit note
+
+- Husky `pre-commit` uses `lint-staged`.
+- `lint-staged` now routes staged `*.ts(x)` files through `npm run lint:file:fix --`.
+- That means pre-commit fix/lint now uses the same cached ESLint wrapper as the manual smart/file commands.
 
 ## Keep / remove guidance
 
@@ -105,4 +233,35 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 
 - The old diagnostic tests (`live-search`, `debug-search`, `trace-pipeline`, `root-cause-trace`) were intentionally removed from automated lanes because they were expensive and low-signal.
 - The heavy lane should stay small. Add to it reluctantly.
-- `src/__tests__/integration/cache-service.integration.test.ts` lives in the integration lane rather than the default unit lane.
+- `src/__tests__/integration/cache-service*.integration.test.ts` lives in the integration lane rather than the default unit lane.
+- Keep large e2e files split by ownership:
+  - `search-api.core` owns search/interpret/resolve/replay/hybrid endpoint contracts
+  - `search-api.ops` owns `/health` and `/ready`
+  - `infrastructure.invariants` owns rate-limit/request-id/replay determinism/isolation
+  - `infrastructure.contracts` owns content-type/envelope/error-contract checks
+
+## Recommended inner loop
+
+- Smart default:
+  - `npm run check:smart`
+  - `npm run check:smart src/domain/foo.ts`
+  - `npm run check:staged`
+  - `npm run lint:smart`
+  - `npm run lint:smart src/domain/foo.ts`
+  - `npm run lint:staged`
+  - `npm run git:prepush:smart`
+
+- Narrowest possible:
+  - `npm run test:file -- test/unit/foo.test.ts`
+  - `npm run test:related -- src/domain/foo.ts`
+  - `npm run test:e2e:file -- test/e2e/infrastructure.invariants.test.ts --testNamePattern "Group 1: Rate Limiting"`
+  - `npm run test:e2e:file -- test/e2e/infrastructure.contracts.test.ts --testNamePattern "Group 5: Content-Type Edge Cases"`
+- Fast local sweep:
+  - `npm run check:related -- src/domain/foo.ts`
+  - `npm run check:quick`
+- Broader confidence only when needed:
+  - `npm run check:dev`
+  - Then the dedicated lane that matches the area you touched
+- `npm run test:e2e:inmemory`
+  - Broader in-memory e2e lane.
+  - Includes infrastructure/edge-case/hard-scenario coverage that is still lighter than runtime e2e, but heavier than contract/smoke.

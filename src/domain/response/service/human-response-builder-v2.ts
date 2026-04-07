@@ -1,5 +1,9 @@
 /**
- * T6.2: Human Response Builder V2
+ * T6.2 / E4-U3: Human Response Builder V2 — Human-Oriented Sidecar Surface
+ *
+ * Sidecar ownership: serves the interpret/explain path only.
+ * NOT the main runtime response surface — see response-builder.ts (E4-U1).
+ * Do NOT wire into /v2/search/* route handlers.
  *
  * Builds a {@link SearchResponseV2Human} from ranked results.
  * This builder is strictly for human-oriented responses:

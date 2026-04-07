@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildAuthorityTraceRef, buildAdmissionAuthorityTraceRef } from '../service/authority-trace.js';
+import {
+  buildAuthorityTraceRef,
+  buildAdmissionAuthorityTraceRef,
+  buildInternalErrorAuthorityTraceRef,
+} from '../service/authority-trace.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 
@@ -81,6 +85,51 @@ describe('authority trace refs', () => {
     expect(a).not.toBe(b);
   });
 
+  it('uses compiled retrieval mode override when provided', () => {
+    const plan = minimalPlan({ retrievalMode: 'entity_resolution' });
+    const snap = minimalSnapshot();
+    const plannerModeRef = buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      chosenEntityId: 'e1',
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+    });
+    const compiledModeRef = buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      retrievalMode: 'recommendation',
+      chosenEntityId: 'e1',
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+    });
+
+    expect(compiledModeRef).not.toBe(plannerModeRef);
+  });
+
+  it('changes decision ref when effective route changes', () => {
+    const plan = minimalPlan({ route: 'entity', retrievalMode: 'attribute_search' });
+    const snap = minimalSnapshot();
+    const entityRef = buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      route: 'entity',
+      chosenEntityId: 'e1',
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+    });
+    const hybridRef = buildAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      route: 'hybrid',
+      chosenEntityId: 'e1',
+      decisionStatus: 'resolved',
+      nextAction: 'return_result',
+    });
+
+    expect(hybridRef).not.toBe(entityRef);
+  });
+
   it('builds admission ref deterministically', () => {
     const plan = minimalPlan();
     const snap = minimalSnapshot();
@@ -96,5 +145,52 @@ describe('authority trace refs', () => {
     });
     expect(a).toBe(b);
     expect(a).toMatch(/^admission:v1:short_entity:[a-f0-9]{64}$/);
+  });
+
+  it('changes admission ref when compiled retrieval mode override changes', () => {
+    const plan = minimalPlan({ retrievalMode: 'entity_resolution' });
+    const snap = minimalSnapshot();
+    const plannerModeRef = buildAdmissionAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      reason: 'POLICY_BLOCKED',
+    });
+    const compiledModeRef = buildAdmissionAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      reason: 'POLICY_BLOCKED',
+      retrievalMode: 'recommendation',
+    });
+
+    expect(compiledModeRef).not.toBe(plannerModeRef);
+  });
+
+  it('changes admission ref when effective route changes', () => {
+    const plan = minimalPlan({ route: 'entity', retrievalMode: 'attribute_search' });
+    const snap = minimalSnapshot();
+    const entityRef = buildAdmissionAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      reason: 'POLICY_BLOCKED',
+      route: 'entity',
+    });
+    const hybridRef = buildAdmissionAuthorityTraceRef({
+      queryPlan: plan,
+      snapshot: snap,
+      reason: 'POLICY_BLOCKED',
+      route: 'hybrid',
+    });
+
+    expect(hybridRef).not.toBe(entityRef);
+  });
+
+  it('builds a decodable internal error authority ref', () => {
+    const snap = minimalSnapshot();
+    const ref = buildInternalErrorAuthorityTraceRef({
+      snapshot: snap,
+      requestId: 'req-123',
+    });
+
+    expect(ref).toMatch(/^decision:v1:internal_error:[a-f0-9]{64}$/);
   });
 });

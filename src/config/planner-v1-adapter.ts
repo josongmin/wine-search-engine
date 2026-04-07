@@ -8,18 +8,41 @@
  * Responsibility: compile the `policy` field (dropped from QueryPlanV2) and
  * expose `route` / `retrievalMode` under the V1 field names.
  *
+ * Also implements the optional `planWithCompiled` extension so callers can get
+ * the ExecutionCompiler-produced {@link CompiledWineQuery} without re-deriving
+ * route/mode decisions downstream (E1-U2).
+ *
  * T1.5 will remove this adapter once all consumers migrate to QueryPlanV2.
  */
 import type { QueryPlanV1 } from '../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../domain/query/model/compiled-wine-query.js';
 import type { Planner, PlannerContext } from '../domain/query/service/planner.js';
+import type {
+  PlanWithCompiledResult,
+  QueryPlannerPort,
+} from '../application/search/port/search-pipeline-deps.port.js';
 import { PolicyCompiler } from '../domain/query/service/policy-compiler.js';
+import { ExecutionCompiler } from '../domain/query/service/execution-compiler.js';
 
-export class PlannerV1Adapter {
+export class PlannerV1Adapter implements QueryPlannerPort {
   private readonly policyCompiler = new PolicyCompiler();
+  private readonly executionCompiler = new ExecutionCompiler();
 
   constructor(private readonly planner: Planner) {}
 
   async plan(query: string, context?: PlannerContext): Promise<QueryPlanV1> {
+    const { v1 } = await this._planBoth(query, context);
+    return v1;
+  }
+
+  async planWithCompiled(query: string, context?: PlannerContext): Promise<PlanWithCompiledResult> {
+    return this._planBoth(query, context);
+  }
+
+  private async _planBoth(
+    query: string,
+    context?: PlannerContext,
+  ): Promise<{ v1: QueryPlanV1; compiled: CompiledWineQuery }> {
     const v2 = await this.planner.plan(query, context);
 
     const policy = this.policyCompiler.compile(
@@ -29,7 +52,7 @@ export class PlannerV1Adapter {
       v2.uncertainty,
     );
 
-    return {
+    const v1: QueryPlanV1 = {
       rawQuery: v2.rawQuery,
       normalizedQuery: v2.normalizedQuery,
       ...(v2.normalizedQueryViews !== undefined && { normalizedQueryViews: v2.normalizedQueryViews }),
@@ -48,7 +71,7 @@ export class PlannerV1Adapter {
       thresholdProfileId: v2.thresholdProfileId,
       ...(v2.admission_context !== undefined && { admission_context: v2.admission_context }),
       ...(v2.sessionContext !== undefined && { sessionContext: v2.sessionContext }),
-      queryBudget: v2.queryBudget,
+      ...(v2.queryBudget !== undefined ? { queryBudget: v2.queryBudget } : {}),
       ...(v2.targetEntityType !== undefined && { targetEntityType: v2.targetEntityType }),
       // Preserve decompositionHint from V2 so downstream consumers (observability,
       // interpret explainer, pre-route phase) can surface decomposition signals.
@@ -56,5 +79,9 @@ export class PlannerV1Adapter {
       // from all observability slices and V2 explain responses.
       ...(v2.decompositionHint !== undefined && { decompositionHint: v2.decompositionHint }),
     };
+
+    const compiled = this.executionCompiler.compile({ plan: v2 });
+
+    return { v1, compiled };
   }
 }

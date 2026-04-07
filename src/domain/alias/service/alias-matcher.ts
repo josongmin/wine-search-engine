@@ -254,12 +254,11 @@ export class AliasMatcher {
 
     const maxDist = Math.floor(normalized.length * FUZZY_THRESHOLD_RATIO);
 
-    // Search using the normalized form; the repo returns candidates
-    // that we then filter by edit distance.
-    const candidates = await this.aliasRepo.findByNormalizedValue(normalized);
-    const allByScope = scope
-      ? this.activeOnly(candidates).filter((a) => a.scope === scope || a.scope === 'global')
-      : this.activeOnly(candidates);
+    // Use the fuzzy-candidates retrieval path (prefix/trigram index) rather than
+    // exact-normalized lookup, so the repo can return plausible near-miss candidates
+    // rather than only exact matches (which would defeat the purpose of fuzzy matching).
+    const candidates = await this.aliasRepo.findFuzzyCandidates(normalized, scope);
+    const allByScope = this.activeOnly(candidates);
 
     // Also check entity aliases for nearby values
     const results: AliasMatchResult[] = [];
@@ -297,10 +296,8 @@ export class AliasMatcher {
       return [];
     }
 
-    const candidates = await this.aliasRepo.findByNormalizedValue(normalized);
-    const allByScope = scope
-      ? this.activeOnly(candidates).filter((a) => a.scope === scope || a.scope === 'global')
-      : this.activeOnly(candidates);
+    const candidates = await this.aliasRepo.findFuzzyCandidates(normalized, scope);
+    const allByScope = this.activeOnly(candidates);
 
     const results: AliasMatchResult[] = [];
     for (const alias of allByScope) {

@@ -32,6 +32,21 @@ class StubAliasRepository implements AliasRepository {
     return this.aliases.filter((a) => !a.suppressed && a.normalizedValue === normalized);
   }
 
+  async findFuzzyCandidates(normalized: string, scope?: AliasScope): Promise<readonly Alias[]> {
+    if (this.broadNormalizedLookup) {
+      // Return all non-suppressed aliases so fuzzy/phonetic can run edit distance checks
+      return this.aliases.filter((a) => !a.suppressed && (
+        scope === undefined || a.scope === scope || a.scope === 'global'
+      ));
+    }
+    // Minimal prefix-based candidates (half-prefix heuristic)
+    const prefixLen = Math.ceil(normalized.length / 2);
+    const prefix = normalized.slice(0, prefixLen);
+    return this.aliases.filter((a) => !a.suppressed
+      && a.normalizedValue.startsWith(prefix)
+      && (scope === undefined || a.scope === scope || a.scope === 'global'));
+  }
+
   async save(_alias: Alias): Promise<void> {}
   async suppress(_aliasId: string, _reason: string): Promise<void> {}
   async bulkSave(_aliases: readonly Alias[]): Promise<void> {}

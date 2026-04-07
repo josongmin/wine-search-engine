@@ -1,4 +1,15 @@
 /**
+ * E6-U3: Decomposition Reuse Map (lock)
+ *
+ * Decomposition is a REUSE path, not a new runtime:
+ *   - Detection: this file (decomposition-detector.ts)
+ *   - Model: domain/query/model/query-decomposition.ts
+ *   - Adapter seam: application/search/decomposed-search-adapter.ts
+ *
+ * Do NOT create a decomposition-specific orchestrator stack or a parallel
+ * search runtime for decomposed queries. The DecomposedSearchAdapter is the
+ * single wiring point — it holds a delegate to the main SearchUseCase.
+ *
  * Epic 14, Step 14.1: Query Decomposition Detector
  *
  * Detects "A vs B" style comparison queries and decomposes them into

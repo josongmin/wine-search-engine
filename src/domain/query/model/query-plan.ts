@@ -22,6 +22,15 @@ import type { QueryDecompositionHint } from './query-decomposition.js';
  *
  * Downstream consumers (resolver, scorer, abstention layer) read only from
  * the query plan and never re-derive planning decisions.
+ *
+ * ⚠️  FIELD FREEZE (E1-U9 / apr-7-v0.4)
+ * QueryPlanV1 is a **compatibility-only surface**. Do NOT add new fields here.
+ * Execution decisions (route, mode, budget, provenance policy) belong in
+ * {@link EngineExecutionContract} produced by {@link ExecutionCompiler}.
+ * Understanding fields (intent, queryClass, anchors, etc.) belong in
+ * {@link QueryUnderstandingSnapshot} inside {@link CompiledWineQuery}.
+ * New planner outputs go into {@link QueryPlanV2} and flow through
+ * ExecutionCompiler → CompiledWineQuery. V1 will be removed in T1.5.
  */
 export interface QueryPlanV1 {
   /** The original user query string, unmodified. */

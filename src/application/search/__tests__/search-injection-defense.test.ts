@@ -4,6 +4,41 @@ import { QuerySanitizer } from '../../../domain/security/service/query-sanitizer
 import type { InjectionJudgePort } from '../../../domain/security/port/injection-judge.port.js';
 import { PolicyBlockedError } from '../../../domain/shared/error/policy-blocked.js';
 import { MAX_QUERY_LENGTH } from '../../../domain/shared/constants.js';
+import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
+
+function makeMinimalPlan(query: string): QueryPlanV1 {
+  return {
+    rawQuery: query,
+    normalizedQuery: query,
+    intent: 'semantic_discovery',
+    route: 'hybrid',
+    retrievalMode: 'attribute_search',
+    queryClass: 'known_item',
+    anchors: [],
+    constraints: { hard: [], soft: [], inferred: [] },
+    expansions: { lexical: [], semantic: [] },
+    policy: {
+      requireExact: false,
+      allowApproximate: true,
+      requireClarification: false,
+      fallbackMode: 'hybrid',
+      policyReasonCodes: [],
+    },
+    uncertainty: {
+      overall: 0.1,
+      ambiguityDetected: false,
+      ambiguityTypes: [],
+      ambiguitySeverity: 'low',
+      decisionEffect: 'trace_only',
+      parserConfidence: 0.9,
+      anchorConfidence: 0.9,
+      constraintConfidence: 0.9,
+    },
+    plannerVersion: '1.0.0',
+    policyRuleVersion: '1.0.0',
+    thresholdProfileId: 'default',
+  };
+}
 
 describe('SearchUseCase with Injection Defense', () => {
   let useCase: SearchUseCase;
@@ -20,13 +55,109 @@ describe('SearchUseCase with Injection Defense', () => {
       querySanitizer: sanitizer,
       injectionJudge: mockInjectionJudge as InjectionJudgePort | undefined,
       queryPlanner: {
-        plan: vi.fn(),
+        plan: vi.fn(async (query: string) => makeMinimalPlan(query)),
       } as any,
-      entityResolver: {} as any,
-      candidatePool: {} as any,
-      ranker: {} as any,
-      decisionEngine: {} as any,
-      responseBuilder: {} as any,
+      entityResolver: {
+        resolve: vi.fn().mockResolvedValue({
+          status: 'resolved',
+          candidates: [],
+          topEntity: undefined,
+          decisionTrace: {
+            queryClass: 'known_item',
+            top1CalibratedScore: 0.9,
+            top2CalibratedScore: 0.1,
+            calibratedGap: 0.8,
+            decisionConfidenceC: 0.9,
+            ambiguityDetected: false,
+            ambiguityTypes: [],
+            appliedThresholds: { resolveThreshold: 0.7, gapThreshold: 0.2 },
+            outcomeReasonCodes: [],
+          },
+          conformalSetSize: 0,
+        }),
+      } as any,
+      candidatePool: {
+        generate: vi.fn().mockResolvedValue([]),
+      } as any,
+      ranker: {
+        rank: vi.fn().mockResolvedValue([]),
+      } as any,
+      decisionEngine: {
+        decide: vi.fn().mockResolvedValue({
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          signalSet: {
+            entity_integrity_score: 0,
+            hard_constraint_pass: 1,
+            soft_constraint_score: 0,
+            semantic_relevance_score: 0,
+            preference_alignment_score: 0,
+            popularity_score: 0,
+            availability_score: 0,
+            uncertainty_penalty: 1,
+          },
+          evidenceItems: [],
+          decisionTraceRef: 'trace',
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1.0.0',
+            threshold_profile_id: 'default',
+            planner_version: '1.0.0',
+            feature_flags: {},
+          },
+          decisionTrace: {
+            decisionStatus: 'failed',
+            nextAction: 'fail',
+            inputs: {
+              queryClass: 'known_item',
+              policy: makeMinimalPlan('stub').policy,
+            },
+            signals: {
+              decisionConfidence: 0,
+              calibratedGap: 0,
+              ambiguity: false,
+            },
+            thresholds: {
+              resolveThreshold: 0.7,
+              gapThreshold: 0.2,
+            },
+            versions: {
+              policyRuleVersion: '1.0.0',
+              thresholdProfileId: 'default',
+            },
+            rulesApplied: [],
+            finalReason: 'stub',
+          },
+          failureReason: 'NO_RESULTS',
+        }),
+      } as any,
+      responseBuilder: {
+        build: vi.fn().mockImplementation(({ requestId, queryTimeMs, route, decisionOutput }) => ({
+          queryType: 'search',
+          engineDecision: {
+            decisionStatus: decisionOutput.decisionStatus,
+            nextAction: decisionOutput.nextAction,
+            route,
+            decisionConfidence: decisionOutput.decisionConfidence,
+            confidenceSemantics: decisionOutput.confidenceSemantics,
+            decisionTraceRef: decisionOutput.decisionTraceRef,
+            decisionSnapshot: decisionOutput.decisionSnapshot,
+          },
+          results: [],
+          meta: {
+            requestId,
+            queryTimeMs,
+            route,
+            version: '1.0.0',
+            engine_schema_version: 'search_response_v1',
+            decisionSnapshot: decisionOutput.decisionSnapshot,
+            response_hash: 'hash',
+          },
+        })),
+      } as any,
       mixedSolver: {} as any,
     };
 
@@ -86,14 +217,7 @@ describe('SearchUseCase with Injection Defense', () => {
       useCase = new SearchUseCase(depsWithoutJudge);
 
       const plannerMock = depsWithoutJudge.queryPlanner as any;
-      plannerMock.plan.mockResolvedValueOnce({
-        rawQuery: 'find wine',
-        normalizedQuery: 'find wine',
-        route: 'hybrid',
-        queryClass: 'entity',
-        constraints: { hard: [], soft: [] },
-        policy: {},
-      });
+      plannerMock.plan.mockResolvedValueOnce(makeMinimalPlan('find wine'));
 
       const request: SearchRequest = { query: 'find wine' };
 

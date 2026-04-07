@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -72,10 +73,12 @@ export function buildHybridRetrievalInputForPlan(
   plan: QueryPlanV1,
   route: HybridRetrievalInput['route'] = 'hybrid',
   anchorEntityId?: EntityId,
+  compiled?: CompiledWineQuery,
 ): HybridRetrievalInput {
   return {
     queryPlan: plan,
     route,
+    ...(compiled !== undefined ? { compiledRetrievalMode: compiled.execution.effectiveRetrievalMode } : {}),
     lexicalQueries: [plan.normalizedQuery],
     semanticQueries: [plan.rawQuery],
     hardConstraints: plan.constraints.hard,
@@ -86,33 +89,41 @@ export function buildHybridRetrievalInputForPlan(
 
 /**
  * Specialized browse/compare paths first; falls back to {@link CandidatePoolPort.generate}.
+ *
+ * E2-U4: Accepts optional CompiledWineQuery. When present, specialised path dispatch
+ * uses compiled.execution.effectiveRetrievalMode (authoritative) instead of
+ * plan.retrievalMode (V1 fallback).
  */
 export async function retrieveHybridCandidatesForPlan(
   plan: QueryPlanV1,
   ports: HybridCandidateRetrievalPorts,
   resolveEntity: (p: QueryPlanV1) => Promise<EntityResolveResult>,
+  compiled?: CompiledWineQuery,
 ): Promise<HybridCandidateRetrievalResult> {
+  // E2-U4: compiled-first mode for specialised path dispatch
+  const effectiveMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
+
   const limit = SPECIALIZED_HYBRID_RETRIEVAL_LIMIT;
   let fallbackAnchorEntityId: EntityId | undefined;
   const degradationReasons = new Set<SpecializedFallbackReason>();
   const requestedRoute = (
-    plan.retrievalMode === 'producer_browse' ||
-    plan.retrievalMode === 'region_browse' ||
-    plan.retrievalMode === 'compare_candidates'
+    effectiveMode === 'producer_browse' ||
+    effectiveMode === 'region_browse' ||
+    effectiveMode === 'compare_candidates'
   )
-    ? plan.retrievalMode
+    ? effectiveMode
     : null;
 
   pipelineDebug(
     {
       step: 'retrieval.hybrid_candidates.start',
-      retrieval_mode: plan.retrievalMode,
+      retrieval_mode: effectiveMode,
       query_class: plan.queryClass,
     },
     'pipeline hybrid retrieval',
   );
 
-  switch (plan.retrievalMode) {
+  switch (effectiveMode) {
     case 'producer_browse': {
       const producerName = extractProducerBrowseSeed(plan);
       if (ports.browseRetriever === undefined) {
@@ -229,6 +240,7 @@ export async function retrieveHybridCandidatesForPlan(
     plan,
     'hybrid',
     fallbackAnchorEntityId,
+    compiled,
   );
 
   pipelineDebug({ step: 'retrieval.candidate_pool.fallback' }, 'pipeline candidate pool generate');

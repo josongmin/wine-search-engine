@@ -29,13 +29,40 @@ afterAll(async () => {
   await closeTestServer(server);
 });
 
+function postV2Search(body: unknown) {
+  return postJson(server.app, '/v2/search', body);
+}
+
+function postV2Hybrid(body: unknown) {
+  return postJson(server.app, '/v2/search/hybrid', body);
+}
+
+function postV2Interpret(body: unknown) {
+  return postJson(server.app, '/v2/search/interpret', body);
+}
+
+function injectTextPlain(url: string, body: unknown) {
+  return server.app.inject({
+    method: 'POST',
+    url,
+    headers: { 'content-type': 'text/plain' },
+    payload: JSON.stringify(body),
+  });
+}
+
+function expectRequestIdErrorShape(body: Record<string, unknown>) {
+  const error = body['error'] as Record<string, unknown>;
+  expect(typeof error['code']).toBe('string');
+  expect(typeof error['request_id']).toBe('string');
+}
+
 // ---------------------------------------------------------------------------
 // V2 search
 // ---------------------------------------------------------------------------
 
 describe('POST /v2/search — V2 human response shape', () => {
   it('returns 200 with version=2 and responseType=human', async () => {
-    const res = await postJson(server.app, '/v2/search', {
+    const res = await postV2Search({
       query: 'Opus One 2018',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -52,7 +79,7 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it('response validates against SearchResponseV2HumanSchema (camelCase pre-serialization)', async () => {
-    const res = await postJson(server.app, '/v2/search', {
+    const res = await postV2Search({
       query: 'Château Margaux',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -66,7 +93,7 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it('returns comparison envelope for decomposed "vs" queries', async () => {
-    const res = await postJson(server.app, '/v2/search', {
+    const res = await postV2Search({
       query: 'Opus One vs Château Margaux',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -85,7 +112,7 @@ describe('POST /v2/search — V2 human response shape', () => {
   });
 
   it('each result item has version=2 and responseType=human', async () => {
-    const res = await postJson(server.app, '/v2/search', {
+    const res = await postV2Search({
       query: 'Opus One 2018',
       options: { mode: 'entity', explain: false, clarification: false },
     });
@@ -105,39 +132,17 @@ describe('POST /v2/search — V2 human response shape', () => {
     }
   });
 
-  it('rejects requests without content-type: application/json', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v2/search',
-      headers: { 'content-type': 'text/plain' },
-      payload: JSON.stringify({ query: 'test' }),
-    });
-
-    expect(response.statusCode).toBe(415);
-  });
-
-  it('returns 400 for missing required query field', async () => {
-    const res = await postJson(server.app, '/v2/search', {
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(res.statusCode).toBe(400);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(typeof error['code']).toBe('string');
-    expect(typeof error['request_id']).toBe('string');
-  });
-
-  it('returns 400 for empty body {}', async () => {
-    const res = await postJson(server.app, '/v2/search', {});
-
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('returns 400 for empty string query', async () => {
-    const res = await postJson(server.app, '/v2/search', { query: '' });
-
-    expect(res.statusCode).toBe(400);
+  it.each([
+    ['missing required query field', () => postV2Search({ options: { mode: 'entity', explain: false, clarification: false } }), 400],
+    ['empty body', () => postV2Search({}), 400],
+    ['empty string query', () => postV2Search({ query: '' }), 400],
+    ['text/plain body', () => injectTextPlain('/v2/search', { query: 'test' }), 415],
+  ])('rejects %s', async (_label, runRequest, expectedStatus) => {
+    const response = await runRequest();
+    expect(response.statusCode).toBe(expectedStatus);
+    if (expectedStatus === 400) {
+      expectRequestIdErrorShape(response.json() as Record<string, unknown>);
+    }
   });
 });
 
@@ -147,7 +152,7 @@ describe('POST /v2/search — V2 human response shape', () => {
 
 describe('POST /v2/search/hybrid — V2 human response shape', () => {
   it('returns 200 with version=2 and responseType=human', async () => {
-    const res = await postJson(server.app, '/v2/search/hybrid', {
+    const res = await postV2Hybrid({
       query: 'full bodied red wine',
     });
 
@@ -162,25 +167,15 @@ describe('POST /v2/search/hybrid — V2 human response shape', () => {
     expect(typeof body['total_candidates']).toBe('number');
   });
 
-  it('returns 400 for missing required query field', async () => {
-    const res = await postJson(server.app, '/v2/search/hybrid', {});
-
-    expect(res.statusCode).toBe(400);
-    const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(typeof error['code']).toBe('string');
-    expect(typeof error['request_id']).toBe('string');
-  });
-
-  it('rejects requests without content-type: application/json', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v2/search/hybrid',
-      headers: { 'content-type': 'text/plain' },
-      payload: JSON.stringify({ query: 'test' }),
-    });
-
-    expect(response.statusCode).toBe(415);
+  it.each([
+    ['missing required query field', () => postV2Hybrid({}), 400],
+    ['text/plain body', () => injectTextPlain('/v2/search/hybrid', { query: 'test' }), 415],
+  ])('rejects %s', async (_label, runRequest, expectedStatus) => {
+    const response = await runRequest();
+    expect(response.statusCode).toBe(expectedStatus);
+    if (expectedStatus === 400) {
+      expectRequestIdErrorShape(response.json() as Record<string, unknown>);
+    }
   });
 });
 
@@ -190,7 +185,7 @@ describe('POST /v2/search/hybrid — V2 human response shape', () => {
 
 describe('POST /v2/search/interpret — V2 interpret response shape', () => {
   it('returns 200 with version=2 and responseType=interpret', async () => {
-    const res = await postJson(server.app, '/v2/search/interpret', {
+    const res = await postV2Interpret({
       query: 'Opus One 2018',
     });
 
@@ -209,25 +204,256 @@ describe('POST /v2/search/interpret — V2 interpret response shape', () => {
     expect(typeof body['confidence']).toBe('number');
   });
 
-  it('returns 400 for missing required query field', async () => {
-    const res = await postJson(server.app, '/v2/search/interpret', {});
+  it('reuses X-Request-Id as the surfaced query_id for correlation', async () => {
+    const res = await postJson(
+      server.app,
+      '/v2/search/interpret',
+      { query: 'Opus One 2018' },
+      { 'x-request-id': 'req-v2-interpret-123' },
+    );
 
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(200);
     const body = res.json() as Record<string, unknown>;
-    const error = body['error'] as Record<string, unknown>;
-    expect(typeof error['code']).toBe('string');
-    expect(typeof error['request_id']).toBe('string');
+    expect(body['query_id']).toBe('req-v2-interpret-123');
   });
 
-  it('rejects requests without content-type: application/json', async () => {
-    const response = await server.app.inject({
-      method: 'POST',
-      url: '/v2/search/interpret',
-      headers: { 'content-type': 'text/plain' },
-      payload: JSON.stringify({ query: 'test' }),
+  it.each([
+    ['missing required query field', () => postV2Interpret({}), 400],
+    ['unknown request fields', () => postV2Interpret({ query: 'Opus One 2018', futureFlag: true }), 400],
+    ['text/plain body', () => injectTextPlain('/v2/search/interpret', { query: 'test' }), 415],
+  ])('rejects %s', async (_label, runRequest, expectedStatus) => {
+    const response = await runRequest();
+    expect(response.statusCode).toBe(expectedStatus);
+    if (expectedStatus === 400) {
+      expectRequestIdErrorShape(response.json() as Record<string, unknown>);
+    }
+  });
+
+  it('surfaces canonical non-anchor channels for plain comparison queries', async () => {
+    const res = await postV2Interpret({
+      query: 'Barolo vs Amarone',
     });
 
-    expect(response.statusCode).toBe(415);
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+
+    expect(body['response_type']).toBe('interpret');
+    expect(body['detected_intent']).toBe('comparison');
+    const activeChannels = body['active_channels'];
+    expect(Array.isArray(activeChannels)).toBe(true);
+    expect(activeChannels).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+    ]);
+    expect(new Set(activeChannels as string[]).size).toBe(
+      (activeChannels as string[]).length,
+    );
+    expect(activeChannels).not.toContain('sparse');
+    expect(activeChannels).not.toContain('dense');
+    expect(activeChannels).not.toContain('compare_anchor');
+    expect(activeChannels).not.toContain('learned_sparse');
+  });
+
+  it('surfaces compare_anchor for side-by-side candidate comparison queries', async () => {
+    const res = await postV2Interpret({
+      query: 'opus one vs napa cabs',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+
+    expect(body['detected_intent']).toBe('comparison');
+    expect(body['decomposition_strategy']).toBe('comparison');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'compare_anchor',
+    ]);
+  });
+
+  it('surfaces browse_region for hierarchical region browse queries', async () => {
+    const res = await postV2Interpret({
+      query: 'Bordeaux/Medoc/Pauillac',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+
+    expect(body['detected_intent']).toBe('region_browse');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'browse_region',
+    ]);
+  });
+
+  it('surfaces anchor_similarity for recommendation queries anchored on a reference wine', async () => {
+    const res = await postV2Interpret({
+      query: 'wines cheaper than Opus One',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+
+    expect(body['detected_intent']).toBe('recommendation');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'anchor_similarity',
+    ]);
+  });
+
+  it('surfaces canonical activeChannels for recommendation queries without leaking legacy aliases', async () => {
+    const res = await postV2Interpret({
+      query: 'wines like Sassicaia',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+
+    expect(body['detected_intent']).toBe('entity_fuzzy');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+    ]);
+    expect(new Set(body['active_channels'] as string[]).size).toBe(
+      (body['active_channels'] as string[]).length,
+    );
+    expect(body['active_channels']).not.toContain('sparse');
+    expect(body['active_channels']).not.toContain('dense');
+    expect(body['active_channels']).not.toContain('compare_anchor');
+  });
+
+  it('surfaces decomposition strategy for comparison queries without leaking V1 planner fields', async () => {
+    const res = await postV2Interpret({
+      query: 'Barolo vs Amarone',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+
+    expect(body['decomposition_strategy']).toBe('comparison');
+    expect(body['query_text']).toBe('Barolo vs Amarone');
+    expect(body['raw_query']).toBeUndefined();
+    expect(body['normalized_query']).toBeUndefined();
+    expect(body['route']).toBeUndefined();
+  });
+
+  it('surfaces attribute-level hard constraints instead of count labels', async () => {
+    const res = await postV2Interpret({
+      query: 'red wine from france',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('attribute_constrained');
+    expect(body['applied_constraints']).toEqual(['hard:wine_type', 'hard:country']);
+  });
+
+  it('surfaces attribute-level soft constraints for budget-style queries', async () => {
+    const res = await postV2Interpret({
+      query: 'Chardonnay under 50 dollars',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['applied_constraints']).toEqual(['soft:price_band']);
+  });
+
+  it('surfaces compare_anchor for anchor-vs-catalog comparison queries', async () => {
+    const res = await postV2Interpret({
+      query: 'opus one vs napa cabs',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('comparison');
+    expect(body['decomposition_strategy']).toBe('comparison');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'compare_anchor',
+    ]);
+    expect(body['ranking_signals']).toContain('anchor_similarity');
+  });
+
+  it('surfaces browse_region for region-browse queries', async () => {
+    const res = await postV2Interpret({
+      query: 'Bordeaux/Medoc/Pauillac',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('region_browse');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'browse_region',
+    ]);
+  });
+
+  it('surfaces anchor_similarity for anchor-conditioned recommendation queries', async () => {
+    const res = await postV2Interpret({
+      query: 'wines cheaper than Opus One',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('recommendation');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'anchor_similarity',
+    ]);
+    expect(body['ranking_signals']).toContain('anchor_similarity');
+  });
+
+  it('surfaces anchor_similarity for English relative-anchor recommendation queries', async () => {
+    const res = await postV2Interpret({
+      query: 'cheaper than Chateau Margaux',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('recommendation');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'anchor_similarity',
+    ]);
+    expect(body['ranking_signals']).toContain('anchor_similarity');
+  });
+
+  it('surfaces anchor_similarity for Korean relative-anchor recommendation queries', async () => {
+    const res = await postV2Interpret({
+      query: '샤토 마고보다 저렴한 와인',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('recommendation');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'anchor_similarity',
+    ]);
+    expect(body['ranking_signals']).toContain('anchor_similarity');
+  });
+
+  it('surfaces anchor_similarity for Korean similarity-anchor recommendation queries', async () => {
+    const res = await postV2Interpret({
+      query: '오퍼스 원 같은 와인',
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body['detected_intent']).toBe('recommendation');
+    expect(body['active_channels']).toEqual([
+      'sparse_bm25',
+      'dense_semantic',
+      'anchor_similarity',
+    ]);
+    expect(body['ranking_signals']).toContain('anchor_similarity');
   });
 });
 
@@ -263,8 +489,21 @@ describe('V1 routes — shape unchanged', () => {
 
     // V1 interpret has raw_query, intent, route — NOT version/responseType
     expect(body['raw_query']).toBeDefined();
+    expect(body['normalized_query']).toBeDefined();
     expect(body['intent']).toBeDefined();
+    expect(body['route']).toBeDefined();
+    expect(body['query_class']).toBeDefined();
+    expect(body['policy']).toBeDefined();
+    expect(body['constraints']).toBeDefined();
+    expect(body['version']).toBeUndefined();
     expect(body['response_type']).toBeUndefined();
+    expect(body['query_id']).toBeUndefined();
+    expect(body['query_text']).toBeUndefined();
+    expect(body['detected_intent']).toBeUndefined();
+    expect(body['active_channels']).toBeUndefined();
+    expect(body['applied_constraints']).toBeUndefined();
+    expect(body['ranking_signals']).toBeUndefined();
+    expect(body['confidence']).toBeUndefined();
   });
 });
 

@@ -6,6 +6,7 @@ import type {
 
 export interface InterpretRequest {
   readonly query: string;
+  readonly requestId?: string | undefined;
   readonly context?: SearchRequestContext | undefined;
   readonly sessionContext?: SearchSessionContext | undefined;
   readonly queryBudget?: SearchQueryBudget | undefined;

@@ -3,6 +3,7 @@ import { buildInterpretResponseV2 } from '../interpret-explain-adapter-v2.js';
 import type { ExplainAdapterV2Input } from '../interpret-explain-adapter-v2.js';
 import type { QueryObservabilitySlice } from '../../../domain/query/model/query-observability-vocab.js';
 import type { QueryDecompositionHint } from '../../../domain/query/model/query-decomposition.js';
+import type { NormalizedConstraint } from '../../../domain/shared/types/index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,6 +37,19 @@ function makeInput(overrides: Partial<ExplainAdapterV2Input> = {}): ExplainAdapt
     observabilitySlice: makeSlice(),
     activeChannels: ['sparse_bm25', 'dense_semantic'],
     ...overrides,
+  };
+}
+
+function makeConstraint(
+  attribute: string,
+  kind: 'hard' | 'soft',
+): NormalizedConstraint {
+  return {
+    attribute,
+    operator: '=',
+    value: `${kind}:${attribute}`,
+    source_phrase: `${kind}:${attribute}`,
+    confidence: 0.9,
   };
 }
 
@@ -189,6 +203,27 @@ describe('buildInterpretResponseV2', () => {
       observabilitySlice: makeSlice({ hardConstraintCount: 0, softConstraintCount: 0 }),
     }));
     expect(result.appliedConstraints).toEqual([]);
+  });
+
+  it('prefers concrete constraint attribute labels over count-based fallback labels', () => {
+    const result = buildInterpretResponseV2(makeInput({
+      observabilitySlice: makeSlice({ hardConstraintCount: 3, softConstraintCount: 2 }),
+      hardConstraints: [
+        makeConstraint('region', 'hard'),
+        makeConstraint('region', 'hard'),
+        makeConstraint('color', 'hard'),
+      ],
+      softConstraints: [
+        makeConstraint('price', 'soft'),
+        makeConstraint('price', 'soft'),
+      ],
+    }));
+
+    expect(result.appliedConstraints).toEqual([
+      'hard:region',
+      'hard:color',
+      'soft:price',
+    ]);
   });
 
   it('passes through queryId and queryText', () => {

@@ -1,3 +1,18 @@
+/**
+ * E5-U5: Calibrator Activation Prerequisites
+ *
+ * Prerequisites for calibrator activation:
+ *   1. Sufficient eval sample size — minimum case count must be met before ECE
+ *      measurements are statistically meaningful.
+ *   2. Baseline score distribution — confidence scores must cover the full [0, 1]
+ *      range with adequate bin density; sparse distributions invalidate ECE.
+ *   3. Feature stability — the feature set driving confidence scores must be
+ *      stable (no in-flight schema or weight changes) at the time of calibration.
+ *
+ * Calibrator MUST NOT activate unless all prerequisites pass; see
+ * search-usecase-ranked-route-resolve.ts for insertion point (E3-U6).
+ */
+
 import type { QueryClass } from '../../shared/types/index.js';
 import type { EvalResult } from '../model/eval-result.js';
 import type { EvalCase } from '../model/eval-case.js';

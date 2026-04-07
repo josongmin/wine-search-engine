@@ -24,36 +24,85 @@ function minimalPlan(route: QueryPlanV1['route']): QueryPlanV1 {
   } as QueryPlanV1;
 }
 
+function makeAnchoredPlan(route: QueryPlanV1['route'], anchorId: string): QueryPlanV1 {
+  return {
+    ...minimalPlan(route),
+    anchors: [{
+      surfaceForm: 'Opus One',
+      normalizedForm: 'opus one',
+      candidateEntityIds: [anchorId],
+      confidence: 0.95,
+      source: 'alias',
+    }],
+  } as QueryPlanV1;
+}
+
+function makeDecisionTrace(
+  overrides: Partial<EntityResolveResult['decisionTrace']> = {},
+): EntityResolveResult['decisionTrace'] {
+  return {
+    queryClass: 'unknown',
+    top1CalibratedScore: 0,
+    top2CalibratedScore: 0,
+    calibratedGap: 0,
+    decisionConfidenceC: 0,
+    ambiguityDetected: false,
+    ambiguityTypes: [],
+    appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+    outcomeReasonCodes: [],
+    ...overrides,
+  };
+}
+
+function makeResolverResult(
+  overrides: Partial<EntityResolveResult> = {},
+): EntityResolveResult {
+  return {
+    status: 'resolved',
+    candidates: [],
+    decisionTrace: makeDecisionTrace(),
+    conformalSetSize: 1,
+    ...overrides,
+  };
+}
+
+function makeRankedResult(overrides: Partial<RankedResult> = {}): RankedResult {
+  return {
+    entityId: createEntityId('ranked'),
+    canonicalLabel: 'Ranked Wine',
+    finalScore: 0.9,
+    rank: 1,
+    componentScores: {
+      entityIntegrity: 1,
+      semantic: 0.7,
+      hardConstraintPass: true,
+      softConstraint: 0,
+      attributeAlignment: 0,
+      preferenceAlignment: 0,
+      popularity: 0,
+      availability: 1,
+      uncertaintyPenalty: 0,
+    },
+    evidenceItems: [],
+    matchedConstraints: [],
+    unmetConstraints: [],
+    inferredConstraints: [],
+    ...overrides,
+  };
+}
+
 describe('buildSearchDecisionInput', () => {
   it('fails anchor evidence when mixed route is missing explicit anchor resolution context', () => {
     const eid = createEntityId();
-    const plan = {
-      ...minimalPlan('mixed'),
-      anchors: [{
-        surfaceForm: 'Opus One',
-        normalizedForm: 'opus one',
-        candidateEntityIds: [eid],
-        confidence: 0.95,
-        source: 'alias',
-      }],
-    } as QueryPlanV1;
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
-      candidates: [],
+    const plan = makeAnchoredPlan('mixed', eid);
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'X', calibratedScore: 0.9 },
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.9,
-        top2CalibratedScore: 0,
         calibratedGap: 0.9,
         decisionConfidenceC: 0.9,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
-      conformalSetSize: 1,
-    };
+      }),
+    });
     const input = buildSearchDecisionInput(plan, resolverResult, []);
     expect(input.evidenceSummary.anchorResolution).toEqual({
       anchorEntityPresent: false,
@@ -63,33 +112,15 @@ describe('buildSearchDecisionInput', () => {
 
   it('uses effectiveRoute when API override forces mixed execution and keeps anchor evidence fail-closed without anchor context', () => {
     const eid = createEntityId();
-    const plan = {
-      ...minimalPlan('entity'),
-      anchors: [{
-        surfaceForm: 'Opus One',
-        normalizedForm: 'opus one',
-        candidateEntityIds: [eid],
-        confidence: 0.95,
-        source: 'alias',
-      }],
-    } as QueryPlanV1;
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
-      candidates: [],
+    const plan = makeAnchoredPlan('entity', eid);
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'X', calibratedScore: 0.9 },
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.9,
-        top2CalibratedScore: 0,
         calibratedGap: 0.9,
         decisionConfidenceC: 0.9,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
-      conformalSetSize: 1,
-    };
+      }),
+    });
 
     const input = buildSearchDecisionInput(plan, resolverResult, [], 'mixed');
     expect(input.effectiveRoute).toBe('mixed');
@@ -100,21 +131,26 @@ describe('buildSearchDecisionInput', () => {
     expect(input.admissionContext?.requires_anchor_evidence).toBe(true);
   });
 
+  it('carries effectiveRetrievalMode when compiled execution mode is provided', () => {
+    const input = buildSearchDecisionInput(
+      minimalPlan('hybrid'),
+      makeResolverResult(),
+      [],
+      'hybrid',
+      undefined,
+      undefined,
+      'recommendation',
+    );
+
+    expect(input.effectiveRoute).toBe('hybrid');
+    expect(input.effectiveRetrievalMode).toBe('recommendation');
+  });
+
   it('requires explicit mixed-anchor resolution when mixed route context is present', () => {
     const eid = createEntityId('selected');
     const anchorId = createEntityId('anchor');
-    const plan = {
-      ...minimalPlan('mixed'),
-      anchors: [{
-        surfaceForm: 'Opus One',
-        normalizedForm: 'opus one',
-        candidateEntityIds: [anchorId],
-        confidence: 0.95,
-        source: 'alias',
-      }],
-    } as QueryPlanV1;
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
+    const plan = makeAnchoredPlan('mixed', anchorId);
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'Selected Wine', calibratedScore: 0.92 },
       candidates: [{
         entityId: eid,
@@ -123,24 +159,18 @@ describe('buildSearchDecisionInput', () => {
         rank: 1,
         evidenceRefs: [],
       }],
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.92,
         top2CalibratedScore: 0.40,
         calibratedGap: 0.52,
         decisionConfidenceC: 0.92,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['MIXED_ROUTE'],
-      },
-      conformalSetSize: 1,
-    };
-    const rankedResults: RankedResult[] = [{
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
       entityId: eid,
       canonicalLabel: 'Selected Wine',
       finalScore: 0.89,
-      rank: 1,
       componentScores: {
         entityIntegrity: 1,
         anchorSimilarity: 0.8,
@@ -160,10 +190,7 @@ describe('buildSearchDecisionInput', () => {
         strength: 'high',
         provenance: 'anchor similarity',
       }],
-      matchedConstraints: [],
-      unmetConstraints: [],
-      inferredConstraints: [],
-    }];
+    })];
 
     const input = buildSearchDecisionInput(
       plan,
@@ -190,44 +217,24 @@ describe('buildSearchDecisionInput', () => {
 
   it('omits rankingSignals when no ranked results', () => {
     const plan = minimalPlan('entity');
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
-      candidates: [],
-      decisionTrace: {
-        queryClass: 'unknown',
-        top1CalibratedScore: 0,
-        top2CalibratedScore: 0,
-        calibratedGap: 0,
-        decisionConfidenceC: 0,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
+    const resolverResult = makeResolverResult({
+      decisionTrace: makeDecisionTrace(),
       conformalSetSize: 0,
-    };
+    });
     const input = buildSearchDecisionInput(plan, resolverResult, undefined);
     expect(input.rankingSignals).toBeUndefined();
   });
 
   it('passes execution honesty signals into the decision input', () => {
     const plan = minimalPlan('hybrid');
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
-      candidates: [],
-      decisionTrace: {
-        queryClass: 'unknown',
+    const resolverResult = makeResolverResult({
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.8,
         top2CalibratedScore: 0.2,
         calibratedGap: 0.6,
         decisionConfidenceC: 0.8,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
-      conformalSetSize: 1,
-    };
+      }),
+    });
 
     const input = buildSearchDecisionInput(
       plan,
@@ -249,8 +256,7 @@ describe('buildSearchDecisionInput', () => {
     const resolvedId = createEntityId('entity-resolved');
     const differentRankedId = createEntityId('entity-ranked');
     const plan = minimalPlan('hybrid');
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: resolvedId, canonicalLabel: 'Resolved Wine', calibratedScore: 0.92 },
       candidates: [{
         entityId: resolvedId,
@@ -259,24 +265,17 @@ describe('buildSearchDecisionInput', () => {
         rank: 1,
         evidenceRefs: ['alias:resolved'],
       }],
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.92,
         top2CalibratedScore: 0.30,
         calibratedGap: 0.62,
         decisionConfidenceC: 0.92,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
-      conformalSetSize: 1,
-    };
-    const rankedResults: RankedResult[] = [{
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
       entityId: differentRankedId,
       canonicalLabel: 'Different Wine',
       finalScore: 0.88,
-      rank: 1,
       componentScores: {
         entityIntegrity: 1,
         semantic: 0.7,
@@ -295,10 +294,7 @@ describe('buildSearchDecisionInput', () => {
         strength: 'high',
         provenance: 'Semantic relevance from dense retrieval similarity',
       }],
-      matchedConstraints: [],
-      unmetConstraints: [],
-      inferredConstraints: [],
-    }];
+    })];
 
     const input = buildSearchDecisionInput(plan, resolverResult, rankedResults);
 
@@ -311,8 +307,7 @@ describe('buildSearchDecisionInput', () => {
   it('keeps exact-match identity on aligned ranked routes even when ranked evidence items are empty', () => {
     const eid = createEntityId('entity-exact');
     const plan = minimalPlan('hybrid');
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'Exact Wine', calibratedScore: 0.995 },
       candidates: [{
         entityId: eid,
@@ -321,24 +316,17 @@ describe('buildSearchDecisionInput', () => {
         rank: 1,
         evidenceRefs: ['alias:exact'],
       }],
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.995,
         top2CalibratedScore: 0.2,
         calibratedGap: 0.795,
         decisionConfidenceC: 0.995,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
-      conformalSetSize: 1,
-    };
-    const rankedResults: RankedResult[] = [{
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
       entityId: eid,
       canonicalLabel: 'Exact Wine',
       finalScore: 0.95,
-      rank: 1,
       componentScores: {
         entityIntegrity: 1,
         semantic: 0,
@@ -351,10 +339,7 @@ describe('buildSearchDecisionInput', () => {
         uncertaintyPenalty: 0,
       },
       evidenceItems: [],
-      matchedConstraints: [],
-      unmetConstraints: [],
-      inferredConstraints: [],
-    }];
+    })];
 
     const input = buildSearchDecisionInput(plan, resolverResult, rankedResults);
 
@@ -367,8 +352,7 @@ describe('buildSearchDecisionInput', () => {
   it('does not mint identity evidence for synthetic ranked routes without ranked corroboration', () => {
     const eid = createEntityId('synthetic-ranked');
     const plan = minimalPlan('hybrid');
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'Synthetic Wine', calibratedScore: 0.95 },
       candidates: [{
         entityId: eid,
@@ -377,24 +361,18 @@ describe('buildSearchDecisionInput', () => {
         rank: 1,
         evidenceRefs: [],
       }],
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.95,
         top2CalibratedScore: 0.50,
         calibratedGap: 0.45,
         decisionConfidenceC: 0.95,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['HYBRID_ROUTE'],
-      },
-      conformalSetSize: 1,
-    };
-    const rankedResults: RankedResult[] = [{
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
       entityId: eid,
       canonicalLabel: 'Synthetic Wine',
       finalScore: 0.95,
-      rank: 1,
       componentScores: {
         entityIntegrity: 1,
         semantic: 0.7,
@@ -407,10 +385,7 @@ describe('buildSearchDecisionInput', () => {
         uncertaintyPenalty: 0,
       },
       evidenceItems: [],
-      matchedConstraints: [],
-      unmetConstraints: [],
-      inferredConstraints: [],
-    }];
+    })];
 
     const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'hybrid');
 
@@ -421,8 +396,7 @@ describe('buildSearchDecisionInput', () => {
   it('does not mint identity evidence for synthetic ranked routes with only negative ranked evidence', () => {
     const eid = createEntityId('synthetic-negative-ranked');
     const plan = minimalPlan('hybrid');
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'Synthetic Wine', calibratedScore: 0.95 },
       candidates: [{
         entityId: eid,
@@ -431,24 +405,18 @@ describe('buildSearchDecisionInput', () => {
         rank: 1,
         evidenceRefs: [],
       }],
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.95,
         top2CalibratedScore: 0.50,
         calibratedGap: 0.45,
         decisionConfidenceC: 0.95,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
         outcomeReasonCodes: ['HYBRID_ROUTE'],
-      },
-      conformalSetSize: 1,
-    };
-    const rankedResults: RankedResult[] = [{
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
       entityId: eid,
       canonicalLabel: 'Synthetic Wine',
       finalScore: 0.95,
-      rank: 1,
       componentScores: {
         entityIntegrity: 1,
         semantic: 0.7,
@@ -466,10 +434,7 @@ describe('buildSearchDecisionInput', () => {
         contribution: '-0.25',
         detail: 'negative evidence should not count as identity corroboration',
       }],
-      matchedConstraints: [],
-      unmetConstraints: [],
-      inferredConstraints: [],
-    }];
+    })];
 
     const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'hybrid');
 
@@ -482,14 +447,7 @@ describe('buildSearchDecisionInput', () => {
   it('captures matched hard constraints and anchor evidence from the ranked top result', () => {
     const eid = createEntityId('entity-anchor');
     const plan = {
-      ...minimalPlan('mixed'),
-      anchors: [{
-        surfaceForm: 'Opus One',
-        normalizedForm: 'opus one',
-        candidateEntityIds: [eid],
-        confidence: 0.95,
-        source: 'alias',
-      }],
+      ...makeAnchoredPlan('mixed', eid),
       constraints: {
         hard: [{
           attribute: 'country',
@@ -508,8 +466,7 @@ describe('buildSearchDecisionInput', () => {
         }],
       },
     } as QueryPlanV1;
-    const resolverResult: EntityResolveResult = {
-      status: 'resolved',
+    const resolverResult = makeResolverResult({
       topEntity: { entityId: eid, canonicalLabel: 'Anchored Wine', calibratedScore: 0.995 },
       candidates: [{
         entityId: eid,
@@ -518,24 +475,17 @@ describe('buildSearchDecisionInput', () => {
         rank: 1,
         evidenceRefs: ['alias:anchored'],
       }],
-      decisionTrace: {
-        queryClass: 'unknown',
+      decisionTrace: makeDecisionTrace({
         top1CalibratedScore: 0.995,
         top2CalibratedScore: 0.20,
         calibratedGap: 0.795,
         decisionConfidenceC: 0.995,
-        ambiguityDetected: false,
-        ambiguityTypes: [],
-        appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-        outcomeReasonCodes: [],
-      },
-      conformalSetSize: 1,
-    };
-    const rankedResults: RankedResult[] = [{
+      }),
+    });
+    const rankedResults: RankedResult[] = [makeRankedResult({
       entityId: eid,
       canonicalLabel: 'Anchored Wine',
       finalScore: 0.95,
-      rank: 1,
       componentScores: {
         entityIntegrity: 1,
         anchorSimilarity: 0.8,
@@ -556,9 +506,8 @@ describe('buildSearchDecisionInput', () => {
         provenance: 'Similarity to anchor entity based on attributes and embedding',
       }],
       matchedConstraints: ['country'],
-      unmetConstraints: [],
       inferredConstraints: ['appellation'],
-    }];
+    })];
 
     const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'mixed', {
       mixedAnchor: {

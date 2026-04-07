@@ -1,11 +1,13 @@
 import { isDeepStrictEqual } from 'node:util';
 import { SNAPSHOT_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schema-version.js';
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import { canonicalJsonStringify } from '../../domain/shared/utils/canonical-json.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import type { SnapshotVersions } from './search.usecase.js';
+import type { SnapshotVersionContractV2 } from './snapshot-version-contract.js';
 
 const DEFAULT_POLICY_RULE_VERSION = '1.0.0';
 const DEFAULT_THRESHOLD_PROFILE_ID = 'default';
@@ -106,6 +108,36 @@ export function readDecisionSnapshotFromSearchResponse(
   response: SearchResponseV1,
 ): DecisionSnapshot {
   return response.meta.decisionSnapshot ?? response.engineDecision.decisionSnapshot;
+}
+
+/**
+ * E1-U6: Project CompiledWineQuery execution fields → SnapshotVersionContractV2.
+ *
+ * Field mapping (compiled → snapshot vocabulary):
+ *   compiled.query.plannerVersion       → plannerVersion
+ *   compiled.query.policyRuleVersion    → policyRuleVersion
+ *   compiled.query.thresholdProfileId   → thresholdProfileId
+ *   compiled.execution.effectiveRoute   → executionRoute
+ *   compiled.execution.effectiveRetrievalMode → retrievalMode
+ *
+ * This is the authoritative projection spec for cache-key enrichment and
+ * observability consumers that need route/mode in the snapshot contract.
+ *
+ * NOTE: This function is not yet called from any production code path.
+ * PgSnapshotStore.save() uses V1 snapshot IDs only.
+ * To activate V2 snapshot IDs: call this function and pass result to buildDeterministicSnapshotIdV2,
+ * then wire into the search pipeline's cache-key and snapshot-store calls.
+ */
+export function buildSnapshotVersionContractV2FromCompiled(
+  compiled: CompiledWineQuery,
+): SnapshotVersionContractV2 {
+  return {
+    plannerVersion: compiled.query.plannerVersion,
+    policyRuleVersion: compiled.query.policyRuleVersion,
+    thresholdProfileId: compiled.query.thresholdProfileId,
+    executionRoute: compiled.execution.effectiveRoute,
+    retrievalMode: compiled.execution.effectiveRetrievalMode,
+  };
 }
 
 /**

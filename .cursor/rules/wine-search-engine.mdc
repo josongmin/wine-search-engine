@@ -20,13 +20,27 @@ alwaysApply: true
 - `npm run build` — production compile (`tsconfig.build.json`, excludes tests).
 - `npm run start` — run compiled server.
 - `npm run lint` / `npm run lint:fix` — ESLint (flat config + `typescript-eslint` type-aware rules).
+- `npm run check:quick` — fastest local check: lightweight test lane only.
+- `npm run check:smart [changed-file...]` — smart local check that skips docs-only changes, skips typecheck for test-only changes, and runs typecheck before the narrowest useful lane for source/config changes.
+- `npm run lint:file -- <file...>` — lint only the given files, with a small local cache for repeated runs.
+- `npm run lint:smart [changed-file...]` — lint only changed lintable files; skip docs-only changes; fall back to full lint for large changed sets.
+- `npm run check:related -- <changed-file...>` — narrow changed-scope local check via Vitest `related` on the lightweight lane.
 - `npm run check:dev` — everyday local check: typecheck + lightweight test lane.
 - `npm run typecheck` — `tsc --noEmit` (default `tsconfig.json`: `src/`).
 - `npm run test` — lightweight everyday Vitest lane.
-- `npm run test:meta` — meta/parity lane for workflow, fixture, and route consistency checks.
+- `npm run test:file -- <test-file...>` — explicit-file run inside the lightweight lane; forwards extra Vitest args.
+- `npm run test:related -- <changed-file...>` — related-test run inside the lightweight lane.
+- `npm run test:eval` — eval/reporting-focused unit lane.
+- `npm run test:meta` — meta/parity lane for workflow, fixture, route consistency, and response/schema contract checks.
 - `npm run test:unit` — fuller unit regression lane.
+- `npm run test:unit:file -- <test-file...>` — explicit-file run inside the fuller unit lane; forwards extra Vitest args.
+- `npm run test:unit:related -- <changed-file...>` — related-test run inside the fuller unit lane.
+- `npm run test:integration:file -- <test-file...>` — explicit-file run inside the integration lane; forwards extra Vitest args.
+- `npm run test:integration:related -- <changed-file...>` — related-test run inside the integration lane.
 - `npm run test:watchlist` — watchlist-only lane.
 - `npm run test:heavy` — expensive search regression lane.
+- `npm run test:e2e:file -- <test-file...>` — explicit-file run inside the in-memory e2e lane; forwards extra Vitest args.
+- `npm run test:e2e:related -- <changed-file...>` — related-test run inside the in-memory e2e lane.
 - `npm run verify:http-contracts` — OpenAPI/catalog parity (also in `git:prepush`).
 - `npm run git:prepush:quick` — typecheck + unit without contract check.
 - `npm run git:prepush:heavy` — typecheck + unit + HTTP contract check + heavy test lane.

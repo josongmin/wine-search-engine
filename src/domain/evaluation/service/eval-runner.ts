@@ -1,3 +1,25 @@
+/**
+ * E5-U6: Shadow-First Path Definition (lock)
+ *
+ * All calibrator/lane/rerank activation changes MUST go through a shadow run
+ * via EvalRunner BEFORE any production cutover. Shadow path:
+ *   1. Run new logic alongside existing logic (shadow mode, no user impact)
+ *   2. Compare EvalResult[*].utilityScore and EvalMetrics against baseline
+ *   3. Only if shadow passes PromotionGate criteria → proceed to E5-U7
+ *
+ * Direct production cutover (even behind a feature flag) without shadow run
+ * is NOT permitted. EvalRunner is the authoritative shadow execution seam.
+ *
+ * E5-U7: Promotion Acceptance Gate (lock)
+ *
+ * After shadow run completes, PromotionGate.evaluate() is the single
+ * acceptance check. Criteria (from promotion-gate.ts):
+ *   - Utility scorer: utilityScore improvement ≥ threshold
+ *   - Slice evaluator: no regression on gold-set flagged slices
+ *   - Calibration evaluator: calibration gap within bounds
+ *
+ * Do NOT accept promotion via human judgment alone — gate criteria must pass.
+ */
 import type { DecisionStatus, EntityId, EvidenceItem, DecisionSnapshot } from '../../shared/types/index.js';
 import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
 import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
@@ -12,6 +34,34 @@ import { SliceEvaluator, type FlaggedSlice } from './slice-evaluator.js';
 import { SelectivePredictor } from './selective-predictor.js';
 import { CalibrationEvaluator } from './calibration-evaluator.js';
 import { EvidenceAuditor } from './evidence-auditor.js';
+
+/**
+ * E5-U1: Eval Feature Delta List
+ *
+ * Features that eval-runner reads from SearchPipelineOutput (adapter-provided
+ * projection of RankedResult / SearchResponse fields):
+ *
+ *   Signal / score feature            Source field
+ *   ──────────────────────────────────────────────────────────────────
+ *   predictedEntityId                 RankedResult.entityId (top result)
+ *   predictedStatus                   SearchResponse / DecisionEngine output
+ *   decisionConfidence                SearchResponse.engineDecision.confidence
+ *   executionMode                     SearchResponse.engineDecision.executionMode
+ *   blockingEligible                  SearchResponse.engineDecision.blockingEligible
+ *   degradationReasons                SearchResponse.engineDecision.degradationReasons
+ *   evidenceItems                     SearchResponse.engineDecision.evidenceItems
+ *   latencyMs                         SearchResponse / pipeline latency
+ *   decisionSnapshot                  SearchResponse.decisionSnapshot
+ *   admissionViolationDetected        Adapter-detected RFC-016 invariant breach
+ *   topResultScoreComponents          RankedResult.scoreComponents (LTR features)
+ *   funnelMetrics                     RankingStagePipeline.getLastFunnelMetrics()
+ *   retrievalProvenanceSlices         RankedResult[*].retrievalProvenance (via eval-provenance adapter)
+ *
+ * CONTRACT: eval-runner MUST read only from RankedResult fields and
+ * SearchResponse fields (surfaced via SearchPipelineOutput); it must NOT
+ * access internal ranker state directly. All new eval signals must be
+ * added to SearchPipelineOutput first, not read inline from ranker internals.
+ */
 
 /**
  * The output of the search pipeline for a single query, as seen by the

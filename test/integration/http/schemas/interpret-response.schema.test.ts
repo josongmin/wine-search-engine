@@ -23,4 +23,26 @@ describe('InterpretResponseSchema', () => {
 
     expect(InterpretResponseSchema.safeParse(deepKeysToSnake(plan)).success).toBe(true);
   });
+
+  it('rejects V2 explain fields so the V1 interpret contract stays fail-closed', async () => {
+    const parts = createTestContainer();
+
+    const plan = await parts.container.interpretUseCase.execute({
+      query: 'Opus One 2018',
+    });
+
+    const polluted = {
+      ...deepKeysToSnake(plan),
+      version: '2',
+      response_type: 'interpret',
+      query_id: 'q-v2',
+      detected_intent: 'entity_exact',
+      active_channels: ['sparse_bm25'],
+      applied_constraints: [],
+      ranking_signals: ['semantic_similarity'],
+      confidence: 0.9,
+    };
+
+    expect(InterpretResponseSchema.safeParse(polluted).success).toBe(false);
+  });
 });

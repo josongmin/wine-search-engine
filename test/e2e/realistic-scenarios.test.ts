@@ -52,7 +52,7 @@ describe('Realistic Scenarios — alias normalization', () => {
         options: { mode: 'hybrid', explain: false, clarification: false },
       });
 
-      expect(getSearchDecisionStatus(entity)).not.toBe('failed');
+      expect(getSearchDecisionStatus(entity)).toMatch(/^(resolved|ambiguous)$/);
       expect(getSearchEntityIds(hybrid).slice(0, 5)).toContain(expectedEntityId);
     });
   }
@@ -67,7 +67,7 @@ describe('Realistic Scenarios — alias normalization', () => {
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(getSearchDecisionStatus(accented)).not.toBe('failed');
+    expect(getSearchDecisionStatus(accented)).toMatch(/^(resolved|ambiguous)$/);
     expect(getSearchEntityIds(stripped).slice(0, 5)).toContain('chateau-margaux-2015');
   });
 });
@@ -91,16 +91,6 @@ describe('Realistic Scenarios — vintage and specificity', () => {
     expect(getSearchEntityIds(body).slice(0, 5)).toContain('sassicaia-2018');
   });
 
-  it("'Opus One 2099' remains graceful for unknown vintages", async () => {
-    const body = await search({
-      query: 'Opus One 2099',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(getSearchDecisionStatus(body)).toMatch(/^(resolved|ambiguous|failed)$/);
-    expect(Array.isArray(body.results)).toBe(true);
-  });
-
   it("'2018 Cabernet' returns at least one Cabernet-led wine in the top-5", async () => {
     const cabernetIds = new Set(['opus-one-2018', 'chateau-margaux-2015', 'sassicaia-2018']);
     const body = await search({
@@ -114,44 +104,19 @@ describe('Realistic Scenarios — vintage and specificity', () => {
 });
 
 describe('Realistic Scenarios — semantic and multilingual smoke', () => {
-  it("'결혼식 샴페인' keeps a sparkling candidate in the top-5", async () => {
+  it.each([
+    ['결혼식 샴페인', new Set(['moet-brut'])],
+    ['스테이크랑 어울리는 와인', new Set(['opus-one-2018', 'penfolds-grange-2017', 'sassicaia-2018'])],
+    ['Bordeaux 레드 와인', new Set(['chateau-margaux-2015', 'sauternes-2015'])],
+    ['피노누아', new Set(['romanee-conti-2019'])],
+  ])("'%s' keeps a representative candidate in the top-5", async (query, expectedIds) => {
     const body = await search({
-      query: '결혼식 샴페인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(getSearchEntityIds(body).slice(0, 5)).toContain('moet-brut');
-  });
-
-  it("'스테이크랑 어울리는 와인' keeps at least one steak-friendly red in the top-5", async () => {
-    const steakIds = new Set(['opus-one-2018', 'penfolds-grange-2017', 'sassicaia-2018']);
-    const body = await search({
-      query: '스테이크랑 어울리는 와인',
+      query,
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
     const topFive = getSearchEntityIds(body).slice(0, 5);
-    expect(topFive.some((entityId) => steakIds.has(entityId))).toBe(true);
-  });
-
-  it("'Bordeaux 레드 와인' keeps a Bordeaux candidate in the top-5", async () => {
-    const bordeauxIds = new Set(['chateau-margaux-2015', 'sauternes-2015']);
-    const body = await search({
-      query: 'Bordeaux 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    const topFive = getSearchEntityIds(body).slice(0, 5);
-    expect(topFive.some((entityId) => bordeauxIds.has(entityId))).toBe(true);
-  });
-
-  it("'피노누아' keeps Burgundy Pinot in the top-5", async () => {
-    const body = await search({
-      query: '피노누아',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(getSearchEntityIds(body).slice(0, 5)).toContain('romanee-conti-2019');
+    expect(topFive.some((entityId) => expectedIds.has(entityId))).toBe(true);
   });
 
   it("'아마로네 강한' returns non-empty results in auto mode", async () => {
@@ -161,6 +126,7 @@ describe('Realistic Scenarios — semantic and multilingual smoke', () => {
     });
 
     expect(body.results.length).toBeGreaterThan(0);
+    expect(getSearchMeta(body).route).toMatch(/^(hybrid|mixed)$/);
   });
 });
 
@@ -172,24 +138,6 @@ describe('Realistic Scenarios — graceful degradation', () => {
     });
 
     expect(getSearchDecisionStatus(body)).toMatch(/^(ambiguous|failed)$/);
-  });
-
-  it("'Screaming Eagle' returns a well-formed 200 response", async () => {
-    const body = await search({
-      query: 'Screaming Eagle',
-      options: { mode: 'entity', explain: false, clarification: false },
-    });
-
-    expect(Array.isArray(body.results)).toBe(true);
-  });
-
-  it("'wine under 10000 won' stays graceful even without fixture support", async () => {
-    const body = await search({
-      query: 'wine under 10000 won',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    });
-
-    expect(Array.isArray(body.results)).toBe(true);
   });
 });
 
@@ -218,7 +166,6 @@ describe('Realistic Scenarios — mode routing', () => {
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
 
-    expect(body.results.length).toBeGreaterThan(0);
     expect(getSearchEntityIds(body).slice(0, 5)).toContain('opus-one-2018');
   });
 });

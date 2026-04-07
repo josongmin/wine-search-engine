@@ -12,6 +12,7 @@
 
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { RetrievalMode } from '../../query/model/retrieval-mode.js';
+import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 import { CACHE_MODE_CONFIG } from '../model/cache-key.js';
 
 /**
@@ -36,8 +37,8 @@ export class CacheEligibilityAnalyzer {
    * @param queryPlan - Query plan from planner (contains retrieval mode, intents, etc.)
    * @returns Eligibility decision with TTL
    */
-  analyze(queryPlan: QueryPlanV1): CacheEligibilityResult {
-    const mode = queryPlan.retrievalMode;
+  analyze(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): CacheEligibilityResult {
+    const mode = compiled?.execution.effectiveRetrievalMode ?? queryPlan.retrievalMode;
 
     // Step 1: Check if mode is cacheable at all
     const modeConfig = CACHE_MODE_CONFIG[mode];

@@ -1,9 +1,16 @@
 /**
- * T5.4: Selective precision reranking gate.
+ * T5.4 / E3-U3: Selective precision reranking gate.
  *
  * Determines whether cross-encoder reranking should be triggered for a given
  * query, based on candidate count, query class, route, and anchor presence.
  * This avoids the cost of reranking when it is unlikely to improve precision.
+ *
+ * Contract ownership:
+ *   - {@link RerankGateInput}  — the ONLY input surface for gate decisions
+ *   - {@link RerankGateDecision} — the ONLY output surface; consumers read shouldRerank + reason
+ *   - {@link evaluateRerankGate} — pure function, no I/O; single call site is Ranker.rank()
+ *
+ * Do NOT add a second call site or duplicate the gate logic in route helpers.
  */
 
 export interface RerankGateInput {
@@ -29,7 +36,7 @@ export interface RerankGateDecision {
  * Gate priority (first matching rule wins):
  *  1. rerankForced === true        → always rerank
  *  2. candidateCount < 5           → skip (not enough candidates)
- *  3. short_entity / exact_lookup   → skip (already highly precise)
+ *  3. short_entity / entity route    → skip (already highly precise)
  *  4. comparison_query / hasAnchor → always rerank (high value)
  *  5. semantic_preference          → always rerank (ambiguous semantics benefit most)
  *  6. candidateCount >= 20         → rerank (enough candidates to benefit)
@@ -46,7 +53,7 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return { shouldRerank: false, reason: 'too_few_candidates' };
   }
 
-  if (queryClass === 'short_entity' || effectiveRoute === 'exact_lookup') {
+  if (queryClass === 'short_entity' || effectiveRoute === 'entity') {
     return { shouldRerank: false, reason: 'already_precise' };
   }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { buildSearchLogEvent } from '../log-search-event.js';
+import { buildInternalErrorAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 
 function digest(seed: string): string {
   return createHash('sha256').update(seed).digest('hex');
@@ -29,5 +30,24 @@ describe('buildSearchLogEvent', () => {
     expect(event.invalid_snapshot_id_reason).toBe('invalid_snapshot_id');
     expect(event.authority_trace_schema_version).toBeUndefined();
     expect(event.snapshot_schema_version).toBeUndefined();
+  });
+
+  it('accepts canonical internal-error authority refs in fallback logs', () => {
+    const event = buildSearchLogEvent({
+      authority_trace_ref: buildInternalErrorAuthorityTraceRef({
+        snapshot: {
+          model_versions: {},
+          index_versions: {},
+          policy_rule_version: '1',
+          threshold_profile_id: 'default',
+          planner_version: '1',
+          feature_flags: {},
+        },
+        requestId: 'req-err-1',
+      }),
+    });
+
+    expect(event.authority_trace_schema_version).toBe('v1');
+    expect(event.invalid_authority_trace_ref_reason).toBeUndefined();
   });
 });

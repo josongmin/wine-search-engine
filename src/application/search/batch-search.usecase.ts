@@ -26,6 +26,34 @@ export type {
 } from './batch-search.dto.js';
 
 /**
+ * Semaphore-based concurrency limiter.
+ *
+ * Spawns `limit` concurrent workers; each worker continuously pulls the next
+ * available task from a shared index until all tasks are complete. This avoids
+ * the barrier-sync stall of chunk-based approaches where one slow task in a
+ * batch holds up every subsequent batch from starting.
+ *
+ * @param tasks - Array of zero-argument async factories (one per task).
+ * @param limit - Maximum number of tasks to execute simultaneously.
+ * @returns Results array in the same order as `tasks`.
+ */
+async function runWithConcurrency<T>(
+  tasks: ReadonlyArray<() => Promise<T>>,
+  limit: number,
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length) as T[];
+  let index = 0;
+  async function worker(): Promise<void> {
+    while (index < tasks.length) {
+      const i = index++;
+      results[i] = await tasks[i]!();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+/**
  * BatchSearchUseCase: orchestrates parallel or fail-fast batch search execution.
  *
  * Features:
@@ -194,9 +222,13 @@ export class BatchSearchUseCase {
   }
 
   /**
-   * Execute all requests in parallel; continue on errors.
+   * Execute all requests with bounded concurrency; continue on errors.
    *
-   * Each request is executed independently. If one fails, others continue.
+   * Uses a semaphore/worker-pool pattern instead of chunk-based barrier sync.
+   * Up to BATCH_CONCURRENCY_LIMIT workers run simultaneously; each worker
+   * picks the next available task as soon as it finishes its current one.
+   * This avoids the barrier-sync problem where a single slow request in a
+   * chunk blocks all subsequent chunks from starting.
    *
    * @param requests - Array of batch search request items.
    * @param batchId - Batch identifier for sub-request ID generation.
@@ -208,18 +240,10 @@ export class BatchSearchUseCase {
     batchId: string,
     timeoutMs: number,
   ): Promise<readonly BatchSearchResultItem[]> {
-    const results: BatchSearchResultItem[] = [];
-    const limit = BatchSearchUseCase.BATCH_CONCURRENCY_LIMIT;
-
-    for (let i = 0; i < requests.length; i += limit) {
-      const chunk = requests.slice(i, i + limit);
-      const chunkResults = await Promise.all(
-        chunk.map((req) => this.executeSingle(req, batchId, timeoutMs)),
-      );
-      results.push(...chunkResults);
-    }
-
-    return results;
+    const tasks = requests.map(
+      (req) => () => this.executeSingle(req, batchId, timeoutMs),
+    );
+    return runWithConcurrency(tasks, BatchSearchUseCase.BATCH_CONCURRENCY_LIMIT);
   }
 
   /**
@@ -244,12 +268,12 @@ export class BatchSearchUseCase {
       results.push(result);
 
       if (result.status === 'failed') {
-        // Aborted items are surfaced as failures so the batch cardinality is
-        // preserved and the caller can distinguish which items were skipped.
+        // Aborted items are surfaced as not_executed so the batch cardinality is
+        // preserved and the caller can distinguish which items were skipped vs failed.
         for (const remainingReq of requests.slice(index + 1)) {
           results.push({
             id: remainingReq.id,
-            status: 'failed',
+            status: 'not_executed',
             error: {
               code: 'INTERNAL_ERROR',
               message: 'Batch execution aborted due to earlier failure',
@@ -302,9 +326,11 @@ export class BatchSearchUseCase {
 
       // Execute with timeout; always cancel the timer after the race settles
       // to avoid holding the Node.js event loop open on successful requests.
+      const abortController = new AbortController();
       let timerId: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         timerId = setTimeout(() => {
+          abortController.abort();
           reject(new Error('RETRIEVAL_TIMEOUT'));
         }, timeoutMs);
       });
@@ -312,19 +338,29 @@ export class BatchSearchUseCase {
       let rawResponse;
       try {
         rawResponse = await Promise.race([
-          this.searchUseCase.execute(searchRequest, requestId),
+          this.searchUseCase.execute(searchRequest, requestId, {
+            abortSignal: abortController.signal,
+          }),
           timeoutPromise,
         ]);
       } finally {
-        clearTimeout(timerId);
+        if (timerId !== undefined) {
+          clearTimeout(timerId);
+        }
       }
 
-      // Batch items are always standard search queries, not comparisons
+      // Batch items are defined to return the standard V1 search envelope only.
+      // Comparison-style queries are unsupported in this route contract and
+      // should surface as a caller-facing query-shape error, not an internal
+      // server failure.
       if (rawResponse.queryType !== 'search') {
         return {
           id: req.id,
           status: 'failed',
-          error: { code: 'INTERNAL_ERROR', message: 'Batch item returned comparison response' },
+          error: {
+            code: 'QUERY_PARSE_ERROR',
+            message: 'Batch search does not support comparison-style queries',
+          },
         };
       }
       const response = rawResponse;

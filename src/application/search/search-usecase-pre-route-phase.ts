@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
@@ -17,11 +18,15 @@ import { createSearchQuerySecurityGate, type SearchSecurityGateDeps } from './se
 import { logSearchEvent } from '../../observability/log-search-event.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
+import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
+import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 
 export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
 export type SearchPreRoutePhaseResult =
-  | { readonly outcome: 'continue'; readonly plan: QueryPlanV1 }
+  | { readonly outcome: 'continue'; readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery }
   | { readonly outcome: 'return'; readonly response: SearchPreRouteEarlyResponse };
 
 export interface SearchPreRoutePhaseContext {
@@ -52,26 +57,41 @@ export async function runSearchPreRoutePhase(
     if (isValidDecomposition(decomposition.outcome)) {
       const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
       const timeoutSignal = Symbol('timeout');
+      const abortController = new AbortController();
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
-        setTimeout(() => { resolve(timeoutSignal); }, DECOMPOSED_SEARCH_TIMEOUT_MS);
+        timeoutHandle = setTimeout(() => {
+          abortController.abort();
+          resolve(timeoutSignal);
+        }, DECOMPOSED_SEARCH_TIMEOUT_MS);
+      });
+      const decomposedSearchPromise = ctx.decomposedSearch.execute(
+        decomposition.outcome.subQueries,
+        decomposition.outcome.comparisonIntent,
+        sanitizedQuery,
+        ctx.requestId,
+        ctx.startTime,
+        {
+          ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
+          ...(ctx.request.sessionContext !== undefined
+            ? { sessionContext: ctx.request.sessionContext }
+            : {}),
+          ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+        },
+        { abortSignal: abortController.signal },
+      ).catch((err: unknown) => {
+        if (abortController.signal.aborted && err instanceof Error && err.name === 'AbortError') {
+          return timeoutSignal;
+        }
+        throw err;
       });
       const decomposedResponse = await Promise.race([
-        ctx.decomposedSearch.execute(
-          decomposition.outcome.subQueries,
-          decomposition.outcome.comparisonIntent,
-          sanitizedQuery,
-          ctx.requestId,
-          ctx.startTime,
-          {
-            ...(ctx.request.context !== undefined ? { context: ctx.request.context } : {}),
-            ...(ctx.request.sessionContext !== undefined
-              ? { sessionContext: ctx.request.sessionContext }
-              : {}),
-            ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
-          },
-        ),
+        decomposedSearchPromise,
         timeoutPromise,
       ]);
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+      }
       if (decomposedResponse === timeoutSignal) {
         pipelineDebug(
           {
@@ -81,7 +101,7 @@ export async function runSearchPreRoutePhase(
           },
           'pipeline pre_route decomposed search timed out — continuing without decomposition',
         );
-      } else {
+      } else if (typeof decomposedResponse !== 'symbol') {
         const response = decomposedResponse;
         logSearchEvent({
           runtime_correlation_ref: ctx.requestId,
@@ -99,14 +119,32 @@ export async function runSearchPreRoutePhase(
     }
   }
 
-  const plan = await ctx.queryPlanner.plan(
-    sanitizedQuery,
-    buildPlannerContextFromSearchRequest(ctx.request),
-  );
+  // Use planWithCompiled when available (PlannerV1Adapter implements this).
+  // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
+  const plannerContext = buildPlannerContextFromSearchRequest(ctx.request);
+  let plan: QueryPlanV1;
+  let compiled: CompiledWineQuery;
+  if (ctx.queryPlanner.planWithCompiled !== undefined) {
+    const result = await ctx.queryPlanner.planWithCompiled(sanitizedQuery, plannerContext);
+    plan = result.v1;
+    compiled = result.compiled;
+  } else {
+    plan = await ctx.queryPlanner.plan(sanitizedQuery, plannerContext);
+    compiled = compileFromLegacyPlan(plan);
+    pipelineDebug(
+      {
+        step: 'pre_route.plan_compiled_fallback',
+        note: 'planWithCompiled unavailable — using V1→V2 reconstruction',
+        plan_route: plan.route,
+        compiled_route: compiled.execution.effectiveRoute,
+      },
+      'pipeline pre_route compiled fallback',
+    );
+  }
 
   logSearchEvent({
     runtime_correlation_ref: ctx.requestId,
-    query_observability: planToObservabilitySlice(ctx.requestId, plan),
+    query_observability: planToObservabilitySlice(ctx.requestId, plan, compiled),
     ...(plan.decompositionHint !== undefined
       ? { decomposition_strategy: plan.decompositionHint.strategy }
       : {}),
@@ -122,16 +160,62 @@ export async function runSearchPreRoutePhase(
       },
       'pipeline pre_route constraint exit',
     );
-    const response = ctx.responseBuilder.build(
-      buildConstraintContradictionExitParams(
-        plan,
-        ctx.request,
-        ctx.requestId,
-        ctx.startTime,
-        ctx.snapshotVersions,
-        satResult.conflictPairs,
-      ),
-    );
+    let response: SearchResponseV1;
+    try {
+      response = ctx.responseBuilder.build(
+        buildConstraintContradictionExitParams(
+          plan,
+          ctx.request,
+          ctx.requestId,
+          ctx.startTime,
+          ctx.snapshotVersions,
+          satResult.conflictPairs,
+          compiled,
+        ),
+      );
+    } catch (buildErr) {
+      bootstrapLogger.warn(
+        { requestId: ctx.requestId, err: buildErr },
+        '[runSearchPreRoutePhase] responseBuilder.build() threw in constraint-contradiction exit; returning bare safe response',
+      );
+      const queryTimeMs = Date.now() - ctx.startTime;
+      const safeSnapshot = buildDecisionSnapshotFromPlan(plan, ctx.snapshotVersions);
+      const effectiveRoute = compiled.execution.effectiveRoute;
+      const safeTraceRef = buildAuthorityTraceRef({
+        queryPlan: plan,
+        snapshot: safeSnapshot,
+        route: effectiveRoute,
+        retrievalMode: compiled.execution.effectiveRetrievalMode,
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        failureReason: 'HARD_CONSTRAINT_VIOLATION',
+      });
+      response = {
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route: effectiveRoute,
+          decisionConfidence: 0,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: safeTraceRef,
+          authorityTraceRef: safeTraceRef,
+          decisionSnapshot: safeSnapshot,
+        },
+        results: [],
+        meta: {
+          requestId: ctx.requestId,
+          queryTimeMs,
+          route: effectiveRoute,
+          version: '1.0.0',
+          engine_schema_version: 'search_response_v1',
+          authorityTraceRef: safeTraceRef,
+          runtimeCorrelationRef: ctx.requestId,
+          executionMode: 'degraded',
+          blockingEligible: false,
+        },
+      };
+    }
     return { outcome: 'return', response };
   }
 
@@ -139,6 +223,7 @@ export async function runSearchPreRoutePhase(
     const cached = await tryGetCachedSearchResponse(
       ctx.cacheService,
       plan,
+      compiled,
       ctx.request,
       ctx.snapshotVersions,
       ctx.cacheLookupRuntimeState,
@@ -165,9 +250,11 @@ export async function runSearchPreRoutePhase(
       step: 'pre_route.continue',
       query_class: plan.queryClass,
       plan_route: plan.route,
+      compiled_route: compiled.execution.effectiveRoute,
+      compiled_mode: compiled.execution.effectiveRetrievalMode,
     },
     'pipeline pre_route plan ready',
   );
 
-  return { outcome: 'continue', plan };
+  return { outcome: 'continue', plan, compiled };
 }

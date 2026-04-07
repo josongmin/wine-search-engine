@@ -7,6 +7,10 @@ import {
 import type { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 
+function singleRequest(query = 'Test'): BatchSearchRequestItem[] {
+  return [{ id: '1', query }];
+}
+
 function makeSearchResponse(): SearchResponseV1 {
   return {
     queryType: 'search',
@@ -158,64 +162,25 @@ describe('BatchSearchUseCase', () => {
 
   describe('timeout validation', () => {
     it('should use default timeout (5000 ms)', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
         makeSearchResponse(),
       );
 
-      await useCase.execute(requests);
+      await useCase.execute(singleRequest());
 
       expect(mockSearchUseCase.execute).toHaveBeenCalled();
     });
 
-    it('should accept timeout in range (1000–30000 ms)', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
-      const options: BatchSearchOptions = { timeout_ms: 10000 };
-
+    it.each([
+      ['accept timeout in range (1000–30000 ms)', { timeout_ms: 10000 }],
+      ['clamp timeout below minimum to 1000 ms', { timeout_ms: 500 }],
+      ['clamp timeout above maximum to 30000 ms', { timeout_ms: 60000 }],
+    ] as const)('should %s', async (_label, options) => {
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
         makeSearchResponse(),
       );
 
-      const response = await useCase.execute(requests, options);
-
-      expect(response.succeeded).toBe(1);
-    });
-
-    it('should clamp timeout below minimum to 1000 ms', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
-      const options: BatchSearchOptions = { timeout_ms: 500 };
-
-      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        makeSearchResponse(),
-      );
-
-      const response = await useCase.execute(requests, options);
-
-      // Should not fail due to timeout clamping
-      expect(response.succeeded).toBe(1);
-    });
-
-    it('should clamp timeout above maximum to 30000 ms', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
-      const options: BatchSearchOptions = { timeout_ms: 60000 };
-
-      vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
-        makeSearchResponse(),
-      );
-
-      const response = await useCase.execute(requests, options);
+      const response = await useCase.execute(singleRequest(), options);
 
       expect(response.succeeded).toBe(1);
     });
@@ -275,6 +240,42 @@ describe('BatchSearchUseCase', () => {
         expect(failedResult.error.code).toBe('POLICY_BLOCKED');
       }
     });
+
+    it('marks comparison-style responses as QUERY_PARSE_ERROR instead of INTERNAL_ERROR', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValueOnce({
+        queryType: 'comparison',
+        originalQuery: 'Opus One vs Sassicaia',
+        comparisonIntent: 'compare',
+        entities: [
+          {
+            subQuery: 'Opus One',
+            topResult: null,
+            resultCount: 0,
+            resolutionStatus: 'failed',
+            allResults: [],
+          },
+          {
+            subQuery: 'Sassicaia',
+            topResult: null,
+            resultCount: 0,
+            resolutionStatus: 'failed',
+            allResults: [],
+          },
+        ],
+        overallStatus: 'failed',
+        requestId: 'req-1',
+        executionTimeMs: 1,
+      } as never);
+
+      const response = await useCase.execute(singleRequest('Opus One vs Sassicaia'));
+
+      const failedResult = response.results[0];
+      expect(failedResult?.status).toBe('failed');
+      if (failedResult?.status === 'failed') {
+        expect(failedResult.error.code).toBe('QUERY_PARSE_ERROR');
+        expect(failedResult.error.message).toContain('does not support comparison-style queries');
+      }
+    });
   });
 
   describe('fail-fast mode (fail_fast=true)', () => {
@@ -296,11 +297,12 @@ describe('BatchSearchUseCase', () => {
 
       expect(response.total).toBe(3);
       expect(response.succeeded).toBe(1);
-      expect(response.failed).toBe(2);
+      expect(response.failed).toBe(1);
+      expect(response.not_executed).toBe(1);
       expect(mockSearchUseCase.execute).toHaveBeenCalledTimes(2);
       expect(response.results[2]).toMatchObject({
         id: '3',
-        status: 'failed',
+        status: 'not_executed',
         error: {
           code: 'INTERNAL_ERROR',
           message: 'Batch execution aborted due to earlier failure',
@@ -331,82 +333,90 @@ describe('BatchSearchUseCase', () => {
         expect(result.error.code).toBe('RETRIEVAL_TIMEOUT');
       }
     });
+
+    it('aborts the underlying search execution when timeout wins', async () => {
+      vi.useFakeTimers();
+
+      let receivedSignal: AbortSignal | undefined;
+      vi.mocked(mockSearchUseCase.execute).mockImplementation(
+        async (_request, _requestId, options) => {
+          receivedSignal = options?.abortSignal;
+          await new Promise<never>((_resolve, reject) => {
+            options?.abortSignal?.addEventListener('abort', () => {
+              const error = new Error('aborted');
+              error.name = 'AbortError';
+              reject(error);
+            }, { once: true });
+          });
+          throw new Error('unreachable');
+        },
+      );
+
+      const responsePromise = useCase.execute(
+        [{ id: '1', query: 'Slow query' }],
+        { timeout_ms: 10 },
+      );
+
+      await vi.advanceTimersByTimeAsync(1000);
+      const response = await responsePromise;
+
+      expect(receivedSignal?.aborted).toBe(true);
+      expect(response.failed).toBe(1);
+      const result = response.results[0];
+      if (result?.status === 'failed') {
+        expect(result.error.code).toBe('RETRIEVAL_TIMEOUT');
+      }
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   describe('error mapping', () => {
-    it('should map POLICY_BLOCKED error', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Blocked query' },
-      ];
-
-      const policyError = new (class DomainError extends Error {
-        override name = 'DomainError';
-        code = 'POLICY_BLOCKED';
-        constructor() {
-          super('Query blocked by policy');
-        }
-      })();
-
-      vi.mocked(mockSearchUseCase.execute).mockRejectedValueOnce(
-        policyError,
-      );
-
-      const response = await useCase.execute(requests);
-
-      const result = response.results[0];
-      expect(result?.status).toBe('failed');
-      if (result?.status === 'failed') {
-        expect(result.error.code).toBe('POLICY_BLOCKED');
-      }
-    });
-
-    it('should map QUERY_PARSE_ERROR (ZodError)', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Invalid' },
-      ];
-
-      const zodError = new (class extends Error {
-        override name = 'ZodError';
-        constructor() {
-          super('Invalid query format');
-        }
-      })();
-
-      vi.mocked(mockSearchUseCase.execute).mockRejectedValueOnce(zodError);
-
-      const response = await useCase.execute(requests);
-
-      const result = response.results[0];
-      expect(result?.status).toBe('failed');
-      if (result?.status === 'failed') {
-        expect(result.error.code).toBe('QUERY_PARSE_ERROR');
-      }
-    });
-
-    it('should map INTERNAL_ERROR for unknown errors', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Unknown error' },
-      ];
-
-      vi.mocked(mockSearchUseCase.execute).mockRejectedValueOnce(
+    it.each([
+      [
+        'POLICY_BLOCKED error',
+        'Blocked query',
+        new (class DomainError extends Error {
+          override name = 'DomainError';
+          code = 'POLICY_BLOCKED';
+          constructor() {
+            super('Query blocked by policy');
+          }
+        })(),
+        'POLICY_BLOCKED',
+      ],
+      [
+        'QUERY_PARSE_ERROR (ZodError)',
+        'Invalid',
+        new (class extends Error {
+          override name = 'ZodError';
+          constructor() {
+            super('Invalid query format');
+          }
+        })(),
+        'QUERY_PARSE_ERROR',
+      ],
+      [
+        'INTERNAL_ERROR for unknown errors',
+        'Unknown error',
         new Error('Unknown error'),
-      );
+        'INTERNAL_ERROR',
+      ],
+    ] as const)('should map %s', async (_label, query, error, expectedCode) => {
+      vi.mocked(mockSearchUseCase.execute).mockRejectedValueOnce(error);
 
-      const response = await useCase.execute(requests);
+      const response = await useCase.execute(singleRequest(query));
 
       const result = response.results[0];
       expect(result?.status).toBe('failed');
       if (result?.status === 'failed') {
-        expect(result.error.code).toBe('INTERNAL_ERROR');
+        expect(result.error.code).toBe(expectedCode);
       }
     });
   });
 
   describe('sub-request ID generation', () => {
     it('should generate sub-request ID as ${batchId}-${item.id}', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: 'query1', query: 'Test' },
-      ];
+      const requests: BatchSearchRequestItem[] = [{ id: 'query1', query: 'Test' }];
 
       const batchId = 'batch-123';
 
@@ -424,31 +434,23 @@ describe('BatchSearchUseCase', () => {
 
   describe('idempotency', () => {
     it('should return consistent batch_id when provided', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
       const batchId = 'my-batch-123';
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
         makeSearchResponse(),
       );
 
-      const response = await useCase.execute(requests, undefined, batchId);
+      const response = await useCase.execute(singleRequest(), undefined, batchId);
 
       expect(response.batch_id).toBe('my-batch-123');
     });
 
     it('should generate batch_id when not provided', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
         makeSearchResponse(),
       );
 
-      const response = await useCase.execute(requests);
+      const response = await useCase.execute(singleRequest());
 
       expect(response.batch_id).toBeDefined();
       expect(response.batch_id).toMatch(/^batch:v1:[a-f0-9]{64}$/);
@@ -523,15 +525,11 @@ describe('BatchSearchUseCase', () => {
 
   describe('SearchResponseV1 preservation', () => {
     it('should preserve SearchResponseV1 structure in successful items', async () => {
-      const requests: BatchSearchRequestItem[] = [
-        { id: '1', query: 'Test' },
-      ];
-
       const mockResponse: SearchResponseV1 = makeSearchResponse();
 
       vi.mocked(mockSearchUseCase.execute).mockResolvedValue(mockResponse);
 
-      const response = await useCase.execute(requests);
+      const response = await useCase.execute(singleRequest());
 
       const result = response.results[0];
       expect(result?.status).toBe('succeeded');

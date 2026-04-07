@@ -1,4 +1,5 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
@@ -11,6 +12,7 @@ import type { ResultItem } from '../../domain/response/model/result-item.js';
  */
 export function buildConstraintContradictionResponseParams(options: {
   readonly plan: QueryPlanV1;
+  readonly compiled?: CompiledWineQuery | undefined;
   readonly snapshot: DecisionSnapshot;
   readonly requestId: string;
   readonly startTime: number;
@@ -21,6 +23,7 @@ export function buildConstraintContradictionResponseParams(options: {
 }): ResponseBuildParams {
   const {
     plan,
+    compiled,
     snapshot,
     requestId,
     startTime,
@@ -49,6 +52,10 @@ export function buildConstraintContradictionResponseParams(options: {
     decisionTraceRef: buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot,
+      route: effectiveRoute,
+      ...(compiled !== undefined
+        ? { retrievalMode: compiled.execution.effectiveRetrievalMode }
+        : {}),
       decisionStatus: 'failed',
       nextAction: 'fail',
       failureReason: 'HARD_CONSTRAINT_VIOLATION',
@@ -84,6 +91,7 @@ export function buildConstraintContradictionResponseParams(options: {
 
   return {
     queryPlan: plan,
+    ...(compiled !== undefined ? { compiled } : {}),
     decisionOutput,
     results: [],
     requestId,
@@ -99,6 +107,7 @@ export function buildConstraintContradictionResponseParams(options: {
  */
 export function buildEntropyAbstainResponseParams(options: {
   readonly plan: QueryPlanV1;
+  readonly compiled?: CompiledWineQuery | undefined;
   readonly snapshot: DecisionSnapshot;
   readonly requestId: string;
   readonly startTime: number;
@@ -112,6 +121,7 @@ export function buildEntropyAbstainResponseParams(options: {
 }): ResponseBuildParams {
   const {
     plan,
+    compiled,
     snapshot,
     requestId,
     startTime,
@@ -143,6 +153,10 @@ export function buildEntropyAbstainResponseParams(options: {
     decisionTraceRef: buildAuthorityTraceRef({
       queryPlan: plan,
       snapshot,
+      route: effectiveRoute,
+      ...(compiled !== undefined
+        ? { retrievalMode: compiled.execution.effectiveRetrievalMode }
+        : {}),
       decisionStatus: 'ambiguous',
       nextAction: 'clarify',
     }),
@@ -175,6 +189,7 @@ export function buildEntropyAbstainResponseParams(options: {
 
   return {
     queryPlan: plan,
+    ...(compiled !== undefined ? { compiled } : {}),
     decisionOutput,
     results,
     clarification: {

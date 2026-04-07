@@ -12,7 +12,10 @@
 
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
-import type { DecomposedSearchParentContext } from './port/search-route-usecases.port.js';
+import type {
+  DecomposedSearchExecutionOptions,
+  DecomposedSearchParentContext,
+} from './port/search-route-usecases.port.js';
 
 export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
   private delegate: DecomposedSearchUseCasePort | undefined;
@@ -32,6 +35,7 @@ export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
     requestId: string,
     startTime: number,
     parentContext?: DecomposedSearchParentContext,
+    options?: DecomposedSearchExecutionOptions,
   ): Promise<ComparisonSearchResponse> {
     if (this.delegate === undefined) {
       throw new Error(
@@ -45,6 +49,7 @@ export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
       requestId,
       startTime,
       parentContext,
+      options,
     );
   }
 }

@@ -120,4 +120,238 @@ describe('InterpretUseCase', () => {
     ]);
     expect(result.v2Explain.rankingSignals).toContain('anchor_similarity');
   });
+
+  it('uses compiled execution mode for V2 explain observability when planner V1 fields differ', async () => {
+    const plan = {
+      rawQuery: 'Barolo vs Amarone',
+      normalizedQuery: 'barolo vs amarone',
+      intent: 'comparison_search' as const,
+      route: 'entity' as const,
+      retrievalMode: 'compare_candidates' as const,
+      queryClass: 'comparison_query',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {},
+      uncertainty: {
+        overall: 0.15,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0.85,
+        constraintConfidence: 0.9,
+      },
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue(plan),
+      planWithCompiled: vi.fn().mockResolvedValue({
+        v1: plan,
+        compiled: {
+          query: {
+            rawQuery: plan.rawQuery,
+            normalizedQuery: plan.normalizedQuery,
+            intent: plan.intent,
+            queryClass: plan.queryClass,
+            anchors: plan.anchors,
+            constraints: plan.constraints,
+            expansions: plan.expansions,
+            uncertainty: plan.uncertainty,
+            plannerVersion: plan.plannerVersion,
+            policyRuleVersion: plan.policyRuleVersion,
+            thresholdProfileId: plan.thresholdProfileId,
+          },
+          execution: {
+            effectiveRoute: 'hybrid' as const,
+            effectiveRetrievalMode: 'compare_candidates' as const,
+            routeSource: 'planner' as const,
+            budget: { maxCandidates: 20, enablePrecisionRerank: true },
+            provenancePolicy: {
+              requireIdentitySeal: true,
+              requireConstraintEvidence: false,
+              requireAnchorEvidence: false,
+            },
+          },
+        },
+      }),
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner,
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'Barolo vs Amarone',
+        }),
+      },
+    });
+
+    const result = await useCase.execute({
+      query: 'Barolo vs Amarone',
+      buildV2: true,
+    });
+
+    expect(result.v2Explain.detectedIntent).toBe('comparison');
+    expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
+  });
+
+  it('surfaces attribute-based appliedConstraints in V2 explain from actual plan constraints', async () => {
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue({
+        rawQuery: 'French red wine under $50',
+        normalizedQuery: 'french red wine under $50',
+        intent: 'semantic_discovery',
+        route: 'hybrid',
+        retrievalMode: 'attribute_search',
+        queryClass: 'attribute_constrained',
+        anchors: [],
+        constraints: {
+          hard: [
+            {
+              attribute: 'country',
+              operator: '=',
+              value: 'france',
+              source_phrase: 'French',
+              confidence: 0.94,
+            },
+            {
+              attribute: 'color',
+              operator: '=',
+              value: 'red',
+              source_phrase: 'red',
+              confidence: 0.93,
+            },
+          ],
+          soft: [
+            {
+              attribute: 'price_max',
+              operator: '<=',
+              value: '50',
+              source_phrase: 'under $50',
+              confidence: 0.88,
+            },
+          ],
+          inferred: [],
+        },
+        expansions: { lexical: [], semantic: [] },
+        policy: {},
+        uncertainty: {
+          overall: 0.18,
+          ambiguityDetected: false,
+          ambiguityTypes: [],
+          ambiguitySeverity: 'low',
+          decisionEffect: 'trace_only',
+          parserConfidence: 0.9,
+          anchorConfidence: 0.9,
+          constraintConfidence: 0.94,
+        },
+        plannerVersion: '1',
+        policyRuleVersion: '1',
+        thresholdProfileId: 'default',
+      }),
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner,
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'French red wine under $50',
+        }),
+      },
+    });
+
+    const result = await useCase.execute({
+      query: 'French red wine under $50',
+      buildV2: true,
+    });
+
+    expect(result.v2Explain.appliedConstraints).toEqual([
+      'hard:country',
+      'hard:color',
+      'soft:price_max',
+    ]);
+  });
+
+  it('uses caller requestId for V2 explain queryId when provided', async () => {
+    const plan = {
+      rawQuery: 'Opus One 2018',
+      normalizedQuery: 'opus one 2018',
+      intent: 'entity_exact',
+      route: 'entity',
+      retrievalMode: 'entity_lookup',
+      queryClass: 'known_item',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {},
+      uncertainty: {
+        overall: 0.05,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.98,
+        anchorConfidence: 0.98,
+        constraintConfidence: 0.98,
+      },
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    };
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn().mockResolvedValue(plan),
+      planWithCompiled: vi.fn().mockResolvedValue({
+        v1: plan,
+        compiled: {
+          query: {
+            rawQuery: plan.rawQuery,
+            normalizedQuery: plan.normalizedQuery,
+            intent: plan.intent,
+            queryClass: plan.queryClass,
+            anchors: plan.anchors,
+            constraints: plan.constraints,
+            expansions: plan.expansions,
+            uncertainty: plan.uncertainty,
+            plannerVersion: plan.plannerVersion,
+            policyRuleVersion: plan.policyRuleVersion,
+            thresholdProfileId: plan.thresholdProfileId,
+          },
+          execution: {
+            effectiveRoute: 'entity' as const,
+            effectiveRetrievalMode: 'entity_lookup' as const,
+            routeSource: 'planner' as const,
+            budget: { maxCandidates: 10, enablePrecisionRerank: false },
+            provenancePolicy: {
+              requireIdentitySeal: true,
+              requireConstraintEvidence: false,
+              requireAnchorEvidence: false,
+            },
+          },
+        },
+      }),
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner,
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'Opus One 2018',
+        }),
+      },
+    });
+
+    const result = await useCase.execute({
+      query: 'Opus One 2018',
+      buildV2: true,
+      requestId: 'req-interpret-123',
+    });
+
+    expect(result.v2Explain.queryId).toBe('req-interpret-123');
+  });
 });

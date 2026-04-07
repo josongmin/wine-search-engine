@@ -44,6 +44,25 @@ export function buildRankedRouteResolveResult(
     evidenceRefs: [],
   }));
 
+  // E3-U6: Calibrator insertion point — when a future ranked-route calibrator
+  // is wired, it must be applied HERE (after rankedResults are sorted, before
+  // decisionTrace/confidence scores are emitted). This is the single authoritative
+  // hook. Do NOT create a parallel decision layer or second insertion point.
+  // Feature inputs: rankedResults[*].finalScore, top1Score, calibratedGap,
+  // plan.queryClass — all available at this scope. No Ranker internal state needed.
+  //
+  // E5-U5: Calibrator Activation Prerequisites (checklist)
+  // Before wiring a calibrator at this insertion point, ALL of the following
+  // must be closed:
+  //   ✓ E3-U5: Feature source contract (ranked-result.ts comment)
+  //   ✓ E3-U6: Insertion point defined (this comment)
+  //   ✓ E3-U7: No-copy rule documented (decision-engine.ts comment)
+  //   ✓ E5-U1: Eval feature delta list locked (search-usecase-eval-provenance.ts)
+  //   ✓ E5-U2: Eval export wiring map locked
+  //   - E5-U6: Shadow-first path defined and passing before production cutover
+  //   - E5-U7: Promotion acceptance gate criteria met
+  // Do NOT activate (even behind a feature flag) until ALL items above are checked.
+
   return {
     status: rankedResults.length > 0 ? 'resolved' : 'failed',
     ...(topEntity !== undefined ? { topEntity } : {}),

@@ -20,6 +20,10 @@ export interface DecomposedSearchParentContext {
   readonly queryBudget?: SearchQueryBudget | undefined;
 }
 
+export interface DecomposedSearchExecutionOptions {
+  readonly abortSignal?: AbortSignal | undefined;
+}
+
 export interface DecomposedSearchUseCasePort {
   execute(
     subQueries: [string, string],
@@ -28,6 +32,7 @@ export interface DecomposedSearchUseCasePort {
     requestId: string,
     startTime: number,
     parentContext?: DecomposedSearchParentContext,
+    options?: DecomposedSearchExecutionOptions,
   ): Promise<ComparisonSearchResponse>;
 }
 
@@ -44,8 +49,12 @@ export interface ReplayUseCasePort {
 }
 
 export interface InterpretUseCasePort {
-  execute(request: InterpretRequest & { readonly buildV2: true }): Promise<InterpretResultWithV2>;
-  execute(request: InterpretRequest & { readonly buildV2?: boolean | undefined }): Promise<QueryPlanV1 | InterpretResultWithV2>;
+  execute(
+    request: InterpretRequest & { readonly buildV2: true; readonly requestId?: string | undefined },
+  ): Promise<InterpretResultWithV2>;
+  execute(
+    request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
+  ): Promise<QueryPlanV1 | InterpretResultWithV2>;
 }
 
 export interface ResolveUseCasePort {

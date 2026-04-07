@@ -17,7 +17,9 @@ import {
   parseErrorResponse,
   parseSearchResponse,
   postJson,
+  postReplayJson,
 } from './helpers/http-transport.js';
+import { makeReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 
@@ -119,16 +121,12 @@ describe('SearchResponseV1 Schema Contract', () => {
   });
 
   it('every result has at least one evidenceItem with real (non-synthetic) evidence', async () => {
-    const { statusCode, json } = await searchPost({
+    const response = await postJson(server.app, '/v1/search', {
       query: '풀바디 레드 와인',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
-
-    expect(statusCode).toBe(200);
-    const body = parseSearchResponse(await postJson(server.app, '/v1/search', {
-      query: '풀바디 레드 와인',
-      options: { mode: 'hybrid', explain: false, clarification: false },
-    }));
+    expect(response.statusCode).toBe(200);
+    const body = parseSearchResponse(response);
 
     expect(body.results.length).toBeGreaterThan(0);
     for (const result of body.results) {
@@ -204,16 +202,13 @@ describe('Error Response Schema Contract (RFC-014 §5)', () => {
   });
 
   it('409 SNAPSHOT_MISMATCH has correct error shape', async () => {
-    const response = await postJson(server.app, '/v1/search/replay', {
+    const response = await postReplayJson(server.app, {
       query: 'Opus One 2018',
-      decision_snapshot: {
-        model_versions: {},
-        index_versions: {},
+      decision_snapshot: makeReplaySnapshot({
         policy_rule_version: '99.0.0',
         threshold_profile_id: 'wrong',
         planner_version: '99.0.0',
-        feature_flags: {},
-      },
+      }),
     });
 
     expect(response.statusCode).toBe(409);
@@ -224,6 +219,18 @@ describe('Error Response Schema Contract (RFC-014 §5)', () => {
     expect(error.code).toBe('SNAPSHOT_MISMATCH');
     expect(error.request_id).toBeTruthy();
     expect(error.retryable).toBe(false);
+  });
+
+  it('replay helper posts to the expected endpoint contract', async () => {
+    const response = await postReplayJson(server.app, {
+      query: 'Opus One 2018',
+      decision_snapshot: makeReplaySnapshot({
+        policy_rule_version: '9.9.9',
+      }),
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(parseErrorResponse(response).error.code).toBe('SNAPSHOT_MISMATCH');
   });
 });
 

@@ -56,6 +56,7 @@ describe('tryGetCachedSearchResponse', () => {
     const out = await tryGetCachedSearchResponse(
       { getSearchResponse } as import('../../../../src/domain/performance/port/search-response-cache.port.js').SearchResponseCachePort,
       plan,
+      undefined,
       request,
       undefined,
     );
@@ -69,6 +70,7 @@ describe('tryGetCachedSearchResponse', () => {
     const out = await tryGetCachedSearchResponse(
       { getSearchResponse } as import('../../../../src/domain/performance/port/search-response-cache.port.js').SearchResponseCachePort,
       plan,
+      undefined,
       { query: 'x' },
       undefined,
     );

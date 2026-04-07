@@ -1,5 +1,31 @@
+/**
+ * E4-U1: Main Runtime Response Contract Lock
+ *
+ * {@link ResponseBuilder} is the **authoritative main runtime response surface**.
+ * Route handlers (search.usecase, hybrid.usecase, batch-search) MUST build
+ * SearchResponseV1 through ResponseBuilder.build() — not through any V2 builder.
+ *
+ * V2 builders are sidecar / adapter surfaces:
+ *  - {@link MachineResponseBuilderV2} — exposed only via /v1/claude-tools seam
+ *  - {@link HumanResponseBuilderV2}   — human-oriented interpret/explain sidecar
+ *
+ * Do NOT promote V2 builders to main runtime contract without an explicit
+ * migration epic that gates on eval regression results.
+ *
+ * E4-U4: Explanation-Policy Responsibility Split
+ *   - Evidence obligation evaluation → evidence-gate.ts (decision domain)
+ *   - Query-family explanation obligations → explanation-obligation.ts
+ *   - This builder assembles the response; it does NOT own policy decisions.
+ *   - Do NOT add suppress/require logic directly here — route via the obligation map.
+ *
+ * E4-U6: Route/Provenance Metadata Alignment
+ *   - `route` field in ResponseBuilderParams maps to compiled effectiveRoute
+ *   - `retrievalModeSource` maps to EngineExecutionContract.routeSource
+ *   - `plannerSuggestedMode`: from EngineExecutionContract.effectiveRetrievalMode (compiled-first)
+ */
 import type { DecisionOutput } from '../../decision/model/decision-output.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EngineDecision } from '../model/engine-decision.js';
 import type { ResultItem } from '../model/result-item.js';
@@ -9,8 +35,8 @@ import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-
 import type { GroupedResult } from './result-grouper.js';
 import { ResultGrouper } from './result-grouper.js';
 import { deterministicHash } from '../../shared/utils/hash.js';
-import type { SpecializedRouteObservability } from '../../../application/search/specialized-route-observability.js';
-import { toSpecializedRouteMeta } from '../../../application/search/specialized-route-observability.js';
+import type { SpecializedRouteObservability } from '../model/specialized-route.js';
+import { toSpecializedRouteMeta } from '../model/specialized-route.js';
 
 /**
  * Parameters required by {@link ResponseBuilder.build}.
@@ -21,6 +47,9 @@ export interface ResponseBuildParams {
 
   /** Query plan (for extracting constraints and retrieval mode). Optional for backward compat. */
   readonly queryPlan?: QueryPlanV1 | undefined;
+
+  /** Compiled execution contract (E1-U3 carrier). When present, effectiveRetrievalMode takes precedence over queryPlan.retrievalMode. */
+  readonly compiled?: CompiledWineQuery | undefined;
 
   /** Ranked result items to include in the response. */
   readonly results: readonly ResultItem[];
@@ -43,6 +72,12 @@ export interface ResponseBuildParams {
   /** Execution route label. */
   readonly route: string;
 
+  /**
+   * E4-U6: Route/provenance vocabulary — aligned with compiled execution contract.
+   *   retrievalModeSource: from EngineExecutionContract.routeSource ('planner' | 'api_override')
+   *   plannerSuggestedMode: from EngineExecutionContract.effectiveRetrievalMode (compiled-first)
+   * These fields use calibrated semantics vocabulary — do NOT add ad hoc route strings here.
+   */
   /** Whether the retrieval mode was determined by the planner or overridden via the API. */
   readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
 
@@ -138,7 +173,7 @@ export class ResponseBuilder {
     };
 
     // Extract LLM envelope fields (Epic 9)
-    const retrievalMode = params.queryPlan?.retrievalMode;
+    const retrievalMode = params.compiled?.execution.effectiveRetrievalMode ?? params.queryPlan?.retrievalMode;
     const resultType = this.computeResultType(
       enrichedResults,
       params.decisionOutput.decisionStatus,

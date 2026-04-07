@@ -230,4 +230,34 @@ describe('POST /v1/search/replay', () => {
       },
     });
   });
+
+  it('fails closed when a V2 human payload leaks into the V1 replay route', async () => {
+    mockDeps.replayUseCase.execute = vi.fn().mockResolvedValue({
+      queryId: 'q-v2',
+      queryType: 'search',
+      results: [],
+      totalCandidates: 0,
+      version: '2',
+      responseType: 'human',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/search/replay',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: 'Opus One 2018',
+        decision_snapshot: buildReplaySnapshot(),
+      },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(ErrorResponseSchema.safeParse(response.json()).success).toBe(true);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'INTERNAL_ERROR',
+        retryable: false,
+      },
+    });
+  });
 });

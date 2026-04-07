@@ -1,3 +1,20 @@
+/**
+ * E6-U2: Quality Gate Input Contract (lock)
+ *
+ * EvidenceGate is the SINGLE quality gate owner. Input fields it reads:
+ *   - EvidenceSummary.hasIdentityEvidence — entity identity signal present
+ *   - EvidenceSummary.hasConstraintEvidence — constraint coverage present
+ *   - EvidenceSummary.hasAnchorEvidence — anchor similarity present
+ *   - DecisionInput.queryPlan.queryClass — route family for obligation check
+ *   - DecisionInput.evidenceObligation — route-level admission obligations
+ *
+ * Do NOT combine explanation policy (explanation-obligation.ts) with this
+ * quality gate — they are separate concerns:
+ *   - evidence-gate.ts: ENFORCES evidence presence (binary pass/fail)
+ *   - explanation-obligation.ts: DECLARES what explanation SHOULD be shown
+ *
+ * Do NOT add scoring policy, threshold logic, or session signal reads here.
+ */
 import type { DecisionStatus, NextAction } from '../../shared/types/index.js';
 import {
   type EvidenceSummary,
@@ -22,6 +39,19 @@ export interface EvidenceGateResult {
   /** Human-readable reason for the downgrade. */
   readonly reason?: string;
 }
+
+/**
+ * E4-U4: Explanation-Policy Responsibility Split
+ *
+ * This module owns evidence obligation evaluation (RFC-007 §4.1).
+ * Responsibility boundaries:
+ *  - evidence-gate.ts (here) — evaluates WHAT evidence is required and whether it's present
+ *  - response-builder.ts      — assembles the response (field population, no obligation logic)
+ *  - interpret-explain-adapter-v2.ts — formats explanation text (no obligation decisions)
+ *
+ * Do NOT add evidence suppression / fallback logic to response-builder.
+ * Do NOT add response formatting / field mapping here.
+ */
 
 /**
  * Implements the evidence obligation gate per RFC-007 §4.1.

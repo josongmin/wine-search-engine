@@ -12,8 +12,8 @@ export interface SnapshotVersionContractV2 {
   readonly plannerVersion: string;
   readonly policyRuleVersion: string;
   readonly thresholdProfileId: string;
-  readonly executionRoute: string; // from CompiledWineQuery.execution.route
-  readonly retrievalMode: string; // from CompiledWineQuery.execution.retrievalMode
+  readonly executionRoute: string; // from CompiledWineQuery.execution.effectiveRoute
+  readonly retrievalMode: string; // from CompiledWineQuery.execution.effectiveRetrievalMode
 }
 
 // Migration bridge: V1 snapshot key fields

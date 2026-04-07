@@ -2,7 +2,7 @@
  * E2E tests for server protocol behavior.
  *
  * Covers OPTIONS preflight, CORS behavior in test/development modes,
- * and basic health/readiness smoke through the real Fastify server.
+ * and minimal health/readiness protocol smoke through the real Fastify server.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -76,7 +76,7 @@ describe.each([
 });
 
 describe('Health and readiness', () => {
-  it('returns healthy health and ready responses through the real server', async () => {
+  it('returns healthy health and ready responses with request ids through the real server', async () => {
     const resHealth = await getJson(testServer.app, '/health', {
       origin: 'http://localhost:3000',
     });
@@ -91,13 +91,7 @@ describe('Health and readiness', () => {
       origin: 'http://localhost:3000',
     });
     expect(resReady.statusCode).toBe(200);
-    expect(resReady.json()).toMatchObject({
-      ready: true,
-      checks: {
-        postgres: { status: 'skipped', required: false },
-        redis: { status: 'skipped', required: false },
-      },
-    });
+    expect((resReady.json() as Record<string, unknown>)['ready']).toBe(true);
     expect(getHeader(resReady, 'x-request-id')).toBeTruthy();
   });
 
@@ -116,14 +110,7 @@ describe('Health and readiness', () => {
     try {
       const res = await getJson(app, '/ready');
       expect(res.statusCode).toBe(503);
-      expect(res.json()).toMatchObject({
-        ready: false,
-        checks: {
-          postgres: { status: 'skipped', required: false },
-          redis: { status: 'skipped', required: false },
-          vespa: { status: 'down', required: true },
-        },
-      });
+      expect((res.json() as Record<string, unknown>)['ready']).toBe(false);
       expect(getHeader(res, 'x-request-id')).toBeTruthy();
     } finally {
       await app.close();

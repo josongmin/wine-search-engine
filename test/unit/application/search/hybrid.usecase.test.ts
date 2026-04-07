@@ -57,6 +57,32 @@ function createDecisionOutput() {
   };
 }
 
+function createCachedSearchResponse(requestId = 'cached-request') {
+  const decisionOutput = createDecisionOutput();
+  return {
+    queryType: 'search' as const,
+    engineDecision: {
+      decisionStatus: decisionOutput.decisionStatus,
+      nextAction: decisionOutput.nextAction,
+      route: decisionOutput.route,
+      decisionConfidence: decisionOutput.decisionConfidence,
+      confidenceSemantics: decisionOutput.confidenceSemantics,
+      decisionTraceRef: 'trace-cached',
+      decisionSnapshot: decisionOutput.decisionSnapshot,
+    },
+    results: [],
+    meta: {
+      requestId,
+      queryTimeMs: 12,
+      route: decisionOutput.route,
+      version: '1.0.0',
+      engine_schema_version: 'search_response_v1',
+      decisionSnapshot: decisionOutput.decisionSnapshot,
+      response_hash: 'cached-hash',
+    },
+  };
+}
+
 function createResponseBuilder() {
   return {
     build: vi.fn((params: any) => ({
@@ -91,19 +117,188 @@ const safeSanitizer = {
   }),
 };
 
+function createAnchorDocument(entityId: string) {
+  return {
+    entityId,
+    entityType: 'wine',
+    canonicalLabel: 'Opus One 2021',
+    aliasesIdentitySafe: ['opus one'],
+    aliasesNoisyRecall: ['opus'],
+    producer: 'Opus One Winery',
+    region: 'Napa Valley',
+    grapes: ['Cabernet Sauvignon'],
+    searchTextKo: '오퍼스 원 나파 밸리',
+    searchTextEn: 'Opus One Napa Valley',
+    semanticSummary: 'A benchmark Napa Valley Cabernet blend.',
+    body: 5,
+    sweetness: 1,
+    style: 'bold red',
+    priceBand: 'luxury',
+    pairing: ['steak'],
+    occasion: ['cellaring'],
+    availability: true,
+    popularityScore: 0.92,
+  };
+}
+
+function createResolvedResolverResult(plan: QueryPlanV1, entityId: string) {
+  return {
+    status: 'resolved' as const,
+    topEntity: {
+      entityId,
+      canonicalLabel: 'Opus One 2021',
+      calibratedScore: 0.96,
+    },
+    candidates: [{
+      entityId,
+      canonicalLabel: 'Opus One 2021',
+      calibratedScore: 0.96,
+      rank: 1,
+      evidenceRefs: ['alias'],
+    }],
+    decisionTrace: {
+      queryClass: plan.queryClass,
+      top1CalibratedScore: 0.96,
+      top2CalibratedScore: 0.2,
+      calibratedGap: 0.76,
+      decisionConfidenceC: 0.96,
+      ambiguityDetected: false,
+      ambiguityTypes: [],
+      appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+      outcomeReasonCodes: ['TEST'],
+    },
+    conformalSetSize: 1,
+  };
+}
+
+function createRankedResult(
+  entityId: string,
+  canonicalLabel: string,
+  finalScore: number,
+  rank: number,
+  evidenceItems: Array<{
+    type: string;
+    source: string;
+    contribution: string;
+    strength: 'low' | 'medium' | 'high';
+    provenance: string;
+  }>,
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    entityId,
+    canonicalLabel,
+    finalScore,
+    rank,
+    componentScores: {
+      entityIntegrity: 1,
+      semantic: 0.7,
+      hardConstraintPass: true,
+      softConstraint: 0.1,
+      attributeAlignment: 0.2,
+      preferenceAlignment: 0.1,
+      popularity: 0.3,
+      availability: 1,
+      uncertaintyPenalty: 0.02,
+    },
+    matchedConstraints: [],
+    unmetConstraints: [],
+    inferredConstraints: [],
+    evidenceItems,
+    ...overrides,
+  };
+}
+
+function createComparePlan(anchorEntityId: string) {
+  return createPlan({
+    retrievalMode: 'compare_candidates',
+    anchors: [{
+      surfaceForm: 'Opus One',
+      normalizedForm: 'opus one',
+      confidence: 0.98,
+      candidateEntityIds: [anchorEntityId],
+    }] as QueryPlanV1['anchors'],
+  });
+}
+
+function createCompareRetrieverResult(entityId: string) {
+  return [{
+    entityId,
+    canonicalLabel: 'Dominus 2021',
+    retrievalFusionScore: 0.84,
+    matchedConstraints: [],
+    retrievalTrace: {
+      retrievalProfile: 'compare_default',
+      lexicalQueriesUsed: ['opus one'],
+      semanticQueriesUsed: ['opus one'],
+      filtersApplied: [],
+      candidateSources: ['sparse_bm25', 'compare_anchor'],
+    },
+  }];
+}
+
+function createKnownItemLtrModel() {
+  return {
+    queryClass: 'known_item' as const,
+    weights: [0, 0, 1, 0, 0, 0, 0, 0],
+    bias: 0,
+    trainingExampleCount: 1,
+    ndcg5ValidationScore: 1,
+    trainedAt: new Date('2026-01-01T00:00:00.000Z'),
+  };
+}
+
+function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
+  return new HybridUseCase({
+    queryPlanner: { plan: vi.fn().mockResolvedValue(createPlan()) } as never,
+    candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
+    ranker: { rank: vi.fn().mockResolvedValue([]) } as never,
+    decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
+    responseBuilder: createResponseBuilder() as never,
+    querySanitizer: safeSanitizer as never,
+    ...overrides,
+  });
+}
+
 describe('HybridUseCase', () => {
+  it('returns a canonical internal-error authority trace when the hybrid ranking pipeline crashes', async () => {
+    const plan = createPlan();
+    const useCase = makeHybridUseCase({
+      queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
+      candidatePool: {
+        generate: vi.fn().mockRejectedValue(new Error('rank pipeline exploded')),
+      } as never,
+    });
+
+    const response = await useCase.execute({ query: 'ridge cabernet' }, 'req-hybrid-error');
+
+    expect(response).toMatchObject({
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        route: 'error',
+        failure_reason: 'INTERNAL_INCONSISTENCY',
+      },
+      meta: {
+        requestId: 'req-hybrid-error',
+        route: 'error',
+        executionMode: 'degraded',
+        blockingEligible: false,
+        runtimeCorrelationRef: 'req-hybrid-error',
+      },
+    });
+    expect(response.engineDecision.decisionTraceRef).toMatch(
+      /^decision:v1:internal_error:[a-f0-9]{64}$/,
+    );
+    expect(response.meta.authorityTraceRef).toBe(response.engineDecision.decisionTraceRef);
+  });
+
   it('reuses the shared planner context mapping for locale, session, and budget', async () => {
     const previousEntity = createEntityId();
     const plan = createPlan();
     const queryPlanner = { plan: vi.fn().mockResolvedValue(plan) };
-    const useCase = new HybridUseCase({
-      queryPlanner: queryPlanner as never,
-      candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
-      ranker: { rank: vi.fn().mockResolvedValue([]) } as never,
-      decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
-      responseBuilder: createResponseBuilder() as never,
-      querySanitizer: safeSanitizer as never,
-    });
+    const useCase = makeHybridUseCase({ queryPlanner: queryPlanner as never });
 
     await useCase.execute(
       {
@@ -166,14 +361,13 @@ describe('HybridUseCase', () => {
     const ranker = { rank: vi.fn().mockResolvedValue([]) };
     const decisionEngine = { decide: vi.fn().mockResolvedValue(createDecisionOutput()) };
     const responseBuilder = createResponseBuilder();
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       candidatePool: candidatePool as never,
       browseRetriever: browseRetriever as never,
       ranker: ranker as never,
       decisionEngine: decisionEngine as never,
       responseBuilder: responseBuilder as never,
-      querySanitizer: safeSanitizer as never,
     });
 
     await useCase.execute({ query: 'Ridge Vineyards' }, 'req-browse');
@@ -188,42 +382,7 @@ describe('HybridUseCase', () => {
 
   it('returns cached search responses before retrieval/ranking work', async () => {
     const plan = createPlan();
-    const cachedResponse = {
-      queryType: 'search' as const,
-      engineDecision: {
-        decisionStatus: 'resolved' as const,
-        nextAction: 'respond' as const,
-        route: 'hybrid',
-        decisionConfidence: 0.9,
-        confidenceSemantics: 'calibrated_decision_confidence' as const,
-        decisionTraceRef: 'trace-cached',
-        decisionSnapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1.0.0',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
-      },
-      results: [],
-      meta: {
-        requestId: 'cached-request',
-        queryTimeMs: 12,
-        route: 'hybrid',
-        version: '1.0.0',
-        engine_schema_version: 'search_response_v1',
-        decisionSnapshot: {
-          model_versions: {},
-          index_versions: {},
-          policy_rule_version: '1.0.0',
-          threshold_profile_id: 'default',
-          planner_version: '1.0.0',
-          feature_flags: {},
-        },
-        response_hash: 'cached-hash',
-      },
-    };
+    const cachedResponse = createCachedSearchResponse();
     const candidatePool = { generate: vi.fn() };
     const ranker = { rank: vi.fn() };
     const decisionEngine = { decide: vi.fn() };
@@ -235,13 +394,12 @@ describe('HybridUseCase', () => {
       }),
       setSearchResponse: vi.fn(),
     };
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       candidatePool: candidatePool as never,
       ranker: ranker as never,
       decisionEngine: decisionEngine as never,
       responseBuilder: responseBuilder as never,
-      querySanitizer: safeSanitizer as never,
       cacheService: cacheService as never,
     });
 
@@ -283,13 +441,12 @@ describe('HybridUseCase', () => {
       }),
     };
     const queryPlanner = { plan: vi.fn() };
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: queryPlanner as never,
       candidatePool: { generate: vi.fn() } as never,
       ranker: { rank: vi.fn() } as never,
       decisionEngine: { decide: vi.fn() } as never,
       responseBuilder: createResponseBuilder() as never,
-      querySanitizer: safeSanitizer as never,
       decomposedSearch: decomposedSearch as never,
     });
 
@@ -319,6 +476,7 @@ describe('HybridUseCase', () => {
         sessionContext: { sessionId: 'session-2', previousEntities: [expect.any(String)] },
         queryBudget: { maxLatencyMs: 700, maxCandidates: 10, rerankLimit: 5 },
       },
+      { abortSignal: expect.any(AbortSignal) },
     );
     expect(queryPlanner.plan).not.toHaveBeenCalled();
   });
@@ -326,93 +484,23 @@ describe('HybridUseCase', () => {
   it('uses the shared entity-route fallback before specialized compare retrieval', async () => {
     const anchorEntityId = createEntityId('anchor');
     const comparedEntityId = createEntityId('peer');
-    const plan = createPlan({
-      retrievalMode: 'compare_candidates',
-      anchors: [{
-        surfaceForm: 'Opus One',
-        normalizedForm: 'opus one',
-        confidence: 0.98,
-        candidateEntityIds: [anchorEntityId],
-      }] as QueryPlanV1['anchors'],
-    });
+    const plan = createComparePlan(anchorEntityId);
     const compareRetriever = {
-      compareAgainstAnchor: vi.fn().mockResolvedValue([{
-        entityId: comparedEntityId,
-        canonicalLabel: 'Dominus 2021',
-        retrievalFusionScore: 0.84,
-        matchedConstraints: [],
-        retrievalTrace: {
-          retrievalProfile: 'compare_default',
-          lexicalQueriesUsed: ['opus one'],
-          semanticQueriesUsed: ['opus one'],
-          filtersApplied: [],
-          candidateSources: ['sparse_bm25', 'compare_anchor'],
-        },
-      }]),
+      compareAgainstAnchor: vi.fn().mockResolvedValue(createCompareRetrieverResult(comparedEntityId)),
     };
     const entityLookup = {
-      getDocument: vi.fn().mockResolvedValue({
-        entityId: anchorEntityId,
-        entityType: 'wine',
-        canonicalLabel: 'Opus One 2021',
-        aliasesIdentitySafe: ['opus one'],
-        aliasesNoisyRecall: ['opus'],
-        producer: 'Opus One Winery',
-        region: 'Napa Valley',
-        grapes: ['Cabernet Sauvignon'],
-        searchTextKo: '오퍼스 원 나파 밸리',
-        searchTextEn: 'Opus One Napa Valley',
-        semanticSummary: 'A benchmark Napa Valley Cabernet blend.',
-        body: 5,
-        sweetness: 1,
-        style: 'bold red',
-        priceBand: 'luxury',
-        pairing: ['steak'],
-        occasion: ['cellaring'],
-        availability: true,
-        popularityScore: 0.92,
-      }),
+      getDocument: vi.fn().mockResolvedValue(createAnchorDocument(anchorEntityId)),
     };
     const entityResolver = {
-      resolve: vi.fn().mockResolvedValue({
-        status: 'resolved' as const,
-        topEntity: {
-          entityId: anchorEntityId,
-          canonicalLabel: 'Opus One 2021',
-          calibratedScore: 0.96,
-        },
-        candidates: [{
-          entityId: anchorEntityId,
-          canonicalLabel: 'Opus One 2021',
-          calibratedScore: 0.96,
-          rank: 1,
-          evidenceRefs: ['alias'],
-        }],
-        decisionTrace: {
-          queryClass: plan.queryClass,
-          top1CalibratedScore: 0.96,
-          top2CalibratedScore: 0.2,
-          calibratedGap: 0.76,
-          decisionConfidenceC: 0.96,
-          ambiguityDetected: false,
-          ambiguityTypes: [],
-          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-          outcomeReasonCodes: ['TEST'],
-        },
-        conformalSetSize: 1,
-      }),
+      resolve: vi.fn().mockResolvedValue(createResolvedResolverResult(plan, anchorEntityId)),
     };
     const candidatePool = { generate: vi.fn() };
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       candidatePool: candidatePool as never,
       compareRetriever: compareRetriever as never,
       entityResolver: entityResolver as never,
       entityLookup: entityLookup as never,
-      ranker: { rank: vi.fn().mockResolvedValue([]) } as never,
-      decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
-      responseBuilder: createResponseBuilder() as never,
-      querySanitizer: safeSanitizer as never,
     });
 
     await useCase.execute({ query: 'Opus One alternatives' }, 'req-compare');
@@ -438,84 +526,27 @@ describe('HybridUseCase', () => {
 
   it('preserves anchorEntityId when compare retrieval falls back to candidate pool generation', async () => {
     const anchorEntityId = createEntityId('anchor');
-    const plan = createPlan({
-      retrievalMode: 'compare_candidates',
-      anchors: [{
-        surfaceForm: 'Opus One',
-        normalizedForm: 'opus one',
-        confidence: 0.98,
-        candidateEntityIds: [anchorEntityId],
-      }] as QueryPlanV1['anchors'],
-    });
+    const plan = createComparePlan(anchorEntityId);
     const compareRetriever = {
       compareAgainstAnchor: vi.fn().mockResolvedValue([]),
     };
     const entityLookup = {
-      getDocument: vi.fn().mockResolvedValue({
-        entityId: anchorEntityId,
-        entityType: 'wine',
-        canonicalLabel: 'Opus One 2021',
-        aliasesIdentitySafe: ['opus one'],
-        aliasesNoisyRecall: ['opus'],
-        producer: 'Opus One Winery',
-        region: 'Napa Valley',
-        grapes: ['Cabernet Sauvignon'],
-        searchTextKo: '오퍼스 원 나파 밸리',
-        searchTextEn: 'Opus One Napa Valley',
-        semanticSummary: 'A benchmark Napa Valley Cabernet blend.',
-        body: 5,
-        sweetness: 1,
-        style: 'bold red',
-        priceBand: 'luxury',
-        pairing: ['steak'],
-        occasion: ['cellaring'],
-        availability: true,
-        popularityScore: 0.92,
-      }),
+      getDocument: vi.fn().mockResolvedValue(createAnchorDocument(anchorEntityId)),
     };
     const entityResolver = {
-      resolve: vi.fn().mockResolvedValue({
-        status: 'resolved' as const,
-        topEntity: {
-          entityId: anchorEntityId,
-          canonicalLabel: 'Opus One 2021',
-          calibratedScore: 0.96,
-        },
-        candidates: [{
-          entityId: anchorEntityId,
-          canonicalLabel: 'Opus One 2021',
-          calibratedScore: 0.96,
-          rank: 1,
-          evidenceRefs: ['alias'],
-        }],
-        decisionTrace: {
-          queryClass: plan.queryClass,
-          top1CalibratedScore: 0.96,
-          top2CalibratedScore: 0.2,
-          calibratedGap: 0.76,
-          decisionConfidenceC: 0.96,
-          ambiguityDetected: false,
-          ambiguityTypes: [],
-          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-          outcomeReasonCodes: ['TEST'],
-        },
-        conformalSetSize: 1,
-      }),
+      resolve: vi.fn().mockResolvedValue(createResolvedResolverResult(plan, anchorEntityId)),
     };
     const candidatePool = {
       generate: vi.fn().mockResolvedValue([]),
     };
     const responseBuilder = createResponseBuilder();
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
       candidatePool: candidatePool as never,
       compareRetriever: compareRetriever as never,
       entityResolver: entityResolver as never,
       entityLookup: entityLookup as never,
-      ranker: { rank: vi.fn().mockResolvedValue([]) } as never,
-      decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
       responseBuilder: responseBuilder as never,
-      querySanitizer: safeSanitizer as never,
     });
 
     await useCase.execute({ query: 'Opus One alternatives' }, 'req-compare-fallback');
@@ -544,82 +575,68 @@ describe('HybridUseCase', () => {
     const plan = createPlan();
     const ranker = {
       rank: vi.fn().mockResolvedValue([
-        {
-          entityId: firstEntityId,
-          canonicalLabel: 'Alpha',
-          finalScore: 0.82,
-          rank: 1,
-          componentScores: {
-            entityIntegrity: 1,
-            semantic: 0.9,
-            hardConstraintPass: true,
-            softConstraint: 0.2,
-            attributeAlignment: 0.1,
-            preferenceAlignment: 0.1,
-            popularity: 0.1,
-            availability: 1,
-            uncertaintyPenalty: 0.05,
-          },
-          matchedConstraints: [],
-          unmetConstraints: [],
-          inferredConstraints: [],
-          evidenceItems: [{
+        createRankedResult(
+          firstEntityId,
+          'Alpha',
+          0.82,
+          1,
+          [{
             type: 'alpha',
             source: 'ranker',
             contribution: '+0.10',
             strength: 'medium' as const,
             provenance: 'alpha evidence',
           }],
-        },
-        {
-          entityId: secondEntityId,
-          canonicalLabel: 'Beta',
-          finalScore: 0.79,
-          rank: 2,
-          componentScores: {
-            entityIntegrity: 1,
-            semantic: 0.2,
-            hardConstraintPass: true,
-            softConstraint: 0.2,
-            attributeAlignment: 0.1,
-            preferenceAlignment: 0.1,
-            popularity: 0.95,
-            availability: 1,
-            uncertaintyPenalty: 0.05,
+          {
+            componentScores: {
+              entityIntegrity: 1,
+              semantic: 0.9,
+              hardConstraintPass: true,
+              softConstraint: 0.2,
+              attributeAlignment: 0.1,
+              preferenceAlignment: 0.1,
+              popularity: 0.1,
+              availability: 1,
+              uncertaintyPenalty: 0.05,
+            },
           },
-          matchedConstraints: [],
-          unmetConstraints: [],
-          inferredConstraints: [],
-          evidenceItems: [{
+        ),
+        createRankedResult(
+          secondEntityId,
+          'Beta',
+          0.79,
+          2,
+          [{
             type: 'beta',
             source: 'ranker',
             contribution: '+0.20',
             strength: 'high' as const,
             provenance: 'beta evidence',
           }],
-        },
+          {
+            componentScores: {
+              entityIntegrity: 1,
+              semantic: 0.2,
+              hardConstraintPass: true,
+              softConstraint: 0.2,
+              attributeAlignment: 0.1,
+              preferenceAlignment: 0.1,
+              popularity: 0.95,
+              availability: 1,
+              uncertaintyPenalty: 0.05,
+            },
+          },
+        ),
       ]),
     };
     const decisionEngine = { decide: vi.fn().mockResolvedValue(createDecisionOutput()) };
     const responseBuilder = createResponseBuilder();
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
-      candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
       ranker: ranker as never,
       decisionEngine: decisionEngine as never,
       responseBuilder: responseBuilder as never,
-      ltrModels: new Map([[
-        'known_item',
-        {
-          queryClass: 'known_item',
-          weights: [0, 0, 1, 0, 0, 0, 0, 0],
-          bias: 0,
-          trainingExampleCount: 1,
-          ndcg5ValidationScore: 1,
-          trainedAt: new Date('2026-01-01T00:00:00.000Z'),
-        },
-      ]]),
-      querySanitizer: safeSanitizer as never,
+      ltrModels: new Map([['known_item', createKnownItemLtrModel()]]),
     });
 
     await useCase.execute({ query: 'ridge cabernet' }, 'req-ltr');
@@ -643,7 +660,7 @@ describe('HybridUseCase', () => {
     ]);
     expect(responseParams?.results[0]?.entity.entityId).toBe(firstEntityId);
     expect(responseParams?.retrievalModeSource).toBe('api_override');
-    expect(responseParams?.plannerSuggestedMode).toBe('hybrid');
+    expect(responseParams?.plannerSuggestedMode).toBe('attribute_search');
     expect(responseParams).not.toHaveProperty('funnelMetrics');
     expect(responseParams?.counterfactuals).toEqual([
       expect.objectContaining({
@@ -667,44 +684,24 @@ describe('HybridUseCase', () => {
       }),
     };
     const responseBuilder = createResponseBuilder();
-    const useCase = new HybridUseCase({
+    const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
-      candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
       ranker: {
-        rank: vi.fn().mockResolvedValue([{
-          entityId,
-          canonicalLabel: 'Window Wine',
-          finalScore: 0.77,
-          rank: 1,
-          componentScores: {
-            entityIntegrity: 1,
-            semantic: 0.7,
-            hardConstraintPass: true,
-            softConstraint: 0.1,
-            attributeAlignment: 0.2,
-            preferenceAlignment: 0.1,
-            popularity: 0.3,
-            availability: 1,
-            uncertaintyPenalty: 0.02,
-          },
-          matchedConstraints: [],
-          unmetConstraints: [],
-          inferredConstraints: [],
-          evidenceItems: [],
-          vintageYear: 2019,
-          grapePrimaryEnc: 11,
-          regionEnc: 22,
-          countryEnc: 33,
-          body: 3,
-          tannin: 2,
-          acidity: 4,
-          sweetness: 1,
-        }]),
+        rank: vi.fn().mockResolvedValue([
+          createRankedResult(entityId, 'Window Wine', 0.77, 1, [], {
+            vintageYear: 2019,
+            grapePrimaryEnc: 11,
+            regionEnc: 22,
+            countryEnc: 33,
+            body: 3,
+            tannin: 2,
+            acidity: 4,
+            sweetness: 1,
+          }),
+        ]),
       } as never,
-      decisionEngine: { decide: vi.fn().mockResolvedValue(createDecisionOutput()) } as never,
       responseBuilder: responseBuilder as never,
       drinkingWindow: drinkingWindow as never,
-      querySanitizer: safeSanitizer as never,
     });
 
     await useCase.execute({ query: 'window wine' }, 'req-window');

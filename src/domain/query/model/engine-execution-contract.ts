@@ -68,12 +68,27 @@ export interface EngineExecutionContract {
    * Source of the route decision.
    * - 'planner' — used the planner's suggestedRoute
    * - 'api_override' — caller explicitly specified a route override
+   *
+   * NOTE: This field is computed by ExecutionCompiler but not yet consumed by any production
+   * code path. Wiring is deferred. Do NOT read this field until the consuming component is implemented.
+   * Note: retrievalModeSource in ResponseBuildParams is derived independently from apiOverrideMode,
+   * not from this field.
    */
   readonly routeSource: 'planner' | 'api_override';
 
-  /** Resource budget for this execution. */
+  /**
+   * Resource budget for this execution.
+   *
+   * NOTE: This field is computed by ExecutionCompiler but not yet consumed by any production
+   * code path. Wiring is deferred. Do NOT read this field until the consuming component is implemented.
+   */
   readonly budget: ExecutionBudget;
 
-  /** Provenance policy derived from the admission_context. */
+  /**
+   * Provenance policy derived from the admission_context.
+   *
+   * NOTE: This field is computed by ExecutionCompiler but not yet consumed by any production
+   * code path. Wiring is deferred. Do NOT read this field until the consuming component is implemented.
+   */
   readonly provenancePolicy: ProvenancePolicy;
 }

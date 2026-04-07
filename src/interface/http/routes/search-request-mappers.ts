@@ -3,7 +3,10 @@ import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
 import type { ReplayRequest } from '../../../application/search/replay-request.dto.js';
 import type {
   SearchOptions,
+  SearchQueryBudget,
+  SearchRequestContext,
   SearchRequest,
+  SearchSessionContext,
 } from '../../../application/search/search-request.dto.js';
 import type {
   HybridSearchOptions,
@@ -18,6 +21,23 @@ import {
   type ResolveRequestSchema,
   type SearchRequestSchema,
 } from '../schemas/search-request.schema.js';
+
+interface NormalizedRequestAliases {
+  readonly context?: SearchRequestContext | undefined;
+  readonly sessionContext?: SearchSessionContext | undefined;
+  readonly queryBudget?: SearchQueryBudget | undefined;
+}
+
+function extractNormalizedAliases(body: unknown): NormalizedRequestAliases {
+  const candidate = body as Partial<NormalizedRequestAliases>;
+  return {
+    ...(candidate.context !== undefined ? { context: candidate.context } : {}),
+    ...(candidate.sessionContext !== undefined
+      ? { sessionContext: candidate.sessionContext }
+      : {}),
+    ...(candidate.queryBudget !== undefined ? { queryBudget: candidate.queryBudget } : {}),
+  };
+}
 
 function normalizeSearchOptions(
   options: z.output<typeof SearchRequestSchema>['options'],
@@ -48,11 +68,10 @@ function normalizeHybridOptions(
 
 export function toSearchRequest(body: z.output<typeof SearchRequestSchema>): SearchRequest {
   const options = normalizeSearchOptions(body.options);
+  const aliases = extractNormalizedAliases(body);
   return {
     query: body.query,
-    ...(body.context !== undefined ? { context: body.context } : {}),
-    ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
-    ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
+    ...aliases,
     ...(options !== undefined ? { options } : {}),
     ...(body.retrieval_mode !== undefined ? { retrieval_mode: body.retrieval_mode } : {}),
   };
@@ -62,21 +81,19 @@ export function toHybridSearchRequest(
   body: z.output<typeof HybridRequestSchema>,
 ): HybridSearchRequest {
   const options = normalizeHybridOptions(body.options);
+  const aliases = extractNormalizedAliases(body);
   return {
     query: body.query,
-    ...(body.context !== undefined ? { context: body.context } : {}),
-    ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
-    ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
+    ...aliases,
     ...(options !== undefined ? { options } : {}),
   };
 }
 
 export function toInterpretRequest(body: z.output<typeof InterpretRequestSchema>): InterpretRequest {
+  const aliases = extractNormalizedAliases(body);
   return {
     query: body.query,
-    ...(body.context !== undefined ? { context: body.context } : {}),
-    ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
-    ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
+    ...aliases,
   };
 }
 
@@ -84,17 +101,17 @@ export function toResolveRequest(
   body: z.output<typeof ResolveRequestSchema>,
   requestId: string,
 ): ResolveRequest {
+  const aliases = extractNormalizedAliases(body);
   return {
     query: body.query,
     requestId,
-    ...(body.context !== undefined ? { context: body.context } : {}),
-    ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
-    ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
+    ...aliases,
   };
 }
 
 export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): ReplayRequest {
   const options = normalizeSearchOptions(body.options);
+  const aliases = extractNormalizedAliases(body);
   const snapshot: DecisionSnapshot = {
     snapshot_id: body.decision_snapshot.snapshot_id,
     model_versions: body.decision_snapshot.model_versions,
@@ -112,9 +129,7 @@ export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): Rep
   return {
     query: body.query,
     decision_snapshot: snapshot,
-    ...(body.context !== undefined ? { context: body.context } : {}),
-    ...(body.sessionContext !== undefined ? { sessionContext: body.sessionContext } : {}),
-    ...(body.queryBudget !== undefined ? { queryBudget: body.queryBudget } : {}),
+    ...aliases,
     ...(options !== undefined ? { options } : {}),
     ...(body.expected_response_hash !== undefined
       ? { expected_response_hash: body.expected_response_hash }

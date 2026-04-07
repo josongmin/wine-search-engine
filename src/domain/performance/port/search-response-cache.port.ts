@@ -10,6 +10,7 @@ import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { CacheResult } from '../model/cache-result.js';
 import type { CacheReadRuntimeState } from '../../cache/cache-policy.js';
+import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 
 export interface SearchResponseCachePort {
   getSearchResponse(
@@ -20,6 +21,7 @@ export interface SearchResponseCachePort {
     },
     currentSnapshot: DecisionSnapshot,
     runtimeState?: CacheReadRuntimeState,
+    compiled?: CompiledWineQuery,
   ): Promise<CacheResult<SearchResponseV1>>;
 
   setSearchResponse(
@@ -29,5 +31,6 @@ export interface SearchResponseCachePort {
       readonly context?: { readonly locale: string };
     },
     response: SearchResponseV1,
+    compiled?: CompiledWineQuery,
   ): Promise<boolean>;
 }

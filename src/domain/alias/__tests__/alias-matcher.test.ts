@@ -33,6 +33,18 @@ class InMemoryAliasRepository implements AliasRepository {
     });
   }
 
+  async findFuzzyCandidates(normalized: string, scope?: AliasScope): Promise<readonly Alias[]> {
+    // In-memory: return all non-suppressed aliases that share at least half
+    // the prefix, so the edit-distance filter in the matcher has candidates to work with.
+    const prefixLen = Math.ceil(normalized.length / 2);
+    const prefix = normalized.slice(0, prefixLen);
+    return this.aliases.filter((a) => {
+      if (a.suppressed) return false;
+      if (scope !== undefined && a.scope !== scope && a.scope !== 'global') return false;
+      return a.normalizedValue.startsWith(prefix);
+    });
+  }
+
   async save(alias: Alias): Promise<void> {
     const idx = this.aliases.findIndex((a) => a.aliasId === alias.aliasId);
     if (idx >= 0) {

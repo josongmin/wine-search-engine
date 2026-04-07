@@ -2098,6 +2098,23 @@ async function run(): Promise<void> {
     );
   }
 
+  // Validate conformal coverage guarantee (RFC-017 §4.1).
+  // Recall@100 serves as the empirical coverage of the conformal prediction set
+  // (the top-100 results). Under a valid conformal calibration with alpha=0.1,
+  // we expect coverage >= 90%. A 5% tolerance is allowed for finite-sample noise.
+  {
+    const CONFORMAL_ALPHA = 0.1;
+    const expectedCoverage = 1 - CONFORMAL_ALPHA; // 0.9
+    const empiricalCoverage = evalResult.recall_at_100;
+    if (empiricalCoverage < expectedCoverage - 0.05) {
+      console.warn(
+        `[Eval] Conformal coverage ${(empiricalCoverage * 100).toFixed(1)}% < expected ` +
+        `${(expectedCoverage * 100).toFixed(1)}% (alpha=${CONFORMAL_ALPHA}) — ` +
+        'calibration may be invalid; consider re-running conformal calibration',
+      );
+    }
+  }
+
   // Print summary
   console.log('\n=== EVAL RESULTS ===');
   console.log(`  Queries:          ${evalResult.query_count}`);

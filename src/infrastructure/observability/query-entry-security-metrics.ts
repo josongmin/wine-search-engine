@@ -1,3 +1,10 @@
+/**
+ * ARCHITECTURE NOTE: QueryEntrySecurityObserver interface is defined here (infrastructure)
+ * but is imported by application-layer files (search.usecase.ts, hybrid.usecase.ts, etc.).
+ * TODO: Move the QueryEntrySecurityObserver interface to src/domain/security/port/
+ * and import it from there. The concrete collector stays here in infrastructure.
+ */
+
 export interface QueryEntrySecurityMetrics {
   readonly layer1Blocks: number;
   readonly layer2Blocks: number;

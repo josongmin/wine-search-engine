@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { formatConstraintConflictDescription } from '../../../../src/application/search/search-usecase-constraint-conflict.js';
 import { mergeCachedSearchResponseMeta } from '../../../../src/application/search/search-usecase-cache-hit.js';
 import { dispatchSearchRouteExecution } from '../../../../src/application/search/search-usecase-route-dispatch.js';
+import { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
 import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 
@@ -98,5 +99,72 @@ describe('dispatchSearchRouteExecution', () => {
       }),
     ).resolves.toBe(hybridOut);
     expect(mixed).toHaveBeenCalledOnce();
+  });
+});
+
+describe('SearchUseCase unexpected error fallback', () => {
+  it('returns a canonical internal-error authority trace when pre-route planning throws', async () => {
+    const useCase = new SearchUseCase({
+      queryPlanner: {
+        plan: vi.fn().mockRejectedValue(new Error('planner exploded')),
+      } as never,
+      entityResolver: {
+        resolve: vi.fn(),
+      } as never,
+      candidatePool: {
+        generate: vi.fn(),
+      } as never,
+      ranker: {
+        rank: vi.fn(),
+      } as never,
+      decisionEngine: {
+        decide: vi.fn(),
+      } as never,
+      responseBuilder: {
+        build: vi.fn(),
+      } as never,
+      mixedSolver: {
+        solve: vi.fn(),
+      } as never,
+      querySanitizer: {
+        sanitize: vi.fn((query: string) => ({
+          safe: true,
+          sanitizedQuery: query.trim(),
+        })),
+      } as never,
+    });
+
+    const execution = await useCase.executeForEvaluation(
+      { query: '  ridge cabernet  ' },
+      'req-search-unexpected',
+    );
+
+    expect(execution).toMatchObject({
+      response: {
+        queryType: 'search',
+        engineDecision: {
+          decisionStatus: 'failed',
+          nextAction: 'fail',
+          route: 'error',
+          executionMode: 'degraded',
+          blockingEligible: false,
+          failure_reason: 'INTERNAL_INCONSISTENCY',
+        },
+        results: [],
+        meta: {
+          requestId: 'req-search-unexpected',
+          route: 'error',
+          executionMode: 'degraded',
+          blockingEligible: false,
+          runtimeCorrelationRef: 'req-search-unexpected',
+        },
+      },
+    });
+    expect(execution.response.engineDecision.decisionTraceRef).toMatch(
+      /^decision:v1:internal_error:[a-f0-9]{64}$/,
+    );
+    expect(execution.response.meta.authorityTraceRef).toBe(
+      execution.response.engineDecision.decisionTraceRef,
+    );
   });
 });

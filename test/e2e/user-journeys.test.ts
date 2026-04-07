@@ -13,7 +13,9 @@ import {
   parseErrorResponse,
   parseSearchResponse,
   postJson,
+  postReplayJson,
 } from './helpers/http-transport.js';
+import { fetchReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 
@@ -150,21 +152,16 @@ describe('User Journeys — semantic and mixed search', () => {
 });
 
 describe('User Journeys — replay consistency and policy handling', () => {
-  const matchingSnapshot = {
-    model_versions: {},
-    index_versions: {},
-    policy_rule_version: '1.0.0',
-    threshold_profile_id: 'default',
-    planner_version: '1.0.0',
-    feature_flags: {},
-  };
-
   it('matching replay preserves decision_status between original and replayed requests', async () => {
     const originalResponse = await postJson(server.app, '/v1/search', {
       query: 'Opus One 2018',
       options: { mode: 'hybrid', explain: false, clarification: false },
     });
-    const replayResponse = await postJson(server.app, '/v1/search/replay', {
+    const matchingSnapshot = await fetchReplaySnapshot(server.app, {
+      query: 'Opus One 2018',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
+    const replayResponse = await postReplayJson(server.app, {
       query: 'Opus One 2018',
       decision_snapshot: matchingSnapshot,
       // Must mirror the original search options; default mode is `auto` and changes routing/decision.

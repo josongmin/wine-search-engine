@@ -7,6 +7,7 @@ import {
 import { probeJsonPostEndpoint } from '../infrastructure/health/readiness-probes.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
+import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import type {
   HealthRouteOptions,
   ReadinessStatus,
@@ -38,11 +39,24 @@ async function probeRedis(
   }
 }
 
+async function probeCalibrationStore(
+  calibrationStore: CalibrationStore,
+): Promise<ReadinessStatus> {
+  try {
+    // Use a representative query class to verify the store is reachable.
+    await calibrationStore.getCalibrationParams('short_entity');
+    return 'up';
+  } catch {
+    return 'down';
+  }
+}
+
 export function buildHealthRouteOptions(
   config: Config,
   runtime: RuntimeHandles,
   watchlistRuntime?: WatchlistRuntimePort | null,
   drinkingWindowPredictor?: DrinkingWindowPredictorPort,
+  calibrationStore?: CalibrationStore,
 ): HealthRouteOptions {
   const expectsRedis = expectsRedisAtStartup(config);
   const watchlistEnabled = isWatchlistEnabled(config);
@@ -132,6 +146,15 @@ export function buildHealthRouteOptions(
                   query: '__healthcheck__',
                   texts: ['__healthcheck__'],
                 }),
+            },
+          }
+        : {}),
+      ...(config.nodeEnv === 'production' && calibrationStore !== undefined
+        ? {
+            calibration_store: {
+              required: true,
+              check: (): Promise<ReadinessStatus> =>
+                probeCalibrationStore(calibrationStore),
             },
           }
         : {}),

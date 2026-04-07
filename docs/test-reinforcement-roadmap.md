@@ -63,9 +63,11 @@ Make `npm run test:e2e` a trustworthy PR gate.
 Actions:
 
 - Normalize transport assertions to `snake_case` in:
-  - `test/e2e/infrastructure.test.ts`
+  - `test/e2e/infrastructure.invariants.test.ts`
+  - `test/e2e/infrastructure.contracts.test.ts`
   - `test/e2e/response-invariants.test.ts`
-  - `test/e2e/edge-cases.test.ts`
+  - `test/e2e/edge-cases.input.test.ts`
+  - `test/e2e/edge-cases.protocol.test.ts`
   - `test/e2e/user-journeys.test.ts`
   - `test/e2e/realistic-scenarios.test.ts`
   - `test/e2e/golden-set.test.ts`
@@ -254,10 +256,14 @@ Merge order:
 
 Keep and tighten:
 
-- `test/e2e/search-api.test.ts`
+- `test/e2e/search-api.search.test.ts`
+- `test/e2e/search-api.secondary.test.ts`
+- `test/e2e/search-api.ops.test.ts`
 - `test/e2e/schema-contract.test.ts`
-- `test/e2e/infrastructure.test.ts`
-- `test/e2e/edge-cases.test.ts`
+- `test/e2e/infrastructure.invariants.test.ts`
+- `test/e2e/infrastructure.contracts.test.ts`
+- `test/e2e/edge-cases.input.test.ts`
+- `test/e2e/edge-cases.protocol.test.ts`
 
 Rewrite/split:
 

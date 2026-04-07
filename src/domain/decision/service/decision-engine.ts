@@ -1,3 +1,14 @@
+/**
+ * E3-U7: Decision-Engine No-Copy Rule.
+ *
+ * This file is the SINGLE authoritative decision engine. Any calibrator,
+ * confidence scorer, or ranked-route policy MUST plug in via the ranked-route
+ * insertion point (search-usecase-ranked-route-resolve.ts) — NOT by copying or
+ * subclassing this engine. "Small decision coordinator" is not a valid reason
+ * to create a parallel decision layer. See E3-U6 and E3-U7 unit cards.
+ *
+ * @see search-usecase-ranked-route-resolve.ts — single calibrator insertion point
+ */
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
@@ -31,6 +42,17 @@ const NOISY_SHORT_QUERY_STRATEGIES = new Set([
 const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
+const EXPLORATORY_RETRIEVAL_MODES = new Set([
+  'compare_candidates',
+  'recommendation',
+  'similar_items',
+  'producer_browse',
+  'region_browse',
+]);
+
+function isExploratoryRetrievalMode(mode: string | undefined): boolean {
+  return mode !== undefined && EXPLORATORY_RETRIEVAL_MODES.has(mode);
+}
 
 function deriveAdmissionContext(
   input: DecisionInput,
@@ -100,6 +122,13 @@ export class DecisionEngine {
 
   /**
    * Makes the binding decision for a query resolution.
+   *
+   * doc_guard E3-U7: No-copy rule.
+   * Decision objects returned by this method must NOT be cloned or mutated
+   * downstream. Consumers receive a read-only view of the DecisionOutput;
+   * pass the same reference forward. Creating a modified copy to adjust
+   * decisionStatus, nextAction, or any trace field is forbidden — route
+   * all post-decision logic through policy hooks wired before this call.
    *
    * @param input - Aggregated signals from all pipeline stages.
    * @param snapshot - System version snapshot at decision time.
@@ -416,6 +445,8 @@ export class DecisionEngine {
     state: DecisionState,
     rulesApplied: string[],
   ): DecisionState {
+    const effectiveRetrievalMode = input.effectiveRetrievalMode ?? input.queryPlan.retrievalMode;
+
     // require_exact: if resolved but the richer identity trail does not
     // support an exact match, downgrade
     if (input.policy.requireExact && state.status === 'resolved') {
@@ -431,6 +462,22 @@ export class DecisionEngine {
         };
       }
       rulesApplied.push('POLICY_REQUIRE_EXACT_SATISFIED');
+    }
+
+    if (
+      !input.policy.allowApproximate &&
+      state.status === 'resolved' &&
+      isExploratoryRetrievalMode(effectiveRetrievalMode)
+    ) {
+      rulesApplied.push('POLICY_NO_APPROXIMATE_EXPLORATORY_MODE');
+      return {
+        status: 'ambiguous',
+        nextAction: 'clarify',
+        rulesApplied: [...rulesApplied],
+        finalReason:
+          `Policy disallows approximate resolution for exploratory retrieval mode ` +
+          `(${effectiveRetrievalMode}); downgraded to AMBIGUOUS.`,
+      };
     }
 
     // allow_approximate: if false and status is ambiguous with hybrid_search,
@@ -651,6 +698,12 @@ export class DecisionEngine {
       decisionTraceRef: buildAuthorityTraceRef({
         queryPlan: input.queryPlan,
         snapshot,
+        ...(input.effectiveRoute !== undefined
+          ? { route: input.effectiveRoute }
+          : {}),
+        ...(input.effectiveRetrievalMode !== undefined
+          ? { retrievalMode: input.effectiveRetrievalMode }
+          : {}),
         ...(topCandidate !== undefined ? { chosenEntityId: topCandidate.entityId } : {}),
         decisionStatus: state.status,
         nextAction: state.nextAction,

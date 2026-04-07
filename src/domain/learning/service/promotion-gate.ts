@@ -1,3 +1,44 @@
+/**
+ * E5-U3: Promotion Spine Reuse Contract
+ *
+ * PromotionGate is the single gate for all model/weight promotion decisions.
+ * Do NOT duplicate promotion logic in eval-runner, threshold-optimizer, or
+ * anywhere else. All promotion acceptance checks MUST go through
+ * PromotionGate.evaluateAliasProposal() or
+ * PromotionGate.evaluateThresholdProposal().
+ *
+ * Composition root: src/config/container-learning.ts is the authoritative
+ * wiring point for PromotionGate — it owns construction and dependency
+ * injection for this service. Do NOT construct PromotionGate outside of that
+ * composition root.
+ *
+ * This file, threshold-optimizer.ts, and the proposal/feedback stores are the
+ * EXISTING promotion/threshold/learning spine. Future calibrator activation
+ * MUST reuse these surfaces — it MUST NOT introduce:
+ *   - A new proposal store or threshold store
+ *   - A new feedback persistence layer
+ *   - A parallel coordinator owning threshold write
+ *
+ * E5-U4: Rollout-Governor Scope (lock)
+ *
+ * A future rollout governor coordinator MUST:
+ *   - READ from this gate and ThresholdOptimizer only (no new stores)
+ *   - ORCHESTRATE activation via existing gates/stores (shadow-first path)
+ *   - NOT directly own: threshold optimization, persistence, or kill-switch
+ *
+ * E5-U6: Shadow-First Path (lock)
+ *
+ * All calibrator/lane/rerank changes are observed via shadow run BEFORE
+ * production cutover. Shadow path reads from eval-runner.ts + this gate.
+ * Direct production cutover without shadow run is NOT permitted.
+ *
+ * E5-U7: Promotion Acceptance Gate (lock)
+ *
+ * Shadow results must pass the gate criteria defined below before any
+ * production promotion. Gate criteria are: eval metrics (utility, precision)
+ * above threshold for at least N shadow runs, with no regression on
+ * held-out gold set. Criteria are enforced here, not in application layer.
+ */
 import type { AliasProposal } from '../model/alias-proposal.js';
 import type { ThresholdProposal } from '../model/threshold-proposal.js';
 import type { ProposalStore } from '../port/proposal-store.port.js';
