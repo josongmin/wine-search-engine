@@ -28,6 +28,13 @@ import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { pipelineDebug } from '../../../observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
 
+/** Default anchor confidence when plan omits explicit score (neutral). */
+const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
+/** Max expansion terms fed into retrieval query views. */
+const QUERY_EXPANSION_MAX_TERMS = 32;
+/** Weight increment per repeated token occurrence in expansion stats. */
+const QUERY_EXPANSION_TERM_WEIGHT_STEP = 0.25;
+
 /**
  * Orchestrates the full hybrid retrieval pipeline (RFC-012).
  *
@@ -431,7 +438,7 @@ export class CandidatePoolService {
       ...(anchorDocument.embedding !== undefined
         ? { embedding: anchorDocument.embedding }
         : {}),
-      anchorConfidence: input.queryPlan.anchors[0]?.confidence ?? 0.5,
+      anchorConfidence: input.queryPlan.anchors[0]?.confidence ?? HYBRID_ANCHOR_CONFIDENCE_DEFAULT,
     };
   }
 }
@@ -664,9 +671,9 @@ function buildLearnedSparseQueryWeights(
 
   return [...counts.entries()]
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .slice(0, 32)
+    .slice(0, QUERY_EXPANSION_MAX_TERMS)
     .map(([token, count]) => ({
       token,
-      weight: 1 + (count - 1) * 0.25,
+      weight: 1 + (count - 1) * QUERY_EXPANSION_TERM_WEIGHT_STEP,
     }));
 }

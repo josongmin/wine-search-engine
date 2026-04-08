@@ -2,6 +2,7 @@ import type { SearchResponseV1 } from '../../../domain/response/model/search-res
 import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
 import type { EvalProvenanceSlice } from '../../../domain/retrieval/model/provenance.js';
 import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
+import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { SearchRequest } from '../search-request.dto.js';
 
 export type SearchExecutorResult = SearchResponseV1 | ComparisonSearchResponse;
@@ -12,9 +13,7 @@ export interface SearchExecutorEvaluationResult {
   readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
-export interface SearchExecutionOptions {
-  readonly abortSignal?: AbortSignal | undefined;
-}
+export type SearchExecutionOptions = RequestExecutionContext;
 
 export interface SearchExecutorPort {
   execute(

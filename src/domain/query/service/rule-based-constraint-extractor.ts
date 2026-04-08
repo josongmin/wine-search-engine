@@ -1,10 +1,23 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import {
+  KRW_PER_MAN_WON,
+  KRW_PER_USD_APPROXIMATE,
+} from '../../shared/constants.js';
+import {
   extractSearchConstraints,
 } from './search-constraint-extractor.js';
 
 /** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
 export const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
+
+const DECIMAL_RADIX = 10;
+/** Rough KRW→USD when user says "만원" without explicit FX (soft banding only). */
+const KRW_MANWON_TO_USD_HEURISTIC = 7;
+/** USD thresholds for mapping numeric under-$X hints to price_band. */
+const PRICE_BAND_BUDGET_MAX_USD = 20;
+const PRICE_BAND_MID_MAX_USD = 50;
+const PRICE_BAND_PREMIUM_MAX_USD = 100;
+const USD_ROUND_DECIMAL_PLACES = 100;
 
 /**
  * Rule-based constraint extractor: pattern-matches the normalized query
@@ -77,10 +90,16 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     /(\d+)\s*(?:달러|dollar)\s*이하/iu.exec(q) ??
     /(\d+)\s*만원\s*(?:이하|미만|대)/iu.exec(q);
   if (priceUnder?.[1] !== undefined) {
-    const priceValue = parseInt(priceUnder[1], 10);
-    const usd = /만원/u.test(q) ? priceValue * 7 : priceValue;
+    const priceValue = parseInt(priceUnder[1], DECIMAL_RADIX);
+    const usd = /만원/u.test(q) ? priceValue * KRW_MANWON_TO_USD_HEURISTIC : priceValue;
     const band =
-      usd <= 20 ? 'budget' : usd <= 50 ? 'mid' : usd <= 100 ? 'premium' : 'luxury';
+      usd <= PRICE_BAND_BUDGET_MAX_USD
+        ? 'budget'
+        : usd <= PRICE_BAND_MID_MAX_USD
+          ? 'mid'
+          : usd <= PRICE_BAND_PREMIUM_MAX_USD
+            ? 'premium'
+            : 'luxury';
     soft.push({
       attribute: 'price_band',
       operator: '=',
@@ -221,24 +240,28 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   // not hard requirements — a wine at 51,000₩ should not be excluded when
   // the user asked for "5만원 이하").
   if (searchConstraints.maxPriceKrw !== undefined) {
-    const maxUsd = Math.round((searchConstraints.maxPriceKrw / 1350) * 100) / 100;
+    const maxUsd =
+      Math.round((searchConstraints.maxPriceKrw / KRW_PER_USD_APPROXIMATE) * USD_ROUND_DECIMAL_PLACES)
+      / USD_ROUND_DECIMAL_PLACES;
     soft.push({
       attribute: 'price_usd',
       operator: '<=',
       value: maxUsd,
-      source_phrase: `${searchConstraints.maxPriceKrw / 10_000}만원 이하`,
+      source_phrase: `${searchConstraints.maxPriceKrw / KRW_PER_MAN_WON}만원 이하`,
       confidence: 0.82,
       mapping_version: mv,
     });
   }
 
   if (searchConstraints.minPriceKrw !== undefined) {
-    const minUsd = Math.round((searchConstraints.minPriceKrw / 1350) * 100) / 100;
+    const minUsd =
+      Math.round((searchConstraints.minPriceKrw / KRW_PER_USD_APPROXIMATE) * USD_ROUND_DECIMAL_PLACES)
+      / USD_ROUND_DECIMAL_PLACES;
     soft.push({
       attribute: 'price_usd',
       operator: '>=',
       value: minUsd,
-      source_phrase: `${searchConstraints.minPriceKrw / 10_000}만원 이상`,
+      source_phrase: `${searchConstraints.minPriceKrw / KRW_PER_MAN_WON}만원 이상`,
       confidence: 0.82,
       mapping_version: mv,
     });

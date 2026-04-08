@@ -1,3 +1,5 @@
+import { KRW_PER_MAN_WON } from '../../shared/constants.js';
+
 /**
  * Wine style classification.
  */
@@ -12,10 +14,19 @@ export type PriceBand = 'low' | 'mid' | 'high';
  * Price band boundaries in Korean Won (KRW).
  * Each band is a [min, max) range.
  */
+/** Low band ceiling in 만원 units (5 × 10,000 KRW). */
+const PRICE_BAND_LOW_MAX_MAN_WON_UNITS = 5;
+/** Mid band ceiling in 만원 units (15 × 10,000 KRW). */
+const PRICE_BAND_MID_MAX_MAN_WON_UNITS = 15;
+/** ~5만원: typical "low" retail ceiling in KR market banding. */
+const PRICE_BAND_LOW_MAX_KRW = PRICE_BAND_LOW_MAX_MAN_WON_UNITS * KRW_PER_MAN_WON;
+/** ~15만원: upper bound of "mid" before "high" luxury band. */
+const PRICE_BAND_MID_MAX_KRW = PRICE_BAND_MID_MAX_MAN_WON_UNITS * KRW_PER_MAN_WON;
+
 export const PRICE_BAND_BOUNDARIES_KRW = {
-  low: [0, 50_000],
-  mid: [50_000, 150_000],
-  high: [150_000, Infinity],
+  low: [0, PRICE_BAND_LOW_MAX_KRW],
+  mid: [PRICE_BAND_LOW_MAX_KRW, PRICE_BAND_MID_MAX_KRW],
+  high: [PRICE_BAND_MID_MAX_KRW, Infinity],
 } as const;
 
 /**

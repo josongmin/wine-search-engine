@@ -22,6 +22,6 @@ export { type InferredAttribute } from './model/inferred-attribute.js';
 export { type MappingTablePort } from './port/mapping-table.port.js';
 
 // Services
-export { NLMapper } from './service/nl-mapper.js';
+export { NLMapper, type MapConstraintsOptions } from './service/nl-mapper.js';
 export { ConstraintEvaluator } from './service/constraint-evaluator.js';
 export { AttributeInferrer } from './service/attribute-inferrer.js';

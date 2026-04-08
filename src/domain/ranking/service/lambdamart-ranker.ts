@@ -29,14 +29,41 @@
  * from the training context (queryClass + exampleCount) so training runs
  * are reproducible across process restarts.
  */
+
+/** Standard xorshift32 shift tuple (Marsaglia). */
+const XORSHIFT32_LEFT1 = 13;
+const XORSHIFT32_RIGHT = 17;
+const XORSHIFT32_LEFT2 = 5;
+/** 2^32 — normalizes unsigned 32-bit xorshift output to [0, 1). */
+const UINT32_TO_UNIT_INTERVAL_DIVISOR = 0x100000000;
+
+/** Eight ranking features → uniform prior sums to 1.0 for stable cold-start. */
+const LAMBDAMART_UNIFORM_FEATURE_WEIGHT = 0.125;
+const LAMBDAMART_INITIAL_BIAS = 0.5;
+const LAMBDAMART_MAX_TRAINING_ITERATIONS = 100;
+const LAMBDAMART_ITERATIONS_MULTIPLIER_PER_EXAMPLE = 10;
+const LAMBDAMART_BATCH_SIZE_DIVISOR = 10;
+/** String hash mix constant (djb-style; deterministic seed mixing). */
+const QUERY_CLASS_SEED_MULTIPLIER = 31;
+const LAMBDAMART_FEATURE_DIMENSION = 8;
+const LAMBDAMART_WEIGHT_CLAMP_LOW = -1;
+const LAMBDAMART_WEIGHT_CLAMP_HIGH = 1;
+const LAMBDAMART_BIAS_CLAMP_HIGH = 2;
+/** Below this L1 norm, weights are treated as collapsed; renormalize uniformly. */
+const LAMBDAMART_WEIGHT_SUM_EPSILON = 1e-8;
+/** Validation NDCG@K (pairwise expansion uses top-K ranked pool). */
+const LAMBDAMART_VALIDATION_NDCG_K = 5;
+/** Max relevance label in training examples (grades 0..3). */
+const LAMBDAMART_MAX_RELEVANCE_GRADE = 3;
+
 function xorshift32(state: { value: number }): number {
   let x = state.value;
-  x ^= x << 13;
-  x ^= x >> 17;
-  x ^= x << 5;
+  x ^= x << XORSHIFT32_LEFT1;
+  x ^= x >> XORSHIFT32_RIGHT;
+  x ^= x << XORSHIFT32_LEFT2;
   // Ensure positive 32-bit integer
   state.value = x >>> 0;
-  return (x >>> 0) / 0x100000000;
+  return (x >>> 0) / UINT32_TO_UNIT_INTERVAL_DIVISOR;
 }
 
 /**
@@ -116,8 +143,11 @@ export function trainLambdaMARTModel(
     if (classExamples.length === 0) {
       return {
         queryClass,
-        weights: [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125] as readonly number[],
-        bias: 0.5,
+        weights: Array.from(
+          { length: LAMBDAMART_FEATURE_DIMENSION },
+          () => LAMBDAMART_UNIFORM_FEATURE_WEIGHT,
+        ) as readonly number[],
+        bias: LAMBDAMART_INITIAL_BIAS,
         trainingExampleCount: 0,
         ndcg5ValidationScore: 0,
         trainedAt: new Date(),
@@ -125,11 +155,20 @@ export function trainLambdaMARTModel(
     }
 
     // Mutable copy for training
-    const weights: number[] = [0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125];
-    let bias = 0.5;
+    const weights: number[] = Array.from(
+      { length: LAMBDAMART_FEATURE_DIMENSION },
+      () => LAMBDAMART_UNIFORM_FEATURE_WEIGHT,
+    );
+    let bias = LAMBDAMART_INITIAL_BIAS;
 
-    const numIterations = Math.min(100, classExamples.length * 10);
-    const batchSize = Math.max(1, Math.floor(classExamples.length / 10));
+    const numIterations = Math.min(
+      LAMBDAMART_MAX_TRAINING_ITERATIONS,
+      classExamples.length * LAMBDAMART_ITERATIONS_MULTIPLIER_PER_EXAMPLE,
+    );
+    const batchSize = Math.max(
+      1,
+      Math.floor(classExamples.length / LAMBDAMART_BATCH_SIZE_DIVISOR),
+    );
     const featureNames = [
       'bm25Score',
       'semanticScore',
@@ -145,7 +184,7 @@ export function trainLambdaMARTModel(
     // so training is reproducible across process restarts (no Math.random()).
     let classSeed = classExamples.length;
     for (let ci = 0; ci < queryClass.length; ci++) {
-      classSeed = (classSeed * 31 + queryClass.charCodeAt(ci)) >>> 0;
+      classSeed = (classSeed * QUERY_CLASS_SEED_MULTIPLIER + queryClass.charCodeAt(ci)) >>> 0;
     }
 
     for (let iter = 0; iter < numIterations; iter++) {
@@ -153,7 +192,7 @@ export function trainLambdaMARTModel(
       deterministicShuffle(shuffled, (classSeed + iter) >>> 0);
       const batch = shuffled.slice(0, batchSize);
 
-      const gradients: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
+      const gradients: number[] = Array.from({ length: LAMBDAMART_FEATURE_DIMENSION }, () => 0);
       let biasMeanDelta = 0;
 
       for (const example of batch) {
@@ -168,7 +207,7 @@ export function trainLambdaMARTModel(
         const scoreDiff = score1 - score2;
         const lambda = labelDiff * stableSigmoid(-scoreDiff);
 
-        for (let j = 0; j < 8; j++) {
+        for (let j = 0; j < LAMBDAMART_FEATURE_DIMENSION; j++) {
           const fname = (featureNames[j] ?? featureNames[0]) as keyof RankingFeatures;
           const featureDiff = example.features1[fname] - example.features2[fname];
           const currentGradient = gradients[j] ?? 0;
@@ -185,17 +224,23 @@ export function trainLambdaMARTModel(
         );
       }
 
-      for (let j = 0; j < 8; j++) {
+      for (let j = 0; j < LAMBDAMART_FEATURE_DIMENSION; j++) {
         const currentWeight = weights[j] ?? 0;
         const currentGradient = gradients[j] ?? 0;
         const gradient = currentGradient / batch.length;
         const nextWeight =
           currentWeight + learningRate * gradient - regularization * currentWeight;
-        weights[j] = Math.max(-1, Math.min(1, nextWeight));
+        weights[j] = Math.max(
+          LAMBDAMART_WEIGHT_CLAMP_LOW,
+          Math.min(LAMBDAMART_WEIGHT_CLAMP_HIGH, nextWeight),
+        );
       }
 
       bias = bias + learningRate * (biasMeanDelta / batch.length);
-      bias = Math.max(-1, Math.min(2, bias));
+      bias = Math.max(
+        LAMBDAMART_WEIGHT_CLAMP_LOW,
+        Math.min(LAMBDAMART_BIAS_CLAMP_HIGH, bias),
+      );
     }
 
     const absWeights = weights.map((w) => Math.abs(w));
@@ -204,7 +249,7 @@ export function trainLambdaMARTModel(
     // them all toward 0), fall back to uniform weights to avoid extreme values
     // that lose discriminative power after clamping.
     const normalizedWeights =
-      weightSum > 1e-8
+      weightSum > LAMBDAMART_WEIGHT_SUM_EPSILON
         ? weights.map((w) => w / weightSum)
         : weights.map(() => 1 / weights.length);
 
@@ -256,7 +301,7 @@ function scoreFeaturesRaw(
   ];
 
   let score = bias;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < LAMBDAMART_FEATURE_DIMENSION; i++) {
     const fv = featureValues[i] ?? 0;
     const wv = weights[i] ?? 0;
     if (!Number.isFinite(fv) || !Number.isFinite(wv)) continue;
@@ -289,7 +334,9 @@ function computeValidationNdcg(
       { label: ex.label2, score: scoreFeaturesRaw(ex.features2, weights, bias) },
     ]);
 
-    const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 5);
+    const ranked = scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, LAMBDAMART_VALIDATION_NDCG_K);
 
     let dcg = 0;
     for (const [i, item] of ranked.entries()) {
@@ -302,8 +349,9 @@ function computeValidationNdcg(
     // 2 documents per pair (doc1 + doc2), not 1 — using `exs.length` here was
     // a /2 systematic underestimate of IDCG, inflating reported NDCG.
     const idcg = Array.from(
-      { length: Math.min(5, scored.length) },
-      (_, i) => (Math.pow(2, 3) - 1) / Math.log2(i + 2),
+      { length: Math.min(LAMBDAMART_VALIDATION_NDCG_K, scored.length) },
+      (_, i) =>
+        (Math.pow(2, LAMBDAMART_MAX_RELEVANCE_GRADE) - 1) / Math.log2(i + 2),
     ).reduce((sum, value) => sum + value, 0);
 
     const queryNdcg = idcg > 0 ? dcg / idcg : 0;

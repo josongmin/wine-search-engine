@@ -12,6 +12,11 @@ import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { embeddingsFromOpenAiResponse } from './openai-json.js';
 
+/** Default vector width for BGE-M3 / Vespa ANN field alignment. */
+const OPENAI_EMBEDDING_DEFAULT_DIMENSIONS = 1024;
+/** Truncate HTTP error bodies in thrown messages. */
+const OPENAI_EMBEDDING_HTTP_ERROR_PREVIEW_CHARS = 200;
+
 export interface OpenAiEmbeddingServiceOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
   readonly baseUrl: string;
@@ -38,7 +43,7 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.httpTimeoutMs = options.httpTimeoutMs;
-    this.dimensions = options.dimensions ?? 1024;
+    this.dimensions = options.dimensions ?? OPENAI_EMBEDDING_DEFAULT_DIMENSIONS;
   }
 
   async embed(text: string): Promise<readonly number[]> {
@@ -120,7 +125,7 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
       );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `OpenAI embeddings failed [HTTP ${status}]: ${text.slice(0, 200)}`,
+        `OpenAI embeddings failed [HTTP ${status}]: ${text.slice(0, OPENAI_EMBEDDING_HTTP_ERROR_PREVIEW_CHARS)}`,
       );
     }
 

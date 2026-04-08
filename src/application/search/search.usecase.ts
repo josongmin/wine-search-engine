@@ -14,6 +14,7 @@ import type { QueryEntrySecurityObserver } from '../../domain/security/port/secu
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
+import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
@@ -163,7 +164,7 @@ export class SearchUseCase {
         }
         throw err;
       }
-      if (err instanceof Error && err.name === 'AbortError') {
+      if (isAbortError(err)) {
         throw err;
       }
 
@@ -196,11 +197,7 @@ export class SearchUseCase {
     startTime: number,
     options?: SearchExecutionOptions,
   ): Promise<SearchExecutorEvaluationResult> {
-    if (options?.abortSignal?.aborted) {
-      const error = new Error('Search execution aborted');
-      error.name = 'AbortError';
-      throw error;
-    }
+    throwIfAborted(options?.abortSignal, 'Search execution aborted');
 
     pipelineDebug(
       {
@@ -214,6 +211,7 @@ export class SearchUseCase {
 
     const preRoute = await runSearchPreRoutePhase({
       request,
+      ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
       requestId,
       startTime,
       snapshotVersions: this.deps.snapshotVersions,
@@ -233,11 +231,7 @@ export class SearchUseCase {
       decomposedSearch: this.deps.decomposedSearch,
     });
 
-    if (options?.abortSignal?.aborted) {
-      const error = new Error('Search execution aborted');
-      error.name = 'AbortError';
-      throw error;
-    }
+    throwIfAborted(options?.abortSignal, 'Search execution aborted');
 
     if (preRoute.outcome === 'return') {
       pipelineDebug(
@@ -312,6 +306,8 @@ export class SearchUseCase {
         },
       },
     );
+
+    throwIfAborted(options?.abortSignal, 'Search execution aborted');
 
     // Steps 3b–7: Entropy abstain (RFC-013) → DecisionEngine → response → cache write
     const response = await runSearchPostRoutePhase({

@@ -261,6 +261,33 @@ function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
 }
 
 describe('HybridUseCase', () => {
+  it('throws AbortError when abortSignal is already aborted before execute', async () => {
+    const queryPlanner = { plan: vi.fn().mockResolvedValue(createPlan()) };
+    const useCase = makeHybridUseCase({ queryPlanner: queryPlanner as never });
+    const ac = new AbortController();
+    ac.abort();
+
+    await expect(
+      useCase.execute({ query: 'ridge cabernet' }, 'req-abort-early', { abortSignal: ac.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(queryPlanner.plan).not.toHaveBeenCalled();
+  });
+
+  it('forwards abortSignal into planner context when provided', async () => {
+    const plan = createPlan();
+    const queryPlanner = { plan: vi.fn().mockResolvedValue(plan) };
+    const useCase = makeHybridUseCase({ queryPlanner: queryPlanner as never });
+    const ac = new AbortController();
+
+    await useCase.execute({ query: 'ridge cabernet' }, 'req-abort-fwd', { abortSignal: ac.signal });
+
+    expect(queryPlanner.plan).toHaveBeenCalledWith(
+      'ridge cabernet',
+      expect.objectContaining({ abortSignal: ac.signal }),
+    );
+  });
+
   it('throws DomainError when the hybrid ranking pipeline crashes (propagated as 500)', async () => {
     const plan = createPlan();
     const useCase = makeHybridUseCase({

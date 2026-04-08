@@ -22,6 +22,9 @@ const ZERO_SIGNALS: MatchSignalSet = {
   ambiguityPenalty: 0,
 };
 
+/** Down-weights fuzzy edit-distance channel vs exact alias confidence. */
+const FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR = 0.8;
+
 function inferAliasType(anchor: AnchorCandidate): AliasType {
   const strategies = new Set(anchor.lookupStrategies ?? []);
   if (strategies.has('phonetic_exact') || strategies.has('phonetic_fuzzy')) {
@@ -66,7 +69,7 @@ function buildSignals(plan: QueryPlanV1, anchor: AnchorCandidate): MatchSignalSe
       strategies.has('phonetic_exact') || strategies.has('phonetic_fuzzy')
         ? anchor.confidence
         : 0,
-    editDistanceScore: fuzzyLike ? anchor.confidence * 0.8 : 0,
+    editDistanceScore: fuzzyLike ? anchor.confidence * FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR : 0,
   };
 }
 

@@ -25,6 +25,15 @@
  */
 export const CONTAMINATION_THRESHOLD = 0.45;
 
+/** Title token count vs canonical above this ratio counts as length padding. */
+const TITLE_CANONICAL_LENGTH_ANOMALY_RATIO = 2.5;
+/** Weight for Jaccard distance in composite contamination score. */
+const CONTAMINATION_SCORE_WEIGHT_JACCARD = 0.5;
+/** Weight for promotional token density. */
+const CONTAMINATION_SCORE_WEIGHT_NOISE = 0.35;
+/** Weight for title/label length anomaly. */
+const CONTAMINATION_SCORE_WEIGHT_LENGTH = 0.15;
+
 /**
  * Token words that are known marketplace noise — not part of any canonical
  * wine name and therefore count against the title's semantic quality.
@@ -118,7 +127,7 @@ export function detectContamination(
     canonicalTokens.length > 0
       ? titleTokens.length / canonicalTokens.length
       : 1;
-  const lengthAnomaly = lengthRatio > 2.5;
+  const lengthAnomaly = lengthRatio > TITLE_CANONICAL_LENGTH_ANOMALY_RATIO;
 
   // ── Composite score ────────────────────────────────────────────────────────
   //
@@ -129,9 +138,9 @@ export function detectContamination(
   const jaccardPenalty = 1 - jaccardSimilarity;
   const score = Math.min(
     1,
-    0.50 * jaccardPenalty +
-    0.35 * noiseDensity +
-    0.15 * (lengthAnomaly ? 1 : 0),
+    CONTAMINATION_SCORE_WEIGHT_JACCARD * jaccardPenalty +
+    CONTAMINATION_SCORE_WEIGHT_NOISE * noiseDensity +
+    CONTAMINATION_SCORE_WEIGHT_LENGTH * (lengthAnomaly ? 1 : 0),
   );
 
   return {

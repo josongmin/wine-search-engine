@@ -30,6 +30,25 @@ const NEAR_DUPLICATE_JACCARD_LONG = 0.7;
  *  short Korean queries like "와인 추천" (5 chars) benefit from bigrams. */
 const SHORT_STRING_THRESHOLD = 10;
 
+/** Max recursion depth for manual canonicalization before hashing subtree. */
+const MANUAL_CANONICALIZE_MAX_DEPTH = 32;
+/** Hex prefix length of SHA-256 digest in depth-limit sentinel (collision resistance vs size). */
+const MANUAL_CANONICALIZE_DEPTH_HASH_PREFIX_CHARS = 16;
+/** Treat string as Hangul-dominant when this fraction of chars are Hangul/Jamo. */
+const HANGUL_DOMINANCE_RATIO = 0.5;
+/** Unicode: first Hangul syllable (가). */
+const UNICODE_HANGUL_SYLLABLE_FIRST = 0xAC00;
+/** Unicode: last Hangul syllable (힣). */
+const UNICODE_HANGUL_SYLLABLE_LAST = 0xD7A3;
+/** Unicode: Hangul Jamo block start. */
+const UNICODE_HANGUL_JAMO_FIRST = 0x1100;
+/** Unicode: Hangul Jamo block end. */
+const UNICODE_HANGUL_JAMO_LAST = 0x11FF;
+/** Unicode: Hangul compatibility Jamo start. */
+const UNICODE_HANGUL_COMPAT_JAMO_FIRST = 0x3130;
+/** Unicode: Hangul compatibility Jamo end. */
+const UNICODE_HANGUL_COMPAT_JAMO_LAST = 0x318F;
+
 /**
  * Tool-input keys that contribute to loop-detection normalization. Limiting
  * the surface to a known allowlist prevents adversarial padding attacks
@@ -157,7 +176,7 @@ function canonicalizeForLoopKey(value: unknown): string {
 }
 
 function manualCanonicalize(value: unknown, depth = 0): string {
-  if (depth > 32) {
+  if (depth > MANUAL_CANONICALIZE_MAX_DEPTH) {
     // Distinct subtrees beyond depth 32 must NOT all collapse to one sentinel,
     // or an adversarial LLM could evade loop detection by burying differences
     // beneath a sufficiently nested wrapper. Hash with SHA-256 (collision-
@@ -174,7 +193,7 @@ function manualCanonicalize(value: unknown, depth = 0): string {
         serialized = `unserializable:${typeof value}`;
       }
     }
-    const h = createHash('sha256').update(serialized).digest('hex').slice(0, 16);
+    const h = createHash('sha256').update(serialized).digest('hex').slice(0, MANUAL_CANONICALIZE_DEPTH_HASH_PREFIX_CHARS);
     return `"[depth-limit:${h}]"`;
   }
   if (value === null) return 'null';
@@ -286,7 +305,7 @@ function trigramSet(s: string): Set<string> {
   //     because Korean syllables are information-dense and trigrams of 3
   //     Hangul chars give too few overlapping n-grams to detect near-dupes.
   //   - Longer ASCII-dominant: trigrams (n=3) for standard behaviour.
-  const isHangulDominant = countHangulChars(s) > s.length * 0.5;
+  const isHangulDominant = countHangulChars(s) > s.length * HANGUL_DOMINANCE_RATIO;
   const isShort = s.length < SHORT_STRING_THRESHOLD; // 10 chars
   const n = (isHangulDominant || isShort) ? 2 : 3;
   for (let i = 0; i <= s.length - n; i++) {
@@ -301,9 +320,9 @@ function countHangulChars(s: string): number {
     const code = ch.codePointAt(0) ?? 0;
     // Hangul syllables U+AC00–U+D7A3, Jamo U+1100–U+11FF, Compatibility Jamo U+3130–U+318F
     if (
-      (code >= 0xAC00 && code <= 0xD7A3)
-      || (code >= 0x1100 && code <= 0x11FF)
-      || (code >= 0x3130 && code <= 0x318F)
+      (code >= UNICODE_HANGUL_SYLLABLE_FIRST && code <= UNICODE_HANGUL_SYLLABLE_LAST)
+      || (code >= UNICODE_HANGUL_JAMO_FIRST && code <= UNICODE_HANGUL_JAMO_LAST)
+      || (code >= UNICODE_HANGUL_COMPAT_JAMO_FIRST && code <= UNICODE_HANGUL_COMPAT_JAMO_LAST)
     ) {
       count++;
     }

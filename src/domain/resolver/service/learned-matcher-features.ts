@@ -20,6 +20,9 @@ export interface MatcherFeatureVector {
 
 const TRIGRAM_SIZE = 3;
 
+/** Partial credit when scripts differ or either side is mixed-script. */
+const SCRIPT_COMPATIBILITY_PARTIAL = 0.5;
+
 /**
  * Extracts character n-grams (trigrams) from a lowercased string.
  */
@@ -151,9 +154,9 @@ export function computeMatcherFeatures(
   if (queryScript === candidateScript) {
     scriptCompatibility = 1.0;
   } else if (queryScript === ScriptKind.Mixed || candidateScript === ScriptKind.Mixed) {
-    scriptCompatibility = 0.5;
+    scriptCompatibility = SCRIPT_COMPATIBILITY_PARTIAL;
   } else {
-    scriptCompatibility = 0.5;
+    scriptCompatibility = SCRIPT_COMPATIBILITY_PARTIAL;
   }
 
   // Provenance stage — determined later by the resolver; default to 'unknown'

@@ -14,14 +14,7 @@ import type {
   DecomposedSearchParentContext,
 } from './port/search-route-usecases.port.js';
 import { buildComparisonAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) {
-    const error = new Error('Decomposed search aborted');
-    error.name = 'AbortError';
-    throw error;
-  }
-}
+import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 
 export class UnexpectedDecomposedResponseError extends DomainError {
   constructor() {
@@ -54,7 +47,7 @@ export class DecomposedSearchUseCase {
     parentContext?: DecomposedSearchParentContext,
     options?: DecomposedSearchExecutionOptions,
   ): Promise<ComparisonSearchResponse> {
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Decomposed search aborted');
 
     const baseRequest: Omit<SearchRequest, 'query'> = {
       options: { mode: 'auto', explain: parentContext?.explain ?? false, clarification: false },
@@ -89,7 +82,7 @@ export class DecomposedSearchUseCase {
     const rawResultA = settledA.value;
     const rawResultB = settledB.value;
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Decomposed search aborted');
 
     // Sub-queries should never themselves be comparison queries; narrow via discriminant
     if (rawResultA.queryType !== 'search' || rawResultB.queryType !== 'search') {

@@ -18,6 +18,8 @@ import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import type { SnapshotVersions } from './search.usecase.js';
 import type { DecisionStatus, NextAction } from '../../domain/shared/types/index.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
+import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 
 export type { ResolveRequest } from './resolve-request.dto.js';
 export type { ResolveResponse } from './resolve-response.dto.js';
@@ -38,14 +40,6 @@ export interface ResolveUseCaseDeps {
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
 }
 
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) {
-    const error = new Error('Resolve use case aborted');
-    error.name = 'AbortError';
-    throw error;
-  }
-}
-
 /**
  * Entity resolve use case — runs only entity resolution (no ranking/decision).
  *
@@ -58,9 +52,9 @@ export class ResolveUseCase {
 
   async execute(
     request: ResolveRequest,
-    options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: RequestExecutionContext,
   ): Promise<ResolveResponse> {
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
     pipelineDebug(
       {
@@ -79,19 +73,22 @@ export class ResolveUseCase {
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
     const plan = await this.deps.queryPlanner.plan(
       effectiveQuery,
-      buildPlannerContextFromSearchRequest({
-        query: effectiveQuery,
-        context: request.context,
-        sessionContext: request.sessionContext,
-        queryBudget: request.queryBudget,
-      }),
+      buildPlannerContextFromSearchRequest(
+        {
+          query: effectiveQuery,
+          context: request.context,
+          sessionContext: request.sessionContext,
+          queryBudget: request.queryBudget,
+        },
+        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+      ),
     );
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
     const satResult = this.constraintSAT.check(plan.constraints);
     if (satResult.contradicted) {
@@ -122,7 +119,7 @@ export class ResolveUseCase {
       };
     }
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
     // Build resolver input
     const candidateEntities = await buildResolverCandidatesFromPlan(
@@ -143,7 +140,7 @@ export class ResolveUseCase {
       candidateEntities,
     };
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
     // Run entity resolver
     const result = await this.deps.entityResolver.resolve(resolverInput);

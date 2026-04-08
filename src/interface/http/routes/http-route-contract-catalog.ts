@@ -21,6 +21,10 @@ import {
   InterpretV2RouteContract,
 } from './route-contracts.js';
 import type { HttpRouteContractManifest, RegisteredHttpRouteContract } from './register-contract-route.js';
+import {
+  HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+  HTTP_SUCCESS_STATUS_MIN,
+} from '../constants.js';
 
 export interface DeclaredHttpRouteContract {
   readonly method: 'GET' | 'POST' | 'DELETE' | 'PUT' | 'PATCH';
@@ -71,11 +75,11 @@ export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManif
       .sort((left, right) => left - right),
     successStatusCodes: Object.keys(entry.contract.responses)
       .map((statusCode) => Number(statusCode))
-      .filter((statusCode) => statusCode >= 200 && statusCode < 300)
+      .filter((statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE)
       .sort((left, right) => left - right),
     errorStatusCodes: Object.keys(entry.contract.responses)
       .map((statusCode) => Number(statusCode))
-      .filter((statusCode) => statusCode < 200 || statusCode >= 300)
+      .filter((statusCode) => statusCode < HTTP_SUCCESS_STATUS_MIN || statusCode >= HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE)
       .sort((left, right) => left - right),
   })).sort(compareContracts);
 

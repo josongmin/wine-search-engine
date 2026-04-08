@@ -12,6 +12,12 @@
  * @module search-constraint-extractor
  */
 
+import {
+  KRW_PER_CHEON_WON,
+  KRW_PER_MAN_WON,
+  KRW_PER_USD_APPROXIMATE,
+} from '../../shared/constants.js';
+
 // ---------------------------------------------------------------------------
 // KRW ↔ USD conversion
 // ---------------------------------------------------------------------------
@@ -25,9 +31,14 @@
  * number — it influences soft filtering only; the ranking pipeline does its
  * own calibration.
  *
- * 1 USD ≈ 1350 KRW (mid-2025 reference rate).
+ * Single source: {@link KRW_PER_USD_APPROXIMATE} in domain shared constants.
  */
-export const KRW_PER_USD = 1350 as const;
+export const KRW_PER_USD = KRW_PER_USD_APPROXIMATE;
+
+/** "만원대" band: lower fraction of midpoint KRW. */
+const KRW_PRICE_BAND_LOWER_FRACTION = 0.9;
+/** "만원대" band: upper fraction of midpoint KRW. */
+const KRW_PRICE_BAND_UPPER_FRACTION = 1.1;
 
 /**
  * Converts Korean Won to US Dollars, rounding to two decimal places.
@@ -239,8 +250,8 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
     const hi = parseFloat(rangeMatch[2]);
     if (Number.isFinite(lo) && Number.isFinite(hi)) {
       return {
-        minPriceKrw: Math.round(lo * 10_000),
-        maxPriceKrw: Math.round(hi * 10_000),
+        minPriceKrw: Math.round(lo * KRW_PER_MAN_WON),
+        maxPriceKrw: Math.round(hi * KRW_PER_MAN_WON),
       };
     }
   }
@@ -248,11 +259,11 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
   // "X만원대" — treat as ±10% band around X만원 midpoint
   const bandMatch = /(\d+(?:\.\d+)?)\s*만원대/u.exec(q);
   if (bandMatch !== null && bandMatch[1] !== undefined) {
-    const mid = parseFloat(bandMatch[1]) * 10_000;
+    const mid = parseFloat(bandMatch[1]) * KRW_PER_MAN_WON;
     if (Number.isFinite(mid)) {
       return {
-        minPriceKrw: Math.round(mid * 0.9),
-        maxPriceKrw: Math.round(mid * 1.1),
+        minPriceKrw: Math.round(mid * KRW_PRICE_BAND_LOWER_FRACTION),
+        maxPriceKrw: Math.round(mid * KRW_PRICE_BAND_UPPER_FRACTION),
       };
     }
   }
@@ -261,21 +272,21 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
   const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만)/u.exec(q);
   if (underMatch !== null && underMatch[1] !== undefined) {
     const v = parseFloat(underMatch[1]);
-    if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * 10_000) };
+    if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_MAN_WON) };
   }
 
   // Lower bound: "X만원 이상"
   const overMatch = /(\d+(?:\.\d+)?)\s*만원\s*이상/u.exec(q);
   if (overMatch !== null && overMatch[1] !== undefined) {
     const v = parseFloat(overMatch[1]);
-    if (Number.isFinite(v)) return { minPriceKrw: Math.round(v * 10_000) };
+    if (Number.isFinite(v)) return { minPriceKrw: Math.round(v * KRW_PER_MAN_WON) };
   }
 
   // 천원 (thousands of won): "X천원 이하"
   const underCheon = /(\d+(?:\.\d+)?)\s*천원\s*(?:이하|이내|미만)/u.exec(q);
   if (underCheon !== null && underCheon[1] !== undefined) {
     const v = parseFloat(underCheon[1]);
-    if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * 1_000) };
+    if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_CHEON_WON) };
   }
 
   // Raw 원: "X원 이하"

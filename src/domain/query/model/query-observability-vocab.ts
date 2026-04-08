@@ -2,6 +2,9 @@ import type { ConstraintExtractionTrace } from '../../attribute/model/constraint
 import type { QueryPlanV1, QueryPlanV2 } from './query-plan.js';
 import type { CompiledWineQuery } from './compiled-wine-query.js';
 
+/** Truncate raw query in observability vocab payloads (telemetry size bound). */
+const OBSERVABILITY_RAW_QUERY_PREVIEW_CHARS = 200;
+
 /**
  * Type guard that distinguishes a QueryPlanV2 from a QueryPlanV1.
  *
@@ -140,7 +143,7 @@ export function planToObservabilitySlice(
 
   return {
     queryId,
-    rawQuery: plan.rawQuery.slice(0, 200),
+    rawQuery: plan.rawQuery.slice(0, OBSERVABILITY_RAW_QUERY_PREVIEW_CHARS),
     queryFamily: deriveQueryFamily(plan, compiled),
     intent: plan.intent,
     queryClass: plan.queryClass,

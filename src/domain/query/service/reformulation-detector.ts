@@ -25,6 +25,9 @@ export type ReformulationType =
   | 'topic_switch'
   | 'none';
 
+/** Word count at or above this suggests a new topic vs session refinement. */
+const TOPIC_SWITCH_MIN_WORD_COUNT = 5;
+
 /** Korean correction markers indicating the user is correcting a prior query. */
 const CORRECTION_MARKERS: readonly RegExp[] = [
   /아니[라요]/u,          // "no, (it's) ..."
@@ -108,7 +111,7 @@ export class ReformulationDetector {
     // If there is prior context but no markers, assume topic switch for long
     // queries and constraint narrowing for short ones.
     const wordCount = currentQuery.split(/\s+/).length;
-    if (wordCount >= 5) {
+    if (wordCount >= TOPIC_SWITCH_MIN_WORD_COUNT) {
       return 'topic_switch';
     }
 

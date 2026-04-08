@@ -18,6 +18,11 @@ import type { CanonicalizationCandidate } from '../model/canonicalization-candid
 import type { EntityMatchResult } from '../model/entity-match-result.js';
 import type { SourceTrustProfile } from '../model/source-trust-profile.js';
 
+/** Blend weight for base resolver confidence in trust-adjusted score. */
+const TRUST_BLEND_BASE_WEIGHT = 0.7;
+/** Blend weight for averaged source-trust fields. */
+const TRUST_BLEND_TRUST_WEIGHT = 0.3;
+
 /**
  * Minimal read-only view of an entity used for matching.
  * This avoids a hard dependency on the entity domain's full model.
@@ -300,6 +305,6 @@ export class EntityMatcher {
 
     const avgTrust = trustSum / count;
     // Weighted blend: 70% base confidence, 30% trust modifier
-    return baseConfidence * 0.7 + avgTrust * 0.3;
+    return baseConfidence * TRUST_BLEND_BASE_WEIGHT + avgTrust * TRUST_BLEND_TRUST_WEIGHT;
   }
 }

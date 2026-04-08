@@ -14,7 +14,7 @@
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
  *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off
- *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 106 main scenarios, concurrency 1, judge off
+ *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 106 main scenarios, concurrency 1, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 200+ scenarios + phase2, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # retrieval-only evaluation
  *
@@ -36,7 +36,7 @@ import { QuerySanitizer } from '../../../src/domain/security/service/query-sanit
 import { AGENT_SCENARIOS, AGENT_SCENARIOS_WITH_PHASE2 } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
-import type { AgentBenchmarkScenario, ScenarioTier, TerminationReason } from './scenario.js';
+import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
@@ -125,7 +125,7 @@ function parseArgs(): CliArgs {
       args = { ...args, concurrency: 1 };
     }
     if (!explicitJudge) {
-      args = { ...args, enableJudge: false };
+      args = { ...args, enableJudge: true };
     }
   }
 
@@ -167,6 +167,12 @@ function parseArgs(): CliArgs {
  *
  * Real-mode achieves this via YQL `!(field contains)` filters; mock-mode must
  * mirror this contract to avoid false-floor scores in the negation tier.
+ *
+ * NOTE: Because the label embeds the query, mock contextRelevance scores are
+ * artificially high (~94%) vs real Vespa results (~46%). This is intentional —
+ * mock mode tests agent logic, not retrieval quality. The gap is genuine signal:
+ * real contextRelevance measures actual retrieval relevance. Do NOT use mock
+ * contextRelevance scores to make claims about retrieval quality; use real-mode.
  */
 function generateMockResultLabel(query: string): { label: string; producer: string; region: string } {
   // Extract Korean negation terms (term BEFORE the suffix).
@@ -454,11 +460,14 @@ async function runWithConcurrency<T, R>(
   fn: (item: T, index: number) => Promise<R>,
 ): Promise<readonly R[]> {
   const results: R[] = new Array(items.length);
-  let cursor = 0;
+  // Use an explicit queue instead of a shared cursor++ to avoid the race where
+  // two workers read the same index before either increments (JS is single-
+  // threaded but await yields control, so cursor++ is NOT atomic across awaits).
+  const queue: number[] = Array.from({ length: items.length }, (_, i) => i);
   const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
     while (true) {
-      const i = cursor++;
-      if (i >= items.length) break;
+      const i = queue.shift();
+      if (i === undefined) break;
       results[i] = await fn(items[i] as T, i);
     }
   });
@@ -469,6 +478,19 @@ async function runWithConcurrency<T, R>(
 // ─────────────────────────────────────────────────────────────────────
 // Retry wrapper for transient failures
 // ─────────────────────────────────────────────────────────────────────
+
+// Backoff constants — named so audit/review can verify the arithmetic.
+// Rate-limit (429): TPM windows reset every 60s; start at 5s to give the
+// quota time to recover: 5s → 10s → 20s (capped at RUNNER_RATE_LIMIT_MAX_MS).
+const RUNNER_RATE_LIMIT_BASE_MS = 5_000;
+const RUNNER_RATE_LIMIT_MAX_MS = 30_000;
+// Transient errors (5xx, network): short jittered backoff, not quota-related.
+const RUNNER_TRANSIENT_BASE_MS = 200;
+
+function isRateLimitError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return msg.includes('rate limit') || msg.includes('429');
+}
 
 async function withRetry<T>(
   fn: () => Promise<T>,
@@ -482,8 +504,13 @@ async function withRetry<T>(
     } catch (err) {
       lastErr = err;
       if (attempt >= maxAttempts || !shouldRetry(err)) throw err;
-      // Light exponential backoff: 200ms, 400ms, ...
-      await new Promise((r) => setTimeout(r, 200 * attempt));
+      // Rate-limit errors (429/TPM): slow exponential backoff — quota windows
+      // are 60s; fast retries just keep hitting the wall.
+      // Other transient errors (5xx, network): light exponential backoff.
+      const delayMs = isRateLimitError(err)
+        ? Math.min(RUNNER_RATE_LIMIT_BASE_MS * 2 ** (attempt - 1), RUNNER_RATE_LIMIT_MAX_MS)
+        : RUNNER_TRANSIENT_BASE_MS * attempt;
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   }
   throw lastErr;
@@ -491,6 +518,12 @@ async function withRetry<T>(
 
 function isTransient(err: unknown): boolean {
   const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  // Explicitly exclude 4xx client errors — retrying Bad Request / Unauthorized
+  // / Forbidden never helps and wastes budget. Only 5xx + network + rate-limit
+  // are genuinely transient.
+  if (msg.includes('400') || msg.includes('401') || msg.includes('403') || msg.includes('404') || msg.includes('405')) {
+    return false;
+  }
   return (
     msg.includes('timeout')
     || msg.includes('econnreset')
@@ -661,6 +694,25 @@ export interface BenchmarkReport {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+/**
+ * Returns true when a scenario expectation has enough material for the LLM
+ * judge to evaluate — either a hand-written rubric or at least one structured
+ * field that `composeAutoRubric()` in judge.ts converts into rubric criteria.
+ */
+function hasJudgeMaterial(exp: ScenarioExpectation): boolean {
+  if (exp.rubric !== undefined) return true;
+  if (exp.priceBandKrw !== undefined) return true;
+  if (exp.vintageRange !== undefined) return true;
+  if (exp.drinkingWindowStatus !== undefined) return true;
+  if (exp.requireHedging !== undefined) return true;
+  if (exp.requiredRegister !== undefined) return true;
+  if (exp.refusalExpected !== undefined) return true;
+  if (exp.mustCiteFromToolResults !== undefined) return true;
+  if (exp.maxConfidence !== undefined) return true;
+  if (exp.factCheckClaims !== undefined && exp.factCheckClaims.length > 0) return true;
+  return false;
+}
+
 // Main run logic
 // ─────────────────────────────────────────────────────────────────────
 
@@ -778,8 +830,8 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         let faithScore: number | undefined;
         if (judgeLlm !== null) {
           const judgePromises: Promise<void>[] = [];
-          // Answer quality judge (rubric-based)
-          if (scenario.expectation.rubric !== undefined) {
+          // Answer quality judge (rubric-based or structured fields via auto-rubric)
+          if (hasJudgeMaterial(scenario.expectation)) {
             judgePromises.push(
               judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples).then((r) => {
                 if (r.score !== null) judgeScore = r.score;
@@ -787,8 +839,15 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
               }),
             );
           }
-          // RAGAS Faithfulness judge (grounding in tool results)
-          if (observations.length > 0) {
+          // RAGAS Faithfulness judge (grounding in tool results).
+          // Special case: mustNotCallTools scenarios correctly produced zero
+          // observations — they made no claims from tool results, so they are
+          // perfectly faithful by definition. Score 1.0 without an LLM call.
+          // For all other no-observation cases (LLM unavailable, etc.) leave
+          // faithScore undefined so the scorer imputes from present dims.
+          if (observations.length === 0 && scenario.expectation.mustNotCallTools !== undefined) {
+            faithScore = 1.0;
+          } else if (observations.length > 0) {
             judgePromises.push(
               judgeFaithfulness(judgeLlm, result.answer, observations).then((r) => {
                 if (r.score !== null) faithScore = r.score;
@@ -1037,7 +1096,12 @@ async function main(): Promise<void> {
     console.error(`  ⚠ Critical:   ${report.criticalFailureCount} scenario(s) had a critical failure (overall=0)`);
   }
   if (report.judgeFailCount > 0) {
-    console.error(`  Judge fails:  ${report.judgeFailCount}`);
+    // Warn loudly when >10% of judge calls failed — the overall score may be
+    // unreliable because failed dims are silently imputed to the present-dim mean.
+    const judgeCallsTotal = report.executedCount * (report.judgeModel !== null ? 2 : 0); // answer + faithfulness
+    const failRate = judgeCallsTotal > 0 ? report.judgeFailCount / judgeCallsTotal : 0;
+    const failSymbol = failRate >= 0.1 ? '⚠ ' : '  ';
+    console.error(`  ${failSymbol}Judge fails: ${report.judgeFailCount}${failRate >= 0.1 ? ` (${(failRate * 100).toFixed(0)}% — scores may be unreliable, re-run or check API quota)` : ''}`);
   }
   if (report.judgeRequiredButSkippedCount > 0) {
     console.error(`  ⚠️  ${report.judgeRequiredButSkippedCount} scenario(s) require judge for reliable scoring (run without --no-judge for accurate results)`);

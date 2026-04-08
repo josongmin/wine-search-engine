@@ -30,6 +30,13 @@ import { getAuthenticatedSubject, configureAuthenticatedSubjectTrust } from './a
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
+import {
+  HTTP_DEFAULT_BODY_LIMIT_BYTES,
+  HTTP_DEFAULT_CONNECTION_TIMEOUT_MS,
+  HTTP_DEFAULT_REQUEST_TIMEOUT_MS,
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE,
+} from './constants.js';
 
 const serverLog = bootstrapLogger.child({ component: 'HttpServer' });
 
@@ -155,7 +162,7 @@ function registerTelemetryHooks(app: FastifyInstance, tracer: Tracer): void {
     const { otelSpan } = request;
     if (otelSpan !== undefined) {
       otelSpan.setAttribute('http.status_code', reply.statusCode);
-      if (reply.statusCode >= 500) {
+      if (reply.statusCode >= HTTP_STATUS_INTERNAL_SERVER_ERROR) {
         otelSpan.setStatus({ code: SpanStatusCode.ERROR });
       }
       otelSpan.end();
@@ -189,7 +196,7 @@ export async function createServer(
     },
     genReqId: (req) => resolveIncomingRequestId(req.headers),
     trustProxy: options?.trustProxy ?? false,
-    bodyLimit: options?.bodyLimitBytes ?? 1_048_576,
+    bodyLimit: options?.bodyLimitBytes ?? HTTP_DEFAULT_BODY_LIMIT_BYTES,
     // Close idle keep-alive connections when server.close() is called so that
     // the process can exit cleanly during graceful shutdown (SIGTERM/SIGINT).
     // Without this, open keep-alive connections with no active request prevent
@@ -199,10 +206,10 @@ export async function createServer(
     forceCloseConnections: 'idle',
     // TCP connection handshake timeout — prevents slow-connect attacks from
     // holding sockets open indefinitely.
-    connectionTimeout: options?.connectionTimeout ?? 10_000,
+    connectionTimeout: options?.connectionTimeout ?? HTTP_DEFAULT_CONNECTION_TIMEOUT_MS,
     // Per-request processing deadline — returns 503 if a route handler takes
     // longer than this to reply, preventing runaway requests from accumulating.
-    requestTimeout: options?.requestTimeout ?? 30_000,
+    requestTimeout: options?.requestTimeout ?? HTTP_DEFAULT_REQUEST_TIMEOUT_MS,
   });
 
   if (options?.enableSecurityHeaders ?? true) {
@@ -291,7 +298,7 @@ export async function createServer(
       const mediaType = rawCt.split(';')[0]?.trim().toLowerCase() ?? '';
       if (mediaType !== 'application/json') {
         const requestId = getRequestId(request);
-        await reply.status(415).send({
+        await reply.status(HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE).send({
           error: {
             request_id: requestId,
             code: 'UNSUPPORTED_MEDIA_TYPE',

@@ -1,6 +1,9 @@
 import type { ReadinessStatus } from '../../interface/http/routes/health.route.js';
 
 const DEFAULT_PROBE_TIMEOUT_MS = 750;
+/** JSON POST probe treats this HTTP status range as dependency healthy. */
+const READINESS_PROBE_HTTP_SUCCESS_MIN = 200;
+const READINESS_PROBE_HTTP_SUCCESS_MAX_EXCLUSIVE = 300;
 
 export async function withProbeTimeout(
   operation: (signal: AbortSignal) => Promise<ReadinessStatus>,
@@ -38,6 +41,9 @@ export async function probeJsonPostEndpoint(
     // 429 (rate-limited), and 5xx all indicate the dependency cannot serve
     // production traffic. Earlier code accepted any < 500 which silently
     // hid auth/config drift behind a green health page.
-    return response.status >= 200 && response.status < 300 ? 'up' : 'down';
+    return response.status >= READINESS_PROBE_HTTP_SUCCESS_MIN
+      && response.status < READINESS_PROBE_HTTP_SUCCESS_MAX_EXCLUSIVE
+      ? 'up'
+      : 'down';
   });
 }

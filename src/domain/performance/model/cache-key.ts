@@ -8,6 +8,9 @@
 import type { RetrievalMode } from '../../query/model/retrieval-mode.js';
 import { createHash } from 'crypto';
 
+/** Truncate SHA-256 hex in Redis keys (bounded length, still low collision rate). */
+const CACHE_KEY_HASH_HEX_PREFIX_LENGTH = 16;
+
 /**
  * Query-level cache key: Identifies an entire search query + mode.
  *
@@ -138,7 +141,7 @@ export class QueryCacheKeyBuilder {
     const keyParts: string[] = ['query'];
     if (snapshotId !== undefined && snapshotId.length > 0) {
       // Hash to bound length and avoid leaking the full snapshot id in keys.
-      keyParts.push(`s:${hashDeterministic(snapshotId).slice(0, 16)}`);
+      keyParts.push(`s:${hashDeterministic(snapshotId).slice(0, CACHE_KEY_HASH_HEX_PREFIX_LENGTH)}`);
     }
     keyParts.push(
       retrievalMode,
@@ -268,7 +271,7 @@ function hashDeterministic(input: string): string {
   return createHash('sha256')
     .update(input)
     .digest('hex')
-    .substring(0, 16);
+    .substring(0, CACHE_KEY_HASH_HEX_PREFIX_LENGTH);
 }
 
 /**

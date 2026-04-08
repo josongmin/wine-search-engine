@@ -21,6 +21,54 @@ const TYPE_MISMATCH_PENALTY = 0.6;
  */
 const GENERIC_UNMET_PENALTY = 0.2;
 
+/** Scales constraint match ratio bonus in entity integrity [0,1]. */
+const CONSTRAINT_MATCH_RATIO_BONUS_SCALE = 0.1;
+/** Penalty when query has anchors but candidate lacks anchor rank. */
+const MISSING_ANCHOR_RANK_PENALTY = 0.1;
+/** Inferred constraints contribute at this fraction of listed confidence. */
+const INFERRED_CONSTRAINT_WEIGHT_FACTOR = 0.5;
+/** Neutral attribute alignment when the plan specifies no structured attrs. */
+const ATTRIBUTE_ALIGNMENT_NEUTRAL = 0.5;
+/** Sigmoid steepness mapping raw RRF-style fusion to (0,1). */
+const SEMANTIC_SIGMOID_STEEPNESS = 10;
+/** RRF-style fusion value at sigmoid inflection (tuned for typical scores). */
+const SEMANTIC_SIGMOID_MIDPOINT = 0.05;
+/** Popularity baseline when BM25 sparse rank is unavailable. */
+const POPULARITY_NO_SPARSE_BASELINE = 0.3;
+/** Blend: query-level uncertainty weight. */
+const UNCERTAINTY_BLEND_QUERY_WEIGHT = 0.6;
+/** Blend: candidate unmatched-ratio weight. */
+const UNCERTAINTY_BLEND_CANDIDATE_WEIGHT = 0.4;
+/** Caps contribution from unmatched constraint ratio to uncertainty penalty. */
+const UNCERTAINTY_UNMATCHED_RATIO_SCALE = 0.5;
+/** Default preference alignment without user-specific preference context. */
+const PREFERENCE_ALIGNMENT_NEUTRAL = 0.5;
+/** Vespa prestige absent: neutral [0,1] so missing data does not suppress. */
+const PRODUCER_PRESTIGE_NEUTRAL_WHEN_ABSENT = 0.5;
+/** Vintage recency half-life in years (paired with ln2 decay in computeRecency). */
+const RECENCY_HALF_LIFE_YEARS = 8;
+/** Region match weight in anchor preservation score. */
+const ANCHOR_PRESERVE_REGION_WEIGHT = 0.25;
+/** Primary grape match weight in anchor preservation score. */
+const ANCHOR_PRESERVE_GRAPE_WEIGHT = 0.2;
+/** Body / tannin style axis weights (paired). */
+const ANCHOR_PRESERVE_BODY_WEIGHT = 0.15;
+const ANCHOR_PRESERVE_TANNIN_WEIGHT = 0.15;
+/** Acidity axis weight in anchor preservation. */
+const ANCHOR_PRESERVE_ACIDITY_WEIGHT = 0.1;
+/** Sweetness axis weight in anchor preservation. */
+const ANCHOR_PRESERVE_SWEETNESS_WEIGHT = 0.05;
+/** Retrieval fusion floor for “has signal” in preservation fallback. */
+const ANCHOR_PRESERVE_RETRIEVAL_SIGNAL_FLOOR = 0.05;
+/** Fallback preservation when metadata is missing but retrieval is strong. */
+const ANCHOR_PRESERVE_FALLBACK_HIGH = 0.6;
+/** Fallback preservation when metadata and retrieval are weak. */
+const ANCHOR_PRESERVE_FALLBACK_LOW = 0.4;
+/** Small boost when retrieval fusion exceeds the signal floor. */
+const ANCHOR_PRESERVE_RETRIEVAL_BOOST = 0.05;
+/** Max structured attribute delta for 0–1 similarity (4-point style scale). */
+const ATTRIBUTE_SIMILARITY_MAX_DELTA = 4;
+
 /**
  * Computes individual signal scores for each candidate in the ranking pipeline.
  *
@@ -64,12 +112,12 @@ export class SignalComputer {
       queryPlan.constraints.soft.length;
     if (totalConstraints > 0) {
       const matchRatio = candidate.matchedConstraints.length / totalConstraints;
-      score += matchRatio * 0.1;
+      score += matchRatio * CONSTRAINT_MATCH_RATIO_BONUS_SCALE;
     }
 
     // Penalize if there are anchors but no anchor rank (suggests non-anchor match)
     if (queryPlan.anchors.length > 0 && candidate.anchorRank === undefined) {
-      score -= 0.1;
+      score -= MISSING_ANCHOR_RANK_PENALTY;
     }
 
     return clamp01(score);
@@ -169,7 +217,7 @@ export class SignalComputer {
 
     // Also consider inferred constraints at reduced weight
     for (const constraint of constraints.inferred) {
-      const weight = constraint.confidence * 0.5; // Inferred = half weight
+      const weight = constraint.confidence * INFERRED_CONSTRAINT_WEIGHT_FACTOR;
       totalWeight += weight;
       if (matchedSet.has(constraint.attribute)) {
         weightedSum += weight;
@@ -193,8 +241,8 @@ export class SignalComputer {
 
     // Sigmoid normalization: 1 / (1 + exp(-k * (x - midpoint)))
     // Tuned so that typical RRF scores map to [0.2, 0.8]
-    const k = 10;
-    const midpoint = 0.05; // Typical RRF midpoint
+    const k = SEMANTIC_SIGMOID_STEEPNESS;
+    const midpoint = SEMANTIC_SIGMOID_MIDPOINT;
     const normalized = 1 / (1 + Math.exp(-k * (raw - midpoint)));
 
     return clamp01(normalized);
@@ -230,7 +278,7 @@ export class SignalComputer {
 
     if (expectedAttributes.size === 0) {
       // No structured expectations → neutral score
-      return 0.5;
+      return ATTRIBUTE_ALIGNMENT_NEUTRAL;
     }
 
     const matchedSet = new Set(candidate.matchedConstraints);
@@ -259,7 +307,7 @@ export class SignalComputer {
     // Sparse rank serves as a proxy: lower rank = more popular/relevant
     const sparseRank = candidate.sparseRank;
     if (sparseRank === undefined) {
-      return 0.3; // No BM25 data → neutral baseline
+      return POPULARITY_NO_SPARSE_BASELINE;
     }
 
     // log-decay: 1 / (1 + log(rank))
@@ -310,11 +358,14 @@ export class SignalComputer {
     if (totalConstraints > 0) {
       const unmatchedRatio =
         1 - candidate.matchedConstraints.length / totalConstraints;
-      candidateUncertainty = unmatchedRatio * 0.5;
+      candidateUncertainty = unmatchedRatio * UNCERTAINTY_UNMATCHED_RATIO_SCALE;
     }
 
     // Combine query-level and candidate-level uncertainty
-    return clamp01(queryUncertainty * 0.6 + candidateUncertainty * 0.4);
+    return clamp01(
+      queryUncertainty * UNCERTAINTY_BLEND_QUERY_WEIGHT
+        + candidateUncertainty * UNCERTAINTY_BLEND_CANDIDATE_WEIGHT,
+    );
   }
 
   /**
@@ -332,7 +383,7 @@ export class SignalComputer {
       return clamp01(candidate.producerPrestige);
     }
     // Neutral when prestige data is absent — don't penalise missing data.
-    return 0.5;
+    return PRODUCER_PRESTIGE_NEUTRAL_WHEN_ABSENT;
   }
 
   /**
@@ -354,8 +405,7 @@ export class SignalComputer {
     const vintage = candidate.vintageYear;
     if (vintage === undefined) return undefined;
     const ageDelta = Math.max(0, referenceYear - vintage);
-    const HALF_LIFE_YEARS = 8;
-    const decay = Math.LN2 / HALF_LIFE_YEARS;
+    const decay = Math.LN2 / RECENCY_HALF_LIFE_YEARS;
     return clamp01(Math.exp(-decay * ageDelta));
   }
 
@@ -432,7 +482,7 @@ export class SignalComputer {
       hardConstraintPass: this.evaluateHardConstraints(candidate, constraints),
       softConstraint: this.computeSoftConstraint(candidate, constraints),
       attributeAlignment: this.computeAttributeAlignment(candidate, queryPlan),
-      preferenceAlignment: 0.5, // Neutral default — requires user context enrichment
+      preferenceAlignment: PREFERENCE_ALIGNMENT_NEUTRAL,
       popularity: this.computePopularity(candidate),
       availability: this.computeAvailability(candidate),
       uncertaintyPenalty: this.computeUncertaintyPenalty(candidate, queryPlan),
@@ -567,37 +617,76 @@ export class SignalComputer {
     let preservedWeight = 0;
 
     if (anchor.region !== undefined && candidate.region !== undefined) {
-      totalWeight += 0.25;
+      totalWeight += ANCHOR_PRESERVE_REGION_WEIGHT;
       if (anchor.region === candidate.region) {
-        preservedWeight += 0.25;
+        preservedWeight += ANCHOR_PRESERVE_REGION_WEIGHT;
       }
     }
 
     if (anchor.grapePrimary !== undefined && candidate.grapePrimary !== undefined) {
-      totalWeight += 0.20;
+      totalWeight += ANCHOR_PRESERVE_GRAPE_WEIGHT;
       if (anchor.grapePrimary === candidate.grapePrimary) {
-        preservedWeight += 0.20;
+        preservedWeight += ANCHOR_PRESERVE_GRAPE_WEIGHT;
       }
     }
 
-    preservedWeight += attributeSimilarity(anchor.body, candidate.body, 0.15);
-    totalWeight += comparableWeight(anchor.body, candidate.body, 0.15);
+    preservedWeight += attributeSimilarity(
+      anchor.body,
+      candidate.body,
+      ANCHOR_PRESERVE_BODY_WEIGHT,
+    );
+    totalWeight += comparableWeight(
+      anchor.body,
+      candidate.body,
+      ANCHOR_PRESERVE_BODY_WEIGHT,
+    );
 
-    preservedWeight += attributeSimilarity(anchor.tannin, candidate.tannin, 0.15);
-    totalWeight += comparableWeight(anchor.tannin, candidate.tannin, 0.15);
+    preservedWeight += attributeSimilarity(
+      anchor.tannin,
+      candidate.tannin,
+      ANCHOR_PRESERVE_TANNIN_WEIGHT,
+    );
+    totalWeight += comparableWeight(
+      anchor.tannin,
+      candidate.tannin,
+      ANCHOR_PRESERVE_TANNIN_WEIGHT,
+    );
 
-    preservedWeight += attributeSimilarity(anchor.acidity, candidate.acidity, 0.10);
-    totalWeight += comparableWeight(anchor.acidity, candidate.acidity, 0.10);
+    preservedWeight += attributeSimilarity(
+      anchor.acidity,
+      candidate.acidity,
+      ANCHOR_PRESERVE_ACIDITY_WEIGHT,
+    );
+    totalWeight += comparableWeight(
+      anchor.acidity,
+      candidate.acidity,
+      ANCHOR_PRESERVE_ACIDITY_WEIGHT,
+    );
 
-    preservedWeight += attributeSimilarity(anchor.sweetness, candidate.sweetness, 0.05);
-    totalWeight += comparableWeight(anchor.sweetness, candidate.sweetness, 0.05);
+    preservedWeight += attributeSimilarity(
+      anchor.sweetness,
+      candidate.sweetness,
+      ANCHOR_PRESERVE_SWEETNESS_WEIGHT,
+    );
+    totalWeight += comparableWeight(
+      anchor.sweetness,
+      candidate.sweetness,
+      ANCHOR_PRESERVE_SWEETNESS_WEIGHT,
+    );
 
     if (totalWeight === 0) {
-      return clamp01(candidate.retrievalFusionScore > 0.05 ? 0.6 : 0.4);
+      return clamp01(
+        candidate.retrievalFusionScore > ANCHOR_PRESERVE_RETRIEVAL_SIGNAL_FLOOR
+          ? ANCHOR_PRESERVE_FALLBACK_HIGH
+          : ANCHOR_PRESERVE_FALLBACK_LOW,
+      );
     }
 
     const metadataScore = preservedWeight / totalWeight;
-    const retrievalBoost = candidate.retrievalFusionScore > 0.05 ? 0.05 : 0;
+    const retrievalBoost =
+      candidate.retrievalFusionScore > ANCHOR_PRESERVE_RETRIEVAL_SIGNAL_FLOOR
+        ? ANCHOR_PRESERVE_RETRIEVAL_BOOST
+        : 0;
     return clamp01(metadataScore + retrievalBoost);
   }
 }
@@ -627,7 +716,9 @@ function attributeSimilarity(
     return 0;
   }
 
-  const maxDelta = 4;
-  const normalized = 1 - Math.min(Math.abs(left - right), maxDelta) / maxDelta;
+  const normalized =
+    1
+    - Math.min(Math.abs(left - right), ATTRIBUTE_SIMILARITY_MAX_DELTA)
+      / ATTRIBUTE_SIMILARITY_MAX_DELTA;
   return normalized * weight;
 }

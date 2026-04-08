@@ -11,6 +11,9 @@
  * Maps the first letter verbatim, then encodes subsequent consonants as
  * digits (1-6). Ignores vowels and H/W/Y. Pads or truncates to 4 characters.
  */
+/** Classic Soundex output width (letter + three digits). */
+const SOUNDEX_ENCODED_LENGTH = 4;
+
 export function soundexEn(word: string): string {
   const upper = word.toUpperCase().replace(/[^A-Z]/g, '');
   if (upper.length === 0) return '0000';
@@ -27,7 +30,7 @@ export function soundexEn(word: string): string {
   let result = upper[0] ?? '';
   let lastCode = CODES[result] ?? '0';
 
-  for (let i = 1; i < upper.length && result.length < 4; i++) {
+  for (let i = 1; i < upper.length && result.length < SOUNDEX_ENCODED_LENGTH; i++) {
     const ch = upper[i];
     if (ch === undefined) continue;
     const code = CODES[ch];
@@ -39,7 +42,7 @@ export function soundexEn(word: string): string {
     }
   }
 
-  return result.padEnd(4, '0');
+  return result.padEnd(SOUNDEX_ENCODED_LENGTH, '0');
 }
 
 /**

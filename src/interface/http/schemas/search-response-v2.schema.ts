@@ -26,6 +26,12 @@
  */
 
 import { z } from 'zod';
+import {
+  MAX_CLARIFICATION_CANDIDATES,
+  MAX_SEARCH_EVIDENCE_ITEMS_PER_RESULT,
+  MAX_SEARCH_METADATA_OBJECT_KEYS,
+  MAX_SEARCH_RESULTS_PER_RESPONSE,
+} from '../constants.js';
 import { CANONICAL_AUTHORITY_TRACE_REF_PATTERN } from './search-response.schema.js';
 import {
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -111,7 +117,7 @@ export const ComparisonEntityV2HumanSchema = z.object({
 const SearchResponseV2HumanSearchSchemaBase = z.object({
   queryId: z.string().min(1),
   queryType: z.literal('search'),
-  results: z.array(ResultItemV2HumanSchema).max(200),
+  results: z.array(ResultItemV2HumanSchema).max(MAX_SEARCH_RESULTS_PER_RESPONSE),
   totalCandidates: z.number().int().nonnegative(),
   authorityTraceRef: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtimeCorrelationRef: z.string().min(1).optional(),
@@ -189,7 +195,7 @@ export const ResultItemV2MachineSchema = z.object({
   rank: z.number().int().positive(),
   finalScore: z.number().finite(),
   componentScores: ComponentScoresV2Schema,
-  evidenceItems: z.array(EvidenceItemV2Schema).max(100),
+  evidenceItems: z.array(EvidenceItemV2Schema).max(MAX_SEARCH_EVIDENCE_ITEMS_PER_RESULT),
   retrievalProvenance: z.string().min(1).optional(),
   version: z.literal('2'),
   responseType: z.literal('machine'),
@@ -206,7 +212,7 @@ export const ResultItemV2MachineSchema = z.object({
  */
 export const SearchResponseV2MachineSchema = z.object({
   queryId: z.string().min(1),
-  results: z.array(ResultItemV2MachineSchema).max(200),
+  results: z.array(ResultItemV2MachineSchema).max(MAX_SEARCH_RESULTS_PER_RESPONSE),
   version: z.literal('2'),
   responseType: z.literal('machine'),
 }).strict();
@@ -230,11 +236,11 @@ export const InterpretResponseV2Schema = z.object({
   /** Decomposition strategy when query was split into sub-queries. */
   decompositionStrategy: z.string().min(1).optional(),
   /** Retrieval channel names that were activated for this query. */
-  activeChannels: z.array(z.string().min(1)).max(20),
+  activeChannels: z.array(z.string().min(1)).max(MAX_CLARIFICATION_CANDIDATES),
   /** Constraint labels that were applied during query planning. */
-  appliedConstraints: z.array(z.string().min(1)).max(50),
+  appliedConstraints: z.array(z.string().min(1)).max(MAX_SEARCH_METADATA_OBJECT_KEYS),
   /** Ranking signal names that influenced scoring for this query. */
-  rankingSignals: z.array(z.string().min(1)).max(50),
+  rankingSignals: z.array(z.string().min(1)).max(MAX_SEARCH_METADATA_OBJECT_KEYS),
   /** Planner confidence in the detected intent, in [0, 1]. */
   confidence: z.number().min(0).max(1),
   version: z.literal('2'),

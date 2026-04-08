@@ -2,6 +2,7 @@ import type { SearchResponseV1 } from '../../../domain/response/model/search-res
 import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
 import type { QueryPlanV1 } from '../../../domain/query/model/query-plan.js';
 import type {
+  BatchSearchExecutionContext,
   BatchSearchOptions,
   BatchSearchRequestItem,
   BatchSearchResponse,
@@ -11,6 +12,7 @@ import type { InterpretRequest } from '../interpret-request.dto.js';
 import type { InterpretResultWithV2 } from '../interpret.usecase.js';
 import type { ResolveRequest } from '../resolve-request.dto.js';
 import type { ResolveResponse } from '../resolve-response.dto.js';
+import type { RequestExecutionContext } from '../../../domain/shared/request-execution-context.js';
 import type { HybridSearchRequest } from '../hybrid-request.dto.js';
 import type { SearchQueryBudget, SearchRequestContext, SearchSessionContext } from '../search-request.dto.js';
 
@@ -26,9 +28,7 @@ export interface DecomposedSearchParentContext {
   readonly explain?: boolean | undefined;
 }
 
-export interface DecomposedSearchExecutionOptions {
-  readonly abortSignal?: AbortSignal | undefined;
-}
+export type DecomposedSearchExecutionOptions = RequestExecutionContext;
 
 export interface DecomposedSearchUseCasePort {
   execute(
@@ -47,20 +47,17 @@ export interface BatchSearchUseCasePort {
     requests: readonly BatchSearchRequestItem[],
     options?: BatchSearchOptions,
     batchId?: string,
+    executionContext?: BatchSearchExecutionContext,
   ): Promise<BatchSearchResponse>;
 }
 
-export interface ReplayExecutionOptions {
-  readonly abortSignal?: AbortSignal | undefined;
-}
+export type ReplayExecutionOptions = RequestExecutionContext;
 
 export interface ReplayUseCasePort {
   execute(request: ReplayRequest, requestId: string, options?: ReplayExecutionOptions): Promise<SearchResponseV1>;
 }
 
-export interface InterpretExecutionOptions {
-  readonly abortSignal?: AbortSignal | undefined;
-}
+export type InterpretExecutionOptions = RequestExecutionContext;
 
 export interface InterpretUseCasePort {
   execute(
@@ -73,17 +70,18 @@ export interface InterpretUseCasePort {
   ): Promise<QueryPlanV1 | InterpretResultWithV2>;
 }
 
-export interface ResolveExecutionOptions {
-  readonly abortSignal?: AbortSignal | undefined;
-}
+export type ResolveExecutionOptions = RequestExecutionContext;
 
 export interface ResolveUseCasePort {
   execute(request: ResolveRequest, options?: ResolveExecutionOptions): Promise<ResolveResponse>;
 }
 
+export type HybridExecutionOptions = RequestExecutionContext;
+
 export interface HybridUseCasePort {
   execute(
     request: HybridSearchRequest,
     requestId: string,
+    options?: HybridExecutionOptions,
   ): Promise<SearchResponseV1 | ComparisonSearchResponse>;
 }

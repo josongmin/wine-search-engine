@@ -102,10 +102,13 @@ export interface ExtendedLTRFeatures extends RankingFeatures {
   readonly producerPrestigeFeature: number;
 }
 
+/** Neutral producer prestige feature when component missing. */
+const LTR_PRODUCER_PRESTIGE_FEATURE_DEFAULT = 0.5;
+
 export function extractExtendedLTRFeatures(scores: LTRScoreComponents): ExtendedLTRFeatures {
   return {
     ...extractLTRFeatures(scores),
     criticScoreFeature: scores.criticScore ?? 0.0,
-    producerPrestigeFeature: scores.producerPrestige ?? 0.5,
+    producerPrestigeFeature: scores.producerPrestige ?? LTR_PRODUCER_PRESTIGE_FEATURE_DEFAULT,
   };
 }

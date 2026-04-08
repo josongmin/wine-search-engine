@@ -1,6 +1,15 @@
 import type { InjectionResult } from '../model/injection-result.js';
 import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 
+/** C0 controls stripped through U+0008 (preserve tab U+0009). */
+const UNICODE_C0_CONTROL_STRIP_END = 0x08;
+const UNICODE_VERTICAL_TAB = 0x0b;
+const UNICODE_FORM_FEED = 0x0c;
+/** C0 controls U+000E–U+001F stripped. */
+const UNICODE_C0_HIGH_START = 0x0e;
+const UNICODE_C0_HIGH_END = 0x1f;
+const UNICODE_DELETE = 0x7f;
+
 /**
  * Static pattern-based prompt injection detection for wine search queries.
  *
@@ -24,31 +33,40 @@ export class QuerySanitizer {
   private static readonly INJECTION_PATTERNS = {
     // System prompt / instruction hijacking
     system_prompt: [
-      // Unicode-aware boundaries: (?<!\p{L}\p{N}) / (?!\p{L}\p{N}) replace \b
-      // so Korean and accented-Latin chars don't silently escape the pattern.
-      /(?<!\p{L}\p{N})ignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})ignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/iu,
+      // Unicode-aware boundaries: two separate lookbehinds (?<!\p{L})(?<!\p{N}) are
+      // required because a single combined (?<!\p{L}\p{N}) only blocks when BOTH
+      // a letter AND digit precede — "시스템ignore" would slip through.
+      // Separate lookbehinds block when EITHER a letter OR digit precedes.
+      /(?<!\p{L})(?<!\p{N})ignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})ignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/iu,
       /(?:system|assistant|admin)\s+mode/i,
-      /(?<!\p{L}\p{N})(?:system|admin)\s+override(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:system|admin)\s+override(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
     ],
 
     // Jailbreak / adversarial prompts
     jailbreak: [
-      /(?<!\p{L}\p{N})(?:dev|debug|hack|god|hero|devil)\s+mode(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})do\s+not\s+(?:filter|block|refuse|deny|reject)(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})generate\s+harmful(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})unrestricted\s+(?:mode|access|content)(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:dev|debug|hack|god|hero|devil)\s+mode(?!\p{L})(?!\p{N})/iu,
+      // "do not filter/block/refuse" in an AI-control context is a jailbreak signal.
+      // False-positive guard: "do not filter results for allergens" is a legitimate
+      // user preference. We block when:
+      //   (a) any of block/refuse/deny/reject appear (more unambiguous than "filter"), OR
+      //   (b) "filter" is followed by an AI-directive object (my/any/harmful/user/queries)
+      // "do not filter results/wines/for ..." is excluded.
+      /(?<!\p{L})(?<!\p{N})do\s+not\s+(?:block|refuse|deny|reject)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})do\s+not\s+filter\s+(?:my|this|these|any|all|your|user|queries?|requests?|messages?|inputs?|harmful|unsafe|adult)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})generate\s+harmful(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})unrestricted\s+(?:mode|access|content)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L})(?!\p{N})/iu,
     ],
 
     // SQL injection
     sql_injection: [
       /;\s*(?:drop|delete|update|insert|select|create)/i,
-      /(?<!\p{L}\p{N})union\s+select(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})or\s+1\s*=\s*1(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})exec(?:ute)?\s*\(/iu,
+      /(?<!\p{L})(?<!\p{N})union\s+select(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})or\s+1\s*=\s*1(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})exec(?:ute)?\s*\(/iu,
       /--\s*$/,                          // SQL comment at end
       /\/\*[\s\S]*?\*\//,                // Block comment (cross-line)
       // Bare DML/DDL statements — `select wines from Bordeaux` is natural
@@ -56,13 +74,13 @@ export class QuerySanitizer {
       // DML/DDL keywords are not. Match SELECT...FROM with column-style
       // payload (`*`, identifiers with dots/commas, count(...)) within a
       // 60-char window and a hard FROM clause to keep false positives low.
-      /(?<!\p{L}\p{N})select\s+(?:\*|[\w.,\s()]{1,60}?)\s+from(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))(?!\p{L}\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})select\s+(?:\*|[\w.,\s()]{1,60}?)\s+from(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))(?!\p{L})(?!\p{N})/iu,
       // NoSQL operator injection (MongoDB-style). Pattern matches both bare
       // (`$where:`) and JSON-quoted (`"$where":`) forms — wine queries should
       // never contain MongoDB operators.
-      /\$where(?!\p{L}\p{N})/iu,
-      /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)(?!\p{L}\p{N})/iu,
+      /\$where(?!\p{L})(?!\p{N})/iu,
+      /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)(?!\p{L})(?!\p{N})/iu,
     ],
 
     // Script injection / XSS
@@ -86,8 +104,15 @@ export class QuerySanitizer {
     // were never evaluated (dead code) — only backticks/$(…)  and "; && together"
     // were checked via inline code in Layer 1g.
     command_injection: [
-      /(?<!\p{L}\p{N})(?:bash|\/bin\/sh|cmd\.exe|powershell|zsh)(?!\p{L}\p{N})/iu,
-      /(?<!\p{L}\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
+      // Shell paths are high-confidence injection signals. "bash your palate" would
+      // be a false positive for plain "bash" — require a shell-invocation context:
+      // a preceding space/start AND either ";" or file-path slashes following, OR
+      // the full path form (/bin/sh). Plain "bash" as an English adjective is excluded.
+      /(?<!\p{L})(?<!\p{N})\/bin\/(?:sh|bash|zsh)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:cmd\.exe|powershell)(?!\p{L})(?!\p{N})/iu,
+      // "bash -c", "bash --", "bash ;" are shell invocations; "bash your palate" is not.
+      /(?<!\p{L})(?<!\p{N})bash\s+[-;]/iu,
+      /(?<!\p{L})(?<!\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
       /`[^`]*`/,                        // Backticks
       /\$\([^)]*\)/,                    // Command substitution
       /(?=.*&&)(?=.*;)/,                // Both && and ; present (command chaining)
@@ -102,8 +127,8 @@ export class QuerySanitizer {
     pii_extraction: [
       /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/iu,
       /(?:개인\s*정보|personal\s*(?:info|data))\s*(?:보여|알려|줘|목록|조회|show|list|get|dump)/iu,
-      /(?<!\p{L}\p{N})(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)(?!\p{L}\p{N})/iu,
-      /(?:api\s*key|secret\s*key|access\s*token)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)(?!\p{L})(?!\p{N})/iu,
+      /(?:api\s*key|secret\s*key|access\s*token)(?!\p{L})(?!\p{N})/iu,
     ],
 
     // Unicode / encoding tricks
@@ -222,12 +247,13 @@ export class QuerySanitizer {
   }
 
   /**
-   * Returns true if the query triggered any injection pattern from a category.
+   * Returns true if any pattern in the category matches the query, undefined otherwise.
+   * Never returns false — undefined means "no match found" (analogous to Array.find).
    */
   private matchPatterns(
     query: string,
     category: keyof typeof QuerySanitizer.INJECTION_PATTERNS,
-  ): boolean | undefined {
+  ): true | undefined {
     const patterns = QuerySanitizer.INJECTION_PATTERNS[category];
     for (const pattern of patterns) {
       if (pattern.test(query)) {
@@ -253,11 +279,11 @@ export class QuerySanitizer {
     for (let i = 0; i < input.length; i += 1) {
       const c = input.charCodeAt(i);
       if (
-        (c >= 0x00 && c <= 0x08) ||
-        c === 0x0b ||
-        c === 0x0c ||
-        (c >= 0x0e && c <= 0x1f) ||
-        c === 0x7f
+        (c >= 0x00 && c <= UNICODE_C0_CONTROL_STRIP_END) ||
+        c === UNICODE_VERTICAL_TAB ||
+        c === UNICODE_FORM_FEED ||
+        (c >= UNICODE_C0_HIGH_START && c <= UNICODE_C0_HIGH_END) ||
+        c === UNICODE_DELETE
       ) {
         continue;
       }

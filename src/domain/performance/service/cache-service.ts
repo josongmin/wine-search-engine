@@ -27,6 +27,13 @@ import {
 
 const log = bootstrapLogger.child({ component: 'CacheService' });
 
+/** Cap TTL for ambiguous decisions (clarification may change quickly). */
+const QUERY_RESPONSE_CACHE_TTL_AMBIGUOUS_CAP_SECONDS = 60;
+/** Cap TTL for failed decisions (transient errors). */
+const QUERY_RESPONSE_CACHE_TTL_FAILED_CAP_SECONDS = 30;
+/** Embedding vector cache TTL (seconds) — model-stable vectors. */
+const EMBEDDING_VECTOR_CACHE_TTL_SECONDS = 7200;
+
 function constraintValueString(value: unknown): string {
   if (value === null || value === undefined) {
     return '';
@@ -280,8 +287,8 @@ export class CacheService implements SearchResponseCachePort {
         decisionStatus === 'resolved'
           ? eligibility.ttlSeconds
           : decisionStatus === 'ambiguous'
-            ? Math.min(eligibility.ttlSeconds, 60)
-            : /* failed */ Math.min(eligibility.ttlSeconds, 30);
+            ? Math.min(eligibility.ttlSeconds, QUERY_RESPONSE_CACHE_TTL_AMBIGUOUS_CAP_SECONDS)
+            : /* failed */ Math.min(eligibility.ttlSeconds, QUERY_RESPONSE_CACHE_TTL_FAILED_CAP_SECONDS);
       // Redis SET ... EX 0 is rejected — never write a non-positive TTL.
       // A min of 1s caps the worst case (write+immediate-expiry) without
       // crashing the writer path.
@@ -433,7 +440,7 @@ export class CacheService implements SearchResponseCachePort {
     if (!this.embeddingCache) return;
 
     const cacheKey = this.embeddingCacheKeyBuilder.build(text, modelId, 'Search: ');
-    await this.embeddingCache.set(cacheKey, embedding, 7200);
+    await this.embeddingCache.set(cacheKey, embedding, EMBEDDING_VECTOR_CACHE_TTL_SECONDS);
   }
 
   /**

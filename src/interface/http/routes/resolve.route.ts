@@ -8,6 +8,8 @@ import { registerContractRoute } from './register-contract-route.js';
 import { ResolveRouteContract } from './route-contracts.js';
 import { toResolveRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
+import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
  * POST /v1/entity/resolve — entity resolution only.
@@ -24,9 +26,11 @@ export function registerResolveRoute(
       const parsed = parseContractBody(request, ResolveRouteContract);
       const resolveRequest = toResolveRequest(parsed, getRequestId(request));
 
-      const result = await deps.resolveUseCase.execute(resolveRequest);
+      const result = await deps.resolveUseCase.execute(resolveRequest, {
+        abortSignal: abortSignalFromFastifyRequest(request),
+      });
 
-      sendRouteContractResponse(request, reply, ResolveRouteContract, 200, result);
+      sendRouteContractResponse(request, reply, ResolveRouteContract, HTTP_STATUS_OK, result);
     },
   });
 }

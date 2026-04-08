@@ -35,8 +35,13 @@ const STATS_KEY_MISSES = 'cache:stats:phrase:misses';
 
 /** Minimum TTL — Redis rejects EX <= 0; we silently clamp to keep callers safe. */
 const PHRASE_CACHE_MIN_TTL_SECONDS = 1;
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+const HOURS_PER_DAY = 24;
+const PHRASE_CACHE_MAX_TTL_DAYS = 7;
 /** Maximum TTL — 7 days. Anything longer is almost certainly a bug. */
-const PHRASE_CACHE_MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
+const PHRASE_CACHE_MAX_TTL_SECONDS =
+  PHRASE_CACHE_MAX_TTL_DAYS * HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE;
 
 export class RedisPhraseCache implements PhraseCachePort {
   constructor(private readonly redis: RedisClient) {}

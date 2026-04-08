@@ -1,4 +1,5 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
+import { throwIfAborted } from '../../shared/cooperative-abort.js';
 import type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
 import type { NLMapping } from '../model/nl-mapping.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
@@ -12,6 +13,23 @@ const DEFAULT_MAPPING_VERSION = 'v1.0';
  * Default source identifier for built-in mappings.
  */
 const DEFAULT_SOURCE = 'builtin_curated';
+
+/** Lower bound for moderate-sweet / elegant-light body curated ranges. */
+const DEFAULT_MAPPING_ATTR_MODERATE_MIN = 0.3;
+/** Upper bound shared by moderate-sweet and balanced-high body band. */
+const DEFAULT_MAPPING_ATTR_MODERATE_MAX = 0.6;
+/** Lower bound for "balanced body" phrasing (slightly fuller than elegant). */
+const DEFAULT_MAPPING_ATTR_BALANCED_MIN = 0.4;
+/** Curated [min,max] attribute range: moderately sweet / elegant light body. */
+const DEFAULT_MAPPING_RANGE_MODERATE: readonly [number, number] = [
+  DEFAULT_MAPPING_ATTR_MODERATE_MIN,
+  DEFAULT_MAPPING_ATTR_MODERATE_MAX,
+];
+/** Curated [min,max] for "balanced" body phrasing. */
+const DEFAULT_MAPPING_RANGE_BALANCED_BODY: readonly [number, number] = [
+  DEFAULT_MAPPING_ATTR_BALANCED_MIN,
+  DEFAULT_MAPPING_ATTR_MODERATE_MAX,
+];
 
 /**
  * Hardcoded default NL-to-attribute mappings for common Korean wine phrases.
@@ -121,7 +139,7 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
       phrase: '적당히 달달한',
       mappedAttribute: 'sweetness',
       operator: 'range',
-      value: [0.3, 0.6] as readonly [number, number],
+      value: DEFAULT_MAPPING_RANGE_MODERATE,
       mappingConfidence: 0.85,
       mappingVersion: DEFAULT_MAPPING_VERSION,
       source: DEFAULT_SOURCE,
@@ -285,8 +303,8 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
 
   // Texture / body
   ['강렬한', { phrase: '강렬한', mappedAttribute: 'body', operator: '>=', value: 0.8, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
-  ['우아한', { phrase: '우아한', mappedAttribute: 'body', operator: 'range', value: [0.3, 0.6] as readonly [number, number], mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
-  ['균형 잡힌', { phrase: '균형 잡힌', mappedAttribute: 'body', operator: 'range', value: [0.4, 0.6] as readonly [number, number], mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['우아한', { phrase: '우아한', mappedAttribute: 'body', operator: 'range', value: DEFAULT_MAPPING_RANGE_MODERATE, mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['균형 잡힌', { phrase: '균형 잡힌', mappedAttribute: 'body', operator: 'range', value: DEFAULT_MAPPING_RANGE_BALANCED_BODY, mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
   // Occasion extended
   ['기념일', { phrase: '기념일', mappedAttribute: 'occasion', operator: 'in', value: 'anniversary', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
@@ -325,6 +343,11 @@ export interface MapConstraintsResult {
   readonly constraints: NormalizedConstraint[];
   /** Request-scoped extraction provenance (observability / QueryPlanV2.constraintExtraction shape). */
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
+}
+
+/** Optional controls for {@link NLMapper.mapConstraints} (cancellation, future flags). */
+export interface MapConstraintsOptions {
+  readonly abortSignal?: AbortSignal | undefined;
 }
 
 /**
@@ -366,14 +389,20 @@ export class NLMapper {
    * Phrases that do not match any mapping are silently skipped.
    *
    * @param phrases - Array of natural-language phrases.
+   * @param options - Optional cancellation — when {@link MapConstraintsOptions.abortSignal}
+   *   aborts, throws an `AbortError`-named {@link Error} (checked before each phrase).
    * @returns Constraints and a rule-table extraction trace (no LLM fields).
    */
   async mapConstraints(
     phrases: readonly string[],
+    options?: MapConstraintsOptions,
   ): Promise<MapConstraintsResult> {
+    throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
+
     const results: NormalizedConstraint[] = [];
 
     for (const phrase of phrases) {
+      throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
       const mapping = await this.mapPhrase(phrase);
       if (mapping !== null) {
         results.push(toNormalizedConstraint(mapping));

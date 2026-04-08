@@ -1,5 +1,22 @@
 import type { QueryClass } from '../../shared/types/index.js';
 
+/** Semantic-preference gap when confidence is high (tighter disambiguation). */
+const DYNAMIC_GAP_SEMANTIC_PREF_HIGH_CONFIDENCE = 0.01;
+/** Semantic-preference standard gap (fuzzy NL). */
+const DYNAMIC_GAP_SEMANTIC_PREF_STANDARD = 0.015;
+/** Confidence floor to use tighter semantic-preference gap. */
+const DYNAMIC_GAP_SEMANTIC_PREF_CONFIDENCE_FLOOR = 0.55;
+/** Short-entity direct lookup gap. */
+const DYNAMIC_GAP_SHORT_ENTITY = 0.03;
+/** Ambiguous short-form requires wider separation. */
+const DYNAMIC_GAP_AMBIGUOUS_SHORT_FORM = 0.08;
+/** Anchored similarity gap (moderate). */
+const DYNAMIC_GAP_ANCHORED_SIMILARITY = 0.03;
+/** Pure constraint gap. */
+const DYNAMIC_GAP_PURE_CONSTRAINT = 0.05;
+/** Comparison and unknown-query fallback gap (strict winner). */
+const DYNAMIC_GAP_WIDE = 0.1;
+
 /**
  * A single threshold entry within a threshold profile.
  *
@@ -43,41 +60,33 @@ export function computeDynamicGapThreshold(
 ): number {
   // Semantic preference: lowest gap required (1.5%), allows fuzzy matching
   if (queryClass === 'semantic_preference') {
-    // If confidence > 0.55, even lower gap (1%) acceptable
-    if (confidence > 0.55) {
-      return 0.01;
+    if (confidence > DYNAMIC_GAP_SEMANTIC_PREF_CONFIDENCE_FLOOR) {
+      return DYNAMIC_GAP_SEMANTIC_PREF_HIGH_CONFIDENCE;
     }
-    // Standard semantic pref: 1.5%
-    return 0.015;
+    return DYNAMIC_GAP_SEMANTIC_PREF_STANDARD;
   }
 
-  // Short entity: moderate gap (3%)
   if (queryClass === 'short_entity') {
-    return 0.03;
+    return DYNAMIC_GAP_SHORT_ENTITY;
   }
 
-  // Ambiguous short form: wider gap (8%)
   if (queryClass === 'ambiguous_short_form') {
-    return 0.08;
+    return DYNAMIC_GAP_AMBIGUOUS_SHORT_FORM;
   }
 
-  // Anchored similarity: moderate gap (3%)
   if (queryClass === 'anchored_similarity') {
-    return 0.03;
+    return DYNAMIC_GAP_ANCHORED_SIMILARITY;
   }
 
-  // Pure constraint: moderate-wide gap (5%)
   if (queryClass === 'pure_constraint') {
-    return 0.05;
+    return DYNAMIC_GAP_PURE_CONSTRAINT;
   }
 
-  // Comparison query: wide gap (10%)
   if (queryClass === 'comparison_query') {
-    return 0.10;
+    return DYNAMIC_GAP_WIDE;
   }
 
-  // Unknown: fallback to wide gap (10%)
-  return 0.10;
+  return DYNAMIC_GAP_WIDE;
 }
 
 /**

@@ -41,6 +41,12 @@ const SCHEMA = 'wine_entity';
 const DEFAULT_SPARSE_LIMIT = 100;
 const DEFAULT_DENSE_LIMIT = 100;
 const BULK_BATCH_SIZE = 50;
+/** Inflate ANN targetHits when post-filters prune neighbors (recall vs latency). */
+const DENSE_FILTER_TARGET_HITS_MULTIPLIER = 5;
+/** Hard cap on targetHits passed to Vespa HNSW (memory / latency guard). */
+const DENSE_TARGET_HITS_ABSOLUTE_CAP = 1000;
+/** Cap exploreAdditionalHits to limit HNSW graph exploration tail latency. */
+const DENSE_HNSW_EXPLORE_ADDITIONAL_CAP = 200;
 /**
  * Hard cap on entity-id count for bulk fetch helpers. Prevents a buggy or
  * malicious caller from issuing thousands of parallel Vespa batches that
@@ -268,12 +274,12 @@ export class VespaSearchIndex implements SearchIndexPort {
     // recall. Inflate targetHits relative to filter selectivity so the
     // candidate pool can survive filter pruning.
     const hasFilters = filterClause.length > 0;
-    const filterMultiplier = hasFilters ? 5 : 1;
-    const targetHits = Math.min(1000, requestedLimit * filterMultiplier);
+    const filterMultiplier = hasFilters ? DENSE_FILTER_TARGET_HITS_MULTIPLIER : 1;
+    const targetHits = Math.min(DENSE_TARGET_HITS_ABSOLUTE_CAP, requestedLimit * filterMultiplier);
     // exploreAdditionalHits raises ef_search beyond targetHits so the HNSW
     // graph explores more neighbours at query time, improving ANN recall at
     // a small latency cost. Cap at 200 to avoid tail spikes on large corpora.
-    const exploreAdditional = Math.min(targetHits, 200);
+    const exploreAdditional = Math.min(targetHits, DENSE_HNSW_EXPLORE_ADDITIONAL_CAP);
     const yql =
       `select * from ${SCHEMA} where ` +
       `({targetHits: ${targetHits}, hnsw.exploreAdditionalHits: ${exploreAdditional}} ` +

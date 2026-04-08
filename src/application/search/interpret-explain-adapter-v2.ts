@@ -102,11 +102,15 @@ function deriveAppliedConstraints(
  *
  * The slice carries `overallUncertainty` in [0, 1] where higher means more
  * uncertain. We map this to a confidence value: confidence = 1 − uncertainty,
- * falling back to 0.5 if the value is not finite.
+ * falling back to a neutral mid-point if the value is not finite.
  */
+const NEUTRAL_CONFIDENCE_WHEN_UNCERTAINTY_INVALID = 0.5;
+
 function deriveConfidence(slice: QueryObservabilitySlice): number {
   const raw = 1 - slice.overallUncertainty;
-  return Number.isFinite(raw) ? Math.max(0, Math.min(1, raw)) : 0.5;
+  return Number.isFinite(raw)
+    ? Math.max(0, Math.min(1, raw))
+    : NEUTRAL_CONFIDENCE_WHEN_UNCERTAINTY_INVALID;
 }
 
 /**

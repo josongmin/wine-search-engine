@@ -22,6 +22,16 @@ import type {
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
 
+/** Valid conformal alpha interval is (0, this upper bound]. */
+const CONFORMAL_ALPHA_MAX_EXCLUSIVE = 0.5;
+/** Blend resolver raw score with learned match probability. */
+const LEARNED_MATCH_RAW_SCORE_BLEND = 0.6;
+const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
+/** Cap confidence gap for short-form queries with only noisy lookup support. */
+const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
+/** Decimal places when serializing gap for traces. */
+const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
+
 function classifyLearnedMatcherFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   return message.includes('timed out')
@@ -114,7 +124,7 @@ export function computeConformalSetSize(
   alpha: number,
   k: number,
 ): number {
-  if (alpha <= 0 || alpha > 0.5) {
+  if (alpha <= 0 || alpha > CONFORMAL_ALPHA_MAX_EXCLUSIVE) {
     throw new RangeError(`computeConformalSetSize: alpha must be in (0, 0.5], got ${alpha}`);
   }
   if (k < 0) {
@@ -453,7 +463,10 @@ export class Resolver {
     const next = scored.map((entry) => {
       const prob = probMap.get(String(entry.candidate.entityId));
       if (prob === undefined) return entry;
-      return { candidate: entry.candidate, rawScore: 0.6 * entry.rawScore + 0.4 * prob };
+      return {
+        candidate: entry.candidate,
+        rawScore: LEARNED_MATCH_RAW_SCORE_BLEND * entry.rawScore + LEARNED_MATCH_PROBABILITY_BLEND * prob,
+      };
     });
     return { scored: next, learnedOutputs };
   }
@@ -684,10 +697,10 @@ export class Resolver {
     );
 
     if (isShortForm && hasOnlyNoisySupport && delta > 0) {
-      return Math.min(delta, 0.01);
+      return Math.min(delta, SHORT_FORM_NOISY_SUPPORT_GAP_CAP);
     }
 
-    return Number(delta.toFixed(4));
+    return Number(delta.toFixed(RESOLVER_GAP_TRACE_DECIMAL_PLACES));
   }
 
   private isLookupStrategy(strategy: string): strategy is LookupStrategy {

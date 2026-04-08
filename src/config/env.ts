@@ -1,19 +1,57 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
+/** Default Fastify listen port for local development. */
+const DEFAULT_SERVER_PORT = 3000;
+/** RFC-014 §13 default per-IP rate-limit window max before production tuning. */
+const DEFAULT_HTTP_RATE_LIMIT_MAX = 100;
+const KIBIBYTE = 1024;
+/** Fastify bodyLimit ceiling in MiB (generous for batch JSON; tunable via env). */
+const HTTP_BODY_LIMIT_MAX_MIB = 32;
+/** Fastify bodyLimit ceiling in bytes. */
+const HTTP_BODY_LIMIT_MAX_BYTES = HTTP_BODY_LIMIT_MAX_MIB * KIBIBYTE * KIBIBYTE;
+/** Default JSON body limit: 1 MiB. */
+const DEFAULT_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+/** Minimum debug secret length so X-Debug-Key cannot be a trivial guess. */
+const ENV_HTTP_DEBUG_SECRET_MIN_LEN = 16;
+/** PostgreSQL default port. */
+const DEFAULT_PG_PORT = 5432;
+/** Default pool size per node (raised for 10K QPS target; tune vs max_connections). */
+const DEFAULT_PG_POOL_MAX = 40;
+const DEFAULT_PG_POOL_IDLE_TIMEOUT_MS = 30_000;
+const DEFAULT_PG_POOL_CONNECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_EMBEDDING_HTTP_TIMEOUT_MS = 30_000;
+/** Cross-encoder blend: lower trusts external reranker less (domain default). */
+const DEFAULT_RERANK_BLEND_SCALE = 0.7;
+const DEFAULT_RERANKER_HTTP_TIMEOUT_MS = 30_000;
+const DEFAULT_LEARNED_MATCHER_HTTP_TIMEOUT_MS = 30_000;
+/** OpenAI-compatible client read timeout (chat/completions can be slow). */
+const DEFAULT_OPENAI_HTTP_TIMEOUT_MS = 120_000;
+const DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS = 5_000;
+const AGENT_MAX_STEPS_UPPER_BOUND = 10;
+const DEFAULT_AGENT_MAX_STEPS = 5;
+const DEFAULT_AGENT_TIMEOUT_MS = 30_000;
+const DEFAULT_AGENT_PER_STEP_TIMEOUT_MS = 10_000;
+/** Webhook HMAC secret minimum length (watchlist delivery signing). */
+const ENV_WEBHOOK_SECRET_MIN_LEN = 16;
+/** sysexits.h EX_CONFIG — invalid configuration at startup. */
+const SYSEXITS_EX_CONFIG = 78;
+/** Default Anthropic model when ANTHROPIC_INJECTION_MODEL is unset. */
+const DEFAULT_ANTHROPIC_INJECTION_MODEL = 'claude-haiku-4-5-20251001';
+
 /**
  * Schema for all environment variables required by the Wine Intelligence Engine.
  * Uses Zod for runtime validation and type inference.
  */
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().positive().default(DEFAULT_SERVER_PORT),
   LOG_LEVEL: z
     .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
     .default('info'),
 
   /** Per-IP request cap (RFC-014 §13). Set high for local offline eval; use 0 to disable. */
-  HTTP_RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(100),
+  HTTP_RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(DEFAULT_HTTP_RATE_LIMIT_MAX),
 
   /**
    * Trust `X-Forwarded-*` headers (client IP, proto) when behind a reverse proxy / load balancer.
@@ -25,12 +63,17 @@ const envSchema = z.object({
     .default('false'),
 
   /** Max JSON body size in bytes (Fastify `bodyLimit`). Default 1 MiB. */
-  HTTP_BODY_LIMIT_BYTES: z.coerce.number().int().positive().max(32 * 1024 * 1024).default(1_048_576),
+  HTTP_BODY_LIMIT_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(HTTP_BODY_LIMIT_MAX_BYTES)
+    .default(DEFAULT_HTTP_BODY_LIMIT_BYTES),
 
   /**
    * When set (≥16 chars), clients may send `X-Debug-Key: <same value>` for per-request log level `debug`.
    */
-  HTTP_DEBUG_SECRET: z.string().min(16).optional(),
+  HTTP_DEBUG_SECRET: z.string().min(ENV_HTTP_DEBUG_SECRET_MIN_LEN).optional(),
 
   /** Register `@fastify/helmet` security headers (recommended on in production). */
   HTTP_SECURITY_HEADERS: z
@@ -49,15 +92,23 @@ const envSchema = z.object({
 
   // PostgreSQL
   PG_HOST: z.string().min(1).default('localhost'),
-  PG_PORT: z.coerce.number().int().positive().default(5432),
+  PG_PORT: z.coerce.number().int().positive().default(DEFAULT_PG_PORT),
   PG_DATABASE: z.string().min(1).default('wine_engine'),
   PG_USER: z.string().min(1).default('wine'),
   PG_PASSWORD: z.string().default(''),
   // 10K QPS production target: 10 connections per node caps at ~2K QPS
   // before queueing. Default raised to 40 — tune against pg max_connections.
-  PG_POOL_MAX: z.coerce.number().int().positive().default(40),
-  PG_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
-  PG_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  PG_POOL_MAX: z.coerce.number().int().positive().default(DEFAULT_PG_POOL_MAX),
+  PG_POOL_IDLE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_PG_POOL_IDLE_TIMEOUT_MS),
+  PG_POOL_CONNECTION_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_PG_POOL_CONNECTION_TIMEOUT_MS),
 
   // Redis
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
@@ -76,14 +127,22 @@ const envSchema = z.object({
   /** Expected embedding vector dimension. When set, vectors with mismatched dimensions are rejected. */
   EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
   /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
-  EMBEDDING_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  EMBEDDING_HTTP_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_EMBEDDING_HTTP_TIMEOUT_MS),
 
   // Reranker Service (optional external HTTP API)
   RERANKER_SERVICE_URL: z.string().url().optional(),
   /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
-  RERANK_BLEND_SCALE: z.coerce.number().min(0).max(1).default(0.7),
+  RERANK_BLEND_SCALE: z.coerce.number().min(0).max(1).default(DEFAULT_RERANK_BLEND_SCALE),
   /** Per-request HTTP timeout for reranker API calls (AbortSignal). */
-  RERANKER_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  RERANKER_HTTP_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_RERANKER_HTTP_TIMEOUT_MS),
 
   // Cohere reranker (preferred managed reranking)
   COHERE_API_KEY: z.string().optional(),
@@ -93,7 +152,11 @@ const envSchema = z.object({
   // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
   LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
   /** Per-request HTTP timeout for learned matcher API calls (AbortSignal). */
-  LEARNED_MATCHER_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  LEARNED_MATCHER_HTTP_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_LEARNED_MATCHER_HTTP_TIMEOUT_MS),
 
   // OpenAI API (optional — hexagonal ChatLlmPort + optional OpenAiEmbeddingService)
   OPENAI_API_KEY: z.string().optional(),
@@ -107,14 +170,22 @@ const envSchema = z.object({
    * Set to a different model (e.g. text-embedding-3-large) for higher quality.
    */
   OPENAI_EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
-  OPENAI_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  OPENAI_HTTP_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_OPENAI_HTTP_TIMEOUT_MS),
   /** Enable LLM-backed query constraint extraction (requires OPENAI_API_KEY). */
   LLM_QUERY_INTERPRETER: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default('false'),
   /** Timeout for LLM query interpreter calls (ms). */
-  LLM_QUERY_INTERPRETER_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  LLM_QUERY_INTERPRETER_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS),
 
   // Agent
   /** Enable agentic multi-step search (requires OPENAI_API_KEY). */
@@ -122,9 +193,18 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .default('false'),
-  AGENT_MAX_STEPS: z.coerce.number().int().min(1).max(10).default(5),
-  AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
-  AGENT_PER_STEP_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  AGENT_MAX_STEPS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(AGENT_MAX_STEPS_UPPER_BOUND)
+    .default(DEFAULT_AGENT_MAX_STEPS),
+  AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_MS),
+  AGENT_PER_STEP_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_AGENT_PER_STEP_TIMEOUT_MS),
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -148,7 +228,7 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .transform((v) => v === 'true')
     .optional(),
-  WEBHOOK_SECRET: z.string().min(16).optional(),
+  WEBHOOK_SECRET: z.string().min(ENV_WEBHOOK_SECRET_MIN_LEN).optional(),
 
   // Kill Switches
   KILL_SWITCH_ALIAS_OVERLAY: z
@@ -313,7 +393,7 @@ function buildConfig(parsed: EnvVars) {
     anthropic: {
       apiKey: parsed.ANTHROPIC_API_KEY,
       injectionModel:
-        parsed.ANTHROPIC_INJECTION_MODEL ?? 'claude-haiku-4-5-20251001',
+        parsed.ANTHROPIC_INJECTION_MODEL ?? DEFAULT_ANTHROPIC_INJECTION_MODEL,
     },
 
     /** Query-entry security behavior (Layer 1 + Layer 2 prompt-injection defense). */
@@ -401,6 +481,6 @@ export const config: Config = (() => {
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(`\n[wine-search-engine] FATAL: configuration invalid\n  ${message}\n\n`);
     // Exit code 78 = EX_CONFIG (sysexits.h) — the configuration is wrong.
-    process.exit(78);
+    process.exit(SYSEXITS_EX_CONFIG);
   }
 })();

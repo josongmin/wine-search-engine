@@ -1,5 +1,16 @@
 import { z } from 'zod';
 import {
+  MAX_BATCH_SEARCH_REQUEST_ITEMS,
+  MAX_QUERY_BUDGET_CANDIDATES,
+  MAX_QUERY_BUDGET_DENSE_CALLS,
+  MAX_QUERY_BUDGET_LATENCY_MS,
+  MAX_QUERY_BUDGET_RERANK_LIMIT,
+  MAX_SESSION_ENTITY_ID_CHARS,
+  MAX_SESSION_PREVIOUS_ENTITIES,
+  MAX_WATCHLIST_ENTITY_ID_CHARS,
+  MIN_BATCH_SEARCH_ITEM_TIMEOUT_MS,
+} from '../constants.js';
+import {
   QueryStringSchema,
   SearchModeSchema,
   SearchContextSchema,
@@ -10,7 +21,7 @@ import { SearchResponseSchema } from './search-response.schema.js';
 
 const BatchSessionContextSnakeSchema = z.object({
   session_id: z.string().min(1),
-  previous_entities: z.array(z.string().min(1).max(256)).max(50),
+  previous_entities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES),
 }).strict().transform((value) => ({
   sessionContext: {
     sessionId: value.session_id,
@@ -19,10 +30,10 @@ const BatchSessionContextSnakeSchema = z.object({
 }));
 
 const BatchQueryBudgetSnakeSchema = z.object({
-  max_latency_ms: z.number().int().positive().max(30_000),
-  max_candidates: z.number().int().positive().max(1_000),
-  rerank_limit: z.number().int().positive().max(500),
-  max_dense_calls: z.number().int().positive().max(100).optional(),
+  max_latency_ms: z.number().int().positive().max(MAX_QUERY_BUDGET_LATENCY_MS),
+  max_candidates: z.number().int().positive().max(MAX_QUERY_BUDGET_CANDIDATES),
+  rerank_limit: z.number().int().positive().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
+  max_dense_calls: z.number().int().positive().max(MAX_QUERY_BUDGET_DENSE_CALLS).optional(),
 }).strict().transform((value) => ({
   queryBudget: {
     maxLatencyMs: value.max_latency_ms,
@@ -43,7 +54,7 @@ const BatchQueryBudgetSnakeSchema = z.object({
 export const BatchSearchRequestItemSchema = z.object({
   id: z.string()
     .min(1, 'id must be a non-empty string')
-    .max(256, 'id must not exceed 256 characters'),
+    .max(MAX_WATCHLIST_ENTITY_ID_CHARS, `id must not exceed ${String(MAX_WATCHLIST_ENTITY_ID_CHARS)} characters`),
   query: QueryStringSchema,
   limit: z.number().int().positive().optional(),
   retrieval_mode: SearchModeSchema.optional(),
@@ -103,8 +114,14 @@ export const BatchSearchOptionsSchema = z.object({
   fail_fast: z.boolean().optional(),
   timeout_ms: z.number()
     .int()
-    .min(1000, 'timeout_ms must be at least 1000 milliseconds')
-    .max(30000, 'timeout_ms must not exceed 30000 milliseconds')
+    .min(
+      MIN_BATCH_SEARCH_ITEM_TIMEOUT_MS,
+      `timeout_ms must be at least ${String(MIN_BATCH_SEARCH_ITEM_TIMEOUT_MS)} milliseconds`,
+    )
+    .max(
+      MAX_QUERY_BUDGET_LATENCY_MS,
+      `timeout_ms must not exceed ${String(MAX_QUERY_BUDGET_LATENCY_MS)} milliseconds`,
+    )
     .optional(),
 }).strict();
 
@@ -119,11 +136,17 @@ export const BatchSearchOptionsSchema = z.object({
 export const BatchSearchRequestSchema = z.object({
   requests: z.array(BatchSearchRequestItemSchema)
     .min(1, 'requests array must contain at least 1 item')
-    .max(20, 'requests array must not exceed 20 items'),
+    .max(
+      MAX_BATCH_SEARCH_REQUEST_ITEMS,
+      `requests array must not exceed ${String(MAX_BATCH_SEARCH_REQUEST_ITEMS)} items`,
+    ),
   options: BatchSearchOptionsSchema.optional(),
   batch_id: z.string()
     .min(1, 'batch_id must be a non-empty string')
-    .max(256, 'batch_id must not exceed 256 characters')
+    .max(
+      MAX_WATCHLIST_ENTITY_ID_CHARS,
+      `batch_id must not exceed ${String(MAX_WATCHLIST_ENTITY_ID_CHARS)} characters`,
+    )
     .optional(),
 }).strict().superRefine((value, ctx) => {
   const ids = value.requests.map((r) => r.id);
@@ -148,6 +171,7 @@ const BatchSearchErrorSchema = z.object({
     'POLICY_BLOCKED',
     'QUERY_PARSE_ERROR',
     'RETRIEVAL_TIMEOUT',
+    'REQUEST_ABORTED',
     'INTERNAL_ERROR',
   ]),
   message: z.string().min(1),
@@ -183,7 +207,7 @@ export const BatchSearchResponseSchema = z.object({
   not_executed: z.number().int().nonnegative(),
   batch_status: z.enum(['succeeded', 'partial_failure', 'failed']),
   has_failures: z.boolean(),
-  results: z.array(BatchSearchResultItemSchema).max(20),
+  results: z.array(BatchSearchResultItemSchema).max(MAX_BATCH_SEARCH_REQUEST_ITEMS),
   processing_time_ms: z.number().int().nonnegative(),
 }).strict().superRefine((value, ctx) => {
   if (value.succeeded + value.failed + value.not_executed !== value.total) {

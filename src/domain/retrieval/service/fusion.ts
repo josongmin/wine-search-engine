@@ -8,6 +8,9 @@ import {
   summaryToHybridCandidateFields,
 } from './hybrid-candidate-summary.js';
 
+/** Standard RRF smoothing constant (rank + k in denominator). */
+const RECIPROCAL_RANK_FUSION_DEFAULT_K = 60;
+
 /**
  * Fuses results from sparse, dense, and anchor retrieval passes using
  * Reciprocal Rank Fusion (RRF).
@@ -44,7 +47,7 @@ export class FusionService {
     if (k !== undefined && k < 1) {
       throw new Error(`FusionService.fuse: k must be ≥ 1, got ${k}`);
     }
-    const effectiveK = k ?? 60;
+    const effectiveK = k ?? RECIPROCAL_RANK_FUSION_DEFAULT_K;
 
     // Build rank maps for RRF
     const sparseRankMap = new Map<string, number>();

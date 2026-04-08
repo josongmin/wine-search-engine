@@ -21,6 +21,9 @@ import { isEntityId } from '../../domain/shared/types/index.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
+const VESPA_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;
+const VESPA_RERANKER_PARSE_ERROR_JSON_PREVIEW_CHARS = 200;
+
 // ---------------------------------------------------------------------------
 // API response shapes
 // ---------------------------------------------------------------------------
@@ -159,7 +162,7 @@ export class HttpCrossEncoderReranker implements RerankerPort {
       );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `Reranker service call failed [HTTP ${status}]: ${text.slice(0, 200)}`,
+        `Reranker service call failed [HTTP ${status}]: ${text.slice(0, VESPA_RERANKER_HTTP_ERROR_PREVIEW_CHARS)}`,
       );
     }
 
@@ -263,7 +266,7 @@ export class HttpCrossEncoderReranker implements RerankerPort {
     }
 
     throw new Error(
-      `Reranker service: unexpected response shape — ${JSON.stringify(data).slice(0, 200)}`,
+      `Reranker service: unexpected response shape — ${JSON.stringify(data).slice(0, VESPA_RERANKER_PARSE_ERROR_JSON_PREVIEW_CHARS)}`,
     );
   }
 }

@@ -1,5 +1,6 @@
 import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { isAbortError } from '../../../domain/shared/cooperative-abort.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked.js';
 import { SnapshotMismatchError } from '../../../application/search/replay.usecase.js';
@@ -10,18 +11,29 @@ import {
 import { sendPolicyBlockedResponse } from '../errors/policy-blocked.js';
 import { getRequestId } from '../request-id.js';
 import { parseRetryAfterSecondsFromRateLimitMessage } from '../retry-after-from-rate-limit-message.js';
+import {
+  HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_CONFLICT,
+  HTTP_STATUS_FORBIDDEN,
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_PAYLOAD_TOO_LARGE,
+  HTTP_STATUS_REQUEST_TIMEOUT,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+  HTTP_STATUS_TOO_MANY_REQUESTS,
+  RETRY_AFTER_SECONDS_BLOCKING_MISS,
+} from '../constants.js';
 
 /**
  * Maps DomainError codes to HTTP status codes.
  */
 const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
-  WRONG_RESOLVE: 500,
-  EVIDENCE_OBLIGATION: 500,
-  BLOCKING_MISS: 503,
-  SNAPSHOT_MISMATCH: 409,
-  MISSING_SNAPSHOT: 400,
-  DETERMINISM_VIOLATION: 409,
-  [POLICY_BLOCKED_CODE]: 403,
+  WRONG_RESOLVE: HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  EVIDENCE_OBLIGATION: HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  BLOCKING_MISS: HTTP_STATUS_SERVICE_UNAVAILABLE,
+  SNAPSHOT_MISMATCH: HTTP_STATUS_CONFLICT,
+  MISSING_SNAPSHOT: HTTP_STATUS_BAD_REQUEST,
+  DETERMINISM_VIOLATION: HTTP_STATUS_CONFLICT,
+  [POLICY_BLOCKED_CODE]: HTTP_STATUS_FORBIDDEN,
 };
 
 const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set(['BLOCKING_MISS']);
@@ -88,7 +100,10 @@ export function errorHandler(
   // Fastify throws FST_ERR_CTP_BODY_TOO_LARGE when the body exceeds bodyLimit.
   // Without this branch, a 413 returns Fastify's default envelope which does
   // NOT match the RFC-014 error contract.
-  if (fastifyError.code === 'FST_ERR_CTP_BODY_TOO_LARGE' || fastifyError.statusCode === 413) {
+  if (
+    fastifyError.code === 'FST_ERR_CTP_BODY_TOO_LARGE'
+    || fastifyError.statusCode === HTTP_STATUS_PAYLOAD_TOO_LARGE
+  ) {
     const body = buildSearchErrorResponse(
       requestId,
       'PAYLOAD_TOO_LARGE',
@@ -96,7 +111,7 @@ export function errorHandler(
       null,
       false,
     );
-    sendSearchErrorResponse(request, reply, 413, body);
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_PAYLOAD_TOO_LARGE, body);
     return;
   }
 
@@ -115,7 +130,7 @@ export function errorHandler(
       null,
       true,
     );
-    sendSearchErrorResponse(request, reply, 503, body);
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_SERVICE_UNAVAILABLE, body);
     return;
   }
 
@@ -124,7 +139,7 @@ export function errorHandler(
   // propagate 429s with different semantics. Matching on statusCode alone
   // would mis-label them as "RATE_LIMIT_EXCEEDED" with a parsed retry.
   if (
-    fastifyError.statusCode === 429 &&
+    fastifyError.statusCode === HTTP_STATUS_TOO_MANY_REQUESTS &&
     (fastifyError.code === undefined || fastifyError.code.startsWith('FST_'))
   ) {
     const rawMessage = fastifyError.message ?? '';
@@ -142,7 +157,23 @@ export function errorHandler(
       true,
     );
 
-    sendSearchErrorResponse(request, reply, 429, body);
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_TOO_MANY_REQUESTS, body);
+    return;
+  }
+
+  // Cooperative cancellation (AbortSignal, client disconnect) — 408
+  // Distinct from 500 so clients do not treat this as a server defect.
+  if (isAbortError(error)) {
+    request.log.info({ requestId }, 'request_aborted');
+
+    const body = buildSearchErrorResponse(
+      requestId,
+      'REQUEST_ABORTED',
+      'The request was cancelled.',
+      null,
+      false,
+    );
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_REQUEST_TIMEOUT, body);
     return;
   }
 
@@ -162,7 +193,7 @@ export function errorHandler(
       false,
     );
 
-    sendSearchErrorResponse(request, reply, 400, body);
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_BAD_REQUEST, body);
     return;
   }
 
@@ -178,13 +209,13 @@ export function errorHandler(
       false,
     );
 
-    sendSearchErrorResponse(request, reply, 409, body);
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_CONFLICT, body);
     return;
   }
 
   // DomainError — map to appropriate HTTP status
   if (error instanceof DomainError) {
-    const status = DOMAIN_ERROR_STATUS_MAP[error.code] ?? 500;
+    const status = DOMAIN_ERROR_STATUS_MAP[error.code] ?? HTTP_STATUS_INTERNAL_SERVER_ERROR;
     const retryable = isDomainErrorRetryable(error.code);
 
     request.log[error.code === POLICY_BLOCKED_CODE ? 'warn' : 'error'](
@@ -199,8 +230,8 @@ export function errorHandler(
 
     // Retryable 503 errors (e.g., BLOCKING_MISS) MUST advertise Retry-After
     // per RFC 7231 §7.1.3 so SDK retry middleware honors a backoff window.
-    if (retryable && status === 503) {
-      reply.header('Retry-After', '5');
+    if (retryable && status === HTTP_STATUS_SERVICE_UNAVAILABLE) {
+      reply.header('Retry-After', String(RETRY_AFTER_SECONDS_BLOCKING_MISS));
     }
 
     // Do NOT echo `error.message` verbatim — domain errors can carry SQL fragments,
@@ -237,14 +268,14 @@ export function errorHandler(
   );
 
   try {
-    sendSearchErrorResponse(request, reply, 500, body);
+    sendSearchErrorResponse(request, reply, HTTP_STATUS_INTERNAL_SERVER_ERROR, body);
   } catch (sendErr) {
     // Last-resort fallback: if the error response itself fails outbound
     // validation, hand-roll a minimal contract-shaped JSON via the raw socket
     // so the client never sees a Fastify default envelope.
     request.log.error({ requestId, err: sendErr }, 'error_handler_send_failed');
     void reply
-      .status(500)
+      .status(HTTP_STATUS_INTERNAL_SERVER_ERROR)
       .header('Content-Type', 'application/json; charset=utf-8')
       .send(JSON.stringify({
         error: {

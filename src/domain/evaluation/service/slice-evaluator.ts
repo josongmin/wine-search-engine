@@ -6,6 +6,15 @@ import type { SelectivePredictor } from './selective-predictor.js';
 import type { CalibrationEvaluator } from './calibration-evaluator.js';
 import type { EvidenceAuditor } from './evidence-auditor.js';
 
+/** Minimum delta vs overall to flag wrong-resolve regression on a slice. */
+const SLICE_WRONG_RESOLVE_RATE_DELTA_THRESHOLD = 0.05;
+/** Minimum ECE gap vs overall to flag calibration regression on a slice. */
+const SLICE_ECE_DELTA_THRESHOLD = 0.05;
+/** Latency percentile for typical case (median). */
+const LATENCY_PERCENTILE_P50 = 0.5;
+/** Latency percentile for tail (SLO-style). */
+const LATENCY_PERCENTILE_P95 = 0.95;
+
 /**
  * A flagged slice where metrics are significantly below the overall average.
  */
@@ -119,7 +128,7 @@ export class SliceEvaluator {
       // Flag slices where wrong-resolve rate is significantly above overall
       const wrongResolveDelta =
         slice.metrics.wrongResolveRate - overallMetrics.wrongResolveRate;
-      if (wrongResolveDelta > 0.05) {
+      if (wrongResolveDelta > SLICE_WRONG_RESOLVE_RATE_DELTA_THRESHOLD) {
         flagged.push({
           sliceTag: slice.sliceTag,
           metric: 'wrongResolveRate',
@@ -131,7 +140,7 @@ export class SliceEvaluator {
 
       // Flag slices where ECE is significantly above overall
       const eceDelta = slice.metrics.ece - overallMetrics.ece;
-      if (eceDelta > 0.05) {
+      if (eceDelta > SLICE_ECE_DELTA_THRESHOLD) {
         flagged.push({
           sliceTag: slice.sliceTag,
           metric: 'ece',
@@ -184,8 +193,8 @@ export class SliceEvaluator {
       evidenceSufficiency: evidenceAudit.sufficiency,
       evidenceComprehensiveness: evidenceAudit.comprehensiveness,
       admissionViolationRate: admissionViolations / count,
-      p50LatencyMs: this.percentile(latencies, 0.5),
-      p95LatencyMs: this.percentile(latencies, 0.95),
+      p50LatencyMs: this.percentile(latencies, LATENCY_PERCENTILE_P50),
+      p95LatencyMs: this.percentile(latencies, LATENCY_PERCENTILE_P95),
     };
   }
 

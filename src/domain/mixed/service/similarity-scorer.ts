@@ -1,5 +1,12 @@
 import type { AnchorProfile } from '../model/anchor-profile.js';
 
+/** Region adjacency map match score (not identical but neighboring). */
+const REGION_ADJACENCY_MATCH_SCORE = 0.6;
+/** Same continent but not adjacent region score. */
+const SAME_CONTINENT_MATCH_SCORE = 0.3;
+/** Neutral cosine fallback when embeddings missing or length-mismatched. */
+const EMBEDDING_UNAVAILABLE_NEUTRAL_SCORE = 0.5;
+
 /**
  * Minimal candidate attributes needed for similarity scoring.
  *
@@ -173,17 +180,17 @@ export class SimilarityScorer {
     // Adjacent region
     const anchorAdjacent = REGION_ADJACENCY[aNorm];
     if (anchorAdjacent !== undefined && anchorAdjacent.includes(cNorm)) {
-      return 0.6;
+      return REGION_ADJACENCY_MATCH_SCORE;
     }
     const candidateAdjacent = REGION_ADJACENCY[cNorm];
     if (candidateAdjacent !== undefined && candidateAdjacent.includes(aNorm)) {
-      return 0.6;
+      return REGION_ADJACENCY_MATCH_SCORE;
     }
 
     // Same continent
     for (const regions of Object.values(CONTINENT_REGIONS)) {
       if (regions.includes(cNorm) && regions.includes(aNorm)) {
-        return 0.3;
+        return SAME_CONTINENT_MATCH_SCORE;
       }
     }
 
@@ -282,7 +289,7 @@ export class SimilarityScorer {
       anchorEmb.length === 0 ||
       candidateEmb.length !== anchorEmb.length
     ) {
-      return 0.5; // Neutral when embeddings are unavailable
+      return EMBEDDING_UNAVAILABLE_NEUTRAL_SCORE; // Neutral when embeddings are unavailable
     }
 
     let dot = 0;

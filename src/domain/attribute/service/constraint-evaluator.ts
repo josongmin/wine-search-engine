@@ -2,6 +2,11 @@ import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/
 import type { AttributeSpace } from '../model/attributes.js';
 import type { ConstraintEvaluationResult } from '../model/constraint.js';
 
+/** Soft constraint treated as "met" at or above this score. */
+const SOFT_CONSTRAINT_MATCH_THRESHOLD = 0.5;
+/** Partial credit when attribute missing (soft/inferred only). */
+const SOFT_SCORE_MISSING_ATTRIBUTE = 0.3;
+
 /**
  * Evaluates a {@link ConstraintBundle} against a candidate's attribute space.
  * Implements RFC-004 §5.
@@ -44,7 +49,7 @@ export class ConstraintEvaluator {
       softCount++;
       const score = this.scoreConstraint(c, candidateAttributes);
       softTotal += score;
-      if (score >= 0.5) {
+      if (score >= SOFT_CONSTRAINT_MATCH_THRESHOLD) {
         matched.push(c.attribute);
       } else {
         unmet.push(c.attribute);
@@ -57,7 +62,7 @@ export class ConstraintEvaluator {
       const score = this.scoreConstraint(c, candidateAttributes);
       softTotal += score;
       inferred.push(c.attribute);
-      if (score < 0.5) {
+      if (score < SOFT_CONSTRAINT_MATCH_THRESHOLD) {
         unmet.push(c.attribute);
       }
     }
@@ -103,7 +108,7 @@ export class ConstraintEvaluator {
 
     // Missing attribute: partial penalty (0.3) rather than full fail
     if (attrValue === undefined) {
-      return 0.3;
+      return SOFT_SCORE_MISSING_ATTRIBUTE;
     }
 
     if (this.evaluateOperator(constraint.operator, attrValue, constraint.value)) {

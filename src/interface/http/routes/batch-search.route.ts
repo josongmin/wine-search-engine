@@ -7,6 +7,8 @@ import {
 import { registerContractRoute } from './register-contract-route.js';
 import { BatchSearchRouteContract } from './route-contracts.js';
 import { getRequestId } from '../request-id.js';
+import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { HTTP_STATUS_OK } from '../constants.js';
 import type { BatchSearchResponse } from '../../../application/search/batch-search.usecase.js';
 
 function normalizeBatchResponse(
@@ -78,6 +80,7 @@ function normalizeBatchResponse(
  * - QUERY_PARSE_ERROR: Query validation failed
  * - QUERY_PARSE_ERROR: Comparison-style queries are not supported in batch items
  * - RETRIEVAL_TIMEOUT: Request exceeded timeout
+ * - REQUEST_ABORTED: Client cancelled the HTTP request or cooperative abort
  * - INTERNAL_ERROR: Unexpected server error
  *
  * HTTP status codes:
@@ -106,6 +109,7 @@ export function registerBatchSearchRoute(
         body.requests,
         body.options,
         effectiveBatchId,
+        { abortSignal: abortSignalFromFastifyRequest(request) },
       );
 
       // HTTP transport indicates the batch request itself succeeded.
@@ -115,7 +119,7 @@ export function registerBatchSearchRoute(
         request,
         reply,
         BatchSearchRouteContract,
-        200,
+        HTTP_STATUS_OK,
         normalizeBatchResponse(response),
       );
     },

@@ -6,13 +6,16 @@
  * Version pinned to model encoding version: v1.0-enc20260405
  */
 
+/** Reserved integer for out-of-vocabulary / unknown categorical labels. */
+const ML_PIPELINE_LABEL_OOV_CODE = 999;
+
 /**
  * ML pipeline label encoder (drinking-window / Epic 15). Distinct from
  * {@link ../../domain/ranking/service/wine-attribute-encoder.js#WineCatalogLabelEncoder}.
  */
 export class MlPipelineLabelEncoder {
   private readonly mapping: Map<string, number>;
-  private readonly oovCode: number = 999;
+  private readonly oovCode: number = ML_PIPELINE_LABEL_OOV_CODE;
 
   /**
    * @param labels - List of unique label strings. Index becomes the encoded value.
@@ -135,12 +138,12 @@ export class MlPipelineWineAttributeEncoders {
     for (const part of parts) {
       if (part.length > 0) {
         const code = this.regionEnc.encode(part);
-        if (code !== 999) {
+        if (code !== ML_PIPELINE_LABEL_OOV_CODE) {
           return code;
         }
       }
     }
-    return 999;
+    return ML_PIPELINE_LABEL_OOV_CODE;
   }
 
   /**

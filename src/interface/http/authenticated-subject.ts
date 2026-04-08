@@ -1,5 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
+import { MAX_AUTHENTICATED_SUBJECT_CHARS } from './constants.js';
+
 export const AUTHENTICATED_SUBJECT_HEADER = 'x-authenticated-subject';
 
 declare module 'fastify' {
@@ -34,7 +36,11 @@ export function getAuthenticatedSubject(
   }
   const raw = firstHeaderValue(request.headers[AUTHENTICATED_SUBJECT_HEADER]);
   const subject = raw?.trim();
-  if (subject === undefined || subject.length === 0 || subject.length > 128) {
+  if (
+    subject === undefined
+    || subject.length === 0
+    || subject.length > MAX_AUTHENTICATED_SUBJECT_CHARS
+  ) {
     return null;
   }
   // Reject control characters, whitespace, and characters that could enable

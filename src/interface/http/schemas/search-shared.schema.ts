@@ -1,5 +1,15 @@
 import { z } from 'zod';
 import { MAX_QUERY_LENGTH } from '../../../domain/shared/constants.js';
+import {
+  MAX_CURRENCY_CODE_CHARS,
+  MAX_QUERY_BUDGET_CANDIDATES,
+  MAX_QUERY_BUDGET_DENSE_CALLS,
+  MAX_QUERY_BUDGET_LATENCY_MS,
+  MAX_QUERY_BUDGET_RERANK_LIMIT,
+  MAX_SEARCH_CONTEXT_LOCALE_CHARS,
+  MAX_SESSION_ENTITY_ID_CHARS,
+  MAX_SESSION_PREVIOUS_ENTITIES,
+} from '../constants.js';
 
 export const QueryStringSchema = z
   .string()
@@ -9,22 +19,22 @@ export const QueryStringSchema = z
 export const SearchModeSchema = z.enum(['auto', 'entity', 'hybrid', 'mixed']);
 
 export const SearchContextSchema = z.object({
-  locale: z.string().min(1).max(35),
-  currency: z.string().min(1).max(3),
+  locale: z.string().min(1).max(MAX_SEARCH_CONTEXT_LOCALE_CHARS),
+  currency: z.string().min(1).max(MAX_CURRENCY_CODE_CHARS),
 }).strict();
 
 export const SessionContextSchema = z.object({
   sessionId: z.string().min(1),
-  previousEntities: z.array(z.string().min(1).max(256)).max(50),
+  previousEntities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES),
 }).strict();
 
 export const QueryBudgetSchema = z.object({
-  maxLatencyMs: z.number().int().positive().max(30_000),
-  maxCandidates: z.number().int().positive().max(1_000),
-  rerankLimit: z.number().int().positive().max(500),
+  maxLatencyMs: z.number().int().positive().max(MAX_QUERY_BUDGET_LATENCY_MS),
+  maxCandidates: z.number().int().positive().max(MAX_QUERY_BUDGET_CANDIDATES),
+  rerankLimit: z.number().int().positive().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
   // Optional: caps the number of dense (embedding) retrieval calls per query.
   // Aligns with response-side QueryBudgetTransportSchema and domain QueryBudget.
-  maxDenseCalls: z.number().int().positive().max(100).optional(),
+  maxDenseCalls: z.number().int().positive().max(MAX_QUERY_BUDGET_DENSE_CALLS).optional(),
 }).strict();
 
 export const SearchOptionsSchema = z.object({

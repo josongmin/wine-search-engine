@@ -129,3 +129,49 @@ describe('EMPTY_ANSWER fallback regression — structural guarantee', () => {
     expect(hasLiteralSlice || hasNamedConstant).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Part 4: Tool-observation-aware terminationReason fix (FALLBACK_TERMINATION fix)
+//
+// When the agent successfully called tools (has observations) but the final
+// synthesis LLM call fails, terminationReason must be 'answer', not 'fallback'.
+// 'fallback' should only apply when NO tool calls were made at all.
+// ---------------------------------------------------------------------------
+
+describe('EMPTY_ANSWER fallback regression — tool-observation-aware terminationReason', () => {
+  it('R-EMPTY-09: Layer 2 fallback search is skipped when hasToolObservations is true', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(
+      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+      'utf-8',
+    );
+    // The guard must check !hasToolObservations before running Layer 2 search
+    expect(src).toMatch(/hasToolObservations/);
+    expect(src).toMatch(/!hasToolObservations/);
+    // Layer 2 condition must include the !hasToolObservations guard
+    expect(src).toMatch(/answer === '' && terminationReason !== 'answer' && !hasToolObservations/);
+  });
+
+  it('R-EMPTY-10: Layer 3 sets terminationReason=answer when tool observations exist', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(
+      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+      'utf-8',
+    );
+    // Layer 3 must use ternary or conditional to set 'answer' vs 'fallback'
+    // based on whether tool observations exist
+    expect(src).toMatch(/hasToolObservations \? 'answer' : 'fallback'/);
+  });
+
+  it('R-EMPTY-11: Layer 4 sets terminationReason=answer when tool observations exist', async () => {
+    const fs = await import('fs');
+    const src = fs.readFileSync(
+      new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
+      'utf-8',
+    );
+    // Confirm Layer 4 also uses the same ternary (both Layer 3 and 4 must have it)
+    const matches = src.match(/hasToolObservations \? 'answer' : 'fallback'/g);
+    expect(matches).not.toBeNull();
+    expect(matches?.length).toBeGreaterThanOrEqual(2);
+  });
+});

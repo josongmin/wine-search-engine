@@ -13,16 +13,10 @@ import { buildInterpretResponseV2 } from './interpret-explain-adapter-v2.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
+import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 
 const retrievalProfileService = new RetrievalProfileService();
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) {
-    const error = new Error('Interpret use case aborted');
-    error.name = 'AbortError';
-    throw error;
-  }
-}
 
 export type { InterpretRequest } from './interpret-request.dto.js';
 
@@ -63,17 +57,17 @@ export class InterpretUseCase {
 
   async execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
-    options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: RequestExecutionContext,
   ): Promise<QueryPlanV1>;
   async execute(
     request: InterpretRequest & { readonly buildV2: true; readonly requestId?: string | undefined },
-    options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: RequestExecutionContext,
   ): Promise<InterpretResultWithV2>;
   async execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
-    options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: RequestExecutionContext,
   ): Promise<QueryPlanV1 | InterpretResultWithV2> {
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Interpret use case aborted');
 
     const securityGate = createSearchQuerySecurityGate({
       querySanitizer: this.deps.querySanitizer,
@@ -83,14 +77,17 @@ export class InterpretUseCase {
     });
     const effectiveQuery = await securityGate.getSafeQueryOrThrow(request.query);
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Interpret use case aborted');
 
-    const plannerContext = buildPlannerContextFromSearchRequest({
-      query: effectiveQuery,
-      context: request.context,
-      sessionContext: request.sessionContext,
-      queryBudget: request.queryBudget,
-    });
+    const plannerContext = buildPlannerContextFromSearchRequest(
+      {
+        query: effectiveQuery,
+        context: request.context,
+        sessionContext: request.sessionContext,
+        queryBudget: request.queryBudget,
+      },
+      { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+    );
 
     let plan: QueryPlanV1;
     let compiled: CompiledWineQuery | undefined;
@@ -105,7 +102,7 @@ export class InterpretUseCase {
       }
     }
 
-    throwIfAborted(options?.abortSignal);
+    throwIfAborted(options?.abortSignal, 'Interpret use case aborted');
 
     pipelineDebug(
       {

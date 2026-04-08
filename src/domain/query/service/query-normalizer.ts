@@ -156,6 +156,11 @@ const buildTransliterationVariants = (value: string): readonly string[] =>
     transliterateByComponents(value) ?? '',
   ]);
 
+/** Minimum tokens to generate reorder variants (pairwise permutations). */
+const QUERY_REORDER_VARIANT_MIN_TOKENS = 2;
+/** Maximum tokens — beyond this, permutation count explodes. */
+const QUERY_REORDER_VARIANT_MAX_TOKENS = 4;
+
 /**
  * Generates all unique token orderings for a whitespace-delimited query.
  * Only generates permutations for queries with 2-4 tokens to avoid explosion.
@@ -163,7 +168,7 @@ const buildTransliterationVariants = (value: string): readonly string[] =>
  */
 const buildReorderedVariants = (value: string): readonly string[] => {
   const tokens = value.trim().split(/\s+/);
-  if (tokens.length < 2 || tokens.length > 4) {
+  if (tokens.length < QUERY_REORDER_VARIANT_MIN_TOKENS || tokens.length > QUERY_REORDER_VARIANT_MAX_TOKENS) {
     return [];
   }
   const permutations: string[] = [];

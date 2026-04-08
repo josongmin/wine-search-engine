@@ -1729,3 +1729,76 @@ describe('blocked termination reason — security gate correct behavior', () => 
     expect(r.scores.terminationCorrectness).toBe(1);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Step-0 fallback exemptions for structured checks
+// ─────────────────────────────────────────────────────────────────────
+
+describe('step-0 fallback exemptions for structured checks', () => {
+  const step0Fallback = makeExecution({
+    answer: 'Based on your query, I found: Result for: 명절 가족 모임에 들고 갈 와인, 어른들도 드실 거야 (Benchmark Winery, Test Region).',
+    stepCount: 0,
+    toolsUsed: [],
+    toolCallCount: 0,
+    terminationReason: 'fallback',
+  });
+
+  it('requiredRegister check is skipped for step-0 fallback (no REGISTER_MISMATCH)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, requiredRegister: 'formal' }),
+      step0Fallback,
+      undefined,
+    );
+    const hasRegisterMismatch = (r.diagnostics ?? []).some((d) => d.code === 'REGISTER_MISMATCH');
+    expect(hasRegisterMismatch).toBe(false);
+  });
+
+  it('drinkingWindowStatus check is skipped for step-0 fallback (no DRINKING_WINDOW_MISMATCH)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, drinkingWindowStatus: 'hold' }),
+      makeExecution({
+        answer: 'Result for: 셀러에 넣어둘 만한 거, 지금 마시면 아까운 와인 (Benchmark Winery).',
+        stepCount: 0,
+        toolsUsed: [],
+        toolCallCount: 0,
+        terminationReason: 'fallback',
+      }),
+      undefined,
+    );
+    const hasDrinkingMismatch = (r.diagnostics ?? []).some((d) => d.code === 'DRINKING_WINDOW_MISMATCH');
+    expect(hasDrinkingMismatch).toBe(false);
+  });
+
+  it('requireHedging check is skipped for step-0 fallback (no HEDGING_MISSING)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, requireHedging: true }),
+      makeExecution({
+        answer: 'Result for: 그 유명한 와인 (Benchmark Winery, Test Region).',
+        stepCount: 0,
+        toolsUsed: [],
+        toolCallCount: 0,
+        terminationReason: 'fallback',
+      }),
+      undefined,
+    );
+    const hasHedgingMissing = (r.diagnostics ?? []).some((d) => d.code === 'HEDGING_MISSING');
+    expect(hasHedgingMissing).toBe(false);
+  });
+
+  it('requiredRegister IS checked for step-1+ fallback (agent ran, produced output)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 3, requiredRegister: 'formal' }),
+      makeExecution({
+        answer: '이거 어때, 괜찮아? 저렴하고 좋은 거 있어.',
+        stepCount: 1,
+        toolsUsed: [tool('search_wines')],
+        toolCallCount: 1,
+        terminationReason: 'fallback',
+      }),
+      undefined,
+    );
+    // step=1 → agent ran → register IS checked
+    const hasRegisterMismatch = (r.diagnostics ?? []).some((d) => d.code === 'REGISTER_MISMATCH');
+    expect(hasRegisterMismatch).toBe(true);
+  });
+});

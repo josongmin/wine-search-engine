@@ -2,6 +2,9 @@
  * Shared JSON parsing for OpenAI-compatible embedding API responses.
  */
 
+/** Keys listed when describing response shape for logs (avoid huge key lists). */
+const OPENAI_JSON_DIAGNOSTIC_KEY_PREVIEW_COUNT = 6;
+
 interface EmbeddingObject {
   readonly object: string;
   readonly index: number;
@@ -42,7 +45,7 @@ function describeResponseShape(data: unknown): string {
   if (data === undefined) return 'undefined';
   if (typeof data !== 'object') return `type=${typeof data}`;
   const obj = data as Record<string, unknown>;
-  const keys = Object.keys(obj).slice(0, 6);
+  const keys = Object.keys(obj).slice(0, OPENAI_JSON_DIAGNOSTIC_KEY_PREVIEW_COUNT);
   const dataField = obj['data'];
   if (!Array.isArray(dataField)) {
     return `object{keys=[${keys.join(',')}], data=${dataField === undefined ? 'missing' : typeof dataField}}`;

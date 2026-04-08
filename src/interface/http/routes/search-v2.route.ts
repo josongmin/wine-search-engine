@@ -17,6 +17,8 @@ import {
   SearchResponseV2HumanSchema,
   InterpretResponseV2Schema,
 } from '../schemas/search-response-v2.schema.js';
+import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { HTTP_STATUS_OK } from '../constants.js';
 
 // ---------------------------------------------------------------------------
 // Route registrations
@@ -43,6 +45,7 @@ export function registerSearchV2Route(
       const v1Response = await deps.searchUseCase.execute(
         searchRequest,
         getRequestId(request),
+        { abortSignal: abortSignalFromFastifyRequest(request) },
       );
 
       const queryId = getRequestId(request);
@@ -51,7 +54,7 @@ export function registerSearchV2Route(
       // Use sendContractResponse directly (not sendRouteContractResponse) to validate
       // the camelCase V2 payload against the camelCase V2 schema before Fastify's
       // preSerialization hook converts keys to snake_case for the wire format.
-      sendContractResponse(request, reply, 200, SearchResponseV2HumanSchema, humanResponse);
+      sendContractResponse(request, reply, HTTP_STATUS_OK, SearchResponseV2HumanSchema, humanResponse);
     },
   });
 }
@@ -75,12 +78,13 @@ export function registerHybridV2Route(
       const v1Response = await deps.hybridUseCase.execute(
         hybridRequest,
         getRequestId(request),
+        { abortSignal: abortSignalFromFastifyRequest(request) },
       );
 
       const queryId = getRequestId(request);
       const humanResponse = projectToHumanResponse(v1Response, queryId);
 
-      sendContractResponse(request, reply, 200, SearchResponseV2HumanSchema, humanResponse);
+      sendContractResponse(request, reply, HTTP_STATUS_OK, SearchResponseV2HumanSchema, humanResponse);
     },
   });
 }
@@ -103,17 +107,20 @@ export function registerInterpretV2Route(
       const parsed = parseContractBody(request, InterpretV2RouteContract);
       const interpretRequest = toInterpretRequest(parsed);
 
-      const result = await deps.interpretUseCase.execute({
-        ...interpretRequest,
-        buildV2: true,
-        requestId: getRequestId(request),
-      });
+      const result = await deps.interpretUseCase.execute(
+        {
+          ...interpretRequest,
+          buildV2: true,
+          requestId: getRequestId(request),
+        },
+        { abortSignal: abortSignalFromFastifyRequest(request) },
+      );
       // NOTE: result.compiled (CompiledWineQuery) is available here but not currently used.
       // E1-U4 intent: callers can use compiled.execution.effectiveRoute for route-gating decisions.
       // If explain-mode or route-conditional response shaping is needed, read compiled here.
       const v2Response = result.v2Explain;
 
-      sendContractResponse(request, reply, 200, InterpretResponseV2Schema, v2Response);
+      sendContractResponse(request, reply, HTTP_STATUS_OK, InterpretResponseV2Schema, v2Response);
     },
   });
 }

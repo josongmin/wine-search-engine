@@ -30,6 +30,19 @@ import {
   WatchlistListRouteContract,
 } from './route-contracts.js';
 import { getRequestId } from '../request-id.js';
+import {
+  HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_CREATED,
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_NOT_FOUND,
+  HTTP_STATUS_NO_CONTENT,
+  HTTP_STATUS_OK,
+  HTTP_STATUS_UNAUTHORIZED,
+  WATCHLIST_OFFSET_MIN,
+  WATCHLIST_PAGE_DEFAULT_LIMIT,
+  WATCHLIST_PAGE_MAX_LIMIT,
+  WATCHLIST_PAGE_MIN_LIMIT,
+} from '../constants.js';
 
 function createErrorResponse(requestId: string, code: string, message: string) {
   return WatchlistErrorResponseSchema.parse({
@@ -60,7 +73,7 @@ function requireSubject(
     request,
     reply,
     contract,
-    401,
+    HTTP_STATUS_UNAUTHORIZED,
     createErrorResponse(
       getRequestId(request),
       'UNAUTHORIZED',
@@ -105,24 +118,30 @@ export function registerWatchlistRoute(
         const limitParam = queryParams['limit'];
         const offsetParam = queryParams['offset'];
         const limit = Math.min(
-          Math.max(1, Number(limitParam) || 50),
-          200,
+          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number(limitParam) || WATCHLIST_PAGE_DEFAULT_LIMIT),
+          WATCHLIST_PAGE_MAX_LIMIT,
         );
-        const offset = Math.max(0, Number(offsetParam) || 0);
+        const offset = Math.max(WATCHLIST_OFFSET_MIN, Number(offsetParam) || WATCHLIST_OFFSET_MIN);
         const entries = allEntries.slice(offset, offset + limit);
         const response = ListWatchlistResponseSchema.parse({
           entries: entries.map(toWatchlistEntryResponse),
           total: allEntries.length,
         });
 
-        sendRouteContractResponse(request, reply, WatchlistListRouteContract, 200, response);
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistListRouteContract,
+          HTTP_STATUS_OK,
+          response,
+        );
       } catch (err: unknown) {
         request.log.error({ err }, 'list_watchlist_failed');
         sendRouteContractResponse(
           request,
           reply,
           WatchlistListRouteContract,
-          500,
+          HTTP_STATUS_INTERNAL_SERVER_ERROR,
           createErrorResponse(
             getRequestId(request),
             'INTERNAL_ERROR',
@@ -158,14 +177,20 @@ export function registerWatchlistRoute(
           watchlist_id: entry.id,
         });
 
-        sendRouteContractResponse(request, reply, WatchlistCreateRouteContract, 201, response);
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistCreateRouteContract,
+          HTTP_STATUS_CREATED,
+          response,
+        );
       } catch (err: unknown) {
         request.log.error({ err }, 'create_watchlist_failed');
         sendRouteContractResponse(
           request,
           reply,
           WatchlistCreateRouteContract,
-          500,
+          HTTP_STATUS_INTERNAL_SERVER_ERROR,
           createErrorResponse(
             getRequestId(request),
             'INTERNAL_ERROR',
@@ -192,7 +217,7 @@ export function registerWatchlistRoute(
           request,
           reply,
           WatchlistGetRouteContract,
-          400,
+          HTTP_STATUS_BAD_REQUEST,
           createErrorResponse(
             getRequestId(request),
             'VALIDATION_ERROR',
@@ -214,7 +239,7 @@ export function registerWatchlistRoute(
             request,
             reply,
             WatchlistGetRouteContract,
-            404,
+            HTTP_STATUS_NOT_FOUND,
             createErrorResponse(
               getRequestId(request),
               'NOT_FOUND',
@@ -228,7 +253,7 @@ export function registerWatchlistRoute(
           request,
           reply,
           WatchlistGetRouteContract,
-          200,
+          HTTP_STATUS_OK,
           GetWatchlistResponseSchema.parse(toWatchlistEntryResponse(entry)),
         );
       } catch (err: unknown) {
@@ -237,7 +262,7 @@ export function registerWatchlistRoute(
           request,
           reply,
           WatchlistGetRouteContract,
-          500,
+          HTTP_STATUS_INTERNAL_SERVER_ERROR,
           createErrorResponse(
             getRequestId(request),
             'INTERNAL_ERROR',
@@ -264,7 +289,7 @@ export function registerWatchlistRoute(
           request,
           reply,
           WatchlistDeleteRouteContract,
-          400,
+          HTTP_STATUS_BAD_REQUEST,
           createErrorResponse(
             getRequestId(request),
             'VALIDATION_ERROR',
@@ -286,7 +311,7 @@ export function registerWatchlistRoute(
             request,
             reply,
             WatchlistDeleteRouteContract,
-            404,
+            HTTP_STATUS_NOT_FOUND,
             createErrorResponse(
               getRequestId(request),
               'NOT_FOUND',
@@ -296,14 +321,19 @@ export function registerWatchlistRoute(
           return;
         }
 
-        sendRouteContractResponse(request, reply, WatchlistDeleteRouteContract, 204);
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistDeleteRouteContract,
+          HTTP_STATUS_NO_CONTENT,
+        );
       } catch (err: unknown) {
         request.log.error({ err }, 'delete_watchlist_failed');
         sendRouteContractResponse(
           request,
           reply,
           WatchlistDeleteRouteContract,
-          500,
+          HTTP_STATUS_INTERNAL_SERVER_ERROR,
           createErrorResponse(
             getRequestId(request),
             'INTERNAL_ERROR',
@@ -330,7 +360,7 @@ export function registerWatchlistRoute(
           request,
           reply,
           WatchlistDeliveriesRouteContract,
-          400,
+          HTTP_STATUS_BAD_REQUEST,
           createErrorResponse(
             getRequestId(request),
             'VALIDATION_ERROR',
@@ -352,7 +382,7 @@ export function registerWatchlistRoute(
             request,
             reply,
             WatchlistDeliveriesRouteContract,
-            404,
+            HTTP_STATUS_NOT_FOUND,
             createErrorResponse(
               getRequestId(request),
               'NOT_FOUND',
@@ -365,8 +395,11 @@ export function registerWatchlistRoute(
         const dQueryParams = request.query as Record<string, unknown>;
         const dLimitParam = dQueryParams['limit'];
         const dOffsetParam = dQueryParams['offset'];
-        const dLimit = Math.min(Math.max(1, Number(dLimitParam) || 50), 200);
-        const dOffset = Math.max(0, Number(dOffsetParam) || 0);
+        const dLimit = Math.min(
+          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number(dLimitParam) || WATCHLIST_PAGE_DEFAULT_LIMIT),
+          WATCHLIST_PAGE_MAX_LIMIT,
+        );
+        const dOffset = Math.max(WATCHLIST_OFFSET_MIN, Number(dOffsetParam) || WATCHLIST_OFFSET_MIN);
         const pagedDeliveries = deliveries.slice(dOffset, dOffset + dLimit);
         const response = ListDeliveriesResponseSchema.parse({
           deliveries: pagedDeliveries.map((log: WatchlistDeliveryLogEntry) => ({
@@ -380,14 +413,20 @@ export function registerWatchlistRoute(
           total: deliveries.length,
         });
 
-        sendRouteContractResponse(request, reply, WatchlistDeliveriesRouteContract, 200, response);
+        sendRouteContractResponse(
+          request,
+          reply,
+          WatchlistDeliveriesRouteContract,
+          HTTP_STATUS_OK,
+          response,
+        );
       } catch (err: unknown) {
         request.log.error({ err }, 'list_watchlist_deliveries_failed');
         sendRouteContractResponse(
           request,
           reply,
           WatchlistDeliveriesRouteContract,
-          500,
+          HTTP_STATUS_INTERNAL_SERVER_ERROR,
           createErrorResponse(
             getRequestId(request),
             'INTERNAL_ERROR',

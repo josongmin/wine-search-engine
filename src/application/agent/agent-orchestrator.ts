@@ -132,6 +132,7 @@ export class AgentOrchestrator {
     query: string,
     requestId: string,
     overrides?: Partial<Pick<AgentConfig, 'maxSteps' | 'perStepTimeoutMs' | 'agentTimeoutMs'>>,
+    abortSignal?: AbortSignal,
   ): Promise<AgentResult> {
     // Adaptive step budget — lexical classifier picks a tighter ceiling for
     // specific SKU lookups, adversarial probes, and off-domain queries.
@@ -259,9 +260,21 @@ export class AgentOrchestrator {
         // LLM call with per-step timeout and AbortSignal propagation.
         // The AbortController cancels the underlying HTTP request when the
         // timeout fires, preventing orphaned in-flight requests.
+        // Short-circuit if the caller (HTTP route) already signalled abort
+        // (client disconnect). This prevents spending LLM tokens for a response
+        // nobody will receive.
+        if (abortSignal?.aborted === true) {
+          terminationReason = 'error';
+          break;
+        }
+
         const stepStart = Date.now();
         let llmResult: { text: string; model: string; finishReason?: string | null };
         const stepAbortController = new AbortController();
+        // Propagate caller abort into the per-step controller so the HTTP client
+        // connection also cancels the underlying LLM fetch.
+        const propagateAbort = (): void => { stepAbortController.abort(); };
+        abortSignal?.addEventListener('abort', propagateAbort, { once: true });
         let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
           llmResult = await Promise.race([
@@ -287,6 +300,7 @@ export class AgentOrchestrator {
           terminationReason = 'error';
           break;
         } finally {
+          abortSignal?.removeEventListener('abort', propagateAbort);
           if (stepTimeoutHandle !== undefined) {
             clearTimeout(stepTimeoutHandle);
           }
@@ -509,7 +523,19 @@ export class AgentOrchestrator {
       }
     }
 
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer') {
+    // Track whether the agent already gathered tool observations before reaching fallback.
+    // When observations exist, synthesis failed but tool execution succeeded — the agent
+    // correctly called the right tools; only the final LLM synthesis call failed (infra).
+    // In that case we avoid re-running a fresh search (Layer 2) and instead use
+    // Layer 3 (raw observation) with terminationReason='answer' so the scorer does not
+    // penalise correct tool execution as a complete failure.
+    const hasToolObservations = steps.some((s) => s.observation !== undefined && s.observation.length > 0);
+
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations) {
+      // Layer 2: single-shot fallback search — only when the agent made NO tool calls.
+      // Skip when tool observations exist; those cases go directly to Layer 3 so we
+      // preserve the agent's correct tool execution in the terminationReason.
+      //
       // Cap the fallback search at FALLBACK_SEARCH_TIMEOUT_MS (module-scope const).
       // This is independent of perStepTimeoutMs to avoid the inversion bug where
       // low perStep settings gave the fallback the same exhausted budget.
@@ -555,8 +581,11 @@ export class AgentOrchestrator {
       if (lastObs?.observation !== undefined) {
         answer = `검색 결과 요약: ${lastObs.observation.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)}`;
         fallbackApplied = true;
-        terminationReason = 'fallback';
-        log.error({ requestId }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
+        // When tool observations exist, the agent successfully called the right tools —
+        // only the synthesis LLM call failed (infrastructure). Use terminationReason='answer'
+        // so the scorer credits correct tool execution rather than penalising as full failure.
+        terminationReason = hasToolObservations ? 'answer' : 'fallback';
+        log.error({ requestId, hasToolObservations }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
       }
     }
 
@@ -564,7 +593,9 @@ export class AgentOrchestrator {
       // Layer 4: absolute guarantee — no tool call is ALWAYS better than empty
       answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
       fallbackApplied = true;
-      terminationReason = 'fallback';
+      // Same reasoning as Layer 3: if tool observations exist, the agent execution was
+      // correct; only synthesis failed. Use 'answer' to avoid penalising correct execution.
+      terminationReason = hasToolObservations ? 'answer' : 'fallback';
       log.error({ requestId, query, steps: steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
     }
 

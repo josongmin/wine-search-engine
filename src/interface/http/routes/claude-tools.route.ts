@@ -34,6 +34,10 @@ import {
   ClaudeToolsListRouteContract,
 } from './route-contracts.js';
 import { getRequestId, resolveRequestId } from '../request-id.js';
+import {
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_OK,
+} from '../constants.js';
 
 /**
  * Register /v1/claude-tools endpoint.
@@ -59,7 +63,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
           parsed.tool_input,
           requestId,
         );
-        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 200, {
+        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, HTTP_STATUS_OK, {
           tool_name: parsed.tool_name,
           tool_result: executionResult.result,
           request_id: requestId,
@@ -72,7 +76,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
           throw err;
         }
         request.log.error({ err, requestId }, 'claude_tools_execution_failed');
-        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, 500, {
+        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, HTTP_STATUS_INTERNAL_SERVER_ERROR, {
           error: 'TOOL_EXECUTION_FAILED',
           message: 'An unexpected error occurred while executing the tool.',
           request_id: requestId,
@@ -86,7 +90,7 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
     url: '/v1/claude-tools',
     contract: ClaudeToolsListRouteContract,
     handler: async (request, reply) => {
-      sendRouteContractResponse(request, reply, ClaudeToolsListRouteContract, 200, {
+      sendRouteContractResponse(request, reply, ClaudeToolsListRouteContract, HTTP_STATUS_OK, {
         tools: WINE_SEARCH_TOOLS,
         request_id: getRequestId(request),
       });

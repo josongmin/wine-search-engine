@@ -15,6 +15,13 @@ describe('public query route contracts', () => {
     expect(ResolveRouteContract.responses[403]).toBe(ErrorResponseSchema);
   });
 
+  it('declares cooperative-abort (408) error responses for search-family endpoints', () => {
+    expect(SearchRouteContract.responses[408]).toBe(ErrorResponseSchema);
+    expect(HybridRouteContract.responses[408]).toBe(ErrorResponseSchema);
+    expect(InterpretRouteContract.responses[408]).toBe(ErrorResponseSchema);
+    expect(ResolveRouteContract.responses[408]).toBe(ErrorResponseSchema);
+  });
+
   it('pins the search-family capability matrix in route contract metadata', () => {
     expect(SearchRouteContract.capabilities).toEqual([
       'security',

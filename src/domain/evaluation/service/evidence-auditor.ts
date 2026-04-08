@@ -1,5 +1,10 @@
 import type { EvalResult } from '../model/eval-result.js';
 
+/** Min summed positive evidence contribution for "sufficient" high-strength cases. */
+const EVIDENCE_SUFFICIENCY_CONTRIBUTION_FLOOR = 0.3;
+/** Evidence must explain at least this fraction of decision confidence. */
+const EVIDENCE_COMPREHENSIVENESS_CONFIDENCE_RATIO = 0.5;
+
 /**
  * Summary of evidence faithfulness metrics for a set of evaluation results.
  */
@@ -65,7 +70,7 @@ export class EvidenceAuditor {
       );
 
       // Sufficiency requires strong evidence that collectively supports the decision
-      if (hasHighStrength && totalPositiveContribution > 0.3) {
+      if (hasHighStrength && totalPositiveContribution > EVIDENCE_SUFFICIENCY_CONTRIBUTION_FLOOR) {
         sufficientCount++;
       }
     }
@@ -107,7 +112,7 @@ export class EvidenceAuditor {
       // below the resolve threshold.
       if (
         result.decisionConfidence > 0 &&
-        totalContribution / result.decisionConfidence > 0.5
+        totalContribution / result.decisionConfidence > EVIDENCE_COMPREHENSIVENESS_CONFIDENCE_RATIO
       ) {
         comprehensiveCount++;
       }

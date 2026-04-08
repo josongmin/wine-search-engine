@@ -102,6 +102,28 @@ function unique(values: readonly string[]): readonly string[] {
 
 const MODEL_STALENESS_THRESHOLD_DAYS = 30;
 
+const MILLISECONDS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+const HOURS_PER_DAY = 24;
+const MILLISECONDS_PER_DAY =
+  MILLISECONDS_PER_SECOND * SECONDS_PER_MINUTE * MINUTES_PER_HOUR * HOURS_PER_DAY;
+
+/** LambdaMART weight vector length (must match {@link extractLTRFeatures} output). */
+const LTR_MODEL_FEATURE_DIMENSION = 8;
+
+/** Entity IDs captured after primary sort for funnel rerank telemetry. */
+const PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT = 5;
+
+/** Maps normalized critic score to 80–100 “proxy points” display scale. */
+const CRITIC_PROXY_SCORE_DISPLAY_BASE = 80;
+const CRITIC_PROXY_SCORE_DISPLAY_SPAN = 20;
+
+/** Treat reranker batch as degenerate when max-min below this (use neutral norm). */
+const RERANK_SCORE_MIN_MAX_RANGE_EPSILON = 1e-8;
+/** Neutral normalized rerank score when range is unusable. */
+const RERANK_SCORE_NORMALIZED_NEUTRAL = 0.5;
+
 function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
@@ -113,7 +135,7 @@ function applyLearnedLtrRerank(
   }
 
   const modelAgeMs = Date.now() - ltrModel.trainedAt.getTime();
-  const modelAgeDays = modelAgeMs / (1000 * 60 * 60 * 24);
+  const modelAgeDays = modelAgeMs / MILLISECONDS_PER_DAY;
   if (modelAgeDays > MODEL_STALENESS_THRESHOLD_DAYS) {
     bootstrapLogger.warn(
       {
@@ -125,9 +147,8 @@ function applyLearnedLtrRerank(
     );
   }
 
-  const EXPECTED_FEATURE_DIM = 8;
-  if (ltrModel.weights.length !== EXPECTED_FEATURE_DIM) {
-    bootstrapLogger.warn({ queryClass, modelWeightDim: ltrModel.weights.length, expectedDim: EXPECTED_FEATURE_DIM }, '[Ranker] LTR model dimension mismatch — skipping LTR rerank');
+  if (ltrModel.weights.length !== LTR_MODEL_FEATURE_DIMENSION) {
+    bootstrapLogger.warn({ queryClass, modelWeightDim: ltrModel.weights.length, expectedDim: LTR_MODEL_FEATURE_DIMENSION }, '[Ranker] LTR model dimension mismatch — skipping LTR rerank');
     return { results: [...rankedResults], skippedDueToDimensionMismatch: true };
   }
 
@@ -491,7 +512,7 @@ export class Ranker {
 
     // T5.6: Capture top-5 entity IDs after primary sort, before any reranking.
     // RankingStagePipeline reads this snapshot to compute rerankChangedTopK.
-    localPreRerankTop5 = viable.slice(0, 5).map((e) => String(e.entityId));
+    localPreRerankTop5 = viable.slice(0, PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT).map((e) => String(e.entityId));
 
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
@@ -601,7 +622,9 @@ export class Ranker {
         ...(entry.sweetness !== undefined ? { sweetness: entry.sweetness } : {}),
         ...(entry.criticScoreNormalized !== undefined
           ? {
-              avgCriticProxyScore: Math.round(80 + entry.criticScoreNormalized * 20),
+              avgCriticProxyScore: Math.round(
+                CRITIC_PROXY_SCORE_DISPLAY_BASE + entry.criticScoreNormalized * CRITIC_PROXY_SCORE_DISPLAY_SPAN,
+              ),
               criticScoreNormalized: entry.criticScoreNormalized,
             }
           : {}),
@@ -702,7 +725,11 @@ export class Ranker {
       : NaN;
 
     function normalizeRerankScore(raw: number): number {
-      if (!Number.isFinite(raw) || !Number.isFinite(rawRange) || rawRange < 1e-8) return 0.5;
+      if (
+        !Number.isFinite(raw)
+        || !Number.isFinite(rawRange)
+        || rawRange < RERANK_SCORE_MIN_MAX_RANGE_EPSILON
+      ) return RERANK_SCORE_NORMALIZED_NEUTRAL;
       // Min-max within batch: maps to [0, 1] preserving relative order.
       // Sigmoid compression is unnecessary when min-max already bounds the range.
       return (raw - minRaw) / rawRange;

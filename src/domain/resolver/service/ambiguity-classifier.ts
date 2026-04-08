@@ -8,6 +8,11 @@ const SHORT_FORM_CANDIDATE_THRESHOLD = 3;
 /** Score ratio threshold: if top-2 is within this ratio of top-1, it is "strong". */
 const STRONG_MATCH_RATIO = 0.85;
 
+/** Top candidates scanned for multi-vintage / producer-family ambiguity. */
+const AMBIGUITY_TOP_CANDIDATE_SCAN_K = 5;
+/** Top candidates scanned for alias-collision ambiguity. */
+const AMBIGUITY_ALIAS_COLLISION_SCAN_K = 10;
+
 /**
  * Classifies ambiguity among resolution candidates, per RFC-006 §7.
  *
@@ -97,7 +102,7 @@ export class AmbiguityClassifier {
    */
   private detectMultiVintage(candidates: readonly ResolverCandidate[]): boolean {
     const wineByLabel = new Map<string, Set<string>>();
-    for (const candidate of candidates.slice(0, 5)) {
+    for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
       if (candidate.entityType === 'wine') {
         const vintage = candidate.attributeHints?.['vintage'];
         if (typeof vintage === 'string' || typeof vintage === 'number') {
@@ -127,7 +132,7 @@ export class AmbiguityClassifier {
    */
   private detectAliasCollision(candidates: readonly ResolverCandidate[]): boolean {
     const aliasToEntities = new Map<string, Set<string>>();
-    for (const candidate of candidates.slice(0, 10)) {
+    for (const candidate of candidates.slice(0, AMBIGUITY_ALIAS_COLLISION_SCAN_K)) {
       for (const aliasMatch of candidate.aliasMatches) {
         const entities = aliasToEntities.get(aliasMatch.aliasValue) ?? new Set<string>();
         entities.add(candidate.entityId);
@@ -148,7 +153,7 @@ export class AmbiguityClassifier {
    */
   private detectProducerFamilyCollision(candidates: readonly ResolverCandidate[]): boolean {
     const producerCounts = new Map<string, number>();
-    for (const candidate of candidates.slice(0, 5)) {
+    for (const candidate of candidates.slice(0, AMBIGUITY_TOP_CANDIDATE_SCAN_K)) {
       const producer = candidate.attributeHints?.['producer'];
       if (typeof producer === 'string') {
         producerCounts.set(producer, (producerCounts.get(producer) ?? 0) + 1);

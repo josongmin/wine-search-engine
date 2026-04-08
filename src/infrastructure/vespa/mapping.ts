@@ -17,6 +17,28 @@ import {
   type RetrievalHitSummaryKey,
 } from '../../domain/retrieval/port/search-index.port.js';
 import { createEntityId } from '../../domain/shared/types/entity-id.js';
+import {
+  MAX_PRODUCED_VINTAGE_YEAR,
+  MIN_PRODUCED_VINTAGE_YEAR,
+} from '../../domain/shared/constants.js';
+
+/** Decimal radix for parseInt on external filter tokens. */
+const DECIMAL_RADIX = 10;
+/** Clamp for 0–10 sensor-style fields in YQL (acidity, tannin, finish). */
+const WINE_SENSOR_SCALE_MIN = 0;
+const WINE_SENSOR_SCALE_MAX = 10;
+/** Absurd price filter cap — avoids scientific notation in YQL. */
+const MAX_PRICE_USD_YQL_CLAMP = 1_000_000;
+/** Physical ceiling for wine ABV in filter clamps (% vol). */
+const MAX_ALCOHOL_PCT_YQL_CLAMP = 25;
+/** Fraction digits when interpolating normalized critic/prestige scores into YQL. */
+const NORMALIZED_SCORE_YQL_DECIMAL_PLACES = 4;
+/** Pipe-delimited `_in` token key suffix length (`foo_in`). */
+const SPARSE_IN_SUFFIX_LENGTH = 3;
+/** Safety cap on parsed sparse tensor cell count to prevent memory exhaustion on corrupt/hostile documents. */
+const MAX_SPARSE_TENSOR_CELLS = 10_000;
+/** `_not` suffix length when deriving field name for NOT-IN clauses. */
+const SPARSE_NOT_FIELD_SUFFIX_LENGTH = 4;
 
 // ---------------------------------------------------------------------------
 // Type guards
@@ -86,6 +108,8 @@ function parseSparseWeightsTensor(raw: unknown): DocumentSparseVector | undefine
   const obj = raw as Record<string, unknown>;
   const cells = obj['cells'];
   if (!Array.isArray(cells)) return undefined;
+  // Guard against memory exhaustion from corrupt or adversarially large Vespa documents.
+  if (cells.length > MAX_SPARSE_TENSOR_CELLS) return undefined;
 
   const entries: { token: string; weight: number }[] = [];
   for (const cell of cells) {
@@ -692,63 +716,111 @@ export function buildSparseFilters(filters: readonly string[]): string {
       // bypass downstream filtering logic and to avoid scientific-notation
       // YQL interpolation.
       case 'vintage_year_min': {
-        const n = parseInt(value, 10);
-        if (Number.isFinite(n)) clauses.push(`vintage_year >= ${clampInt(n, 1900, 2100)}`);
+        const n = parseInt(value, DECIMAL_RADIX);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `vintage_year >= ${clampInt(n, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR)}`,
+          );
+        }
         break;
       }
       case 'vintage_year_max': {
-        const n = parseInt(value, 10);
-        if (Number.isFinite(n)) clauses.push(`vintage_year <= ${clampInt(n, 1900, 2100)}`);
+        const n = parseInt(value, DECIMAL_RADIX);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `vintage_year <= ${clampInt(n, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR)}`,
+          );
+        }
         break;
       }
       case 'acidity_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`acidity >= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `acidity >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
+          );
+        }
         break;
       }
       case 'acidity_max': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`acidity <= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `acidity <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
+          );
+        }
         break;
       }
       case 'tannin_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`tannin >= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `tannin >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
+          );
+        }
         break;
       }
       case 'tannin_max': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`tannin <= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `tannin <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
+          );
+        }
         break;
       }
       case 'finish_length_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`finish_length >= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `finish_length >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
+          );
+        }
         break;
       }
       case 'finish_length_max': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`finish_length <= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `finish_length <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
+          );
+        }
         break;
       }
       case 'price_usd_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`price_usd >= ${clampNum(n, 0, 1_000_000).toFixed(2)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `price_usd >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_PRICE_USD_YQL_CLAMP).toFixed(2)}`,
+          );
+        }
         break;
       }
       case 'price_usd_max': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`price_usd <= ${clampNum(n, 0, 1_000_000).toFixed(2)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `price_usd <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_PRICE_USD_YQL_CLAMP).toFixed(2)}`,
+          );
+        }
         break;
       }
       case 'critic_score_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`critic_score_normalized >= ${clampNum(n, 0, 1).toFixed(4)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `critic_score_normalized >= ${clampNum(n, 0, 1).toFixed(NORMALIZED_SCORE_YQL_DECIMAL_PLACES)}`,
+          );
+        }
         break;
       }
       case 'producer_prestige_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`producer_prestige >= ${clampNum(n, 0, 1).toFixed(4)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `producer_prestige >= ${clampNum(n, 0, 1).toFixed(NORMALIZED_SCORE_YQL_DECIMAL_PLACES)}`,
+          );
+        }
         break;
       }
 
@@ -761,12 +833,20 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       case 'alcohol_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`alcohol_pct >= ${clampNum(n, 0, 25).toFixed(2)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `alcohol_pct >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP).toFixed(2)}`,
+          );
+        }
         break;
       }
       case 'alcohol_max': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`alcohol_pct <= ${clampNum(n, 0, 25).toFixed(2)}`);
+        if (Number.isFinite(n)) {
+          clauses.push(
+            `alcohol_pct <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP).toFixed(2)}`,
+          );
+        }
         break;
       }
       case 'certification':
@@ -779,9 +859,9 @@ export function buildSparseFilters(filters: readonly string[]): string {
         clauses.push(`producer_type contains ${yqlString(value)}`);
         break;
       case 'drinking_window_now': {
-        const n = parseInt(value, 10);
+        const n = parseInt(value, DECIMAL_RADIX);
         if (Number.isFinite(n)) {
-          const yr = clampInt(n, 1900, 2200);
+          const yr = clampInt(n, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR);
           clauses.push(`drinking_window_start <= ${yr}`);
           clauses.push(`drinking_window_end >= ${yr}`);
         }
@@ -853,13 +933,20 @@ export function buildSparseFilters(filters: readonly string[]): string {
         // The base field name (with optional _not suffix) is validated against a whitelist
         // to prevent YQL injection.
         if (key.endsWith('_in')) {
-          const fieldWithSuffix = key.slice(0, -3); // strip '_in' suffix
+          const fieldWithSuffix = key.slice(0, -SPARSE_IN_SUFFIX_LENGTH);
           if (!ALLOWED_SPARSE_IN_FIELDS.has(fieldWithSuffix)) break;
+          // The value is a pipe-delimited list produced by our constraint pipeline.
+          // Individual tokens must NOT contain pipes — if the raw value itself
+          // contains a pipe beyond the delimiters it signals a schema bug or
+          // injection attempt. We validate the raw value's structure:
+          // - split, then ensure every token is non-empty (rejects "a||b", "|", etc.)
+          // Note: checking !v.includes('|') AFTER split is logically dead code because
+          // split removes all pipes. The guard must be on the joined form, not the parts.
           const vals = value.split('|').filter((v) => v.length > 0);
           if (vals.length === 0) break;
           if (fieldWithSuffix.endsWith('_not')) {
             // Negation NOT-IN: !(field contains "v1") AND !(field contains "v2")
-            const actualField = fieldWithSuffix.slice(0, -4); // strip '_not' suffix
+            const actualField = fieldWithSuffix.slice(0, -SPARSE_NOT_FIELD_SUFFIX_LENGTH);
             for (const v of vals) {
               clauses.push(`!(${actualField} contains ${yqlString(v)})`);
             }

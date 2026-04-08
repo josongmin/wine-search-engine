@@ -25,6 +25,11 @@ export interface DetectableDecompositionOutcome {
   readonly comparisonIntent?: 'compare' | 'recommend_one' | 'list_both' | undefined;
 }
 
+/** Confidence when both comparison sub-queries are non-empty. */
+const DECOMPOSITION_CONFIDENCE_FULL_PAIR = 0.9;
+/** Confidence when only one side parsed (partial decomposition). */
+const DECOMPOSITION_CONFIDENCE_PARTIAL = 0.4;
+
 export function toQueryDecompositionHint(
   outcome: DetectableDecompositionOutcome,
 ): QueryDecompositionHint {
@@ -45,7 +50,7 @@ export function toQueryDecompositionHint(
   return {
     strategy,
     subQueryCount: nonEmptyCount,
-    confidence: nonEmptyCount === 2 ? 0.9 : 0.4,
+    confidence: nonEmptyCount === 2 ? DECOMPOSITION_CONFIDENCE_FULL_PAIR : DECOMPOSITION_CONFIDENCE_PARTIAL,
     reason:
       outcome.comparisonIntent !== undefined
         ? `comparison:${outcome.comparisonIntent}`

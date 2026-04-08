@@ -16,6 +16,8 @@ import {
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
+const HTTP_EMBEDDING_SERVICE_ERROR_PREVIEW_CHARS = 200;
+
 // ---------------------------------------------------------------------------
 // HttpEmbeddingService
 // ---------------------------------------------------------------------------
@@ -164,7 +166,7 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
       );
       const text = await response.text().catch(() => '');
       throw new Error(
-        `Embedding service call failed [HTTP ${status}]: ${text.slice(0, 200)}`,
+        `Embedding service call failed [HTTP ${status}]: ${text.slice(0, HTTP_EMBEDDING_SERVICE_ERROR_PREVIEW_CHARS)}`,
       );
     }
 

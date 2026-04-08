@@ -19,6 +19,16 @@ import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-d
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
 import { buildMachineResponseV2 } from '../../domain/response/service/machine-response-builder-v2.js';
+import {
+  MAX_PRODUCED_VINTAGE_YEAR,
+  MIN_PRODUCED_VINTAGE_YEAR,
+} from '../../domain/shared/constants.js';
+import { MAX_WINE_TOOL_SEARCH_RESULTS } from '../http/constants.js';
+
+/** Predictor expects body/tannin on 1–5 scale; documents store 0–1. */
+const DRINKING_WINDOW_BODY_TANNIN_SCALE = 5;
+/** criticScoreNormalized is 0–1; predictor wants 0–100 proxy points. */
+const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
 
 /**
  * Zod schema for search_wines tool input.
@@ -26,7 +36,7 @@ import { buildMachineResponseV2 } from '../../domain/response/service/machine-re
  */
 const SearchToolInputSchema = z.object({
   query: z.string().min(1, 'Query must not be empty'),
-  limit: z.number().int().min(1).max(50).optional().default(10),
+  limit: z.number().int().min(1).max(MAX_WINE_TOOL_SEARCH_RESULTS).optional().default(10),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional().default('auto'),
 });
 
@@ -52,7 +62,7 @@ export type FoodPairingInput = z.infer<typeof FoodPairingInputSchema>;
  */
 const DrinkingWindowInputSchema = z.object({
   entity_id: z.string().min(1, 'Entity ID must not be empty'),
-  target_year: z.number().int().min(1900).max(2100).optional(),
+  target_year: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR).optional(),
 });
 
 export type DrinkingWindowInput = z.infer<typeof DrinkingWindowInputSchema>;
@@ -331,12 +341,12 @@ export class WineToolExecutor {
       body: doc.body,
       // tannin/acidity in the document are stored on a [0,1] normalized scale.
       // The predictor expects a [0,5] scale, so we expand here.
-      tannin: doc.tannin! * 5,
-      acidity: doc.acidity! * 5,
+      tannin: doc.tannin! * DRINKING_WINDOW_BODY_TANNIN_SCALE,
+      acidity: doc.acidity! * DRINKING_WINDOW_BODY_TANNIN_SCALE,
       sweetness: doc.sweetness,
       // criticScoreNormalized is [0,1]; convert to the [0,100] proxy score
       // expected by the predictor.
-      avgCriticProxyScore: doc.criticScoreNormalized! * 100,
+      avgCriticProxyScore: doc.criticScoreNormalized! * DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE,
       targetYear,
     });
   }

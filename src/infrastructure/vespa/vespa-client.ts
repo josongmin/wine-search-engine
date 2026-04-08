@@ -11,6 +11,13 @@ import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 const vespaLog = bootstrapLogger.child({ component: 'VespaClient' });
 
+const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
+const HTTP_STATUS_NOT_FOUND = 404;
+const HTTP_STATUS_SERVER_ERROR_MIN = 500;
+const VESPA_SEARCH_REQUEST_TIMEOUT_MS = 30_000;
+const VESPA_DOCUMENT_MUTATION_TIMEOUT_MS = 15_000;
+const VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS = 10_000;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -139,7 +146,7 @@ function handleHttpError(
 ): never {
   const status = response.status;
 
-  if (status === 429) {
+  if (status === HTTP_STATUS_TOO_MANY_REQUESTS) {
     const retryAfter = response.headers.get('Retry-After');
     vespaLog.warn(
       { status, operation, ...(retryAfter !== null ? { retryAfter } : {}) },
@@ -147,13 +154,13 @@ function handleHttpError(
     );
     throw new VespaHttpError(
       `Vespa ${operation} rate-limited [HTTP 429]${retryAfter !== null ? `; Retry-After: ${retryAfter}` : ''}: ${body}`,
-      429,
+      HTTP_STATUS_TOO_MANY_REQUESTS,
       true,
       false, // 429 is a transient rate-limit, not a client error
     );
   }
 
-  if (status >= 500) {
+  if (status >= HTTP_STATUS_SERVER_ERROR_MIN) {
     vespaLog.warn(
       { status, operation },
       `Vespa server error (${status}) during ${operation}`,
@@ -309,7 +316,7 @@ export class VespaClient {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        30_000,
+        VESPA_SEARCH_REQUEST_TIMEOUT_MS,
       );
 
       if (!response.ok) {
@@ -403,7 +410,7 @@ export class VespaClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: payload }),
       },
-      15_000,
+      VESPA_DOCUMENT_MUTATION_TIMEOUT_MS,
     );
 
     if (!response.ok) {
@@ -456,7 +463,7 @@ export class VespaClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: assignFields }),
       },
-      15_000,
+      VESPA_DOCUMENT_MUTATION_TIMEOUT_MS,
     );
 
     if (!response.ok) {
@@ -474,10 +481,14 @@ export class VespaClient {
    */
   async delete(docId: string): Promise<void> {
     const url = this.docUrl(this.appName, docId);
-    const response = await this.fetchWithTimeout(url, { method: 'DELETE' }, 10_000);
+    const response = await this.fetchWithTimeout(
+      url,
+      { method: 'DELETE' },
+      VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS,
+    );
 
     // 404 is acceptable — the document simply did not exist.
-    if (!response.ok && response.status !== 404) {
+    if (!response.ok && response.status !== HTTP_STATUS_NOT_FOUND) {
       const text = await response.text().catch(() => '');
       handleHttpError(response, 'document DELETE', text);
     }
@@ -493,9 +504,9 @@ export class VespaClient {
    */
   async get(docId: string): Promise<Record<string, unknown> | null> {
     const url = this.docUrl(this.appName, docId);
-    const response = await this.fetchWithTimeout(url, {}, 10_000);
+    const response = await this.fetchWithTimeout(url, {}, VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS);
 
-    if (response.status === 404) return null;
+    if (response.status === HTTP_STATUS_NOT_FOUND) return null;
 
     if (!response.ok) {
       const text = await response.text().catch(() => '');

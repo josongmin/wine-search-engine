@@ -12,15 +12,19 @@ import type { ErrorResponseBody } from '../schemas/search-response.schema.js';
 import { getRequestId } from '../request-id.js';
 import { getAuthenticatedSubject } from '../authenticated-subject.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { HTTP_STATUS_FORBIDDEN } from '../constants.js';
 
 const securityAuditLog = bootstrapLogger.child({ component: 'security_audit' });
+
+/** Truncate SHA-256 hex in audit hashes (correlate without full digest). */
+const POLICY_BLOCKED_AUDIT_HASH_HEX_PREFIX_CHARS = 16;
 
 /**
  * Returns a one-way hash of a string suitable for audit logs.
  * The query text itself must not appear in logs (PII / content policy concern).
  */
 function hashForAuditLog(value: string): string {
-  return createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 16);
+  return createHash('sha256').update(value, 'utf8').digest('hex').slice(0, POLICY_BLOCKED_AUDIT_HASH_HEX_PREFIX_CHARS);
 }
 
 export function buildPolicyBlockedErrorResponse(requestId: string): ErrorResponseBody {
@@ -63,5 +67,5 @@ export function sendPolicyBlockedResponse(
     url: request.url,
   });
 
-  sendSearchErrorResponse(request, reply, 403, buildPolicyBlockedErrorResponse(requestId));
+  sendSearchErrorResponse(request, reply, HTTP_STATUS_FORBIDDEN, buildPolicyBlockedErrorResponse(requestId));
 }

@@ -7,6 +7,15 @@ import {
 
 const HEX_64_PATTERN = /^[a-f0-9]{64}$/;
 
+/** Colon-separated segments in `decision|admission:ver:class:digest`. */
+const AUTHORITY_TRACE_REF_SEGMENT_COUNT = 4;
+/** Colon-separated segments in `batch:ver:digest`. */
+const BATCH_ID_SEGMENT_COUNT = 3;
+/** Colon-separated segments in snapshot id v1. */
+const SNAPSHOT_ID_V1_SEGMENT_COUNT = 6;
+/** Colon-separated segments in snapshot id v2 (adds execution + retrieval). */
+const SNAPSHOT_ID_V2_SEGMENT_COUNT = 8;
+
 export interface DecodedAuthorityTraceRefV1 {
   readonly family: 'decision' | 'admission';
   readonly schemaVersion: typeof AUTHORITY_TRACE_SCHEMA_VERSION;
@@ -73,7 +82,7 @@ export function decodeAuthorityTraceRef(ref: string): DecodedAuthorityTraceRef |
     || schemaVersion !== AUTHORITY_TRACE_SCHEMA_VERSION
     || !isNonEmpty(queryClass)
     || !isHexDigest(digest)
-    || parts.length !== 4
+    || parts.length !== AUTHORITY_TRACE_REF_SEGMENT_COUNT
   ) {
     return null;
   }
@@ -111,7 +120,7 @@ export function decodeBatchId(batchId: string): DecodedBatchId | null {
     family !== 'batch'
     || schemaVersion !== BATCH_ID_SCHEMA_VERSION
     || !isHexDigest(digest)
-    || parts.length !== 3
+    || parts.length !== BATCH_ID_SEGMENT_COUNT
   ) {
     return null;
   }
@@ -155,7 +164,7 @@ export function decodeSnapshotId(snapshotId: string): DecodedSnapshotId | null {
       || !isNonEmpty(plannerVersion)
       || !isNonEmpty(policyRuleVersion)
       || !isHexDigest(digest)
-      || parts.length !== 6
+      || parts.length !== SNAPSHOT_ID_V1_SEGMENT_COUNT
     ) {
       return null;
     }
@@ -184,7 +193,7 @@ export function decodeSnapshotId(snapshotId: string): DecodedSnapshotId | null {
       || !isNonEmpty(executionRoute)
       || !isNonEmpty(retrievalMode)
       || !isHexDigest(digest)
-      || parts.length !== 8
+      || parts.length !== SNAPSHOT_ID_V2_SEGMENT_COUNT
     ) {
       return null;
     }

@@ -45,12 +45,14 @@ export interface BuildCounterfactualsOptions {
   readonly abstainContext?: boolean;
 }
 
+const DEFAULT_COUNTERFACTUAL_TOP_RESULT_WINDOW = 5;
+
 export function buildSearchCounterfactuals(
   resolverResult: EntityResolveResult,
   rankedResults: readonly RankedResult[],
   options: BuildCounterfactualsOptions = {},
 ): readonly CounterfactualReject[] {
-  const topResultWindow = options.topResultWindow ?? 5;
+  const topResultWindow = options.topResultWindow ?? DEFAULT_COUNTERFACTUAL_TOP_RESULT_WINDOW;
   const abstain = options.abstainContext === true;
 
   const counterfactuals: CounterfactualReject[] = [];

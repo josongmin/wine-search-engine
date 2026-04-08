@@ -24,6 +24,13 @@ import type {
   SearchResponseV2Machine,
 } from '../model/result-item-v2.js';
 
+/** Decimal places for fusion score in compact provenance string. */
+const RETRIEVAL_PROVENANCE_FUSION_SCORE_DECIMALS = 4;
+/** Evidence strength → numeric weight for machine consumers. */
+const EVIDENCE_WEIGHT_HIGH = 1;
+const EVIDENCE_WEIGHT_MEDIUM = 0.5;
+const EVIDENCE_WEIGHT_LOW = 0.1;
+
 export interface MachineResponseBuildParamsV2 {
   readonly queryId: string;
   readonly results: readonly RankedResult[];
@@ -40,7 +47,7 @@ function serializeProvenance(
   provenance: NonNullable<RankedResult['retrievalProvenance']>,
 ): string {
   const channels = preferCanonicalRetrievalChannelLabels(provenance.channels).join(',');
-  const score = provenance.fusionScore.toFixed(4);
+  const score = provenance.fusionScore.toFixed(RETRIEVAL_PROVENANCE_FUSION_SCORE_DECIMALS);
   return `${channels}@${provenance.fusionProfile}/${score}`;
 }
 
@@ -68,9 +75,9 @@ export function buildMachineResponseV2(
         signal: ei.type,
         value: Number.isFinite(parsed) ? parsed : 0,
         weight:
-          ei.strength === 'high' ? 1
-          : ei.strength === 'medium' ? 0.5
-          : 0.1,
+          ei.strength === 'high' ? EVIDENCE_WEIGHT_HIGH
+          : ei.strength === 'medium' ? EVIDENCE_WEIGHT_MEDIUM
+          : EVIDENCE_WEIGHT_LOW,
       };
     });
 

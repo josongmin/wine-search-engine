@@ -6,16 +6,46 @@ import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
 } from '../../../domain/shared/constants.js';
+import {
+  AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH,
+  MAX_CLARIFICATION_CANDIDATES,
+  MAX_ENTITY_SUMMARY_GRAPES,
+  MAX_ERROR_ENVELOPE_CODE_CHARS,
+  MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS,
+  MAX_ERROR_ENVELOPE_MESSAGE_CHARS,
+  MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS,
+  MAX_INTERPRET_SECONDARY_INTENTS,
+  MAX_NORMALIZED_QUERY_VIEW_STRINGS,
+  MAX_QUERY_BUDGET_CANDIDATES,
+  MAX_QUERY_BUDGET_DENSE_CALLS,
+  MAX_QUERY_BUDGET_LATENCY_MS,
+  MAX_QUERY_BUDGET_RERANK_LIMIT,
+  MAX_RESOLVE_CANDIDATES,
+  MAX_SEARCH_CONSTRAINT_STRING_LIST,
+  MAX_SEARCH_COUNTERFACTUALS,
+  MAX_SEARCH_EVIDENCE_ITEMS_PER_RESULT,
+  MAX_SEARCH_METADATA_OBJECT_KEYS,
+  MAX_SEARCH_META_DEBUG_REFS,
+  MAX_SEARCH_PARSED_UNPARSED_FRAGMENTS,
+  MAX_SEARCH_RESULTS_PER_RESPONSE,
+  MAX_SEARCH_RETRIEVAL_PROVENANCE_SLICES,
+  MAX_SEARCH_SHORT_STRING_LIST,
+  MAX_SEARCH_UNCERTAINTY_STRING_LIST,
+  MAX_SESSION_ENTITY_ID_CHARS,
+  MAX_SESSION_PREVIOUS_ENTITIES,
+  SEARCH_RELEVANCE_SCORE_ABS_MAX,
+} from '../constants.js';
 
-export const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
-  /^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{64}$/;
+export const CANONICAL_AUTHORITY_TRACE_REF_PATTERN = new RegExp(
+  `^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{${String(AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH)}}$`,
+);
 
 export const ErrorResponseSchema = z.object({
   error: z.object({
-    request_id: z.string().max(256),
-    code: z.string().max(128),
-    message: z.string().max(4096),
-    failure_reason: z.string().max(1024).nullable(),
+    request_id: z.string().max(MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS),
+    code: z.string().max(MAX_ERROR_ENVELOPE_CODE_CHARS),
+    message: z.string().max(MAX_ERROR_ENVELOPE_MESSAGE_CHARS),
+    failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable(),
     retryable: z.boolean(),
   }).strict(),
 }).strict();
@@ -29,7 +59,7 @@ export const EvidenceItemSchema = z.object({
   strength: z.enum(['low', 'medium', 'high']),
   provenance: z.string().min(1),
   metadata: z.record(z.string(), z.unknown()).refine(
-    (obj) => Object.keys(obj).length <= 50,
+    (obj) => Object.keys(obj).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
     'metadata must have at most 50 keys',
   ).optional(),
 }).strict();
@@ -43,7 +73,7 @@ export const EntitySummarySchema = z.object({
   appellation: z.string().min(1).optional(),
   producer_prestige: z.number().finite().optional(),
   vintage: z.number().int().optional(),
-  grapes: z.array(z.string().min(1)).max(20).optional(),
+  grapes: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_GRAPES).optional(),
   price_range: z.string().min(1).optional(),
 }).strict();
 
@@ -61,16 +91,16 @@ export const MatchDetailSchema = z.object({
 }).strict();
 
 export const ConstraintEvaluationSchema = z.object({
-  matched: z.array(z.string()).max(100),
-  unmet: z.array(z.string()).max(100),
-  inferred: z.array(z.string()).max(100),
+  matched: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+  unmet: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+  inferred: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
 }).strict();
 
 export const UncertaintyBlockSchema = z.object({
   uncertainty_confidence: z.number().min(0).max(1),
-  missing_info: z.array(z.string()).max(50),
+  missing_info: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST),
   approximation_used: z.boolean(),
-  ambiguity_flags: z.array(z.string()).max(20).optional(),
+  ambiguity_flags: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
 }).strict();
 
 export const DrinkingWindowSchema = z.object({
@@ -91,26 +121,30 @@ export const ResultItemSchema = z.object({
   entity: EntitySummarySchema,
   // Bounded relevance: never NaN/Infinity, never absurd numbers that would
   // break percentile telemetry or float32 client-side ranking.
-  relevance_score: z.number().finite().min(-1e6).max(1e6),
+  relevance_score: z
+    .number()
+    .finite()
+    .min(-SEARCH_RELEVANCE_SCORE_ABS_MAX)
+    .max(SEARCH_RELEVANCE_SCORE_ABS_MAX),
   match: MatchDetailSchema,
   constraints: ConstraintEvaluationSchema,
   uncertainty: UncertaintyBlockSchema,
-  evidence_items: z.array(EvidenceItemSchema).min(1).max(100),
+  evidence_items: z.array(EvidenceItemSchema).min(1).max(MAX_SEARCH_EVIDENCE_ITEMS_PER_RESULT),
   human_readable_evidence_summary: z.string().min(1).optional(),
   drinking_window: DrinkingWindowSchema.optional(),
-  match_reasons: z.array(z.string()).max(50).optional(),
-  violated_constraints: z.array(z.string()).max(50).optional(),
+  match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
+  violated_constraints: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
 }).strict();
 
 export const ClarificationCandidateSchema = z.object({
   entity_id: z.string().min(1),
   label: z.string().min(1),
-  distinguishing_features: z.array(z.string()).max(20),
+  distinguishing_features: z.array(z.string()).max(MAX_CLARIFICATION_CANDIDATES),
 }).strict();
 
 export const ClarificationPayloadSchema = z.object({
   reason: z.string().min(1),
-  candidates: z.array(ClarificationCandidateSchema).max(20),
+  candidates: z.array(ClarificationCandidateSchema).max(MAX_CLARIFICATION_CANDIDATES),
   suggestion_type: z.enum(['disambiguation', 'missing_info']),
 }).strict();
 
@@ -138,7 +172,7 @@ export const EngineDecisionSchema = z.object({
     .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
     .optional(),
   blocking_eligible: z.boolean().optional(),
-  degradation_reasons: z.array(z.string().min(1)).max(20).optional(),
+  degradation_reasons: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
   decision_snapshot: DecisionSnapshotSchema,
   failure_reason: z.string().min(1).optional(),
   admission_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
@@ -152,13 +186,13 @@ export const ParsedConstraintsExternSchema = z.object({
     field: z.string().min(1),
     op: z.string().min(1),
     value: z.string(),
-  }).strict()).max(100),
+  }).strict()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
   soft: z.array(z.object({
     field: z.string().min(1),
     op: z.string().min(1),
     value: z.string(),
-  }).strict()).max(100),
-  unparsed: z.array(z.string()).max(50),
+  }).strict()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+  unparsed: z.array(z.string()).max(MAX_SEARCH_PARSED_UNPARSED_FRAGMENTS),
 }).strict();
 
 export const SearchResponseMetaSchema = z.object({
@@ -168,7 +202,7 @@ export const SearchResponseMetaSchema = z.object({
   version: z.string().min(1),
   engine_schema_version: z.literal('search_response_v1'),
   decision_snapshot: DecisionSnapshotSchema.optional(),
-  debug_refs: z.array(z.string()).max(50).optional(),
+  debug_refs: z.array(z.string()).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
   response_hash: z.string().min(1).optional(),
   authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtime_correlation_ref: z.string().min(1).optional(),
@@ -176,7 +210,7 @@ export const SearchResponseMetaSchema = z.object({
     .enum(['authoritative', 'degraded', 'heuristic', 'advisory'])
     .optional(),
   blocking_eligible: z.boolean().optional(),
-  degradation_reasons: z.array(z.string().min(1)).max(20).optional(),
+  degradation_reasons: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
   specialized_route_requested: z
     .enum(['producer_browse', 'region_browse', 'compare_candidates'])
     .nullable()
@@ -201,14 +235,14 @@ export const SearchResponseMetaSchema = z.object({
   retrieval_provenance_slices: z.array(z.object({
     query_id: z.string().min(1),
     candidate_entity_id: z.string().min(1),
-    channels: z.array(z.string().min(1)).max(20),
+    channels: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),
     top_channel: z.string().min(1),
     anchor_conditioned: z.boolean(),
     protected: z.boolean(),
     protected_reason: z.string().min(1).optional(),
     fusion_score: z.number().finite(),
     rank: z.number().int().positive(),
-  }).strict()).max(500).optional(),
+  }).strict()).max(MAX_SEARCH_RETRIEVAL_PROVENANCE_SLICES).optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({
@@ -217,8 +251,8 @@ export const SearchResponseSchema = z.object({
   // Hard cap on response size: ranking pipeline already truncates, but
   // a defense-in-depth bound keeps an out-of-control producer from
   // shipping 100k items into a single HTTP response.
-  results: z.array(ResultItemSchema).max(200),
-  counterfactuals: z.array(CounterfactualRejectSchema).max(100).optional(),
+  results: z.array(ResultItemSchema).max(MAX_SEARCH_RESULTS_PER_RESPONSE),
+  counterfactuals: z.array(CounterfactualRejectSchema).max(MAX_SEARCH_COUNTERFACTUALS).optional(),
   clarification: ClarificationPayloadSchema.nullable().optional(),
   meta: SearchResponseMetaSchema,
   retrieval_mode: z.enum([
@@ -304,7 +338,7 @@ export const ComparisonEntitySchema = z.object({
   top_result: ResultItemSchema.nullable(),
   result_count: z.number().int().nonnegative(),
   resolution_status: z.enum(['resolved', 'ambiguous', 'failed']),
-  all_results: z.array(ResultItemSchema).max(200),
+  all_results: z.array(ResultItemSchema).max(MAX_SEARCH_RESULTS_PER_RESPONSE),
 }).strict();
 
 export const ComparisonSearchResponseSchema = z.object({
@@ -344,20 +378,22 @@ const NormalizedQueryViewsSchema = z.object({
   vintage_canonicalized: z.string().min(1),
   vintage_stripped: z.string().min(1),
   transliterated: z.string().min(1).optional(),
-  reordered: z.array(z.string().min(1)).max(50).optional(),
-  lookup_variants: z.array(z.string().min(1)).max(50),
+  reordered: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS).optional(),
+  lookup_variants: z.array(z.string().min(1)).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
 }).strict();
 
 const SessionContextTransportSchema = z.object({
   session_id: z.string().min(1),
-  previous_entities: z.array(z.string().min(1).max(256)).max(50),
+  previous_entities: z
+    .array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS))
+    .max(MAX_SESSION_PREVIOUS_ENTITIES),
 }).strict();
 
 const QueryBudgetTransportSchema = z.object({
-  max_latency_ms: z.number().int().positive().max(30_000),
-  max_candidates: z.number().int().positive().max(1_000),
-  rerank_limit: z.number().int().positive().max(500),
-  max_dense_calls: z.number().int().positive().max(100).optional(),
+  max_latency_ms: z.number().int().positive().max(MAX_QUERY_BUDGET_LATENCY_MS),
+  max_candidates: z.number().int().positive().max(MAX_QUERY_BUDGET_CANDIDATES),
+  rerank_limit: z.number().int().positive().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
+  max_dense_calls: z.number().int().positive().max(MAX_QUERY_BUDGET_DENSE_CALLS).optional(),
 }).strict();
 
 export const InterpretResponseSchema = z.object({
@@ -365,19 +401,19 @@ export const InterpretResponseSchema = z.object({
   normalized_query: z.string().min(1),
   normalized_query_views: NormalizedQueryViewsSchema.optional(),
   intent: z.string().min(1),
-  secondary_intents: z.array(z.string().min(1)).max(10).optional(),
+  secondary_intents: z.array(z.string().min(1)).max(MAX_INTERPRET_SECONDARY_INTENTS).optional(),
   route: z.enum(['entity', 'hybrid', 'mixed']),
   retrieval_mode: z.string().min(1),
   query_class: z.string().min(1),
-  anchors: z.array(z.record(z.unknown())).max(50),
+  anchors: z.array(z.record(z.unknown())).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
   constraints: z.object({
-    hard: z.array(z.record(z.unknown())).max(100),
-    soft: z.array(z.record(z.unknown())).max(100),
-    inferred: z.array(z.record(z.unknown())).max(100),
+    hard: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    soft: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    inferred: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
   }).strict(),
   expansions: z.object({
-    lexical: z.array(z.string()).max(100),
-    semantic: z.array(z.string()).max(100),
+    lexical: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
+    semantic: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
   }).strict(),
   policy: z.record(z.unknown()),
   uncertainty: z.record(z.unknown()),
@@ -401,10 +437,10 @@ export const ResolveCandidateSchema = z.object({
   canonical_label: z.string().min(1),
   rank: z.number().int().positive(),
   calibrated_score: z.number().min(0).max(1),
-  evidence_refs: z.array(z.string().min(1)).max(50).optional(),
-  match_reasons: z.array(z.string()).max(50).optional(),
+  evidence_refs: z.array(z.string().min(1)).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
+  match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
   metadata: z.record(z.string(), z.unknown()).refine(
-    (obj) => Object.keys(obj).length <= 50,
+    (obj) => Object.keys(obj).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
     'metadata must have at most 50 keys',
   ).optional(),
 }).strict();
@@ -417,7 +453,7 @@ export const ResolveTopEntitySchema = z.object({
 
 export const ResolveResponseSchema = z.object({
   status: z.enum(['resolved', 'ambiguous', 'failed']),
-  candidates: z.array(ResolveCandidateSchema).max(200),
+  candidates: z.array(ResolveCandidateSchema).max(MAX_RESOLVE_CANDIDATES),
   top_entity: ResolveTopEntitySchema.optional(),
   decision_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN),
   authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN),

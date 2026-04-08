@@ -17,6 +17,9 @@ import type { QueryClass } from '../../shared/types/index.js';
 import type { EvalResult } from '../model/eval-result.js';
 import type { EvalCase } from '../model/eval-case.js';
 
+/** Midpoint offset for bin center in reliability diagram (equal-width bins). */
+const RELIABILITY_BIN_CENTER_OFFSET = 0.5;
+
 /**
  * A single bin in a reliability diagram.
  */
@@ -120,8 +123,8 @@ export class CalibrationEvaluator {
     }
 
     return binData.map((bin, i) => ({
-      binCenter: (i + 0.5) * binWidth,
-      avgConfidence: bin.count > 0 ? bin.confidenceSum / bin.count : (i + 0.5) * binWidth,
+      binCenter: (i + RELIABILITY_BIN_CENTER_OFFSET) * binWidth,
+      avgConfidence: bin.count > 0 ? bin.confidenceSum / bin.count : (i + RELIABILITY_BIN_CENTER_OFFSET) * binWidth,
       avgAccuracy: bin.count > 0 ? bin.correctCount / bin.count : 0,
       count: bin.count,
     }));

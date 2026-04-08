@@ -16,6 +16,7 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 
 // ---------------------------------------------------------------------------
@@ -314,7 +315,13 @@ export async function executeAgentTool(
             }
           }
           const check = parts.join(' ');
-          return !negTerms.some((term) => check.includes(term));
+          // Use Unicode-aware word boundary so "cabernet" doesn't match "cabernet franc"
+          // as a full-word exclusion. \b is ASCII-only and silently fails on non-ASCII.
+          return !negTerms.some((term) => {
+            const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+            return re.test(check);
+          });
         });
         if (filtered.length < response.results.length) {
           const filteredResponse = { ...response, results: filtered } as typeof response;
@@ -408,8 +415,13 @@ export async function executeAgentTool(
               ? { modelVersion: doc.drinkingWindowModelVersion }
               : {}),
           };
+          const statusLabel = currentlyDrinkable
+            ? `currently drinkable (peak: ${start}–${end})`
+            : targetYear < start
+              ? `not yet at peak — hold until ${start}`
+              : `past peak (window closed ${end})`;
           return {
-            observation: `${doc.canonicalLabel}: drinking window ${start}-${end}, currently ${currentlyDrinkable ? 'drinkable' : 'not in window'}`,
+            observation: `${doc.canonicalLabel}: drinking window ${start}-${end}. As of ${targetYear}: ${statusLabel}.`,
             rawResult: dw,
           };
         }
@@ -430,8 +442,13 @@ export async function executeAgentTool(
       }
       const dw = firstResult.drinkingWindow;
       if (dw !== undefined) {
+        const statusLabelFallback = dw.currentlyDrinkable
+          ? `currently drinkable (peak: ${dw.drinkingWindowStart}–${dw.drinkingWindowEnd})`
+          : targetYear < dw.drinkingWindowStart
+            ? `not yet at peak — hold until ${dw.drinkingWindowStart}`
+            : `past peak (window closed ${dw.drinkingWindowEnd})`;
         return {
-          observation: `${firstResult.entity.canonicalLabel}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}, currently ${dw.currentlyDrinkable ? 'drinkable' : 'not in window'}, confidence: ${dw.confidence}`,
+          observation: `${firstResult.entity.canonicalLabel}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}. As of ${targetYear}: ${statusLabelFallback}. Confidence: ${dw.confidence}`,
           rawResult: dw,
         };
       }
@@ -449,7 +466,11 @@ export async function executeAgentTool(
       const parsed = parseResult.data;
       // Prefer explicit KRW budget; fall back to legacy USD field (converted).
       const budgetKrw = parsed.max_price_krw
-        ?? (parsed.max_price !== undefined ? Math.round(parsed.max_price * 1_400) : undefined);
+        ?? (
+          parsed.max_price !== undefined
+            ? Math.round(parsed.max_price * KRW_PER_USD_APPROXIMATE)
+            : undefined
+        );
       const query = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}${budgetKrw !== undefined ? ` under ${budgetKrw} KRW` : ''}`;
       const response = await deps.searchUseCase.execute({ query }, requestId);
 

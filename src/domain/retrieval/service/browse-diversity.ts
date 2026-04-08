@@ -2,6 +2,23 @@ import type { SparseHit } from '../port/search-index.port.js';
 
 const VINTAGE_YEAR_IN_LABEL = /(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/gu;
 
+/** BM25 multiplier weights for critic / prestige lifts (producer browse). */
+const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;
+const PRODUCER_BROWSE_PRESTIGE_LIFT = 0.025;
+/** Region browse uses slightly higher prestige lift for exploration. */
+const REGION_BROWSE_CRITIC_LIFT = 0.02;
+const REGION_BROWSE_PRESTIGE_LIFT = 0.03;
+/** Max OR-query variants for producer browse lexical expansion. */
+const PRODUCER_BROWSE_MAX_LEXICAL_VARIANTS = 4;
+/** Max OR-query variants for region browse (path + segments). */
+const REGION_BROWSE_MAX_LEXICAL_VARIANTS = 6;
+/** Producer cap math: min slots per producer, divisor ties to result limit. */
+const REGION_DIVERSITY_PER_PRODUCER_MIN = 2;
+const REGION_DIVERSITY_PER_PRODUCER_MAX = 4;
+const REGION_DIVERSITY_LIMIT_DIVISOR = 5;
+/** Hard cap on sparse over-fetch before diversity selection. */
+const BROWSE_SPARSE_FETCH_CEILING = 240;
+
 /** Strips 4-digit vintage tokens from a display label (product-line key). */
 export function stripVintageFromLabel(label: string): string {
   return label.replace(VINTAGE_YEAR_IN_LABEL, ' ').replace(/\s+/g, ' ').trim();
@@ -35,7 +52,7 @@ function critic01(c: number | undefined): number {
 export function producerBrowseRankScore(hit: SparseHit): number {
   const c = critic01(hit.summary?.criticScoreNormalized);
   const pr = prestige01(hit.summary?.producerPrestige);
-  return hit.score * (1 + 0.02 * c + 0.025 * pr);
+  return hit.score * (1 + PRODUCER_BROWSE_CRITIC_LIFT * c + PRODUCER_BROWSE_PRESTIGE_LIFT * pr);
 }
 
 /**
@@ -44,7 +61,7 @@ export function producerBrowseRankScore(hit: SparseHit): number {
 export function regionBrowseRankScore(hit: SparseHit): number {
   const c = critic01(hit.summary?.criticScoreNormalized);
   const pr = prestige01(hit.summary?.producerPrestige);
-  return hit.score * (1 + 0.02 * c + 0.03 * pr);
+  return hit.score * (1 + REGION_BROWSE_CRITIC_LIFT * c + REGION_BROWSE_PRESTIGE_LIFT * pr);
 }
 
 /**
@@ -68,7 +85,7 @@ export function expandProducerBrowseLexicalQueries(seed: string): readonly strin
   if (lower !== trimmed) {
     push(lower);
   }
-  return out.slice(0, 4);
+  return out.slice(0, PRODUCER_BROWSE_MAX_LEXICAL_VARIANTS);
 }
 
 /**
@@ -98,7 +115,7 @@ export function expandRegionBrowseLexicalQueries(seed: string): readonly string[
       push(seg);
     }
   }
-  return out.slice(0, 6);
+  return out.slice(0, REGION_BROWSE_MAX_LEXICAL_VARIANTS);
 }
 
 /**
@@ -167,7 +184,13 @@ export function diversifyRegionBrowseHits(
     return [];
   }
 
-  const maxPerProducer = Math.max(2, Math.min(4, Math.ceil(limit / 5)));
+  const maxPerProducer = Math.max(
+    REGION_DIVERSITY_PER_PRODUCER_MIN,
+    Math.min(
+      REGION_DIVERSITY_PER_PRODUCER_MAX,
+      Math.ceil(limit / REGION_DIVERSITY_LIMIT_DIVISOR),
+    ),
+  );
 
   const sorted = [...hits].sort((a, b) => regionBrowseRankScore(b) - regionBrowseRankScore(a));
 
@@ -212,11 +235,12 @@ export function diversifyRegionBrowseHits(
 }
 
 /** Over-fetch multiplier for sparse browse before diversity selection. */
-export const BROWSE_SPARSE_OVERFETCH_FACTOR = 8;
+const BROWSE_SPARSE_OVERFETCH_MULTIPLIER = 8;
+export const BROWSE_SPARSE_OVERFETCH_FACTOR = BROWSE_SPARSE_OVERFETCH_MULTIPLIER;
 
 export function browseSparseFetchLimit(resultLimit: number): number {
   const raw = resultLimit * BROWSE_SPARSE_OVERFETCH_FACTOR;
-  return Math.min(240, Math.max(resultLimit, raw));
+  return Math.min(BROWSE_SPARSE_FETCH_CEILING, Math.max(resultLimit, raw));
 }
 
 /**

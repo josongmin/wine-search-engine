@@ -10,6 +10,36 @@ import { promises as dnsPromises } from 'node:dns';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
 
+/** Private/reserved IPv4 first-octet / pair patterns (SSRF at delivery time). */
+const IPV4_LOOPBACK_FIRST_OCTET = 127;
+const IPV4_PRIVATE_CLASS_A_FIRST_OCTET = 10;
+const IPV4_THIS_NETWORK_FIRST_OCTET = 0;
+const IPV4_PRIVATE_CLASS_B_FIRST_OCTET = 172;
+const IPV4_PRIVATE_CLASS_B_SECOND_MIN = 16;
+const IPV4_PRIVATE_CLASS_B_SECOND_MAX = 31;
+const IPV4_PRIVATE_CLASS_C_FIRST_OCTET = 192;
+const IPV4_PRIVATE_CLASS_C_SECOND_OCTET = 168;
+const IPV4_LINK_LOCAL_FIRST_OCTET = 169;
+const IPV4_LINK_LOCAL_SECOND_OCTET = 254;
+
+/** Minimum HMAC secret length (matches env schema). */
+const WEBHOOK_SECRET_MIN_LENGTH = 16;
+/** Total delivery attempts (initial + retries). */
+const WEBHOOK_MAX_DELIVERY_ATTEMPTS = 4;
+const WEBHOOK_BACKOFF_MS_FIRST_GAP = 1000;
+const WEBHOOK_BACKOFF_MS_SECOND_GAP = 5000;
+const WEBHOOK_BACKOFF_MS_THIRD_GAP = 30_000;
+/** Milliseconds between attempts: after 1st fail, 2nd fail, 3rd fail. */
+const WEBHOOK_BACKOFF_MS_AFTER_ATTEMPT = [
+  WEBHOOK_BACKOFF_MS_FIRST_GAP,
+  WEBHOOK_BACKOFF_MS_SECOND_GAP,
+  WEBHOOK_BACKOFF_MS_THIRD_GAP,
+] as const;
+/** Per-attempt fetch timeout (fail fast on hung callbacks). */
+const WEBHOOK_FETCH_TIMEOUT_MS = 5000;
+const HTTP_SUCCESS_MIN = 200;
+const HTTP_SUCCESS_MAX_EXCLUSIVE = 300;
+
 /**
  * Returns true if the given resolved IP address is private/reserved/loopback
  * and should be rejected at webhook delivery time. Defends against DNS rebinding
@@ -22,10 +52,16 @@ function isPrivateOrReservedIp(ip: string): boolean {
     const a = Number(v4[1]);
     const b = Number(v4[2]);
     return (
-      a === 127 || a === 10 || a === 0 ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) ||
-      (a === 169 && b === 254)
+      a === IPV4_LOOPBACK_FIRST_OCTET
+      || a === IPV4_PRIVATE_CLASS_A_FIRST_OCTET
+      || a === IPV4_THIS_NETWORK_FIRST_OCTET
+      || (
+        a === IPV4_PRIVATE_CLASS_B_FIRST_OCTET
+        && b >= IPV4_PRIVATE_CLASS_B_SECOND_MIN
+        && b <= IPV4_PRIVATE_CLASS_B_SECOND_MAX
+      )
+      || (a === IPV4_PRIVATE_CLASS_C_FIRST_OCTET && b === IPV4_PRIVATE_CLASS_C_SECOND_OCTET)
+      || (a === IPV4_LINK_LOCAL_FIRST_OCTET && b === IPV4_LINK_LOCAL_SECOND_OCTET)
     );
   }
   // IPv6 (collapsed forms accepted; just check well-known prefixes)
@@ -98,8 +134,10 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
    * @param sleepFn  - Optional sleep implementation (injectable for tests).
    */
   constructor(secret: string, sleepFn?: (ms: number) => Promise<void>) {
-    if (secret.length < 16) {
-      throw new Error('WEBHOOK_SECRET must be at least 16 characters');
+    if (secret.length < WEBHOOK_SECRET_MIN_LENGTH) {
+      throw new Error(
+        `WEBHOOK_SECRET must be at least ${String(WEBHOOK_SECRET_MIN_LENGTH)} characters`,
+      );
     }
     this.secret = secret;
     this.sleepFn = sleepFn ?? this.defaultSleep;
@@ -130,8 +168,8 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
 
     // 4 total attempts: initial try + 3 retries separated by 1 s, 5 s, 30 s waits.
     // backoffs[i] is the wait *before* attempt i+1 (i.e. after attempt i fails).
-    const maxAttempts = 4;
-    const backoffs = [1000, 5000, 30000]; // 1s, 5s, 30s — one entry per inter-attempt gap
+    const maxAttempts = WEBHOOK_MAX_DELIVERY_ATTEMPTS;
+    const backoffs = WEBHOOK_BACKOFF_MS_AFTER_ATTEMPT;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const attemptNumber = attempt + 1;
@@ -232,7 +270,7 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
-    }, 5000); // 5s timeout
+    }, WEBHOOK_FETCH_TIMEOUT_MS);
 
     try {
       const response = await fetch(url, {
@@ -249,10 +287,12 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
       const statusCode = response.status;
       return {
         statusCode,
-        errorMessage: statusCode >= 200 && statusCode < 300
-          ? null
-          : `Webhook returned HTTP ${statusCode}`,
-        succeeded: statusCode >= 200 && statusCode < 300,
+        errorMessage:
+          statusCode >= HTTP_SUCCESS_MIN && statusCode < HTTP_SUCCESS_MAX_EXCLUSIVE
+            ? null
+            : `Webhook returned HTTP ${statusCode}`,
+        succeeded:
+          statusCode >= HTTP_SUCCESS_MIN && statusCode < HTTP_SUCCESS_MAX_EXCLUSIVE,
       };
     } finally {
       clearTimeout(timeoutId);

@@ -44,6 +44,13 @@ import type { ThresholdProposal } from '../model/threshold-proposal.js';
 import type { ProposalStore } from '../port/proposal-store.port.js';
 import type { SliceMetrics } from '../../evaluation/model/eval-metrics.js';
 
+/** Absolute utility drop (points) vs baseline to flag shadow regression. */
+const SHADOW_UTILITY_ABS_REGRESSION_THRESHOLD = 0.01;
+/** Relative utility drop vs baseline to flag shadow regression. */
+const SHADOW_UTILITY_RELATIVE_DROP_THRESHOLD = 0.02;
+/** Allowed wrong-resolve rate increase vs baseline on a slice. */
+const SHADOW_WRONG_RESOLVE_RATE_INCREASE_THRESHOLD = 0.005;
+
 /**
  * Result of evaluating a proposal through the promotion gate.
  */
@@ -357,8 +364,8 @@ export class PromotionGate {
           ? (baseline.metrics.decisionUtility - shadow.metrics.decisionUtility) / baseline.metrics.decisionUtility
           : 0;
       if (
-        shadow.metrics.decisionUtility < baseline.metrics.decisionUtility - 0.01 ||
-        relativeUtilityDrop > 0.02
+        shadow.metrics.decisionUtility < baseline.metrics.decisionUtility - SHADOW_UTILITY_ABS_REGRESSION_THRESHOLD
+        || relativeUtilityDrop > SHADOW_UTILITY_RELATIVE_DROP_THRESHOLD
       ) {
         regressions.push({
           sliceTag: shadow.sliceTag,
@@ -368,7 +375,7 @@ export class PromotionGate {
         });
       }
 
-      if (shadow.metrics.wrongResolveRate > baseline.metrics.wrongResolveRate + 0.005) {
+      if (shadow.metrics.wrongResolveRate > baseline.metrics.wrongResolveRate + SHADOW_WRONG_RESOLVE_RATE_INCREASE_THRESHOLD) {
         regressions.push({
           sliceTag: shadow.sliceTag,
           metric: 'wrongResolveRate',

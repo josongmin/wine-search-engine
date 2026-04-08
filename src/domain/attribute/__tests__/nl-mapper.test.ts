@@ -20,6 +20,23 @@ class NullMappingTablePort implements MappingTablePort {
 
 // ── Stub that returns custom mappings ──────────────────────────────────────────
 
+class SlowNullMappingTablePort implements MappingTablePort {
+  constructor(private readonly delayMs: number) {}
+
+  async findMapping(_phrase: string, _version?: string): Promise<NLMapping | null> {
+    await new Promise((resolve) => {
+      setTimeout(resolve, this.delayMs);
+    });
+    return null;
+  }
+  async findMappingsByAttribute(_attribute: string): Promise<readonly NLMapping[]> {
+    return [];
+  }
+  async getCurrentVersion(): Promise<string> {
+    return 'v1.0';
+  }
+}
+
 class CustomMappingTablePort implements MappingTablePort {
   constructor(private readonly mapping: NLMapping) {}
 
@@ -153,6 +170,18 @@ describe('NLMapper', () => {
       it('all unknown phrases returns empty array', async () => {
         const { constraints } = await mapper.mapConstraints(['unknown1', 'unknown2']);
         expect(constraints).toHaveLength(0);
+      });
+
+      it('mapConstraints throws AbortError when signal aborts between slow phrase lookups', async () => {
+        const slowMapper = new NLMapper(new SlowNullMappingTablePort(40));
+        const controller = new AbortController();
+        const phrases = ['za', 'zb', 'zc', 'zd'];
+        const mapped = slowMapper.mapConstraints(phrases, { abortSignal: controller.signal });
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+        controller.abort();
+        await expect(mapped).rejects.toMatchObject({ name: 'AbortError' });
       });
     });
 

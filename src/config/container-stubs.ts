@@ -19,6 +19,11 @@ import type {
   AliasMatcher,
 } from '../domain/query/service/anchor-extractor.js';
 
+/** Bit shift for djb2-style rolling hash in deterministic stub vectors. */
+const STUB_EMBED_HASH_SHIFT = 5;
+/** 16-bit mask normalizing hash to [0, 1] before scaling to [-1, 1]. */
+const STUB_EMBED_UINT16_MAX = 0xffff;
+
 export class StubBlockingPort implements BlockingPort {
   block(
     _query: string,
@@ -50,11 +55,11 @@ export class StubEmbeddingService implements EmbeddingServicePort {
     const vec = new Array<number>(this.dimension);
     let hash = 0;
     for (let i = 0; i < text.length; i++) {
-      hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
+      hash = ((hash << STUB_EMBED_HASH_SHIFT) - hash + text.charCodeAt(i)) | 0;
     }
     for (let i = 0; i < this.dimension; i++) {
-      hash = ((hash << 5) - hash + i) | 0;
-      vec[i] = ((hash & 0xffff) / 0xffff) * 2 - 1;
+      hash = ((hash << STUB_EMBED_HASH_SHIFT) - hash + i) | 0;
+      vec[i] = ((hash & STUB_EMBED_UINT16_MAX) / STUB_EMBED_UINT16_MAX) * 2 - 1;
     }
     return vec;
   }

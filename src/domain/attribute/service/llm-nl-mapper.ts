@@ -25,19 +25,29 @@ import type { MappingTablePort } from '../port/mapping-table.port.js';
 import type { PhraseCachePort } from '../port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
 import type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
-import { NLMapper, toNormalizedConstraint, type MapConstraintsResult } from './nl-mapper.js';
+import {
+  NLMapper,
+  toNormalizedConstraint,
+  type MapConstraintsOptions,
+  type MapConstraintsResult,
+} from './nl-mapper.js';
 import {
   LlmConstraintResponseSchema,
   LLM_ALLOWED_ATTRIBUTES,
   type LlmConstraintItem,
 } from '../model/llm-constraint-schema.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { abortError, throwIfAborted } from '../../shared/cooperative-abort.js';
 
 const log = bootstrapLogger.child({ component: 'LlmNLMapper' });
 
 const LLM_MAPPING_VERSION = 'llm-v1.0';
 const LLM_CONFIDENCE_THRESHOLD = 0.5;
 const LLM_TIMEOUT_MS = 5_000;
+/** Prefix length of SHA-1 hex in prompt fingerprint (cache namespace). */
+const PROMPT_FINGERPRINT_HEX_PREFIX_CHARS = 8;
+/** Truncate raw LLM text in schema-validation failure logs. */
+const LLM_SCHEMA_FAIL_RAW_TEXT_PREVIEW_CHARS = 200;
 
 const SYSTEM_PROMPT = `You are a wine search query constraint parser. Given Korean or English wine search phrases, extract structured attribute constraints.
 
@@ -64,7 +74,7 @@ If a phrase has no wine-related constraint meaning, omit it from the array. Retu
  * any prompt edit produce a brand-new key namespace, so old entries become
  * unreachable and harmless.
  */
-const PROMPT_FINGERPRINT = createHash('sha1').update(SYSTEM_PROMPT).digest('hex').slice(0, 8);
+const PROMPT_FINGERPRINT = createHash('sha1').update(SYSTEM_PROMPT).digest('hex').slice(0, PROMPT_FINGERPRINT_HEX_PREFIX_CHARS);
 /** @internal Exported for testing — production callers should not depend on the layout. */
 export const CACHE_KEY_NAMESPACE = `${LLM_MAPPING_VERSION}:${PROMPT_FINGERPRINT}`;
 
@@ -100,7 +110,10 @@ export class LlmNLMapper extends NLMapper {
    */
   override async mapConstraints(
     phrases: readonly string[],
+    options?: MapConstraintsOptions,
   ): Promise<MapConstraintsResult> {
+    throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
+
     const ruleResults: NormalizedConstraint[] = [];
     const missedPhrases: string[] = [];
 
@@ -119,6 +132,7 @@ export class LlmNLMapper extends NLMapper {
 
     // Step 1: Rule table lookup (deterministic, fast)
     for (const phrase of dedupedPhrases) {
+      throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
       const mapping = await this.mapPhrase(phrase);
       if (mapping !== null) {
         ruleResults.push(toNormalizedConstraint(mapping));
@@ -146,6 +160,7 @@ export class LlmNLMapper extends NLMapper {
       const uncachedPhrases: string[] = [];
       if (this.phraseCache !== undefined) {
         for (const phrase of llmPhrases) {
+          throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
           try {
             const cached = await this.phraseCache.get(this.cacheKey(phrase));
             if (cached !== null) {
@@ -188,7 +203,7 @@ export class LlmNLMapper extends NLMapper {
       if (uncachedPhrases.length > 0) {
         const llmStart = Date.now();
         try {
-          const rawItems = await this.callLlm(uncachedPhrases);
+          const rawItems = await this.callLlm(uncachedPhrases, options?.abortSignal);
           llmLatencyMs = Date.now() - llmStart;
 
           // Cache LLM results per phrase, including negative entries for phrases
@@ -224,6 +239,12 @@ export class LlmNLMapper extends NLMapper {
             llmResults.push(llmItemToConstraint(item));
           }
         } catch (err) {
+          if (options?.abortSignal?.aborted) {
+            throw abortError(
+              err instanceof Error ? err.message : 'Constraint mapping aborted',
+              err,
+            );
+          }
           llmLatencyMs = Date.now() - llmStart;
           log.warn(
             { err, missedPhraseCount: uncachedPhrases.length, latencyMs: llmLatencyMs },
@@ -285,12 +306,21 @@ export class LlmNLMapper extends NLMapper {
     return `${CACHE_KEY_NAMESPACE}:${phrase}`;
   }
 
-  private async callLlm(phrases: readonly string[]): Promise<LlmConstraintItem[]> {
+  private async callLlm(
+    phrases: readonly string[],
+    externalSignal?: AbortSignal,
+  ): Promise<LlmConstraintItem[]> {
     const userMessage = JSON.stringify(phrases);
-    const controller = new AbortController();
+    const timeoutController = new AbortController();
     const timeoutHandle = setTimeout(() => {
-      controller.abort();
+      timeoutController.abort();
     }, this.llmTimeoutMs);
+
+    const combinedSignal =
+      externalSignal !== undefined
+        ? AbortSignal.any([externalSignal, timeoutController.signal])
+        : timeoutController.signal;
+
     const llmTimeoutError = (): Error =>
       new Error(`LLM query interpreter timed out after ${this.llmTimeoutMs}ms`);
 
@@ -302,14 +332,17 @@ export class LlmNLMapper extends NLMapper {
         ],
         temperature: 0,
         maxOutputTokens: 512,
-        abortSignal: controller.signal,
+        abortSignal: combinedSignal,
       });
       // Disarm timeout as soon as the provider returns so a late timer tick
       // cannot fire while we parse/validate synchronously.
       clearTimeout(timeoutHandle);
       // Real adapters reject when aborted; non-compliant mocks might still
       // resolve later — do not treat that as a successful completion.
-      if (controller.signal.aborted) {
+      if (externalSignal?.aborted) {
+        throw abortError('Constraint mapping aborted');
+      }
+      if (timeoutController.signal.aborted) {
         throw llmTimeoutError();
       }
 
@@ -318,7 +351,7 @@ export class LlmNLMapper extends NLMapper {
 
       if (!validated.success) {
         log.warn(
-          { issues: validated.error.issues, rawText: result.text.slice(0, 200) },
+          { issues: validated.error.issues, rawText: result.text.slice(0, LLM_SCHEMA_FAIL_RAW_TEXT_PREVIEW_CHARS) },
           'LLM response failed schema validation',
         );
         return [];
@@ -326,7 +359,13 @@ export class LlmNLMapper extends NLMapper {
 
       return validated.data;
     } catch (err) {
-      if (controller.signal.aborted) {
+      if (externalSignal?.aborted) {
+        throw abortError(
+          err instanceof Error ? err.message : 'Constraint mapping aborted',
+          err,
+        );
+      }
+      if (timeoutController.signal.aborted) {
         throw llmTimeoutError();
       }
       throw err;

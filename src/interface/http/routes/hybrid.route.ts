@@ -12,6 +12,8 @@ import { getRequestId } from '../request-id.js';
 import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
 import { projectToHumanResponse } from './search-human-projection.js';
 import { SearchResponseV2HumanSchema } from '../schemas/search-response-v2.schema.js';
+import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
  * POST /v1/search/hybrid — force hybrid search route.
@@ -33,7 +35,9 @@ export function registerHybridRoute(
       const hybridRequest = toHybridSearchRequest(parsed);
       const requestId = getRequestId(request);
 
-      const response = await deps.hybridUseCase.execute(hybridRequest, requestId);
+      const response = await deps.hybridUseCase.execute(hybridRequest, requestId, {
+        abortSignal: abortSignalFromFastifyRequest(request),
+      });
 
       void reply.header('Vary', 'Accept');
 
@@ -41,11 +45,11 @@ export function registerHybridRoute(
         const humanResponse = projectToHumanResponse(response, requestId);
         void reply.header('Content-Type', MEDIA_TYPE_HUMAN);
 
-        sendContractResponse(request, reply, 200, SearchResponseV2HumanSchema, humanResponse);
+        sendContractResponse(request, reply, HTTP_STATUS_OK, SearchResponseV2HumanSchema, humanResponse);
         return;
       }
 
-      sendRouteContractResponse(request, reply, HybridRouteContract, 200, response);
+      sendRouteContractResponse(request, reply, HybridRouteContract, HTTP_STATUS_OK, response);
     },
   });
 }

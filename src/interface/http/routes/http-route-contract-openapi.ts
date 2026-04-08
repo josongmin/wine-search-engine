@@ -2,6 +2,10 @@
 import { z } from 'zod';
 import { DeclaredHttpRouteContractCatalog } from './http-route-contract-catalog.js';
 import { camelToSnake } from '../middleware/snake-case-hook.js';
+import {
+  HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+  HTTP_SUCCESS_STATUS_MIN,
+} from '../constants.js';
 
 export interface OpenApiBridgeOperation {
   readonly operationId: string;
@@ -157,7 +161,7 @@ function inferHeaderParameters(
 }
 
 function describeResponse(statusCode: number): string {
-  if (statusCode >= 200 && statusCode < 300) {
+  if (statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE) {
     return `Successful response (${statusCode})`;
   }
   return `Error response (${statusCode})`;
@@ -191,8 +195,12 @@ export function buildHttpRouteContractOpenApiBridge(): OpenApiBridgeDocument {
     const statusCodes = Object.keys(entry.contract.responses)
       .map((statusCode) => Number(statusCode))
       .sort((left, right) => left - right);
-    const successStatusCodes = statusCodes.filter((statusCode) => statusCode >= 200 && statusCode < 300);
-    const errorStatusCodes = statusCodes.filter((statusCode) => statusCode < 200 || statusCode >= 300);
+    const successStatusCodes = statusCodes.filter(
+      (statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+    );
+    const errorStatusCodes = statusCodes.filter(
+      (statusCode) => statusCode < HTTP_SUCCESS_STATUS_MIN || statusCode >= HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+    );
 
     const operation: OpenApiBridgeOperation = {
       operationId: entry.contract.operationId,

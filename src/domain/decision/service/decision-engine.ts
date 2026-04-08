@@ -43,6 +43,9 @@ const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
 
+/** Decimal places for C/gap floats embedded in decision trace strings. */
+const DECISION_TRACE_FLOAT_DECIMAL_PLACES = 4;
+
 /**
  * Emergency fallback resolveTau used when a brand-new QueryClass enum value
  * was added without updating either the active threshold profile or the
@@ -354,7 +357,7 @@ export class DecisionEngine {
         status: 'resolved',
         nextAction: 'return_result',
         rulesApplied: [...rulesApplied],
-        finalReason: `Calibrated C=${C.toFixed(4)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(4)} >= T_gap=${dynamicGapThreshold.toFixed(4)}, no ambiguity.`,
+        finalReason: `Calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_gap=${dynamicGapThreshold.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, no ambiguity.`,
       };
     }
 
@@ -374,7 +377,7 @@ export class DecisionEngine {
         rulesApplied.push('AMBIGUITY_DETECTED');
       }
       if (!gapMeetsThreshold) {
-        reasons.push(`gap=${delta.toFixed(4)} < T_gap=${dynamicGapThreshold.toFixed(4)}`);
+        reasons.push(`gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_gap=${dynamicGapThreshold.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}`);
         rulesApplied.push('GAP_BELOW_THRESHOLD');
       }
       return {
@@ -394,7 +397,7 @@ export class DecisionEngine {
         status: 'ambiguous',
         nextAction: 'hybrid_search',
         rulesApplied: [...rulesApplied],
-        finalReason: `Low confidence C=${C.toFixed(4)} < T_resolve=${thresholds.resolveTau}; falling back to hybrid search.`,
+        finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; falling back to hybrid search.`,
       };
     }
 
@@ -404,7 +407,7 @@ export class DecisionEngine {
         status: 'ambiguous',
         nextAction: 'clarify',
         rulesApplied: [...rulesApplied],
-        finalReason: `Low confidence C=${C.toFixed(4)} < T_resolve=${thresholds.resolveTau}; requesting clarification.`,
+        finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; requesting clarification.`,
       };
     }
 
@@ -414,7 +417,7 @@ export class DecisionEngine {
       status: 'failed',
       nextAction: 'fail',
       rulesApplied: [...rulesApplied],
-      finalReason: `Low confidence C=${C.toFixed(4)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
+      finalReason: `Low confidence C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_resolve=${thresholds.resolveTau}; no viable path.`,
     };
   }
 
@@ -570,7 +573,7 @@ export class DecisionEngine {
       rulesApplied: [...rulesApplied],
       finalReason:
         `Short query used noisy lookup strategy (${strategies.join(', ')}) without enough margin ` +
-        `(C=${resolverTrace.decisionConfidenceC.toFixed(4)}, gap=${resolverTrace.calibratedGap.toFixed(4)}).`,
+        `(C=${resolverTrace.decisionConfidenceC.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, gap=${resolverTrace.calibratedGap.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}).`,
     };
   }
 

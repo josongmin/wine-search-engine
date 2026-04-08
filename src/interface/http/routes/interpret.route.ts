@@ -11,6 +11,8 @@ import { toInterpretRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
 import { MEDIA_TYPE_HUMAN, wantsHumanResponse } from '../content-negotiation.js';
 import { InterpretResponseV2Schema } from '../schemas/search-response-v2.schema.js';
+import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
+import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
  * POST /v1/search/interpret — query interpretation / explain.
@@ -34,23 +36,31 @@ export function registerInterpretRoute(
 
       void reply.header('Vary', 'Accept');
 
+      const interpretOptions = { abortSignal: abortSignalFromFastifyRequest(request) };
+
       if (wantsHumanResponse(request.headers.accept)) {
-        const result = await deps.interpretUseCase.execute({
-          ...interpretRequest,
-          buildV2: true,
-          requestId,
-        });
+        const result = await deps.interpretUseCase.execute(
+          {
+            ...interpretRequest,
+            buildV2: true,
+            requestId,
+          },
+          interpretOptions,
+        );
         void reply.header('Content-Type', MEDIA_TYPE_HUMAN);
 
-        sendContractResponse(request, reply, 200, InterpretResponseV2Schema, result.v2Explain);
+        sendContractResponse(request, reply, HTTP_STATUS_OK, InterpretResponseV2Schema, result.v2Explain);
         return;
       }
 
-      const plan = await deps.interpretUseCase.execute({
-        ...interpretRequest,
-        requestId,
-      });
-      sendRouteContractResponse(request, reply, InterpretRouteContract, 200, plan);
+      const plan = await deps.interpretUseCase.execute(
+        {
+          ...interpretRequest,
+          requestId,
+        },
+        interpretOptions,
+      );
+      sendRouteContractResponse(request, reply, InterpretRouteContract, HTTP_STATUS_OK, plan);
     },
   });
 }

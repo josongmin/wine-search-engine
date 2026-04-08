@@ -2,6 +2,31 @@ import type { AliasProposal } from '../model/alias-proposal.js';
 import type { ProposalStore } from '../port/proposal-store.port.js';
 import type { QueryEntityAggregation } from './feedback-processor.js';
 
+/** Unicode blocks for mixed-script homoglyph detection (alias safety). */
+const UNICODE_LATIN_BASIC_START = 0x0041;
+const UNICODE_LATIN_EXTENDED_END = 0x024f;
+const UNICODE_LATIN_EXTENDED_ADDITIONAL_START = 0x1e00;
+const UNICODE_LATIN_EXTENDED_ADDITIONAL_END = 0x1eff;
+const UNICODE_CYRILLIC_START = 0x0400;
+const UNICODE_CYRILLIC_END = 0x04ff;
+const UNICODE_GREEK_START = 0x0370;
+const UNICODE_GREEK_END = 0x03ff;
+const UNICODE_ARMENIAN_START = 0x0530;
+const UNICODE_ARMENIAN_END = 0x058f;
+const UNICODE_CHEROKEE_START = 0x13a0;
+const UNICODE_CHEROKEE_END = 0x13ff;
+
+/** Saturating divisor for evidence volume → confidence factor. */
+const ALIAS_CONFIDENCE_VOLUME_SIGNAL_CAP = 50;
+/** Minimum distinct purchases before purchase signal contributes. */
+const ALIAS_CONFIDENCE_MIN_PURCHASES = 3;
+/** Purchase count at which purchase factor saturates to 1. */
+const ALIAS_CONFIDENCE_PURCHASE_SATURATION = 5;
+const ALIAS_CONFIDENCE_WEIGHT_VOLUME = 0.3;
+const ALIAS_CONFIDENCE_WEIGHT_CTR = 0.3;
+const ALIAS_CONFIDENCE_WEIGHT_SESSION = 0.2;
+const ALIAS_CONFIDENCE_WEIGHT_PURCHASE = 0.2;
+
 /**
  * Configuration for alias proposal thresholds.
  */
@@ -167,25 +192,28 @@ export class AliasProposer {
 
       // Basic Latin and Latin Extended
       if (
-        (code >= 0x0041 && code <= 0x024f) ||
-        (code >= 0x1e00 && code <= 0x1eff)
+        (code >= UNICODE_LATIN_BASIC_START && code <= UNICODE_LATIN_EXTENDED_END) ||
+        (
+          code >= UNICODE_LATIN_EXTENDED_ADDITIONAL_START
+          && code <= UNICODE_LATIN_EXTENDED_ADDITIONAL_END
+        )
       ) {
         hasLatin = true;
       }
       // Cyrillic
-      if (code >= 0x0400 && code <= 0x04ff) {
+      if (code >= UNICODE_CYRILLIC_START && code <= UNICODE_CYRILLIC_END) {
         hasCyrillic = true;
       }
       // Greek
-      if (code >= 0x0370 && code <= 0x03ff) {
+      if (code >= UNICODE_GREEK_START && code <= UNICODE_GREEK_END) {
         hasGreek = true;
       }
       // Armenian (homoglyph attack vector against Latin)
-      if (code >= 0x0530 && code <= 0x058f) {
+      if (code >= UNICODE_ARMENIAN_START && code <= UNICODE_ARMENIAN_END) {
         hasArmenian = true;
       }
       // Cherokee (classic homoglyph source)
-      if (code >= 0x13a0 && code <= 0x13ff) {
+      if (code >= UNICODE_CHEROKEE_START && code <= UNICODE_CHEROKEE_END) {
         hasCherokee = true;
       }
     }
@@ -207,7 +235,7 @@ export class AliasProposer {
     const totalSignals = agg.positiveCount + agg.negativeCount;
 
     // Volume factor: more signals = higher confidence (saturating)
-    const volumeFactor = Math.min(1.0, totalSignals / 50);
+    const volumeFactor = Math.min(1.0, totalSignals / ALIAS_CONFIDENCE_VOLUME_SIGNAL_CAP);
 
     // CTR factor
     const ctrFactor = ctr;
@@ -221,9 +249,15 @@ export class AliasProposer {
     // this, one purchase from any session could push raw confidence past
     // the auto-approval threshold.
     const purchaseFactor =
-      agg.purchases >= 3 ? Math.min(1, agg.purchases / 5) : 0;
+      agg.purchases >= ALIAS_CONFIDENCE_MIN_PURCHASES
+        ? Math.min(1, agg.purchases / ALIAS_CONFIDENCE_PURCHASE_SATURATION)
+        : 0;
 
-    const raw = 0.3 * volumeFactor + 0.3 * ctrFactor + 0.2 * sessionFactor + 0.2 * purchaseFactor;
+    const raw =
+      ALIAS_CONFIDENCE_WEIGHT_VOLUME * volumeFactor
+      + ALIAS_CONFIDENCE_WEIGHT_CTR * ctrFactor
+      + ALIAS_CONFIDENCE_WEIGHT_SESSION * sessionFactor
+      + ALIAS_CONFIDENCE_WEIGHT_PURCHASE * purchaseFactor;
 
     return Math.min(1.0, Math.max(0, raw));
   }

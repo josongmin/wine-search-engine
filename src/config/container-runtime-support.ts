@@ -17,6 +17,11 @@ import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-regis
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 
+/** Consecutive cache failures before opening circuit (matches CacheService default). */
+const CACHE_CIRCUIT_BREAKER_THRESHOLD_DEFAULT = 5;
+/** Milliseconds until circuit half-closes after open (matches CacheService default). */
+const CACHE_CIRCUIT_BREAKER_RESET_MS_DEFAULT = 60_000;
+
 class RedisJudgmentCacheAdapter implements JudgmentCachePort {
   constructor(
     private readonly redis: RedisClient,
@@ -121,8 +126,8 @@ export async function buildRuntimeSupportServices(
       cacheService = new CacheService(
         new RedisQueryCache(redisClient),
         new RedisEmbeddingCache(redisClient),
-        5,
-        60000,
+        CACHE_CIRCUIT_BREAKER_THRESHOLD_DEFAULT,
+        CACHE_CIRCUIT_BREAKER_RESET_MS_DEFAULT,
       );
       bootstrapLogger.info('[Container] Cache infrastructure initialized');
     } else {

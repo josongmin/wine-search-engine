@@ -1,3 +1,4 @@
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type {
   SearchQueryBudget,
@@ -29,7 +30,11 @@ export type BatchErrorCode =
   | 'POLICY_BLOCKED'
   | 'QUERY_PARSE_ERROR'
   | 'RETRIEVAL_TIMEOUT'
+  | 'REQUEST_ABORTED'
   | 'INTERNAL_ERROR';
+
+/** HTTP / executor context (not part of the JSON batch body). */
+export type BatchSearchExecutionContext = RequestExecutionContext;
 
 export interface BatchSearchError {
   readonly code: BatchErrorCode;

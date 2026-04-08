@@ -11,6 +11,8 @@ import {
   isAbortError,
 } from '../http/fetch-with-timeout.js';
 
+const LEARNED_MATCHER_UNEXPECTED_JSON_PREVIEW_CHARS = 200;
+
 // ---------------------------------------------------------------------------
 // API shapes
 // ---------------------------------------------------------------------------
@@ -145,7 +147,7 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
     const data: unknown = await response.json();
     if (!isMatchApiResponse(data)) {
       throw new Error(
-        `LearnedMatcher: unexpected response shape — ${JSON.stringify(data).slice(0, 200)}`,
+        `LearnedMatcher: unexpected response shape — ${JSON.stringify(data).slice(0, LEARNED_MATCHER_UNEXPECTED_JSON_PREVIEW_CHARS)}`,
       );
     }
 

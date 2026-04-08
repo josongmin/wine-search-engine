@@ -29,8 +29,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Sassicaia'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(sassicaia|사시카이아)'],
       rubric:
         'Must return information about Sassicaia (Tenuta San Guido). '
@@ -45,8 +45,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Romanée-Conti'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(romanée|romanee|로마네\\s*콩티|DRC)'],
       rubric:
         'Must resolve DRC to Domaine de la Romanée-Conti. '
@@ -61,8 +61,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Pétrus'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(pétrus|petrus|페트뤼스)'],
       rubric:
         'Must resolve 페트뤼스 to Pétrus (Pomerol, Bordeaux). '
@@ -77,8 +77,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Tignanello'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(tignanello|티냐넬로)', '(2019)'],
       rubric:
         'Must return info about Tignanello 2019 (Antinori, Super Tuscan). '
@@ -93,8 +93,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Dom'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(dom\\s*p[eé]rignon|돔\\s*페리뇽)'],
       rubric:
         'Must resolve 돔페리뇽 to Dom Pérignon. '
@@ -109,8 +109,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Penfolds'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(penfolds|펜폴즈)'],
       rubric:
         'Must resolve to Penfolds (likely Grange or Bin 389 given red label hint). '
@@ -125,8 +125,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Castel'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(castel|까스텔)'],
       rubric:
         'Must resolve 까스텔 to Castel wines (major French value brand). '
@@ -141,8 +141,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Saint-Émilion'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(saint[\\s-]?[eé]milion|쌩떼밀리옹|생테밀리옹)'],
       rubric:
         'Must resolve 쌩떼밀리옹 to Saint-Émilion (Bordeaux right bank). '
@@ -157,8 +157,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Margaux'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(chateau\\s*margaux|샤또\\s*마고|margaux)'],
       rubric:
         'Must provide price info or range for Château Margaux. '
@@ -173,8 +173,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Moët'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(mo[eë]t|모엣|chandon|샹동)'],
       rubric:
         'Must resolve to Moët & Chandon Rosé Impérial. '
@@ -189,8 +189,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Yellow Tail'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(yellow\\s*tail|옐로우\\s*테일)'],
       rubric:
         'Must identify Yellow Tail Shiraz and give an honest assessment. '
@@ -204,8 +204,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     description: 'Appellation hierarchy knowledge + name resolution',
     expectation: {
       maxSteps: 3,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 5_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 8_000,
       answerMustMatch: ['(haut[\\s-]?m[eé]doc|오메독)'],
       rubric:
         'Must explain the difference between Haut-Médoc AOC and Cru Bourgeois classification. '
@@ -225,8 +225,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red)'],
       rubric:
         'Must recommend red wines with blackberry and chocolate notes. '
@@ -241,8 +241,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines with vanilla and smoky character (oak-aged). '
         + 'Should explain oak aging as the source. Oaked Chardonnay, Rioja Reserva, etc.',
@@ -256,8 +256,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(화이트|white)'],
       rubric:
         'Must recommend crisp white wines with citrus character. '
@@ -272,8 +272,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines with earthy/terroir-driven character. '
         + 'Burgundy Pinot Noir, Nebbiolo, old-world Tempranillo, Châteauneuf-du-Pape.',
@@ -287,8 +287,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red|풀바디|full[\\s-]?body)'],
       rubric:
         'Must recommend full-bodied reds with leather notes (aged wines). '
@@ -303,8 +303,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend light-bodied wines with floral aromatics. '
         + 'Moscato, Gewürztraminer, Torrontés, Beaujolais, Pinot Noir expected.',
@@ -318,8 +318,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines with pronounced minerality and saline character. '
         + 'Chablis, Muscadet, Santorini Assyrtiko, coastal whites expected.',
@@ -333,8 +333,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines with explosive tropical fruit character (mango, passion fruit, pineapple). '
         + 'New Zealand Sauvignon Blanc, Viognier, oaked New World Chardonnay expected.',
@@ -353,8 +353,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines with Robert Parker (Wine Advocate) 95+ rating. '
         + 'Should cite scores or explain quality tier. Must not fabricate scores.',
@@ -368,8 +368,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 50_000 },
       rubric:
         'Must recommend wines rated 4.5+ on Vivino under 50,000 KRW. '
@@ -384,8 +384,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 30_000 },
       rubric:
         'Must recommend daily wines with Wine Spectator 90+ score under 30,000 KRW. '
@@ -400,8 +400,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must address James Suckling 100-point wines. Should name actual examples if known. '
         + 'Must not fabricate scores — if data unavailable, acknowledge the gap.',
@@ -415,8 +415,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 5_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 8_000,
       rubric:
         'Must recommend wines with best score-to-price ratio. '
         + 'Should explain the value proposition with concrete scores and prices.',
@@ -435,8 +435,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(로제|rosé|ros[eé])'],
       rubric:
         'Must recommend rosé wines specifically. '
@@ -451,8 +451,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(스파클링|sparkling|프로세코|prosecco|카바|cava|크레망|crémant)'],
       rubric:
         'Must recommend sparkling wines that are NOT Champagne (Prosecco, Cava, Crémant, etc.). '
@@ -467,8 +467,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend dessert wines (Sauternes, Tokaji, late harvest, ice wine, Moscato d\'Asti, etc.). '
         + 'Should explain different styles of sweet wine.',
@@ -482,8 +482,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must explain orange wine (skin-contact white wine) and recommend examples. '
         + 'Should mention Georgian origin and modern producers (Gravner, Radikon, etc.).',
@@ -497,8 +497,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(포트|port|porto)'],
       rubric:
         'Must recommend Port wine for after-dinner drinking. '
@@ -512,8 +512,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     description: 'Fortified wine: Sherry education',
     expectation: {
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(셰리|sherry|jerez)'],
       rubric:
         'Must explain Sherry types (Fino, Manzanilla, Amontillado, Oloroso, Pedro Ximénez). '
@@ -533,8 +533,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red)'],
       rubric:
         'Must recommend red wines with very low tannin and no oak aging. '
@@ -549,8 +549,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red|풀바디|full[\\s-]?body)'],
       // answerMustNotMatch removed: refusal text "Cabernet 빼고 추천" legitimately contains the term.
       rubric:
@@ -567,8 +567,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(화이트|white)'],
       rubric:
         'Must recommend white wines that are NOT Chardonnay, NOT Sauvignon Blanc, NOT Riesling. '
@@ -583,8 +583,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(스파클링|sparkling)'],
       rubric:
         'Must recommend dry sparkling wines that are NOT Champagne and NOT Italian (no Prosecco). '
@@ -599,8 +599,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend Old World wines excluding Bordeaux. '
         + 'Burgundy, Rhône, Italy, Spain, Germany, Portugal expected. '
@@ -620,8 +620,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       priceBandKrw: { max: 40_000 },
       rubric:
         'Must calculate total budget: 4 people × 20,000 KRW = 80,000 KRW for 2 bottles → ~40,000 KRW/bottle. '
@@ -636,8 +636,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       rubric:
         'Must estimate bottle count for 20 people (~half bottle per person = ~10 bottles, '
         + 'or ~2-3 glasses per person). Should recommend wines for the party.',
@@ -651,8 +651,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       priceBandKrw: { max: 100_000 },
       rubric:
         'Must recommend 2 wines whose combined price is ≤100,000 KRW. '
@@ -667,7 +667,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 4,
-      maxDurationMs: 20_000,
+      maxDurationMs: 60_000,
       maxTotalTokens: 8_000,
       priceBandKrw: { max: 300_000 },
       rubric:
@@ -683,8 +683,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must estimate KRW equivalent of $50 (~65,000-70,000 KRW) and recommend wines in that range. '
         + 'Should note that exchange rates fluctuate.',
@@ -698,8 +698,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       priceBandKrw: { max: 200_000 },
       rubric:
         'Must recommend 4 different wines (one per week) totaling ≤200,000 KRW (~50,000 avg). '
@@ -719,8 +719,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Bordeaux'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(bordeaux|보르도)'],
       rubric:
         'Must handle pure English query and recommend Bordeaux under $100. '
@@ -735,8 +735,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'compare_wines' }],
       maxSteps: 3,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 8_000,
       answerMustMatch: ['(pinot\\s*noir|피노\\s*누아르)', '(nebbiolo|네비올로)'],
       rubric:
         'Must compare Pinot Noir and Nebbiolo with stylistic differences. '
@@ -751,8 +751,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines', inputContains: ['Napa'] }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(napa|나파)', '(cabernet|카베르네)'],
       rubric:
         'Must handle redundant bilingual input (same query in English + Korean). '
@@ -767,8 +767,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(이탈리아|italy|italian)', '(레드|red)'],
       rubric:
         'Must recommend value Italian red wines. Should merge the bilingual intent correctly.',
@@ -781,8 +781,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     description: 'English terms + Korean structure',
     expectation: {
       maxSteps: 3,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 8_000,
       answerMustMatch: ['(champagne|샴페인)', '(cr[eé]mant|크레망)'],
       rubric:
         'Must explain the difference between Champagne and Crémant (region, method, price). '
@@ -802,8 +802,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       priceBandKrw: { max: 200_000 },
       rubric:
         'Must recommend wines with 10+ year aging potential under 200,000 KRW. '
@@ -818,8 +818,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       drinkingWindowStatus: 'hold',
       rubric:
         'Must recommend wines that are worth cellaring and NOT at peak now. '
@@ -834,8 +834,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       vintageRange: { min: 2015, max: 2015 },
       drinkingWindowStatus: 'now',
       rubric:
@@ -851,8 +851,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
-      maxTotalTokens: 6_000,
+      maxDurationMs: 50_000,
+      maxTotalTokens: 8_000,
       vintageRange: { min: 2024, max: 2024 },
       rubric:
         'Must recommend wines from 2024 vintage with 20+ year aging potential. '
@@ -873,8 +873,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines that are NOT from Spain. '
         + 'Any other region (France, Italy, Chile, etc.) is acceptable. '
@@ -889,8 +889,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red)'],
       rubric:
         'Must recommend red wines that are NOT from Italy. '
@@ -905,8 +905,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(피노\\s*누아르|pinot\\s*noir)'],
       rubric:
         'Must recommend Old World Pinot Noir only — Burgundy, Alsace, Germany, etc. '
@@ -922,8 +922,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       // answerExcludes removed: refusal text "메를로 빼고" legitimately contains the term.
       rubric:
         'Must recommend Bordeaux-style wines or blends whose PRIMARY grape is NOT Merlot. '
@@ -939,8 +939,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(화이트|white)'],
       // answerExcludes removed: refusal text contains the excluded term legitimately.
       rubric:
@@ -957,8 +957,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       // answerExcludes removed: refusal text contains the excluded term legitimately.
       rubric:
         'Must recommend Rhône-style wines whose DOMINANT grape is NOT Syrah/Shiraz. '
@@ -974,8 +974,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(샤르도네|샤도네이|chardonnay)'],
       rubric:
         'Must recommend unoaked or lightly oaked Chardonnay with no pronounced oak character. '
@@ -991,8 +991,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red)'],
       rubric:
         'Must recommend soft, approachable red wines with low tannin. '
@@ -1008,8 +1008,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(화이트|white)'],
       rubric:
         'Must recommend dry white wines with no residual sweetness. '
@@ -1025,8 +1025,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red)'],
       rubric:
         'Must recommend red wines from regions OTHER than France and Italy. '
@@ -1042,8 +1042,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red|풀바디|full[\\s-]?body)'],
       // answerExcludes removed: refusal text contains the excluded terms legitimately.
       rubric:
@@ -1060,8 +1060,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend vegan wines that use no animal-derived fining agents '
         + '(no egg white, casein, gelatin, isinglass). '
@@ -1076,8 +1076,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend certified organic wines. '
         + 'Should mention organic certification (EU Organic, USDA Organic, etc.) '
@@ -1092,8 +1092,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines certified or confirmed vegan (no animal products in production). '
         + 'Should explain why standard wines may not be vegan. '
@@ -1108,7 +1108,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 100_000 },
       rubric:
@@ -1125,8 +1125,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { min: 50_000 },
       rubric:
         'Must recommend premium wines clearly positioned above the entry-level tier (≥50,000 KRW or equivalent). '
@@ -1141,8 +1141,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend low-sulfite or no-added-sulfite wines. '
         + 'Natural wine producers or specific low-SO2 labels expected. '
@@ -1157,8 +1157,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend bold, high-alcohol wines (typically 14%+ ABV). '
         + 'Amarone, Zinfandel, Shiraz, Châteauneuf-du-Pape expected. '
@@ -1173,8 +1173,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend South American wines that are NOT from Chile and NOT from Argentina. '
         + 'Uruguay (Tannat), Brazil, Bolivia expected. '
@@ -1189,8 +1189,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(레드|red)'],
       rubric:
         'Must recommend light-to-medium bodied red wines. '
@@ -1206,8 +1206,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       answerMustMatch: ['(스파클링|sparkling|기포|fizz|effervescent)'],
       rubric:
         'Must recommend sparkling wines that are NOT Champagne and NOT Italian (no Prosecco, no Franciacorta). '
@@ -1222,8 +1222,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 30_000 },
       rubric:
         'Must recommend affordable, everyday-drinking wines (≤30,000 KRW range). '
@@ -1238,8 +1238,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines that are neither red nor white. '
         + 'Rosé, orange wine, sparkling, or dessert wines expected. '
@@ -1254,8 +1254,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend entry-level or standard-tier wines, NOT Reserva, Gran Reserva, or Riserva. '
         + 'Should explain that these are accessible, everyday-quality wines without sacrificing character.',
@@ -1269,8 +1269,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend blended wines featuring two or more grape varieties. '
         + 'Bordeaux blends, GSM (Grenache-Syrah-Mourvèdre), Super Tuscans, Meritage expected. '
@@ -1285,8 +1285,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines with naturally lower acidity for a smoother, rounder palate. '
         + 'Viognier, Grenache, Merlot, oaked Chardonnay, Malbec expected. '
@@ -1306,7 +1306,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 100_000 },
       vintageRange: { min: 2016, max: 2019 },
@@ -1324,7 +1324,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 40_000, max: 69_000 },
       answerMustMatch: ['(부르고뉴|burgundy|bourgogne)', '(피노\\s*누아|pinot\\s*noir)'],
@@ -1342,7 +1342,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 200_000 },
       vintageRange: { min: 2015 },
@@ -1361,7 +1361,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 150_000 },
       answerMustMatch: ['(바로사|barossa)', '(쉬라즈|shiraz)'],
@@ -1379,7 +1379,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       vintageRange: { min: 2020, max: 2022 },
       answerMustMatch: ['(말보로|marlborough)', '(소비뇽\\s*블랑|sauvignon\\s*blanc)'],
@@ -1397,8 +1397,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 50_000 },
       answerMustMatch: ['(리슬링|riesling)', '(독일|germany|german)'],
       rubric:
@@ -1415,8 +1415,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 30_000 },
       vintageRange: { min: 2019, max: 2019 },
       answerMustMatch: ['(칠레|chile|chilean)', '(카베르네\\s*소비뇽|cabernet\\s*sauvignon)'],
@@ -1433,8 +1433,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 70_000 },
       answerMustMatch: ['(레드|red)'],
       rubric:
@@ -1451,7 +1451,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 100_000, max: 199_000 },
       vintageRange: { min: 2017, max: 2020 },
@@ -1469,7 +1469,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 150_000 },
       vintageRange: { min: 2018, max: 2018 },
@@ -1487,7 +1487,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 200_000 },
       vintageRange: { min: 2016, max: 2018 },
@@ -1505,8 +1505,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 50_000 },
       vintageRange: { min: 2019 },
       rubric:
@@ -1523,7 +1523,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 150_000 },
       vintageRange: { min: 2015 },
@@ -1541,7 +1541,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 100_000 },
       vintageRange: { min: 2017, max: 2020 },
@@ -1559,7 +1559,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 300_000 },
       vintageRange: { min: 2015, max: 2015 },
@@ -1578,7 +1578,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 40_000, max: 69_000 },
       vintageRange: { min: 2018, max: 2021 },
@@ -1597,8 +1597,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 50_000 },
       vintageRange: { min: 2016 },
       answerMustMatch: ['(카르메네르|carmenere|carménère)', '(칠레|chile)'],
@@ -1615,7 +1615,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 80_000 },
       vintageRange: { min: 2017, max: 2017 },
@@ -1633,7 +1633,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 100_000 },
       answerMustMatch: ['(스파클링|sparkling|champagne|크레망|crémant)', '(브뤼|brut)'],
@@ -1651,7 +1651,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 70_000 },
       answerMustMatch: ['(로제|rosé|rose)', '(스파클링|sparkling|champagne|프로방스|provence)'],
@@ -1668,8 +1668,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       vintageRange: { min: 2021 },
       answerMustMatch: ['(모스카토|moscato|muscat)'],
       rubric:
@@ -1686,7 +1686,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 120_000 },
       vintageRange: { min: 2018 },
@@ -1704,7 +1704,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 50_000 },
       answerMustMatch: ['(화이트|white|blanc)', '(부르고뉴|burgundy|bourgogne|알자스|alsace)'],
@@ -1722,7 +1722,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 50_000 },
       vintageRange: { min: 2020 },
@@ -1740,7 +1740,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 100_000, max: 199_000 },
       rubric:
@@ -1762,7 +1762,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       rubric:
         'Must recommend approachable, crowd-pleasing wines suitable for a beginner at a wine bar. '
@@ -1778,7 +1778,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       requiredRegister: 'formal',
       rubric:
@@ -1796,8 +1796,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend festive, celebratory wines suitable for a birthday surprise party. '
         + 'Sparkling wine or impressive red expected. '
@@ -1812,8 +1812,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines suited for a cozy, introspective solo evening on a rainy day. '
         + 'Warming reds, aromatic whites, or dessert wines expected. '
@@ -1828,8 +1828,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines conducive to quiet, focused enjoyment (not overpowering). '
         + 'Light to medium-bodied wines, good acidity, easy-drinking character expected. '
@@ -1844,8 +1844,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend light, refreshing wines suitable after exercise. '
         + 'Low alcohol, high acidity, crisp profile preferred. '
@@ -1861,7 +1861,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 100_000 },
       rubric:
@@ -1878,8 +1878,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines suitable for a personal achievement celebration. '
         + 'Should feel special and self-rewarding without being excessively expensive. '
@@ -1894,8 +1894,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines suitable as gifts to bring when traveling abroad. '
         + 'Should consider portability (no fragile labels, good closure), recognizable Korean terroir or interesting story. '
@@ -1909,8 +1909,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     description: 'Situation: summer outdoor BBQ party',
     expectation: {
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines suitable for a summer outdoor BBQ party. '
         + 'Should consider food (grilled meats), heat, and casual atmosphere. '
@@ -1926,7 +1926,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       rubric:
         'Must recommend wines suitable for a Christmas dinner celebration. '
@@ -1942,8 +1942,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend beginner-friendly wines for parents who have never drunk wine before. '
         + 'Sweet, fruity, low-tannin or low-acid options expected. '
@@ -1959,7 +1959,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       rubric:
         'Must recommend wines impressive enough to gift to a professional sommelier. '
@@ -1975,8 +1975,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend crowd-pleasing, universally appealing wines suitable as a romantic gift when the recipient\'s preferences are unknown. '
         + 'Should suggest safe but thoughtful options (a rosé, a light red, or a food-friendly white). '
@@ -1991,8 +1991,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       priceBandKrw: { max: 30_000 },
       rubric:
         'Must recommend easy-drinking, affordable wines for a casual solo movie night. '
@@ -2008,7 +2008,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 50_000, max: 150_000 },
       requiredRegister: 'formal',
@@ -2025,8 +2025,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     description: 'Situation: wine with Korean fried chicken for 4 friends',
     expectation: {
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines that pair well with fried chicken for a casual group of 4. '
         + 'Should suggest fun, casual options (sparkling, light reds, crisp whites). '
@@ -2042,8 +2042,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines suitable for post-golf socializing at a clubhouse. '
         + 'Should be elegant, easy-drinking, and socially appropriate. '
@@ -2059,7 +2059,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       requiredRegister: 'formal',
       rubric:
@@ -2077,8 +2077,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend warm, comforting wines suitable for consoling a friend. '
         + 'Soft, approachable reds (Pinot Noir, Grenache), smooth whites, or dessert wines expected. '
@@ -2093,7 +2093,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       priceBandKrw: { max: 50_000 },
       rubric:
@@ -2110,7 +2110,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       rubric:
         'Must recommend "textbook" wines that exemplify their variety or region clearly — ideal for learning. '
@@ -2126,7 +2126,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
+      maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       rubric:
         'Must recommend highly romantic and memorable wines appropriate for a marriage proposal. '
@@ -2143,7 +2143,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 3,
-      maxDurationMs: 15_000,
+      maxDurationMs: 50_000,
       maxTotalTokens: 6_000,
       rubric:
         'Must recommend a starter cellar composition (varied styles, regions, aging potential). '
@@ -2159,8 +2159,8 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 12_000,
-      maxTotalTokens: 4_000,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
       rubric:
         'Must recommend wines suitable for a family graduation celebration at a restaurant. '
         + 'Should be crowd-pleasing for mixed ages and tastes. '

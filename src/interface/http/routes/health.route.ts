@@ -7,6 +7,7 @@ import {
   HealthRouteContract,
   ReadyRouteContract,
 } from './route-contracts.js';
+import { HTTP_STATUS_OK, HTTP_STATUS_SERVICE_UNAVAILABLE } from '../constants.js';
 
 /**
  * Tracks the last time the event loop was responsive.
@@ -103,7 +104,7 @@ export function registerHealthRoutes(
         request,
         reply,
         HealthRouteContract,
-        isStuck ? 503 : 200,
+        isStuck ? HTTP_STATUS_SERVICE_UNAVAILABLE : HTTP_STATUS_OK,
         body,
       );
     },
@@ -152,7 +153,7 @@ export function registerHealthRoutes(
         request,
         reply,
         ReadyRouteContract,
-        ready ? 200 : 503,
+        ready ? HTTP_STATUS_OK : HTTP_STATUS_SERVICE_UNAVAILABLE,
         body,
       );
     },

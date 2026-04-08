@@ -22,6 +22,7 @@ import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 
 export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
@@ -29,8 +30,9 @@ export type SearchPreRoutePhaseResult =
   | { readonly outcome: 'continue'; readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery }
   | { readonly outcome: 'return'; readonly response: SearchPreRouteEarlyResponse };
 
-export interface SearchPreRoutePhaseContext {
+export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
   readonly request: SearchRequest;
+  /** When set, forwarded into {@link PlannerContext.abortSignal} (NL / LLM constraint path). */
   readonly requestId: string;
   readonly startTime: number;
   readonly snapshotVersions: SnapshotVersionInjection;
@@ -58,6 +60,10 @@ export async function runSearchPreRoutePhase(
       const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
       const timeoutSignal = Symbol('timeout');
       const abortController = new AbortController();
+      const decomposedAbortSignal =
+        ctx.abortSignal !== undefined
+          ? AbortSignal.any([ctx.abortSignal, abortController.signal])
+          : abortController.signal;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<typeof timeoutSignal>((resolve) => {
         timeoutHandle = setTimeout(() => {
@@ -81,7 +87,7 @@ export async function runSearchPreRoutePhase(
           // gets counterfactuals on both sub-search legs.
           ...(ctx.request.options?.explain === true ? { explain: true } : {}),
         },
-        { abortSignal: abortController.signal },
+        { abortSignal: decomposedAbortSignal },
       ).catch((err: unknown) => {
         // After timeout fires we abort the controller. Any subsequent rejection
         // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
@@ -138,7 +144,9 @@ export async function runSearchPreRoutePhase(
 
   // Use planWithCompiled when available (PlannerV1Adapter implements this).
   // Falls back to plan() + local ExecutionCompiler for adapters that only implement the base port.
-  const plannerContext = buildPlannerContextFromSearchRequest(ctx.request);
+  const plannerContext = buildPlannerContextFromSearchRequest(ctx.request, {
+    ...(ctx.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
+  });
   let plan: QueryPlanV1;
   let compiled: CompiledWineQuery;
   if (ctx.queryPlanner.planWithCompiled !== undefined) {

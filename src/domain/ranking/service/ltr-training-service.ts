@@ -13,6 +13,33 @@ import type { RankingFeatures, LambdaMARTExample, QueryClassWeights } from './la
 import { trainLambdaMARTModel } from './lambdamart-ranker.js';
 import { extractLTRFeatures } from './ltr-feature-extractor.js';
 
+/** Legacy proxy: shift utility score into feature space (train/eval fallback). */
+const LEGACY_UTILITY_SCORE_SHIFT = 1.5;
+/** Legacy proxy: scale denominator for utility normalization. */
+const LEGACY_UTILITY_SCORE_SCALE = 2.5;
+/** Default outcome signal before branching (legacy eval path). */
+const LEGACY_OUTCOME_SIGNAL_DEFAULT = 0.3;
+/** Proxy feature when outcome is safe abstain. */
+const LEGACY_OUTCOME_SIGNAL_SAFE_ABSTAIN = 0.6;
+/** Proxy feature when outcome is avoidable abstain. */
+const LEGACY_OUTCOME_SIGNAL_AVOIDABLE_ABSTAIN = 0.2;
+/** Neutral BM25 / recency / diversity when absent from legacy eval. */
+const LEGACY_FEATURE_SCORE_NEUTRAL = 0.0;
+/** Mid popularity prior for legacy feature vector. */
+const LEGACY_POPULARITY_SCORE_PROXY = 0.5;
+/** Strong degradation retains most of the label (synthetic hard negative). */
+const TRAINING_LABEL_DEGRADATION_STRONG = 0.7;
+/** Medium degradation for mid-tier negatives. */
+const TRAINING_LABEL_DEGRADATION_MEDIUM = 0.4;
+/** Weak degradation for easy negatives. */
+const TRAINING_LABEL_DEGRADATION_WEAK = 0.1;
+/** Deterministic label degradation multipliers for pairwise negatives. */
+const TRAINING_LABEL_DEGRADATION_FACTORS = [
+  TRAINING_LABEL_DEGRADATION_STRONG,
+  TRAINING_LABEL_DEGRADATION_MEDIUM,
+  TRAINING_LABEL_DEGRADATION_WEAK,
+] as const;
+
 /**
  * Extracts ranking features from evaluation result.
  *
@@ -33,22 +60,26 @@ function extractFeaturesFromResult(result: EvalResult, _evalCase: EvalCase): Ran
 
   // Fallback for legacy eval results without stored ComponentScores.
   // Uses proxy signals from eval outcomes — has inherent train-serve gap.
-  const utility = (result.utilityScore + 1.5) / 2.5;
-  let outcomeSignal = 0.3;
-  if (result.isCorrectResolve) outcomeSignal = 1.0;
-  else if (result.isSafeAbstain) outcomeSignal = 0.6;
-  else if (result.isAvoidableAbstain) outcomeSignal = 0.2;
-  else if (result.isWrongResolve) outcomeSignal = 0.0;
+  const utility = (result.utilityScore + LEGACY_UTILITY_SCORE_SHIFT) / LEGACY_UTILITY_SCORE_SCALE;
+  const outcomeSignal = result.isCorrectResolve
+    ? 1.0
+    : result.isSafeAbstain
+      ? LEGACY_OUTCOME_SIGNAL_SAFE_ABSTAIN
+      : result.isAvoidableAbstain
+        ? LEGACY_OUTCOME_SIGNAL_AVOIDABLE_ABSTAIN
+        : result.isWrongResolve
+          ? LEGACY_FEATURE_SCORE_NEUTRAL
+          : LEGACY_OUTCOME_SIGNAL_DEFAULT;
 
   return {
-    bm25Score: 0.0,
+    bm25Score: LEGACY_FEATURE_SCORE_NEUTRAL,
     semanticScore: result.decisionConfidence,
-    popularityScore: 0.5,
-    recencyScore: 0.0,
+    popularityScore: LEGACY_POPULARITY_SCORE_PROXY,
+    recencyScore: LEGACY_FEATURE_SCORE_NEUTRAL,
     classMatchScore: outcomeSignal,
     attributeMatchScore: utility,
-    diversityScore: 0.0,
-    multilingualScore: 0.0,
+    diversityScore: LEGACY_FEATURE_SCORE_NEUTRAL,
+    multilingualScore: LEGACY_FEATURE_SCORE_NEUTRAL,
   };
 }
 
@@ -88,8 +119,7 @@ export function buildTrainingExamples(
     // Generate pairwise comparisons with degraded negatives at varying levels.
     // Use deterministic degradation factors (not random) to create consistent
     // training signal: label 3 vs 2, 3 vs 1, 3 vs 0, etc.
-    const degradationFactors = [0.7, 0.4, 0.1] as const;
-    for (const factor of degradationFactors) {
+    for (const factor of TRAINING_LABEL_DEGRADATION_FACTORS) {
       const degradedLabel = Math.max(0, Math.round(label * factor)) as 0 | 1 | 2 | 3;
       if (degradedLabel < label) {
         examples.push({

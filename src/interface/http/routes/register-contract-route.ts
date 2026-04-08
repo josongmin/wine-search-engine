@@ -1,6 +1,10 @@
 import type { FastifyInstance, RouteHandlerMethod } from 'fastify';
 import { runWithRequestPipelineDebug } from '../../../observability/request-pipeline-debug.js';
 import type { HttpRouteContract } from './route-contracts.js';
+import {
+  HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+  HTTP_SUCCESS_STATUS_MIN,
+} from '../constants.js';
 
 export interface RegisteredHttpRouteContract {
   readonly method: string;
@@ -46,8 +50,12 @@ export function registerContractRoute(
   const responseStatusCodes = Object.keys(options.contract.responses)
     .map((statusCode) => Number(statusCode))
     .sort((left, right) => left - right);
-  const successStatusCodes = responseStatusCodes.filter((statusCode) => statusCode >= 200 && statusCode < 300);
-  const errorStatusCodes = responseStatusCodes.filter((statusCode) => statusCode < 200 || statusCode >= 300);
+  const successStatusCodes = responseStatusCodes.filter(
+    (statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+  );
+  const errorStatusCodes = responseStatusCodes.filter(
+    (statusCode) => statusCode < HTTP_SUCCESS_STATUS_MIN || statusCode >= HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+  );
 
   ensureRouteContractStore(app).push({
     method: options.method,

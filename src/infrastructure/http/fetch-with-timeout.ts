@@ -2,16 +2,7 @@
  * Shared `fetch` wrapper with AbortSignal-based timeout for HTTP service adapters.
  */
 
-export function isAbortError(error: unknown): boolean {
-  if (error instanceof Error && error.name === 'AbortError') {
-    return true;
-  }
-  return (
-    typeof DOMException !== 'undefined' &&
-    error instanceof DOMException &&
-    error.name === 'AbortError'
-  );
-}
+export { isAbortError } from '../../domain/shared/cooperative-abort.js';
 
 /**
  * `fetch` with a wall-clock timeout. Uses a dedicated `AbortController` and

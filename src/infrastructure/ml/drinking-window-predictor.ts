@@ -20,6 +20,27 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
  */
 export const DRINKING_WINDOW_MODEL_VERSION = 'heuristic-v1.0-enc20260405';
 
+/** Heuristic window predictor: baseline years before structure/critic bonuses. */
+const HEURISTIC_BASE_WINDOW_YEARS = 3;
+/** Sensory axes are centered at this 1–5 scale midpoint. */
+const HEURISTIC_STRUCTURE_CENTER = 2;
+const HEURISTIC_BODY_TANNIN_EXTENSION_WEIGHT = 1.5;
+const HEURISTIC_ACIDITY_EXTENSION_WEIGHT = 1.0;
+const HEURISTIC_CRITIC_SCORE_ELITE = 95;
+const HEURISTIC_CRITIC_BONUS_ELITE = 5;
+const HEURISTIC_CRITIC_SCORE_HIGH = 90;
+const HEURISTIC_CRITIC_BONUS_HIGH = 3;
+const HEURISTIC_CRITIC_SCORE_GOOD = 85;
+const HEURISTIC_CRITIC_BONUS_GOOD = 1;
+const HEURISTIC_SWEETNESS_STRUCTURAL_MID = 3;
+const HEURISTIC_SWEETNESS_EXTENSION_WEIGHT = 1.5;
+const HEURISTIC_TOTAL_WINDOW_MIN_YEARS = 3;
+const HEURISTIC_TOTAL_WINDOW_MAX_YEARS = 25;
+const HEURISTIC_VINTAGE_DRINKING_START_OFFSET = 2;
+const HEURISTIC_MEDIUM_CONFIDENCE_CRITIC_FLOOR = 90;
+const HEURISTIC_MEDIUM_CONFIDENCE_TANNIN_FLOOR = 3;
+const HEURISTIC_MEDIUM_CONFIDENCE_ACIDITY_FLOOR = 4;
+
 type OrtTensor = {
   readonly data: Float32Array;
 };
@@ -202,26 +223,45 @@ export class DrinkingWindowPredictor {
     const acidity = input.acidity;
     const score = Math.max(0, input.avgCriticProxyScore);
 
-    const baseWindow = 3;
-    const bodyBonus = Math.max(0, (body - 2) * 1.5);
-    const tanninBonus = Math.max(0, (tannin - 2) * 1.5);
-    const acidityBonus = Math.max(0, (acidity - 2) * 1.0);
-    const criticBonus = score >= 95 ? 5 : score >= 90 ? 3 : score >= 85 ? 1 : 0;
-    // sweetness > 3 (sweet/dessert wines) acts as a preservative and extends aging potential
-    const sweetnessBonus = Math.max(0, (input.sweetness - 3) * 1.5);
+    const baseWindow = HEURISTIC_BASE_WINDOW_YEARS;
+    const bodyBonus = Math.max(
+      0,
+      (body - HEURISTIC_STRUCTURE_CENTER) * HEURISTIC_BODY_TANNIN_EXTENSION_WEIGHT,
+    );
+    const tanninBonus = Math.max(
+      0,
+      (tannin - HEURISTIC_STRUCTURE_CENTER) * HEURISTIC_BODY_TANNIN_EXTENSION_WEIGHT,
+    );
+    const acidityBonus = Math.max(
+      0,
+      (acidity - HEURISTIC_STRUCTURE_CENTER) * HEURISTIC_ACIDITY_EXTENSION_WEIGHT,
+    );
+    const criticBonus =
+      score >= HEURISTIC_CRITIC_SCORE_ELITE
+        ? HEURISTIC_CRITIC_BONUS_ELITE
+        : score >= HEURISTIC_CRITIC_SCORE_HIGH
+          ? HEURISTIC_CRITIC_BONUS_HIGH
+          : score >= HEURISTIC_CRITIC_SCORE_GOOD
+            ? HEURISTIC_CRITIC_BONUS_GOOD
+            : 0;
+    // Sweetness above the structural midpoint extends aging potential (preservative effect).
+    const sweetnessBonus = Math.max(
+      0,
+      (input.sweetness - HEURISTIC_SWEETNESS_STRUCTURAL_MID) * HEURISTIC_SWEETNESS_EXTENSION_WEIGHT,
+    );
 
-    // Floor totalWindow at 3 so end > start always holds, even when all
+    // Floor totalWindow so end > start always holds, even when all
     // bonuses are 0 (light wine, low score). Without this floor, vintage=2024
     // with totalWindow=1 produced start=2026 > end=2025 (invariant violation).
     const totalWindow = Math.max(
-      3,
+      HEURISTIC_TOTAL_WINDOW_MIN_YEARS,
       Math.min(
-        25,
+        HEURISTIC_TOTAL_WINDOW_MAX_YEARS,
         baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus + sweetnessBonus,
       ),
     );
 
-    const drinkingWindowStart = vintage + 2;
+    const drinkingWindowStart = vintage + HEURISTIC_VINTAGE_DRINKING_START_OFFSET;
     const drinkingWindowEnd = Math.max(
       drinkingWindowStart + 1,
       Math.round(vintage + totalWindow),
@@ -232,7 +272,13 @@ export class DrinkingWindowPredictor {
 
     let confidence: 'high' | 'medium' | 'low' = 'low';
 
-    if (score >= 90 && (tannin >= 3 || acidity >= 4)) {
+    if (
+      score >= HEURISTIC_MEDIUM_CONFIDENCE_CRITIC_FLOOR
+      && (
+        tannin >= HEURISTIC_MEDIUM_CONFIDENCE_TANNIN_FLOOR
+        || acidity >= HEURISTIC_MEDIUM_CONFIDENCE_ACIDITY_FLOOR
+      )
+    ) {
       confidence = 'medium';
     }
 

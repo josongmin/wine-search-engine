@@ -4,6 +4,11 @@
  * All functions are pure and side-effect free.
  */
 
+/** Smallest plausible bare-number bottle volume (ml) for heuristic parse. */
+const BARE_VOLUME_ASSUME_ML_MIN = 50;
+/** Largest plausible bare-number bottle volume (ml) before rejecting. */
+const BARE_VOLUME_ASSUME_ML_MAX = 5000;
+
 /**
  * Normalizes a free-text field by trimming, collapsing whitespace,
  * applying Unicode NFC normalization, and optionally stripping accents.
@@ -53,7 +58,7 @@ export function normalizeVolume(raw: string): number | null {
     if (bareNumber !== null) {
       const value = Number(bareNumber[1]);
       // Common ml sizes: 187, 375, 500, 750, 1000, 1500
-      if (value >= 50 && value <= 5000) {
+      if (value >= BARE_VOLUME_ASSUME_ML_MIN && value <= BARE_VOLUME_ASSUME_ML_MAX) {
         return value;
       }
     }

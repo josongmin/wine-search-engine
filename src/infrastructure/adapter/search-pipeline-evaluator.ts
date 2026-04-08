@@ -18,6 +18,8 @@
 
 import { nanoid } from 'nanoid';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+const EVAL_REQUEST_ID_NANOID_LENGTH = 12;
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
 import type { SearchExecutorEvaluationResult } from '../../application/search/port/search-executor.port.js';
@@ -93,7 +95,7 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       // nanoid (not Date.now) to avoid collisions when many cases run within the
       // same millisecond — collision corrupts log correlation, snapshot dedup,
       // and runtimeCorrelationRef matching.
-      const requestId = `eval-${nanoid(12)}`;
+      const requestId = `eval-${nanoid(EVAL_REQUEST_ID_NANOID_LENGTH)}`;
       const evalExecution = 'executeForEvaluation' in this.searchUseCase
         && typeof this.searchUseCase.executeForEvaluation === 'function'
         ? await this.searchUseCase.executeForEvaluation(

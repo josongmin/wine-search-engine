@@ -29,9 +29,14 @@ export interface AliasMatchResult {
  * Type priority weights used in score calculation.
  * See RFC-003 §5.
  */
+/** Base score when normalized alias value matches (before type/prior weighting). */
+const NORMALIZED_ALIAS_MATCH_SCORE = 0.95;
+/** Phonetic skeleton match score (consonant-skeleton heuristic). */
+const PHONETIC_ALIAS_MATCH_SCORE = 0.8;
+
 const TYPE_WEIGHTS: Readonly<Record<AliasType, number>> = {
   canonical: 1.0,
-  translation: 0.95,
+  translation: NORMALIZED_ALIAS_MATCH_SCORE,
   phonetic: 0.85,
   misspelling: 0.6,
   observed_query_alias: 0.7,
@@ -201,8 +206,8 @@ export class AliasMatcher {
       entityId: alias.entityId,
       alias,
       matchType: 'normalized' as const,
-      matchScore: 0.95,
-      weightedScore: 0.95 * TYPE_WEIGHTS[alias.type] * alias.confidencePrior,
+      matchScore: NORMALIZED_ALIAS_MATCH_SCORE,
+      weightedScore: NORMALIZED_ALIAS_MATCH_SCORE * TYPE_WEIGHTS[alias.type] * alias.confidencePrior,
     }));
   }
 
@@ -307,8 +312,8 @@ export class AliasMatcher {
           entityId: alias.entityId,
           alias,
           matchType: 'phonetic',
-          matchScore: 0.8,
-          weightedScore: 0.8 * TYPE_WEIGHTS[alias.type] * alias.confidencePrior,
+          matchScore: PHONETIC_ALIAS_MATCH_SCORE,
+          weightedScore: PHONETIC_ALIAS_MATCH_SCORE * TYPE_WEIGHTS[alias.type] * alias.confidencePrior,
         });
       }
     }

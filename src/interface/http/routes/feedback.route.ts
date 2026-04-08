@@ -14,6 +14,11 @@ import { createEntityId } from '../../../domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../../domain/shared/types/decision-snapshot.js';
 import { getRequestId } from '../request-id.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from '../../../application/search/search-usecase-decision-snapshot.js';
+import {
+  HTTP_STATUS_CREATED,
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+} from '../constants.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -76,7 +81,7 @@ export function registerFeedbackRoute(
           request,
           reply,
           FeedbackSubmitRouteContract,
-          503,
+          HTTP_STATUS_SERVICE_UNAVAILABLE,
           ErrorResponseSchema.parse({
             error: {
               request_id: requestId,
@@ -126,7 +131,7 @@ export function registerFeedbackRoute(
           request,
           reply,
           FeedbackSubmitRouteContract,
-          500,
+          HTTP_STATUS_INTERNAL_SERVER_ERROR,
           ErrorResponseSchema.parse({
             error: {
               request_id: requestId,
@@ -140,7 +145,7 @@ export function registerFeedbackRoute(
         return;
       }
 
-      sendRouteContractResponse(request, reply, FeedbackSubmitRouteContract, 201, {
+      sendRouteContractResponse(request, reply, FeedbackSubmitRouteContract, HTTP_STATUS_CREATED, {
         signal_id: signal.signalId,
         accepted: true,
       });

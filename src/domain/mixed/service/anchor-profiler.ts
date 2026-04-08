@@ -1,6 +1,9 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
 
+/** Optional slots counted toward profile completeness (grapes, body, sweetness, style). */
+const ANCHOR_PROFILE_OPTIONAL_ATTRIBUTE_SLOTS = 4;
+
 /**
  * Raw entity data used to build an anchor profile.
  *
@@ -107,7 +110,7 @@ export class AnchorProfiler {
     present += 3;
 
     // Optional but important fields
-    total += 4;
+    total += ANCHOR_PROFILE_OPTIONAL_ATTRIBUTE_SLOTS;
     if (entityData.grapes.length > 0) present++;
     if (entityData.body !== undefined) present++;
     if (entityData.sweetness !== undefined) present++;

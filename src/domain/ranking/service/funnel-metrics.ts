@@ -15,6 +15,9 @@
 import type { FunnelMetrics, RankingFunnelTrace } from '../model/ranking-stage.js';
 import type { RankedResult } from '../model/ranked-result.js';
 
+/** Top-K size for rerank-order comparison telemetry. */
+const FUNNEL_RERANK_TOP_K = 5;
+
 /**
  * Compute funnel-level aggregate metrics from the completed funnel trace
  * and the final ranked result list.
@@ -54,10 +57,10 @@ export function computeFunnelMetrics(
     preRerankTop5EntityIds.length > 0
   ) {
     const postRerankTop5 = results
-      .slice(0, 5)
+      .slice(0, FUNNEL_RERANK_TOP_K)
       .map((r) => String(r.entityId));
 
-    const preSlice = preRerankTop5EntityIds.slice(0, 5);
+    const preSlice = preRerankTop5EntityIds.slice(0, FUNNEL_RERANK_TOP_K);
 
     // Changed if lengths differ or any position differs
     if (preSlice.length !== postRerankTop5.length) {

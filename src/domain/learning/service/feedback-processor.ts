@@ -2,6 +2,13 @@ import type { EntityId } from '../../shared/types/index.js';
 import type { FeedbackSignal } from '../model/feedback-signal.js';
 import type { FeedbackStore } from '../port/feedback-store.port.js';
 
+/** Default rolling window when `since` omitted (unbounded table guard). */
+const DEFAULT_FEEDBACK_AGGREGATION_WINDOW_DAYS = 90;
+const HOURS_PER_DAY = 24;
+const MINUTES_PER_HOUR = 60;
+const SECONDS_PER_MINUTE = 60;
+const MILLISECONDS_PER_SECOND = 1000;
+
 /**
  * Aggregated feedback for a single query-entity pair.
  */
@@ -86,9 +93,16 @@ export class FeedbackProcessor {
     // memory growth from loading the entire feedback table (production can
     // have millions of rows). Callers that need broader windows must
     // explicitly pass a Date.
-    const DEFAULT_WINDOW_DAYS = 90;
     const effectiveSince =
-      since ?? new Date(Date.now() - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      since
+      ?? new Date(
+        Date.now()
+        - DEFAULT_FEEDBACK_AGGREGATION_WINDOW_DAYS
+        * HOURS_PER_DAY
+        * MINUTES_PER_HOUR
+        * SECONDS_PER_MINUTE
+        * MILLISECONDS_PER_SECOND,
+      );
     const signals = await this.feedbackStore.getFeedback({ since: effectiveSince });
 
     return this.computeAggregations(signals);

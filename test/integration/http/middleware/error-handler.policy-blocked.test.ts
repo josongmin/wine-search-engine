@@ -74,6 +74,16 @@ describe('errorHandler policy-blocked contract', () => {
     app.get('/unknown-error', async () => {
       throw new Error('boom');
     });
+
+    app.get('/abort-error', async () => {
+      const error = new Error('cooperative abort');
+      error.name = 'AbortError';
+      throw error;
+    });
+
+    app.get('/abort-dom-error', async () => {
+      throw new DOMException('aborted', 'AbortError');
+    });
   });
 
   afterEach(async () => {
@@ -182,6 +192,42 @@ describe('errorHandler policy-blocked contract', () => {
     expect(body).toMatchObject({
       error: {
         code,
+        retryable: false,
+      },
+    });
+  });
+
+  it('maps AbortError to 408 REQUEST_ABORTED (not generic 500)', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/abort-error',
+    });
+
+    expect(response.statusCode).toBe(408);
+    const body = response.json();
+    expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+    expect(body).toMatchObject({
+      error: {
+        code: 'REQUEST_ABORTED',
+        message: 'The request was cancelled.',
+        retryable: false,
+      },
+    });
+  });
+
+  it('maps DOMException AbortError to 408 REQUEST_ABORTED (not generic 500)', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/abort-dom-error',
+    });
+
+    expect(response.statusCode).toBe(408);
+    const body = response.json();
+    expect(ErrorResponseSchema.safeParse(body).success).toBe(true);
+    expect(body).toMatchObject({
+      error: {
+        code: 'REQUEST_ABORTED',
+        message: 'The request was cancelled.',
         retryable: false,
       },
     });

@@ -21,7 +21,10 @@ import type {
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
 import type { HybridSearchRequest } from './hybrid-request.dto.js';
-import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
+import type {
+  DecomposedSearchUseCasePort,
+  HybridExecutionOptions,
+} from './port/search-route-usecases.port.js';
 import {
   executeHybridRouteRankingPipeline,
   resolveEntityRouteForPlan,
@@ -32,8 +35,9 @@ import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
-
+import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
+export type { HybridExecutionOptions } from './port/search-route-usecases.port.js';
 
 /**
  * Dependencies injected into the HybridUseCase.
@@ -78,7 +82,10 @@ export class HybridUseCase {
   async execute(
     request: HybridSearchRequest,
     requestId: string,
+    options?: HybridExecutionOptions,
   ): Promise<SearchResponseV1 | ComparisonSearchResponse> {
+    throwIfAborted(options?.abortSignal, 'Hybrid search execution aborted');
+
     const startTime = Date.now();
     const searchRequest = toSearchRequest(request);
 
@@ -93,6 +100,7 @@ export class HybridUseCase {
 
     const preRoute = await runSearchPreRoutePhase({
       request: searchRequest,
+      ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
       requestId,
       startTime,
       snapshotVersions: this.deps.snapshotVersions,
@@ -111,6 +119,8 @@ export class HybridUseCase {
         ?? this.deps.cacheLookupRuntimeState,
       decomposedSearch: this.deps.decomposedSearch,
     });
+
+    throwIfAborted(options?.abortSignal, 'Hybrid search execution aborted');
 
     if (preRoute.outcome === 'return') {
       return preRoute.response;
@@ -137,7 +147,7 @@ export class HybridUseCase {
       // Propagate domain errors and abort signals to the global error handler
       // so they receive the correct HTTP status (e.g. 403 for POLICY_BLOCKED).
       if (err instanceof DomainError) throw err;
-      if (err instanceof Error && err.name === 'AbortError') throw err;
+      if (isAbortError(err)) throw err;
 
       const errorMessage = err instanceof Error ? err.message : String(err);
       bootstrapLogger.error(
@@ -156,6 +166,8 @@ export class HybridUseCase {
       routeDegradation,
       specializedRouteObservability,
     } = hybridPipelineResult;
+
+    throwIfAborted(options?.abortSignal, 'Hybrid search execution aborted');
 
     pipelineDebug(
       {

@@ -12,6 +12,8 @@ import {
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
+const COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;
+
 export interface CohereRerankerOptions {
   readonly baseUrl: string;
   readonly apiKey: string;
@@ -131,7 +133,7 @@ export class CohereReranker implements RerankerPort {
         'pipeline Cohere reranker HTTP',
       );
       const text = await response.text().catch(() => '');
-      throw new Error(`Cohere reranker failed [HTTP ${status}]: ${text.slice(0, 200)}`);
+      throw new Error(`Cohere reranker failed [HTTP ${status}]: ${text.slice(0, COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS)}`);
     }
 
     const data: unknown = await response.json();

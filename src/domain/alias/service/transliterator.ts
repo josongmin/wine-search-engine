@@ -18,6 +18,13 @@ export interface TransliterationResult {
 /** Supported source languages for transliteration. */
 export type SourceLang = 'fr' | 'it' | 'es' | 'en';
 
+/** High confidence when label hits curated exception dictionary. */
+const TRANSLITERATION_EXCEPTION_CONFIDENCE = 0.95;
+/** Default confidence for rule-based transliteration (non-exception). */
+const TRANSLITERATION_RULE_CONFIDENCE = 0.75;
+/** Compact phonetic variant confidence (space-stripped primary). */
+const TRANSLITERATION_COMPACT_CONFIDENCE = 0.6;
+
 /**
  * Cross-lingual transliterator for wine domain terms.
  * Implements RFC-003 §4.5 with rule-based French/Italian/Spanish/English
@@ -489,7 +496,7 @@ export class Transliterator {
     results.push({
       value: primary,
       type: 'translation',
-      confidence: isException ? 0.95 : 0.75,
+      confidence: isException ? TRANSLITERATION_EXCEPTION_CONFIDENCE : TRANSLITERATION_RULE_CONFIDENCE,
     });
 
     // If not an exception, also generate a phonetic variant without spaces
@@ -499,7 +506,7 @@ export class Transliterator {
         results.push({
           value: compact,
           type: 'phonetic',
-          confidence: 0.6,
+          confidence: TRANSLITERATION_COMPACT_CONFIDENCE,
         });
       }
     }

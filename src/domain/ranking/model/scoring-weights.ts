@@ -4,6 +4,17 @@ import {
   preferCanonicalRetrievalChannelLabels,
 } from '../../retrieval/model/retrieval-channel.js';
 
+/** Redistribute mass toward anchor similarity when anchor channel active. */
+const CHANNEL_WEIGHT_ANCHOR_SIMILARITY_BOOST = 1.3;
+/** Down-weight semantic when anchor channel steals mass (paired boost). */
+const CHANNEL_WEIGHT_SEMANTIC_ANCHOR_PAIR_DIVISOR = 1.3;
+/** Slight semantic up-weight when learned sparse retrieval present. */
+const CHANNEL_WEIGHT_SEMANTIC_LEARNED_SPARSE_BOOST = 1.1;
+/** Soft-constraint emphasis under relative filter retrieval. */
+const CHANNEL_WEIGHT_SOFT_CONSTRAINT_RELATIVE_FILTER_BOOST = 1.2;
+/** Attribute alignment emphasis when only sparse BM25 fires. */
+const CHANNEL_WEIGHT_ATTRIBUTE_SPARSE_ONLY_BOOST = 1.2;
+
 /**
  * Weight configuration for the score aggregation formula.
  *
@@ -254,17 +265,17 @@ export function resolveChannelAwareWeights(
   const multilingualScore = baseWeights.multilingualScore;
 
   if (hasAnchorChannel) {
-    anchorSimilarity *= 1.3;
-    semantic /= 1.3;
+    anchorSimilarity *= CHANNEL_WEIGHT_ANCHOR_SIMILARITY_BOOST;
+    semantic /= CHANNEL_WEIGHT_SEMANTIC_ANCHOR_PAIR_DIVISOR;
   }
   if (hasLearnedSparse) {
-    semantic *= 1.1;
+    semantic *= CHANNEL_WEIGHT_SEMANTIC_LEARNED_SPARSE_BOOST;
   }
   if (hasRelativeFilter) {
-    softConstraint *= 1.2;
+    softConstraint *= CHANNEL_WEIGHT_SOFT_CONSTRAINT_RELATIVE_FILTER_BOOST;
   }
   if (onlySparseBm25) {
-    attributeAlignment *= 1.2;
+    attributeAlignment *= CHANNEL_WEIGHT_ATTRIBUTE_SPARSE_ONLY_BOOST;
   }
 
   // Proportional normalisation — preserve total of non-gate, non-penalty weights.

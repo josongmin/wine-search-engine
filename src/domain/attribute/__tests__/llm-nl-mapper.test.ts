@@ -267,6 +267,36 @@ describe('LlmNLMapper phrase cache', () => {
     expect(trace?.llmLatencyMs ?? 0).toBeGreaterThanOrEqual(mapperTimeoutMs - 20);
   });
 
+  it('pre-aborted caller abortSignal — throws AbortError before LLM', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const llm = new StubChatLlm([fruityItem]);
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000);
+
+    await expect(
+      mapper.mapConstraints(['zzz_unknown_phrase'], { abortSignal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(llm.callCount).toBe(0);
+  });
+
+  it('caller abortSignal during LLM — propagates AbortError (not rule-only fallback)', async () => {
+    const controller = new AbortController();
+    const llm = new HangUntilAbortChatLlm();
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, 60_000);
+
+    const mapped = mapper.mapConstraints(['zzz_unknown_phrase'], {
+      abortSignal: controller.signal,
+    });
+    await new Promise((r) => {
+      setTimeout(r, 15);
+    });
+    controller.abort();
+
+    await expect(mapped).rejects.toMatchObject({ name: 'AbortError' });
+    expect(llm.callCount).toBe(1);
+  });
+
   it('LLM timeout → ignores late resolve if adapter ignores abortSignal (defensive)', async () => {
     const lateItem: LlmConstraintItem = { ...fruityItem, phrase: 'zzz_unknown_phrase' };
     const llm = new IgnoresAbortDelayedChatLlm(150, [lateItem]);

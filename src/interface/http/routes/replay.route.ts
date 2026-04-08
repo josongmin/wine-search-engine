@@ -8,7 +8,9 @@ import { registerContractRoute } from './register-contract-route.js';
 import { ReplayRouteContract } from './route-contracts.js';
 import { toReplayRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
+import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
 import { ErrorResponseSchema } from '../schemas/search-response.schema.js';
+import { HTTP_STATUS_FORBIDDEN, HTTP_STATUS_OK } from '../constants.js';
 
 /**
  * Returns true when the request is allowed to invoke replay.
@@ -55,7 +57,7 @@ export function registerReplayRoute(
           request,
           reply,
           ReplayRouteContract,
-          403,
+          HTTP_STATUS_FORBIDDEN,
           ErrorResponseSchema.parse({
             error: {
               request_id: requestId,
@@ -71,9 +73,11 @@ export function registerReplayRoute(
 
       const parsed = parseContractBody(request, ReplayRouteContract);
       const replayRequest = toReplayRequest(parsed);
-      const response = await deps.replayUseCase.execute(replayRequest, getRequestId(request));
+      const response = await deps.replayUseCase.execute(replayRequest, getRequestId(request), {
+        abortSignal: abortSignalFromFastifyRequest(request),
+      });
 
-      sendRouteContractResponse(request, reply, ReplayRouteContract, 200, response);
+      sendRouteContractResponse(request, reply, ReplayRouteContract, HTTP_STATUS_OK, response);
     },
   });
 }

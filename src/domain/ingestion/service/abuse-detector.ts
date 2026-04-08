@@ -29,6 +29,17 @@ const DEFAULT_MASS_REGISTRATION_LIMIT = 1000;
 /** Default sustained rate limit (records per hour). Burst attacks that stay below the count limit are caught here. */
 const DEFAULT_RATE_LIMIT_PER_HOUR = 1000;
 
+/** Max entity names listed in SEO-spam reason string. */
+const SEO_SPAM_REASON_ENTITY_PREVIEW_COUNT = 5;
+/** Title length beyond which we flag likely SEO stuffing. */
+const SEO_SPAM_TITLE_CHAR_THRESHOLD = 200;
+/** Severity uses `high` when entity references exceed this count. */
+const SEO_SPAM_HIGH_SEVERITY_MIN_ENTITIES = 3;
+/** Truncate titles in anomaly reasons for logs/UI. */
+const TITLE_ANOMALY_REASON_SNIPPET_CHARS = 80;
+/** Multiplier vs default limits for mass-registration `high` severity. */
+const MASS_REGISTRATION_SEVERITY_BURST_MULTIPLIER = 5;
+
 /**
  * Detects various forms of abuse in ingested wine catalog data.
  */
@@ -61,13 +72,13 @@ export class AbuseDetector {
     if (matchedEntities.length > 1) {
       return {
         flagged: true,
-        reason: `Title references ${String(matchedEntities.length)} known entities: ${matchedEntities.slice(0, 5).join(', ')}. Possible SEO keyword stuffing.`,
-        severity: matchedEntities.length > 3 ? 'high' : 'medium',
+        reason: `Title references ${String(matchedEntities.length)} known entities: ${matchedEntities.slice(0, SEO_SPAM_REASON_ENTITY_PREVIEW_COUNT).join(', ')}. Possible SEO keyword stuffing.`,
+        severity: matchedEntities.length > SEO_SPAM_HIGH_SEVERITY_MIN_ENTITIES ? 'high' : 'medium',
       };
     }
 
     // Check for excessive length (SEO spam titles tend to be very long)
-    if (record.rawTitle.length > 200) {
+    if (record.rawTitle.length > SEO_SPAM_TITLE_CHAR_THRESHOLD) {
       return {
         flagged: true,
         reason: `Title is unusually long (${String(record.rawTitle.length)} chars). Possible SEO spam.`,
@@ -102,7 +113,8 @@ export class AbuseDetector {
 
     if (exceedsCount || exceedsRate) {
       const severity: AbuseSeverity =
-        recentCount > DEFAULT_MASS_REGISTRATION_LIMIT * 5 || ratePerHour > DEFAULT_RATE_LIMIT_PER_HOUR * 5
+        recentCount > DEFAULT_MASS_REGISTRATION_LIMIT * MASS_REGISTRATION_SEVERITY_BURST_MULTIPLIER
+        || ratePerHour > DEFAULT_RATE_LIMIT_PER_HOUR * MASS_REGISTRATION_SEVERITY_BURST_MULTIPLIER
           ? 'high'
           : 'medium';
 
@@ -149,7 +161,7 @@ export class AbuseDetector {
     if (similarity < threshold) {
       return {
         flagged: true,
-        reason: `Title-to-canonical similarity is ${similarity.toFixed(2)}, below threshold ${String(threshold)}. Raw: "${truncate(rawTitle, 80)}" vs Canonical: "${truncate(canonicalLabel, 80)}"`,
+        reason: `Title-to-canonical similarity is ${similarity.toFixed(2)}, below threshold ${String(threshold)}. Raw: "${truncate(rawTitle, TITLE_ANOMALY_REASON_SNIPPET_CHARS)}" vs Canonical: "${truncate(canonicalLabel, TITLE_ANOMALY_REASON_SNIPPET_CHARS)}"`,
         severity: similarity < threshold / 2 ? 'high' : 'medium',
       };
     }

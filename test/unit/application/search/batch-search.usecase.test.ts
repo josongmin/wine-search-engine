@@ -538,6 +538,88 @@ describe('BatchSearchUseCase', () => {
     });
   });
 
+  describe('HTTP abortSignal execution context', () => {
+    it('returns all items as not_executed with REQUEST_ABORTED when signal is already aborted', async () => {
+      const ac = new AbortController();
+      ac.abort();
+
+      const response = await useCase.execute(
+        [
+          { id: 'a', query: 'q1' },
+          { id: 'b', query: 'q2' },
+        ],
+        {},
+        'batch-abort-early',
+        { abortSignal: ac.signal },
+      );
+
+      expect(response.not_executed).toBe(2);
+      expect(response.succeeded).toBe(0);
+      expect(response.failed).toBe(0);
+      expect(vi.mocked(mockSearchUseCase.execute)).not.toHaveBeenCalled();
+
+      for (const r of response.results) {
+        expect(r.status).toBe('not_executed');
+        if (r.status === 'not_executed') {
+          expect(r.error.code).toBe('REQUEST_ABORTED');
+        }
+      }
+    });
+
+    it('maps sub-search AbortError to REQUEST_ABORTED', async () => {
+      const err = new Error('cancelled');
+      err.name = 'AbortError';
+      vi.mocked(mockSearchUseCase.execute).mockRejectedValueOnce(err);
+
+      const response = await useCase.execute(singleRequest('x'), {}, 'batch-sub');
+      const r = response.results[0];
+      expect(r?.status).toBe('failed');
+      if (r?.status === 'failed') {
+        expect(r.error.code).toBe('REQUEST_ABORTED');
+      }
+    });
+
+    it('maps sub-search DOMException AbortError to REQUEST_ABORTED', async () => {
+      vi.mocked(mockSearchUseCase.execute).mockRejectedValueOnce(
+        new DOMException('aborted', 'AbortError'),
+      );
+
+      const response = await useCase.execute(singleRequest('x'), {}, 'batch-dom');
+      const r = response.results[0];
+      expect(r?.status).toBe('failed');
+      if (r?.status === 'failed') {
+        expect(r.error.code).toBe('REQUEST_ABORTED');
+      }
+    });
+
+    it('fail_fast: skips remaining items with REQUEST_ABORTED when parent aborts between items', async () => {
+      const parent = new AbortController();
+      vi.mocked(mockSearchUseCase.execute).mockResolvedValueOnce(makeSearchResponse());
+
+      const execPromise = useCase.execute(
+        [
+          { id: '1', query: 'a' },
+          { id: '2', query: 'b' },
+        ],
+        { fail_fast: true, timeout_ms: 30_000 },
+        'bff-abort-between',
+        { abortSignal: parent.signal },
+      );
+
+      await vi.waitFor(() => vi.mocked(mockSearchUseCase.execute).mock.calls.length === 1);
+      parent.abort();
+
+      const response = await execPromise;
+      expect(response.results[0]?.status).toBe('succeeded');
+      const r2 = response.results[1];
+      expect(r2?.status).toBe('not_executed');
+      if (r2?.status === 'not_executed') {
+        expect(r2.error.code).toBe('REQUEST_ABORTED');
+      }
+      expect(vi.mocked(mockSearchUseCase.execute)).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('request options propagation', () => {
     it('should pass context, sessionContext, queryBudget to SearchUseCase', async () => {
       const requests: BatchSearchRequestItem[] = [

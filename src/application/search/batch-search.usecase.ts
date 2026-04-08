@@ -1,3 +1,4 @@
+import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { BATCH_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schema-version.js';
@@ -5,6 +6,7 @@ import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import { decodeBatchIdDetailed } from '../../domain/decision/service/id-schema-decoder.js';
 import type {
   BatchErrorCode,
+  BatchSearchExecutionContext,
   BatchSearchOptions,
   BatchSearchRequestItem,
   BatchSearchResponse,
@@ -16,6 +18,7 @@ import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 
 export type {
   BatchErrorCode,
+  BatchSearchExecutionContext,
   BatchSearchOptions,
   BatchSearchRequestItem,
   BatchSearchResponse,
@@ -37,14 +40,24 @@ export type {
  * @param limit - Maximum number of tasks to execute simultaneously.
  * @returns Results array in the same order as `tasks`.
  */
+const BATCH_ITEM_NOT_EXECUTED_ABORT_MESSAGE =
+  'Batch item was not executed because the batch was cancelled.';
+
 async function runWithConcurrency<T>(
   tasks: ReadonlyArray<() => Promise<T>>,
   limit: number,
-): Promise<T[]> {
-  const results: T[] = new Array(tasks.length) as T[];
+  parentSignal?: AbortSignal,
+): Promise<(T | undefined)[]> {
+  const results: (T | undefined)[] = Array.from(
+    { length: tasks.length },
+    (): T | undefined => undefined,
+  );
   let index = 0;
   async function worker(): Promise<void> {
     while (index < tasks.length) {
+      if (parentSignal?.aborted) {
+        return;
+      }
       const i = index++;
       results[i] = await tasks[i]!();
     }
@@ -55,6 +68,11 @@ async function runWithConcurrency<T>(
 
 /**
  * BatchSearchUseCase: orchestrates parallel or fail-fast batch search execution.
+ *
+ * **Parent cancellation** (`BatchSearchExecutionContext.abortSignal`, e.g. HTTP disconnect):
+ * - Slots that never start: `not_executed` + `REQUEST_ABORTED`.
+ * - In-flight sub-searches: cooperative cancel only — workers stop scheduling new items;
+ *   running `SearchExecutorPort.execute` calls end when they honor `abortSignal`.
  *
  * Features:
  * - Validates batch size (max 20 requests)
@@ -103,6 +121,7 @@ export class BatchSearchUseCase {
     requests: readonly BatchSearchRequestItem[],
     options?: BatchSearchOptions,
     batchId?: string,
+    executionContext?: BatchSearchExecutionContext,
   ): Promise<BatchSearchResponse> {
     const startTime = Date.now();
     const timeoutMs = this.normalizeTimeout(options?.timeout_ms);
@@ -110,6 +129,7 @@ export class BatchSearchUseCase {
       failFast: options?.fail_fast ?? false,
       timeoutMs,
     });
+    const parentSignal = executionContext?.abortSignal;
 
     // Validate batch size
     if (requests.length === 0) {
@@ -173,6 +193,27 @@ export class BatchSearchUseCase {
       seenIds.add(req.id);
     }
 
+    if (parentSignal?.aborted) {
+      return {
+        batch_id: actualBatchId,
+        total: requests.length,
+        succeeded: 0,
+        failed: 0,
+        not_executed: requests.length,
+        batch_status: 'failed',
+        has_failures: true,
+        results: requests.map((req) => ({
+          id: req.id,
+          status: 'not_executed' as const,
+          error: {
+            code: 'REQUEST_ABORTED' as const,
+            message: BATCH_ITEM_NOT_EXECUTED_ABORT_MESSAGE,
+          },
+        })),
+        processing_time_ms: Date.now() - startTime,
+      };
+    }
+
     // Determine execution strategy
     const failFast = options?.fail_fast ?? false;
     const decodedBatchId = decodeBatchIdDetailed(actualBatchId);
@@ -193,8 +234,8 @@ export class BatchSearchUseCase {
 
     // Execute requests
     const results = failFast
-      ? await this.executeFailFast(requests, actualBatchId, timeoutMs)
-      : await this.executePartial(requests, actualBatchId, timeoutMs);
+      ? await this.executeFailFast(requests, actualBatchId, timeoutMs, parentSignal)
+      : await this.executePartial(requests, actualBatchId, timeoutMs, parentSignal);
 
     // Aggregate results
     const succeeded = results.filter((r) => r.status === 'succeeded').length;
@@ -239,11 +280,26 @@ export class BatchSearchUseCase {
     requests: readonly BatchSearchRequestItem[],
     batchId: string,
     timeoutMs: number,
+    parentSignal?: AbortSignal,
   ): Promise<readonly BatchSearchResultItem[]> {
     const tasks = requests.map(
-      (req) => () => this.executeSingle(req, batchId, timeoutMs),
+      (req) => () => this.executeSingle(req, batchId, timeoutMs, parentSignal),
     );
-    return runWithConcurrency(tasks, BatchSearchUseCase.BATCH_CONCURRENCY_LIMIT);
+    const raw = await runWithConcurrency(
+      tasks,
+      BatchSearchUseCase.BATCH_CONCURRENCY_LIMIT,
+      parentSignal,
+    );
+    return raw.map((r, i) =>
+      r ?? {
+        id: requests[i]!.id,
+        status: 'not_executed' as const,
+        error: {
+          code: 'REQUEST_ABORTED' as const,
+          message: BATCH_ITEM_NOT_EXECUTED_ABORT_MESSAGE,
+        },
+      },
+    );
   }
 
   /**
@@ -261,10 +317,25 @@ export class BatchSearchUseCase {
     requests: readonly BatchSearchRequestItem[],
     batchId: string,
     timeoutMs: number,
+    parentSignal?: AbortSignal,
   ): Promise<readonly BatchSearchResultItem[]> {
     const results: BatchSearchResultItem[] = [];
     for (const [index, req] of requests.entries()) {
-      const result = await this.executeSingle(req, batchId, timeoutMs);
+      if (parentSignal?.aborted) {
+        for (const remainingReq of requests.slice(index)) {
+          results.push({
+            id: remainingReq.id,
+            status: 'not_executed',
+            error: {
+              code: 'REQUEST_ABORTED',
+              message: BATCH_ITEM_NOT_EXECUTED_ABORT_MESSAGE,
+            },
+          });
+        }
+        break;
+      }
+
+      const result = await this.executeSingle(req, batchId, timeoutMs, parentSignal);
       results.push(result);
 
       if (result.status === 'failed') {
@@ -307,6 +378,7 @@ export class BatchSearchUseCase {
     req: BatchSearchRequestItem,
     batchId: string,
     timeoutMs: number,
+    parentSignal?: AbortSignal,
   ): Promise<BatchSearchResultItem> {
     const requestId = `${batchId}-${req.id}`;
 
@@ -327,11 +399,15 @@ export class BatchSearchUseCase {
 
       // Execute with timeout; always cancel the timer after the race settles
       // to avoid holding the Node.js event loop open on successful requests.
-      const abortController = new AbortController();
+      const timeoutController = new AbortController();
+      const itemAbortSignal =
+        parentSignal !== undefined
+          ? AbortSignal.any([parentSignal, timeoutController.signal])
+          : timeoutController.signal;
       let timerId: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         timerId = setTimeout(() => {
-          abortController.abort();
+          timeoutController.abort();
           reject(new Error('RETRIEVAL_TIMEOUT'));
         }, timeoutMs);
       });
@@ -340,7 +416,7 @@ export class BatchSearchUseCase {
       try {
         rawResponse = await Promise.race([
           this.searchUseCase.execute(searchRequest, requestId, {
-            abortSignal: abortController.signal,
+            abortSignal: itemAbortSignal,
           }),
           timeoutPromise,
         ]);
@@ -414,6 +490,13 @@ export class BatchSearchUseCase {
       return {
         code: 'RETRIEVAL_TIMEOUT',
         message: 'Request exceeded timeout',
+      };
+    }
+
+    if (isAbortError(err)) {
+      return {
+        code: 'REQUEST_ABORTED',
+        message: 'Request was cancelled',
       };
     }
 

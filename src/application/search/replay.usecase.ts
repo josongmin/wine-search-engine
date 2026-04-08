@@ -4,6 +4,7 @@ import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type { SnapshotVersions } from './search.usecase.js';
 import type { ReplayRequest } from './replay-request.dto.js';
 import type { SearchRequest } from './search-request.dto.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import type { SearchExecutorPort } from './port/search-executor.port.js';
 import {
   buildDecisionSnapshotFromRuntimeVersions,
@@ -98,7 +99,7 @@ export class ReplayUseCase {
   async execute(
     request: ReplayRequest,
     requestId: string,
-    options?: { readonly abortSignal?: AbortSignal | undefined },
+    options?: RequestExecutionContext,
   ): Promise<SearchResponseV1> {
     // Runtime guard: tests cast null through unknown to exercise MissingSnapshotError.
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see replay-usecase.test.ts

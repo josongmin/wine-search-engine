@@ -64,6 +64,12 @@ export interface PhaseDispatchDecision {
  * - **Medium**: sparse + dense -> RRF -> top-K
  * - **Hard**: full pipeline (sparse + dense + anchor ANN + rerank)
  */
+
+/** Strong alias match on short entity → treat retrieval as easy. */
+const CASCADE_EASY_ALIAS_MATCH_STRENGTH = 0.9;
+/** Minimum anchor confidence for “medium” anchored_similarity path. */
+const CASCADE_MEDIUM_ANCHOR_CONFIDENCE = 0.8;
+
 export class CascadeRouter {
   /**
    * Estimate how difficult a query is to resolve, determining which
@@ -81,13 +87,13 @@ export class CascadeRouter {
     aliasMatchStrength: number,
     constraintCount: number,
   ): 'easy' | 'medium' | 'hard' {
-    if (queryClass === 'short_entity' && aliasMatchStrength >= 0.9) {
+    if (queryClass === 'short_entity' && aliasMatchStrength >= CASCADE_EASY_ALIAS_MATCH_STRENGTH) {
       return 'easy';
     }
 
     if (
       queryClass === 'anchored_similarity' &&
-      anchorConfidence >= 0.8 &&
+      anchorConfidence >= CASCADE_MEDIUM_ANCHOR_CONFIDENCE &&
       constraintCount <= 2
     ) {
       return 'medium';

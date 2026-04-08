@@ -1,5 +1,14 @@
 import { z } from 'zod';
 import {
+  MAX_QUERY_BUDGET_CANDIDATES,
+  MAX_QUERY_BUDGET_DENSE_CALLS,
+  MAX_QUERY_BUDGET_LATENCY_MS,
+  MAX_QUERY_BUDGET_RERANK_LIMIT,
+  MAX_SEARCH_SHORT_STRING_LIST,
+  MAX_SESSION_ENTITY_ID_CHARS,
+  MAX_SESSION_PREVIOUS_ENTITIES,
+} from '../constants.js';
+import {
   DecisionSnapshotSchema,
   HybridOptionsSchema,
   QueryBudgetSchema,
@@ -12,7 +21,7 @@ import {
 
 const SessionContextSnakeSchema = z.object({
   session_id: z.string().min(1),
-  previous_entities: z.array(z.string().min(1).max(256)).max(50),
+  previous_entities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES),
 }).strict().transform((value) => ({
   sessionContext: {
     sessionId: value.session_id,
@@ -21,10 +30,10 @@ const SessionContextSnakeSchema = z.object({
 }));
 
 const QueryBudgetSnakeSchema = z.object({
-  max_latency_ms: z.number().int().positive().max(30_000),
-  max_candidates: z.number().int().positive().max(1_000),
-  rerank_limit: z.number().int().positive().max(500),
-  max_dense_calls: z.number().int().positive().max(100).optional(),
+  max_latency_ms: z.number().int().positive().max(MAX_QUERY_BUDGET_LATENCY_MS),
+  max_candidates: z.number().int().positive().max(MAX_QUERY_BUDGET_CANDIDATES),
+  rerank_limit: z.number().int().positive().max(MAX_QUERY_BUDGET_RERANK_LIMIT),
+  max_dense_calls: z.number().int().positive().max(MAX_QUERY_BUDGET_DENSE_CALLS).optional(),
 }).strict().transform((value) => ({
   queryBudget: {
     maxLatencyMs: value.max_latency_ms,
@@ -98,7 +107,7 @@ export const ReplayRequestSchema = withRequestAliases({
   expected_response_hash: z.string().min(1).optional(),
   preflight_honesty_contract: z.object({
     execution_mode: z.enum(['authoritative', 'degraded', 'heuristic', 'advisory']),
-    degradation_reasons: z.array(z.string().min(1)).max(20),
+    degradation_reasons: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),
     blocking_eligible: z.boolean().optional(),
   }).strict().optional(),
 });

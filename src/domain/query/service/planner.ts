@@ -21,6 +21,7 @@ import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
+import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import {
@@ -37,6 +38,26 @@ const PLANNER_VERSION = '1.0.0';
 
 /** Current policy rule version. */
 const POLICY_RULE_VERSION = '1.0.0';
+
+/** Short-query ambiguity: anchor confidence must exceed this when multiple candidates exist. */
+const SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD = 0.8;
+/** Confidence assigned to taxonomy-derived pairing soft constraints. */
+const PAIRING_SOFT_CONSTRAINT_CONFIDENCE = 0.88;
+/** Parser confidence floor in uncertainty (weak prior). */
+const UNCERTAINTY_PARSER_CONFIDENCE_FLOOR = 0.5;
+/** Parser confidence reduction per whitespace token. */
+const UNCERTAINTY_PARSER_CONFIDENCE_PER_TOKEN_PENALTY = 0.05;
+/** Constraint confidence when no hard constraints are present. */
+const UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL = 0.5;
+/** Below this aggregate anchor confidence, flag low_anchor_confidence ambiguity. */
+const UNCERTAINTY_LOW_ANCHOR_CONFIDENCE_THRESHOLD = 0.6;
+const UNCERTAINTY_OVERALL_WEIGHT_PARSER = 0.3;
+const UNCERTAINTY_OVERALL_WEIGHT_ANCHOR = 0.4;
+const UNCERTAINTY_OVERALL_WEIGHT_CONSTRAINT = 0.3;
+/** Added to overall uncertainty when any ambiguity markers fire. */
+const UNCERTAINTY_AMBIGUITY_OVERALL_BUMP = 0.15;
+/** Overall uncertainty at or above this triggers raise_threshold decision effect. */
+const UNCERTAINTY_RAISE_THRESHOLD_OVERALL = 0.6;
 
 /** Vintage year pattern to detect explicit vintage specification. */
 const VINTAGE_YEAR_PATTERN = /(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/u;
@@ -61,7 +82,7 @@ const REGION_KEYWORDS: readonly RegExp[] = [
 /**
  * Context passed to the planner alongside the raw query.
  */
-export interface PlannerContext {
+export interface PlannerContext extends RequestExecutionContext {
   /** Locale hint for language-aware processing. */
   readonly locale?: string | undefined;
   /** Session context for multi-turn reformulation detection. */
@@ -156,7 +177,7 @@ export class Planner {
     );
 
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
-    const parsed = await this.parseConstraints(normalizedQuery);
+    const parsed = await this.parseConstraints(normalizedQuery, context?.abortSignal);
     const constraints = this.mergePairingIntoBundle(
       parsed.bundle,
       normalizedQuery,
@@ -393,7 +414,10 @@ export class Planner {
         (sum, a) => sum + a.candidateEntityIds.length,
         0,
       );
-      if (totalCandidates > 1 && anchors.some((a) => a.confidence < 0.8)) {
+      if (
+        totalCandidates > 1
+        && anchors.some((a) => a.confidence < SHORT_QUERY_AMBIGUOUS_ANCHOR_CONFIDENCE_THRESHOLD)
+      ) {
         return 'ambiguous_short_form';
       }
       return 'short_entity';
@@ -463,7 +487,7 @@ export class Planner {
       operator: 'in',
       value: [tag],
       source_phrase: normalizedQuery,
-      confidence: 0.88,
+      confidence: PAIRING_SOFT_CONSTRAINT_CONFIDENCE,
     }));
     return {
       hard: bundle.hard,
@@ -472,7 +496,10 @@ export class Planner {
     };
   }
 
-  private async parseConstraints(normalizedQuery: string): Promise<{
+  private async parseConstraints(
+    normalizedQuery: string,
+    abortSignal?: AbortSignal,
+  ): Promise<{
     readonly bundle: ConstraintBundle;
     readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   }> {
@@ -493,7 +520,10 @@ export class Planner {
       }
     }
 
-    const mapped = await this.nlMapper.mapConstraints(candidatePhrases);
+    const mapped = await this.nlMapper.mapConstraints(
+      candidatePhrases,
+      abortSignal !== undefined ? { abortSignal } : undefined,
+    );
     const matched = mapped.constraints;
     const constraintExtraction = mapped.constraintExtraction;
 
@@ -534,7 +564,13 @@ export class Planner {
   ): Promise<QueryUncertainty> {
     // Parser confidence: higher for shorter, cleaner queries.
     const tokenCount = normalizedQuery.split(/\s+/).length;
-    const parserConfidence = Math.max(0.5, Math.min(1.0, 1.0 - tokenCount * 0.05));
+    const parserConfidence = Math.max(
+      UNCERTAINTY_PARSER_CONFIDENCE_FLOOR,
+      Math.min(
+        1.0,
+        1.0 - tokenCount * UNCERTAINTY_PARSER_CONFIDENCE_PER_TOKEN_PENALTY,
+      ),
+    );
 
     // Anchor confidence: max anchor confidence, or 0 if no anchors.
     // Loop instead of Math.max(...spread) to avoid stack overflow on large anchor sets.
@@ -553,7 +589,7 @@ export class Planner {
             constraints.hard.reduce((s, c) => s + c.confidence, 0) /
               Math.max(1, constraints.hard.length),
           )
-        : 0.5; // neutral when no constraints expected
+        : UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL;
 
     // Detect ambiguity from anchors and dictionary.
     const ambiguityTypes: string[] = [];
@@ -596,7 +632,7 @@ export class Planner {
     }
 
     // Low anchor confidence with anchors present -> ambiguity.
-    if (anchors.length > 0 && anchorConfidence < 0.6) {
+    if (anchors.length > 0 && anchorConfidence < UNCERTAINTY_LOW_ANCHOR_CONFIDENCE_THRESHOLD) {
       ambiguityTypes.push('low_anchor_confidence');
       if (ambiguitySeverity === 'low') {
         ambiguitySeverity = 'medium';
@@ -610,11 +646,11 @@ export class Planner {
       1.0,
       Math.max(
         0.0,
-        1.0 -
-          0.3 * parserConfidence -
-          0.4 * anchorConfidence -
-          0.3 * constraintConfidence +
-          (ambiguityDetected ? 0.15 : 0),
+        1.0
+          - UNCERTAINTY_OVERALL_WEIGHT_PARSER * parserConfidence
+          - UNCERTAINTY_OVERALL_WEIGHT_ANCHOR * anchorConfidence
+          - UNCERTAINTY_OVERALL_WEIGHT_CONSTRAINT * constraintConfidence
+          + (ambiguityDetected ? UNCERTAINTY_AMBIGUITY_OVERALL_BUMP : 0),
       ),
     );
 
@@ -622,7 +658,7 @@ export class Planner {
     let decisionEffect: QueryUncertainty['decisionEffect'];
     if (ambiguitySeverity === 'high') {
       decisionEffect = 'force_clarify';
-    } else if (ambiguitySeverity === 'medium' || overall >= 0.6) {
+    } else if (ambiguitySeverity === 'medium' || overall >= UNCERTAINTY_RAISE_THRESHOLD_OVERALL) {
       decisionEffect = 'raise_threshold';
     } else if (ambiguityDetected) {
       decisionEffect = 'trace_only';

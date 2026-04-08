@@ -35,6 +35,21 @@ import {
   PostFeedbackRequestSchema,
   PostFeedbackResponseSchema,
 } from '../schemas/feedback.schema.js';
+import {
+  HTTP_STATUS_BAD_REQUEST,
+  HTTP_STATUS_CONFLICT,
+  HTTP_STATUS_CREATED,
+  HTTP_STATUS_FORBIDDEN,
+  HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  HTTP_STATUS_NOT_FOUND,
+  HTTP_STATUS_NO_CONTENT,
+  HTTP_STATUS_OK,
+  HTTP_STATUS_REQUEST_TIMEOUT,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+  HTTP_STATUS_TOO_MANY_REQUESTS,
+  HTTP_STATUS_UNAUTHORIZED,
+  MAX_AUTHENTICATED_SUBJECT_CHARS,
+} from '../constants.js';
 
 type ResponseSchema = z.ZodTypeAny | null;
 type SearchRouteCapability =
@@ -89,7 +104,7 @@ const ClaudeToolsExecuteRequestSchema = z.object({
     'compare_wines',
   ]),
   tool_input: z.record(z.unknown()).optional().default({}),
-  request_id: z.string().max(128).regex(/^[a-zA-Z0-9._-]+$/).optional(),
+  request_id: z.string().max(MAX_AUTHENTICATED_SUBJECT_CHARS).regex(/^[a-zA-Z0-9._-]+$/).optional(),
 });
 
 const ClaudeToolsExecuteResponseSchema = z.object({
@@ -113,16 +128,16 @@ const ClaudeToolsListResponseSchema = z.object({
 export const HealthRouteContract = defineRouteContract({
   operationId: 'system.health',
   responses: {
-    200: HealthResponseSchema,
-    503: HealthResponseSchema,
+    [HTTP_STATUS_OK]: HealthResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: HealthResponseSchema,
   },
 });
 
 export const ReadyRouteContract = defineRouteContract({
   operationId: 'system.ready',
   responses: {
-    200: ReadyResponseSchema,
-    503: ReadyResponseSchema,
+    [HTTP_STATUS_OK]: ReadyResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ReadyResponseSchema,
   },
 });
 
@@ -130,16 +145,16 @@ export const ClaudeToolsExecuteRouteContract = defineRouteContract({
   operationId: 'tools.execute',
   body: ClaudeToolsExecuteRequestSchema,
   responses: {
-    200: ClaudeToolsExecuteResponseSchema,
-    400: ClaudeToolsErrorResponseSchema,
-    500: ClaudeToolsErrorResponseSchema,
+    [HTTP_STATUS_OK]: ClaudeToolsExecuteResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ClaudeToolsErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ClaudeToolsErrorResponseSchema,
   },
 });
 
 export const ClaudeToolsListRouteContract = defineRouteContract({
   operationId: 'tools.list',
   responses: {
-    200: ClaudeToolsListResponseSchema,
+    [HTTP_STATUS_OK]: ClaudeToolsListResponseSchema,
   },
 });
 
@@ -156,11 +171,12 @@ export const SearchRouteContract = defineRouteContract({
     'ranked_post_route',
   ],
   responses: {
-    200: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -177,11 +193,12 @@ export const HybridRouteContract = defineRouteContract({
     'ranked_post_route',
   ],
   responses: {
-    200: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: z.union([SearchResponseSchema, ComparisonSearchResponseSchema]),
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -193,11 +210,12 @@ export const InterpretRouteContract = defineRouteContract({
     'planner_only',
   ],
   responses: {
-    200: InterpretResponseSchema,
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: InterpretResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -211,11 +229,12 @@ export const ResolveRouteContract = defineRouteContract({
     'resolver_only',
   ],
   responses: {
-    200: ResolveResponseSchema,
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: ResolveResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -223,12 +242,12 @@ export const ReplayRouteContract = defineRouteContract({
   operationId: 'search.replay',
   body: ReplayRequestSchema,
   responses: {
-    200: SearchResponseSchema,
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    409: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: SearchResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_CONFLICT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -236,10 +255,10 @@ export const BatchSearchRouteContract = defineRouteContract({
   operationId: 'search.batch',
   body: BatchSearchRequestSchema,
   responses: {
-    200: BatchSearchResponseSchema,
-    400: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: BatchSearchResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -247,10 +266,10 @@ export const WatchlistListRouteContract = defineRouteContract({
   operationId: 'watchlist.list',
   headers: WatchlistAuthHeadersSchema,
   responses: {
-    200: ListWatchlistResponseSchema,
-    401: WatchlistErrorResponseSchema,
-    429: WatchlistErrorResponseSchema,
-    500: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_OK]: ListWatchlistResponseSchema,
+    [HTTP_STATUS_UNAUTHORIZED]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: WatchlistErrorResponseSchema,
   },
 });
 
@@ -259,11 +278,11 @@ export const WatchlistCreateRouteContract = defineRouteContract({
   body: CreateWatchlistRequestSchema,
   headers: WatchlistAuthHeadersSchema,
   responses: {
-    201: CreateWatchlistResponseSchema,
-    400: WatchlistErrorResponseSchema,
-    401: WatchlistErrorResponseSchema,
-    429: WatchlistErrorResponseSchema,
-    500: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_CREATED]: CreateWatchlistResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_UNAUTHORIZED]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: WatchlistErrorResponseSchema,
   },
 });
 
@@ -272,12 +291,12 @@ export const WatchlistGetRouteContract = defineRouteContract({
   params: WatchlistIdParamsSchema,
   headers: WatchlistAuthHeadersSchema,
   responses: {
-    200: GetWatchlistResponseSchema,
-    400: WatchlistErrorResponseSchema,
-    401: WatchlistErrorResponseSchema,
-    404: WatchlistErrorResponseSchema,
-    429: WatchlistErrorResponseSchema,
-    500: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_OK]: GetWatchlistResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_UNAUTHORIZED]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_NOT_FOUND]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: WatchlistErrorResponseSchema,
   },
 });
 
@@ -286,12 +305,12 @@ export const WatchlistDeleteRouteContract = defineRouteContract({
   params: WatchlistIdParamsSchema,
   headers: WatchlistAuthHeadersSchema,
   responses: {
-    204: null,
-    400: WatchlistErrorResponseSchema,
-    401: WatchlistErrorResponseSchema,
-    404: WatchlistErrorResponseSchema,
-    429: WatchlistErrorResponseSchema,
-    500: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_NO_CONTENT]: null,
+    [HTTP_STATUS_BAD_REQUEST]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_UNAUTHORIZED]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_NOT_FOUND]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: WatchlistErrorResponseSchema,
   },
 });
 
@@ -300,12 +319,12 @@ export const WatchlistDeliveriesRouteContract = defineRouteContract({
   params: WatchlistIdParamsSchema,
   headers: WatchlistAuthHeadersSchema,
   responses: {
-    200: ListDeliveriesResponseSchema,
-    400: WatchlistErrorResponseSchema,
-    401: WatchlistErrorResponseSchema,
-    404: WatchlistErrorResponseSchema,
-    429: WatchlistErrorResponseSchema,
-    500: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_OK]: ListDeliveriesResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_UNAUTHORIZED]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_NOT_FOUND]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: WatchlistErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: WatchlistErrorResponseSchema,
   },
 });
 
@@ -313,11 +332,11 @@ export const FeedbackSubmitRouteContract = defineRouteContract({
   operationId: 'learning.submitFeedback',
   body: PostFeedbackRequestSchema,
   responses: {
-    201: PostFeedbackResponseSchema,
-    400: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
-    503: ErrorResponseSchema,
+    [HTTP_STATUS_CREATED]: PostFeedbackResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -371,11 +390,12 @@ export const SearchV2RouteContract = defineRouteContract({
   apiVersion: '2',
   responseType: 'human',
   responses: {
-    200: SearchResponseV2HumanSchema,
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: SearchResponseV2HumanSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -394,11 +414,12 @@ export const HybridV2RouteContract = defineRouteContract({
   apiVersion: '2',
   responseType: 'human',
   responses: {
-    200: SearchResponseV2HumanSchema,
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: SearchResponseV2HumanSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 
@@ -412,10 +433,11 @@ export const InterpretV2RouteContract = defineRouteContract({
   apiVersion: '2',
   responseType: 'interpret',
   responses: {
-    200: InterpretResponseV2Schema,
-    400: ErrorResponseSchema,
-    403: ErrorResponseSchema,
-    429: ErrorResponseSchema,
-    500: ErrorResponseSchema,
+    [HTTP_STATUS_OK]: InterpretResponseV2Schema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });

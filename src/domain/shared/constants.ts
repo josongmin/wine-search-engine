@@ -23,3 +23,19 @@ export const MIN_PRODUCED_VINTAGE_YEAR = 1700;
  * pre-release listings, but bounded enough to catch obvious bad data.
  */
 export const MAX_PRODUCED_VINTAGE_YEAR = 2200;
+
+/**
+ * Approximate KRW per USD for NL price extraction (soft filters only; no FX API).
+ * Mid-2025 reference rate; aligns rule-based and search-constraint extractors.
+ */
+export const KRW_PER_USD_APPROXIMATE = 1350;
+
+/**
+ * KRW in one Korean "만원" (10,000 won) unit — used in 만원/천원 parsers.
+ */
+export const KRW_PER_MAN_WON = 10_000;
+
+/**
+ * KRW in one "천원" (1,000 won) unit.
+ */
+export const KRW_PER_CHEON_WON = 1_000;

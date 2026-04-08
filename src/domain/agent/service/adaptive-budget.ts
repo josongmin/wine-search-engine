@@ -30,6 +30,13 @@ const MIN_STEPS_FOUR_PLUS_CONSTRAINTS = 8;
  */
 const MIN_STEPS_THREE_CONSTRAINTS = 6;
 
+/** Truncate regex source in adaptive-budget log reasons (telemetry string cap). */
+const ADAPTIVE_BUDGET_PATTERN_REASON_CHARS = 40;
+/** Shorter preview for nested-condition reason strings. */
+const ADAPTIVE_BUDGET_NESTED_REASON_CHARS = 20;
+/** Minimum hard-constraint count to allocate iterative-refinement step budget. */
+const CONSTRAINT_COUNT_FOR_ITERATIVE_REFINEMENT = 4;
+
 const PROPER_NOUN_PATTERN = /(?<!\p{L}\p{N})(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+\s+){0,3}[A-Z][a-zA-Z'\u00C0-\u017F-]+(?!\p{L}\p{N})/u;
 const VINTAGE_PATTERN = /(?<!\p{L}\p{N})(?:18|19|20)\d{2}(?!\p{L}\p{N})/u;
 /** Hangul wine name patterns: 3+ consecutive Hangul syllables that look like
@@ -44,7 +51,11 @@ const ADVERSARIAL_PATTERNS: readonly RegExp[] = [
   /(?<!\p{L}\p{N})(?:select|insert|update|delete|drop|truncate|alter|create)(?!\p{L}\p{N})[\s\S]{0,20}(?<!\p{L}\p{N})(?:from|into|table|database)(?!\p{L}\p{N})/iu,
   // Prompt injection
   /(?<!\p{L}\p{N})(?:ignore\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules))(?!\p{L}\p{N})/iu,
-  /(?<!\p{L}\p{N})system\s*[:>]/iu,
+  // "system:" / "system >" only trigger at the START of a word boundary.
+  // False-positive guard: "operating system: ..." or "wine system > ..." are
+  // legitimate phrases; we require the match to be at start-of-string or after
+  // whitespace to avoid flagging mid-sentence uses.
+  /(?:^|\s)system\s*[:>]/iu,
   /(?<!\p{L}\p{N})(?:dan\s+mode|jailbreak)(?!\p{L}\p{N})/iu,
   // Schema/PII extraction
   /(?<!\p{L}\p{N})(?:db|database)\s+schema(?!\p{L}\p{N})/iu,
@@ -92,7 +103,7 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
       return {
         maxSteps: 1,
         classification: 'adversarial',
-        reason: `matched adversarial pattern: ${pattern.source.slice(0, 40)}`,
+        reason: `matched adversarial pattern: ${pattern.source.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
       };
     }
   }
@@ -103,7 +114,7 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
       return {
         maxSteps: 1,
         classification: 'off_domain',
-        reason: `matched off-domain pattern: ${pattern.source.slice(0, 40)}`,
+        reason: `matched off-domain pattern: ${pattern.source.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
       };
     }
   }
@@ -122,7 +133,7 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
     return {
       maxSteps: 8,
       classification: 'nested_condition',
-      reason: `nested constraints: ${nestedHits.map((re) => re.source.slice(0, 20)).join(', ')}`,
+      reason: `nested constraints: ${nestedHits.map((re) => re.source.slice(0, ADAPTIVE_BUDGET_NESTED_REASON_CHARS)).join(', ')}`,
     };
   }
 
@@ -180,7 +191,7 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   const hasVintage = constraints.vintageMin !== undefined || constraints.vintageMax !== undefined ? 1 : 0;
   const constraintCount = exclusionCount + hasPrice + hasVintage;
 
-  if (constraintCount >= 4) {
+  if (constraintCount >= CONSTRAINT_COUNT_FOR_ITERATIVE_REFINEMENT) {
     return {
       maxSteps: MIN_STEPS_FOUR_PLUS_CONSTRAINTS,
       classification: 'nested_condition',

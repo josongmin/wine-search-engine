@@ -99,6 +99,9 @@ export interface ResponseBuildParams {
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
 }
 
+/** Fixed-point precision for confidence in deterministic response hash. */
+const RESPONSE_HASH_CONFIDENCE_DECIMAL_PLACES = 4;
+
 /**
  * Assembles a complete {@link SearchResponseV1} from domain outputs.
  *
@@ -140,7 +143,7 @@ export class ResponseBuilder {
     const responseHash = deterministicHash(
       params.decisionOutput.decisionStatus,
       params.decisionOutput.nextAction,
-      params.decisionOutput.decisionConfidence.toFixed(4),
+      params.decisionOutput.decisionConfidence.toFixed(RESPONSE_HASH_CONFIDENCE_DECIMAL_PLACES),
       String(enrichedResults.length),
       topEntityId,
       snapshot.policy_rule_version,

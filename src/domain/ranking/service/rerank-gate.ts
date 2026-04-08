@@ -42,6 +42,12 @@ export interface RerankGateDecision {
  *  6. candidateCount >= 20         → rerank (enough candidates to benefit)
  *  7. default                      → skip
  */
+
+/** Below this candidate count, cross-encoder rerank is skipped. */
+const RERANK_GATE_MIN_CANDIDATE_COUNT = 5;
+/** At or above this count, rerank is assumed worthwhile unless other rules skip. */
+const RERANK_GATE_LARGE_CANDIDATE_COUNT = 20;
+
 export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
   const { candidateCount, queryClass, effectiveRoute, hasAnchor, rerankForced } = input;
 
@@ -49,7 +55,7 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return { shouldRerank: true, reason: 'forced' };
   }
 
-  if (candidateCount < 5) {
+  if (candidateCount < RERANK_GATE_MIN_CANDIDATE_COUNT) {
     return { shouldRerank: false, reason: 'too_few_candidates' };
   }
 
@@ -68,7 +74,7 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return { shouldRerank: true, reason: 'semantic_preference' };
   }
 
-  if (candidateCount >= 20) {
+  if (candidateCount >= RERANK_GATE_LARGE_CANDIDATE_COUNT) {
     return { shouldRerank: true, reason: 'large_candidate_set' };
   }
 

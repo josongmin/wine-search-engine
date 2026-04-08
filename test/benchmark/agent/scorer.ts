@@ -835,6 +835,10 @@ function scoreStructuredChecks(
 ): number {
   let multiplier = 1;
   const lowerAnswer = answer.toLowerCase();
+  // When the LLM was unavailable (step-0 fallback), the fallback answer embeds the
+  // user's query text verbatim. Register and drinkingWindow checks on that text would
+  // score the USER's language, not the AGENT's. Skip those dims to avoid false positives.
+  const isStep0Fallback = execution.terminationReason === 'fallback' && (execution.stepCount ?? 0) === 0;
 
   // 1. priceBandKrw — extract Korean price patterns, check bounds
   if (exp.priceBandKrw !== undefined) {
@@ -883,11 +887,13 @@ function scoreStructuredChecks(
   }
 
   // 3. drinkingWindowStatus — keyword match
-  if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
+  // Skip for step-0 fallback: the fallback answer embeds the user's query text, which may
+  // accidentally contain cellar/hold keywords from the query itself — not from the agent.
+  if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any' && !isStep0Fallback) {
     const status = exp.drinkingWindowStatus;
     const keywords: Record<string, readonly RegExp[]> = {
       now: [/drinkable|peak|optimal|currently|지금|마시기\s*좋|음용\s*적기|최적|피크/iu],
-      hold: [/hold|cellar|aging|young|숙성|보관|셀러링|더\s*기다|음용\s*전/iu],
+      hold: [/hold|cellar|aging|young|숙성|보관|셀러|셀러링|더\s*기다|음용\s*전|아직|이르/iu],
       past: [/past|over|decline|지남|지났|과거/iu],
     };
     const patterns = keywords[status] ?? [];
@@ -928,7 +934,9 @@ function scoreStructuredChecks(
   }
 
   // 5. requireHedging — must contain hedging language
-  if (exp.requireHedging === true) {
+  // Skip for step-0 fallback: the generic fallback answer never contains hedging,
+  // but this is an infra failure not an agent failure.
+  if (exp.requireHedging === true && !isStep0Fallback) {
     const hedging = /아마|~?\s*수도|perhaps|might|maybe|여러\s*후보|several|다양|clarif|명확|구체적|어떤/i;
     if (!hedging.test(answer)) {
       diagnostics.push({
@@ -942,7 +950,11 @@ function scoreStructuredChecks(
   }
 
   // 6. requiredRegister — Korean formal vs casual
-  if (exp.requiredRegister !== undefined) {
+  // Skip when the answer is from the fallback path (step-0 LLM unavailable):
+  // the fallback embeds the user's query text verbatim, which carries the user's
+  // register (casual or formal) — not the agent's. Checking it would score the
+  // USER's register, not the agent's, producing false REGISTER_MISMATCH failures.
+  if (exp.requiredRegister !== undefined && !isStep0Fallback) {
     const formalMarkers = (lowerAnswer.match(/합니다|습니다|드립니다|하세요|겠습니다/g) ?? []).length;
     const casualMarkers = (lowerAnswer.match(/해|야|거|줄게|건데|잖아/g) ?? []).length;
     const dominant = formalMarkers >= casualMarkers ? 'formal' : 'casual';
@@ -1189,7 +1201,7 @@ function scoreContextRelevance(
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
     const keywords: Record<string, readonly RegExp[]> = {
       now: [/drinkable|peak|optimal|currently|지금|마시기\s*좋|음용\s*적기|최적|피크/iu],
-      hold: [/hold|cellar|aging|young|숙성|보관|셀러링|더\s*기다|음용\s*전/iu],
+      hold: [/hold|cellar|aging|young|숙성|보관|셀러|셀러링|더\s*기다|음용\s*전|아직|이르/iu],
       past: [/past|over|decline|지남|지났|과거/iu],
     };
     const patterns = keywords[exp.drinkingWindowStatus] ?? [];
@@ -1220,10 +1232,12 @@ function scoreContextRelevance(
       })
       .filter((q) => q.length > 0);
     if (queryTerms.length > 0) {
-      const lower = obsText.toLowerCase();
+      // NFKC-normalize both sides so composed/decomposed Hangul match consistently.
+      const lower = obsText.toLowerCase().normalize('NFKC');
       const anyRelevant = queryTerms.some((q) => {
-        const words = q.toLowerCase()
-          .split(/\s+/)
+        const words = q.toLowerCase().normalize('NFKC')
+          // Split on whitespace OR Unicode punctuation — handles Korean without spaces.
+          .split(/[\s\p{P}]+/u)
           .filter((w) => w.length >= CONTEXT_PRECISION_MIN_WORD_LEN && !STOPWORDS.has(w));
         if (words.length === 0) return true; // no significant words → pass
         const found = words.filter((w) => lower.includes(w));
@@ -1251,7 +1265,7 @@ function scoreContextRelevance(
   const score = hardFailed.length > 0 ? 0 : passedCount / checks.length;
 
   if (score < 1) {
-    const severity = hardFailed.length > 0 ? 'warn' : 'warn';
+    const severity: DiagnosticSeverity = hardFailed.length > 0 ? 'critical' : 'warn';
     diagnostics.push({
       dim: 'contextRelevance',
       severity,

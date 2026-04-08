@@ -122,7 +122,7 @@ export default tseslint.config(
        * Generous ignore list to avoid noise on trivial arithmetic.
        */
       'no-magic-numbers': [
-        'warn',
+        'error',
         {
           ignore: [0, 1, -1, 2, 3, 10, 100, 1000],
           ignoreArrayIndexes: true,
