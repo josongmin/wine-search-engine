@@ -278,4 +278,44 @@ describe('executeAgentTool', () => {
     const raw = result.rawResult as SearchResponseV1;
     expect(raw.results).toHaveLength(1);
   });
+
+  it('tags observation with RETRIEVAL_QUALITY: reliable when ≥3 results and few constraints', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-1', canonicalLabel: 'Wine A', type: 'wine' },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-2', canonicalLabel: 'Wine B', type: 'wine' },
+          relevanceScore: 0.8,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.8, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-3', canonicalLabel: 'Wine C', type: 'wine' },
+          relevanceScore: 0.7,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.6, semantic: 0.6, attribute: 0.6, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.7, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '레드 와인 추천' }, deps, 'req-123');
+    expect(result.observation).toContain('RETRIEVAL_QUALITY: reliable');
+  });
+
+  it('tags observation with RETRIEVAL_QUALITY: unreliable when 0 results', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse([]));
+    const result = await executeAgentTool('search_wines', { query: '레드 와인 추천' }, deps, 'req-123');
+    expect(result.observation).toContain('RETRIEVAL_QUALITY: unreliable');
+  });
 });

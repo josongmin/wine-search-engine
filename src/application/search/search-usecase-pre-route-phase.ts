@@ -169,22 +169,38 @@ export async function runSearchPreRoutePhase(
 
   // Merge caller-supplied structured filters (from agent tools / batch API)
   // into the planner's hard constraints so they flow to Vespa as YQL filters.
+  //
+  // Override semantics (SOTA best practice — Multi-Meta-RAG pattern):
+  //   Structured params from the agent are AUTHORITATIVE and override NL-extracted
+  //   constraints on the same attribute. This prevents noisy NL extraction from
+  //   conflicting with the agent's explicit intent. For example, if the agent passes
+  //   wine_type="red" AND the NL planner also extracted wine_type="red" from the
+  //   enriched query, we keep the agent version (same result). But if the planner
+  //   extracts wine_type="white" from a confusing enriched query, the agent's
+  //   explicit wine_type="red" replaces it.
+  //
+  //   Override applies per (attribute, operator) pair — so agent's exclude_grapes
+  //   replaces any NL-extracted exclude for the same attribute, but does NOT
+  //   override a different attribute like wine_type.
   if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
-    const existingAttrs = new Set(
-      plan.constraints.hard.map((c) => `${c.attribute}:${c.operator}:${String(c.value)}`),
+    // Attributes covered by structured agent filters (operator-aware override).
+    // For 'exclude'/'not_in' operators, override only same-operator NL constraints.
+    const agentCoveredKeys = new Set(
+      ctx.request.filters.map((f) => `${f.attribute}:${f.operator}`),
     );
-    const deduped = ctx.request.filters.filter(
-      (f) => !existingAttrs.has(`${f.attribute}:${f.operator}:${String(f.value)}`),
+    // Drop NL-extracted constraints that are overridden by agent structured params.
+    // Exact-match on (attribute, operator) — same attribute with different operator
+    // (e.g. NL extracted region='=' and agent passed region='exclude') coexist.
+    const nonOverridden = plan.constraints.hard.filter(
+      (c) => !agentCoveredKeys.has(`${c.attribute}:${c.operator}`),
     );
-    if (deduped.length > 0) {
-      plan = {
-        ...plan,
-        constraints: {
-          ...plan.constraints,
-          hard: [...plan.constraints.hard, ...deduped],
-        },
-      };
-    }
+    plan = {
+      ...plan,
+      constraints: {
+        ...plan.constraints,
+        hard: [...nonOverridden, ...ctx.request.filters],
+      },
+    };
   }
 
   logSearchEvent({

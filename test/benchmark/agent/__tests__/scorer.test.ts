@@ -506,36 +506,21 @@ describe('overall score (weighted geometric mean)', () => {
     expect(r.scores.overall).toBeLessThan(0.83);
   });
 
-  it('monotonicity: adding judge=0.5 (neutral) does not change overall vs judge=null', () => {
-    // v4 fix: fixed 0.5 neutral imputation — null dims imputed at 0.5 independently.
-    // Adding judge=0.5 (exactly the neutral value) should leave overall unchanged
-    // because the imputation for null was already 0.5.
-    const baseExecution = makeExecution({
-      answer: 'Opus One 2018 is a great Napa Cabernet.',
-      observations: ['Found: Opus One 2018 | region: Napa Valley'],
-    });
-    const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, undefined, 0.8);
-    const withNeutralJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, 0.5, 0.8);
-    // judge=0.5 = neutral prior → overall should be equal (within float tolerance)
-    expect(withNeutralJudge.scores.overall).toBeCloseTo(withNullJudge.scores.overall, 2);
+  it('null-drop: judge=null excludes judge from geo-mean → overall ≥ judge=0.5', () => {
+    // v4 null-drop: null dims are EXCLUDED (weight dropped from denominator).
+    // judge=null → present dims only → no drag. judge=0.5 → participates → may lower.
+    const base = makeExecution({ answer: 'Opus One 2018 is a great Napa Cabernet.', observations: ['Found: Opus One 2018 | region: Napa Valley'] });
+    const withNull = scoreScenario(makeScenario({ maxSteps: 5 }), base, undefined, 0.8);
+    const withHalf = scoreScenario(makeScenario({ maxSteps: 5 }), base, 0.5, 0.8);
+    expect(withNull.scores.overall).toBeGreaterThanOrEqual(withHalf.scores.overall);
   });
 
-  it('monotonicity: adding weak judge (0.2) lowers overall vs null but does not affect unrelated dims', () => {
-    // v4 fix: non-monotonicity bug was: adding judge=0.2 lowers presentMeanLog → cascades
-    // to LOWER imputed value for ALL other null dims (faithfulness, contextRelevance, etc).
-    // After fix: null dims always imputed at 0.5; judge=0.2 only affects the judge dim itself.
-    const baseExecution = makeExecution({
-      answer: 'Opus One 2018 is a great Napa Cabernet.',
-      observations: ['Found: Opus One 2018 | region: Napa Valley'],
-    });
-    const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, undefined, 0.8);
-    const withWeakJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, 0.2, 0.8);
-    // judge=0.2 < 0.5 neutral → should lower overall (judge dim contributes low)
-    expect(withWeakJudge.scores.overall).toBeLessThan(withNullJudge.scores.overall);
-    // But the drop should be proportional to judge weight (0.15), not cascaded into other dims.
-    // Before fix: drop was up to 14.5% due to coupling. After fix: drop ≈ 4-6% (judge weight only).
-    const drop = withNullJudge.scores.overall - withWeakJudge.scores.overall;
-    expect(drop).toBeLessThan(0.10); // bounded: judge weight 0.15 × log-scale effect < 10%
+  it('null-drop: adding weak judge (0.2) lowers overall vs null (judge now participates)', () => {
+    // judge=null → excluded. judge=0.2 → participates with low value → drags geo-mean.
+    const base = makeExecution({ answer: 'Opus One 2018 is a great Napa Cabernet.', observations: ['Found: Opus One 2018 | region: Napa Valley'] });
+    const withNull = scoreScenario(makeScenario({ maxSteps: 5 }), base, undefined, 0.8);
+    const withWeak = scoreScenario(makeScenario({ maxSteps: 5 }), base, 0.2, 0.8);
+    expect(withWeak.scores.overall).toBeLessThan(withNull.scores.overall);
   });
 });
 
@@ -765,12 +750,9 @@ describe('null judge handling', () => {
     expect(Math.abs(rPresent.scores.overall - rNull.scores.overall)).toBeLessThan(0.02);
   });
 
-  it('presentWeight=0 (all dims null) → returns NEUTRAL_IMPUTED_VALUE (0.5) not 0', () => {
-    // When all dims are null, geo-mean of (all 0.5 imputed) = 0.5, not 0.
-    // This case is degenerate but semantically: "no information → neutral, not failure."
-    // In practice all-null is unreachable via normal scoreScenario() (answerQuality always fires),
-    // so test the mathematical property directly via weightedGeometricMean behavior:
-    // judge=null is imputed at 0.5; a scenario with all-1 dims plus null judge scores > 0.5.
+  it('null-drop: multiple null dims → overall computed from present dims only (no drag)', () => {
+    // v4 null-drop: null dims excluded from denominator. With judge=null and
+    // faithfulness=null, overall is computed from present dims only — no 0.5 drag.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ answer: 'good answer about wine vintage and region' }),
@@ -1686,53 +1668,40 @@ describe('multiple null dimensions — geo mean handles gracefully', () => {
   });
 });
 
-describe('weightedGeometricMean imputation invariant', () => {
-  // Regression guard (v4 — fixed 0.5 neutral imputation):
-  // A disabled (null) dimension is imputed at 0.5 (max-entropy prior for [0,1]).
-  // This is NOT the present-only geo-mean (v3 was present-mean, which caused
-  // non-monotone coupling: adding judge=0.2 lowered imputed value for unrelated
-  // null dims like faithfulness, dropping overall by up to 14%).
+describe('weightedGeometricMean null-drop invariant', () => {
+  // Regression guard (v4 — null-drop):
+  // A disabled (null) dimension is EXCLUDED from the geo-mean computation.
+  // Its weight is dropped from the denominator, remaining dims are renormalized.
   //
   // Key invariants:
-  //   - null → imputed at 0.5 (independent of other dims' values)
-  //   - judge=0.5 → same as null (neutral, no change)
-  //   - judge=1.0 → strictly higher than null (above neutral)
-  //   - judge=0.0 → strictly lower than null (below neutral)
+  //   - null → excluded from geo-mean (no drag, no inflation)
+  //   - judge=1.0 with null → null has no effect; judge=1.0 may raise or lower
+  //     depending on whether 1.0 is above or below the present-dims geo-mean
+  //   - judge=0.0 → always lowers overall (0.0 is below any positive geo-mean)
+  //   - No coupling: adding info about dim A cannot change the contribution of dim B
 
-  it('null judge does not inflate overall compared to judge=present-mean', () => {
-    // With judge null, overall is computed from the remaining dims.
+  it('null judge is excluded: overall is computed from present dims only', () => {
     const rNull = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
-      undefined, // judge disabled
+      undefined, // judge disabled → excluded
     );
     expect(rNull.scores.judge).toBeNull();
     expect(rNull.scores.overall).toBeGreaterThan(0);
     expect(Number.isFinite(rNull.scores.overall)).toBe(true);
-
-    // With judge = 1.0 (perfect), overall should be HIGHER than with judge disabled
-    // (imputation uses present-only mean which is < 1.0 for realistic executions).
-    const rPerfect = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
-      1.0, // judge = perfect
-    );
-    expect(rPerfect.scores.overall).toBeGreaterThanOrEqual(rNull.scores.overall);
   });
 
   it('null judge does not collapse overall compared to judge=0', () => {
-    // With judge=0, overall should be strictly LOWER than with judge=null
-    // (null imputes to present-mean, not 0). This is the key invariant from
-    // the original comment: "disabling a dim is a no-op, not a zero penalty".
+    // judge=0 participates and drags geo-mean; judge=null is excluded.
     const rNull = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
-      undefined, // judge disabled
+      undefined,
     );
     const rZero = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
-      0.0, // judge = worst
+      0.0,
     );
     expect(rNull.scores.overall).toBeGreaterThan(rZero.scores.overall);
   });
@@ -2143,6 +2112,47 @@ describe('step-0 fallback exemptions for structured checks', () => {
 // v4: ANSWER_LENGTH_BONUS and ANSWER_TRIVIAL_PENALTY removed entirely.
 // scoreAnswerQuality is now purely contract-based. See scorer.ts removal comment.
 // The 8 tests below were deleted — they tested behavior that no longer exists.
+
+// ─────────────────────────────────────────────────────────────────────
+// Korean CLR (Correct Language Rate) diagnostics
+// ─────────────────────────────────────────────────────────────────────
+
+describe('Korean CLR diagnostics', () => {
+  it('emits CLR_CODE_SWITCH warn when Korean query gets English-only answer', () => {
+    const scenario = makeScenario({}, { query: '레드 와인 추천해줘' });
+    const execution = makeExecution({ answer: 'I recommend Chateau Margaux. It is a great red wine from Bordeaux France.' });
+    const result = scoreScenario(scenario, execution, undefined);
+    const clrDiag = result.diagnostics?.find((d) => d.code === 'CLR_CODE_SWITCH');
+    expect(clrDiag).toBeDefined();
+    expect(clrDiag?.severity).toBe('warn');
+  });
+
+  it('does NOT emit CLR_CODE_SWITCH when Korean query gets Korean answer', () => {
+    const scenario = makeScenario({}, { query: '레드 와인 추천해줘' });
+    const execution = makeExecution({ answer: '보르도 레드 와인을 추천드립니다. 까베르네 소비뇽 위주의 Chateau Margaux가 좋습니다.' });
+    const result = scoreScenario(scenario, execution, undefined);
+    const clrDiag = result.diagnostics?.find((d) => d.code === 'CLR_CODE_SWITCH');
+    expect(clrDiag).toBeUndefined();
+  });
+
+  it('does NOT emit CLR_CODE_SWITCH for English-language query', () => {
+    const scenario = makeScenario({}, { query: 'recommend a red wine from France' });
+    const execution = makeExecution({ answer: 'I recommend Chateau Margaux from Bordeaux.' });
+    const result = scoreScenario(scenario, execution, undefined);
+    const clrDiag = result.diagnostics?.find((d) => d.code === 'CLR_CODE_SWITCH');
+    expect(clrDiag).toBeUndefined();
+  });
+
+  it('CLR_CODE_SWITCH does NOT collapse overall score to 0', () => {
+    const scenario = makeScenario({}, { query: '레드 와인 추천해줘' });
+    const execution = makeExecution({ answer: 'I recommend Chateau Margaux red wine from Bordeaux.' });
+    const result = scoreScenario(scenario, execution, undefined);
+    const clrDiag = result.diagnostics?.find((d) => d.code === 'CLR_CODE_SWITCH');
+    expect(clrDiag).toBeDefined();
+    expect(result.scores.criticalFailure).toBe(false);
+    expect(result.scores.overall).toBeGreaterThan(0);
+  });
+});
 
 // ─────────────────────────────────────────────────────────────────────
 // TIER_WEIGHTS sum to 1.0 (Fix 3)

@@ -26,18 +26,43 @@ export interface JudgeResult {
   readonly samples: number;
 }
 
-const JUDGE_SYSTEM_PROMPT = `You are a strict evaluator for a wine search engine's agent responses. \
+/** Judge temperature — 0.1 is optimal for consistency (arxiv 2603.28304). */
+const JUDGE_TEMPERATURE = 0.1;
+
+const JUDGE_SYSTEM_PROMPT = `You are a strict evaluator for a wine search engine's agent responses.
 Given a user query, the agent's answer, and a rubric, score how well the answer satisfies the rubric.
 
-Output STRICTLY a single JSON object on one line:
-{"score": 0.0, "rationale": "one-sentence reason"}
+## Evaluation Process (follow this exactly)
+1. List which rubric criteria the answer satisfies and which it misses.
+2. Check factual grounding: are wine names, regions, prices from the search results (not hallucinated)?
+3. Assign a score based on the ratio of satisfied criteria.
 
-Score scale:
-  1.00 — fully satisfies the rubric, factually correct, complete
-  0.75 — mostly satisfies, minor gaps
-  0.50 — partially satisfies, significant gaps
-  0.25 — barely satisfies, major issues
-  0.00 — does not satisfy or hallucinates
+## Score Scale
+  1.00 — fully satisfies ALL rubric criteria, factually correct, complete
+  0.75 — satisfies most criteria (≥75%), minor gaps only
+  0.50 — satisfies about half the criteria, significant gaps
+  0.25 — satisfies few criteria (<25%), major issues
+  0.00 — does not satisfy any criteria, or hallucinates wine information
+
+## Domain Examples
+Example 1 — Score 1.00:
+  Query: "보르도 레드 추천" | Rubric: "Must recommend Bordeaux red wines"
+  Answer: "보르도 레드로 Château Margaux 2015, Pauillac 지역의 풀바디 카베르네 블렌드입니다."
+  → All criteria met: Bordeaux ✓, red ✓, specific wine ✓, region detail ✓
+
+Example 2 — Score 0.25:
+  Query: "5만원 이하 가성비 와인" | Rubric: "Recommend wines ≤50,000 KRW"
+  Answer: "Opus One을 추천합니다. 훌륭한 와인이에요."
+  → Price constraint violated (Opus One >> 50,000₩), no price mentioned ✗
+
+Example 3 — Score 0.50:
+  Query: "이탈리아 화이트 추천" | Rubric: "Must recommend Italian white wines with region info"
+  Answer: "Pinot Grigio를 추천드립니다. 가볍고 시원한 스타일이에요."
+  → Italian ✓, white ✓, but no region specified ✗, only 1 wine ✗
+
+## Output Format
+Output STRICTLY a single JSON object:
+{"score": 0.0, "rationale": "brief analysis: [criteria met] vs [criteria missed]"}
 
 Output ONLY the JSON. No markdown, no preamble, no trailing commentary.`;
 
@@ -155,8 +180,8 @@ async function callJudgeOnce(
         { role: 'system', content: JUDGE_SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },
       ],
-      temperature: 0,
-      maxOutputTokens: 200,
+      temperature: JUDGE_TEMPERATURE,
+      maxOutputTokens: 300,
     });
     return parseJudgeResponse(result.text);
   } catch {
@@ -293,20 +318,34 @@ function composeAutoRubric(
 // RAGAS Faithfulness Judge
 // ─────────────────────────────────────────────────────────────────────
 
-const FAITHFULNESS_SYSTEM_PROMPT = `You are a faithfulness evaluator. Given an agent's answer and the tool results (context) it received, score how well the answer's factual claims are grounded in the context.
+const FAITHFULNESS_SYSTEM_PROMPT = `You are a faithfulness evaluator using NLI-style atomic claim verification.
 
-Output STRICTLY a single JSON object:
-{"score": 0.0, "rationale": "one-sentence reason"}
+## Evaluation Process (follow exactly)
+1. DECOMPOSE the answer into atomic factual claims. Examples of claims:
+   - "Château Margaux is a Bordeaux wine" (wine name + region)
+   - "It costs around 50,000원" (price)
+   - "2018 vintage" (vintage year)
+   - "Cabernet Sauvignon blend" (grape variety)
+   - "Pairs well with steak" (pairing recommendation)
+2. For EACH claim, classify against the context:
+   - ENTAILED: claim is directly supported by context
+   - NEUTRAL: claim cannot be verified from context (not necessarily wrong)
+   - CONTRADICTED: claim directly contradicts context
+3. Score = entailed_count / (entailed_count + contradicted_count). Neutral claims are excluded.
+   If no verifiable claims exist, score 1.0 (no contradictions).
 
-Score = (number of answer claims supported by context) / (total factual claims in answer).
-- 1.00: every factual claim in the answer is supported by the context
-- 0.75: most claims supported, minor unsupported details
-- 0.50: about half the claims are unsupported or fabricated
-- 0.25: mostly fabricated, few claims match context
-- 0.00: completely fabricated, no grounding in context
+## Score Scale
+- 1.00: all verifiable claims entailed, zero contradictions
+- 0.75: most claims entailed, 1-2 neutral, zero contradictions
+- 0.50: some claims contradicted or many unverifiable
+- 0.25: multiple contradictions with context
+- 0.00: mostly contradicted or entirely fabricated
 
-Ignore stylistic/opinion statements — only evaluate factual claims (wine names, prices, regions, vintages, scores, tasting notes).
-Output ONLY the JSON.`;
+Ignore stylistic/opinion statements — only evaluate factual claims about wines (names, prices, regions, vintages, grapes, tasting notes).
+
+## Output
+{"score": 0.0, "rationale": "N claims: X entailed, Y neutral, Z contradicted. [brief explanation]"}
+Output ONLY the JSON. No markdown.`;
 
 /**
  * RAGAS-style faithfulness evaluation via LLM judge.
@@ -358,8 +397,8 @@ Score the faithfulness of the answer against the context.`;
           { role: 'system', content: FAITHFULNESS_SYSTEM_PROMPT },
           { role: 'user', content: userPrompt },
         ],
-        temperature: 0,
-        maxOutputTokens: 200,
+        temperature: JUDGE_TEMPERATURE,
+        maxOutputTokens: 300,
       });
       return parseJudgeResponse(result.text);
     } catch {

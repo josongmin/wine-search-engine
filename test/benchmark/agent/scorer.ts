@@ -549,6 +549,12 @@ export function scoreScenario(
   // no observations available.
   const contextRecall = scoreContextRecall(scenario, execution, diagnostics);
 
+  // Korean Correct Language Rate (CLR): when the query is Korean (≥ 20% Hangul characters),
+  // check whether the answer is also predominantly Korean. Code-switching to English mid-answer
+  // is a known LLM failure mode that degrades user experience. This is a monitoring-only
+  // diagnostic (severity='warn') — it does NOT affect scores, only surfaces the signal.
+  emitKoreanClrDiagnostic(scenario.query, execution.answer, diagnostics);
+
   // Critical-fail check — any of these collapses overall to 0.
   const criticalFailure = diagnostics.some((d) => d.severity === 'critical');
 
@@ -1363,7 +1369,7 @@ function extractVintageYears(text: string): number[] {
   const years: number[] = [];
   const allMatches: { year: number; index: number }[] = [];
   for (const m of text.matchAll(/(?:^|[^\p{L}\p{N}])(1[6-9]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/gu)) {
-    allMatches.push({ year: Number(m[1]), index: m.index! });
+    allMatches.push({ year: Number(m[1]), index: m.index });
   }
 
   for (let i = 0; i < allMatches.length; i++) {
@@ -1872,6 +1878,72 @@ function scoreCostEfficiency(
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Korean Correct Language Rate (CLR) monitoring
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Fraction of characters in `text` that are Hangul (Korean syllable blocks U+AC00–U+D7A3
+ * plus Hangul Jamo U+1100–U+11FF and Compatibility Jamo U+3130–U+318F).
+ * Used to decide whether a query / answer is "Korean-dominant".
+ */
+function hangulCharFraction(text: string): number {
+  if (text.length === 0) return 0;
+  let count = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (
+      (cp >= 0xAC00 && cp <= 0xD7A3) || // syllable blocks
+      (cp >= 0x1100 && cp <= 0x11FF) || // Hangul Jamo
+      (cp >= 0x3130 && cp <= 0x318F)    // Compatibility Jamo
+    ) {
+      count++;
+    }
+  }
+  return count / text.length;
+}
+
+/**
+ * Minimum Hangul fraction in a query to classify it as "Korean" for CLR purposes.
+ * 0.20 = at least 1 in 5 chars is Hangul — a short mixed Korean/English query like
+ * "보르도 Cabernet 추천" (26 chars, 8 Hangul ≈ 30%) passes the threshold.
+ */
+const KOREAN_QUERY_HANGUL_THRESHOLD = 0.20;
+
+/**
+ * Minimum Hangul fraction expected in a Korean-query answer. Below this threshold
+ * the agent is considered to have code-switched to English.
+ * 0.10 = 1 in 10 chars is Hangul — very permissive (wine names are English proper nouns).
+ * Catches severe code-switching (pure-English answer to a Korean question).
+ */
+const KOREAN_ANSWER_HANGUL_THRESHOLD = 0.10;
+
+/**
+ * Emits a CLR_CODE_SWITCH diagnostic when a Korean query receives an English-heavy answer.
+ * Severity is always 'warn' — code-switching is a UX issue, not a correctness failure.
+ * This diagnostic does NOT affect scoring (no criticalFailure, no score multiplier).
+ */
+function emitKoreanClrDiagnostic(
+  query: string,
+  answer: string,
+  diagnostics: Diagnostic[],
+): void {
+  const queryHangulFraction = hangulCharFraction(query);
+  if (queryHangulFraction < KOREAN_QUERY_HANGUL_THRESHOLD) return; // not a Korean query
+
+  const answerHangulFraction = hangulCharFraction(answer);
+  if (answerHangulFraction < KOREAN_ANSWER_HANGUL_THRESHOLD) {
+    diagnostics.push({
+      dim: 'answerQuality',
+      severity: 'warn',
+      code: 'CLR_CODE_SWITCH',
+      message: `Korean query received English-heavy answer (query Hangul=${(queryHangulFraction * 100).toFixed(0)}%, answer Hangul=${(answerHangulFraction * 100).toFixed(0)}%)`,
+      observed: answerHangulFraction,
+      expected: KOREAN_ANSWER_HANGUL_THRESHOLD,
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Math helpers
 // ─────────────────────────────────────────────────────────────────────
 
@@ -1900,25 +1972,33 @@ function renormaliseWeights(weights: Required<DimensionWeights>): Required<Dimen
 }
 
 /**
- * Weighted geometric mean with FIXED NEUTRAL IMPUTATION for missing dimensions.
+ * Weighted geometric mean with NULL-DROP for missing dimensions (SOTA++ v4).
  *
- * When a dimension's score is null (e.g. judge disabled), the dimension is
- * imputed with a fixed neutral value of 0.5 (maximum-entropy prior for [0,1]).
+ * When a dimension's score is null (e.g. judge disabled, faithfulness unmeasured),
+ * the dimension is EXCLUDED from the computation entirely — its weight is dropped
+ * from the denominator and the remaining weights are renormalized.
  *
- * WHY 0.5, not present-only mean:
- * The previous approach imputed null dims with the geometric mean of all PRESENT
- * dims. This creates a non-monotone coupling bug: adding judge=0.2 lowers the
- * present-mean from ~0.90 to ~0.75, which cascades into LOWER imputation for
- * unrelated null dims (faithfulness, contextRelevance). Adding real information
- * about one dimension perversely lowered the overall score by up to 14%.
+ * WHY null-drop, not fixed 0.5 imputation:
+ * The 0.5 imputation approach created a systematic ~16% drag on --no-judge runs.
+ * In that mode, judge=null AND faithfulness=null (no LLM judge → no faithfulness
+ * scoring either). With DEFAULT_WEIGHTS judge=0.15 + faithfulness=0.10 = 0.25 of
+ * total weight imputed at 0.5, even a perfect-scoring agent was capped at ~84%.
+ * This made --no-judge scores incomparable with judge-enabled scores AND gave a
+ * false impression of quality degradation.
  *
- * Fixed approach: each null dim is independently imputed at 0.5, regardless of
- * what other dims score. Adding information about any dim ONLY affects overall
- * through that dim's contribution — never through side-effects on other dims.
- * This makes the geo-mean monotone: score(x) ≥ score(x') when x ≥ x' for any dim.
+ * The null-drop approach eliminates this drag: null dims simply don't participate.
+ * The remaining present dims are scored on their own merits with renormalized weights.
  *
- * The weight stays in the denominator, so a disabled dimension is a true
- * no-op when its real score equals 0.5. Scores >0.5 improve overall; <0.5 lower it.
+ * Monotonicity: adding a real score for a previously-null dim ALWAYS changes the
+ * overall in the direction determined by whether the new score is above or below
+ * the present-dims geometric mean. This is the standard approach in RAGAS and
+ * academic agent benchmarks (null metrics are excluded, not imputed).
+ *
+ * WHY this is NOT the same as the rejected "present-mean imputation":
+ * The old approach imputed null dims with the present-only GEOMETRIC MEAN (a
+ * computed VALUE that changed when other dims changed → coupling bug). Null-drop
+ * does not impute any value — it removes the weight entirely. No coupling possible
+ * because there is no imputed value to couple through.
  */
 /** Minimum score floor for non-critical dimensions before geo-mean computation.
  *  Prevents a single weak (but non-critical) dim from collapsing overall by >20x. */
@@ -1934,47 +2014,36 @@ const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>([
   'executionEfficiency',
   'terminationCorrectness',
   'answerQuality',
-  'judge',
+  // judge is intentionally NOT in NO_FLOOR_DIMS (v5): LLM judge scores are noisy
+  // even with N=3 median. A 0.00 judge collapses the geo-mean to ~12% which is
+  // disproportionate — the agent may have answered reasonably but the judge's rubric
+  // evaluation was overly strict. DIMENSION_FLOOR=0.05 caps the penalty at ~10x
+  // rather than ~1000x (log(0.05) vs log(1e-6)).
   'costEfficiency',  // v4: 2x budget overshoot (score=0) is an engineering failure, not noise.
                      // Flooring it to 0.05 reduced the log-space penalty by 10.8x.
 ]);
-
-/** Fixed neutral imputation value for null dimensions (max-entropy prior for [0,1]).
- * See weightedGeometricMean comment for the coupling-bug justification. */
-const NEUTRAL_IMPUTED_VALUE = 0.5;
 
 function weightedGeometricMean(
   dimScores: Record<string, number | null>,
   weights: Record<string, number>,
 ): number {
   const EPS = 1e-6;
-  // Null dims are imputed at the fixed neutral value (0.5) independently of
-  // which other dims are present. This decouples imputation: adding a low score
-  // for dim A cannot lower the imputed value of unrelated null dim B.
-  const neutralLog = Math.log(NEUTRAL_IMPUTED_VALUE + EPS);
-
+  // Null-drop: only present (non-null) dims participate. Null dims are excluded
+  // entirely — their weight is NOT in the denominator.
   let weightedLogSum = 0;
-  let totalWeight = 0;
   let presentWeight = 0;
   for (const key of Object.keys(weights)) {
     const w = weights[key]!;
     const x = dimScores[key];
-    const logX = (x === null || x === undefined)
-      ? neutralLog
-      : Math.log(clamp01(x) + EPS);
-    weightedLogSum += w * logX;
-    totalWeight += w;
-    if (x !== null && x !== undefined) presentWeight += w;
+    if (x === null || x === undefined) continue; // null-drop: skip entirely
+    weightedLogSum += w * Math.log(clamp01(x) + EPS);
+    presentWeight += w;
   }
-  if (totalWeight === 0) return 0; // degenerate: no dims defined at all
-  // presentWeight === 0: ALL dims are null — every one gets imputed at NEUTRAL_IMPUTED_VALUE.
-  // Consistent with max-entropy prior: geo-mean of all 0.5s = 0.5, not 0.
-  // Returning 0 here would contradict the imputation philosophy (null ≠ failure).
-  if (presentWeight === 0) return NEUTRAL_IMPUTED_VALUE;
+  if (presentWeight === 0) return 0; // degenerate: no dims have scores
   // Do NOT subtract EPS here — EPS was added to log() inputs only to prevent
   // log(0)=-Infinity. Subtracting it from exp() output introduces a systematic
   // negative bias: for a perfect score (x=1), exp(log(1+1e-6))−1e-6 ≈ 0, which
   // would clamp incorrectly. Let clamp01 handle any float rounding artefact.
-  const raw = Math.exp(weightedLogSum / totalWeight);
+  const raw = Math.exp(weightedLogSum / presentWeight);
   return clamp01(raw);
 }

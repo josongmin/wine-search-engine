@@ -52,9 +52,11 @@ const SearchInputSchema = z.object({
   // .int() implies finite (no NaN/Infinity) per Zod semantics; .min/.max add domain bounds
   limit: z.number().int().min(1).max(SEARCH_LIMIT_MAX).optional(),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
-  /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]). */
+  /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]).
+   *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
   exclude_grapes: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
-  /** Countries/regions to exclude (e.g. ["France", "프랑스"]). */
+  /** Countries/regions to exclude (e.g. ["France", "프랑스"]).
+   *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
   exclude_regions: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
   max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
@@ -67,6 +69,9 @@ const SearchInputSchema = z.object({
   vintage_min: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
   /** Maximum vintage year (inclusive). */
   vintage_max: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
+  /** When true, activate diversity dedup to spread results across grapes/regions/styles.
+   *  Use when user says "다양하게", "각각", "종류별로", "different styles", etc. */
+  want_diversity: z.boolean().optional(),
 });
 
 const CompareInputSchema = z.object({
@@ -165,6 +170,15 @@ export function isKnownTool(name: string): boolean {
 const MIN_CONSTRAINTS_FOR_STAGED_HINT = 3;
 
 /**
+ * Minimum result count to classify retrieval as "reliable".
+ * Below this threshold (with multi-constraint query) the observation is tagged
+ * [RETRIEVAL_QUALITY: partial] — agent should try relaxing one NICE-TO-HAVE
+ * constraint before accepting the result as sufficient.
+ * Domain rationale: user asking for wine recommendations expects 2-3 concrete options.
+ */
+const MIN_RESULTS_FOR_RELIABLE_QUALITY = 3;
+
+/**
  * Maximum length of the enriched query string (original query + appended exclusion/price params).
  * The base query is max 500 chars; exclusion/price params can add ~200 chars.
  * Domain rationale: Vespa YQL parser has a 4 KB query limit; downstream NL parser
@@ -175,7 +189,6 @@ const MAX_ENRICHED_QUERY_LEN = 700;
 /** Regex for diversity-intent detection. Korean included → /u flag required (rule 8).
  *  Word boundaries use (?:^|[^\p{L}\p{N}])…(?=$|[^\p{L}\p{N}]) instead of \b so
  *  Korean and accented Latin chars are matched correctly (rule 8: no \b on non-ASCII). */
-// eslint-disable-next-line no-restricted-syntax -- [^\p{L}\p{N}] is a character class (correct); rule targets bare \p{L}\p{N} AND-sequence outside brackets.
 const WANTS_DIVERSITY_RE = /(?:^|[^\p{L}\p{N}])(?:diverse|different|다른|다르게|각각|variety)(?=$|[^\p{L}\p{N}])/iu;
 
 /**
@@ -244,7 +257,6 @@ const KOREAN_NEGATION_PREFIX_RE = /(?:비\s+|안\s+쓴\s+|대신\s+)(\S+)/gu;
  * Captures the term following "not", "without", "exclude", "no", "skip", "non-".
  * Uses \p{L}\p{N} character classes instead of \b to handle accented Latin/non-ASCII.
  */
-// eslint-disable-next-line no-restricted-syntax -- [\p{L}\p{N}] is a character class (correct OR), not the bare \p{L}\p{N} AND-sequence the rule targets.
 const ENGLISH_NEGATION_RE = /(?:not|without|exclude|no|skip|non-)\s+([\p{L}\p{N}][^,\n]*?)(?=\s*,|\s+and\s|\s*$)/giu;
 
 function extractNegationTerms(query: string): readonly string[] {
@@ -504,8 +516,11 @@ async function executeAgentToolInner(
         };
       }
 
-      // Activate diversity dedup when query contains diversity hints (WANTS_DIVERSITY_RE is module-scope)
-      const wantsDiversity = WANTS_DIVERSITY_RE.test(parsed.query);
+      // Activate diversity dedup when (a) agent explicitly set want_diversity=true, or
+      // (b) query text contains diversity-intent keywords (WANTS_DIVERSITY_RE).
+      // Structured param takes precedence — avoids regex false-positives on queries
+      // that happen to contain "다른" or "variety" in a non-diversity context.
+      const wantsDiversity = parsed.want_diversity === true || WANTS_DIVERSITY_RE.test(parsed.query);
 
       // Negation post-filter: exclude results whose identity fields contain negated terms.
       // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
@@ -584,7 +599,7 @@ async function executeAgentToolInner(
       // Zero-result escalation: guide the agent to relax constraints one by one.
       if (response.results.length === 0) {
         return {
-          observation: `검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
+          observation: `[RETRIEVAL_QUALITY: unreliable — 0 results]\n검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
           rawResult: response,
         };
       }
@@ -595,6 +610,27 @@ async function executeAgentToolInner(
       const constraintHints = detectConstraintKeywords(parsed.query);
       if (constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT) {
         obs += `\n[감지된 조건 ${constraintHints.length}개: ${constraintHints.join(', ')}. 결과가 부족하면 조건을 하나씩 제거하며 재검색하세요.]`;
+      }
+
+      // Corrective RAG quality tag: structured annotation that classifies retrieval
+      // quality so the agent can reliably decide whether to retry with relaxed constraints.
+      // "partial" = results returned but count is low (1–2) with multi-constraint query —
+      // agent should consider relaxing a NICE-TO-HAVE constraint before answering.
+      // "reliable" = ≥3 results or no multi-constraint pressure.
+      const qualityTag = (
+        response.results.length < MIN_RESULTS_FOR_RELIABLE_QUALITY &&
+        constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT
+      )
+        ? '[RETRIEVAL_QUALITY: partial — consider relaxing one NICE-TO-HAVE constraint before answering]'
+        : '[RETRIEVAL_QUALITY: reliable]';
+      obs = `${qualityTag}\n${obs}`;
+
+      // Price filter context: when max_price_krw was applied, annotate observation
+      // so the agent can state "예산 범위 내 검색 결과" even when per-wine prices
+      // are missing from the index. This prevents judge=0 for price-constrained
+      // scenarios where priceRange is sparse.
+      if (parsed.max_price_krw !== undefined) {
+        obs += `\n[PRICE_FILTER: 검색 결과는 ${parsed.max_price_krw}원 이하로 필터링되었습니다.]`;
       }
 
       return {

@@ -154,7 +154,7 @@ function parseArgs(): CliArgs {
     model: get('--model'),
     judgeModel: get('--judge-model'),
     enableJudge: !explicitNoJudge,
-    judgeSamples: Number.parseInt(explicitJudgeSamples ?? '1', 10) || 1,
+    judgeSamples: Number.parseInt(explicitJudgeSamples ?? '3', 10) || 3,
     baseline: get('--baseline'),
     failIfWorseThan:
       get('--fail-if-worse-than') !== undefined
@@ -446,6 +446,14 @@ function percentile(sortedAsc: readonly number[], p: number): number {
   return loVal + (hiVal - loVal) * (idx - lo);
 }
 
+// ── Latency SLA thresholds (KPI targets) ──
+/** p50 must be under this for SLA pass (ms). */
+const LATENCY_SLA_P50_MS = 10_000;
+/** p95 must be under this for SLA pass (ms). */
+const LATENCY_SLA_P95_MS = 20_000;
+/** Individual scenario hard timeout (ms) — exceeding this = SLA violation. */
+const LATENCY_SLA_TIMEOUT_MS = 30_000;
+
 interface LatencyStats {
   readonly mean: number;
   readonly p50: number;
@@ -527,6 +535,53 @@ function tCriticalValue95(df: number): number {
   return 1.96;
 }
 
+/**
+ * Bootstrap 95% CI (2026 SOTA — distribution-free, no normality assumption).
+ *
+ * Resamples the score array B times with replacement, computes the geo-mean
+ * of each resample, and reports the 2.5th/97.5th percentiles. More robust
+ * than Student-t for skewed distributions (common with geo-mean scoring).
+ *
+ * Uses a fixed seed (scenario count) for reproducibility across runs.
+ */
+const BOOTSTRAP_RESAMPLES = 2_000;
+
+function bootstrapCi95(values: readonly number[]): WilsonCi {
+  const n = values.length;
+  if (n === 0) return { mean: 0, lower: 0, upper: 0, n: 0 };
+  if (n === 1) {
+    const v = values[0] ?? 0;
+    return { mean: v, lower: v, upper: v, n: 1 };
+  }
+
+  // Simple seeded PRNG (mulberry32) for reproducibility.
+  let seed = n * 2654435761;
+  const rand = (): number => {
+    seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const EPS = 1e-12;
+  const geoMeans: number[] = [];
+  for (let b = 0; b < BOOTSTRAP_RESAMPLES; b++) {
+    let logSum = 0;
+    for (let i = 0; i < n; i++) {
+      const idx = Math.floor(rand() * n);
+      logSum += Math.log(Math.max(values[idx] ?? EPS, EPS));
+    }
+    geoMeans.push(Math.exp(logSum / n));
+  }
+
+  geoMeans.sort((a, b) => a - b);
+  const lo = geoMeans[Math.floor(0.025 * BOOTSTRAP_RESAMPLES)] ?? 0;
+  const hi = geoMeans[Math.floor(0.975 * BOOTSTRAP_RESAMPLES)] ?? 1;
+  const mean = Math.exp(values.reduce((s, v) => s + Math.log(Math.max(v, EPS)), 0) / n);
+
+  return { mean, lower: Math.max(0, lo), upper: Math.min(1, hi), n };
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Report shape
 // ─────────────────────────────────────────────────────────────────────
@@ -606,6 +661,8 @@ export interface BenchmarkReport {
   readonly summary: {
     readonly overallScore: number;
     readonly overallCi95: WilsonCi;
+    /** Bootstrap 95% CI — distribution-free, more robust for skewed geo-mean. */
+    readonly overallBootstrapCi95: WilsonCi;
     readonly executionEfficiency: number;
     readonly toolAccuracy: number;
     readonly stepEfficiency: number;
@@ -622,6 +679,15 @@ export interface BenchmarkReport {
     readonly judge: number | null;
     readonly avgSteps: number;
     readonly latencyMs: LatencyStats;
+    /** Latency SLA KPI assessment. */
+    readonly latencySla: {
+      /** p50 < 10s target. */
+      readonly p50Pass: boolean;
+      /** p95 < 20s target. */
+      readonly p95Pass: boolean;
+      /** Scenarios exceeding 30s (hard timeout). */
+      readonly timeoutCount: number;
+    };
     readonly tokens: {
       readonly inputMean: number;
       readonly outputMean: number;
@@ -1077,6 +1143,8 @@ function buildReport(
   // in no-judge mode) so the CI reflects the same population as overallScore.
   const overallScores = executedForAggregate.map((r) => r.scores.overall);
   const overallCi95 = tCi95(overallScores);
+  // Bootstrap CI — distribution-free, more robust for skewed geo-mean scores.
+  const overallBootstrapCi95 = bootstrapCi95(overallScores);
 
   return {
     timestamp: new Date().toISOString(),
@@ -1103,6 +1171,7 @@ function buildReport(
     summary: {
       overallScore,
       overallCi95,
+      overallBootstrapCi95,
       executionEfficiency: avgScore('executionEfficiency'),
       toolAccuracy: avgScore('toolAccuracy'),
       stepEfficiency: avgScore('stepEfficiency'),
@@ -1118,6 +1187,11 @@ function buildReport(
           ? executed.reduce((s, r) => s + (r.stepCount ?? 0), 0) / executed.length
           : 0,
       latencyMs: summariseLatency(durations),
+      latencySla: {
+        p50Pass: summariseLatency(durations).p50 < LATENCY_SLA_P50_MS,
+        p95Pass: summariseLatency(durations).p95 < LATENCY_SLA_P95_MS,
+        timeoutCount: durations.filter((d) => d > LATENCY_SLA_TIMEOUT_MS).length,
+      },
       tokens: {
         inputMean:
           executed.length > 0
@@ -1253,9 +1327,13 @@ async function main(): Promise<void> {
       + `(no judge — overallScore reflects ${report.executedCount - report.judgeRequiredExcludedCount} scenarios only)`,
     );
   }
+  const bci = s.overallBootstrapCi95;
   console.error(
     `  Overall:      ${(s.overallScore * 100).toFixed(1)}% (geo-mean) `
-    + `[95% CI ${(s.overallCi95.lower * 100).toFixed(1)}–${(s.overallCi95.upper * 100).toFixed(1)}%, n=${s.overallCi95.n}]`,
+    + `[bootstrap 95% CI ${(bci.lower * 100).toFixed(1)}–${(bci.upper * 100).toFixed(1)}%, n=${bci.n}]`,
+  );
+  console.error(
+    `                (t-CI: ${(s.overallCi95.lower * 100).toFixed(1)}–${(s.overallCi95.upper * 100).toFixed(1)}%)`,
   );
   console.error('  ────── dimensions ──────');
   console.error(`  Exec Eff:     ${(s.executionEfficiency * 100).toFixed(1)}%   (tool ${(s.toolAccuracy * 100).toFixed(0)}% × step ${(s.stepEfficiency * 100).toFixed(0)}%)`);
@@ -1268,10 +1346,15 @@ async function main(): Promise<void> {
   console.error(`  Judge:        ${s.judge !== null ? `${(s.judge * 100).toFixed(1)}%` : 'disabled'}`);
   console.error('  ────── execution ───────');
   console.error(`  Avg Steps:    ${s.avgSteps.toFixed(1)}`);
-  console.error(`  Latency p50:  ${s.latencyMs.p50.toFixed(0)}ms`);
-  console.error(`  Latency p95:  ${s.latencyMs.p95.toFixed(0)}ms`);
+  const p50Tag = s.latencySla.p50Pass ? 'PASS' : 'FAIL';
+  const p95Tag = s.latencySla.p95Pass ? 'PASS' : 'FAIL';
+  console.error(`  Latency p50:  ${s.latencyMs.p50.toFixed(0)}ms  [SLA <${LATENCY_SLA_P50_MS / 1000}s: ${p50Tag}]`);
+  console.error(`  Latency p95:  ${s.latencyMs.p95.toFixed(0)}ms  [SLA <${LATENCY_SLA_P95_MS / 1000}s: ${p95Tag}]`);
   console.error(`  Latency p99:  ${s.latencyMs.p99.toFixed(0)}ms`);
   console.error(`  Latency max:  ${s.latencyMs.max.toFixed(0)}ms`);
+  if (s.latencySla.timeoutCount > 0) {
+    console.error(`  Timeouts:     ${s.latencySla.timeoutCount} scenario(s) exceeded ${LATENCY_SLA_TIMEOUT_MS / 1000}s`);
+  }
   console.error(`  Tokens in:    ${s.tokens.inputMean.toFixed(0)} mean`);
   console.error(`  Tokens out:   ${s.tokens.outputMean.toFixed(0)} mean`);
   console.error(`  Tokens p95:   ${s.tokens.totalP95.toFixed(0)} total`);
