@@ -234,7 +234,7 @@ export class QuerySanitizer {
       /<iframe/i,
       /<img\s+src=/i,
       /data:text\/html/i,
-      /<svg.*?on/i,
+      /<svg[\s\S]*?on/i,
     ],
 
     // Command injection

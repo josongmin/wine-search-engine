@@ -303,6 +303,21 @@ const FAITHFULNESS_WARN_THRESHOLD = 0.5;
 const CONTEXT_PRECISION_WORD_THRESHOLD = 0.3;
 /** Context precision: minimum word length to be considered significant. */
 const CONTEXT_PRECISION_MIN_WORD_LEN = 3;
+/**
+ * Stopwords for query-context alignment check in scoreContextRelevance.
+ * Module-scope to avoid per-call allocation (rule 16: deterministic sets).
+ * Korean structural words (이하/이상/부터/까지) are excluded from content matching
+ * because they appear in enriched queries (agent-tools appendStructuredQueryClauses)
+ * but not in observation summaries.
+ */
+const CONTEXT_RELEVANCE_STOPWORDS: ReadonlySet<string> = new Set([
+  // English
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'wine', 'wines', 'under', 'over', 'not',
+  // Korean structural/functional words — frequent in queries but not observations
+  '와인', '추천', '좋은', '이하', '이상', '부터', '까지', '해줘', '해주세요', '있는', '없는', '중에', '같은',
+  '정도', '주세요', '원하는', '원해요', '알려줘', '알려주세요', '찾아줘', '찾아주세요',
+]);
+
 /** Korean 만원 multiplier for price extraction. */
 const MAN_WON_MULTIPLIER = 10_000;
 /** Approximate USD→KRW rate for price extraction. */
@@ -1260,12 +1275,6 @@ function scoreContextRelevance(
   // observations. Threshold: at least 30% of significant words should appear
   // for the context to be considered relevant.
   if (execution.toolsUsed.length > 0) {
-    const STOPWORDS = new Set([
-      // English
-      'the', 'and', 'for', 'with', 'from', 'that', 'this', 'wine', 'wines', 'under', 'over', 'not',
-      // Korean common words that appear in queries but aren't content-bearing
-      '와인', '추천', '좋은', '이하', '이상', '해줘', '해주세요', '있는', '없는', '중에', '같은',
-    ]);
     const queryTerms = execution.toolsUsed
       .map((t) => {
         try {
@@ -1281,7 +1290,7 @@ function scoreContextRelevance(
         const words = q.toLowerCase().normalize('NFKC')
           // Split on whitespace OR Unicode punctuation — handles Korean without spaces.
           .split(/[\s\p{P}]+/u)
-          .filter((w) => w.length >= CONTEXT_PRECISION_MIN_WORD_LEN && !STOPWORDS.has(w));
+          .filter((w) => w.length >= CONTEXT_PRECISION_MIN_WORD_LEN && !CONTEXT_RELEVANCE_STOPWORDS.has(w));
         if (words.length === 0) return true; // no significant words → pass
         const found = words.filter((w) => lower.includes(w));
         return found.length / words.length >= CONTEXT_PRECISION_WORD_THRESHOLD;

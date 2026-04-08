@@ -82,7 +82,7 @@ const FoodPairingInputSchema = z.object({
   /** Budget in Korean Won (KRW). Use this instead of USD amounts. */
   max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
   /** Legacy USD price field — accepted for backwards compat but converted internally. */
-  max_price: z.number().finite().optional(),
+  max_price: z.number().finite().min(0).optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
 });
 

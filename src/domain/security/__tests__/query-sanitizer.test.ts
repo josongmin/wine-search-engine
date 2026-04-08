@@ -174,6 +174,8 @@ describe('QuerySanitizer', () => {
       'javascript:alert(1)',
       '<img src=x onerror=alert(1)>',
       '<svg onload=alert(1)>',
+      // Newline bypass: <svg\nonload=...> must also be blocked ([\s\S] fix)
+      '<svg\nonload=alert(1)>',
       'onclick=malicious()',
       '<iframe src="evil.com">',
       'data:text/html,<script>alert(1)</script>',
