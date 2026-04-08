@@ -14,6 +14,7 @@
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
+import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
 import type { AgentStep, AgentTerminationReason } from '../../domain/agent/model/agent-step.js';
@@ -38,6 +39,8 @@ const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
 /** Wall-clock budget for the observation-based synthesis LLM call (Layer 1 fallback). */
 const SYNTHESIS_TIMEOUT_MS = 12_000;
+/** Wall-clock budget for the Layer 2 single-shot fallback search. */
+const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
 
 /** Parsed LLM output — either a tool call or a final answer. */
 interface LlmAction {
@@ -96,6 +99,13 @@ function parseLlmOutput(text: string): LlmAction {
 export interface AgentOrchestratorDeps {
   readonly chatLlm: ChatLlmPort;
   readonly toolDeps: AgentToolDeps;
+  /**
+   * Optional pre-execution security gate. When provided, queries that fail
+   * sanitization (injection, jailbreak, PII extraction, etc.) are refused
+   * immediately without calling any LLM or tool — they return terminationReason='blocked'.
+   * When absent, the per-tool security gates still apply (defence-in-depth).
+   */
+  readonly querySanitizer?: QuerySanitizer | undefined;
 }
 
 export class AgentOrchestrator {
@@ -129,6 +139,28 @@ export class AgentOrchestrator {
         fallbackApplied: false,
         terminationReason: 'answer',
       };
+    }
+
+    // Security pre-check: if a sanitizer is wired in, refuse injection/jailbreak/PII
+    // queries immediately before any LLM or tool call. This ensures expectedBlocked
+    // adversarial scenarios terminate with reason='blocked' and 0 tool calls.
+    if (this.deps.querySanitizer !== undefined) {
+      const sanitizeResult = this.deps.querySanitizer.sanitize(query);
+      if (!sanitizeResult.safe) {
+        log.warn(
+          { requestId, reason: sanitizeResult.reason },
+          'Agent pre-check blocked query before LLM call',
+        );
+        return {
+          answer: '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.',
+          steps: [],
+          totalDurationMs: 0,
+          totalTokens: { input: 0, output: 0 },
+          toolCallCount: 0,
+          fallbackApplied: false,
+          terminationReason: 'blocked',
+        };
+      }
     }
 
     const adaptive = overrides?.maxSteps === undefined ? classifyQueryBudget(query) : undefined;
@@ -443,30 +475,34 @@ export class AgentOrchestrator {
             clearTimeout(synthTimer);
           }
         };
+        // Attempt 1: full 512-token synthesis
+        let synthAnswer: string | undefined;
         try {
-          let synthAnswer = await attemptSynthesis(512);
-          if (synthAnswer === undefined) {
-            // Retry once with shorter max tokens for faster response
+          synthAnswer = await attemptSynthesis(512);
+        } catch (synthErr1) {
+          log.error({ err: synthErr1, requestId }, 'synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=256');
+        }
+        // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw)
+        if (synthAnswer === undefined) {
+          try {
             log.info({ requestId, obsSteps: obsSteps.length }, 'synthesis attempt 1 returned empty — retrying with maxOutputTokens=256');
             synthAnswer = await attemptSynthesis(256);
+          } catch (synthErr2) {
+            log.error({ err: synthErr2, requestId }, 'synthesis attempt 2 threw — proceeding to fallback search');
           }
-          if (synthAnswer !== undefined) {
-            answer = synthAnswer;
-            terminationReason = 'answer';
-            log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
-          }
-        } catch (synthErr) {
-          log.error({ err: synthErr, requestId }, 'observation synthesis failed, proceeding to fallback search');
+        }
+        if (synthAnswer !== undefined) {
+          answer = synthAnswer;
+          terminationReason = 'answer';
+          log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
         }
       }
     }
 
     if (!policyBlocked && answer === '' && terminationReason !== 'answer') {
-      // Cap the fallback search at a fixed wall-clock budget independent of
-      // perStepTimeoutMs. The previous Math.min(perStep, 5s) was inverted:
-      // when operators tuned perStepTimeoutMs LOW (e.g. 2s), the fallback got
-      // the SAME 2s the agent already exhausted, making it useless.
-      const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
+      // Cap the fallback search at FALLBACK_SEARCH_TIMEOUT_MS (module-scope const).
+      // This is independent of perStepTimeoutMs to avoid the inversion bug where
+      // low perStep settings gave the fallback the same exhausted budget.
       const fallbackController = new AbortController();
       const fallbackTimer = setTimeout(
         () => {
@@ -510,7 +546,7 @@ export class AgentOrchestrator {
         answer = `검색 결과 요약: ${lastObs.observation.slice(0, 300)}`;
         fallbackApplied = true;
         terminationReason = 'fallback';
-        log.warn({ requestId }, 'Layer 3 fallback: using last observation as answer');
+        log.error({ requestId }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');
       }
     }
 

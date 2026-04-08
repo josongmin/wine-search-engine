@@ -59,10 +59,21 @@ function constraintToSparseFilterTokens(
     case 'appellation':
       return stringEq('appellation');
     case 'grape_primary':
-      // For exclusion, emit NOT filters for both grape fields in the schema
-      // (grape_primary is a string field; grapes is an array<string> field).
+      // Exclusion must cover BOTH grape fields in the schema:
+      // grape_primary (string) and grapes (array<string>).
       if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
         return [`grape_primary_not:${value}`, `grapes_not:${value}`];
+      }
+      if (operator === 'not_in' && Array.isArray(value)) {
+        const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0);
+        if (normalized.length === 0) return [];
+        const joined = normalized.join('|');
+        // Single value: use _not form; multiple: use _not_in pipe-delimited form.
+        // Both emit for grape_primary AND grapes fields.
+        if (normalized.length === 1) {
+          return [`grape_primary_not:${normalized[0]}`, `grapes_not:${normalized[0]}`];
+        }
+        return [`grape_primary_not_in:${joined}`, `grapes_not_in:${joined}`];
       }
       return stringEq('grape_primary');
     case 'style':
@@ -91,23 +102,27 @@ function constraintToSparseFilterTokens(
     }
 
     case 'acidity': {
-      if ((operator === '>=' || operator === '=') && typeof value === 'number' && Number.isFinite(value)) {
-        return [`acidity_min:${value}`];
-      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) return [];
+      if (operator === '>=') return [`acidity_min:${value}`];
+      if (operator === '<=') return [`acidity_max:${value}`];
+      if (operator === '=') return [`acidity_min:${value}`, `acidity_max:${value}`];
       return [];
     }
 
     case 'tannin': {
-      if ((operator === '>=' || operator === '=') && typeof value === 'number' && Number.isFinite(value)) {
-        return [`tannin_min:${value}`];
-      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) return [];
+      if (operator === '>=') return [`tannin_min:${value}`];
+      // '<=' is the key case for "타닌 낮은" queries — was previously silently dropped
+      if (operator === '<=') return [`tannin_max:${value}`];
+      if (operator === '=') return [`tannin_min:${value}`, `tannin_max:${value}`];
       return [];
     }
 
     case 'finish_length': {
-      if ((operator === '>=' || operator === '=') && typeof value === 'number' && Number.isFinite(value)) {
-        return [`finish_length_min:${value}`];
-      }
+      if (typeof value !== 'number' || !Number.isFinite(value)) return [];
+      if (operator === '>=') return [`finish_length_min:${value}`];
+      if (operator === '<=') return [`finish_length_max:${value}`];
+      if (operator === '=') return [`finish_length_min:${value}`, `finish_length_max:${value}`];
       return [];
     }
 

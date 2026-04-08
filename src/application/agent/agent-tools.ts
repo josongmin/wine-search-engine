@@ -115,24 +115,46 @@ export function isKnownTool(name: string): boolean {
 const MIN_CONSTRAINTS_FOR_STAGED_HINT = 3;
 
 /**
+ * Maximum length of the enriched query string (original query + appended exclusion/price params).
+ * The base query is max 500 chars; exclusion/price params can add ~200 chars.
+ * Domain rationale: Vespa YQL parser has a 4 KB query limit; downstream NL parser
+ * has its own 700-char soft limit for reliable constraint extraction.
+ */
+const MAX_ENRICHED_QUERY_LEN = 700;
+
+/** Regex for diversity-intent detection. Korean included → /u flag required (rule 8). */
+const WANTS_DIVERSITY_RE = /(?:diverse|different|다른|다르게|각각|variety)/iu;
+
+/**
  * Keyword → label pairs for constraint detection.
  * Module-scope to avoid per-call allocation (deterministic, never changes).
  * All Korean patterns use /u flag and avoid \b (ASCII-only boundary).
  */
 const CONSTRAINT_KEYWORDS: ReadonlyArray<[RegExp, string]> = [
-  [/타닌|tannin/iu, '타닌'],
-  [/과일향|fruity|fruit/iu, '과일향'],
-  [/오크|oak/iu, '오크'],
-  [/미네랄|mineral/iu, '미네랄'],
-  [/산도|acidity|acid/iu, '산도'],
-  [/바디|body/iu, '바디'],
-  [/당도|sweet/iu, '당도'],
+  // Sensory attributes — require adjacent Korean context or full English words
+  // to avoid matching unrelated words (e.g. /oak/ matching "Oakville" region).
+  [/타닌|(?<![a-z])tannin(?![a-z])/iu, '타닌'],
+  [/과일향|(?<![a-z])fruity(?![a-z])|(?<![a-z])fruit(?![a-z])/iu, '과일향'],
+  // '오크' is rare as a standalone Korean word outside wine context; "oak" scoped to
+  // prevent matching place names like "Oakville", "Oakland" — require non-alpha boundary.
+  [/오크(?!빌|랜드|먼트)|(?<![a-zA-Z])oak(?:ed|ing|y)?(?![a-zA-Z])/iu, '오크'],
+  [/미네랄|(?<![a-z])mineral/iu, '미네랄'],
+  // '산도' is safe (wine-specific); "acid" scoped to word boundary equivalent
+  [/산도|(?<![a-z])acid(?:ic|ity|s)?(?![a-z])/iu, '산도'],
+  // '바디' safe; "body" scoped to avoid "somebody", "everybody" etc.
+  [/바디감?|(?<![a-z])body(?![a-z])/iu, '바디'],
+  // '당도' safe; "sweet" scoped to avoid "sweetspot", "sweetheart" etc.
+  [/당도|(?<![a-z])sweet(?:ness|ish)?(?![a-zA-Z])/iu, '당도'],
+  // Price — numeric-anchored, safe
   [/[0-9]+\s*만?\s*원|[$€]\s*[0-9]+/u, '가격'],
-  [/비건|vegan/iu, '비건'],
-  [/유기농|organic/iu, '유기농'],
-  [/[0-9]{4}\s*년|vintage\s+[0-9]{4}/iu, '빈티지'],
-  [/이탈리아|프랑스|스페인|독일|한국|italy|france|spain|germany/iu, '국가'],
-  [/레드|화이트|스파클링|로제|red|white|sparkling|ros[eé]/iu, '와인타입'],
+  [/비건|(?<![a-z])vegan(?![a-z])/iu, '비건'],
+  [/유기농|(?<![a-z])organic(?![a-z])/iu, '유기농'],
+  // Vintage — numeric-anchored, safe
+  [/[0-9]{4}\s*년|(?<![a-z])vintage\s+[0-9]{4}/iu, '빈티지'],
+  // Country names — safe (proper nouns, distinct)
+  [/이탈리아|프랑스|스페인|독일|한국|(?<![a-z])italy|france|spain|germany(?![a-z])/iu, '국가'],
+  // Wine type — safe (domain-specific terms)
+  [/레드|화이트|스파클링|로제|(?<![a-z])red|white|sparkling|ros[eé](?![a-z])/iu, '와인타입'],
 ];
 
 function detectConstraintKeywords(query: string): readonly string[] {
@@ -232,9 +254,6 @@ export async function executeAgentTool(
         enrichedQuery += `, under ${parsed.max_price_krw} KRW`;
       }
 
-      // Cap enriched query length to prevent downstream issues. The original
-      // query is max 500 chars but exclusion/price params can add ~200 chars.
-      const MAX_ENRICHED_QUERY_LEN = 700;
       if (enrichedQuery.length > MAX_ENRICHED_QUERY_LEN) {
         enrichedQuery = enrichedQuery.slice(0, MAX_ENRICHED_QUERY_LEN);
       }
@@ -256,8 +275,8 @@ export async function executeAgentTool(
         };
       }
 
-      // Activate diversity dedup when query contains diversity hints
-      const wantsDiversity = /(?:diverse|different|다른|다르게|각각|variety)/i.test(parsed.query);
+      // Activate diversity dedup when query contains diversity hints (WANTS_DIVERSITY_RE is module-scope)
+      const wantsDiversity = WANTS_DIVERSITY_RE.test(parsed.query);
 
       // Negation post-filter: exclude results whose identity fields contain negated terms.
       // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.

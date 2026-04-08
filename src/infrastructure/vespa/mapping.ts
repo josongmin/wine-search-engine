@@ -586,11 +586,13 @@ const yqlString = yqlEscapeString;
  * Positive fields produce Vespa OR clauses; `_not` variants produce AND NOT clauses.
  */
 const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
-  'wine_type', 'country', 'region', 'appellation', 'grape_primary', 'style',
+  // Positive fields — produce Vespa OR clauses via <field>_in tokens
+  'wine_type', 'country', 'region', 'appellation', 'grape_primary', 'grapes', 'style',
   'price_band', 'flavor_profile', 'classification', 'certification',
   'soil_type', 'producer_type',
-  // Negation variants — used by <field>_not_in tokens
-  'wine_type_not', 'country_not', 'region_not', 'appellation_not', 'grape_primary_not',
+  // Negation variants — used by <field>_not_in tokens (produce AND NOT clauses)
+  'wine_type_not', 'country_not', 'region_not', 'appellation_not',
+  'grape_primary_not', 'grapes_not',  // grapes_not needed for grape_primary not_in dual-field
   'style_not', 'price_band_not', 'flavor_profile_not', 'classification_not',
   'certification_not', 'soil_type_not', 'producer_type_not',
 ]);
@@ -704,14 +706,29 @@ export function buildSparseFilters(filters: readonly string[]): string {
         if (Number.isFinite(n)) clauses.push(`acidity >= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
+      case 'acidity_max': {
+        const n = parseFloat(value);
+        if (Number.isFinite(n)) clauses.push(`acidity <= ${clampNum(n, 0, 10).toFixed(3)}`);
+        break;
+      }
       case 'tannin_min': {
         const n = parseFloat(value);
         if (Number.isFinite(n)) clauses.push(`tannin >= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
+      case 'tannin_max': {
+        const n = parseFloat(value);
+        if (Number.isFinite(n)) clauses.push(`tannin <= ${clampNum(n, 0, 10).toFixed(3)}`);
+        break;
+      }
       case 'finish_length_min': {
         const n = parseFloat(value);
         if (Number.isFinite(n)) clauses.push(`finish_length >= ${clampNum(n, 0, 10).toFixed(3)}`);
+        break;
+      }
+      case 'finish_length_max': {
+        const n = parseFloat(value);
+        if (Number.isFinite(n)) clauses.push(`finish_length <= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
       case 'price_usd_min': {

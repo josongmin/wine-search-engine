@@ -103,6 +103,7 @@ export async function createContainer(
           agentOrchestrator: new AgentOrchestrator(
             {
               chatLlm: core.chatLlm,
+              querySanitizer: core.querySanitizer,
               toolDeps: {
                 searchUseCase: features.searchUseCase,
                 decomposedSearchExecute: async (subQueries, comparisonIntent, originalQuery, requestId, startTime) =>
@@ -116,9 +117,7 @@ export async function createContainer(
                 // Direct entity lookup by ID — bypasses the full search pipeline
                 // for check_drinking_window. Uses the Vespa search index's
                 // getDocument method which is a single O(1) GET, not a search.
-                entityLookup: core.entityLookup !== undefined
-                  ? async (id) => (await core.entityLookup!.getDocument(id)) ?? undefined
-                  : undefined,
+                entityLookup: async (id) => (await core.entityLookup.getDocument(id)) ?? undefined,
               },
             },
             {
