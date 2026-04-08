@@ -7,7 +7,7 @@
  * Coverage:
  *  - "30만원 이하" → price_usd <= filter in YQL
  *  - "2018년산 와인" → vintage_year exact filter
- *  - "5만원에서 10만원" → price_usd min AND max filters
+ *  - "5~10만원 레드" → price_usd min AND max filters (tilde form; "에서" form not supported)
  *  - Empty constraints → no YQL fragment (fast path)
  *  - Clamp behaviour: extreme values stay within domain bounds
  *  - False-positive: non-numeric Korean queries not misclassified
@@ -33,9 +33,10 @@ describe('Price/Vintage YQL — extractSearchConstraints price', () => {
     expect(c.minPriceKrw).toBeUndefined();
   });
 
-  it('R-PVY-02: "5만원에서 10만원" extracts min=50_000 and max=100_000', () => {
-    const _c = extractSearchConstraints('5만원에서 10만원');
-    // range: "5~10만원" form — test the tilde form explicitly
+  it('R-PVY-02: "5~10만원 레드" extracts min=50_000 and max=100_000', () => {
+    // Note: the "에서" form ("5만원에서 10만원") is NOT supported by extractKrwPrice —
+    // only the tilde/hyphen range forms ("X~Y만원", "X-Y만원") are matched.
+    // This test covers only the supported tilde form.
     const c2 = extractSearchConstraints('5~10만원 레드');
     expect(c2.minPriceKrw).toBe(50_000);
     expect(c2.maxPriceKrw).toBe(100_000);

@@ -1,10 +1,10 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import {
   KRW_PER_MAN_WON,
-  KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
 import {
   extractSearchConstraints,
+  krwToUsd,
 } from './search-constraint-extractor.js';
 
 /** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
@@ -17,7 +17,6 @@ const KRW_MANWON_TO_USD_HEURISTIC = 7;
 const PRICE_BAND_BUDGET_MAX_USD = 20;
 const PRICE_BAND_MID_MAX_USD = 50;
 const PRICE_BAND_PREMIUM_MAX_USD = 100;
-const USD_ROUND_DECIMAL_PLACES = 100;
 
 /**
  * Rule-based constraint extractor: pattern-matches the normalized query
@@ -240,9 +239,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   // not hard requirements — a wine at 51,000₩ should not be excluded when
   // the user asked for "5만원 이하").
   if (searchConstraints.maxPriceKrw !== undefined) {
-    const maxUsd =
-      Math.round((searchConstraints.maxPriceKrw / KRW_PER_USD_APPROXIMATE) * USD_ROUND_DECIMAL_PLACES)
-      / USD_ROUND_DECIMAL_PLACES;
+    const maxUsd = krwToUsd(searchConstraints.maxPriceKrw);
     soft.push({
       attribute: 'price_usd',
       operator: '<=',
@@ -254,9 +251,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   if (searchConstraints.minPriceKrw !== undefined) {
-    const minUsd =
-      Math.round((searchConstraints.minPriceKrw / KRW_PER_USD_APPROXIMATE) * USD_ROUND_DECIMAL_PLACES)
-      / USD_ROUND_DECIMAL_PLACES;
+    const minUsd = krwToUsd(searchConstraints.minPriceKrw);
     soft.push({
       attribute: 'price_usd',
       operator: '>=',
