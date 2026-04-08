@@ -65,7 +65,9 @@ function isStringArray(v: unknown): v is string[] {
 }
 
 function isNumberArray(v: unknown): v is number[] {
-  return Array.isArray(v) && v.every((x) => typeof x === 'number');
+  // isFinite guard required: NaN/Infinity have typeof 'number' but are not valid
+  // embedding values. Consistent with isNumber which already includes isFinite.
+  return Array.isArray(v) && v.every((x) => typeof x === 'number' && isFinite(x));
 }
 
 function getString(
@@ -597,11 +599,13 @@ function parseFilterToken(token: string): { key: string; value: string } {
  * `entity_id in ("${id}")`  // breaks if id contains " or \
  */
 export function yqlEscapeString(value: string): string {
-  // Strip null bytes and ASCII control characters (U+0000–U+001F, U+007F)
-  // before escaping — these have no legitimate use in wine entity names
-  // and could confuse YQL parsers or log aggregators.
-  // eslint-disable-next-line no-control-regex -- intentionally strips ASCII control chars U+0000–U+001F/U+007F
-  const sanitized = value.replace(/[\x00-\x1F\x7F]/g, '');
+  // Strip ASCII control chars (U+0000–U+001F, U+007F), Unicode line-terminators
+  // (U+0085 NEL, U+2028 LS, U+2029 PS), and BOM/ZWNBSP (U+FEFF) before escaping.
+  // These have no legitimate use in wine entity names and could confuse YQL parsers,
+  // log aggregators, or inject newlines into structured log output.
+  // U+2028/U+2029 are valid JS line-terminators and can break YQL string literals.
+  // eslint-disable-next-line no-control-regex -- intentionally strips ASCII/Unicode control chars
+  const sanitized = value.replace(/[\x00-\x1F\x7F\x85\u2028\u2029\uFEFF]/gu, '');
   return `"${sanitized.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 

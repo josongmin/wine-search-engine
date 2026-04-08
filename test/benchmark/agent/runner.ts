@@ -22,7 +22,10 @@
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
  * Wall-clock profiling: `wallClock` in JSON + "wall clock" section on stderr
- * (init → scenario pool → shutdown, plus per-scenario mean/sum).
+ * (init → scenario pool → shutdown, per-scenario mean/sum, `concurrency`).
+ * `sumScenarioWallMs` is sequential work-time; with concurrency greater than 1 it can
+ * exceed `scenariosPhaseMs` (pool wall). `scenarioWallSampleCount` counts
+ * scenarios that actually ran (not skipped), including errors.
  *
  * Exit codes:
  *   0 — success (and overall score not worse than baseline by --fail-if-worse-than)
@@ -33,6 +36,8 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
+import { formatBenchmarkDurationMs } from './benchmark-duration-format.js';
+import { isBenchmarkRunnerCliEntrypoint } from './runner-cli-entry.js';
 import { loadConfig } from '../../../src/config/env.js';
 import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestrator.js';
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
@@ -45,6 +50,8 @@ import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.j
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
 import type { AgentTerminationReason } from '../../../src/domain/agent/model/agent-step.js';
+
+export { formatBenchmarkDurationMs } from './benchmark-duration-format.js';
 
 // ─────────────────────────────────────────────────────────────────────
 // CLI args
@@ -95,7 +102,7 @@ function parseArgs(): CliArgs {
     tierFilter: get('--tier') as ScenarioTier | undefined,
     idFilter: explicitId !== undefined ? explicitId.split(',').map(Number) : undefined,
     container: 'real',
-    concurrency: Number.parseInt(explicitConcurrency ?? '1', 10) || 1,
+    concurrency: Number.parseInt(explicitConcurrency ?? '3', 10) || 3,
     maxRetries: Number.parseInt(get('--max-retries') ?? '1', 10) || 1,
     seed: get('--seed') !== undefined ? Number.parseInt(get('--seed')!, 10) : undefined,
     model: get('--model'),
@@ -126,7 +133,7 @@ function parseArgs(): CliArgs {
 
   if (profile === 'standard') {
     if (explicitConcurrency === undefined) {
-      args = { ...args, concurrency: 1 };
+      args = { ...args, concurrency: 3 };
     }
     if (!explicitJudge) {
       args = { ...args, enableJudge: true };
@@ -138,7 +145,7 @@ function parseArgs(): CliArgs {
       args = { ...args, includePhase2: true };
     }
     if (explicitConcurrency === undefined) {
-      args = { ...args, concurrency: 2 };
+      args = { ...args, concurrency: 3 };
     }
     if (!explicitJudge) {
       args = { ...args, enableJudge: true };
@@ -150,7 +157,7 @@ function parseArgs(): CliArgs {
 
   if (profile === 'retrieval') {
     if (explicitConcurrency === undefined) {
-      args = { ...args, concurrency: 1 };
+      args = { ...args, concurrency: 3 };
     }
     if (!explicitJudge) {
       args = { ...args, enableJudge: false };
@@ -475,33 +482,6 @@ export interface WilsonCi {
   readonly n: number;
 }
 
-/** Threshold: below this, print durations as integer ms instead of seconds. */
-const BENCHMARK_DURATION_MS_SHORT_MAX = 1_000;
-/** Seconds per minute for human-readable duration lines. */
-const BENCHMARK_SECONDS_PER_MINUTE = 60;
-/** Milliseconds per second. */
-const BENCHMARK_MS_PER_SECOND = 1_000;
-
-/**
- * Formats a duration for CLI / logs (deterministic; no locale grouping).
- * Exported for unit tests.
- */
-export function formatBenchmarkDurationMs(ms: number): string {
-  if (!Number.isFinite(ms) || ms < 0) {
-    return '0ms';
-  }
-  if (ms < BENCHMARK_DURATION_MS_SHORT_MAX) {
-    return `${Math.round(ms)}ms`;
-  }
-  const sec = ms / BENCHMARK_MS_PER_SECOND;
-  if (sec < BENCHMARK_SECONDS_PER_MINUTE) {
-    return `${sec.toFixed(1)}s`;
-  }
-  const wholeMin = Math.floor(sec / BENCHMARK_SECONDS_PER_MINUTE);
-  const remSec = sec - wholeMin * BENCHMARK_SECONDS_PER_MINUTE;
-  return `${wholeMin}m ${remSec.toFixed(0)}s`;
-}
-
 /**
  * End-to-end wall clock for the benchmark process (distinct from per-scenario
  * `summary.latencyMs`, which reflects orchestrator-reported durations).
@@ -524,6 +504,8 @@ export interface BenchmarkWallClock {
   readonly sumScenarioWallMs: number;
   /** Count of scenarios that contributed to mean/sum (executed or errored, not skipped). */
   readonly scenarioWallSampleCount: number;
+  /** Same as CLI `--concurrency`; explains pool wall vs sum of per-scenario walls. */
+  readonly concurrency: number;
 }
 
 export interface BenchmarkReport {
@@ -770,6 +752,17 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
   const scenariosDoneAt = Date.now();
 
+  const expectedWallSamples = scenarios.reduce(
+    (n, s) => n + (s.skip === undefined ? 1 : 0),
+    0,
+  );
+  if (scenarioWallSampleCount !== expectedWallSamples) {
+    console.error(
+      `  [WARN] wallClock scenarioWallSampleCount=${scenarioWallSampleCount} `
+      + `!== expected non-skipped=${expectedWallSamples} (profiling bug?)`,
+    );
+  }
+
   // Shutdown with timeout — pool.end() can hang indefinitely when PG
   // connections don't release, and redisClient.quit() can hang when the
   // server is unreachable. The benchmark CLI must never stall after results
@@ -799,7 +792,15 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       scenarioWallSampleCount > 0 ? scenarioWallMsSum / scenarioWallSampleCount : 0,
     sumScenarioWallMs: scenarioWallMsSum,
     scenarioWallSampleCount,
+    concurrency: args.concurrency,
   };
+
+  const wallClockPhaseSum = initMs + scenariosPhaseMs + shutdownMs;
+  if (wallClockPhaseSum !== wallClock.totalMs) {
+    console.error(
+      `  [WARN] wallClock phase sum (${wallClockPhaseSum}ms) !== totalMs (${wallClock.totalMs}ms) — clock skew?`,
+    );
+  }
 
   return buildReport(results, scenarios, modelId, judgeModelId, args, judgeFailCount, wallClock);
 }
@@ -889,6 +890,12 @@ function buildReport(
       + `(no judge available — run without --no-judge for accurate aggregate)`,
     );
   }
+  if (executedForAggregate.length === 0 && executed.length > 0) {
+    console.error(
+      '  [WARN] All executed scenarios are judgeRequired but no judge is available. '
+      + 'overallScore=0 is NOT meaningful — run with a judge for a valid aggregate.',
+    );
+  }
 
   const durations = executed.map((r) => r.totalDurationMs ?? 0);
   const totalTokens = executed.map((r) => (r.totalTokens?.input ?? 0) + (r.totalTokens?.output ?? 0));
@@ -964,7 +971,18 @@ async function compareBaseline(
 ): Promise<{ regressed: boolean; delta: number }> {
   try {
     const raw = await fs.readFile(resolvePath(baselinePath), 'utf8');
-    const baseline = JSON.parse(raw) as BenchmarkReport;
+    // Cast to unknown first (CLAUDE.md rule 12): JSON.parse result is unknown until validated.
+    // We only access the specific fields we need (.summary.overallScore) with safe navigation.
+    const baselineUnknown = JSON.parse(raw) as unknown;
+    if (
+      typeof baselineUnknown !== 'object' || baselineUnknown === null
+      || !('summary' in baselineUnknown)
+      || typeof (baselineUnknown as Record<string, unknown>)['summary'] !== 'object'
+    ) {
+      console.error(`  [BASELINE] Baseline file has unexpected shape — skipping comparison`);
+      return { regressed: false, delta: 0 };
+    }
+    const baseline = baselineUnknown as BenchmarkReport;
 
     const delta = current.summary.overallScore - baseline.summary.overallScore;
     const threshold = failIfWorseThan ?? 0.05;
@@ -1027,7 +1045,8 @@ async function main(): Promise<void> {
   );
   console.error(
     `  Per scenario: mean ${formatBenchmarkDurationMs(wc.meanScenarioWallMs)} wall · sum `
-    + `${formatBenchmarkDurationMs(wc.sumScenarioWallMs)} (n=${wc.scenarioWallSampleCount})`,
+    + `${formatBenchmarkDurationMs(wc.sumScenarioWallMs)} (n=${wc.scenarioWallSampleCount}, `
+    + `concurrency=${wc.concurrency})`,
   );
   if (report.criticalFailureCount > 0) {
     console.error(`  ⚠ Critical:   ${report.criticalFailureCount} scenario(s) had a critical failure (overall=0)`);
@@ -1114,12 +1133,15 @@ async function main(): Promise<void> {
   }
 }
 
-main().then(() => {
-  // Explicit exit: after shutdown timeout, dangling PG/Redis connections may
-  // keep the event loop alive indefinitely. process.exit(0) ensures the CLI
-  // terminates cleanly after results are written.
-  process.exit(0);
-}).catch((err: unknown) => {
-  console.error('Benchmark failed:', err);
-  process.exit(1);
-});
+// Allow importing types/helpers (e.g. unit tests) without starting the benchmark.
+if (isBenchmarkRunnerCliEntrypoint(process.argv[1], import.meta.url)) {
+  main().then(() => {
+    // Explicit exit: after shutdown timeout, dangling PG/Redis connections may
+    // keep the event loop alive indefinitely. process.exit(0) ensures the CLI
+    // terminates cleanly after results are written.
+    process.exit(0);
+  }).catch((err: unknown) => {
+    console.error('Benchmark failed:', err);
+    process.exit(1);
+  });
+}

@@ -133,6 +133,11 @@ describe('extractSearchConstraints — country exclusion', () => {
     const c = extractSearchConstraints('미국 빼고');
     expect(c.excludeCountries).toContain('USA');
   });
+
+  it('extracts repeated English exclusions used by agent tool serialization', () => {
+    const c = extractSearchConstraints('red wine, not France, not Italy');
+    expect(c.excludeCountries).toEqual(expect.arrayContaining(['France', 'Italy']));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -173,6 +178,11 @@ describe('extractSearchConstraints — KRW price', () => {
     const c = extractSearchConstraints('레드와인 추천');
     expect(c.maxPriceKrw).toBeUndefined();
     expect(c.minPriceKrw).toBeUndefined();
+  });
+
+  it('parses raw won upper bound used by agent tool serialization', () => {
+    const c = extractSearchConstraints('레드 와인, 50000원 이하');
+    expect(c.maxPriceKrw).toBe(50_000);
   });
 });
 

@@ -28,7 +28,7 @@ import { buildNumericRangeFilters } from '../../src/infrastructure/vespa/mapping
 
 describe('Price/Vintage YQL — extractSearchConstraints price', () => {
   it('R-PVY-01: "30만원 이하 와인" extracts maxPriceKrw = 300_000', () => {
-    const _c = extractSearchConstraints('30만원 이하 와인');
+    const c = extractSearchConstraints('30만원 이하 와인');
     expect(c.maxPriceKrw).toBe(300_000);
     expect(c.minPriceKrw).toBeUndefined();
   });
@@ -42,13 +42,13 @@ describe('Price/Vintage YQL — extractSearchConstraints price', () => {
   });
 
   it('R-PVY-03: "10만원 이상" extracts minPriceKrw = 100_000', () => {
-    const _c = extractSearchConstraints('10만원 이상 보르도');
+    const c = extractSearchConstraints('10만원 이상 보르도');
     expect(c.minPriceKrw).toBe(100_000);
     expect(c.maxPriceKrw).toBeUndefined();
   });
 
   it('R-PVY-04: "3만원대" extracts a band around 30_000 KRW', () => {
-    const _c = extractSearchConstraints('3만원대 와인 추천');
+    const c = extractSearchConstraints('3만원대 와인 추천');
     expect(c.minPriceKrw).toBeDefined();
     expect(c.maxPriceKrw).toBeDefined();
     // Band is ±10% around 30_000 KRW
@@ -68,7 +68,7 @@ describe('Price/Vintage YQL — extractSearchConstraints vintage', () => {
     // The extractor handles "YYYY년 이후", "YYYY년 이전", and year ranges "YYYY-YYYY".
     // "2018년산" has no operator suffix, so it falls through to no match in current extractor.
     // The test validates the CURRENT behaviour (append-only regression).
-    const _c = extractSearchConstraints('2018년산 와인');
+    const c = extractSearchConstraints('2018년산 와인');
     // vintageMin/vintageMax may both be undefined for "년산" without an operator — document this.
     // This serves as a guard: if the extractor is later extended to handle "년산", the test
     // confirms the new value (update the expect) rather than silently passing.
@@ -77,19 +77,19 @@ describe('Price/Vintage YQL — extractSearchConstraints vintage', () => {
   });
 
   it('R-PVY-06: "2015년 이후 와인" extracts vintageMin=2015', () => {
-    const _c = extractSearchConstraints('2015년 이후 와인');
+    const c = extractSearchConstraints('2015년 이후 와인');
     expect(c.vintageMin).toBe(2015);
     expect(c.vintageMax).toBeUndefined();
   });
 
   it('R-PVY-07: "2020년 이전 와인" extracts vintageMax=2020', () => {
-    const _c = extractSearchConstraints('2020년 이전 와인');
+    const c = extractSearchConstraints('2020년 이전 와인');
     expect(c.vintageMax).toBe(2020);
     expect(c.vintageMin).toBeUndefined();
   });
 
   it('R-PVY-08: "2015-2020" extracts vintageMin=2015, vintageMax=2020', () => {
-    const _c = extractSearchConstraints('2015-2020년 빈티지 레드');
+    const c = extractSearchConstraints('2015-2020년 빈티지 레드');
     expect(c.vintageMin).toBe(2015);
     expect(c.vintageMax).toBe(2020);
   });

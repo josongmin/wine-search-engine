@@ -6,7 +6,7 @@
  * picks a tighter ceiling so:
  *
  *   - Specific SKU lookups       → 2 steps  (entity + maybe drinking-window)
- *   - Adversarial / off-domain   → 1 step   (refuse, no tool call)
+ *   - Sanitizer-blocked / off-domain → 1 step   (refuse, no tool call)
  *   - Compound / multi-course    → 6 steps  (search × 2-3 + pairing)
  *   - Default                    → 4 steps  (one search + one refinement)
  *
@@ -16,6 +16,7 @@
  */
 
 import { extractSearchConstraints } from '../../query/service/search-constraint-extractor.js';
+import { QuerySanitizer } from '../../security/service/query-sanitizer.js';
 
 /**
  * Minimum step count for queries with 4+ explicit hard constraints.
@@ -46,29 +47,20 @@ const VINTAGE_PATTERN = /(?<!\p{L}\p{N})(?:18|19|20)\d{2}(?!\p{L}\p{N})/u;
  *  "오푸스원", "바롤로", "브루넬로", "샤토마고" etc. */
 const HANGUL_SKU_PATTERN = /[\uAC00-\uD7A3]{3,}/;
 
-const ADVERSARIAL_PATTERNS: readonly RegExp[] = [
-  // SQL injection — Unicode-aware boundaries replace \b (ASCII-only)
-  /(?<!\p{L}\p{N})(?:select|insert|update|delete|drop|truncate|alter|create)(?!\p{L}\p{N})[\s\S]{0,20}(?<!\p{L}\p{N})(?:from|into|table|database)(?!\p{L}\p{N})/iu,
-  // Prompt injection
-  /(?<!\p{L}\p{N})(?:ignore\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules))(?!\p{L}\p{N})/iu,
-  // "system:" / "system >" only trigger when "system" is the FIRST token
-  // (at the very start of the string, possibly preceded by whitespace only).
-  // False-positive guard: "wine classification system: how does it work?" and
-  // "Bordeaux AOC system: explain appellations" must NOT match — "system" is
-  // a mid-sentence noun there, not a directive role prefix.
-  /^\s*system\s*[:>]/iu,
-  /(?<!\p{L}\p{N})(?:dan\s+mode|jailbreak)(?!\p{L}\p{N})/iu,
-  // Schema/PII extraction
-  /(?<!\p{L}\p{N})(?:db|database)\s+schema(?!\p{L}\p{N})/iu,
-  /(?<!\p{L}\p{N})(?:other|previous)\s+users?(?!\p{L}\p{N})/iu,
-  // PII / cross-tenant extraction
-  /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/iu,
-  /(?:개인\s*정보|personal\s*(?:info|data)|이메일|email|전화번호|phone)/iu,
-  // Schema / API leak
-  /(?:api\s*key|secret|password|비밀번호|토큰|token)/iu,
-  // Resource exhaustion patterns (extremely long repetitive input)
-  /(.{5,})\1{10,}/,
-];
+/**
+ * Adaptive-budget reuses the canonical QuerySanitizer for blocked-input
+ * classification instead of maintaining a second security regex corpus here.
+ * This file remains responsible for budget sizing, not primary security policy.
+ */
+const ADAPTIVE_BUDGET_SANITIZER = new QuerySanitizer();
+/** Resource-exhaustion hint kept local because it affects budget sizing even
+ * when the input is not strictly a policy block.
+ * Two patterns cover different repeat-unit sizes:
+ *   - 2-4 char units (e.g. "카베르네 " × 800): `(.{2,4})\1{15,}`
+ *   - 5+ char units (longer repeating phrases): `(.{5,})\1{10,}`
+ * Both use /u flag so `.` matches Unicode codepoints (not UTF-16 code units). */
+const REPETITIVE_INPUT_PATTERN_SHORT: RegExp = /(.{2,4})\1{15,}/u;
+const REPETITIVE_INPUT_PATTERN_LONG: RegExp = /(.{5,})\1{10,}/u;
 
 const OFF_DOMAIN_PATTERNS: readonly RegExp[] = [
   // Non-wine subjects. Unicode-aware boundaries because \b is ASCII-only
@@ -107,15 +99,23 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
     return { maxSteps: 0, classification: 'default', reason: 'empty query' };
   }
 
-  // 1. Adversarial — tightest budget. Agent should refuse.
-  for (const pattern of ADVERSARIAL_PATTERNS) {
-    if (pattern.test(trimmed)) {
-      return {
-        maxSteps: 1,
-        classification: 'adversarial',
-        reason: `matched adversarial pattern: ${pattern.source.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
-      };
-    }
+  // 1. Sanitizer-blocked queries — tightest budget. The sanitizer remains the
+  // real block/deny layer; this classification only aligns the budget with it.
+  const sanitizeResult = ADAPTIVE_BUDGET_SANITIZER.sanitize(trimmed);
+  if (!sanitizeResult.safe) {
+    return {
+      maxSteps: 1,
+      classification: 'adversarial',
+      reason: `query sanitizer blocked input: ${sanitizeResult.reason.slice(0, ADAPTIVE_BUDGET_PATTERN_REASON_CHARS)}`,
+    };
+  }
+
+  if (REPETITIVE_INPUT_PATTERN_SHORT.test(trimmed) || REPETITIVE_INPUT_PATTERN_LONG.test(trimmed)) {
+    return {
+      maxSteps: 1,
+      classification: 'adversarial',
+      reason: 'repetitive input pattern',
+    };
   }
 
   // 2. Off-domain — also 1 step (refuse + redirect).
@@ -201,7 +201,12 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   const noCompoundHits = compoundHits.length === 0;
   const noSituationHits = situationHits.length === 0;
   const noConstraint = !hasConstraint;
-  const isPureHangulSku = /^[\uAC00-\uD7A3]{3,}$/.test(trimmed);
+  // Require 4+ syllables for pure-Hangul SKU classification: 3-syllable common Korean words
+  // (사랑해, 맛있어, 고마워, 스테이크) are too ambiguous to classify as wine entity lookups.
+  // 4+ syllables (오푸스원=4, 바롤로=3! — still a risk, 샤토마고=4, 브루넬로=4) provides
+  // a better signal. Note: 바롤로 is 3 syllables and IS a real wine name — this is a known
+  // FP tradeoff. 3-syllable pure-Hangul queries will fall to the default budget (which is fine).
+  const isPureHangulSku = /^[\uAC00-\uD7A3]{4,}$/.test(trimmed);
   if ((PROPER_NOUN_PATTERN.test(trimmed) || isPureHangulSku) && noCompoundHits && noSituationHits && noConstraint) {
     return {
       maxSteps: 3,

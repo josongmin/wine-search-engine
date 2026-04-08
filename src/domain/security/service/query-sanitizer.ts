@@ -36,6 +36,7 @@ const CONFUSABLES_MAP: Readonly<Record<string, string>> = {
   '\u0425': 'X', // Х → X
   '\u0443\u0301': 'y', // у́ (with accent) → y
   // Greek lookalikes
+  '\u03B1': 'a', // α → a (Greek small alpha)
   '\u03BF': 'o', // ο → o (Greek small omicron)
   '\u03B5': 'e', // ε → e (Greek small epsilon — approximate)
   '\u03B9': 'i', // ι → i (Greek small iota)
@@ -126,7 +127,13 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})ignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/iu,
       /(?:system|assistant|admin)\s+mode/i,
-      /(?<!\p{L})(?<!\p{N})(?:system|admin)\s+override(?!\p{L})(?!\p{N})/iu,
+      /^\s*(?:system|admin)\s*[:>]/iu,
+      // "system override" / "admin override" at start of string or after punctuation —
+      // a preceding word boundary means the user is issuing a directive, not using
+      // "system" as a mid-sentence noun (e.g. "wine classification system override settings"
+      // is blocked but acceptable; "operating system override" is a rare FP risk).
+      /^\s*(?:system|admin)\s+override/iu,
+      /[.!?]\s*(?:system|admin)\s+override/iu,
       /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
       // Indirect prompt injection via bracketed directives embedded in user content.
       // Detects [SYSTEM: , [INST: , [ASSISTANT: etc. — these are LLM prompt-format
@@ -154,7 +161,19 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})do\s+not\s+filter\s+(?:my|this|these|any|all|your|user|queries?|requests?|messages?|inputs?|harmful|unsafe|adult)(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})generate\s+harmful(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})unrestricted\s+(?:mode|access|content)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})dan\s+mode(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L})(?!\p{N})/iu,
+      // Classic jailbreak phrases: "forget everything", "disregard all rules", etc.
+      // Avoid "the/these/those" in alternation — too broad; "forget the name" and
+      // "disregard the price" are legitimate user phrasings.
+      /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your|my|any)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every|prior|previous|your|my)(?!\p{L})(?!\p{N})/iu,
+      // "new instructions/rules/prompt/guidelines/system" — injection vector
+      /(?<!\p{L})(?<!\p{N})new\s+(?:instructions?|rules?|prompts?|guidelines?|system\s+prompt|directives?)(?!\p{L})(?!\p{N})/iu,
+      // "override system prompt" / "override your instructions"
+      /(?<!\p{L})(?<!\p{N})override\s+(?:system\s+prompt|your\s+(?:instructions?|rules?|guidelines?|training|programming))(?!\p{L})(?!\p{N})/iu,
+      // "clear memory/context/history" — session reset injection
+      /(?<!\p{L})(?<!\p{N})clear\s+(?:memory|context|history|your\s+(?:memory|context|training))(?!\p{L})(?!\p{N})/iu,
     ],
 
     // SQL injection
@@ -163,6 +182,7 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})union\s+select(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})or\s+1\s*=\s*1(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})exec(?:ute)?\s*\(/iu,
+      /(?<!\p{L})(?<!\p{N})(?:db|database)\s+schema(?!\p{L})(?!\p{N})/iu,
       /--\s*$/,                          // SQL comment at end
       /\/\*[\s\S]*?\*\//,                // Block comment (cross-line)
       // Bare DML/DDL statements — `select wines from Bordeaux` is natural
@@ -206,8 +226,11 @@ export class QuerySanitizer {
       // the full path form (/bin/sh). Plain "bash" as an English adjective is excluded.
       /(?<!\p{L})(?<!\p{N})\/bin\/(?:sh|bash|zsh)(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})(?:cmd\.exe|powershell)(?!\p{L})(?!\p{N})/iu,
-      // "bash -c", "bash --", "bash ;" are shell invocations; "bash your palate" is not.
-      /(?<!\p{L})(?<!\p{N})bash\s+[-;]/iu,
+      // "bash -c", "bash ;" are shell invocations; "bash your palate" and "bash --login"
+      // (double-dash long options in legitimate CLI docs) are not.
+      // Match "bash -X" (single dash, one non-dash char) OR "bash ;".
+      // Negative lookahead (?!-) rejects "--" (double-dash long option prefix).
+      /(?<!\p{L})(?<!\p{N})bash\s+-(?!-).|(?<!\p{L})(?<!\p{N})bash\s+;/iu,
       /(?<!\p{L})(?<!\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
       /`[^`]*`/,                        // Backticks
       /\$\([^)]*\)/,                    // Command substitution

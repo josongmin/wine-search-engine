@@ -495,7 +495,7 @@ export function scoreScenario(
   // All other dims get the floor: faithfulness, contextRelevance, contextRecall,
   // costEfficiency, answerQuality, answerRelevancy are noisy enough that a single
   // 0.01 value is more likely measurement error than a true catastrophic failure.
-  const NO_FLOOR_DIMS = new Set<string>(['executionEfficiency', 'terminationCorrectness', 'judge']);
+  // NO_FLOOR_DIMS is module-scope (rule 16: deterministic sets should not be allocated per-call).
   const dimScoresFloored: Record<string, number | null> = {};
   for (const [k, v] of Object.entries(dimScores)) {
     dimScoresFloored[k] = (v === null || NO_FLOOR_DIMS.has(k))
@@ -1563,6 +1563,14 @@ function renormaliseWeights(weights: Required<DimensionWeights>): Required<Dimen
 /** Minimum score floor for non-critical dimensions before geo-mean computation.
  *  Prevents a single weak (but non-critical) dim from collapsing overall by >20x. */
 const DIMENSION_FLOOR = 0.05;
+
+/**
+ * Dimensions that intentionally receive NO floor treatment before geo-mean.
+ * These are either binary/discrete (terminationCorrectness, executionEfficiency)
+ * or externally validated (judge) — flooring them would mask real 0-valued failures.
+ * Defined at module scope: deterministic constant, no per-call allocation (rule 16).
+ */
+const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>(['executionEfficiency', 'terminationCorrectness', 'judge']);
 
 function weightedGeometricMean(
   dimScores: Record<string, number | null>,

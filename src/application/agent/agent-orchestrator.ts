@@ -53,22 +53,19 @@ const LOG_PREVIEW_CHARS = 200;
 /** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 
-/** Parsed LLM output — either a tool call or a final answer. */
+/** Parsed LLM output — either a tool call, a parallel batch, or a final answer. */
 interface LlmAction {
   readonly thought: string;
+  // Sequential single tool call
   readonly action?: { readonly tool: string; readonly input: Record<string, unknown> };
+  // Parallel batch: LLM emits {"thought":"…","actions":[{tool,input},{tool,input}]}
+  readonly actions?: readonly { readonly tool: string; readonly input: Record<string, unknown> }[];
   readonly answer?: string;
 }
 
 function parseLlmOutput(text: string): LlmAction {
   try {
-    // Trim first, then strip markdown code fences (anchored ^ needs trimmed input).
-    // The previous regex `^```json?\s*` matched only "```jso" or "```json" — plain
-    // ``` fences (no language tag) that LLMs often emit fell through and broke JSON.parse.
     const trimmed = text.trim();
-    // Strip ANY language tag (typescript, yaml, plain, etc.). Models routinely
-    // emit ` ```json `, ` ``` `, ` ```typescript `, etc. — restricting to a
-    // small whitelist degrades the agent to passthrough on legitimate JSON.
     const cleaned = trimmed
       .replace(/^```[\w-]*\s*\n?/i, '')
       .replace(/\s*```$/i, '')
@@ -81,24 +78,42 @@ function parseLlmOutput(text: string): LlmAction {
       return { thought, answer: parsed['answer'] };
     }
 
+    // Parallel batch: {"thought":"…","actions":[{tool,input},…]}
+    // Validate each entry; silently drop malformed entries.
+    const actionsRaw = parsed['actions'];
+    if (Array.isArray(actionsRaw) && actionsRaw.length > 0) {
+      const validActions = (actionsRaw as unknown[])
+        .filter((a): a is Record<string, unknown> => typeof a === 'object' && a !== null)
+        .map((a) => ({
+          tool: typeof a['tool'] === 'string' ? a['tool'] : '',
+          input:
+            typeof a['input'] === 'object' && a['input'] !== null
+              ? (a['input'] as Record<string, unknown>)
+              : {},
+        }))
+        .filter((a) => a.tool.length > 0);
+      if (validActions.length > 0) {
+        return { thought, actions: validActions };
+      }
+    }
+
+    // Single tool call (sequential)
     const action = parsed['action'] as Record<string, unknown> | undefined;
     if (action !== undefined && typeof action['tool'] === 'string' && action['tool'].length > 0) {
-      const input = (typeof action['input'] === 'object' && action['input'] !== null)
-        ? action['input'] as Record<string, unknown>
-        : {};
+      const input =
+        typeof action['input'] === 'object' && action['input'] !== null
+          ? (action['input'] as Record<string, unknown>)
+          : {};
       return { thought, action: { tool: action['tool'], input } };
     }
 
-    // If neither action nor answer, treat the whole text as an answer.
-    // Logged as warn so ops can detect a model that's no longer following the
-    // structured output protocol — otherwise this silently degrades to passthrough.
+    // If neither action/actions nor answer, treat the whole text as an answer.
     log.warn(
       { textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
       'agent LLM produced JSON without action or answer; falling back to raw text',
     );
     return { thought: '[unparseable LLM structure]', answer: trimmed };
   } catch {
-    // LLM returned non-JSON — treat as direct answer.
     log.warn(
       { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },
       'agent LLM produced non-JSON output; falling back to raw text',
