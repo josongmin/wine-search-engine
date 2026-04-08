@@ -18,9 +18,14 @@ const CONFUSABLES_MAP: Readonly<Record<string, string>> = {
   '\u0435': 'e', // е → e
   '\u0456': 'i', // і → i
   '\u0458': 'j', // ј → j
+  '\u043A': 'k', // к → k (Cyrillic small ka — visually identical to Latin k)
+  '\u043C': 'm', // м → m (Cyrillic small em — bypass "mode", "mode override")
+  '\u043D': 'n', // н → n (Cyrillic small en — bypass "jailbreak", "instructions")
+  '\u043F': 'p', // п → p (Cyrillic small pe — bypass "prompt")
   '\u043E': 'o', // о → o
   '\u0440': 'r', // р → r
   '\u0441': 'c', // с → c
+  '\u0442': 't', // т → t (Cyrillic small te — bypass "system", "instructions")
   '\u0445': 'x', // х → x
   '\u0443': 'y', // у → y
   '\u0410': 'A', // А → A
@@ -37,12 +42,14 @@ const CONFUSABLES_MAP: Readonly<Record<string, string>> = {
   '\u0443\u0301': 'y', // у́ (with accent) → y
   // Greek lookalikes
   '\u03B1': 'a', // α → a (Greek small alpha)
+  '\u03B7': 'h', // η → h (Greek small eta — visually similar to Latin h)
   '\u03BF': 'o', // ο → o (Greek small omicron)
   '\u03B5': 'e', // ε → e (Greek small epsilon — approximate)
   '\u03B9': 'i', // ι → i (Greek small iota)
   '\u03BA': 'k', // κ → k (Greek small kappa)
   '\u03BD': 'v', // ν → v (Greek small nu)
-  '\u03C1': 'p', // ρ → p (Greek small rho)
+  '\u03C1': 'r', // ρ → r (Greek small rho — visually identical to Latin r, NOT p)
+  '\u03C4': 't', // τ → t (Greek small tau — visually similar, bypass "system", "instructions")
   '\u03C5': 'u', // υ → u (Greek small upsilon)
   '\u0391': 'A', // Α → A (Greek capital alpha)
   '\u0392': 'B', // Β → B (Greek capital beta)
@@ -128,12 +135,11 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/iu,
       /(?:system|assistant|admin)\s+mode/i,
       /^\s*(?:system|admin)\s*[:>]/iu,
-      // "system override" / "admin override" at start of string or after punctuation —
-      // a preceding word boundary means the user is issuing a directive, not using
-      // "system" as a mid-sentence noun (e.g. "wine classification system override settings"
-      // is blocked but acceptable; "operating system override" is a rare FP risk).
+      // "system override" / "admin override" at start of string, after sentence punctuation,
+      // OR after a newline/carriage-return (multi-line injection vector).
+      // "Hello\nsystem override" and "First. system override" are both directive forms.
       /^\s*(?:system|admin)\s+override/iu,
-      /[.!?]\s*(?:system|admin)\s+override/iu,
+      /[.!?\r\n]\s*(?:system|admin)\s+override/iu,
       /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
       // Indirect prompt injection via bracketed directives embedded in user content.
       // Detects [SYSTEM: , [INST: , [ASSISTANT: etc. — these are LLM prompt-format
@@ -252,7 +258,9 @@ export class QuerySanitizer {
 
     // Unicode / encoding tricks
     unicode_tricks: [
-      /[\u200B-\u200D\uFEFF]/,          // Zero-width chars
+      /[\u200B-\u200D\uFEFF]/,          // Zero-width chars + BOM/ZWNBSP
+      /\u00AD/,                         // Soft hyphen (U+00AD) — invisible in most renderers,
+                                        // can split "jailbreak" → "jail\u00ADbreak" bypassing patterns
       /[\u202A-\u202E]/,                // Bidirectional text (LRE/RLE/PDF/LRO/RLO)
       /[\u2066-\u2069]/,                // Directional isolates (LRI/RLI/FSI/PDI) — modern bidi attacks
       /[\uFFF0-\uFFFF]/,                // Noncharacters
