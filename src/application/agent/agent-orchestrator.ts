@@ -29,8 +29,10 @@ import {
 } from './agent-prompt.js';
 import {
   executeAgentTool,
+  executeAgentToolsBatch,
   isKnownTool,
   type AgentToolDeps,
+  type AgentToolResult,
 } from './agent-tools.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
@@ -217,6 +219,14 @@ export class AgentOrchestrator {
     let unknownToolAttempts = 0;
     const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
     /**
+     * Hard cap on parallel tools per batch step. An adversarially-prompted LLM
+     * can emit {"actions":[...100 tools...]} to trigger 100 concurrent Promise.all
+     * executions, exhausting DB connection pools or Vespa rate limits. Capping at
+     * 4 allows legitimate parallel patterns (search + food pairing = 2; compare +
+     * drinking-window × 2 = 3) while blocking resource-exhaustion attacks.
+     */
+    const MAX_TOOLS_PER_BATCH = 4;
+    /**
      * Set after the first zero-result observation so we inject the constraint-
      * relaxation hint exactly once into the next LLM user message.
      */
@@ -238,12 +248,12 @@ export class AgentOrchestrator {
           break;
         }
 
-        // Synthesize-before-exhaustion: when 1 step remains and we already have
-        // observations, nudge the LLM to produce a final answer rather than
-        // burning the last step on another tool call that will hit fallback.
+        // Synthesize-before-exhaustion: when 1 step remains, nudge the LLM to
+        // produce a final answer rather than burning the last step on another
+        // tool call that will hit fallback. Fire regardless of whether
+        // observations exist — maxSteps=1 must also receive the nudge.
         const remainingSteps = effectiveConfig.maxSteps - budget.getStepCount();
-        const hasObservations = steps.some((s) => s.observation !== undefined);
-        const isLastStep = remainingSteps === 1 && hasObservations;
+        const isLastStep = remainingSteps === 1;
 
         // Pre-flight token budget check — prevent unnecessary LLM calls when
         // the budget is already exhausted. The check uses accumulated totals
@@ -260,10 +270,15 @@ export class AgentOrchestrator {
         // Build messages
         // Consume any pending refinement hint by prepending it to the query message.
         // The hint is only injected once (hasInjectedRefinementHint guards re-entry).
-        const baseUserContent = pendingRefinementHint !== undefined
+        // CLAUDE.md rule: after enriching a string, length-check the RESULT (not just the input).
+        const baseUserContentRaw = pendingRefinementHint !== undefined
           ? `${pendingRefinementHint}\n\n${query}`
           : query;
         pendingRefinementHint = undefined;
+        // Cap the enriched user content at maxContextChars to prevent context overflow.
+        const baseUserContent = baseUserContentRaw.length > effectiveConfig.maxContextChars
+          ? baseUserContentRaw.slice(0, effectiveConfig.maxContextChars)
+          : baseUserContentRaw;
         const userMsg = buildUserMessage(baseUserContent);
         const stepMessages = buildStepMessages(steps);
         const messages = [
@@ -377,7 +392,128 @@ export class AgentOrchestrator {
           break;
         }
 
-        // Tool call
+        // ── Parallel batch ──────────────────────────────────────────────────
+        // LLM emits {"thought":"…","actions":[{tool,input},{tool,input}]}
+        // All tools fire simultaneously via Promise.all.
+        // Policy-block (DomainError) from any tool → re-thrown, caught here, abort loop.
+        if (parsed.actions !== undefined) {
+          const batchCalls = parsed.actions;
+
+          // Per-batch tool count limit: reject oversized batches to prevent
+          // resource exhaustion via Promise.all with 100+ concurrent tool calls.
+          if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
+            terminationReason = 'error';
+            steps.push({
+              index: steps.length,
+              thought: parsed.thought,
+              actions: batchCalls.slice(0, MAX_TOOLS_PER_BATCH),
+              observations: [
+                `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`,
+              ],
+              durationMs: Date.now() - stepStart,
+              tokenCount: { input: inputTokens, output: outputTokens },
+            });
+            break;
+          }
+
+          // Unknown tool guard: reject the whole batch on first unknown name.
+          const unknownTool = batchCalls.find((c) => !isKnownTool(c.tool));
+          if (unknownTool !== undefined) {
+            unknownToolAttempts++;
+            if (unknownToolAttempts > MAX_UNKNOWN_TOOL_ATTEMPTS) {
+              terminationReason = 'error';
+              break;
+            }
+            steps.push({
+              index: steps.length,
+              thought: parsed.thought,
+              actions: batchCalls,
+              observations: [
+                `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`,
+              ],
+              durationMs: Date.now() - stepStart,
+              tokenCount: { input: inputTokens, output: outputTokens },
+            });
+            continue;
+          }
+
+          // Loop detection: recordStep for each call; abort on first violation.
+          let batchLoopBlocked = false;
+          for (const call of batchCalls) {
+            const loopCheck = budget.recordStep(call.tool, call.input);
+            if (!loopCheck.allowed) {
+              terminationReason = loopCheck.reason ?? 'loop_detected';
+              batchLoopBlocked = true;
+              break;
+            }
+          }
+          if (batchLoopBlocked) break;
+
+          // Execute all tools in parallel.
+          // Policy-block DomainErrors propagate through executeAgentToolsBatch
+          // (not caught inside executeAgentTool). Wrap in try-catch here.
+          let batchResults: readonly AgentToolResult[];
+          try {
+            batchResults = await executeAgentToolsBatch(
+              batchCalls,
+              this.deps.toolDeps,
+              `${requestId}-step${steps.length}`,
+            );
+          } catch (batchErr) {
+            if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
+              policyBlocked = true;
+              terminationReason = 'blocked';
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                actions: batchCalls,
+                observations: [`Policy blocked: ${batchErr.message}`],
+                durationMs: Date.now() - stepStart,
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+            } else {
+              terminationReason = 'error';
+            }
+            break;
+          }
+
+          const observations: string[] = [];
+          for (const result of batchResults) {
+            observations.push(
+              truncateObservation(result.observation, this.config.maxContextChars),
+            );
+            if (
+              result.rawResult !== null &&
+              typeof result.rawResult === 'object' &&
+              'queryType' in (result.rawResult as Record<string, unknown>) &&
+              (result.rawResult as Record<string, unknown>)['queryType'] === 'search'
+            ) {
+              lastSearchResult = result.rawResult as SearchResponseV1;
+            }
+          }
+
+          steps.push({
+            index: steps.length,
+            thought: parsed.thought,
+            actions: batchCalls,
+            observations,
+            durationMs: Date.now() - stepStart,
+            tokenCount: { input: inputTokens, output: outputTokens },
+          });
+
+          const remainingAfterBatch = effectiveConfig.maxSteps - budget.getStepCount();
+          if (
+            !hasInjectedRefinementHint &&
+            remainingAfterBatch >= 3 &&
+            observations.some((o) => o.includes('0개') || o.includes('검색 결과가 없습니다'))
+          ) {
+            hasInjectedRefinementHint = true;
+            pendingRefinementHint =
+              'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
+          }
+        }
+
+        // ── Sequential single tool call ─────────────────────────────────────
         if (parsed.action !== undefined) {
           const { tool, input } = parsed.action;
 
@@ -540,6 +676,14 @@ export class AgentOrchestrator {
               abortSignal: synthAbort.signal,
             });
             const parsedSynth = parseLlmOutput(synthResult.text);
+            // If the synthesis LLM still returns a tool call despite the sentinel
+            // instruction, treat it as failure (return undefined). Continuing
+            // with parsedSynth.action would cause a use-after-loop tool execution
+            // outside the budget guard.
+            if (parsedSynth.action !== undefined || parsedSynth.actions !== undefined) {
+              log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
+              return undefined;
+            }
             return parsedSynth.answer && parsedSynth.answer.trim().length > 0
               ? parsedSynth.answer
               : undefined;

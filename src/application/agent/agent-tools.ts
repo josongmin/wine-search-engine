@@ -18,6 +18,8 @@ import type { EntityId } from '../../domain/shared/types/index.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
 import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
+import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -326,7 +328,12 @@ export async function executeAgentTool(
   try {
     const result = await executeAgentToolInner(toolName, input, deps, requestId);
     return { ...result, observation: capObservation(result.observation) };
-  } catch {
+  } catch (err) {
+    // Policy-block errors MUST propagate — they are security decisions, not
+    // tool failures. Re-throw so the orchestrator can terminate the loop.
+    if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
+      throw err;
+    }
     return {
       observation: `Tool "${toolName}" encountered an unexpected error. Try a different approach or query.`,
       rawResult: null,
@@ -337,12 +344,13 @@ export async function executeAgentTool(
 /**
  * Execute multiple tool calls in parallel (Promise.all).
  *
- * Each tool is isolated: a failure in one does NOT abort the others.
- * Policy-block errors are re-thrown immediately so the orchestrator can
- * terminate the loop — they must not be swallowed like ordinary errors.
+ * Isolation contract:
+ *  - Ordinary tool errors are caught per-call and returned as error observations.
+ *  - Policy-block DomainErrors are re-thrown immediately (propagated from
+ *    executeAgentTool) so the orchestrator terminates the loop. The caller
+ *    (orchestrator) wraps executeAgentToolsBatch in try-catch for this.
  *
- * requestId convention: `${baseRequestId}-step${stepIndex}-p${toolIndex}`
- * so each parallel call has a unique, traceable ID in logs.
+ * requestId convention: `${baseRequestId}-p${toolIndex}`
  */
 export async function executeAgentToolsBatch(
   toolCalls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],

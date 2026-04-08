@@ -5,7 +5,13 @@
 import type { ChatMessage } from '../../domain/ai/port/chat-llm.port.js';
 import type { AgentStep } from '../../domain/agent/model/agent-step.js';
 
-const SYSTEM_PROMPT = `You are Cuvee, a wine intelligence agent. Answer in the user's language and register (Korean casual ↔ formal). Think step by step. Output strict JSON only.
+/** Build the system prompt with today's date injected for drinking window reasoning.
+ *  The date is needed so the LLM can evaluate "is this wine drinkable NOW?" without
+ *  hallucinating the current year. Built at request time (not module load) so the
+ *  date is always fresh. */
+function buildSystemPrompt(): string {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD, UTC
+  return `You are Cuvee, a wine intelligence agent. Today's date: ${today}. Answer in the user's language and register (Korean casual ↔ formal). Think step by step. Output strict JSON only.
 
 ## Tools
 - search_wines(query, limit?, exclude_grapes?, exclude_regions?, max_price_krw?) — main search. Embed ALL constraints in query; use structured params for exclusions/price (KRW; $50≈70000).
@@ -36,9 +42,10 @@ const SYSTEM_PROMPT = `You are Cuvee, a wine intelligence agent. Answer in the u
 - Single tool call:   {"thought":"…","action":{"tool":"tool_name","input":{…}}}
 - Parallel tools:     {"thought":"…","actions":[{"tool":"tool_a","input":{…}},{"tool":"tool_b","input":{…}}]}
 - Final answer:       {"thought":"…","answer":"…"}`;
+}
 
 export function buildSystemMessage(): ChatMessage {
-  return { role: 'system', content: SYSTEM_PROMPT };
+  return { role: 'system', content: buildSystemPrompt() };
 }
 
 export function buildUserMessage(query: string): ChatMessage {
