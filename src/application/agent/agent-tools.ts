@@ -674,11 +674,18 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     const parts = [
       `${i + 1}. ${r.entity.canonicalLabel}`,
       `(id: ${r.entity.entityId})`,
-      `score: ${r.relevanceScore.toFixed(2)}`,
     ];
     if (r.entity.producer) parts.push(`producer: ${r.entity.producer}`);
     if (r.entity.region) parts.push(`region: ${r.entity.region}`);
     if (r.entity.vintage) parts.push(`vintage: ${r.entity.vintage}`);
+    // Grapes: helps agent verify negation constraints and give richer answers
+    if (r.entity.grapes !== undefined && r.entity.grapes.length > 0) {
+      parts.push(`grapes: ${r.entity.grapes.slice(0, 3).join(', ')}`);
+    }
+    // Price: agents need price context for budget recommendations
+    if (r.entity.priceRange !== undefined) {
+      parts.push(`price: ${r.entity.priceRange}`);
+    }
     if (r.drinkingWindow) {
       parts.push(`drink: ${r.drinkingWindow.drinkingWindowStart}-${r.drinkingWindow.drinkingWindowEnd}`);
     }
@@ -695,11 +702,16 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     const parts = [
       `${e.subQuery}: ${top.entity.canonicalLabel}`,
       `entity_id: ${top.entity.entityId}`,
-      `score: ${top.relevanceScore.toFixed(2)}`,
     ];
     if (top.entity.producer) parts.push(`producer: ${top.entity.producer}`);
     if (top.entity.region) parts.push(`region: ${top.entity.region}`);
     if (top.entity.vintage) parts.push(`vintage: ${top.entity.vintage}`);
+    if (top.entity.grapes !== undefined && top.entity.grapes.length > 0) {
+      parts.push(`grapes: ${top.entity.grapes.slice(0, 3).join(', ')}`);
+    }
+    if (top.entity.priceRange !== undefined) {
+      parts.push(`price: ${top.entity.priceRange}`);
+    }
     if (top.drinkingWindow) {
       parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);
     }

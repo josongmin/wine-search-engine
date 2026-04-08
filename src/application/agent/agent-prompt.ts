@@ -39,6 +39,14 @@ function buildSystemPrompt(): string {
 17. PARALLEL TOOLS: When 2+ tools are independent (results don't depend on each other), fire them in one "actions" batch. Examples: search_wines + get_food_pairings for the same query; check_drinking_window on two wines after compare_wines. Sequential is required ONLY when tool B needs tool A's output (e.g. entity_id from search → check_drinking_window).
 18. ANSWER IMMEDIATELY after ANY search that returns results (>0 wines). Only exception: Rule 4 requires drinking_window check after search. Do not call search_wines a second time if you already have results.
 
+## Answer Quality (apply in EVERY final answer)
+- GROUND every wine name in tool result data — never invent wines not in observations.
+- INCLUDE: grape variety, region, and price band when the tool result provides them.
+- For recommendations: give 2-3 concrete options with brief WHY for each (flavor, occasion, pairing).
+- For negation queries: explicitly confirm the excluded items are absent from your recommendations.
+- For refusals (off-domain / unsafe): 1-2 sentences max, no tools.
+- HEDGE appropriately: "검색 결과 기준으로", "데이터 기준으로는" when data may be stale.
+
 ## Output Format
 - Single tool call:   {"thought":"…","action":{"tool":"tool_name","input":{…}}}
 - Parallel tools:     {"thought":"…","actions":[{"tool":"tool_a","input":{…}},{"tool":"tool_b","input":{…}}]}
