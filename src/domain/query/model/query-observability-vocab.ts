@@ -1,3 +1,4 @@
+import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { QueryPlanV1, QueryPlanV2 } from './query-plan.js';
 import type { CompiledWineQuery } from './compiled-wine-query.js';
 
@@ -34,19 +35,7 @@ export type QueryFamilyLabel = (typeof QUERY_FAMILY_LABELS)[number];
 type PlanLike = QueryPlanV1 | QueryPlanV2;
 
 /** Constraint extraction provenance — tracks rule vs LLM hit rates. */
-export interface ConstraintExtractionObservability {
-  readonly candidatePhraseCount: number;
-  readonly ruleTableHitCount: number;
-  readonly llmHitCount: number;
-  readonly llmSkippedCount: number;
-  readonly fallbackTriggered: boolean;
-  readonly source: 'rule_only' | 'llm_only' | 'hybrid' | 'fallback';
-  readonly llmLatencyMs: number | null;
-  readonly phraseCacheHits: number;
-  readonly phraseCacheNegativeSkipped: number;
-  readonly phraseCacheMisses: number;
-  readonly missedPhrases: readonly string[];
-}
+export type ConstraintExtractionObservability = ConstraintExtractionTrace;
 
 export interface QueryObservabilitySlice {
   readonly queryId: string;
@@ -121,6 +110,12 @@ export function deriveQueryFamily(
   return 'unknown';
 }
 
+/**
+ * Build the query observability slice. Resolution order for `constraintExtraction`:
+ * 1. Explicit 4th argument (when callers need an override).
+ * 2. `plan.constraintExtraction` when `plan` is QueryPlanV2.
+ * 3. `compiled.query.constraintExtraction` (ExecutionCompiler copy of planner output).
+ */
 export function planToObservabilitySlice(
   queryId: string,
   plan: PlanLike,
@@ -129,6 +124,11 @@ export function planToObservabilitySlice(
 ): QueryObservabilitySlice {
   // decompositionHint is optional on both QueryPlanV1 and QueryPlanV2; no 'in' guard needed.
   const decompositionHint = plan.decompositionHint;
+
+  const resolvedConstraintExtraction =
+    constraintExtraction
+    ?? (isQueryPlanV2(plan) ? plan.constraintExtraction : undefined)
+    ?? compiled?.query.constraintExtraction;
 
   // Guard against NaN propagating to downstream confidence computation.
   // plan.uncertainty.overall must be a valid finite number in [0, 1]; if it
@@ -160,6 +160,8 @@ export function planToObservabilitySlice(
           decompositionConfidence: decompositionHint.confidence,
         }
       : {}),
-    ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
+    ...(resolvedConstraintExtraction !== undefined
+      ? { constraintExtraction: resolvedConstraintExtraction }
+      : {}),
   };
 }

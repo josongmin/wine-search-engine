@@ -37,12 +37,12 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
   {
     operator: 'similar_to',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*같은/,
-      /(?<anchor>.+?)\s*비슷한/,
+      /(?<anchor>.+?)\s*같은/u,
+      /(?<anchor>.+?)\s*비슷한/u,
     ],
     postfixPatterns: [
-      /\blike\s+(?<anchor>.+?)(?:\s+wine)?$/i,
-      /\bsimilar\s+to\s+(?<anchor>.+?)(?:\s+wine)?$/i,
+      /(?<!\p{L}\p{N})like\s+(?<anchor>.+?)(?:\s+wine)?$/iu,
+      /(?<!\p{L}\p{N})similar\s+to\s+(?<anchor>.+?)(?:\s+wine)?$/iu,
     ],
   },
 
@@ -51,12 +51,12 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
     operator: 'cheaper_than',
     impliedAxis: 'price_band',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*저렴한/,
-      /(?<anchor>.+?)\s*보다\s*싼/,
+      /(?<anchor>.+?)\s*보다\s*저렴한/u,
+      /(?<anchor>.+?)\s*보다\s*싼/u,
     ],
     postfixPatterns: [
-      /\bcheaper\s+than\s+(?<anchor>.+)/i,
-      /\bless\s+expensive\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})cheaper\s+than\s+(?<anchor>.+)/iu,
+      /(?<!\p{L}\p{N})less\s+expensive\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -65,11 +65,11 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
     operator: 'more_expensive_than',
     impliedAxis: 'price_band',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*비싼/,
+      /(?<anchor>.+?)\s*보다\s*비싼/u,
     ],
     postfixPatterns: [
-      /\bmore\s+expensive\s+than\s+(?<anchor>.+)/i,
-      /\bpricier\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})more\s+expensive\s+than\s+(?<anchor>.+)/iu,
+      /(?<!\p{L}\p{N})pricier\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -78,10 +78,10 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
     operator: 'lighter_than',
     impliedAxis: 'body',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*가벼운/,
+      /(?<anchor>.+?)\s*보다\s*가벼운/u,
     ],
     postfixPatterns: [
-      /\blighter\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})lighter\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -90,12 +90,12 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
     operator: 'fuller_than',
     impliedAxis: 'body',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*묵직한/,
+      /(?<anchor>.+?)\s*보다\s*묵직한/u,
     ],
     postfixPatterns: [
-      /\bheavier\s+than\s+(?<anchor>.+)/i,
-      /\bfuller\s+than\s+(?<anchor>.+)/i,
-      /\bfull[\s-]?bodied\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})heavier\s+than\s+(?<anchor>.+)/iu,
+      /(?<!\p{L}\p{N})fuller\s+than\s+(?<anchor>.+)/iu,
+      /(?<!\p{L}\p{N})full[\s-]?bodied\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -104,11 +104,11 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
     operator: 'drier_than',
     impliedAxis: 'sweetness',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*드라이한/,
+      /(?<anchor>.+?)\s*보다\s*드라이한/u,
     ],
     postfixPatterns: [
-      /\bdrier\s+than\s+(?<anchor>.+)/i,
-      /\bmore\s+dry\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})drier\s+than\s+(?<anchor>.+)/iu,
+      /(?<!\p{L}\p{N})more\s+dry\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -117,12 +117,12 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
     operator: 'sweeter_than',
     impliedAxis: 'sweetness',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*달달한/,
-      /(?<anchor>.+?)\s*보다\s*단/,
+      /(?<anchor>.+?)\s*보다\s*달달한/u,
+      /(?<anchor>.+?)\s*보다\s*단/u,
     ],
     postfixPatterns: [
-      /\bsweeter\s+than\s+(?<anchor>.+)/i,
-      /\bmore\s+sweet\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})sweeter\s+than\s+(?<anchor>.+)/iu,
+      /(?<!\p{L}\p{N})more\s+sweet\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -130,11 +130,11 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
   {
     operator: 'better_than',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*보다\s*좋은/,
-      /(?<anchor>.+?)\s*보다\s*나은/,
+      /(?<anchor>.+?)\s*보다\s*좋은/u,
+      /(?<anchor>.+?)\s*보다\s*나은/u,
     ],
     postfixPatterns: [
-      /\bbetter\s+than\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})better\s+than\s+(?<anchor>.+)/iu,
     ],
   },
 
@@ -142,11 +142,11 @@ const OPERATOR_PATTERNS: readonly OperatorPattern[] = [
   {
     operator: 'not',
     prefixPatterns: [
-      /(?<anchor>.+?)\s*말고/,
-      /(?<anchor>.+?)\s*대신/,
+      /(?<anchor>.+?)\s*말고/u,
+      /(?<anchor>.+?)\s*대신/u,
     ],
     postfixPatterns: [
-      /\binstead\s+of\s+(?<anchor>.+)/i,
+      /(?<!\p{L}\p{N})instead\s+of\s+(?<anchor>.+)/iu,
     ],
   },
 ];

@@ -159,6 +159,18 @@ export interface ScenarioExpectation {
 
   // ─── Per-scenario weight overrides ───
   readonly weights?: ScenarioDimensionWeights;
+
+  // ─── Judge dependency ───
+  /**
+   * When true, this scenario's core constraint can ONLY be verified by the
+   * LLM judge — the rule-based scorer cannot distinguish a correct from
+   * incorrect answer. In --no-judge mode, these scenarios are scored but
+   * their `overall` is marked unreliable in diagnostics.
+   *
+   * Set this on scenarios where `rubric` encodes the primary pass/fail
+   * criterion (e.g. negation: "recommended wine must not be Cabernet").
+   */
+  readonly judgeRequired?: boolean;
 }
 
 export interface AgentBenchmarkScenario {

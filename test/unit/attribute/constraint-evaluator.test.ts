@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ConstraintEvaluator } from '../../../src/domain/attribute/service/constraint-evaluator.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../../src/domain/shared/types/index.js';
-import type { AttributeSpace } from '../../../src/domain/attribute/model/attributes.js';
-
 const evaluator = new ConstraintEvaluator();
 
 function makeConstraint(
@@ -20,15 +18,6 @@ function makeBundle(
 ): ConstraintBundle {
   return { hard, soft, inferred };
 }
-
-const FULL_ATTRS: AttributeSpace = {
-  body: 0.8,
-  sweetness: 0.1,
-  acidity: 0.7,
-  tannin: 0.6,
-  priceBand: 'mid',
-  occasion: ['gift', 'dinner'],
-};
 
 describe('ConstraintEvaluator', () => {
   describe('hard constraints', () => {
@@ -85,7 +74,7 @@ describe('ConstraintEvaluator', () => {
     it('exclude constraint: "gift" excluded, candidate has "gift" occasion → filtered', () => {
       const excludeConstraint = makeConstraint('occasion', 'exclude', 'gift');
       const bundle = makeBundle([excludeConstraint]);
-      const result = evaluator.evaluate(bundle, {
+      evaluator.evaluate(bundle, {
         body: 0.5,
         sweetness: 0.1,
         occasion: ['gift', 'dinner'],

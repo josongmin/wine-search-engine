@@ -70,7 +70,7 @@ function synthesiseEvidenceSummary(result: RankedResult): string {
     // Convert snake_case type to readable label
     const label = item.type
       .replace(/_/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase());
+      .replace(/(?<!\p{L}\p{N})\p{L}/gu, (c) => c.toUpperCase());
 
     return metaValue !== undefined
       ? `${label} (${metaValue})`

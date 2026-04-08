@@ -20,10 +20,11 @@ import type { ResponseBuildParams } from '../../../domain/response/service/respo
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
 import type { MixedQueryResult } from '../../../domain/mixed/model/mixed-query-result.js';
 import type { CompiledWineQuery } from '../../../domain/query/model/compiled-wine-query.js';
-
 /**
  * Combined plan + compiled result for implementations that can produce both in one call.
  * Avoids the V2-is-discarded problem in PlannerV1Adapter by exposing compiled alongside V1.
+ *
+ * NL constraint extraction provenance (when present) lives on `compiled.query.constraintExtraction`.
  */
 export interface PlanWithCompiledResult {
   readonly v1: QueryPlanV1;

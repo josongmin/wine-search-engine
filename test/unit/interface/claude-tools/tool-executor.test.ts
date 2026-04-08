@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WineToolExecutor, type WineToolExecutorDeps } from '../../../../src/interface/claude-tools/tool-executor.js';
-import type { SearchUseCase, SearchRequest } from '../../../../src/application/search/search.usecase.js';
+import type { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
 import type { DecomposedSearchUseCase } from '../../../../src/application/search/decomposed-search.usecase.js';
 import type { DrinkingWindowUseCase } from '../../../../src/application/drinking-window/drinking-window.usecase.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';

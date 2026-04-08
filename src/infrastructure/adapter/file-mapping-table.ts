@@ -30,7 +30,7 @@ export class FileMappingTableAdapter implements MappingTablePort {
     const path = filePath ?? resolveDataPath('data/nl-mappings.json');
     try {
       const raw = readFileSync(path, 'utf8');
-      const parsed = JSON.parse(raw) as Partial<MappingTableFile>;
+      const parsed = JSON.parse(raw) as unknown as Partial<MappingTableFile>;
       this.version = parsed.version ?? 'v1.0';
       this.mappings = parsed.mappings ?? [];
     } catch {

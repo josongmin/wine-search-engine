@@ -20,7 +20,7 @@ import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
-import type { ConstraintExtractionTrace } from '../../attribute/service/llm-nl-mapper.js';
+import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import {
@@ -39,10 +39,10 @@ const PLANNER_VERSION = '1.0.0';
 const POLICY_RULE_VERSION = '1.0.0';
 
 /** Vintage year pattern to detect explicit vintage specification. */
-const VINTAGE_YEAR_PATTERN = /\b(19|20)\d{2}\b/;
+const VINTAGE_YEAR_PATTERN = /(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/u;
 
 /** Producer catalog browse: "Château X best wines" (Epic 7, golden `producer_browse`). */
-const PRODUCER_BROWSE_QUERY_PATTERN = /\b(?:best|top|great|famous)\s+wines\b/i;
+const PRODUCER_BROWSE_QUERY_PATTERN = /(?<!\p{L}\p{N})(?:best|top|great|famous)\s+wines(?!\p{L}\p{N})/iu;
 
 /** Region path: hierarchical "A / B / C" (Epic 7, golden `region_browse`). */
 function regionHierarchySlashCount(normalizedQuery: string): number {
@@ -51,8 +51,8 @@ function regionHierarchySlashCount(normalizedQuery: string): number {
 
 /** Region/location keywords for geographic entity detection. */
 const REGION_KEYWORDS: readonly RegExp[] = [
-  /\b(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)\b/i,
-  /\b(?:valley|region|appellation|aoc|doc|doca|côtes|côte)\b/i,
+  /(?<!\p{L}\p{N})(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})(?:valley|region|appellation|aoc|doc|doca|côtes|côte)(?!\p{L}\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:나파|샤블리|보르도|투지|롱글로|토스카나)(?=$|[^\p{L}\p{N}])/u,
   /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
@@ -82,7 +82,6 @@ export interface PlannerContext {
  */
 export class Planner {
   private readonly queryNormalizer = new QueryNormalizer();
-  private _lastConstraintExtractionTrace: ConstraintExtractionTrace | undefined;
 
   constructor(
     private readonly ambiguityDict: AmbiguityDictionary,
@@ -91,15 +90,6 @@ export class Planner {
     private readonly nlMapper: NLMapper,
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
   ) {}
-
-  /**
-   * Returns the constraint extraction trace from the most recent plan() call,
-   * if the injected NLMapper supports it (i.e. {@link LlmNLMapper}).
-   * Captured immediately after parseConstraints() to prevent interleaving.
-   */
-  getLastConstraintExtractionTrace(): ConstraintExtractionTrace | undefined {
-    return this._lastConstraintExtractionTrace;
-  }
 
   /**
    * Plans a query by executing the full planning pipeline.
@@ -166,14 +156,11 @@ export class Planner {
     );
 
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
+    const parsed = await this.parseConstraints(normalizedQuery);
     const constraints = this.mergePairingIntoBundle(
-      await this.parseConstraints(normalizedQuery),
+      parsed.bundle,
       normalizedQuery,
     );
-    // Capture extraction trace immediately — before any other await yields control.
-    this._lastConstraintExtractionTrace =
-      (this.nlMapper as { getLastExtractionTrace?: () => ConstraintExtractionTrace | undefined })
-        .getLastExtractionTrace?.();
 
     // 7. Build expansions.
     const baseExpansions = this.expansionBuilder.build(
@@ -252,6 +239,9 @@ export class Planner {
       queryBudget: budget,
       ...(decompositionHint.strategy !== 'none' ? { decompositionHint } : {}),
       ...(targetEntityType !== undefined && { targetEntityType }),
+      ...(parsed.constraintExtraction !== undefined
+        ? { constraintExtraction: parsed.constraintExtraction }
+        : {}),
     };
   }
 
@@ -482,9 +472,10 @@ export class Planner {
     };
   }
 
-  private async parseConstraints(
-    normalizedQuery: string,
-  ): Promise<ConstraintBundle> {
+  private async parseConstraints(normalizedQuery: string): Promise<{
+    readonly bundle: ConstraintBundle;
+    readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
+  }> {
     const tokens = normalizedQuery.split(/\s+/);
     const candidatePhrases: string[] = [];
 
@@ -502,7 +493,9 @@ export class Planner {
       }
     }
 
-    const matched = await this.nlMapper.mapConstraints(candidatePhrases);
+    const mapped = await this.nlMapper.mapConstraints(candidatePhrases);
+    const matched = mapped.constraints;
+    const constraintExtraction = mapped.constraintExtraction;
 
     const hard: ConstraintBundle['hard'][number][] = [];
     const soft: ConstraintBundle['soft'][number][] = [];
@@ -519,10 +512,16 @@ export class Planner {
     // or cold-start configs), fall back to rule-based extraction so that
     // wine_type, country, and sensory constraints are never silently dropped.
     if (hard.length === 0 && soft.length === 0) {
-      return extractRuleBasedConstraints(normalizedQuery);
+      return {
+        bundle: extractRuleBasedConstraints(normalizedQuery),
+        ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
+      };
     }
 
-    return { hard, soft, inferred: [] };
+    return {
+      bundle: { hard, soft, inferred: [] },
+      ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
+    };
   }
 
   /**

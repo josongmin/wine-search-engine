@@ -1,4 +1,5 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
+import type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
 import type { NLMapping } from '../model/nl-mapping.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
 
@@ -319,6 +320,13 @@ export function toNormalizedConstraint(mapping: NLMapping): NormalizedConstraint
   };
 }
 
+/** Result of {@link NLMapper.mapConstraints} — constraints plus optional extraction provenance. */
+export interface MapConstraintsResult {
+  readonly constraints: NormalizedConstraint[];
+  /** Request-scoped extraction provenance (observability / QueryPlanV2.constraintExtraction shape). */
+  readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
+}
+
 /**
  * Maps natural-language phrases to structured attribute constraints.
  * Implements RFC-004 §4.
@@ -358,11 +366,11 @@ export class NLMapper {
    * Phrases that do not match any mapping are silently skipped.
    *
    * @param phrases - Array of natural-language phrases.
-   * @returns Array of normalized constraints (one per matched phrase).
+   * @returns Constraints and a rule-table extraction trace (no LLM fields).
    */
   async mapConstraints(
     phrases: readonly string[],
-  ): Promise<NormalizedConstraint[]> {
+  ): Promise<MapConstraintsResult> {
     const results: NormalizedConstraint[] = [];
 
     for (const phrase of phrases) {
@@ -372,6 +380,24 @@ export class NLMapper {
       }
     }
 
-    return results;
+    const source: ConstraintExtractionTrace['source'] =
+      results.length > 0 ? 'rule_only' : 'fallback';
+    const constraintExtraction: ConstraintExtractionTrace = {
+      candidatePhraseCount: phrases.length,
+      ruleTableHitCount: results.length,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: results.length === 0,
+      source,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: phrases.filter(
+        (p) => !results.some((r) => r.source_phrase === p),
+      ),
+    };
+
+    return { constraints: results, constraintExtraction };
   }
 }

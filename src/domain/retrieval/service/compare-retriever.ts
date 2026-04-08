@@ -54,7 +54,7 @@ export class CompareRetriever {
     readonly country?: string | undefined;
   }): readonly string[] {
     const queries = new Set<string>();
-    const compactLabel = anchor.canonicalLabel.replace(/\b(19|20)\d{2}\b/g, '').trim();
+    const compactLabel = anchor.canonicalLabel.replace(/(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/gu, '').trim();
     if (compactLabel.length > 0) {
       queries.add(compactLabel);
     }

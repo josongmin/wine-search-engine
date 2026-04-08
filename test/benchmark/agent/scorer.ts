@@ -126,6 +126,8 @@ export interface ScenarioResult {
   readonly diagnostics?: readonly Diagnostic[];
   /** Compact human-readable diagnostic strings for CLI display. */
   readonly diagnosticStrings?: readonly string[];
+  /** True when judgeRequired=true and judge was not run (--no-judge mode). */
+  readonly judgeRequiredButSkipped: boolean;
 }
 
 const ZERO_SCORES: ScenarioScores = {
@@ -305,6 +307,10 @@ const CONTEXT_PRECISION_MIN_WORD_LEN = 3;
 const MAN_WON_MULTIPLIER = 10_000;
 /** Approximate USD→KRW rate for price extraction. */
 const USD_TO_KRW_APPROX = 1_400;
+/** Approximate EUR→KRW rate for price extraction (€1 ≈ ₩1,500). */
+const EUR_TO_KRW_APPROX = 1_500;
+/** Approximate GBP→KRW rate for price extraction (£1 ≈ ₩1,700). */
+const GBP_TO_KRW_APPROX = 1_700;
 
 /** Korean stopwords for extractProperNouns — module-level to avoid per-call allocation. */
 const KOREAN_PROPER_NOUN_STOPWORDS = new Set([
@@ -327,6 +333,7 @@ export function scoreScenario(
       skipped: true,
       skipReason: scenario.skip,
       scores: ZERO_SCORES,
+      judgeRequiredButSkipped: false,
     };
   }
 
@@ -338,13 +345,20 @@ export function scoreScenario(
       skipped: false,
       error: error ?? 'execution returned null',
       scores: ZERO_SCORES,
+      judgeRequiredButSkipped: false,
     };
   }
 
   const exp = scenario.expectation;
   const diagnostics: Diagnostic[] = [];
 
-  const toolAccuracy = scoreToolAccuracy(exp, execution.toolsUsed, diagnostics);
+  const toolAccuracy = scoreToolAccuracy(
+    exp,
+    execution.toolsUsed,
+    diagnostics,
+    execution.terminationReason,
+    execution.stepCount,
+  );
   const stepEfficiency = scoreStepEfficiency(exp, execution.stepCount, diagnostics);
   // executionEfficiency: monotone weighted mean of toolAccuracy + stepEfficiency.
   // Earlier the formula switched to max() when both <0.5 to avoid double-
@@ -359,29 +373,47 @@ export function scoreScenario(
   // Structured checks multiply into answerQuality — each failed check docks a %.
   const structuredMultiplier = scoreStructuredChecks(exp, execution.answer, execution, diagnostics);
   const answerQuality = clamp01(baseAnswerQuality * structuredMultiplier);
-  const terminationCorrectness = scoreTermination(exp, execution.terminationReason, diagnostics);
+  const terminationCorrectness = scoreTermination(
+    exp,
+    execution.terminationReason,
+    diagnostics,
+    execution.stepCount,
+  );
   const costEfficiency = scoreCostEfficiency(exp, execution, diagnostics);
 
   // Judge: undefined → null (DROPPED from geo-mean, not 1.0).
   const judge: number | null = judgeScore === undefined ? null : clamp01(judgeScore);
 
   // RAGAS Answer Relevancy: does the answer address the question asked?
-  // When judgeScore is provided, use it as the relevancy proxy (judge already
-  // assesses this). When no judge, use a heuristic: answerMustMatch patterns
-  // satisfied → 1.0, any miss → 0.5. No patterns and no judge → null.
+  //
+  // P0 fix: when judgeScore is present, `judge` dim already carries that signal
+  // in the geo-mean (weight=0.07). Using judgeScore ALSO as answerRelevancy
+  // (weight=0.10) double-counts the same value with total weight 0.17, silently
+  // biasing overall by up to ±15% whenever the judge fires.
+  //
+  // Corrected behaviour:
+  //   - judgeScore present → answerRelevancy = null (judge dim owns that signal)
+  //   - no judge, answerMustMatch patterns present → pattern-based heuristic
+  //   - no judge, no patterns → null (no information)
   let answerRelevancy: number | null = null;
-  if (judgeScore !== undefined) {
-    answerRelevancy = clamp01(judgeScore);
-  } else if (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) {
-    let allMatched = true;
-    for (const pattern of exp.answerMustMatch) {
-      try {
-        const re = new RegExp(pattern, 'i');
-        if (!re.test(execution.answer)) { allMatched = false; break; }
-      } catch { /* invalid regex — treat as miss */ allMatched = false; break; }
+  if (judgeScore === undefined) {
+    // No judge — use regex heuristic if patterns are defined.
+    if (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) {
+      let matchedCount = 0;
+      for (const pattern of exp.answerMustMatch) {
+        try {
+          const re = new RegExp(pattern, 'iu');
+          if (re.test(execution.answer)) matchedCount++;
+        } catch { /* invalid regex — treat as miss */ }
+      }
+      // P1-A fix: partial credit only for fully-matched patterns (fraction of
+      // matched). A miss gives 0.0, not 0.5 — the old 0.5 floor let an answer
+      // that missed ALL patterns score above a near-perfect-but-low-judged answer.
+      answerRelevancy = matchedCount / exp.answerMustMatch.length;
     }
-    answerRelevancy = allMatched ? 1.0 : 0.5;
+    // else: null — no information without judge or patterns
   }
+  // judgeScore present → leave answerRelevancy = null; judge dim owns this signal
 
   // RAGAS Faithfulness: LLM-scored grounding of answer claims in tool results.
   // null when no observations (no tool calls → nothing to ground against).
@@ -429,18 +461,43 @@ export function scoreScenario(
     judge,
   };
 
-  // Apply DIMENSION_FLOOR to non-null scores before geo-mean. Critical failures
-  // stay at true 0 to preserve the security signal; for non-critical scenarios,
-  // clamp each present dim to at least DIMENSION_FLOOR so a single weak signal
-  // does not collapse the geo-mean by 20x relative to a zero.
+  // Apply DIMENSION_FLOOR to non-null scores before geo-mean, but ONLY for
+  // "quality" dimensions where a near-zero value is noisy rather than diagnostic.
+  //
+  // P0-B fix: executionEfficiency and terminationCorrectness are PRIMARY execution
+  // signals — if the agent called the wrong tool or didn't terminate correctly,
+  // that IS the regression we want to catch. Flooring them to 0.05 masks a
+  // 0.01→0.05 collapse as 5x less severe than it really is (a ~15% overall swing).
+  //
+  // Dims excluded from floor (must stay at true score, even 0.0):
+  //   - executionEfficiency: tool selection + step budget signal
+  //   - terminationCorrectness: binary safety net
+  //   - judge: LLM rubric — a judge score of 0 means the rubric explicitly failed
+  //
+  // All other dims get the floor: faithfulness, contextRelevance, contextRecall,
+  // costEfficiency, answerQuality, answerRelevancy are noisy enough that a single
+  // 0.01 value is more likely measurement error than a true catastrophic failure.
+  const NO_FLOOR_DIMS = new Set<string>(['executionEfficiency', 'terminationCorrectness', 'judge']);
   const dimScoresFloored: Record<string, number | null> = {};
   for (const [k, v] of Object.entries(dimScores)) {
-    dimScoresFloored[k] = v === null ? null : Math.max(v, DIMENSION_FLOOR);
+    dimScoresFloored[k] = (v === null || NO_FLOOR_DIMS.has(k))
+      ? v
+      : Math.max(v, DIMENSION_FLOOR);
   }
 
   const overall = criticalFailure
     ? 0
     : weightedGeometricMean(dimScoresFloored, weights);
+
+  const judgeRequiredButSkipped = (scenario.expectation.judgeRequired === true) && (judgeScore === undefined);
+  if (judgeRequiredButSkipped) {
+    diagnostics.push({
+      dim: 'judge',
+      severity: 'warn',
+      code: 'JUDGE_REQUIRED_BUT_SKIPPED',
+      message: 'This scenario requires LLM judge to verify core constraint — overall score is unreliable without judge.',
+    });
+  }
 
   const diagnosticStrings = diagnostics.map((d) => {
     const head = `[${d.severity}] ${d.dim}/${d.code}: ${d.message}`;
@@ -478,6 +535,7 @@ export function scoreScenario(
       criticalFailure,
     },
     ...(diagnostics.length > 0 ? { diagnostics, diagnosticStrings } : {}),
+    judgeRequiredButSkipped,
   };
 }
 
@@ -489,7 +547,26 @@ function scoreToolAccuracy(
   exp: ScenarioExpectation,
   toolsUsed: readonly ToolCallTrace[],
   diagnostics: Diagnostic[],
+  terminationReason?: string,
+  stepCount?: number,
 ): number {
+  // When the agent never ran (step 0 + fallback), tool expectations cannot be
+  // evaluated — the LLM was unavailable (e.g. rate-limited), not the agent's fault.
+  // Return 1 with an info note so the dim doesn't punish infrastructure failures.
+  if (
+    terminationReason === 'fallback'
+    && (stepCount ?? 0) === 0
+    && exp.mustNotCallTools === undefined
+    && exp.expectedBlocked !== true
+  ) {
+    diagnostics.push({
+      dim: 'toolAccuracy',
+      severity: 'info',
+      code: 'TOOL_ACCURACY_SKIPPED_STEP0_FALLBACK',
+      message: 'tool accuracy not scored: agent never ran (step 0 fallback, LLM unavailable)',
+    });
+    return 1;
+  }
   // Adversarial: mustNotCallTools is a CRITICAL hard fail.
   if (exp.mustNotCallTools !== undefined && exp.mustNotCallTools.length > 0) {
     const violated = exp.mustNotCallTools.filter((forbidden) =>
@@ -809,9 +886,9 @@ function scoreStructuredChecks(
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
     const status = exp.drinkingWindowStatus;
     const keywords: Record<string, readonly RegExp[]> = {
-      now: [/마시기\s*좋|drinkable|지금|now|peak|최적/i],
-      hold: [/숙성|hold|기다|cellar|too\s*young|이르/i],
-      past: [/지남|past\s*peak|over|넘/i],
+      now: [/drinkable|peak|optimal|currently|지금|마시기\s*좋|음용\s*적기|최적|피크/iu],
+      hold: [/hold|cellar|aging|young|숙성|보관|셀러링|더\s*기다|음용\s*전/iu],
+      past: [/past|over|decline|지남|지났|과거/iu],
     };
     const patterns = keywords[status] ?? [];
     const found = patterns.some((re) => re.test(answer));
@@ -956,26 +1033,35 @@ function scoreStructuredChecks(
 function extractKoreanPrices(text: string): number[] {
   const prices: number[] = [];
   // N만원 pattern (만 = 10,000)
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*만\s*원/g)) {
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*만\s*원/gu)) {
     prices.push(Number(m[1]) * MAN_WON_MULTIPLIER);
   }
-  // Plain numbers + 원
-  for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/g)) {
+  // Plain numbers + 원 (e.g. 50,000원 or 50000원)
+  for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/gu)) {
     prices.push(Number(m[1]!.replace(/,/g, '')));
   }
-  // Dollar amounts
-  for (const m of text.matchAll(/\$\s*(\d+(?:\.\d+)?)/g)) {
+  // Dollar amounts ($50 or $ 50.00)
+  for (const m of text.matchAll(/\$\s*(\d+(?:\.\d+)?)/gu)) {
     prices.push(Number(m[1]) * USD_TO_KRW_APPROX);
+  }
+  // Euro amounts (€50 or € 50.00)
+  for (const m of text.matchAll(/€\s*(\d+(?:\.\d+)?)/gu)) {
+    prices.push(Number(m[1]) * EUR_TO_KRW_APPROX);
+  }
+  // Pound amounts (£50 or £ 50.00)
+  for (const m of text.matchAll(/£\s*(\d+(?:\.\d+)?)/gu)) {
+    prices.push(Number(m[1]) * GBP_TO_KRW_APPROX);
   }
   return prices;
 }
 
-/** Extract 4-digit years that look like wine vintages (1800-2099) */
-/** Extract 4-digit years (1800-2099) using Unicode-safe boundaries.
- *  Uses `(?:^|[^\p{L}\p{N}])` instead of `\b` per CLAUDE.md rule #8. */
+/** Extract 4-digit years that look like wine vintages (1600-2099).
+ *  Range extended from 1800 to 1600 to cover rare historic bottles
+ *  (pre-phylloxera Bordeaux, Madeira, Tokaji) found in collector queries.
+ *  Uses Unicode-safe boundaries instead of \b (CLAUDE.md rule 8). */
 function extractVintageYears(text: string): number[] {
   const years: number[] = [];
-  for (const m of text.matchAll(/(?:^|[^\p{L}\p{N}])(1[89]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/gu)) {
+  for (const m of text.matchAll(/(?:^|[^\p{L}\p{N}])(1[6-9]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/gu)) {
     years.push(Number(m[1]));
   }
   return years;
@@ -1102,9 +1188,9 @@ function scoreContextRelevance(
   // Drinking window status check
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
     const keywords: Record<string, readonly RegExp[]> = {
-      now: [/drinkable|peak|optimal|currently|지금/i],
-      hold: [/hold|cellar|aging|young|숙성/i],
-      past: [/past|over|decline|지남/i],
+      now: [/drinkable|peak|optimal|currently|지금|마시기\s*좋|음용\s*적기|최적|피크/iu],
+      hold: [/hold|cellar|aging|young|숙성|보관|셀러링|더\s*기다|음용\s*전/iu],
+      past: [/past|over|decline|지남|지났|과거/iu],
     };
     const patterns = keywords[exp.drinkingWindowStatus] ?? [];
     checks.push({
@@ -1149,16 +1235,30 @@ function scoreContextRelevance(
 
   if (checks.length === 0) return null; // no constraints to evaluate
 
+  // P1-B fix: price and vintage are HARD constraints — if the retrieval returned
+  // results outside the constraint, the context is wrong for that query regardless
+  // of how many soft checks passed. A single hard-constraint failure → score 0.
+  //
+  // Soft checks (query_terms_in_context, drinkingWindowStatus) are averaged
+  // independently and blended: hard-fail collapses the overall to 0.
+  const hardFailed = checks
+    .filter((c) => !c.passed && (c.label === 'price_in_range' || c.label === 'vintage_in_range'))
+    .map((c) => c.label);
+
+  const failed = checks.filter((c) => !c.passed).map((c) => c.label);
   const passedCount = checks.filter((c) => c.passed).length;
-  const score = passedCount / checks.length;
+  // Hard constraint failure → 0; otherwise soft-average across all checks.
+  const score = hardFailed.length > 0 ? 0 : passedCount / checks.length;
 
   if (score < 1) {
-    const failed = checks.filter((c) => !c.passed).map((c) => c.label);
+    const severity = hardFailed.length > 0 ? 'warn' : 'warn';
     diagnostics.push({
       dim: 'contextRelevance',
-      severity: 'warn',
-      code: 'CONTEXT_RELEVANCE_LOW',
-      message: `tool results did not match constraints: ${failed.join(', ')}`,
+      severity,
+      code: hardFailed.length > 0 ? 'CONTEXT_HARD_CONSTRAINT_FAILED' : 'CONTEXT_RELEVANCE_LOW',
+      message: hardFailed.length > 0
+        ? `hard constraint(s) failed — retrieval returned out-of-range results: ${hardFailed.join(', ')}`
+        : `tool results did not match constraints: ${failed.join(', ')}`,
       observed: score,
       expected: 1,
     });
@@ -1227,6 +1327,7 @@ function scoreTermination(
   exp: ScenarioExpectation,
   reason: string,
   diagnostics: Diagnostic[],
+  _stepCount?: number,
 ): number {
   if (exp.expectedBlocked === true) {
     if (reason === 'blocked' || reason === 'answer') return 1;
@@ -1254,6 +1355,9 @@ function scoreTermination(
 
   if (exp.terminationReason === undefined) {
     if (reason === 'answer') return 1;
+    // Security gate fired: 'blocked' is always correct behavior for adversarial inputs.
+    // Score 1 so the security gate doesn't penalize correct rejection.
+    if (reason === 'blocked') return 1;
     if (reason === 'fallback') {
       diagnostics.push({
         dim: 'terminationCorrectness',
@@ -1275,14 +1379,20 @@ function scoreTermination(
   }
   const ok = reason === exp.terminationReason;
   if (!ok) {
+    // Fallback termination = LLM unavailable (rate limit / infra failure), not agent logic error.
+    // Give partial credit (0.25) instead of hard 0 so infra failures don't collapse the tier.
+    // This applies to all fallback cases regardless of step count, since even a mid-run
+    // fallback is an infrastructure failure, not an agent design failure.
+    const isFallbackMismatch = reason === 'fallback';
     diagnostics.push({
       dim: 'terminationCorrectness',
       severity: 'warn',
       code: 'TERMINATION_MISMATCH',
-      message: `expected termination=${exp.terminationReason}, got ${reason}`,
+      message: `expected termination=${exp.terminationReason}, got ${reason}${isFallbackMismatch ? ' (LLM unavailable — partial credit)' : ''}`,
       observed: reason,
       expected: exp.terminationReason,
     });
+    if (isFallbackMismatch) return 0.25;
   }
   return ok ? 1 : 0;
 }

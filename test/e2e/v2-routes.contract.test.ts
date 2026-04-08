@@ -13,11 +13,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestServer, closeTestServer, type TestServer } from './helpers/test-server.js';
 import { postJson, getJson } from './helpers/http-transport.js';
-import {
-  SearchResponseV2HumanSchema,
-  InterpretResponseV2Schema,
-} from '../../src/interface/http/schemas/search-response-v2.schema.js';
-import { SearchResponseSchema } from '../../src/interface/http/schemas/search-response.schema.js';
 import { decodeAuthorityTraceRefDetailed } from '../../src/domain/decision/service/id-schema-decoder.js';
 import { MEDIA_TYPE_HUMAN } from '../../src/interface/http/content-negotiation.js';
 

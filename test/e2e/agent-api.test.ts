@@ -7,7 +7,7 @@
  * runs for real — only the LLM reasoning is scripted.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { createTestContainer } from '../integration/helpers/test-container.js';
 import { createServer } from '../../src/interface/http/server.js';

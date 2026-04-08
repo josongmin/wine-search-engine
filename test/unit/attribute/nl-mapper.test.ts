@@ -83,20 +83,20 @@ describe('NLMapper', () => {
   });
 
   it('mapConstraints converts multiple phrases to normalized constraints', async () => {
-    const constraints = await mapper.mapConstraints(['묵직한', '드라이']);
+    const { constraints } = await mapper.mapConstraints(['묵직한', '드라이']);
     expect(constraints).toHaveLength(2);
     expect(constraints.some((c) => c.attribute === 'body')).toBe(true);
     expect(constraints.some((c) => c.attribute === 'sweetness')).toBe(true);
   });
 
   it('mapConstraints silently skips unknown phrases', async () => {
-    const constraints = await mapper.mapConstraints(['묵직한', '존재하지않는표현']);
+    const { constraints } = await mapper.mapConstraints(['묵직한', '존재하지않는표현']);
     expect(constraints).toHaveLength(1);
     expect(constraints[0]!.attribute).toBe('body');
   });
 
   it('mapConstraints for range phrase produces correct value shape', async () => {
-    const constraints = await mapper.mapConstraints(['적당히 달달한']);
+    const { constraints } = await mapper.mapConstraints(['적당히 달달한']);
     expect(constraints).toHaveLength(1);
     const c = constraints[0]!;
     expect(c.attribute).toBe('sweetness');
@@ -106,7 +106,7 @@ describe('NLMapper', () => {
   });
 
   it('mapConstraints for "in" phrase produces array value', async () => {
-    const constraints = await mapper.mapConstraints(['선물용']);
+    const { constraints } = await mapper.mapConstraints(['선물용']);
     expect(constraints).toHaveLength(1);
     const c = constraints[0]!;
     expect(c.attribute).toBe('occasion');

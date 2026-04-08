@@ -39,18 +39,18 @@ export interface AliasMatcher {
  * reference and constraints/preferences, requiring mixed-query handling.
  */
 const KOREAN_MIXED_QUERY_MARKERS: readonly RegExp[] = [
-  /같은/,      // "like" (similarity)
-  /비슷한/,    // "similar to"
-  /말고/,      // "not / instead of" (exclusion)
-  /대신/,      // "instead of"
-  /보다/,      // "compared to / more than"
+  /같은/u,      // "like" (similarity)
+  /비슷한/u,    // "similar to"
+  /말고/u,      // "not / instead of" (exclusion)
+  /대신/u,      // "instead of"
+  /보다/u,      // "compared to / more than"
 ] as const;
 
 /** Latin-script comparison markers. */
 const COMPARISON_MARKERS: readonly RegExp[] = [
-  /\bvs\.?\b/i,
-  /\bversus\b/i,
-  /\bcompared?\s+to\b/i,
+  /(?<!\p{L}\p{N})vs\.?(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})versus(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})compared?\s+to(?!\p{L}\p{N})/iu,
 ] as const;
 
 /**

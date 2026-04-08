@@ -494,9 +494,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     for (const result of settled) {
       if (result.status === 'fulfilled') {
         for (const proj of result.value) {
-          if (proj.entityId !== undefined) {
-            projectionMap.set(String(proj.entityId), proj);
-          }
+          projectionMap.set(String(proj.entityId), proj);
         }
       }
     }

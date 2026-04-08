@@ -1,6 +1,6 @@
 import type { SparseHit } from '../port/search-index.port.js';
 
-const VINTAGE_YEAR_IN_LABEL = /\b(19|20)\d{2}\b/g;
+const VINTAGE_YEAR_IN_LABEL = /(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/gu;
 
 /** Strips 4-digit vintage tokens from a display label (product-line key). */
 export function stripVintageFromLabel(label: string): string {

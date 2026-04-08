@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { AddressInfo } from 'node:net';
 
 export interface CapturedHttpRequest {
   readonly method: string;

@@ -45,18 +45,54 @@ const noAmbiguityDict: AmbiguityDictionary = {
 
 const noOpNLMapper: NLMapper = {
   mapPhrase: () => Promise.resolve(null),
-  mapConstraints: () => Promise.resolve([]),
+  mapConstraints: () => Promise.resolve({ constraints: [] }),
 } as unknown as NLMapper;
 
 function makePlanner(
   entries: Map<string, AliasMatchResult> = new Map(),
   dict: AmbiguityDictionary = noAmbiguityDict,
+  nlMapper: NLMapper = noOpNLMapper,
 ): Planner {
   const aliasMatcher = new StubAliasMatcher(entries);
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
-  return new Planner(dict, anchorExtractor, expansionBuilder, noOpNLMapper);
+  return new Planner(dict, anchorExtractor, expansionBuilder, nlMapper);
 }
+
+// ── Request-scoped constraint extraction (no shared mutable trace) ───────────
+
+describe('Planner – constraint extraction metadata', () => {
+  it('concurrent plan() calls each keep their own constraintExtraction from NLMapper', async () => {
+    const tracingNLMapper: NLMapper = {
+      mapPhrase: () => Promise.resolve(null),
+      mapConstraints: async (phrases: readonly string[]) => ({
+        constraints: [],
+        constraintExtraction: {
+          candidatePhraseCount: phrases.length,
+          ruleTableHitCount: 0,
+          llmHitCount: 0,
+          llmSkippedCount: 0,
+          fallbackTriggered: true,
+          source: 'fallback',
+          llmLatencyMs: null,
+          phraseCacheHits: 0,
+          phraseCacheNegativeSkipped: 0,
+          phraseCacheMisses: 0,
+          missedPhrases: [],
+        },
+      }),
+    } as unknown as NLMapper;
+
+    const planner = makePlanner(new Map(), noAmbiguityDict, tracingNLMapper);
+    const [pShort, pLong] = await Promise.all([planner.plan('x'), planner.plan('x y z')]);
+
+    expect(pShort.constraintExtraction?.candidatePhraseCount).toBeDefined();
+    expect(pLong.constraintExtraction?.candidatePhraseCount).toBeDefined();
+    expect(pLong.constraintExtraction!.candidatePhraseCount).toBeGreaterThan(
+      pShort.constraintExtraction!.candidatePhraseCount,
+    );
+  });
+});
 
 // ── QueryPlanV2 shape ──────────────────────────────────────────────────────────
 
@@ -156,6 +192,49 @@ describe('planV2ToUnderstandingSnapshot', () => {
     expect(typeof snapshot.plannerVersion).toBe('string');
     expect(typeof snapshot.policyRuleVersion).toBe('string');
     expect(typeof snapshot.thresholdProfileId).toBe('string');
+  });
+
+  it('forwards constraintExtraction from QueryPlanV2 onto the snapshot', () => {
+    const extraction = {
+      candidatePhraseCount: 4,
+      ruleTableHitCount: 0,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: true,
+      source: 'fallback' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const plan: QueryPlanV2 = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      intent: 'semantic_discovery',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0,
+        constraintConfidence: 0.5,
+      },
+      queryClass: 'semantic_preference',
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+      suggestedRoute: 'hybrid',
+      suggestedRetrievalMode: 'attribute_search',
+      constraintExtraction: extraction,
+    };
+    const snapshot = planV2ToUnderstandingSnapshot(plan);
+    expect(snapshot.constraintExtraction).toEqual(extraction);
   });
 
   it('snapshot does NOT include suggestedRoute, suggestedRetrievalMode, or admission_context', () => {

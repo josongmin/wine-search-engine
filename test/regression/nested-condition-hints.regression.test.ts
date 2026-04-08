@@ -34,16 +34,19 @@ describe('Nested condition regression — CONSTRAINT_KEYWORDS patterns', () => {
 
   it('R-NESTED-02: CONSTRAINT_KEYWORDS uses /u flag (Unicode-safe) on all patterns', () => {
     const src = readSrc('src/application/agent/agent-tools.ts');
-    // Every regex in CONSTRAINT_KEYWORDS must end with /iu or /u
     const constBlock = src.match(/const CONSTRAINT_KEYWORDS[\s\S]*?\];/);
     expect(constBlock).not.toBeNull();
     if (constBlock) {
-      // Extract all regex literals in the block
-      const regexLiterals = constBlock[0].match(/\/[^/]+\/[gimsuy]*/g) ?? [];
-      for (const regex of regexLiterals) {
-        expect(regex).toMatch(/u/); // must have unicode flag
-        // Must NOT use \b (ASCII-only word boundary)
-        expect(regex).not.toContain('\\b');
+      const block = constBlock[0];
+      // Every regex line in the block must include the unicode flag (/u or /iu)
+      // Extract regex flags by matching the closing delimiter + flag chars on each regex literal
+      // Use a line-by-line approach that handles complex patterns with lookbehind
+      const lines = block.split('\n').filter((l) => l.includes('/,'));
+      for (const line of lines) {
+        // Each CONSTRAINT_KEYWORDS entry regex ends with /iu, or /u before the comma
+        expect(line).toMatch(/\/[gimsuy]*u[gimsuy]*,/);
+        // Must NOT use ASCII word boundary \b
+        expect(line).not.toContain('\\b');
       }
     }
   });
@@ -145,9 +148,10 @@ describe('Nested condition regression — agent-prompt multi-constraint strategy
     expect(src).toMatch(/Multi-constraint/i);
   });
 
-  it('R-NESTED-10: strategy mentions MOST SELECTIVE constraint first', () => {
+  it('R-NESTED-10: strategy instructs agent to search with hard constraints first', () => {
     const src = readSrc('src/application/agent/agent-prompt.ts');
-    expect(src).toMatch(/MOST SELECTIVE|most selective/);
+    // After the refactor, the strategy says "search with ALL hard constraints in ONE call"
+    expect(src).toMatch(/hard constraint|HARD constraint|hard.*constraint/i);
   });
 
   it('R-NESTED-11: strategy mentions relaxing constraints when results < 3', () => {

@@ -134,7 +134,7 @@ export class AdaptiveToolExecutor {
       Array.isArray((result as unknown as Record<string, unknown>)['results']) &&
       'engineDecision' in result
     ) {
-      const searchResult = result as SearchResponseV1;
+      const searchResult = result;
       const status = searchResult.engineDecision.decisionStatus;
       return (
         searchResult.results.length === 0 ||

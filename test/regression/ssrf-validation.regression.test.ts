@@ -9,7 +9,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
 
 // Import the schema that contains isPrivateOrReservedHost + HttpsUrlSchema
 // via the CreateWatchlistRequestSchema which chains them.

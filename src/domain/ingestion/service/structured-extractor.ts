@@ -132,12 +132,12 @@ function extractWineLabel(normalizedTitle: string, producer?: string): string | 
     if (lowerTitle.startsWith(lowerProducer)) {
       label = label.slice(producer.length).trim();
       // Remove leading separators
-      label = label.replace(/^[-–—:,]\s*/, '');
+      label = label.replace(/^[-\u2013\u2014:,]\s*/u, '');
     }
   }
 
   // Remove vintage year from label
-  label = label.replace(/\b(1[89]\d{2}|20[0-9]{2})\b/, '').trim();
+  label = label.replace(/(?<!\p{L}\p{N})(1[89]\d{2}|20[0-9]{2})(?!\p{L}\p{N})/u, '').trim();
 
   // Collapse whitespace
   label = label.replace(/\s+/g, ' ').trim();
@@ -196,7 +196,7 @@ function extractVolume(record: RawSourceRecord): number | undefined {
   }
 
   // Fallback: try to find volume in title
-  const titleMatch = record.rawTitle.match(/(\d+(?:\.\d+)?)\s*(ml|cl|l)\b/i);
+  const titleMatch = record.rawTitle.match(/(\d+(?:\.\d+)?)\s*(ml|cl|l)(?!\p{L}\p{N})/iu);
   if (titleMatch !== null) {
     const vol = normalizeVolume(`${titleMatch[1]}${titleMatch[2]}`);
     if (vol !== null) return vol;

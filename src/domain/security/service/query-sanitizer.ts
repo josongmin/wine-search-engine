@@ -24,30 +24,31 @@ export class QuerySanitizer {
   private static readonly INJECTION_PATTERNS = {
     // System prompt / instruction hijacking
     system_prompt: [
-      // Use \b on the trailing side (not \s+) so end-of-string and punctuation also match.
-      /\bignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)\b/i,
-      /\bignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)\b/i,
-      /\b(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/i,
+      // Unicode-aware boundaries: (?<!\p{L}\p{N}) / (?!\p{L}\p{N}) replace \b
+      // so Korean and accented-Latin chars don't silently escape the pattern.
+      /(?<!\p{L}\p{N})ignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})ignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/iu,
       /(?:system|assistant|admin)\s+mode/i,
-      /\b(?:system|admin)\s+override\b/i,
-      /\byou\s+(?:must|should|will)\s+(?:now|immediately)\b/i,
+      /(?<!\p{L}\p{N})(?:system|admin)\s+override(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L}\p{N})/iu,
     ],
 
     // Jailbreak / adversarial prompts
     jailbreak: [
-      /\b(?:dev|debug|hack|god|hero|devil)\s+mode\b/i,
-      /\bdo\s+not\s+(?:filter|block|refuse|deny|reject)\b/i,
-      /\bgenerate\s+harmful\b/i,
-      /\bunrestricted\s+(?:mode|access|content)\b/i,
-      /\b(?:jailbreak|bypass|circumvent)\b/i,
+      /(?<!\p{L}\p{N})(?:dev|debug|hack|god|hero|devil)\s+mode(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})do\s+not\s+(?:filter|block|refuse|deny|reject)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})generate\s+harmful(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})unrestricted\s+(?:mode|access|content)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L}\p{N})/iu,
     ],
 
     // SQL injection
     sql_injection: [
       /;\s*(?:drop|delete|update|insert|select|create)/i,
-      /\bunion\s+select\b/i,
-      /\bor\s+1\s*=\s*1\b/i,
-      /\bexec(?:ute)?\s*\(/i,
+      /(?<!\p{L}\p{N})union\s+select(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})or\s+1\s*=\s*1(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})exec(?:ute)?\s*\(/iu,
       /--\s*$/,                          // SQL comment at end
       /\/\*[\s\S]*?\*\//,                // Block comment (cross-line)
       // Bare DML/DDL statements — `select wines from Bordeaux` is natural
@@ -55,13 +56,13 @@ export class QuerySanitizer {
       // DML/DDL keywords are not. Match SELECT...FROM with column-style
       // payload (`*`, identifiers with dots/commas, count(...)) within a
       // 60-char window and a hard FROM clause to keep false positives low.
-      /\bselect\s+(?:\*|[\w.,\s()]{1,60}?)\s+from\b/i,
-      /\b(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))\b/i,
+      /(?<!\p{L}\p{N})select\s+(?:\*|[\w.,\s()]{1,60}?)\s+from(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))(?!\p{L}\p{N})/iu,
       // NoSQL operator injection (MongoDB-style). Pattern matches both bare
       // (`$where:`) and JSON-quoted (`"$where":`) forms — wine queries should
       // never contain MongoDB operators.
-      /\$where\b/i,
-      /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)\b/i,
+      /\$where(?!\p{L}\p{N})/iu,
+      /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)(?!\p{L}\p{N})/iu,
     ],
 
     // Script injection / XSS
@@ -85,8 +86,8 @@ export class QuerySanitizer {
     // were never evaluated (dead code) — only backticks/$(…)  and "; && together"
     // were checked via inline code in Layer 1g.
     command_injection: [
-      /\b(?:bash|\/bin\/sh|cmd\.exe|powershell|zsh)\b/i,
-      /\b(?:exec|system|eval|spawn)\s*\(/i,
+      /(?<!\p{L}\p{N})(?:bash|\/bin\/sh|cmd\.exe|powershell|zsh)(?!\p{L}\p{N})/iu,
+      /(?<!\p{L}\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
       /`[^`]*`/,                        // Backticks
       /\$\([^)]*\)/,                    // Command substitution
       /(?=.*&&)(?=.*;)/,                // Both && and ; present (command chaining)
@@ -99,10 +100,10 @@ export class QuerySanitizer {
     // - "database schema" alone triggers; "wine database" does not (moved to sql_injection)
     // - "create table" with SQL payload triggers (already in sql_injection); standalone removed
     pii_extraction: [
-      /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/i,
-      /(?:개인\s*정보|personal\s*(?:info|data))\s*(?:보여|알려|줘|목록|조회|show|list|get|dump)/i,
-      /\b(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)\b/i,
-      /(?:api\s*key|secret\s*key|access\s*token)\b/i,
+      /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/iu,
+      /(?:개인\s*정보|personal\s*(?:info|data))\s*(?:보여|알려|줘|목록|조회|show|list|get|dump)/iu,
+      /(?<!\p{L}\p{N})(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)(?!\p{L}\p{N})/iu,
+      /(?:api\s*key|secret\s*key|access\s*token)(?!\p{L}\p{N})/iu,
     ],
 
     // Unicode / encoding tricks

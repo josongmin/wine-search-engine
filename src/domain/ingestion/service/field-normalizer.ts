@@ -92,7 +92,7 @@ export function normalizeYear(raw: string): number | null {
   if (trimmed.length === 0) return null;
 
   // Extract first four-digit sequence that looks like a plausible wine vintage
-  const match = trimmed.match(/\b(1[89]\d{2}|20[0-9]{2})\b/);
+  const match = trimmed.match(/(?<!\p{L}\p{N})(1[89]\d{2}|20[0-9]{2})(?!\p{L}\p{N})/u);
   if (match === null) {
     // Try without word boundary for cases like "2018년"
     const looseMatch = trimmed.match(/(1[89]\d{2}|20[0-9]{2})/);

@@ -5,7 +5,6 @@ import {
   toRetrievalChannel,
   preferCanonicalRetrievalChannelLabel,
   preferCanonicalRetrievalChannelLabels,
-  PHASE_TO_CHANNEL,
 } from '../retrieval-channel.js';
 import { PHASE_TO_CHANNEL as CASCADE_PHASE_TO_CHANNEL } from '../../service/cascade-router.js';
 

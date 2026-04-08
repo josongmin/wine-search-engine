@@ -90,7 +90,7 @@ describe('Structural invariant: exported Korean regex patterns have /u flag', ()
     const { PAIRING_PATTERNS } = await import(
       '../../src/domain/query/service/pairing-extractor.js'
     );
-    for (const [tag, patterns] of Object.entries(PAIRING_PATTERNS) as [string, RegExp[]][]) {
+    for (const [tag, patterns] of Object.entries(PAIRING_PATTERNS)) {
       for (const pattern of patterns) {
         if (KOREAN_RANGE.test(pattern.source)) {
           expect(

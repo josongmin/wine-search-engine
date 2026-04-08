@@ -29,7 +29,7 @@ function firstHeaderValue(value: string | string[] | undefined): string | undefi
 export function getAuthenticatedSubject(
   request: Pick<FastifyRequest, 'headers' | 'server'>,
 ): string | null {
-  if (request.server?.trustsAuthenticatedSubjectHeader !== true) {
+  if (request.server.trustsAuthenticatedSubjectHeader !== true) {
     return null;
   }
   const raw = firstHeaderValue(request.headers[AUTHENTICATED_SUBJECT_HEADER]);
@@ -40,7 +40,7 @@ export function getAuthenticatedSubject(
   // Reject control characters, whitespace, and characters that could enable
   // log injection (CRLF) or header smuggling. Only safe printable chars
   // pass. This prevents rate-limit key pollution via crafted headers.
-  if (!/^[A-Za-z0-9._@:\-]+$/.test(subject)) {
+  if (!/^[A-Za-z0-9._@:-]+$/.test(subject)) {
     return null;
   }
   return subject;

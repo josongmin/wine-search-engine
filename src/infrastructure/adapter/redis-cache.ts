@@ -20,6 +20,7 @@ export class RedisCache {
     const raw = await this.client.get(key);
     if (raw == null) return null;
     try {
+      // eslint-disable-next-line no-restricted-syntax -- intentional unchecked cast; callers are expected to use getValidated() instead (see @deprecated above)
       return JSON.parse(raw) as T;
     } catch {
       return null;

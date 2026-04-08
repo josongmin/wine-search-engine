@@ -27,16 +27,16 @@ const NOISE_TOKENS: readonly string[] = [
 
 /** Patterns that indicate promotional or marketing text. */
 const PROMOTIONAL_PATTERNS: readonly RegExp[] = [
-  // \b works for ASCII digits/percent; Korean words don't need \b (use lookahead)
-  /\d+%\s*(?:off|할인|세일)/i,
-  /(?:free\s+shipping|무료\s*배송)/i,
-  /\b(?:limited\s+(?:time|edition|offer))\b/i,
-  /\b(?:best\s+seller)\b|(?:^|\s)베스트(?:\s|$)/i,
-  /\b(?:hot\s+deal)\b|(?:^|\s)(?:특가|행사)(?:\s|$)/i,
-  /\b(?:buy\s+\d+\s+get)\b/i,
+  // Unicode-aware boundaries replace \b (ASCII-only, silently fails on Korean/accented Latin).
+  /\d+%\s*(?:off|할인|세일)/iu,
+  /(?:free\s+shipping|무료\s*배송)/iu,
+  /(?<!\p{L}\p{N})(?:limited\s+(?:time|edition|offer))(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})(?:best\s+seller)(?!\p{L}\p{N})|(?:^|\s)베스트(?:\s|$)/iu,
+  /(?<!\p{L}\p{N})(?:hot\s+deal)(?!\p{L}\p{N})|(?:^|\s)(?:특가|행사)(?:\s|$)/iu,
+  /(?<!\p{L}\p{N})(?:buy\s+\d+\s+get)(?!\p{L}\p{N})/iu,
   /[!]{2,}/,
-  /★+/,
-  /(?:^|\s)(?:추천|인기)(?:\s|$)/,
+  /★+/u,
+  /(?:^|\s)(?:추천|인기)(?:\s|$)/u,
 ];
 
 /**

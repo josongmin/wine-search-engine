@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { LlmNLMapper, CACHE_KEY_NAMESPACE } from '../service/llm-nl-mapper.js';
 import type { PhraseCachePort } from '../port/phrase-cache.port.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
@@ -49,6 +49,56 @@ class FailingChatLlm implements ChatLlmPort {
   }
 }
 
+/** Never resolves; rejects when `abortSignal` aborts (mirrors real HTTP cancellation). */
+class HangUntilAbortChatLlm implements ChatLlmPort {
+  public callCount = 0;
+
+  complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
+    this.callCount += 1;
+    return new Promise((_resolve, reject) => {
+      const signal = request.abortSignal;
+      if (signal === undefined) {
+        reject(new Error('HangUntilAbortChatLlm: abortSignal required'));
+        return;
+      }
+      if (signal.aborted) {
+        reject(new Error('HangUntilAbortChatLlm: already aborted'));
+        return;
+      }
+      signal.addEventListener(
+        'abort',
+        () => {
+          reject(new Error('HangUntilAbortChatLlm: aborted'));
+        },
+        { once: true },
+      );
+    });
+  }
+}
+
+/** Resolves after a delay without honoring `abortSignal` (violates real HTTP behavior). */
+class IgnoresAbortDelayedChatLlm implements ChatLlmPort {
+  public callCount = 0;
+
+  constructor(
+    private readonly delayMs: number,
+    private readonly response: LlmConstraintItem[],
+  ) {}
+
+  complete(_request: ChatCompletionRequest): Promise<ChatCompletionResult> {
+    this.callCount += 1;
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve({
+          text: JSON.stringify(this.response),
+          model: 'stub-bad',
+          finishReason: 'stop',
+        });
+      }, this.delayMs);
+    });
+  }
+}
+
 class InMemoryPhraseCache implements PhraseCachePort {
   public store = new Map<string, LlmConstraintItem[]>();
   public getCalls: string[] = [];
@@ -92,17 +142,19 @@ describe('LlmNLMapper phrase cache', () => {
     const cache = new InMemoryPhraseCache();
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
 
-    const result = await mapper.mapConstraints(['zzz_unknown_phrase']);
+    const { constraints: result, constraintExtraction: trace } = await mapper.mapConstraints([
+      'zzz_unknown_phrase',
+    ]);
 
     expect(result).toHaveLength(1);
     expect(result[0]?.attribute).toBe('flavor_profile');
+    expect(llm.lastRequest?.abortSignal).toBeInstanceOf(AbortSignal);
     expect(llm.callCount).toBe(1);
     // version-namespaced key
     expect(cache.setCalls).toHaveLength(1);
     expect(cache.setCalls[0]?.key).toContain(CACHE_KEY_NAMESPACE);
     expect(cache.setCalls[0]?.key).toContain('zzz_unknown_phrase');
     expect(cache.setCalls[0]?.ttl).toBe(86_400);
-    const trace = mapper.getLastExtractionTrace();
     expect(trace?.phraseCacheHits).toBe(0);
     expect(trace?.phraseCacheMisses).toBe(1);
     expect(trace?.llmHitCount).toBe(1);
@@ -115,11 +167,12 @@ describe('LlmNLMapper phrase cache', () => {
     cache.store.set(cacheKey, [fruityItem]);
 
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
-    const result = await mapper.mapConstraints(['zzz_unknown_phrase']);
+    const { constraints: result, constraintExtraction: trace } = await mapper.mapConstraints([
+      'zzz_unknown_phrase',
+    ]);
 
     expect(result).toHaveLength(1);
     expect(llm.callCount).toBe(0); // LLM was never called
-    const trace = mapper.getLastExtractionTrace();
     expect(trace?.phraseCacheHits).toBe(1);
   });
 
@@ -129,11 +182,12 @@ describe('LlmNLMapper phrase cache', () => {
     cache.store.set(`${CACHE_KEY_NAMESPACE}:nonsense`, []); // negative entry
 
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
-    const result = await mapper.mapConstraints(['nonsense']);
+    const { constraints: result, constraintExtraction: trace } = await mapper.mapConstraints([
+      'nonsense',
+    ]);
 
     expect(result).toHaveLength(0);
     expect(llm.callCount).toBe(0); // critical: negative cache prevents LLM call
-    const trace = mapper.getLastExtractionTrace();
     // Negative skip is counted separately from hits — pure negative is not a useful hit.
     expect(trace?.phraseCacheHits).toBe(0);
     expect(trace?.phraseCacheNegativeSkipped).toBe(1);
@@ -161,11 +215,12 @@ describe('LlmNLMapper phrase cache', () => {
     cache.store.set(`${CACHE_KEY_NAMESPACE}:zzz_unknown_phrase`, [lowConfidenceItem]);
 
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
-    const result = await mapper.mapConstraints(['zzz_unknown_phrase']);
+    const { constraints: result, constraintExtraction: trace } = await mapper.mapConstraints([
+      'zzz_unknown_phrase',
+    ]);
 
     expect(result).toHaveLength(0);
     expect(llm.callCount).toBe(0);
-    const trace = mapper.getLastExtractionTrace();
     // Cached entry was found but filtered out — counts as a miss for trace
     // accounting purposes, NOT a hit (we paid the lookup, gained no constraints).
     expect(trace?.phraseCacheHits).toBe(0);
@@ -176,7 +231,7 @@ describe('LlmNLMapper phrase cache', () => {
     const llm = new StubChatLlm([fruityItem]);
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, new BrokenPhraseCache());
 
-    const result = await mapper.mapConstraints(['zzz_unknown_phrase']);
+    const { constraints: result } = await mapper.mapConstraints(['zzz_unknown_phrase']);
 
     expect(result).toHaveLength(1);
     expect(llm.callCount).toBe(1);
@@ -187,11 +242,42 @@ describe('LlmNLMapper phrase cache', () => {
     const cache = new InMemoryPhraseCache();
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
 
-    const result = await mapper.mapConstraints(['zzz_unknown_phrase']);
+    const { constraints: result } = await mapper.mapConstraints(['zzz_unknown_phrase']);
 
     expect(result).toHaveLength(0);
     expect(llm.callCount).toBe(1);
     // No cache write on LLM failure
+    expect(cache.setCalls).toHaveLength(0);
+  });
+
+  it('LLM timeout → aborts ChatLlmPort (abortSignal), rule-only fallback, no cache write', async () => {
+    const llm = new HangUntilAbortChatLlm();
+    const cache = new InMemoryPhraseCache();
+    const mapperTimeoutMs = 100;
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, mapperTimeoutMs, cache);
+
+    const { constraints: result, constraintExtraction: trace } = await mapper.mapConstraints([
+      'zzz_unknown_phrase',
+    ]);
+
+    expect(result).toHaveLength(0);
+    expect(llm.callCount).toBe(1);
+    expect(cache.setCalls).toHaveLength(0);
+    expect(trace?.llmLatencyMs).not.toBeNull();
+    expect(trace?.llmLatencyMs ?? 0).toBeGreaterThanOrEqual(mapperTimeoutMs - 20);
+  });
+
+  it('LLM timeout → ignores late resolve if adapter ignores abortSignal (defensive)', async () => {
+    const lateItem: LlmConstraintItem = { ...fruityItem, phrase: 'zzz_unknown_phrase' };
+    const llm = new IgnoresAbortDelayedChatLlm(150, [lateItem]);
+    const cache = new InMemoryPhraseCache();
+    const mapperTimeoutMs = 50;
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, mapperTimeoutMs, cache);
+
+    const { constraints: result } = await mapper.mapConstraints(['zzz_unknown_phrase']);
+
+    expect(result).toHaveLength(0);
+    expect(llm.callCount).toBe(1);
     expect(cache.setCalls).toHaveLength(0);
   });
 
@@ -200,7 +286,11 @@ describe('LlmNLMapper phrase cache', () => {
     const cache = new InMemoryPhraseCache();
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
 
-    const result = await mapper.mapConstraints(['zzz_unknown_phrase', 'zzz_unknown_phrase', 'zzz_unknown_phrase']);
+    const { constraints: result } = await mapper.mapConstraints([
+      'zzz_unknown_phrase',
+      'zzz_unknown_phrase',
+      'zzz_unknown_phrase',
+    ]);
 
     // Single result, single LLM call, single cache write — duplicates collapsed.
     expect(result).toHaveLength(1);
@@ -219,7 +309,7 @@ describe('LlmNLMapper phrase cache', () => {
     // LLM should be called once with at most 20 phrases.
     expect(llm.callCount).toBe(1);
     const userMsg = llm.lastRequest?.messages.find((m) => m.role === 'user')?.content ?? '';
-    const sentPhrases = JSON.parse(userMsg) as string[];
+    const sentPhrases = JSON.parse(userMsg) as unknown as string[];
     expect(sentPhrases).toHaveLength(20);
     // Earlier phrases retained, later phrases dropped (slice semantics).
     expect(sentPhrases).toContain('zzz_unknown_0');
@@ -236,9 +326,8 @@ describe('LlmNLMapper phrase cache', () => {
     // 'cherry' is not in cache → miss → LLM call
 
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
-    await mapper.mapConstraints(['apple', 'banana', 'cherry']);
+    const { constraintExtraction: trace } = await mapper.mapConstraints(['apple', 'banana', 'cherry']);
 
-    const trace = mapper.getLastExtractionTrace();
     expect(trace?.phraseCacheHits).toBe(1);
     expect(trace?.phraseCacheNegativeSkipped).toBe(1);
     expect(trace?.phraseCacheMisses).toBe(1);
@@ -248,6 +337,17 @@ describe('LlmNLMapper phrase cache', () => {
       + (trace?.phraseCacheNegativeSkipped ?? 0)
       + (trace?.phraseCacheMisses ?? 0),
     ).toBe(3);
+  });
+
+  it('concurrent mapConstraints calls each get an isolated extraction trace', async () => {
+    const llm = new StubChatLlm([]);
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000);
+    const [r1, r2] = await Promise.all([
+      mapper.mapConstraints(['concurrent_a']),
+      mapper.mapConstraints(['concurrent_b', 'concurrent_c']),
+    ]);
+    expect(r1.constraintExtraction?.candidatePhraseCount).toBe(1);
+    expect(r2.constraintExtraction?.candidatePhraseCount).toBe(2);
   });
 
   it('CACHE_KEY_NAMESPACE includes both version and prompt fingerprint', () => {
@@ -264,7 +364,7 @@ describe('LlmNLMapper phrase cache', () => {
     cache.store.set(`${CACHE_KEY_NAMESPACE}:apple`, [apple]);
 
     const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000, cache);
-    const result = await mapper.mapConstraints(['apple', 'banana']);
+    const { constraints: result } = await mapper.mapConstraints(['apple', 'banana']);
 
     expect(result).toHaveLength(2);
     expect(llm.callCount).toBe(1);

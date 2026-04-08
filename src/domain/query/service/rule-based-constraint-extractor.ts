@@ -73,12 +73,12 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   const priceUnder =
-    /\bunder\s+\$?(\d+)\b/i.exec(q) ??
-    /(\d+)\s*(?:달러|dollar)\s*이하/i.exec(q) ??
-    /(\d+)\s*만원\s*(?:이하|미만|대)/i.exec(q);
+    /(?<!\p{L}\p{N})under\s+\$?(\d+)(?!\p{L}\p{N})/iu.exec(q) ??
+    /(\d+)\s*(?:달러|dollar)\s*이하/iu.exec(q) ??
+    /(\d+)\s*만원\s*(?:이하|미만|대)/iu.exec(q);
   if (priceUnder?.[1] !== undefined) {
     const priceValue = parseInt(priceUnder[1], 10);
-    const usd = /만원/.test(q) ? priceValue * 7 : priceValue;
+    const usd = /만원/u.test(q) ? priceValue * 7 : priceValue;
     const band =
       usd <= 20 ? 'budget' : usd <= 50 ? 'mid' : usd <= 100 ? 'premium' : 'luxury';
     soft.push({
@@ -92,20 +92,20 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   // Standalone price-level keywords (no numeric amount)
-  if (!priceUnder && /(?:비싼|비싸|고급|럭셔리|프리미엄)/.test(q)) {
+  if (!priceUnder && /(?:비싼|비싸|고급|럭셔리|프리미엄)/u.test(q)) {
     soft.push({
       attribute: 'price_band',
       operator: '=',
-      value: /(?:비싼|비싸|럭셔리)/.test(q) ? 'luxury' : 'premium',
+      value: /(?:비싼|비싸|럭셔리)/u.test(q) ? 'luxury' : 'premium',
       source_phrase: '비싼/고급',
       confidence: 0.7,
       mapping_version: mv,
     });
-  } else if (!priceUnder && /(?:저렴|싼|가성비|입문)/.test(q)) {
+  } else if (!priceUnder && /(?:저렴|싼|가성비|입문)/u.test(q)) {
     soft.push({
       attribute: 'price_band',
       operator: '=',
-      value: /가성비/.test(q) ? 'mid' : 'budget',
+      value: /가성비/u.test(q) ? 'mid' : 'budget',
       source_phrase: '저렴/가성비',
       confidence: 0.7,
       mapping_version: mv,
@@ -113,7 +113,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   // Critic score / rating keywords
-  if (/(?:평점|점수|별점|리뷰)\s*(?:좋은|높은|훌륭|최고)/.test(q)) {
+  if (/(?:평점|점수|별점|리뷰)\s*(?:좋은|높은|훌륭|최고)/u.test(q)) {
     soft.push({
       attribute: 'critic_score',
       operator: '>=',

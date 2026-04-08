@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  NOISY_ENTITY_CATEGORIES,
   assertNoisyEntityQualityThresholds,
   extractRankedEntityIds,
   loadNoisyEntityBenchmark,

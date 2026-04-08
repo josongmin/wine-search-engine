@@ -11,7 +11,6 @@ import {
   getSearchDecision,
   getSearchDecisionSnapshot,
   getSearchMeta,
-  parseErrorResponse,
   parseSearchResponse,
 } from './helpers/http-transport.js';
 import { makeReplaySnapshot } from './helpers/replay-snapshot.js';

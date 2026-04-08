@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   BatchSearchUseCase,
   type BatchSearchRequestItem,
-  type BatchSearchOptions,
 } from '../../../../src/application/search/batch-search.usecase.js';
 import type { SearchUseCase } from '../../../../src/application/search/search.usecase.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';

@@ -249,6 +249,25 @@ describe('ExecutionCompiler', () => {
     expect(result.execution.effectiveRetrievalMode).toBeDefined();
   });
 
+  it('forwards plan.constraintExtraction onto compiled.query', () => {
+    const extraction = {
+      candidatePhraseCount: 9,
+      ruleTableHitCount: 1,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: false,
+      source: 'rule_only' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const plan = { ...makeMinimalPlan(), constraintExtraction: extraction };
+    const result = compiler.compile({ plan });
+    expect(result.query.constraintExtraction).toEqual(extraction);
+  });
+
   // Extra: attribute_search has correct budget defaults
   it('sets correct defaults for attribute_search mode', () => {
     const plan = makeMinimalPlan({

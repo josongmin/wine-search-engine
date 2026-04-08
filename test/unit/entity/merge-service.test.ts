@@ -125,7 +125,6 @@ describe('canMerge', () => {
         producerId: 'prod-A',
         regionId: 'region-1',
       });
-      const now = new Date();
       const aWithSig: Entity = {
         ...a,
         identitySignature: sig,

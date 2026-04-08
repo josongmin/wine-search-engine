@@ -301,8 +301,6 @@ export class WineToolExecutor {
     const missing: string[] = [];
     if (doc.tannin === undefined) missing.push('tannin');
     if (doc.acidity === undefined) missing.push('acidity');
-    if (doc.body === undefined) missing.push('body');
-    if (doc.sweetness === undefined) missing.push('sweetness');
     if (doc.criticScoreNormalized === undefined) missing.push('criticScoreNormalized');
     if (doc.grapePrimaryEnc === undefined) missing.push('grapePrimaryEnc');
     if (doc.regionEnc === undefined) missing.push('regionEnc');
@@ -330,12 +328,12 @@ export class WineToolExecutor {
       grapePrimaryEnc: doc.grapePrimaryEnc!,
       regionEnc: doc.regionEnc!,
       countryEnc: doc.countryEnc!,
-      body: doc.body!,
+      body: doc.body,
       // tannin/acidity in the document are stored on a [0,1] normalized scale.
       // The predictor expects a [0,5] scale, so we expand here.
       tannin: doc.tannin! * 5,
       acidity: doc.acidity! * 5,
-      sweetness: doc.sweetness!,
+      sweetness: doc.sweetness,
       // criticScoreNormalized is [0,1]; convert to the [0,100] proxy score
       // expected by the predictor.
       avgCriticProxyScore: doc.criticScoreNormalized! * 100,

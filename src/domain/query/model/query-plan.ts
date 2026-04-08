@@ -12,6 +12,7 @@ import type { QueryTargetType } from './query-target-type.js';
 import type { NormalizedQueryViews } from './query-views.js';
 import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.js';
 import type { QueryDecompositionHint } from './query-decomposition.js';
+import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -139,6 +140,8 @@ export interface QueryPlanV2 {
   readonly sessionContext?: SessionContext;
   readonly queryBudget?: QueryBudget;
   readonly decompositionHint?: QueryDecompositionHint;
+  /** NL constraint extraction provenance (rule vs LLM); request-scoped, not read from singletons. */
+  readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
 
   // --- Admission context (planner still populates this) ---
   readonly admission_context?: {
@@ -154,7 +157,7 @@ export interface QueryPlanV2 {
   readonly suggestedRetrievalMode: RetrievalMode;
 }
 
-/** Convert QueryPlanV2 to QueryUnderstandingSnapshot (drops suggestions and admission_context). */
+/** Convert QueryPlanV2 to QueryUnderstandingSnapshot (drops route/mode suggestions and admission_context). */
 export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstandingSnapshot {
   return {
     rawQuery: plan.rawQuery,
@@ -174,5 +177,6 @@ export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstan
     ...(plan.sessionContext !== undefined && { sessionContext: plan.sessionContext }),
     ...(plan.queryBudget !== undefined && { queryBudget: plan.queryBudget }),
     ...(plan.decompositionHint !== undefined && { decompositionHint: plan.decompositionHint }),
+    ...(plan.constraintExtraction !== undefined && { constraintExtraction: plan.constraintExtraction }),
   };
 }

@@ -88,8 +88,8 @@ export function searchResponseToEvalProvenanceSlices(
 
     return {
       ...slice,
-      channels: validatedChannels as EvalProvenanceSlice['channels'],
-      topChannel: validatedTop as EvalProvenanceSlice['topChannel'],
+      channels: validatedChannels,
+      topChannel: validatedTop,
     };
   });
 }

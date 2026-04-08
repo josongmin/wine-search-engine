@@ -41,6 +41,16 @@ const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 const SYNTHESIS_TIMEOUT_MS = 12_000;
 /** Wall-clock budget for the Layer 2 single-shot fallback search. */
 const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
+/** First synthesis attempt: full token budget (allows detailed, well-structured answers). */
+const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
+/** Second synthesis attempt: halved budget — fast path when first attempt times out. */
+const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
+/** Layer 3 fallback: max chars of observation to include in answer (prevents oversized responses). */
+const LAYER3_OBSERVATION_SLICE_CHARS = 300;
+/** Log-preview chars for non-parseable LLM text — enough to diagnose without bloating the log line. */
+const LOG_PREVIEW_CHARS = 200;
+/** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
+const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 /** Parsed LLM output — either a tool call or a final answer. */
 interface LlmAction {
@@ -62,7 +72,7 @@ function parseLlmOutput(text: string): LlmAction {
       .replace(/^```[\w-]*\s*\n?/i, '')
       .replace(/\s*```$/i, '')
       .trim();
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const parsed = JSON.parse(cleaned) as unknown as Record<string, unknown>;
 
     const thought = typeof parsed['thought'] === 'string' ? parsed['thought'] : '';
 
@@ -82,14 +92,14 @@ function parseLlmOutput(text: string): LlmAction {
     // Logged as warn so ops can detect a model that's no longer following the
     // structured output protocol — otherwise this silently degrades to passthrough.
     log.warn(
-      { textPreview: trimmed.slice(0, 200) },
+      { textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
       'agent LLM produced JSON without action or answer; falling back to raw text',
     );
     return { thought: '[unparseable LLM structure]', answer: trimmed };
   } catch {
     // LLM returned non-JSON — treat as direct answer.
     log.warn(
-      { textPreview: text.slice(0, 200) },
+      { textPreview: text.slice(0, LOG_PREVIEW_CHARS) },
       'agent LLM produced non-JSON output; falling back to raw text',
     );
     return { thought: '[unparseable LLM output]', answer: text.trim() };
@@ -289,10 +299,10 @@ export class AgentOrchestrator {
           break;
         }
 
-        // Estimate token counts (rough: 4 chars ≈ 1 token)
+        // Estimate token counts (rough: CHARS_PER_TOKEN_ESTIMATE chars ≈ 1 token)
         const inputChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-        const inputTokens = Math.ceil(inputChars / 4);
-        const outputTokens = Math.ceil(llmResult.text.length / 4);
+        const inputTokens = Math.ceil(inputChars / CHARS_PER_TOKEN_ESTIMATE);
+        const outputTokens = Math.ceil(llmResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
         totalInputTokens += inputTokens;
         totalOutputTokens += outputTokens;
 
@@ -475,18 +485,18 @@ export class AgentOrchestrator {
             clearTimeout(synthTimer);
           }
         };
-        // Attempt 1: full 512-token synthesis
+        // Attempt 1: full token budget synthesis
         let synthAnswer: string | undefined;
         try {
-          synthAnswer = await attemptSynthesis(512);
+          synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
         } catch (synthErr1) {
-          log.error({ err: synthErr1, requestId }, 'synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=256');
+          log.error({ err: synthErr1, requestId }, `synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         }
         // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw)
         if (synthAnswer === undefined) {
           try {
-            log.info({ requestId, obsSteps: obsSteps.length }, 'synthesis attempt 1 returned empty — retrying with maxOutputTokens=256');
-            synthAnswer = await attemptSynthesis(256);
+            log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
+            synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
           } catch (synthErr2) {
             log.error({ err: synthErr2, requestId }, 'synthesis attempt 2 threw — proceeding to fallback search');
           }
@@ -543,7 +553,7 @@ export class AgentOrchestrator {
       // Layer 3: synthesize from last available observation (deterministic, no LLM)
       const lastObs = steps.findLast((s) => s.observation !== undefined && s.observation.length > 0);
       if (lastObs?.observation !== undefined) {
-        answer = `검색 결과 요약: ${lastObs.observation.slice(0, 300)}`;
+        answer = `검색 결과 요약: ${lastObs.observation.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)}`;
         fallbackApplied = true;
         terminationReason = 'fallback';
         log.error({ requestId }, 'Layer 3 fallback: all LLM synthesis paths failed — using raw observation');

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { z, type ZodType } from 'zod';
+import type { ZodType } from 'zod';
 import {
   ComparisonSearchResponseSchema,
   ErrorResponseSchema,

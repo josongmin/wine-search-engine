@@ -7,7 +7,6 @@
 
 import { createEntityId, type EntityId } from '../../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../../src/domain/retrieval/model/retrieval-document.js';
-import type { Alias } from '../../../src/domain/alias/model/alias.js';
 import type { HybridCandidate } from '../../../src/domain/retrieval/model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../../../src/domain/retrieval/model/retrieval-trace.js';
 import type { AnchorEntityData } from '../../../src/domain/mixed/service/anchor-profiler.js';

@@ -27,32 +27,32 @@ export type ReformulationType =
 
 /** Korean correction markers indicating the user is correcting a prior query. */
 const CORRECTION_MARKERS: readonly RegExp[] = [
-  /아니[라요]/,          // "no, (it's) ..."
-  /아닌데/,              // "that's not right"
-  /그게\s*아니/,         // "that's not (it)"
-  /\b(no|not)\b/i,
-  /\bcorrection\b/i,
+  /아니[라요]/u,          // "no, (it's) ..."
+  /아닌데/u,              // "that's not right"
+  /그게\s*아니/u,         // "that's not (it)"
+  /(?<!\p{L}\p{N})(no|not)(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})correction(?!\p{L}\p{N})/iu,
 ] as const;
 
 /** Korean narrowing markers indicating the user is adding constraints. */
 const NARROWING_MARKERS: readonly RegExp[] = [
-  /근데/,               // "but" (adding condition)
-  /그\s*중에/,          // "among those"
-  /더\s*(싼|비싼|좋은)/, // "cheaper / more expensive / better"
-  /\bbut\b/i,
-  /\balso\b/i,
-  /\bunder\b/i,
-  /\bcheaper\b/i,
+  /근데/u,               // "but" (adding condition)
+  /그\s*중에/u,          // "among those"
+  /더\s*(싼|비싼|좋은)/u, // "cheaper / more expensive / better"
+  /(?<!\p{L}\p{N})but(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})also(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})under(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})cheaper(?!\p{L}\p{N})/iu,
 ] as const;
 
 /** Korean refinement markers indicating the user is refining the entity. */
 const REFINEMENT_MARKERS: readonly RegExp[] = [
-  /그\s*거\s*말고/,     // "not that one"
-  /다른/,               // "different / another"
-  /대신/,               // "instead"
-  /\binstead\b/i,
-  /\bother\b/i,
-  /\banother\b/i,
+  /그\s*거\s*말고/u,     // "not that one"
+  /다른/u,               // "different / another"
+  /대신/u,               // "instead"
+  /(?<!\p{L}\p{N})instead(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})other(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})another(?!\p{L}\p{N})/iu,
 ] as const;
 
 /**

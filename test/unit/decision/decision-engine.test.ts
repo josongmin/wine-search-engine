@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { DecisionEngine } from '../../../src/domain/decision/service/decision-engine.js';
-import { EvidenceGate, computeConformalSetSize, DEFAULT_ALPHA } from '../../../src/domain/resolver/service/resolver.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../../src/domain/query/model/threshold-profile.js';
 import type { ThresholdStore } from '../../../src/domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../../src/domain/query/model/threshold-profile.js';

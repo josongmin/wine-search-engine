@@ -287,7 +287,7 @@ export class PromotionGate {
     for (const proposal of pending) {
       // Re-check inside the loop: kill switch can be activated by another
       // process/request between iterations.
-      if (this._killSwitchActive) break;
+      if (this.isKillSwitchActive()) break;
       const decision = await this.evaluateAliasProposal(proposal);
       results.push({ proposal, decision });
     }

@@ -15,7 +15,6 @@ import { createTestServer, closeTestServer, type TestServer } from './helpers/te
 import {
   getSearchDecision,
   getSearchDecisionSnapshot,
-  getSearchEntityIds,
   getSearchRelevanceScores,
   parseSearchResponse,
   postJson,

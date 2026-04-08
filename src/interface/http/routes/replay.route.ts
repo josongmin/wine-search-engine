@@ -27,7 +27,7 @@ function hasReplayAuthorization(request: FastifyRequest): boolean {
   if (secret === undefined || secret.length === 0) {
     return true;
   }
-  return request.debugRequest === true;
+  return request.debugRequest;
 }
 
 /**

@@ -108,7 +108,7 @@ export function registerAgentRoute(
       // disconnects, abort the orchestrator so we stop spending LLM tokens.
       // Without this, a closed connection still costs us ~10 LLM round-trips.
       const lifecycleController = new AbortController();
-      const onClose = () => lifecycleController.abort();
+      const onClose = () => { lifecycleController.abort(); };
       request.raw.once('close', onClose);
 
       let result;

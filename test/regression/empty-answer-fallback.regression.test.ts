@@ -75,15 +75,11 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
       new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
       'utf-8',
     );
-    // After fix: synthesis failure must log.error, not log.warn
-    // Check that the synthesis catch block uses log.error
-    const synthCatchBlock = src.match(/observation synthesis failed.*?\n.*?log\.(error|warn)/s);
-    expect(synthCatchBlock).not.toBeNull();
-    if (synthCatchBlock) {
-      // The match should capture 'error', not 'warn'
-      const logCall = synthCatchBlock[0];
-      expect(logCall).toContain('log.error');
-    }
+    // After fix: synthesis failure must log.error (not log.warn).
+    // There are now 2 separate catch blocks (attempt 1 + attempt 2), both must use log.error.
+    // Verify no log.warn for synthesis failures.
+    expect(src).toMatch(/synthesis attempt.*threw.*\n.*log\.error/s);
+    expect(src).not.toMatch(/synthesis.*threw.*\n.*log\.warn/s);
   });
 
   it('R-EMPTY-06: fallback search failure logs at error level (not warn)', async () => {
@@ -125,7 +121,11 @@ describe('EMPTY_ANSWER fallback regression — structural guarantee', () => {
       new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
       'utf-8',
     );
-    // Layer 3 must use .slice(0, 300) to bound the observation length
-    expect(src).toMatch(/\.slice\(0,\s*300\)/);
+    // Layer 3 must use .slice(0, LAYER3_OBSERVATION_SLICE_CHARS) or literal .slice(0, 300).
+    // After the magic-number lint fix the literal was replaced with the named constant.
+    const hasLiteralSlice = /\.slice\(0,\s*300\)/.test(src);
+    const hasNamedConstant = /const LAYER3_OBSERVATION_SLICE_CHARS\s*=\s*300/.test(src) &&
+      /\.slice\(0,\s*LAYER3_OBSERVATION_SLICE_CHARS\)/.test(src);
+    expect(hasLiteralSlice || hasNamedConstant).toBe(true);
   });
 });

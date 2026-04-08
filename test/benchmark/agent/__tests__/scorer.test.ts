@@ -58,6 +58,52 @@ describe('scoreScenario — skipped / errored', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────
+// judgeRequiredButSkipped
+// ─────────────────────────────────────────────────────────────────────
+
+describe('scoreScenario — judgeRequired', () => {
+  it('judgeRequiredButSkipped is false when judgeRequired is not set', () => {
+    const scenario = makeScenario({ maxSteps: 2 });
+    const result = scoreScenario(scenario, makeExecution(), undefined);
+    expect(result.judgeRequiredButSkipped).toBe(false);
+  });
+
+  it('judgeRequiredButSkipped is false when judgeRequired=true but judge ran', () => {
+    const scenario = makeScenario({ maxSteps: 2, judgeRequired: true });
+    const result = scoreScenario(scenario, makeExecution(), 0.8);
+    expect(result.judgeRequiredButSkipped).toBe(false);
+  });
+
+  it('judgeRequiredButSkipped is true when judgeRequired=true and no judge score', () => {
+    const scenario = makeScenario({ maxSteps: 2, judgeRequired: true });
+    const result = scoreScenario(scenario, makeExecution(), undefined);
+    expect(result.judgeRequiredButSkipped).toBe(true);
+  });
+
+  it('adds JUDGE_REQUIRED_BUT_SKIPPED diagnostic when judgeRequiredButSkipped', () => {
+    const scenario = makeScenario({ maxSteps: 2, judgeRequired: true });
+    const result = scoreScenario(scenario, makeExecution(), undefined);
+    const diag = result.diagnostics?.find((d) => d.code === 'JUDGE_REQUIRED_BUT_SKIPPED');
+    expect(diag).toBeDefined();
+    expect(diag?.severity).toBe('warn');
+    expect(diag?.dim).toBe('judge');
+  });
+
+  it('judgeRequiredButSkipped is false for skipped scenarios', () => {
+    const scenario = makeScenario({ maxSteps: 2, judgeRequired: true }, { skip: 'phase 2' });
+    const result = scoreScenario(scenario, makeExecution(), undefined);
+    expect(result.skipped).toBe(true);
+    expect(result.judgeRequiredButSkipped).toBe(false);
+  });
+
+  it('judgeRequiredButSkipped is false for errored scenarios', () => {
+    const scenario = makeScenario({ maxSteps: 2, judgeRequired: true });
+    const result = scoreScenario(scenario, null, undefined, undefined, 'crash');
+    expect(result.judgeRequiredButSkipped).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
 // Tool accuracy
 // ─────────────────────────────────────────────────────────────────────
 
@@ -598,9 +644,12 @@ describe('null judge handling', () => {
       0, // judge says 0
     );
     expect(r.scores.judge).toBe(0);
-    // Judge weight is only 0.10, so overall should be reduced but not crushed.
+    // P0-B fix: judge dim has NO_FLOOR treatment — a judge score of 0 is a true
+    // rubric failure (not noise). judge weight=0.07, no floor, so overall can
+    // be driven very low by geo-mean. The exact value depends on other dims but
+    // must be < 0.95 and > 0 (not total collapse — other dims are fine).
     expect(r.scores.overall).toBeLessThan(0.95);
-    expect(r.scores.overall).toBeGreaterThan(0.3);
+    expect(r.scores.overall).toBeGreaterThan(0);
   });
 
   it('judge undefined produces SAME or HIGHER overall than judge=0 (no inverted incentive)', () => {
@@ -1032,7 +1081,10 @@ describe('RAGAS Context Relevance', () => {
       }),
       undefined,
     );
-    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_RELEVANCE_LOW')).toBe(true);
+    // P1-B fix: vintage is a hard constraint — out-of-range → CONTEXT_HARD_CONSTRAINT_FAILED
+    // (not CONTEXT_RELEVANCE_LOW), and contextRelevance collapses to 0.
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(true);
+    expect(r.scores.contextRelevance).toBe(0);
   });
 
   it('drinkingWindowStatus: passes when keywords match', () => {
@@ -1192,22 +1244,27 @@ describe('answerRelevancy', () => {
     expect(r.scores.answerRelevancy).toBeNull();
   });
 
-  it('equals judgeScore when judge is provided', () => {
+  it('P0-A fix: judge present → answerRelevancy=null (no double-counting)', () => {
+    // Before fix: answerRelevancy = judgeScore (0.75), meaning judge score was
+    // applied at combined weight 0.07+0.10=0.17. Now answerRelevancy drops to
+    // null when judge is present — the judge dim owns that signal at weight 0.07.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ answer: 'a wine recommendation' }),
-      0.75, // judge
+      0.75, // judge present
     );
-    expect(r.scores.answerRelevancy).toBe(0.75);
+    expect(r.scores.answerRelevancy).toBeNull();
+    expect(r.scores.judge).toBe(0.75);
   });
 
-  it('judge=0 → answerRelevancy=0', () => {
+  it('P0-A fix: judge=0 → answerRelevancy=null, judge=0 in scores', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ answer: 'a wine recommendation' }),
       0,
     );
-    expect(r.scores.answerRelevancy).toBe(0);
+    expect(r.scores.answerRelevancy).toBeNull();
+    expect(r.scores.judge).toBe(0);
   });
 
   it('1.0 when all answerMustMatch patterns satisfied and no judge', () => {
@@ -1219,23 +1276,37 @@ describe('answerRelevancy', () => {
     expect(r.scores.answerRelevancy).toBe(1.0);
   });
 
-  it('0.5 when any answerMustMatch pattern is missed and no judge', () => {
+  it('P1-A fix: partial match → fractional score (not 0.5 floor)', () => {
+    // Before: any miss → 0.5 regardless of how many patterns matched.
+    // After: score = matchedCount / totalPatterns (1 of 2 = 0.5 happens to
+    // be the same here, but 0-of-2 is now 0.0 not 0.5).
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, answerMustMatch: ['Opus One', 'Napa'] }),
       makeExecution({ answer: 'I recommend Opus One.' }),
       undefined,
     );
-    expect(r.scores.answerRelevancy).toBe(0.5);
+    expect(r.scores.answerRelevancy).toBeCloseTo(0.5); // 1 of 2 matched
   });
 
-  it('judge takes priority over answerMustMatch heuristic', () => {
-    // Even with a missed pattern, judge=0.9 wins
+  it('P1-A fix: zero-of-N miss → 0.0 (not the old 0.5 floor)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, answerMustMatch: ['Barolo', 'Napa'] }),
+      makeExecution({ answer: 'Try this Chardonnay.' }),
+      undefined,
+    );
+    expect(r.scores.answerRelevancy).toBe(0); // 0 of 2 matched
+  });
+
+  it('P0-A fix: judge present suppresses answerMustMatch heuristic entirely', () => {
+    // Before: judge=0.9 was used AS answerRelevancy. Now: answerRelevancy=null,
+    // judge dim carries the signal. The heuristic is not computed at all.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, answerMustMatch: ['Napa'] }),
       makeExecution({ answer: 'I recommend Opus One.' }),
       0.9, // judge present
     );
-    expect(r.scores.answerRelevancy).toBe(0.9);
+    expect(r.scores.answerRelevancy).toBeNull();
+    expect(r.scores.judge).toBe(0.9);
   });
 
   it('is included in scores object', () => {
@@ -1350,6 +1421,77 @@ describe('multiple null dimensions — geo mean handles gracefully', () => {
   });
 });
 
+describe('step-0 fallback exemption (LLM unavailable — infra failure)', () => {
+  it('step-0 fallback with expected tool → toolAccuracy=1 (not penalized)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeExecution({ stepCount: 0, toolsUsed: [], toolCallCount: 0, terminationReason: 'fallback' }),
+      undefined,
+    );
+    expect(r.scores.toolAccuracy).toBe(1);
+    const diag = r.diagnostics.find((d) => d.code === 'TOOL_ACCURACY_SKIPPED_STEP0_FALLBACK');
+    expect(diag).toBeDefined();
+    expect(diag?.severity).toBe('info');
+  });
+
+  it('step-0 fallback with TERMINATION_MISMATCH → 0.25 partial credit (not 0)', () => {
+    // Scenario explicitly expects terminationReason='answer'
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, terminationReason: 'answer' }),
+      makeExecution({ stepCount: 0, toolsUsed: [], terminationReason: 'fallback' }),
+      undefined,
+    );
+    expect(r.scores.terminationCorrectness).toBeCloseTo(0.25, 2);
+    const diag = r.diagnostics.find((d) => d.code === 'TERMINATION_MISMATCH');
+    expect(diag?.message).toContain('partial credit');
+  });
+
+  it('step-0 fallback with mustNotCallTools → still checks (security gate must not be bypassed)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 1, mustNotCallTools: ['search_wines'] }),
+      makeExecution({ stepCount: 0, toolsUsed: [], terminationReason: 'fallback' }),
+      undefined,
+    );
+    // mustNotCallTools not violated (no tools called) → toolAccuracy=1
+    expect(r.scores.toolAccuracy).toBe(1);
+  });
+
+  it('step-0 fallback with expectedBlocked=true → NOT exempted (security critical)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 1, expectedBlocked: true }),
+      makeExecution({ stepCount: 0, toolsUsed: [], terminationReason: 'fallback' }),
+      undefined,
+    );
+    // expectedBlocked=true but got fallback (not blocked) → critical failure
+    expect(r.scores.terminationCorrectness).toBe(0);
+    const diag = r.diagnostics.find((d) => d.code === 'EXPECTED_BLOCKED_NOT_BLOCKED');
+    expect(diag).toBeDefined();
+  });
+
+  it('step-1 fallback (agent ran) → tool accuracy scored normally (missing tool IS penalized)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeExecution({ stepCount: 1, toolsUsed: [], toolCallCount: 0, terminationReason: 'fallback' }),
+      undefined,
+    );
+    // stepCount=1 → agent did run, tool missing IS a genuine failure → toolAccuracy=0
+    expect(r.scores.toolAccuracy).toBe(0);
+  });
+
+  it('step-1 fallback with explicit terminationReason expectation → partial credit (0.25)', () => {
+    // Even a mid-run fallback (e.g. synthesis LLM rate-limited after 1 tool call)
+    // is an infra failure, not agent logic failure — give partial credit.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, terminationReason: 'answer' }),
+      makeExecution({ stepCount: 1, toolsUsed: [], terminationReason: 'fallback' }),
+      undefined,
+    );
+    expect(r.scores.terminationCorrectness).toBeCloseTo(0.25, 2);
+    const diag = r.diagnostics.find((d) => d.code === 'TERMINATION_MISMATCH');
+    expect(diag?.message).toContain('partial credit');
+  });
+});
+
 describe('penalty constants are used correctly', () => {
   it('extra tool calls use PENALTY_EXTRA_TOOL_PER_CALL and CAP', () => {
     // 6 extra calls should hit the 50% cap
@@ -1371,5 +1513,219 @@ describe('penalty constants are used correctly', () => {
     );
     // 6 extras, 10% each = 60% but capped at 50%. Score = 1.0 * 0.5 = 0.5
     expect(r.scores.toolAccuracy).toBeCloseTo(0.5, 1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// P0-B regression: DIMENSION_FLOOR must NOT apply to execution/term/judge
+// ─────────────────────────────────────────────────────────────────────
+
+describe('P0-B regression — DIMENSION_FLOOR exemptions', () => {
+  it('executionEfficiency near-zero is NOT floored to 0.05 (regression mask prevention)', () => {
+    // Before fix: executionEfficiency=0.01 would be raised to DIMENSION_FLOOR=0.05
+    // making a critical tool failure look 5x less bad in the geo-mean.
+    // After fix: executionEfficiency passes through unmodified.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, tools: [{ tool: 'search_wines' }] }),
+      makeExecution({
+        stepCount: 20,        // massively over budget → near-zero stepEfficiency
+        toolCallCount: 20,
+        toolsUsed: [tool('wrong_tool')], // wrong tool → low toolAccuracy
+      }),
+      undefined,
+    );
+    // executionEfficiency = merge(toolAccuracy, stepEfficiency) — both near 0.
+    // Must stay near 0, NOT be floored to 0.05.
+    expect(r.scores.executionEfficiency).toBeLessThan(0.1);
+  });
+
+  it('judge=0 is NOT floored — stays at 0 and drives overall lower than no-judge', () => {
+    const withZeroJudge = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good answer' }),
+      0,
+    );
+    // Structural: judge dim present in scores at 0
+    expect(withZeroJudge.scores.judge).toBe(0);
+
+    const withNoJudge = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good answer' }),
+      undefined,
+    );
+    // Before P0-B fix: judge=0 was floored to 0.05, making it barely worse than no-judge.
+    // After fix: judge=0 is unflored, so it drives overall clearly lower than no-judge.
+    expect(withZeroJudge.scores.overall).toBeLessThan(withNoJudge.scores.overall);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// P1-B regression: hard constraint failure → contextRelevance = 0
+// ─────────────────────────────────────────────────────────────────────
+
+describe('P1-B regression — contextRelevance hard constraint collapse', () => {
+  it('price out-of-range → score 0 (not 0.67 partial)', () => {
+    // Before fix: 1 price check fail + 2 soft checks pass = 2/3 = 0.67.
+    // After fix: price is hard constraint → 0.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, priceBandKrw: { min: 50_000, max: 100_000 } }),
+      makeExecution({
+        observations: ['Wine A: 200,000원 | Napa Cabernet 2019 | score: 95'],
+        toolsUsed: [tool('search_wines', JSON.stringify({ query: 'Cabernet Napa' }))],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRelevance).toBe(0);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(true);
+  });
+
+  it('vintage out-of-range → score 0', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, vintageRange: { min: 2015, max: 2020 } }),
+      makeExecution({
+        observations: ['Wine B: 2010 Burgundy Pinot Noir | 80,000원'],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRelevance).toBe(0);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(true);
+  });
+
+  it('price in-range + vintage in-range → partial score from soft checks only', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        priceBandKrw: { min: 50_000, max: 150_000 },
+        vintageRange: { min: 2015, max: 2020 },
+      }),
+      makeExecution({
+        observations: ['Wine C: 2018 Napa Cabernet | 80,000원'],
+        toolsUsed: [tool('search_wines', JSON.stringify({ query: 'Cabernet Napa 2018' }))],
+      }),
+      undefined,
+    );
+    // Both hard constraints pass → score > 0
+    expect(r.scores.contextRelevance).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// P2 regression: extractKoreanPrices €/£ support
+// ─────────────────────────────────────────────────────────────────────
+
+describe('P2 regression — extractKoreanPrices currency coverage', () => {
+  it('€ amounts are extracted and converted to KRW', () => {
+    // €50 × 1500 = 75,000 KRW — within 50k–100k range
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, priceBandKrw: { min: 50_000, max: 100_000 } }),
+      makeExecution({
+        observations: ['Wine: €50 Burgundy Chardonnay 2019'],
+      }),
+      undefined,
+    );
+    // price check should PASS (75k is in range) — no hard constraint failure
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(false);
+  });
+
+  it('£ amounts are extracted and converted to KRW', () => {
+    // £100 × 1700 = 170,000 KRW — above 50k–100k range → hard fail
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, priceBandKrw: { min: 50_000, max: 100_000 } }),
+      makeExecution({
+        observations: ['Wine: £100 Bordeaux 2018'],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRelevance).toBe(0);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// P2 regression: extractVintageYears 1600s support
+// ─────────────────────────────────────────────────────────────────────
+
+describe('P2 regression — extractVintageYears historic vintage coverage', () => {
+  it('1797 vintage is extracted (pre-phylloxera historic bottle)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, vintageRange: { min: 1790, max: 1800 } }),
+      makeExecution({
+        observations: ['Rare 1797 Madeira Sercial — historic collector piece'],
+      }),
+      undefined,
+    );
+    // vintage 1797 is in range 1790–1800 → should pass, NOT hard fail
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(false);
+  });
+
+  it('1650 vintage NOT extracted (below minimum 1600 floor)', () => {
+    // 1650 < 1600 regex lower bound — should be ignored, no vintage check fired
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, vintageRange: { min: 1640, max: 1660 } }),
+      makeExecution({
+        observations: ['Ancient 1650 bottle from private cellar'],
+      }),
+      undefined,
+    );
+    // 1650 not extracted (below regex range) → no vintage check → contextRelevance
+    // either null or based on other checks only (no hard fail from vintage)
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(false);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Blocked termination reason — security gate scenarios
+// ─────────────────────────────────────────────────────────────────────
+
+describe('blocked termination reason — security gate correct behavior', () => {
+  it('terminationReason=blocked with no expectedBlocked → terminationCorrectness=1 (correct rejection)', () => {
+    // Security gate fires correctly on adversarial input. Score should be 1.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2 }),
+      makeExecution({
+        answer: '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.',
+        stepCount: 0,
+        toolsUsed: [],
+        toolCallCount: 0,
+        terminationReason: 'blocked',
+      }),
+      undefined,
+    );
+    expect(r.scores.terminationCorrectness).toBe(1);
+    // Must not produce UNKNOWN_TERMINATION_REASON diagnostic for 'blocked'
+    const hasUnknown = (r.diagnostics ?? []).some((d) => d.code === 'UNKNOWN_TERMINATION_REASON');
+    expect(hasUnknown).toBe(false);
+  });
+
+  it('terminationReason=blocked with expectedBlocked=true → still 1 (explicit expectation)', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, expectedBlocked: true, mustNotCallTools: ['search_wines'] }),
+      makeExecution({
+        answer: '처리 불가',
+        stepCount: 0,
+        toolsUsed: [],
+        toolCallCount: 0,
+        terminationReason: 'blocked',
+      }),
+      undefined,
+    );
+    expect(r.scores.terminationCorrectness).toBe(1);
+  });
+
+  it('terminationReason=answer with expectedBlocked=true → terminationCorrectness=1 (answer also acceptable)', () => {
+    // Both 'blocked' and 'answer' are valid when expectedBlocked=true.
+    // The key enforcement is in toolAccuracy (mustNotCallTools) and answerQuality.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, expectedBlocked: true }),
+      makeExecution({
+        answer: 'I cannot process that request.',
+        stepCount: 0,
+        toolsUsed: [],
+        toolCallCount: 0,
+        terminationReason: 'answer',
+      }),
+      undefined,
+    );
+    expect(r.scores.terminationCorrectness).toBe(1);
   });
 });

@@ -200,10 +200,12 @@ function generateMockResultLabel(query: string): { label: string; producer: stri
   let producer = 'Benchmark Winery';
   let region = 'Test Region';
   if (blocked.size > 0) {
-    // Strip blocked terms from the label (case-insensitive).
+    // Strip blocked terms from the label (case-insensitive, Unicode-aware).
+    // MUST NOT use \b — it is ASCII-only and silently fails on Korean/accented chars (CLAUDE.md rule #8).
     for (const term of blocked) {
-      const re = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-      label = label.replace(re, '');
+      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'giu');
+      label = label.replace(re, ' ');
     }
     label = label.replace(/\s+/g, ' ').trim();
     // If the negation removed everything, fall back to a safe alternative.
@@ -227,11 +229,36 @@ function generateMockResultLabel(query: string): { label: string; producer: stri
   return { label, producer, region };
 }
 
-function buildMockToolDeps(): AgentToolDeps {
+/**
+ * Build mock tool deps for smoke-mode benchmark runs.
+ *
+ * @param scenarioMap - All scenarios indexed by ID, used to look up
+ *   `goldenEntityIds` so contextRecall is exercised in mock mode.
+ *   When a scenario has goldenEntityIds defined, the first mock result
+ *   carries `goldenEntityIds[0]` as its entityId, giving contextRecall
+ *   a non-trivial (≥50%) score. Without this, every mock run returns the
+ *   same hardcoded ID and no scenario ever matches, so contextRecall is
+ *   always null. In real mode, actual Vespa entity IDs are returned.
+ */
+function buildMockToolDeps(
+  scenarioMap: ReadonlyMap<number, AgentBenchmarkScenario>,
+): AgentToolDeps {
   return {
     searchUseCase: {
       async execute(request: { query: string }, requestId: string) {
         const mock = generateMockResultLabel(request.query);
+
+        // Derive scenario ID from requestId (format: "bench-<id>").
+        // Falls back to a deterministic per-scenario string when no golden IDs
+        // are defined, so entity IDs are at least scenario-unique in mock mode.
+        const scenarioId = requestId.startsWith('bench-')
+          ? Number.parseInt(requestId.slice('bench-'.length), 10)
+          : NaN;
+        const scenario = Number.isFinite(scenarioId) ? scenarioMap.get(scenarioId) : undefined;
+        const entityId =
+          scenario?.goldenEntityIds?.[0] ??
+          (Number.isFinite(scenarioId) ? `wine-bench-mock-${scenarioId}` : 'wine-bench-mock');
+
         return {
           queryType: 'search' as const,
           engineDecision: {
@@ -253,7 +280,7 @@ function buildMockToolDeps(): AgentToolDeps {
           results: [
             {
               entity: {
-                entityId: 'wine-bench-001',
+                entityId,
                 canonicalLabel: mock.label,
                 type: 'wine',
                 producer: mock.producer,
@@ -602,6 +629,7 @@ export interface BenchmarkReport {
   readonly skippedCount: number;
   readonly errorCount: number;
   readonly criticalFailureCount: number;
+  readonly judgeRequiredButSkippedCount: number;
   readonly judgeFailCount: number;
   readonly results: readonly ScenarioResult[];
   readonly summary: {
@@ -662,6 +690,13 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       })
     : null;
 
+  // Build scenario list early so the mock container can look up goldenEntityIds.
+  const baseScenarios = args.includePhase2 ? AGENT_SCENARIOS_WITH_PHASE2 : AGENT_SCENARIOS;
+  const scenarios = filterScenarios(baseScenarios, args);
+  const scenarioMap = new Map<number, AgentBenchmarkScenario>(
+    baseScenarios.map((s) => [s.id, s]),
+  );
+
   // Container wiring
   let toolDeps: AgentToolDeps;
   let shutdown: () => Promise<void> = async () => {};
@@ -672,7 +707,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     shutdown = built.shutdown;
   } else {
     console.error('  [INIT] mock container (smoke mode — search returns synthetic results)');
-    toolDeps = buildMockToolDeps();
+    toolDeps = buildMockToolDeps(scenarioMap);
   }
 
   const orchestrator = new AgentOrchestrator(
@@ -685,9 +720,6 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       ...(args.seed !== undefined ? { seed: args.seed } : {}),
     },
   );
-
-  const baseScenarios = args.includePhase2 ? AGENT_SCENARIOS_WITH_PHASE2 : AGENT_SCENARIOS;
-  const scenarios = filterScenarios(baseScenarios, args);
 
   let judgeFailCount = 0;
 
@@ -855,6 +887,8 @@ function buildReport(
   const ctxRecallScores = executed.map((r) => r.scores.contextRecall).filter((s): s is number => s !== null);
   const ctxRecallMean = ctxRecallScores.length > 0 ? ctxRecallScores.reduce((s, v) => s + v, 0) / ctxRecallScores.length : null;
 
+  const judgeRequiredButSkippedCount = executed.filter((r) => r.judgeRequiredButSkipped).length;
+
   const byTier: Record<string, { count: number; avgScore: number }> = {};
   for (const r of executed) {
     const entry = byTier[r.tier] ?? { count: 0, avgScore: 0 };
@@ -888,6 +922,7 @@ function buildReport(
     skippedCount: results.filter((r) => r.skipped).length,
     errorCount: results.filter((r) => r.error !== undefined).length,
     criticalFailureCount,
+    judgeRequiredButSkippedCount,
     judgeFailCount,
     results,
     summary: {
@@ -1003,6 +1038,9 @@ async function main(): Promise<void> {
   }
   if (report.judgeFailCount > 0) {
     console.error(`  Judge fails:  ${report.judgeFailCount}`);
+  }
+  if (report.judgeRequiredButSkippedCount > 0) {
+    console.error(`  ⚠️  ${report.judgeRequiredButSkippedCount} scenario(s) require judge for reliable scoring (run without --no-judge for accurate results)`);
   }
   console.error(
     `  Overall:      ${(s.overallScore * 100).toFixed(1)}% (geo-mean) `

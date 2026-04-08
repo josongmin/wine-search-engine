@@ -45,7 +45,7 @@ const noAmbiguityDict: AmbiguityDictionary = {
 /** NLMapper stub that returns no constraints. */
 const noOpNLMapper: NLMapper = {
   mapPhrase: () => Promise.resolve(null),
-  mapConstraints: () => Promise.resolve([]),
+  mapConstraints: () => Promise.resolve({ constraints: [] }),
 } as unknown as NLMapper;
 
 /** Build a Planner with the given alias entries. */

@@ -10,7 +10,6 @@ import {
   parseSearchResponse,
   postJson,
 } from './helpers/http-transport.js';
-import { makeReplaySnapshot } from './helpers/replay-snapshot.js';
 
 let server: TestServer;
 

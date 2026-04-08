@@ -4,6 +4,7 @@ import {
   isQueryPlanV2,
   QUERY_FAMILY_LABELS,
 } from '../../model/query-observability-vocab.js';
+import type { CompiledWineQuery } from '../../model/compiled-wine-query.js';
 import type { QueryPlanV1, QueryPlanV2 } from '../../model/query-plan.js';
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,214 @@ describe('planToObservabilitySlice', () => {
     expect(slice.plannerVersion).toBe('2.0.0');
     expect(slice.policyRuleVersion).toBe('1.0.0');
     expect(slice.thresholdProfileId).toBe('default');
+  });
+
+  it('uses plan.constraintExtraction on QueryPlanV2 when the 4th argument is omitted', () => {
+    const extraction = {
+      candidatePhraseCount: 5,
+      ruleTableHitCount: 0,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: true,
+      source: 'fallback' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const plan = makePlan({ constraintExtraction: extraction });
+    const slice = planToObservabilitySlice('req-ce-1', plan);
+    expect(slice.constraintExtraction).toEqual(extraction);
+  });
+
+  it('4th argument overrides plan.constraintExtraction when both are present', () => {
+    const fromPlan = {
+      candidatePhraseCount: 1,
+      ruleTableHitCount: 0,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: true,
+      source: 'fallback' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const override = { ...fromPlan, candidatePhraseCount: 99 };
+    const plan = makePlan({ constraintExtraction: fromPlan });
+    const slice = planToObservabilitySlice('req-ce-2', plan, undefined, override);
+    expect(slice.constraintExtraction?.candidatePhraseCount).toBe(99);
+  });
+
+  it('uses compiled.query.constraintExtraction when plan is V1 (search / interpret path)', () => {
+    const extraction = {
+      candidatePhraseCount: 7,
+      ruleTableHitCount: 0,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: true,
+      source: 'fallback' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const plan: QueryPlanV1 = {
+      rawQuery: 'x',
+      normalizedQuery: 'x',
+      intent: 'facet_search',
+      route: 'hybrid',
+      retrievalMode: 'attribute_search',
+      queryClass: 'pure_constraint',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'hybrid',
+        policyReasonCodes: [],
+      },
+      uncertainty: {
+        overall: 0.2,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.8,
+        anchorConfidence: 0,
+        constraintConfidence: 0.5,
+      },
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+    };
+    const compiled: CompiledWineQuery = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+        constraintExtraction: extraction,
+      },
+      execution: {
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'attribute_search',
+        routeSource: 'planner',
+        budget: { maxCandidates: 50, enablePrecisionRerank: true },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+    const slice = planToObservabilitySlice('req-v1-compiled-ce', plan, compiled);
+    expect(slice.constraintExtraction).toEqual(extraction);
+  });
+
+  it('falls back to compiled.query.constraintExtraction when V2 plan omits it', () => {
+    const extraction = {
+      candidatePhraseCount: 3,
+      ruleTableHitCount: 1,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: false,
+      source: 'rule_only' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const plan = makePlan();
+    const compiled: CompiledWineQuery = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+        constraintExtraction: extraction,
+      },
+      execution: {
+        effectiveRoute: 'entity',
+        effectiveRetrievalMode: 'entity_lookup',
+        routeSource: 'planner',
+        budget: { maxCandidates: 10, enablePrecisionRerank: false },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+    const slice = planToObservabilitySlice('req-v2-compiled-ce', plan, compiled);
+    expect(slice.constraintExtraction).toEqual(extraction);
+  });
+
+  it('prefers plan.constraintExtraction over compiled.query when both are set (V2)', () => {
+    const fromCompiled = {
+      candidatePhraseCount: 1,
+      ruleTableHitCount: 0,
+      llmHitCount: 0,
+      llmSkippedCount: 0,
+      fallbackTriggered: true,
+      source: 'fallback' as const,
+      llmLatencyMs: null,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const fromPlan = { ...fromCompiled, candidatePhraseCount: 42 };
+    const plan = makePlan({ constraintExtraction: fromPlan });
+    const compiled: CompiledWineQuery = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+        constraintExtraction: fromCompiled,
+      },
+      execution: {
+        effectiveRoute: 'entity',
+        effectiveRetrievalMode: 'entity_lookup',
+        routeSource: 'planner',
+        budget: { maxCandidates: 10, enablePrecisionRerank: false },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+    const slice = planToObservabilitySlice('req-v2-priority', plan, compiled);
+    expect(slice.constraintExtraction?.candidatePhraseCount).toBe(42);
   });
 
   it('derives queryFamily entity_exact for entity_exact intent', () => {

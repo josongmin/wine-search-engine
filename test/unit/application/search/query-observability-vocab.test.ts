@@ -108,4 +108,27 @@ describe('query-observability-vocab', () => {
     expect(slice.queryFamily).toBe('attribute_constrained');
     expect(deriveQueryFamily(plan)).toBe('attribute_constrained');
   });
+
+  it('uses compiled.query.constraintExtraction for V1 plan + compiled (pre-route shape)', () => {
+    const extraction = {
+      candidatePhraseCount: 11,
+      ruleTableHitCount: 0,
+      llmHitCount: 2,
+      llmSkippedCount: 0,
+      fallbackTriggered: false,
+      source: 'hybrid' as const,
+      llmLatencyMs: 40,
+      phraseCacheHits: 0,
+      phraseCacheNegativeSkipped: 0,
+      phraseCacheMisses: 0,
+      missedPhrases: [] as readonly string[],
+    };
+    const plan = makePlan();
+    const base = makeCompiled();
+    const compiled = makeCompiled({
+      query: { ...base.query, constraintExtraction: extraction },
+    });
+    const slice = planToObservabilitySlice('req-ce-v1', plan, compiled);
+    expect(slice.constraintExtraction).toEqual(extraction);
+  });
 });

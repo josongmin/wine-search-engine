@@ -8,6 +8,7 @@ import type { QueryBudget } from './query-budget.js';
 import type { QueryTargetType } from './query-target-type.js';
 import type { NormalizedQueryViews } from './query-views.js';
 import type { QueryDecompositionHint } from './query-decomposition.js';
+import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 
 /**
  * The understanding portion of a query plan — everything the planner
@@ -73,4 +74,10 @@ export interface QueryUnderstandingSnapshot {
 
   /** Optional decomposition hint for decomposition-aware execution. */
   readonly decompositionHint?: QueryDecompositionHint;
+
+  /**
+   * NL → constraint extraction provenance (rule vs LLM), when the planner produced it.
+   * ExecutionCompiler copies this into `CompiledWineQuery.query` — request-scoped, not singleton state.
+   */
+  readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
 }

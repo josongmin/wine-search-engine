@@ -30,8 +30,8 @@ const MIN_STEPS_FOUR_PLUS_CONSTRAINTS = 8;
  */
 const MIN_STEPS_THREE_CONSTRAINTS = 6;
 
-const PROPER_NOUN_PATTERN = /\b(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+\s+){0,3}[A-Z][a-zA-Z'\u00C0-\u017F-]+\b/;
-const VINTAGE_PATTERN = /\b(?:18|19|20)\d{2}\b/;
+const PROPER_NOUN_PATTERN = /(?<!\p{L}\p{N})(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+\s+){0,3}[A-Z][a-zA-Z'\u00C0-\u017F-]+(?!\p{L}\p{N})/u;
+const VINTAGE_PATTERN = /(?<!\p{L}\p{N})(?:18|19|20)\d{2}(?!\p{L}\p{N})/u;
 /** Hangul wine name patterns: 3+ consecutive Hangul syllables that look like
  *  a wine entity name (not common Korean words). The previous 2+ char pattern
  *  matched "와인", "년산" etc. causing false positives on generic queries like
@@ -40,20 +40,20 @@ const VINTAGE_PATTERN = /\b(?:18|19|20)\d{2}\b/;
 const HANGUL_SKU_PATTERN = /[\uAC00-\uD7A3]{3,}/;
 
 const ADVERSARIAL_PATTERNS: readonly RegExp[] = [
-  // SQL injection
-  /\b(?:select|insert|update|delete|drop|truncate|alter|create)\b[\s\S]{0,20}\b(?:from|into|table|database)\b/i,
+  // SQL injection — Unicode-aware boundaries replace \b (ASCII-only)
+  /(?<!\p{L}\p{N})(?:select|insert|update|delete|drop|truncate|alter|create)(?!\p{L}\p{N})[\s\S]{0,20}(?<!\p{L}\p{N})(?:from|into|table|database)(?!\p{L}\p{N})/iu,
   // Prompt injection
-  /\b(?:ignore\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules))\b/i,
-  /\bsystem\s*[:>]/i,
-  /\b(?:dan\s+mode|jailbreak)\b/i,
+  /(?<!\p{L}\p{N})(?:ignore\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules))(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})system\s*[:>]/iu,
+  /(?<!\p{L}\p{N})(?:dan\s+mode|jailbreak)(?!\p{L}\p{N})/iu,
   // Schema/PII extraction
-  /\b(?:db|database)\s+schema\b/i,
-  /\b(?:other|previous)\s+users?\b/i,
+  /(?<!\p{L}\p{N})(?:db|database)\s+schema(?!\p{L}\p{N})/iu,
+  /(?<!\p{L}\p{N})(?:other|previous)\s+users?(?!\p{L}\p{N})/iu,
   // PII / cross-tenant extraction
-  /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/i,
-  /(?:개인\s*정보|personal\s*(?:info|data)|이메일|email|전화번호|phone)/i,
+  /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/iu,
+  /(?:개인\s*정보|personal\s*(?:info|data)|이메일|email|전화번호|phone)/iu,
   // Schema / API leak
-  /(?:api\s*key|secret|password|비밀번호|토큰|token)/i,
+  /(?:api\s*key|secret|password|비밀번호|토큰|token)/iu,
   // Resource exhaustion patterns (extremely long repetitive input)
   /(.{5,})\1{10,}/,
 ];
@@ -110,12 +110,12 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
 
   // 3. Nested condition: 3+ constraint types in one query → needs more steps to decompose.
   const NESTED_CONDITION_INDICATORS: readonly RegExp[] = [
-    /(?:만\s*원|\d+\s*원|달러|\$|₩)/i,   // price — require 만원 or digit+원 to avoid matching 원래/원산지
-    /(?:레드|화이트|로제|스파클링|red|white|rosé|sparkling)/i, // color
-    /(?:이탈리아|프랑스|스페인|칠레|호주|미국|Italy|France|Spain|Chile|Australia|USA|Napa|Bordeaux|Burgundy|Tuscany)/i, // region
-    /(?:카베르네|메를로|피노|샤르도네|소비뇽|Cabernet|Merlot|Pinot|Chardonnay|Sauvignon|Riesling|Syrah|Nebbiolo)/i, // grape
-    /(?:타닌|산도|바디|드라이|스위트|tannin|acidity|body|dry|sweet|oaky|fruity)/i, // style
-    /(?:스테이크|파스타|치킨|해산물|삼겹살|steak|pasta|seafood|chicken|cheese)/i, // food
+    /(?:만\s*원|\d+\s*원|달러|\$|₩)/iu,   // price — require 만원 or digit+원 to avoid matching 원래/원산지
+    /(?:레드|화이트|로제|스파클링|red|white|rosé|sparkling)/iu, // color
+    /(?:이탈리아|프랑스|스페인|칠레|호주|미국|Italy|France|Spain|Chile|Australia|USA|Napa|Bordeaux|Burgundy|Tuscany)/iu, // region
+    /(?:카베르네|메를로|피노|샤르도네|소비뇽|Cabernet|Merlot|Pinot|Chardonnay|Sauvignon|Riesling|Syrah|Nebbiolo)/iu, // grape
+    /(?:타닌|산도|바디|드라이|스위트|tannin|acidity|body|dry|sweet|oaky|fruity)/iu, // style
+    /(?:스테이크|파스타|치킨|해산물|삼겹살|steak|pasta|seafood|chicken|cheese)/iu, // food
   ];
   const nestedHits = NESTED_CONDITION_INDICATORS.filter((re) => re.test(trimmed));
   if (nestedHits.length >= 3) {

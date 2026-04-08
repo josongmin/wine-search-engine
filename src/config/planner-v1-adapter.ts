@@ -30,6 +30,11 @@ export class PlannerV1Adapter implements QueryPlannerPort {
 
   constructor(private readonly planner: Planner) {}
 
+  /**
+   * Returns V1-shaped plan only. NL `constraintExtraction` is **not** on QueryPlanV1;
+   * use `planWithCompiled()` and read `compiled.query.constraintExtraction`, or call
+   * `planToObservabilitySlice` with the compiled object (it falls back to `compiled.query`).
+   */
   async plan(query: string, context?: PlannerContext): Promise<QueryPlanV1> {
     const { v1 } = await this._planBoth(query, context);
     return v1;

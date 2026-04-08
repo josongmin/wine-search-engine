@@ -128,7 +128,7 @@ describe('NLMapper', () => {
 
     describe('mapConstraints — multiple phrases', () => {
       it('maps multiple valid phrases to multiple constraints', async () => {
-        const constraints = await mapper.mapConstraints(['묵직한', '드라이', '선물용']);
+        const { constraints } = await mapper.mapConstraints(['묵직한', '드라이', '선물용']);
         expect(constraints).toHaveLength(3);
 
         const bodyConstraint = constraints.find((c) => c.attribute === 'body');
@@ -141,31 +141,31 @@ describe('NLMapper', () => {
       });
 
       it('unknown phrases are silently skipped', async () => {
-        const constraints = await mapper.mapConstraints(['묵직한', '존재하지않는표현', '드라이']);
+        const { constraints } = await mapper.mapConstraints(['묵직한', '존재하지않는표현', '드라이']);
         expect(constraints).toHaveLength(2);
       });
 
       it('empty phrase list returns empty array', async () => {
-        const constraints = await mapper.mapConstraints([]);
+        const { constraints } = await mapper.mapConstraints([]);
         expect(constraints).toHaveLength(0);
       });
 
       it('all unknown phrases returns empty array', async () => {
-        const constraints = await mapper.mapConstraints(['unknown1', 'unknown2']);
+        const { constraints } = await mapper.mapConstraints(['unknown1', 'unknown2']);
         expect(constraints).toHaveLength(0);
       });
     });
 
     describe('constraint shape', () => {
       it('constraint includes source_phrase and confidence', async () => {
-        const constraints = await mapper.mapConstraints(['묵직한']);
+        const { constraints } = await mapper.mapConstraints(['묵직한']);
         expect(constraints[0]?.source_phrase).toBe('묵직한');
         expect(constraints[0]?.confidence).toBeGreaterThan(0);
         expect(constraints[0]?.confidence).toBeLessThanOrEqual(1);
       });
 
       it('occasion constraint converts "in" operator value to array', async () => {
-        const constraints = await mapper.mapConstraints(['선물용']);
+        const { constraints } = await mapper.mapConstraints(['선물용']);
         const c = constraints[0];
         expect(c?.operator).toBe('in');
         // toNormalizedConstraint wraps single string value in array
@@ -174,7 +174,7 @@ describe('NLMapper', () => {
       });
 
       it('range operator constraint converts value to {min, max} object', async () => {
-        const constraints = await mapper.mapConstraints(['적당히 달달한']);
+        const { constraints } = await mapper.mapConstraints(['적당히 달달한']);
         const c = constraints[0];
         expect(c?.operator).toBe('range');
         expect(typeof c?.value).toBe('object');

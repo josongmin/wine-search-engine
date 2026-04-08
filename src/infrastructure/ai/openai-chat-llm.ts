@@ -170,7 +170,7 @@ export class OpenAiChatLlm implements ChatLlmPort {
     const expDelay = Math.min(baseMs * 2 ** (attempt - 1), maxMs);
     const delay = Math.floor(Math.random() * expDelay);
     return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => resolve(), delay);
+      const timer = setTimeout(() => { resolve(); }, delay);
       if (signal) {
         const onAbort = () => {
           clearTimeout(timer);

@@ -19,24 +19,37 @@ import { createEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 
 // ---------------------------------------------------------------------------
+// Schema bounds — named constants so lint catches accidental magic numbers
+// ---------------------------------------------------------------------------
+
+/** Max characters for a search query string passed to the tool. */
+const SEARCH_QUERY_MAX_LEN = 500;
+/** Max results the agent can request in a single search call. */
+const SEARCH_LIMIT_MAX = 20;
+/** Max KRW price the agent can filter on (~100M KRW, safely above any real wine). */
+const MAX_PRICE_KRW_BOUND = 100_000_000;
+/** Top-N results shown in the observation string (controls context window usage). */
+const SUMMARY_TOP_N = 5;
+
+// ---------------------------------------------------------------------------
 // Input schemas (same as tool-schemas.ts — reusing patterns)
 // ---------------------------------------------------------------------------
 
 const SearchInputSchema = z.object({
-  query: z.string().min(1).max(500),
-  limit: z.number().int().min(1).max(20).optional(),
+  query: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
+  limit: z.number().int().min(1).max(SEARCH_LIMIT_MAX).optional(),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
   /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]). */
   exclude_grapes: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   /** Countries/regions to exclude (e.g. ["France", "프랑스"]). */
   exclude_regions: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
-  max_price_krw: z.number().int().min(0).max(100_000_000).optional(),
+  max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
 });
 
 const CompareInputSchema = z.object({
-  query_a: z.string().min(1).max(500),
-  query_b: z.string().min(1).max(500),
+  query_a: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
+  query_b: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
 });
 
 const DrinkingWindowInputSchema = z.object({
@@ -46,6 +59,9 @@ const DrinkingWindowInputSchema = z.object({
 
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1),
+  /** Budget in Korean Won (KRW). Use this instead of USD amounts. */
+  max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
+  /** Legacy USD price field — accepted for backwards compat but converted internally. */
   max_price: z.number().finite().optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
 });
@@ -431,7 +447,10 @@ export async function executeAgentTool(
         return { observation: `Invalid input for get_food_pairings: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
       const parsed = parseResult.data;
-      const query = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}${parsed.max_price ? ` under $${parsed.max_price}` : ''}`;
+      // Prefer explicit KRW budget; fall back to legacy USD field (converted).
+      const budgetKrw = parsed.max_price_krw
+        ?? (parsed.max_price !== undefined ? Math.round(parsed.max_price * 1_400) : undefined);
+      const query = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}${budgetKrw !== undefined ? ` under ${budgetKrw} KRW` : ''}`;
       const response = await deps.searchUseCase.execute({ query }, requestId);
 
       if (response.queryType !== 'search') {
@@ -515,7 +534,7 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     });
   }
 
-  const lines = displayResults.slice(0, 5).map((r, i) => {
+  const lines = displayResults.slice(0, SUMMARY_TOP_N).map((r, i) => {
     const parts = [
       `${i + 1}. ${r.entity.canonicalLabel}`,
       `(id: ${r.entity.entityId})`,
@@ -530,7 +549,7 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     return parts.join(' | ');
   });
 
-  return `Found ${results.length} results (showing top ${Math.min(5, displayResults.length)}):\n${lines.join('\n')}`;
+  return `Found ${results.length} results (showing top ${Math.min(SUMMARY_TOP_N, displayResults.length)}):\n${lines.join('\n')}`;
 }
 
 function summarizeComparison(response: ComparisonSearchResponse): string {

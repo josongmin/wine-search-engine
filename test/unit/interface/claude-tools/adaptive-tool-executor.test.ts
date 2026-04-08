@@ -181,7 +181,7 @@ describe('AdaptiveToolExecutor', () => {
       expect(executeSpyOn).toHaveBeenCalledTimes(2);
 
       // Check first call: execute(toolName, input, requestId)
-      const [toolName1, input1, requestId1] = executeSpyOn.mock.calls[0]!;
+      const [toolName1, , requestId1] = executeSpyOn.mock.calls[0]!;
       expect(toolName1).toBe('search_wines');
       expect(requestId1).toBe('req-fallback');
 
@@ -335,7 +335,7 @@ describe('AdaptiveToolExecutor', () => {
       executeSpyOn.mockResolvedValueOnce(emptyResponse);
       executeSpyOn.mockResolvedValueOnce(mockNonEmptySearchResponse);
 
-      const result = await adaptiveExecutor.executeWithFallback(
+      await adaptiveExecutor.executeWithFallback(
         'search_wines',
         { query: 'test', retrieval_mode: 'auto' },
         'req-empty-len',

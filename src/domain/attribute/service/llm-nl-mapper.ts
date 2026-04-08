@@ -24,7 +24,8 @@ import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
 import type { PhraseCachePort } from '../port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
-import { NLMapper, toNormalizedConstraint } from './nl-mapper.js';
+import type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
+import { NLMapper, toNormalizedConstraint, type MapConstraintsResult } from './nl-mapper.js';
 import {
   LlmConstraintResponseSchema,
   LLM_ALLOWED_ATTRIBUTES,
@@ -68,7 +69,8 @@ const PROMPT_FINGERPRINT = createHash('sha1').update(SYSTEM_PROMPT).digest('hex'
 export const CACHE_KEY_NAMESPACE = `${LLM_MAPPING_VERSION}:${PROMPT_FINGERPRINT}`;
 
 /**
- * Observability data emitted per mapConstraints() call.
+ * Observability payload returned from {@link NLMapper.mapConstraints} as
+ * `constraintExtraction` (request-scoped — not stored on the service instance).
  *
  * Phrase-cache breakdown (operators reading this for cost dashboards):
  *  - phraseCacheHits: cache returned a non-empty entry that produced ≥1
@@ -81,23 +83,9 @@ export const CACHE_KEY_NAMESPACE = `${LLM_MAPPING_VERSION}:${PROMPT_FINGERPRINT}
  * were actually checked against the cache (i.e. missedPhrases capped at
  * MAX_LLM_PHRASES). When phraseCache is undefined, all three are 0.
  */
-export interface ConstraintExtractionTrace {
-  readonly candidatePhraseCount: number;
-  readonly ruleTableHitCount: number;
-  readonly llmHitCount: number;
-  readonly llmSkippedCount: number;
-  readonly fallbackTriggered: boolean;
-  readonly source: 'rule_only' | 'llm_only' | 'hybrid' | 'fallback';
-  readonly llmLatencyMs: number | null;
-  readonly phraseCacheHits: number;
-  readonly phraseCacheNegativeSkipped: number;
-  readonly phraseCacheMisses: number;
-  readonly missedPhrases: readonly string[];
-}
+export type { ConstraintExtractionTrace } from '../model/constraint-extraction-trace.js';
 
 export class LlmNLMapper extends NLMapper {
-  private _lastExtractionTrace: ConstraintExtractionTrace | undefined;
-
   constructor(
     mappingTable: MappingTablePort,
     private readonly chatLlm: ChatLlmPort,
@@ -108,19 +96,11 @@ export class LlmNLMapper extends NLMapper {
   }
 
   /**
-   * Returns the trace from the most recent {@link mapConstraints} call.
-   * Used by the Planner to populate {@link QueryObservabilitySlice}.
-   */
-  getLastExtractionTrace(): ConstraintExtractionTrace | undefined {
-    return this._lastExtractionTrace;
-  }
-
-  /**
    * Maps phrases to constraints using rule table first, then LLM for misses.
    */
   override async mapConstraints(
     phrases: readonly string[],
-  ): Promise<NormalizedConstraint[]> {
+  ): Promise<MapConstraintsResult> {
     const ruleResults: NormalizedConstraint[] = [];
     const missedPhrases: string[] = [];
 
@@ -264,7 +244,7 @@ export class LlmNLMapper extends NLMapper {
           : hasLlmHits ? 'llm_only'
             : 'fallback';
 
-    this._lastExtractionTrace = {
+    const constraintExtraction: ConstraintExtractionTrace = {
       candidatePhraseCount: phrases.length,
       ruleTableHitCount: ruleResults.length,
       llmHitCount: llmResults.length,
@@ -292,7 +272,7 @@ export class LlmNLMapper extends NLMapper {
       'constraint extraction complete',
     );
 
-    return allResults;
+    return { constraints: allResults, constraintExtraction };
   }
 
   /**
@@ -307,29 +287,31 @@ export class LlmNLMapper extends NLMapper {
 
   private async callLlm(phrases: readonly string[]): Promise<LlmConstraintItem[]> {
     const userMessage = JSON.stringify(phrases);
-
-    // ChatLlmPort.complete() doesn't accept AbortSignal, so we enforce
-    // timeout via Promise.race — the LLM call continues in the background
-    // but its result is discarded if the timeout fires first.
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_resolve, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`LLM query interpreter timed out after ${this.llmTimeoutMs}ms`));
-      }, this.llmTimeoutMs);
-    });
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => {
+      controller.abort();
+    }, this.llmTimeoutMs);
+    const llmTimeoutError = (): Error =>
+      new Error(`LLM query interpreter timed out after ${this.llmTimeoutMs}ms`);
 
     try {
-      const result = await Promise.race([
-        this.chatLlm.complete({
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: userMessage },
-          ],
-          temperature: 0,
-          maxOutputTokens: 512,
-        }),
-        timeoutPromise,
-      ]);
+      const result = await this.chatLlm.complete({
+        messages: [
+          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'user', content: userMessage },
+        ],
+        temperature: 0,
+        maxOutputTokens: 512,
+        abortSignal: controller.signal,
+      });
+      // Disarm timeout as soon as the provider returns so a late timer tick
+      // cannot fire while we parse/validate synchronously.
+      clearTimeout(timeoutHandle);
+      // Real adapters reject when aborted; non-compliant mocks might still
+      // resolve later — do not treat that as a successful completion.
+      if (controller.signal.aborted) {
+        throw llmTimeoutError();
+      }
 
       const parsed: unknown = JSON.parse(result.text);
       const validated = LlmConstraintResponseSchema.safeParse(parsed);
@@ -343,10 +325,13 @@ export class LlmNLMapper extends NLMapper {
       }
 
       return validated.data;
-    } finally {
-      if (timeoutHandle !== undefined) {
-        clearTimeout(timeoutHandle);
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw llmTimeoutError();
       }
+      throw err;
+    } finally {
+      clearTimeout(timeoutHandle);
     }
   }
 }

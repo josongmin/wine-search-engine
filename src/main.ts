@@ -33,9 +33,7 @@ async function configureGlobalHttpDispatcher(): Promise<void> {
     // module resolution check; if the package isn't present, the catch
     // arm logs and falls back to default dispatcher behavior.
     const undiciSpec = 'undici';
-    const undici: unknown = await (
-      Function('s', 'return import(s)') as (s: string) => Promise<unknown>
-    )(undiciSpec).catch(() => null);
+    const undici: unknown = await (import(undiciSpec as never) as Promise<unknown>).catch(() => null);
     if (undici === null || typeof undici !== 'object') return;
     const mod = undici as {
       Agent?: new (opts: Record<string, unknown>) => unknown;

@@ -163,7 +163,7 @@ const KOREAN_COUNTRY_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/스페인|spain|spanish/iu, 'Spain'],
   [/호주|australia|australian/iu, 'Australia'],
   [/칠레|chile|chilean/iu, 'Chile'],
-  [/미국|미\b|usa|united\s+states|american/iu, 'USA'],
+  [/미국|미(?!\p{L}\p{N})|usa|united\s+states|american/iu, 'USA'],
   [/아르헨티나|argentina|argentinian/iu, 'Argentina'],
   [/독일|germany|german/iu, 'Germany'],
   [/포르투갈|portugal|portuguese/iu, 'Portugal'],
@@ -303,7 +303,7 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
  */
 function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vintageMax'> {
   // Year range: "2018-2022" or "2018~2022"
-  const rangeMatch = /\b((?:19|20)\d{2})[~\-–]((?:19|20)\d{2})\b/u.exec(q);
+  const rangeMatch = /(?<!\p{L}\p{N})((?:19|20)\d{2})[~\-–]((?:19|20)\d{2})(?!\p{L}\p{N})/u.exec(q);
   if (rangeMatch !== null && rangeMatch[1] !== undefined && rangeMatch[2] !== undefined) {
     const lo = parseInt(rangeMatch[1], 10);
     const hi = parseInt(rangeMatch[2], 10);
