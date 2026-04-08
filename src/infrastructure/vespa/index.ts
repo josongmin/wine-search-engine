@@ -20,4 +20,5 @@ export {
   fromVespaFields,
   buildSparseFilters,
   buildDenseFilters,
+  buildNumericRangeFilters,
 } from './mapping.js';

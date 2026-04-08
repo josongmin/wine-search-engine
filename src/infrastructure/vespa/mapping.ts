@@ -21,6 +21,10 @@ import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,
 } from '../../domain/shared/constants.js';
+import {
+  type SearchConstraints,
+  krwToUsd,
+} from '../../domain/query/service/search-constraint-extractor.js';
 
 /** Decimal radix for parseInt on external filter tokens. */
 const DECIMAL_RADIX = 10;
@@ -669,6 +673,71 @@ function clampNum(value: number, min: number, max: number): number {
 
 function clampInt(value: number, min: number, max: number): number {
   return Math.round(clampNum(value, min, max));
+}
+
+/**
+ * Builds YQL AND filter clauses directly from a {@link SearchConstraints} object
+ * for price (KRW → USD) and vintage year numeric range filters.
+ *
+ * This is the Phase 1-B injection path: constraints extracted lexically from the
+ * raw query (via `extractSearchConstraints`) are injected as hard YQL numeric
+ * predicates, bypassing the soft/hard classification in the planner.
+ *
+ * Vespa fields used:
+ *   - `price_usd`    (float) — Korean KRW prices converted via {@link krwToUsd}
+ *   - `vintage_year` (int)   — vintage year range, clamped to domain bounds
+ *
+ * @param constraints - Structured constraints from `extractSearchConstraints`.
+ * @returns A YQL fragment starting with ` AND ` for each active filter, or `""` if none.
+ *
+ * @example
+ * buildNumericRangeFilters({ maxPriceKrw: 50_000 })
+ * // → ' AND price_usd <= 37.04'
+ *
+ * buildNumericRangeFilters({ vintageMin: 2015, vintageMax: 2020 })
+ * // → ' AND vintage_year >= 2015 AND vintage_year <= 2020'
+ */
+export function buildNumericRangeFilters(constraints: SearchConstraints): string {
+  const clauses: string[] = [];
+
+  // Price range: KRW → USD, clamped to [0, MAX_PRICE_USD_YQL_CLAMP].
+  if (constraints.minPriceKrw !== undefined) {
+    const usd = krwToUsd(constraints.minPriceKrw);
+    if (Number.isFinite(usd)) {
+      const clamped = clampNum(usd, 0, MAX_PRICE_USD_YQL_CLAMP);
+      clauses.push(`price_usd >= ${clamped.toFixed(2)}`);
+    }
+  }
+
+  if (constraints.maxPriceKrw !== undefined) {
+    const usd = krwToUsd(constraints.maxPriceKrw);
+    if (Number.isFinite(usd)) {
+      const clamped = clampNum(usd, 0, MAX_PRICE_USD_YQL_CLAMP);
+      clauses.push(`price_usd <= ${clamped.toFixed(2)}`);
+    }
+  }
+
+  // Vintage year range: integer, clamped to domain bounds.
+  if (constraints.vintageMin !== undefined) {
+    const yr = clampInt(
+      constraints.vintageMin,
+      MIN_PRODUCED_VINTAGE_YEAR,
+      MAX_PRODUCED_VINTAGE_YEAR,
+    );
+    clauses.push(`vintage_year >= ${yr}`);
+  }
+
+  if (constraints.vintageMax !== undefined) {
+    const yr = clampInt(
+      constraints.vintageMax,
+      MIN_PRODUCED_VINTAGE_YEAR,
+      MAX_PRODUCED_VINTAGE_YEAR,
+    );
+    clauses.push(`vintage_year <= ${yr}`);
+  }
+
+  if (clauses.length === 0) return '';
+  return ' AND ' + clauses.join(' AND ');
 }
 
 export function buildSparseFilters(filters: readonly string[]): string {
