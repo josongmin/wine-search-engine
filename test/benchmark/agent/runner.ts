@@ -32,6 +32,7 @@ import { resolve as resolvePath } from 'node:path';
 import { loadConfig } from '../../../src/config/env.js';
 import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestrator.js';
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
+import { QuerySanitizer } from '../../../src/domain/security/service/query-sanitizer.js';
 import { AGENT_SCENARIOS, AGENT_SCENARIOS_WITH_PHASE2 } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
@@ -159,10 +160,78 @@ function parseArgs(): CliArgs {
 // Mock container (smoke mode)
 // ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Generate a mock canonicalLabel that:
+ * 1. Includes query terms so context-precision scoring works (not random pool)
+ * 2. EXCLUDES any term that the query asks to negate ("빼고/말고/제외/not/without")
+ *
+ * Real-mode achieves this via YQL `!(field contains)` filters; mock-mode must
+ * mirror this contract to avoid false-floor scores in the negation tier.
+ */
+function generateMockResultLabel(query: string): { label: string; producer: string; region: string } {
+  // Extract Korean negation terms (term BEFORE the suffix).
+  const negatedTerms = new Set<string>();
+  for (const m of query.matchAll(/(\S+)\s*(?:빼고|제외하고|제외|말고|없이|빼)/giu)) {
+    if (m[1]) negatedTerms.add(m[1].toLowerCase());
+  }
+  // Extract English negation terms (term AFTER the prefix).
+  for (const m of query.matchAll(/(?:not|without|exclude|skip|no)\s+([\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+)?)/giu)) {
+    if (m[1]) negatedTerms.add(m[1].toLowerCase());
+  }
+  // Common grape/region aliases that should also be filtered (e.g. "카베르네 소비뇽" → also block "Cabernet").
+  const ALIASES: Record<string, readonly string[]> = {
+    '카베르네': ['cabernet'],
+    '카베르네 소비뇽': ['cabernet sauvignon', 'cabernet'],
+    '메를로': ['merlot'],
+    '피노': ['pinot'],
+    '샤도네이': ['chardonnay'],
+    '프랑스': ['france', 'french', 'bordeaux', 'burgundy', 'champagne'],
+    '이탈리아': ['italy', 'italian', 'tuscany', 'piedmont'],
+    '스페인': ['spain', 'spanish', 'rioja'],
+  };
+  const blocked = new Set<string>();
+  for (const t of negatedTerms) {
+    blocked.add(t);
+    for (const alias of ALIASES[t] ?? []) blocked.add(alias);
+  }
+
+  // Build a label that includes the query (for context-precision) but with negated terms stripped.
+  let label = query.slice(0, 80);
+  let producer = 'Benchmark Winery';
+  let region = 'Test Region';
+  if (blocked.size > 0) {
+    // Strip blocked terms from the label (case-insensitive).
+    for (const term of blocked) {
+      const re = new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
+      label = label.replace(re, '');
+    }
+    label = label.replace(/\s+/g, ' ').trim();
+    // If the negation removed everything, fall back to a safe alternative.
+    if (label.length < 5) {
+      label = 'Alternative Wine Selection';
+    } else {
+      label = `Result: ${label}`;
+    }
+    // Use a producer/region that doesn't conflict with blocked terms.
+    if (!Array.from(blocked).some((b) => 'tempranillo rioja'.includes(b))) {
+      producer = 'Mock Bodega';
+      region = 'Rioja';
+    } else if (!Array.from(blocked).some((b) => 'riesling mosel'.includes(b))) {
+      producer = 'Demo Weingut';
+      region = 'Mosel';
+    }
+  } else {
+    label = `Result for: ${label}`;
+  }
+
+  return { label, producer, region };
+}
+
 function buildMockToolDeps(): AgentToolDeps {
   return {
     searchUseCase: {
       async execute(request: { query: string }, requestId: string) {
+        const mock = generateMockResultLabel(request.query);
         return {
           queryType: 'search' as const,
           engineDecision: {
@@ -185,10 +254,10 @@ function buildMockToolDeps(): AgentToolDeps {
             {
               entity: {
                 entityId: 'wine-bench-001',
-                canonicalLabel: `Result for: ${request.query.slice(0, 50)}`,
+                canonicalLabel: mock.label,
                 type: 'wine',
-                producer: 'Benchmark Winery',
-                region: 'Test Region',
+                producer: mock.producer,
+                region: mock.region,
               },
               relevanceScore: 0.85,
               match: {
@@ -607,7 +676,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   }
 
   const orchestrator = new AgentOrchestrator(
-    { chatLlm, toolDeps },
+    { chatLlm, toolDeps, querySanitizer: new QuerySanitizer() },
     {
       maxSteps: 8, // generous; per-scenario maxSteps is the real budget via overrides
       agentTimeoutMs: 60_000,
