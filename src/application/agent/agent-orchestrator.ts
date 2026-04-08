@@ -37,8 +37,9 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
-/** Wall-clock budget for the observation-based synthesis LLM call (Layer 1 fallback). */
-const SYNTHESIS_TIMEOUT_MS = 12_000;
+/** Wall-clock budget for the observation-based synthesis LLM call (Layer 1 fallback).
+ * gpt-4o averages 20-30s per call; 12s caused consistent timeouts. */
+const SYNTHESIS_TIMEOUT_MS = 60_000;
 /** Wall-clock budget for the Layer 2 single-shot fallback search. */
 const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
 /** First synthesis attempt: full token budget (allows detailed, well-structured answers). */
@@ -252,7 +253,7 @@ export class AgentOrchestrator {
         const messages = [
           buildSystemMessage(),
           ...(isLastStep
-            ? [{ ...userMsg, content: userMsg.content + '\n\n[SYSTEM: This is your LAST step. You MUST provide a final answer NOW using the information you have gathered. Do NOT call another tool.]' }]
+            ? [{ ...userMsg, content: userMsg.content + `\n\n[SYSTEM:${requestId}:LAST_STEP. This is your LAST step. You MUST provide a final answer NOW using the information you have gathered. Do NOT call another tool.]` }]
             : [userMsg]),
           ...buildStepMessages(steps),
         ];
@@ -467,20 +468,30 @@ export class AgentOrchestrator {
     // Observation-based synthesis: if we have tool results but no answer,
     // try to synthesize from what we already gathered before doing a fresh search.
     // This avoids the "agent ran 3 steps, got great results, then returned nothing" failure.
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer') {
+    // Skip entirely if caller already disconnected — synthesis costs 1-2 LLM round-trips
+    // that nobody will receive.
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && abortSignal?.aborted !== true) {
       const obsSteps = steps.filter((s) => s.observation !== undefined && s.observation.length > 0);
       if (obsSteps.length > 0) {
+        // requestId embedded in sentinel to prevent adversarial tool results from
+        // containing the literal string and colliding with our synthesis detector.
+        const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED. You must output ONLY this JSON format:\n{"thought":"brief summary of what you found","answer":"your complete response to the user in their language"}\nDo NOT output "action". Do NOT call any tool. Output the "answer" field now with your best response based on the tool results above.]`;
         const synthMessages = [
           buildSystemMessage(),
           buildUserMessage(query),
           ...buildStepMessages(steps),
           {
             role: 'user' as const,
-            content: '[SYSTEM: You have gathered information but did not provide a final answer. Based on the tool results above, provide your final answer NOW.]',
+            content: synthSentinel,
           },
         ];
         const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
+          // Short-circuit if caller disconnected before we even start the LLM call.
+          if (abortSignal?.aborted === true) return undefined;
           const synthAbort = new AbortController();
+          // Propagate caller abort into the synthesis controller.
+          const propagateSynthAbort = (): void => { synthAbort.abort(); };
+          abortSignal?.addEventListener('abort', propagateSynthAbort, { once: true });
           const synthTimer = setTimeout(() => {
             synthAbort.abort();
           }, SYNTHESIS_TIMEOUT_MS);
@@ -496,6 +507,7 @@ export class AgentOrchestrator {
               ? parsedSynth.answer
               : undefined;
           } finally {
+            abortSignal?.removeEventListener('abort', propagateSynthAbort);
             clearTimeout(synthTimer);
           }
         };
@@ -507,7 +519,8 @@ export class AgentOrchestrator {
           log.error({ err: synthErr1, requestId }, `synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         }
         // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw)
-        if (synthAnswer === undefined) {
+        // Skip if caller disconnected between attempts.
+        if (synthAnswer === undefined && abortSignal?.aborted !== true as boolean) {
           try {
             log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
             synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
@@ -531,15 +544,19 @@ export class AgentOrchestrator {
     // penalise correct tool execution as a complete failure.
     const hasToolObservations = steps.some((s) => s.observation !== undefined && s.observation.length > 0);
 
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations) {
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations && abortSignal?.aborted !== true) {
       // Layer 2: single-shot fallback search — only when the agent made NO tool calls.
       // Skip when tool observations exist; those cases go directly to Layer 3 so we
       // preserve the agent's correct tool execution in the terminationReason.
+      // Also skip if caller already disconnected (abortSignal.aborted).
       //
       // Cap the fallback search at FALLBACK_SEARCH_TIMEOUT_MS (module-scope const).
       // This is independent of perStepTimeoutMs to avoid the inversion bug where
       // low perStep settings gave the fallback the same exhausted budget.
       const fallbackController = new AbortController();
+      // Chain caller abort → fallback controller so client disconnect cancels the search.
+      const propagateFallbackAbort = (): void => { fallbackController.abort(); };
+      abortSignal?.addEventListener('abort', propagateFallbackAbort, { once: true });
       const fallbackTimer = setTimeout(
         () => {
           fallbackController.abort();
@@ -571,6 +588,7 @@ export class AgentOrchestrator {
         // Log so an outage of the fallback path is observable instead of silent.
         log.error({ err, requestId }, 'agent fallback search failed');
       } finally {
+        abortSignal?.removeEventListener('abort', propagateFallbackAbort);
         clearTimeout(fallbackTimer);
       }
     }

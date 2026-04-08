@@ -1,9 +1,11 @@
 /**
- * SOTA++ agent benchmark runner.
+ * SOTA++ agent benchmark runner — real container (PG + Redis + Vespa).
+ *
+ * For a fast mock-only smoke test (no infra required), use smoke.ts instead:
+ *   npx tsx test/benchmark/agent/smoke.ts
  *
  * Usage:
- *   npx tsx test/benchmark/agent/runner.ts                                    # full suite, mock container
- *   npx tsx test/benchmark/agent/runner.ts --container real                   # real DI container (PG + Redis)
+ *   npx tsx test/benchmark/agent/runner.ts                                    # full suite, real container
  *   npx tsx test/benchmark/agent/runner.ts --tier single_shot
  *   npx tsx test/benchmark/agent/runner.ts --id 1,2,3
  *   npx tsx test/benchmark/agent/runner.ts --concurrency 5
@@ -19,6 +21,8 @@
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # retrieval-only evaluation
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
+ * Wall-clock profiling: `wallClock` in JSON + "wall clock" section on stderr
+ * (init → scenario pool → shutdown, plus per-scenario mean/sum).
  *
  * Exit codes:
  *   0 — success (and overall score not worse than baseline by --fail-if-worse-than)
@@ -50,7 +54,7 @@ interface CliArgs {
   readonly profile?: 'quick' | 'standard' | 'nightly' | 'retrieval';
   readonly tierFilter?: ScenarioTier;
   readonly idFilter?: readonly number[];
-  readonly container: 'mock' | 'real';
+  readonly container: 'real';
   readonly concurrency: number;
   readonly maxRetries: number;
   readonly seed?: number;
@@ -90,7 +94,7 @@ function parseArgs(): CliArgs {
     profile,
     tierFilter: get('--tier') as ScenarioTier | undefined,
     idFilter: explicitId !== undefined ? explicitId.split(',').map(Number) : undefined,
-    container: (get('--container') as 'mock' | 'real' | undefined) ?? 'mock',
+    container: 'real',
     concurrency: Number.parseInt(explicitConcurrency ?? '1', 10) || 1,
     maxRetries: Number.parseInt(get('--max-retries') ?? '1', 10) || 1,
     seed: get('--seed') !== undefined ? Number.parseInt(get('--seed')!, 10) : undefined,
@@ -157,183 +161,6 @@ function parseArgs(): CliArgs {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Mock container (smoke mode)
-// ─────────────────────────────────────────────────────────────────────
-
-/**
- * Generate a mock canonicalLabel that:
- * 1. Includes query terms so context-precision scoring works (not random pool)
- * 2. EXCLUDES any term that the query asks to negate ("빼고/말고/제외/not/without")
- *
- * Real-mode achieves this via YQL `!(field contains)` filters; mock-mode must
- * mirror this contract to avoid false-floor scores in the negation tier.
- *
- * NOTE: Because the label embeds the query, mock contextRelevance scores are
- * artificially high (~94%) vs real Vespa results (~46%). This is intentional —
- * mock mode tests agent logic, not retrieval quality. The gap is genuine signal:
- * real contextRelevance measures actual retrieval relevance. Do NOT use mock
- * contextRelevance scores to make claims about retrieval quality; use real-mode.
- */
-function generateMockResultLabel(query: string): { label: string; producer: string; region: string } {
-  // Extract Korean negation terms (term BEFORE the suffix).
-  const negatedTerms = new Set<string>();
-  for (const m of query.matchAll(/(\S+)\s*(?:빼고|제외하고|제외|말고|없이|빼)/giu)) {
-    if (m[1]) negatedTerms.add(m[1].toLowerCase());
-  }
-  // Extract English negation terms (term AFTER the prefix).
-  for (const m of query.matchAll(/(?:not|without|exclude|skip|no)\s+([\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+)?)/giu)) {
-    if (m[1]) negatedTerms.add(m[1].toLowerCase());
-  }
-  // Common grape/region aliases that should also be filtered (e.g. "카베르네 소비뇽" → also block "Cabernet").
-  const ALIASES: Record<string, readonly string[]> = {
-    '카베르네': ['cabernet'],
-    '카베르네 소비뇽': ['cabernet sauvignon', 'cabernet'],
-    '메를로': ['merlot'],
-    '피노': ['pinot'],
-    '샤도네이': ['chardonnay'],
-    '프랑스': ['france', 'french', 'bordeaux', 'burgundy', 'champagne'],
-    '이탈리아': ['italy', 'italian', 'tuscany', 'piedmont'],
-    '스페인': ['spain', 'spanish', 'rioja'],
-  };
-  const blocked = new Set<string>();
-  for (const t of negatedTerms) {
-    blocked.add(t);
-    for (const alias of ALIASES[t] ?? []) blocked.add(alias);
-  }
-
-  // Build a label that includes the query (for context-precision) but with negated terms stripped.
-  let label = query.slice(0, 80);
-  let producer = 'Benchmark Winery';
-  let region = 'Test Region';
-  if (blocked.size > 0) {
-    // Strip blocked terms from the label (case-insensitive, Unicode-aware).
-    // MUST NOT use \b — it is ASCII-only and silently fails on Korean/accented chars (CLAUDE.md rule #8).
-    for (const term of blocked) {
-      const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'giu');
-      label = label.replace(re, ' ');
-    }
-    label = label.replace(/\s+/g, ' ').trim();
-    // If the negation removed everything, fall back to a safe alternative.
-    if (label.length < 5) {
-      label = 'Alternative Wine Selection';
-    } else {
-      label = `Result: ${label}`;
-    }
-    // Use a producer/region that doesn't conflict with blocked terms.
-    if (!Array.from(blocked).some((b) => 'tempranillo rioja'.includes(b))) {
-      producer = 'Mock Bodega';
-      region = 'Rioja';
-    } else if (!Array.from(blocked).some((b) => 'riesling mosel'.includes(b))) {
-      producer = 'Demo Weingut';
-      region = 'Mosel';
-    }
-  } else {
-    label = `Result for: ${label}`;
-  }
-
-  return { label, producer, region };
-}
-
-/**
- * Build mock tool deps for smoke-mode benchmark runs.
- *
- * @param scenarioMap - All scenarios indexed by ID, used to look up
- *   `goldenEntityIds` so contextRecall is exercised in mock mode.
- *   When a scenario has goldenEntityIds defined, the first mock result
- *   carries `goldenEntityIds[0]` as its entityId, giving contextRecall
- *   a non-trivial (≥50%) score. Without this, every mock run returns the
- *   same hardcoded ID and no scenario ever matches, so contextRecall is
- *   always null. In real mode, actual Vespa entity IDs are returned.
- */
-function buildMockToolDeps(
-  scenarioMap: ReadonlyMap<number, AgentBenchmarkScenario>,
-): AgentToolDeps {
-  return {
-    searchUseCase: {
-      async execute(request: { query: string }, requestId: string) {
-        const mock = generateMockResultLabel(request.query);
-
-        // Derive scenario ID from requestId (format: "bench-<id>").
-        // Falls back to a deterministic per-scenario string when no golden IDs
-        // are defined, so entity IDs are at least scenario-unique in mock mode.
-        const scenarioId = requestId.startsWith('bench-')
-          ? Number.parseInt(requestId.slice('bench-'.length), 10)
-          : NaN;
-        const scenario = Number.isFinite(scenarioId) ? scenarioMap.get(scenarioId) : undefined;
-        const entityId =
-          scenario?.goldenEntityIds?.[0] ??
-          (Number.isFinite(scenarioId) ? `wine-bench-mock-${scenarioId}` : 'wine-bench-mock');
-
-        return {
-          queryType: 'search' as const,
-          engineDecision: {
-            decisionStatus: 'resolved' as const,
-            nextAction: 'return_result' as const,
-            route: 'hybrid',
-            decisionConfidence: 0.8,
-            confidenceSemantics: 'calibrated_decision_confidence' as const,
-            decisionTraceRef: 'bench-trace',
-            decisionSnapshot: {
-              model_versions: {},
-              index_versions: {},
-              policy_rule_version: '1.0.0',
-              threshold_profile_id: 'default-v1',
-              planner_version: '1.0.0',
-              feature_flags: {},
-            },
-          },
-          results: [
-            {
-              entity: {
-                entityId,
-                canonicalLabel: mock.label,
-                type: 'wine',
-                producer: mock.producer,
-                region: mock.region,
-              },
-              relevanceScore: 0.85,
-              match: {
-                matchType: 'hybrid' as const,
-                scoreComponents: {
-                  lexical: 0,
-                  semantic: 0.8,
-                  attribute: 0.7,
-                  popularity: 0.5,
-                  preferenceAlignment: 0.5,
-                },
-              },
-              constraints: { matched: [], unmet: [], inferred: [] },
-              uncertainty: {
-                uncertaintyConfidence: 0.9,
-                missingInfo: [],
-                approximationUsed: false,
-              },
-              evidenceItems: [
-                {
-                  type: 'semantic_relevance',
-                  source: 'benchmark',
-                  contribution: '+0.80',
-                  strength: 'high' as const,
-                  provenance: 'Benchmark evidence',
-                },
-              ],
-            },
-          ],
-          meta: {
-            requestId,
-            queryTimeMs: 10,
-            route: 'hybrid',
-            version: '1.0.0',
-            engine_schema_version: 'search_response_v1',
-          },
-        };
-      },
-    } as never,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────
 // Real container — wires the production DI graph for end-to-end benchmark
 // ─────────────────────────────────────────────────────────────────────
 
@@ -341,7 +168,7 @@ async function buildRealToolDeps(): Promise<{
   toolDeps: AgentToolDeps;
   shutdown: () => Promise<void>;
 }> {
-  // Lazy imports so mock-mode runs don't pay the PG/Redis import cost.
+  // Lazy imports so the module graph stays lean when imported for type checking.
   const { createContainer } = await import('../../../src/config/container.js');
   const { createManagedRuntimeHandles } = await import('../../../src/config/runtime-handles.js');
   const { createPgPool, shouldUsePgPool } = await import('../../../src/infrastructure/db/pg-pool.js');
@@ -648,12 +475,63 @@ export interface WilsonCi {
   readonly n: number;
 }
 
+/** Threshold: below this, print durations as integer ms instead of seconds. */
+const BENCHMARK_DURATION_MS_SHORT_MAX = 1_000;
+/** Seconds per minute for human-readable duration lines. */
+const BENCHMARK_SECONDS_PER_MINUTE = 60;
+/** Milliseconds per second. */
+const BENCHMARK_MS_PER_SECOND = 1_000;
+
+/**
+ * Formats a duration for CLI / logs (deterministic; no locale grouping).
+ * Exported for unit tests.
+ */
+export function formatBenchmarkDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return '0ms';
+  }
+  if (ms < BENCHMARK_DURATION_MS_SHORT_MAX) {
+    return `${Math.round(ms)}ms`;
+  }
+  const sec = ms / BENCHMARK_MS_PER_SECOND;
+  if (sec < BENCHMARK_SECONDS_PER_MINUTE) {
+    return `${sec.toFixed(1)}s`;
+  }
+  const wholeMin = Math.floor(sec / BENCHMARK_SECONDS_PER_MINUTE);
+  const remSec = sec - wholeMin * BENCHMARK_SECONDS_PER_MINUTE;
+  return `${wholeMin}m ${remSec.toFixed(0)}s`;
+}
+
+/**
+ * End-to-end wall clock for the benchmark process (distinct from per-scenario
+ * `summary.latencyMs`, which reflects orchestrator-reported durations).
+ */
+export interface BenchmarkWallClock {
+  /** Config load + container wiring + orchestrator construction. */
+  readonly initMs: number;
+  /**
+   * Wall time for `runWithConcurrency` (all scenarios). When concurrency is
+   * greater than 1 this is less than the sum of per-scenario walls.
+   */
+  readonly scenariosPhaseMs: number;
+  /** Pool quit / Redis close (capped by shutdown race timeout). */
+  readonly shutdownMs: number;
+  /** init + scenario phase + shutdown (full `runBenchmark`). */
+  readonly totalMs: number;
+  /** Arithmetic mean of per-scenario wall time (skipped scenarios excluded). */
+  readonly meanScenarioWallMs: number;
+  /** Sum of per-scenario wall times (sequential work-time lower bound). */
+  readonly sumScenarioWallMs: number;
+  /** Count of scenarios that contributed to mean/sum (executed or errored, not skipped). */
+  readonly scenarioWallSampleCount: number;
+}
+
 export interface BenchmarkReport {
   readonly timestamp: string;
   readonly model: string;
   readonly judgeModel: string | null;
   readonly judgeSamples: number;
-  readonly container: 'mock' | 'real';
+  readonly container: 'real';
   readonly seed: number | null;
   /** SHA-256 hash of the agent system prompt for reproducibility tracking. */
   readonly promptHash: string;
@@ -663,7 +541,16 @@ export interface BenchmarkReport {
   readonly errorCount: number;
   readonly criticalFailureCount: number;
   readonly judgeRequiredButSkippedCount: number;
+  /**
+   * Count of judgeRequired scenarios excluded from the overallScore aggregate
+   * because no judge was available (no-judge mode). These scenarios are still
+   * present in `results` but their scores do not contribute to overallScore
+   * or overallCi95 to prevent contamination of the aggregate.
+   */
+  readonly judgeRequiredExcludedCount: number;
   readonly judgeFailCount: number;
+  /** Wall-clock breakdown for the whole CLI run (profiling). */
+  readonly wallClock: BenchmarkWallClock;
   readonly results: readonly ScenarioResult[];
   readonly summary: {
     readonly overallScore: number;
@@ -717,6 +604,7 @@ function hasJudgeMaterial(exp: ScenarioExpectation): boolean {
 // ─────────────────────────────────────────────────────────────────────
 
 async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
+  const runStartedAt = Date.now();
   const config = loadConfig();
 
   if (config.openai.apiKey === undefined) {
@@ -742,38 +630,33 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       })
     : null;
 
-  // Build scenario list early so the mock container can look up goldenEntityIds.
   const baseScenarios = args.includePhase2 ? AGENT_SCENARIOS_WITH_PHASE2 : AGENT_SCENARIOS;
   const scenarios = filterScenarios(baseScenarios, args);
-  const scenarioMap = new Map<number, AgentBenchmarkScenario>(
-    baseScenarios.map((s) => [s.id, s]),
-  );
 
   // Container wiring
-  let toolDeps: AgentToolDeps;
-  let shutdown: () => Promise<void> = async () => {};
-  if (args.container === 'real') {
-    console.error('  [INIT] real container — wiring PG + Redis + production deps...');
-    const built = await buildRealToolDeps();
-    toolDeps = built.toolDeps;
-    shutdown = built.shutdown;
-  } else {
-    console.error('  [INIT] mock container (smoke mode — search returns synthetic results)');
-    toolDeps = buildMockToolDeps(scenarioMap);
-  }
+  console.error('  [INIT] real container — wiring PG + Redis + production deps...');
+  const built = await buildRealToolDeps();
+  const toolDeps = built.toolDeps;
+  const shutdown = built.shutdown;
 
   const orchestrator = new AgentOrchestrator(
     { chatLlm, toolDeps, querySanitizer: new QuerySanitizer() },
     {
       maxSteps: 8, // generous; per-scenario maxSteps is the real budget via overrides
-      agentTimeoutMs: 60_000,
-      perStepTimeoutMs: 20_000,
+      agentTimeoutMs: 120_000,
+      // gpt-4o takes 20-30s per call + up to 2s+4s+8s=14s 429 backoff → need 90s headroom.
+      // 20s caused backoff sleeps to be aborted mid-retry, cutting off the 429 recovery chain.
+      perStepTimeoutMs: 90_000,
       maxContextChars: 12_000,
       ...(args.seed !== undefined ? { seed: args.seed } : {}),
     },
   );
 
+  const initDoneAt = Date.now();
+
   let judgeFailCount = 0;
+  let scenarioWallMsSum = 0;
+  let scenarioWallSampleCount = 0;
 
   const results = await runWithConcurrency(
     scenarios,
@@ -860,12 +743,17 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
         const scored = scoreScenario(scenario, execution, judgeScore, faithScore);
         const elapsed = Date.now() - start;
+        scenarioWallMsSum += elapsed;
+        scenarioWallSampleCount++;
         console.error(
           `  [DONE] #${scenario.id} score=${scored.scores.overall.toFixed(2)} `
           + `steps=${scored.stepCount} ${elapsed}ms`,
         );
         return scored;
       } catch (err) {
+        const elapsed = Date.now() - start;
+        scenarioWallMsSum += elapsed;
+        scenarioWallSampleCount++;
         console.error(
           `  [FAIL] #${scenario.id} ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -879,6 +767,8 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       }
     },
   );
+
+  const scenariosDoneAt = Date.now();
 
   // Shutdown with timeout — pool.end() can hang indefinitely when PG
   // connections don't release, and redisClient.quit() can hang when the
@@ -895,7 +785,23 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     ),
   ]);
 
-  return buildReport(results, scenarios, modelId, judgeModelId, args, judgeFailCount);
+  const shutdownDoneAt = Date.now();
+
+  const initMs = initDoneAt - runStartedAt;
+  const scenariosPhaseMs = scenariosDoneAt - initDoneAt;
+  const shutdownMs = shutdownDoneAt - scenariosDoneAt;
+  const wallClock: BenchmarkWallClock = {
+    initMs,
+    scenariosPhaseMs,
+    shutdownMs,
+    totalMs: shutdownDoneAt - runStartedAt,
+    meanScenarioWallMs:
+      scenarioWallSampleCount > 0 ? scenarioWallMsSum / scenarioWallSampleCount : 0,
+    sumScenarioWallMs: scenarioWallMsSum,
+    scenarioWallSampleCount,
+  };
+
+  return buildReport(results, scenarios, modelId, judgeModelId, args, judgeFailCount, wallClock);
 }
 
 function filterScenarios(
@@ -918,14 +824,29 @@ function buildReport(
   judgeModel: string | null,
   args: CliArgs,
   judgeFailCount: number,
+  wallClock: BenchmarkWallClock,
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
+
+  // When judge is not available, judgeRequired scenarios cannot be reliably
+  // scored — their overall score is unreliable (rubric criteria go unchecked).
+  // Exclude them from the overallScore / overallCi95 aggregate to prevent
+  // contamination. They still appear in `results` for visibility.
+  const judgeAvailable = judgeModel !== null;
+  const judgeRequiredExcluded = judgeAvailable
+    ? []
+    : executed.filter((r) => r.judgeRequiredButSkipped);
+  const judgeRequiredExcludedCount = judgeRequiredExcluded.length;
+  // executedForAggregate: scenarios that contribute to the overall score.
+  const executedForAggregate = judgeAvailable
+    ? executed
+    : executed.filter((r) => !r.judgeRequiredButSkipped);
 
   // Numeric dimensions only — judge can be null when disabled, so handled separately.
   type NumericDim = 'executionEfficiency' | 'toolAccuracy' | 'stepEfficiency' | 'answerQuality' | 'terminationCorrectness' | 'costEfficiency' | 'overall';
   const avgScore = (field: NumericDim): number => {
-    if (executed.length === 0) return 0;
-    return executed.reduce((sum, r) => sum + r.scores[field], 0) / executed.length;
+    if (executedForAggregate.length === 0) return 0;
+    return executedForAggregate.reduce((sum, r) => sum + r.scores[field], 0) / executedForAggregate.length;
   };
 
   // Judge mean: only over scenarios that produced a non-null judge score.
@@ -947,9 +868,12 @@ function buildReport(
   const ctxRecallMean = ctxRecallScores.length > 0 ? ctxRecallScores.reduce((s, v) => s + v, 0) / ctxRecallScores.length : null;
 
   const judgeRequiredButSkippedCount = executed.filter((r) => r.judgeRequiredButSkipped).length;
+  // judgeRequiredExcludedCount already computed above (judgeRequiredExcluded.length).
 
+  // byTier uses executedForAggregate so per-tier scores are consistent with
+  // the overall aggregate (judgeRequired scenarios excluded in no-judge mode).
   const byTier: Record<string, { count: number; avgScore: number }> = {};
-  for (const r of executed) {
+  for (const r of executedForAggregate) {
     const entry = byTier[r.tier] ?? { count: 0, avgScore: 0 };
     entry.count++;
     entry.avgScore += r.scores.overall;
@@ -959,13 +883,22 @@ function buildReport(
     byTier[tier]!.avgScore /= byTier[tier]!.count;
   }
 
+  if (judgeRequiredExcludedCount > 0) {
+    console.error(
+      `  [WARN] ${judgeRequiredExcludedCount} judgeRequired scenario(s) excluded from overallScore `
+      + `(no judge available — run without --no-judge for accurate aggregate)`,
+    );
+  }
+
   const durations = executed.map((r) => r.totalDurationMs ?? 0);
   const totalTokens = executed.map((r) => (r.totalTokens?.input ?? 0) + (r.totalTokens?.output ?? 0));
   const sortedTokens = [...totalTokens].sort((a, b) => a - b);
 
   const overallScore = avgScore('overall');
   const criticalFailureCount = executed.filter((r) => r.scores.criticalFailure).length;
-  const overallScores = executed.map((r) => r.scores.overall);
+  // overallCi95 uses only the aggregate-eligible scenarios (judgeRequired excluded
+  // in no-judge mode) so the CI reflects the same population as overallScore.
+  const overallScores = executedForAggregate.map((r) => r.scores.overall);
   const overallCi95 = tCi95(overallScores);
 
   return {
@@ -982,7 +915,9 @@ function buildReport(
     errorCount: results.filter((r) => r.error !== undefined).length,
     criticalFailureCount,
     judgeRequiredButSkippedCount,
+    judgeRequiredExcludedCount,
     judgeFailCount,
+    wallClock,
     results,
     summary: {
       overallScore,
@@ -1030,16 +965,6 @@ async function compareBaseline(
   try {
     const raw = await fs.readFile(resolvePath(baselinePath), 'utf8');
     const baseline = JSON.parse(raw) as BenchmarkReport;
-
-    // Guard: container mode must match. Comparing mock baseline vs real
-    // current (or vice versa) produces meaningless deltas.
-    if (current.container !== baseline.container) {
-      console.error(
-        `\n  [BASELINE] ⚠ CONTAINER MISMATCH: current=${current.container} baseline=${baseline.container}`
-        + '\n  Scores between mock and real modes are NOT comparable. Skipping regression check.',
-      );
-      return { regressed: false, delta: 0 };
-    }
 
     const delta = current.summary.overallScore - baseline.summary.overallScore;
     const threshold = failIfWorseThan ?? 0.05;
@@ -1092,6 +1017,18 @@ async function main(): Promise<void> {
   console.error(`  Judge:        ${report.judgeModel ?? 'disabled'}${report.judgeSamples > 1 ? ` (N=${report.judgeSamples} median)` : ''}`);
   console.error(`  Scenarios:    ${report.scenarioCount} (${report.executedCount} executed, `
     + `${report.skippedCount} skipped, ${report.errorCount} errored)`);
+  const wc = report.wallClock;
+  console.error('  ────── wall clock ───────');
+  console.error(`  Total:        ${formatBenchmarkDurationMs(wc.totalMs)}`);
+  console.error(
+    `  Phases:       init ${formatBenchmarkDurationMs(wc.initMs)} · scenarios `
+    + `${formatBenchmarkDurationMs(wc.scenariosPhaseMs)} · shutdown `
+    + formatBenchmarkDurationMs(wc.shutdownMs),
+  );
+  console.error(
+    `  Per scenario: mean ${formatBenchmarkDurationMs(wc.meanScenarioWallMs)} wall · sum `
+    + `${formatBenchmarkDurationMs(wc.sumScenarioWallMs)} (n=${wc.scenarioWallSampleCount})`,
+  );
   if (report.criticalFailureCount > 0) {
     console.error(`  ⚠ Critical:   ${report.criticalFailureCount} scenario(s) had a critical failure (overall=0)`);
   }
@@ -1105,6 +1042,12 @@ async function main(): Promise<void> {
   }
   if (report.judgeRequiredButSkippedCount > 0) {
     console.error(`  ⚠️  ${report.judgeRequiredButSkippedCount} scenario(s) require judge for reliable scoring (run without --no-judge for accurate results)`);
+  }
+  if (report.judgeRequiredExcludedCount > 0) {
+    console.error(
+      `  ⚠️  ${report.judgeRequiredExcludedCount} judgeRequired scenario(s) EXCLUDED from overall score `
+      + `(no judge — overallScore reflects ${report.executedCount - report.judgeRequiredExcludedCount} scenarios only)`,
+    );
   }
   console.error(
     `  Overall:      ${(s.overallScore * 100).toFixed(1)}% (geo-mean) `

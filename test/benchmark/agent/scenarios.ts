@@ -18,7 +18,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 1, tier: 'single_shot', query: 'Opus One 2018', description: 'Exact entity search',
     expectation: { tools: [{ tool: 'search_wines', inputContains: ['Opus'] }], maxSteps: 2, answerContains: ['Opus One'],
       maxDurationMs: 40_000, maxTotalTokens: 6_000,
-      rubric: 'Answer must mention the wine "Opus One" and indicate it is a wine result. Allow vintage 2018 mention.' } },
+      rubric: 'Answer must mention the wine "Opus One" and indicate it is a wine result. Allow vintage 2018 mention.' },
+    goldenEntityIds: ['opus-one-2018'] },
   { id: 2, tier: 'single_shot', query: '풀바디 레드 와인 추천', description: 'Attribute search (Korean)',
     expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2,
       maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -41,7 +42,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxSteps: 3, maxDurationMs: 90_000, maxTotalTokens: 8_000,
       drinkingWindowStatus: 'any',
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)'],
-      rubric: 'Answer must address whether Opus One is currently drinkable based on its drinking window.' } },
+      rubric: 'Answer must address whether Opus One is currently drinkable based on its drinking window.' },
+    goldenEntityIds: ['opus-one'] },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 2: Multi-Step (도구 2-3회)
@@ -55,7 +57,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 7, tier: 'multi_step', query: 'Opus One이랑 비슷한데 더 싼 거', description: 'Similar + cheaper',
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 8_000,
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)', '(저렴|싸|싼|cheap|less\\s+expensive|under|이하|이하로|비교적)'],
-      rubric: 'Answer must reference Opus One for context AND recommend wines that are explicitly cheaper or lower-priced.' } },
+      rubric: 'Answer must reference Opus One for context AND recommend wines that are explicitly cheaper or lower-priced.' },
+    goldenEntityIds: ['opus-one'] },
   { id: 8, tier: 'multi_step', query: '이탈리아 레드 중에 평점 좋고 지금 마실 수 있는 거', description: 'Search + drinking window',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -99,6 +102,10 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 15, tier: 'complex_reasoning', query: '보르도 2015 vs 2016 빈티지 비교, 둘 다 지금 마시기 좋은지도 알려줘', description: 'Compare + dual drinking window',
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       answerMustMatch: ['(2015)', '(2016)', '(보르도|bordeaux)'],
+      // judgeRequired: answerMustMatch checks presence of vintage numbers and region name,
+      // but cannot verify that BOTH vintages' drinking windows were addressed — that requires
+      // reading comprehension only the LLM judge can reliably perform.
+      judgeRequired: true,
       rubric: 'Must compare 2015 vs 2016 Bordeaux vintages AND address drinking window for both.' } },
 
   // Tier 4 (Conversational) entirely moved to scenarios.phase2.ts
@@ -190,11 +197,16 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 3, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       vintageRange: { min: 2019, max: 2019 },
       answerMustMatch: ['(오푸스\\s*원|opus\\s*one)', '(알마비바|almaviva)', '(2019)'],
-      rubric: 'Must compare Opus One and Almaviva specifically for 2019 vintage. Both wines addressed with vintage constraint.' } },
+      rubric: 'Must compare Opus One and Almaviva specifically for 2019 vintage. Both wines addressed with vintage constraint.' },
+    goldenEntityIds: ['opus-one-2019', 'almaviva-2019'] },
   { id: 34, tier: 'comparison_nested', query: '부르고뉴 피노 누아르 상위 3개 비교해줘', description: 'Search top3 → chain compare',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(부르고뉴|burgundy|bourgogne)', '(피노\\s*누아르|pinot\\s*noir)'],
+      // judgeRequired: answerMustMatch only checks region/grape keywords — it cannot
+      // verify that at least 3 wines were compared or that they are differentiated.
+      // The "rank or differentiate" criterion requires LLM reading comprehension.
+      judgeRequired: true,
       rubric: 'Must search for top Burgundy Pinot Noirs and compare at least 3. Should rank or differentiate them.' } },
 
   // ─────────────────────────────────────────────────────────────────────
@@ -204,7 +216,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)'],
-      rubric: 'Must reference Opus One as the style anchor and recommend wines at roughly half the price.' } },
+      rubric: 'Must reference Opus One as the style anchor and recommend wines at roughly half the price.' },
+    goldenEntityIds: ['opus-one'] },
   // #36-38 moved to scenarios.phase2.ts (session_history dependency)
   { id: 39, tier: 'relative_reference', query: '친구가 추천해준 건데 이탈리아 바로 뭐시기...', description: 'Fuzzy entity resolution',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -354,7 +367,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(샤또\\s*마고|chateau\\s*margaux|margaux)'],
-      rubric: 'Must interpret ㄹㅇ as 리얼 (really). Should provide info about Château Margaux quality/reputation.' } },
+      rubric: 'Must interpret ㄹㅇ as 리얼 (really). Should provide info about Château Margaux quality/reputation.' },
+    goldenEntityIds: ['chateau-margaux'] },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 14: Price Expression Diversity

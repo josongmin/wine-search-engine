@@ -593,7 +593,12 @@ function parseFilterToken(token: string): { key: string; value: string } {
  * `entity_id in ("${id}")`  // breaks if id contains " or \
  */
 export function yqlEscapeString(value: string): string {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  // Strip null bytes and ASCII control characters (U+0000–U+001F, U+007F)
+  // before escaping — these have no legitimate use in wine entity names
+  // and could confuse YQL parsers or log aggregators.
+  // eslint-disable-next-line no-control-regex -- intentionally strips ASCII control chars U+0000–U+001F/U+007F
+  const sanitized = value.replace(/[\x00-\x1F\x7F]/g, '');
+  return `"${sanitized.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 /**

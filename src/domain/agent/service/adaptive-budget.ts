@@ -51,11 +51,12 @@ const ADVERSARIAL_PATTERNS: readonly RegExp[] = [
   /(?<!\p{L}\p{N})(?:select|insert|update|delete|drop|truncate|alter|create)(?!\p{L}\p{N})[\s\S]{0,20}(?<!\p{L}\p{N})(?:from|into|table|database)(?!\p{L}\p{N})/iu,
   // Prompt injection
   /(?<!\p{L}\p{N})(?:ignore\s+(?:all\s+)?(?:previous|prior|your)\s+(?:instructions|rules))(?!\p{L}\p{N})/iu,
-  // "system:" / "system >" only trigger at the START of a word boundary.
-  // False-positive guard: "operating system: ..." or "wine system > ..." are
-  // legitimate phrases; we require the match to be at start-of-string or after
-  // whitespace to avoid flagging mid-sentence uses.
-  /(?:^|\s)system\s*[:>]/iu,
+  // "system:" / "system >" only trigger when "system" is the FIRST token
+  // (at the very start of the string, possibly preceded by whitespace only).
+  // False-positive guard: "wine classification system: how does it work?" and
+  // "Bordeaux AOC system: explain appellations" must NOT match — "system" is
+  // a mid-sentence noun there, not a directive role prefix.
+  /^\s*system\s*[:>]/iu,
   /(?<!\p{L}\p{N})(?:dan\s+mode|jailbreak)(?!\p{L}\p{N})/iu,
   // Schema/PII extraction
   /(?<!\p{L}\p{N})(?:db|database)\s+schema(?!\p{L}\p{N})/iu,
@@ -75,6 +76,15 @@ const OFF_DOMAIN_PATTERNS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:weather|날씨)(?=$|[^\p{L}\p{N}])/iu,
   /(?:^|[^\p{L}\p{N}])(?:stock|주식|환율|exchange\s+rate)(?=$|[^\p{L}\p{N}])/iu,
   /(?:^|[^\p{L}\p{N}])(?:맥주|beer|소주|whisky|위스키|vodka)(?=$|[^\p{L}\p{N}])/iu,
+  // Sports — numeric context not needed; these words are unambiguous off-domain
+  /(?:^|[^\p{L}\p{N}])(?:축구|football|야구|baseball|농구|basketball)(?=$|[^\p{L}\p{N}])/iu,
+  // Crypto / finance — unambiguous off-domain
+  /(?:^|[^\p{L}\p{N}])(?:코인|bitcoin|crypto|암호화폐)(?=$|[^\p{L}\p{N}])/iu,
+  // Politics — "champagne region politics" should NOT trigger this because
+  // "politics" requires a word boundary; the pattern won't match mid-word.
+  // Note: "champagne region politics" WILL match — politics is a clear off-domain
+  // signal regardless of context in a wine search engine.
+  /(?:^|[^\p{L}\p{N}])(?:정치|politics|대통령|president|선거|election)(?=$|[^\p{L}\p{N}])/iu,
 ];
 
 const COMPOUND_INDICATORS: readonly string[] = [
@@ -176,6 +186,27 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
       maxSteps: 3,
       classification: 'specific_sku',
       reason: 'proper noun + vintage year detected',
+    };
+  }
+
+  // 4b. Specific SKU without vintage — a bare Latin proper noun (e.g. "Opus One",
+  // "Château Margaux") is still a specific entity lookup that needs at most 3
+  // steps (entity search + optional detail + answer).
+  // For Hangul: require the ENTIRE trimmed string to be Hangul characters only
+  // (no spaces, no other chars) — this matches pure Hangul wine names like
+  // "오푸스원" while rejecting generic Korean queries like "와인 추천해줘" which
+  // contain spaces / non-Hangul chars alongside 3+ syllable Hangul words.
+  // Guard: skip if the query also contains compound or situation signals, or if
+  // a constraint fires (those paths already get their own classification above).
+  const noCompoundHits = compoundHits.length === 0;
+  const noSituationHits = situationHits.length === 0;
+  const noConstraint = !hasConstraint;
+  const isPureHangulSku = /^[\uAC00-\uD7A3]{3,}$/.test(trimmed);
+  if ((PROPER_NOUN_PATTERN.test(trimmed) || isPureHangulSku) && noCompoundHits && noSituationHits && noConstraint) {
+    return {
+      maxSteps: 3,
+      classification: 'specific_sku',
+      reason: 'proper noun (no vintage) — specific entity lookup',
     };
   }
 

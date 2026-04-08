@@ -25,8 +25,9 @@ describe('EMPTY_ANSWER fallback regression — synthesis timeout constant', () =
       new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url),
       'utf-8',
     );
-    // Must contain the named const at module scope
-    expect(src).toMatch(/const SYNTHESIS_TIMEOUT_MS\s*=\s*12[_0-9]*/);
+    // Must contain the named const at module scope with a value >= 12_000.
+    // Accepted values: 12_000 (original fix) or larger (e.g. 60_000 after LLM latency tuning).
+    expect(src).toMatch(/const SYNTHESIS_TIMEOUT_MS\s*=\s*(?:1[2-9]|[2-9]\d|\d{3,})[_0-9]*/);
     // Must NOT contain the old 8_000 value assigned to this const
     expect(src).not.toMatch(/const SYNTHESIS_TIMEOUT_MS\s*=\s*8[_0-9]*/);
   });

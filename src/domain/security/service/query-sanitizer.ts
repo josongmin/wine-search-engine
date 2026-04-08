@@ -1,6 +1,91 @@
 import type { InjectionResult } from '../model/injection-result.js';
 import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 
+/**
+ * Confusables map: Cyrillic and Greek lookalikes → ASCII Latin equivalents.
+ * Based on Unicode TR39 (https://www.unicode.org/reports/tr39/) confusables.
+ * These characters are visually identical to Latin letters but have different
+ * code points, so NFKC normalization does NOT map them — explicit replacement
+ * is required to close the cross-script bypass vector.
+ *
+ * NFKC handles fullwidth/half-width and compatibility variants (e.g. ｆ→f,
+ * ² →2) but NOT cross-script homoglyphs. This map covers the most common
+ * attack characters used in prompt injection bypass attempts.
+ */
+const CONFUSABLES_MAP: Readonly<Record<string, string>> = {
+  // Cyrillic lookalikes (most common injection bypass chars)
+  '\u0430': 'a', // а → a
+  '\u0435': 'e', // е → e
+  '\u0456': 'i', // і → i
+  '\u0458': 'j', // ј → j
+  '\u043E': 'o', // о → o
+  '\u0440': 'r', // р → r
+  '\u0441': 'c', // с → c
+  '\u0445': 'x', // х → x
+  '\u0443': 'y', // у → y
+  '\u0410': 'A', // А → A
+  '\u0412': 'B', // В → B
+  '\u0415': 'E', // Е → E
+  '\u041A': 'K', // К → K
+  '\u041C': 'M', // М → M
+  '\u041D': 'H', // Н → H
+  '\u041E': 'O', // О → O
+  '\u0420': 'R', // Р → R
+  '\u0421': 'C', // С → C
+  '\u0422': 'T', // Т → T
+  '\u0425': 'X', // Х → X
+  '\u0443\u0301': 'y', // у́ (with accent) → y
+  // Greek lookalikes
+  '\u03BF': 'o', // ο → o (Greek small omicron)
+  '\u03B5': 'e', // ε → e (Greek small epsilon — approximate)
+  '\u03B9': 'i', // ι → i (Greek small iota)
+  '\u03BA': 'k', // κ → k (Greek small kappa)
+  '\u03BD': 'v', // ν → v (Greek small nu)
+  '\u03C1': 'p', // ρ → p (Greek small rho)
+  '\u03C5': 'u', // υ → u (Greek small upsilon)
+  '\u0391': 'A', // Α → A (Greek capital alpha)
+  '\u0392': 'B', // Β → B (Greek capital beta)
+  '\u0395': 'E', // Ε → E (Greek capital epsilon)
+  '\u0396': 'Z', // Ζ → Z (Greek capital zeta)
+  '\u0397': 'H', // Η → H (Greek capital eta)
+  '\u0399': 'I', // Ι → I (Greek capital iota)
+  '\u039A': 'K', // Κ → K (Greek capital kappa)
+  '\u039C': 'M', // Μ → M (Greek capital mu)
+  '\u039D': 'N', // Ν → N (Greek capital nu)
+  '\u039F': 'O', // Ο → O (Greek capital omicron)
+  '\u03A1': 'P', // Ρ → P (Greek capital rho)
+  '\u03A4': 'T', // Τ → T (Greek capital tau)
+  '\u03A5': 'Y', // Υ → Y (Greek capital upsilon)
+  '\u03A7': 'X', // Χ → X (Greek capital chi)
+};
+
+/**
+ * Pre-compiled regex that matches any character in CONFUSABLES_MAP.
+ * Defined at module scope to avoid per-call RegExp allocation.
+ */
+const CONFUSABLES_REGEX = new RegExp(
+  // eslint-disable-next-line no-misleading-character-class -- individual confusable chars, not combining sequences
+  `[${Object.keys(CONFUSABLES_MAP).join('')}]`,
+  'gu',
+);
+
+/**
+ * Applies NFKC normalization followed by confusables substitution.
+ *
+ * NFKC handles compatibility variants (fullwidth, superscripts, etc.).
+ * The confusables map handles cross-script homoglyphs (Cyrillic/Greek lookalikes)
+ * that NFKC cannot resolve because they are distinct Unicode characters.
+ *
+ * @param input - Raw query string (already confirmed non-empty)
+ * @returns Normalized string with lookalikes replaced by ASCII equivalents
+ */
+function applyNormalization(input: string): string {
+  // Step 1: NFKC — resolves fullwidth Latin, superscripts, ligatures, etc.
+  const nfkc = input.normalize('NFKC');
+  // Step 2: Confusables substitution — replaces cross-script homoglyphs
+  return nfkc.replace(CONFUSABLES_REGEX, (ch) => CONFUSABLES_MAP[ch] ?? ch);
+}
+
 /** C0 controls stripped through U+0008 (preserve tab U+0009). */
 const UNICODE_C0_CONTROL_STRIP_END = 0x08;
 const UNICODE_VERTICAL_TAB = 0x0b;
@@ -163,8 +248,18 @@ export class QuerySanitizer {
       };
     }
 
+    // NFKC + confusables normalization: collapses Unicode lookalikes
+    // (Cyrillic е→e, о→o, Greek ο→o, etc.) before pattern matching.
+    // NFKC handles compatibility variants; the confusables map handles
+    // cross-script homoglyphs (Cyrillic/Greek) that NFKC cannot resolve.
+    // This closes the bypass vector where attackers substitute visually
+    // identical non-ASCII chars to evade regex patterns.
+    // Applied AFTER empty check (normalize doesn't affect emptiness) but
+    // BEFORE length check (normalized form may differ in length).
+    const normalizedQuery = applyNormalization(rawQuery);
+
     // Layer 1a: Length check (fast, simple DoS prevention)
-    if (rawQuery.length > MAX_QUERY_LENGTH) {
+    if (normalizedQuery.length > MAX_QUERY_LENGTH) {
       return {
         safe: false,
         reason: 'LENGTH_EXCEEDED',
@@ -172,7 +267,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1b: Unicode trick detection (fast, no context needed)
-    const unicodeMatch = this.matchPatterns(rawQuery, 'unicode_tricks');
+    const unicodeMatch = this.matchPatterns(normalizedQuery, 'unicode_tricks');
     if (unicodeMatch !== undefined) {
       return {
         safe: false,
@@ -181,7 +276,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1c: System prompt / instruction hijacking (highest confidence false positives)
-    const systemMatch = this.matchPatterns(rawQuery, 'system_prompt');
+    const systemMatch = this.matchPatterns(normalizedQuery, 'system_prompt');
     if (systemMatch !== undefined) {
       return {
         safe: false,
@@ -190,7 +285,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1d: Jailbreak attempts (medium confidence)
-    const jailbreakMatch = this.matchPatterns(rawQuery, 'jailbreak');
+    const jailbreakMatch = this.matchPatterns(normalizedQuery, 'jailbreak');
     if (jailbreakMatch !== undefined) {
       return {
         safe: false,
@@ -199,7 +294,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1e: Script / XSS injection (very specific, no false positives) - CHECK BEFORE SQL!
-    const scriptMatch = this.matchPatterns(rawQuery, 'script_injection');
+    const scriptMatch = this.matchPatterns(normalizedQuery, 'script_injection');
     if (scriptMatch !== undefined) {
       return {
         safe: false,
@@ -208,7 +303,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1f: SQL injection (high confidence, domain-specific)
-    const sqlMatch = this.matchPatterns(rawQuery, 'sql_injection');
+    const sqlMatch = this.matchPatterns(normalizedQuery, 'sql_injection');
     if (sqlMatch !== undefined) {
       return {
         safe: false,
@@ -217,7 +312,7 @@ export class QuerySanitizer {
     }
 
     // Layer 1g: PII / cross-tenant data extraction
-    const piiMatch = this.matchPatterns(rawQuery, 'pii_extraction');
+    const piiMatch = this.matchPatterns(normalizedQuery, 'pii_extraction');
     if (piiMatch !== undefined) {
       return {
         safe: false,
@@ -230,7 +325,7 @@ export class QuerySanitizer {
     // substitution, chaining) are checked in one place.  The previous inline checks only
     // covered backticks and "both ; and && present", leaving shell names, exec(), and
     // command substitution completely undetected (dead code in INJECTION_PATTERNS).
-    const commandMatch = this.matchPatterns(rawQuery, 'command_injection');
+    const commandMatch = this.matchPatterns(normalizedQuery, 'command_injection');
     if (commandMatch !== undefined) {
       return {
         safe: false,
@@ -238,8 +333,8 @@ export class QuerySanitizer {
       };
     }
 
-    // Passed all static checks: sanitize and return
-    const sanitizedQuery = this.normalizeWhitespace(rawQuery);
+    // Passed all static checks: sanitize and return (use normalized form throughout)
+    const sanitizedQuery = this.normalizeWhitespace(normalizedQuery);
     return {
       safe: true,
       sanitizedQuery,
