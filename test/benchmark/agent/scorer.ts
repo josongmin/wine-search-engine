@@ -1283,7 +1283,17 @@ function scoreContextRelevance(
       .map((t) => {
         try {
           const parsed = JSON.parse(t.input ?? '{}') as Record<string, unknown>;
-          return typeof parsed['query'] === 'string' ? parsed['query'] : '';
+          // Extract query-bearing fields from all tools:
+          //   search_wines: query
+          //   compare_wines: query_a, query_b
+          //   get_food_pairings: food
+          //   check_drinking_window: entity_id (skip — opaque ID, not a semantic query)
+          if (typeof parsed['query'] === 'string') return parsed['query'];
+          if (typeof parsed['food'] === 'string') return parsed['food'];
+          // compare_wines: join both sides
+          const qa = typeof parsed['query_a'] === 'string' ? parsed['query_a'] : '';
+          const qb = typeof parsed['query_b'] === 'string' ? parsed['query_b'] : '';
+          return [qa, qb].filter((s) => s.length > 0).join(' ');
         } catch { return ''; }
       })
       .filter((q) => q.length > 0);
