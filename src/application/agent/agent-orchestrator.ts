@@ -655,7 +655,7 @@ export class AgentOrchestrator {
       if (obsSteps.length > 0) {
         // requestId embedded in sentinel to prevent adversarial tool results from
         // containing the literal string and colliding with our synthesis detector.
-        const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED. You must output ONLY this JSON format:\n{"thought":"brief summary of what you found","answer":"your complete response to the user in their language"}\nDo NOT output "action". Do NOT call any tool. Output the "answer" field now with your best response based on the tool results above.]`;
+        const synthSentinel = `[SYSTEM:${requestId}:FINAL_ANSWER_REQUIRED]\nYou have exhausted your step budget. Synthesize the tool results above into a final answer now.\nOutput ONLY this JSON — no other text, no code fences:\n{"thought":"one-sentence summary of findings","answer":"your complete, grounded response in the user's language (Korean if query was Korean)"}\nRules:\n- "answer" must reference specific wines, regions, or prices from the tool results above.\n- Do NOT call any tool. Do NOT output "action" or "actions".\n- If results were empty, tell the user no match was found and suggest broadening the search.`;
         const synthMessages = [
           buildSystemMessage(),
           buildUserMessage(query),
