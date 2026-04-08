@@ -16,6 +16,12 @@ export interface ChatCompletionRequest {
   readonly model?: string;
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
+  /**
+   * Deterministic seed for reproducible outputs (OpenAI `seed` parameter).
+   * When set, the provider should return the same completion for identical
+   * messages+model+temperature. Not all providers support this.
+   */
+  readonly seed?: number | undefined;
   /** Optional abort signal for cooperative cancellation. */
   readonly abortSignal?: AbortSignal | undefined;
 }

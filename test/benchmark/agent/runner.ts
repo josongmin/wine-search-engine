@@ -22,6 +22,7 @@
  *   2 — regression detected (overall worse than baseline by threshold)
  */
 
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { loadConfig } from '../../../src/config/env.js';
@@ -29,10 +30,11 @@ import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestr
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
 import { AGENT_SCENARIOS, AGENT_SCENARIOS_WITH_PHASE2 } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution } from './scorer.js';
-import { judgeAnswerN } from './judge.js';
+import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import type { AgentBenchmarkScenario, ScenarioTier, TerminationReason } from './scenario.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
+import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
 import type { AgentTerminationReason } from '../../../src/domain/agent/model/agent-step.js';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -454,6 +456,8 @@ export interface BenchmarkReport {
   readonly judgeSamples: number;
   readonly container: 'mock' | 'real';
   readonly seed: number | null;
+  /** SHA-256 hash of the agent system prompt for reproducibility tracking. */
+  readonly promptHash: string;
   readonly scenarioCount: number;
   readonly executedCount: number;
   readonly skippedCount: number;
@@ -470,6 +474,10 @@ export interface BenchmarkReport {
     readonly answerQuality: number;
     readonly terminationCorrectness: number;
     readonly costEfficiency: number;
+    /** RAGAS Faithfulness mean (grounding). null when no observations available. */
+    readonly faithfulness: number | null;
+    /** RAGAS Context Precision mean. null when no structured constraints. */
+    readonly contextPrecision: number | null;
     /** Mean judge score across scenarios that produced a non-null judge value. */
     readonly judge: number | null;
     readonly avgSteps: number;
@@ -529,10 +537,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   const orchestrator = new AgentOrchestrator(
     { chatLlm, toolDeps },
     {
-      maxSteps: 8, // generous; per-scenario maxSteps is the real budget
+      maxSteps: 8, // generous; per-scenario maxSteps is the real budget via overrides
       agentTimeoutMs: 60_000,
       perStepTimeoutMs: 20_000,
       maxContextChars: 12_000,
+      ...(args.seed !== undefined ? { seed: args.seed } : {}),
     },
   );
 
@@ -551,15 +560,23 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
 
       if (scenario.skip !== undefined) {
         console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
-        return scoreScenario(scenario, null, undefined);
+        return scoreScenario(scenario, null, undefined, undefined);
       }
 
       console.error(`  [RUN]  #${scenario.id} ${scenario.description}`);
       const start = Date.now();
 
       try {
+        // Pass scenario maxSteps as an override so the adaptive budget
+        // classifier doesn't override the scenario's expected budget.
+        // Without this, a scenario expecting maxSteps:2 would get
+        // adaptive_budget=3 for specific_sku, deflating stepEfficiency.
         const result = await withRetry(
-          () => orchestrator.execute(scenario.query, `bench-${scenario.id}`),
+          () => orchestrator.execute(
+            scenario.query,
+            `bench-${scenario.id}`,
+            { maxSteps: scenario.expectation.maxSteps },
+          ),
           args.maxRetries,
           isTransient,
         );
@@ -586,17 +603,34 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           totalTokens: result.totalTokens,
         };
 
-        // LLM judge (optional, with N-sample median voting for variance reduction).
-        // judge.score === null when judge is disabled / no rubric / all samples failed —
-        // the scorer drops the dim from the geo-mean rather than inflating it to 1.
+        // LLM judges (optional). Run in parallel — no data dependency between
+        // rubric judge and faithfulness judge. ~2x speedup on judge-heavy runs.
         let judgeScore: number | undefined;
-        if (judgeLlm !== null && scenario.expectation.rubric !== undefined) {
-          const judgeResult = await judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples);
-          if (judgeResult.score !== null) judgeScore = judgeResult.score;
-          if (judgeResult.failed) judgeFailCount++;
+        let faithScore: number | undefined;
+        if (judgeLlm !== null) {
+          const judgePromises: Promise<void>[] = [];
+          // Answer quality judge (rubric-based)
+          if (scenario.expectation.rubric !== undefined) {
+            judgePromises.push(
+              judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples).then((r) => {
+                if (r.score !== null) judgeScore = r.score;
+                if (r.failed) judgeFailCount++;
+              }),
+            );
+          }
+          // RAGAS Faithfulness judge (grounding in tool results)
+          if (observations.length > 0) {
+            judgePromises.push(
+              judgeFaithfulness(judgeLlm, result.answer, observations).then((r) => {
+                if (r.score !== null) faithScore = r.score;
+                if (r.failed) judgeFailCount++;
+              }),
+            );
+          }
+          await Promise.all(judgePromises);
         }
 
-        const scored = scoreScenario(scenario, execution, judgeScore);
+        const scored = scoreScenario(scenario, execution, judgeScore, faithScore);
         const elapsed = Date.now() - start;
         console.error(
           `  [DONE] #${scenario.id} score=${scored.scores.overall.toFixed(2)} `
@@ -610,6 +644,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         return scoreScenario(
           scenario,
           null,
+          undefined,
           undefined,
           err instanceof Error ? err.message : String(err),
         );
@@ -670,6 +705,13 @@ function buildReport(
     ? judgeScores.reduce((sum, s) => sum + s, 0) / judgeScores.length
     : null;
 
+  // RAGAS dim means — only over scenarios that produced non-null values.
+  const faithScores = executed.map((r) => r.scores.faithfulness).filter((s): s is number => s !== null);
+  const faithMean = faithScores.length > 0 ? faithScores.reduce((s, v) => s + v, 0) / faithScores.length : null;
+
+  const ctxPrecScores = executed.map((r) => r.scores.contextPrecision).filter((s): s is number => s !== null);
+  const ctxPrecMean = ctxPrecScores.length > 0 ? ctxPrecScores.reduce((s, v) => s + v, 0) / ctxPrecScores.length : null;
+
   const byTier: Record<string, { count: number; avgScore: number }> = {};
   for (const r of executed) {
     const entry = byTier[r.tier] ?? { count: 0, avgScore: 0 };
@@ -697,6 +739,7 @@ function buildReport(
     judgeSamples: args.judgeSamples,
     container: args.container,
     seed: args.seed ?? null,
+    promptHash: createHash('sha256').update(buildSystemMessage().content).digest('hex').slice(0, 16),
     scenarioCount: scenarios.length,
     executedCount: executed.length,
     skippedCount: results.filter((r) => r.skipped).length,
@@ -713,6 +756,8 @@ function buildReport(
       answerQuality: avgScore('answerQuality'),
       terminationCorrectness: avgScore('terminationCorrectness'),
       costEfficiency: avgScore('costEfficiency'),
+      faithfulness: faithMean,
+      contextPrecision: ctxPrecMean,
       judge: judgeMean,
       avgSteps:
         executed.length > 0
@@ -747,6 +792,17 @@ async function compareBaseline(
   try {
     const raw = await fs.readFile(resolvePath(baselinePath), 'utf8');
     const baseline = JSON.parse(raw) as BenchmarkReport;
+
+    // Guard: container mode must match. Comparing mock baseline vs real
+    // current (or vice versa) produces meaningless deltas.
+    if (current.container !== baseline.container) {
+      console.error(
+        `\n  [BASELINE] ⚠ CONTAINER MISMATCH: current=${current.container} baseline=${baseline.container}`
+        + '\n  Scores between mock and real modes are NOT comparable. Skipping regression check.',
+      );
+      return { regressed: false, delta: 0 };
+    }
+
     const delta = current.summary.overallScore - baseline.summary.overallScore;
     const threshold = failIfWorseThan ?? 0.05;
     const regressed = delta < -threshold;
@@ -808,6 +864,8 @@ async function main(): Promise<void> {
   console.error('  ────── dimensions ──────');
   console.error(`  Exec Eff:     ${(s.executionEfficiency * 100).toFixed(1)}%   (tool ${(s.toolAccuracy * 100).toFixed(0)}% × step ${(s.stepEfficiency * 100).toFixed(0)}%)`);
   console.error(`  Answer Qual:  ${(s.answerQuality * 100).toFixed(1)}%`);
+  console.error(`  Faithful:     ${s.faithfulness !== null ? `${(s.faithfulness * 100).toFixed(1)}%` : 'n/a'}`);
+  console.error(`  Ctx Prec:     ${s.contextPrecision !== null ? `${(s.contextPrecision * 100).toFixed(1)}%` : 'n/a'}`);
   console.error(`  Term Corr:    ${(s.terminationCorrectness * 100).toFixed(1)}%`);
   console.error(`  Cost Eff:     ${(s.costEfficiency * 100).toFixed(1)}%`);
   console.error(`  Judge:        ${s.judge !== null ? `${(s.judge * 100).toFixed(1)}%` : 'disabled'}`);
@@ -836,7 +894,12 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err: unknown) => {
+main().then(() => {
+  // Explicit exit: after shutdown timeout, dangling PG/Redis connections may
+  // keep the event loop alive indefinitely. process.exit(0) ensures the CLI
+  // terminates cleanly after results are written.
+  process.exit(0);
+}).catch((err: unknown) => {
   console.error('Benchmark failed:', err);
   process.exit(1);
 });

@@ -75,6 +75,9 @@ export class OpenAiChatLlm implements ChatLlmPort {
     if (request.maxOutputTokens !== undefined) {
       body['max_tokens'] = request.maxOutputTokens;
     }
+    if (request.seed !== undefined) {
+      body['seed'] = request.seed;
+    }
 
     // Retry on transient failures (429, 5xx, network) with full jitter.
     // OpenAI does NOT auto-retry on the underlying fetch path; without

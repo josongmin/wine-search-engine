@@ -173,6 +173,7 @@ export class AgentOrchestrator {
               messages,
               temperature: 0,
               maxOutputTokens: 1024,
+              ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
               abortSignal: stepAbortController.signal,
             }),
             new Promise<never>((_resolve, reject) => {

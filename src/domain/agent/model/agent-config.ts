@@ -10,6 +10,8 @@ export interface AgentConfig {
   readonly perStepTimeoutMs: number;
   /** Maximum phrases sent to LLM context per step. */
   readonly maxContextChars: number;
+  /** Deterministic seed for LLM calls (propagated to ChatCompletionRequest.seed). */
+  readonly seed?: number | undefined;
 }
 
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {

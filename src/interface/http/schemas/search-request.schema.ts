@@ -98,7 +98,7 @@ export const ReplayRequestSchema = withRequestAliases({
   expected_response_hash: z.string().min(1).optional(),
   preflight_honesty_contract: z.object({
     execution_mode: z.enum(['authoritative', 'degraded', 'heuristic', 'advisory']),
-    degradation_reasons: z.array(z.string().min(1)),
+    degradation_reasons: z.array(z.string().min(1)).max(20),
     blocking_eligible: z.boolean().optional(),
   }).strict().optional(),
 });

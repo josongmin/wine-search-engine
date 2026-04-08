@@ -284,7 +284,7 @@ export const GetWatchlistResponseSchema = z.object({
   watchlist_id: WatchlistIdSchema,
   user_id: AuthenticatedSubjectSchema,
   entity_id: z.string().min(1),
-  trigger_conditions: z.array(WatchlistTriggerResponseSchema),
+  trigger_conditions: z.array(WatchlistTriggerResponseSchema).max(10),
   callback_url: HttpsUrlSchema,
   created_at: z.string().datetime(),
   expires_at: z.string().datetime().nullable(),
@@ -293,7 +293,7 @@ export const GetWatchlistResponseSchema = z.object({
 export type GetWatchlistResponse = z.infer<typeof GetWatchlistResponseSchema>;
 
 export const ListWatchlistResponseSchema = z.object({
-  entries: z.array(GetWatchlistResponseSchema),
+  entries: z.array(GetWatchlistResponseSchema).max(1000),
   total: z.number().int().nonnegative(),
 }).strict();
 
@@ -311,7 +311,7 @@ export const DeliveryLogEntrySchema = z.object({
 export type DeliveryLogEntry = z.infer<typeof DeliveryLogEntrySchema>;
 
 export const ListDeliveriesResponseSchema = z.object({
-  deliveries: z.array(DeliveryLogEntrySchema),
+  deliveries: z.array(DeliveryLogEntrySchema).max(1000),
   total: z.number().int().nonnegative(),
 }).strict();
 

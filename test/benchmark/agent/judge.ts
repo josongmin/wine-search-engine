@@ -260,3 +260,80 @@ function composeAutoRubric(
 
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// RAGAS Faithfulness Judge
+// ─────────────────────────────────────────────────────────────────────
+
+const FAITHFULNESS_SYSTEM_PROMPT = `You are a faithfulness evaluator. Given an agent's answer and the tool results (context) it received, score how well the answer's factual claims are grounded in the context.
+
+Output STRICTLY a single JSON object:
+{"score": 0.0, "rationale": "one-sentence reason"}
+
+Score = (number of answer claims supported by context) / (total factual claims in answer).
+- 1.00: every factual claim in the answer is supported by the context
+- 0.75: most claims supported, minor unsupported details
+- 0.50: about half the claims are unsupported or fabricated
+- 0.25: mostly fabricated, few claims match context
+- 0.00: completely fabricated, no grounding in context
+
+Ignore stylistic/opinion statements — only evaluate factual claims (wine names, prices, regions, vintages, scores, tasting notes).
+Output ONLY the JSON.`;
+
+/**
+ * RAGAS-style faithfulness evaluation via LLM judge.
+ *
+ * Scores how well the agent's answer is grounded in the tool results
+ * (observations). Returns null when no observations exist (no context
+ * to ground against) or when the LLM call fails.
+ *
+ * This is conceptually distinct from answer quality (rubric satisfaction):
+ * an answer can be high-quality but unfaithful (hallucinated details that
+ * happen to be correct), or faithful but low-quality (accurate but
+ * unhelpful).
+ */
+export async function judgeFaithfulness(
+  judgeLlm: ChatLlmPort,
+  answer: string,
+  observations: readonly string[],
+): Promise<JudgeResult> {
+  if (observations.length === 0 || answer.trim().length === 0) {
+    return { score: null, rationale: 'no context to evaluate faithfulness', failed: false, samples: 0 };
+  }
+
+  const contextText = observations
+    .map((obs, i) => `[Tool Result ${i + 1}]: ${obs}`)
+    .join('\n\n');
+
+  const userPrompt = `Context (tool results the agent received):
+${contextText}
+
+Agent answer:
+${answer}
+
+Score the faithfulness of the answer against the context.`;
+
+  try {
+    const result = await judgeLlm.complete({
+      messages: [
+        { role: 'system', content: FAITHFULNESS_SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0,
+      maxOutputTokens: 200,
+    });
+
+    const parsed = parseJudgeResponse(result.text);
+    if (parsed === null) {
+      return { score: null, rationale: `faithfulness parse failed: ${result.text.slice(0, 80)}`, failed: true, samples: 1 };
+    }
+    return { score: parsed.score, rationale: parsed.rationale, failed: false, samples: 1 };
+  } catch (err) {
+    return {
+      score: null,
+      rationale: `faithfulness call failed: ${err instanceof Error ? err.message : String(err)}`,
+      failed: true,
+      samples: 1,
+    };
+  }
+}

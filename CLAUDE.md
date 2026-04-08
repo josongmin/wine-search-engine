@@ -94,6 +94,18 @@ After any session that modifies more than 3 files, mentally test 3 inputs per ch
 
 If any case is uncertain, add a regression test before declaring done. Audit-first beats fix-second.
 
+## Schema quality bar (HTTP-facing Zod schemas)
+
+- Every `z.number()` MUST include `.finite()` unless `.int()` is used (which already excludes NaN/Infinity).
+- Every `z.array()` MUST include `.max(N)` with a domain-justified bound.
+- Every JSONB/Redis deserialization MUST use Zod `.parse()` or a runtime type guard — `as DomainType` casts on external data are **prohibited**.
+- Every `parseFloat()` / `Number()` on external input MUST be followed by a `Number.isFinite()` guard before use.
+- Every `log.error({ err })` MUST flow through the pino `serializers.err` sanitizer — never log raw error objects from DB/HTTP clients (they carry SQL params, connection strings, user queries).
+- Every HTTP error response (4xx/5xx) MUST conform to the RFC-014 error envelope shape `{ error: { request_id, code, message, failure_reason, retryable } }`. Add error-code branches to `error-handler.ts` for any new Fastify error code.
+- Catch blocks in use-case code MUST NOT fabricate success-shaped (200 OK) responses from unexpected errors. Only enumerated, expected degradation paths may return degraded responses; unknown errors MUST throw to the HTTP error handler.
+- `Math.random()` MUST NOT be used for ID generation — use `crypto.randomUUID()`.
+- `\b` word boundary in regex MUST NOT be used with non-ASCII content — see rule 8 in test discipline.
+
 ## Private notes
 
 Put machine-specific preferences in **`CLAUDE.local.md`** (gitignored) at the repo root.

@@ -1,10 +1,14 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
+import queryPlugin from "@tanstack/eslint-plugin-query";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // React Query best practices — catches query key collisions,
+  // missing signal forwarding, stale destructuring.
+  ...queryPlugin.configs["flat/recommended"],
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

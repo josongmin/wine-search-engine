@@ -58,6 +58,8 @@ export type DiagnosticDim =
   | 'answerQuality'
   | 'terminationCorrectness'
   | 'costEfficiency'
+  | 'faithfulness'
+  | 'contextPrecision'
   | 'judge';
 
 export interface Diagnostic {
@@ -76,6 +78,16 @@ export interface ScenarioScores {
   readonly answerQuality: number;
   readonly terminationCorrectness: number;
   readonly costEfficiency: number;
+  /**
+   * RAGAS Faithfulness: fraction of answer claims grounded in tool results.
+   * null when no observations available (no tool calls made).
+   */
+  readonly faithfulness: number | null;
+  /**
+   * RAGAS Context Precision: fraction of tool results that are relevant to
+   * the query constraints. null when no structured constraints to check.
+   */
+  readonly contextPrecision: number | null;
   readonly judge: number | null; // null when judge disabled
   readonly overall: number;
   /** True when a hard / critical violation collapsed overall to 0. */
@@ -109,6 +121,8 @@ const ZERO_SCORES: ScenarioScores = {
   answerQuality: 0,
   terminationCorrectness: 0,
   costEfficiency: 0,
+  faithfulness: null,
+  contextPrecision: null,
   judge: null,
   overall: 0,
   criticalFailure: false,
@@ -126,10 +140,12 @@ export type DimensionWeights = Partial<Record<
 >>;
 
 export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
-  answerQuality: 0.30,
-  executionEfficiency: 0.30,
+  answerQuality: 0.25,
+  executionEfficiency: 0.25,
+  faithfulness: 0.10,
+  contextPrecision: 0.05,
   costEfficiency: 0.15,
-  terminationCorrectness: 0.15,
+  terminationCorrectness: 0.10,
   judge: 0.10,
 };
 
@@ -148,108 +164,68 @@ export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
 export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> = {
   // Security-critical tiers — termination + execution dominant
   adversarial: {
-    terminationCorrectness: 0.30,
-    executionEfficiency: 0.30,
-    answerQuality: 0.20,
-    costEfficiency: 0.10,
-    judge: 0.10,
+    terminationCorrectness: 0.25, executionEfficiency: 0.25, answerQuality: 0.15,
+    faithfulness: 0.05, contextPrecision: 0.05, costEfficiency: 0.10, judge: 0.15,
   },
   edge_case: {
-    terminationCorrectness: 0.25,
-    executionEfficiency: 0.30,
-    answerQuality: 0.20,
-    costEfficiency: 0.15,
-    judge: 0.10,
+    terminationCorrectness: 0.20, executionEfficiency: 0.25, answerQuality: 0.15,
+    faithfulness: 0.10, contextPrecision: 0.05, costEfficiency: 0.15, judge: 0.10,
   },
-  // Answer-quality dominant tiers — correctness of the actual recommendation matters most
+  // Answer-quality + faithfulness dominant — grounding matters most
   knowledge_hybrid: {
-    answerQuality: 0.45,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.10,
-    terminationCorrectness: 0.10,
-    judge: 0.15,
+    answerQuality: 0.30, faithfulness: 0.15, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
   },
   negation: {
-    answerQuality: 0.40,
-    executionEfficiency: 0.25,
-    costEfficiency: 0.10,
-    terminationCorrectness: 0.10,
-    judge: 0.15,
+    answerQuality: 0.30, faithfulness: 0.15, contextPrecision: 0.05,
+    executionEfficiency: 0.20, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
   },
   nested_condition: {
-    answerQuality: 0.40,
-    executionEfficiency: 0.25,
-    costEfficiency: 0.10,
-    terminationCorrectness: 0.10,
-    judge: 0.15,
+    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.10,
+    executionEfficiency: 0.20, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
   },
-  // Cost-sensitive tiers — these legitimately need more budget but should still pay
+  // Cost-sensitive tiers
   extreme: {
-    answerQuality: 0.30,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.25,
-    terminationCorrectness: 0.10,
-    judge: 0.15,
+    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.20, terminationCorrectness: 0.10, judge: 0.15,
   },
   comparison_nested: {
-    answerQuality: 0.30,
-    executionEfficiency: 0.25,
-    costEfficiency: 0.20,
-    terminationCorrectness: 0.10,
-    judge: 0.15,
+    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.20, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.15,
   },
-  // Korean-language nuance tiers — answer quality + judge dominant
+  // Korean-language nuance tiers — faithfulness + judge weighted
   korean_colloquial: {
-    answerQuality: 0.40,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.10,
-    terminationCorrectness: 0.10,
-    judge: 0.20,
+    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
   },
   korean_food_pairing: {
-    answerQuality: 0.40,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.10,
-    terminationCorrectness: 0.10,
-    judge: 0.20,
+    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
   },
-  // Subjective / situational tiers — judge weighted more
+  // Subjective / situational tiers
   mood_atmosphere: {
-    answerQuality: 0.35,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.10,
-    terminationCorrectness: 0.10,
-    judge: 0.25,
+    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.25,
   },
   situation_based: {
-    answerQuality: 0.35,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.15,
-    terminationCorrectness: 0.10,
-    judge: 0.20,
+    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
   },
   gift_refined: {
-    answerQuality: 0.35,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.15,
-    terminationCorrectness: 0.10,
-    judge: 0.20,
+    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
   },
   price_expression: {
-    answerQuality: 0.40,
-    executionEfficiency: 0.20,
-    costEfficiency: 0.15,
-    terminationCorrectness: 0.10,
-    judge: 0.15,
+    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.10,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
   },
-  // single_shot, multi_step, complex_reasoning, relative_reference,
-  // seasonal_temporal, conversational → inherit DEFAULT_WEIGHTS.
 };
 
 export function scoreScenario(
   scenario: AgentBenchmarkScenario,
   execution: ScenarioExecution | null,
   judgeScore: number | undefined,
+  faithfulnessScore?: number | undefined,
   error?: string,
 ): ScenarioResult {
   if (scenario.skip !== undefined) {
@@ -295,18 +271,31 @@ export function scoreScenario(
   const terminationCorrectness = scoreTermination(exp, execution.terminationReason, diagnostics);
   const costEfficiency = scoreCostEfficiency(exp, execution, diagnostics);
 
-  // Judge: undefined → null (DROPPED from geo-mean, not 1.0). This fixes the
-  // pre-fix bug where --no-judge inflated overall by ~7-10%.
+  // Judge: undefined → null (DROPPED from geo-mean, not 1.0).
   const judge: number | null = judgeScore === undefined ? null : clamp01(judgeScore);
+
+  // RAGAS Faithfulness: LLM-scored grounding of answer claims in tool results.
+  // null when no observations (no tool calls → nothing to ground against).
+  const faithfulness: number | null = faithfulnessScore ?? null;
+  if (faithfulness !== null && faithfulness < 0.5) {
+    diagnostics.push({
+      dim: 'faithfulness',
+      severity: 'warn',
+      code: 'FAITHFULNESS_LOW',
+      message: `answer grounding in tool results is weak (${(faithfulness * 100).toFixed(0)}%)`,
+      observed: faithfulness,
+    });
+  }
+
+  // RAGAS Context Precision: rule-based check of tool result relevance
+  // against scenario's structured constraints (priceBandKrw, vintageRange, etc.).
+  // null when no structured constraints or no observations.
+  const contextPrecision = scoreContextPrecision(exp, execution, diagnostics);
 
   // Critical-fail check — any of these collapses overall to 0.
   const criticalFailure = diagnostics.some((d) => d.severity === 'critical');
 
   // Resolve weights — scenario override > tier override > default.
-  // Per-scenario partial overrides are RENORMALISED so the visible numbers
-  // are interpreted as ratios, not absolute weights. Without this, setting
-  // `terminationCorrectness: 0.80` would make the dim sum 1.50 and silently
-  // depend on the geo-mean's totalWeight normalisation, surprising users.
   const baseWeights: Required<DimensionWeights> = {
     ...DEFAULT_WEIGHTS,
     ...(TIER_WEIGHTS[scenario.tier] ?? {}),
@@ -317,6 +306,8 @@ export function scoreScenario(
   const dimScores: Record<keyof Required<DimensionWeights>, number | null> = {
     executionEfficiency,
     answerQuality,
+    faithfulness,
+    contextPrecision,
     terminationCorrectness,
     costEfficiency,
     judge,
@@ -329,8 +320,8 @@ export function scoreScenario(
   const diagnosticStrings = diagnostics.map((d) => {
     const head = `[${d.severity}] ${d.dim}/${d.code}: ${d.message}`;
     const obs = d.observed !== undefined ? `observed=${String(d.observed)}` : '';
-    const exp = d.expected !== undefined ? `expected=${String(d.expected)}` : '';
-    const tail = [obs, exp].filter((s) => s.length > 0).join(', ');
+    const expStr = d.expected !== undefined ? `expected=${String(d.expected)}` : '';
+    const tail = [obs, expStr].filter((s) => s.length > 0).join(', ');
     return tail.length > 0 ? `${head} (${tail})` : head;
   });
 
@@ -353,6 +344,8 @@ export function scoreScenario(
       answerQuality,
       terminationCorrectness,
       costEfficiency,
+      faithfulness,
+      contextPrecision,
       judge,
       overall,
       criticalFailure,
@@ -837,18 +830,41 @@ function extractKoreanPrices(text: string): number[] {
 }
 
 /** Extract 4-digit years that look like wine vintages (1800-2099) */
+/** Extract 4-digit years (1800-2099) using Unicode-safe boundaries.
+ *  Uses `(?:^|[^\p{L}\p{N}])` instead of `\b` per CLAUDE.md rule #8. */
 function extractVintageYears(text: string): number[] {
   const years: number[] = [];
-  for (const m of text.matchAll(/\b(1[89]\d{2}|20\d{2})\b/g)) {
+  for (const m of text.matchAll(/(?:^|[^\p{L}\p{N}])(1[89]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/gu)) {
     years.push(Number(m[1]));
   }
   return years;
 }
 
-/** Extract proper noun sequences (capitalized multi-word names) from text */
+/**
+ * Extract wine-name-like sequences from text. Handles both Latin proper nouns
+ * (capitalized multi-word) and Korean wine names (2+ Hangul syllables that
+ * look like entity names). This is an approximation — false positives on
+ * common Korean phrases are acceptable because the grounding check only
+ * penalizes names NOT found in observations, so a false extraction that IS
+ * in observations is harmless.
+ */
 function extractProperNouns(text: string): string[] {
-  const matches = text.match(/\b(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)\b/g);
-  return matches ?? [];
+  const results: string[] = [];
+  // Latin proper nouns: "Opus One", "Château Margaux", "Screaming Eagle"
+  const latinMatches = text.match(/\b(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)\b/g);
+  if (latinMatches) results.push(...latinMatches);
+  // Korean wine names: sequences of 2+ Hangul syllables (오푸스원, 샤또마고, 바롤로)
+  // Filter out common Korean grammar words to reduce false positives.
+  const KOREAN_STOPWORDS = new Set(['추천합니다', '추천해', '와인을', '와인이', '입니다', '있습니다', '없습니다', '합니다', '습니다', '드립니다', '같은', '비슷한', '좋은', '마시기']);
+  const koreanMatches = text.match(/[\uAC00-\uD7A3]{2,}/g);
+  if (koreanMatches) {
+    for (const m of koreanMatches) {
+      if (!KOREAN_STOPWORDS.has(m) && m.length >= 3) {
+        results.push(m);
+      }
+    }
+  }
+  return results;
 }
 
 /** Navigate a nested object by dot-path: "filters.priceMaxKrw" */
@@ -882,6 +898,123 @@ function evaluatePredicate(
     default:
       return false;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// RAGAS Context Precision (rule-based, no LLM needed)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Evaluates whether tool results are relevant to the query's constraints.
+ *
+ * Unlike faithfulness (does the ANSWER cite the context?), context precision
+ * asks: did the RETRIEVAL return results that match what was asked? This
+ * separates "search pipeline returned junk" from "agent hallucinated".
+ *
+ * Checks each available structured constraint against observations text:
+ * - priceBandKrw: prices in observations within range?
+ * - vintageRange: years in observations within range?
+ * - drinkingWindowStatus: keywords present?
+ *
+ * Returns null when no structured constraints exist or no observations.
+ */
+function scoreContextPrecision(
+  exp: ScenarioExpectation,
+  execution: ScenarioExecution,
+  diagnostics: Diagnostic[],
+): number | null {
+  if (execution.observations.length === 0) return null;
+  const obsText = execution.observations.join(' ');
+
+  const checks: { passed: boolean; label: string }[] = [];
+
+  // Price check: any prices mentioned in observations should be in range
+  if (exp.priceBandKrw !== undefined) {
+    const prices = extractKoreanPrices(obsText);
+    if (prices.length > 0) {
+      const inRange = prices.filter((p) => {
+        if (exp.priceBandKrw!.min !== undefined && p < exp.priceBandKrw!.min) return false;
+        if (exp.priceBandKrw!.max !== undefined && p > exp.priceBandKrw!.max) return false;
+        return true;
+      });
+      checks.push({ passed: inRange.length > 0, label: 'price_in_range' });
+    }
+  }
+
+  // Vintage check
+  if (exp.vintageRange !== undefined) {
+    const years = extractVintageYears(obsText);
+    if (years.length > 0) {
+      const inRange = years.filter((y) => {
+        if (exp.vintageRange!.min !== undefined && y < exp.vintageRange!.min) return false;
+        if (exp.vintageRange!.max !== undefined && y > exp.vintageRange!.max) return false;
+        return true;
+      });
+      checks.push({ passed: inRange.length > 0, label: 'vintage_in_range' });
+    }
+  }
+
+  // Drinking window status check
+  if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
+    const keywords: Record<string, readonly RegExp[]> = {
+      now: [/drinkable|peak|optimal|currently|지금/i],
+      hold: [/hold|cellar|aging|young|숙성/i],
+      past: [/past|over|decline|지남/i],
+    };
+    const patterns = keywords[exp.drinkingWindowStatus] ?? [];
+    checks.push({
+      passed: patterns.some((re) => re.test(obsText)),
+      label: `dw_status_${exp.drinkingWindowStatus}`,
+    });
+  }
+
+  // Query-context alignment: check if the tool results mention keywords from
+  // the agent's search queries. For each tool call, extract significant words
+  // (≥3 chars, not stopwords) from the query and check how many appear in
+  // observations. Threshold: at least 30% of significant words should appear
+  // for the context to be considered relevant.
+  if (execution.toolsUsed.length > 0) {
+    const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'wine', 'wines', 'under', 'over', 'not']);
+    const queryTerms = execution.toolsUsed
+      .map((t) => {
+        try {
+          const parsed = JSON.parse(t.input ?? '{}') as Record<string, unknown>;
+          return typeof parsed['query'] === 'string' ? parsed['query'] : '';
+        } catch { return ''; }
+      })
+      .filter((q) => q.length > 0);
+    if (queryTerms.length > 0) {
+      const lower = obsText.toLowerCase();
+      const anyRelevant = queryTerms.some((q) => {
+        const words = q.toLowerCase()
+          .split(/\s+/)
+          .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+        if (words.length === 0) return true; // no significant words → pass
+        const found = words.filter((w) => lower.includes(w));
+        return found.length / words.length >= 0.3; // 30% threshold
+      });
+      checks.push({ passed: anyRelevant, label: 'query_terms_in_context' });
+    }
+  }
+
+  if (checks.length === 0) return null; // no constraints to evaluate
+
+  const passedCount = checks.filter((c) => c.passed).length;
+  const score = passedCount / checks.length;
+
+  if (score < 1) {
+    const failed = checks.filter((c) => !c.passed).map((c) => c.label);
+    diagnostics.push({
+      dim: 'contextPrecision',
+      severity: 'warn',
+      code: 'CONTEXT_PRECISION_LOW',
+      message: `tool results did not match constraints: ${failed.join(', ')}`,
+      observed: score,
+      expected: 1,
+    });
+  }
+
+  return score;
 }
 
 function scoreTermination(
@@ -1031,13 +1164,11 @@ function renormaliseWeights(weights: Required<DimensionWeights>): Required<Dimen
   if (sum <= 0 || !Number.isFinite(sum)) return weights;
   if (Math.abs(sum - 1) < 1e-9) return weights;
   const factor = 1 / sum;
-  return {
-    executionEfficiency: weights.executionEfficiency * factor,
-    answerQuality: weights.answerQuality * factor,
-    terminationCorrectness: weights.terminationCorrectness * factor,
-    costEfficiency: weights.costEfficiency * factor,
-    judge: weights.judge * factor,
-  };
+  const result: Record<string, number> = {};
+  for (const [key, value] of Object.entries(weights)) {
+    result[key] = value * factor;
+  }
+  return result as Required<DimensionWeights>;
 }
 
 /**

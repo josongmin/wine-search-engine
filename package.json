@@ -7,6 +7,7 @@
   },
   "scripts": {
     "artifacts:link": "bash scripts/build/link-external-artifacts.sh",
+    "deadcode": "knip --no-exit-code",
     "dev": "tsx watch src/main.ts",
     "build": "npm run artifacts:link && tsc --project tsconfig.build.json",
     "start": "node dist/main.js",
@@ -153,6 +154,7 @@
     "eslint": "^9.0.0",
     "fast-check": "^4.6.0",
     "husky": "^9.1.7",
+    "knip": "^6.3.1",
     "lint-staged": "^16.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

@@ -183,7 +183,7 @@ export const BatchSearchResponseSchema = z.object({
   not_executed: z.number().int().nonnegative(),
   batch_status: z.enum(['succeeded', 'partial_failure', 'failed']),
   has_failures: z.boolean(),
-  results: z.array(BatchSearchResultItemSchema),
+  results: z.array(BatchSearchResultItemSchema).max(20),
   processing_time_ms: z.number().int().nonnegative(),
 }).strict().superRefine((value, ctx) => {
   if (value.succeeded + value.failed + value.not_executed !== value.total) {

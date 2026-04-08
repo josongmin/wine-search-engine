@@ -65,6 +65,40 @@ export default tseslint.config(
       /** DP / index-heavy code still uses `!`; tighten incrementally. */
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-console': ['error', { allow: ['warn', 'error'] }],
+      /**
+       * Bugbash-derived safety rules — prevent the top recurring bug classes.
+       * Each pattern was found 10+ times across the codebase during the
+       * audit; these selectors catch new instances at lint time.
+       */
+      'no-restricted-syntax': [
+        'error',
+        {
+          // Math.max(...spread) / Math.min(...spread) — stack overflow on large arrays.
+          // Use a loop instead (see CLAUDE.md rule 9).
+          selector: 'CallExpression[callee.object.name="Math"][callee.property.name=/^(max|min)$/] > SpreadElement',
+          message: 'Math.max/min with spread can overflow the call stack on large arrays. Use a loop.',
+        },
+        // NOTE: Math.random() is NOT banned via lint — it has legitimate uses
+        // for jitter/delay in retry logic. The CLAUDE.md quality bar prohibits
+        // Math.random() for ID generation (use crypto.randomUUID() instead).
+        // This is enforced via code review, not lint.
+      ],
+    },
+  },
+  /** Infrastructure adapter boundary safety.
+   *  Warn (not error) on `as` casts at JSONB/Redis boundaries so new code
+   *  gets flagged in the editor while existing casts are cleaned up
+   *  incrementally. Promote to 'error' once all existing casts are removed.
+   */
+  {
+    files: ['src/infrastructure/adapter/pg-*.ts', 'src/infrastructure/cache/redis-*.ts'],
+    rules: {
+      '@typescript-eslint/consistent-type-assertions': [
+        'warn',
+        {
+          assertionStyle: 'never',
+        },
+      ],
     },
   },
   /** Tests + src/__tests__: mocks, stubs, and Vitest patterns. */

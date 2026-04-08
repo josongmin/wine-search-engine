@@ -230,11 +230,11 @@ export const InterpretResponseV2Schema = z.object({
   /** Decomposition strategy when query was split into sub-queries. */
   decompositionStrategy: z.string().min(1).optional(),
   /** Retrieval channel names that were activated for this query. */
-  activeChannels: z.array(z.string().min(1)),
+  activeChannels: z.array(z.string().min(1)).max(20),
   /** Constraint labels that were applied during query planning. */
-  appliedConstraints: z.array(z.string().min(1)),
+  appliedConstraints: z.array(z.string().min(1)).max(50),
   /** Ranking signal names that influenced scoring for this query. */
-  rankingSignals: z.array(z.string().min(1)),
+  rankingSignals: z.array(z.string().min(1)).max(50),
   /** Planner confidence in the detected intent, in [0, 1]. */
   confidence: z.number().min(0).max(1),
   version: z.literal('2'),

@@ -71,6 +71,8 @@ export type TerminationReason = 'answer' | 'fallback' | 'blocked' | 'error' | 't
 export interface ScenarioDimensionWeights {
   readonly executionEfficiency?: number;
   readonly answerQuality?: number;
+  readonly faithfulness?: number;
+  readonly contextPrecision?: number;
   readonly terminationCorrectness?: number;
   readonly costEfficiency?: number;
   readonly judge?: number;
