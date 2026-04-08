@@ -132,7 +132,18 @@ export class QuerySanitizer {
       // Separate lookbehinds block when EITHER a letter OR digit precedes.
       /(?<!\p{L})(?<!\p{N})ignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})ignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/iu,
+      // "you are now X", "act as X", "roleplay as X" — persona injection.
+      // "you are looking for" and "wines become more complex" are false positives
+      // for the bare forms, so require explicit escalation context:
+      //   - "you are now" (temporal escalation)
+      //   - "act as" (role-play directive) — narrow enough
+      //   - "pretend" without qualification is too broad; require "to be" following
+      //   - "roleplay as" — specific enough
+      //   - "become" requires an explicit dangerous role/persona
+      /(?<!\p{L})(?<!\p{N})you\s+are\s+now\s+/iu,
+      /(?<!\p{L})(?<!\p{N})act\s+as\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model)|my\s+(?:assistant|tool)|an?\s+(?:ai|assistant)\s+without)/iu,
+      /(?<!\p{L})(?<!\p{N})(?:roleplay\s+as|pretend\s+(?:to\s+be|you\s+are?))\s+/iu,
+      /(?<!\p{L})(?<!\p{N})become\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model))(?!\p{L})(?!\p{N})/iu,
       /(?:system|assistant|admin)\s+mode/i,
       /^\s*(?:system|admin)\s*[:>]/iu,
       // "system override" / "admin override" at start of string, after sentence punctuation,
@@ -170,10 +181,10 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})dan\s+mode(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L})(?!\p{N})/iu,
       // Classic jailbreak phrases: "forget everything", "disregard all rules", etc.
-      // Avoid "the/these/those" in alternation — too broad; "forget the name" and
-      // "disregard the price" are legitimate user phrasings.
-      /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your|my|any)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every|prior|previous|your|my)(?!\p{L})(?!\p{N})/iu,
+      // Avoid broad pronouns (my, the) — "forget my preferences" and "disregard the price"
+      // are legitimate user phrasings. Only unambiguous directive objects are blocked.
+      /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your|any)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every|prior|previous|your)(?!\p{L})(?!\p{N})/iu,
       // "new instructions/rules/prompt/guidelines/system" — injection vector
       /(?<!\p{L})(?<!\p{N})new\s+(?:instructions?|rules?|prompts?|guidelines?|system\s+prompt|directives?)(?!\p{L})(?!\p{N})/iu,
       // "override system prompt" / "override your instructions"
@@ -234,9 +245,10 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})(?:cmd\.exe|powershell)(?!\p{L})(?!\p{N})/iu,
       // "bash -c", "bash ;" are shell invocations; "bash your palate" and "bash --login"
       // (double-dash long options in legitimate CLI docs) are not.
-      // Match "bash -X" (single dash, one non-dash char) OR "bash ;".
+      // Match "bash -X" (single dash, any non-dash char including newlines) OR "bash ;".
       // Negative lookahead (?!-) rejects "--" (double-dash long option prefix).
-      /(?<!\p{L})(?<!\p{N})bash\s+-(?!-).|(?<!\p{L})(?<!\p{N})bash\s+;/iu,
+      // [\s\S] instead of . to match newline-separated args ("bash -\nc 'cmd'").
+      /(?<!\p{L})(?<!\p{N})bash\s+-(?!-)[\s\S]|(?<!\p{L})(?<!\p{N})bash\s+;/iu,
       /(?<!\p{L})(?<!\p{N})(?:exec|system|eval|spawn)\s*\(/iu,
       /`[^`]*`/,                        // Backticks
       /\$\([^)]*\)/,                    // Command substitution
