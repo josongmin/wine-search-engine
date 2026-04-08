@@ -595,7 +595,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   }
 
   const modelId = args.model ?? config.openai.chatModel;
-  const judgeModelId = args.enableJudge ? (args.judgeModel ?? 'gpt-4o-mini') : null;
+  const judgeModelId = args.enableJudge ? (args.judgeModel ?? 'gpt-4.5-mini') : null;
 
   const chatLlm: ChatLlmPort = new OpenAiChatLlm({
     baseUrl: config.openai.baseUrl,
@@ -626,7 +626,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     {
       maxSteps: 8, // generous; per-scenario maxSteps is the real budget via overrides
       agentTimeoutMs: 120_000,
-      // gpt-4o takes 20-30s per call + up to 2s+4s+8s=14s 429 backoff → need 90s headroom.
+      // gpt-4.5-mini typically 5-15s per call + up to 2s+4s+8s=14s 429 backoff → 90s headroom.
       // 20s caused backoff sleeps to be aborted mid-retry, cutting off the 429 recovery chain.
       perStepTimeoutMs: 90_000,
       maxContextChars: 12_000,
@@ -667,16 +667,21 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           isTransient,
         );
 
-        const toolsUsed = result.steps
-          .filter((s) => s.action !== undefined)
-          .map((s) => ({
-            tool: s.action!.tool,
-            input: JSON.stringify(s.action!.input),
-          }));
+        const toolsUsed = result.steps.flatMap((s) => {
+          if (s.actions !== undefined) {
+            return s.actions.map((a) => ({ tool: a.tool, input: JSON.stringify(a.input) }));
+          }
+          if (s.action !== undefined) {
+            return [{ tool: s.action.tool, input: JSON.stringify(s.action.input) }];
+          }
+          return [];
+        });
 
-        const observations = result.steps
-          .filter((s) => s.observation !== undefined)
-          .map((s) => s.observation!);
+        const observations = result.steps.flatMap((s) => {
+          if (s.observations !== undefined) return s.observations.filter((o) => o.length > 0);
+          if (s.observation !== undefined) return [s.observation];
+          return [];
+        });
 
         const execution: ScenarioExecution = {
           answer: result.answer,

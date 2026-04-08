@@ -191,6 +191,16 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})override\s+(?:system\s+prompt|your\s+(?:instructions?|rules?|guidelines?|training|programming))(?!\p{L})(?!\p{N})/iu,
       // "clear memory/context/history" — session reset injection
       /(?<!\p{L})(?<!\p{N})clear\s+(?:memory|context|history|your\s+(?:memory|context|training))(?!\p{L})(?!\p{N})/iu,
+      // "from now on you will" — future instruction binding / persistent injection
+      /(?<!\p{L})(?<!\p{N})from\s+now\s+on(?:\s+you\s+(?:will|must|should|are))?(?!\p{L})(?!\p{N})/iu,
+      // "you have no restrictions" / "you have been freed" — capability assertion injection
+      /(?<!\p{L})(?<!\p{N})you\s+have\s+(?:no\s+restrictions?|been\s+freed|no\s+limits?|no\s+rules?)(?!\p{L})(?!\p{N})/iu,
+      // "as a language model" / "as an AI" in imperative context — persona bypass preamble
+      // False-positive guard: require "ignore" or "bypass" or "without restrictions" after
+      // to avoid blocking "as an AI-assisted sommelier, I recommend..."
+      /(?<!\p{L})(?<!\p{N})as\s+(?:an?\s+)?(?:(?:large\s+)?language\s+model|ai|llm)(?:\s+without\s+(?:restrictions?|filters?|limits?|safety)|,?\s+(?:ignore|bypass|disregard))(?!\p{L})(?!\p{N})/iu,
+      // "your original/previous/real instructions" — reference injection
+      /(?<!\p{L})(?<!\p{N})your\s+(?:original|previous|prior|real|true|actual)\s+instructions?(?!\p{L})(?!\p{N})/iu,
     ],
 
     // SQL injection
@@ -268,11 +278,11 @@ export class QuerySanitizer {
       /(?:api\s*key|secret\s*key|access\s*token)(?!\p{L})(?!\p{N})/iu,
     ],
 
-    // Unicode / encoding tricks
+    // Unicode / encoding tricks (checked AFTER NFKC normalization)
+    // NOTE: Soft hyphen (U+00AD) is checked on rawQuery BEFORE normalization,
+    // because NFKC removes U+00AD — a post-normalize regex would be dead code.
     unicode_tricks: [
       /[\u200B-\u200D\uFEFF]/,          // Zero-width chars + BOM/ZWNBSP
-      /\u00AD/,                         // Soft hyphen (U+00AD) — invisible in most renderers,
-                                        // can split "jailbreak" → "jail\u00ADbreak" bypassing patterns
       /[\u202A-\u202E]/,                // Bidirectional text (LRE/RLE/PDF/LRO/RLO)
       /[\u2066-\u2069]/,                // Directional isolates (LRI/RLI/FSI/PDI) — modern bidi attacks
       /[\uFFF0-\uFFFF]/,                // Noncharacters
@@ -299,6 +309,18 @@ export class QuerySanitizer {
       return {
         safe: false,
         reason: 'EMPTY_QUERY',
+      };
+    }
+
+    // Layer 0: Soft hyphen check on RAW input — must run BEFORE NFKC normalization
+    // because NFKC removes U+00AD, making any post-normalize check dead code.
+    // Soft hyphen (U+00AD) is invisible in most renderers and can split blocked
+    // patterns (e.g. "jail\u00ADbreak") to evade regex matching. Checking the
+    // raw bytes is the only reliable detection point.
+    if (rawQuery.includes('\u00AD')) {
+      return {
+        safe: false,
+        reason: 'UNICODE_ATTACK',
       };
     }
 

@@ -5,6 +5,11 @@ alwaysApply: true
 
 # Wine Search Engine
 
+## Coding assistant (Cursor / IDE agents)
+
+- **Developer-facing replies**: Explain, summarize, and discuss in **Korean (한국어)** unless the user explicitly asks for another language.
+- **Codebase conventions**: Keep **source code**, **identifiers**, **comments that match surrounding files**, and **git commit messages** consistent with existing repo practice (mostly English in this project).
+
 ## Stack
 
 - **Runtime**: Node.js ≥ 22, ESM (`"type": "module"`).

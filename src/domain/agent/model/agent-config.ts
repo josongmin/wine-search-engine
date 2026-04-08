@@ -16,9 +16,24 @@ export interface AgentConfig {
   readonly seed?: number | undefined;
 }
 
+/**
+ * Mutual consistency of timing limits (CLAUDE.md rule 22):
+ *   maxSteps=5, perStepTimeoutMs=10_000 → naive max = 5 × 10s = 50s
+ *   agentTimeoutMs=25_000 < HTTP_DEFAULT_REQUEST_TIMEOUT_MS (30_000) intentionally.
+ *   The 5s buffer lets the HTTP layer synthesise and send the response after the
+ *   agent loop terminates. Without the gap both timers fire simultaneously and
+ *   Fastify closes the connection while the route handler is still serialising.
+ *
+ *   Naive max wall-clock: maxSteps=5 × perStepTimeoutMs=10_000 = 50s.
+ *   agentTimeoutMs=25_000 is the hard cut that fires well before that worst case.
+ *
+ *   Token budget: maxTotalTokens=50_000 / maxSteps=5 = 10_000 tokens/step.
+ *   System prompt ≈ 700 tokens; 5 step messages ≈ 3_000 tokens; response ≈ 1_024 tokens.
+ *   Headroom per step ≈ 10_000 − 700 − 3_000 − 1_024 ≈ 5_276 tokens for context.
+ */
 export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   maxSteps: 5,
-  agentTimeoutMs: 30_000,
+  agentTimeoutMs: 25_000,
   perStepTimeoutMs: 10_000,
   maxContextChars: 8_000,
   maxTotalTokens: 50_000,

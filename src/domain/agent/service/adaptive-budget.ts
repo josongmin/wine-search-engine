@@ -180,8 +180,18 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   // measurement showed maxSteps=2 was too tight for "Opus One 2018"-style
   // queries where the agent legitimately wants context plus the result.
   // Both Latin (Opus One 2018) and Hangul (오푸스원 2018) variants supported.
+  // Lowercase-input detection for vintage+proper-noun path only:
+  // "opus one 2018" typed all-lowercase should be treated as specific_sku.
+  // Requires 2+ consecutive all-lowercase Latin words (each 3+ chars) — this matches
+  // "opus one", "chateau margaux", "screaming eagle", etc. but NOT bare "wine 2018"
+  // (single word before vintage) or "2018 wine" (word after vintage).
+  // Only applied to the vintage path; the no-vintage path keeps original behavior
+  // to avoid misclassifying generic queries like "2018 wine" or single-word queries.
+  const ALL_LOWERCASE_PROPER_NOUN_RE = /(?:^|(?<=\s))[a-z][a-z'\u00C0-\u017F-]{2,}(?:\s+[a-z][a-z'\u00C0-\u017F-]{2,})+/u;
+  const hasLowercaseProperNoun = ALL_LOWERCASE_PROPER_NOUN_RE.test(trimmed) && !/[A-Z\uAC00-\uD7A3]/.test(trimmed);
   const hasProperNoun = PROPER_NOUN_PATTERN.test(trimmed) || HANGUL_SKU_PATTERN.test(trimmed);
-  if (hasProperNoun && VINTAGE_PATTERN.test(trimmed)) {
+  // For vintage+lowercase queries, also check hasLowercaseProperNoun
+  if ((hasProperNoun || hasLowercaseProperNoun) && VINTAGE_PATTERN.test(trimmed)) {
     return {
       maxSteps: 3,
       classification: 'specific_sku',
@@ -207,7 +217,7 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   // a better signal. Note: 바롤로 is 3 syllables and IS a real wine name — this is a known
   // FP tradeoff. 3-syllable pure-Hangul queries will fall to the default budget (which is fine).
   const isPureHangulSku = /^[\uAC00-\uD7A3]{4,}$/.test(trimmed);
-  if ((PROPER_NOUN_PATTERN.test(trimmed) || isPureHangulSku) && noCompoundHits && noSituationHits && noConstraint) {
+  if ((PROPER_NOUN_PATTERN.test(trimmed) || hasLowercaseProperNoun || isPureHangulSku) && noCompoundHits && noSituationHits && noConstraint) {
     return {
       maxSteps: 3,
       classification: 'specific_sku',

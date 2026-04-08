@@ -1,5 +1,6 @@
 # Agent instructions
 
+- **Language (coding agents)**: Chat with the developer in **Korean** by default; keep code/identifiers aligned with repo conventions (see [`.cursor/rules/wine-search-engine.mdc`](./.cursor/rules/wine-search-engine.mdc)).
 - **Shared context**: [`CLAUDE.md`](./CLAUDE.md) (architecture, commands, quality bar).
 - **Debug / trace a request (LLMs):** [`.ai/llm-debugging-playbook.md`](./.ai/llm-debugging-playbook.md) first, then [`.ai/debug-mode.md`](./.ai/debug-mode.md); steps: [`src/observability/pipeline-debug-steps.ts`](./src/observability/pipeline-debug-steps.ts).
 - **Cursor**: [`.cursor/rules/wine-search-engine.mdc`](./.cursor/rules/wine-search-engine.mdc) (always-on project rules).

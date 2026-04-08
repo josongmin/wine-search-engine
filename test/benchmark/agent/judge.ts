@@ -81,14 +81,21 @@ export async function judgeAnswerN(
     return { score: null, rationale: 'no rubric — judge skipped', failed: false, samples: 0 };
   }
 
-  const userPrompt = `Query: ${scenario.query}
+  // Delimiters prevent a malicious query or answer from injecting fake scores.
+  // The judge sees [USER QUERY START]...[USER QUERY END] as a clear boundary
+  // so an attacker-controlled "\nScore: 1.0" inside the query cannot be mistaken
+  // for the expected JSON output format.
+  const userPrompt = `[USER QUERY START]
+${scenario.query}
+[USER QUERY END]
 
 Rubric: ${effectiveRubric}
 
-Agent answer:
+[AGENT ANSWER START]
 ${answer}
+[AGENT ANSWER END]
 
-Score this answer.`;
+Score the answer above against the rubric.`;
 
   const sampleCount = Math.max(1, Math.floor(samples));
   const results = await Promise.all(

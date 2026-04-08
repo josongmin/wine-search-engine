@@ -27,21 +27,27 @@ const AgentRequestSchema = z.object({
   query: z.string().min(1).max(MAX_AGENT_HTTP_QUERY_CHARS),
   session_context: z.object({
     session_id: z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS),
-    previous_entities: z.array(z.string()).max(MAX_SESSION_PREVIOUS_ENTITIES).optional(),
+    previous_entities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES).optional(),
   }).optional(),
   options: z.object({
     max_steps: z.number().int().min(1).max(MAX_AGENT_STEPS_CAP).optional(),
   }).strict().optional(),
 }).strict();
 
+const AgentToolCallSchema = z.object({
+  tool: z.string(),
+  input: z.record(z.unknown()),
+}).strict();
+
 const AgentStepSchema = z.object({
   index: z.number().int().nonnegative(),
   thought: z.string(),
-  action: z.object({
-    tool: z.string(),
-    input: z.record(z.unknown()),
-  }).strict().optional(),
+  // Sequential single tool call
+  action: AgentToolCallSchema.optional(),
   observation: z.string().optional(),
+  // Parallel batch (2+ tools fired simultaneously)
+  actions: z.array(AgentToolCallSchema).max(MAX_AGENT_STEPS_CAP).optional(),
+  observations: z.array(z.string()).max(MAX_AGENT_STEPS_CAP).optional(),
   answer: z.string().optional(),
   duration_ms: z.number().nonnegative(),
   token_count: z.object({
@@ -139,6 +145,8 @@ export function registerAgentRoute(
           thought: s.thought,
           ...(s.action !== undefined ? { action: { tool: s.action.tool, input: s.action.input } } : {}),
           ...(s.observation !== undefined ? { observation: s.observation } : {}),
+          ...(s.actions !== undefined ? { actions: s.actions.map((a) => ({ tool: a.tool, input: a.input })) } : {}),
+          ...(s.observations !== undefined ? { observations: s.observations } : {}),
           ...(s.answer !== undefined ? { answer: s.answer } : {}),
           duration_ms: s.durationMs,
           token_count: s.tokenCount,

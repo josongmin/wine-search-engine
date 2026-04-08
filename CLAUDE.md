@@ -4,6 +4,8 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 
 **HTTP debug & tracing requests:** agents read **`.ai/llm-debugging-playbook.md`** first; setup and limits: **`.ai/debug-mode.md`**. Canonical `step` strings: **`src/observability/pipeline-debug-steps.ts`**. Index: **`.ai/README.md`**.
 
+**Assistant ↔ developer:** Use **Korean (한국어)** for natural-language explanations unless the user asks otherwise; keep code and identifiers consistent with existing English-heavy repo style.
+
 ## Commands
 
 | Command | Purpose |
