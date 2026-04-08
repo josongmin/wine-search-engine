@@ -74,6 +74,17 @@ export function deepKeysToSnake(value: unknown): unknown {
     return value.map(deepKeysToSnake);
   }
 
+  // Non-plain objects (Buffer, URL, class instances, typed arrays):
+  // return as-is so their JSON serialization behaviour is preserved and
+  // we don't accidentally convert a Buffer into { "0": 97, "1": 98 }.
+  if (
+    type === 'object' &&
+    Object.getPrototypeOf(value) !== Object.prototype &&
+    Object.getPrototypeOf(value) !== null
+  ) {
+    return value;
+  }
+
   // Plain objects: create new object with transformed keys
   if (type === 'object') {
     const obj = value as Record<string, unknown>;

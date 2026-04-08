@@ -39,7 +39,6 @@ export function WineDetailView({ entityId }: WineDetailViewProps) {
   return (
     <WineDetailPanel
       source={{ kind: 'entity', data }}
-      query={entityId}
     />
   );
 }

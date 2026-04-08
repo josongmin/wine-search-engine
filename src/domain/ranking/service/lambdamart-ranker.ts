@@ -298,8 +298,11 @@ function computeValidationNdcg(
       dcg += gain * discount;
     }
 
+    // IDCG must reflect the same candidate pool size as DCG. `scored` contains
+    // 2 documents per pair (doc1 + doc2), not 1 — using `exs.length` here was
+    // a /2 systematic underestimate of IDCG, inflating reported NDCG.
     const idcg = Array.from(
-      { length: Math.min(5, exs.length) },
+      { length: Math.min(5, scored.length) },
       (_, i) => (Math.pow(2, 3) - 1) / Math.log2(i + 2),
     ).reduce((sum, value) => sum + value, 0);
 

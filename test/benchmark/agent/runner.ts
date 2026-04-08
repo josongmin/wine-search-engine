@@ -374,35 +374,72 @@ function summariseLatency(values: readonly number[]): LatencyStats {
 }
 
 /**
- * Wilson score 95% confidence interval for the mean of bounded [0,1] scores.
+ * Student-t 95% confidence interval for the mean of continuous bounded
+ * [0,1] scores. The earlier implementation used Wilson, which is designed
+ * for binomial PROPORTIONS (k successes / n trials) — applying it to a
+ * continuous geo-mean ignores within-sample variance entirely. Two runs
+ * with the same mean but different variances would report identical CIs.
  *
- * Uses the standard formula:
- *   center = (p + z²/(2n)) / (1 + z²/n)
- *   margin = z * sqrt(p(1-p)/n + z²/(4n²)) / (1 + z²/n)
+ * We use the t-distribution with n-1 degrees of freedom and the sample
+ * standard deviation (Bessel-corrected). Result is clipped to [0,1].
  *
- * z = 1.96 for 95% confidence. The Wilson interval is preferred over the
- * naive normal approximation because it stays inside [0,1] for small n and
- * extreme proportions, which matches our overall-score distribution.
+ * For n < 2 the SD is undefined; we degenerate to a zero-width interval
+ * around the mean rather than reporting a misleading CI from a single point.
  */
-function wilsonCi95(mean: number, n: number): WilsonCi {
+function tCi95(values: readonly number[]): WilsonCi {
+  const n = values.length;
   if (n === 0) return { mean: 0, lower: 0, upper: 0, n: 0 };
-  const z = 1.96;
-  const z2 = z * z;
-  const denom = 1 + z2 / n;
-  const center = (mean + z2 / (2 * n)) / denom;
-  const margin = (z * Math.sqrt(mean * (1 - mean) / n + z2 / (4 * n * n))) / denom;
+  const mean = values.reduce((s, v) => s + v, 0) / n;
+  if (n === 1) return { mean, lower: mean, upper: mean, n: 1 };
+
+  // Bessel-corrected sample variance.
+  const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1);
+  const sd = Math.sqrt(variance);
+  const standardError = sd / Math.sqrt(n);
+
+  // Two-tailed Student-t critical values for α=0.05. Cubic table covering
+  // the range we care about for benchmark suites (n=2..200). Falls back to
+  // 1.96 (z) for n > 200 where t→z.
+  const tCrit = tCriticalValue95(n - 1);
+  const margin = tCrit * standardError;
   return {
     mean,
-    lower: Math.max(0, center - margin),
-    upper: Math.min(1, center + margin),
+    lower: Math.max(0, mean - margin),
+    upper: Math.min(1, mean + margin),
     n,
   };
+}
+
+/**
+ * Two-tailed t-distribution critical value at α=0.05 for given degrees of
+ * freedom. Lookup table for df=1..30; analytic interpolation thereafter.
+ */
+function tCriticalValue95(df: number): number {
+  if (df <= 0) return 12.706; // df=1 fallback
+  const table: Record<number, number> = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571,
+    6: 2.447, 7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228,
+    11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145, 15: 2.131,
+    16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+    21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060,
+    26: 2.056, 27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+  };
+  if (df in table) return table[df]!;
+  // df > 30: t approaches z=1.96; smooth interpolation.
+  if (df < 60) return 2.042 - (2.042 - 2.000) * ((df - 30) / 30);
+  if (df < 120) return 2.000 - (2.000 - 1.980) * ((df - 60) / 60);
+  return 1.96;
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // Report shape
 // ─────────────────────────────────────────────────────────────────────
 
+/**
+ * 95% confidence interval for a continuous mean. The type name was historical
+ * (originally Wilson) — actual implementation now uses Student-t with sample
+ * variance. Field shape kept stable for baseline JSON compat.
+ */
 export interface WilsonCi {
   readonly mean: number;
   readonly lower: number;
@@ -534,11 +571,16 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             input: JSON.stringify(s.action!.input),
           }));
 
+        const observations = result.steps
+          .filter((s) => s.observation !== undefined)
+          .map((s) => s.observation!);
+
         const execution: ScenarioExecution = {
           answer: result.answer,
           stepCount: result.steps.length,
           toolCallCount: result.toolCallCount,
           toolsUsed,
+          observations,
           terminationReason: mapTerminationReason(result.terminationReason),
           totalDurationMs: result.totalDurationMs,
           totalTokens: result.totalTokens,
@@ -575,7 +617,20 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     },
   );
 
-  await shutdown();
+  // Shutdown with timeout — pool.end() can hang indefinitely when PG
+  // connections don't release, and redisClient.quit() can hang when the
+  // server is unreachable. The benchmark CLI must never stall after results
+  // are collected.
+  const SHUTDOWN_TIMEOUT_MS = 10_000;
+  await Promise.race([
+    shutdown(),
+    new Promise<void>((resolve) =>
+      setTimeout(() => {
+        console.error('  [WARN] shutdown timed out after 10s — forcing exit');
+        resolve();
+      }, SHUTDOWN_TIMEOUT_MS),
+    ),
+  ]);
 
   return buildReport(results, scenarios, modelId, judgeModelId, args, judgeFailCount);
 }
@@ -632,7 +687,8 @@ function buildReport(
 
   const overallScore = avgScore('overall');
   const criticalFailureCount = executed.filter((r) => r.scores.criticalFailure).length;
-  const overallCi95 = wilsonCi95(overallScore, executed.length);
+  const overallScores = executed.map((r) => r.scores.overall);
+  const overallCi95 = tCi95(overallScores);
 
   return {
     timestamp: new Date().toISOString(),

@@ -225,6 +225,7 @@ export const ReplayRouteContract = defineRouteContract({
   responses: {
     200: SearchResponseSchema,
     400: ErrorResponseSchema,
+    403: ErrorResponseSchema,
     409: ErrorResponseSchema,
     429: ErrorResponseSchema,
     500: ErrorResponseSchema,

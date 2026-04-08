@@ -45,11 +45,14 @@ async function request<T>(
 
   // Compose external signal (e.g., React Query's queryFn signal) with the
   // local timeout controller. Either one aborting cancels the fetch.
+  // Named handler so we can remove it in `finally` to prevent listener
+  // leaks when the signal outlives this request.
+  const onExternalAbort = () => controller.abort();
   if (externalSignal) {
     if (externalSignal.aborted) {
       controller.abort();
     } else {
-      externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
     }
   }
 
@@ -108,6 +111,7 @@ async function request<T>(
     throw new ApiError(0, 'NETWORK', message, true);
   } finally {
     clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
   }
 }
 

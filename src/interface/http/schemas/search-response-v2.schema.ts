@@ -111,7 +111,7 @@ export const ComparisonEntityV2HumanSchema = z.object({
 const SearchResponseV2HumanSearchSchemaBase = z.object({
   queryId: z.string().min(1),
   queryType: z.literal('search'),
-  results: z.array(ResultItemV2HumanSchema),
+  results: z.array(ResultItemV2HumanSchema).max(200),
   totalCandidates: z.number().int().nonnegative(),
   authorityTraceRef: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtimeCorrelationRef: z.string().min(1).optional(),
@@ -187,9 +187,9 @@ export const ResultItemV2MachineSchema = z.object({
   entityId: z.string().min(1),
   canonicalLabel: z.string().min(1),
   rank: z.number().int().positive(),
-  finalScore: z.number(),
+  finalScore: z.number().finite(),
   componentScores: ComponentScoresV2Schema,
-  evidenceItems: z.array(EvidenceItemV2Schema),
+  evidenceItems: z.array(EvidenceItemV2Schema).max(100),
   retrievalProvenance: z.string().min(1).optional(),
   version: z.literal('2'),
   responseType: z.literal('machine'),
@@ -206,7 +206,7 @@ export const ResultItemV2MachineSchema = z.object({
  */
 export const SearchResponseV2MachineSchema = z.object({
   queryId: z.string().min(1),
-  results: z.array(ResultItemV2MachineSchema),
+  results: z.array(ResultItemV2MachineSchema).max(200),
   version: z.literal('2'),
   responseType: z.literal('machine'),
 }).strict();

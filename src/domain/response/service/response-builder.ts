@@ -189,7 +189,7 @@ export class ResponseBuilder {
       queryType: 'search',
       engineDecision: enrichedEngineDecision,
       results: enrichedResults,
-      counterfactuals: params.counterfactuals,
+      ...(params.counterfactuals !== undefined ? { counterfactuals: params.counterfactuals } : {}),
       clarification: params.clarification ?? null,
       meta,
       ...(retrievalMode !== undefined ? { retrievalMode } : {}),
@@ -262,8 +262,7 @@ export class ResponseBuilder {
 
     const blockingEligible = params.contract?.blockingEligible
       ?? (
-        executionMode !== 'heuristic'
-        && executionMode !== 'advisory'
+        executionMode === 'authoritative'
         && results.every((result) => result.drinkingWindow?.blockingEligible !== false)
       );
 

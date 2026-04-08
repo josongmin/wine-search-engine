@@ -55,7 +55,7 @@ export function registerReplayRoute(
           request,
           reply,
           ReplayRouteContract,
-          400,
+          403,
           ErrorResponseSchema.parse({
             error: {
               request_id: requestId,

@@ -176,7 +176,23 @@ export async function buildRuntimeSupportServices(
     && !config.drinkingWindow.allowHeuristicInProduction
   ) {
     throw new Error(
-      'Production startup refuses heuristic-only drinking-window prediction. Set ALLOW_HEURISTIC_DRINKING_WINDOW=true only with explicit approval.',
+      'Production startup refuses heuristic-only drinking-window prediction. ' +
+        'The heuristic emits responses with executionMode="heuristic" and is rule-based — not ML. ' +
+        'To enable ONNX prediction: set DRINKING_WINDOW_MODEL_DIR to a directory containing window_start.onnx and window_end.onnx. ' +
+        'To explicitly opt in to heuristic-only operation (advisory mode), set ALLOW_HEURISTIC_DRINKING_WINDOW=true.',
+    );
+  }
+  if (
+    config.nodeEnv === 'production'
+    && drinkingWindowPredictor.modelVersion.startsWith('heuristic')
+    && config.drinkingWindow.allowHeuristicInProduction
+  ) {
+    bootstrapLogger.warn(
+      {
+        modelVersion: drinkingWindowPredictor.modelVersion,
+        evidenceLevel: 'heuristic',
+      },
+      '[Container] Drinking-window predictor running in heuristic-only mode in production (ALLOW_HEURISTIC_DRINKING_WINDOW=true). All predictions will carry executionMode="heuristic".',
     );
   }
 

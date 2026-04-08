@@ -76,9 +76,19 @@ export class PgThresholdStore implements ThresholdStore {
     if (row != null) {
       const parsed = rowToProfile(row, 'getDefault');
       if (parsed !== null) return parsed;
-      log.warn('default threshold profile invalid; falling back to in-memory DEFAULT_THRESHOLD_PROFILE');
+      // Row exists but JSONB shape drift — surface as a fallback signal so
+      // operators see "shape drift" distinct from "no row at all".
+      log.error(
+        { fallbackReason: 'invalid_shape', profileId: row.profile_id },
+        '[PgThresholdStore] default threshold profile JSONB invalid; falling back to in-memory DEFAULT_THRESHOLD_PROFILE',
+      );
+      return DEFAULT_THRESHOLD_PROFILE;
     }
-    // Guaranteed non-null fallback per port contract
+    // No row — table empty or never seeded. Distinct log from the shape-drift case.
+    log.warn(
+      { fallbackReason: 'no_default_row' },
+      '[PgThresholdStore] no default threshold profile in DB; using in-memory DEFAULT_THRESHOLD_PROFILE',
+    );
     return DEFAULT_THRESHOLD_PROFILE;
   }
 

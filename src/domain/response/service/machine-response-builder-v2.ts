@@ -62,14 +62,17 @@ export function buildMachineResponseV2(
     // Map EvidenceItem[] → structured { signal, value, weight } objects.
     // `type` is the signal name; `contribution` (e.g. "+0.42") is parsed to
     // a numeric value; `strength` is encoded as a weight: high=1, medium=0.5, low=0.1.
-    const evidenceItems = result.evidenceItems.map((ei) => ({
-      signal: ei.type,
-      value: parseFloat(ei.contribution),
-      weight:
-        ei.strength === 'high' ? 1
-        : ei.strength === 'medium' ? 0.5
-        : 0.1,
-    }));
+    const evidenceItems = result.evidenceItems.map((ei) => {
+      const parsed = Number(ei.contribution);
+      return {
+        signal: ei.type,
+        value: Number.isFinite(parsed) ? parsed : 0,
+        weight:
+          ei.strength === 'high' ? 1
+          : ei.strength === 'medium' ? 0.5
+          : 0.1,
+      };
+    });
 
     // Build the result item with conditional spread for retrievalProvenance
     const item: ResultItemV2Machine = {

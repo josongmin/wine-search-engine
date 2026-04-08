@@ -189,12 +189,31 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
         [queryClass, activeVersion],
       );
 
-      // Activate the previous version
-      await client.query(
+      // Activate the previous version. Find the actual latest version below
+      // the active one — do NOT assume contiguous (version N-1 may have been
+      // deleted by clearAllModels or manual DB intervention).
+      const prevResult = await client.query<{ model_version: number }>(
+        `SELECT model_version FROM ltr_model_registry
+         WHERE query_class = $1 AND model_version < $2
+         ORDER BY model_version DESC LIMIT 1`,
+        [queryClass, activeVersion],
+      );
+      const prevVersion = prevResult.rows[0]?.model_version;
+      if (prevVersion === undefined) {
+        // Deactivated the current but nothing to activate → rollback.
+        await client.query('ROLLBACK');
+        return false;
+      }
+
+      const activateResult = await client.query(
         `UPDATE ltr_model_registry SET is_active = TRUE
          WHERE query_class = $1 AND model_version = $2`,
-        [queryClass, activeVersion - 1],
+        [queryClass, prevVersion],
       );
+      if (activateResult.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return false;
+      }
 
       await client.query('COMMIT');
       return true;

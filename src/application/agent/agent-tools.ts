@@ -173,7 +173,14 @@ export async function executeAgentTool(
       if (firstResult === undefined) {
         return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };
       }
-      if (String(firstResult.entity.entityId) !== parsed.entity_id) {
+      // Normalize for comparison: trim whitespace + Unicode NFC + case-insensitive.
+      // EntityIds are stored case-sensitively but the LLM may emit case/whitespace
+      // variants — strict equality would falsely reject a correct match.
+      const normalizeForCompare = (s: string): string => s.normalize('NFC').trim().toLowerCase();
+      if (
+        normalizeForCompare(String(firstResult.entity.entityId)) !==
+        normalizeForCompare(parsed.entity_id)
+      ) {
         return {
           observation: `Wine ${parsed.entity_id} not found (closest match was ${String(firstResult.entity.entityId)} which is a different wine).`,
           rawResult: null,
@@ -306,7 +313,23 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     if (top.drinkingWindow) {
       parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);
     }
+    // Include match type / style hints if available for richer comparison synthesis
+    const matchType = top.match?.matchType;
+    if (matchType) parts.push(`match: ${matchType}`);
     return parts.join(' | ');
   });
-  return `Comparison (${response.comparisonIntent}):\nSide A: ${sides[0]}\nSide B: ${sides[1]}`;
+
+  // Build a rich observation that explicitly signals completion so the agent
+  // doesn't thrash by calling search_wines for individual wines that are already
+  // fully described above. The previous 2-line sparse observation lacked this
+  // closure signal, causing the LLM to chain 2-3 unnecessary search_wines calls
+  // ("let me look up more details on Side A...") which burned 15-25 seconds.
+  const summary = [
+    `Comparison (${response.comparisonIntent}):`,
+    `Side A: ${sides[0]}`,
+    `Side B: ${sides[1]}`,
+    '',
+    'COMPARISON_COMPLETE: Both wines are fully described above. You now have ALL data needed to synthesize your comparison answer. Do NOT call search_wines — the comparison result already contains everything.',
+  ];
+  return summary.join('\n');
 }

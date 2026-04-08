@@ -202,7 +202,17 @@ function computeValidationMetrics(
 }
 
 /**
- * Fine-tunes BGE-M3 model on wine domain triplets (simulation).
+ * Fine-tunes BGE-M3 model on wine domain triplets.
+ *
+ * **CRITICAL: This is a simulation, not real ML training.** It computes a
+ * Jaccard text-overlap score as an embedding proxy and synthesizes a loss
+ * curve from `Math.exp(-epoch)` — no gradients are computed and no model
+ * is updated. The returned checkpoint contains no loadable weights.
+ *
+ * Real fine-tuning requires Python + PyTorch + CUDA. To use this function,
+ * the caller MUST set `BGE_M3_ALLOW_SIMULATION=true` to acknowledge that
+ * the produced metrics are dashboard fixtures, not training output.
+ * Production training should shell out to a Python service instead.
  */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function finetune(
@@ -210,6 +220,13 @@ export async function finetune(
   config: FineTuningConfig = DEFAULT_FINETUNING_CONFIG,
   validationTriplets?: readonly EmbeddingTriplet[],
 ): Promise<EmbeddingModelCheckpoint> {
+  if (process.env['BGE_M3_ALLOW_SIMULATION'] !== 'true') {
+    throw new Error(
+      'bge-m3-finetuner.finetune() is a simulation that fabricates training metrics. ' +
+        'Set BGE_M3_ALLOW_SIMULATION=true to opt in (only for dashboard fixtures), or ' +
+        'replace with a real Python BGE-M3 fine-tune service.',
+    );
+  }
   if (triplets.length === 0) {
     throw new Error('No training triplets provided');
   }

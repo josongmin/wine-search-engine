@@ -12,6 +12,8 @@
  */
 
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
+import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
 import type { AgentStep, AgentTerminationReason } from '../../domain/agent/model/agent-step.js';
@@ -137,10 +139,14 @@ export class AgentOrchestrator {
      * search use case after the agent's protective layers said no.
      */
     let policyBlocked = false;
+    let unknownToolAttempts = 0;
+    const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
 
     try {
       while (true) {
-        // Budget check
+        // Budget check — enforce BOTH step count AND wall-clock timeout.
+        // The previous code only checked steps; a chain of perStepTimeoutMs
+        // steps could exceed agentTimeoutMs without ever tripping canProceed.
         const budgetCheck = budget.canProceed();
         if (!budgetCheck.allowed) {
           terminationReason = budgetCheck.reason ?? 'max_steps';
@@ -226,7 +232,15 @@ export class AgentOrchestrator {
           // Unknown tool guard FIRST — do not consume budget on adversarial
           // LLM-emitted unknown tool names. Adds an observation step but
           // does not call recordStep so the loop counter is preserved.
+          // Cap unknown-tool attempts to prevent infinite loops from an
+          // adversarial or confused LLM that keeps emitting the same
+          // invalid tool name.
           if (!isKnownTool(tool)) {
+            unknownToolAttempts++;
+            if (unknownToolAttempts > MAX_UNKNOWN_TOOL_ATTEMPTS) {
+              terminationReason = 'error';
+              break;
+            }
             steps.push({
               index: steps.length,
               thought: parsed.thought,
@@ -260,7 +274,7 @@ export class AgentOrchestrator {
           } catch (toolErr) {
             // Detect policy-block errors so the fallback doesn't re-run the
             // raw query through the same security layer that already rejected it.
-            if (toolErr instanceof Error && /POLICY_BLOCKED|PolicyBlocked/i.test(toolErr.name + ':' + toolErr.message)) {
+            if (toolErr instanceof DomainError && toolErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
             }
             observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
@@ -290,7 +304,7 @@ export class AgentOrchestrator {
     } catch (err) {
       log.error({ err, requestId }, 'Agent orchestrator unexpected error');
       terminationReason = 'error';
-      if (err instanceof Error && /POLICY_BLOCKED|PolicyBlocked/i.test(err.name + ':' + err.message)) {
+      if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
         policyBlocked = true;
       }
     }

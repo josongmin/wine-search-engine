@@ -266,8 +266,8 @@ export class ConstraintOverlay {
       }
 
       case 'exclude':
-        // For evaluation purposes, exclude returns true if the value matches
-        // (meaning the constraint IS violated — the candidate should be removed)
+        // Returns true when value does NOT match the exclusion (constraint satisfied).
+        // Returns false when value matches the exclusion (constraint violated → penalty).
         return !this.matchesExclude(value, constraint.value);
 
       default:

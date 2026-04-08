@@ -686,13 +686,20 @@ export class Ranker {
     // a sigmoid squashes them to a comparable [0, 1] range, and min-max
     // within the batch preserves the relative ordering while ensuring scale
     // compatibility with the original aggregated score (also [0, 1]).
+    // Filter non-finite scores BEFORE computing min/max — a single +/-Infinity
+    // would make rawRange Infinity, all scores fall to the 0.5 fallback, and a
+    // -Infinity min would propagate NaN through the entire normalization (NaN
+    // then poisons every blendedScore via 0.5*NaN + 0.5*orig = NaN).
     let minRaw = Infinity;
     let maxRaw = -Infinity;
     for (const r of rerankResults) {
+      if (!Number.isFinite(r.score)) continue;
       if (r.score < minRaw) minRaw = r.score;
       if (r.score > maxRaw) maxRaw = r.score;
     }
-    const rawRange = maxRaw - minRaw;
+    const rawRange = Number.isFinite(minRaw) && Number.isFinite(maxRaw)
+      ? maxRaw - minRaw
+      : NaN;
 
     function normalizeRerankScore(raw: number): number {
       if (!Number.isFinite(raw) || !Number.isFinite(rawRange) || rawRange < 1e-8) return 0.5;

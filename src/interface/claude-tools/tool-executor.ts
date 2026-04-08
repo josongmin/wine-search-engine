@@ -264,18 +264,13 @@ export class WineToolExecutor {
   /**
    * Execute check_drinking_window tool.
    *
-   * Calls DrinkingWindowUseCase.check() with entity attributes.
-   *
-   * NOTE: This is a simplified version that returns a drinking window block.
-   * In a full implementation, we'd fetch the entity from the search index
-   * first to get its vintage and attributes, then check drinkability.
-   *
-   * For now, we return a placeholder that indicates entity_id-based lookup
-   * would be needed.
+   * Calls DrinkingWindowUseCase.check() with entity attributes pulled from
+   * the search index. Refuses to call the predictor with hardcoded defaults
+   * — every required ML feature must come from the indexed document.
    *
    * @param input - Raw input (validated against DrinkingWindowInputSchema)
    * @param requestId - Parent request ID
-   * @returns DrinkingWindowBlock (or error if entity not found)
+   * @returns DrinkingWindowBlock (or error if entity not found / incomplete)
    */
   private async executeDrinkingWindow(
     input: unknown,
@@ -299,6 +294,27 @@ export class WineToolExecutor {
       return { error: `Entity ${validated.entity_id} has no vintage year — cannot predict drinking window.` };
     }
 
+    // Strict feature gating: refuse to call the predictor with fabricated
+    // defaults. The previous implementation passed hardcoded 0.5/0.85 and
+    // zero encodings, which fed garbage to the ONNX model and produced
+    // misleading "predictions".
+    const missing: string[] = [];
+    if (doc.tannin === undefined) missing.push('tannin');
+    if (doc.acidity === undefined) missing.push('acidity');
+    if (doc.body === undefined) missing.push('body');
+    if (doc.sweetness === undefined) missing.push('sweetness');
+    if (doc.criticScoreNormalized === undefined) missing.push('criticScoreNormalized');
+    if (doc.grapePrimaryEnc === undefined) missing.push('grapePrimaryEnc');
+    if (doc.regionEnc === undefined) missing.push('regionEnc');
+    if (doc.countryEnc === undefined) missing.push('countryEnc');
+    if (missing.length > 0) {
+      return {
+        error:
+          `Entity ${validated.entity_id} is missing ML features required for drinking-window prediction: ${missing.join(', ')}. ` +
+          `Reindex the entity or use search_wines for a heuristic estimate.`,
+      };
+    }
+
     toolLog.debug(
       {
         entityId: validated.entity_id,
@@ -309,20 +325,20 @@ export class WineToolExecutor {
       'check_drinking_window',
     );
 
-    const tannin01 = doc.tannin !== undefined ? doc.tannin : 0.5;
-    const acidity01 = doc.acidity !== undefined ? doc.acidity : 0.5;
-    const critic01 = doc.criticScoreNormalized !== undefined ? doc.criticScoreNormalized : 0.85;
-
     return this.deps.drinkingWindowUseCase.check({
       vintage: doc.vintageYear,
-      grapePrimaryEnc: 0,
-      regionEnc: 0,
-      countryEnc: 0,
-      body: doc.body,
-      tannin: tannin01 * 5,
-      acidity: acidity01 * 5,
-      sweetness: doc.sweetness,
-      avgCriticProxyScore: critic01 * 100,
+      grapePrimaryEnc: doc.grapePrimaryEnc!,
+      regionEnc: doc.regionEnc!,
+      countryEnc: doc.countryEnc!,
+      body: doc.body!,
+      // tannin/acidity in the document are stored on a [0,1] normalized scale.
+      // The predictor expects a [0,5] scale, so we expand here.
+      tannin: doc.tannin! * 5,
+      acidity: doc.acidity! * 5,
+      sweetness: doc.sweetness!,
+      // criticScoreNormalized is [0,1]; convert to the [0,100] proxy score
+      // expected by the predictor.
+      avgCriticProxyScore: doc.criticScoreNormalized! * 100,
       targetYear,
     });
   }

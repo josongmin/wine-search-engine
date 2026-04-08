@@ -50,9 +50,17 @@ export async function judgeAnswer(
 }
 
 /**
- * Judge with N samples + median voting. Higher N reduces variance at linear
- * cost. Failures within the sample group are filtered out — if all N fail,
- * the result is `{score: null, failed: true}`.
+ * Judge with N samples + median voting (majority semantics).
+ *
+ * Higher N reduces variance at linear cost. The result requires at least
+ * ⌈N/2⌉ successful samples — fewer triggers `failed:true` and `score:null`,
+ * which the scorer drops from the geo-mean (no inflation, no false floor).
+ *
+ * For N=1 the threshold is 1 (must succeed). For N=3 the threshold is 2.
+ * Without the threshold, a single noisy success outranks N-1 failures.
+ *
+ * The median of even-length successful arrays is the average of the two
+ * middle elements (standard definition).
  */
 export async function judgeAnswerN(
   judgeLlm: ChatLlmPort,
@@ -60,38 +68,50 @@ export async function judgeAnswerN(
   answer: string,
   samples: number,
 ): Promise<JudgeResult> {
-  if (scenario.expectation.rubric === undefined) {
+  // Auto-compose rubric from structured fields when hand-written rubric is absent.
+  // This activates the judge dimension for scenarios that specify structured
+  // expectations (priceBandKrw, factCheckClaims, requireHedging, etc.) even
+  // without a manual rubric string.
+  const composedRubric = composeAutoRubric(scenario.expectation);
+  const effectiveRubric = scenario.expectation.rubric
+    ? (composedRubric ? `${scenario.expectation.rubric}\n\nAdditional checks:\n${composedRubric}` : scenario.expectation.rubric)
+    : composedRubric;
+
+  if (effectiveRubric === undefined) {
     return { score: null, rationale: 'no rubric — judge skipped', failed: false, samples: 0 };
   }
 
   const userPrompt = `Query: ${scenario.query}
 
-Rubric: ${scenario.expectation.rubric}
+Rubric: ${effectiveRubric}
 
 Agent answer:
 ${answer}
 
 Score this answer.`;
 
-  // Run N samples in parallel.
   const sampleCount = Math.max(1, Math.floor(samples));
   const results = await Promise.all(
     Array.from({ length: sampleCount }, () => callJudgeOnce(judgeLlm, userPrompt)),
   );
 
   const successful = results.filter((r): r is { score: number; rationale: string } => r !== null);
-  if (successful.length === 0) {
+
+  // Majority threshold — need at least ⌈N/2⌉ successes for a valid sample.
+  const majorityThreshold = Math.ceil(sampleCount / 2);
+  if (successful.length < majorityThreshold) {
     return {
       score: null,
-      rationale: 'all judge samples failed',
+      rationale: `only ${successful.length}/${sampleCount} judge samples succeeded (need ${majorityThreshold})`,
       failed: true,
       samples: sampleCount,
     };
   }
 
-  // Median across successful samples (more robust than mean to outliers).
+  // Median (robust to outliers). For even-length arrays, average the two middle values.
   const sortedScores = successful.map((r) => r.score).sort((a, b) => a - b);
-  const median = sortedScores[Math.floor(sortedScores.length / 2)] ?? 0;
+  const median = computeMedian(sortedScores);
+
   // Pick the rationale closest to median for human review.
   const closestIdx = successful
     .map((r, i) => ({ idx: i, dist: Math.abs(r.score - median) }))
@@ -104,6 +124,15 @@ Score this answer.`;
     failed: false,
     samples: sampleCount,
   };
+}
+
+function computeMedian(sortedAsc: readonly number[]): number {
+  if (sortedAsc.length === 0) return 0;
+  const mid = Math.floor(sortedAsc.length / 2);
+  if (sortedAsc.length % 2 === 1) {
+    return sortedAsc[mid] ?? 0;
+  }
+  return ((sortedAsc[mid - 1] ?? 0) + (sortedAsc[mid] ?? 0)) / 2;
 }
 
 async function callJudgeOnce(
@@ -126,8 +155,13 @@ async function callJudgeOnce(
 }
 
 function parseJudgeResponse(text: string): { score: number; rationale: string } | null {
-  // Strip code fences if present.
-  const cleaned = text.trim().replace(/^```json\s*|\s*```$/g, '').trim();
+  // Strip code fences (with or without `json` tag), then trim.
+  // Earlier regex `/^```json\s*|\s*```$/g` missed bare ``` openers and required
+  // an explicit `json` tag — models that emitted plain ``` fences fell through.
+  const cleaned = text.trim()
+    .replace(/^```(?:json)?\s*\n?/i, '')
+    .replace(/\n?\s*```\s*$/i, '')
+    .trim();
   try {
     const parsed: unknown = JSON.parse(cleaned);
     if (
@@ -143,11 +177,86 @@ function parseJudgeResponse(text: string): { score: number; rationale: string } 
       return null;
     }
     if (!Number.isFinite(obj.score)) return null;
-    return {
-      score: Math.max(0, Math.min(1, obj.score)),
-      rationale: obj.rationale,
-    };
+    const clamped = Math.max(0, Math.min(1, obj.score));
+    // Annotate rationale when the judge produced an out-of-range score so a
+    // misbehaving judge model is visible in the rationale, not silently clipped.
+    const rationale = Math.abs(clamped - obj.score) > 0.01
+      ? `[clamped from ${obj.score.toFixed(2)}] ${obj.rationale}`
+      : obj.rationale;
+    return { score: clamped, rationale };
   } catch {
     return null;
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Auto-rubric composer
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Compose a rubric from structured scenario fields. Returns undefined when
+ * no structured fields are set (the judge should be skipped entirely).
+ *
+ * This allows scenarios that specify e.g. `priceBandKrw`, `factCheckClaims`,
+ * or `requireHedging` but have no hand-written `rubric` to still activate
+ * the judge dimension — auto-composing quality criteria from the structured
+ * expectations.
+ */
+function composeAutoRubric(
+  exp: import('./scenario.js').ScenarioExpectation,
+): string | undefined {
+  const lines: string[] = [];
+
+  if (exp.priceBandKrw !== undefined) {
+    const parts: string[] = [];
+    if (exp.priceBandKrw.min !== undefined) parts.push(`≥${exp.priceBandKrw.min.toLocaleString()} KRW`);
+    if (exp.priceBandKrw.max !== undefined) parts.push(`≤${exp.priceBandKrw.max.toLocaleString()} KRW`);
+    lines.push(`All recommended wines must be priced ${parts.join(' and ')}.`);
+  }
+
+  if (exp.vintageRange !== undefined) {
+    const parts: string[] = [];
+    if (exp.vintageRange.min !== undefined) parts.push(`${exp.vintageRange.min}`);
+    if (exp.vintageRange.max !== undefined) parts.push(`${exp.vintageRange.max}`);
+    lines.push(`All mentioned vintages must be in the range ${parts.join('-')}.`);
+  }
+
+  if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
+    const statusText: Record<string, string> = {
+      now: 'currently drinkable / at peak',
+      hold: 'needs further aging / too young',
+      past: 'past peak / over the hill',
+    };
+    lines.push(`The answer must indicate that the wine is ${statusText[exp.drinkingWindowStatus] ?? exp.drinkingWindowStatus}.`);
+  }
+
+  if (exp.requireHedging === true) {
+    lines.push('The answer must use hedging language (maybe, perhaps, several candidates) because the query is ambiguous.');
+  }
+
+  if (exp.requiredRegister === 'formal') {
+    lines.push('The answer must use formal Korean register (합니다/습니다 endings).');
+  } else if (exp.requiredRegister === 'casual') {
+    lines.push('The answer may use casual Korean register (해/야/거 endings).');
+  }
+
+  if (exp.refusalExpected === true) {
+    lines.push('The answer must refuse or indicate that the requested item does not exist. Must NOT fabricate availability or details.');
+  }
+
+  if (exp.mustCiteFromToolResults === true) {
+    lines.push('Every wine mentioned in the answer must have appeared in the search tool results. No fabricated wine names.');
+  }
+
+  if (exp.factCheckClaims !== undefined && exp.factCheckClaims.length > 0) {
+    for (const claim of exp.factCheckClaims) {
+      lines.push(`Fact check: "${claim.claim}" — must be ${claim.mustBeTrue ? 'TRUE' : 'FALSE'} in the answer.`);
+    }
+  }
+
+  if (exp.maxConfidence !== undefined && exp.maxConfidence < 0.5) {
+    lines.push('The answer must NOT be overconfident. Hedging or listing multiple options is preferred.');
+  }
+
+  return lines.length > 0 ? lines.join('\n') : undefined;
 }

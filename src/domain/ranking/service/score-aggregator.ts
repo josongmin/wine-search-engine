@@ -67,6 +67,11 @@ export class ScoreAggregator {
 
     // Final hard guard against any remaining non-finite drift, then clamp
     // to bounded output range. -Infinity sentinels remain caller-handled.
+    //
+    // NOTE: weights are tuned so the realistic max sum is ≤ 1.0; when
+    // mode-overlay produces sums > 1, ranker.ts performs a separate
+    // mode-aware re-normalization. Hard clamp here is correct under those
+    // assumptions, but watch for top-end saturation under future weight tuning.
     if (!Number.isFinite(score)) return -Infinity;
     return Math.max(0, Math.min(MAX_SCORE, score));
   }

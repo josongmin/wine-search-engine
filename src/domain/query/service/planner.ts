@@ -53,8 +53,8 @@ function regionHierarchySlashCount(normalizedQuery: string): number {
 const REGION_KEYWORDS: readonly RegExp[] = [
   /\b(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)\b/i,
   /\b(?:valley|region|appellation|aoc|doc|doca|côtes|côte)\b/i,
-  /\b(?:나파|샤블리|보르도|투지|롱글로|토스카나)\b/,
-  /\b(?:지역|지방|아펠라시옹|지역명)\b/,
+  /(?:^|[^\p{L}\p{N}])(?:나파|샤블리|보르도|투지|롱글로|토스카나)(?=$|[^\p{L}\p{N}])/u,
+  /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
 
@@ -538,10 +538,11 @@ export class Planner {
     const parserConfidence = Math.max(0.5, Math.min(1.0, 1.0 - tokenCount * 0.05));
 
     // Anchor confidence: max anchor confidence, or 0 if no anchors.
-    const anchorConfidence =
-      anchors.length > 0
-        ? Math.max(...anchors.map((a) => a.confidence))
-        : 0;
+    // Loop instead of Math.max(...spread) to avoid stack overflow on large anchor sets.
+    let anchorConfidence = 0;
+    for (const a of anchors) {
+      if (a.confidence > anchorConfidence) anchorConfidence = a.confidence;
+    }
 
     // Constraint confidence: based on number of extracted constraints.
     const totalConstraints =

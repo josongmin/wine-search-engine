@@ -73,15 +73,21 @@ export class CharNgramIndex {
   }
 
   /**
-   * Extracts character trigrams from a string.
-   * For strings shorter than 3 characters, returns the string itself as a single "trigram".
+   * Extracts UNIQUE character trigrams from a string.
+   *
+   * Returns an array (not a Set) for compat with `.length` usage in Jaccard,
+   * but deduplicates so that repeated trigrams (e.g. "aaaa" → ["aaa"]) don't
+   * inflate the shared count and produce similarity > 1.0.
+   *
+   * For strings shorter than 3 characters, returns the string itself as a
+   * single "trigram".
    */
   private extractTrigrams(s: string): string[] {
     if (s.length < 3) return [s];
-    const trigrams: string[] = [];
+    const seen = new Set<string>();
     for (let i = 0; i <= s.length - 3; i++) {
-      trigrams.push(s.slice(i, i + 3));
+      seen.add(s.slice(i, i + 3));
     }
-    return trigrams;
+    return [...seen];
   }
 }

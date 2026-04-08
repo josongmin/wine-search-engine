@@ -21,19 +21,19 @@ const PRICE_KEYWORDS: readonly RegExp[] = [
 /** Pairing-related keywords. */
 const PAIRING_KEYWORDS: readonly RegExp[] = [
   /\b(?:pair|pairing|goes?\s+with|match|accompany)\b/i,
-  /\b(?:어울리|곁들|맞는|페어링)\b/,
+  /(?:^|[^\p{L}\p{N}])(?:어울리|곁들|맞는|페어링)(?=$|[^\p{L}\p{N}])/u,
   /\b(?:steak|fish|cheese|chicken|pasta|pizza|beef|pork|seafood)\b/i,
-  /\b(?:스테이크|생선|치즈|치킨|파스타|피자|소고기|돼지고기|해산물)\b/,
+  /(?:^|[^\p{L}\p{N}])(?:스테이크|생선|치즈|치킨|파스타|피자|소고기|돼지고기|해산물)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
 /** Constraint keywords indicating structured filtering. */
 const CONSTRAINT_KEYWORDS: readonly RegExp[] = [
   /\b(?:red|white|rose|sparkling|natural)\b/i,
-  /\b(?:레드|화이트|로제|스파클링|내추럴)\b/,
+  /(?:^|[^\p{L}\p{N}])(?:레드|화이트|로제|스파클링|내추럴)(?=$|[^\p{L}\p{N}])/u,
   /\b(?:from|region|grape|variety|vintage|year)\b/i,
-  /\b(?:지역|품종|빈티지|연도)\b/,
+  /(?:^|[^\p{L}\p{N}])(?:지역|품종|빈티지|연도)(?=$|[^\p{L}\p{N}])/u,
   /\b(?:dry|sweet|tannic|fruity|oaky|light|full[\s-]?body)\b/i,
-  /\b(?:드라이|스위트|타닌|과일|오크|라이트|풀바디)\b/,
+  /(?:^|[^\p{L}\p{N}])(?:드라이|스위트|타닌|과일|오크|라이트|풀바디)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
 export type IntentDetectionAnchorExtractor = Pick<

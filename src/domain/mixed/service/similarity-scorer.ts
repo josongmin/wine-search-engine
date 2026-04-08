@@ -227,8 +227,11 @@ export class SimilarityScorer {
    * Exact match → 1.0, partial token overlap → proportional, no overlap → 0.0.
    */
   computeStyleDistance(candidateStyle: string, anchorStyle: string): number {
-    const cTokens = candidateStyle.toLowerCase().trim().split(/\s+/);
-    const aTokens = new Set(anchorStyle.toLowerCase().trim().split(/\s+/));
+    // `"".split(/\s+/)` returns `[""]` (length 1), not `[]`. Filter empty tokens
+    // so two empty/whitespace-only styles correctly return 0.0 (no data) instead
+    // of incorrectly computing 1.0 (perfect match of empty-vs-empty).
+    const cTokens = candidateStyle.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const aTokens = new Set(anchorStyle.toLowerCase().trim().split(/\s+/).filter(Boolean));
 
     if (cTokens.length === 0 || aTokens.size === 0) {
       return 0.0;

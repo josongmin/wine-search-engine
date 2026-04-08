@@ -37,6 +37,12 @@ export function getAuthenticatedSubject(
   if (subject === undefined || subject.length === 0 || subject.length > 128) {
     return null;
   }
+  // Reject control characters, whitespace, and characters that could enable
+  // log injection (CRLF) or header smuggling. Only safe printable chars
+  // pass. This prevents rate-limit key pollution via crafted headers.
+  if (!/^[A-Za-z0-9._@:\-]+$/.test(subject)) {
+    return null;
+  }
   return subject;
 }
 

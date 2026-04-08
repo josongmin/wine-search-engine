@@ -43,6 +43,8 @@ export interface ScenarioExecution {
   readonly stepCount: number;
   readonly toolCallCount: number;
   readonly toolsUsed: readonly ToolCallTrace[];
+  /** Raw observation strings from each tool call step (used by grounding checks). */
+  readonly observations: readonly string[];
   readonly terminationReason: TerminationReason;
   readonly totalDurationMs: number;
   readonly totalTokens: { input: number; output: number };
@@ -132,10 +134,19 @@ export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
 };
 
 /**
- * Per-tier weight overrides — adversarial tier promotes security signal,
- * knowledge_hybrid promotes answer quality.
+ * Per-tier weight overrides. Each entry MUST sum to 1.0 — enforced by the
+ * weightInvariants test in scorer.test.ts. When adding a tier here, also
+ * extend the test's TIER_KEYS list.
+ *
+ * Weighting principles (post-audit):
+ *   - adversarial / edge_case: termination + execution heavy (security signal)
+ *   - knowledge_hybrid / knowledge-style tiers: answer quality dominant
+ *   - extreme / comparison_nested: cost more important (these blow budgets)
+ *   - negation / nested_condition: answer quality dominant (constraint satisfaction)
+ *   - default tiers (single_shot, multi_step, …): inherit DEFAULT_WEIGHTS
  */
-export const TIER_WEIGHTS: Readonly<Record<string, DimensionWeights>> = {
+export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> = {
+  // Security-critical tiers — termination + execution dominant
   adversarial: {
     terminationCorrectness: 0.30,
     executionEfficiency: 0.30,
@@ -150,6 +161,7 @@ export const TIER_WEIGHTS: Readonly<Record<string, DimensionWeights>> = {
     costEfficiency: 0.15,
     judge: 0.10,
   },
+  // Answer-quality dominant tiers — correctness of the actual recommendation matters most
   knowledge_hybrid: {
     answerQuality: 0.45,
     executionEfficiency: 0.20,
@@ -157,6 +169,81 @@ export const TIER_WEIGHTS: Readonly<Record<string, DimensionWeights>> = {
     terminationCorrectness: 0.10,
     judge: 0.15,
   },
+  negation: {
+    answerQuality: 0.40,
+    executionEfficiency: 0.25,
+    costEfficiency: 0.10,
+    terminationCorrectness: 0.10,
+    judge: 0.15,
+  },
+  nested_condition: {
+    answerQuality: 0.40,
+    executionEfficiency: 0.25,
+    costEfficiency: 0.10,
+    terminationCorrectness: 0.10,
+    judge: 0.15,
+  },
+  // Cost-sensitive tiers — these legitimately need more budget but should still pay
+  extreme: {
+    answerQuality: 0.30,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.25,
+    terminationCorrectness: 0.10,
+    judge: 0.15,
+  },
+  comparison_nested: {
+    answerQuality: 0.30,
+    executionEfficiency: 0.25,
+    costEfficiency: 0.20,
+    terminationCorrectness: 0.10,
+    judge: 0.15,
+  },
+  // Korean-language nuance tiers — answer quality + judge dominant
+  korean_colloquial: {
+    answerQuality: 0.40,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.10,
+    terminationCorrectness: 0.10,
+    judge: 0.20,
+  },
+  korean_food_pairing: {
+    answerQuality: 0.40,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.10,
+    terminationCorrectness: 0.10,
+    judge: 0.20,
+  },
+  // Subjective / situational tiers — judge weighted more
+  mood_atmosphere: {
+    answerQuality: 0.35,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.10,
+    terminationCorrectness: 0.10,
+    judge: 0.25,
+  },
+  situation_based: {
+    answerQuality: 0.35,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.15,
+    terminationCorrectness: 0.10,
+    judge: 0.20,
+  },
+  gift_refined: {
+    answerQuality: 0.35,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.15,
+    terminationCorrectness: 0.10,
+    judge: 0.20,
+  },
+  price_expression: {
+    answerQuality: 0.40,
+    executionEfficiency: 0.20,
+    costEfficiency: 0.15,
+    terminationCorrectness: 0.10,
+    judge: 0.15,
+  },
+  // single_shot, multi_step, complex_reasoning, relative_reference,
+  // seasonal_temporal, conversational → inherit DEFAULT_WEIGHTS.
 };
 
 export function scoreScenario(
@@ -192,16 +279,19 @@ export function scoreScenario(
 
   const toolAccuracy = scoreToolAccuracy(exp, execution.toolsUsed, diagnostics);
   const stepEfficiency = scoreStepEfficiency(exp, execution.stepCount, diagnostics);
-  // executionEfficiency: when both sub-dims are healthy, take their weighted
-  // arithmetic mean. When BOTH dip below 0.5 it usually means thrashing
-  // (single root cause), so take max() to avoid double-penalty. When only
-  // one is low, the failure is independent — use mean.
-  const executionEfficiency =
-    toolAccuracy < 0.5 && stepEfficiency < 0.5
-      ? Math.max(toolAccuracy, stepEfficiency)
-      : (toolAccuracy * 0.6 + stepEfficiency * 0.4);
+  // executionEfficiency: monotone weighted mean of toolAccuracy + stepEfficiency.
+  // Earlier the formula switched to max() when both <0.5 to avoid double-
+  // penalising thrashing (single root cause), but that branch was non-monotone
+  // at the 0.5 boundary — improving an input could DECREASE the output.
+  // The dim merge already lives in the geo-mean weighting (executionEfficiency
+  // gets the same weight that tool+step would have shared), so a single
+  // weighted mean is sufficient and stable.
+  const executionEfficiency = toolAccuracy * 0.6 + stepEfficiency * 0.4;
 
-  const answerQuality = scoreAnswerQuality(exp, execution.answer, diagnostics);
+  const baseAnswerQuality = scoreAnswerQuality(exp, execution.answer, diagnostics);
+  // Structured checks multiply into answerQuality — each failed check docks a %.
+  const structuredMultiplier = scoreStructuredChecks(exp, execution.answer, execution, diagnostics);
+  const answerQuality = clamp01(baseAnswerQuality * structuredMultiplier);
   const terminationCorrectness = scoreTermination(exp, execution.terminationReason, diagnostics);
   const costEfficiency = scoreCostEfficiency(exp, execution, diagnostics);
 
@@ -213,11 +303,16 @@ export function scoreScenario(
   const criticalFailure = diagnostics.some((d) => d.severity === 'critical');
 
   // Resolve weights — scenario override > tier override > default.
-  const weights: Required<DimensionWeights> = {
+  // Per-scenario partial overrides are RENORMALISED so the visible numbers
+  // are interpreted as ratios, not absolute weights. Without this, setting
+  // `terminationCorrectness: 0.80` would make the dim sum 1.50 and silently
+  // depend on the geo-mean's totalWeight normalisation, surprising users.
+  const baseWeights: Required<DimensionWeights> = {
     ...DEFAULT_WEIGHTS,
     ...(TIER_WEIGHTS[scenario.tier] ?? {}),
     ...(scenario.expectation.weights ?? {}),
   };
+  const weights = renormaliseWeights(baseWeights);
 
   const dimScores: Record<keyof Required<DimensionWeights>, number | null> = {
     executionEfficiency,
@@ -231,11 +326,13 @@ export function scoreScenario(
     ? 0
     : weightedGeometricMean(dimScores, weights);
 
-  const diagnosticStrings = diagnostics.map((d) =>
-    d.observed !== undefined && d.expected !== undefined
-      ? `[${d.severity}] ${d.dim}/${d.code}: ${d.message} (observed=${String(d.observed)}, expected=${String(d.expected)})`
-      : `[${d.severity}] ${d.dim}/${d.code}: ${d.message}`,
-  );
+  const diagnosticStrings = diagnostics.map((d) => {
+    const head = `[${d.severity}] ${d.dim}/${d.code}: ${d.message}`;
+    const obs = d.observed !== undefined ? `observed=${String(d.observed)}` : '';
+    const exp = d.expected !== undefined ? `expected=${String(d.expected)}` : '';
+    const tail = [obs, exp].filter((s) => s.length > 0).join(', ');
+    return tail.length > 0 ? `${head} (${tail})` : head;
+  });
 
   return {
     id: scenario.id,
@@ -511,6 +608,282 @@ function scoreAnswerQuality(
   return score;
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Structured checks (9 schema fields → answerQuality / toolAccuracy multipliers)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Evaluate scenario-defined structured assertions that go beyond substring
+ * matching. Returns a multiplier in (0, 1] applied to answerQuality. Each
+ * check that fails docks a fraction; critical failures produce 0.
+ */
+function scoreStructuredChecks(
+  exp: ScenarioExpectation,
+  answer: string,
+  execution: ScenarioExecution,
+  diagnostics: Diagnostic[],
+): number {
+  let multiplier = 1;
+  const lowerAnswer = answer.toLowerCase();
+
+  // 1. priceBandKrw — extract Korean price patterns, check bounds
+  if (exp.priceBandKrw !== undefined) {
+    const prices = extractKoreanPrices(answer);
+    if (prices.length > 0) {
+      const outOfBound = prices.filter((p) => {
+        if (exp.priceBandKrw!.min !== undefined && p < exp.priceBandKrw!.min) return true;
+        if (exp.priceBandKrw!.max !== undefined && p > exp.priceBandKrw!.max) return true;
+        return false;
+      });
+      if (outOfBound.length > 0) {
+        diagnostics.push({
+          dim: 'answerQuality',
+          severity: 'warn',
+          code: 'PRICE_BAND_VIOLATED',
+          message: `prices out of range: ${outOfBound.join(', ')} KRW`,
+          observed: outOfBound.join(','),
+          expected: `${exp.priceBandKrw.min ?? '?'}-${exp.priceBandKrw.max ?? '?'}`,
+        });
+        multiplier *= 0.7;
+      }
+    }
+  }
+
+  // 2. vintageRange — extract 4-digit years, check min/max
+  if (exp.vintageRange !== undefined) {
+    const years = extractVintageYears(answer);
+    if (years.length > 0) {
+      const outOfRange = years.filter((y) => {
+        if (exp.vintageRange!.min !== undefined && y < exp.vintageRange!.min) return true;
+        if (exp.vintageRange!.max !== undefined && y > exp.vintageRange!.max) return true;
+        return false;
+      });
+      if (outOfRange.length > 0) {
+        diagnostics.push({
+          dim: 'answerQuality',
+          severity: 'warn',
+          code: 'VINTAGE_RANGE_VIOLATED',
+          message: `vintages out of range: ${outOfRange.join(', ')}`,
+          observed: outOfRange.join(','),
+          expected: `${exp.vintageRange.min ?? '?'}-${exp.vintageRange.max ?? '?'}`,
+        });
+        multiplier *= 0.7;
+      }
+    }
+  }
+
+  // 3. drinkingWindowStatus — keyword match
+  if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
+    const status = exp.drinkingWindowStatus;
+    const keywords: Record<string, readonly RegExp[]> = {
+      now: [/마시기\s*좋|drinkable|지금|now|peak|최적/i],
+      hold: [/숙성|hold|기다|cellar|too\s*young|이르/i],
+      past: [/지남|past\s*peak|over|넘/i],
+    };
+    const patterns = keywords[status] ?? [];
+    const found = patterns.some((re) => re.test(answer));
+    if (!found) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'DRINKING_WINDOW_MISMATCH',
+        message: `expected drinking window status '${status}' keywords not found`,
+        expected: status,
+      });
+      multiplier *= 0.8;
+    }
+  }
+
+  // 4. expectedToolArgs — tool input JSON dot-path traversal
+  if (exp.expectedToolArgs !== undefined && exp.expectedToolArgs.length > 0) {
+    for (const argSpec of exp.expectedToolArgs) {
+      const matchingCalls = execution.toolsUsed.filter((t) => t.tool === argSpec.tool);
+      const anyMatch = matchingCalls.some((call) => {
+        try {
+          const parsed = JSON.parse(call.input ?? '{}') as Record<string, unknown>;
+          const value = getNestedValue(parsed, argSpec.argPath);
+          return evaluatePredicate(value, argSpec.predicate, argSpec.value);
+        } catch { return false; }
+      });
+      if (!anyMatch) {
+        diagnostics.push({
+          dim: 'toolAccuracy',
+          severity: 'warn',
+          code: 'EXPECTED_TOOL_ARG_MISSING',
+          message: `${argSpec.tool}.${argSpec.argPath} ${argSpec.predicate} ${String(argSpec.value ?? '')} not satisfied`,
+        });
+        multiplier *= 0.9;
+      }
+    }
+  }
+
+  // 5. requireHedging — must contain hedging language
+  if (exp.requireHedging === true) {
+    const hedging = /아마|~?\s*수도|perhaps|might|maybe|여러\s*후보|several|다양|clarif|명확|구체적|어떤/i;
+    if (!hedging.test(answer)) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'HEDGING_MISSING',
+        message: 'answer lacks required hedging language for ambiguous query',
+      });
+      multiplier *= 0.7;
+    }
+  }
+
+  // 6. requiredRegister — Korean formal vs casual
+  if (exp.requiredRegister !== undefined) {
+    const formalMarkers = (lowerAnswer.match(/합니다|습니다|드립니다|하세요|겠습니다/g) ?? []).length;
+    const casualMarkers = (lowerAnswer.match(/해|야|거|줄게|건데|잖아/g) ?? []).length;
+    const dominant = formalMarkers >= casualMarkers ? 'formal' : 'casual';
+    // Only penalise if the answer has enough Korean to judge and the register is wrong.
+    const totalMarkers = formalMarkers + casualMarkers;
+    if (totalMarkers >= 2 && dominant !== exp.requiredRegister) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'REGISTER_MISMATCH',
+        message: `expected ${exp.requiredRegister} register but detected ${dominant}`,
+        observed: dominant,
+        expected: exp.requiredRegister,
+      });
+      multiplier *= 0.8;
+    }
+  }
+
+  // 7. maxConfidence — penalise overconfident language when maxConfidence is low
+  if (exp.maxConfidence !== undefined && exp.maxConfidence < 0.5) {
+    const overconfident = /확실히|definitely|100%|분명히|틀림없이|absolutely|certainly/i;
+    if (overconfident.test(answer)) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'warn',
+        code: 'OVERCONFIDENT_LANGUAGE',
+        message: 'overconfident language detected despite low maxConfidence',
+      });
+      multiplier *= 0.8;
+    }
+  }
+
+  // 8. refusalExpected — CRITICAL: answer must contain refusal + must NOT contain affirmation
+  if (exp.refusalExpected === true) {
+    const refusalMarkers = /없|존재하지|찾을\s*수\s*없|not\s+found|unavailable|해당\s*빈티지/i;
+    const affirmativeMarkers = /재고\s*있|구매\s*가능|in\s+stock|available|추천.*합니다/i;
+    if (!refusalMarkers.test(answer)) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'critical',
+        code: 'REFUSAL_MISSING',
+        message: 'answer should refuse but contains no refusal markers',
+      });
+      return 0;
+    }
+    if (affirmativeMarkers.test(answer)) {
+      diagnostics.push({
+        dim: 'answerQuality',
+        severity: 'critical',
+        code: 'REFUSAL_CONTRADICTED',
+        message: 'answer should refuse but contains affirmative markers',
+      });
+      return 0;
+    }
+  }
+
+  // 9. mustCiteFromToolResults — wine names in answer must appear in observations
+  if (exp.mustCiteFromToolResults === true && execution.observations.length > 0) {
+    // Extract wine-like proper nouns from the answer (capitalized multi-word sequences)
+    const answerWineNames = extractProperNouns(answer);
+    if (answerWineNames.length > 0) {
+      const observationText = execution.observations.join(' ').toLowerCase();
+      const uncited = answerWineNames.filter(
+        (name) => !observationText.includes(name.toLowerCase()),
+      );
+      if (uncited.length > 0) {
+        diagnostics.push({
+          dim: 'answerQuality',
+          severity: 'warn',
+          code: 'UNCITED_WINE_NAMES',
+          message: `wine names in answer not found in tool results: ${uncited.join(', ')}`,
+          observed: uncited.join(','),
+        });
+        multiplier *= 0.5;
+      }
+    }
+  }
+
+  return multiplier;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Structured check helpers
+// ─────────────────────────────────────────────────────────────────────
+
+/** Extract Korean-style prices: "5만원", "100,000원", "50000원", "$50" */
+function extractKoreanPrices(text: string): number[] {
+  const prices: number[] = [];
+  // N만원 pattern (만 = 10,000)
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*만\s*원/g)) {
+    prices.push(Number(m[1]) * 10_000);
+  }
+  // Plain numbers + 원
+  for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/g)) {
+    prices.push(Number(m[1]!.replace(/,/g, '')));
+  }
+  // Dollar amounts
+  for (const m of text.matchAll(/\$\s*(\d+(?:\.\d+)?)/g)) {
+    prices.push(Number(m[1]) * 1_400); // rough KRW conversion
+  }
+  return prices;
+}
+
+/** Extract 4-digit years that look like wine vintages (1800-2099) */
+function extractVintageYears(text: string): number[] {
+  const years: number[] = [];
+  for (const m of text.matchAll(/\b(1[89]\d{2}|20\d{2})\b/g)) {
+    years.push(Number(m[1]));
+  }
+  return years;
+}
+
+/** Extract proper noun sequences (capitalized multi-word names) from text */
+function extractProperNouns(text: string): string[] {
+  const matches = text.match(/\b(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)\b/g);
+  return matches ?? [];
+}
+
+/** Navigate a nested object by dot-path: "filters.priceMaxKrw" */
+function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  let current: unknown = obj;
+  for (const segment of path.split('.')) {
+    if (current === null || current === undefined || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+/** Evaluate a predicate against a value */
+function evaluatePredicate(
+  actual: unknown,
+  predicate: 'equals' | 'lte' | 'gte' | 'contains' | 'exists',
+  expected?: unknown,
+): boolean {
+  switch (predicate) {
+    case 'exists':
+      return actual !== undefined && actual !== null;
+    case 'equals':
+      return actual === expected;
+    case 'lte':
+      return typeof actual === 'number' && typeof expected === 'number' && actual <= expected;
+    case 'gte':
+      return typeof actual === 'number' && typeof expected === 'number' && actual >= expected;
+    case 'contains':
+      return typeof actual === 'string' && typeof expected === 'string'
+        && actual.toLowerCase().includes(expected.toLowerCase());
+    default:
+      return false;
+  }
+}
+
 function scoreTermination(
   exp: ScenarioExpectation,
   reason: string,
@@ -551,6 +924,14 @@ function scoreTermination(
       });
       return 0;
     }
+    // Unknown / future enum value — push diagnostic so silent zeros are visible.
+    diagnostics.push({
+      dim: 'terminationCorrectness',
+      severity: 'warn',
+      code: 'UNKNOWN_TERMINATION_REASON',
+      message: `unknown termination reason: ${reason}`,
+      observed: reason,
+    });
     return 0;
   }
   const ok = reason === exp.terminationReason;
@@ -581,8 +962,16 @@ function scoreCostEfficiency(
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
 ): number {
-  const DEFAULT_MAX_DURATION_MS = 15_000;
-  const DEFAULT_MAX_TOTAL_TOKENS = 10_000;
+  // Defaults raised post-audit. Observed real-mode p95 ~ 12s for happy paths
+  // and 25s for the comparison route — a 15s default was tighter than p95
+  // and falsely penalised legitimate runs. 25s is ~p99 of healthy execution
+  // and matches "user starts wondering if it's broken" UX threshold.
+  const DEFAULT_MAX_DURATION_MS = 25_000;
+  const DEFAULT_MAX_TOTAL_TOKENS = 12_000;
+  /** Overshoot ratio that escalates from `warn` to `critical`. 1.0 means
+   *  "the budget was exceeded by another full budget" — i.e. >2x the budget. */
+  const CRITICAL_OVERSHOOT_RATIO = 1.0;
+
   const maxDuration = exp.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
   const maxTokens = exp.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS;
   const totalTokens = execution.totalTokens.input + execution.totalTokens.output;
@@ -590,10 +979,11 @@ function scoreCostEfficiency(
   let durOvershoot = 0;
   if (Number.isFinite(maxDuration) && execution.totalDurationMs > maxDuration) {
     durOvershoot = (execution.totalDurationMs - maxDuration) / maxDuration;
+    const severity: DiagnosticSeverity = durOvershoot >= CRITICAL_OVERSHOOT_RATIO ? 'critical' : 'warn';
     diagnostics.push({
       dim: 'costEfficiency',
-      severity: 'warn',
-      code: 'LATENCY_BUDGET_EXCEEDED',
+      severity,
+      code: severity === 'critical' ? 'LATENCY_BUDGET_BLOWN' : 'LATENCY_BUDGET_EXCEEDED',
       message: `duration ${execution.totalDurationMs}ms > budget ${maxDuration}ms`,
       observed: execution.totalDurationMs,
       expected: maxDuration,
@@ -603,10 +993,11 @@ function scoreCostEfficiency(
   let tokOvershoot = 0;
   if (Number.isFinite(maxTokens) && totalTokens > maxTokens) {
     tokOvershoot = (totalTokens - maxTokens) / maxTokens;
+    const severity: DiagnosticSeverity = tokOvershoot >= CRITICAL_OVERSHOOT_RATIO ? 'critical' : 'warn';
     diagnostics.push({
       dim: 'costEfficiency',
-      severity: 'warn',
-      code: 'TOKEN_BUDGET_EXCEEDED',
+      severity,
+      code: severity === 'critical' ? 'TOKEN_BUDGET_BLOWN' : 'TOKEN_BUDGET_EXCEEDED',
       message: `tokens ${totalTokens} > budget ${maxTokens}`,
       observed: totalTokens,
       expected: maxTokens,
@@ -631,22 +1022,70 @@ function clamp01(x: number): number {
 }
 
 /**
- * Weighted geometric mean. Skips dimensions with null score (judge=null when
- * disabled), renormalising remaining weights so a disabled judge does not
- * inflate overall.
+ * Renormalise weights so they sum to 1.0. Used after merging partial
+ * scenario overrides over tier defaults so users can set "terminationCorrectness: 0.80"
+ * as a ratio-style boost without manually balancing the other dims.
+ */
+function renormaliseWeights(weights: Required<DimensionWeights>): Required<DimensionWeights> {
+  const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+  if (sum <= 0 || !Number.isFinite(sum)) return weights;
+  if (Math.abs(sum - 1) < 1e-9) return weights;
+  const factor = 1 / sum;
+  return {
+    executionEfficiency: weights.executionEfficiency * factor,
+    answerQuality: weights.answerQuality * factor,
+    terminationCorrectness: weights.terminationCorrectness * factor,
+    costEfficiency: weights.costEfficiency * factor,
+    judge: weights.judge * factor,
+  };
+}
+
+/**
+ * Weighted geometric mean with NEUTRAL IMPUTATION for missing dimensions.
+ *
+ * When a dimension's score is null (e.g. judge disabled), the previous
+ * implementation skipped it AND renormalised remaining weights — but that
+ * silently inflated overall by ~1/(1-w_missing). A `--no-judge` run scored
+ * higher than the same run with judge=0.5, breaking comparability.
+ *
+ * The fix: impute the missing dim with the geo-mean of all PRESENT dims
+ * (unbiased prior — "we have no information, so assume average"). The
+ * weight stays in the denominator, so disabling a dimension is a true
+ * no-op rather than a free uplift.
  */
 function weightedGeometricMean(
   dimScores: Record<string, number | null>,
   weights: Record<string, number>,
 ): number {
   const EPS = 1e-3;
-  let weightedLogSum = 0;
-  let totalWeight = 0;
+  // First pass: present-only mean for imputation.
+  let presentLogSum = 0;
+  let presentWeight = 0;
   for (const key of Object.keys(weights)) {
     const x = dimScores[key];
     if (x === null || x === undefined) continue;
     const w = weights[key]!;
-    weightedLogSum += w * Math.log(clamp01(x) + EPS);
+    presentLogSum += w * Math.log(clamp01(x) + EPS);
+    presentWeight += w;
+  }
+  if (presentWeight === 0) return 0;
+  // The neutral imputed value (in log-space) is the present-only mean.
+  // For a disabled dimension, this contributes weight·(presentMeanLog),
+  // making its contribution exactly equal to the running mean — effectively
+  // no change to overall.
+  const presentMeanLog = presentLogSum / presentWeight;
+
+  // Second pass: full denominator, present dims contribute their own log,
+  // absent dims contribute the imputed (mean) log.
+  let weightedLogSum = 0;
+  let totalWeight = 0;
+  for (const key of Object.keys(weights)) {
+    const w = weights[key]!;
+    const x = dimScores[key];
+    const logX = (x === null || x === undefined)
+      ? presentMeanLog
+      : Math.log(clamp01(x) + EPS);
+    weightedLogSum += w * logX;
     totalWeight += w;
   }
   if (totalWeight === 0) return 0;

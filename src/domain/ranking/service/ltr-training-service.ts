@@ -182,8 +182,9 @@ export function createModelRegistry(
     trainingMetrics: {
       totalExamples: weights.reduce((sum, w) => sum + w.trainingExampleCount, 0),
       meanNdcg5: ndcgScores.length > 0 ? ndcgScores.reduce((a, b) => a + b, 0) / ndcgScores.length : 0,
-      minNdcg5: ndcgScores.length > 0 ? Math.min(...ndcgScores) : 0,
-      maxNdcg5: ndcgScores.length > 0 ? Math.max(...ndcgScores) : 0,
+      // Loop-based min/max to avoid stack overflow on large ndcgScores arrays.
+      minNdcg5: (() => { let m = Infinity; for (const v of ndcgScores) if (v < m) m = v; return m === Infinity ? 0 : m; })(),
+      maxNdcg5: (() => { let m = -Infinity; for (const v of ndcgScores) if (v > m) m = v; return m === -Infinity ? 0 : m; })(),
     },
   };
 }

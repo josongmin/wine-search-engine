@@ -84,6 +84,22 @@ export function errorHandler(
 
   const fastifyError = error as { code?: string; statusCode?: number; message?: string };
 
+  // Body too large — 413 Payload Too Large
+  // Fastify throws FST_ERR_CTP_BODY_TOO_LARGE when the body exceeds bodyLimit.
+  // Without this branch, a 413 returns Fastify's default envelope which does
+  // NOT match the RFC-014 error contract.
+  if (fastifyError.code === 'FST_ERR_CTP_BODY_TOO_LARGE' || fastifyError.statusCode === 413) {
+    const body = buildSearchErrorResponse(
+      requestId,
+      'PAYLOAD_TOO_LARGE',
+      'Request body exceeds the maximum allowed size.',
+      null,
+      false,
+    );
+    sendSearchErrorResponse(request, reply, 413, body);
+    return;
+  }
+
   // Request timeout — 503 Service Unavailable
   // Fastify throws FST_ERR_HANDLER_TIMEOUT (statusCode=503) when a route
   // handler exceeds the configured requestTimeout option.
@@ -104,9 +120,13 @@ export function errorHandler(
   }
 
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
-  // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the
-  // limit is exceeded (without a custom errorResponseBuilder).
-  if (fastifyError.statusCode === 429) {
+  // Only match rate-limit plugin errors — future upstream proxies could
+  // propagate 429s with different semantics. Matching on statusCode alone
+  // would mis-label them as "RATE_LIMIT_EXCEEDED" with a parsed retry.
+  if (
+    fastifyError.statusCode === 429 &&
+    (fastifyError.code === undefined || fastifyError.code.startsWith('FST_'))
+  ) {
     const rawMessage = fastifyError.message ?? '';
 
     request.log.warn({ requestId }, 'rate_limit_exceeded');

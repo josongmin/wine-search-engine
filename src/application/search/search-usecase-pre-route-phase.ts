@@ -83,7 +83,11 @@ export async function runSearchPreRoutePhase(
         },
         { abortSignal: abortController.signal },
       ).catch((err: unknown) => {
-        if (abortController.signal.aborted && err instanceof Error && err.name === 'AbortError') {
+        // After timeout fires we abort the controller. Any subsequent rejection
+        // — AbortError, HTTP 5xx from in-flight sub-search, planner crash —
+        // would otherwise become an unhandledRejection because nothing is
+        // awaiting the inner promise post-race. Swallow ALL errors after abort.
+        if (abortController.signal.aborted) {
           return timeoutSignal;
         }
         throw err;

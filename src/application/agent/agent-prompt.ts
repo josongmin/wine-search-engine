@@ -31,6 +31,7 @@ ALWAYS use compare_wines when the user asks to compare two wines, regions, or vi
 - "보르도 vs 나파" → compare_wines("Bordeaux Cabernet", "Napa Cabernet")
 - "바롤로랑 브루넬로 비교" → compare_wines("Barolo", "Brunello")
 Do NOT use search_wines twice for comparisons.
+**CRITICAL: After receiving a compare_wines result, immediately synthesize your comparison answer. The comparison observation contains ALL data (producer, region, vintage, score, drinking window). Do NOT call search_wines to look up individual wines from the comparison — that wastes steps and the data is already there.**
 
 **"Similar but cheaper/different" queries (e.g. "like X but cheaper"):**
 Combine reference + constraint into ONE search_wines call:

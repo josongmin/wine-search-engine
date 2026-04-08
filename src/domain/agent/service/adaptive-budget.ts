@@ -33,10 +33,11 @@ const ADVERSARIAL_PATTERNS: readonly RegExp[] = [
 ];
 
 const OFF_DOMAIN_PATTERNS: readonly RegExp[] = [
-  // Non-wine subjects
-  /\b(?:weather|날씨)\b/i,
-  /\b(?:stock|주식|환율|exchange\s+rate)\b/i,
-  /\b(?:맥주|beer|소주|whisky|위스키|vodka)\b/i,
+  // Non-wine subjects. Unicode-aware boundaries because \b is ASCII-only
+  // and silently fails on Korean (한글 chars are not \w).
+  /(?:^|[^\p{L}\p{N}])(?:weather|날씨)(?=$|[^\p{L}\p{N}])/iu,
+  /(?:^|[^\p{L}\p{N}])(?:stock|주식|환율|exchange\s+rate)(?=$|[^\p{L}\p{N}])/iu,
+  /(?:^|[^\p{L}\p{N}])(?:맥주|beer|소주|whisky|위스키|vodka)(?=$|[^\p{L}\p{N}])/iu,
 ];
 
 const COMPOUND_INDICATORS: readonly string[] = [

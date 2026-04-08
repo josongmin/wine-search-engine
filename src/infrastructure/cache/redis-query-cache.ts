@@ -128,16 +128,16 @@ export class RedisQueryCache implements QueryCachePort {
       const hits = hitsStr ? parseInt(hitsStr, 10) : 0;
       const misses = missesStr ? parseInt(missesStr, 10) : 0;
 
-      // Count entries with pattern scan (query:* keys, excluding stats)
+      // Count entries with pattern scan. Stats counters live under
+      // `cache:stats:query:*`, not `query:*`, so the SCAN naturally excludes
+      // them — no extra filter needed.
       let entriesCount = 0;
-      for await (const key of this.redis.scanIterator({
+      for await (const _key of this.redis.scanIterator({
         MATCH: 'query:*',
         COUNT: 100,
       })) {
-        const keyStr = String(key);
-        if (!keyStr.startsWith('query:cache:stats')) {
-          entriesCount++;
-        }
+        void _key;
+        entriesCount++;
       }
 
       // Approximate size from Redis INFO (production would use more accurate measurement)
@@ -177,6 +177,22 @@ export class RedisQueryCache implements QueryCachePort {
     } catch (error) {
       log.error({ err: error }, 'clear error');
       return 0;
+    }
+  }
+
+  /**
+   * Resets hit/miss counters to 0. Stats persist across `clear()` by design
+   * (so dashboards can compare hit rate before/after a flush). Call this
+   * explicitly only when starting a new measurement window.
+   */
+  async resetStats(): Promise<void> {
+    try {
+      await Promise.all([
+        this.redis.del(this.statsKeyHits),
+        this.redis.del(this.statsKeyMisses),
+      ]);
+    } catch (error) {
+      log.error({ err: error }, 'reset stats error');
     }
   }
 }

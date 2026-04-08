@@ -18,10 +18,32 @@ export interface BudgetCheck {
  *  allow legitimate "search → drill-in → refine" but block "search × N". */
 const PER_TOOL_CALL_CAP = 3;
 
-/** Trigram Jaccard threshold for near-duplicate query detection. 0.7 catches
- *  "Opus One 2018" / "Opus One" / "Opus One wine" without false-positiving
- *  semantically distinct queries that share a few tokens. */
-const NEAR_DUPLICATE_JACCARD = 0.7;
+/** Trigram Jaccard threshold for near-duplicate query detection. Adaptive:
+ *  0.6 for short strings (< 15 chars) where n-gram overlap is naturally
+ *  lower, 0.7 for longer strings. Catches "Opus One 2018" / "Opus One wine"
+ *  without false-positiving semantically distinct queries. */
+const NEAR_DUPLICATE_JACCARD_SHORT = 0.6;
+const NEAR_DUPLICATE_JACCARD_LONG = 0.7;
+/** Strings shorter than this use bigrams and a lower Jaccard threshold.
+ *  Tuned at 10 after calibration: "2018 one opus" (13 chars) must use
+ *  trigrams so vintage-distinct queries aren't false-positived, while
+ *  short Korean queries like "와인 추천" (5 chars) benefit from bigrams. */
+const SHORT_STRING_THRESHOLD = 10;
+
+/**
+ * Tool-input keys that contribute to loop-detection normalization. Limiting
+ * the surface to a known allowlist prevents adversarial padding attacks
+ * (e.g. `{query: "x", _pad: "alpha beta gamma..."}`) that would otherwise
+ * dilute the trigram set and bypass near-duplicate detection.
+ */
+const QUERY_BEARING_KEYS: ReadonlySet<string> = new Set([
+  'query',
+  'query_a',
+  'query_b',
+  'food',
+  'color',
+  'entity_id',
+]);
 
 export class StepBudget {
   private readonly startTime: number;
@@ -30,7 +52,8 @@ export class StepBudget {
   private readonly seenActions = new Set<string>();
   /** Per-tool invocation counter (regardless of input). */
   private readonly perToolCallCounts = new Map<string, number>();
-  /** Per-tool history of normalized query strings for near-duplicate check. */
+  /** Per-tool history of normalized query strings for near-duplicate check.
+   *  Bounded to PER_TOOL_CALL_CAP entries — older history is subsumed. */
   private readonly perToolNormalizedQueries = new Map<string, string[]>();
 
   constructor(private readonly config: AgentConfig) {
@@ -48,43 +71,60 @@ export class StepBudget {
     return { allowed: true };
   }
 
-  /** Record a step and check for loops. Returns false if loop detected. */
+  /**
+   * Record a step and check for loops.
+   *
+   * DRY-RUN PATTERN: every check runs against current state without mutation.
+   * State (stepCount, seenActions, perToolCallCounts, perToolNormalizedQueries)
+   * is updated only when the call is allowed. Rejected calls do NOT advance
+   * step counters or pollute history — this fixes the off-by-one where blocked
+   * steps consumed the agent's budget early and made later identical calls
+   * misclassify as "exact loop" when they were really "per-tool cap exceeded".
+   */
   recordStep(tool: string, input: Record<string, unknown>): BudgetCheck {
-    this.stepCount++;
-    // Canonical serialization: sort keys recursively (including nested objects).
-    // Both the primary path (canonicalJsonStringify) and the fallback
-    // (manualCanonicalize for non-POJO/NaN/Infinity) are deep-key-sorted, so
-    // an adversarial LLM cannot evade loop detection by reordering keys or
-    // by injecting Date/Map/Set into tool input.
+    // Canonical serialization for exact-key dedup.
     const sortedInput = canonicalizeForLoopKey(input);
     const key = `${tool}:${sortedInput}`;
     if (this.seenActions.has(key)) {
       return { allowed: false, reason: 'loop_detected' };
     }
-    this.seenActions.add(key);
 
     // Per-tool call cap — catches reformulation thrashing that exact-key
     // dedup misses (e.g. search_wines("Opus One"), search_wines("Opus 2018"),
     // search_wines("Opus One wine") all distinct under canonical key).
-    const perToolCount = (this.perToolCallCounts.get(tool) ?? 0) + 1;
-    this.perToolCallCounts.set(tool, perToolCount);
-    if (perToolCount > PER_TOOL_CALL_CAP) {
+    const projectedPerToolCount = (this.perToolCallCounts.get(tool) ?? 0) + 1;
+    if (projectedPerToolCount > PER_TOOL_CALL_CAP) {
       return { allowed: false, reason: 'loop_detected' };
     }
 
     // Near-duplicate check: trigram Jaccard ≥ 0.7 against any prior call to
-    // the same tool. The agent prompt allows ONE broaden-and-retry; the third
-    // semantically-equivalent attempt is a thrash.
+    // the same tool, restricted to query-bearing keys (anti-padding).
     const normalizedQuery = normalizeQueryForLoopDetection(input);
     if (normalizedQuery.length > 0) {
       const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
+      const threshold = normalizedQuery.length < SHORT_STRING_THRESHOLD
+        ? NEAR_DUPLICATE_JACCARD_SHORT
+        : NEAR_DUPLICATE_JACCARD_LONG;
       for (const prior of priorQueries) {
         const similarity = trigramJaccard(normalizedQuery, prior);
-        if (similarity >= NEAR_DUPLICATE_JACCARD) {
+        if (similarity >= threshold) {
           return { allowed: false, reason: 'loop_detected' };
         }
       }
+    }
+
+    // ALL CHECKS PASSED — now mutate state.
+    this.stepCount++;
+    this.seenActions.add(key);
+    this.perToolCallCounts.set(tool, projectedPerToolCount);
+    if (normalizedQuery.length > 0) {
+      const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
       priorQueries.push(normalizedQuery);
+      // Bound history to PER_TOOL_CALL_CAP entries — older entries can never
+      // affect a future allow/deny decision because the cap fires first.
+      while (priorQueries.length > PER_TOOL_CALL_CAP) {
+        priorQueries.shift();
+      }
       this.perToolNormalizedQueries.set(tool, priorQueries);
     }
 
@@ -171,14 +211,20 @@ function manualCanonicalize(value: unknown, depth = 0): string {
 
 /**
  * Extract a normalized query string from the tool input for near-duplicate
- * loop detection. Handles the most common shapes:
+ * loop detection. Restricted to QUERY_BEARING_KEYS so an adversarial LLM
+ * cannot dilute the trigram set with throwaway keys (anti-padding):
+ *
  *   { query: string }            — direct query
  *   { query_a, query_b }         — comparison pair (joined)
- *   { food, color, max_price }   — pairing tool
+ *   { food, color }              — pairing tool
  *   { entity_id }                — drinking-window check
  *
+ * Unknown / non-allowlisted keys are ignored. Numeric query values (e.g.
+ * vintage years inside a query field) are still collected; non-allowlisted
+ * keys (limit, max_price, etc.) are not.
+ *
  * Normalization: NFKC, lowercase, strip non-letter/digit, collapse whitespace,
- * and tokenize. Tokens sorted so word reordering doesn't dodge the check.
+ * tokenize, sort tokens. Word reordering can't dodge the check.
  */
 function normalizeQueryForLoopDetection(input: Record<string, unknown>): string {
   const parts: string[] = [];
@@ -190,7 +236,9 @@ function normalizeQueryForLoopDetection(input: Record<string, unknown>): string 
       for (const val of Object.values(v as Record<string, unknown>)) collect(val);
     }
   };
-  collect(input);
+  for (const [key, value] of Object.entries(input)) {
+    if (QUERY_BEARING_KEYS.has(key)) collect(value);
+  }
   const joined = parts.join(' ');
   if (joined.length === 0) return '';
   // NFKC + lowercase + strip non-alphanumeric (keep Korean syllables via \p{L}/\p{N}).
@@ -229,16 +277,18 @@ function trigramJaccard(a: string, b: string): number {
 
 function trigramSet(s: string): Set<string> {
   const set = new Set<string>();
-  if (s.length < 3) {
+  if (s.length < 2) {
     for (const ch of s) set.add(ch);
     return set;
   }
-  // Korean has high information density per syllable — trigrams of 3 Hangul
-  // syllables represent ~12 chars worth of meaning, giving very few overlapping
-  // n-grams between near-duplicates. Use bigrams for Hangul-dominated strings
-  // to keep similarity comparable to Latin trigrams.
+  // Adaptive n-gram size:
+  //   - Hangul-dominant (>50%) or short strings (<15 chars): bigrams (n=2)
+  //     because Korean syllables are information-dense and trigrams of 3
+  //     Hangul chars give too few overlapping n-grams to detect near-dupes.
+  //   - Longer ASCII-dominant: trigrams (n=3) for standard behaviour.
   const isHangulDominant = countHangulChars(s) > s.length * 0.5;
-  const n = isHangulDominant ? 2 : 3;
+  const isShort = s.length < SHORT_STRING_THRESHOLD; // 10 chars
+  const n = (isHangulDominant || isShort) ? 2 : 3;
   for (let i = 0; i <= s.length - n; i++) {
     set.add(s.slice(i, i + n));
   }

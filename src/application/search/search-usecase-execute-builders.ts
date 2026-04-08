@@ -189,7 +189,7 @@ export function buildEntropyAbstainResponseParams(options: {
         plannerVersion: plan.plannerVersion,
       },
       rulesApplied: ['ENTROPY_ABSTAIN'],
-      finalReason: `Normalized entropy ${entropy.toFixed(4)} exceeds threshold; query is ambiguous`,
+      finalReason: `Normalized entropy ${Number.isFinite(entropy) ? entropy.toFixed(4) : 'unknown'} exceeds threshold; query is ambiguous`,
     },
   };
 
@@ -199,7 +199,7 @@ export function buildEntropyAbstainResponseParams(options: {
     decisionOutput,
     results,
     clarification: {
-      reason: `Query is ambiguous (entropy=${entropy.toFixed(3)}). Please refine your search.`,
+      reason: `Query is ambiguous (entropy=${Number.isFinite(entropy) ? entropy.toFixed(3) : 'unknown'}). Please refine your search.`,
       candidates: rankedResults.slice(0, 3).map((r) => ({
         entityId: r.entityId,
         label: r.canonicalLabel,

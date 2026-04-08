@@ -225,9 +225,18 @@ export class PromotionGate {
       return { approved: false, reasons, newStatus: 'rejected' };
     }
 
-    // Minimum utility delta
-    if (proposal.expectedUtilityDelta < this.config.thresholdMinUtilityDelta) {
-      reasons.push('INSUFFICIENT_UTILITY_IMPROVEMENT');
+    // Minimum utility delta.
+    // NaN guard: `NaN < threshold` is false, so a proposal with NaN
+    // utility would slip past this check without the explicit guard.
+    if (
+      !Number.isFinite(proposal.expectedUtilityDelta) ||
+      proposal.expectedUtilityDelta < this.config.thresholdMinUtilityDelta
+    ) {
+      reasons.push(
+        Number.isFinite(proposal.expectedUtilityDelta)
+          ? 'INSUFFICIENT_UTILITY_IMPROVEMENT'
+          : 'UTILITY_DELTA_NON_FINITE',
+      );
       await this.proposalStore.updateProposalStatus(proposal.proposalId, 'rejected');
       return { approved: false, reasons, newStatus: 'rejected' };
     }
@@ -267,10 +276,18 @@ export class PromotionGate {
   async processPendingAliasProposals(): Promise<
     readonly { readonly proposal: AliasProposal; readonly decision: PromotionDecision }[]
   > {
+    // Early exit: if the kill switch is already active, skip the DB round-trip.
+    if (this._killSwitchActive) {
+      return [];
+    }
+
     const pending = await this.proposalStore.getPendingAliasProposals();
     const results: { proposal: AliasProposal; decision: PromotionDecision }[] = [];
 
     for (const proposal of pending) {
+      // Re-check inside the loop: kill switch can be activated by another
+      // process/request between iterations.
+      if (this._killSwitchActive) break;
       const decision = await this.evaluateAliasProposal(proposal);
       results.push({ proposal, decision });
     }

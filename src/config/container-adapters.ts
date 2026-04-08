@@ -21,6 +21,7 @@ import { WatchlistAwareSearchIndex } from '../infrastructure/watchlist/watchlist
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import { isWatchlistEnabled } from './watchlist.js';
+import { bootstrapLogger } from './bootstrap-logger.js';
 import type { AmbiguityDictionary } from '../domain/query/port/ambiguity-dictionary.port.js';
 import type { BlockingPort } from '../domain/resolver/port/blocking.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
@@ -164,10 +165,26 @@ export function buildCoreAdapterServices(
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),
     ambiguityDict: pool ? new PgAmbiguityDictionary(pool) : new StubAmbiguityDictionary(),
     thresholdStore: pool ? new PgThresholdStore(pool) : new StubThresholdStore(),
-    aliasMatcher:
-      !config.killSwitch.aliasOverlay && pool
-        ? new PgAliasMatcher(pool)
-        : new StubAliasMatcher(),
+    aliasMatcher: ((): typeof StubAliasMatcher.prototype | InstanceType<typeof PgAliasMatcher> => {
+      if (config.killSwitch.aliasOverlay) {
+        bootstrapLogger.warn(
+          {
+            killSwitch: 'aliasOverlay',
+            nodeEnv: config.nodeEnv,
+            consequence:
+              'alias_matcher_disabled — fuzzy/exact alias retrieval is OFF; entity lookup quality will degrade',
+          },
+          '[container] kill-switch active: using StubAliasMatcher (returns no matches)',
+        );
+        return new StubAliasMatcher();
+      }
+      if (!pool) {
+        // Already covered by the production-no-pool throw above; this is
+        // the dev/test path.
+        return new StubAliasMatcher();
+      }
+      return new PgAliasMatcher(pool);
+    })(),
     mappingTable: new FileMappingTableAdapter(),
     anchorResolver: new VespaAnchorResolver(searchIndex),
     similarRetrieval: new VespaSimilarRetrieval(searchIndex),

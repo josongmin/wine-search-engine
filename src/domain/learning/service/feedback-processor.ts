@@ -82,9 +82,14 @@ export class FeedbackProcessor {
    * @returns Aggregated statistics per query-entity pair.
    */
   async aggregateByQueryEntity(since?: Date): Promise<readonly QueryEntityAggregation[]> {
-    const signals = await this.feedbackStore.getFeedback(
-      since ? { since } : undefined,
-    );
+    // Default to 90 days when no window is specified to prevent unbounded
+    // memory growth from loading the entire feedback table (production can
+    // have millions of rows). Callers that need broader windows must
+    // explicitly pass a Date.
+    const DEFAULT_WINDOW_DAYS = 90;
+    const effectiveSince =
+      since ?? new Date(Date.now() - DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+    const signals = await this.feedbackStore.getFeedback({ since: effectiveSince });
 
     return this.computeAggregations(signals);
   }

@@ -108,12 +108,13 @@ function inferComparisonIntent(
   const q = query.toLowerCase();
 
   // "which is better", "추천", "추천해", "어느 게 좋아"
-  if (/\b(?:which|better|recommend|추천|좋아|나은)\b/i.test(q)) {
+  // Use Unicode-aware boundaries: \b is ASCII-only and silently fails on Korean.
+  if (/(?:^|[^\p{L}\p{N}])(?:which|better|recommend|추천|좋아|나은)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     return 'recommend_one';
   }
 
   // "both", "둘 다", "정보", "details"
-  if (/\b(?:both|details|information|둘|다|정보)\b/i.test(q)) {
+  if (/(?:^|[^\p{L}\p{N}])(?:both|details|information|둘|다|정보)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     return 'list_both';
   }
 

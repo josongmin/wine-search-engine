@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreScenario, type ScenarioExecution, type ToolCallTrace } from '../scorer.js';
+import { scoreScenario, DEFAULT_WEIGHTS, TIER_WEIGHTS, type ScenarioExecution, type ToolCallTrace } from '../scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation } from '../scenario.js';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -26,6 +26,7 @@ function makeExecution(overrides: Partial<ScenarioExecution> = {}): ScenarioExec
     stepCount: 2,
     toolCallCount: 1,
     toolsUsed: [{ tool: 'search_wines', input: '{"query":"test"}' }],
+    observations: ['Found 3 results: Wine A (Benchmark Winery), Wine B, Wine C'],
     terminationReason: 'answer',
     totalDurationMs: 1_000,
     totalTokens: { input: 500, output: 200 },
@@ -689,5 +690,246 @@ describe('per-tier weights', () => {
     );
     // With termination weight 0.80 and termination=0, overall should be very low
     expect(r.scores.overall).toBeLessThan(0.2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Weight invariants (M4)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('weight invariants', () => {
+  const REQUIRED_KEYS = [
+    'executionEfficiency',
+    'answerQuality',
+    'terminationCorrectness',
+    'costEfficiency',
+    'judge',
+  ] as const;
+
+  function sumWeights(w: Record<string, number>): number {
+    return Object.values(w).reduce((a, b) => a + b, 0);
+  }
+
+  it('DEFAULT_WEIGHTS sums to 1.0', () => {
+    expect(Math.abs(sumWeights(DEFAULT_WEIGHTS) - 1)).toBeLessThan(1e-9);
+  });
+
+  it('DEFAULT_WEIGHTS has all required dimension keys', () => {
+    for (const key of REQUIRED_KEYS) {
+      expect(DEFAULT_WEIGHTS).toHaveProperty(key);
+      expect(typeof DEFAULT_WEIGHTS[key]).toBe('number');
+    }
+  });
+
+  it('every TIER_WEIGHTS entry sums to 1.0', () => {
+    for (const [tier, weights] of Object.entries(TIER_WEIGHTS)) {
+      const sum = sumWeights(weights as Record<string, number>);
+      expect(Math.abs(sum - 1), `tier ${tier} sum=${sum}`).toBeLessThan(1e-9);
+    }
+  });
+
+  it('every TIER_WEIGHTS entry has all required keys', () => {
+    for (const [tier, weights] of Object.entries(TIER_WEIGHTS)) {
+      for (const key of REQUIRED_KEYS) {
+        expect(weights, `tier ${tier} missing ${key}`).toHaveProperty(key);
+      }
+    }
+  });
+
+  it('per-scenario partial weight override is renormalised to sum 1.0', () => {
+    // Setting a single dimension should not break invariants — scorer must
+    // renormalise so the user's intent (boost terminationCorrectness) holds
+    // proportionally across the remaining dims.
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        // Only specify ONE dim — the others default. After merge they sum > 1.
+        weights: { terminationCorrectness: 0.80 },
+      }),
+      makeExecution(),
+      1,
+    );
+    // The score should be deterministic (no NaN, no Infinity).
+    expect(Number.isFinite(r.scores.overall)).toBe(true);
+    expect(r.scores.overall).toBeGreaterThanOrEqual(0);
+    expect(r.scores.overall).toBeLessThanOrEqual(1);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Structured checks (Track 1b — 9 schema fields)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('scoreStructuredChecks', () => {
+  it('priceBandKrw: penalises when answer contains out-of-range price', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, priceBandKrw: { max: 50_000 } }),
+      makeExecution({ answer: '추천 와인: Opus One (15만원)' }),
+      undefined,
+    );
+    // 15만원 = 150,000 KRW > max 50,000 → penalty
+    expect(r.scores.answerQuality).toBeLessThan(1);
+    expect(r.diagnostics?.some((d) => d.code === 'PRICE_BAND_VIOLATED')).toBe(true);
+  });
+
+  it('priceBandKrw: passes when price is within range', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, priceBandKrw: { max: 50_000 } }),
+      makeExecution({ answer: '추천 와인: Good Wine (3만원)' }),
+      undefined,
+    );
+    // 3만원 = 30,000 → within range
+    expect(r.diagnostics?.some((d) => d.code === 'PRICE_BAND_VIOLATED')).toBeFalsy();
+  });
+
+  it('vintageRange: penalises when mentioned vintage is out of range', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, vintageRange: { min: 2018, max: 2020 } }),
+      makeExecution({ answer: 'I recommend the 2015 Barolo' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'VINTAGE_RANGE_VIOLATED')).toBe(true);
+  });
+
+  it('drinkingWindowStatus: penalises when answer lacks expected keywords', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, drinkingWindowStatus: 'hold' }),
+      makeExecution({ answer: 'This wine is fantastic right now, drink it tonight!' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'DRINKING_WINDOW_MISMATCH')).toBe(true);
+  });
+
+  it('drinkingWindowStatus: passes when correct keywords present', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, drinkingWindowStatus: 'hold' }),
+      makeExecution({ answer: 'This young wine needs more cellar time — hold for 5 years.' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'DRINKING_WINDOW_MISMATCH')).toBeFalsy();
+  });
+
+  it('requireHedging: penalises when answer lacks hedging language', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, requireHedging: true }),
+      makeExecution({ answer: 'The best wine is Opus One. Buy it now.' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'HEDGING_MISSING')).toBe(true);
+  });
+
+  it('requireHedging: passes when hedging present', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, requireHedging: true }),
+      makeExecution({ answer: '여러 후보가 있는데, perhaps Opus One or Screaming Eagle' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'HEDGING_MISSING')).toBeFalsy();
+  });
+
+  it('requiredRegister: penalises wrong Korean register', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, requiredRegister: 'formal' }),
+      makeExecution({ answer: '이 와인 좋아. 한번 먹어봐. 괜찮은 거야.' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'REGISTER_MISMATCH')).toBe(true);
+  });
+
+  it('requiredRegister: passes correct register', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, requiredRegister: 'formal' }),
+      makeExecution({ answer: '이 와인을 추천합니다. 품질이 우수합니다.' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'REGISTER_MISMATCH')).toBeFalsy();
+  });
+
+  it('maxConfidence: penalises overconfident language', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, maxConfidence: 0.3 }),
+      makeExecution({ answer: '확실히 이 와인이 최고입니다!' }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'OVERCONFIDENT_LANGUAGE')).toBe(true);
+  });
+
+  it('refusalExpected: critical fail when no refusal markers', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, refusalExpected: true }),
+      makeExecution({ answer: 'Here is a great 1962 Screaming Eagle!' }),
+      undefined,
+    );
+    expect(r.scores.criticalFailure).toBe(true);
+    expect(r.scores.overall).toBe(0);
+  });
+
+  it('refusalExpected: passes when refusal markers present', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, refusalExpected: true }),
+      makeExecution({ answer: '해당 빈티지는 존재하지 않습니다. Screaming Eagle은 1992년부터 생산됩니다.' }),
+      undefined,
+    );
+    expect(r.scores.criticalFailure).toBe(false);
+    expect(r.scores.answerQuality).toBe(1);
+  });
+
+  it('mustCiteFromToolResults: penalises uncited wine names', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, mustCiteFromToolResults: true }),
+      makeExecution({
+        answer: 'I recommend Opus One and Screaming Eagle.',
+        observations: ['Found: Opus One (Mondavi), Ridge Monte Bello'],
+      }),
+      undefined,
+    );
+    // Screaming Eagle not in observations → penalty
+    expect(r.diagnostics?.some((d) => d.code === 'UNCITED_WINE_NAMES')).toBe(true);
+    expect(r.scores.answerQuality).toBeLessThan(1);
+  });
+
+  it('mustCiteFromToolResults: passes when all cited', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, mustCiteFromToolResults: true }),
+      makeExecution({
+        answer: 'I recommend Opus One.',
+        observations: ['Found: Opus One (Mondavi), Ridge Monte Bello'],
+      }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'UNCITED_WINE_NAMES')).toBeFalsy();
+  });
+
+  it('expectedToolArgs: penalises when tool arg predicate not satisfied', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedToolArgs: [
+          { tool: 'search_wines', argPath: 'filters.priceMaxKrw', predicate: 'lte', value: 50000 },
+        ],
+      }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"wine","filters":{"priceMaxKrw":100000}}')],
+      }),
+      undefined,
+    );
+    // 100000 > 50000 → lte predicate fails
+    expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBe(true);
+  });
+
+  it('expectedToolArgs: passes when predicate satisfied', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 5,
+        expectedToolArgs: [
+          { tool: 'search_wines', argPath: 'filters.priceMaxKrw', predicate: 'lte', value: 50000 },
+        ],
+      }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"wine","filters":{"priceMaxKrw":30000}}')],
+      }),
+      undefined,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'EXPECTED_TOOL_ARG_MISSING')).toBeFalsy();
   });
 });

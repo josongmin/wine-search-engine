@@ -102,16 +102,23 @@ function normaliseConfidences(results: readonly RankedResult[]): readonly number
   }
 
   const scores = results.map((r) => r.finalScore);
-  const maxScore = Math.max(...scores);
-  const minScore = Math.min(...scores);
+  let maxScore = -Infinity;
+  let minScore = Infinity;
+  for (const s of scores) {
+    if (!Number.isFinite(s)) continue;
+    if (s > maxScore) maxScore = s;
+    if (s < minScore) minScore = s;
+  }
+  if (!Number.isFinite(maxScore) || !Number.isFinite(minScore)) {
+    return results.map(() => 1.0);
+  }
   const range = maxScore - minScore;
 
   if (range === 0) {
-    // All scores identical — every result gets equal confidence
     return results.map(() => 1.0);
   }
 
-  return scores.map((s) => (s - minScore) / range);
+  return scores.map((s) => (Number.isFinite(s) ? (s - minScore) / range : 0));
 }
 
 // ---------------------------------------------------------------------------

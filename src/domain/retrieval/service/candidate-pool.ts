@@ -173,14 +173,17 @@ export class CandidatePoolService {
           : await this.embeddingService.embedBatch(input.semanticQueries);
 
         const primaryEmbedding = embeddings[0];
-        if (!primaryEmbedding) {
+        // Reject both undefined AND empty embeddings — an empty Float32Array
+        // is truthy but produces nonsense ANN results / Vespa errors downstream.
+        if (!primaryEmbedding || primaryEmbedding.length === 0) {
           bootstrapLogger.error(
             {
               queryClass: input.queryPlan.queryClass,
               semanticQueryCount: input.semanticQueries.length,
               embeddingModelId: this.embeddingModelId,
+              reason: !primaryEmbedding ? 'embedding_undefined' : 'embedding_empty',
             },
-            '[CandidatePool] Dense retrieval expected an embedding but received none',
+            '[CandidatePool] Dense retrieval expected a non-empty embedding',
           );
           denseDegraded = true;
         } else {

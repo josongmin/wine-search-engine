@@ -172,17 +172,21 @@ export class CandidateAssembler {
         if (blockedByQuota) continue;
       }
 
-      // Producer slot check
+      // Producer slot check.
+      // Use the indexed `producer` field from the underlying HybridCandidate
+      // (sourced from Vespa's `producer` projection). Candidates with no
+      // producer metadata bypass the cap — lack of metadata must never
+      // penalize a candidate (mirrors DefaultRankingPolicy diversity).
       if (policy.maxProducerSlots !== undefined) {
-        // Derive a "producer key" from entityId prefix (e.g. "prod:123:" prefix pattern)
-        // In the real system this would use entity metadata; here we use a heuristic.
-        const producerKey = extractProducerKey(c.entityId);
-        const count = producerCounts.get(producerKey) ?? 0;
-        if (count >= policy.maxProducerSlots) {
-          cappedBy = 'producerSlot';
-          continue;
+        const producerKey = c.legacyCandidate.producer;
+        if (producerKey !== undefined && producerKey.length > 0) {
+          const count = producerCounts.get(producerKey) ?? 0;
+          if (count >= policy.maxProducerSlots) {
+            cappedBy = 'producerSlot';
+            continue;
+          }
+          producerCounts.set(producerKey, count + 1);
         }
-        producerCounts.set(producerKey, count + 1);
       }
 
       // Update channel counts
@@ -210,11 +214,3 @@ export class CandidateAssembler {
   }
 }
 
-/**
- * Extract a producer key from an entityId for diversity slot counting.
- * Format: "prod:{id}:*" → "prod:{id}" if producer-prefixed; else return entityId directly.
- */
-function extractProducerKey(entityId: string): string {
-  const match = /^(prod:\d+):/.exec(entityId);
-  return match?.[1] ?? entityId;
-}

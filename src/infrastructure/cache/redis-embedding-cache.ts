@@ -103,10 +103,14 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
 
   async set(
     cacheKey: EmbeddingCacheKey,
-    embedding: readonly number[],
+    rawEmbedding: readonly number[],
     ttlSeconds: number,
   ): Promise<void> {
     try {
+      // Coerce to plain Array before JSON.stringify — ML backends often
+      // return Float32Array whose JSON representation is {"0":...} (an
+      // object, not array), which the read path rejects as poisoned.
+      const embedding = Array.isArray(rawEmbedding) ? rawEmbedding : Array.from(rawEmbedding);
       const serialized = JSON.stringify(embedding);
       await this.redis.set(cacheKey.redisKey, serialized, { EX: ttlSeconds });
     } catch (error) {

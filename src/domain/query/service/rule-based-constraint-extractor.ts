@@ -16,16 +16,16 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   const mv = RULE_BASED_CONSTRAINT_MAPPING_VERSION;
 
   const wineTypeRules: [RegExp, string][] = [
-    [/\b(?:red|rouge|레드|적포도주)\b/i, 'red'],
-    [/\b(?:white|blanc|화이트|백포도주)\b/i, 'white'],
+    [/(?:^|[^\p{L}\p{N}])(?:red|rouge|레드|적포도주)(?=$|[^\p{L}\p{N}])/iu, 'red'],
+    [/(?:^|[^\p{L}\p{N}])(?:white|blanc|화이트|백포도주)(?=$|[^\p{L}\p{N}])/iu, 'white'],
     // Use lookarounds (not \b) because \b is ASCII-aware and 'é' is not a word char,
     // which would break the trailing word boundary on "rosé".
     [/(?:^|[^\p{L}\p{N}])(?:ros[eé]|로제)(?=$|[^\p{L}\p{N}])/iu, 'rosé'],
-    [/\b(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)\b/i, 'sparkling'],
-    [/\b(?:natural wine|내추럴 와인|내추럴)\b/i, 'natural'],
-    [/\b(?:dessert wine|디저트 와인|sauternes|icewine)\b/i, 'dessert'],
-    [/\b(?:fortified|주정강화|port|sherry|madeira|marsala)\b/i, 'fortified'],
-    [/\b(?:orange wine|오렌지 와인|amber wine)\b/i, 'orange'],
+    [/(?:^|[^\p{L}\p{N}])(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)(?=$|[^\p{L}\p{N}])/iu, 'sparkling'],
+    [/(?:^|[^\p{L}\p{N}])(?:natural wine|내추럴 와인|내추럴)(?=$|[^\p{L}\p{N}])/iu, 'natural'],
+    [/(?:^|[^\p{L}\p{N}])(?:dessert wine|디저트 와인|sauternes|icewine)(?=$|[^\p{L}\p{N}])/iu, 'dessert'],
+    [/(?:^|[^\p{L}\p{N}])(?:fortified|주정강화|port|sherry|madeira|marsala)(?=$|[^\p{L}\p{N}])/iu, 'fortified'],
+    [/(?:^|[^\p{L}\p{N}])(?:orange wine|오렌지 와인|amber wine)(?=$|[^\p{L}\p{N}])/iu, 'orange'],
   ];
   for (const [pattern, value] of wineTypeRules) {
     if (pattern.test(q)) {
@@ -42,18 +42,18 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   const countryRules: [RegExp, string][] = [
-    [/\b(?:french|france|프랑스)\b/i, 'France'],
-    [/\b(?:italian|italy|이탈리아)\b/i, 'Italy'],
-    [/\b(?:spanish|spain|스페인)\b/i, 'Spain'],
-    [/\b(?:american|usa|us wine|california|napa|sonoma|oregon|미국)\b/i, 'USA'],
-    [/\b(?:australian|australia|호주)\b/i, 'Australia'],
-    [/\b(?:argentinian|argentina|아르헨티나)\b/i, 'Argentina'],
-    [/\b(?:chilean|chile|칠레)\b/i, 'Chile'],
-    [/\b(?:german|germany|독일)\b/i, 'Germany'],
-    [/\b(?:portuguese|portugal|포르투갈)\b/i, 'Portugal'],
-    [/\b(?:new zealand|뉴질랜드)\b/i, 'New Zealand'],
-    [/\b(?:south african?|south africa|남아공)\b/i, 'South Africa'],
-    [/\b(?:austrian|austria|오스트리아)\b/i, 'Austria'],
+    [/(?:^|[^\p{L}\p{N}])(?:french|france|프랑스)(?=$|[^\p{L}\p{N}])/iu, 'France'],
+    [/(?:^|[^\p{L}\p{N}])(?:italian|italy|이탈리아)(?=$|[^\p{L}\p{N}])/iu, 'Italy'],
+    [/(?:^|[^\p{L}\p{N}])(?:spanish|spain|스페인)(?=$|[^\p{L}\p{N}])/iu, 'Spain'],
+    [/(?:^|[^\p{L}\p{N}])(?:american|usa|us wine|california|napa|sonoma|oregon|미국)(?=$|[^\p{L}\p{N}])/iu, 'USA'],
+    [/(?:^|[^\p{L}\p{N}])(?:australian|australia|호주)(?=$|[^\p{L}\p{N}])/iu, 'Australia'],
+    [/(?:^|[^\p{L}\p{N}])(?:argentinian|argentina|아르헨티나)(?=$|[^\p{L}\p{N}])/iu, 'Argentina'],
+    [/(?:^|[^\p{L}\p{N}])(?:chilean|chile|칠레)(?=$|[^\p{L}\p{N}])/iu, 'Chile'],
+    [/(?:^|[^\p{L}\p{N}])(?:german|germany|독일)(?=$|[^\p{L}\p{N}])/iu, 'Germany'],
+    [/(?:^|[^\p{L}\p{N}])(?:portuguese|portugal|포르투갈)(?=$|[^\p{L}\p{N}])/iu, 'Portugal'],
+    [/(?:^|[^\p{L}\p{N}])(?:new zealand|뉴질랜드)(?=$|[^\p{L}\p{N}])/iu, 'New Zealand'],
+    [/(?:^|[^\p{L}\p{N}])(?:south african?|south africa|남아공)(?=$|[^\p{L}\p{N}])/iu, 'South Africa'],
+    [/(?:^|[^\p{L}\p{N}])(?:austrian|austria|오스트리아)(?=$|[^\p{L}\p{N}])/iu, 'Austria'],
   ];
   for (const [pattern, value] of countryRules) {
     if (pattern.test(q)) {
@@ -121,7 +121,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  if (/\b(?:full[\s-]?body|풀바디|bold|heavy|묵직)\b/i.test(q)) {
+  if (/(?:^|[^\p{L}\p{N}])(?:full[\s-]?body|풀바디|bold|heavy|묵직)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     soft.push({
       attribute: 'body',
       operator: '=',
@@ -130,7 +130,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       confidence: 0.75,
       mapping_version: mv,
     });
-  } else if (/\b(?:light[\s-]?body|라이트바디|light wine|가벼운|가볍)\b/i.test(q)) {
+  } else if (/(?:^|[^\p{L}\p{N}])(?:light[\s-]?body|라이트바디|light wine|가벼운|가볍)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     soft.push({
       attribute: 'body',
       operator: '=',
@@ -141,7 +141,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  if (/\b(?:dry wine|드라이|brut|extra[\s-]?brut)\b/i.test(q)) {
+  if (/(?:^|[^\p{L}\p{N}])(?:dry wine|드라이|brut|extra[\s-]?brut)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     soft.push({
       attribute: 'sweetness',
       operator: '=',
@@ -150,7 +150,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       confidence: 0.8,
       mapping_version: mv,
     });
-  } else if (/\b(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)\b/i.test(q)) {
+  } else if (/(?:^|[^\p{L}\p{N}])(?:sweet wine|달콤한|스위트|demi[\s-]?sec|semi[\s-]?sweet)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     soft.push({
       attribute: 'sweetness',
       operator: '=',
