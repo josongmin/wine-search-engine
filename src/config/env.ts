@@ -67,7 +67,11 @@ const envSchema = z.object({
   VESPA_CONTENT_CLUSTER: z.string().min(1).default('wine_content'),
 
   // Embedding Service
-  EMBEDDING_SERVICE_URL: z.string().url().default('http://localhost:8081'),
+  // External embedding HTTP service (fallback when OpenAI embedding is not configured).
+  // No default — if neither OPENAI_EMBEDDING_MODEL nor EMBEDDING_SERVICE_URL is set
+  // and OPENAI_API_KEY is present, the system uses OpenAI embeddings. If neither key
+  // nor URL is set, dense retrieval is disabled via the kill switch guard below.
+  EMBEDDING_SERVICE_URL: z.string().url().optional(),
   EMBEDDING_MODEL: z.string().min(1).default('bge-m3'),
   /** Expected embedding vector dimension. When set, vectors with mismatched dimensions are rejected. */
   EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
@@ -97,10 +101,12 @@ const envSchema = z.object({
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
   /**
-   * When set together with OPENAI_API_KEY, dense retrieval uses OpenAI embeddings
-   * instead of EMBEDDING_SERVICE_URL (HttpEmbeddingService).
+   * Embedding model for dense retrieval via OpenAI-compatible API.
+   * Defaults to text-embedding-3-small — the most cost-effective option.
+   * When OPENAI_API_KEY is set, this model is used automatically.
+   * Set to a different model (e.g. text-embedding-3-large) for higher quality.
    */
-  OPENAI_EMBEDDING_MODEL: z.string().min(1).optional(),
+  OPENAI_EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
   OPENAI_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   /** Enable LLM-backed query constraint extraction (requires OPENAI_API_KEY). */
   LLM_QUERY_INTERPRETER: z

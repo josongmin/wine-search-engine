@@ -132,7 +132,16 @@ export function buildCoreAdapterServices(
         ...(config.embedding.dimension !== undefined ? { dimensions: config.embedding.dimension } : {}),
       });
     }
-    return new HttpEmbeddingService();
+    if (config.embedding.url !== undefined) {
+      return new HttpEmbeddingService();
+    }
+    // No embedding source configured — dense retrieval won't work.
+    // Return stub so the process boots; the kill switch guard downstream
+    // will degrade gracefully.
+    bootstrapLogger.warn(
+      'No embedding source configured (set OPENAI_API_KEY or EMBEDDING_SERVICE_URL). Dense retrieval disabled.',
+    );
+    return new StubEmbeddingService(config.embedding.dimension);
   })();
 
   const chatLlm: ChatLlmPort | undefined =

@@ -237,8 +237,17 @@ export async function executeAgentTool(
       if (response.queryType !== 'search') {
         return { observation: 'Unexpected response type for pairing search.', rawResult: response };
       }
+      // Enrich with pairing context so the LLM gives a richer answer that
+      // explains WHY each wine pairs with the food (not just "here are results").
+      const baseObs = summarizeSearchResults(response);
+      const pairingHint = [
+        '',
+        `PAIRING_CONTEXT: These wines were matched for "${parsed.food}" pairing.`,
+        'When synthesizing your answer, explain WHY each wine pairs well with the food (acidity, tannin, body, flavour bridge).',
+        'Include practical serving suggestions (temperature, decanting) if relevant.',
+      ].join('\n');
       return {
-        observation: summarizeSearchResults(response),
+        observation: baseObs + pairingHint,
         rawResult: response,
       };
     }

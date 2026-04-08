@@ -39,7 +39,11 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
     readonly httpTimeoutMs?: number;
     readonly expectedDimension?: number;
   }) {
-    this.url = options?.url ?? config.embedding.url;
+    const url = options?.url ?? config.embedding.url;
+    if (url === undefined) {
+      throw new Error('HttpEmbeddingService: EMBEDDING_SERVICE_URL is required when not using OpenAI embeddings');
+    }
+    this.url = url;
     this.model = options?.model ?? config.embedding.model;
     this.httpTimeoutMs = options?.httpTimeoutMs ?? config.embedding.httpTimeoutMs;
     this.expectedDimension = options?.expectedDimension ?? config.embedding.dimension;

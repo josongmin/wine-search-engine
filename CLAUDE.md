@@ -75,6 +75,14 @@ For any non-trivial code change, follow this exact order:
 6. **For any schema bound change** (`min`, `max`, `.refine`): justify the bound with a domain fact (RFC, real-world data). Add a test for a value JUST inside and JUST outside the bound.
 7. **For any new `as` cast or `unknown` narrowing**: add a runtime guard test that exercises the rejection path.
 
+8. **For any regex containing Korean (한글) or accented Latin (é, ñ)**: DO NOT use `\b`. Use `(?:^|[^\p{L}\p{N}])...(?=$|[^\p{L}\p{N}])` with `/u` flag. `\b` is ASCII-only and **silently fails** on non-ASCII word boundaries — this was the #1 bug class (50+ instances).
+9. **For any `Math.max()` or `Math.min()` call**: NEVER use spread (`...array`). Use a loop. Spread pushes all elements onto the call stack and crashes on arrays > ~65K elements.
+10. **For any Zod `z.object()`**: ALWAYS chain `.strict()` unless you have an explicit documented reason to allow extra properties.
+11. **For any JSONB column read from PostgreSQL**: NEVER cast directly with `as DomainType`. Use a runtime type guard or Zod schema validation. DB data can be corrupted by migrations, ETL bugs, or manual edits.
+12. **For any `JSON.parse()` result**: Cast to `unknown` first, then validate shape. NEVER `JSON.parse(x) as T`. Prefer `RedisCache.getValidated(key, schema)` over `.get<T>(key)`.
+13. **For any schema bound change** (`min`, `max`): The bound MUST reference a named domain constant (not a magic number). Add a contract parity test that the HTTP schema and domain parser agree on the same bound.
+14. **After applying any fix**: VERIFY the fix is actually in the file (`grep` or `Read`). Linter hooks and file watchers can revert changes silently — this happened multiple times during audit rounds 22-27.
+
 Regression tests live under `test/regression/<topic>.regression.test.ts` and are append-only — never delete a regression test.
 
 ## Self-audit pass (after multi-file refactors)

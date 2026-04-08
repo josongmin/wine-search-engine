@@ -1,0 +1,105 @@
+#!/usr/bin/env node
+/**
+ * Static pattern scanner for known-bad code patterns.
+ *
+ * Runs as part of the pre-push hook and CI pipeline. Exits 1 if any
+ * ERROR-severity pattern is detected; WARNs are logged but don't fail.
+ *
+ * Patterns are derived from the 32 audit rounds (262 findings):
+ * - \b with Korean/accented chars (50+ bugs)
+ * - Math.max/min(...spread) (5+ stack-overflow bugs)
+ * - JSON.parse(...) as T (7+ type-safety bugs)
+ * - z.object() without .strict() (2+ schema bugs)
+ */
+
+import { readFileSync } from 'node:fs';
+import { resolve, relative } from 'node:path';
+import { globSync } from 'glob';
+
+const SRC_ROOT = resolve(process.cwd(), 'src');
+const KOREAN_RANGE = /[\uAC00-\uD7AF]/;
+
+/** @typedef {{ name: string; severity: 'error' | 'warn'; test: (line: string, filePath: string) => boolean }} Pattern */
+
+/** @type {Pattern[]} */
+const PATTERNS = [
+  {
+    name: '\\b wrapping Korean chars (ASCII-only word boundary)',
+    severity: 'error',
+    test: (line) => {
+      if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*')) return false;
+      const regexes = line.match(/\/[^/\n]+\/[gimsuy]*/g) ?? [];
+      return regexes.some((r) => {
+        if (!r.includes('\\b') || !KOREAN_RANGE.test(r) || r.includes('\\p{')) return false;
+        // Only flag when \\b is adjacent to a group containing Korean.
+        // Pattern: \\b(?:...Korean...)\\b  — the \\b wraps the Korean group.
+        // Safe pattern: \\b(?:English)\\b|(?:^|\\s)Korean — \\b only wraps English.
+        // Heuristic: find \\b(?: groups and check if the group content has Korean.
+        const groups = r.match(/\\b\(\?:[^)]+\)\\b/g) ?? [];
+        return groups.some((g) => KOREAN_RANGE.test(g));
+      });
+    },
+  },
+  {
+    name: 'Math.max/min(...spread) — stack overflow risk',
+    severity: 'error',
+    test: (line) => /Math\.(max|min)\(\.\.\./i.test(line) && !line.trimStart().startsWith('//'),
+  },
+  {
+    name: 'JSON.parse(...) as T (unsafe cast, use unknown first)',
+    severity: 'warn',
+    test: (line, filePath) => {
+      if (line.trimStart().startsWith('//')) return false;
+      if (filePath.includes('__tests__') || filePath.includes('.test.')) return false;
+      return /JSON\.parse\([^)]+\)\s+as\s+(?!unknown)/.test(line);
+    },
+  },
+  {
+    name: 'z.object() without .strict() in schema file',
+    severity: 'warn',
+    test: (line, filePath) => {
+      if (!filePath.includes('/schemas/')) return false;
+      if (line.trimStart().startsWith('//')) return false;
+      // Detect z.object({ ... }) not followed by .strict() on the same line
+      // (multi-line chains are harder to detect statically — this catches the common case)
+      return /z\.object\(\{/.test(line) && !line.includes('.strict()');
+    },
+  },
+];
+
+let errorCount = 0;
+let warnCount = 0;
+
+const files = globSync('**/*.ts', {
+  cwd: SRC_ROOT,
+  ignore: ['**/__tests__/**', '**/*.test.ts'],
+  absolute: true,
+});
+
+for (const filePath of files) {
+  const relPath = relative(SRC_ROOT, filePath);
+  const content = readFileSync(filePath, 'utf8');
+  const lines = content.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const pattern of PATTERNS) {
+      if (pattern.test(line, filePath)) {
+        const prefix = pattern.severity === 'error' ? '❌ ERROR' : '⚠️  WARN';
+        console.log(`${prefix}: ${pattern.name}`);
+        console.log(`  ${relPath}:${i + 1}`);
+        console.log(`  ${line.trim()}`);
+        console.log();
+        if (pattern.severity === 'error') errorCount++;
+        else warnCount++;
+      }
+    }
+  }
+}
+
+console.log(`\nSecurity pattern scan: ${errorCount} error(s), ${warnCount} warning(s)`);
+if (errorCount > 0) {
+  console.log('❌ FAILED — fix all errors before pushing.');
+  process.exit(1);
+}
+console.log('✅ Passed.');
