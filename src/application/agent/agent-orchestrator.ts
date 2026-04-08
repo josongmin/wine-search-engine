@@ -250,12 +250,19 @@ export class AgentOrchestrator {
           : query;
         pendingRefinementHint = undefined;
         const userMsg = buildUserMessage(baseUserContent);
+        const stepMessages = buildStepMessages(steps);
         const messages = [
           buildSystemMessage(),
+          userMsg,
+          ...stepMessages,
+          // Inject LAST_STEP nudge as the FINAL user message AFTER all tool
+          // results so the LLM sees "you just got a result → now answer".
+          // Placing it at the query position (before step messages) meant the
+          // model saw the warning before its own tool history, which reduced
+          // compliance. A trailing user message is the natural "now respond" turn.
           ...(isLastStep
-            ? [{ ...userMsg, content: userMsg.content + `\n\n[SYSTEM:${requestId}:LAST_STEP. This is your LAST step. You MUST provide a final answer NOW using the information you have gathered. Do NOT call another tool.]` }]
-            : [userMsg]),
-          ...buildStepMessages(steps),
+            ? [{ role: 'user' as const, content: `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.` }]
+            : []),
         ];
 
         // LLM call with per-step timeout and AbortSignal propagation.
@@ -264,7 +271,7 @@ export class AgentOrchestrator {
         // Short-circuit if the caller (HTTP route) already signalled abort
         // (client disconnect). This prevents spending LLM tokens for a response
         // nobody will receive.
-        if (abortSignal?.aborted === true) {
+        if (abortSignal?.aborted) {
           terminationReason = 'error';
           break;
         }
@@ -276,6 +283,13 @@ export class AgentOrchestrator {
         // connection also cancels the underlying LLM fetch.
         const propagateAbort = (): void => { stepAbortController.abort(); };
         abortSignal?.addEventListener('abort', propagateAbort, { once: true });
+        // Race guard: abort may fire between the pre-flight check above and
+        // addEventListener. Re-check immediately after registration.
+        if (abortSignal?.aborted) {
+          abortSignal.removeEventListener('abort', propagateAbort);
+          terminationReason = 'error';
+          break;
+        }
         let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
           llmResult = await Promise.race([
@@ -470,7 +484,7 @@ export class AgentOrchestrator {
     // This avoids the "agent ran 3 steps, got great results, then returned nothing" failure.
     // Skip entirely if caller already disconnected — synthesis costs 1-2 LLM round-trips
     // that nobody will receive.
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && abortSignal?.aborted !== true) {
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !(abortSignal?.aborted)) {
       const obsSteps = steps.filter((s) => s.observation !== undefined && s.observation.length > 0);
       if (obsSteps.length > 0) {
         // requestId embedded in sentinel to prevent adversarial tool results from
@@ -487,11 +501,19 @@ export class AgentOrchestrator {
         ];
         const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
           // Short-circuit if caller disconnected before we even start the LLM call.
-          if (abortSignal?.aborted === true) return undefined;
+          if (abortSignal?.aborted) return undefined;
           const synthAbort = new AbortController();
           // Propagate caller abort into the synthesis controller.
           const propagateSynthAbort = (): void => { synthAbort.abort(); };
           abortSignal?.addEventListener('abort', propagateSynthAbort, { once: true });
+          // Re-check after addEventListener: if abort fired between the aborted===true
+          // check above and addEventListener, the 'abort' event already fired and the
+          // listener will never be called — synthAbort would never abort. Guard this race.
+          if (abortSignal?.aborted) {
+            synthAbort.abort();
+            abortSignal.removeEventListener('abort', propagateSynthAbort);
+            return undefined;
+          }
           const synthTimer = setTimeout(() => {
             synthAbort.abort();
           }, SYNTHESIS_TIMEOUT_MS);
@@ -520,7 +542,7 @@ export class AgentOrchestrator {
         }
         // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw)
         // Skip if caller disconnected between attempts.
-        if (synthAnswer === undefined && abortSignal?.aborted !== true as boolean) {
+        if (synthAnswer === undefined && !(abortSignal?.aborted)) {
           try {
             log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
             synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
@@ -544,7 +566,7 @@ export class AgentOrchestrator {
     // penalise correct tool execution as a complete failure.
     const hasToolObservations = steps.some((s) => s.observation !== undefined && s.observation.length > 0);
 
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations && abortSignal?.aborted !== true) {
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations && !(abortSignal?.aborted)) {
       // Layer 2: single-shot fallback search — only when the agent made NO tool calls.
       // Skip when tool observations exist; those cases go directly to Layer 3 so we
       // preserve the agent's correct tool execution in the terminationReason.
@@ -557,6 +579,13 @@ export class AgentOrchestrator {
       // Chain caller abort → fallback controller so client disconnect cancels the search.
       const propagateFallbackAbort = (): void => { fallbackController.abort(); };
       abortSignal?.addEventListener('abort', propagateFallbackAbort, { once: true });
+      // Race guard: abort may fire between the outer if-guard and addEventListener.
+      // Re-check immediately after registration. If aborted, skip the fallback search.
+      if (abortSignal?.aborted) {
+        fallbackController.abort();
+        abortSignal.removeEventListener('abort', propagateFallbackAbort);
+        // Fall through to Layer 3/4 without executing the search.
+      } else {
       const fallbackTimer = setTimeout(
         () => {
           fallbackController.abort();
@@ -591,7 +620,8 @@ export class AgentOrchestrator {
         abortSignal?.removeEventListener('abort', propagateFallbackAbort);
         clearTimeout(fallbackTimer);
       }
-    }
+      } // end else (not aborted before fallback search started)
+    } // end if (answer === '' && !hasToolObservations) — Layer 2 block
 
     if (!policyBlocked && answer === '') {
       // Layer 3: synthesize from last available observation (deterministic, no LLM)

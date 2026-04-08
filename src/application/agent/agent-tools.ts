@@ -31,6 +31,10 @@ const SEARCH_LIMIT_MAX = 20;
 const MAX_PRICE_KRW_BOUND = 100_000_000;
 /** Top-N results shown in the observation string (controls context window usage). */
 const SUMMARY_TOP_N = 5;
+/** Max characters in any single observation string returned to the agent loop.
+ * Truncation prevents a single tool result from exhausting the agent's token budget.
+ * ~2000 chars ≈ 500 tokens (at 4 chars/token) — enough for 5 wine summaries. */
+const MAX_OBSERVATION_CHARS = 2_000;
 
 // ---------------------------------------------------------------------------
 // Input schemas (same as tool-schemas.ts — reusing patterns)
@@ -38,6 +42,7 @@ const SUMMARY_TOP_N = 5;
 
 const SearchInputSchema = z.object({
   query: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
+  // .int() implies finite (no NaN/Infinity) per Zod semantics; .min/.max add domain bounds
   limit: z.number().int().min(1).max(SEARCH_LIMIT_MAX).optional(),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
   /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]). */
@@ -53,13 +58,25 @@ const CompareInputSchema = z.object({
   query_b: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
 });
 
+/** Max length for entity_id to prevent unbounded strings reaching Vespa GET / NL parser.
+ * Vespa document IDs are typically ≤200 chars; 500 is a conservative upper bound. */
+const ENTITY_ID_MAX_LEN = 500;
+/** Conservative lower bound for valid wine drinking-window years. */
+const DRINKING_WINDOW_MIN_YEAR = 1700;
+/** Conservative upper bound for valid wine drinking-window years. */
+const DRINKING_WINDOW_MAX_YEAR = 2200;
+
 const DrinkingWindowInputSchema = z.object({
-  entity_id: z.string().min(1),
-  target_year: z.number().int().optional(),
+  entity_id: z.string().min(1).max(ENTITY_ID_MAX_LEN),
+  target_year: z.number().int().min(DRINKING_WINDOW_MIN_YEAR).max(DRINKING_WINDOW_MAX_YEAR).optional(),
 });
 
+/** Max food description length — prevents unbounded strings in the food pairing query.
+ * Food pairing queries are short (e.g. "steak", "파스타"); 200 chars is generous. */
+const FOOD_MAX_LEN = 200;
+
 const FoodPairingInputSchema = z.object({
-  food: z.string().min(1),
+  food: z.string().min(1).max(FOOD_MAX_LEN),
   /** Budget in Korean Won (KRW). Use this instead of USD amounts. */
   max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
   /** Legacy USD price field — accepted for backwards compat but converted internally. */
@@ -244,7 +261,102 @@ const NEGATION_ENTITY_STRING_FIELDS: ReadonlyArray<'region' | 'producer' | 'appe
   'region', 'producer', 'appellation',
 ] as const;
 
+function appendStructuredQueryClauses(
+  baseQuery: string,
+  clauses: readonly string[],
+): string {
+  if (clauses.length === 0) {
+    return baseQuery;
+  }
+  return `${baseQuery}, ${clauses.join(', ')}`;
+}
+
+function buildStructuredSearchClauses(input: {
+  readonly exclude_grapes?: readonly string[] | undefined;
+  readonly exclude_regions?: readonly string[] | undefined;
+  readonly max_price_krw?: number | undefined;
+}): readonly string[] {
+  const clauses: string[] = [];
+  for (const grape of input.exclude_grapes ?? []) {
+    clauses.push(`not ${grape}`);
+  }
+  for (const region of input.exclude_regions ?? []) {
+    clauses.push(`not ${region}`);
+  }
+  if (input.max_price_krw !== undefined) {
+    clauses.push(`${input.max_price_krw}원 이하`);
+  }
+  return clauses;
+}
+
+function collectExcludedTerms(input: {
+  readonly query: string;
+  readonly exclude_grapes?: readonly string[] | undefined;
+  readonly exclude_regions?: readonly string[] | undefined;
+}): readonly string[] {
+  const structuredTerms = [
+    ...(input.exclude_grapes ?? []),
+    ...(input.exclude_regions ?? []),
+  ];
+  return [
+    ...new Set(
+      [
+        ...extractNegationTerms(input.query),
+        ...structuredTerms.map((term) => term.trim().toLowerCase()).filter((term) => term.length > 0),
+      ],
+    ),
+  ];
+}
+
+/**
+ * Truncates an observation string to MAX_OBSERVATION_CHARS to prevent a single
+ * tool result from exhausting the agent's token budget in one step.
+ */
+function capObservation(obs: string): string {
+  if (obs.length <= MAX_OBSERVATION_CHARS) return obs;
+  return obs.slice(0, MAX_OBSERVATION_CHARS) + `\n[observation truncated at ${MAX_OBSERVATION_CHARS} chars]`;
+}
+
 export async function executeAgentTool(
+  toolName: string,
+  input: Record<string, unknown>,
+  deps: AgentToolDeps,
+  requestId: string,
+): Promise<AgentToolResult> {
+  try {
+    const result = await executeAgentToolInner(toolName, input, deps, requestId);
+    return { ...result, observation: capObservation(result.observation) };
+  } catch {
+    return {
+      observation: `Tool "${toolName}" encountered an unexpected error. Try a different approach or query.`,
+      rawResult: null,
+    };
+  }
+}
+
+/**
+ * Execute multiple tool calls in parallel (Promise.all).
+ *
+ * Each tool is isolated: a failure in one does NOT abort the others.
+ * Policy-block errors are re-thrown immediately so the orchestrator can
+ * terminate the loop — they must not be swallowed like ordinary errors.
+ *
+ * requestId convention: `${baseRequestId}-step${stepIndex}-p${toolIndex}`
+ * so each parallel call has a unique, traceable ID in logs.
+ */
+export async function executeAgentToolsBatch(
+  toolCalls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
+  deps: AgentToolDeps,
+  baseRequestId: string,
+): Promise<readonly AgentToolResult[]> {
+  return Promise.all(
+    toolCalls.map((call, i) =>
+      executeAgentTool(call.tool, call.input, deps, `${baseRequestId}-p${i}`),
+    ),
+  );
+}
+
+async function executeAgentToolInner(
   toolName: string,
   input: Record<string, unknown>,
   deps: AgentToolDeps,
@@ -260,16 +372,7 @@ export async function executeAgentTool(
 
       // Enrich query with structured exclusion/price params so the existing
       // search pipeline (which understands natural language) applies them.
-      let enrichedQuery = parsed.query;
-      if (parsed.exclude_grapes !== undefined && parsed.exclude_grapes.length > 0) {
-        enrichedQuery += `, exclude ${parsed.exclude_grapes.join(', ')}`;
-      }
-      if (parsed.exclude_regions !== undefined && parsed.exclude_regions.length > 0) {
-        enrichedQuery += `, not from ${parsed.exclude_regions.join(', ')}`;
-      }
-      if (parsed.max_price_krw !== undefined) {
-        enrichedQuery += `, under ${parsed.max_price_krw} KRW`;
-      }
+      let enrichedQuery = appendStructuredQueryClauses(parsed.query, buildStructuredSearchClauses(parsed));
 
       if (enrichedQuery.length > MAX_ENRICHED_QUERY_LEN) {
         enrichedQuery = enrichedQuery.slice(0, MAX_ENRICHED_QUERY_LEN);
@@ -297,7 +400,7 @@ export async function executeAgentTool(
 
       // Negation post-filter: exclude results whose identity fields contain negated terms.
       // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
-      const negTerms = extractNegationTerms(parsed.query);
+      const negTerms = collectExcludedTerms(parsed);
       if (negTerms.length > 0) {
         const filtered = response.results.filter((r) => {
           const entity = r.entity;
@@ -471,7 +574,11 @@ export async function executeAgentTool(
             ? Math.round(parsed.max_price * KRW_PER_USD_APPROXIMATE)
             : undefined
         );
-      const query = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}${budgetKrw !== undefined ? ` under ${budgetKrw} KRW` : ''}`;
+      const queryBase = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}`;
+      const query = appendStructuredQueryClauses(
+        queryBase,
+        budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],
+      );
       const response = await deps.searchUseCase.execute({ query }, requestId);
 
       if (response.queryType !== 'search') {
