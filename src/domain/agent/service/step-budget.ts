@@ -24,12 +24,24 @@ const MIN_PER_TOOL_CALL_CAP = 3;
  *  while keeping a meaningful guard against runaway reformulation. */
 const PER_TOOL_CALL_CAP_RATIO = 0.6;
 
-/** Trigram Jaccard threshold for near-duplicate query detection. Adaptive:
- *  0.6 for short strings (< 15 chars) where n-gram overlap is naturally
- *  lower, 0.7 for longer strings. Catches "Opus One 2018" / "Opus One wine"
- *  without false-positiving semantically distinct queries. */
+/** Trigram Jaccard threshold for near-duplicate query detection.
+ *  Three-tier adaptive threshold:
+ *  - Short strings (<10 chars): 0.6 — bigrams, lower bar for small n-gram sets
+ *  - Hangul-dominant long strings: 0.92 — Korean price-relaxation queries like
+ *    "30만원 이하 레드 와인" vs "50만원 이하 레드 와인" share ~90% of their
+ *    character bigrams because only the numeric prefix differs; a threshold of
+ *    0.7 would false-positive on legitimate constraint-relaxation, while 0.92
+ *    allows those while still blocking true duplicates (Jaccard=1.0) and
+ *    near-identical queries (Jaccard≥0.95).
+ *  - ASCII-dominant long strings: 0.85 — catches paraphrased reformulations
+ *    ("Opus One wine bottle" vs "wine bottle Opus One", Jaccard=1.0) while
+ *    allowing semantically distinct queries. Raised from 0.7 to 0.85 because
+ *    the adaptive PER_TOOL_CALL_CAP already caps runaway calls — the Jaccard
+ *    guard is a secondary safety net and should not false-positive on
+ *    "2018 Opus One" vs "2019 Opus One" (Jaccard≈0.57, still blocked? No, 0.57<0.85). */
 const NEAR_DUPLICATE_JACCARD_SHORT = 0.6;
-const NEAR_DUPLICATE_JACCARD_LONG = 0.7;
+const NEAR_DUPLICATE_JACCARD_LONG_HANGUL = 0.92;
+const NEAR_DUPLICATE_JACCARD_LONG_ASCII = 0.85;
 /** Strings shorter than this use bigrams and a lower Jaccard threshold.
  *  Tuned at 10 after calibration: "2018 one opus" (13 chars) must use
  *  trigrams so vintage-distinct queries aren't false-positived, while
@@ -125,14 +137,23 @@ export class StepBudget {
       return { allowed: false, reason: 'loop_detected' };
     }
 
-    // Near-duplicate check: trigram Jaccard ≥ 0.7 against any prior call to
-    // the same tool, restricted to query-bearing keys (anti-padding).
+    // Near-duplicate check: trigram Jaccard ≥ threshold against any prior call
+    // to the same tool, restricted to query-bearing keys (anti-padding).
+    // Three-tier threshold: short→0.6, Hangul-dominant→0.92, ASCII→0.85.
+    // The higher Hangul threshold prevents false-positives on price-relaxation
+    // queries like "30만원 이하 레드 와인" vs "50만원 이하 레드 와인" where
+    // only the numeric prefix differs but bigram overlap is ~90%.
     const normalizedQuery = normalizeQueryForLoopDetection(input);
     if (normalizedQuery.length > 0) {
       const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
-      const threshold = normalizedQuery.length < SHORT_STRING_THRESHOLD
-        ? NEAR_DUPLICATE_JACCARD_SHORT
-        : NEAR_DUPLICATE_JACCARD_LONG;
+      let threshold: number;
+      if (normalizedQuery.length < SHORT_STRING_THRESHOLD) {
+        threshold = NEAR_DUPLICATE_JACCARD_SHORT;
+      } else if (countHangulChars(normalizedQuery) > normalizedQuery.length * HANGUL_DOMINANCE_RATIO) {
+        threshold = NEAR_DUPLICATE_JACCARD_LONG_HANGUL;
+      } else {
+        threshold = NEAR_DUPLICATE_JACCARD_LONG_ASCII;
+      }
       for (const prior of priorQueries) {
         const similarity = trigramJaccard(normalizedQuery, prior);
         if (similarity >= threshold) {

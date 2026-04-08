@@ -152,7 +152,7 @@ describe('StepBudget near-duplicate detection', () => {
   it('allows different vintages of the same wine (legitimately distinct lookups)', () => {
     const b = new StepBudget(baseConfig);
     expect(b.recordStep('search_wines', { query: '2018 one opus' }).allowed).toBe(true);
-    // Slightly different vintage — Jaccard ~ 0.57 < 0.7 → allowed
+    // Slightly different vintage — Jaccard ~ 0.57 < 0.85 (ASCII threshold) → allowed
     const second = b.recordStep('search_wines', { query: '2019 one opus' });
     expect(second.allowed).toBe(true);
   });
@@ -168,6 +168,33 @@ describe('StepBudget near-duplicate detection', () => {
     expect(b.recordStep('search_wines', { query: '   ' }).allowed).toBe(true);
     // Different whitespace-only → exact-key blocks because canonical JSON differs only by content
     expect(b.recordStep('search_wines', { query: '\t' }).allowed).toBe(true);
+  });
+
+  it('allows Korean price-relaxation queries (30만원 → 50만원 constraint change)', () => {
+    // "30만원 이하 레드 와인" vs "50만원 이하 레드 와인": only the price prefix differs.
+    // Hangul-dominant long strings use threshold=0.92; bigram Jaccard ≈ 0.85–0.90 < 0.92 → allowed.
+    // This represents legitimate constraint relaxation (agent broadens price band after NO_MATCH).
+    const b = new StepBudget(baseConfig);
+    expect(b.recordStep('search_wines', { query: '30만원 이하 레드 와인' }).allowed).toBe(true);
+    const relaxed = b.recordStep('search_wines', { query: '50만원 이하 레드 와인' });
+    expect(relaxed.allowed).toBe(true);
+  });
+
+  it('still blocks truly identical Korean queries even with high Hangul threshold', () => {
+    // Exact same query string must be blocked by exact-key dedup (not near-duplicate).
+    const b = new StepBudget(baseConfig);
+    expect(b.recordStep('search_wines', { query: '30만원 이하 레드 와인' }).allowed).toBe(true);
+    const duplicate = b.recordStep('search_wines', { query: '30만원 이하 레드 와인' });
+    expect(duplicate.allowed).toBe(false);
+    expect(duplicate.reason).toBe('loop_detected');
+  });
+
+  it('blocks Korean token-reordered identical query (Jaccard=1.0 after token sort)', () => {
+    // Token sort makes these identical → Jaccard=1.0 ≥ 0.92 → blocked.
+    const b = new StepBudget(baseConfig);
+    expect(b.recordStep('search_wines', { query: '레드 와인 이하 30만원' }).allowed).toBe(true);
+    const reordered = b.recordStep('search_wines', { query: '30만원 이하 레드 와인' });
+    expect(reordered.allowed).toBe(false);
   });
 });
 
