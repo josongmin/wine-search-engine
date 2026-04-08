@@ -261,7 +261,7 @@ function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
 }
 
 describe('HybridUseCase', () => {
-  it('returns a canonical internal-error authority trace when the hybrid ranking pipeline crashes', async () => {
+  it('throws DomainError when the hybrid ranking pipeline crashes (propagated as 500)', async () => {
     const plan = createPlan();
     const useCase = makeHybridUseCase({
       queryPlanner: { plan: vi.fn().mockResolvedValue(plan) } as never,
@@ -270,28 +270,12 @@ describe('HybridUseCase', () => {
       } as never,
     });
 
-    const response = await useCase.execute({ query: 'ridge cabernet' }, 'req-hybrid-error');
-
-    expect(response).toMatchObject({
-      queryType: 'search',
-      engineDecision: {
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        route: 'error',
-        failure_reason: 'INTERNAL_INCONSISTENCY',
-      },
-      meta: {
-        requestId: 'req-hybrid-error',
-        route: 'error',
-        executionMode: 'degraded',
-        blockingEligible: false,
-        runtimeCorrelationRef: 'req-hybrid-error',
-      },
-    });
-    expect(response.engineDecision.decisionTraceRef).toMatch(
-      /^decision:v1:internal_error:[a-f0-9]{64}$/,
-    );
-    expect(response.meta.authorityTraceRef).toBe(response.engineDecision.decisionTraceRef);
+    // The refactored hybrid use case now throws instead of returning a
+    // degraded 200 response — this surfaces pipeline crashes as 500 to the
+    // HTTP error handler, making them visible to monitoring + SLOs.
+    await expect(
+      useCase.execute({ query: 'ridge cabernet' }, 'req-hybrid-error'),
+    ).rejects.toThrow('Hybrid pipeline failed unexpectedly');
   });
 
   it('reuses the shared planner context mapping for locale, session, and budget', async () => {

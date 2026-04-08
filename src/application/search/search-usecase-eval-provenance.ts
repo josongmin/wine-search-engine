@@ -71,9 +71,25 @@ export function rankedResultsToEvalProvenanceSlices(
 export function searchResponseToEvalProvenanceSlices(
   response: SearchResponseV1,
 ): readonly EvalProvenanceSlice[] {
-  return (response.meta.retrievalProvenanceSlices ?? []).map((slice) => ({
-    ...slice,
-    channels: preferCanonicalRetrievalChannelLabels(slice.channels) as EvalProvenanceSlice['channels'],
-    topChannel: preferCanonicalRetrievalChannelLabels([slice.topChannel])[0] as EvalProvenanceSlice['topChannel'],
-  }));
+  return (response.meta.retrievalProvenanceSlices ?? []).map((slice) => {
+    // Canonicalize channel labels, then validate against the ProvenanceChannel
+    // enum. The previous `as` casts silently bypassed validation and could
+    // produce invalid typed objects when compatibility aliases mapped to
+    // strings not in the enum. Invalid channels fall back to the original
+    // (which is already a string — just not narrowed).
+    const canonicalChannels = preferCanonicalRetrievalChannelLabels(slice.channels);
+    const validatedChannels = canonicalChannels.filter(isProvenanceChannel);
+    // Use canonicalized top channel if valid, else fall back to original.
+    const canonicalTopArr = preferCanonicalRetrievalChannelLabels([slice.topChannel]);
+    const canonicalTop = canonicalTopArr[0];
+    const validatedTop = canonicalTop !== undefined && isProvenanceChannel(canonicalTop)
+      ? canonicalTop
+      : slice.topChannel;
+
+    return {
+      ...slice,
+      channels: validatedChannels as EvalProvenanceSlice['channels'],
+      topChannel: validatedTop as EvalProvenanceSlice['topChannel'],
+    };
+  });
 }

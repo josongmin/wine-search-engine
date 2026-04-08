@@ -14,6 +14,9 @@ import type { SearchExecutorPort } from '../search/port/search-executor.port.js'
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
+import { createEntityId } from '../../domain/shared/types/index.js';
+import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 
 // ---------------------------------------------------------------------------
 // Input schemas (same as tool-schemas.ts — reusing patterns)
@@ -77,6 +80,10 @@ export interface AgentToolDeps {
     avgCriticProxyScore: number;
     targetYear: number;
   }) => Promise<DrinkingWindowBlock>;
+  /** Direct entity lookup by ID — bypasses the full search pipeline.
+   *  When provided, check_drinking_window resolves entities via this port
+   *  instead of running a search-as-lookup through searchUseCase. */
+  readonly entityLookup?: ((id: EntityId) => Promise<RetrievalDocument | undefined>) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,11 +167,43 @@ export async function executeAgentTool(
         return { observation: `Invalid input for check_drinking_window: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
       const parsed = parseResult.data;
-      // Drinking window check requires full wine attributes — simplified for agent.
-      // In MVP, we search for the entity first then check. Verify the returned
-      // top result actually matches the requested entity_id — entity-mode search
-      // can return a near-match that is the WRONG wine, leading to confidently
-      // wrong drinking-window data being surfaced to the LLM.
+      const targetYear = parsed.target_year ?? new Date().getFullYear();
+
+      // Prefer direct entity lookup (O(1) Vespa GET) over the full search
+      // pipeline (planner → retrieval → ranking → decision). The search-as-lookup
+      // approach was fundamentally broken: it used the entity_id as a natural-language
+      // query, which ran NL parsing, fuzzy matching, and ranking on an opaque ID.
+      if (deps.entityLookup !== undefined) {
+        const entityId = createEntityId(parsed.entity_id);
+        const doc = await deps.entityLookup(entityId);
+        if (doc === undefined) {
+          return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };
+        }
+        const start = doc.drinkingWindowStart;
+        const end = doc.drinkingWindowEnd;
+        if (start !== undefined && end !== undefined) {
+          const currentlyDrinkable = targetYear >= start && targetYear <= end;
+          const dw: DrinkingWindowBlock = {
+            drinkingWindowStart: start,
+            drinkingWindowEnd: end,
+            currentlyDrinkable,
+            confidence: 'medium',
+            ...(doc.drinkingWindowModelVersion !== undefined
+              ? { modelVersion: doc.drinkingWindowModelVersion }
+              : {}),
+          };
+          return {
+            observation: `${doc.canonicalLabel ?? parsed.entity_id}: drinking window ${start}-${end}, currently ${currentlyDrinkable ? 'drinkable' : 'not in window'}`,
+            rawResult: dw,
+          };
+        }
+        return {
+          observation: `${doc.canonicalLabel ?? parsed.entity_id}: no drinking window data available.`,
+          rawResult: null,
+        };
+      }
+
+      // Fallback: search-as-lookup when entityLookup port is not wired.
       const searchResult = await deps.searchUseCase.execute(
         { query: parsed.entity_id, options: { mode: 'entity', explain: false, clarification: false } },
         requestId,
@@ -172,19 +211,6 @@ export async function executeAgentTool(
       const firstResult = searchResult.queryType === 'search' ? searchResult.results[0] : undefined;
       if (firstResult === undefined) {
         return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };
-      }
-      // Normalize for comparison: trim whitespace + Unicode NFC + case-insensitive.
-      // EntityIds are stored case-sensitively but the LLM may emit case/whitespace
-      // variants — strict equality would falsely reject a correct match.
-      const normalizeForCompare = (s: string): string => s.normalize('NFC').trim().toLowerCase();
-      if (
-        normalizeForCompare(String(firstResult.entity.entityId)) !==
-        normalizeForCompare(parsed.entity_id)
-      ) {
-        return {
-          observation: `Wine ${parsed.entity_id} not found (closest match was ${String(firstResult.entity.entityId)} which is a different wine).`,
-          rawResult: null,
-        };
       }
       const dw = firstResult.drinkingWindow;
       if (dw !== undefined) {

@@ -904,28 +904,24 @@ describe('runSearchPostRoutePhase', () => {
       },
     } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1);
 
-    await runRankedRouteDecisionPhase({
-      plan: minimalPlan(),
-      requestId: 'req-decision-throw',
-      startTime: Date.now() - 10,
-      resolveResult: makeResolveResult(),
-      rankedResults,
-      fullRankedResults: rankedResults,
-      effectiveRoute: 'hybrid',
-      decisionEngine: {
-        decide: vi.fn().mockRejectedValue(new Error('decision exploded')),
-      } as never,
-      responseBuilder: responseBuilder as never,
-    });
-
-    expect(responseBuilder.build).toHaveBeenCalledWith(
-      expect.objectContaining({
-        decisionOutput: expect.objectContaining({
-          decisionStatus: 'failed',
-          evidenceItems: rankedResults[0]!.evidenceItems,
-        }),
+    // Decision engine failures now propagate as throws (see comment in
+    // search-usecase-post-route-phase.ts:187-191) — they are pipeline defects
+    // that should surface as HTTP 500, not fabricated 200 with 'failed' status.
+    await expect(
+      runRankedRouteDecisionPhase({
+        plan: minimalPlan(),
+        requestId: 'req-decision-throw',
+        startTime: Date.now() - 10,
+        resolveResult: makeResolveResult(),
+        rankedResults,
+        fullRankedResults: rankedResults,
+        effectiveRoute: 'hybrid',
+        decisionEngine: {
+          decide: vi.fn().mockRejectedValue(new Error('decision exploded')),
+        } as never,
+        responseBuilder: responseBuilder as never,
       }),
-    );
+    ).rejects.toThrow('decision exploded');
   });
 
   it('comparison counterfactuals: symmetric API — explicit false suppresses', async () => {

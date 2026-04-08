@@ -4,7 +4,6 @@ import type { SnapshotVersions } from './search.usecase.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
@@ -32,7 +31,6 @@ import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
-import { buildInternalErrorAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
@@ -144,50 +142,12 @@ export class HybridUseCase {
       const errorMessage = err instanceof Error ? err.message : String(err);
       bootstrapLogger.error(
         { err: errorMessage, requestId },
-        '[HybridUseCase] Unexpected error in hybrid ranking pipeline; returning structured failure response',
+        '[HybridUseCase] Unexpected error in hybrid ranking pipeline — propagating as 500',
       );
-      pipelineDebug(
-        {
-          step: 'hybrid.execute.pipeline_error',
-          error: errorMessage,
-        },
-        'pipeline hybrid ranking error',
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        `Hybrid pipeline failed unexpectedly: ${errorMessage}`,
       );
-      const snapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
-      const errorTraceRef = buildInternalErrorAuthorityTraceRef({
-        snapshot,
-        requestId,
-        failureReason: 'INTERNAL_INCONSISTENCY',
-      });
-      const degradedResponse: SearchResponseV1 = {
-        queryType: 'search',
-        engineDecision: {
-          decisionStatus: 'failed',
-          nextAction: 'fail',
-          route: 'error',
-          decisionConfidence: 0,
-          confidenceSemantics: 'calibrated_decision_confidence',
-          decisionTraceRef: errorTraceRef,
-          decisionSnapshot: snapshot,
-          executionMode: 'degraded',
-          blockingEligible: false,
-          failure_reason: 'INTERNAL_INCONSISTENCY',
-        },
-        results: [],
-        meta: {
-          requestId,
-          queryTimeMs: Date.now() - startTime,
-          route: 'error',
-          version: '1.0.0',
-          engine_schema_version: 'search_response_v1',
-          decisionSnapshot: snapshot,
-          authorityTraceRef: errorTraceRef,
-          runtimeCorrelationRef: requestId,
-          executionMode: 'degraded',
-          blockingEligible: false,
-        },
-      };
-      return degradedResponse;
     }
     const {
       resolveResult,

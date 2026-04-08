@@ -89,6 +89,11 @@ export class AmbiguityClassifier {
 
   /**
    * Detects when the same wine appears with different vintages among top candidates.
+   *
+   * Groups by a vintage-stripped label so "Opus One 2018" and "Opus One 2019"
+   * map to the same group. The previous code used the raw canonicalLabel which
+   * typically includes the vintage — making this function dead code (each
+   * vintage was its own group, so vintages.size was always 1).
    */
   private detectMultiVintage(candidates: readonly ResolverCandidate[]): boolean {
     const wineByLabel = new Map<string, Set<string>>();
@@ -96,7 +101,12 @@ export class AmbiguityClassifier {
       if (candidate.entityType === 'wine') {
         const vintage = candidate.attributeHints?.['vintage'];
         if (typeof vintage === 'string' || typeof vintage === 'number') {
-          const label = candidate.canonicalLabel;
+          // Strip 4-digit year from label for grouping so different vintages
+          // of the same wine converge to one key.
+          const label = candidate.canonicalLabel
+            .replace(/\b(19|20)\d{2}\b/g, '')
+            .trim()
+            .replace(/\s+/g, ' ');
           const vintages = wineByLabel.get(label) ?? new Set<string>();
           vintages.add(String(vintage));
           wineByLabel.set(label, vintages);

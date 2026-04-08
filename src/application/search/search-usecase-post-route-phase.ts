@@ -27,17 +27,11 @@ import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js'
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
-import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
+import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
 } from './specialized-route-observability.js';
-
-function deriveDecisionEvidenceItems(
-  rankedResults: readonly RankedResult[],
-): readonly EvidenceItem[] {
-  return rankedResults[0]?.evidenceItems ?? [];
-}
 
 function mergeRouteDegradation(
   snapshot: DecisionSnapshot,
@@ -190,132 +184,12 @@ export async function runRankedRouteDecisionPhase(
     'pipeline decision engine request',
   );
 
-  let decisionOutput: Awaited<ReturnType<typeof ctx.decisionEngine.decide>>;
-  try {
-    decisionOutput = await ctx.decisionEngine.decide(decisionInput, snapshot);
-  } catch (err) {
-    bootstrapLogger.error(
-      { requestId: ctx.requestId, err },
-      '[runRankedRouteDecisionPhase] decisionEngine.decide() threw unexpectedly; returning degraded failed response',
-    );
-    const failedDecisionOutput = {
-      decisionStatus: 'failed' as const,
-      nextAction: 'fail' as const,
-      decisionConfidence: 0,
-      confidenceSemantics: 'calibrated_decision_confidence' as const,
-      signalSet: {
-        entity_integrity_score: 0,
-        hard_constraint_pass: 0,
-        soft_constraint_score: 0,
-        semantic_relevance_score: 0,
-        preference_alignment_score: 0,
-        popularity_score: 0,
-        availability_score: 0,
-        uncertainty_penalty: 0,
-      },
-      evidenceItems: deriveDecisionEvidenceItems(ctx.rankedResults),
-      decisionTraceRef: buildAuthorityTraceRef({
-        queryPlan: ctx.plan,
-        snapshot,
-        route: ctx.effectiveRoute,
-        ...(ctx.compiled !== undefined
-          ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
-          : {}),
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        failureReason: 'INTERNAL_INCONSISTENCY',
-      }),
-      decisionSnapshot: snapshot,
-      failureReason: 'INTERNAL_INCONSISTENCY' as const,
-      decisionTrace: {
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        inputs: {
-          queryClass: ctx.plan.queryClass,
-          policy: ctx.plan.policy,
-        },
-        signals: {
-          decisionConfidence: 0,
-          calibratedGap: 0,
-          ambiguity: false,
-        },
-        thresholds: {
-          resolveThreshold: 0,
-          gapThreshold: 0,
-        },
-        versions: {
-          plannerVersion: ctx.plan.plannerVersion,
-          policyRuleVersion: ctx.plan.policyRuleVersion,
-          thresholdProfileId: ctx.plan.thresholdProfileId,
-        },
-        rulesApplied: ['INTERNAL_INCONSISTENCY'],
-        finalReason: `Decision engine threw an unexpected error: ${err instanceof Error ? err.message : String(err)}`,
-      },
-      candidates: [],
-    };
-    const queryTimeMs = Date.now() - ctx.startTime;
-    try {
-      return ctx.responseBuilder.build({
-        queryPlan: ctx.plan,
-        ...(ctx.compiled !== undefined ? { compiled: ctx.compiled } : {}),
-        decisionOutput: failedDecisionOutput,
-        results: [],
-        requestId: ctx.requestId,
-        queryTimeMs,
-        route: ctx.effectiveRoute,
-        ...(ctx.retrievalModeSource !== undefined
-          ? { retrievalModeSource: ctx.retrievalModeSource }
-          : {}),
-        ...(ctx.plannerSuggestedMode !== undefined
-          ? { plannerSuggestedMode: ctx.plannerSuggestedMode }
-          : {}),
-      });
-    } catch (buildErr) {
-      if (buildErr instanceof EvidenceObligationError) {
-        throw buildErr;
-      }
-      bootstrapLogger.error(
-        { requestId: ctx.requestId, err: buildErr },
-        '[runRankedRouteDecisionPhase] responseBuilder.build() threw in decision-failed fallback; returning bare safe response',
-      );
-      const safeTraceRef = buildAuthorityTraceRef({
-        queryPlan: ctx.plan,
-        snapshot,
-        route: ctx.effectiveRoute,
-        ...(ctx.compiled !== undefined
-          ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
-          : {}),
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        failureReason: 'INTERNAL_INCONSISTENCY',
-      });
-      return {
-        queryType: 'search',
-        engineDecision: {
-          decisionStatus: 'failed',
-          nextAction: 'fail',
-          route: ctx.effectiveRoute,
-          decisionConfidence: 0,
-          confidenceSemantics: 'calibrated_decision_confidence',
-          decisionTraceRef: safeTraceRef,
-          authorityTraceRef: safeTraceRef,
-          decisionSnapshot: snapshot,
-        },
-        results: [],
-        meta: {
-          requestId: ctx.requestId,
-          queryTimeMs,
-          route: ctx.effectiveRoute,
-          version: '1',
-          engine_schema_version: 'search_response_v1',
-          authorityTraceRef: safeTraceRef,
-          runtimeCorrelationRef: ctx.requestId,
-          executionMode: 'degraded',
-          blockingEligible: false,
-        },
-      };
-    }
-  }
+  // Decision engine failures are pipeline defects — the "final authority"
+  // crashed. Propagate to the HTTP error handler as a 500, not a fabricated
+  // 200 with decisionStatus:'failed'. The prior code here built a hand-rolled
+  // "degraded" SearchResponseV1 that the route emitted as 200, blinding
+  // monitoring, SLOs, and client retry logic.
+  const decisionOutput = await ctx.decisionEngine.decide(decisionInput, snapshot);
 
   pipelineDebug(
     {

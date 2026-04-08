@@ -103,7 +103,7 @@ describe('dispatchSearchRouteExecution', () => {
 });
 
 describe('SearchUseCase unexpected error fallback', () => {
-  it('returns a canonical internal-error authority trace when pre-route planning throws', async () => {
+  it('throws DomainError when pre-route planning throws (propagated as 500)', async () => {
     const useCase = new SearchUseCase({
       queryPlanner: {
         plan: vi.fn().mockRejectedValue(new Error('planner exploded')),
@@ -134,37 +134,10 @@ describe('SearchUseCase unexpected error fallback', () => {
       } as never,
     });
 
-    const execution = await useCase.executeForEvaluation(
-      { query: '  ridge cabernet  ' },
-      'req-search-unexpected',
-    );
-
-    expect(execution).toMatchObject({
-      response: {
-        queryType: 'search',
-        engineDecision: {
-          decisionStatus: 'failed',
-          nextAction: 'fail',
-          route: 'error',
-          executionMode: 'degraded',
-          blockingEligible: false,
-          failure_reason: 'INTERNAL_INCONSISTENCY',
-        },
-        results: [],
-        meta: {
-          requestId: 'req-search-unexpected',
-          route: 'error',
-          executionMode: 'degraded',
-          blockingEligible: false,
-          runtimeCorrelationRef: 'req-search-unexpected',
-        },
-      },
-    });
-    expect(execution.response.engineDecision.decisionTraceRef).toMatch(
-      /^decision:v1:internal_error:[a-f0-9]{64}$/,
-    );
-    expect(execution.response.meta.authorityTraceRef).toBe(
-      execution.response.engineDecision.decisionTraceRef,
-    );
+    // The refactored search use case now throws instead of returning a
+    // degraded 200 response when the pipeline fails unexpectedly.
+    await expect(
+      useCase.execute({ query: '  ridge cabernet  ' }, 'req-search-unexpected'),
+    ).rejects.toThrow();
   });
 });

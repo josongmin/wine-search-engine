@@ -14,8 +14,6 @@ import type { QueryEntrySecurityObserver } from '../../domain/security/port/secu
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
-import { buildDecisionSnapshotFromRuntimeVersions } from './search-usecase-decision-snapshot.js';
-import { buildInternalErrorAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
@@ -169,56 +167,25 @@ export class SearchUseCase {
         throw err;
       }
 
+      // Unexpected errors (OOM, Redis down, nil deref, etc.) must surface as
+      // HTTP 500 — NOT as a fabricated 200 with decisionStatus:'failed'.
+      // The prior code here built a "degraded" SearchResponseV1 and returned
+      // it, which the route emitted as 200 to the client. This hid genuine
+      // infrastructure failures behind a success status code, blinding
+      // monitoring, SLOs, and client retry logic.
+      //
+      // Wrap as DomainError so the global HTTP error handler maps it to 500
+      // with the RFC-014 error contract shape. The original error is
+      // preserved as `cause` for structured logging.
       const errorMessage = err instanceof Error ? err.message : String(err);
       bootstrapLogger.error(
         { err: errorMessage, requestId },
-        '[SearchUseCase] Unexpected error in execute pipeline; returning structured failure response',
+        '[SearchUseCase] Unexpected error in execute pipeline — propagating as 500',
       );
-      pipelineDebug(
-        {
-          step: 'search.execute.unexpected_error',
-          error: errorMessage,
-        },
-        'pipeline search.execute error',
+      throw new DomainError(
+        'INTERNAL_INCONSISTENCY',
+        `Search pipeline failed unexpectedly: ${errorMessage}`,
       );
-
-      const snapshot = buildDecisionSnapshotFromRuntimeVersions(this.deps.snapshotVersions);
-      const errorTraceRef = buildInternalErrorAuthorityTraceRef({
-        snapshot,
-        requestId,
-        failureReason: 'INTERNAL_INCONSISTENCY',
-      });
-
-      const response: SearchResponseV1 = {
-        queryType: 'search',
-        engineDecision: {
-          decisionStatus: 'failed',
-          nextAction: 'fail',
-          route: 'error',
-          decisionConfidence: 0,
-          confidenceSemantics: 'calibrated_decision_confidence',
-          decisionTraceRef: errorTraceRef,
-          decisionSnapshot: snapshot,
-          executionMode: 'degraded',
-          blockingEligible: false,
-          failure_reason: 'INTERNAL_INCONSISTENCY',
-        },
-        results: [],
-        meta: {
-          requestId,
-          queryTimeMs: Date.now() - startTime,
-          route: 'error',
-          version: '1.0.0',
-          engine_schema_version: 'search_response_v1',
-          decisionSnapshot: snapshot,
-          authorityTraceRef: errorTraceRef,
-          runtimeCorrelationRef: requestId,
-          executionMode: 'degraded',
-          blockingEligible: false,
-        },
-      };
-
-      return { response };
     }
   }
 
