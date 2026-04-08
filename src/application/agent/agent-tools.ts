@@ -579,7 +579,14 @@ async function executeAgentToolInner(
       const budgetKrw = parsed.max_price_krw
         ?? (
           parsed.max_price !== undefined
-            ? Math.round(parsed.max_price * KRW_PER_USD_APPROXIMATE)
+            ? (() => {
+                const converted = parsed.max_price * KRW_PER_USD_APPROXIMATE;
+                // Guard against overflow (e.g. max_price = Number.MAX_VALUE → Infinity).
+                // Clamp to MAX_PRICE_KRW_BOUND so the query never contains "Infinity원 이하".
+                return Number.isFinite(converted)
+                  ? Math.min(Math.round(converted), MAX_PRICE_KRW_BOUND)
+                  : undefined;
+              })()
             : undefined
         );
       const queryBase = `wines for ${parsed.food}${parsed.color ? ` ${parsed.color}` : ''}`;

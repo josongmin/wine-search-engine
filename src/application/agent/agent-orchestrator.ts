@@ -505,7 +505,7 @@ export class AgentOrchestrator {
           if (
             !hasInjectedRefinementHint &&
             remainingAfterBatch >= 3 &&
-            observations.some((o) => o.includes('0개') || o.includes('검색 결과가 없습니다'))
+            observations.some((o) => o.includes('0개') || o.includes('검색 결과가 없습니다') || o.startsWith('NO_MATCH:'))
           ) {
             hasInjectedRefinementHint = true;
             pendingRefinementHint =
@@ -605,7 +605,7 @@ export class AgentOrchestrator {
           if (
             !hasInjectedRefinementHint &&
             remainingStepsAfterTool >= 3 &&
-            (observation.includes('0개') || observation.includes('검색 결과가 없습니다'))
+            (observation.includes('0개') || observation.includes('검색 결과가 없습니다') || observation.startsWith('NO_MATCH:'))
           ) {
             hasInjectedRefinementHint = true;
             pendingRefinementHint =
