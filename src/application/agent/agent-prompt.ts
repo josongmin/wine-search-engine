@@ -46,6 +46,7 @@ function buildSystemPrompt(): string {
 - For negation queries: explicitly confirm the excluded items are absent from your recommendations.
 - For refusals (off-domain / unsafe): 1-2 sentences max, no tools.
 - HEDGE appropriately: "검색 결과 기준으로", "데이터 기준으로는" when data may be stale.
+- Korean answers: use natural Korean register matching the query (반말/존댓말). Include wine name in both Korean transliteration AND romanization when known (e.g. "오퍼스 원 (Opus One)"). State price in 원 when observation includes it.
 
 ## Output Format
 - Single tool call:   {"thought":"…","action":{"tool":"tool_name","input":{…}}}
