@@ -42,7 +42,7 @@ export const CANONICAL_AUTHORITY_TRACE_REF_PATTERN = new RegExp(
 
 export const ErrorResponseSchema = z.object({
   error: z.object({
-    request_id: z.string().max(MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS),
+    request_id: z.string().min(1).max(MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS),
     code: z.string().max(MAX_ERROR_ENVELOPE_CODE_CHARS),
     message: z.string().max(MAX_ERROR_ENVELOPE_MESSAGE_CHARS),
     failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable(),

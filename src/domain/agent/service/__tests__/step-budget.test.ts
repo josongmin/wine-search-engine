@@ -24,6 +24,12 @@ const baseConfig: AgentConfig = {
   maxContextChars: 8_000,
 };
 
+/** Config with maxSteps=5 → adaptive cap = max(3, ceil(5*0.6)) = 3 (minimum cap). */
+const capConfig: AgentConfig = {
+  ...baseConfig,
+  maxSteps: 5,
+};
+
 // ─────────────────────────────────────────────────────────────────────
 // canProceed
 // ─────────────────────────────────────────────────────────────────────
@@ -87,15 +93,16 @@ describe('StepBudget exact-key dedup', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('StepBudget per-tool call cap', () => {
-  it('allows up to 3 calls to the same tool with distinct queries', () => {
-    const b = new StepBudget(baseConfig);
+  // capConfig: maxSteps=5 → adaptive cap = max(3, ceil(5*0.6)) = 3
+  it('allows up to 3 calls to the same tool with distinct queries (maxSteps=5 → cap=3)', () => {
+    const b = new StepBudget(capConfig);
     expect(b.recordStep('search_wines', { query: 'opus one' }).allowed).toBe(true);
     expect(b.recordStep('search_wines', { query: 'screaming eagle' }).allowed).toBe(true);
     expect(b.recordStep('search_wines', { query: 'lafite rothschild' }).allowed).toBe(true);
   });
 
-  it('blocks the 4th call to the same tool', () => {
-    const b = new StepBudget(baseConfig);
+  it('blocks the 4th call to the same tool (maxSteps=5 → cap=3)', () => {
+    const b = new StepBudget(capConfig);
     b.recordStep('search_wines', { query: 'a' });
     b.recordStep('search_wines', { query: 'b' });
     b.recordStep('search_wines', { query: 'c' });
@@ -105,13 +112,27 @@ describe('StepBudget per-tool call cap', () => {
   });
 
   it('per-tool cap is independent across tools', () => {
-    const b = new StepBudget(baseConfig);
+    const b = new StepBudget(capConfig);
     b.recordStep('search_wines', { query: 'a' });
     b.recordStep('search_wines', { query: 'b' });
     b.recordStep('search_wines', { query: 'c' });
     // search_wines is at cap, but compare_wines is fresh
     const compare = b.recordStep('compare_wines', { query_a: 'x', query_b: 'y' });
     expect(compare.allowed).toBe(true);
+  });
+
+  it('adaptive cap: maxSteps=8 → cap=5 allows 5 distinct calls', () => {
+    // ceil(8 * 0.6) = 5 → nested_condition scenarios can do 5 search iterations
+    const b = new StepBudget({ ...baseConfig, maxSteps: 8 });
+    expect(b.recordStep('search_wines', { query: 'a' }).allowed).toBe(true);
+    expect(b.recordStep('search_wines', { query: 'b' }).allowed).toBe(true);
+    expect(b.recordStep('search_wines', { query: 'c' }).allowed).toBe(true);
+    expect(b.recordStep('search_wines', { query: 'd' }).allowed).toBe(true);
+    expect(b.recordStep('search_wines', { query: 'e' }).allowed).toBe(true);
+    // 6th call blocked
+    const sixth = b.recordStep('search_wines', { query: 'f' });
+    expect(sixth.allowed).toBe(false);
+    expect(sixth.reason).toBe('loop_detected');
   });
 });
 
@@ -205,7 +226,8 @@ describe('StepBudget dry-run pattern', () => {
   });
 
   it('rejected per-tool-cap call does NOT advance stepCount', () => {
-    const b = new StepBudget(baseConfig);
+    // capConfig: maxSteps=5 → cap=3; 4th call is blocked
+    const b = new StepBudget(capConfig);
     b.recordStep('search_wines', { query: 'a' });
     b.recordStep('search_wines', { query: 'b' });
     b.recordStep('search_wines', { query: 'c' });
@@ -256,16 +278,27 @@ describe('StepBudget Korean handling', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('StepBudget bounded history', () => {
-  it('perTool history bounded to PER_TOOL_CALL_CAP entries', () => {
+  it('perTool history bounded to perToolCallCap entries (maxSteps=5 → cap=3)', () => {
     // We can't directly inspect the private map, but we can verify the cap by
     // checking that calls beyond the cap are rejected (history is meaningful only
-    // up to the cap).
-    const b = new StepBudget(baseConfig);
+    // up to the cap). Use capConfig (maxSteps=5 → cap=3).
+    const b = new StepBudget(capConfig);
     b.recordStep('search_wines', { query: 'a' });
     b.recordStep('search_wines', { query: 'b' });
     b.recordStep('search_wines', { query: 'c' });
-    // 4th call to same tool — blocked by cap
+    // 4th call to same tool — blocked by cap=3
     expect(b.recordStep('search_wines', { query: 'd' }).allowed).toBe(false);
+  });
+
+  it('perTool history bounded to perToolCallCap entries (maxSteps=8 → cap=5)', () => {
+    // ceil(8 * 0.6) = 5; 6th call is blocked, 5th is allowed
+    const b = new StepBudget({ ...baseConfig, maxSteps: 8 });
+    b.recordStep('search_wines', { query: 'a' });
+    b.recordStep('search_wines', { query: 'b' });
+    b.recordStep('search_wines', { query: 'c' });
+    b.recordStep('search_wines', { query: 'd' });
+    expect(b.recordStep('search_wines', { query: 'e' }).allowed).toBe(true);
+    expect(b.recordStep('search_wines', { query: 'f' }).allowed).toBe(false);
   });
 });
 

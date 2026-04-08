@@ -13,10 +13,16 @@ export interface BudgetCheck {
   readonly reason?: AgentTerminationReason | undefined;
 }
 
-/** Per-tool maximum invocation count — prevents runaway thrashing even when
- *  the LLM reformulates the query each time. Tuned conservatively at 3 to
- *  allow legitimate "search → drill-in → refine" but block "search × N". */
-const PER_TOOL_CALL_CAP = 3;
+/** Minimum per-tool invocation cap. Adaptive formula scales with maxSteps:
+ *  max(MIN_PER_TOOL_CALL_CAP, ceil(maxSteps * PER_TOOL_CALL_CAP_RATIO)).
+ *  With maxSteps=8: cap=5; maxSteps=6: cap=4; maxSteps=5: cap=3; maxSteps=3: cap=3.
+ *  Prevents runaway thrashing while allowing nested_condition scenarios that
+ *  legitimately need 4+ search calls (initial + constraint relaxation iterations). */
+const MIN_PER_TOOL_CALL_CAP = 3;
+/** Fraction of maxSteps used to compute the adaptive per-tool cap. Set at 0.6
+ *  so that at maxSteps=8 the cap is 5 (enough for initial + 4 relaxation passes)
+ *  while keeping a meaningful guard against runaway reformulation. */
+const PER_TOOL_CALL_CAP_RATIO = 0.6;
 
 /** Trigram Jaccard threshold for near-duplicate query detection. Adaptive:
  *  0.6 for short strings (< 15 chars) where n-gram overlap is naturally
@@ -72,11 +78,14 @@ export class StepBudget {
   /** Per-tool invocation counter (regardless of input). */
   private readonly perToolCallCounts = new Map<string, number>();
   /** Per-tool history of normalized query strings for near-duplicate check.
-   *  Bounded to PER_TOOL_CALL_CAP entries — older history is subsumed. */
+   *  Bounded to perToolCallCap entries — older history is subsumed. */
   private readonly perToolNormalizedQueries = new Map<string, string[]>();
+  /** Adaptive per-tool call cap: max(MIN_PER_TOOL_CALL_CAP, ceil(maxSteps * 0.6)). */
+  private readonly perToolCallCap: number;
 
   constructor(private readonly config: AgentConfig) {
     this.startTime = Date.now();
+    this.perToolCallCap = Math.max(MIN_PER_TOOL_CALL_CAP, Math.ceil(this.config.maxSteps * PER_TOOL_CALL_CAP_RATIO));
   }
 
   /** Check if another step is allowed. */
@@ -112,7 +121,7 @@ export class StepBudget {
     // dedup misses (e.g. search_wines("Opus One"), search_wines("Opus 2018"),
     // search_wines("Opus One wine") all distinct under canonical key).
     const projectedPerToolCount = (this.perToolCallCounts.get(tool) ?? 0) + 1;
-    if (projectedPerToolCount > PER_TOOL_CALL_CAP) {
+    if (projectedPerToolCount > this.perToolCallCap) {
       return { allowed: false, reason: 'loop_detected' };
     }
 
@@ -139,9 +148,9 @@ export class StepBudget {
     if (normalizedQuery.length > 0) {
       const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
       priorQueries.push(normalizedQuery);
-      // Bound history to PER_TOOL_CALL_CAP entries — older entries can never
+      // Bound history to perToolCallCap entries — older entries can never
       // affect a future allow/deny decision because the cap fires first.
-      while (priorQueries.length > PER_TOOL_CALL_CAP) {
+      while (priorQueries.length > this.perToolCallCap) {
         priorQueries.shift();
       }
       this.perToolNormalizedQueries.set(tool, priorQueries);

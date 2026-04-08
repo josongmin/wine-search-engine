@@ -385,7 +385,7 @@ export class AgentOrchestrator {
             index: steps.length,
             thought: parsed.thought,
             answer: parsed.answer,
-            durationMs: Date.now() - stepStart,
+            durationMs: Math.max(0, Date.now() - stepStart),
             tokenCount: { input: inputTokens, output: outputTokens },
           });
           terminationReason = 'answer';
@@ -410,7 +410,7 @@ export class AgentOrchestrator {
               observations: [
                 `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`,
               ],
-              durationMs: Date.now() - stepStart,
+              durationMs: Math.max(0, Date.now() - stepStart),
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             break;
@@ -431,7 +431,7 @@ export class AgentOrchestrator {
               observations: [
                 `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`,
               ],
-              durationMs: Date.now() - stepStart,
+              durationMs: Math.max(0, Date.now() - stepStart),
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             continue;
@@ -468,7 +468,7 @@ export class AgentOrchestrator {
                 thought: parsed.thought,
                 actions: batchCalls,
                 observations: [`Policy blocked: ${batchErr.message}`],
-                durationMs: Date.now() - stepStart,
+                durationMs: Math.max(0, Date.now() - stepStart),
                 tokenCount: { input: inputTokens, output: outputTokens },
               });
             } else {
@@ -497,7 +497,7 @@ export class AgentOrchestrator {
             thought: parsed.thought,
             actions: batchCalls,
             observations,
-            durationMs: Date.now() - stepStart,
+            durationMs: Math.max(0, Date.now() - stepStart),
             tokenCount: { input: inputTokens, output: outputTokens },
           });
 
@@ -534,7 +534,7 @@ export class AgentOrchestrator {
               thought: parsed.thought,
               action: { tool, input },
               observation: `Unknown tool: ${tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`,
-              durationMs: Date.now() - stepStart,
+              durationMs: Math.max(0, Date.now() - stepStart),
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             continue;
@@ -570,7 +570,7 @@ export class AgentOrchestrator {
                 thought: parsed.thought,
                 action: { tool, input },
                 observation: `Policy blocked: ${toolErr.message}`,
-                durationMs: Date.now() - stepStart,
+                durationMs: Math.max(0, Date.now() - stepStart),
                 tokenCount: { input: inputTokens, output: outputTokens },
               });
               break;
@@ -594,7 +594,7 @@ export class AgentOrchestrator {
             thought: parsed.thought,
             action: { tool, input },
             observation,
-            durationMs: Date.now() - stepStart,
+            durationMs: Math.max(0, Date.now() - stepStart),
             tokenCount: { input: inputTokens, output: outputTokens },
           });
 

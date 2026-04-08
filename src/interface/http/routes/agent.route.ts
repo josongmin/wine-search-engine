@@ -75,7 +75,7 @@ const AgentResponseSchema = z.object({
 
 // ErrorResponseSchema imported from search-response.schema.ts (RFC-014 canonical shape)
 
-const AgentRouteContract = {
+export const AgentRouteContract = {
   operationId: 'agent.execute',
   body: AgentRequestSchema,
   responses: {
@@ -135,6 +135,11 @@ export function registerAgentRoute(
         );
       } finally {
         request.raw.off('close', onClose);
+        // Always abort the controller on request completion (success or error) so
+        // that AbortController internal listener maps are cleaned up. Without this,
+        // AbortSignal listeners registered by the orchestrator accumulate on every
+        // healthy request, causing a memory leak under sustained load.
+        lifecycleController.abort();
       }
 
       const response = {

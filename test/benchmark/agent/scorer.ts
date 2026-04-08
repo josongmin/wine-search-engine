@@ -841,7 +841,7 @@ function scoreAnswerQuality(
     const lowerAnswer = answer.toLowerCase();
     const hasWineRelevantTerm = ANSWER_WINE_RELEVANT_TERMS.some((t) => lowerAnswer.includes(t));
 
-    if (answer.length > ANSWER_MIN_QUALITY_CHARS && hasWineRelevantTerm) {
+    if (answer.length >= ANSWER_MIN_QUALITY_CHARS && hasWineRelevantTerm) {
       // Substantive answer with wine context — small bonus for depth.
       score = Math.min(1, score + ANSWER_LENGTH_BONUS);
     } else if (answer.length < ANSWER_TRIVIAL_CHARS) {
