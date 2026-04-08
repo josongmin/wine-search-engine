@@ -15,6 +15,21 @@
  * to its configured budget.
  */
 
+import { extractSearchConstraints } from '../../query/service/search-constraint-extractor.js';
+
+/**
+ * Minimum step count for queries with 4+ explicit hard constraints.
+ * Allows enough iterations for staged search + iterative constraint relaxation.
+ * 4 constraints → up to 4 searches (one per relaxation) + 2 reasoning steps + 2 buffer = 8.
+ */
+const MIN_STEPS_FOUR_PLUS_CONSTRAINTS = 8;
+
+/**
+ * Minimum step count for queries with exactly 3 explicit hard constraints.
+ * 3 constraints → up to 3 searches + 2 reasoning steps + 1 buffer = 6.
+ */
+const MIN_STEPS_THREE_CONSTRAINTS = 6;
+
 const PROPER_NOUN_PATTERN = /\b(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+\s+){0,3}[A-Z][a-zA-Z'\u00C0-\u017F-]+\b/;
 const VINTAGE_PATTERN = /\b(?:18|19|20)\d{2}\b/;
 /** Hangul wine name patterns: 3+ consecutive Hangul syllables that look like
@@ -153,6 +168,33 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
     };
   }
 
-  // 5. No rule fired — let caller default.
+  // 5. Constraint count — use extractSearchConstraints to count explicit hard
+  // constraints (exclusions + price + vintage). More constraints need more steps
+  // to allow iterative relaxation when the initial tightly-constrained search fails.
+  const constraints = extractSearchConstraints(trimmed);
+  const exclusionCount =
+    (constraints.excludeGrapes?.length ?? 0) +
+    (constraints.excludeCountries?.length ?? 0) +
+    (constraints.excludeRegions?.length ?? 0);
+  const hasPrice = constraints.maxPriceKrw !== undefined || constraints.minPriceKrw !== undefined ? 1 : 0;
+  const hasVintage = constraints.vintageMin !== undefined || constraints.vintageMax !== undefined ? 1 : 0;
+  const constraintCount = exclusionCount + hasPrice + hasVintage;
+
+  if (constraintCount >= 4) {
+    return {
+      maxSteps: MIN_STEPS_FOUR_PLUS_CONSTRAINTS,
+      classification: 'nested_condition',
+      reason: `constraint count ${constraintCount} >= 4 — iterative refinement budget`,
+    };
+  }
+  if (constraintCount >= 3) {
+    return {
+      maxSteps: MIN_STEPS_THREE_CONSTRAINTS,
+      classification: 'nested_condition',
+      reason: `constraint count ${constraintCount} >= 3 — staged search budget`,
+    };
+  }
+
+  // 6. No rule fired — let caller default.
   return undefined;
 }

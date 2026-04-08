@@ -157,6 +157,16 @@ export class AgentOrchestrator {
     let policyBlocked = false;
     let unknownToolAttempts = 0;
     const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
+    /**
+     * Set after the first zero-result observation so we inject the constraint-
+     * relaxation hint exactly once into the next LLM user message.
+     */
+    let hasInjectedRefinementHint = false;
+    /**
+     * Pending hint text to prepend to the next user message in the ReAct loop.
+     * Cleared to undefined after it is consumed.
+     */
+    let pendingRefinementHint: string | undefined;
 
     try {
       for (;;) {
@@ -189,7 +199,13 @@ export class AgentOrchestrator {
         }
 
         // Build messages
-        const userMsg = buildUserMessage(query);
+        // Consume any pending refinement hint by prepending it to the query message.
+        // The hint is only injected once (hasInjectedRefinementHint guards re-entry).
+        const baseUserContent = pendingRefinementHint !== undefined
+          ? `${pendingRefinementHint}\n\n${query}`
+          : query;
+        pendingRefinementHint = undefined;
+        const userMsg = buildUserMessage(baseUserContent);
         const messages = [
           buildSystemMessage(),
           ...(isLastStep
@@ -359,6 +375,20 @@ export class AgentOrchestrator {
             durationMs: Date.now() - stepStart,
             tokenCount: { input: inputTokens, output: outputTokens },
           });
+
+          // Constraint-relaxation hint: if the observation indicates zero results
+          // and we have enough remaining steps, inject a hint once into the next
+          // LLM message to guide iterative constraint relaxation.
+          const remainingStepsAfterTool = effectiveConfig.maxSteps - budget.getStepCount();
+          if (
+            !hasInjectedRefinementHint &&
+            remainingStepsAfterTool >= 3 &&
+            (observation.includes('0개') || observation.includes('검색 결과가 없습니다'))
+          ) {
+            hasInjectedRefinementHint = true;
+            pendingRefinementHint =
+              'HINT: 이전 검색에서 결과가 없었습니다. 가장 제한적인 조건(가격/품종/지역)을 하나씩 완화하여 재검색하세요. 예: 가격 조건을 넓히거나 지역 조건을 제거하고 재검색.';
+          }
         }
       }
     } catch (err) {
