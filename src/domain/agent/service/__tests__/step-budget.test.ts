@@ -196,6 +196,19 @@ describe('StepBudget near-duplicate detection', () => {
     const reordered = b.recordStep('search_wines', { query: '30만원 이하 레드 와인' });
     expect(reordered.allowed).toBe(false);
   });
+
+  it('Hangul dominance uses non-space length (regression: spaces must not dilute ratio)', () => {
+    // "30만원 이하 레드 와인" normalized+sorted = "30만원 레드 와인 이하"
+    // non-space chars = "30만원레드와인이하" (10 chars), Hangul = "만원레드와인이하" (8 chars)
+    // ratio = 8/10 = 0.80 > 0.5 → Hangul dominant → threshold=0.92.
+    // If spaces were included: 14 chars total, 8/14 = 0.57 — still >0.5, but the
+    // fix ensures correctness for longer queries with more spaces.
+    // "30만원 이하 레드 와인" vs "50만원 이하 레드 와인" → Jaccard ≈ 0.85 < 0.92 → allowed.
+    const b = new StepBudget(baseConfig);
+    expect(b.recordStep('search_wines', { query: '30만원 이하 레드 와인' }).allowed).toBe(true);
+    const relaxed = b.recordStep('search_wines', { query: '50만원 이하 레드 와인' });
+    expect(relaxed.allowed).toBe(true);
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────

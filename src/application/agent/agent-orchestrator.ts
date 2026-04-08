@@ -248,16 +248,19 @@ export class AgentOrchestrator {
           break;
         }
 
-        // Synthesize-before-exhaustion: when ≤2 steps remain, nudge the LLM to
-        // produce a final answer rather than burning remaining steps on another
-        // tool call that will hit fallback. "isLastStep" fires on both
-        // remainingSteps===1 (final step) and remainingSteps===2 (penultimate),
-        // because gpt-4o-mini reliably needs one step to actually produce the
-        // answer JSON — firing the nudge one step earlier reduces fallback rate.
-        // Fire regardless of whether observations exist — maxSteps=1 must also
-        // receive the nudge.
+        // Synthesize-before-exhaustion nudge — two tiers:
+        //   LAST_STEP (remainingSteps===1): always inject regardless of history.
+        //   BUDGET_WARNING (remainingSteps===2): inject ONLY when the agent has
+        //     already made at least one tool call (steps.length > 0), so it has
+        //     results to synthesize from. Injecting the warning at step 0 (no
+        //     prior observations) confuses the model: it sees "If you already have
+        //     results, answer NOW" while it has nothing — causing it to hallucinate
+        //     an answer instead of calling a tool.
+        // Pre-condition: maxSteps=2 → remainingSteps=2 at step 0, so the
+        //   "steps.length > 0" guard prevents the premature BUDGET_WARNING.
         const remainingSteps = effectiveConfig.maxSteps - budget.getStepCount();
-        const isLastStep = remainingSteps <= 2;
+        const hasToolHistory = steps.length > 0;
+        const isLastStep = remainingSteps === 1 || (remainingSteps === 2 && hasToolHistory);
 
         // Pre-flight token budget check — prevent unnecessary LLM calls when
         // the budget is already exhausted. The check uses accumulated totals

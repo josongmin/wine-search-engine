@@ -143,13 +143,16 @@ export class StepBudget {
     // The higher Hangul threshold prevents false-positives on price-relaxation
     // queries like "30만원 이하 레드 와인" vs "50만원 이하 레드 와인" where
     // only the numeric prefix differs but bigram overlap is ~90%.
+    // Hangul dominance check uses non-space length as denominator so spaces in
+    // the normalized string (e.g. "30만원 레드 와인 이하") don't inflate the
+    // denominator and undercount Hangul ratio.
     const normalizedQuery = normalizeQueryForLoopDetection(input);
     if (normalizedQuery.length > 0) {
       const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
       let threshold: number;
       if (normalizedQuery.length < SHORT_STRING_THRESHOLD) {
         threshold = NEAR_DUPLICATE_JACCARD_SHORT;
-      } else if (countHangulChars(normalizedQuery) > normalizedQuery.length * HANGUL_DOMINANCE_RATIO) {
+      } else if (countHangulChars(normalizedQuery) > normalizedQuery.replace(/\s/g, '').length * HANGUL_DOMINANCE_RATIO) {
         threshold = NEAR_DUPLICATE_JACCARD_LONG_HANGUL;
       } else {
         threshold = NEAR_DUPLICATE_JACCARD_LONG_ASCII;
