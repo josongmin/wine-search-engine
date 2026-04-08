@@ -128,6 +128,17 @@ export class QuerySanitizer {
       /(?:system|assistant|admin)\s+mode/i,
       /(?<!\p{L})(?<!\p{N})(?:system|admin)\s+override(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
+      // Indirect prompt injection via bracketed directives embedded in user content.
+      // Detects [SYSTEM: , [INST: , [ASSISTANT: etc. — these are LLM prompt-format
+      // markers that attackers embed inside quoted reviews or user-supplied text.
+      // False-positive guard: "시스템 향이 나요" (system aroma) is NOT blocked because
+      // it lacks the bracket+uppercase+colon+space pattern. Only matches when all four
+      // structural elements are present: "[", uppercase letters (4+), ":", space.
+      /\[[A-Z][A-Z_]{3,}:\s/,
+      // LLM prompt injection markers from Llama/Alpaca/Vicuna prompt formats.
+      // <<SYS>> and <|im_start|> are unambiguous LLM-format tokens with no legitimate
+      // use in wine queries.
+      /<<SYS>>|<\|im_start\|>/,
     ],
 
     // Jailbreak / adversarial prompts
