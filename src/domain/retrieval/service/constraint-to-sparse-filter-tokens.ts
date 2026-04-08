@@ -34,8 +34,17 @@ function constraintToSparseFilterTokens(
       if (normalized.length > 1) return [`${key}_in:${normalized.join('|')}`];
       return [];
     }
+    // Negation operators: emit <key>_not tokens for downstream YQL NOT clauses.
     if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
       return [`${key}_not:${value}`];
+    }
+    if (operator === 'not_in' && Array.isArray(value)) {
+      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
+      if (normalized.length === 1) return [`${key}_not:${normalized[0]}`];
+      // Multi-value NOT IN: emit pipe-delimited token so buildSparseFilters can
+      // produce individual Vespa NOT clauses for each value.
+      if (normalized.length > 1) return [`${key}_not_in:${normalized.join('|')}`];
+      return [];
     }
     return [];
   };

@@ -546,8 +546,10 @@ export interface BenchmarkReport {
     readonly costEfficiency: number;
     /** RAGAS Faithfulness mean (grounding). null when no observations available. */
     readonly faithfulness: number | null;
-    /** RAGAS Context Precision mean. null when no structured constraints. */
-    readonly contextPrecision: number | null;
+    /** RAGAS Context Relevance mean (rule-based). null when no structured constraints. */
+    readonly contextRelevance: number | null;
+    /** RAGAS Context Recall mean (entity-ID overlap). null when no goldenEntityIds. */
+    readonly contextRecall: number | null;
     /** Mean judge score across scenarios that produced a non-null judge value. */
     readonly judge: number | null;
     readonly avgSteps: number;
@@ -778,8 +780,11 @@ function buildReport(
   const faithScores = executed.map((r) => r.scores.faithfulness).filter((s): s is number => s !== null);
   const faithMean = faithScores.length > 0 ? faithScores.reduce((s, v) => s + v, 0) / faithScores.length : null;
 
-  const ctxPrecScores = executed.map((r) => r.scores.contextPrecision).filter((s): s is number => s !== null);
-  const ctxPrecMean = ctxPrecScores.length > 0 ? ctxPrecScores.reduce((s, v) => s + v, 0) / ctxPrecScores.length : null;
+  const ctxRelScores = executed.map((r) => r.scores.contextRelevance).filter((s): s is number => s !== null);
+  const ctxRelMean = ctxRelScores.length > 0 ? ctxRelScores.reduce((s, v) => s + v, 0) / ctxRelScores.length : null;
+
+  const ctxRecallScores = executed.map((r) => r.scores.contextRecall).filter((s): s is number => s !== null);
+  const ctxRecallMean = ctxRecallScores.length > 0 ? ctxRecallScores.reduce((s, v) => s + v, 0) / ctxRecallScores.length : null;
 
   const byTier: Record<string, { count: number; avgScore: number }> = {};
   for (const r of executed) {
@@ -826,7 +831,8 @@ function buildReport(
       terminationCorrectness: avgScore('terminationCorrectness'),
       costEfficiency: avgScore('costEfficiency'),
       faithfulness: faithMean,
-      contextPrecision: ctxPrecMean,
+      contextRelevance: ctxRelMean,
+      contextRecall: ctxRecallMean,
       judge: judgeMean,
       avgSteps:
         executed.length > 0
@@ -937,7 +943,8 @@ async function main(): Promise<void> {
   console.error(`  Exec Eff:     ${(s.executionEfficiency * 100).toFixed(1)}%   (tool ${(s.toolAccuracy * 100).toFixed(0)}% × step ${(s.stepEfficiency * 100).toFixed(0)}%)`);
   console.error(`  Answer Qual:  ${(s.answerQuality * 100).toFixed(1)}%`);
   console.error(`  Faithful:     ${s.faithfulness !== null ? `${(s.faithfulness * 100).toFixed(1)}%` : 'n/a'}`);
-  console.error(`  Ctx Prec:     ${s.contextPrecision !== null ? `${(s.contextPrecision * 100).toFixed(1)}%` : 'n/a'}`);
+  console.error(`  Ctx Relev:    ${s.contextRelevance !== null ? `${(s.contextRelevance * 100).toFixed(1)}%` : 'n/a'}`);
+  console.error(`  Ctx Recall:   ${s.contextRecall !== null ? `${(s.contextRecall * 100).toFixed(1)}%` : 'n/a'}`);
   console.error(`  Term Corr:    ${(s.terminationCorrectness * 100).toFixed(1)}%`);
   console.error(`  Cost Eff:     ${(s.costEfficiency * 100).toFixed(1)}%`);
   console.error(`  Judge:        ${s.judge !== null ? `${(s.judge * 100).toFixed(1)}%` : 'disabled'}`);

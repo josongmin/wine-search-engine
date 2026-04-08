@@ -714,6 +714,8 @@ describe('weight invariants', () => {
     'terminationCorrectness',
     'costEfficiency',
     'judge',
+    'contextRelevance',
+    'contextRecall',
   ] as const;
 
   function sumWeights(w: Record<string, number>): number {
@@ -990,14 +992,14 @@ describe('RAGAS Faithfulness', () => {
   });
 });
 
-describe('RAGAS Context Precision', () => {
+describe('RAGAS Context Relevance', () => {
   it('returns null when no observations', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, vintageRange: { min: 2018, max: 2020 } }),
       makeExecution({ observations: [] }),
       undefined,
     );
-    expect(r.scores.contextPrecision).toBeNull();
+    expect(r.scores.contextRelevance).toBeNull();
   });
 
   it('returns null when no structured constraints', () => {
@@ -1008,7 +1010,7 @@ describe('RAGAS Context Precision', () => {
     );
     // No priceBandKrw, vintageRange, drinkingWindowStatus → null
     // (query_terms_in_context check may still fire if tools have query)
-    expect(r.scores.contextPrecision).not.toBeUndefined();
+    expect(r.scores.contextRelevance).not.toBeUndefined();
   });
 
   it('vintageRange: passes when observation contains in-range year', () => {
@@ -1019,7 +1021,7 @@ describe('RAGAS Context Precision', () => {
       }),
       undefined,
     );
-    expect(r.scores.contextPrecision).toBeGreaterThan(0);
+    expect(r.scores.contextRelevance).toBeGreaterThan(0);
   });
 
   it('vintageRange: fails when observation contains out-of-range year', () => {
@@ -1030,7 +1032,7 @@ describe('RAGAS Context Precision', () => {
       }),
       undefined,
     );
-    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_PRECISION_LOW')).toBe(true);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_RELEVANCE_LOW')).toBe(true);
   });
 
   it('drinkingWindowStatus: passes when keywords match', () => {
@@ -1041,7 +1043,7 @@ describe('RAGAS Context Precision', () => {
       }),
       undefined,
     );
-    expect(r.scores.contextPrecision).toBeGreaterThan(0);
+    expect(r.scores.contextRelevance).toBeGreaterThan(0);
   });
 
   it('query-context alignment: passes when tool query terms in observations', () => {
@@ -1054,30 +1056,112 @@ describe('RAGAS Context Precision', () => {
       undefined,
     );
     // "opus" from query should appear in observations
-    expect(r.scores.contextPrecision).toBeGreaterThan(0);
+    expect(r.scores.contextRelevance).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// RAGAS Context Recall (entity-ID overlap)
+// ─────────────────────────────────────────────────────────────────────
+
+describe('RAGAS Context Recall', () => {
+  it('goldenEntityIds present and IDs appear in observations → recall > 0', () => {
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenEntityIds: ['wine-001', 'wine-002'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: [
+          'entityId: wine-001, name: Opus One',
+          'entityId: wine-002, name: Ridge Monte Bello',
+        ],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRecall).toBe(1.0);
+  });
+
+  it('goldenEntityIds present but none appear in observations → recall = 0', () => {
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenEntityIds: ['wine-golden-001', 'wine-golden-002'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: ['entityId: wine-other-999, name: Some Other Wine'],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRecall).toBe(0);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_RECALL_LOW')).toBe(true);
+  });
+
+  it('scenario without goldenEntityIds → recall is null', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        observations: ['entityId: wine-001, name: Opus One'],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRecall).toBeNull();
+  });
+
+  it('partial recall: only some golden IDs in observations → 0 < recall < 1', () => {
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenEntityIds: ['wine-a', 'wine-b', 'wine-c'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: ['Found: wine-a and wine-b in results'],
+      }),
+      undefined,
+    );
+    // 2 of 3 golden IDs found → recall = 2/3 ≈ 0.667
+    expect(r.scores.contextRecall).toBeCloseTo(2 / 3, 5);
+  });
+
+  it('no observations with goldenEntityIds → recall is null', () => {
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenEntityIds: ['wine-x'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({ observations: [] }),
+      undefined,
+    );
+    expect(r.scores.contextRecall).toBeNull();
   });
 });
 
 describe('RAGAS weight integration', () => {
-  it('DEFAULT_WEIGHTS includes faithfulness + contextPrecision + answerRelevancy and sums to 1.0', () => {
+  it('DEFAULT_WEIGHTS includes faithfulness + contextRelevance + contextRecall + answerRelevancy and sums to 1.0', () => {
     expect(DEFAULT_WEIGHTS).toHaveProperty('faithfulness');
-    expect(DEFAULT_WEIGHTS).toHaveProperty('contextPrecision');
+    expect(DEFAULT_WEIGHTS).toHaveProperty('contextRelevance');
+    expect(DEFAULT_WEIGHTS).toHaveProperty('contextRecall');
     expect(DEFAULT_WEIGHTS).toHaveProperty('answerRelevancy');
     const sum = Object.values(DEFAULT_WEIGHTS).reduce((a, b) => a + b, 0);
     expect(Math.abs(sum - 1)).toBeLessThan(1e-9);
   });
 
-  it('every TIER_WEIGHTS entry includes faithfulness + contextPrecision + answerRelevancy', () => {
+  it('every TIER_WEIGHTS entry includes faithfulness + contextRelevance + contextRecall + answerRelevancy', () => {
     for (const [tier, weights] of Object.entries(TIER_WEIGHTS)) {
       expect(weights, `${tier} missing faithfulness`).toHaveProperty('faithfulness');
-      expect(weights, `${tier} missing contextPrecision`).toHaveProperty('contextPrecision');
+      expect(weights, `${tier} missing contextRelevance`).toHaveProperty('contextRelevance');
+      expect(weights, `${tier} missing contextRecall`).toHaveProperty('contextRecall');
       expect(weights, `${tier} missing answerRelevancy`).toHaveProperty('answerRelevancy');
       const sum = Object.values(weights).reduce((a, b) => a + b, 0);
       expect(Math.abs(sum - 1), `${tier} sum=${sum}`).toBeLessThan(1e-9);
     }
   });
 
-  it('renormaliseWeights preserves faithfulness + contextPrecision', () => {
+  it('renormaliseWeights preserves faithfulness + contextRelevance + contextRecall', () => {
     const r = scoreScenario(
       makeScenario({
         maxSteps: 5,
@@ -1252,14 +1336,15 @@ describe('multiple null dimensions — geo mean handles gracefully', () => {
       makeScenario({ maxSteps: 5 }),
       makeExecution({
         answer: 'a helpful wine answer',
-        observations: [],  // no observations → contextPrecision null
+        observations: [],  // no observations → contextRelevance null, contextRecall null
       }),
       undefined,  // no judge
       undefined,  // no faithfulness
     );
     expect(r.scores.judge).toBeNull();
     expect(r.scores.faithfulness).toBeNull();
-    expect(r.scores.contextPrecision).toBeNull();
+    expect(r.scores.contextRelevance).toBeNull();
+    expect(r.scores.contextRecall).toBeNull();
     expect(Number.isFinite(r.scores.overall)).toBe(true);
     expect(r.scores.overall).toBeGreaterThan(0);
   });

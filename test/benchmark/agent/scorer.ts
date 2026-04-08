@@ -60,7 +60,8 @@ export type DiagnosticDim =
   | 'terminationCorrectness'
   | 'costEfficiency'
   | 'faithfulness'
-  | 'contextPrecision'
+  | 'contextRelevance'
+  | 'contextRecall'
   | 'judge';
 
 export interface Diagnostic {
@@ -85,10 +86,16 @@ export interface ScenarioScores {
    */
   readonly faithfulness: number | null;
   /**
-   * RAGAS Context Precision: fraction of tool results that are relevant to
-   * the query constraints. null when no structured constraints to check.
+   * RAGAS Context Relevance: fraction of tool results that are relevant to
+   * the query constraints (keyword/rule-based). null when no structured
+   * constraints to check or no observations available.
    */
-  readonly contextPrecision: number | null;
+  readonly contextRelevance: number | null;
+  /**
+   * RAGAS Context Recall: fraction of goldenEntityIds that appeared in agent
+   * observations. null when scenario has no goldenEntityIds or no observations.
+   */
+  readonly contextRecall: number | null;
   /**
    * RAGAS Answer Relevancy: does the answer actually address the question asked?
    * When judge is present, uses judgeScore as proxy. Otherwise, heuristic from
@@ -129,7 +136,8 @@ const ZERO_SCORES: ScenarioScores = {
   terminationCorrectness: 0,
   costEfficiency: 0,
   faithfulness: null,
-  contextPrecision: null,
+  contextRelevance: null,
+  contextRecall: null,
   answerRelevancy: null,
   judge: null,
   overall: 0,
@@ -141,6 +149,23 @@ const ZERO_SCORES: ScenarioScores = {
  * efficiency (merged tool+step) and cost are secondary. Termination is a
  * binary safety net. Judge is optional, lightly weighted to avoid LLM
  * variance dominating overall.
+ *
+ * Weight budget (must sum to 1.0):
+ *   answerQuality:        0.20  (user-visible outcome)
+ *   executionEfficiency:  0.20  (merged tool+step)
+ *   answerRelevancy:      0.10  (answer-question alignment)
+ *   faithfulness:         0.10  (RAGAS grounding)
+ *   contextRelevance:     0.10  (RAGAS rule-based retrieval relevance, renamed from contextPrecision)
+ *   contextRecall:        0.08  (RAGAS entity-ID overlap; null when no goldenEntityIds)
+ *   costEfficiency:       0.10  (latency + token budget)
+ *   terminationCorrectness: 0.10 (binary safety net)
+ *   judge:                0.02  (optional LLM-as-judge rubric)
+ *   total:                1.00
+ *
+ * Budget notes: contextRecall (0.08) and the bump of contextRelevance from
+ * 0.05 to 0.10 (+0.05) adds +0.13 total. Offset by reducing costEfficiency
+ * 0.15→0.10 (-0.05), answerQuality 0.20→0.15 (-0.05), judge 0.10→0.07 (-0.03).
+ * Net: +0.13 - 0.13 = 0.00.
  */
 export type DimensionWeights = Partial<Record<
   Exclude<keyof ScenarioScores, 'overall' | 'toolAccuracy' | 'stepEfficiency' | 'criticalFailure'>,
@@ -148,14 +173,15 @@ export type DimensionWeights = Partial<Record<
 >>;
 
 export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
-  answerQuality: 0.20,
+  answerQuality: 0.15,
   executionEfficiency: 0.20,
   answerRelevancy: 0.10,
   faithfulness: 0.10,
-  contextPrecision: 0.05,
-  costEfficiency: 0.15,
+  contextRelevance: 0.10,
+  contextRecall: 0.08,
+  costEfficiency: 0.10,
   terminationCorrectness: 0.10,
-  judge: 0.10,
+  judge: 0.07,
 };
 
 /**
@@ -172,61 +198,75 @@ export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
  */
 export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> = {
   // Security-critical tiers — termination + execution dominant
+  // contextRecall: 0 — no goldenEntityIds defined for security scenarios yet
   adversarial: {
-    terminationCorrectness: 0.25, executionEfficiency: 0.20, answerQuality: 0.10,
-    answerRelevancy: 0.10, faithfulness: 0.05, contextPrecision: 0.05, costEfficiency: 0.10, judge: 0.15,
+    terminationCorrectness: 0.30, executionEfficiency: 0.20, answerQuality: 0.10,
+    answerRelevancy: 0.10, faithfulness: 0.05, contextRelevance: 0.05, contextRecall: 0,
+    costEfficiency: 0.10, judge: 0.10,
   },
   edge_case: {
     terminationCorrectness: 0.20, executionEfficiency: 0.20, answerQuality: 0.10,
-    answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05, costEfficiency: 0.15, judge: 0.10,
+    answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05, contextRecall: 0,
+    costEfficiency: 0.15, judge: 0.10,
   },
   // Answer-quality + faithfulness dominant — grounding matters most
   knowledge_hybrid: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.15,
   },
   negation: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.15, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.10,
   },
   nested_condition: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.10,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.10,
+    contextRecall: 0, executionEfficiency: 0.15, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.10,
   },
   // Cost-sensitive tiers
   extreme: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.20, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.20,
+    terminationCorrectness: 0.10, judge: 0.15,
   },
   comparison_nested: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.15, costEfficiency: 0.15,
+    terminationCorrectness: 0.10, judge: 0.15,
   },
   // Korean-language nuance tiers — faithfulness + judge weighted
   korean_colloquial: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.20,
   },
   korean_food_pairing: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.20,
   },
   // Subjective / situational tiers
   mood_atmosphere: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.25,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.25,
   },
   situation_based: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.15,
+    terminationCorrectness: 0.10, judge: 0.20,
   },
   gift_refined: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.10, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.15,
+    terminationCorrectness: 0.10, judge: 0.20,
   },
   price_expression: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.10,
-    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.10,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.15,
   },
 };
 
@@ -356,10 +396,15 @@ export function scoreScenario(
     });
   }
 
-  // RAGAS Context Precision: rule-based check of tool result relevance
+  // RAGAS Context Relevance: rule-based check of tool result relevance
   // against scenario's structured constraints (priceBandKrw, vintageRange, etc.).
   // null when no structured constraints or no observations.
-  const contextPrecision = scoreContextPrecision(exp, execution, diagnostics);
+  const contextRelevance = scoreContextRelevance(exp, execution, diagnostics);
+
+  // RAGAS Context Recall: fraction of goldenEntityIds that appeared in
+  // agent observations. null when no goldenEntityIds on the scenario or
+  // no observations available.
+  const contextRecall = scoreContextRecall(scenario, execution, diagnostics);
 
   // Critical-fail check — any of these collapses overall to 0.
   const criticalFailure = diagnostics.some((d) => d.severity === 'critical');
@@ -377,7 +422,8 @@ export function scoreScenario(
     answerQuality,
     answerRelevancy,
     faithfulness,
-    contextPrecision,
+    contextRelevance,
+    contextRecall,
     terminationCorrectness,
     costEfficiency,
     judge,
@@ -425,7 +471,8 @@ export function scoreScenario(
       terminationCorrectness,
       costEfficiency,
       faithfulness,
-      contextPrecision,
+      contextRelevance,
+      contextRecall,
       judge,
       overall,
       criticalFailure,
@@ -996,13 +1043,13 @@ function evaluatePredicate(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// RAGAS Context Precision (rule-based, no LLM needed)
+// RAGAS Context Relevance (rule-based, no LLM needed)
 // ─────────────────────────────────────────────────────────────────────
 
 /**
  * Evaluates whether tool results are relevant to the query's constraints.
  *
- * Unlike faithfulness (does the ANSWER cite the context?), context precision
+ * Unlike faithfulness (does the ANSWER cite the context?), context relevance
  * asks: did the RETRIEVAL return results that match what was asked? This
  * separates "search pipeline returned junk" from "agent hallucinated".
  *
@@ -1012,8 +1059,11 @@ function evaluatePredicate(
  * - drinkingWindowStatus: keywords present?
  *
  * Returns null when no structured constraints exist or no observations.
+ *
+ * Renamed from scoreContextPrecision — the metric is now "contextRelevance"
+ * to align with RAGAS v2 terminology. The algorithm is unchanged.
  */
-function scoreContextPrecision(
+function scoreContextRelevance(
   exp: ScenarioExpectation,
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
@@ -1105,10 +1155,66 @@ function scoreContextPrecision(
   if (score < 1) {
     const failed = checks.filter((c) => !c.passed).map((c) => c.label);
     diagnostics.push({
-      dim: 'contextPrecision',
+      dim: 'contextRelevance',
       severity: 'warn',
-      code: 'CONTEXT_PRECISION_LOW',
+      code: 'CONTEXT_RELEVANCE_LOW',
       message: `tool results did not match constraints: ${failed.join(', ')}`,
+      observed: score,
+      expected: 1,
+    });
+  }
+
+  return score;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// RAGAS Context Recall (entity-ID overlap, no LLM needed)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Computes RAGAS Context Recall as entity-ID overlap.
+ *
+ * Recall = |retrieved_entity_ids ∩ goldenEntityIds| / |goldenEntityIds|
+ *
+ * "Retrieved" means: the entity ID appears as a substring in any
+ * observation string from the agent's tool calls. This is a conservative
+ * approximation — IDs are short, unique tokens that appear verbatim in
+ * Vespa result JSON forwarded as observations.
+ *
+ * Returns null when:
+ *  - scenario.goldenEntityIds is absent or empty, OR
+ *  - execution.observations is empty (no tool calls made)
+ */
+function scoreContextRecall(
+  scenario: AgentBenchmarkScenario,
+  execution: ScenarioExecution,
+  diagnostics: Diagnostic[],
+): number | null {
+  if (
+    scenario.goldenEntityIds === undefined ||
+    scenario.goldenEntityIds.length === 0
+  ) {
+    return null;
+  }
+  if (execution.observations.length === 0) return null;
+
+  const obsText = execution.observations.join('\n');
+  const golden = scenario.goldenEntityIds;
+  let hitCount = 0;
+  for (const entityId of golden) {
+    if (obsText.includes(entityId)) {
+      hitCount++;
+    }
+  }
+  const score = hitCount / golden.length;
+
+  if (score < 1) {
+    const missing = golden.filter((id) => !obsText.includes(id));
+    diagnostics.push({
+      dim: 'contextRecall',
+      severity: 'warn',
+      code: 'CONTEXT_RECALL_LOW',
+      message: `golden entity IDs missing from observations: ${missing.join(', ')}`,
       observed: score,
       expected: 1,
     });

@@ -578,14 +578,21 @@ export function yqlEscapeString(value: string): string {
 const yqlString = yqlEscapeString;
 
 /**
- * Whitelist of safe field names for `_in` (multi-value) sparse filter tokens.
+ * Whitelist of safe field names for `_in` (multi-value) and `_not_in` (negation
+ * multi-value) sparse filter tokens.
  * Must match the producer in `domain/retrieval/service/constraint-to-sparse-filter-tokens.ts`.
  * Hoisted to module scope to avoid per-iteration allocation in `buildSparseFilters`.
+ *
+ * Positive fields produce Vespa OR clauses; `_not` variants produce AND NOT clauses.
  */
 const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
-  'wine_type', 'country', 'appellation', 'grape_primary', 'style',
+  'wine_type', 'country', 'region', 'appellation', 'grape_primary', 'style',
   'price_band', 'flavor_profile', 'classification', 'certification',
   'soil_type', 'producer_type',
+  // Negation variants — used by <field>_not_in tokens
+  'wine_type_not', 'country_not', 'region_not', 'appellation_not', 'grape_primary_not',
+  'style_not', 'price_band_not', 'flavor_profile_not', 'classification_not',
+  'certification_not', 'soil_type_not', 'producer_type_not',
 ]);
 
 /**
@@ -765,11 +772,10 @@ export function buildSparseFilters(filters: readonly string[]): string {
       }
 
       // -----------------------------------------------------------------------
-      // NOT filters — grape, country, region, style exclusions
+      // NOT filters — string field exclusions via YQL !(field contains "value")
       // -----------------------------------------------------------------------
-      // YQL syntax: !(field contains "value")
-      // These are emitted by searchConstraintsToFilterTokens() for 'exclude'
-      // operator constraints detected by the rule-based constraint extractor.
+      // Emitted by constraintToSparseFilterTokens() for 'exclude'/'not_in' operators.
+      // grape_primary_not also sets grapes_not to cover the array schema field.
 
       case 'grape_primary_not':
         clauses.push(`!(grape_primary contains ${yqlString(value)})`);
@@ -777,6 +783,10 @@ export function buildSparseFilters(filters: readonly string[]): string {
 
       case 'grapes_not':
         clauses.push(`!(grapes contains ${yqlString(value)})`);
+        break;
+
+      case 'wine_type_not':
+        clauses.push(`!(wine_type contains ${yqlString(value)})`);
         break;
 
       case 'country_not':
@@ -787,20 +797,58 @@ export function buildSparseFilters(filters: readonly string[]): string {
         clauses.push(`!(region contains ${yqlString(value)})`);
         break;
 
+      case 'appellation_not':
+        clauses.push(`!(appellation contains ${yqlString(value)})`);
+        break;
+
       case 'style_not':
         clauses.push(`!(style contains ${yqlString(value)})`);
         break;
 
+      case 'price_band_not':
+        clauses.push(`!(price_band contains ${yqlString(value)})`);
+        break;
+
+      case 'flavor_profile_not':
+        clauses.push(`!(flavor_profiles contains ${yqlString(value)})`);
+        break;
+
+      case 'classification_not':
+        clauses.push(`!(classification contains ${yqlString(value)})`);
+        break;
+
+      case 'certification_not':
+        clauses.push(`!(certifications contains ${yqlString(value)})`);
+        break;
+
+      case 'soil_type_not':
+        clauses.push(`!(soil_type contains ${yqlString(value)})`);
+        break;
+
+      case 'producer_type_not':
+        clauses.push(`!(producer_type contains ${yqlString(value)})`);
+        break;
+
       default: {
-        // Multi-value IN tokens: key ends with _in, value is pipe-delimited.
-        // Produces a Vespa OR clause: (field contains "a" OR field contains "b").
-        // Field name is validated against a whitelist to prevent YQL injection.
+        // Multi-value IN / NOT-IN tokens: key ends with _in, value is pipe-delimited.
+        // Positive (_in): produces a Vespa OR clause: (field contains "a" OR field contains "b").
+        // Negation (_not_in): produces individual AND NOT clauses — Vespa has no NOT-IN shorthand.
+        // The base field name (with optional _not suffix) is validated against a whitelist
+        // to prevent YQL injection.
         if (key.endsWith('_in')) {
-          const field = key.slice(0, -3); // strip '_in' suffix
-          if (!ALLOWED_SPARSE_IN_FIELDS.has(field)) break;
+          const fieldWithSuffix = key.slice(0, -3); // strip '_in' suffix
+          if (!ALLOWED_SPARSE_IN_FIELDS.has(fieldWithSuffix)) break;
           const vals = value.split('|').filter((v) => v.length > 0);
-          if (vals.length > 0) {
-            const disjuncts = vals.map((v) => `${field} contains ${yqlString(v)}`);
+          if (vals.length === 0) break;
+          if (fieldWithSuffix.endsWith('_not')) {
+            // Negation NOT-IN: !(field contains "v1") AND !(field contains "v2")
+            const actualField = fieldWithSuffix.slice(0, -4); // strip '_not' suffix
+            for (const v of vals) {
+              clauses.push(`!(${actualField} contains ${yqlString(v)})`);
+            }
+          } else {
+            // Positive IN: (field contains "a" OR field contains "b")
+            const disjuncts = vals.map((v) => `${fieldWithSuffix} contains ${yqlString(v)}`);
             clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
           }
         }

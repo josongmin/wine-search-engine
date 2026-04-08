@@ -80,7 +80,8 @@ export interface ScenarioDimensionWeights {
   readonly executionEfficiency?: number;
   readonly answerQuality?: number;
   readonly faithfulness?: number;
-  readonly contextPrecision?: number;
+  readonly contextRelevance?: number;
+  readonly contextRecall?: number;
   readonly terminationCorrectness?: number;
   readonly costEfficiency?: number;
   readonly judge?: number;
@@ -166,6 +167,13 @@ export interface AgentBenchmarkScenario {
   readonly query: string;
   readonly description: string;
   readonly expectation: ScenarioExpectation;
+  /**
+   * Entity IDs that MUST appear in search results for the scenario to be
+   * considered correctly retrieved. Used to compute RAGAS contextRecall:
+   * |retrieved_entity_ids ∩ goldenEntityIds| / |goldenEntityIds|.
+   * When absent, contextRecall is null (excluded from geo-mean).
+   */
+  readonly goldenEntityIds?: readonly string[];
   /** Severity tag for triage / dashboard weighting. */
   readonly severity?: Severity;
   /** Skip this scenario (e.g., requires Phase 2 features). */
