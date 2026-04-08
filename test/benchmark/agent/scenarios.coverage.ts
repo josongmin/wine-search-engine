@@ -2168,4 +2168,74 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should feel festive but not excessively extravagant.',
     },
   },
+  {
+    id: 485,
+    tier: 'price_expression',
+    query: '3만원대 가성비 레드 와인 추천해줘',
+    description: 'Price expression: 3만원 (≈$22) budget red wine recommendation',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 3,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
+      priceBandKrw: { max: 40_000 },
+      rubric:
+        'Recommend affordable red wines under 40,000 KRW with good value. '
+        + 'Should mention price in 원. Should not recommend premium wines (Opus One, Screaming Eagle etc). '
+        + 'Answer in Korean matching casual register (해줘 → 해드릴게요 or similar).',
+    },
+  },
+  {
+    id: 486,
+    tier: 'negation',
+    query: '카베르네 소비뇽이 들어가지 않은 레드 와인',
+    description: 'Negation: red wine without Cabernet Sauvignon grape',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 3,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 6_000,
+      answerMustNotMatch: ['카베르네 소비뇽', 'Cabernet Sauvignon', 'cabernet'],
+      rubric:
+        'Must recommend red wines that explicitly exclude Cabernet Sauvignon. '
+        + 'Should confirm the exclusion in the answer. '
+        + 'Good alternatives: Pinot Noir, Merlot, Syrah, Grenache, Sangiovese, Nebbiolo.',
+    },
+  },
+  {
+    id: 487,
+    tier: 'korean_colloquial',
+    query: '와인 잘 모르는데 처음 마셔보기 좋은 거 알려줘',
+    description: 'Korean colloquial: first-timer wine recommendation',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 40_000,
+      maxTotalTokens: 5_000,
+      requireHedging: false,
+      rubric:
+        'Must recommend beginner-friendly wines: approachable (low tannin, light-medium body), '
+        + 'affordable, widely available. Should explain WHY it suits a beginner '
+        + '(easy to drink, not too complex). Avoid jargon or assume expertise. '
+        + 'Answer in casual Korean (알려줘 register).',
+    },
+  },
+  {
+    id: 488,
+    tier: 'nested_condition',
+    query: '이탈리아 피노 그리지오 중에서 10만원 이하로 추천해줘',
+    description: 'Nested condition: Italian Pinot Grigio under 100,000 KRW',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 4,
+      maxDurationMs: 45_000,
+      maxTotalTokens: 8_000,
+      priceBandKrw: { max: 100_000 },
+      answerContains: ['이탈리아', 'Pinot Grigio', 'Pinot Gris', '피노 그리지오'],
+      rubric:
+        'Must recommend Italian Pinot Grigio wines under 100,000 KRW. '
+        + 'Should mention both the grape variety and Italy/Italian region. '
+        + 'If no exact match, should explicitly state price or region constraint was broadened.',
+    },
+  },
 ];
