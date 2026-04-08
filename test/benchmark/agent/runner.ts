@@ -549,15 +549,11 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   const scenarios = filterScenarios(baseScenarios, args);
 
   let judgeFailCount = 0;
-  const seenIndices: number[] = [];
 
   const results = await runWithConcurrency(
     scenarios,
     args.concurrency,
     async (scenario) => {
-      const idx = seenIndices.length;
-      seenIndices.push(idx);
-
       if (scenario.skip !== undefined) {
         console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
         return scoreScenario(scenario, null, undefined, undefined);

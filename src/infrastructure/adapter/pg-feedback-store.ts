@@ -7,6 +7,23 @@ import type {
 import type { FeedbackSignal, FeedbackType } from '../../domain/learning/model/feedback-signal.js';
 import type { DecisionSnapshot, EntityId, QueryClass } from '../../domain/shared/types/index.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
+import { isQueryClass } from '../../domain/shared/types/query-class.js';
+
+function toFeedbackType(value: string): FeedbackType {
+  if (
+    value === 'click' ||
+    value === 'purchase' ||
+    value === 'explicit_feedback' ||
+    value === 'clarification_resolution' ||
+    value === 'session_success'
+  ) return value;
+  return 'click';
+}
+
+function toQueryClass(value: string): QueryClass {
+  if (isQueryClass(value)) return value;
+  return 'unknown';
+}
 
 interface FeedbackRow {
   signal_id: string;
@@ -23,13 +40,14 @@ interface FeedbackRow {
 function rowToSignal(row: FeedbackRow): FeedbackSignal {
   return {
     signalId: row.signal_id,
-    type: row.signal_type as FeedbackType,
+    type: toFeedbackType(row.signal_type),
     query: row.query,
-    queryClass: row.query_class as QueryClass,
+    queryClass: toQueryClass(row.query_class),
     entityId: createEntityId(row.entity_id),
     isPositive: row.is_positive,
     timestamp: row.created_at,
     sessionId: row.session_id,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full DecisionSnapshot Zod validation deferred
     decisionSnapshot: row.decision_snapshot as DecisionSnapshot,
   };
 }

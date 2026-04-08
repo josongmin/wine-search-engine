@@ -221,11 +221,53 @@ export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> 
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// Penalty / scoring constants (extracted for visibility and testability)
+// ─────────────────────────────────────────────────────────────────────
+
+/** Tool accuracy: 10% penalty per unexpected tool call, capped at 50%. */
+const PENALTY_EXTRA_TOOL_PER_CALL = 0.1;
+const PENALTY_EXTRA_TOOL_CAP = 0.5;
+/** Tool accuracy: 30% penalty per over-duplicated expected tool. */
+const PENALTY_TOOL_DUPLICATE = 0.7;
+/** Tool accuracy: 50% penalty when expected tool order violated. */
+const PENALTY_TOOL_ORDER_VIOLATION = 0.5;
+/** Execution efficiency split: toolAccuracy × 0.6 + stepEfficiency × 0.4. */
+const EXEC_TOOL_WEIGHT = 0.6;
+const EXEC_STEP_WEIGHT = 0.4;
+/** Structured check penalties — multiplied into answerQuality. */
+const PENALTY_PRICE_BAND_VIOLATED = 0.7;
+const PENALTY_VINTAGE_RANGE_VIOLATED = 0.7;
+const PENALTY_DRINKING_WINDOW_MISMATCH = 0.8;
+const PENALTY_TOOL_ARG_MISSING = 0.9;
+const PENALTY_HEDGING_MISSING = 0.7;
+const PENALTY_REGISTER_MISMATCH = 0.8;
+const PENALTY_OVERCONFIDENT = 0.8;
+const PENALTY_UNCITED_WINE_NAMES = 0.5;
+/** Answer quality: 50% penalty per regex miss in answerMustMatch. */
+const PENALTY_REGEX_MISS = 0.5;
+/** Faithfulness: threshold below which a warning diagnostic fires. */
+const FAITHFULNESS_WARN_THRESHOLD = 0.5;
+/** Context precision: minimum fraction of significant words in context. */
+const CONTEXT_PRECISION_WORD_THRESHOLD = 0.3;
+/** Context precision: minimum word length to be considered significant. */
+const CONTEXT_PRECISION_MIN_WORD_LEN = 3;
+/** Korean 만원 multiplier for price extraction. */
+const MAN_WON_MULTIPLIER = 10_000;
+/** Approximate USD→KRW rate for price extraction. */
+const USD_TO_KRW_APPROX = 1_400;
+
+/** Korean stopwords for extractProperNouns — module-level to avoid per-call allocation. */
+const KOREAN_PROPER_NOUN_STOPWORDS = new Set([
+  '추천합니다', '추천해', '와인을', '와인이', '입니다', '있습니다', '없습니다',
+  '합니다', '습니다', '드립니다', '같은', '비슷한', '좋은', '마시기',
+]);
+
 export function scoreScenario(
   scenario: AgentBenchmarkScenario,
   execution: ScenarioExecution | null,
   judgeScore: number | undefined,
-  faithfulnessScore?: number | undefined,
+  faithfulnessScore?: number,
   error?: string,
 ): ScenarioResult {
   if (scenario.skip !== undefined) {
@@ -262,7 +304,7 @@ export function scoreScenario(
   // The dim merge already lives in the geo-mean weighting (executionEfficiency
   // gets the same weight that tool+step would have shared), so a single
   // weighted mean is sufficient and stable.
-  const executionEfficiency = toolAccuracy * 0.6 + stepEfficiency * 0.4;
+  const executionEfficiency = toolAccuracy * EXEC_TOOL_WEIGHT + stepEfficiency * EXEC_STEP_WEIGHT;
 
   const baseAnswerQuality = scoreAnswerQuality(exp, execution.answer, diagnostics);
   // Structured checks multiply into answerQuality — each failed check docks a %.
@@ -277,7 +319,7 @@ export function scoreScenario(
   // RAGAS Faithfulness: LLM-scored grounding of answer claims in tool results.
   // null when no observations (no tool calls → nothing to ground against).
   const faithfulness: number | null = faithfulnessScore ?? null;
-  if (faithfulness !== null && faithfulness < 0.5) {
+  if (faithfulness !== null && faithfulness < FAITHFULNESS_WARN_THRESHOLD) {
     diagnostics.push({
       dim: 'faithfulness',
       severity: 'warn',
@@ -441,7 +483,7 @@ function scoreToolAccuracy(
       cursor = found + 1;
     }
     if (!inOrder) {
-      score *= 0.5;
+      score *= PENALTY_TOOL_ORDER_VIOLATION;
       diagnostics.push({
         dim: 'toolAccuracy',
         severity: 'warn',
@@ -454,7 +496,7 @@ function scoreToolAccuracy(
   const expectedSet = new Set(expectedNames);
   const extraCalls = toolsUsed.filter((t) => !expectedSet.has(t.tool)).length;
   if (extraCalls > 0) {
-    const penalty = Math.min(0.5, extraCalls * 0.1);
+    const penalty = Math.min(PENALTY_EXTRA_TOOL_CAP, extraCalls * PENALTY_EXTRA_TOOL_PER_CALL);
     score *= 1 - penalty;
     diagnostics.push({
       dim: 'toolAccuracy',
@@ -465,11 +507,17 @@ function scoreToolAccuracy(
     });
   }
 
+  // Check ALL tools for duplication — accumulate penalties instead of breaking
+  // on the first violation. Uses a Set to avoid penalizing the same tool twice
+  // when it appears multiple times in the expected array.
+  const checkedTools = new Set<string>();
   for (const expTool of expected) {
+    if (checkedTools.has(expTool.tool)) continue;
+    checkedTools.add(expTool.tool);
     const expectedReps = expected.filter((e) => e.tool === expTool.tool).length;
     const actualReps = toolsUsed.filter((t) => t.tool === expTool.tool).length;
     if (actualReps > expectedReps * 2 && actualReps > 2) {
-      score *= 0.7;
+      score *= PENALTY_TOOL_DUPLICATE;
       diagnostics.push({
         dim: 'toolAccuracy',
         severity: 'warn',
@@ -478,7 +526,6 @@ function scoreToolAccuracy(
         observed: actualReps,
         expected: expectedReps,
       });
-      break;
     }
   }
 
@@ -577,7 +624,7 @@ function scoreAnswerQuality(
           code: 'ANSWER_MUST_MATCH_MISS',
           message: `regex did not match: ${pattern}`,
         });
-        score *= 0.5;
+        score *= PENALTY_REGEX_MISS;
       }
     }
   }
@@ -637,7 +684,7 @@ function scoreStructuredChecks(
           observed: outOfBound.join(','),
           expected: `${exp.priceBandKrw.min ?? '?'}-${exp.priceBandKrw.max ?? '?'}`,
         });
-        multiplier *= 0.7;
+        multiplier *= PENALTY_PRICE_BAND_VIOLATED;
       }
     }
   }
@@ -660,7 +707,7 @@ function scoreStructuredChecks(
           observed: outOfRange.join(','),
           expected: `${exp.vintageRange.min ?? '?'}-${exp.vintageRange.max ?? '?'}`,
         });
-        multiplier *= 0.7;
+        multiplier *= PENALTY_VINTAGE_RANGE_VIOLATED;
       }
     }
   }
@@ -683,7 +730,7 @@ function scoreStructuredChecks(
         message: `expected drinking window status '${status}' keywords not found`,
         expected: status,
       });
-      multiplier *= 0.8;
+      multiplier *= PENALTY_DRINKING_WINDOW_MISMATCH;
     }
   }
 
@@ -703,9 +750,9 @@ function scoreStructuredChecks(
           dim: 'toolAccuracy',
           severity: 'warn',
           code: 'EXPECTED_TOOL_ARG_MISSING',
-          message: `${argSpec.tool}.${argSpec.argPath} ${argSpec.predicate} ${String(argSpec.value ?? '')} not satisfied`,
+          message: `${argSpec.tool}.${argSpec.argPath} ${argSpec.predicate} ${argSpec.value === undefined ? '' : JSON.stringify(argSpec.value)} not satisfied`,
         });
-        multiplier *= 0.9;
+        multiplier *= PENALTY_TOOL_ARG_MISSING;
       }
     }
   }
@@ -720,7 +767,7 @@ function scoreStructuredChecks(
         code: 'HEDGING_MISSING',
         message: 'answer lacks required hedging language for ambiguous query',
       });
-      multiplier *= 0.7;
+      multiplier *= PENALTY_HEDGING_MISSING;
     }
   }
 
@@ -740,12 +787,13 @@ function scoreStructuredChecks(
         observed: dominant,
         expected: exp.requiredRegister,
       });
-      multiplier *= 0.8;
+      multiplier *= PENALTY_REGISTER_MISMATCH;
     }
   }
 
-  // 7. maxConfidence — penalise overconfident language when maxConfidence is low
-  if (exp.maxConfidence !== undefined && exp.maxConfidence < 0.5) {
+  // 7. maxConfidence — penalise overconfident language. Threshold applies to
+  //    all maxConfidence values (not just <0.5) to match auto-rubric coverage.
+  if (exp.maxConfidence !== undefined) {
     const overconfident = /확실히|definitely|100%|분명히|틀림없이|absolutely|certainly/i;
     if (overconfident.test(answer)) {
       diagnostics.push({
@@ -754,7 +802,7 @@ function scoreStructuredChecks(
         code: 'OVERCONFIDENT_LANGUAGE',
         message: 'overconfident language detected despite low maxConfidence',
       });
-      multiplier *= 0.8;
+      multiplier *= PENALTY_OVERCONFIDENT;
     }
   }
 
@@ -799,7 +847,7 @@ function scoreStructuredChecks(
           message: `wine names in answer not found in tool results: ${uncited.join(', ')}`,
           observed: uncited.join(','),
         });
-        multiplier *= 0.5;
+        multiplier *= PENALTY_UNCITED_WINE_NAMES;
       }
     }
   }
@@ -816,7 +864,7 @@ function extractKoreanPrices(text: string): number[] {
   const prices: number[] = [];
   // N만원 pattern (만 = 10,000)
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*만\s*원/g)) {
-    prices.push(Number(m[1]) * 10_000);
+    prices.push(Number(m[1]) * MAN_WON_MULTIPLIER);
   }
   // Plain numbers + 원
   for (const m of text.matchAll(/(\d{1,3}(?:,\d{3})+|\d{4,})\s*원/g)) {
@@ -824,7 +872,7 @@ function extractKoreanPrices(text: string): number[] {
   }
   // Dollar amounts
   for (const m of text.matchAll(/\$\s*(\d+(?:\.\d+)?)/g)) {
-    prices.push(Number(m[1]) * 1_400); // rough KRW conversion
+    prices.push(Number(m[1]) * USD_TO_KRW_APPROX);
   }
   return prices;
 }
@@ -855,11 +903,10 @@ function extractProperNouns(text: string): string[] {
   if (latinMatches) results.push(...latinMatches);
   // Korean wine names: sequences of 2+ Hangul syllables (오푸스원, 샤또마고, 바롤로)
   // Filter out common Korean grammar words to reduce false positives.
-  const KOREAN_STOPWORDS = new Set(['추천합니다', '추천해', '와인을', '와인이', '입니다', '있습니다', '없습니다', '합니다', '습니다', '드립니다', '같은', '비슷한', '좋은', '마시기']);
   const koreanMatches = text.match(/[\uAC00-\uD7A3]{2,}/g);
   if (koreanMatches) {
     for (const m of koreanMatches) {
-      if (!KOREAN_STOPWORDS.has(m) && m.length >= 3) {
+      if (!KOREAN_PROPER_NOUN_STOPWORDS.has(m) && m.length >= 3) {
         results.push(m);
       }
     }
@@ -988,10 +1035,10 @@ function scoreContextPrecision(
       const anyRelevant = queryTerms.some((q) => {
         const words = q.toLowerCase()
           .split(/\s+/)
-          .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+          .filter((w) => w.length >= CONTEXT_PRECISION_MIN_WORD_LEN && !STOPWORDS.has(w));
         if (words.length === 0) return true; // no significant words → pass
         const found = words.filter((w) => lower.includes(w));
-        return found.length / words.length >= 0.3; // 30% threshold
+        return found.length / words.length >= CONTEXT_PRECISION_WORD_THRESHOLD;
       });
       checks.push({ passed: anyRelevant, label: 'query_terms_in_context' });
     }

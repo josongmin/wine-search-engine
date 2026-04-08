@@ -83,6 +83,11 @@ For any non-trivial code change, follow this exact order:
 13. **For any schema bound change** (`min`, `max`): The bound MUST reference a named domain constant (not a magic number). Add a contract parity test that the HTTP schema and domain parser agree on the same bound.
 14. **After applying any fix**: VERIFY the fix is actually in the file (`grep` or `Read`). Linter hooks and file watchers can revert changes silently — this happened multiple times during audit rounds 22-27.
 
+15. **For any numeric constant used as a penalty, multiplier, threshold, or weight**: Extract it as a named `const` at module scope with a comment explaining the value. Magic numbers in scoring/penalty logic are unauditable — `score *= 0.7` tells the reader nothing; `score *= PENALTY_TOOL_DUPLICATE` tells them everything.
+16. **For any `new Set()`, `new Map()`, or large literal array/object**: If the value is deterministic (same every call), define it at module scope. Allocating inside a function body wastes memory and hides the invariant.
+17. **For any `for...of` loop with `break`**: Verify that breaking early is the correct semantic. If the loop should accumulate results from ALL iterations (penalties, violations, matches), removing `break` is almost certainly correct. Add a test with 2+ triggering elements to confirm.
+18. **For any `Math.ceil(N/2)` or `Math.floor(N/2)` used as a threshold**: Document whether you want "≥50%" (ceil) or "strict majority >50%" (floor+1). Add boundary tests for N=1,2,3,4 — off-by-one in majority logic is the #2 bug class in voting/consensus code.
+
 Regression tests live under `test/regression/<topic>.regression.test.ts` and are append-only — never delete a regression test.
 
 ## Self-audit pass (after multi-file refactors)

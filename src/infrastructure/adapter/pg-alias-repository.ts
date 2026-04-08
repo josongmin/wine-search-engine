@@ -3,6 +3,31 @@ import type { AliasRepository } from '../../domain/alias/port/alias-repository.p
 import type { Alias, AliasScope, AliasType } from '../../domain/alias/model/alias.js';
 import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
 
+function toAliasType(value: string): AliasType {
+  if (
+    value === 'canonical' ||
+    value === 'translation' ||
+    value === 'phonetic' ||
+    value === 'misspelling' ||
+    value === 'observed_query_alias' ||
+    value === 'catalog_noise_alias'
+  ) return value;
+  return 'canonical';
+}
+
+function toAliasScope(value: string): AliasScope {
+  if (
+    value === 'global' ||
+    value === 'locale_ko' ||
+    value === 'locale_en' ||
+    value === 'locale_fr' ||
+    value === 'marketplace_specific' ||
+    value === 'retailer_specific' ||
+    value === 'temporal'
+  ) return value;
+  return 'global';
+}
+
 interface AliasRow {
   alias_id: string;
   entity_id: string;
@@ -23,10 +48,10 @@ function rowToAlias(row: AliasRow): Alias {
     entityId: createEntityId(row.entity_id),
     value: row.surface_form,
     normalizedValue: row.normalized_value,
-    type: row.alias_type as AliasType,
+    type: toAliasType(row.alias_type),
     confidencePrior: row.confidence,
     source: row.source,
-    scope: row.alias_scope as AliasScope,
+    scope: toAliasScope(row.alias_scope),
     suppressed: row.is_suppressed,
   };
 }

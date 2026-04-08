@@ -42,6 +42,7 @@ const VALID_LINEAGE_SOURCE_TYPES: ReadonlySet<string> = new Set([
  */
 function isLineagePayload(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks; object indexing requires Record type
   const obj = value as Record<string, unknown>;
   // Required string fields
   if (typeof obj['sourceRecordId'] !== 'string') return false;
@@ -116,12 +117,14 @@ function rowToRecord(row: LineageRow): LineageRecord | null {
   // Per-field type checks for OPTIONAL fields. Previously the code accessed
   // payload.matchedEntityId etc. and trusted whatever junk JSONB returned.
   // EntityId is a branded type — validate the runtime shape, don't just cast.
-  const matchedEntityId = isValidEntityId(payload['matchedEntityId'])
-    ? (payload['matchedEntityId'] as LineageRecord['matchedEntityId'])
+  const rawMatchedId = payload['matchedEntityId'];
+  const matchedEntityId = isValidEntityId(rawMatchedId)
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- EntityId branded type; runtime-validated by isValidEntityId above
+    ? (rawMatchedId as LineageRecord['matchedEntityId'])
     : undefined;
-  const previousEntityIds = asEntityIdArray(payload['previousEntityIds']) as
-    | LineageRecord['previousEntityIds']
-    | undefined;
+  const rawPrevIds = asEntityIdArray(payload['previousEntityIds']);
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- readonly string[] to branded EntityId[]; runtime-validated by asEntityIdArray
+  const previousEntityIds = rawPrevIds as LineageRecord['previousEntityIds'] | undefined;
   const operator = typeof payload['operator'] === 'string'
     ? payload['operator']
     : undefined;
@@ -129,17 +132,22 @@ function rowToRecord(row: LineageRow): LineageRecord | null {
     ? payload['abuseFlag']
     : undefined;
 
+  // All fields below were runtime-validated by isLineagePayload(); use String()
+  // for validated strings and eslint-disable for union/branded types.
   return {
-    sourceRecordId: payload['sourceRecordId'] as string,
+    sourceRecordId: String(payload['sourceRecordId']),
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- union type validated by isLineagePayload (VALID_LINEAGE_SOURCE_TYPES check)
     sourceType: payload['sourceType'] as LineageRecord['sourceType'],
-    candidateId: payload['candidateId'] as string,
+    candidateId: String(payload['candidateId']),
     ...(matchedEntityId !== undefined ? { matchedEntityId } : {}),
     ...(previousEntityIds !== undefined ? { previousEntityIds } : {}),
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- array of strings validated by isLineagePayload
     normalizationRulesApplied: payload['normalizationRulesApplied'] as readonly string[],
-    extractionVersion: payload['extractionVersion'] as string,
-    matchingVersion: payload['matchingVersion'] as string,
+    extractionVersion: String(payload['extractionVersion']),
+    matchingVersion: String(payload['matchingVersion']),
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- union type validated by isLineagePayload (VALID_LINEAGE_DECISIONS check)
     decision: payload['decision'] as LineageRecord['decision'],
-    decisionReason: payload['decisionReason'] as string,
+    decisionReason: String(payload['decisionReason']),
     ...(operator !== undefined ? { operator } : {}),
     ...(abuseFlag !== undefined ? { abuseFlag } : {}),
     timestamp,

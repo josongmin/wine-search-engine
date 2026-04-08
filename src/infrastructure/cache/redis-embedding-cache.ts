@@ -98,6 +98,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       }
     }
     await this.redis.incr(this.statsKeyHits);
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- array validated above: isArray, length > 0, all elements finite numbers
     return parsed as readonly number[];
   }
 

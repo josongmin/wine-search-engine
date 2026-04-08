@@ -104,7 +104,7 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
           registryId,
           queryClass,
           nextVersion,
-          weights.weights as number[],
+          Array.from(weights.weights),
           weights.bias,
           weights.trainingExampleCount,
           weights.ndcg5ValidationScore,

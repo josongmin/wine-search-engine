@@ -38,6 +38,22 @@ const ALLOWLIST: readonly string[] = [
   '__tests__',
   // Mapping layer already has isNumber/isFinite guards at function level
   'infrastructure/vespa/mapping.ts',
+  // Audit round baseline — these 21 existing uses are either:
+  // (a) converting status codes (guaranteed small integers)
+  // (b) guarded by typeof/truthiness checks upstream
+  // (c) using Number() on known-numeric DB fields
+  // New parseFloat/Number() calls outside these files WILL hard-fail.
+  'domain/ingestion/service/field-normalizer.ts',
+  'domain/mixed/service/constraint-overlay.ts',
+  'domain/resolver/service/resolver.ts',
+  'domain/response/service/human-response-builder-v2.ts',
+  'domain/response/service/machine-response-builder-v2.ts',
+  'infrastructure/adapter/pg-gold-set-store.ts',
+  'infrastructure/watchlist/webhook-delivery.ts',
+  'interface/http/routes/http-route-contract-catalog.ts',
+  'interface/http/routes/http-route-contract-openapi.ts',
+  'interface/http/routes/register-contract-route.ts',
+  'interface/http/routes/watchlist.route.ts',
 ];
 
 async function findTsFiles(dir: string): Promise<string[]> {
@@ -117,9 +133,14 @@ describe('parseFloat/Number() safety audit', () => {
         `[parseFloat safety audit] ${allViolations.length} unguarded parseFloat/Number() calls:\n${report}`,
       );
     }
-    // For now: just verify the scan runs without errors.
-    // Uncomment the next line to enforce:
-    // expect(allViolations).toEqual([]);
-    expect(true).toBe(true);
+    // Hard fail: any new unguarded parseFloat/Number() on external input
+    // in non-allowlisted files must be caught before merge. Add a
+    // Number.isFinite() guard or add the file to ALLOWLIST with a comment.
+    if (allViolations.length > 0) {
+      const report = allViolations.map((v) => `  ${v.file}:${v.line}`).join('\n');
+      expect.fail(
+        `Found ${allViolations.length} unguarded parseFloat/Number() calls:\n${report}`,
+      );
+    }
   });
 });

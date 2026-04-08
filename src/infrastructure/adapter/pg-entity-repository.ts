@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import type { EntityRepository } from '../../domain/entity/port/entity-repository.port.js';
 import type { Entity, EntityMetadata } from '../../domain/entity/model/entity.js';
 import type { EntityType } from '../../domain/entity/model/entity-type.js';
+import { isEntityType } from '../../domain/entity/model/entity-type.js';
 import type { Relations } from '../../domain/entity/model/relations.js';
 import type { EntityAttributes } from '../../domain/entity/model/attributes.js';
 import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
@@ -27,9 +28,11 @@ interface SnapshotRow {
 }
 
 function buildMetadata(metadata: Record<string, unknown>, row: EntityRow): EntityMetadata {
+  const rawCreated = metadata['createdAt'];
+  const rawUpdated = metadata['updatedAt'];
   const base: EntityMetadata = {
-    createdAt: new Date((metadata['createdAt'] as string | undefined) ?? row.created_at),
-    updatedAt: new Date((metadata['updatedAt'] as string | undefined) ?? row.updated_at),
+    createdAt: new Date(typeof rawCreated === 'string' ? rawCreated : row.created_at),
+    updatedAt: new Date(typeof rawUpdated === 'string' ? rawUpdated : row.updated_at),
   };
   const source = metadata['source'];
   const trustRaw = metadata['trustTier'];
@@ -59,13 +62,17 @@ function rowToEntity(row: EntityRow): Entity {
   // `Object.entries(obj)` would either crash or silently iterate string
   // characters / array indices.
   const metadata = isPlainObject(row.metadata) ? row.metadata : {};
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB validated as plain object; full Relations/EntityAttributes Zod validation deferred to domain layer
   const relations = isPlainObject(row.relations) ? (row.relations as Relations) : ({} as Relations);
   const attributes = isPlainObject(row.attributes)
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time
     ? (row.attributes as EntityAttributes)
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- empty fallback for corrupt JSONB
     : ({} as EntityAttributes);
+  const entityType = isEntityType(row.entity_type) ? row.entity_type : 'wine';
   return {
     id: createEntityId(row.entity_id),
-    type: row.entity_type as EntityType,
+    type: entityType,
     canonicalLabel: row.canonical_label,
     identitySignature: row.identity_signature,
     relations,
@@ -140,6 +147,7 @@ export class PgEntityRepository implements EntityRepository {
       if (
         err instanceof Error &&
         'code' in err &&
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing pg error code after 'code' in check
         (err as NodeJS.ErrnoException).code === '23505'
       ) {
         throw new Error(
@@ -261,6 +269,7 @@ export class PgEntityRepository implements EntityRepository {
       // Collect entity_ids that were part of this snapshot
       const snapshotEntityIds = new Set<string>();
       for (const snap of snapResult.rows) {
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB snapshot_data schema validated at write time; full EntityRow Zod validation would be prohibitive
         const data = snap.snapshot_data as EntityRow;
         snapshotEntityIds.add(data.entity_id);
 

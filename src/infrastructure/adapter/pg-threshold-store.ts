@@ -34,6 +34,7 @@ function isValidThresholdProfile(value: unknown): value is ThresholdProfileV1 {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return false;
   }
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks for property access
   const v = value as Record<string, unknown>;
   if (typeof v['id'] !== 'string' || v['id'].length === 0) return false;
   if (typeof v['version'] !== 'string' || v['version'].length === 0) return false;

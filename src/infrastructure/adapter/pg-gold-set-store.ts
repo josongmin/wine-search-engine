@@ -2,7 +2,18 @@ import type { Pool } from 'pg';
 import type { GoldSetStore, GoldSetFilter } from '../../domain/evaluation/port/gold-set-store.port.js';
 import type { EvalCase, LabelTier } from '../../domain/evaluation/model/eval-case.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
-import type { QueryClass, DecisionStatus } from '../../domain/shared/types/index.js';
+import type { DecisionStatus } from '../../domain/shared/types/index.js';
+import { isQueryClass } from '../../domain/shared/types/query-class.js';
+
+function toDecisionStatus(value: string): DecisionStatus {
+  if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;
+  return 'failed';
+}
+
+function toLabelTier(value: string): LabelTier {
+  if (value === 'gold' || value === 'silver' || value === 'bronze') return value;
+  return 'bronze';
+}
 
 interface EvalCaseRow {
   case_id: string;
@@ -20,9 +31,9 @@ function rowToEvalCase(row: EvalCaseRow): EvalCase {
   const base = {
     caseId: row.case_id,
     query: row.query,
-    queryClass: row.query_class as QueryClass,
-    expectedStatus: row.expected_status as DecisionStatus,
-    labelTier: row.label_tier as LabelTier,
+    queryClass: isQueryClass(row.query_class) ? row.query_class : 'unknown',
+    expectedStatus: toDecisionStatus(row.expected_status),
+    labelTier: toLabelTier(row.label_tier),
     timestamp: row.created_at,
     sliceTags: row.slice_tags,
   };

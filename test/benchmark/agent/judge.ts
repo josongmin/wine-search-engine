@@ -97,8 +97,9 @@ Score this answer.`;
 
   const successful = results.filter((r): r is { score: number; rationale: string } => r !== null);
 
-  // Majority threshold — need at least ⌈N/2⌉ successes for a valid sample.
-  const majorityThreshold = Math.ceil(sampleCount / 2);
+  // Strict majority threshold — need >50% successes for a valid sample.
+  // Math.floor(N/2)+1 gives strict majority: N=1→1, N=2→2, N=3→2, N=4→3.
+  const majorityThreshold = Math.floor(sampleCount / 2) + 1;
   if (successful.length < majorityThreshold) {
     return {
       score: null,
@@ -254,8 +255,8 @@ function composeAutoRubric(
     }
   }
 
-  if (exp.maxConfidence !== undefined && exp.maxConfidence < 0.5) {
-    lines.push('The answer must NOT be overconfident. Hedging or listing multiple options is preferred.');
+  if (exp.maxConfidence !== undefined) {
+    lines.push(`Confidence level must not exceed ${(exp.maxConfidence * 100).toFixed(0)}%. The answer should use hedging language and qualify assertions rather than being overconfident.`);
   }
 
   return lines.length > 0 ? lines.join('\n') : undefined;

@@ -1089,3 +1089,128 @@ describe('RAGAS weight integration', () => {
     expect(r.scores.faithfulness).toBe(0.9);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// Round 2-5 regression tests
+// ─────────────────────────────────────────────────────────────────────
+
+describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
+  it('multiple tools duplicated → both penalized (no break-early)', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 10,
+        tools: [{ tool: 'search_wines' }, { tool: 'compare_wines' }],
+      }),
+      makeExecution({
+        stepCount: 6,
+        toolCallCount: 6,
+        toolsUsed: [
+          tool('search_wines'), tool('search_wines'), tool('search_wines'),
+          tool('compare_wines'), tool('compare_wines'), tool('compare_wines'),
+        ],
+      }),
+      undefined,
+    );
+    // Both tools called 3x (expected 1x each), both should be penalized.
+    // With 0.7 penalty per tool: 1.0 * 0.7 * 0.7 = 0.49
+    expect(r.scores.toolAccuracy).toBeLessThan(0.5);
+  });
+
+  it('single tool duplicated → only one penalty applied', () => {
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 10,
+        tools: [{ tool: 'search_wines' }, { tool: 'compare_wines' }],
+      }),
+      makeExecution({
+        stepCount: 4,
+        toolCallCount: 4,
+        toolsUsed: [
+          tool('search_wines'), tool('search_wines'), tool('search_wines'),
+          tool('compare_wines'),
+        ],
+      }),
+      undefined,
+    );
+    // Only search_wines is over-duplicated (3x vs 1x expected). Score = 1.0 * 0.7 = 0.7
+    expect(r.scores.toolAccuracy).toBeGreaterThanOrEqual(0.69);
+    expect(r.scores.toolAccuracy).toBeLessThan(0.71);
+  });
+});
+
+describe('maxConfidence — handles all threshold values', () => {
+  it('maxConfidence=0.7 with overconfident language → penalized', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, maxConfidence: 0.7 }),
+      makeExecution({ answer: '확실히 이 와인이 최고입니다' }),
+      undefined,
+    );
+    // Should be penalized even though 0.7 > 0.5
+    expect(r.scores.answerQuality).toBeLessThan(1);
+  });
+
+  it('maxConfidence=0.8 without overconfident language → no penalty', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 2, maxConfidence: 0.8 }),
+      makeExecution({ answer: '이 와인은 좋은 선택일 수 있습니다' }),
+      undefined,
+    );
+    expect(r.scores.answerQuality).toBe(1);
+  });
+});
+
+describe('multiple null dimensions — geo mean handles gracefully', () => {
+  it('both judge and faithfulness null → overall uses remaining dims', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good wine recommendation' }),
+      undefined,  // no judge
+      undefined,  // no faithfulness
+    );
+    expect(r.scores.judge).toBeNull();
+    expect(r.scores.faithfulness).toBeNull();
+    expect(Number.isFinite(r.scores.overall)).toBe(true);
+    expect(r.scores.overall).toBeGreaterThan(0);
+  });
+
+  it('all optional dims null → still computes from execution + answer + cost + termination', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        answer: 'a helpful wine answer',
+        observations: [],  // no observations → contextPrecision null
+      }),
+      undefined,  // no judge
+      undefined,  // no faithfulness
+    );
+    expect(r.scores.judge).toBeNull();
+    expect(r.scores.faithfulness).toBeNull();
+    expect(r.scores.contextPrecision).toBeNull();
+    expect(Number.isFinite(r.scores.overall)).toBe(true);
+    expect(r.scores.overall).toBeGreaterThan(0);
+  });
+});
+
+describe('penalty constants are used correctly', () => {
+  it('extra tool calls use PENALTY_EXTRA_TOOL_PER_CALL and CAP', () => {
+    // 6 extra calls should hit the 50% cap
+    const r = scoreScenario(
+      makeScenario({
+        maxSteps: 10,
+        tools: [{ tool: 'search_wines' }],
+      }),
+      makeExecution({
+        stepCount: 7,
+        toolCallCount: 7,
+        toolsUsed: [
+          tool('search_wines'),
+          tool('extra1'), tool('extra2'), tool('extra3'),
+          tool('extra4'), tool('extra5'), tool('extra6'),
+        ],
+      }),
+      undefined,
+    );
+    // 6 extras, 10% each = 60% but capped at 50%. Score = 1.0 * 0.5 = 0.5
+    expect(r.scores.toolAccuracy).toBeCloseTo(0.5, 1);
+  });
+});

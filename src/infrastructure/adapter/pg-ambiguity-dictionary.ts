@@ -34,7 +34,10 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
     const row = result.rows[0];
     if (row == null) return null;
 
-    const severity = row.severity as 'low' | 'medium' | 'high';
+    const severity =
+      row.severity === 'low' || row.severity === 'medium' || row.severity === 'high'
+        ? row.severity
+        : 'low';
     return {
       types: row.ambiguity_types,
       severity,

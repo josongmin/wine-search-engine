@@ -119,6 +119,7 @@
     "etl:full": "npm run etl:silver && npm run etl:track-c && npm run etl:validate && npm run etl:index",
     "prepare": "husky",
     "check:security-patterns": "node scripts/test/check-security-patterns.mjs",
+    "check:ci": "npm run typecheck && npm run check:security-patterns && npm run test:unit && npm run verify:http-contracts && npm run deadcode",
     "git:prepush": "npm run typecheck && npm run check:security-patterns && npm run test:unit && npm run verify:http-contracts",
     "git:prepush:smart": "node scripts/test/prepush-smart.mjs",
     "git:prepush:quick": "npm run typecheck && npm run test:unit",

@@ -1,9 +1,25 @@
 import type { Pool } from 'pg';
 import type { ProposalStore } from '../../domain/learning/port/proposal-store.port.js';
 import type { AliasProposal, AliasProposalStatus, AliasProposalEvidence } from '../../domain/learning/model/alias-proposal.js';
+import type { ProposedAliasType } from '../../domain/learning/model/alias-proposal.js';
 import type { ThresholdProposal, ThresholdProposalStatus, ThresholdSet, ThresholdProposalEvidence } from '../../domain/learning/model/threshold-proposal.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
-import type { QueryClass } from '../../domain/shared/types/index.js';
+import { isQueryClass } from '../../domain/shared/types/query-class.js';
+
+function toProposedAliasType(value: string): ProposedAliasType {
+  if (value === 'observed_query_alias') return value;
+  return 'observed_query_alias';
+}
+
+function toAliasProposalStatus(value: string): AliasProposalStatus {
+  if (value === 'pending' || value === 'approved' || value === 'rejected' || value === 'promoted') return value;
+  return 'pending';
+}
+
+function toThresholdProposalStatus(value: string): ThresholdProposalStatus {
+  if (value === 'pending' || value === 'shadow_testing' || value === 'approved' || value === 'rejected') return value;
+  return 'pending';
+}
 
 interface AliasProposalRow {
   proposal_id: string;
@@ -34,10 +50,11 @@ function rowToAliasProposal(row: AliasProposalRow): AliasProposal {
     proposalId: row.proposal_id,
     surfaceForm: row.surface_form,
     targetEntityId: createEntityId(row.target_entity_id),
-    proposedType: row.proposed_type as AliasProposal['proposedType'],
+    proposedType: toProposedAliasType(row.proposed_type),
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full AliasProposalEvidence Zod validation deferred
     evidence: row.evidence as AliasProposalEvidence,
     confidence: row.confidence,
-    status: row.status as AliasProposalStatus,
+    status: toAliasProposalStatus(row.status),
     createdAt: row.created_at,
   };
 }
@@ -45,12 +62,15 @@ function rowToAliasProposal(row: AliasProposalRow): AliasProposal {
 function rowToThresholdProposal(row: ThresholdProposalRow): ThresholdProposal {
   return {
     proposalId: row.proposal_id,
-    queryClass: row.query_class as QueryClass,
+    queryClass: isQueryClass(row.query_class) ? row.query_class : 'unknown',
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full ThresholdSet Zod validation deferred
     proposedThresholds: row.proposed_thresholds as ThresholdSet,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full ThresholdSet Zod validation deferred
     currentThresholds: row.current_thresholds as ThresholdSet,
     expectedUtilityDelta: row.expected_utility_delta,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full ThresholdProposalEvidence Zod validation deferred
     evidence: row.evidence as ThresholdProposalEvidence,
-    status: row.status as ThresholdProposalStatus,
+    status: toThresholdProposalStatus(row.status),
   };
 }
 

@@ -4,6 +4,10 @@ import type { EvalResultStore, EvalResultFilter } from '../../domain/evaluation/
 import type { EvalResult } from '../../domain/evaluation/model/eval-result.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
 import type { DecisionStatus, DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
+function toDecisionStatus(value: string): DecisionStatus {
+  if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;
+  return 'failed';
+}
 
 interface EvalResultRow {
   result_id: string;
@@ -25,15 +29,17 @@ interface EvalResultRow {
 function rowToEvalResult(row: EvalResultRow): EvalResult {
   const base = {
     caseId: row.case_id,
-    predictedStatus: row.predicted_status as DecisionStatus,
+    predictedStatus: toDecisionStatus(row.predicted_status),
     decisionConfidence: row.decision_confidence,
     utilityScore: row.utility_score,
     isCorrectResolve: row.is_correct_resolve,
     isWrongResolve: row.is_wrong_resolve,
     isSafeAbstain: row.is_safe_abstain,
     isAvoidableAbstain: row.is_avoidable_abstain,
-    evidenceItems: (row.evidence_items ?? []) as readonly EvidenceItem[],
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB array schema validated at write time; full EvidenceItem[] Zod validation deferred
+    evidenceItems: (Array.isArray(row.evidence_items) ? row.evidence_items : []) as readonly EvidenceItem[],
     latencyMs: row.latency_ms,
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full DecisionSnapshot Zod validation deferred
     decisionSnapshot: row.decision_snapshot as DecisionSnapshot,
   };
   if (row.predicted_entity_id != null) {

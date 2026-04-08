@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { CalibrationStore, CalibrationParams } from '../../domain/resolver/port/calibration-store.port.js';
 import type { QueryClass } from '../../domain/shared/types/index.js';
+import { isQueryClass } from '../../domain/shared/types/query-class.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'PgCalibrationStore' });
@@ -42,9 +43,20 @@ function rowToCalibrationParams(row: CalibrationRow): CalibrationParams | null {
     );
     return null;
   }
+  // TS can't narrow from Set.has(); use equality checks (already validated above)
+  const method = row.method === 'platt' || row.method === 'isotonic' || row.method === 'temperature'
+    ? row.method
+    : ('platt' satisfies CalibrationParams['method']);
+  if (!isQueryClass(row.query_class)) {
+    log.warn(
+      { queryClass: row.query_class },
+      'calibration_params row has invalid query_class; rejecting',
+    );
+    return null;
+  }
   return {
-    method: row.method as CalibrationParams['method'],
-    queryClass: row.query_class as QueryClass,
+    method,
+    queryClass: row.query_class,
     params: row.params,
     trainedAt: row.trained_at,
     ece: row.ece,

@@ -115,7 +115,15 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
-      '@typescript-eslint/no-unused-vars': 'off',
+      /**
+       * Re-enabled for tests: unused variables in test code are often dead
+       * leftovers (e.g. seenIndices pushed-to but never read) that mask bugs.
+       * Prefix with `_` if intentionally unused.
+       */
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unnecessary-condition': 'off',
       '@typescript-eslint/restrict-template-expressions': [
@@ -123,6 +131,26 @@ export default tseslint.config(
         { allowNumber: true, allowBoolean: true, allowNullish: true },
       ],
       '@typescript-eslint/no-floating-promises': 'off',
+    },
+  },
+  /**
+   * Benchmark scoring code — stricter than general test code. Magic numbers
+   * in scorer/judge produce hard-to-audit penalty logic. Extracted constants
+   * are easier to review and modify.
+   */
+  {
+    files: ['test/benchmark/**/*.ts'],
+    ignores: ['**/*.test.ts', '**/__tests__/**/*.ts'],
+    rules: {
+      'no-magic-numbers': [
+        'warn',
+        {
+          ignore: [0, 1, -1, 2, 100, 1000],
+          ignoreArrayIndexes: true,
+          enforceConst: true,
+          ignoreDefaultValues: true,
+        },
+      ],
     },
   },
 );

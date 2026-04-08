@@ -75,6 +75,7 @@ export class RedisQueryCache implements QueryCachePort {
       }
 
       await this.redis.incr(this.statsKeyHits);
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- structural validation above checks engineDecision, results, meta fields
       return parsed as SearchResponseV1;
     } catch (error) {
       // On Redis errors, treat as miss (don't throw)
