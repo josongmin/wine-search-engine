@@ -161,7 +161,7 @@ const ZERO_SCORES: ScenarioScores = {
  *   contextRecall:        0.08  (RAGAS entity-ID overlap; null when no goldenEntityIds)
  *   costEfficiency:       0.10  (latency + token budget)
  *   terminationCorrectness: 0.10 (binary safety net)
- *   judge:                0.02  (optional LLM-as-judge rubric)
+ *   judge:                0.07  (optional LLM-as-judge rubric)
  *   total:                1.00
  *
  * Budget notes: contextRecall (0.08) and the bump of contextRelevance from
@@ -798,7 +798,7 @@ function scoreAnswerQuality(
   if (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) {
     for (const pattern of exp.answerMustMatch) {
       let re: RegExp;
-      try { re = new RegExp(pattern, 'i'); } catch {
+      try { re = new RegExp(pattern, 'iu'); } catch {
         diagnostics.push({ dim: 'answerQuality', severity: 'warn', code: 'INVALID_REGEX', message: `invalid regex: ${pattern}` });
         continue;
       }
@@ -818,7 +818,7 @@ function scoreAnswerQuality(
   if (exp.answerMustNotMatch !== undefined && exp.answerMustNotMatch.length > 0) {
     for (const pattern of exp.answerMustNotMatch) {
       let re: RegExp;
-      try { re = new RegExp(pattern, 'i'); } catch {
+      try { re = new RegExp(pattern, 'iu'); } catch {
         diagnostics.push({ dim: 'answerQuality', severity: 'warn', code: 'INVALID_REGEX', message: `invalid regex: ${pattern}` });
         continue;
       }
@@ -1608,6 +1608,10 @@ function weightedGeometricMean(
     totalWeight += w;
   }
   if (totalWeight === 0) return 0;
-  const raw = Math.exp(weightedLogSum / totalWeight) - EPS;
+  // Do NOT subtract EPS here — EPS was added to log() inputs only to prevent
+  // log(0)=-Infinity. Subtracting it from exp() output introduces a systematic
+  // negative bias: for a perfect score (x=1), exp(log(1+1e-6))−1e-6 ≈ 0, which
+  // would clamp incorrectly. Let clamp01 handle any float rounding artefact.
+  const raw = Math.exp(weightedLogSum / totalWeight);
   return clamp01(raw);
 }
