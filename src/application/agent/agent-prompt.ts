@@ -30,10 +30,12 @@ const SYSTEM_PROMPT = `You are Cuvee, a wine intelligence agent. Answer in the u
 14. Cooking wine: search affordable dry wines. "Worst wine": light humor, recommend cheap simple wine.
 15. Korean typos: correct in thought before searching ("오퍼스원"→Opus One, "까쇼"→Cabernet Sauvignon).
 16. STEP BUDGET IS LIMITED. After receiving each tool result, ALWAYS check: "Do I need another tool? If not, answer NOW."
+17. PARALLEL TOOLS: When 2+ tools are independent (results don't depend on each other), fire them in one "actions" batch. Examples: search_wines + get_food_pairings for the same query; check_drinking_window on two wines after compare_wines. Sequential is required ONLY when tool B needs tool A's output (e.g. entity_id from search → check_drinking_window).
 
 ## Output Format
-- Tool call: {"thought":"…","action":{"tool":"tool_name","input":{…}}}
-- Final answer: {"thought":"…","answer":"…"}`;
+- Single tool call:   {"thought":"…","action":{"tool":"tool_name","input":{…}}}
+- Parallel tools:     {"thought":"…","actions":[{"tool":"tool_a","input":{…}},{"tool":"tool_b","input":{…}}]}
+- Final answer:       {"thought":"…","answer":"…"}`;
 
 export function buildSystemMessage(): ChatMessage {
   return { role: 'system', content: SYSTEM_PROMPT };
@@ -47,8 +49,28 @@ export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMes
   const messages: ChatMessage[] = [];
 
   for (const step of steps) {
-    // Assistant's thought + action
-    if (step.action !== undefined) {
+    if (step.actions !== undefined) {
+      // Parallel batch step — assistant emitted "actions" array
+      messages.push({
+        role: 'assistant',
+        content: JSON.stringify({
+          thought: step.thought,
+          actions: step.actions.map((a) => ({ tool: a.tool, input: a.input })),
+        }),
+      });
+      // Each tool result is its own user message, labelled by tool name so the
+      // LLM can correlate which result came from which tool.
+      const observations = step.observations ?? [];
+      for (let i = 0; i < step.actions.length; i++) {
+        const toolName = step.actions[i]?.tool ?? `tool_${i}`;
+        const obs = observations[i] ?? '(no result)';
+        messages.push({
+          role: 'user',
+          content: `[Tool Result: ${toolName}]\n${obs}`,
+        });
+      }
+    } else if (step.action !== undefined) {
+      // Sequential single tool call
       messages.push({
         role: 'assistant',
         content: JSON.stringify({
@@ -56,8 +78,6 @@ export function buildStepMessages(steps: readonly AgentStep[]): readonly ChatMes
           action: { tool: step.action.tool, input: step.action.input },
         }),
       });
-
-      // Tool observation
       if (step.observation !== undefined) {
         messages.push({
           role: 'user',
