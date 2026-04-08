@@ -27,23 +27,32 @@ function constraintToSparseFilterTokens(
       return [`${key}:${value}`];
     }
     if (operator === 'in' && Array.isArray(value)) {
-      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-      if (normalized.length === 1) return [`${key}:${normalized[0]}`];
+      // Strip pipe chars from individual values: pipe is the token delimiter used by
+      // buildSparseFilters to split multi-value tokens. A pipe inside a value would
+      // cause silent semantic corruption — "France|Italy" as one value would be split
+      // into two separate filter terms. Strip to prevent this injection vector.
+      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+        .map((entry) => entry.replace(/\|/g, ''));
+      const nonempty = normalized.filter((entry) => entry.length > 0);
+      if (nonempty.length === 1) return [`${key}:${nonempty[0]}`];
       // Multi-value IN: emit pipe-delimited token so buildSparseFilters can
       // produce a Vespa OR clause instead of silently dropping the constraint.
-      if (normalized.length > 1) return [`${key}_in:${normalized.join('|')}`];
+      if (nonempty.length > 1) return [`${key}_in:${nonempty.join('|')}`];
       return [];
     }
     // Negation operators: emit <key>_not tokens for downstream YQL NOT clauses.
     if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
-      return [`${key}_not:${value}`];
+      return [`${key}_not:${value.replace(/\|/g, '')}`];
     }
     if (operator === 'not_in' && Array.isArray(value)) {
-      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-      if (normalized.length === 1) return [`${key}_not:${normalized[0]}`];
+      // Same pipe-stripping: see 'in' branch above.
+      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+        .map((entry) => entry.replace(/\|/g, ''));
+      const nonempty = normalized.filter((entry) => entry.length > 0);
+      if (nonempty.length === 1) return [`${key}_not:${nonempty[0]}`];
       // Multi-value NOT IN: emit pipe-delimited token so buildSparseFilters can
       // produce individual Vespa NOT clauses for each value.
-      if (normalized.length > 1) return [`${key}_not_in:${normalized.join('|')}`];
+      if (nonempty.length > 1) return [`${key}_not_in:${nonempty.join('|')}`];
       return [];
     }
     return [];
@@ -62,10 +71,15 @@ function constraintToSparseFilterTokens(
       // Exclusion must cover BOTH grape fields in the schema:
       // grape_primary (string) and grapes (array<string>).
       if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
-        return [`grape_primary_not:${value}`, `grapes_not:${value}`];
+        const safe = value.replace(/\|/g, '');
+        if (safe.length === 0) return [];
+        return [`grape_primary_not:${safe}`, `grapes_not:${safe}`];
       }
       if (operator === 'not_in' && Array.isArray(value)) {
-        const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0);
+        // Strip pipes to prevent token-delimiter injection (same as stringEq branch).
+        const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0)
+          .map((e) => e.replace(/\|/g, ''))
+          .filter((e) => e.length > 0);
         if (normalized.length === 0) return [];
         const joined = normalized.join('|');
         // Single value: use _not form; multiple: use _not_in pipe-delimited form.
