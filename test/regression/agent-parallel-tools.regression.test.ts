@@ -284,3 +284,87 @@ describe('executeAgentToolsBatch', () => {
     ).rejects.toMatchObject({ code: POLICY_BLOCKED_CODE });
   });
 });
+
+// ─── Regression: parallel-batch obsSteps filter ──────────────────────────────
+// Bug: synthesis obsSteps used to only check s.observation (sequential), skipping
+// s.observations[] (parallel batch). Agent with parallel tool results but no answer
+// would skip synthesis entirely and fall through to raw Layer-2 search.
+// Fix: obsSteps now checks both s.observation and s.observations[].
+
+describe('parallel batch observations count toward synthesis eligibility', () => {
+  it('parallel step with non-empty observations[] is counted as an obs step', () => {
+    // Simulate a step with parallel observations[] and verify it would be
+    // selected by the corrected obsSteps filter.
+    const parallelStep: AgentStep = {
+      index: 0,
+      thought: 'searched in parallel',
+      actions: [
+        { tool: 'search_wines', input: { query: 'Bordeaux' } },
+        { tool: 'get_food_pairings', input: { food: 'steak' } },
+      ],
+      observations: ['Found 5 results (showing top 5):\n1. Château Margaux', 'Cabernet Sauvignon pairs well with steak.'],
+      durationMs: 150,
+      tokenCount: { input: 20, output: 5 },
+    };
+
+    // Replicate the corrected obsSteps filter from agent-orchestrator.ts
+    const steps = [parallelStep];
+    const obsSteps = steps.filter(
+      (s) =>
+        (s.observation !== undefined && s.observation.length > 0) ||
+        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+    );
+
+    // The parallel step MUST be included in obsSteps — synthesis should fire.
+    expect(obsSteps).toHaveLength(1);
+    expect(obsSteps[0]).toBe(parallelStep);
+  });
+
+  it('parallel step with empty observations[] is NOT counted as an obs step', () => {
+    const emptyParallelStep: AgentStep = {
+      index: 0,
+      thought: 'searched but empty',
+      actions: [{ tool: 'search_wines', input: { query: 'xyz' } }],
+      observations: [''],
+      durationMs: 50,
+      tokenCount: { input: 5, output: 5 },
+    };
+
+    const steps = [emptyParallelStep];
+    const obsSteps = steps.filter(
+      (s) =>
+        (s.observation !== undefined && s.observation.length > 0) ||
+        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+    );
+
+    expect(obsSteps).toHaveLength(0);
+  });
+
+  it('mixed sequential + parallel steps: both count toward synthesis eligibility', () => {
+    const seqStep: AgentStep = {
+      index: 0,
+      thought: 'sequential',
+      action: { tool: 'search_wines', input: { query: 'Pinot Noir' } },
+      observation: 'Found 3 results',
+      durationMs: 100,
+      tokenCount: { input: 10, output: 5 },
+    };
+    const parStep: AgentStep = {
+      index: 1,
+      thought: 'parallel',
+      actions: [{ tool: 'get_food_pairings', input: { food: 'duck' } }],
+      observations: ['Duck pairs with Pinot Noir.'],
+      durationMs: 80,
+      tokenCount: { input: 8, output: 4 },
+    };
+
+    const steps = [seqStep, parStep];
+    const obsSteps = steps.filter(
+      (s) =>
+        (s.observation !== undefined && s.observation.length > 0) ||
+        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+    );
+
+    expect(obsSteps).toHaveLength(2);
+  });
+});

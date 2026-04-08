@@ -1,15 +1,16 @@
 /**
  * Agent benchmark scenarios — complete coverage of user intent patterns.
  *
- * Phase-2 (multi-turn / session-history dependent) scenarios live in
- * scenarios.phase2.ts. Adversarial security scenarios (#106-115) live in
- * scenarios.adversarial.ts. Both are auto-merged at the end of this file.
+ * Adversarial security scenarios (#106-116) live in scenarios.adversarial.ts.
+ * Coverage-expansion scenarios (200+) live in scenarios.coverage.ts.
+ * Both are auto-merged at the end of this file.
+ *
+ * Phase-2 (multi-turn / session-history) removed — not implemented, made nightly == standard.
  */
 
 import type { AgentBenchmarkScenario } from './scenario.js';
 import { ADVERSARIAL_SCENARIOS } from './scenarios.adversarial.js';
 import { COVERAGE_SCENARIOS } from './scenarios.coverage.js';
-import { PHASE2_SCENARIOS } from './scenarios.phase2.js';
 
 const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // ─────────────────────────────────────────────────────────────────────
@@ -558,8 +559,6 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
 /**
  * Aggregated benchmark suite. Order matters: main first (1-105), then
  * adversarial extensions (106-116), then coverage expansion (200+).
- * Phase-2 scenarios are NOT included by default — runner.ts opts in
- * via --include-phase2.
  */
 export const AGENT_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   ...MAIN_SCENARIOS,
@@ -567,10 +566,81 @@ export const AGENT_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   ...COVERAGE_SCENARIOS,
 ];
 
-/** Phase-2 scenarios — runner opts in via --include-phase2. */
-export const AGENT_SCENARIOS_WITH_PHASE2: readonly AgentBenchmarkScenario[] = [
-  ...MAIN_SCENARIOS,
-  ...ADVERSARIAL_SCENARIOS,
-  ...COVERAGE_SCENARIOS,
-  ...PHASE2_SCENARIOS,
-];
+/**
+ * Standard profile: ~80 curated scenarios covering all tiers.
+ *
+ * Selection criteria:
+ *   - All critical/judgeRequired adversarial cases (100% included)
+ *   - 1-2 representative cases per tier (most discriminative)
+ *   - Prefer cases with goldenEntityIds (retrieval signal)
+ *   - Exclude near-duplicates within same tier
+ *
+ * Tier coverage (80 total):
+ *   single_shot(5), multi_step(5), complex_reasoning(4),
+ *   edge_case(5), nested_condition(5), comparison_nested(4),
+ *   relative_reference(2), situation_based(5), negation(7),
+ *   knowledge_hybrid(4), extreme(3), gift_refined(3),
+ *   korean_colloquial(4), korean_food_pairing(4), mood_atmosphere(3),
+ *   price_expression(4), seasonal_temporal(3), adversarial(11 — all critical/major),
+ *   wine_name_lookup(4), taste_descriptor(3), rating_score(2),
+ *   wine_type_basic(3), negation_complex(3), arithmetic_query(3),
+ *   bilingual_mixed(3), cellar_aging(2)
+ */
+export const STANDARD_SCENARIO_IDS: ReadonlySet<number> = new Set([
+  // single_shot (5)
+  1, 2, 3, 4, 5,
+  // multi_step (5)
+  6, 7, 8, 9, 10,
+  // complex_reasoning (4)
+  12, 13, 14, 15,
+  // edge_case (5)
+  19, 20, 22, 23, 24,
+  // nested_condition (5)
+  25, 27, 28, 29,
+  430,
+  // comparison_nested (4)
+  30, 31, 32, 34,
+  // relative_reference (2)
+  35, 39,
+  // situation_based (5)
+  40, 41, 42, 44,
+  460,
+  // negation (7) — from main
+  45, 46, 47, 48,
+  // negation (3 more from coverage.ts 400-block)
+  403, 406, 410,
+  // knowledge_hybrid (4)
+  50, 51, 52, 54,
+  // extreme (3)
+  56, 57, 59,
+  // gift_refined (3)
+  88, 90, 92,
+  // korean_colloquial (4)
+  61, 63, 65, 66,
+  // korean_food_pairing (4)
+  81, 83, 85, 87,
+  // mood_atmosphere (3)
+  75, 77, 79,
+  // price_expression (4)
+  68, 70, 72, 74,
+  // seasonal_temporal (3)
+  93, 95, 97,
+  // adversarial — ALL critical/major/judgeRequired (11)
+  98, 99, 100, 105, 106, 107, 108, 110, 112, 114, 116,
+  // wine_name_lookup (4)
+  200, 202, 205, 208,
+  // taste_descriptor (3)
+  220, 223, 226,
+  // rating_score (2)
+  240, 244,
+  // wine_type_basic (3)
+  260, 261, 263,
+  // negation_complex (3)
+  280, 282, 284,
+  // arithmetic_query (3)
+  300, 302, 305,
+  // bilingual_mixed (3)
+  320, 321, 323,
+  // cellar_aging (2)
+  340, 343,
+]);

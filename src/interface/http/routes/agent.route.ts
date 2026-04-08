@@ -49,7 +49,7 @@ const AgentStepSchema = z.object({
   actions: z.array(AgentToolCallSchema).max(MAX_AGENT_STEPS_CAP).optional(),
   observations: z.array(z.string()).max(MAX_AGENT_STEPS_CAP).optional(),
   answer: z.string().optional(),
-  duration_ms: z.number().nonnegative(),
+  duration_ms: z.number().finite().nonnegative(),
   token_count: z.object({
     input: z.number().int().nonnegative(),
     output: z.number().int().nonnegative(),
@@ -69,8 +69,8 @@ const AgentResponseSchema = z.object({
     total_tokens: z.object({
       input: z.number().int().nonnegative(),
       output: z.number().int().nonnegative(),
-    }),
-  }),
+    }).strict(),
+  }).strict(),
 });
 
 // ErrorResponseSchema imported from search-response.schema.ts (RFC-014 canonical shape)

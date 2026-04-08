@@ -636,7 +636,13 @@ export class AgentOrchestrator {
     // Skip entirely if caller already disconnected — synthesis costs 1-2 LLM round-trips
     // that nobody will receive.
     if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !(abortSignal?.aborted)) {
-      const obsSteps = steps.filter((s) => s.observation !== undefined && s.observation.length > 0);
+      // Check both sequential (observation) and parallel batch (observations[]) steps
+      // so synthesis fires when the agent used parallel tools and has results.
+      const obsSteps = steps.filter(
+        (s) =>
+          (s.observation !== undefined && s.observation.length > 0) ||
+          (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+      );
       if (obsSteps.length > 0) {
         // requestId embedded in sentinel to prevent adversarial tool results from
         // containing the literal string and colliding with our synthesis detector.

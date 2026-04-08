@@ -16,8 +16,8 @@
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
  *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off
- *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 106 main scenarios, concurrency 1, judge on
- *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 200+ scenarios + phase2, judge on
+ *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 80 curated scenarios, concurrency 3, judge on
+ *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 233 scenarios, concurrency 3, judge on (3 samples)
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # retrieval-only evaluation
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
@@ -42,7 +42,7 @@ import { loadConfig } from '../../../src/config/env.js';
 import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestrator.js';
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
 import { QuerySanitizer } from '../../../src/domain/security/service/query-sanitizer.js';
-import { AGENT_SCENARIOS, AGENT_SCENARIOS_WITH_PHASE2 } from './scenarios.js';
+import { AGENT_SCENARIOS, STANDARD_SCENARIO_IDS } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
@@ -69,7 +69,6 @@ interface CliArgs {
   readonly judgeModel?: string;
   readonly enableJudge: boolean;
   readonly judgeSamples: number;
-  readonly includePhase2: boolean;
   readonly baseline?: string;
   readonly failIfWorseThan?: number;
   readonly outputPath?: string;
@@ -93,7 +92,6 @@ function parseArgs(): CliArgs {
   const explicitConcurrency = get('--concurrency');
   const explicitJudge = has('--no-judge');
   const explicitJudgeSamples = get('--judge-samples');
-  const explicitPhase2 = has('--include-phase2');
 
   const profile = get('--profile') as CliArgs['profile'];
 
@@ -109,7 +107,6 @@ function parseArgs(): CliArgs {
     judgeModel: get('--judge-model'),
     enableJudge: !explicitJudge,
     judgeSamples: Number.parseInt(explicitJudgeSamples ?? '1', 10) || 1,
-    includePhase2: explicitPhase2,
     baseline: get('--baseline'),
     failIfWorseThan:
       get('--fail-if-worse-than') !== undefined
@@ -132,6 +129,10 @@ function parseArgs(): CliArgs {
   }
 
   if (profile === 'standard') {
+    // 80 curated scenarios — all tiers represented, critical adversarial 100% included
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...STANDARD_SCENARIO_IDS] };
+    }
     if (explicitConcurrency === undefined) {
       args = { ...args, concurrency: 3 };
     }
@@ -141,9 +142,7 @@ function parseArgs(): CliArgs {
   }
 
   if (profile === 'nightly') {
-    if (!explicitPhase2) {
-      args = { ...args, includePhase2: true };
-    }
+    // All 233 scenarios, judge 3 samples for statistical stability
     if (explicitConcurrency === undefined) {
       args = { ...args, concurrency: 3 };
     }
@@ -612,8 +611,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       })
     : null;
 
-  const baseScenarios = args.includePhase2 ? AGENT_SCENARIOS_WITH_PHASE2 : AGENT_SCENARIOS;
-  const scenarios = filterScenarios(baseScenarios, args);
+  const scenarios = filterScenarios(AGENT_SCENARIOS, args);
 
   // Container wiring
   console.error('  [INIT] real container — wiring PG + Redis + production deps...');
@@ -864,13 +862,15 @@ function buildReport(
     : null;
 
   // RAGAS dim means — only over scenarios that produced non-null values.
-  const faithScores = executed.map((r) => r.scores.faithfulness).filter((s): s is number => s !== null);
+  // Use executedForAggregate (consistent with avgScore) so judgeRequired scenarios
+  // excluded in --no-judge mode do not skew the RAGAS aggregate differently from overall.
+  const faithScores = executedForAggregate.map((r) => r.scores.faithfulness).filter((s): s is number => s !== null);
   const faithMean = faithScores.length > 0 ? faithScores.reduce((s, v) => s + v, 0) / faithScores.length : null;
 
-  const ctxRelScores = executed.map((r) => r.scores.contextRelevance).filter((s): s is number => s !== null);
+  const ctxRelScores = executedForAggregate.map((r) => r.scores.contextRelevance).filter((s): s is number => s !== null);
   const ctxRelMean = ctxRelScores.length > 0 ? ctxRelScores.reduce((s, v) => s + v, 0) / ctxRelScores.length : null;
 
-  const ctxRecallScores = executed.map((r) => r.scores.contextRecall).filter((s): s is number => s !== null);
+  const ctxRecallScores = executedForAggregate.map((r) => r.scores.contextRecall).filter((s): s is number => s !== null);
   const ctxRecallMean = ctxRecallScores.length > 0 ? ctxRecallScores.reduce((s, v) => s + v, 0) / ctxRecallScores.length : null;
 
   const judgeRequiredButSkippedCount = executed.filter((r) => r.judgeRequiredButSkipped).length;
