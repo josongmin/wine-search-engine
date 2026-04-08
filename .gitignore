@@ -98,3 +98,4 @@ data/silver-quality-report.json
 *.pem
 *.key
 !**/test/fixtures/**/*.pem
+test_edge_cases.mjs
