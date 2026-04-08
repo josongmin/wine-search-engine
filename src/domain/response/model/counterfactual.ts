@@ -6,6 +6,22 @@ import type {
 } from './specialized-route.js';
 
 /**
+ * Structured rejection categories for counterfactuals. Lets downstream
+ * consumers branch on type instead of substring-matching `rejectedReason`.
+ *
+ * - `lower_calibrated_score`: resolver alternate beaten by top entity in
+ *   calibrated scoring (the classic "rejected vs. winner" case).
+ * - `below_top_window`: ranked-tail item that fell outside the top-K window.
+ * - `abstain_tied`: engine abstained — there is NO winner; this entity is one
+ *   of the indistinguishable candidates the engine held on. Distinct from
+ *   rejection because nothing was actually rejected.
+ */
+export type CounterfactualRejectionType =
+  | 'lower_calibrated_score'
+  | 'below_top_window'
+  | 'abstain_tied';
+
+/**
  * A candidate that was considered but ultimately rejected, with the reason.
  * Included in the response for transparency and debugging.
  */
@@ -15,6 +31,12 @@ export interface CounterfactualReject {
 
   /** Display label for the rejected entity (when available). */
   readonly canonicalLabel?: string | undefined;
+
+  /**
+   * Structured rejection category. Required field — producers always know
+   * the category at emission time.
+   */
+  readonly rejectionType: CounterfactualRejectionType;
 
   /** Human-readable reason this entity was not included in results. */
   readonly rejectedReason: string;

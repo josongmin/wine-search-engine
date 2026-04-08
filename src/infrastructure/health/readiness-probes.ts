@@ -34,6 +34,10 @@ export async function probeJsonPostEndpoint(
       signal,
     });
 
-    return response.status < 500 ? 'up' : 'down';
+    // Only 2xx counts as up. 401/403 (auth misconfig), 404 (wrong URL),
+    // 429 (rate-limited), and 5xx all indicate the dependency cannot serve
+    // production traffic. Earlier code accepted any < 500 which silently
+    // hid auth/config drift behind a green health page.
+    return response.status >= 200 && response.status < 300 ? 'up' : 'down';
   });
 }

@@ -136,7 +136,9 @@ export async function runHybridRankingPipeline(
 
   const { results: rankedResults, metadata: rankingMetadata } = await ranker.rank(rankingInput);
   const rankerDegradation = rankingMetadata.runtimeSignal?.degradation ?? ranker.getLastRuntimeSignal?.()?.degradation;
-  const funnelMetrics = ranker.getLastFunnelMetrics?.();
+  // Prefer metadata.funnelMetrics (per-call, concurrency-safe) over the legacy
+  // getter (instance state, race-prone under concurrent rank() calls).
+  const funnelMetrics = rankingMetadata.funnelMetrics ?? ranker.getLastFunnelMetrics?.();
 
   if (ranker.getLastFunnelMetrics === undefined) {
     pipelineDebug(

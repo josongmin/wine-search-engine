@@ -13,6 +13,9 @@ import type { Pool } from 'pg';
 import type { ThresholdStore } from '../../domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../domain/query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../domain/query/model/threshold-profile.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+const log = bootstrapLogger.child({ component: 'PgThresholdStore' });
 
 interface ThresholdProfileRow {
   profile_id: string;
@@ -22,8 +25,35 @@ interface ThresholdProfileRow {
   updated_at: Date;
 }
 
-function rowToProfile(row: ThresholdProfileRow): ThresholdProfileV1 {
-  return row.profile_data as ThresholdProfileV1;
+/**
+ * Runtime validation for ThresholdProfileV1 deserialized from JSONB.
+ * Threshold profiles gate model promotions; corrupted data must not be
+ * silently accepted. Returns null on shape mismatch (caller decides fallback).
+ */
+function isValidThresholdProfile(value: unknown): value is ThresholdProfileV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  if (typeof v['id'] !== 'string' || v['id'].length === 0) return false;
+  if (typeof v['version'] !== 'string' || v['version'].length === 0) return false;
+  if (typeof v['perQueryClass'] !== 'object' || v['perQueryClass'] === null) return false;
+  if (typeof v['ambiguityPenaltyDefault'] !== 'number'
+      || !Number.isFinite(v['ambiguityPenaltyDefault'])) {
+    return false;
+  }
+  return true;
+}
+
+function rowToProfile(row: ThresholdProfileRow, context: string): ThresholdProfileV1 | null {
+  if (!isValidThresholdProfile(row.profile_data)) {
+    log.warn(
+      { profileId: row.profile_id, context },
+      'threshold_profile_data has invalid shape; rejecting (DB corruption or schema drift)',
+    );
+    return null;
+  }
+  return row.profile_data;
 }
 
 export class PgThresholdStore implements ThresholdStore {
@@ -35,7 +65,7 @@ export class PgThresholdStore implements ThresholdStore {
       [id],
     );
     const row = result.rows[0];
-    return row != null ? rowToProfile(row) : null;
+    return row != null ? rowToProfile(row, 'getProfile') : null;
   }
 
   async getDefault(): Promise<ThresholdProfileV1> {
@@ -44,7 +74,9 @@ export class PgThresholdStore implements ThresholdStore {
     );
     const row = result.rows[0];
     if (row != null) {
-      return rowToProfile(row);
+      const parsed = rowToProfile(row, 'getDefault');
+      if (parsed !== null) return parsed;
+      log.warn('default threshold profile invalid; falling back to in-memory DEFAULT_THRESHOLD_PROFILE');
     }
     // Guaranteed non-null fallback per port contract
     return DEFAULT_THRESHOLD_PROFILE;

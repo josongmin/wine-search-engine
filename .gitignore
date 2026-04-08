@@ -64,6 +64,14 @@ test-results/
 playwright-report
 playwright-report/
 
+# Benchmark run artifacts (per-run results + logs).
+# The committed baseline.json is whitelisted below for regression gating.
+test/benchmark/agent/results/*.json
+test/benchmark/agent/results/*.log
+test/benchmark/agent/results/*.txt
+!test/benchmark/agent/results/baseline.json
+!test/benchmark/agent/results/.gitkeep
+
 # Linked build outputs in nested workspaces
 web/.next
 web/next-env.d.ts

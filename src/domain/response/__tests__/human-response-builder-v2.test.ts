@@ -389,27 +389,7 @@ describe('buildHumanResponseV2', () => {
       expect(item?.rank).toBe(1);
     });
 
-    it('prefers vintageYear over vintage', () => {
-      const params: HumanResponseBuildParamsV2 = {
-        queryId: 'q-vy',
-        results: [
-          makeResult({
-            entityId: createEntityId('wine-vy'),
-            canonicalLabel: 'Vintage Wine',
-            rank: 1,
-            finalScore: 0.8,
-            vintageYear: 2018,
-            vintage: 2015,
-          }),
-        ],
-        totalCandidates: 1,
-      };
-
-      const response = buildHumanResponseV2(params);
-      expect(response.results[0]?.vintage).toBe(2018);
-    });
-
-    it('falls back to vintage when vintageYear is absent', () => {
+    it('omits vintage when vintageYear is absent', () => {
       const params: HumanResponseBuildParamsV2 = {
         queryId: 'q-vfb',
         results: [
@@ -418,14 +398,13 @@ describe('buildHumanResponseV2', () => {
             canonicalLabel: 'Legacy Wine',
             rank: 1,
             finalScore: 0.8,
-            vintage: 2015,
           }),
         ],
         totalCandidates: 1,
       };
 
       const response = buildHumanResponseV2(params);
-      expect(response.results[0]?.vintage).toBe(2015);
+      expect(response.results[0]?.vintage).toBeUndefined();
     });
 
     it('omits producer, region, vintage, grapePrimary when undefined', () => {

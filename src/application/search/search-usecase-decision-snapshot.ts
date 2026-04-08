@@ -131,10 +131,11 @@ export function readDecisionSnapshotFromSearchResponse(
  * This is the authoritative projection spec for cache-key enrichment and
  * observability consumers that need route/mode in the snapshot contract.
  *
- * NOTE: This function is not yet called from any production code path.
- * PgSnapshotStore.save() uses V1 snapshot IDs only.
- * To activate V2 snapshot IDs: call this function and pass result to buildDeterministicSnapshotIdV2,
- * then wire into the search pipeline's cache-key and snapshot-store calls.
+ * Activation guide (separate epic):
+ *   1. Call this function in buildDecisionSnapshotFromPlan when compiled is available
+ *   2. Pass result to buildDeterministicSnapshotIdV2 for enriched cache keys
+ *   3. Update PgSnapshotStore.save() to persist V2 contract fields
+ *   4. Update cache-service.ts QueryCacheKeyBuilder to include route/mode in key
  */
 export function buildSnapshotVersionContractV2FromCompiled(
   compiled: CompiledWineQuery,

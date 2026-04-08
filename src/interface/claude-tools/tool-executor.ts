@@ -167,6 +167,12 @@ export class WineToolExecutor {
         // Guard on the flag value itself (not just presence) so an accidental
         // falsy v2Options does not silently fall through to V2 projection.
         if (v2Options !== undefined) {
+          // Always validate the raw input even on the V2 path so that
+          // malformed query metadata is rejected, not silently dropped.
+          const validation = SearchToolInputSchema.safeParse(input);
+          if (!validation.success) {
+            return { error: `Invalid input for search_wines: ${validation.error.issues.map((i) => i.message).join(', ')}` };
+          }
           const queryId = v2Options.queryId ?? requestId;
           return buildMachineResponseV2({
             queryId,

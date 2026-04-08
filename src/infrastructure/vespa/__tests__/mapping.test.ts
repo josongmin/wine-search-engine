@@ -65,7 +65,7 @@ describe('fromVespaFields entity_id validation', () => {
         producer: 'Some Producer',
         // entity_id deliberately absent
       }),
-    ).toThrow(/fromVespaFields: missing or invalid entity_id/);
+    ).toThrow(/malformed Vespa document/);
   });
 
   it('throws a descriptive error when entity_id is not a string', () => {
@@ -74,20 +74,22 @@ describe('fromVespaFields entity_id validation', () => {
         entity_id: 12345, // number instead of string
         canonical_label: 'Some Wine',
       }),
-    ).toThrow(/fromVespaFields: missing or invalid entity_id/);
+    ).toThrow(/malformed Vespa document/);
   });
 
-  it('error message includes available field keys to aid debugging', () => {
+  it('error message does NOT include available field keys (schema disclosure protection)', () => {
+    // L15 hardening: error messages must not leak internal field keys
+    // because they propagate to clients via 500 responses. Operators get
+    // the full key list from structured logs, not from the exception text.
     let message = '';
     try {
       fromVespaFields({ canonical_label: 'Wine', vintage_year: 2019 });
     } catch (err) {
       message = err instanceof Error ? err.message : String(err);
     }
-    // The error should show which keys ARE present so the caller knows
-    // what Vespa actually returned.
-    expect(message).toContain('canonical_label');
-    expect(message).toContain('vintage_year');
+    expect(message).not.toContain('canonical_label');
+    expect(message).not.toContain('vintage_year');
+    expect(message).toMatch(/malformed Vespa document/);
   });
 });
 

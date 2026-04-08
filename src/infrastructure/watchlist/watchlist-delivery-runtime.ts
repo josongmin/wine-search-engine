@@ -1,4 +1,7 @@
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
+
+const log = bootstrapLogger.child({ component: 'WatchlistDeliveryRuntime' });
 import type {
   WatchlistServicePort,
 } from '../../application/watchlist/watchlist.service.js';
@@ -55,7 +58,11 @@ export class WatchlistDeliveryRuntime implements WatchlistRuntimePort {
       shouldDeliverWatchlistEvent(entry, event, this.now()),
     );
 
-    await Promise.all(
+    // Use allSettled (NOT Promise.all) so a single delivery failure doesn't
+    // reject the whole batch — Promise.all would propagate the first rejection
+    // up to the subscriber, which may then mark the source message as failed
+    // and REDELIVER the entire batch, double-delivering successful entries.
+    const settled = await Promise.allSettled(
       activeEntries.map(async (entry) => {
         await this.webhookDelivery.deliver(entry, event, {
           onAttempt: async (log) => {
@@ -70,6 +77,14 @@ export class WatchlistDeliveryRuntime implements WatchlistRuntimePort {
         });
       }),
     );
+    // Log any individual failures so ops can detect a degraded delivery path.
+    const failures = settled.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failures.length > 0) {
+      log.warn(
+        { failedCount: failures.length, totalCount: activeEntries.length, entityId },
+        'watchlist delivery: some entries failed (others succeeded — no redelivery)',
+      );
+    }
   }
 
 }

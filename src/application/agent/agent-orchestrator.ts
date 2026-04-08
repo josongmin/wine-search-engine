@@ -17,6 +17,7 @@ import type { AgentResult } from '../../domain/agent/model/agent-result.js';
 import type { AgentStep, AgentTerminationReason } from '../../domain/agent/model/agent-step.js';
 import { DEFAULT_AGENT_CONFIG } from '../../domain/agent/model/agent-config.js';
 import { StepBudget } from '../../domain/agent/service/step-budget.js';
+import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
 import {
   buildSystemMessage,
   buildUserMessage,
@@ -42,8 +43,17 @@ interface LlmAction {
 
 function parseLlmOutput(text: string): LlmAction {
   try {
-    // Strip markdown code fences if present
-    const cleaned = text.replace(/^```json?\s*/i, '').replace(/\s*```$/i, '').trim();
+    // Trim first, then strip markdown code fences (anchored ^ needs trimmed input).
+    // The previous regex `^```json?\s*` matched only "```jso" or "```json" — plain
+    // ``` fences (no language tag) that LLMs often emit fell through and broke JSON.parse.
+    const trimmed = text.trim();
+    // Strip ANY language tag (typescript, yaml, plain, etc.). Models routinely
+    // emit ` ```json `, ` ``` `, ` ```typescript `, etc. — restricting to a
+    // small whitelist degrades the agent to passthrough on legitimate JSON.
+    const cleaned = trimmed
+      .replace(/^```[\w-]*\s*\n?/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
 
     const thought = typeof parsed['thought'] === 'string' ? parsed['thought'] : '';
@@ -60,11 +70,21 @@ function parseLlmOutput(text: string): LlmAction {
       return { thought, action: { tool: action['tool'], input } };
     }
 
-    // If neither action nor answer, treat the whole text as an answer
-    return { thought, answer: text };
+    // If neither action nor answer, treat the whole text as an answer.
+    // Logged as warn so ops can detect a model that's no longer following the
+    // structured output protocol — otherwise this silently degrades to passthrough.
+    log.warn(
+      { textPreview: trimmed.slice(0, 200) },
+      'agent LLM produced JSON without action or answer; falling back to raw text',
+    );
+    return { thought: '[unparseable LLM structure]', answer: trimmed };
   } catch {
-    // LLM returned non-JSON — treat as direct answer
-    return { thought: '', answer: text };
+    // LLM returned non-JSON — treat as direct answer.
+    log.warn(
+      { textPreview: text.slice(0, 200) },
+      'agent LLM produced non-JSON output; falling back to raw text',
+    );
+    return { thought: '[unparseable LLM output]', answer: text.trim() };
   }
 }
 
@@ -83,13 +103,40 @@ export class AgentOrchestrator {
     this.config = { ...DEFAULT_AGENT_CONFIG, ...config };
   }
 
-  async execute(query: string, requestId: string): Promise<AgentResult> {
-    const budget = new StepBudget(this.config);
+  async execute(
+    query: string,
+    requestId: string,
+    overrides?: Partial<Pick<AgentConfig, 'maxSteps' | 'perStepTimeoutMs' | 'agentTimeoutMs'>>,
+  ): Promise<AgentResult> {
+    // Adaptive step budget — lexical classifier picks a tighter ceiling for
+    // specific SKU lookups, adversarial probes, and off-domain queries.
+    // Caller-supplied overrides win; classifier only fires when override
+    // absent. Returns undefined for queries without a clear class, falling
+    // back to this.config.maxSteps.
+    const adaptive = overrides?.maxSteps === undefined ? classifyQueryBudget(query) : undefined;
+    const effectiveConfig = {
+      ...this.config,
+      ...(adaptive !== undefined ? { maxSteps: adaptive.maxSteps } : {}),
+      ...(overrides ?? {}),
+    };
+    if (adaptive !== undefined) {
+      log.info(
+        { requestId, classification: adaptive.classification, maxSteps: adaptive.maxSteps, reason: adaptive.reason },
+        'adaptive step budget applied',
+      );
+    }
+    const budget = new StepBudget(effectiveConfig);
     const steps: AgentStep[] = [];
     let lastSearchResult: SearchResponseV1 | undefined;
     let terminationReason: AgentTerminationReason = 'max_steps';
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    /**
+     * Set when a tool execution surfaced a policy block. Prevents the
+     * single-shot fallback from re-running the raw query through the
+     * search use case after the agent's protective layers said no.
+     */
+    let policyBlocked = false;
 
     try {
       while (true) {
@@ -107,9 +154,12 @@ export class AgentOrchestrator {
           ...buildStepMessages(steps),
         ];
 
-        // LLM call with per-step timeout (clearTimeout on success to prevent leak)
+        // LLM call with per-step timeout and AbortSignal propagation.
+        // The AbortController cancels the underlying HTTP request when the
+        // timeout fires, preventing orphaned in-flight requests.
         const stepStart = Date.now();
-        let llmResult: { text: string; model: string };
+        let llmResult: { text: string; model: string; finishReason?: string | null };
+        const stepAbortController = new AbortController();
         let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
           llmResult = await Promise.race([
@@ -117,11 +167,15 @@ export class AgentOrchestrator {
               messages,
               temperature: 0,
               maxOutputTokens: 1024,
+              abortSignal: stepAbortController.signal,
             }),
             new Promise<never>((_resolve, reject) => {
               stepTimeoutHandle = setTimeout(
-                () => reject(new Error('Agent LLM step timed out')),
-                this.config.perStepTimeoutMs,
+                () => {
+                  stepAbortController.abort();
+                  reject(new Error('Agent LLM step timed out'));
+                },
+                effectiveConfig.perStepTimeoutMs,
               );
             }),
           ]);
@@ -133,6 +187,13 @@ export class AgentOrchestrator {
           if (stepTimeoutHandle !== undefined) {
             clearTimeout(stepTimeoutHandle);
           }
+        }
+
+        // Guard against truncated output (LLM hit max_tokens)
+        if (llmResult.finishReason === 'length') {
+          log.warn({ requestId, stepIndex: steps.length }, 'Agent LLM output truncated (finish_reason=length)');
+          terminationReason = 'error';
+          break;
         }
 
         // Estimate token counts (rough: 4 chars ≈ 1 token)
@@ -162,14 +223,9 @@ export class AgentOrchestrator {
         if (parsed.action !== undefined) {
           const { tool, input } = parsed.action;
 
-          // Loop detection
-          const loopCheck = budget.recordStep(tool, input);
-          if (!loopCheck.allowed) {
-            terminationReason = loopCheck.reason ?? 'loop_detected';
-            break;
-          }
-
-          // Unknown tool guard
+          // Unknown tool guard FIRST — do not consume budget on adversarial
+          // LLM-emitted unknown tool names. Adds an observation step but
+          // does not call recordStep so the loop counter is preserved.
           if (!isKnownTool(tool)) {
             steps.push({
               index: steps.length,
@@ -180,6 +236,13 @@ export class AgentOrchestrator {
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             continue;
+          }
+
+          // Loop detection (only for known tools)
+          const loopCheck = budget.recordStep(tool, input);
+          if (!loopCheck.allowed) {
+            terminationReason = loopCheck.reason ?? 'loop_detected';
+            break;
           }
 
           // Execute tool
@@ -195,6 +258,11 @@ export class AgentOrchestrator {
             observation = truncateObservation(toolResult.observation, this.config.maxContextChars);
             rawResult = toolResult.rawResult;
           } catch (toolErr) {
+            // Detect policy-block errors so the fallback doesn't re-run the
+            // raw query through the same security layer that already rejected it.
+            if (toolErr instanceof Error && /POLICY_BLOCKED|PolicyBlocked/i.test(toolErr.name + ':' + toolErr.message)) {
+              policyBlocked = true;
+            }
             observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
             rawResult = null;
           }
@@ -222,27 +290,52 @@ export class AgentOrchestrator {
     } catch (err) {
       log.error({ err, requestId }, 'Agent orchestrator unexpected error');
       terminationReason = 'error';
+      if (err instanceof Error && /POLICY_BLOCKED|PolicyBlocked/i.test(err.name + ':' + err.message)) {
+        policyBlocked = true;
+      }
     }
 
-    // Fallback: if no answer was produced, do a single-shot search
+    // Fallback: if no answer was produced, do a single-shot search.
+    // Skip when a policy block already rejected the query — re-running
+    // the raw query through the search use case would just hit the same
+    // security gate (or worse, slip through if the gate state changed).
     let fallbackApplied = false;
     let answer = steps.find((s) => s.answer !== undefined)?.answer ?? '';
 
-    if (answer === '' && terminationReason !== 'answer') {
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer') {
+      // Cap the fallback search at a fixed wall-clock budget independent of
+      // perStepTimeoutMs. The previous Math.min(perStep, 5s) was inverted:
+      // when operators tuned perStepTimeoutMs LOW (e.g. 2s), the fallback got
+      // the SAME 2s the agent already exhausted, making it useless.
+      const FALLBACK_SEARCH_TIMEOUT_MS = 5_000;
+      const fallbackController = new AbortController();
+      const fallbackTimer = setTimeout(
+        () => {
+          fallbackController.abort();
+        },
+        FALLBACK_SEARCH_TIMEOUT_MS,
+      );
       try {
         const fallbackResult = await this.deps.toolDeps.searchUseCase.execute(
           { query },
           `${requestId}-fallback`,
+          { abortSignal: fallbackController.signal },
         );
         const topResult = fallbackResult.queryType === 'search' ? fallbackResult.results[0] : undefined;
         if (topResult !== undefined) {
-          answer = `${topResult.entity.canonicalLabel} (${topResult.entity.producer ?? ''} ${topResult.entity.region ?? ''})`;
+          const producer = topResult.entity.producer ?? '';
+          const region = topResult.entity.region ?? '';
+          const detail = [producer, region].filter(Boolean).join(', ');
+          answer = `Based on your query, I found: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (Note: simplified result due to processing constraints.)`;
           lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
           fallbackApplied = true;
           terminationReason = 'fallback';
         }
-      } catch {
-        // Fallback also failed — return empty answer
+      } catch (err) {
+        // Log so an outage of the fallback path is observable instead of silent.
+        log.warn({ err, requestId }, 'agent fallback search failed');
+      } finally {
+        clearTimeout(fallbackTimer);
       }
     }
 

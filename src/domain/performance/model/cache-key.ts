@@ -108,28 +108,45 @@ export class QueryCacheKeyBuilder {
     expansionTerms: readonly string[],
     sessionId?: string,
     locale?: string,
+    /**
+     * Optional snapshot ID to namespace the cache by deployment epoch.
+     * When provided, deploys with new snapshots automatically isolate
+     * their cache entries from prior epochs — old keys live in dead key
+     * space and expire via TTL instead of being served stale.
+     */
+    snapshotId?: string,
   ): QueryCacheKey {
-    // Hash constraints deterministically (sorted tuples)
+    // Hash constraints deterministically (sorted tuples).
+    // Use length-prefix encoding to prevent delimiter-collision cache poisoning:
+    // a value containing "|" or "||" must not collide with a different
+    // (attribute, operator, value) tuple at a different position.
+    const encodeField = (s: string): string => `${s.length}:${s}`;
     const sortedConstraints = Array.from(constraintTuples)
       .sort(([a1, a2, a3], [b1, b2, b3]) =>
         a1.localeCompare(b1) || a2.localeCompare(b2) || a3.localeCompare(b3))
-      .map((t) => t.join('|'))
-      .join('||');
+      .map((t) => t.map(encodeField).join('\u0000'))
+      .join('\u0001');
     const constraintSignature = hashDeterministic(sortedConstraints);
 
-    // Hash expansions deterministically (sorted terms)
+    // Hash expansions deterministically (sorted terms, length-prefixed).
     const sortedExpansions = Array.from(expansionTerms).sort();
-    const expansionHash = hashDeterministic(sortedExpansions.join('|'));
+    const expansionHash = hashDeterministic(sortedExpansions.map(encodeField).join('\u0000'));
 
-    // Combine components into deterministic Redis key
-    const keyParts = [
-      'query',
+    // Combine components into deterministic Redis key.
+    // snapshotId (when provided) namespaces by deploy epoch so a new
+    // model/policy snapshot isolates its keys from prior epochs.
+    const keyParts: string[] = ['query'];
+    if (snapshotId !== undefined && snapshotId.length > 0) {
+      // Hash to bound length and avoid leaking the full snapshot id in keys.
+      keyParts.push(`s:${hashDeterministic(snapshotId).slice(0, 16)}`);
+    }
+    keyParts.push(
       retrievalMode,
       hashDeterministic(normalizedQuery),
       constraintSignature,
       expansionHash,
       locale ?? 'default',
-    ];
+    );
     if (sessionId !== undefined) {
       keyParts.push(`session:${sessionId}`);
     }
@@ -170,11 +187,14 @@ export class ResultCacheKeyBuilder {
     retrievalMode: RetrievalMode,
     anchorEntityId?: string,
   ): ResultCacheKey {
-    // Hash filters deterministically
+    // Hash filters deterministically with length-prefix encoding to prevent
+    // delimiter-collision cache poisoning across distinct filter sets.
+    const encodeField = (s: string): string => `${s.length}:${s}`;
     const sortedFilters = Array.from(filterTuples)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map((t) => t.join('|'))
-      .join('||');
+      .sort(([a1, a2, a3], [b1, b2, b3]) =>
+        a1.localeCompare(b1) || a2.localeCompare(b2) || a3.localeCompare(b3))
+      .map((t) => t.map(encodeField).join('\u0000'))
+      .join('\u0001');
     const filterSignature = hashDeterministic(sortedFilters);
 
     // Build Redis key
@@ -222,7 +242,8 @@ export class EmbeddingCacheKeyBuilder {
   ): EmbeddingCacheKey {
     // Redis key from model + instruction prefix + text hash.
     // instructionPrefix distinguishes "Search: " vs "Passage: " embeddings.
-    const hashInput = instructionPrefix !== undefined ? `${instructionPrefix}${text}` : text;
+    // Use a null-byte delimiter so ("Search:","test") cannot collide with ("Search",":test").
+    const hashInput = instructionPrefix !== undefined ? `${instructionPrefix}\u0000${text}` : text;
     const redisKey = ['embedding', modelId, hashDeterministic(hashInput)].join(':');
 
     return {

@@ -292,9 +292,7 @@ export async function createVespaTestContainer(
   };
   const drinkingWindowPredictor =
     options.drinkingWindowPredictor ?? defaultDrinkingWindowPredictor;
-  const drinkingWindowUseCase = options.disableDrinkingWindow === true
-    ? undefined
-    : new DrinkingWindowUseCase(drinkingWindowPredictor);
+  const drinkingWindowUseCase = new DrinkingWindowUseCase(drinkingWindowPredictor);
 
   const searchUseCase = new SearchUseCase({
     queryPlanner,
@@ -306,7 +304,7 @@ export async function createVespaTestContainer(
     responseBuilder,
     mixedSolver,
     snapshotVersions,
-    ...(drinkingWindowUseCase !== undefined ? { drinkingWindow: drinkingWindowUseCase } : {}),
+    ...(!options.disableDrinkingWindow ? { drinkingWindow: drinkingWindowUseCase } : {}),
     querySanitizer,
     injectionJudge,
     ltrModels,
@@ -357,11 +355,13 @@ export async function createVespaTestContainer(
     storage: new InMemoryWatchlistStore(),
   });
 
-  const container: Container = {
+  const container = {
     feedbackStore: null,
     proposalStore: null,
     feedbackProcessor: null,
     aliasProposer: null,
+    feedbackTtlEnforcer: null,
+    promotionGate: null,
     feedbackIngestEnabled: false,
     queryPlanner,
     entityResolver,
@@ -383,7 +383,8 @@ export async function createVespaTestContainer(
     watchlistService,
     watchlistRuntime: null,
     evalRunner: null,
-  };
+    calibrationStore,
+  } satisfies Container;
 
   return {
     container,

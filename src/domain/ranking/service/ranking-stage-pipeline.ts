@@ -224,6 +224,12 @@ export class RankingStagePipeline {
 
     // The pipeline re-packages the inner ranker's metadata alongside its own
     // policy-applied results so that callers get a consistent RankingOutput.
-    return { results: finalResults, metadata: rankingMetadata };
+    // funnelMetrics is bundled into metadata so concurrent requests cannot
+    // overwrite each other via the legacy getLastFunnelMetrics() instance
+    // state — callers should prefer reading metadata.funnelMetrics directly.
+    return {
+      results: finalResults,
+      metadata: { ...rankingMetadata, funnelMetrics: metrics },
+    };
   }
 }

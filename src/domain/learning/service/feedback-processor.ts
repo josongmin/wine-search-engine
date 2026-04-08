@@ -130,11 +130,15 @@ export class FeedbackProcessor {
 
     const issues: FeedbackQualityIssue[] = [];
 
-    // Check for click spam per session-entity
+    // Check for click spam per session-entity.
+    // Use \u0000 (null byte) as separator so sessionIds containing colons
+    // (composite IDs like `tenant:session`, UUIDs in some formats) don't
+    // collide. Colons are valid in many ID schemes; \u0000 is not.
+    const SEP = '\u0000';
     const sessionEntityClicks = new Map<string, FeedbackSignal[]>();
     for (const signal of signals) {
       if (signal.type !== 'click') continue;
-      const key = `${signal.sessionId}:${signal.entityId}`;
+      const key = `${signal.sessionId}${SEP}${String(signal.entityId)}`;
       const existing = sessionEntityClicks.get(key);
       if (existing) {
         existing.push(signal);
@@ -145,9 +149,9 @@ export class FeedbackProcessor {
 
     for (const [key, clicks] of sessionEntityClicks) {
       if (clicks.length >= FeedbackProcessor.CLICK_SPAM_THRESHOLD) {
-        const parts = key.split(':');
-        const sessionId = parts[0]!;
-        const entityId = parts[1]!;
+        const sepIdx = key.indexOf(SEP);
+        const sessionId = sepIdx >= 0 ? key.slice(0, sepIdx) : key;
+        const entityId = sepIdx >= 0 ? key.slice(sepIdx + 1) : '';
         issues.push({
           type: 'click_spam',
           description: `Session ${sessionId} generated ${clicks.length} clicks on entity ${entityId}`,

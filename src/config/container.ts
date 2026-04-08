@@ -71,6 +71,15 @@ export async function createContainer(
   const features = buildFeatureContainerServices(config, core, runtime);
   const watchlist = buildWatchlistContainerServices(config, runtime);
   const learning = buildLearningContainerServices(runtime);
+  // Defense-in-depth: env validation already throws when AGENT_ENABLED=true
+  // and OPENAI_API_KEY is unset (see config/env.ts). If we somehow reach here
+  // without a chatLlm, fail loudly rather than silently 404 the agent route.
+  if (config.agent.enabled && core.chatLlm === undefined) {
+    throw new Error(
+      'AGENT_ENABLED=true but no ChatLlm was constructed — check OPENAI_API_KEY and chatLlm wiring',
+    );
+  }
+
   const feedbackIngestEnabled =
     !config.killSwitch.learning && learning.feedbackStore !== null;
 
@@ -90,12 +99,20 @@ export async function createContainer(
     calibrationStore: core.calibrationStore,
     ...watchlist,
     ...(config.agent.enabled && core.chatLlm !== undefined
-      ? {
+      ? /* agent orchestrator wired */ {
           agentOrchestrator: new AgentOrchestrator(
             {
               chatLlm: core.chatLlm,
               toolDeps: {
                 searchUseCase: features.searchUseCase,
+                decomposedSearchExecute: async (subQueries, comparisonIntent, originalQuery, requestId, startTime) =>
+                  features.decomposedSearchUseCase.execute(
+                    subQueries as [string, string],
+                    comparisonIntent as 'compare' | 'recommend_one' | 'list_both',
+                    originalQuery,
+                    requestId,
+                    startTime,
+                  ),
               },
             },
             {

@@ -24,8 +24,9 @@ export class QuerySanitizer {
   private static readonly INJECTION_PATTERNS = {
     // System prompt / instruction hijacking
     system_prompt: [
-      /\bignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any)\s+/i,
-      /\bignore\s+instructions\b/i,
+      // Use \b on the trailing side (not \s+) so end-of-string and punctuation also match.
+      /\bignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)\b/i,
+      /\bignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)\b/i,
       /\b(?:you\s+are|act\s+as|pretend|roleplay\s+as|become)\s+/i,
       /(?:system|assistant|admin)\s+mode/i,
       /\b(?:system|admin)\s+override\b/i,
@@ -48,7 +49,19 @@ export class QuerySanitizer {
       /\bor\s+1\s*=\s*1\b/i,
       /\bexec(?:ute)?\s*\(/i,
       /--\s*$/,                          // SQL comment at end
-      /\/\*.*?\*\//,                     // Block comment
+      /\/\*[\s\S]*?\*\//,                // Block comment (cross-line)
+      // Bare DML/DDL statements — `select wines from Bordeaux` is natural
+      // language, but `SELECT * FROM`, `SELECT col FROM`, and explicit
+      // DML/DDL keywords are not. Match SELECT...FROM with column-style
+      // payload (`*`, identifiers with dots/commas, count(...)) within a
+      // 60-char window and a hard FROM clause to keep false positives low.
+      /\bselect\s+(?:\*|[\w.,\s()]{1,60}?)\s+from\b/i,
+      /\b(?:insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+(?:table|database|schema|index)|truncate\s+table|alter\s+(?:table|database)|create\s+(?:table|database|index|user))\b/i,
+      // NoSQL operator injection (MongoDB-style). Pattern matches both bare
+      // (`$where:`) and JSON-quoted (`"$where":`) forms — wine queries should
+      // never contain MongoDB operators.
+      /\$where\b/i,
+      /\$(?:ne|gt|gte|lt|lte|in|nin|regex|exists)\b/i,
     ],
 
     // Script injection / XSS
@@ -83,8 +96,10 @@ export class QuerySanitizer {
     // Unicode / encoding tricks
     unicode_tricks: [
       /[\u200B-\u200D\uFEFF]/,          // Zero-width chars
-      /[\u202A-\u202E]/,                // Bidirectional text
+      /[\u202A-\u202E]/,                // Bidirectional text (LRE/RLE/PDF/LRO/RLO)
+      /[\u2066-\u2069]/,                // Directional isolates (LRI/RLI/FSI/PDI) — modern bidi attacks
       /[\uFFF0-\uFFFF]/,                // Noncharacters
+      /[\u{E0000}-\u{E007F}]/u,         // Tag characters — invisible LLM-prompt-injection PoC vector
     ],
   } as const;
 

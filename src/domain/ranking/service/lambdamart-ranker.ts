@@ -157,8 +157,12 @@ export function trainLambdaMARTModel(
       let biasMeanDelta = 0;
 
       for (const example of batch) {
-        const score1 = scoreFeatures(example.features1, weights, bias);
-        const score2 = scoreFeatures(example.features2, weights, bias);
+        // Training MUST use unclamped scores. Clamping to [0,1] mid-training
+        // collapses scoreDiff to {-1, 0, +1} and gives a constant gradient,
+        // preventing the model from learning ranking margins beyond the
+        // initial saturation region.
+        const score1 = scoreFeaturesRaw(example.features1, weights, bias);
+        const score2 = scoreFeaturesRaw(example.features2, weights, bias);
 
         const labelDiff = example.label1 - example.label2;
         const scoreDiff = score1 - score2;
@@ -218,15 +222,24 @@ export function trainLambdaMARTModel(
 
 /**
  * Scores a document's ranking using learned weights.
+ * Inference path: clamp the score to [0,1] for downstream consumers.
  */
 export function scoreDocument(
   features: RankingFeatures,
   weights: QueryClassWeights,
 ): number {
-  return scoreFeatures(features, weights.weights, weights.bias);
+  const raw = scoreFeaturesRaw(features, weights.weights, weights.bias);
+  if (!Number.isFinite(raw)) return 0;
+  return Math.max(0, Math.min(1, raw));
 }
 
-function scoreFeatures(
+/**
+ * Raw (unclamped) scoring used during training. Clamping mid-training
+ * collapses scoreDiff to {-1, 0, +1} and destroys the gradient signal,
+ * trapping LambdaMART in a degenerate region. Inference path applies
+ * the clamp via `scoreDocument`.
+ */
+function scoreFeaturesRaw(
   features: RankingFeatures,
   weights: readonly number[],
   bias: number,
@@ -246,11 +259,10 @@ function scoreFeatures(
   for (let i = 0; i < 8; i++) {
     const fv = featureValues[i] ?? 0;
     const wv = weights[i] ?? 0;
-    // Guard against NaN propagation from non-finite inputs
     if (!Number.isFinite(fv) || !Number.isFinite(wv)) continue;
     score += fv * wv;
   }
-  return Math.max(0, Math.min(1, Number.isFinite(score) ? score : 0));
+  return score;
 }
 
 function computeValidationNdcg(
@@ -269,9 +281,12 @@ function computeValidationNdcg(
   }
 
   for (const [, exs] of queryExamples) {
+    // Use raw scores so the validation NDCG reflects what the training
+    // gradient actually optimized — clamping here would hide divergence
+    // between the saturating clamp region and the model's true ordering.
     const scored = exs.flatMap((ex) => [
-      { label: ex.label1, score: scoreFeatures(ex.features1, weights, bias) },
-      { label: ex.label2, score: scoreFeatures(ex.features2, weights, bias) },
+      { label: ex.label1, score: scoreFeaturesRaw(ex.features1, weights, bias) },
+      { label: ex.label2, score: scoreFeaturesRaw(ex.features2, weights, bias) },
     ]);
 
     const ranked = scored.sort((a, b) => b.score - a.score).slice(0, 5);

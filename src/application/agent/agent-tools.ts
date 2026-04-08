@@ -124,8 +124,10 @@ export async function executeAgentTool(
         };
       }
 
+      // Activate diversity dedup when query contains diversity hints
+      const wantsDiversity = /(?:diverse|different|다른|다르게|각각|variety)/i.test(parsed.query);
       return {
-        observation: summarizeSearchResults(response),
+        observation: summarizeSearchResults(response, wantsDiversity),
         rawResult: response,
       };
     }
@@ -159,7 +161,10 @@ export async function executeAgentTool(
       }
       const parsed = parseResult.data;
       // Drinking window check requires full wine attributes — simplified for agent.
-      // In MVP, we search for the entity first then check.
+      // In MVP, we search for the entity first then check. Verify the returned
+      // top result actually matches the requested entity_id — entity-mode search
+      // can return a near-match that is the WRONG wine, leading to confidently
+      // wrong drinking-window data being surfaced to the LLM.
       const searchResult = await deps.searchUseCase.execute(
         { query: parsed.entity_id, options: { mode: 'entity', explain: false, clarification: false } },
         requestId,
@@ -167,6 +172,12 @@ export async function executeAgentTool(
       const firstResult = searchResult.queryType === 'search' ? searchResult.results[0] : undefined;
       if (firstResult === undefined) {
         return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };
+      }
+      if (String(firstResult.entity.entityId) !== parsed.entity_id) {
+        return {
+          observation: `Wine ${parsed.entity_id} not found (closest match was ${String(firstResult.entity.entityId)} which is a different wine).`,
+          rawResult: null,
+        };
       }
       const dw = firstResult.drinkingWindow;
       if (dw !== undefined) {
@@ -208,13 +219,61 @@ export async function executeAgentTool(
 // Observation summarizers (compact for LLM context)
 // ---------------------------------------------------------------------------
 
-function summarizeSearchResults(response: SearchResponseV1): string {
+function summarizeSearchResults(response: SearchResponseV1, diversify = false): string {
   const { results, engineDecision } = response;
   if (results.length === 0) {
-    return `No results found. Decision: ${engineDecision.decisionStatus}`;
+    // Differentiate between three failure modes so the LLM can stop retrying
+    // a backend that is genuinely down or a query that has no possible match.
+    // The system prompt's "broaden and retry" rule (agent-prompt.ts) is gated
+    // on the absence of "do_not_retry" — see prompt update.
+    const status = engineDecision.decisionStatus;
+    const executionMode = response.meta.executionMode;
+    const degradationReasons = response.meta.degradationReasons;
+
+    // BACKEND_DEGRADED: search infrastructure is unavailable / errored.
+    // Retrying with a different query will produce the same result.
+    const backendDown =
+      status === 'failed'
+      || executionMode === 'degraded'
+      || (Array.isArray(degradationReasons) && degradationReasons.length > 0);
+    if (backendDown) {
+      return (
+        'BACKEND_DEGRADED: search infrastructure is unavailable. '
+        + `Status=${status}, executionMode=${executionMode ?? 'n/a'}. `
+        + 'do_not_retry=true. Provide the user the best partial answer with this fact.'
+      );
+    }
+
+    // CLARIFY: engine asked for clarification, not a search retry.
+    if (engineDecision.nextAction === 'clarify') {
+      return (
+        'CLARIFY_REQUIRED: query was ambiguous. '
+        + 'do_not_retry=true. Ask the user a single targeted clarification question.'
+      );
+    }
+
+    // NO_MATCH: search ran successfully but the corpus has nothing matching.
+    // The agent MAY broaden the query ONCE if the original was over-constrained.
+    return (
+      `NO_MATCH: search ran successfully (status=${status}) but found no wines. `
+      + 'May retry once with a broader query if the original had multiple constraints. '
+      + 'Otherwise tell the user no match exists.'
+    );
   }
 
-  const lines = results.slice(0, 5).map((r, i) => {
+  // Optional producer-level dedup for diversity requests
+  let displayResults = results;
+  if (diversify && results.length > 3) {
+    const seen = new Set<string>();
+    displayResults = results.filter((r) => {
+      const key = r.entity.producer ?? r.entity.entityId;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  const lines = displayResults.slice(0, 5).map((r, i) => {
     const parts = [
       `${i + 1}. ${r.entity.canonicalLabel}`,
       `(id: ${r.entity.entityId})`,
@@ -229,14 +288,25 @@ function summarizeSearchResults(response: SearchResponseV1): string {
     return parts.join(' | ');
   });
 
-  return `Found ${results.length} results (showing top ${Math.min(5, results.length)}):\n${lines.join('\n')}`;
+  return `Found ${results.length} results (showing top ${Math.min(5, displayResults.length)}):\n${lines.join('\n')}`;
 }
 
 function summarizeComparison(response: ComparisonSearchResponse): string {
   const sides = response.entities.map((e) => {
     const top = e.topResult;
-    if (top === null) return `${e.subQuery}: no result`;
-    return `${e.subQuery}: ${top.entity.canonicalLabel} (id: ${top.entity.entityId}, score: ${top.relevanceScore.toFixed(2)})`;
+    if (top === null) return `${e.subQuery}: no result (status: ${e.resolutionStatus})`;
+    const parts = [
+      `${e.subQuery}: ${top.entity.canonicalLabel}`,
+      `entity_id: ${top.entity.entityId}`,
+      `score: ${top.relevanceScore.toFixed(2)}`,
+    ];
+    if (top.entity.producer) parts.push(`producer: ${top.entity.producer}`);
+    if (top.entity.region) parts.push(`region: ${top.entity.region}`);
+    if (top.entity.vintage) parts.push(`vintage: ${top.entity.vintage}`);
+    if (top.drinkingWindow) {
+      parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);
+    }
+    return parts.join(' | ');
   });
-  return `Comparison (${response.comparisonIntent}):\n${sides.join('\n')}`;
+  return `Comparison (${response.comparisonIntent}):\nSide A: ${sides[0]}\nSide B: ${sides[1]}`;
 }

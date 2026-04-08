@@ -1,5 +1,5 @@
 import type { QueryClass } from '../../shared/types/index.js';
-import { plattScaling, temperatureScaling } from '../../shared/utils/calibration.js';
+import { plattScaling } from '../../shared/utils/calibration.js';
 import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
 import type { CalibrationStore, CalibrationParams } from '../port/calibration-store.port.js';
 
@@ -126,12 +126,14 @@ export class Calibrator {
       }
       case 'temperature': {
         const temperature = params.params['temperature'] ?? 1.0;
-        // Temperature scaling requires at least two logits; use raw score
-        // and its complement as a binary distribution.
-        const logits = [rawScore, 1.0 - rawScore];
-        const calibrated = temperatureScaling(logits, temperature);
-        // Return the probability of the positive class (index 0).
-        return calibrated[0] ?? 0.5;
+        // Temperature-scaled sigmoid: P(positive) = 1/(1+exp(-rawScore/T)).
+        // The previous implementation built `[rawScore, 1-rawScore]` and ran
+        // softmax over them, which capped the output at 0.731 for any
+        // rawScore ≥ 1.0 — silently destroying precision for trivially
+        // resolved candidates. A direct sigmoid preserves full dynamic range.
+        const safeT = temperature !== 0 ? temperature : 1;
+        const sigmoid = 1 / (1 + Math.exp(-rawScore / safeT));
+        return Math.max(0, Math.min(1, sigmoid));
       }
       case 'isotonic': {
         // Isotonic calibration uses a piecewise-linear lookup table.
@@ -157,22 +159,33 @@ export class Calibrator {
 
     // Simple linear interpolation between adjacent breakpoints.
     // Breakpoints are stored as x_0, y_0, x_1, y_1, ...
-    let prevX = 0;
+    // Validate sort order at entry — out-of-order breakpoints would
+    // produce monotonicity violations and silently incorrect outputs.
+    let prevX = -Infinity;
     let prevY = 0;
+    let lastY = 0;
     for (let i = 0; i < breakpointCount; i++) {
       const x = params.params[`x_${String(i)}`] ?? 0;
       const y = params.params[`y_${String(i)}`] ?? 0;
+      if (i > 0 && x < prevX) {
+        // Sorted-input contract violation: fall back to identity.
+        return Math.max(0, Math.min(1, rawScore));
+      }
       if (rawScore <= x) {
-        if (x === prevX) {
-          return y;
+        if (i === 0 || x === prevX) {
+          return Math.max(0, Math.min(1, y));
         }
         const t = (rawScore - prevX) / (x - prevX);
-        return prevY + t * (y - prevY);
+        return Math.max(0, Math.min(1, prevY + t * (y - prevY)));
       }
       prevX = x;
       prevY = y;
+      lastY = y;
     }
 
-    return prevY;
+    // Beyond the last breakpoint: extrapolate by clamping to the last y.
+    // The previous code returned `prevY = 0` when breakpointCount === 1
+    // and rawScore exceeded the single x — silently emitting 0.
+    return Math.max(0, Math.min(1, lastY));
   }
 }

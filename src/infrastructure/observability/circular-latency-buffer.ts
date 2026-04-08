@@ -10,6 +10,9 @@ export class CircularLatencyBuffer {
   private count = 0;
 
   constructor(readonly capacity: number) {
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      throw new Error(`CircularLatencyBuffer capacity must be a positive integer, got ${String(capacity)}`);
+    }
     this.buffer = new Float64Array(capacity);
   }
 
@@ -41,5 +44,6 @@ export class CircularLatencyBuffer {
   reset(): void {
     this.head = 0;
     this.count = 0;
+    this.buffer.fill(0);
   }
 }

@@ -297,11 +297,13 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   const watchlistService = new WatchlistService({
     storage: watchlistStore,
   });
-  const container: Container = {
+  const container = {
     feedbackStore: null,
     proposalStore: null,
     feedbackProcessor: null,
     aliasProposer: null,
+    feedbackTtlEnforcer: null,
+    promotionGate: null,
     feedbackIngestEnabled: false,
     queryPlanner,
     entityResolver,
@@ -323,7 +325,8 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     watchlistService,
     watchlistRuntime: null,
     evalRunner: null,
-  };
+    calibrationStore,
+  } satisfies Container;
 
   return {
     container,

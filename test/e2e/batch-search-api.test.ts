@@ -256,4 +256,45 @@ describe('POST /v1/batch-search', () => {
     expect(parsed.data.error.failure_reason).toBeNull();
     expect(parsed.data.error.request_id).toBe(headerRequestId);
   });
+
+  it('per-item explain flag propagates through to each sub-search response', async () => {
+    const res = await post('/v1/batch-search', {
+      batch_id: 'batch-explain',
+      requests: [
+        {
+          id: 'with-explain',
+          query: '풀바디 레드 와인',
+          retrieval_mode: 'hybrid',
+          explain: true,
+        },
+        {
+          id: 'without-explain',
+          query: '풀바디 레드 와인',
+          retrieval_mode: 'hybrid',
+          explain: false,
+        },
+      ],
+    });
+
+    expect(res.statusCode).toBe(200);
+    const parsed = BatchSearchResponseSchema.safeParse(parseJson(res.body));
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) {
+      throw new Error(parsed.error.message);
+    }
+
+    const withExplain = parsed.data.results.find((r) => r.id === 'with-explain');
+    const withoutExplain = parsed.data.results.find((r) => r.id === 'without-explain');
+
+    expect(withExplain?.status).toBe('succeeded');
+    expect(withoutExplain?.status).toBe('succeeded');
+
+    if (withExplain?.status === 'succeeded' && withoutExplain?.status === 'succeeded') {
+      // Item with explain=true must surface counterfactuals
+      expect(Array.isArray(withExplain.response.counterfactuals)).toBe(true);
+      expect((withExplain.response.counterfactuals ?? []).length).toBeGreaterThan(0);
+      // Item with explain=false must NOT surface counterfactuals
+      expect(withoutExplain.response.counterfactuals).toBeUndefined();
+    }
+  });
 });

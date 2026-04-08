@@ -16,9 +16,23 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
     max: pgConfig.poolMax,
     idleTimeoutMillis: pgConfig.idleTimeoutMillis,
     connectionTimeoutMillis: pgConfig.connectionTimeoutMillis,
+    application_name: 'wine-engine',
+    // Server-side timeouts: a slow query must not hold a pool slot
+    // forever. statement_timeout aborts long-running queries server-side;
+    // idle_in_transaction_session_timeout aborts open transactions left
+    // dangling by an application crash.
+    statement_timeout: 10_000,
+    idle_in_transaction_session_timeout: 10_000,
+    // Client-side safety net catching network partitions where server-side
+    // timers never fire (the connection vanished but the client still waits).
+    query_timeout: 12_000,
   });
   nextPool.on('error', (err) => {
-    bootstrapLogger.error({ err }, 'PostgreSQL pool error');
+    // Sanitize: pg client error objects sometimes carry full connection
+    // params. Log only the message + code, never the raw err.
+    const message = err instanceof Error ? err.message : 'unknown';
+    const code = (err as { code?: string } | undefined)?.code;
+    bootstrapLogger.error({ message, code }, 'PostgreSQL pool error');
   });
   return nextPool;
 }

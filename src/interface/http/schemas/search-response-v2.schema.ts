@@ -27,14 +27,18 @@
 
 import { z } from 'zod';
 import { CANONICAL_AUTHORITY_TRACE_REF_PATTERN } from './search-response.schema.js';
+import {
+  MIN_PRODUCED_VINTAGE_YEAR,
+  MAX_PRODUCED_VINTAGE_YEAR,
+} from '../../../domain/shared/constants.js';
 
 // ---------------------------------------------------------------------------
 // V2 shared sub-schemas
 // ---------------------------------------------------------------------------
 
 const DrinkingWindowV2Schema = z.object({
-  start: z.number().int().min(1900).max(2200).optional(),
-  end: z.number().int().min(1900).max(2200).optional(),
+  start: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR).optional(),
+  end: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR).optional(),
 }).strict().refine(
   (w) => w.start === undefined || w.end === undefined || w.start <= w.end,
   'drinking window start must be <= end',
@@ -42,21 +46,21 @@ const DrinkingWindowV2Schema = z.object({
 
 const EvidenceItemV2Schema = z.object({
   signal: z.string().min(1),
-  value: z.number(),
-  weight: z.number(),
+  value: z.number().finite(),
+  weight: z.number().finite(),
 }).strict();
 
 const ComponentScoresV2Schema = z.object({
-  entityIntegrity: z.number(),
-  anchorSimilarity: z.number().optional(),
-  semantic: z.number(),
+  entityIntegrity: z.number().finite(),
+  anchorSimilarity: z.number().finite().optional(),
+  semantic: z.number().finite(),
   hardConstraintPass: z.boolean(),
-  softConstraint: z.number(),
-  attributeAlignment: z.number(),
-  preferenceAlignment: z.number(),
-  popularity: z.number(),
-  availability: z.number(),
-  uncertaintyPenalty: z.number(),
+  softConstraint: z.number().finite(),
+  attributeAlignment: z.number().finite(),
+  preferenceAlignment: z.number().finite(),
+  popularity: z.number().finite(),
+  availability: z.number().finite(),
+  uncertaintyPenalty: z.number().finite(),
 }).strict();
 
 // ---------------------------------------------------------------------------

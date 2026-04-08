@@ -121,6 +121,7 @@ export interface AdversarialGuardPort {
  */
 export class PromotionGate {
   private readonly config: PromotionGateConfig;
+  private _killSwitchActive: boolean;
 
   constructor(
     private readonly proposalStore: ProposalStore,
@@ -128,6 +129,7 @@ export class PromotionGate {
     config?: Partial<PromotionGateConfig>,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this._killSwitchActive = this.config.killSwitchActive;
   }
 
   /**
@@ -147,7 +149,7 @@ export class PromotionGate {
     const reasons: string[] = [];
 
     // Kill switch check
-    if (this.config.killSwitchActive) {
+    if (this._killSwitchActive) {
       reasons.push('KILL_SWITCH_ACTIVE');
       await this.proposalStore.updateProposalStatus(proposal.proposalId, 'rejected');
       return { approved: false, reasons, newStatus: 'rejected' };
@@ -210,7 +212,7 @@ export class PromotionGate {
     const reasons: string[] = [];
 
     // Kill switch check
-    if (this.config.killSwitchActive) {
+    if (this._killSwitchActive) {
       reasons.push('KILL_SWITCH_ACTIVE');
       await this.proposalStore.updateProposalStatus(proposal.proposalId, 'rejected');
       return { approved: false, reasons, newStatus: 'rejected' };
@@ -280,21 +282,21 @@ export class PromotionGate {
    * Activates the kill switch, halting all future promotions.
    */
   activateKillSwitch(): void {
-    (this.config as { killSwitchActive: boolean }).killSwitchActive = true;
+    this._killSwitchActive = true;
   }
 
   /**
    * Deactivates the kill switch, resuming normal promotion processing.
    */
   deactivateKillSwitch(): void {
-    (this.config as { killSwitchActive: boolean }).killSwitchActive = false;
+    this._killSwitchActive = false;
   }
 
   /**
    * Checks whether the kill switch is currently active.
    */
   isKillSwitchActive(): boolean {
-    return this.config.killSwitchActive;
+    return this._killSwitchActive;
   }
 
   /**
@@ -309,14 +311,38 @@ export class PromotionGate {
     baselineMetrics: readonly SliceMetrics[],
   ): readonly { sliceTag: string; metric: string; shadowValue: number; baselineValue: number }[] {
     const baselineMap = new Map(baselineMetrics.map((s) => [s.sliceTag, s]));
+    const shadowMap = new Map(shadowMetrics.map((s) => [s.sliceTag, s]));
     const regressions: { sliceTag: string; metric: string; shadowValue: number; baselineValue: number }[] = [];
+
+    // CRITICAL: a baseline slice missing from shadow is a regression, not
+    // a pass. Previously the loop iterated only shadow slices and silently
+    // skipped any baseline slice without coverage — letting a shadow run
+    // that lost coverage on a sensitive slice slip through promotion.
+    for (const baseline of baselineMetrics) {
+      if (!shadowMap.has(baseline.sliceTag)) {
+        regressions.push({
+          sliceTag: baseline.sliceTag,
+          metric: 'shadow_coverage_missing',
+          shadowValue: 0,
+          baselineValue: 1,
+        });
+      }
+    }
 
     for (const shadow of shadowMetrics) {
       const baseline = baselineMap.get(shadow.sliceTag);
       if (!baseline) continue;
 
-      // Check utility regression (shadow should be >= baseline)
-      if (shadow.metrics.decisionUtility < baseline.metrics.decisionUtility - 0.01) {
+      // Relative regression check (>2% drop) so small baselines aren't
+      // dominated by absolute thresholds. Combined with absolute floor.
+      const relativeUtilityDrop =
+        baseline.metrics.decisionUtility > 0
+          ? (baseline.metrics.decisionUtility - shadow.metrics.decisionUtility) / baseline.metrics.decisionUtility
+          : 0;
+      if (
+        shadow.metrics.decisionUtility < baseline.metrics.decisionUtility - 0.01 ||
+        relativeUtilityDrop > 0.02
+      ) {
         regressions.push({
           sliceTag: shadow.sliceTag,
           metric: 'decisionUtility',
@@ -325,7 +351,6 @@ export class PromotionGate {
         });
       }
 
-      // Check wrong-resolve regression (shadow should be <= baseline)
       if (shadow.metrics.wrongResolveRate > baseline.metrics.wrongResolveRate + 0.005) {
         regressions.push({
           sliceTag: shadow.sliceTag,

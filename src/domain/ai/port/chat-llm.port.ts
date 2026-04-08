@@ -16,6 +16,8 @@ export interface ChatCompletionRequest {
   readonly model?: string;
   readonly temperature?: number;
   readonly maxOutputTokens?: number;
+  /** Optional abort signal for cooperative cancellation. */
+  readonly abortSignal?: AbortSignal | undefined;
 }
 
 export interface ChatCompletionResult {

@@ -250,33 +250,35 @@ export class MixedSolver {
     anchorEntityId: EntityId,
   ): HybridCandidate[] {
     // Step 1: Exclude the anchor entity itself
-    let filtered = candidates.filter((c) => c.entityId !== anchorEntityId);
+    const excluded = candidates.filter((c) => c.entityId !== anchorEntityId);
 
-    // Step 2: Apply producer diversity (max 2 per producer).
+    // Step 2: Sort by retrieval fusion score FIRST so the per-producer cap
+    // selects the top-2 by score (not by arbitrary input order). The
+    // previous order applied the cap on un-sorted candidates and re-sorted
+    // afterwards, so two of an arbitrary lower-scoring producer's wines
+    // could survive while top-scoring ones from the same producer were
+    // dropped.
+    const sorted = [...excluded].sort(
+      (a, b) => b.retrievalFusionScore - a.retrievalFusionScore,
+    );
+
+    // Step 3: Apply producer diversity (max 2 per producer).
     // Candidates with no producer metadata bypass the slot check — lack of
-    // metadata should never penalize a candidate (mirrors DefaultRankingPolicy).
-    const producerMap = new Map<string, HybridCandidate[]>();
-    const noProducer: HybridCandidate[] = [];
-    for (const candidate of filtered) {
+    // metadata should never penalize a candidate.
+    const producerSlots = new Map<string, number>();
+    const filtered: HybridCandidate[] = [];
+    for (const candidate of sorted) {
       const key = candidate.producer;
       if (key === undefined || key === '') {
-        noProducer.push(candidate);
+        filtered.push(candidate);
         continue;
       }
-      if (!producerMap.has(key)) {
-        producerMap.set(key, []);
-      }
-      const group = producerMap.get(key);
-      if (group !== undefined && group.length < 2) {
-        group.push(candidate);
+      const used = producerSlots.get(key) ?? 0;
+      if (used < 2) {
+        filtered.push(candidate);
+        producerSlots.set(key, used + 1);
       }
     }
-
-    filtered = [...Array.from(producerMap.values()).flat(), ...noProducer];
-
-    // Step 3: Re-sort by retrieval fusion score (proxy for embedding similarity)
-    // Higher retrieval score = more similar to anchor
-    filtered.sort((a, b) => b.retrievalFusionScore - a.retrievalFusionScore);
 
     return filtered;
   }
@@ -297,22 +299,28 @@ export class MixedSolver {
     }
 
     const PRESERVATION_THRESHOLD = 0.4;
+
+    // Parallel-load all candidates instead of sequentially awaiting one at a
+    // time. For 50 results × ~5ms each, this drops 250ms → ~5ms per query.
+    const loaded = await Promise.all(
+      results.map((r) => this.candidateAttributes.loadSimilarityCandidate(r.entityId)),
+    );
+
     let preservedCount = 0;
-
-    for (const result of results) {
-      const candidate = await this.candidateAttributes.loadSimilarityCandidate(
-        result.entityId,
-      );
-      if (candidate === undefined) {
-        continue;
-      }
-
+    let scoredCount = 0;
+    for (const candidate of loaded) {
+      if (candidate === undefined) continue;
+      scoredCount++;
       const similarity = this.similarityScorer.score(candidate, anchorProfile);
       if (similarity >= PRESERVATION_THRESHOLD) {
         preservedCount++;
       }
     }
 
-    return preservedCount / results.length;
+    // Normalize over candidates that were actually scored. Using
+    // results.length deflates preservation rate by counting missing-metadata
+    // candidates as failures, tripping fallback thresholds incorrectly.
+    if (scoredCount === 0) return 0;
+    return preservedCount / scoredCount;
   }
 }

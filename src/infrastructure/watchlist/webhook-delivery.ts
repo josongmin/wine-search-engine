@@ -6,8 +6,38 @@
  */
 
 import { createHmac, randomUUID } from 'crypto';
+import { promises as dnsPromises } from 'node:dns';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
+
+/**
+ * Returns true if the given resolved IP address is private/reserved/loopback
+ * and should be rejected at webhook delivery time. Defends against DNS rebinding
+ * where the schema-time hostname check passes but DNS later returns an internal IP.
+ */
+function isPrivateOrReservedIp(ip: string): boolean {
+  // IPv4
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    return (
+      a === 127 || a === 10 || a === 0 ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 169 && b === 254)
+    );
+  }
+  // IPv6 (collapsed forms accepted; just check well-known prefixes)
+  const lower = ip.toLowerCase();
+  if (lower === '::1' || lower === '::' || lower.startsWith('fc') || lower.startsWith('fd')) return true;
+  if (/^fe[89ab]/.test(lower)) return true; // link-local fe80::/10
+  if (lower.startsWith('ff')) return true;   // multicast
+  // IPv4-mapped IPv6
+  const mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(lower);
+  if (mapped) return isPrivateOrReservedIp(mapped[1]!);
+  return false;
+}
 
 const log = bootstrapLogger.child({ component: 'WebhookDelivery' });
 
@@ -163,13 +193,37 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
   ): Promise<WebhookAttemptResult> {
     // Defense-in-depth SSRF check at delivery time (DNS rebinding mitigation).
     // Schema validation runs at creation time; re-check here because DNS can change.
+    let hostname: string;
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== 'https:') {
         return { statusCode: null, errorMessage: 'Callback URL must use https', succeeded: false };
       }
+      hostname = parsed.hostname;
     } catch {
       return { statusCode: null, errorMessage: 'Invalid callback URL', succeeded: false };
+    }
+
+    // Resolve the hostname and reject if any resolved IP falls in a
+    // private/reserved range. Catches DNS-rebinding attacks where a
+    // public hostname now returns an internal address (cloud metadata,
+    // RFC1918, link-local, loopback).
+    try {
+      const lookups = await dnsPromises.lookup(hostname, { all: true });
+      for (const { address } of lookups) {
+        if (isPrivateOrReservedIp(address)) {
+          log.warn({ hostname, address }, 'webhook delivery blocked: resolved IP is private/reserved');
+          return {
+            statusCode: null,
+            errorMessage: 'Callback host resolved to private/reserved IP',
+            succeeded: false,
+          };
+        }
+      }
+    } catch (err) {
+      // DNS resolution failure → fail-closed (do not deliver).
+      log.warn({ hostname, err }, 'webhook delivery blocked: DNS resolution failed');
+      return { statusCode: null, errorMessage: 'DNS resolution failed', succeeded: false };
     }
 
     const body = JSON.stringify(payload);

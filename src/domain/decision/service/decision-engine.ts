@@ -42,6 +42,15 @@ const NOISY_SHORT_QUERY_STRATEGIES = new Set([
 const NOISY_SHORT_QUERY_MAX_COMPACT_LENGTH = 12;
 const NOISY_SHORT_QUERY_CONFIDENCE_FLOOR = 0.9;
 const NOISY_SHORT_QUERY_GAP_FLOOR = 0.08;
+
+/**
+ * Emergency fallback resolveTau used when a brand-new QueryClass enum value
+ * was added without updating either the active threshold profile or the
+ * default profile. Set conservatively HIGH so unknown classes err toward
+ * "ambiguous" rather than wrong-resolve. Tune via the threshold profile,
+ * not by changing this constant — this should rarely fire.
+ */
+const EMERGENCY_FALLBACK_RESOLVE_TAU = 0.85;
 const EXPLORATORY_RETRIEVAL_MODES = new Set([
   'compare_candidates',
   'recommendation',
@@ -292,6 +301,28 @@ export class DecisionEngine {
     const delta = resolverTrace.calibratedGap;
     const A = resolverTrace.ambiguityDetected;
     const conformalSetSize = input.conformalSetSize ?? 1;
+
+    // Guard against non-finite confidence/delta from upstream resolver bugs.
+    // Without this, NaN flows through gates (NaN >= x is false), the response
+    // ships with literal "NaN" in the finalReason text, and operators see
+    // misleading "low confidence" failures instead of the real upstream defect.
+    if (!Number.isFinite(C) || !Number.isFinite(delta)) {
+      rulesApplied.push('NUMERIC_GATE_NONFINITE');
+      bootstrapLogger.error(
+        {
+          C,
+          delta,
+          queryClass: input.queryPlan.queryClass,
+        },
+        '[DecisionEngine] Non-finite calibrated confidence/gap from resolver',
+      );
+      return {
+        status: 'failed',
+        nextAction: 'fail',
+        rulesApplied: [...rulesApplied],
+        finalReason: 'Calibrated confidence is non-finite; resolver upstream defect.',
+      };
+    }
 
     if (conformalSetSize === 0) {
       rulesApplied.push('NUMERIC_GATE_EMPTY_SET');
@@ -576,7 +607,15 @@ export class DecisionEngine {
     const queryClass = input.queryPlan.queryClass;
     const thresholdMap = effectiveProfile.perQueryClass as Partial<typeof effectiveProfile.perQueryClass>;
     const profileThreshold = thresholdMap[queryClass];
-    const baseThreshold = profileThreshold ?? DEFAULT_THRESHOLD_PROFILE.perQueryClass[queryClass];
+    const defaultMap = DEFAULT_THRESHOLD_PROFILE.perQueryClass as Partial<
+      typeof DEFAULT_THRESHOLD_PROFILE.perQueryClass
+    >;
+    // Defense in depth: BOTH the active profile AND the default may lack a
+    // newly-added QueryClass enum value. Without this guard, baseThreshold would
+    // be `undefined` and the next line would crash with `TypeError: Cannot read
+    // properties of undefined (reading 'resolveTau')` — silently turning every
+    // request for that class into INTERNAL_INCONSISTENCY 5xx.
+    const baseThreshold = profileThreshold ?? defaultMap[queryClass];
     if (profileThreshold === undefined) {
       bootstrapLogger.warn(
         {
@@ -587,14 +626,24 @@ export class DecisionEngine {
         '[DecisionEngine] Threshold profile missing query class; using default threshold entry',
       );
     }
+    if (baseThreshold === undefined) {
+      bootstrapLogger.error(
+        { profileId: effectiveProfile.id, queryClass },
+        '[DecisionEngine] DEFAULT_THRESHOLD_PROFILE also lacks query class — using emergency fallback',
+      );
+    }
+    // Emergency fallback if a brand-new QueryClass was added without updating
+    // either profile. Conservative resolveTau so the engine errs toward
+    // "ambiguous" rather than wrong-resolve. gapTau is overridden below by the
+    // dynamic gap computation, so only resolveTau matters here.
+    const safeResolveTau = baseThreshold?.resolveTau ?? EMERGENCY_FALLBACK_RESOLVE_TAU;
 
     // Compute dynamic gap threshold (Wave 3 enhancement, RFC-009 §5.3)
     const confidence = input.resolverResult.decisionTrace.decisionConfidenceC;
     const dynamicGapTau = computeDynamicGapThreshold(queryClass, confidence);
 
-    // Return threshold entry with dynamic gap override
     return {
-      resolveTau: baseThreshold.resolveTau,
+      resolveTau: safeResolveTau,
       gapTau: dynamicGapTau,
     };
   }

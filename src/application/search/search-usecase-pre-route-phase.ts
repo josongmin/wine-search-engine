@@ -77,6 +77,9 @@ export async function runSearchPreRoutePhase(
             ? { sessionContext: ctx.request.sessionContext }
             : {}),
           ...(ctx.request.queryBudget !== undefined ? { queryBudget: ctx.request.queryBudget } : {}),
+          // Forward explain so a comparison-route caller (options.explain=true)
+          // gets counterfactuals on both sub-search legs.
+          ...(ctx.request.options?.explain === true ? { explain: true } : {}),
         },
         { abortSignal: abortController.signal },
       ).catch((err: unknown) => {

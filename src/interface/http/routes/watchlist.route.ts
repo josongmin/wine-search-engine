@@ -21,7 +21,7 @@ import {
 } from '../schemas/watchlist.schema.js';
 import type { WatchlistRouteDeps } from './route-deps.js';
 import { registerContractRoute } from './register-contract-route.js';
-import { sendRouteContractResponse } from './contract-response.js';
+import { parseContractBody, sendRouteContractResponse } from './contract-response.js';
 import {
   WatchlistCreateRouteContract,
   WatchlistDeleteRouteContract,
@@ -143,29 +143,15 @@ export function registerWatchlistRoute(
         return;
       }
 
-      const parsed = WatchlistCreateRouteContract.body.safeParse(request.body);
-      if (!parsed.success) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          WatchlistCreateRouteContract,
-          400,
-          createErrorResponse(
-            getRequestId(request),
-            'VALIDATION_ERROR',
-            'Invalid watchlist request',
-          ),
-        );
-        return;
-      }
+      const body = parseContractBody(request, WatchlistCreateRouteContract);
 
       try {
         const entry = await deps.watchlistService.create({
           userId: subject,
-          entityId: parsed.data.entity_id,
-          triggerConditions: parsed.data.trigger_conditions,
-          callbackUrl: parsed.data.callback_url,
-          expiresAt: parsed.data.expires_at ? new Date(parsed.data.expires_at) : null,
+          entityId: body.entity_id,
+          triggerConditions: body.trigger_conditions,
+          callbackUrl: body.callback_url,
+          expiresAt: body.expires_at ? new Date(body.expires_at) : null,
         });
 
         const response = CreateWatchlistResponseSchema.parse({

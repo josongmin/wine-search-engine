@@ -53,7 +53,9 @@ const envSchema = z.object({
   PG_DATABASE: z.string().min(1).default('wine_engine'),
   PG_USER: z.string().min(1).default('wine'),
   PG_PASSWORD: z.string().default(''),
-  PG_POOL_MAX: z.coerce.number().int().positive().default(10),
+  // 10K QPS production target: 10 connections per node caps at ~2K QPS
+  // before queueing. Default raised to 40 — tune against pg max_connections.
+  PG_POOL_MAX: z.coerce.number().int().positive().default(40),
   PG_POOL_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
   PG_POOL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
@@ -180,6 +182,37 @@ function buildConfig(parsed: EnvVars) {
 
   if (watchlistEnabled && parsed.WEBHOOK_SECRET === undefined) {
     throw new Error('WATCHLIST_ENABLED requires WEBHOOK_SECRET to be set');
+  }
+
+  if (parsed.AGENT_ENABLED && parsed.OPENAI_API_KEY === undefined) {
+    throw new Error(
+      'AGENT_ENABLED=true requires OPENAI_API_KEY to be set. ' +
+        'Set OPENAI_API_KEY or unset AGENT_ENABLED — silently disabling the agent route (POST /v1/agent/*) is not allowed.',
+    );
+  }
+
+  if (parsed.LLM_QUERY_INTERPRETER && parsed.OPENAI_API_KEY === undefined) {
+    throw new Error(
+      'LLM_QUERY_INTERPRETER=true requires OPENAI_API_KEY to be set. ' +
+        'Set OPENAI_API_KEY or unset LLM_QUERY_INTERPRETER — silently falling back to the rule-only NLMapper is not allowed.',
+    );
+  }
+
+  // Production security invariant: Layer 2 prompt-injection defense (LLMInjectionJudge)
+  // requires ANTHROPIC_API_KEY. Without the key the judge is silently undefined and
+  // every query bypasses Layer 2 — INJECTION_JUDGE_FAIL_OPEN=false has NO effect on
+  // judge *absence*, only on judge errors. The only legal opt-out is the explicit
+  // KILL_SWITCH_INJECTION_JUDGE.
+  if (
+    parsed.NODE_ENV === 'production'
+    && parsed.ANTHROPIC_API_KEY === undefined
+    && !parsed.KILL_SWITCH_INJECTION_JUDGE
+  ) {
+    throw new Error(
+      'Production startup requires ANTHROPIC_API_KEY (Layer 2 prompt-injection defense). ' +
+        'To intentionally disable Layer 2, set KILL_SWITCH_INJECTION_JUDGE=true with explicit approval. ' +
+        'Silently disabling Layer 2 by omitting the API key is not allowed.',
+    );
   }
 
   return {
@@ -338,6 +371,30 @@ export function loadConfig(options?: {
 
 /**
  * Parsed and validated environment variables.
- * Throws a descriptive error at startup if any required variable is missing or malformed.
+ *
+ * Evaluated at module-load time so downstream modules can do
+ * `import { config } from './env.js'` without an explicit boot step. The
+ * trade-off is that any validation failure (Zod or invariant throw) happens
+ * before main()'s try/catch can format it nicely — see the operator-friendly
+ * fail-fast block below for the workaround.
  */
-export const config = loadConfig();
+export const config: Config = (() => {
+  try {
+    return loadConfig();
+  } catch (err) {
+    // Eagerly format the error and exit cleanly. Without this block, the
+    // module-load-time throw escapes through `uncaughtException` and the
+    // operator sees a raw Pino-formatted Zod stack trace instead of the
+    // actionable string crafted in buildConfig().
+    //
+    // Bypass via `WINE_ENGINE_SKIP_CONFIG_FAIL_FAST=1` for test harnesses
+    // that intentionally exercise the throwing path.
+    if (process.env.WINE_ENGINE_SKIP_CONFIG_FAIL_FAST === '1') {
+      throw err;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`\n[wine-search-engine] FATAL: configuration invalid\n  ${message}\n\n`);
+    // Exit code 78 = EX_CONFIG (sysexits.h) — the configuration is wrong.
+    process.exit(78);
+  }
+})();

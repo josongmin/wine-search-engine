@@ -70,12 +70,25 @@ export class FusionService {
     }
 
     // Build rankings array for RRF — only include non-empty rankings.
-    // Fusing with an empty ranking (dense off) adds no information and
-    // dilutes the sparse signal (divides by more rankings with no benefit).
+    // CRITICAL: BM25 (sparse) and learned-sparse (SPLADE) share lexical
+    // priors. Treating them as two independent rankings double-counts
+    // lexical signal and demotes pure-semantic recalls. Collapse them
+    // into a single "lexical family" by taking the BEST (lowest) rank
+    // for each entity across the two channels.
+    const lexicalFamilyMap = new Map<string, number>();
+    for (const [id, rank] of sparseRankMap) {
+      lexicalFamilyMap.set(id, rank);
+    }
+    for (const [id, rank] of learnedSparseRankMap) {
+      const existing = lexicalFamilyMap.get(id);
+      if (existing === undefined || rank < existing) {
+        lexicalFamilyMap.set(id, rank);
+      }
+    }
+
     const rankings: ReadonlyMap<string, number>[] = [];
-    if (sparseRankMap.size > 0) rankings.push(sparseRankMap);
+    if (lexicalFamilyMap.size > 0) rankings.push(lexicalFamilyMap);
     if (denseRankMap.size > 0) rankings.push(denseRankMap);
-    if (learnedSparseRankMap.size > 0) rankings.push(learnedSparseRankMap);
     if (anchorHits && anchorRankMap.size > 0) rankings.push(anchorRankMap);
 
     const fusedScores = rrfFuse(rankings, effectiveK);

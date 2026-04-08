@@ -47,15 +47,29 @@ function buildMetadata(metadata: Record<string, unknown>, row: EntityRow): Entit
   return base;
 }
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function rowToEntity(row: EntityRow): Entity {
-  const metadata = row.metadata as Record<string, unknown>;
+  // Defensive JSONB validation: PostgreSQL JSONB columns can hold any JSON
+  // scalar (string, number, array, etc.), not just objects. A bad ETL write
+  // or schema drift can place a non-object value in `metadata`/`relations`/
+  // `attributes`. Without these guards, downstream `for (... in obj)` /
+  // `Object.entries(obj)` would either crash or silently iterate string
+  // characters / array indices.
+  const metadata = isPlainObject(row.metadata) ? row.metadata : {};
+  const relations = isPlainObject(row.relations) ? (row.relations as Relations) : ({} as Relations);
+  const attributes = isPlainObject(row.attributes)
+    ? (row.attributes as EntityAttributes)
+    : ({} as EntityAttributes);
   return {
     id: createEntityId(row.entity_id),
     type: row.entity_type as EntityType,
     canonicalLabel: row.canonical_label,
     identitySignature: row.identity_signature,
-    relations: (row.relations ?? {}) as Relations,
-    attributes: (row.attributes ?? {}) as EntityAttributes,
+    relations,
+    attributes,
     metadata: buildMetadata(metadata, row),
   };
 }
@@ -137,7 +151,7 @@ export class PgEntityRepository implements EntityRepository {
   }
 
   async update(entity: Entity): Promise<void> {
-    await this.pool.query(
+    const result = await this.pool.query(
       `UPDATE entities SET
         entity_type = $2,
         canonical_label = $3,
@@ -158,10 +172,22 @@ export class PgEntityRepository implements EntityRepository {
         entity.metadata.updatedAt,
       ],
     );
+    // Surface silent no-ops: an update against a non-existent entity_id
+    // returns rowCount=0, not an error. Callers expect a successful update
+    // to mean the row exists; otherwise they'd use upsert (save()).
+    if (result.rowCount === 0) {
+      throw new Error(`Entity update failed: no row found for entity_id="${String(entity.id)}"`);
+    }
   }
 
   async delete(id: EntityId): Promise<void> {
-    await this.pool.query('DELETE FROM entities WHERE entity_id = $1', [id]);
+    const result = await this.pool.query(
+      'DELETE FROM entities WHERE entity_id = $1',
+      [id],
+    );
+    if (result.rowCount === 0) {
+      throw new Error(`Entity delete failed: no row found for entity_id="${String(id)}"`);
+    }
   }
 
   async createSnapshot(label: string): Promise<string> {

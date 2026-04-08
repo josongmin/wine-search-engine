@@ -92,6 +92,8 @@ export interface SearchPostRouteExecutionContext {
   readonly cacheService?: SearchResponseCachePort | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  /** When true (options.explain=true), counterfactuals are always included. */
+  readonly includeCounterfactuals?: boolean | undefined;
 }
 
 export interface RankedRouteDecisionPhaseContext {
@@ -101,7 +103,20 @@ export interface RankedRouteDecisionPhaseContext {
   readonly requestId: string;
   readonly startTime: number;
   readonly resolveResult: EntityResolveResult;
+  /**
+   * Visible ranked results (after caller-specified limit). Used for the
+   * `results` array shipped to the client.
+   */
   readonly rankedResults: readonly RankedResult[];
+  /**
+   * Full unlimited ranked results — REQUIRED. Used for counterfactuals and
+   * provenance slices that must reflect the entire retrieval pool, not the
+   * visible limit. Pass the same array as `rankedResults` if no limit applied.
+   *
+   * Required (not optional) so callers cannot silently revert to the broken
+   * pre-fix behavior where counterfactuals were trimmed to the visible limit.
+   */
+  readonly fullRankedResults: readonly RankedResult[];
   readonly decisionContext?: SearchRouteDecisionContext | undefined;
   readonly effectiveRoute: QueryRoute;
   readonly snapshotVersions: SnapshotVersionInjection;
@@ -320,23 +335,28 @@ export async function runRankedRouteDecisionPhase(
     ctx.rankedResults,
     ctx.drinkingWindow,
   );
+  // Provenance slices and counterfactuals MUST use the full retrieval pool,
+  // not the limited result set. Otherwise:
+  // - eval analytics see only top-N channels (silent narrowing of provenance);
+  // - counterfactuals beyond the visible window disappear (E4-U5 transparency
+  //   regression on small `limit` values).
   const retrievalProvenanceSlices = rankedResultsToEvalProvenanceSlices(
     ctx.requestId,
-    ctx.rankedResults,
+    ctx.fullRankedResults,
   );
   // E4-U5: Consult explanation obligation map for the query family.
   // - If obligation.requiresCounterfactual: counterfactuals MUST be included
   //   (override even if ctx.includeCounterfactuals is false).
-  // - If !obligation.requiresCounterfactual: respect ctx.includeCounterfactuals
-  //   (default true — backward compatible; caller can explicitly suppress with false).
+  // - Otherwise respect ctx.includeCounterfactuals (default true —
+  //   backward-compatible; caller can explicitly suppress with `false`).
+  // Symmetric across query families: the prior comparison-only `=== true`
+  // special case was an undocumented asymmetry and has been removed.
   const queryFamily = deriveQueryFamily(ctx.plan, ctx.compiled);
   const obligation = getExplanationObligation(queryFamily);
   const shouldIncludeCounterfactuals =
-    queryFamily === 'comparison'
-      ? ctx.includeCounterfactuals === true
-      : obligation.requiresCounterfactual || ctx.includeCounterfactuals !== false;
+    obligation.requiresCounterfactual || ctx.includeCounterfactuals !== false;
   const counterfactuals = shouldIncludeCounterfactuals
-    ? buildSearchCounterfactuals(ctx.resolveResult, ctx.rankedResults)
+    ? buildSearchCounterfactuals(ctx.resolveResult, ctx.fullRankedResults)
     : [];
 
   /**
@@ -468,9 +488,15 @@ export async function runSearchPostRoutePhase(
   const abstainDecision = ctx.abstainPolicy.shouldAbstain(topScores);
 
   // Apply caller-specified result limit after ranking + abstain check (both need the full set).
-  const limitedRankedResults = ctx.request.limit !== undefined
-    ? ctx.rankedResults.slice(0, ctx.request.limit)
-    : ctx.rankedResults;
+  // Defensive bounds: clamp to [1, 1000] and reject NaN/negative/non-integer
+  // values silently to prevent slice() oddities (slice(0,-1) drops last,
+  // slice(0,NaN) → empty) from corrupting responses.
+  const limitedRankedResults = (() => {
+    const raw = ctx.request.limit;
+    if (raw === undefined || !Number.isFinite(raw) || raw < 1) return ctx.rankedResults;
+    const safeLimit = Math.min(1000, Math.floor(raw));
+    return ctx.rankedResults.slice(0, safeLimit);
+  })();
 
   let response: SearchResponseV1;
 
@@ -488,10 +514,17 @@ export async function runSearchPostRoutePhase(
       limitedRankedResults,
       ctx.drinkingWindow,
     );
+    // Provenance slices and counterfactuals use the FULL ranked results, not
+    // the limited display set — eval analytics need every candidate's channel
+    // mix, and counterfactuals need to surface entities BEYOND the visible
+    // window (which is exactly the value of "why was this picked over X").
     const retrievalProvenanceSlices = rankedResultsToEvalProvenanceSlices(
       ctx.requestId,
-      limitedRankedResults,
+      ctx.rankedResults,
     );
+    const abstainCounterfactuals = ctx.includeCounterfactuals === true
+      ? buildSearchCounterfactuals(ctx.resolveResult, ctx.rankedResults, { abstainContext: true })
+      : [];
     try {
       // Fix D: buildEntropyAbstainResponseParams already includes compiled conditionally —
       // do not spread it again outside to avoid silent override if the builder ever transforms it.
@@ -511,6 +544,7 @@ export async function runSearchPostRoutePhase(
             rankedResults: limitedRankedResults,
             ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
           }),
+          ...(abstainCounterfactuals.length > 0 ? { counterfactuals: abstainCounterfactuals } : {}),
           ...(mergedRouteDegradation !== undefined ? { contract: mergedRouteDegradation } : {}),
           ...(ctx.specializedRouteObservability !== undefined
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
@@ -571,12 +605,14 @@ export async function runSearchPostRoutePhase(
       startTime: ctx.startTime,
       resolveResult: ctx.resolveResult,
       rankedResults: limitedRankedResults,
+      fullRankedResults: ctx.rankedResults,
       decisionContext: ctx.decisionContext,
       effectiveRoute: ctx.effectiveRoute,
       snapshotVersions: ctx.snapshotVersions,
       drinkingWindow: ctx.drinkingWindow,
       decisionEngine: ctx.decisionEngine,
       responseBuilder: ctx.responseBuilder,
+      ...(ctx.includeCounterfactuals !== undefined ? { includeCounterfactuals: ctx.includeCounterfactuals } : {}),
       retrievalModeSource: ctx.retrievalModeSource,
       plannerSuggestedMode: ctx.plannerSuggestedMode,
       routeDegradation: mergedRouteDegradation,

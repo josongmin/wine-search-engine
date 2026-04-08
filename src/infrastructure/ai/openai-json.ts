@@ -55,12 +55,29 @@ function describeResponseShape(data: unknown): string {
 
 export function embeddingsFromOpenAiResponse(
   data: unknown,
+  expectedCount?: number,
 ): readonly (readonly number[])[] {
   if (!isEmbeddingApiResponse(data)) {
     throw new Error(
       `Embedding API: unexpected response shape — ${describeResponseShape(data)}`,
     );
   }
+  // Validate count BEFORE sorting so partial responses don't silently mis-align
+  // input texts to vectors. Some LiteLLM/Azure proxies drop or re-number items.
+  if (expectedCount !== undefined && data.data.length !== expectedCount) {
+    throw new Error(
+      `Embedding API: expected ${String(expectedCount)} embeddings, got ${String(data.data.length)}`,
+    );
+  }
+  // Sort by index defensively (most providers return in input order, but some don't).
   const sorted = [...data.data].sort((a, b) => a.index - b.index);
+  // Validate indices are contiguous 0..N-1; otherwise text→vector alignment is wrong.
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i]!.index !== i) {
+      throw new Error(
+        `Embedding API: non-contiguous indices (expected ${String(i)}, got ${String(sorted[i]!.index)})`,
+      );
+    }
+  }
   return sorted.map((item) => item.embedding as readonly number[]);
 }

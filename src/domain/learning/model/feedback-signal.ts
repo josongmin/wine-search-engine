@@ -2,13 +2,18 @@ import type { EntityId, QueryClass, DecisionSnapshot } from '../../shared/types/
 
 /**
  * Types of user feedback signals that the learning loop collects.
+ * Single source of truth: derive both the runtime tuple and the union type
+ * from FEEDBACK_TYPES so tests can iterate the values without hand-copying.
  */
-export type FeedbackType =
-  | 'click'
-  | 'purchase'
-  | 'explicit_feedback'
-  | 'clarification_resolution'
-  | 'session_success';
+export const FEEDBACK_TYPES = [
+  'click',
+  'purchase',
+  'explicit_feedback',
+  'clarification_resolution',
+  'session_success',
+] as const;
+
+export type FeedbackType = (typeof FEEDBACK_TYPES)[number];
 
 /**
  * A single feedback signal from user interaction, per RFC-010 §2.

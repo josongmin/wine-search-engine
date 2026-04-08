@@ -10,7 +10,7 @@ import type { InjectionJudgePort } from '../../domain/security/port/injection-ju
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { QueryClassWeights } from '../../domain/ranking/index.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
-import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
+import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
@@ -280,6 +280,11 @@ export class SearchUseCase {
         },
         'pipeline pre_route return',
       );
+      // Note on options.explain: pre-route early exits (security blocks,
+      // clarification asks) have no ranked candidates, so there is nothing to
+      // produce counterfactuals from. explain=true is intentionally a no-op
+      // here — the response carries clarification or block reasons instead,
+      // which is the correct affordance for this branch.
       const response = preRoute.response;
       if (includeEvalProvenance && response.queryType === 'search') {
         const retrievalProvenanceSlices = searchResponseToEvalProvenanceSlices(response);
@@ -341,9 +346,6 @@ export class SearchUseCase {
       },
     );
 
-    // TODO: options.explain and options.clarification are not yet implemented in the main search path.
-    // When implemented, they should be forwarded to ResponseBuilder.build() and/or the DecisionEngine.
-
     // Steps 3b–7: Entropy abstain (RFC-013) → DecisionEngine → response → cache write
     const response = await runSearchPostRoutePhase({
       plan,
@@ -365,6 +367,13 @@ export class SearchUseCase {
       cacheService: this.deps.cacheService,
       routeDegradation,
       specializedRouteObservability,
+      // Wire HTTP options.explain → includeCounterfactuals symmetrically:
+      //   explain=true  → includeCounterfactuals=true (force on)
+      //   explain=false → includeCounterfactuals=false (force off)
+      //   explain undefined → leave undefined (obligation map decides)
+      ...(request.options?.explain !== undefined
+        ? { includeCounterfactuals: request.options.explain }
+        : {}),
     });
 
     pipelineDebug(

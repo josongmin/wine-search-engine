@@ -18,7 +18,9 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   const wineTypeRules: [RegExp, string][] = [
     [/\b(?:red|rouge|레드|적포도주)\b/i, 'red'],
     [/\b(?:white|blanc|화이트|백포도주)\b/i, 'white'],
-    [/\b(?:ros[eé]|로제)\b/i, 'rosé'],
+    // Use lookarounds (not \b) because \b is ASCII-aware and 'é' is not a word char,
+    // which would break the trailing word boundary on "rosé".
+    [/(?:^|[^\p{L}\p{N}])(?:ros[eé]|로제)(?=$|[^\p{L}\p{N}])/iu, 'rosé'],
     [/\b(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)\b/i, 'sparkling'],
     [/\b(?:natural wine|내추럴 와인|내추럴)\b/i, 'natural'],
     [/\b(?:dessert wine|디저트 와인|sauternes|icewine)\b/i, 'dessert'],
@@ -82,6 +84,39 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       value: band,
       source_phrase: priceUnder[0],
       confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // Standalone price-level keywords (no numeric amount)
+  if (!priceUnder && /(?:비싼|비싸|고급|럭셔리|프리미엄)/.test(q)) {
+    soft.push({
+      attribute: 'price_band',
+      operator: '=',
+      value: /(?:비싼|비싸|럭셔리)/.test(q) ? 'luxury' : 'premium',
+      source_phrase: '비싼/고급',
+      confidence: 0.7,
+      mapping_version: mv,
+    });
+  } else if (!priceUnder && /(?:저렴|싼|가성비|입문)/.test(q)) {
+    soft.push({
+      attribute: 'price_band',
+      operator: '=',
+      value: /가성비/.test(q) ? 'mid' : 'budget',
+      source_phrase: '저렴/가성비',
+      confidence: 0.7,
+      mapping_version: mv,
+    });
+  }
+
+  // Critic score / rating keywords
+  if (/(?:평점|점수|별점|리뷰)\s*(?:좋은|높은|훌륭|최고)/.test(q)) {
+    soft.push({
+      attribute: 'critic_score',
+      operator: '>=',
+      value: 0.7,
+      source_phrase: '평점 좋은',
+      confidence: 0.75,
       mapping_version: mv,
     });
   }

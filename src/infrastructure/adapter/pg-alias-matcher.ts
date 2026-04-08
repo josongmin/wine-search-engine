@@ -349,7 +349,7 @@ export class PgAliasMatcher implements AliasMatcher {
 
     const fuzzyGrams = Array.from(
       new Set(fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
-    );
+    ).map((gram) => gram.replace(/[%_\\]/g, '\\$&'));
 
     const fuzzyCandidates = await this.pool.query<AliasRow>(
       `SELECT entity_id, surface_form, normalized_value, confidence

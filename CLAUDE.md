@@ -63,6 +63,29 @@ Path aliases: `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config` (s
 - For optional object properties: **omit** keys instead of setting them to `undefined` when types use exact optional semantics.
 - Redis: use the **`redis`** npm package and `src/infrastructure/db/redis-client.ts` (`getRedisClient` is **async**).
 
+## Test discipline (Strict — no exceptions)
+
+For any non-trivial code change, follow this exact order:
+
+1. **Add a test that exercises the new behavior or the bug being fixed.** Run it, confirm it fails (or passes for the new feature) as expected.
+2. **Make the code change.**
+3. **Run the test, confirm it now passes.**
+4. **Add at least one regression test for the most obvious adjacent case** that could break — happy-path inputs that previously worked, edge values (empty, zero, max), and the legitimate input shape closest to the bug.
+5. **For any regex change**: test ASCII, Korean (한글), accented Latin (é, ñ), and emoji inputs. `\b` is ASCII-aware and silently breaks on non-ASCII boundaries.
+6. **For any schema bound change** (`min`, `max`, `.refine`): justify the bound with a domain fact (RFC, real-world data). Add a test for a value JUST inside and JUST outside the bound.
+7. **For any new `as` cast or `unknown` narrowing**: add a runtime guard test that exercises the rejection path.
+
+Regression tests live under `test/regression/<topic>.regression.test.ts` and are append-only — never delete a regression test.
+
+## Self-audit pass (after multi-file refactors)
+
+After any session that modifies more than 3 files, mentally test 3 inputs per changed function:
+- **Empty input** (empty string, empty array, null, undefined where allowed)
+- **Adversarial input** — what would a security researcher try? (special chars, length attacks, type confusion)
+- **The obvious legitimate input** — the input the function was designed for, that previously worked
+
+If any case is uncertain, add a regression test before declaring done. Audit-first beats fix-second.
+
 ## Private notes
 
 Put machine-specific preferences in **`CLAUDE.local.md`** (gitignored) at the repo root.

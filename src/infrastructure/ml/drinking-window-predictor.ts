@@ -96,6 +96,11 @@ export class DrinkingWindowPredictor {
   private sessionEnd?: OrtSession;
   private tensorCtor?: OrtModule['Tensor'];
   private readonly allowHeuristicFallback: boolean;
+  /**
+   * In-flight load promise. Concurrent load() calls share this so we never
+   * end up with two pairs of sessions and a leaked first pair.
+   */
+  private loadPromise: Promise<void> | undefined;
 
   constructor(options?: DrinkingWindowPredictorOptions) {
     this.allowHeuristicFallback = options?.allowHeuristicFallback ?? true;
@@ -107,19 +112,56 @@ export class DrinkingWindowPredictor {
 
   /**
    * Loads ONNX sessions from `window_start.onnx` and `window_end.onnx` under `modelDir`.
+   * Idempotent under concurrent calls — multiple awaiters share one load.
    */
   async load(modelDir: string): Promise<void> {
-    const startPath = path.join(modelDir, 'window_start.onnx');
-    const endPath = path.join(modelDir, 'window_end.onnx');
+    if (this.loadPromise !== undefined) return this.loadPromise;
+    this.loadPromise = (async () => {
+      const startPath = path.join(modelDir, 'window_start.onnx');
+      const endPath = path.join(modelDir, 'window_end.onnx');
 
-    await access(startPath);
-    await access(endPath);
+      await access(startPath);
+      await access(endPath);
 
-    const ort = await loadOrtModule();
-    this.sessionStart = await ort.InferenceSession.create(startPath);
-    this.sessionEnd = await ort.InferenceSession.create(endPath);
-    this.tensorCtor = ort.Tensor;
-    this.currentModelVersion = `onnx:${path.basename(modelDir)}`;
+      const ort = await loadOrtModule();
+      // Build a local triple, then assign atomically. Without this, a
+      // concurrent predict() arriving between sessionStart= and tensorCtor=
+      // would observe a partially-loaded predictor (`isOnnxReady()` may be
+      // true while only some fields are set).
+      const newStart = await ort.InferenceSession.create(startPath);
+      let newEnd: OrtSession;
+      try {
+        newEnd = await ort.InferenceSession.create(endPath);
+      } catch (err) {
+        // Release the start session if end load fails — otherwise we leak.
+        const releasable = newStart as unknown as { release?: () => Promise<void> };
+        if (typeof releasable.release === 'function') {
+          await releasable.release().catch(() => undefined);
+        }
+        throw err;
+      }
+      // Release any previously-loaded sessions before swapping in new ones.
+      const oldStart = this.sessionStart as unknown as { release?: () => Promise<void> } | undefined;
+      const oldEnd = this.sessionEnd as unknown as { release?: () => Promise<void> } | undefined;
+      this.sessionStart = newStart;
+      this.sessionEnd = newEnd;
+      this.tensorCtor = ort.Tensor;
+      this.currentModelVersion = `onnx:${path.basename(modelDir)}`;
+      if (typeof oldStart?.release === 'function') {
+        await oldStart.release().catch(() => undefined);
+      }
+      if (typeof oldEnd?.release === 'function') {
+        await oldEnd.release().catch(() => undefined);
+      }
+    })();
+    try {
+      await this.loadPromise;
+    } catch (err) {
+      // Clear so a future call can retry — without this, a transient failure
+      // permanently locks the predictor into a bad state.
+      this.loadPromise = undefined;
+      throw err;
+    }
   }
 
   /**
@@ -168,13 +210,22 @@ export class DrinkingWindowPredictor {
     // sweetness > 3 (sweet/dessert wines) acts as a preservative and extends aging potential
     const sweetnessBonus = Math.max(0, (input.sweetness - 3) * 1.5);
 
-    const totalWindow = Math.min(
-      25,
-      baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus + sweetnessBonus,
+    // Floor totalWindow at 3 so end > start always holds, even when all
+    // bonuses are 0 (light wine, low score). Without this floor, vintage=2024
+    // with totalWindow=1 produced start=2026 > end=2025 (invariant violation).
+    const totalWindow = Math.max(
+      3,
+      Math.min(
+        25,
+        baseWindow + bodyBonus + tanninBonus + acidityBonus + criticBonus + sweetnessBonus,
+      ),
     );
 
     const drinkingWindowStart = vintage + 2;
-    const drinkingWindowEnd = Math.round(vintage + totalWindow);
+    const drinkingWindowEnd = Math.max(
+      drinkingWindowStart + 1,
+      Math.round(vintage + totalWindow),
+    );
     const peakYear = Math.round(
       drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
     );
@@ -201,11 +252,16 @@ export class DrinkingWindowPredictor {
     TensorCtor: OrtModule['Tensor'],
   ): Promise<DrinkingWindowPrediction> {
     const features = this.toFeatureArray(input);
-    const tensor = new TensorCtor('float32', features, [1, features.length]);
+    // Build TWO distinct tensors. Sharing one Tensor instance across two
+    // concurrent sessions runs causes data races inside the ORT CPU
+    // provider, which has caused corrupted outputs in the field. The
+    // input is tiny (11 floats), so duplicating is essentially free.
+    const tensorStart = new TensorCtor('float32', new Float32Array(features), [1, features.length]);
+    const tensorEnd = new TensorCtor('float32', new Float32Array(features), [1, features.length]);
 
     const ONNX_SLOW_INFERENCE_WARN_MS = 500;
 
-    const runAsync = async (session: OrtSession): Promise<number> => {
+    const runAsync = async (session: OrtSession, tensor: typeof tensorStart): Promise<number> => {
       const t0 = performance.now();
       const result = await session.run({ input: tensor });
       const elapsed = performance.now() - t0;
@@ -223,8 +279,8 @@ export class DrinkingWindowPredictor {
     };
 
     const [startOffset, endOffset] = await Promise.all([
-      runAsync(sessionStart),
-      runAsync(sessionEnd),
+      runAsync(sessionStart, tensorStart),
+      runAsync(sessionEnd, tensorEnd),
     ]);
 
     const drinkingWindowStart = Math.round(input.vintage + Math.max(0, startOffset));

@@ -12,7 +12,9 @@ import type {
   HealthRouteOptions,
   ReadinessStatus,
 } from '../interface/http/routes/health.route.js';
+import { bootstrapLogger } from './bootstrap-logger.js';
 
+const log = bootstrapLogger.child({ component: 'readiness' });
 const PROBE_TIMEOUT_MS = 3_000;
 
 async function probePostgres(
@@ -27,7 +29,8 @@ async function probePostgres(
       }),
     ]);
     return 'up';
-  } catch {
+  } catch (err) {
+    log.warn({ err, probe: 'postgres' }, 'readiness probe failed');
     return 'down';
   } finally {
     if (timer !== undefined) clearTimeout(timer);
@@ -44,7 +47,8 @@ async function probeRedis(
   try {
     await redisClient.ping();
     return 'up';
-  } catch {
+  } catch (err) {
+    log.warn({ err, probe: 'redis' }, 'readiness probe failed');
     return 'down';
   }
 }
@@ -56,7 +60,8 @@ async function probeCalibrationStore(
     // Use a representative query class to verify the store is reachable.
     await calibrationStore.getCalibrationParams('short_entity');
     return 'up';
-  } catch {
+  } catch (err) {
+    log.warn({ err, probe: 'calibration_store' }, 'readiness probe failed');
     return 'down';
   }
 }

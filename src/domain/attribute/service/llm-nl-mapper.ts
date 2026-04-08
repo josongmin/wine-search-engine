@@ -19,8 +19,10 @@
  *   Phase 3: LLM handles long-tail only (~10% of queries)
  */
 
+import { createHash } from 'node:crypto';
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { MappingTablePort } from '../port/mapping-table.port.js';
+import type { PhraseCachePort } from '../port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
 import { NLMapper, toNormalizedConstraint } from './nl-mapper.js';
 import {
@@ -55,7 +57,29 @@ Examples:
 If a phrase has no wine-related constraint meaning, omit it from the array. Return [] for no matches.`;
 
 /**
+ * Cache-key namespace bound to BOTH the explicit version and the actual prompt
+ * content. Editing SYSTEM_PROMPT without bumping LLM_MAPPING_VERSION used to
+ * silently invalidate semantics across the 24h positive TTL — this hash makes
+ * any prompt edit produce a brand-new key namespace, so old entries become
+ * unreachable and harmless.
+ */
+const PROMPT_FINGERPRINT = createHash('sha1').update(SYSTEM_PROMPT).digest('hex').slice(0, 8);
+/** @internal Exported for testing — production callers should not depend on the layout. */
+export const CACHE_KEY_NAMESPACE = `${LLM_MAPPING_VERSION}:${PROMPT_FINGERPRINT}`;
+
+/**
  * Observability data emitted per mapConstraints() call.
+ *
+ * Phrase-cache breakdown (operators reading this for cost dashboards):
+ *  - phraseCacheHits: cache returned a non-empty entry that produced ≥1
+ *    surviving constraint after attribute/confidence filtering
+ *  - phraseCacheNegativeSkipped: cache returned an empty (negative) entry —
+ *    LLM call was skipped, but no constraints were produced from cache
+ *  - phraseCacheMisses: cache had no entry for this phrase, fell through to LLM
+ *
+ * Sum invariant: hits + negativeSkipped + misses = number of phrases that
+ * were actually checked against the cache (i.e. missedPhrases capped at
+ * MAX_LLM_PHRASES). When phraseCache is undefined, all three are 0.
  */
 export interface ConstraintExtractionTrace {
   readonly candidatePhraseCount: number;
@@ -65,7 +89,9 @@ export interface ConstraintExtractionTrace {
   readonly fallbackTriggered: boolean;
   readonly source: 'rule_only' | 'llm_only' | 'hybrid' | 'fallback';
   readonly llmLatencyMs: number | null;
-  readonly cacheHit: boolean;
+  readonly phraseCacheHits: number;
+  readonly phraseCacheNegativeSkipped: number;
+  readonly phraseCacheMisses: number;
   readonly missedPhrases: readonly string[];
 }
 
@@ -76,6 +102,7 @@ export class LlmNLMapper extends NLMapper {
     mappingTable: MappingTablePort,
     private readonly chatLlm: ChatLlmPort,
     private readonly llmTimeoutMs: number = LLM_TIMEOUT_MS,
+    private readonly phraseCache?: PhraseCachePort,
   ) {
     super(mappingTable);
   }
@@ -97,8 +124,21 @@ export class LlmNLMapper extends NLMapper {
     const ruleResults: NormalizedConstraint[] = [];
     const missedPhrases: string[] = [];
 
+    // Dedupe at the entry point so we never pay rule-table or LLM cost twice
+    // for the same phrase. Preserves first-occurrence ordering.
+    const dedupedPhrases: string[] = [];
+    {
+      const seen = new Set<string>();
+      for (const phrase of phrases) {
+        if (!seen.has(phrase)) {
+          seen.add(phrase);
+          dedupedPhrases.push(phrase);
+        }
+      }
+    }
+
     // Step 1: Rule table lookup (deterministic, fast)
-    for (const phrase of phrases) {
+    for (const phrase of dedupedPhrases) {
       const mapping = await this.mapPhrase(phrase);
       if (mapping !== null) {
         ruleResults.push(toNormalizedConstraint(mapping));
@@ -109,34 +149,107 @@ export class LlmNLMapper extends NLMapper {
 
     // Step 2: LLM for missed phrases (cap to prevent token/cost explosion)
     const MAX_LLM_PHRASES = 20;
-    let llmResults: NormalizedConstraint[] = [];
+    const PHRASE_CACHE_TTL_SECONDS = 86_400; // 24h positive TTL
+    const PHRASE_CACHE_NEGATIVE_TTL_SECONDS = 3_600; // 1h negative TTL (shorter so prompt fixes propagate)
+    const llmResults: NormalizedConstraint[] = [];
     let llmSkippedCount = 0;
     let llmLatencyMs: number | null = null;
+    let phraseCacheHits = 0;
+    let phraseCacheNegativeSkipped = 0;
+    let phraseCacheMisses = 0;
     const llmPhrases = missedPhrases.slice(0, MAX_LLM_PHRASES);
 
     if (llmPhrases.length > 0) {
-      const llmStart = Date.now();
-      try {
-        const rawItems = await this.callLlm(llmPhrases);
-        llmLatencyMs = Date.now() - llmStart;
-
-        for (const item of rawItems) {
-          if (!LLM_ALLOWED_ATTRIBUTES.has(item.attribute)) {
-            llmSkippedCount++;
-            continue;
+      // Step 2a: Check phrase cache before LLM call.
+      // Cache key is namespaced by CACHE_KEY_NAMESPACE (version + prompt
+      // fingerprint) so prompt edits or version bumps invalidate stale entries.
+      const uncachedPhrases: string[] = [];
+      if (this.phraseCache !== undefined) {
+        for (const phrase of llmPhrases) {
+          try {
+            const cached = await this.phraseCache.get(this.cacheKey(phrase));
+            if (cached !== null) {
+              // Negative cache: empty array means "LLM returned nothing for this phrase".
+              // Skip the LLM call entirely; counted separately so operators can see
+              // how many cost-saving negative skips happened.
+              if (cached.length === 0) {
+                phraseCacheNegativeSkipped++;
+                continue;
+              }
+              const beforeCount = llmResults.length;
+              for (const item of cached) {
+                if (LLM_ALLOWED_ATTRIBUTES.has(item.attribute) && item.confidence >= LLM_CONFIDENCE_THRESHOLD) {
+                  llmResults.push(llmItemToConstraint(item));
+                }
+              }
+              // Only count as a useful cache hit if ≥1 item survived filtering.
+              // A cached entry that gets fully filtered out is recorded as a
+              // miss equivalent for trace purposes (we paid the lookup but
+              // gained no constraints) — but we still skip the LLM call
+              // because the LLM would just return the same filtered-out items.
+              if (llmResults.length > beforeCount) {
+                phraseCacheHits++;
+              } else {
+                phraseCacheMisses++;
+              }
+              continue;
+            }
+            phraseCacheMisses++;
+          } catch { /* cache read failure → fall through to LLM */
+            phraseCacheMisses++;
           }
-          if (item.confidence < LLM_CONFIDENCE_THRESHOLD) {
-            llmSkippedCount++;
-            continue;
-          }
-          llmResults.push(llmItemToConstraint(item));
+          uncachedPhrases.push(phrase);
         }
-      } catch (err) {
-        llmLatencyMs = Date.now() - llmStart;
-        log.warn(
-          { err, missedPhraseCount: missedPhrases.length, latencyMs: llmLatencyMs },
-          'LLM constraint extraction failed — continuing with rule-only results',
-        );
+      } else {
+        uncachedPhrases.push(...llmPhrases);
+      }
+
+      // Step 2b: LLM call for uncached phrases only
+      if (uncachedPhrases.length > 0) {
+        const llmStart = Date.now();
+        try {
+          const rawItems = await this.callLlm(uncachedPhrases);
+          llmLatencyMs = Date.now() - llmStart;
+
+          // Cache LLM results per phrase, including negative entries for phrases
+          // the LLM returned nothing for (so common no-match phrases don't keep
+          // re-triggering the LLM).
+          const itemsByPhrase = new Map<string, LlmConstraintItem[]>();
+          for (const phrase of uncachedPhrases) {
+            itemsByPhrase.set(phrase, []);
+          }
+          for (const item of rawItems) {
+            const list = itemsByPhrase.get(item.phrase) ?? [];
+            list.push(item);
+            itemsByPhrase.set(item.phrase, list);
+          }
+          if (this.phraseCache !== undefined) {
+            for (const [phrase, items] of itemsByPhrase) {
+              const ttl = items.length === 0 ? PHRASE_CACHE_NEGATIVE_TTL_SECONDS : PHRASE_CACHE_TTL_SECONDS;
+              this.phraseCache.set(this.cacheKey(phrase), items, ttl).catch((err: unknown) => {
+                log.warn({ err, phrase }, 'Failed to cache LLM phrase result');
+              });
+            }
+          }
+
+          for (const item of rawItems) {
+            if (!LLM_ALLOWED_ATTRIBUTES.has(item.attribute)) {
+              llmSkippedCount++;
+              continue;
+            }
+            if (item.confidence < LLM_CONFIDENCE_THRESHOLD) {
+              llmSkippedCount++;
+              continue;
+            }
+            llmResults.push(llmItemToConstraint(item));
+          }
+        } catch (err) {
+          llmLatencyMs = Date.now() - llmStart;
+          log.warn(
+            { err, missedPhraseCount: uncachedPhrases.length, latencyMs: llmLatencyMs },
+            'LLM constraint extraction failed — continuing with rule-only results',
+          );
+        }
       }
     }
 
@@ -159,7 +272,9 @@ export class LlmNLMapper extends NLMapper {
       fallbackTriggered: allResults.length === 0,
       source,
       llmLatencyMs,
-      cacheHit: false, // TODO: wire Redis phrase cache in Phase 2
+      phraseCacheHits,
+      phraseCacheNegativeSkipped,
+      phraseCacheMisses,
       missedPhrases: missedPhrases.filter(
         (p) => !llmResults.some((r) => r.source_phrase === p),
       ),
@@ -178,6 +293,16 @@ export class LlmNLMapper extends NLMapper {
     );
 
     return allResults;
+  }
+
+  /**
+   * Build a namespace-prefixed cache key. The namespace combines
+   * LLM_MAPPING_VERSION with a SHA-1 prefix of SYSTEM_PROMPT, so any prompt
+   * edit (with or without an explicit version bump) produces a new key
+   * partition and old entries become unreachable.
+   */
+  private cacheKey(phrase: string): string {
+    return `${CACHE_KEY_NAMESPACE}:${phrase}`;
   }
 
   private async callLlm(phrases: readonly string[]): Promise<LlmConstraintItem[]> {
@@ -206,7 +331,7 @@ export class LlmNLMapper extends NLMapper {
         timeoutPromise,
       ]);
 
-      const parsed = JSON.parse(result.text);
+      const parsed: unknown = JSON.parse(result.text);
       const validated = LlmConstraintResponseSchema.safeParse(parsed);
 
       if (!validated.success) {
@@ -227,14 +352,15 @@ export class LlmNLMapper extends NLMapper {
 }
 
 function llmItemToConstraint(item: LlmConstraintItem): NormalizedConstraint {
-  let value: NormalizedConstraint['value'];
-  if (typeof item.value === 'object' && !Array.isArray(item.value) && item.value !== null) {
-    value = { min: item.value.min, max: item.value.max };
-  } else if (Array.isArray(item.value)) {
-    value = item.value;
-  } else {
-    value = item.value;
-  }
+  // Range objects (`{min, max}`) are normalized into a discriminated form;
+  // strings, numbers, and string-arrays pass through unchanged. The Zod
+  // schema (LlmConstraintItemSchema) guarantees `value` is non-null, so the
+  // discriminator is purely typeof + Array.isArray.
+  const rawValue = item.value;
+  const value: NormalizedConstraint['value'] =
+    typeof rawValue === 'object' && !Array.isArray(rawValue)
+      ? { min: rawValue.min, max: rawValue.max }
+      : rawValue;
 
   return {
     attribute: item.attribute,
@@ -245,5 +371,3 @@ function llmItemToConstraint(item: LlmConstraintItem): NormalizedConstraint {
     mapping_version: LLM_MAPPING_VERSION,
   };
 }
-
-// Removed — uses toNormalizedConstraint from nl-mapper.ts

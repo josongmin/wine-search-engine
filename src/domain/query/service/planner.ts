@@ -13,6 +13,7 @@ import type { SessionContext } from '../model/session-context.js';
 import type { QueryBudget } from '../model/query-budget.js';
 import type { QueryTargetType } from '../model/query-target-type.js';
 import { DEFAULT_QUERY_BUDGET } from '../model/query-budget.js';
+import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
 import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
@@ -29,6 +30,7 @@ import {
 } from './planner-intent-detection.js';
 import { analyzeQueryDecomposition } from './decomposition-detector.js';
 import { extractAllPairingConstraints } from './pairing-extractor.js';
+import { correctKoreanWineTypos } from './korean-wine-aliases.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -120,10 +122,12 @@ export class Planner {
    */
   async plan(query: string, context?: PlannerContext): Promise<QueryPlanV2> {
     // Defense-in-depth: cap query length to prevent ReDoS in downstream regex extractors.
-    const safeQuery = query.length > 500 ? query.slice(0, 500) : query;
+    // Aligned with HTTP-layer MAX_QUERY_LENGTH so the planner never receives larger.
+    const safeQuery = query.length > MAX_QUERY_LENGTH ? query.slice(0, MAX_QUERY_LENGTH) : query;
 
-    // 1. Normalize.
-    const queryViews = this.queryNormalizer.normalize(safeQuery);
+    // 1. Normalize + Korean typo correction.
+    const typoFixed = correctKoreanWineTypos(safeQuery);
+    const queryViews = this.queryNormalizer.normalize(typoFixed);
     const normalizedQuery = queryViews.accentless;
 
     // 2. Extract anchors.

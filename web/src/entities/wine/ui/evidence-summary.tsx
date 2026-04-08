@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import type { EvidenceItem } from '@/shared/api';
 import { cn } from '@/shared/lib';
 
@@ -12,11 +13,17 @@ const strengthColor: Record<string, string> = {
   low: 'text-neutral-400',
 };
 
+const STRENGTH_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
+
 export function EvidenceSummary({ items, max = 3 }: EvidenceSummaryProps) {
-  const sorted = [...items].sort((a, b) => {
-    const order = { high: 0, medium: 1, low: 2 };
-    return (order[a.strength] ?? 3) - (order[b.strength] ?? 3);
-  });
+  // Memoize the sort so we don't allocate a new sorted array on every render.
+  const sorted = useMemo(
+    () =>
+      [...items].sort(
+        (a, b) => (STRENGTH_ORDER[a.strength] ?? 3) - (STRENGTH_ORDER[b.strength] ?? 3),
+      ),
+    [items],
+  );
 
   const visible = sorted.slice(0, max);
   const remaining = sorted.length - max;
@@ -28,7 +35,12 @@ export function EvidenceSummary({ items, max = 3 }: EvidenceSummaryProps) {
       </p>
       <ul className="space-y-0.5">
         {visible.map((ev, i) => (
-          <li key={i} className="flex items-center gap-1.5 text-xs">
+          // Stable composite key so reconciliation doesn't reuse DOM nodes
+          // for different evidence after a refetch shuffles the list.
+          <li
+            key={`${ev.source}:${ev.type}:${ev.provenance}:${i}`}
+            className="flex items-center gap-1.5 text-xs"
+          >
             <span className={cn('font-mono', strengthColor[ev.strength] ?? 'text-neutral-400')}>
               {ev.contribution}
             </span>

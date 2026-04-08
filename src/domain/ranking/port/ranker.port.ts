@@ -27,6 +27,13 @@ export interface RankingMetadata {
   readonly runtimeSignal: RankerRuntimeSignal | undefined;
   /** Top-5 entityIds captured after primary sort, before rerank. */
   readonly preRerankTop5: readonly string[];
+  /**
+   * Funnel metrics computed by RankingStagePipeline. Populated only when the
+   * ranker is wrapped in the stage pipeline; undefined for direct Ranker.
+   * Returned via metadata (not instance state) so concurrent rank() calls
+   * cannot corrupt each other's funnel data.
+   */
+  readonly funnelMetrics?: FunnelMetrics | undefined;
 }
 
 /**

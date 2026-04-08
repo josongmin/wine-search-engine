@@ -26,7 +26,7 @@ import { registerAgentRoute } from './routes/agent.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
-import { getAuthenticatedSubject } from './authenticated-subject.js';
+import { getAuthenticatedSubject, configureAuthenticatedSubjectTrust } from './authenticated-subject.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
@@ -93,19 +93,24 @@ async function registerCorsSupport(
     .map((o) => o.trim())
     .filter((o) => o.length > 0);
 
+  // Localhost-only allowlist for non-production: prevents arbitrary cross-origin
+  // pages from making credentialed requests against a developer machine.
+  const LOCALHOST_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+
   await app.register(cors, {
     hook: 'preHandler',
     origin(origin, callback) {
-      if (options.nodeEnv !== 'production') {
-        callback(null, true);
-        return;
-      }
-
       // Requests without an Origin header (server-to-server, curl, load-balancer
       // health checks) are not browser CORS requests.  Allow them through
       // unconditionally; CORS headers simply won't be set, which is correct.
       if (origin === undefined) {
         callback(null, true);
+        return;
+      }
+
+      if (options.nodeEnv !== 'production') {
+        // Only reflect localhost origins in dev/test to prevent staging XSS exfil.
+        callback(null, LOCALHOST_ORIGIN_RE.test(origin));
         return;
       }
 
@@ -201,8 +206,18 @@ export async function createServer(
   });
 
   if (options?.enableSecurityHeaders ?? true) {
+    // JSON-only API: lock down CSP to deny all subresource loads and
+    // frame-ancestors. Even error pages or accidental HTML responses
+    // cannot execute scripts or be framed by malicious pages.
     await app.register(helmet, {
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          baseUri: ["'none'"],
+          formAction: ["'none'"],
+        },
+      },
       crossOriginEmbedderPolicy: false,
     });
   }
@@ -216,6 +231,11 @@ export async function createServer(
   if (options?.enableCors ?? true) {
     await registerCorsSupport(app, { nodeEnv, allowedOrigins });
   }
+
+  // Configure trust for the X-Authenticated-Subject header. Without an
+  // upstream verifying proxy (trustProxy=false) the header is client-supplied
+  // and must be ignored to prevent impersonation.
+  configureAuthenticatedSubjectTrust(app, options?.trustProxy ?? false);
 
   // Register middleware (debug mode first so request_start uses per-request log level)
   registerHttpDebugMode(app, { secret: options?.httpDebugSecret });
@@ -264,8 +284,9 @@ export async function createServer(
   //   - accepts   "application/json; charset=utf-8"
   //   - rejects   "text/plain"
   //   - rejects   "not-application/json"   (would pass a naive .includes() check)
+  const METHODS_WITH_BODY = new Set(['POST', 'PUT', 'PATCH']);
   app.addHook('preParsing', async (request, reply) => {
-    if (request.method === 'POST') {
+    if (METHODS_WITH_BODY.has(request.method)) {
       const rawCt = request.headers['content-type'] ?? '';
       const mediaType = rawCt.split(';')[0]?.trim().toLowerCase() ?? '';
       if (mediaType !== 'application/json') {
@@ -275,7 +296,7 @@ export async function createServer(
             request_id: requestId,
             code: 'UNSUPPORTED_MEDIA_TYPE',
             message:
-              'Content-Type must be application/json for POST requests.',
+              'Content-Type must be application/json for POST/PUT/PATCH requests.',
             failure_reason: null,
             retryable: false,
           },

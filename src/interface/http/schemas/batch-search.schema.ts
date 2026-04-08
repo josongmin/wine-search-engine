@@ -22,11 +22,13 @@ const BatchQueryBudgetSnakeSchema = z.object({
   max_latency_ms: z.number().int().positive().max(30_000),
   max_candidates: z.number().int().positive().max(1_000),
   rerank_limit: z.number().int().positive().max(500),
+  max_dense_calls: z.number().int().positive().max(100).optional(),
 }).strict().transform((value) => ({
   queryBudget: {
     maxLatencyMs: value.max_latency_ms,
     maxCandidates: value.max_candidates,
     rerankLimit: value.rerank_limit,
+    ...(value.max_dense_calls !== undefined ? { maxDenseCalls: value.max_dense_calls } : {}),
   },
 }));
 
@@ -50,6 +52,8 @@ export const BatchSearchRequestItemSchema = z.object({
   session_context: BatchSessionContextSnakeSchema.optional(),
   queryBudget: QueryBudgetSchema.optional(),
   query_budget: BatchQueryBudgetSnakeSchema.optional(),
+  /** When true, the response includes counterfactuals for this item. */
+  explain: z.boolean().optional(),
 }).strict().superRefine((value, ctx) => {
   if (value.sessionContext !== undefined && value.session_context !== undefined) {
     ctx.addIssue({

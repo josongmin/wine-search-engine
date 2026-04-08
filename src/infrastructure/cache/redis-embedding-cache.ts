@@ -37,23 +37,68 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
     this.redis = redis;
   }
 
-  async get(cacheKey: EmbeddingCacheKey): Promise<readonly number[] | undefined> {
+  /**
+   * Single source of truth for poisoned-entry handling: bumps the miss counter,
+   * fires-and-forgets a DEL on the key, and returns undefined. Used by all three
+   * failure paths (parse error, shape error, element error) so they stay consistent.
+   */
+  private async handlePoisoned(
+    cacheKey: EmbeddingCacheKey,
+    reason: string,
+  ): Promise<undefined> {
+    log.warn({ key: cacheKey.redisKey, reason }, 'embedding cache poisoned; treating as miss');
+    // Wrap miss counter + delete in try/catch so a synchronous redis throw
+    // (closed client, broken socket) doesn't reject this promise and propagate
+    // up to the caller — defeating the "treat as miss" semantics.
     try {
-      const cached = await this.redis.get(cacheKey.redisKey);
+      await this.redis.incr(this.statsKeyMisses);
+    } catch {
+      // metric increment is best-effort
+    }
+    try {
+      await this.redis.del(cacheKey.redisKey);
+    } catch {
+      // delete is best-effort; the entry's TTL will eventually clean it up
+    }
+    return undefined;
+  }
 
-      if (cached === null) {
-        await this.redis.incr(this.statsKeyMisses);
-        return undefined;
-      }
-
-      await this.redis.incr(this.statsKeyHits);
-      const embedding = JSON.parse(cached) as readonly number[];
-      return embedding;
+  async get(cacheKey: EmbeddingCacheKey): Promise<readonly number[] | undefined> {
+    let cached: string | null;
+    try {
+      cached = await this.redis.get(cacheKey.redisKey);
     } catch (error) {
-      log.error({ err: error }, 'deserialization error');
+      log.error({ err: error }, 'redis get error');
       await this.redis.incr(this.statsKeyMisses);
       return undefined;
     }
+
+    if (cached === null) {
+      await this.redis.incr(this.statsKeyMisses);
+      return undefined;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(cached);
+    } catch {
+      // Non-JSON poisoning: also delete so reads don't keep paying.
+      return this.handlePoisoned(cacheKey, 'json_parse_error');
+    }
+
+    // Validate shape: must be a non-empty array of finite numbers.
+    // CRITICAL: increment hits ONLY after validation passes; otherwise
+    // the hit-rate metric is inflated by poisoned reads.
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return this.handlePoisoned(cacheKey, 'not_an_array_or_empty');
+    }
+    for (const v of parsed) {
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        return this.handlePoisoned(cacheKey, 'non_numeric_element');
+      }
+    }
+    await this.redis.incr(this.statsKeyHits);
+    return parsed as readonly number[];
   }
 
   async set(
@@ -79,9 +124,11 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
 
   async deleteByModel(modelId: string): Promise<number> {
     try {
+      // Escape Redis glob metacharacters in modelId to prevent pattern injection
+      const safeModelId = modelId.replace(/[*?[\]\\]/g, '\\$&');
       return await deleteRedisKeysMatchingPattern(
         this.redis,
-        `embedding:${modelId}:*`,
+        `embedding:${safeModelId}:*`,
       );
     } catch (error) {
       log.error({ err: error }, 'delete by model error');

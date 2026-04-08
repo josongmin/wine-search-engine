@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { FeedbackRouteDeps } from './route-deps.js';
 import {
+  parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
@@ -14,6 +15,22 @@ import type { DecisionSnapshot } from '../../../domain/shared/types/decision-sna
 import { getRequestId } from '../request-id.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from '../../../application/search/search-usecase-decision-snapshot.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Extract a client-supplied idempotency key from the Idempotency-Key header.
+ * Validates as UUID-shaped to defend against header injection / log poisoning;
+ * any other value is rejected (returns null) so the route falls back to a
+ * server-generated UUID.
+ */
+function extractIdempotencyKey(request: FastifyRequest): string | null {
+  const raw = request.headers['idempotency-key'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return UUID_RE.test(trimmed) ? trimmed : null;
+}
+
 function buildFeedbackDecisionSnapshot(): DecisionSnapshot {
   return {
     ...buildDecisionSnapshotFromRuntimeVersions(),
@@ -23,7 +40,12 @@ function buildFeedbackDecisionSnapshot(): DecisionSnapshot {
   };
 }
 
-function mapSignal(
+/**
+ * Maps HTTP feedback signal types to their domain FeedbackType counterparts.
+ * Exported so contract-drift tests can verify schema↔domain parity directly
+ * (importing the actual mapper, not a hardcoded copy).
+ */
+export function mapSignal(
   signalType: 'click' | 'purchase' | 'dismiss',
 ): { readonly type: FeedbackType; readonly isPositive: boolean } {
   if (signalType === 'click') {
@@ -68,27 +90,7 @@ export function registerFeedbackRoute(
         return;
       }
 
-      const parsed = FeedbackSubmitRouteContract.body.safeParse(request.body);
-      if (!parsed.success) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          FeedbackSubmitRouteContract,
-          400,
-          ErrorResponseSchema.parse({
-            error: {
-              request_id: requestId,
-              code: 'VALIDATION_ERROR',
-              message: 'Invalid feedback request body.',
-              failure_reason: parsed.error.message,
-              retryable: false,
-            },
-          }),
-        );
-        return;
-      }
-
-      const body = parsed.data;
+      const body = parseContractBody(request, FeedbackSubmitRouteContract);
       const { type, isPositive } = mapSignal(body.signal_type);
       const queryClass: QueryClass =
         body.query_class !== undefined && isQueryClass(body.query_class)
@@ -96,7 +98,11 @@ export function registerFeedbackRoute(
           : 'unknown';
 
       const signal: FeedbackSignal = {
-        signalId: randomUUID(),
+        // Honor an optional client-supplied Idempotency-Key header so that
+        // network-retried submissions resolve to the same row, making the
+        // pg `ON CONFLICT (signal_id) DO NOTHING` clause load-bearing.
+        // Validate as UUID-shaped to prevent header injection / log poisoning.
+        signalId: extractIdempotencyKey(request) ?? randomUUID(),
         type,
         query: body.query,
         queryClass,
@@ -110,7 +116,12 @@ export function registerFeedbackRoute(
       try {
         await deps.feedbackStore.saveFeedback(signal);
       } catch (err: unknown) {
-        request.log.error({ err, requestId }, 'feedback_save_failed');
+        // Redact the err object: pg driver errors can include parameterized
+        // SQL with values interpolated, leaking the user's query and entity_id
+        // into structured logs.
+        const errCode = (err as { code?: string } | undefined)?.code;
+        const errName = err instanceof Error ? err.name : 'Unknown';
+        request.log.error({ errCode, errName, requestId }, 'feedback_save_failed');
         sendRouteContractResponse(
           request,
           reply,

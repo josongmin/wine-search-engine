@@ -207,32 +207,12 @@ function isLegacyHeuristicRetrievalMode(retrievalMode: string): boolean {
  *  - sparseTopN / denseTopN  — per-channel candidate budget
  *  - finalTopK        — post-fusion candidate ceiling
  *
- * Specialised path hints (not in profile, driven by retrievalMode):
- *  - producer_browse  → BrowseRetrieverPort.browseProducer()
- *  - region_browse    → BrowseRetrieverPort.browseRegion()
- *  - compare_candidates → CompareRetrieverPort.compareAgainstAnchor()
+ * Specialised retrieval modes (producer_browse / region_browse /
+ * compare_candidates) are dispatched upstream in
+ * search-usecase-hybrid-candidates.ts via
+ * compiled.execution.effectiveRetrievalMode — they do NOT flow through this
+ * profile service.
  */
-
-/**
- * E2-U2 Lane Policy Table Skeleton
- *
- * Structured output from a lane policy decision.
- * Combines profile selection, specialised path hint, and default budget.
- * Produced by getDecisionOutput(); consumed by retrieval input assembly.
- */
-export interface LaneDecisionOutput {
-  /** The resolved retrieval profile for channel dispatch and fusion. */
-  readonly profile: RetrievalProfile;
-
-  /**
-   * Specialised retrieval path hint when retrieval mode implies a dedicated retriever.
-   * - 'producer_browse' → call BrowseRetrieverPort.browseProducer()
-   * - 'region_browse'   → call BrowseRetrieverPort.browseRegion()
-   * - 'compare_candidates' → call CompareRetrieverPort.compareAgainstAnchor()
-   * - undefined         → use standard CandidatePoolPort.generate()
-   */
-  readonly specializedPathHint?: 'producer_browse' | 'region_browse' | 'compare_candidates' | undefined;
-}
 
 /**
  * Selects the appropriate {@link RetrievalProfile} based on query class,
@@ -358,27 +338,4 @@ export class RetrievalProfileService {
     return this.getProfile(queryClass, route, retrievalMode, queryFamily).channelMix;
   }
 
-  /**
-   * E2-U2: Return the full lane decision output — profile + specialised path hint.
-   * This is the authoritative single call for retrieval input assembly:
-   * callers get both the profile (for channel dispatch / fusion) and
-   * any specialised path hint (for dedicated retriever dispatch).
-   */
-  getDecisionOutput(
-    queryClass: QueryClass,
-    route: string,
-    retrievalMode?: string,
-    queryFamily?: QueryFamily,
-  ): LaneDecisionOutput {
-    const profile = this.getProfile(queryClass, route, retrievalMode, queryFamily);
-    const specializedPathHint =
-      retrievalMode === 'producer_browse' ? 'producer_browse'
-      : retrievalMode === 'region_browse' ? 'region_browse'
-      : retrievalMode === 'compare_candidates' ? 'compare_candidates'
-      : undefined;
-    return {
-      profile,
-      ...(specializedPathHint !== undefined ? { specializedPathHint } : {}),
-    };
-  }
 }

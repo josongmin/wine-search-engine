@@ -188,7 +188,7 @@ describe('buildSearchCounterfactuals', () => {
       topEntity: { entityId: topId, canonicalLabel: 'Top', calibratedScore: 0.9 },
       conformalSetSize: 1,
     };
-    const cfs = buildSearchCounterfactuals(resolverResult, [], 5);
+    const cfs = buildSearchCounterfactuals(resolverResult, [], { topResultWindow: 5 });
     expect(cfs.some((c) => c.entityId === otherId)).toBe(true);
   });
 });

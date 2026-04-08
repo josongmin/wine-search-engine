@@ -70,19 +70,16 @@ export class CandidatePoolService {
   async generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
     const queryFamily = deriveQueryFamily(input.queryPlan);
     const retrievalMode = this.resolveRuntimeRetrievalMode(input);
-    // E2-U2: Use getDecisionOutput() as the canonical lane policy entry point.
-    // Returns { profile, specializedPathHint } in one call instead of getProfile() alone.
-    // TODO: specializedPathHint is returned but not yet consumed here.
-    // Specialized routing (BrowseRetrieverPort, CompareRetrieverPort) is currently
-    // handled upstream in search-usecase-hybrid-candidates.ts via compiled.execution.effectiveRetrievalMode.
-    // To use the hint here, read laneDecision.specializedPathHint and dispatch accordingly.
-    const laneDecision = this.profileService.getDecisionOutput(
+    // Specialized routing (producer_browse / region_browse / compare_candidates)
+    // is decided upstream in search-usecase-hybrid-candidates.ts from
+    // compiled.execution.effectiveRetrievalMode, so this path only needs the
+    // generic retrieval profile.
+    const profile = this.profileService.getProfile(
       input.queryPlan.queryClass,
       input.route,
       retrievalMode,
       queryFamily,
     );
-    const profile = laneDecision.profile;
 
     const anchorConfidence = input.anchorProfile?.anchorConfidence ?? 0;
     const aliasMatchStrength = this.estimateAliasStrength(input);
@@ -326,8 +323,14 @@ export class CandidatePoolService {
     if (anchors.length === 0) {
       return 0;
     }
-    // Use the highest anchor confidence as a proxy for alias match strength
-    return Math.max(...anchors.map((a) => a.confidence));
+    // Use the highest anchor confidence as a proxy for alias match strength.
+    // Loop instead of Math.max(...spread) to avoid stack overflow on adversarial
+    // inputs that produce tens of thousands of anchors.
+    let max = -Infinity;
+    for (const a of anchors) {
+      if (a.confidence > max) max = a.confidence;
+    }
+    return max;
   }
 
   private resolveRuntimeRetrievalMode(input: HybridRetrievalInput): string | undefined {

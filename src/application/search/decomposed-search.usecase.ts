@@ -57,7 +57,7 @@ export class DecomposedSearchUseCase {
     throwIfAborted(options?.abortSignal);
 
     const baseRequest: Omit<SearchRequest, 'query'> = {
-      options: { mode: 'auto', explain: false, clarification: false },
+      options: { mode: 'auto', explain: parentContext?.explain ?? false, clarification: false },
       ...(parentContext?.context !== undefined ? { context: parentContext.context } : {}),
       ...(parentContext?.sessionContext !== undefined
         ? { sessionContext: parentContext.sessionContext }

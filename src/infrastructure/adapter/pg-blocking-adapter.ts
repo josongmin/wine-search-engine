@@ -6,7 +6,11 @@ interface CandidateRow {
   entity_id: string;
 }
 
-function escapeLikePattern(input: string): string {
+/**
+ * Escapes PostgreSQL LIKE pattern metacharacters (`%`, `_`, `\`).
+ * Exported for property-based regression tests.
+ */
+export function escapeLikePattern(input: string): string {
   return input.replace(/[%_\\]/g, '\\$&');
 }
 

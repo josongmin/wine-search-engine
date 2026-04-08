@@ -42,7 +42,9 @@ export interface ConstraintExtractionObservability {
   readonly fallbackTriggered: boolean;
   readonly source: 'rule_only' | 'llm_only' | 'hybrid' | 'fallback';
   readonly llmLatencyMs: number | null;
-  readonly cacheHit: boolean;
+  readonly phraseCacheHits: number;
+  readonly phraseCacheNegativeSkipped: number;
+  readonly phraseCacheMisses: number;
   readonly missedPhrases: readonly string[];
 }
 

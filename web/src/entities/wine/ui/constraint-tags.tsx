@@ -9,17 +9,19 @@ export function ConstraintTags({ constraints }: ConstraintTagsProps) {
   return (
     <div className="flex flex-wrap gap-1">
       {constraints.matched.map((c) => (
-        <Badge key={c} variant="success">
+        // Prefix the React key so the same constraint string appearing in
+        // matched + unmet + inferred doesn't collide on render.
+        <Badge key={`m:${c}`} variant="success">
           ✓ {c}
         </Badge>
       ))}
       {constraints.unmet.map((c) => (
-        <Badge key={c} variant="danger">
+        <Badge key={`u:${c}`} variant="danger">
           ✗ {c}
         </Badge>
       ))}
       {constraints.inferred.map((c) => (
-        <Badge key={c} variant="info">
+        <Badge key={`i:${c}`} variant="info">
           ~ {c}
         </Badge>
       ))}

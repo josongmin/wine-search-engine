@@ -297,12 +297,15 @@ export class ResponseBuilder {
    */
   private enrichResults(results: readonly ResultItem[]): readonly ResultItem[] {
     return results.map((result) => {
-      // Extract matchReasons from evidence items with strength != 'low' and positive contribution
+      // Extract matchReasons from evidence items with strength != 'low' and positive contribution.
+      // Use Number() instead of parseFloat() so "0.05abc" rejects (NaN) instead of
+      // silently coercing to 0.05. Empty string, malformed strings, and Infinity
+      // all become NaN → filtered out instead of polluting match reasons.
       const matchReasons = result.evidenceItems
         .filter((ei) => {
           const strength = ei.strength;
-          const contrib = parseFloat(ei.contribution);
-          return strength !== 'low' && contrib > 0;
+          const contrib = Number(ei.contribution);
+          return strength !== 'low' && Number.isFinite(contrib) && contrib > 0;
         })
         .map((ei) => ei.provenance);
 
@@ -407,6 +410,9 @@ export class ResponseBuilder {
 
   /**
    * Convert constraint value to string representation for external format.
+   * Validates the range branch at runtime instead of trusting the cast —
+   * an upstream `{min: undefined, max: 100}` would otherwise produce literal
+   * "undefined-100" in client-visible responses.
    */
   private constraintValueToString(value: string | number | { min: number; max: number } | ReadonlyArray<string>): string {
     if (typeof value === 'string' || typeof value === 'number') {
@@ -415,8 +421,19 @@ export class ResponseBuilder {
     if (Array.isArray(value)) {
       return `[${value.join(', ')}]`;
     }
-    const range = value as { min: number; max: number };
-    return `${range.min}-${range.max}`;
+    // Validate the range branch at runtime instead of trusting the type — an
+    // upstream `{min: undefined, max: 100}` would otherwise produce literal
+    // "undefined-100" in client-visible responses.
+    const candidate = value as { min: unknown; max: unknown };
+    if (
+      typeof candidate.min === 'number'
+      && typeof candidate.max === 'number'
+      && Number.isFinite(candidate.min)
+      && Number.isFinite(candidate.max)
+    ) {
+      return `${candidate.min}-${candidate.max}`;
+    }
+    return '[invalid_constraint_value]';
   }
 
   /**

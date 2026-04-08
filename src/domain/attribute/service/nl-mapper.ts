@@ -258,6 +258,40 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
       source: DEFAULT_SOURCE,
     },
   ],
+
+  // ── Korean slang / abbreviations / extended vocabulary ──────────────
+
+  // Price: standalone price-level words
+  ['비싼', { phrase: '비싼', mappedAttribute: 'price_band', operator: '=', value: 'luxury', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['비싸', { phrase: '비싸', mappedAttribute: 'price_band', operator: '=', value: 'luxury', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['저렴한', { phrase: '저렴한', mappedAttribute: 'price_band', operator: '=', value: 'budget', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['싼', { phrase: '싼', mappedAttribute: 'price_band', operator: '=', value: 'budget', mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['가성비', { phrase: '가성비', mappedAttribute: 'price_band', operator: '=', value: 'mid', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['고급', { phrase: '고급', mappedAttribute: 'price_band', operator: '=', value: 'premium', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
+  // Critic score / rating
+  ['평점 좋은', { phrase: '평점 좋은', mappedAttribute: 'critic_score', operator: '>=', value: 0.7, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['평점좋은', { phrase: '평점좋은', mappedAttribute: 'critic_score', operator: '>=', value: 0.7, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['평점 높은', { phrase: '평점 높은', mappedAttribute: 'critic_score', operator: '>=', value: 0.8, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['점수 높은', { phrase: '점수 높은', mappedAttribute: 'critic_score', operator: '>=', value: 0.8, mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
+  // Flavor / aroma
+  ['과일향', { phrase: '과일향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'fruity', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['오크향', { phrase: '오크향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'oaky', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['꽃향', { phrase: '꽃향', mappedAttribute: 'flavor_profile', operator: 'in', value: 'floral', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['스파이시', { phrase: '스파이시', mappedAttribute: 'flavor_profile', operator: 'in', value: 'spicy', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['미네랄', { phrase: '미네랄', mappedAttribute: 'flavor_profile', operator: 'in', value: 'mineral', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
+  // Texture / body
+  ['강렬한', { phrase: '강렬한', mappedAttribute: 'body', operator: '>=', value: 0.8, mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['우아한', { phrase: '우아한', mappedAttribute: 'body', operator: 'range', value: [0.3, 0.6] as readonly [number, number], mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['균형 잡힌', { phrase: '균형 잡힌', mappedAttribute: 'body', operator: 'range', value: [0.4, 0.6] as readonly [number, number], mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+
+  // Occasion extended
+  ['기념일', { phrase: '기념일', mappedAttribute: 'occasion', operator: 'in', value: 'anniversary', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['데이트', { phrase: '데이트', mappedAttribute: 'occasion', operator: 'in', value: 'date', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['혼술', { phrase: '혼술', mappedAttribute: 'occasion', operator: 'in', value: 'solo', mappingConfidence: 0.85, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['집들이', { phrase: '집들이', mappedAttribute: 'occasion', operator: 'in', value: 'housewarming', mappingConfidence: 0.9, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 ]);
 
 /**

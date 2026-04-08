@@ -472,7 +472,18 @@ export class Ranker {
 
     // Step 5: Sort by finalScore descending, tie-break by entityId ascending
     // for deterministic ordering (RFC-009/015 determinism gate).
+    // NaN handling: NaN propagated through any subtraction yields NaN, which
+    // Array.sort treats as "equal" in implementation-defined order. Force
+    // any NaN candidate to lose to a real number so determinism is preserved
+    // even under upstream score corruption.
     viable.sort((a, b) => {
+      const aFinite = Number.isFinite(a.finalScore);
+      const bFinite = Number.isFinite(b.finalScore);
+      if (!aFinite && !bFinite) {
+        return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+      }
+      if (!aFinite) return 1;  // a (NaN) loses to b (finite)
+      if (!bFinite) return -1; // b (NaN) loses to a (finite)
       const scoreDiff = b.finalScore - a.finalScore;
       if (scoreDiff !== 0) return scoreDiff;
       return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
@@ -583,10 +594,7 @@ export class Ranker {
           ? { drinkingWindowModelVersion: entry.drinkingWindowModelVersion }
           : {}),
         // Epic 15: Wine attributes for dynamic prediction
-        // TODO: remove vintage after consumers migrate to vintageYear
-        ...(entry.vintageYear !== undefined
-          ? { vintage: entry.vintageYear, vintageYear: entry.vintageYear }
-          : {}),
+        ...(entry.vintageYear !== undefined ? { vintageYear: entry.vintageYear } : {}),
         ...(entry.body !== undefined ? { body: entry.body } : {}),
         ...(entry.tannin !== undefined ? { tannin: entry.tannin } : {}),
         ...(entry.acidity !== undefined ? { acidity: entry.acidity } : {}),
@@ -718,10 +726,25 @@ export class Ranker {
       }
     }
 
-    // Sort reranked portion by blended score
-    rerankedTopK.sort((a, b) => b.finalScore - a.finalScore);
-
-    // Append the rest (unchanged)
-    return [...rerankedTopK, ...rest];
+    // Sort the entire combined set (top-K reranked + rest) by finalScore.
+    // Previous code concatenated `[...rerankedTopK, ...rest]` which preserved
+    // top-K position even when a rest candidate's original score now exceeded
+    // a blended top-K score — producing rank inversions across the boundary.
+    // Re-sorting fixes this and applies the same NaN-safe tie-break as the
+    // primary sort.
+    const combined = [...rerankedTopK, ...rest];
+    combined.sort((a, b) => {
+      const aFinite = Number.isFinite(a.finalScore);
+      const bFinite = Number.isFinite(b.finalScore);
+      if (!aFinite && !bFinite) {
+        return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+      }
+      if (!aFinite) return 1;
+      if (!bFinite) return -1;
+      const scoreDiff = b.finalScore - a.finalScore;
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+    });
+    return combined;
   }
 }

@@ -8,6 +8,7 @@ describe('buildCoreAdapterServices', () => {
     const config = parseEnv({
       NODE_ENV: 'production',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
     });
 
     expect(() => buildCoreAdapterServices(config, {})).toThrowError(/PostgreSQL-backed adapters/);

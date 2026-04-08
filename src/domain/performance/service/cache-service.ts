@@ -126,7 +126,10 @@ export class CacheService implements SearchResponseCachePort {
 
     try {
       const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
-      // Build cache key
+      // Build cache key. Include snapshot_id so a deploy with a new
+      // policy/model snapshot automatically isolates fresh keys from
+      // prior-epoch entries — avoiding stale-result reads while old
+      // entries decay via TTL.
       const cacheKey = this.queryCacheKeyBuilder.build(
         plan.normalizedQuery,
         effectiveRetrievalMode,
@@ -140,6 +143,7 @@ export class CacheService implements SearchResponseCachePort {
         ],
         request.sessionContext?.sessionId,
         request.context?.locale,
+        currentSnapshot.snapshot_id,
       );
 
       // Get from cache
@@ -259,6 +263,7 @@ export class CacheService implements SearchResponseCachePort {
         ],
         request.sessionContext?.sessionId,
         request.context?.locale,
+        snapshot.snapshot_id,
       );
 
       // Stratify TTL by decision status (Bug fix: non-resolved responses must
@@ -271,12 +276,16 @@ export class CacheService implements SearchResponseCachePort {
       // - failed     → 30 s   (failure is frequently transient; short TTL limits
       //                         blast radius while still absorbing retry bursts)
       const decisionStatus = response.engineDecision.decisionStatus;
-      const effectiveTtl =
+      const rawTtl =
         decisionStatus === 'resolved'
           ? eligibility.ttlSeconds
           : decisionStatus === 'ambiguous'
             ? Math.min(eligibility.ttlSeconds, 60)
             : /* failed */ Math.min(eligibility.ttlSeconds, 30);
+      // Redis SET ... EX 0 is rejected — never write a non-positive TTL.
+      // A min of 1s caps the worst case (write+immediate-expiry) without
+      // crashing the writer path.
+      const effectiveTtl = Math.max(1, Math.floor(rawTtl));
 
       await this.queryCache.set(cacheKey, response, effectiveTtl);
       this.recordCacheSuccess();
@@ -336,6 +345,14 @@ export class CacheService implements SearchResponseCachePort {
         // Make mutable copy to satisfy embedBatch interface
         const newEmbeddings = await embeddingService.embedBatch(uncachedTexts);
         const mutableEmbeddings = newEmbeddings.slice();
+        // Critical correctness check: the embedding service must return one
+        // vector per input text in the same order. A truncated or reordered
+        // response would silently associate wrong vectors with wrong texts.
+        if (mutableEmbeddings.length !== uncachedTexts.length) {
+          throw new Error(
+            `Embedding service returned ${mutableEmbeddings.length} vectors for ${uncachedTexts.length} texts`,
+          );
+        }
 
         // Store in cache
         for (const [j, idx] of uncachedIndices.entries()) {
@@ -482,6 +499,13 @@ export class CacheService implements SearchResponseCachePort {
   }
 
   private recordCacheSuccess(): void {
+    // Symmetric with recordCacheError: do not heal the breaker counter while
+    // the breaker is open. A request that began before the breaker opened can
+    // resolve cleanly mid-window and would otherwise reset
+    // consecutiveErrorCount to 0, prematurely "healing" a flapping backend.
+    if (this.circuitBreakerOpen) {
+      return;
+    }
     this.consecutiveErrorCount = 0;
   }
 }

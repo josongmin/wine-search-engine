@@ -18,6 +18,12 @@ export interface DecomposedSearchParentContext {
   readonly context?: SearchRequestContext | undefined;
   readonly sessionContext?: SearchSessionContext | undefined;
   readonly queryBudget?: SearchQueryBudget | undefined;
+  /**
+   * Forwards the parent search request's `options.explain` to each sub-search
+   * so that explain=true on a comparison query produces counterfactuals on
+   * both legs.
+   */
+  readonly explain?: boolean | undefined;
 }
 
 export interface DecomposedSearchExecutionOptions {

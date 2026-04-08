@@ -7,6 +7,8 @@ const maxDevThreads = resolveMaxThreads(1);
 const devTestInclude = [
   'test/unit/**/*.test.ts',
   'test/helpers/**/*.test.ts',
+  'test/regression/**/*.test.ts',
+  'test/benchmark/**/__tests__/**/*.test.ts',
   'src/application/**/__tests__/**/*.test.ts',
   'src/config/**/__tests__/**/*.test.ts',
   'src/domain/**/__tests__/**/*.test.ts',

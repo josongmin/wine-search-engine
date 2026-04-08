@@ -98,6 +98,42 @@ export class EvidenceMapper {
       provenance: 'Product availability signal',
     });
 
+    if (scores.producerPrestige !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.producerPrestige,
+        type: 'producer_prestige',
+        source: 'catalog_data',
+        provenance: 'Producer prestige derived from winery rating',
+      });
+    }
+
+    if (scores.criticScore !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.criticScore,
+        type: 'critic_score',
+        source: 'catalog_data',
+        provenance: 'Critic score signal from proxy or aggregated ratings',
+      });
+    }
+
+    if (scores.recency !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.recency,
+        type: 'recency',
+        source: 'temporal_signal',
+        provenance: 'Vintage recency signal — higher for more recent vintages',
+      });
+    }
+
+    if (scores.multilingualScore !== undefined) {
+      this.addIfNonZero(items, {
+        value: scores.multilingualScore,
+        type: 'multilingual',
+        source: 'query_analysis',
+        provenance: 'Multilingual match boost for Korean alias coverage',
+      });
+    }
+
     if (scores.uncertaintyPenalty > 0) {
       items.push({
         type: 'uncertainty_penalty',

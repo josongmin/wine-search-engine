@@ -47,13 +47,38 @@ export class RedisQueryCache implements QueryCachePort {
         return undefined;
       }
 
-      // Cache hit: Parse and return
+      // Parse and validate shape before counting as a hit. A poisoned or
+      // schema-drifted entry must NOT be reported as a hit (would inflate
+      // hit-rate metrics) and must be removed so subsequent reads don't
+      // keep paying the parse cost.
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(cached);
+      } catch {
+        log.warn({ key: cacheKey.redisKey, reason: 'json_parse_error' }, 'query cache poisoned; treating as miss');
+        await this.redis.incr(this.statsKeyMisses);
+        void this.redis.del(cacheKey.redisKey).catch(() => undefined);
+        return undefined;
+      }
+
+      // Minimal structural validation — must look like SearchResponseV1.
+      // The pipeline performs schema validation downstream; here we only
+      // need to reject obviously corrupt entries.
+      if (
+        typeof parsed !== 'object' || parsed === null ||
+        !('engineDecision' in parsed) || !('results' in parsed) || !('meta' in parsed)
+      ) {
+        log.warn({ key: cacheKey.redisKey, reason: 'shape_mismatch' }, 'query cache poisoned; treating as miss');
+        await this.redis.incr(this.statsKeyMisses);
+        void this.redis.del(cacheKey.redisKey).catch(() => undefined);
+        return undefined;
+      }
+
       await this.redis.incr(this.statsKeyHits);
-      const response = JSON.parse(cached) as SearchResponseV1;
-      return response;
+      return parsed as SearchResponseV1;
     } catch (error) {
-      // On deserialization error, treat as miss (don't throw)
-      log.error({ err: error }, 'deserialization error');
+      // On Redis errors, treat as miss (don't throw)
+      log.error({ err: error }, 'redis get error');
       await this.redis.incr(this.statsKeyMisses);
       return undefined;
     }

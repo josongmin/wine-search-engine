@@ -13,6 +13,11 @@ export interface BatchSearchRequestItem {
   readonly context?: SearchRequestContext | undefined;
   readonly sessionContext?: SearchSessionContext | undefined;
   readonly queryBudget?: SearchQueryBudget | undefined;
+  /**
+   * When true, the corresponding sub-search returns counterfactuals in its
+   * response. Defaults to false to keep batch responses minimal.
+   */
+  readonly explain?: boolean | undefined;
 }
 
 export interface BatchSearchOptions {

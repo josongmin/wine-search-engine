@@ -22,6 +22,9 @@ export const QueryBudgetSchema = z.object({
   maxLatencyMs: z.number().int().positive().max(30_000),
   maxCandidates: z.number().int().positive().max(1_000),
   rerankLimit: z.number().int().positive().max(500),
+  // Optional: caps the number of dense (embedding) retrieval calls per query.
+  // Aligns with response-side QueryBudgetTransportSchema and domain QueryBudget.
+  maxDenseCalls: z.number().int().positive().max(100).optional(),
 }).strict();
 
 export const SearchOptionsSchema = z.object({

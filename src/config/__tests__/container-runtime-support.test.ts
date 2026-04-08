@@ -28,6 +28,7 @@ describe('buildRuntimeSupportServices', () => {
     const config = parseEnv({
       NODE_ENV: 'production',
       PG_PASSWORD: 'secret',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
     });
 
     await expect(buildRuntimeSupportServices(config, {})).rejects.toThrow(/heuristic-only drinking-window/);
@@ -38,11 +39,34 @@ describe('buildRuntimeSupportServices', () => {
       NODE_ENV: 'production',
       PG_PASSWORD: 'secret',
       ALLOW_HEURISTIC_DRINKING_WINDOW: 'true',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
     });
 
     const services = await buildRuntimeSupportServices(config, {});
 
     expect(services.drinkingWindowPredictor.modelVersion).toContain('heuristic');
+  });
+
+  it('does NOT instantiate phraseCache when Redis is unavailable', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      LLM_QUERY_INTERPRETER: 'true',
+      OPENAI_API_KEY: 'sk-test',
+    });
+
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.phraseCache).toBeUndefined();
+  });
+
+  it('does NOT instantiate phraseCache when LLM_QUERY_INTERPRETER is disabled', async () => {
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    // We can't easily inject a real Redis client in this unit lane, but the
+    // gate's first conjunct (llmQueryInterpreter) must be enough to skip.
+    const services = await buildRuntimeSupportServices(config, {});
+
+    expect(services.phraseCache).toBeUndefined();
   });
 
   it('fails startup when an explicit drinking-window model directory cannot be loaded', async () => {

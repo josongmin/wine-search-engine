@@ -89,6 +89,7 @@ describe('watchlist runtime factories', () => {
       NODE_ENV: 'production',
       WATCHLIST_ENABLED: 'true',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
     });
 
     expect(() => buildWatchlistContainerServices(config, {

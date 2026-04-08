@@ -60,15 +60,37 @@ describe('OPTIONS preflight', () => {
 });
 
 describe.each([
-  { nodeEnv: 'test' as const, origin: 'http://localhost:3000' },
-  { nodeEnv: 'development' as const, origin: 'http://example.com' },
-])('CORS in %s mode', ({ nodeEnv, origin }) => {
-  it(`echoes the request origin in ${nodeEnv} mode`, async () => {
+  { nodeEnv: 'test' as const, origin: 'http://localhost:3000', expected: 'http://localhost:3000' },
+  { nodeEnv: 'development' as const, origin: 'http://localhost:5173', expected: 'http://localhost:5173' },
+  { nodeEnv: 'development' as const, origin: 'http://127.0.0.1:8080', expected: 'http://127.0.0.1:8080' },
+])('CORS in %s mode', ({ nodeEnv, origin, expected }) => {
+  it(`echoes the localhost origin in ${nodeEnv} mode`, async () => {
     const app = await createProtocolServer({ nodeEnv });
     try {
       const res = await getJson(app, '/health', { origin });
       expect(res.statusCode).toBe(200);
-      expect(getHeader(res, 'access-control-allow-origin')).toBe(origin);
+      expect(getHeader(res, 'access-control-allow-origin')).toBe(expected);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('CORS dev-mode lockdown', () => {
+  it('does not echo arbitrary public origins in development', async () => {
+    // L15 hardening: dev-mode CORS used to reflect any Origin, allowing
+    // cross-origin pages in a developer's browser to make credentialed
+    // requests against localhost. Only localhost-family origins are now
+    // reflected.
+    const app = await createProtocolServer({ nodeEnv: 'development' });
+    try {
+      const res = await getJson(app, '/health', { origin: 'http://attacker.example' });
+      expect(res.statusCode).toBe(200);
+      // Origin must NOT be reflected for non-localhost origins. Either the
+      // header is absent or empty — both block the browser from reading
+      // the response cross-origin.
+      const acao = getHeader(res, 'access-control-allow-origin');
+      expect(acao === undefined || acao === '').toBe(true);
     } finally {
       await app.close();
     }

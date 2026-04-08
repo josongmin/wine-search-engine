@@ -20,6 +20,13 @@ export function getWineDataDir(): string {
 
 export function resolveDataPath(pathLike: string): string {
   if (isAbsolute(pathLike)) {
+    // Absolute paths bypass containment — validate against the data directory.
+    const dataDir = getWineDataDir();
+    if (!pathLike.startsWith(dataDir + sep) && pathLike !== dataDir) {
+      throw new Error(
+        `Path traversal blocked: absolute path "${pathLike}" is outside data directory "${dataDir}"`,
+      );
+    }
     return pathLike;
   }
 

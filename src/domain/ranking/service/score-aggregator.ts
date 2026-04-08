@@ -40,27 +40,34 @@ export class ScoreAggregator {
       return -Infinity;
     }
 
-    // Weighted sum of non-gate signals
+    // Weighted sum of non-gate signals.
+    // Each term is guarded with finiteOr0() so a NaN/Infinity from a single
+    // signal cannot poison the entire score (which would propagate to the
+    // sort comparator and produce non-deterministic ordering — RFC-009/015
+    // determinism gate).
+    const finiteOr0 = (n: number): number => (Number.isFinite(n) ? n : 0);
     let score = 0;
 
-    score += signals.entityIntegrity * weights.entityIntegrity;
-    score += (signals.anchorSimilarity ?? 0) * weights.anchorSimilarity;
-    score += signals.semantic * weights.semantic;
-    score += signals.softConstraint * weights.softConstraint;
-    score += signals.attributeAlignment * weights.attributeAlignment;
-    score += signals.preferenceAlignment * weights.preferenceAlignment;
-    score += signals.popularity * weights.popularity;
-    score += signals.availability * weights.availability;
+    score += finiteOr0(signals.entityIntegrity) * weights.entityIntegrity;
+    score += finiteOr0(signals.anchorSimilarity ?? 0) * weights.anchorSimilarity;
+    score += finiteOr0(signals.semantic) * weights.semantic;
+    score += finiteOr0(signals.softConstraint) * weights.softConstraint;
+    score += finiteOr0(signals.attributeAlignment) * weights.attributeAlignment;
+    score += finiteOr0(signals.preferenceAlignment) * weights.preferenceAlignment;
+    score += finiteOr0(signals.popularity) * weights.popularity;
+    score += finiteOr0(signals.availability) * weights.availability;
     // SOTA++ signals — only contribute when the mode weights them (> 0)
-    score += (signals.producerPrestige ?? 0) * weights.producerPrestige;
-    score += (signals.recency ?? 0) * weights.recency;
-    score += (signals.criticScore ?? 0) * weights.criticScore;
-    score += (signals.multilingualScore ?? 0) * weights.multilingualScore;
+    score += finiteOr0(signals.producerPrestige ?? 0) * weights.producerPrestige;
+    score += finiteOr0(signals.recency ?? 0) * weights.recency;
+    score += finiteOr0(signals.criticScore ?? 0) * weights.criticScore;
+    score += finiteOr0(signals.multilingualScore ?? 0) * weights.multilingualScore;
 
     // Uncertainty penalty is subtracted
-    score -= signals.uncertaintyPenalty * weights.uncertaintyPenalty;
+    score -= finiteOr0(signals.uncertaintyPenalty) * weights.uncertaintyPenalty;
 
-    // Normalize to bounded range [0, MAX_SCORE]
+    // Final hard guard against any remaining non-finite drift, then clamp
+    // to bounded output range. -Infinity sentinels remain caller-handled.
+    if (!Number.isFinite(score)) return -Infinity;
     return Math.max(0, Math.min(MAX_SCORE, score));
   }
 }

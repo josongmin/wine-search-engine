@@ -27,6 +27,21 @@ const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
 const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set(['BLOCKING_MISS']);
 
 /**
+ * Generic, non-sensitive messages for each domain error code. Used in HTTP
+ * responses instead of `error.message` to avoid leaking SQL fragments, internal
+ * IDs, snapshot hashes, user input echoes, or other sensitive details that
+ * may appear in domain error messages. Detailed messages still go to logs.
+ */
+const SAFE_DOMAIN_ERROR_MESSAGES: Readonly<Record<string, string>> = {
+  WRONG_RESOLVE: 'The engine could not confidently identify a wine for this query.',
+  EVIDENCE_OBLIGATION: 'The engine could not produce a result with sufficient evidence.',
+  BLOCKING_MISS: 'The retrieval layer is temporarily unavailable. Please retry.',
+  SNAPSHOT_MISMATCH: 'Replay snapshot does not match the current engine version.',
+  MISSING_SNAPSHOT: 'Replay snapshot was not found.',
+  DETERMINISM_VIOLATION: 'Replay produced a non-deterministic result.',
+};
+
+/**
  * Determines whether a domain error is retryable.
  */
 function isDomainErrorRetryable(code: string): boolean {
@@ -51,6 +66,22 @@ export function errorHandler(
 ): void {
   const requestId = getRequestId(request);
 
+  // If a response was already partially sent (e.g., handler partially flushed
+  // headers before throwing), do not attempt to send another — Fastify would
+  // throw FST_ERR_REP_ALREADY_SENT and trigger an unbounded recursion in the
+  // error handler.
+  if (reply.sent) {
+    request.log.error({ requestId, err: error }, 'error_after_reply_sent');
+    return;
+  }
+
+  // Reset snakeCaseApplied unconditionally for ALL error paths. A prior
+  // sendRouteContractResponse may have set this to true before throwing — if we
+  // didn't reset, the preSerialization hook would skip key conversion for the
+  // error body. All error bodies built here use literal snake_case keys, so the
+  // reset is always safe and never causes double-conversion.
+  reply.snakeCaseApplied = false;
+
   const fastifyError = error as { code?: string; statusCode?: number; message?: string };
 
   // Request timeout — 503 Service Unavailable
@@ -60,11 +91,6 @@ export function errorHandler(
   // the generic handler at the bottom.
   if (fastifyError.code === 'FST_ERR_HANDLER_TIMEOUT') {
     request.log.warn({ requestId }, 'request_timeout');
-
-    // Reset snakeCaseApplied so the preSerialization hook correctly converts
-    // this response (it may have been set by a prior sendRouteContractResponse
-    // call that failed before sending).
-    reply.snakeCaseApplied = false;
 
     const body = buildSearchErrorResponse(
       requestId,
@@ -80,7 +106,6 @@ export function errorHandler(
   // Rate limit — 429 Too Many Requests (RFC-014 §13)
   // @fastify/rate-limit v10 throws a FastifyError with statusCode=429 when the
   // limit is exceeded (without a custom errorResponseBuilder).
-  reply.snakeCaseApplied = false;
   if (fastifyError.statusCode === 429) {
     const rawMessage = fastifyError.message ?? '';
 
@@ -152,10 +177,23 @@ export function errorHandler(
       return;
     }
 
+    // Retryable 503 errors (e.g., BLOCKING_MISS) MUST advertise Retry-After
+    // per RFC 7231 §7.1.3 so SDK retry middleware honors a backoff window.
+    if (retryable && status === 503) {
+      reply.header('Retry-After', '5');
+    }
+
+    // Do NOT echo `error.message` verbatim — domain errors can carry SQL fragments,
+    // internal IDs, snapshot hashes, user input echoes, or LLM outputs. Use a
+    // generic per-code message and keep details in server-side logs only.
+    // Fallback includes the error code (already in body.error.code; codes are
+    // not sensitive) so unmapped failures bucket distinctly in client trackers.
+    const safeMessage = SAFE_DOMAIN_ERROR_MESSAGES[error.code]
+      ?? `Request failed (${error.code}).`;
     const body = buildSearchErrorResponse(
       requestId,
       error.code,
-      error.message,
+      safeMessage,
       null,
       retryable,
     );
@@ -178,5 +216,24 @@ export function errorHandler(
     false,
   );
 
-  sendSearchErrorResponse(request, reply, 500, body);
+  try {
+    sendSearchErrorResponse(request, reply, 500, body);
+  } catch (sendErr) {
+    // Last-resort fallback: if the error response itself fails outbound
+    // validation, hand-roll a minimal contract-shaped JSON via the raw socket
+    // so the client never sees a Fastify default envelope.
+    request.log.error({ requestId, err: sendErr }, 'error_handler_send_failed');
+    void reply
+      .status(500)
+      .header('Content-Type', 'application/json; charset=utf-8')
+      .send(JSON.stringify({
+        error: {
+          request_id: requestId,
+          code: 'INTERNAL_ERROR',
+          message: 'An unexpected error occurred.',
+          failure_reason: null,
+          retryable: false,
+        },
+      }));
+  }
 }

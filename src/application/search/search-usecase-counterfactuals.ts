@@ -30,26 +30,56 @@ import type { EntityResolveResult } from '../../domain/resolver/model/resolve-re
  * alternates. We track emitted entity IDs and skip any tail item whose ID
  * was already added from the resolver-alternate section.
  */
+export interface BuildCounterfactualsOptions {
+  readonly topResultWindow?: number;
+  /**
+   * When true, the engine has abstained from picking a winner. The function
+   * still returns the same candidate set but with reasoning that reflects
+   * "tied / engine held" rather than "rejected vs. top". Without this flag the
+   * abstain path would emit semantically misleading "below top candidate"
+   * strings even though there is no top candidate.
+   *
+   * See header note: counterfactuals, clarifications, and abstain must remain
+   * conceptually distinct.
+   */
+  readonly abstainContext?: boolean;
+}
+
 export function buildSearchCounterfactuals(
   resolverResult: EntityResolveResult,
   rankedResults: readonly RankedResult[],
-  topResultWindow: number = 5,
+  options: BuildCounterfactualsOptions = {},
 ): readonly CounterfactualReject[] {
+  const topResultWindow = options.topResultWindow ?? 5;
+  const abstain = options.abstainContext === true;
+
   const counterfactuals: CounterfactualReject[] = [];
   const topEntityId = resolverResult.topEntity?.entityId;
   const emittedEntityIds = new Set<string>();
+  // Always seed with the chosen top entity (when known) so it can never
+  // be re-emitted as a counterfactual via either resolver candidates or
+  // ranked tail dedup. Independent of abstain context.
+  if (topEntityId !== undefined) {
+    emittedEntityIds.add(String(topEntityId));
+  }
 
   if (resolverResult.candidates.length > 1) {
     for (const candidate of resolverResult.candidates) {
-      if (candidate.entityId === topEntityId) continue;
+      if (!abstain && candidate.entityId === topEntityId) continue;
+      const score = Number.isFinite(candidate.calibratedScore)
+        ? candidate.calibratedScore.toFixed(3)
+        : 'N/A';
+      const rejectedReason = abstain
+        ? `Engine abstained: candidate calibrated_score=${score} insufficiently distinguished (rank ${candidate.rank} of ${resolverResult.candidates.length})`
+        : `Calibrated score ${score} below top candidate` +
+          (topEntityId !== undefined
+            ? ` (rank ${candidate.rank} of ${resolverResult.candidates.length})`
+            : '');
       counterfactuals.push({
         entityId: candidate.entityId,
         canonicalLabel: candidate.canonicalLabel,
-        rejectedReason:
-          `Calibrated score ${Number.isFinite(candidate.calibratedScore) ? candidate.calibratedScore.toFixed(3) : 'N/A'} below top candidate` +
-          (topEntityId !== undefined
-            ? ` (rank ${candidate.rank} of ${resolverResult.candidates.length})`
-            : ''),
+        rejectionType: abstain ? 'abstain_tied' : 'lower_calibrated_score',
+        rejectedReason,
         ...(candidate.evidenceRefs[0] !== undefined
           ? { evidenceRef: candidate.evidenceRefs[0] }
           : {}),
@@ -64,13 +94,19 @@ export function buildSearchCounterfactuals(
       // ranked results as resolver candidates, so tail items would be emitted twice
       // if we do not guard here.
       if (emittedEntityIds.has(String(result.entityId))) continue;
+      const finalScore = Number.isFinite(result.finalScore)
+        ? result.finalScore.toFixed(3)
+        : 'below_threshold';
+      const rejectedReason = abstain
+        ? `Engine abstained: tail candidate (rank ${result.rank}/${rankedResults.length}, final_score=${finalScore})`
+        : `Lower ranking (rank ${result.rank}/${rankedResults.length}); ` +
+          `final_score=${finalScore}, ` +
+          `hard_constraint_pass=${String(result.componentScores.hardConstraintPass)}`;
       counterfactuals.push({
         entityId: result.entityId,
         canonicalLabel: result.canonicalLabel,
-        rejectedReason:
-          `Lower ranking (rank ${result.rank}/${rankedResults.length}); ` +
-          `final_score=${Number.isFinite(result.finalScore) ? result.finalScore.toFixed(3) : 'below_threshold'}, ` +
-          `hard_constraint_pass=${String(result.componentScores.hardConstraintPass)}`,
+        rejectionType: abstain ? 'abstain_tied' : 'below_top_window',
+        rejectedReason,
       });
       emittedEntityIds.add(String(result.entityId));
     }

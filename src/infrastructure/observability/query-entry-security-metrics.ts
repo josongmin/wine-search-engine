@@ -1,27 +1,14 @@
 /**
- * ARCHITECTURE NOTE: QueryEntrySecurityObserver interface is defined here (infrastructure)
- * but is imported by application-layer files (search.usecase.ts, hybrid.usecase.ts, etc.).
- * TODO: Move the QueryEntrySecurityObserver interface to src/domain/security/port/
- * and import it from there. The concrete collector stays here in infrastructure.
+ * Concrete metric collector for query-entry security events.
+ *
+ * Interface definitions live in domain/security/port/security-observer.port.ts
+ * (hexagonal: domain port). This file provides the infrastructure implementation.
  */
 
-export interface QueryEntrySecurityMetrics {
-  readonly layer1Blocks: number;
-  readonly layer2Blocks: number;
-  readonly judgeErrors: number;
-  readonly failClosedBlocks: number;
-  readonly failOpenBypasses: number;
-  readonly lastJudgeErrorTimestamp?: number;
-  readonly lastJudgeErrorMode?: 'fail_open' | 'fail_closed';
-}
-
-export interface QueryEntrySecurityObserver {
-  onLayer1Blocked(reason: string): void;
-  onLayer2Blocked(reason: string): void;
-  onJudgeError(error: unknown, mode: 'fail_open' | 'fail_closed'): void;
-  onFailClosedBlock(): void;
-  onFailOpenBypass(): void;
-}
+import type {
+  QueryEntrySecurityMetrics,
+  QueryEntrySecurityObserver,
+} from '../../domain/security/port/security-observer.port.js';
 
 export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObserver {
   private layer1Blocks = 0;

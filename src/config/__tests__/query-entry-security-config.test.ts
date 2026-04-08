@@ -23,6 +23,7 @@ describe('query entry security config', () => {
     const config = parseEnv({
       NODE_ENV: 'production',
       PG_PASSWORD: 'secret',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
     });
 
     expect(config.queryEntrySecurity.judgeFailureMode).toBe('fail_closed');

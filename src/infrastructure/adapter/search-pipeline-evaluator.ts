@@ -16,7 +16,9 @@
  * enabling RFC-009 evaluation pipeline integration.
  */
 
+import { nanoid } from 'nanoid';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type { SearchUseCaseContract } from '../../config/container-search-contracts.js';
 import type { SearchExecutorEvaluationResult } from '../../application/search/port/search-executor.port.js';
 import type { EvalCase } from '../../domain/evaluation/model/eval-case.js';
@@ -88,7 +90,10 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
     const startMs = Date.now();
 
     try {
-      const requestId = `eval-${Date.now()}`;
+      // nanoid (not Date.now) to avoid collisions when many cases run within the
+      // same millisecond — collision corrupts log correlation, snapshot dedup,
+      // and runtimeCorrelationRef matching.
+      const requestId = `eval-${nanoid(12)}`;
       const evalExecution = 'executeForEvaluation' in this.searchUseCase
         && typeof this.searchUseCase.executeForEvaluation === 'function'
         ? await this.searchUseCase.executeForEvaluation(
@@ -168,6 +173,21 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       return output;
     } catch (error) {
       const latencyMs = Date.now() - startMs;
+      // Re-throw DomainError defect codes so the eval runner reports actual
+      // pipeline breakage instead of silently downgrading them to a benign
+      // 'failed prediction'. Without this, regression eval would green-light
+      // builds where SearchUseCase intentionally throws WRONG_RESOLVE /
+      // BLOCKING_MISS / EVIDENCE_OBLIGATION as defects.
+      const defectCodes = new Set([
+        'WRONG_RESOLVE', 'BLOCKING_MISS', 'EVIDENCE_OBLIGATION',
+      ]);
+      if (error instanceof DomainError && defectCodes.has(error.code)) {
+        log.error(
+          { err: error, code: error.code, latencyMs, query, queryClass },
+          'eval pipeline raised pipeline defect — propagating',
+        );
+        throw error;
+      }
       log.error(
         { err: error, latencyMs, query, queryClass },
         'eval pipeline query failed',

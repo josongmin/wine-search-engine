@@ -100,15 +100,21 @@ export class DriftDetector {
     const baselineStd = this.standardDeviation(metric.baselineValues);
     const currentMean = this.mean(metric.currentValues);
 
-    // Avoid division by zero — if baseline has zero variance, any difference is notable
+    // Avoid division by zero — if baseline has zero variance, any difference is notable.
+    // EPSILON guard prevents 1e-18 float drift from being flagged as critical.
+    const FLOAT_EQUALITY_EPS = 1e-12;
     if (baselineStd === 0) {
-      if (currentMean === baselineMean) return null;
+      if (Math.abs(currentMean - baselineMean) < FLOAT_EQUALITY_EPS) return null;
 
+      // Use a large finite sentinel (1e9) instead of Number.MAX_SAFE_INTEGER.
+      // Downstream consumers that sum/avg deviations across signals would
+      // overflow with 2^53-1 sentinels; 1e9 is "obviously huge" but stays
+      // numerically tractable.
       return {
         metricName: metric.name,
         currentValue: currentMean,
         baselineValue: baselineMean,
-        deviation: Infinity,
+        deviation: 1e9,
         severity: 'critical',
         detectedAt: new Date(),
         window,
@@ -148,9 +154,24 @@ export class DriftDetector {
       return 0;
     }
 
-    const dim = baselineEmbeddings[0]!.length;
-    const baselineCentroid = this.computeCentroid(baselineEmbeddings, dim);
-    const currentCentroid = this.computeCentroid(currentEmbeddings, dim);
+    const baselineDim = baselineEmbeddings[0]!.length;
+    const currentDim = currentEmbeddings[0]!.length;
+    // Dimension mismatch (model upgrade 768→1024) would crash inside the
+    // centroid loop with `noUncheckedIndexedAccess`. Surface as max
+    // distance instead so the caller treats it as critical drift.
+    if (baselineDim !== currentDim) {
+      return 2.0;
+    }
+    // Validate uniform dimensions inside each set; a single mismatched
+    // vector would crash or silently truncate.
+    for (const emb of baselineEmbeddings) {
+      if (emb.length !== baselineDim) return 2.0;
+    }
+    for (const emb of currentEmbeddings) {
+      if (emb.length !== currentDim) return 2.0;
+    }
+    const baselineCentroid = this.computeCentroid(baselineEmbeddings, baselineDim);
+    const currentCentroid = this.computeCentroid(currentEmbeddings, currentDim);
 
     return this.cosineDistance(baselineCentroid, currentCentroid);
   }
@@ -172,12 +193,12 @@ export class DriftDetector {
     return values.reduce((sum, v) => sum + v, 0) / values.length;
   }
 
-  /** Computes population standard deviation. */
+  /** Computes sample standard deviation (Bessel's correction n-1). */
   private standardDeviation(values: readonly number[]): number {
     if (values.length < 2) return 0;
     const avg = this.mean(values);
     const squaredDiffs = values.reduce((sum, v) => sum + (v - avg) ** 2, 0);
-    return Math.sqrt(squaredDiffs / values.length);
+    return Math.sqrt(squaredDiffs / (values.length - 1));
   }
 
   /** Computes the centroid (mean vector) of a set of embeddings. */

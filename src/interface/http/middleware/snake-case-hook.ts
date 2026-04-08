@@ -15,7 +15,11 @@
  *    default JSON serialization behaviour is preserved
  */
 
-/** LRU-style cache for camelCase → snake_case conversions (bounded to prevent memory leak). */
+/**
+ * Bounded FIFO cache for camelCase → snake_case conversions.
+ * Keys are response schema field names (a small fixed vocabulary), so FIFO
+ * eviction is sufficient — no LRU reorder is needed.
+ */
 const snakeCaseCache = new Map<string, string>();
 const SNAKE_CASE_CACHE_MAX = 512;
 
@@ -36,9 +40,9 @@ export function camelToSnake(key: string): string {
   }
 
   if (snakeCaseCache.size >= SNAKE_CASE_CACHE_MAX) {
-    // Evict oldest entry
-    const firstKey = snakeCaseCache.keys().next().value as string;
-    snakeCaseCache.delete(firstKey);
+    // Evict oldest entry (FIFO)
+    const firstKey = snakeCaseCache.keys().next().value;
+    if (firstKey !== undefined) snakeCaseCache.delete(firstKey);
   }
   snakeCaseCache.set(key, result);
   return result;

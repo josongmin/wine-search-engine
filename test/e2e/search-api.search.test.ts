@@ -261,3 +261,37 @@ describe('POST /v1/search — error paths', () => {
     expectPolicyBlocked(parseErrorResponse(res).error);
   });
 });
+
+describe('POST /v1/search — explain mode', () => {
+  it('explain=true surfaces counterfactuals[] with structured rejection_type', async () => {
+    const res = await postSearch({
+      query: '풀바디 레드 와인',
+      options: { mode: 'hybrid', explain: true, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res) as { counterfactuals?: Array<Record<string, unknown>> };
+    // The hybrid query against the in-memory fixture produces a ranked tail,
+    // so counterfactuals must be present and non-empty.
+    expect(Array.isArray(body.counterfactuals)).toBe(true);
+    expect((body.counterfactuals ?? []).length).toBeGreaterThan(0);
+    // Every entry must carry the new structured rejection_type field.
+    for (const cf of body.counterfactuals ?? []) {
+      expect(['lower_calibrated_score', 'below_top_window', 'abstain_tied']).toContain(
+        cf['rejection_type'],
+      );
+      expect(typeof cf['rejected_reason']).toBe('string');
+    }
+  });
+
+  it('explain not requested → counterfactuals omitted from response body', async () => {
+    const res = await postSearch({
+      query: '풀바디 레드 와인',
+      options: { mode: 'hybrid', explain: false, clarification: false },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = parseSearchResponse(res) as Record<string, unknown>;
+    expect(body['counterfactuals']).toBeUndefined();
+  });
+});

@@ -2,7 +2,7 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
-import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
+import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import type { QueryPlannerPort } from './port/search-pipeline-deps.port.js';
 import type { InterpretRequest } from './interpret-request.dto.js';
 import type { InterpretResponseV2 } from '../../domain/response/model/result-item-v2.js';

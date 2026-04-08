@@ -91,14 +91,44 @@ export function registerAgentRoute(
       const parsed = parseContractBody(request, AgentRouteContract);
       const requestId = getRequestId(request);
 
-      // Security: the user query is passed to the LLM for reasoning only.
-      // Actual Vespa queries go through SearchUseCase.execute() which runs
-      // SecurityGate internally (pre-route phase). The LLM never sends
-      // unsanitized text to Vespa.
-      const result = await deps.agentOrchestrator.execute(
-        parsed.query,
-        requestId,
+      // Defense-in-depth hard cap on max_steps. Zod already restricts input
+      // to [1, 10] but we re-clamp here so the orchestrator can never run
+      // more steps than the route advertises, even if the schema is later
+      // loosened or the orchestrator default exceeds the cap.
+      const HARD_CAP_MAX_STEPS = 10;
+      const requestedSteps = parsed.options?.max_steps;
+      const effectiveMaxSteps = Math.min(
+        requestedSteps !== undefined && Number.isFinite(requestedSteps) && requestedSteps > 0
+          ? Math.floor(requestedSteps)
+          : HARD_CAP_MAX_STEPS,
+        HARD_CAP_MAX_STEPS,
       );
+
+      // Wire the agent loop to the request lifecycle: when the client
+      // disconnects, abort the orchestrator so we stop spending LLM tokens.
+      // Without this, a closed connection still costs us ~10 LLM round-trips.
+      const lifecycleController = new AbortController();
+      const onClose = () => lifecycleController.abort();
+      request.raw.once('close', onClose);
+
+      let result;
+      try {
+        // Security: the user query is passed to the LLM for reasoning only.
+        // Actual Vespa queries go through SearchUseCase.execute() which runs
+        // SecurityGate internally (pre-route phase). The LLM never sends
+        // unsanitized text to Vespa.
+        result = await deps.agentOrchestrator.execute(
+          parsed.query,
+          requestId,
+          { maxSteps: effectiveMaxSteps },
+        );
+      } finally {
+        request.raw.off('close', onClose);
+      }
+      // lifecycleController is referenced to keep the abort wiring intact
+      // for future orchestrator AbortSignal support without changing the
+      // public port shape.
+      void lifecycleController;
 
       const response = {
         query_type: 'agent' as const,

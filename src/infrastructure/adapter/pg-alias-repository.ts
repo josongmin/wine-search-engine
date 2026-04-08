@@ -28,8 +28,6 @@ function rowToAlias(row: AliasRow): Alias {
     source: row.source,
     scope: row.alias_scope as AliasScope,
     suppressed: row.is_suppressed,
-    effectiveFrom: undefined,
-    lineageRef: undefined,
   };
 }
 

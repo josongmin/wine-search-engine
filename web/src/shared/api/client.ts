@@ -30,7 +30,7 @@ export class ApiError extends Error {
   }
 }
 
-type RequestOptions = RequestInit & { subject?: boolean };
+type RequestOptions = RequestInit & { subject?: boolean; externalSignal?: AbortSignal };
 
 async function request<T>(
   path: string,
@@ -41,7 +41,18 @@ async function request<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  const { subject, ...fetchInit } = options;
+  const { subject, externalSignal, ...fetchInit } = options;
+
+  // Compose external signal (e.g., React Query's queryFn signal) with the
+  // local timeout controller. Either one aborting cancels the fetch.
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(fetchInit.headers as Record<string, string> | undefined),
@@ -54,7 +65,20 @@ async function request<T>(
     const res = await fetch(url, { ...fetchInit, signal: controller.signal, headers });
 
     const retryAfterRaw = res.headers.get('Retry-After');
-    const retryAfterMs = retryAfterRaw ? parseInt(retryAfterRaw, 10) * 1000 : undefined;
+    // Retry-After can be either delta-seconds or HTTP-date (RFC 7231).
+    // parseInt on an HTTP-date returns NaN; clamp safely.
+    let retryAfterMs: number | undefined;
+    if (retryAfterRaw) {
+      const asSeconds = Number.parseInt(retryAfterRaw, 10);
+      if (Number.isFinite(asSeconds) && asSeconds >= 0) {
+        retryAfterMs = asSeconds * 1000;
+      } else {
+        const asDate = Date.parse(retryAfterRaw);
+        if (Number.isFinite(asDate)) {
+          retryAfterMs = Math.max(0, asDate - Date.now());
+        }
+      }
+    }
 
     if (!res.ok) {
       const body = await res.json().catch(() => null);
@@ -79,47 +103,88 @@ async function request<T>(
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new ApiError(0, 'TIMEOUT', `Request timed out after ${timeoutMs}ms`, true);
     }
-    throw new ApiError(0, 'NETWORK', String(err), true);
+    // Avoid String(err) — it can leak Error.stack into user-facing messages.
+    const message = err instanceof Error ? err.message : 'Network error';
+    throw new ApiError(0, 'NETWORK', message, true);
   } finally {
     clearTimeout(timer);
   }
 }
 
+export interface ApiCallOptions {
+  readonly signal?: AbortSignal;
+}
+
 export const api = {
-  search(body: SearchRequest) {
-    return request<SearchResponse>('/v1/search', { method: 'POST', body: JSON.stringify(body) });
+  search(body: SearchRequest, opts: ApiCallOptions = {}) {
+    return request<SearchResponse>('/v1/search', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      externalSignal: opts.signal,
+    });
   },
 
-  searchHybrid(body: SearchRequest) {
-    return request<SearchResponse>('/v1/search/hybrid', { method: 'POST', body: JSON.stringify(body) });
+  searchHybrid(body: SearchRequest, opts: ApiCallOptions = {}) {
+    return request<SearchResponse>('/v1/search/hybrid', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      externalSignal: opts.signal,
+    });
   },
 
-  entityResolve(body: EntityResolveRequest) {
-    return request<EntityResolveResponse>('/v1/entity/resolve', { method: 'POST', body: JSON.stringify(body) });
+  entityResolve(body: EntityResolveRequest, opts: ApiCallOptions = {}) {
+    return request<EntityResolveResponse>('/v1/entity/resolve', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      externalSignal: opts.signal,
+    });
   },
 
-  submitFeedback(body: FeedbackRequest) {
-    return request<FeedbackResponse>('/v1/feedback', { method: 'POST', body: JSON.stringify(body) });
+  submitFeedback(body: FeedbackRequest, opts: ApiCallOptions = {}) {
+    return request<FeedbackResponse>('/v1/feedback', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      externalSignal: opts.signal,
+    });
   },
 
   health: {
-    check() {
-      return request<{ status: string; timestamp: string; uptime: number }>('/health', {}, 5_000);
+    check(opts: ApiCallOptions = {}) {
+      return request<{ status: string; timestamp: string; uptime: number }>(
+        '/health',
+        { externalSignal: opts.signal },
+        5_000,
+      );
     },
   },
 
   watchlist: {
-    list() {
-      return request<WatchlistListResponse>('/v1/watchlist', { subject: true });
+    list(opts: ApiCallOptions = {}) {
+      return request<WatchlistListResponse>('/v1/watchlist', {
+        subject: true,
+        externalSignal: opts.signal,
+      });
     },
-    get(id: string) {
-      return request<WatchlistEntry>(`/v1/watchlist/${encodeURIComponent(id)}`, { subject: true });
+    get(id: string, opts: ApiCallOptions = {}) {
+      return request<WatchlistEntry>(`/v1/watchlist/${encodeURIComponent(id)}`, {
+        subject: true,
+        externalSignal: opts.signal,
+      });
     },
-    create(body: WatchlistCreateRequest) {
-      return request<WatchlistEntry>('/v1/watchlist', { method: 'POST', body: JSON.stringify(body), subject: true });
+    create(body: WatchlistCreateRequest, opts: ApiCallOptions = {}) {
+      return request<WatchlistEntry>('/v1/watchlist', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        subject: true,
+        externalSignal: opts.signal,
+      });
     },
-    delete(id: string) {
-      return request<void>(`/v1/watchlist/${encodeURIComponent(id)}`, { method: 'DELETE', subject: true });
+    delete(id: string, opts: ApiCallOptions = {}) {
+      return request<void>(`/v1/watchlist/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        subject: true,
+        externalSignal: opts.signal,
+      });
     },
   },
 } as const;

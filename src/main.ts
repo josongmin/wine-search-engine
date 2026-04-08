@@ -16,6 +16,53 @@ import { bootstrapLogger } from './config/bootstrap-logger.js';
 import { logKillSwitchPolicyAtStartup } from './config/kill-switch-policy.js';
 
 /**
+ * Tune undici (Node 22 native fetch dispatcher) for high-RPS Vespa/LLM
+ * traffic. Default per-origin connection cap + minimal keep-alive create
+ * TCP/TLS churn at hundreds of requests/sec. Setting a global dispatcher
+ * with sane keep-alive + connection pool numbers stops ephemeral port
+ * exhaustion under burst load. Must run before any fetch() call.
+ *
+ * undici is a transitive dep of Node 22 itself but is not always exposed
+ * as an importable module — best-effort dynamic import keeps the bootstrap
+ * resilient when the package is not in node_modules.
+ */
+async function configureGlobalHttpDispatcher(): Promise<void> {
+  try {
+    // undici ships with Node 22 but is not always exposed as a top-level
+    // import. We use a dynamic specifier (variable) to bypass TypeScript's
+    // module resolution check; if the package isn't present, the catch
+    // arm logs and falls back to default dispatcher behavior.
+    const undiciSpec = 'undici';
+    const undici: unknown = await (
+      Function('s', 'return import(s)') as (s: string) => Promise<unknown>
+    )(undiciSpec).catch(() => null);
+    if (undici === null || typeof undici !== 'object') return;
+    const mod = undici as {
+      Agent?: new (opts: Record<string, unknown>) => unknown;
+      setGlobalDispatcher?: (dispatcher: unknown) => void;
+    };
+    if (typeof mod.Agent !== 'function' || typeof mod.setGlobalDispatcher !== 'function') {
+      return;
+    }
+    mod.setGlobalDispatcher(
+      new mod.Agent({
+        connect: { timeout: 5_000 },
+        keepAliveTimeout: 10_000,
+        keepAliveMaxTimeout: 60_000,
+        pipelining: 4,
+        connections: 256,
+      }),
+    );
+    bootstrapLogger.info({ component: 'http-dispatcher' }, 'undici global dispatcher tuned');
+  } catch (err) {
+    bootstrapLogger.warn(
+      { err },
+      'undici dispatcher tuning failed; falling back to defaults',
+    );
+  }
+}
+
+/**
  * Wine Intelligence Engine — main entry point.
  *
  * 1. Load environment configuration
@@ -25,6 +72,11 @@ import { logKillSwitchPolicyAtStartup } from './config/kill-switch-policy.js';
  * 5. Graceful shutdown on SIGTERM/SIGINT
  */
 async function main(): Promise<void> {
+  // Configure undici BEFORE any module that might issue a fetch (config
+  // loaders, telemetry SDK init, etc.) so the global dispatcher applies
+  // to the very first outbound request.
+  await configureGlobalHttpDispatcher();
+
   const config = loadConfig();
   logKillSwitchPolicyAtStartup(config, bootstrapLogger);
   const telemetrySdk = initTelemetry();
@@ -109,6 +161,7 @@ async function main(): Promise<void> {
   }
 
   // Step 5: Graceful shutdown
+  const SHUTDOWN_HARD_TIMEOUT_MS = 25_000;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) {
       server.log.warn(`Received ${signal} during shutdown; ignoring duplicate signal.`);
@@ -116,6 +169,16 @@ async function main(): Promise<void> {
     }
     shuttingDown = true;
     server.log.info(`Received ${signal}, shutting down gracefully...`);
+
+    // Hard timeout: if any close() deadlocks (e.g., Redis quit on a broken
+    // socket, hung pg pool .end()), we exit with code 1 instead of hanging
+    // until k8s SIGKILLs us at the end of the grace period.
+    const hardTimer = setTimeout(() => {
+      server.log.fatal('Shutdown exceeded hard timeout; forcing exit(1).');
+      process.exit(1);
+    }, SHUTDOWN_HARD_TIMEOUT_MS);
+    hardTimer.unref();
+
     try {
       if (startedWatchlistRuntime && container.watchlistRuntime?.isRunning() === true) {
         await container.watchlistRuntime.stop();
@@ -123,19 +186,25 @@ async function main(): Promise<void> {
       await server.close();
       await managedRuntime.close();
       server.log.info('Server closed successfully.');
+      clearTimeout(hardTimer);
       process.exit(0);
     } catch (err) {
       server.log.error({ err }, 'Error during shutdown');
+      clearTimeout(hardTimer);
       process.exit(1);
     }
   };
 
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  process.once('SIGINT', () => void shutdown('SIGINT'));
 }
 
+// Treat unhandled rejections as fatal: a Node process in this state has
+// undefined behavior (per Node default since v15). Log + exit so a fresh
+// process replaces us instead of running silently corrupted.
 process.on('unhandledRejection', (reason: unknown) => {
-  bootstrapLogger.error({ err: reason }, 'unhandled promise rejection');
+  bootstrapLogger.fatal({ err: reason }, 'unhandled promise rejection — exiting');
+  process.exit(1);
 });
 
 process.on('uncaughtException', (err: Error) => {

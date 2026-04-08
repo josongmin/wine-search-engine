@@ -143,8 +143,8 @@ export function decideResponseCacheReadPolicy(input: {
     return { eligibility: 'bypass', reason: 'contract_version_drift' };
   }
   if (
-    input.currentModelVersions !== undefined
-    && input.cachedModelVersions === undefined
+    (input.currentModelVersions !== undefined && input.cachedModelVersions === undefined) ||
+    (input.cachedModelVersions !== undefined && input.currentModelVersions === undefined)
   ) {
     return { eligibility: 'bypass', reason: 'model_version_drift' };
   }

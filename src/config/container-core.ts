@@ -82,6 +82,7 @@ export async function buildCoreContainerServices(
       adapters.chatLlm,
       config.openai.llmQueryInterpreter,
       config.openai.llmQueryInterpreterTimeoutMs,
+      support.phraseCache,
     ),
   );
   const entityResolver = buildEntityResolver(adapters, config);

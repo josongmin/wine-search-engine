@@ -96,11 +96,13 @@ export function parseWatchlistTrigger(input: unknown): WatchlistTrigger | null {
 
   switch (input.type) {
     case 'new_vintage':
-      return isFiniteNumber(input.minVintage) && input.minVintage > 0
+      // minVintage is an integer year (matches HTTP z.number().int().positive())
+      return isFiniteNumber(input.minVintage) && Number.isInteger(input.minVintage) && input.minVintage > 0
         ? { type: input.type, minVintage: input.minVintage }
         : null;
     case 'price_drop':
-      return isFiniteNumber(input.threshold) && input.threshold > 0
+      // threshold is a percent (0 < threshold <= 100); aligned with HTTP schema.
+      return isFiniteNumber(input.threshold) && input.threshold > 0 && input.threshold <= 100
         && isFiniteNumber(input.baselinePrice) && input.baselinePrice > 0
         ? {
             type: input.type,
@@ -109,11 +111,13 @@ export function parseWatchlistTrigger(input: unknown): WatchlistTrigger | null {
           }
         : null;
     case 'stock_available':
-      return isFiniteNumber(input.minQty) && input.minQty > 0
+      // minQty is integer-valued (matches HTTP z.number().int().positive())
+      return isFiniteNumber(input.minQty) && Number.isInteger(input.minQty) && input.minQty > 0
         ? { type: input.type, minQty: input.minQty }
         : null;
     case 'critic_score_above':
-      return isFiniteNumber(input.threshold) && input.threshold >= 0
+      // threshold is a 0-100 score; aligned with HTTP schema.
+      return isFiniteNumber(input.threshold) && input.threshold >= 0 && input.threshold <= 100
         ? { type: input.type, threshold: input.threshold }
         : null;
     default:

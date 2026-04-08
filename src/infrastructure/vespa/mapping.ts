@@ -96,7 +96,8 @@ function parseSparseWeightsTensor(raw: unknown): DocumentSparseVector | undefine
     if (
       typeof address !== 'object' ||
       address === null ||
-      typeof value !== 'number'
+      typeof value !== 'number' ||
+      !Number.isFinite(value)
     ) continue;
     const token = (address as Record<string, unknown>)['token'];
     if (typeof token !== 'string') continue;
@@ -332,14 +333,12 @@ export function fromVespaFields(
   // Validate entity_id before calling createEntityId: a missing or
   // non-string entity_id would produce createEntityId('') which throws
   // "EntityId cannot be an empty string" with no indication of which
-  // document was malformed. Fail early with the actual field value shown.
+  // document was malformed. Fail early. Field keys are NOT included in the
+  // error message — they leak the internal schema to clients via 500
+  // responses. Operators can find the full key list in structured logs.
   const rawEntityId = fields['entity_id'];
   if (typeof rawEntityId !== 'string' || rawEntityId.length === 0) {
-    throw new Error(
-      `fromVespaFields: missing or invalid entity_id field ` +
-        `(got ${JSON.stringify(rawEntityId)}). ` +
-        `Available keys: [${Object.keys(fields).join(', ')}]`,
-    );
+    throw new Error('fromVespaFields: malformed Vespa document — missing entity_id');
   }
 
   return {
@@ -470,9 +469,7 @@ export function toRetrievalFeatureProjection(doc: RetrievalDocument): RetrievalF
 export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProjection {
   const entityIdRaw = raw['entity_id'];
   if (!isString(entityIdRaw) || entityIdRaw.length === 0) {
-    throw new Error(
-      `parseHitSummary: missing or empty entity_id in hit_summary response (keys: ${Object.keys(raw).join(', ')})`,
-    );
+    throw new Error('parseHitSummary: missing or empty entity_id in hit_summary response');
   }
   const canonicalLabel = getOptionalString(raw, 'canonical_label');
   const producer = getOptionalString(raw, 'producer');
@@ -581,6 +578,17 @@ export function yqlEscapeString(value: string): string {
 const yqlString = yqlEscapeString;
 
 /**
+ * Whitelist of safe field names for `_in` (multi-value) sparse filter tokens.
+ * Must match the producer in `domain/retrieval/service/constraint-to-sparse-filter-tokens.ts`.
+ * Hoisted to module scope to avoid per-iteration allocation in `buildSparseFilters`.
+ */
+const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
+  'wine_type', 'country', 'appellation', 'grape_primary', 'style',
+  'price_band', 'flavor_profile', 'classification', 'certification',
+  'soil_type', 'producer_type',
+]);
+
+/**
  * Builds YQL AND filter clauses from an array of filter tokens for use in
  * sparse (BM25 / lexical) queries.
  *
@@ -615,6 +623,16 @@ const yqlString = yqlEscapeString;
  * @param filters - Array of filter token strings.
  * @returns A YQL fragment starting with ` AND ` for each token, or `""` if empty.
  */
+function clampNum(value: number, min: number, max: number): number {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  return Math.round(clampNum(value, min, max));
+}
+
 export function buildSparseFilters(filters: readonly string[]): string {
   if (filters.length === 0) return '';
 
@@ -633,12 +651,12 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       case 'body_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`body >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`body >= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
       case 'body_max': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`body <= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`body <= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
       case 'availability':
@@ -659,50 +677,54 @@ export function buildSparseFilters(filters: readonly string[]): string {
         clauses.push(`appellation contains ${yqlString(value)}`);
         break;
 
-      // New wine-domain numeric range filters
+      // New wine-domain numeric range filters.
+      // All numeric inputs are clamped to domain bounds to prevent
+      // attackers from sending extreme values (e.g., -999999999) that
+      // bypass downstream filtering logic and to avoid scientific-notation
+      // YQL interpolation.
       case 'vintage_year_min': {
         const n = parseInt(value, 10);
-        if (isFinite(n)) clauses.push(`vintage_year >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`vintage_year >= ${clampInt(n, 1900, 2100)}`);
         break;
       }
       case 'vintage_year_max': {
         const n = parseInt(value, 10);
-        if (isFinite(n)) clauses.push(`vintage_year <= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`vintage_year <= ${clampInt(n, 1900, 2100)}`);
         break;
       }
       case 'acidity_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`acidity >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`acidity >= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
       case 'tannin_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`tannin >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`tannin >= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
       case 'finish_length_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`finish_length >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`finish_length >= ${clampNum(n, 0, 10).toFixed(3)}`);
         break;
       }
       case 'price_usd_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`price_usd >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`price_usd >= ${clampNum(n, 0, 1_000_000).toFixed(2)}`);
         break;
       }
       case 'price_usd_max': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`price_usd <= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`price_usd <= ${clampNum(n, 0, 1_000_000).toFixed(2)}`);
         break;
       }
       case 'critic_score_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`critic_score_normalized >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`critic_score_normalized >= ${clampNum(n, 0, 1).toFixed(4)}`);
         break;
       }
       case 'producer_prestige_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`producer_prestige >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`producer_prestige >= ${clampNum(n, 0, 1).toFixed(4)}`);
         break;
       }
 
@@ -715,12 +737,12 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       case 'alcohol_min': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`alcohol_pct >= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`alcohol_pct >= ${clampNum(n, 0, 25).toFixed(2)}`);
         break;
       }
       case 'alcohol_max': {
         const n = parseFloat(value);
-        if (isFinite(n)) clauses.push(`alcohol_pct <= ${n}`);
+        if (Number.isFinite(n)) clauses.push(`alcohol_pct <= ${clampNum(n, 0, 25).toFixed(2)}`);
         break;
       }
       case 'certification':
@@ -734,9 +756,10 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       case 'drinking_window_now': {
         const n = parseInt(value, 10);
-        if (isFinite(n)) {
-          clauses.push(`drinking_window_start <= ${n}`);
-          clauses.push(`drinking_window_end >= ${n}`);
+        if (Number.isFinite(n)) {
+          const yr = clampInt(n, 1900, 2200);
+          clauses.push(`drinking_window_start <= ${yr}`);
+          clauses.push(`drinking_window_end >= ${yr}`);
         }
         break;
       }
@@ -745,14 +768,9 @@ export function buildSparseFilters(filters: readonly string[]): string {
         // Multi-value IN tokens: key ends with _in, value is pipe-delimited.
         // Produces a Vespa OR clause: (field contains "a" OR field contains "b").
         // Field name is validated against a whitelist to prevent YQL injection.
-        const ALLOWED_IN_FIELDS: ReadonlySet<string> = new Set([
-          'wine_type', 'country', 'appellation', 'grape_primary', 'style',
-          'price_band', 'flavor_profile', 'classification', 'certification',
-          'soil_type', 'producer_type',
-        ]);
         if (key.endsWith('_in')) {
           const field = key.slice(0, -3); // strip '_in' suffix
-          if (!ALLOWED_IN_FIELDS.has(field)) break;
+          if (!ALLOWED_SPARSE_IN_FIELDS.has(field)) break;
           const vals = value.split('|').filter((v) => v.length > 0);
           if (vals.length > 0) {
             const disjuncts = vals.map((v) => `${field} contains ${yqlString(v)}`);

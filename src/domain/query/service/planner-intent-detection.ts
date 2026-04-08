@@ -8,10 +8,13 @@ export const ANCHOR_PRESENT_CONFIDENCE = 0.5;
 /** Anchor confidence above which entity_exact intent is assigned. */
 export const EXACT_ANCHOR_CONFIDENCE = 0.85;
 
-/** Price-related keywords for budget search detection. */
+/** Price-related keywords for budget search detection.
+ *  Korean patterns use bare alternation (no \b) because \b is a word-boundary
+ *  for ASCII only — Korean jamo/syllables are not delimited by \b. */
 const PRICE_KEYWORDS: readonly RegExp[] = [
   /\d+\s*(?:원|만원|dollar|usd|\$|€|£)/i,
-  /\b(?:under|below|cheaper|budget|affordable)\b|(?:저렴|싼|가성비)/i,
+  /\b(?:under|below|cheaper|budget|affordable)\b/i,
+  /(?:저렴|싼|가성비|비싼|비싸|고급|럭셔리|프리미엄)/,
   /만원\s*(?:이하|미만|대)/,
 ] as const;
 

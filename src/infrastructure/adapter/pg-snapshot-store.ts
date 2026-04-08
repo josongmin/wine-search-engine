@@ -117,11 +117,70 @@ export class PgSnapshotStore implements SnapshotStore {
     const row = result.rows[0];
     if (row == null) return null;
 
-    const data = row.snapshot_data as SnapshotEnvelope | DecisionSnapshot;
-    // Envelope rows store { snapshotId, snapshot }; legacy rows are raw DecisionSnapshot.
-    if ('snapshotId' in data && 'snapshot' in data) {
-      return data.snapshot;
-    }
-    return data;
+    return extractSnapshot(row.snapshot_data);
   }
+}
+
+/**
+ * Decode a snapshot JSONB payload, handling both the modern envelope format
+ * `{ snapshotId, snapshot }` and the legacy raw `DecisionSnapshot` format.
+ *
+ * Returns null on shape mismatch — including partial corruption (missing
+ * required fields). The decision pipeline will crash deep inside on a
+ * silently-typed garbage snapshot, so we validate aggressively here.
+ */
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (typeof v !== 'string') return false;
+  }
+  return true;
+}
+
+function isBoolRecord(value: unknown): value is Record<string, boolean> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  for (const v of Object.values(value as Record<string, unknown>)) {
+    if (typeof v !== 'boolean') return false;
+  }
+  return true;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  // Reject whitespace-only strings — they pass `.length > 0` but feed garbage
+  // into identityHash() and snapshot_id composition, producing format-sensitive
+  // hash keys that break string equality across platforms (CRLF vs LF, tab vs space).
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isValidDecisionSnapshot(raw: unknown): raw is DecisionSnapshot {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const obj = raw as Record<string, unknown>;
+  // Required non-empty (and non-whitespace) string fields
+  if (!isNonEmptyString(obj['snapshot_id'])) return false;
+  if (!isNonEmptyString(obj['policy_rule_version'])) return false;
+  if (!isNonEmptyString(obj['threshold_profile_id'])) return false;
+  if (!isNonEmptyString(obj['planner_version'])) return false;
+  if (!isNonEmptyString(obj['response_contract_version'])) return false;
+  // Required Record<string, string> fields — VALUES must also be strings.
+  if (!isStringRecord(obj['model_versions'])) return false;
+  if (!isStringRecord(obj['index_versions'])) return false;
+  // feature_flags is Record<string, boolean>
+  if (!isBoolRecord(obj['feature_flags'])) return false;
+  return true;
+}
+
+function extractSnapshot(raw: unknown): DecisionSnapshot | null {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  // Envelope: { snapshotId, snapshot: DecisionSnapshot }
+  if ('snapshotId' in obj && 'snapshot' in obj) {
+    const inner = obj['snapshot'];
+    if (isValidDecisionSnapshot(inner)) return inner;
+    return null;
+  }
+  // Legacy: raw DecisionSnapshot — must pass full structural validation
+  if (isValidDecisionSnapshot(obj)) return obj;
+  return null;
 }

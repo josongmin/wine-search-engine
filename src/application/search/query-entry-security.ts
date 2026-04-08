@@ -1,7 +1,6 @@
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
-// TODO: Once QueryEntrySecurityObserver is moved to src/domain/security/port/, update this import.
-import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
+import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import {
   PolicyBlockedError,
 } from '../../domain/shared/error/policy-blocked.js';

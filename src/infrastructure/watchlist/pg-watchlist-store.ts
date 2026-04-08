@@ -118,8 +118,11 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
   }
 
   async findByUserId(userId: string): Promise<readonly WatchlistEntry[]> {
+    // Hard server-side cap of 1000 entries per user to prevent unbounded
+    // memory growth from accidental or malicious mass-creation. The route
+    // layer applies the caller's offset/limit on top of this set.
     const result = await this.executor.query<WatchlistRow>(
-      `SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at ASC`,
+      `SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1000`,
       [userId],
     );
     return result.rows.map(rowToWatchlistEntry);
@@ -127,7 +130,7 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
 
   async findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
     const result = await this.executor.query<WatchlistRow>(
-      `SELECT * FROM watchlists WHERE entity_id = $1 ORDER BY created_at ASC`,
+      `SELECT * FROM watchlists WHERE entity_id = $1 ORDER BY created_at ASC LIMIT 1000`,
       [entityId],
     );
     return result.rows.map(rowToWatchlistEntry);
@@ -144,10 +147,13 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
   async listByWatchlistId(
     watchlistId: string,
   ): Promise<readonly WatchlistDeliveryLogEntry[]> {
+    // Hard server-side cap of 1000 delivery records to bound memory.
+    // Older history must be queried via dedicated archival paths.
     const result = await this.executor.query<WatchlistDeliveryLogRow>(
       `SELECT * FROM watchlist_delivery_logs
        WHERE watchlist_id = $1
-       ORDER BY delivered_at ASC, attempt ASC`,
+       ORDER BY delivered_at DESC, attempt DESC
+       LIMIT 1000`,
       [watchlistId],
     );
     return result.rows.map(rowToDeliveryLogEntry);

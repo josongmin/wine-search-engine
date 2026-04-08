@@ -194,6 +194,7 @@ async function runRankedPhaseForContract(
       },
     }),
     rankedResults: [],
+    fullRankedResults: [],
     effectiveRoute: 'hybrid',
     snapshotVersions: options.snapshotVersions,
     decisionEngine: makeDecisionEngine(
@@ -284,6 +285,192 @@ describe('runSearchPostRoutePhase', () => {
       }),
     );
     expect(decisionEngine.decide).not.toHaveBeenCalled();
+  });
+
+  it('entropy-abstain path honors includeCounterfactuals=true (explain mode)', async () => {
+    const built = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
+    const responseBuilder = makeResponseBuilder(built);
+    const decisionEngine = makeDecisionEngine();
+    const abstainPolicy = makeAbstainPolicy(true, 0.95);
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const rankedResults = [
+      makeRankedResult({
+        entityId: createEntityId('e-abstain-cf-top'),
+        canonicalLabel: 'TopWine',
+        finalScore: 0.6,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.5,
+          hardConstraintPass: true,
+          softConstraint: 0,
+          attributeAlignment: 0,
+          preferenceAlignment: 0,
+          popularity: 0,
+          availability: 1,
+          uncertaintyPenalty: 0,
+        },
+        evidenceItems: [{
+          type: 'semantic_relevance',
+          source: 'ranker',
+          contribution: '+0.50',
+          strength: 'medium' as const,
+          provenance: 'top',
+        }],
+      }),
+      makeRankedResult({
+        entityId: createEntityId('e-abstain-cf-tail'),
+        canonicalLabel: 'TailWine',
+        finalScore: 0.4,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.4,
+          hardConstraintPass: true,
+          softConstraint: 0,
+          attributeAlignment: 0,
+          preferenceAlignment: 0,
+          popularity: 0,
+          availability: 1,
+          uncertaintyPenalty: 0,
+        },
+        evidenceItems: [{
+          type: 'semantic_relevance',
+          source: 'ranker',
+          contribution: '+0.40',
+          strength: 'medium' as const,
+          provenance: 'tail',
+        }],
+      }),
+    ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+
+    await runSearchPostRoutePhase({
+      plan,
+      request,
+      requestId: 'r-explain-abstain',
+      startTime: Date.now() - 10,
+      resolveResult: {
+        status: 'resolved',
+        topEntity: { entityId: createEntityId('e-abstain-cf-top'), confidence: 0.6 },
+        candidates: [
+          {
+            entityId: createEntityId('e-abstain-cf-top'),
+            canonicalLabel: 'TopWine',
+            calibratedScore: 0.6,
+            rank: 1,
+            evidenceRefs: [],
+          },
+          {
+            entityId: createEntityId('e-abstain-cf-tail'),
+            canonicalLabel: 'TailWine',
+            calibratedScore: 0.4,
+            rank: 2,
+            evidenceRefs: [],
+          },
+        ],
+        decisionTrace: {
+          queryClass: 'unknown',
+          top1CalibratedScore: 0.6,
+          top2CalibratedScore: 0.4,
+          calibratedGap: 0.2,
+          decisionConfidenceC: 0.5,
+          ambiguityDetected: true,
+          ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+          outcomeReasonCodes: [],
+        },
+        conformalSetSize: 2,
+      } as never,
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      plannerSuggestedMode: 'hybrid',
+      retrievalModeSource: 'planner',
+      abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+      includeCounterfactuals: true,
+    });
+
+    // The builder should have been invoked with a non-empty counterfactuals
+    // array — explain=true must surface them even on the abstain path.
+    expect(responseBuilder.build).toHaveBeenCalledOnce();
+    const callArg = (responseBuilder.build as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { counterfactuals?: unknown[] };
+    expect(callArg?.counterfactuals).toBeDefined();
+    expect(Array.isArray(callArg?.counterfactuals)).toBe(true);
+    expect((callArg?.counterfactuals ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('entropy-abstain path omits counterfactuals by default (explain not set)', async () => {
+    const built = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
+    const responseBuilder = makeResponseBuilder(built);
+    const decisionEngine = makeDecisionEngine();
+    const abstainPolicy = makeAbstainPolicy(true, 0.95);
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const rankedResults = [
+      makeRankedResult({
+        entityId: createEntityId('e-noexplain'),
+        canonicalLabel: 'W',
+        finalScore: 0.5,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: 0.5,
+          hardConstraintPass: true,
+          softConstraint: 0,
+          attributeAlignment: 0,
+          preferenceAlignment: 0,
+          popularity: 0,
+          availability: 1,
+          uncertaintyPenalty: 0,
+        },
+        evidenceItems: [{
+          type: 'semantic_relevance',
+          source: 'ranker',
+          contribution: '+0.50',
+          strength: 'medium' as const,
+          provenance: 'p',
+        }],
+      }),
+    ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+
+    await runSearchPostRoutePhase({
+      plan,
+      request,
+      requestId: 'r-no-explain',
+      startTime: Date.now() - 10,
+      resolveResult: {
+        status: 'resolved',
+        candidates: [],
+        decisionTrace: {
+          queryClass: 'unknown',
+          top1CalibratedScore: 0.5,
+          top2CalibratedScore: 0.5,
+          calibratedGap: 0,
+          decisionConfidenceC: 0.5,
+          ambiguityDetected: true,
+          ambiguityTypes: [],
+          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+          outcomeReasonCodes: [],
+        },
+        conformalSetSize: 2,
+      },
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      plannerSuggestedMode: 'hybrid',
+      retrievalModeSource: 'planner',
+      abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+      snapshotVersions: undefined,
+      drinkingWindow: undefined,
+      decisionEngine,
+      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+      cacheService: undefined,
+    });
+
+    const callArg = (responseBuilder.build as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { counterfactuals?: unknown };
+    // counterfactuals key must NOT be present when explain not requested
+    expect(callArg?.counterfactuals).toBeUndefined();
   });
 
   it('passes richer identity evidence into the shared decision input for ranked routes', async () => {
@@ -510,6 +697,7 @@ describe('runSearchPostRoutePhase', () => {
       startTime,
       resolveResult,
       rankedResults,
+      fullRankedResults: rankedResults,
       effectiveRoute: 'hybrid',
       snapshotVersions: {
         modelVersions: {},
@@ -722,6 +910,7 @@ describe('runSearchPostRoutePhase', () => {
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult(),
       rankedResults,
+      fullRankedResults: rankedResults,
       effectiveRoute: 'hybrid',
       decisionEngine: {
         decide: vi.fn().mockRejectedValue(new Error('decision exploded')),
@@ -739,7 +928,7 @@ describe('runSearchPostRoutePhase', () => {
     );
   });
 
-  it('does not include comparison counterfactuals unless explicitly requested', async () => {
+  it('comparison counterfactuals: symmetric API — explicit false suppresses', async () => {
     const responseBuilder = makeResponseBuilder();
 
     await runRankedRouteDecisionPhase({
@@ -749,7 +938,7 @@ describe('runSearchPostRoutePhase', () => {
         retrievalMode: 'compare_candidates',
         queryClass: 'comparison_query',
       },
-      requestId: 'req-comparison',
+      requestId: 'req-comparison-suppress',
       startTime: Date.now() - 10,
       resolveResult: makeResolveResult({
         candidates: [
@@ -782,9 +971,23 @@ describe('runSearchPostRoutePhase', () => {
           finalScore: 0.71,
         }),
       ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [
+        makeRankedResult({
+          entityId: createEntityId('entity-top'),
+          canonicalLabel: 'Top',
+          rank: 1,
+        }),
+        makeRankedResult({
+          entityId: createEntityId('entity-alt'),
+          canonicalLabel: 'Alt',
+          rank: 2,
+          finalScore: 0.71,
+        }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
       effectiveRoute: 'hybrid',
       decisionEngine: makeDecisionEngine() as never,
       responseBuilder: responseBuilder as never,
+      includeCounterfactuals: false,
     });
 
     expect(responseBuilder.build).toHaveBeenCalledWith(

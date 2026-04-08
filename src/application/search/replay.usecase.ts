@@ -209,8 +209,13 @@ function applyPreflightHonestyFloor(
     actualExecutionMode,
     preflightHonestyContract.execution_mode,
   );
-  const actualReasons = new Set([
-    ...(response.engineDecision.degradationReasons ?? response.meta.degradationReasons ?? []),
+  // Merge BOTH sources rather than `??`-shortcircuiting on the first non-undefined.
+  // The previous code dropped meta-level reasons whenever engineDecision had an
+  // (even empty) array, losing degradation context that the original response had
+  // recorded only at meta level.
+  const actualReasons = new Set<string>([
+    ...(response.engineDecision.degradationReasons ?? []),
+    ...(response.meta.degradationReasons ?? []),
   ]);
   for (const reason of preflightHonestyContract.degradation_reasons) {
     actualReasons.add(reason);

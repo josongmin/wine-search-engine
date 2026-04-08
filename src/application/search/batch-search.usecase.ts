@@ -320,7 +320,7 @@ export class BatchSearchUseCase {
         ...(req.limit !== undefined ? { limit: req.limit } : {}),
         options: {
           mode: req.retrieval_mode ?? 'auto',
-          explain: false,
+          explain: req.explain ?? false,
           clarification: true,
         },
       };

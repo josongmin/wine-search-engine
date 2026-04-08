@@ -204,10 +204,15 @@ async function withRetry<T>(
         throw err;
       }
       if (attempt < config.maxRetries) {
-        const delay = Math.min(
+        // Full jitter (AWS architecture blog): random in [0, expDelay].
+        // Without jitter, every concurrent failed request retries at the
+        // same instant, creating a thundering herd against an already
+        // failing Vespa under load.
+        const expDelay = Math.min(
           config.baseDelayMs * 2 ** attempt,
           config.maxDelayMs,
         );
+        const delay = Math.floor(Math.random() * expDelay);
         await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
       }
     }
@@ -291,7 +296,11 @@ export class VespaClient {
   ): Promise<VespaQueryResponse> {
     return withRetry(async () => {
       const url = `${this.baseUrl}/search/`;
-      const body: Record<string, unknown> = { yql, ...params };
+      // CRITICAL: spread `params` first so a caller-supplied `yql` cannot
+      // override the audited query string. The previous order
+      // `{ yql, ...params }` allowed a malicious or buggy caller to swap
+      // out the YQL after construction, defeating sparse-filter validation.
+      const body: Record<string, unknown> = { ...params, yql };
 
       const response = await this.fetchWithTimeout(
         url,
@@ -311,10 +320,44 @@ export class VespaClient {
       const data: unknown = await response.json();
       assertObject(data, 'query response');
 
-      // Minimal structural validation before casting.
+      // Structural validation before casting. Vespa schema drift would
+      // otherwise produce a silently-typed garbage response.
       if (!('root' in data)) {
         throw new Error('Vespa: query response missing "root" field');
       }
+      const root = (data)['root'];
+      if (root === null || typeof root !== 'object' || Array.isArray(root)) {
+        throw new Error('Vespa: query response "root" is not an object');
+      }
+      const rootObj = root as Record<string, unknown>;
+      if ('children' in rootObj && rootObj['children'] !== undefined && !Array.isArray(rootObj['children'])) {
+        throw new Error('Vespa: query response "root.children" is not an array');
+      }
+
+      // Filter out malformed hits before downstream consumers see them.
+      // A single hit missing `relevance` (NaN-by-omission) corrupts the
+      // sort comparator and downstream similarity normalization.
+      const rawChildren = Array.isArray(rootObj['children']) ? rootObj['children'] : [];
+      const validChildren: unknown[] = [];
+      for (const hit of rawChildren) {
+        if (
+          hit !== null &&
+          typeof hit === 'object' &&
+          typeof (hit as Record<string, unknown>)['id'] === 'string' &&
+          typeof (hit as Record<string, unknown>)['relevance'] === 'number' &&
+          Number.isFinite((hit as Record<string, unknown>)['relevance'])
+        ) {
+          validChildren.push(hit);
+        }
+      }
+      if (validChildren.length !== rawChildren.length) {
+        const dropped = rawChildren.length - validChildren.length;
+        pipelineDebug(
+          { step: PipelineDebugStep.VESPA_QUERY, dropped_malformed_hits: dropped },
+          'pipeline vespa hit validation dropped entries',
+        );
+      }
+      rootObj['children'] = validChildren;
 
       const parsed = data as unknown as VespaQueryResponse;
       const hitCount = parsed.root.children?.length ?? 0;

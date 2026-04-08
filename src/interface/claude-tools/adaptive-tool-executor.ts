@@ -127,8 +127,14 @@ export class AdaptiveToolExecutor {
    */
   private isEmptyResult(result: AnyToolResult): boolean {
     // Check if it's a SearchResponseV1
-    if ('queryType' in result && result.queryType === 'search') {
-      const searchResult: SearchResponseV1 = result;
+    if (
+      'queryType' in result &&
+      result.queryType === 'search' &&
+      'results' in result &&
+      Array.isArray((result as unknown as Record<string, unknown>)['results']) &&
+      'engineDecision' in result
+    ) {
+      const searchResult = result as SearchResponseV1;
       const status = searchResult.engineDecision.decisionStatus;
       return (
         searchResult.results.length === 0 ||

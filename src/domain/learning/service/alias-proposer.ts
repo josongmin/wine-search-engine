@@ -158,6 +158,8 @@ export class AliasProposer {
     let hasLatin = false;
     let hasCyrillic = false;
     let hasGreek = false;
+    let hasArmenian = false;
+    let hasCherokee = false;
 
     for (const char of text) {
       const code = char.codePointAt(0);
@@ -178,10 +180,18 @@ export class AliasProposer {
       if (code >= 0x0370 && code <= 0x03ff) {
         hasGreek = true;
       }
+      // Armenian (homoglyph attack vector against Latin)
+      if (code >= 0x0530 && code <= 0x058f) {
+        hasArmenian = true;
+      }
+      // Cherokee (classic homoglyph source)
+      if (code >= 0x13a0 && code <= 0x13ff) {
+        hasCherokee = true;
+      }
     }
 
-    // Mixed Latin+Cyrillic or Latin+Greek is suspicious
-    return (hasLatin && hasCyrillic) || (hasLatin && hasGreek);
+    // Any Latin + non-Latin lookalike script is suspicious.
+    return hasLatin && (hasCyrillic || hasGreek || hasArmenian || hasCherokee);
   }
 
   /**
@@ -205,10 +215,15 @@ export class AliasProposer {
     // Session success factor
     const sessionFactor = sessionSuccessRate;
 
-    // Purchase signal is a strong indicator
-    const purchaseFactor = agg.purchases > 0 ? 0.1 : 0;
+    // Purchase signal is a strong indicator, but a SINGLE purchase can be a
+    // bot/abuse vector. Require at least 3 distinct purchases for any
+    // contribution and saturate at 5 (proportional, not binary). Without
+    // this, one purchase from any session could push raw confidence past
+    // the auto-approval threshold.
+    const purchaseFactor =
+      agg.purchases >= 3 ? Math.min(1, agg.purchases / 5) : 0;
 
-    const raw = 0.3 * volumeFactor + 0.3 * ctrFactor + 0.2 * sessionFactor + 0.2 + purchaseFactor;
+    const raw = 0.3 * volumeFactor + 0.3 * ctrFactor + 0.2 * sessionFactor + 0.2 * purchaseFactor;
 
     return Math.min(1.0, Math.max(0, raw));
   }

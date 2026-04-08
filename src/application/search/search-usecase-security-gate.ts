@@ -1,6 +1,6 @@
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
-import type { QueryEntrySecurityObserver } from '../../infrastructure/observability/query-entry-security-metrics.js';
+import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import { QueryEntrySecurityGate } from './query-entry-security.js';
 
 export interface SearchSecurityGateDeps {

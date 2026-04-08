@@ -25,24 +25,26 @@ import type {
 // ---------------------------------------------------------------------------
 
 /**
- * Normalise per-result confidence scores via min-max over relevanceScore values.
- * - Single result → 1.0.
- * - Multiple results → highest relevanceScore = 1.0, lowest = 0.0.
- * - Ties → equal confidence.
+ * Per-result confidence = the calibrated `relevanceScore` directly.
+ *
+ * `relevanceScore` is sourced from `RankedResult.finalScore` which is bounded
+ * to [0, 1] by ScoreAggregator (Math.max(0, Math.min(MAX_SCORE=1.0, ...)))
+ * and remains in [0, 1] after rerank blending (linear combination of two
+ * [0, 1] values with weights summing to 1).
+ *
+ * The previous min-max rescaling was a UX bug: it produced literal 0.0 for the
+ * lowest item even when its underlying relevanceScore was high (top=0.95 /
+ * bottom=0.93). The 0.5 floor variant only made the lie less extreme (50% vs
+ * 0%) — both decoupled displayed confidence from actual relevance.
+ *
+ * Clamp is defensive against upstream corruption; should be a no-op.
  */
 function normaliseConfidences(items: readonly ResultItem[]): readonly number[] {
-  if (items.length === 0) return [];
-  if (items.length === 1) return [1.0];
-  const scores = items.map((i) => i.relevanceScore);
-  let maxScore = -Infinity;
-  let minScore = Infinity;
-  for (const s of scores) {
-    if (s > maxScore) maxScore = s;
-    if (s < minScore) minScore = s;
-  }
-  const range = maxScore - minScore;
-  if (range === 0) return items.map(() => 1.0);
-  return scores.map((s) => (s - minScore) / range);
+  return items.map((i) => {
+    const s = i.relevanceScore;
+    if (!Number.isFinite(s)) return 0;
+    return Math.max(0, Math.min(1, s));
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -100,23 +102,24 @@ function projectSearchToHuman(
   const totalCandidates =
     v1Response.results.length + (v1Response.counterfactuals?.length ?? 0);
 
+  // Resolve refs ONCE then check explicitly for non-empty string. The previous
+  // pattern `(a ?? b ? { x: a ?? b } : {})` evaluated `??` then truthiness:
+  // an empty string `""` satisfied `??` but was falsy → property silently dropped,
+  // breaking trace correlation joins for clients that store empty strings.
+  const authorityTraceRef =
+    v1Response.engineDecision.authorityTraceRef ?? v1Response.meta.authorityTraceRef;
+  const runtimeCorrelationRef =
+    v1Response.engineDecision.runtimeCorrelationRef ?? v1Response.meta.runtimeCorrelationRef;
   return {
     queryId,
     queryType: 'search',
     results,
     totalCandidates,
-    ...(v1Response.engineDecision.authorityTraceRef ?? v1Response.meta.authorityTraceRef
-      ? {
-          authorityTraceRef:
-            v1Response.engineDecision.authorityTraceRef ?? v1Response.meta.authorityTraceRef,
-        }
+    ...(typeof authorityTraceRef === 'string' && authorityTraceRef.length > 0
+      ? { authorityTraceRef }
       : {}),
-    ...(v1Response.engineDecision.runtimeCorrelationRef ?? v1Response.meta.runtimeCorrelationRef
-      ? {
-          runtimeCorrelationRef:
-            v1Response.engineDecision.runtimeCorrelationRef
-            ?? v1Response.meta.runtimeCorrelationRef,
-        }
+    ...(typeof runtimeCorrelationRef === 'string' && runtimeCorrelationRef.length > 0
+      ? { runtimeCorrelationRef }
       : {}),
     version: '2',
     responseType: 'human',
@@ -144,6 +147,9 @@ function projectComparisonToHuman(
         : null,
   });
 
+  // ComparisonSearchResponse.entities is a tuple [Entity, Entity] — TypeScript
+  // guarantees both indexes at compile time. The runtime tuple shape is also
+  // enforced by the response schema (z.tuple) so no extra defense needed here.
   const entities: SearchResponseV2HumanComparison['entities'] = [
     projectSide(comparison.entities[0]),
     projectSide(comparison.entities[1]),
@@ -157,10 +163,10 @@ function projectComparisonToHuman(
     overallStatus: comparison.overallStatus,
     entities,
     totalCandidates: entities[0].resultCount + entities[1].resultCount,
-    ...(comparison.authorityTraceRef !== undefined
+    ...(typeof comparison.authorityTraceRef === 'string' && comparison.authorityTraceRef.length > 0
       ? { authorityTraceRef: comparison.authorityTraceRef }
       : {}),
-    ...(comparison.runtimeCorrelationRef !== undefined
+    ...(typeof comparison.runtimeCorrelationRef === 'string' && comparison.runtimeCorrelationRef.length > 0
       ? { runtimeCorrelationRef: comparison.runtimeCorrelationRef }
       : {}),
     version: '2',

@@ -1,25 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import type { BatchSearchRouteDeps } from './route-deps.js';
 import {
+  parseContractBody,
   sendRouteContractResponse,
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import { BatchSearchRouteContract } from './route-contracts.js';
-import { ErrorResponseSchema } from '../schemas/search-response.schema.js';
-import type { BatchSearchResponse } from '../../../application/search/batch-search.usecase.js';
 import { getRequestId } from '../request-id.js';
-
-function createValidationErrorResponse(requestId: string, message: string) {
-  return ErrorResponseSchema.parse({
-    error: {
-      request_id: requestId,
-      code: 'VALIDATION_ERROR',
-      message,
-      failure_reason: null,
-      retryable: false,
-    },
-  });
-}
+import type { BatchSearchResponse } from '../../../application/search/batch-search.usecase.js';
 
 function normalizeBatchResponse(
   response: Omit<BatchSearchResponse, 'batch_status' | 'has_failures'>
@@ -108,22 +96,16 @@ export function registerBatchSearchRoute(
     url: '/v1/batch-search',
     contract: BatchSearchRouteContract,
     handler: async (request, reply) => {
-      const parsed = BatchSearchRouteContract.body.safeParse(request.body);
-      if (!parsed.success) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          BatchSearchRouteContract,
-          400,
-          createValidationErrorResponse(getRequestId(request), 'Invalid batch search request'),
-        );
-        return;
-      }
+      const body = parseContractBody(request, BatchSearchRouteContract);
 
+      // Use the HTTP requestId as the batch_id when the client did not
+      // supply one, so per-item subqueries (`${batch_id}-${item.id}`) can
+      // be correlated back to the originating HTTP request in logs/traces.
+      const effectiveBatchId = body.batch_id ?? getRequestId(request);
       const response = await deps.batchSearchUseCase.execute(
-        parsed.data.requests,
-        parsed.data.options,
-        parsed.data.batch_id,
+        body.requests,
+        body.options,
+        effectiveBatchId,
       );
 
       // HTTP transport indicates the batch request itself succeeded.

@@ -2,6 +2,10 @@ import { z } from 'zod';
 import {
   DecisionSnapshotSchema,
 } from './search-shared.schema.js';
+import {
+  MIN_PRODUCED_VINTAGE_YEAR,
+  MAX_PRODUCED_VINTAGE_YEAR,
+} from '../../../domain/shared/constants.js';
 
 export const CANONICAL_AUTHORITY_TRACE_REF_PATTERN =
   /^(decision|admission):v1:[A-Za-z0-9_]+:[a-f0-9]{64}$/;
@@ -37,7 +41,7 @@ export const EntitySummarySchema = z.object({
   producer: z.string().min(1).optional(),
   region: z.string().min(1).optional(),
   appellation: z.string().min(1).optional(),
-  producer_prestige: z.number().optional(),
+  producer_prestige: z.number().finite().optional(),
   vintage: z.number().int().optional(),
   grapes: z.array(z.string().min(1)).optional(),
   price_range: z.string().min(1).optional(),
@@ -70,9 +74,9 @@ export const UncertaintyBlockSchema = z.object({
 }).strict();
 
 export const DrinkingWindowSchema = z.object({
-  drinking_window_start: z.number().int().min(1900).max(2200),
-  drinking_window_end: z.number().int().min(1900).max(2200),
-  peak_year: z.number().int().min(1900).max(2200).optional(),
+  drinking_window_start: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
+  drinking_window_end: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR),
+  peak_year: z.number().int().min(MIN_PRODUCED_VINTAGE_YEAR).max(MAX_PRODUCED_VINTAGE_YEAR).optional(),
   currently_drinkable: z.boolean(),
   confidence: z.enum(['high', 'medium', 'low']),
   evidence_level: z.enum(['learned', 'heuristic']).optional(),
@@ -85,7 +89,9 @@ export const DrinkingWindowSchema = z.object({
 
 export const ResultItemSchema = z.object({
   entity: EntitySummarySchema,
-  relevance_score: z.number(),
+  // Bounded relevance: never NaN/Infinity, never absurd numbers that would
+  // break percentile telemetry or float32 client-side ranking.
+  relevance_score: z.number().finite().min(-1e6).max(1e6),
   match: MatchDetailSchema,
   constraints: ConstraintEvaluationSchema,
   uncertainty: UncertaintyBlockSchema,
@@ -111,6 +117,7 @@ export const ClarificationPayloadSchema = z.object({
 export const CounterfactualRejectSchema = z.object({
   entity_id: z.string().min(1),
   canonical_label: z.string().min(1).optional(),
+  rejection_type: z.enum(['lower_calibrated_score', 'below_top_window', 'abstain_tied']),
   rejected_reason: z.string().min(1),
   evidence_ref: z.string().min(1).optional(),
 }).strict();
@@ -199,16 +206,19 @@ export const SearchResponseMetaSchema = z.object({
     anchor_conditioned: z.boolean(),
     protected: z.boolean(),
     protected_reason: z.string().min(1).optional(),
-    fusion_score: z.number(),
+    fusion_score: z.number().finite(),
     rank: z.number().int().positive(),
-  }).strict()).optional(),
+  }).strict()).max(500).optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({
   query_type: z.literal('search'),
   engine_decision: EngineDecisionSchema,
-  results: z.array(ResultItemSchema),
-  counterfactuals: z.array(CounterfactualRejectSchema).optional(),
+  // Hard cap on response size: ranking pipeline already truncates, but
+  // a defense-in-depth bound keeps an out-of-control producer from
+  // shipping 100k items into a single HTTP response.
+  results: z.array(ResultItemSchema).max(200),
+  counterfactuals: z.array(CounterfactualRejectSchema).max(100).optional(),
   clarification: ClarificationPayloadSchema.nullable().optional(),
   meta: SearchResponseMetaSchema,
   retrieval_mode: z.enum([

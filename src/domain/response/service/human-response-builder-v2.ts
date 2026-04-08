@@ -124,8 +124,7 @@ export function buildHumanResponseV2(params: HumanResponseBuildParamsV2): Search
   const confidences = normaliseConfidences(results);
 
   const mappedResults: ResultItemV2Human[] = results.map((result, index) => {
-    // eslint-disable-next-line @typescript-eslint/no-deprecated
-    const vintage = result.vintageYear ?? result.vintage;
+    const vintage = result.vintageYear;
     const confidence = confidences[index] ?? 1.0;
 
     // Build drinkingWindow only if at least one bound is defined

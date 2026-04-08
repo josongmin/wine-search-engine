@@ -126,7 +126,9 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
 
     const data: unknown = await response.json();
     try {
-      const vectors = embeddingsFromOpenAiResponse(data);
+      // Pass batchSize so length/index mismatches throw rather than silently
+      // mis-aligning text→vector pairs (proxies sometimes drop or re-number).
+      const vectors = embeddingsFromOpenAiResponse(data, batchSize);
       for (const vec of vectors) {
         if (vec.length !== this.dimensions) {
           throw new Error(

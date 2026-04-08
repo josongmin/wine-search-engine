@@ -76,54 +76,109 @@ export class OpenAiChatLlm implements ChatLlmPort {
       body['max_tokens'] = request.maxOutputTokens;
     }
 
-    let response: Response;
-    try {
-      response = await fetchWithTimeout(
-        this.endpoint,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${this.apiKey}`,
+    // Retry on transient failures (429, 5xx, network) with full jitter.
+    // OpenAI does NOT auto-retry on the underlying fetch path; without
+    // this, a single rate-limit blip kills any in-flight request.
+    const MAX_ATTEMPTS = 3;
+    const BASE_DELAY_MS = 250;
+    const MAX_DELAY_MS = 2_000;
+
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      // Honor caller cancellation between attempts.
+      if (request.abortSignal?.aborted === true) {
+        throw new Error('OpenAI chat: aborted');
+      }
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(
+          this.endpoint,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${this.apiKey}`,
+            },
+            body: JSON.stringify(body),
           },
-          body: JSON.stringify(body),
-        },
-        this.httpTimeoutMs,
-      );
-    } catch (err) {
-      if (isAbortError(err)) {
+          this.httpTimeoutMs,
+          request.abortSignal,
+        );
+      } catch (err) {
+        if (isAbortError(err)) {
+          throw new Error(`OpenAI chat: request timed out after ${this.httpTimeoutMs}ms`);
+        }
+        // Network-level error: retry on attempts < MAX
+        lastError = err;
+        if (attempt < MAX_ATTEMPTS) {
+          await this.sleepWithJitter(attempt, BASE_DELAY_MS, MAX_DELAY_MS, request.abortSignal);
+          continue;
+        }
+        throw err;
+      }
+
+      if (!response.ok) {
+        const status = response.status;
+        const text = await response.text().catch(() => '');
+        const isTransient = status === 429 || (status >= 500 && status < 600);
+        if (isTransient && attempt < MAX_ATTEMPTS) {
+          lastError = new Error(`OpenAI chat HTTP ${status}: ${text.slice(0, 200)}`);
+          await this.sleepWithJitter(attempt, BASE_DELAY_MS, MAX_DELAY_MS, request.abortSignal);
+          continue;
+        }
+        throw new Error(`OpenAI chat failed [HTTP ${status}]: ${text.slice(0, 200)}`);
+      }
+
+      const data: unknown = await response.json();
+      if (!isChatCompletionsResponse(data)) {
         throw new Error(
-          `OpenAI chat: request timed out after ${this.httpTimeoutMs}ms`,
+          `OpenAI chat: unexpected response — ${JSON.stringify(data).slice(0, 240)}`,
         );
       }
-      throw err;
+
+      const choice = data.choices[0];
+      const content = choice?.message?.content;
+      const text =
+        typeof content === 'string'
+          ? content
+          : content == null
+            ? ''
+            : String(content);
+
+      return {
+        text,
+        model: data.model,
+        finishReason: choice?.finish_reason ?? null,
+      };
     }
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`OpenAI chat failed [HTTP ${response.status}]: ${text.slice(0, 200)}`);
-    }
+    // Exhausted all retries
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('OpenAI chat: retry budget exhausted');
+  }
 
-    const data: unknown = await response.json();
-    if (!isChatCompletionsResponse(data)) {
-      throw new Error(
-        `OpenAI chat: unexpected response — ${JSON.stringify(data).slice(0, 240)}`,
-      );
-    }
-
-    const choice = data.choices[0];
-    const content = choice?.message?.content;
-    const text =
-      typeof content === 'string'
-        ? content
-        : content == null
-          ? ''
-          : String(content);
-
-    return {
-      text,
-      model: data.model,
-      finishReason: choice?.finish_reason ?? null,
-    };
+  private sleepWithJitter(
+    attempt: number,
+    baseMs: number,
+    maxMs: number,
+    signal: AbortSignal | undefined,
+  ): Promise<void> {
+    const expDelay = Math.min(baseMs * 2 ** (attempt - 1), maxMs);
+    const delay = Math.floor(Math.random() * expDelay);
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(), delay);
+      if (signal) {
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(new Error('OpenAI chat: aborted'));
+        };
+        if (signal.aborted) {
+          onAbort();
+        } else {
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }
+    });
   }
 }

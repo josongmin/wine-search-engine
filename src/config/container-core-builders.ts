@@ -28,6 +28,7 @@ import { SimilarityScorer } from '../domain/mixed/service/similarity-scorer.js';
 import { ConstraintOverlay } from '../domain/mixed/service/constraint-overlay.js';
 import { NLMapper } from '../domain/attribute/service/nl-mapper.js';
 import { LlmNLMapper } from '../domain/attribute/service/llm-nl-mapper.js';
+import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { Config } from './env.js';
@@ -60,13 +61,14 @@ export async function buildQueryPlanner(
   chatLlm?: ChatLlmPort,
   llmQueryInterpreter?: boolean,
   llmQueryInterpreterTimeoutMs?: number,
+  phraseCache?: PhraseCachePort,
 ): Promise<Planner> {
   let fuzzyMatcher: FuzzyMatcherPort | undefined;
 
   if (pool !== undefined) {
     try {
       const { rows } = await pool.query<{ surface_form: string }>(
-        'SELECT DISTINCT surface_form FROM aliases WHERE is_suppressed = FALSE',
+        'SELECT DISTINCT surface_form FROM aliases WHERE is_suppressed = FALSE LIMIT 100000',
       );
       const terms = rows.map((r) => r.surface_form);
       if (terms.length > 0) {
@@ -74,13 +76,30 @@ export async function buildQueryPlanner(
         fm.initialize(terms);
         fuzzyMatcher = fm;
       }
-    } catch {
+    } catch (err: unknown) {
+      // Catch ONLY "relation does not exist" (PG SQLSTATE 42P01).
+      // Any other error — pool exhaustion, auth failure, network flap —
+      // must propagate so the operator notices instead of silently
+      // running production with no fuzzy matching.
+      const code = (err as { code?: string } | undefined)?.code;
+      if (code !== '42P01') {
+        throw err;
+      }
       // Alias table may not exist yet; proceed without fuzzy matching.
     }
   }
 
+  // Defense-in-depth: env validation already throws when LLM_QUERY_INTERPRETER
+  // is true and OPENAI_API_KEY is unset (see config/env.ts). If we reach this
+  // point with the flag enabled but no chatLlm, fail loudly rather than
+  // silently falling back to the rule-only mapper.
+  if (llmQueryInterpreter === true && chatLlm === undefined) {
+    throw new Error(
+      'LLM_QUERY_INTERPRETER=true but no ChatLlm was constructed — check OPENAI_API_KEY and chatLlm wiring',
+    );
+  }
   const nlMapper = llmQueryInterpreter && chatLlm !== undefined
-    ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs)
+    ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache)
     : new NLMapper(adapters.mappingTable);
 
   return new Planner(
