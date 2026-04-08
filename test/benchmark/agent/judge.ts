@@ -73,8 +73,10 @@ export async function judgeAnswerN(
   // expectations (priceBandKrw, factCheckClaims, requireHedging, etc.) even
   // without a manual rubric string.
   const composedRubric = composeAutoRubric(scenario.expectation);
+  // v4: removed "Additional checks:" label — it deprioritized primary constraints
+  // like refusalExpected and requiredRegister in the judge's prompt framing.
   const effectiveRubric = scenario.expectation.rubric
-    ? (composedRubric ? `${scenario.expectation.rubric}\n\nAdditional checks:\n${composedRubric}` : scenario.expectation.rubric)
+    ? (composedRubric ? `${scenario.expectation.rubric}\n\n${composedRubric}` : scenario.expectation.rubric)
     : composedRubric;
 
   if (effectiveRubric === undefined) {
@@ -237,22 +239,33 @@ function composeAutoRubric(
   }
 
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
+    // v4: bilingual status descriptions matching scorer.ts keyword patterns
     const statusText: Record<string, string> = {
-      now: 'currently drinkable / at peak',
-      hold: 'needs further aging / too young',
-      past: 'past peak / over the hill',
+      now: 'currently drinkable / at peak (Korean: 마시기 좋, 음용 적기, 최적, 피크, 지금)',
+      hold: 'needs further aging / too young (Korean: 숙성, 보관, 셀러, 더 기다, 음용 전, 아직, 이르)',
+      past: 'past peak / over the hill (Korean: 지남, 지났, 과거)',
     };
     lines.push(`The answer must indicate that the wine is ${statusText[exp.drinkingWindowStatus] ?? exp.drinkingWindowStatus}.`);
   }
 
   if (exp.requireHedging === true) {
-    lines.push('The answer must use hedging language (maybe, perhaps, several candidates) because the query is ambiguous.');
+    // v4: bilingual hedging markers matching scorer.ts v4 regex
+    lines.push(
+      'The answer must use hedging language because the query is ambiguous. ' +
+      'Korean hedging markers: 아마도, 어쩌면, 혹시, ~수도 있, ~을 수 있, ~일 수 있, 여러 후보. ' +
+      'English: maybe, perhaps, might, could be, it seems, several candidates.',
+    );
   }
 
   if (exp.requiredRegister === 'formal') {
-    lines.push('The answer must use formal Korean register (합니다/습니다 endings).');
+    lines.push('The answer must use formal Korean register (합니다/습니다/드립니다/하세요/겠습니다 endings).');
   } else if (exp.requiredRegister === 'casual') {
-    lines.push('The answer may use casual Korean register (해/야/거 endings).');
+    // v4: synced with scorer.ts v4 casual markers (multi-char patterns, not 1-char 해/야/거)
+    lines.push(
+      'The answer may use casual Korean register. ' +
+      'Casual markers: 줄게, 건데, 잖아, 거든, 할게, 할래, 해줘, 해봐, 먹자, 가자, 하자, 인데, 거야, 잖아요. ' +
+      'Formal markers (합니다, 습니다, 드립니다, 하세요, 겠습니다) should be absent or rare.',
+    );
   }
 
   if (exp.refusalExpected === true) {
@@ -307,10 +320,19 @@ Output ONLY the JSON.`;
  * happen to be correct), or faithful but low-quality (accurate but
  * unhelpful).
  */
+/**
+ * v4: judgeFaithfulness now supports N-sample median voting, matching judgeAnswerN.
+ * Single-sample faithfulness had ~3x higher variance than N=3 answer judge — a
+ * single LLM hallucination could swing the score by 0.5+ for one scenario,
+ * shifting aggregate by 1-2% over a full benchmark run.
+ *
+ * Default samples=1 for back-compat; runner passes args.judgeSamples for parity.
+ */
 export async function judgeFaithfulness(
   judgeLlm: ChatLlmPort,
   answer: string,
   observations: readonly string[],
+  samples: number = 1,
 ): Promise<JudgeResult> {
   if (observations.length === 0 || answer.trim().length === 0) {
     return { score: null, rationale: 'no context to evaluate faithfulness', failed: false, samples: 0 };
@@ -328,27 +350,47 @@ ${answer}
 
 Score the faithfulness of the answer against the context.`;
 
-  try {
-    const result = await judgeLlm.complete({
-      messages: [
-        { role: 'system', content: FAITHFULNESS_SYSTEM_PROMPT },
-        { role: 'user', content: userPrompt },
-      ],
-      temperature: 0,
-      maxOutputTokens: 200,
-    });
-
-    const parsed = parseJudgeResponse(result.text);
-    if (parsed === null) {
-      return { score: null, rationale: `faithfulness parse failed: ${result.text.slice(0, 80)}`, failed: true, samples: 1 };
+  const sampleCount = Math.max(1, Math.floor(samples));
+  const callOnce = async (): Promise<{ score: number; rationale: string } | null> => {
+    try {
+      const result = await judgeLlm.complete({
+        messages: [
+          { role: 'system', content: FAITHFULNESS_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0,
+        maxOutputTokens: 200,
+      });
+      return parseJudgeResponse(result.text);
+    } catch {
+      return null;
     }
-    return { score: parsed.score, rationale: parsed.rationale, failed: false, samples: 1 };
-  } catch (err) {
+  };
+
+  const results = await Promise.all(Array.from({ length: sampleCount }, () => callOnce()));
+  const successful = results.filter((r): r is { score: number; rationale: string } => r !== null);
+
+  const majorityThreshold = Math.floor(sampleCount / 2) + 1;
+  if (successful.length < majorityThreshold) {
     return {
       score: null,
-      rationale: `faithfulness call failed: ${err instanceof Error ? err.message : String(err)}`,
+      rationale: `only ${successful.length}/${sampleCount} faithfulness samples succeeded (need ${majorityThreshold})`,
       failed: true,
-      samples: 1,
+      samples: sampleCount,
     };
   }
+
+  const sortedScores = successful.map((r) => r.score).sort((a, b) => a - b);
+  const median = computeMedian(sortedScores);
+  const closestIdx = successful
+    .map((r, i) => ({ idx: i, dist: Math.abs(r.score - median) }))
+    .sort((a, b) => a.dist - b.dist)[0]?.idx ?? 0;
+  const rationale = successful[closestIdx]?.rationale ?? '';
+
+  return {
+    score: median,
+    rationale: sampleCount > 1 ? `median of ${successful.length}/${sampleCount}: ${rationale}` : rationale,
+    failed: false,
+    samples: sampleCount,
+  };
 }

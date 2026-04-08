@@ -68,7 +68,7 @@ def compute_occasion(price_band: str, wine_type: str, rating: float) -> list[str
         return ["dessert", "after_dinner"]
 
     # Rosé → aperitif / weeknight
-    if wine_type == "rose":
+    if wine_type in ("rosé", "rose"):
         tags += ["aperitif"]
         if price_band in ("value", "mid"):
             tags.append("weeknight")
@@ -156,9 +156,8 @@ CLASSIFICATION_PATTERNS: list[tuple[str, str]] = [
 ]
 
 def extract_classification(label: str) -> Optional[str]:
-    label_lower = label.lower()
     for signal, cls in CLASSIFICATION_PATTERNS:
-        if signal.lower() in label_lower:
+        if re.search(r'\b' + re.escape(signal) + r'\b', label, re.IGNORECASE):
             return cls
     return None
 
@@ -374,9 +373,9 @@ def patch(wine: dict) -> dict:
     region     = w.get("region", "")
     country    = w.get("country", "")
     grapes     = w.get("grapes") or []
-    body       = float(w.get("body") or 0.5)
-    tannin     = float(w.get("tannin") or 0.5)
-    rating     = float(w.get("ratingAvg") or 4.0)
+    body       = float(w["body"]) if w.get("body") is not None else 0.5
+    tannin     = float(w["tannin"]) if w.get("tannin") is not None else 0.5
+    rating     = float(w["ratingAvg"]) if w.get("ratingAvg") is not None else 4.0
 
     # finish_length
     w["finishLength"] = compute_finish_length(body, tannin, wine_type)

@@ -11,11 +11,12 @@
  *   npx tsx test/benchmark/agent/runner.ts --concurrency 5
  *   npx tsx test/benchmark/agent/runner.ts --baseline test/benchmark/agent/results/baseline.json
  *   npx tsx test/benchmark/agent/runner.ts --fail-if-worse-than 0.05
- *   npx tsx test/benchmark/agent/runner.ts --model gpt-4o --judge-model gpt-4o-mini
+ *   npx tsx test/benchmark/agent/runner.ts --model gpt-5.4 --judge-model gpt-5.4-mini
  *   npx tsx test/benchmark/agent/runner.ts --no-judge                         # disable LLM-as-judge
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
  *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off
+ *   npx tsx test/benchmark/agent/runner.ts --profile quick-realdata             # 60 high-signal scenarios, concurrency 7, judge on (~5-8 min)
  *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 80 curated scenarios, concurrency 3, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 233 scenarios, concurrency 3, judge on (3 samples)
  *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # retrieval-only evaluation
@@ -41,9 +42,10 @@ import { isBenchmarkRunnerCliEntrypoint } from './runner-cli-entry.js';
 import { loadConfig } from '../../../src/config/env.js';
 import { AgentOrchestrator } from '../../../src/application/agent/agent-orchestrator.js';
 import { OpenAiChatLlm } from '../../../src/infrastructure/ai/openai-chat-llm.js';
+import { AnthropicChatLlm } from '../../../src/infrastructure/ai/anthropic-chat-llm.js';
 import { QuerySanitizer } from '../../../src/domain/security/service/query-sanitizer.js';
 import { AGENT_SCENARIOS, STANDARD_SCENARIO_IDS } from './scenarios.js';
-import { scoreScenario, type ScenarioResult, type ScenarioExecution } from './scorer.js';
+import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTrace } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
@@ -58,7 +60,7 @@ export { formatBenchmarkDurationMs } from './benchmark-duration-format.js';
 // ─────────────────────────────────────────────────────────────────────
 
 interface CliArgs {
-  readonly profile?: 'quick' | 'standard' | 'nightly' | 'retrieval';
+  readonly profile?: 'quick' | 'quick-realdata' | 'standard' | 'nightly' | 'retrieval';
   readonly tierFilter?: ScenarioTier;
   readonly idFilter?: readonly number[];
   readonly container: 'real';
@@ -80,6 +82,49 @@ const QUICK_SCENARIO_IDS = new Set([
   50, 56, 61, 65, 68, 75, 81, 88, 93, 98,  // language/adversarial
 ]);
 
+/**
+ * "quick-realdata" profile — 60 high-signal scenarios for fast iteration with real infra.
+ * Selection criteria:
+ *   - All 5 worst performers from last standard run (#32, #42, #63, #90, #106)
+ *   - Adversarial tier: full coverage (refusal, injection, jailbreak, PII, unicode)
+ *   - Weak tiers: single_shot×5, negation_complex×4, wine_type_basic×3, korean_colloquial×4
+ *   - Healthy regression guards: nested_condition×4, comparison_nested×3, multi_step×3
+ *   - Broad tier sampling: negation, situation_based, gift_refined, knowledge_hybrid, extreme
+ * Concurrency 7 (10 hits gpt-5.4-mini TPM limits → 429 cascades), judge on, ~5-8 min wall clock.
+ */
+const QUICK_REALDATA_SCENARIO_IDS = new Set([
+  // Worst performers (regression must-haves)
+  106, 32, 42, 90, 63,
+  // Adversarial — full tier coverage
+  101, 102, 103, 104, 105, 107, 108, 109, 110, 111,
+  // single_shot (weakest tier)
+  1, 2, 3, 4, 7,
+  // negation_complex
+  70, 71, 72, 73,
+  // wine_type_basic
+  5, 6, 8,
+  // korean_colloquial
+  60, 61, 62, 64,
+  // negation
+  25, 26, 27, 28,
+  // multi_step
+  15, 16, 17,
+  // situation_based
+  40, 41, 43,
+  // nested_condition (regression guard)
+  50, 51, 52, 53,
+  // comparison_nested
+  55, 56, 57,
+  // gift_refined
+  88, 89, 90,
+  // knowledge_hybrid
+  30, 31,
+  // extreme
+  80, 81,
+  // taste_descriptor
+  20, 21,
+]);
+
 function parseArgs(): CliArgs {
   const argv = process.argv.slice(2);
   const get = (flag: string): string | undefined => {
@@ -90,7 +135,10 @@ function parseArgs(): CliArgs {
 
   const explicitId = get('--id');
   const explicitConcurrency = get('--concurrency');
-  const explicitJudge = has('--no-judge');
+  const explicitNoJudge = has('--no-judge');
+  const explicitJudgeModel = get('--judge-model');
+  // --judge-model explicitly passed counts as opting into judge mode
+  const explicitJudge = explicitNoJudge || explicitJudgeModel !== undefined;
   const explicitJudgeSamples = get('--judge-samples');
 
   const profile = get('--profile') as CliArgs['profile'];
@@ -105,7 +153,7 @@ function parseArgs(): CliArgs {
     seed: get('--seed') !== undefined ? Number.parseInt(get('--seed')!, 10) : undefined,
     model: get('--model'),
     judgeModel: get('--judge-model'),
-    enableJudge: !explicitJudge,
+    enableJudge: !explicitNoJudge,
     judgeSamples: Number.parseInt(explicitJudgeSamples ?? '1', 10) || 1,
     baseline: get('--baseline'),
     failIfWorseThan:
@@ -151,6 +199,20 @@ function parseArgs(): CliArgs {
     }
     if (explicitJudgeSamples === undefined) {
       args = { ...args, judgeSamples: 3 };
+    }
+  }
+
+  if (profile === 'quick-realdata') {
+    // 60 high-signal scenarios, concurrency 7, judge on — ~5-8 min wall clock
+    // concurrency 10 hits gpt-5.4-mini TPM limits → cascading 429s → Ctx Recall 0%
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...QUICK_REALDATA_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: 7 };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
     }
   }
 
@@ -512,8 +574,16 @@ export interface BenchmarkReport {
   readonly model: string;
   readonly judgeModel: string | null;
   readonly judgeSamples: number;
+  /** Embedding model used for dense retrieval (from OPENAI_EMBEDDING_MODEL). */
+  readonly embeddingModel: string;
+  /** Hostname of the OpenAI-compatible API endpoint (e.g. "api.openai.com"). */
+  readonly apiBaseDomain: string;
   readonly container: 'real';
   readonly seed: number | null;
+  /** Node.js runtime version (e.g. "v22.4.0") for environment reproducibility. */
+  readonly nodeVersion: string;
+  /** OS platform string (e.g. "darwin", "linux"). */
+  readonly platform: string;
   /** SHA-256 hash of the agent system prompt for reproducibility tracking. */
   readonly promptHash: string;
   readonly scenarioCount: number;
@@ -588,28 +658,54 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   const runStartedAt = Date.now();
   const config = loadConfig();
 
-  if (config.openai.apiKey === undefined) {
-    console.error('ERROR: OPENAI_API_KEY required. Set in .env or environment.');
-    process.exit(1);
+  const modelId = args.model ?? config.openai.chatModel;
+  const embeddingModel = config.openai.embeddingModel;
+  // Extract hostname only — avoid logging full URL which may contain auth tokens in some configs.
+  const apiBaseDomain = (() => {
+    try { return new URL(config.openai.baseUrl).hostname; } catch { return config.openai.baseUrl; }
+  })();
+  const isAnthropicModel = modelId.startsWith('claude-');
+
+  if (isAnthropicModel) {
+    if (config.anthropic?.apiKey === undefined) {
+      console.error('ERROR: ANTHROPIC_API_KEY required for claude-* models. Set in .env or environment.');
+      process.exit(1);
+    }
+  } else {
+    if (config.openai.apiKey === undefined) {
+      console.error('ERROR: OPENAI_API_KEY required. Set in .env or environment.');
+      process.exit(1);
+    }
   }
 
-  const modelId = args.model ?? config.openai.chatModel;
-  const judgeModelId = args.enableJudge ? (args.judgeModel ?? 'gpt-4.5-mini') : null;
+  // Judge always uses OpenAI (cost-effective GPT-mini) regardless of agent model
+  const judgeModelId = args.enableJudge ? (args.judgeModel ?? 'gpt-5.4-mini') : null;
 
-  const chatLlm: ChatLlmPort = new OpenAiChatLlm({
-    baseUrl: config.openai.baseUrl,
-    apiKey: config.openai.apiKey,
-    defaultModel: modelId,
-    httpTimeoutMs: config.openai.httpTimeoutMs,
-  });
+  const chatLlm: ChatLlmPort = isAnthropicModel
+    ? new AnthropicChatLlm({
+        // apiKey is guaranteed non-undefined here — we process.exit(1) above if absent
+        apiKey: config.anthropic.apiKey as string,
+        defaultModel: modelId,
+        httpTimeoutMs: config.openai.httpTimeoutMs,
+      })
+    : new OpenAiChatLlm({
+        baseUrl: config.openai.baseUrl,
+        // apiKey is guaranteed non-undefined here — we process.exit(1) above if absent
+        apiKey: config.openai.apiKey as string,
+        defaultModel: modelId,
+        httpTimeoutMs: config.openai.httpTimeoutMs,
+      });
+
   const judgeLlm: ChatLlmPort | null = judgeModelId !== null
     ? new OpenAiChatLlm({
         baseUrl: config.openai.baseUrl,
-        apiKey: config.openai.apiKey,
+        apiKey: config.openai.apiKey ?? '',
         defaultModel: judgeModelId,
         httpTimeoutMs: config.openai.httpTimeoutMs,
       })
     : null;
+
+  const effectiveConcurrency = args.concurrency;
 
   const scenarios = filterScenarios(AGENT_SCENARIOS, args);
 
@@ -624,7 +720,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     {
       maxSteps: 8, // generous; per-scenario maxSteps is the real budget via overrides
       agentTimeoutMs: 120_000,
-      // gpt-4.5-mini typically 5-15s per call + up to 2s+4s+8s=14s 429 backoff → 90s headroom.
+      // gpt-5.4-mini typically 5-15s per call + up to 2s+4s+8s=14s 429 backoff → 90s headroom.
       // 20s caused backoff sleeps to be aborted mid-retry, cutting off the 429 recovery chain.
       perStepTimeoutMs: 90_000,
       maxContextChars: 12_000,
@@ -637,17 +733,19 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   let judgeFailCount = 0;
   let scenarioWallMsSum = 0;
   let scenarioWallSampleCount = 0;
+  let completedCount = 0;
+  const totalToRun = scenarios.filter((s) => s.skip === undefined).length;
 
   const results = await runWithConcurrency(
     scenarios,
-    args.concurrency,
+    effectiveConcurrency,
     async (scenario) => {
       if (scenario.skip !== undefined) {
         console.error(`  [SKIP] #${scenario.id} ${scenario.description}: ${scenario.skip}`);
         return scoreScenario(scenario, null, undefined, undefined);
       }
 
-      console.error(`  [RUN]  #${scenario.id} ${scenario.description}`);
+      console.error(`  [RUN]  #${String(scenario.id).padEnd(3)} [${scenario.tier.slice(0, 16).padEnd(16)}] ${scenario.description.slice(0, 55)}`);
       const start = Date.now();
 
       try {
@@ -692,9 +790,26 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           totalTokens: result.totalTokens,
         };
 
+        // Map AgentStep[] → StepTrace[] for triage profiling in the result JSON.
+        const stepTraces: StepTrace[] = result.steps.map((s) => {
+          const trace: StepTrace = {
+            index: s.index,
+            thought: s.thought,
+            durationMs: s.durationMs,
+            tokenCount: s.tokenCount,
+            ...(s.action !== undefined ? { action: { tool: s.action.tool, input: s.action.input as Record<string, unknown> } } : {}),
+            ...(s.observation !== undefined ? { observation: s.observation } : {}),
+            ...(s.actions !== undefined ? { actions: s.actions.map((a) => ({ tool: a.tool, input: a.input as Record<string, unknown> })) } : {}),
+            ...(s.observations !== undefined ? { observations: s.observations } : {}),
+            ...(s.answer !== undefined ? { answer: s.answer } : {}),
+          };
+          return trace;
+        });
+
         // LLM judges (optional). Run in parallel — no data dependency between
         // rubric judge and faithfulness judge. ~2x speedup on judge-heavy runs.
         let judgeScore: number | undefined;
+        let judgeReasoning: string | undefined;
         let faithScore: number | undefined;
         if (judgeLlm !== null) {
           const judgePromises: Promise<void>[] = [];
@@ -703,21 +818,51 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             judgePromises.push(
               judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples).then((r) => {
                 if (r.score !== null) judgeScore = r.score;
+                if (r.rationale.length > 0) judgeReasoning = r.rationale;
                 if (r.failed) judgeFailCount++;
               }),
             );
           }
           // RAGAS Faithfulness judge (grounding in tool results).
-          // Special case: mustNotCallTools scenarios correctly produced zero
-          // observations — they made no claims from tool results, so they are
-          // perfectly faithful by definition. Score 1.0 without an LLM call.
-          // For all other no-observation cases (LLM unavailable, etc.) leave
-          // faithScore undefined so the scorer imputes from present dims.
-          if (observations.length === 0 && scenario.expectation.mustNotCallTools !== undefined) {
-            faithScore = 1.0;
+          //
+          // No-observation cases (observations.length === 0):
+          //   1. mustNotCallTools set → agent CORRECTLY made no tool calls.
+          //      Claims are knowledge-only; grounding N/A. Score 1.0.
+          //   2. expectedBlocked=true → agent blocked before tools ran. Score 1.0.
+          //   3. tools === undefined (knowledge-only scenario) → agent correctly
+          //      answered from domain knowledge with no search. Score 1.0.
+          //      Examples: "What is the difference between Bordeaux and Burgundy?"
+          //   4. refusalExpected=true → agent correctly refused (no search needed). Score 1.0.
+          //   5. terminationReason='blocked' (security gate fired) → policy-grounded
+          //      refusal; no tool calls expected even if not explicitly flagged. Score 1.0.
+          //   6. Infra failure (step-0 fallback, LLM rate-limit) → agent never ran.
+          //      Leave faithScore undefined → scorer imputes at 0.5 neutral.
+          //   7. All other cases → agent answered without tool calls when tools were
+          //      expected. Claims are ungrounded. Score 0.0.
+          //
+          // Note: `result.steps.length` (not `result.stepCount`) — AgentResult
+          // exposes `steps: readonly AgentStep[]`, not a `stepCount` numeric property.
+          if (observations.length === 0) {
+            const isExpectedNoTools =
+              scenario.expectation.mustNotCallTools !== undefined ||
+              scenario.expectation.expectedBlocked === true ||
+              scenario.expectation.tools === undefined ||       // knowledge-only scenario
+              scenario.expectation.refusalExpected === true;   // refusal is correct response
+            const isBlockedTermination = execution.terminationReason === 'blocked';
+            const isInfraFailure =
+              result.terminationReason === 'fallback' && result.steps.length === 0;
+            if (isExpectedNoTools || isBlockedTermination) {
+              // Correct behavior: no tool calls were made as intended.
+              faithScore = 1.0;
+            } else if (!isInfraFailure) {
+              // Agent answered without tool calls (and tools were expected).
+              // All answer claims are ungrounded — zero faithfulness.
+              faithScore = 0.0;
+            }
+            // isInfraFailure: leave faithScore undefined → scorer imputes at 0.5 neutral
           } else if (observations.length > 0) {
             judgePromises.push(
-              judgeFaithfulness(judgeLlm, result.answer, observations).then((r) => {
+              judgeFaithfulness(judgeLlm, result.answer, observations, args.judgeSamples).then((r) => {
                 if (r.score !== null) faithScore = r.score;
                 if (r.failed) judgeFailCount++;
               }),
@@ -726,21 +871,39 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           await Promise.all(judgePromises);
         }
 
-        const scored = scoreScenario(scenario, execution, judgeScore, faithScore);
+        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning);
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
+        const sc = scored.scores;
+        const judgePart = judgeScore !== undefined ? ` judge=${judgeScore.toFixed(2)}` : '';
+        const faithPart = faithScore !== undefined ? ` faith=${faithScore.toFixed(2)}` : '';
+        const dimParts = [
+          `tool=${(sc.toolAccuracy * 100).toFixed(0)}%`,
+          `ans=${(sc.answerQuality * 100).toFixed(0)}%`,
+          `term=${(sc.terminationCorrectness * 100).toFixed(0)}%`,
+        ].join(' ');
+        completedCount++;
         console.error(
-          `  [DONE] #${scenario.id} score=${scored.scores.overall.toFixed(2)} `
-          + `steps=${scored.stepCount} ${elapsed}ms`,
+          `  [DONE] #${String(scenario.id).padEnd(3)} `
+          + `[${scenario.tier.slice(0, 16).padEnd(16)}] `
+          + `score=${(sc.overall * 100).toFixed(1).padStart(5)}% `
+          + `tools=${execution.toolCallCount} steps=${scored.stepCount} `
+          + `${dimParts}${judgePart}${faithPart} `
+          + `${(elapsed / 1000).toFixed(1)}s `
+          + `[${completedCount}/${totalToRun}]`,
         );
         return scored;
       } catch (err) {
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
+        completedCount++;
         console.error(
-          `  [FAIL] #${scenario.id} ${err instanceof Error ? err.message : String(err)}`,
+          `  [FAIL] #${String(scenario.id).padEnd(3)} [${scenario.tier.slice(0, 16).padEnd(16)}] `
+          + `${err instanceof Error ? err.message.slice(0, 80) : String(err)} `
+          + `${(elapsed / 1000).toFixed(1)}s `
+          + `[${completedCount}/${totalToRun}]`,
         );
         return scoreScenario(
           scenario,
@@ -795,7 +958,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
       scenarioWallSampleCount > 0 ? scenarioWallMsSum / scenarioWallSampleCount : 0,
     sumScenarioWallMs: scenarioWallMsSum,
     scenarioWallSampleCount,
-    concurrency: args.concurrency,
+    concurrency: effectiveConcurrency,
   };
 
   const wallClockPhaseSum = initMs + scenariosPhaseMs + shutdownMs;
@@ -805,7 +968,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     );
   }
 
-  return buildReport(results, scenarios, modelId, judgeModelId, args, judgeFailCount, wallClock);
+  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, wallClock);
 }
 
 function filterScenarios(
@@ -826,6 +989,8 @@ function buildReport(
   scenarios: readonly AgentBenchmarkScenario[],
   model: string,
   judgeModel: string | null,
+  embeddingModel: string,
+  apiBaseDomain: string,
   args: CliArgs,
   judgeFailCount: number,
   wallClock: BenchmarkWallClock,
@@ -918,8 +1083,12 @@ function buildReport(
     model,
     judgeModel,
     judgeSamples: args.judgeSamples,
+    embeddingModel,
+    apiBaseDomain,
     container: args.container,
     seed: args.seed ?? null,
+    nodeVersion: process.version,
+    platform: process.platform,
     promptHash: createHash('sha256').update(buildSystemMessage().content).digest('hex').slice(0, 16),
     scenarioCount: scenarios.length,
     executedCount: executed.length,
@@ -984,8 +1153,11 @@ async function compareBaseline(
       || !('summary' in baselineUnknown)
       || typeof (baselineUnknown as Record<string, unknown>)['summary'] !== 'object'
     ) {
-      console.error(`  [BASELINE] Baseline file has unexpected shape — skipping comparison`);
-      return { regressed: false, delta: 0 };
+      // v4 fix: invalid baseline → fail (regressed: true), not silent pass.
+      // The previous behavior (regressed: false) meant a corrupted or missing
+      // baseline file always reported "PASSED" — masking real regressions.
+      console.error(`  [BASELINE] ⚠ Baseline file has unexpected shape — treating as regression (fail-safe)`);
+      return { regressed: true, delta: 0 };
     }
     const baseline = baselineUnknown as BenchmarkReport;
 
@@ -1003,10 +1175,12 @@ async function compareBaseline(
     }
     return { regressed, delta };
   } catch (err) {
+    // v4 fix: baseline read failure → fail-safe (regressed: true).
+    // Missing or unreadable baseline should NOT silently pass the benchmark.
     console.error(
-      `  [BASELINE] read failed: ${err instanceof Error ? err.message : String(err)}`,
+      `  [BASELINE] ⚠ read failed: ${err instanceof Error ? err.message : String(err)} — treating as regression (fail-safe)`,
     );
-    return { regressed: false, delta: 0 };
+    return { regressed: true, delta: 0 };
   }
 }
 
@@ -1035,9 +1209,15 @@ async function main(): Promise<void> {
   if (args.profile !== undefined) {
     console.error(`  Profile:      ${args.profile}`);
   }
-  console.error(`  Container:    ${report.container}`);
+  console.error('  ────── run profile ─────');
   console.error(`  Model:        ${report.model}`);
+  console.error(`  Embedding:    ${report.embeddingModel}`);
   console.error(`  Judge:        ${report.judgeModel ?? 'disabled'}${report.judgeSamples > 1 ? ` (N=${report.judgeSamples} median)` : ''}`);
+  console.error(`  API:          ${report.apiBaseDomain}`);
+  console.error(`  Container:    ${report.container}`);
+  console.error(`  Node:         ${report.nodeVersion}  (${report.platform})`);
+  console.error(`  Seed:         ${report.seed ?? 'none (non-deterministic)'}`);
+  console.error(`  Prompt hash:  ${report.promptHash}`);
   console.error(`  Scenarios:    ${report.scenarioCount} (${report.executedCount} executed, `
     + `${report.skippedCount} skipped, ${report.errorCount} errored)`);
   const wc = report.wallClock;

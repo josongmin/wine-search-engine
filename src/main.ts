@@ -130,6 +130,7 @@ async function main(): Promise<void> {
     bodyLimitBytes: config.http.bodyLimitBytes,
     enableSecurityHeaders: config.http.securityHeaders,
     httpDebugSecret: config.http.debugSecret,
+    enableAgentBenchmarkUi: config.enableAgentBenchmarkUi,
   });
 
   let shuttingDown = false;

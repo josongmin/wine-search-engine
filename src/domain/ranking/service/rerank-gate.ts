@@ -43,9 +43,11 @@ export interface RerankGateDecision {
  *  7. default                      → skip
  */
 
-/** Below this candidate count, cross-encoder rerank is skipped. */
+/** Below this candidate count, cross-encoder overhead exceeds benefit — the
+ *  pool is too sparse for meaningful re-ordering (RFC-017 §5.4). */
 const RERANK_GATE_MIN_CANDIDATE_COUNT = 5;
-/** At or above this count, rerank is assumed worthwhile unless other rules skip. */
+/** At or above this count, diversity is high enough that cross-encoder
+ *  re-ordering reliably improves top-5 precision (RFC-017 §5.4). */
 const RERANK_GATE_LARGE_CANDIDATE_COUNT = 20;
 
 export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {

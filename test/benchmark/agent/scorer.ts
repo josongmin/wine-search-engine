@@ -1,5 +1,5 @@
 /**
- * SOTA++ benchmark scorer (v2 — post-real-mode audit).
+ * SOTA++ benchmark scorer (v4 — 0.5 neutral imputation, answerRelevancy removed).
  *
  * Scoring dimensions (each 0..1):
  *   - executionEfficiency:    merged tool accuracy + step efficiency to remove
@@ -38,6 +38,26 @@ export interface ToolCallTrace {
   readonly input?: string;
 }
 
+/**
+ * Per-step trace captured from an AgentStep for triage / profiling.
+ * Mirrors AgentStep but with tool inputs typed as Record<string,unknown>
+ * (runner JSON.parses the stringified input before passing here).
+ */
+export interface StepTrace {
+  readonly index: number;
+  readonly thought: string;
+  // sequential
+  readonly action?: { readonly tool: string; readonly input: Record<string, unknown> };
+  readonly observation?: string;
+  // parallel
+  readonly actions?: ReadonlyArray<{ readonly tool: string; readonly input: Record<string, unknown> }>;
+  readonly observations?: readonly string[];
+  // answer step
+  readonly answer?: string;
+  readonly durationMs: number;
+  readonly tokenCount: { readonly input: number; readonly output: number };
+}
+
 export interface ScenarioExecution {
   readonly answer: string;
   readonly stepCount: number;
@@ -50,13 +70,30 @@ export interface ScenarioExecution {
   readonly totalTokens: { input: number; output: number };
 }
 
+/**
+ * Single source of truth for joining observations into a searchable text block.
+ *
+ * Rules:
+ *  - Separator is '\n' to preserve observation boundaries (a price at the end of
+ *    obs N must not merge with text at the start of obs N+1).
+ *  - NFKC normalization for consistent Korean/Unicode matching.
+ *  - toLowerCase() for case-insensitive substring searches.
+ *
+ * ALL scorer functions that search observation text MUST call this helper instead
+ * of rolling their own join logic.
+ */
+export function normalizeObservations(observations: readonly string[]): string {
+  return observations.join('\n').toLowerCase().normalize('NFKC');
+}
+
 export type DiagnosticSeverity = 'info' | 'warn' | 'critical';
+// v4: 'answerRelevancy' removed — dimension is always null, weight=0, no code emits
+// diagnostics with that dim. Keeping it would allow accidental misuse.
 export type DiagnosticDim =
   | 'executionEfficiency'
   | 'toolAccuracy'
   | 'stepEfficiency'
   | 'answerQuality'
-  | 'answerRelevancy'
   | 'terminationCorrectness'
   | 'costEfficiency'
   | 'faithfulness'
@@ -92,16 +129,16 @@ export interface ScenarioScores {
    */
   readonly contextRelevance: number | null;
   /**
-   * RAGAS Context Recall: fraction of goldenEntityIds that appeared in agent
-   * observations. null when scenario has no goldenEntityIds or no observations.
+   * RAGAS Context Recall: fraction of goldenKeywords that appeared in agent
+   * observations. null when scenario has no goldenKeywords or no observations.
    */
   readonly contextRecall: number | null;
   /**
-   * RAGAS Answer Relevancy: does the answer actually address the question asked?
-   * When judge is present, uses judgeScore as proxy. Otherwise, heuristic from
-   * answerMustMatch pattern satisfaction. null when no patterns and no judge.
+   * RAGAS Answer Relevancy: always null in SOTA++ v4 — dimension removed from scoring.
+   * answerMustMatch patterns penalize answerQuality via PENALTY_REGEX_MISS instead.
+   * Retained in the schema for diagnostic visibility; weight=0 in all tiers.
    */
-  readonly answerRelevancy: number | null;
+  readonly answerRelevancy: null;
   readonly judge: number | null; // null when judge disabled
   readonly overall: number;
   /** True when a hard / critical violation collapsed overall to 0. */
@@ -128,6 +165,16 @@ export interface ScenarioResult {
   readonly diagnosticStrings?: readonly string[];
   /** True when judgeRequired=true and judge was not run (--no-judge mode). */
   readonly judgeRequiredButSkipped: boolean;
+  /**
+   * Per-step trace for triage: thought, tool calls with inputs, observations.
+   * Omitted for skipped/errored scenarios and when no steps were provided.
+   */
+  readonly steps?: readonly StepTrace[];
+  /**
+   * Rationale string from the LLM judge (closest-to-median sample).
+   * Omitted when judge was not run or failed.
+   */
+  readonly judgeReasoning?: string;
 }
 
 const ZERO_SCORES: ScenarioScores = {
@@ -149,25 +196,37 @@ const ZERO_SCORES: ScenarioScores = {
 /**
  * Default weights — answerQuality dominates (user-visible outcome). Execution
  * efficiency (merged tool+step) and cost are secondary. Termination is a
- * binary safety net. Judge is optional, lightly weighted to avoid LLM
- * variance dominating overall.
+ * binary safety net. Judge is optional, weighted to capture rubric quality.
  *
- * Weight budget (must sum to 1.0):
- *   answerQuality:        0.20  (user-visible outcome)
+ * Weight budget (must sum to 1.0) — SOTA++ v4:
+ *   answerQuality:        0.25  (user-visible outcome; +0.05 from v3)
  *   executionEfficiency:  0.20  (merged tool+step)
- *   answerRelevancy:      0.10  (answer-question alignment)
  *   faithfulness:         0.10  (RAGAS grounding)
- *   contextRelevance:     0.10  (RAGAS rule-based retrieval relevance, renamed from contextPrecision)
- *   contextRecall:        0.08  (RAGAS entity-ID overlap; null when no goldenEntityIds)
+ *   contextRelevance:     0.10  (RAGAS rule-based retrieval relevance)
+ *   contextRecall:        0     (diagnostic only — weight=0 so overall is unaffected;
+ *                                goldenKeywords coverage is too sparse to penalise fairly)
  *   costEfficiency:       0.10  (latency + token budget)
  *   terminationCorrectness: 0.10 (binary safety net)
- *   judge:                0.07  (optional LLM-as-judge rubric)
+ *   judge:                0.15  (LLM-as-judge rubric; +0.05 from v3's 0.10)
+ *   answerRelevancy:      0     (removed from scoring — see comment below)
  *   total:                1.00
  *
- * Budget notes: contextRecall (0.08) and the bump of contextRelevance from
- * 0.05 to 0.10 (+0.05) adds +0.13 total. Offset by reducing costEfficiency
- * 0.15→0.10 (-0.05), answerQuality 0.20→0.15 (-0.05), judge 0.10→0.07 (-0.03).
- * Net: +0.13 - 0.13 = 0.00.
+ * v4 budget delta vs v3:
+ *   answerRelevancy 0.10→0  (-0.10): removed — the heuristic path (pattern-based 0..1
+ *                             when no judge) and judge path (null) were INCOMPARABLE.
+ *                             Authors adding answerMustMatch patterns could LOWER overall
+ *                             (patterns can miss → 0.0) vs authors with no patterns (null
+ *                             → imputed at neutral). This perverse incentive was structurally
+ *                             broken. answerMustMatch patterns still penalize answerQuality
+ *                             via PENALTY_REGEX_MISS — the signal is preserved, just no
+ *                             longer double-counted in a separate dimension.
+ *   answerQuality   0.20→0.25 (+0.05): absorb the answerRelevancy weight into primary signal
+ *   judge           0.10→0.15 (+0.05): rubric evaluation now carries more weight
+ *   Net: -0.10 + 0.05 + 0.05 = 0.00
+ *
+ * contextRecall remains a DIAGNOSTIC metric (reported in stderr, not dropped from JSON)
+ * but weight=0 means it cannot drag overall down even when goldenKeywords coverage
+ * is sparse (only 6 scenarios define goldenKeywords out of 233).
  */
 export type DimensionWeights = Partial<Record<
   Exclude<keyof ScenarioScores, 'overall' | 'toolAccuracy' | 'stepEfficiency' | 'criticalFailure'>,
@@ -175,15 +234,15 @@ export type DimensionWeights = Partial<Record<
 >>;
 
 export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
-  answerQuality: 0.15,
+  answerQuality: 0.25,
   executionEfficiency: 0.20,
-  answerRelevancy: 0.10,
+  answerRelevancy: 0,   // removed — see v4 budget comment above
   faithfulness: 0.10,
   contextRelevance: 0.10,
-  contextRecall: 0.08,
+  contextRecall: 0,     // diagnostic only — see weight budget comment above
   costEfficiency: 0.10,
   terminationCorrectness: 0.10,
-  judge: 0.07,
+  judge: 0.15,
 };
 
 /**
@@ -200,75 +259,76 @@ export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
  */
 export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> = {
   // Security-critical tiers — termination + execution dominant
-  // contextRecall: 0 — no goldenEntityIds defined for security scenarios yet
+  // contextRecall: 0 — no goldenKeywords defined for security scenarios yet
+  // answerRelevancy: 0 — removed in v4; weight redistributed to terminationCorrectness+judge
   adversarial: {
-    terminationCorrectness: 0.30, executionEfficiency: 0.20, answerQuality: 0.10,
-    answerRelevancy: 0.10, faithfulness: 0.05, contextRelevance: 0.05, contextRecall: 0,
-    costEfficiency: 0.10, judge: 0.10,
+    terminationCorrectness: 0.35, executionEfficiency: 0.20, answerQuality: 0.10,
+    answerRelevancy: 0, faithfulness: 0.05, contextRelevance: 0.05, contextRecall: 0,
+    costEfficiency: 0.10, judge: 0.15,
   },
   edge_case: {
-    terminationCorrectness: 0.20, executionEfficiency: 0.20, answerQuality: 0.10,
-    answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05, contextRecall: 0,
-    costEfficiency: 0.15, judge: 0.10,
+    terminationCorrectness: 0.25, executionEfficiency: 0.20, answerQuality: 0.10,
+    answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05, contextRecall: 0,
+    costEfficiency: 0.15, judge: 0.15,
   },
   // Answer-quality + faithfulness dominant — grounding matters most
   knowledge_hybrid: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextRelevance: 0.05,
+    answerQuality: 0.30, answerRelevancy: 0, faithfulness: 0.15, contextRelevance: 0.05,
     contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
-    terminationCorrectness: 0.10, judge: 0.15,
+    terminationCorrectness: 0.10, judge: 0.20,
   },
   negation: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextRelevance: 0.05,
+    answerQuality: 0.30, answerRelevancy: 0, faithfulness: 0.15, contextRelevance: 0.05,
     contextRecall: 0, executionEfficiency: 0.15, costEfficiency: 0.10,
-    terminationCorrectness: 0.10, judge: 0.10,
+    terminationCorrectness: 0.10, judge: 0.15,
   },
   nested_condition: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.10,
+    answerQuality: 0.30, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.10,
     contextRecall: 0, executionEfficiency: 0.15, costEfficiency: 0.10,
-    terminationCorrectness: 0.10, judge: 0.10,
+    terminationCorrectness: 0.10, judge: 0.15,
   },
   // Cost-sensitive tiers
   extreme: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
-    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.20,
+    answerQuality: 0.25, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.25,
     terminationCorrectness: 0.10, judge: 0.15,
   },
   comparison_nested: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
-    contextRecall: 0.05, executionEfficiency: 0.10, costEfficiency: 0.15,
-    terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.25, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.15,
+    terminationCorrectness: 0.10, judge: 0.25,
   },
   // Korean-language nuance tiers — faithfulness + judge weighted
   korean_colloquial: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
-    contextRecall: 0.05, executionEfficiency: 0.05, costEfficiency: 0.10,
-    terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.30, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.05, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.30,
   },
   korean_food_pairing: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
-    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
-    terminationCorrectness: 0.10, judge: 0.20,
-  },
-  // Subjective / situational tiers
-  mood_atmosphere: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    answerQuality: 0.30, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
     contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
     terminationCorrectness: 0.10, judge: 0.25,
   },
+  // Subjective / situational tiers
+  mood_atmosphere: {
+    answerQuality: 0.25, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
+    contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
+    terminationCorrectness: 0.10, judge: 0.30,
+  },
   situation_based: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    answerQuality: 0.25, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
     contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.15,
-    terminationCorrectness: 0.10, judge: 0.20,
+    terminationCorrectness: 0.10, judge: 0.25,
   },
   gift_refined: {
-    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.05,
+    answerQuality: 0.25, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.05,
     contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.15,
-    terminationCorrectness: 0.10, judge: 0.20,
+    terminationCorrectness: 0.10, judge: 0.25,
   },
   price_expression: {
-    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextRelevance: 0.10,
+    answerQuality: 0.30, answerRelevancy: 0, faithfulness: 0.10, contextRelevance: 0.10,
     contextRecall: 0, executionEfficiency: 0.10, costEfficiency: 0.10,
-    terminationCorrectness: 0.10, judge: 0.15,
+    terminationCorrectness: 0.10, judge: 0.20,
   },
 };
 
@@ -290,13 +350,27 @@ const EXEC_STEP_WEIGHT = 0.4;
 const PENALTY_PRICE_BAND_VIOLATED = 0.7;
 const PENALTY_VINTAGE_RANGE_VIOLATED = 0.7;
 const PENALTY_DRINKING_WINDOW_MISMATCH = 0.8;
-const PENALTY_TOOL_ARG_MISSING = 0.9;
+/** v4: raised from 0.9 → 0.7. A missing tool argument is a structural execution
+ * failure (tool was called but lacked a required arg). The old 10% dock was far
+ * too mild — milder than price band violations (30%) despite being a more
+ * fundamental error. Now aligned with other structural check penalties. */
+const PENALTY_TOOL_ARG_MISSING = 0.7;
 const PENALTY_HEDGING_MISSING = 0.7;
 const PENALTY_REGISTER_MISMATCH = 0.8;
 const PENALTY_OVERCONFIDENT = 0.8;
 const PENALTY_UNCITED_WINE_NAMES = 0.5;
 /** Answer quality: 50% penalty per regex miss in answerMustMatch. */
 const PENALTY_REGEX_MISS = 0.5;
+/**
+ * Answer quality: 50% penalty per answerMustNotMatch hit.
+ * v4: rebalanced from 0.20 → 0.50. The old 80% dock was disproportionate —
+ * a polite Korean preamble ("죄송합니다만...") before a valid recommendation
+ * lost 80% of answerQuality, more than a missing tool argument (now 30%).
+ * At 50%, a single hit is a meaningful penalty but recoverable via judge;
+ * two hits stack to 0.25 (75% dock) which is proportional to double failure.
+ * Intentionally non-fatal (not a critical-fail): judge can partially offset.
+ */
+const PENALTY_MUST_NOT_MATCH = 0.50;
 /** Faithfulness: threshold below which a warning diagnostic fires. */
 const FAITHFULNESS_WARN_THRESHOLD = 0.5;
 /** Context precision: minimum fraction of significant words in context. */
@@ -324,36 +398,44 @@ const CONTEXT_RELEVANCE_STOPWORDS: ReadonlySet<string> = new Set([
 
 /** Korean 만원 multiplier for price extraction. */
 const MAN_WON_MULTIPLIER = 10_000;
-/** Approximate USD→KRW rate for price extraction. */
-const USD_TO_KRW_APPROX = 1_400;
+/**
+ * Approximate USD→KRW rate for price extraction.
+ * v4: synced with production constant KRW_PER_USD_APPROXIMATE (src/domain/shared/constants.ts).
+ * The scorer and production search pipeline must use the same rate — otherwise the
+ * scorer rejects prices that the pipeline correctly surfaced (3.7% systematic bias
+ * at the old 1,400 vs production's 1,350). If the shared constant changes, update here too.
+ */
+const USD_TO_KRW_APPROX = 1_350;
 /** Approximate EUR→KRW rate for price extraction (€1 ≈ ₩1,500). */
 const EUR_TO_KRW_APPROX = 1_500;
 /** Approximate GBP→KRW rate for price extraction (£1 ≈ ₩1,700). */
 const GBP_TO_KRW_APPROX = 1_700;
 
-/**
- * Answer length quality signal — applied only in pure heuristic mode (no judge).
- * A detailed answer (>100 chars with a wine-relevant term) earns a small bonus.
- * A trivially short answer (<20 chars, non-refusal) incurs a small penalty.
- * These thresholds are intentionally generous: they catch evasive one-liners and
- * reward substantive replies without penalising legitimately brief refusals.
- */
-const ANSWER_MIN_QUALITY_CHARS = 100;
-const ANSWER_TRIVIAL_CHARS = 20;
-const ANSWER_LENGTH_BONUS = 0.05;
-const ANSWER_TRIVIAL_PENALTY = 0.1;
+// v4 removal: ANSWER_LENGTH_BONUS, ANSWER_TRIVIAL_PENALTY, ANSWER_WINE_RELEVANT_TERMS
+// were removed entirely. The length bonus (+0.05 for answers ≥100 chars with wine terms)
+// was a degenerate signal: essentially +5% for any Korean answer mentioning '와인', which
+// is every answer in this domain. The trivial penalty (-0.1 for <20 chars) was redundant
+// with answerContains and the NO_QUALITY_CONSTRAINTS diagnostic. Both were additive
+// adjustments on a multiplicative score (asymmetric math) and only fired when no judge
+// was present — the one path that already lacked quality signal. Removing them makes
+// scoreAnswerQuality purely contract-based: answerContains, answerMustMatch,
+// answerExcludes, answerMustNotMatch, and structured checks.
 
-/** Wine-relevant terms used for the length-quality bonus check. */
-const ANSWER_WINE_RELEVANT_TERMS = [
-  '와인', 'wine', '와이너리', 'winery', '포도', 'grape',
-  '빈티지', 'vintage', '지역', 'region', '추천', 'recommend',
-] as const;
-
-/** Korean stopwords for extractProperNouns — module-level to avoid per-call allocation. */
+/** Korean stopwords for extractProperNouns — module-level to avoid per-call allocation.
+ * v4 expanded: added predicate endings and common descriptive phrases that were
+ * incorrectly extracted as wine names (e.g., "좋은와인입니다" → UNCITED penalty). */
 const KOREAN_PROPER_NOUN_STOPWORDS = new Set([
-  '추천합니다', '추천해', '와인을', '와인이', '입니다', '있습니다', '없습니다',
-  '합니다', '습니다', '드립니다', '같은', '비슷한', '좋은', '마시기',
+  '추천합니다', '추천해', '추천드립니다', '권장합니다',
+  '와인을', '와인이', '와인은', '와인같은', '와인이라고',
+  '입니다', '있습니다', '없습니다', '합니다', '습니다', '드립니다',
+  '같은', '비슷한', '좋은', '마시기', '좋습니다', '좋아요',
+  '맛있습니다', '맛있어요', '훌륭합니다', '완벽합니다', '최고입니다',
 ]);
+/** Korean predicate suffix pattern — Hangul sequences ending with these verb/adjective
+ * endings are grammatical phrases, not wine proper nouns. Used in extractProperNouns
+ * as a second filter after the stopword set to catch compound phrases that aren't in
+ * the finite stopword list. */
+const KOREAN_PREDICATE_SUFFIX_RE = /(?:합니다|습니다|니다|어요|아요|해요|에요|인데|거든|잖아|네요|군요|지요|세요|겠어|이고|하고|하며|입니|이며)$/;
 
 export function scoreScenario(
   scenario: AgentBenchmarkScenario,
@@ -361,6 +443,8 @@ export function scoreScenario(
   judgeScore: number | undefined,
   faithfulnessScore?: number,
   error?: string,
+  steps?: readonly StepTrace[],
+  judgeReasoning?: string,
 ): ScenarioResult {
   if (scenario.skip !== undefined) {
     return {
@@ -421,36 +505,26 @@ export function scoreScenario(
   // Judge: undefined → null (DROPPED from geo-mean, not 1.0).
   const judge: number | null = judgeScore === undefined ? null : clamp01(judgeScore);
 
-  // RAGAS Answer Relevancy: does the answer address the question asked?
+  // RAGAS Answer Relevancy: ALWAYS null — removed from scoring in SOTA++ v4.
   //
-  // P0 fix: when judgeScore is present, `judge` dim already carries that signal
-  // in the geo-mean (weight=0.07). Using judgeScore ALSO as answerRelevancy
-  // (weight=0.10) double-counts the same value with total weight 0.17, silently
-  // biasing overall by up to ±15% whenever the judge fires.
+  // v4 removal rationale: the dimension had two INCOMPARABLE code paths:
+  //   - judgeScore present → null (imputed at neutral 0.5)
+  //   - no judge, answerMustMatch patterns → 0.0–1.0 heuristic
+  //   - no judge, no patterns → null (imputed at neutral 0.5)
   //
-  // Corrected behaviour:
-  //   - judgeScore present → answerRelevancy = null (judge dim owns that signal)
-  //   - no judge, answerMustMatch patterns present → pattern-based heuristic
-  //   - no judge, no patterns → null (no information)
-  let answerRelevancy: number | null = null;
-  if (judgeScore === undefined) {
-    // No judge — use regex heuristic if patterns are defined.
-    if (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) {
-      let matchedCount = 0;
-      for (const pattern of exp.answerMustMatch) {
-        try {
-          const re = new RegExp(pattern, 'iu');
-          if (re.test(execution.answer)) matchedCount++;
-        } catch { /* invalid regex — treat as miss */ }
-      }
-      // P1-A fix: partial credit only for fully-matched patterns (fraction of
-      // matched). A miss gives 0.0, not 0.5 — the old 0.5 floor let an answer
-      // that missed ALL patterns score above a near-perfect-but-low-judged answer.
-      answerRelevancy = matchedCount / exp.answerMustMatch.length;
-    }
-    // else: null — no information without judge or patterns
-  }
-  // judgeScore present → leave answerRelevancy = null; judge dim owns this signal
+  // The incomparability created a perverse incentive: scenario authors who added
+  // answerMustMatch constraints could LOWER their scenario's overall score if any
+  // pattern missed (0.0 < 0.5 neutral). Authors with no patterns got the neutral
+  // imputation for "free", making vague scenarios score better than precise ones.
+  //
+  // The signal is PRESERVED: answerMustMatch patterns still penalize answerQuality
+  // via PENALTY_REGEX_MISS (0.5× per miss) in scoreAnswerQuality(). The weight
+  // previously allocated to answerRelevancy (0.10) was redistributed to
+  // answerQuality (+0.05) and judge (+0.05) in DEFAULT_WEIGHTS.
+  //
+  // answerRelevancy remains in ScenarioScores for diagnostic visibility but has
+  // weight=0 in all tiers — it contributes nothing to overall.
+  const answerRelevancy: number | null = null;
 
   // RAGAS Faithfulness: LLM-scored grounding of answer claims in tool results.
   // null when no observations (no tool calls → nothing to ground against).
@@ -470,8 +544,8 @@ export function scoreScenario(
   // null when no structured constraints or no observations.
   const contextRelevance = scoreContextRelevance(exp, execution, diagnostics);
 
-  // RAGAS Context Recall: fraction of goldenEntityIds that appeared in
-  // agent observations. null when no goldenEntityIds on the scenario or
+  // RAGAS Context Recall: fraction of goldenKeywords that appeared in
+  // agent observations. null when no goldenKeywords on the scenario or
   // no observations available.
   const contextRecall = scoreContextRecall(scenario, execution, diagnostics);
 
@@ -486,6 +560,25 @@ export function scoreScenario(
   };
   const weights = renormaliseWeights(baseWeights);
 
+  // v4: emit diagnostic when scenario weight overrides cause renormalization.
+  // Silent renormalization is a design trap: weights: { terminationCorrectness: 0.80 }
+  // produces effective weight ~0.47 (not 0.80), and all other dims are implicitly
+  // reduced by ~41%. The diagnostic makes this visible in benchmark output.
+  if (scenario.expectation.weights !== undefined) {
+    const preNormSum = Object.values(baseWeights).reduce((a, b) => a + b, 0);
+    const RENORM_WARN_THRESHOLD = 0.01;
+    if (Math.abs(preNormSum - 1) > RENORM_WARN_THRESHOLD) {
+      diagnostics.push({
+        dim: 'answerQuality', // meta-diagnostic; no specific dim
+        severity: 'info',
+        code: 'WEIGHTS_RENORMALIZED',
+        message: `scenario weight overrides sum to ${preNormSum.toFixed(3)} (not 1.0) — all weights were proportionally scaled. Effective terminationCorrectness=${weights.terminationCorrectness.toFixed(3)}`,
+        observed: preNormSum,
+        expected: 1,
+      });
+    }
+  }
+
   const dimScores: Record<keyof Required<DimensionWeights>, number | null> = {
     executionEfficiency,
     answerQuality,
@@ -499,21 +592,25 @@ export function scoreScenario(
   };
 
   // Apply DIMENSION_FLOOR to non-null scores before geo-mean, but ONLY for
-  // "quality" dimensions where a near-zero value is noisy rather than diagnostic.
+  // truly noisy secondary dimensions.
   //
-  // P0-B fix: executionEfficiency and terminationCorrectness are PRIMARY execution
-  // signals — if the agent called the wrong tool or didn't terminate correctly,
-  // that IS the regression we want to catch. Flooring them to 0.05 masks a
-  // 0.01→0.05 collapse as 5x less severe than it really is (a ~15% overall swing).
+  // SOTA++ v3 structural fix: answerQuality removed from floored dims.
+  // answerQuality is computed from real signals (answerContains, answerMustMatch,
+  // structured checks, PENALTY_MUST_NOT_MATCH). A genuine 0.01 answerQuality
+  // means the answer completely failed every check — flooring it to 0.05 hid a
+  // 5x collapse behind measurement-noise framing. answerQuality is now treated
+  // as a primary signal alongside executionEfficiency and terminationCorrectness.
   //
   // Dims excluded from floor (must stay at true score, even 0.0):
   //   - executionEfficiency: tool selection + step budget signal
   //   - terminationCorrectness: binary safety net
+  //   - answerQuality: primary user-facing outcome — genuine 0 must stay 0
   //   - judge: LLM rubric — a judge score of 0 means the rubric explicitly failed
   //
-  // All other dims get the floor: faithfulness, contextRelevance, contextRecall,
-  // costEfficiency, answerQuality, answerRelevancy are noisy enough that a single
-  // 0.01 value is more likely measurement error than a true catastrophic failure.
+  // Dims that DO get the floor (genuinely noisy secondary signals):
+  //   - faithfulness, contextRelevance, contextRecall, costEfficiency, answerRelevancy
+  //     These are approximations (heuristics / sparse LLM samples). A 0.01 here
+  //     is more likely measurement noise than a true catastrophic failure.
   // NO_FLOOR_DIMS is module-scope (rule 16: deterministic sets should not be allocated per-call).
   const dimScoresFloored: Record<string, number | null> = {};
   for (const [k, v] of Object.entries(dimScores)) {
@@ -573,6 +670,8 @@ export function scoreScenario(
     },
     ...(diagnostics.length > 0 ? { diagnostics, diagnosticStrings } : {}),
     judgeRequiredButSkipped,
+    ...(steps !== undefined && steps.length > 0 ? { steps } : {}),
+    ...(judgeReasoning !== undefined ? { judgeReasoning } : {}),
   };
 }
 
@@ -634,7 +733,21 @@ function scoreToolAccuracy(
     return 0;
   }
 
-  if (exp.tools === undefined || exp.tools.length === 0) return 1;
+  if (exp.tools === undefined || exp.tools.length === 0) {
+    // No tool expectations defined. Emit info diagnostic so scenario authors
+    // can see which scenarios are leaving toolAccuracy unconstrained.
+    // Only emit when mustNotCallTools and expectedBlocked are also absent —
+    // those paths already define tool behavior explicitly.
+    if (exp.mustNotCallTools === undefined && exp.expectedBlocked !== true) {
+      diagnostics.push({
+        dim: 'toolAccuracy',
+        severity: 'info',
+        code: 'TOOL_EXPECTATIONS_UNDEFINED',
+        message: 'scenario defines no tool expectations (tools[], mustNotCallTools, expectedBlocked); toolAccuracy not constrained — add expected tool calls to validate retrieval behavior',
+      });
+    }
+    return 1;
+  }
   const expected = exp.tools;
   const expectedNames = expected.map((t) => t.tool);
 
@@ -706,24 +819,34 @@ function scoreToolAccuracy(
     });
   }
 
-  // Check ALL tools for duplication — accumulate penalties instead of breaking
-  // on the first violation. Uses a Set to avoid penalizing the same tool twice
-  // when it appears multiple times in the expected array.
-  const checkedTools = new Set<string>();
-  for (const expTool of expected) {
-    if (checkedTools.has(expTool.tool)) continue;
-    checkedTools.add(expTool.tool);
-    const expectedReps = expected.filter((e) => e.tool === expTool.tool).length;
-    const actualReps = toolsUsed.filter((t) => t.tool === expTool.tool).length;
-    if (actualReps > expectedReps * 2 && actualReps > 2) {
-      score *= PENALTY_TOOL_DUPLICATE;
+  // v4: continuous ratio penalty replaces hard `> 2x AND > 2` cliff.
+  // The old threshold had a discontinuity: expectedReps=1, actualReps=2 → no penalty;
+  // actualReps=3 → sudden 30% penalty. The continuous model gives smooth degradation:
+  //   penalty = max(expectedReps / actualReps, PENALTY_TOOL_DUPLICATE)
+  // This caps at PENALTY_TOOL_DUPLICATE (0.7) for extreme duplication but gives
+  // graduated penalties for mild over-calling (e.g., 5 expected, 6 actual → 0.83).
+  // O(N) via pre-built Maps instead of O(N²) filter-per-tool.
+  const expectedCounts = new Map<string, number>();
+  for (const e of expected) {
+    expectedCounts.set(e.tool, (expectedCounts.get(e.tool) ?? 0) + 1);
+  }
+  const actualCounts = new Map<string, number>();
+  for (const t of toolsUsed) {
+    actualCounts.set(t.tool, (actualCounts.get(t.tool) ?? 0) + 1);
+  }
+  for (const [tool, expReps] of expectedCounts) {
+    const actReps = actualCounts.get(tool) ?? 0;
+    if (actReps > expReps) {
+      const ratio = expReps / actReps; // 0 < ratio < 1
+      const penalty = Math.max(ratio, PENALTY_TOOL_DUPLICATE);
+      score *= penalty;
       diagnostics.push({
         dim: 'toolAccuracy',
         severity: 'warn',
         code: 'TOOL_DUPLICATE_CALLS',
-        message: `tool ${expTool.tool} called ${actualReps}x (expected ${expectedReps}x)`,
-        observed: actualReps,
-        expected: expectedReps,
+        message: `tool ${tool} called ${actReps}x (expected ${expReps}x, penalty ${((1 - penalty) * 100).toFixed(0)}%)`,
+        observed: actReps,
+        expected: expReps,
       });
     }
   }
@@ -785,6 +908,34 @@ function scoreAnswerQuality(
 
   let score = 1;
 
+  // Observability: emit a diagnostic when the scenario has NO heuristic quality
+  // constraints AND no LLM judge. In that case, answerQuality defaults to 1.0
+  // regardless of what the agent said — which masks incomplete scenario specifications.
+  // The diagnostic does NOT change the score; fixing requires adding constraints
+  // or judgeRequired=true to the scenario.
+  const hasHeuristicConstraints =
+    (exp.answerContains !== undefined && exp.answerContains.length > 0) ||
+    (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) ||
+    (exp.answerExcludes !== undefined && exp.answerExcludes.length > 0) ||
+    (exp.answerMustNotMatch !== undefined && exp.answerMustNotMatch.length > 0) ||
+    exp.refusalExpected === true ||
+    exp.requireHedging === true ||
+    exp.requiredRegister !== undefined ||
+    exp.maxConfidence !== undefined ||
+    exp.mustCiteFromToolResults === true ||
+    exp.priceBandKrw !== undefined ||
+    exp.vintageRange !== undefined ||
+    exp.drinkingWindowStatus !== undefined;
+
+  if (!hasHeuristicConstraints && judgeScore === undefined) {
+    diagnostics.push({
+      dim: 'answerQuality',
+      severity: 'warn',
+      code: 'NO_QUALITY_CONSTRAINTS',
+      message: 'scenario has no heuristic answer constraints and no judge score; answerQuality defaults to 1.0 — add answerContains/answerMustMatch/rubric+judgeRequired to constrain this dimension',
+    });
+  }
+
   if (exp.answerContains !== undefined && exp.answerContains.length > 0) {
     const matched = exp.answerContains.filter((kw) => normalizedAnswer.includes(normalize(kw)));
     const ratio = matched.length / exp.answerContains.length;
@@ -818,7 +969,9 @@ function scoreAnswerQuality(
     for (const pattern of exp.answerMustMatch) {
       let re: RegExp;
       try { re = new RegExp(pattern, 'iu'); } catch {
-        diagnostics.push({ dim: 'answerQuality', severity: 'warn', code: 'INVALID_REGEX', message: `invalid regex: ${pattern}` });
+        // A broken required-match regex silently passes scenarios that should fail.
+        // Treat as critical to force scenario authors to fix broken patterns.
+        diagnostics.push({ dim: 'answerQuality', severity: 'critical', code: 'INVALID_REGEX', message: `invalid regex in answerMustMatch: ${pattern}` });
         continue;
       }
       if (!re.test(answer)) {
@@ -833,49 +986,45 @@ function scoreAnswerQuality(
     }
   }
 
-  // answerMustNotMatch: regex array, none may hit (critical)
+  // answerMustNotMatch: regex array, none may hit.
+  //
+  // SOTA++ v3 structural fix: downgraded from critical (immediate return 0) to
+  // a strong multiplicative penalty. The previous hard-return 0 bypassed judge
+  // scoring entirely, meaning `judgeRequired: true` scenarios with a matching
+  // pattern could never be rescued by the judge even when the answer was
+  // substantively correct (e.g. "죄송합니다만, 추천드리겠습니다" — polite preamble
+  // before a valid recommendation). The judge now runs regardless, so a high
+  // judge score can partially offset a heuristic-triggered penalty.
+  //
+  // Severity is 'warn' (not 'critical') so it does NOT trigger the
+  // criticalFailure short-circuit that collapses overall to 0.
+  // The penalty (PENALTY_MUST_NOT_MATCH) is 0.20 — strong enough to flag a
+  // genuine refusal but not so extreme that a polite preamble annihilates a
+  // correct recommendation.
   if (exp.answerMustNotMatch !== undefined && exp.answerMustNotMatch.length > 0) {
     for (const pattern of exp.answerMustNotMatch) {
       let re: RegExp;
       try { re = new RegExp(pattern, 'iu'); } catch {
-        diagnostics.push({ dim: 'answerQuality', severity: 'warn', code: 'INVALID_REGEX', message: `invalid regex: ${pattern}` });
+        // An invalid answerMustNotMatch regex means the forbidden-content check
+        // cannot run — this is a critical scenario authoring error (security gap),
+        // not a graceful miss. Fail the scenario hard so the author is forced to fix it.
+        diagnostics.push({ dim: 'answerQuality', severity: 'critical', code: 'INVALID_REGEX', message: `invalid regex in answerMustNotMatch: ${pattern}` });
         continue;
       }
       if (re.test(answer)) {
         diagnostics.push({
           dim: 'answerQuality',
-          severity: 'critical',
+          severity: 'warn',
           code: 'ANSWER_MUST_NOT_MATCH_HIT',
-          message: `forbidden regex matched: ${pattern}`,
+          message: `forbidden pattern matched: ${pattern}`,
         });
-        return 0;
+        score *= PENALTY_MUST_NOT_MATCH;
       }
     }
   }
 
-  // Length-based quality signal — only in pure heuristic mode (no judge).
-  // When a judge is present it already captures depth/substance; this heuristic
-  // would double-count. Skip for refusal scenarios: a short "죄송합니다" is correct.
-  if (judgeScore === undefined && exp.refusalExpected !== true) {
-    const lowerAnswer = answer.toLowerCase();
-    const hasWineRelevantTerm = ANSWER_WINE_RELEVANT_TERMS.some((t) => lowerAnswer.includes(t));
-
-    if (answer.length >= ANSWER_MIN_QUALITY_CHARS && hasWineRelevantTerm) {
-      // Substantive answer with wine context — small bonus for depth.
-      score = Math.min(1, score + ANSWER_LENGTH_BONUS);
-    } else if (answer.length < ANSWER_TRIVIAL_CHARS) {
-      // Suspiciously short answer — likely incomplete or evasive.
-      score = Math.max(0, score - ANSWER_TRIVIAL_PENALTY);
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'ANSWER_TOO_SHORT',
-        message: `Answer is ${answer.length} chars — likely incomplete or evasive`,
-        observed: `${answer.length} chars`,
-        expected: `>= ${ANSWER_MIN_QUALITY_CHARS} chars`,
-      });
-    }
-  }
+  // v4: length-based bonus/penalty removed. scoreAnswerQuality is now purely contract-based.
+  // See ANSWER_LENGTH_BONUS removal comment above for rationale.
 
   return clamp01(score);
 }
@@ -978,7 +1127,7 @@ function scoreStructuredChecks(
       const matchingCalls = execution.toolsUsed.filter((t) => t.tool === argSpec.tool);
       const anyMatch = matchingCalls.some((call) => {
         try {
-          const parsed = JSON.parse(call.input ?? '{}') as Record<string, unknown>;
+          const parsed = (JSON.parse(call.input ?? '{}') as unknown) as Record<string, unknown>;
           const value = getNestedValue(parsed, argSpec.argPath);
           return evaluatePredicate(value, argSpec.predicate, argSpec.value);
         } catch { return false; }
@@ -999,7 +1148,10 @@ function scoreStructuredChecks(
   // Skip for step-0 fallback: the generic fallback answer never contains hedging,
   // but this is an infra failure not an agent failure.
   if (exp.requireHedging === true && !isStep0Fallback) {
-    const hedging = /아마|~?\s*수도|perhaps|might|maybe|여러\s*후보|several|다양|clarif|명확|구체적|어떤/i;
+    // v4 fix: removed '명확'/'구체적' (mean CLEAR/SPECIFIC — opposite of hedging),
+    // '다양' (means DIVERSE — confident, not hedging), '어떤' (too broad).
+    // Added stronger Korean hedging forms that are unambiguous.
+    const hedging = /아마도|어쩌면|혹시|수도\s*있|을\s*수\s*있|일\s*수\s*있|여러\s*후보|perhaps|might|maybe|could\s+be|it\s+seems/i;
     if (!hedging.test(answer)) {
       diagnostics.push({
         dim: 'answerQuality',
@@ -1018,11 +1170,15 @@ function scoreStructuredChecks(
   // USER's register, not the agent's, producing false REGISTER_MISMATCH failures.
   if (exp.requiredRegister !== undefined && !isStep0Fallback) {
     const formalMarkers = (lowerAnswer.match(/합니다|습니다|드립니다|하세요|겠습니다/g) ?? []).length;
-    const casualMarkers = (lowerAnswer.match(/해|야|거|줄게|건데|잖아/g) ?? []).length;
+    // v4 fix: 1-char Korean casual markers ('해','야','거') produce massive false positives
+    // because they appear as substrings in formal words: 추천해드립니다→'해', 해당→'해',
+    // 거품→'거', 야생→'야'. Use multi-char patterns that only match true casual sentence
+    // endings, not word-internal substrings. Threshold raised from 2→3 to reduce noise.
+    const casualMarkers = (lowerAnswer.match(/줄게|건데|잖아|거든|할게|할래|해줘|해봐|먹자|가자|하자|인데|거야|잖아요/g) ?? []).length;
     const dominant = formalMarkers >= casualMarkers ? 'formal' : 'casual';
     // Only penalise if the answer has enough Korean to judge and the register is wrong.
     const totalMarkers = formalMarkers + casualMarkers;
-    if (totalMarkers >= 2 && dominant !== exp.requiredRegister) {
+    if (totalMarkers >= 3 && dominant !== exp.requiredRegister) {
       diagnostics.push({
         dim: 'answerQuality',
         severity: 'warn',
@@ -1038,7 +1194,9 @@ function scoreStructuredChecks(
   // 7. maxConfidence — penalise overconfident language. Threshold applies to
   //    all maxConfidence values (not just <0.5) to match auto-rubric coverage.
   if (exp.maxConfidence !== undefined) {
-    const overconfident = /확실히|definitely|100%|분명히|틀림없이|absolutely|certainly/i;
+    // v4 fix: removed '확실히'/'분명히' — standard polite Korean ("확실히 좋은 와인입니다"
+    // is normal sommelier language, not overconfidence). Kept genuinely extreme markers.
+    const overconfident = /틀림없이|무조건|절대\s*(?!적|값)|100%|absolutely|undoubtedly|without\s+(?:a\s+)?doubt/i;
     if (overconfident.test(answer)) {
       diagnostics.push({
         dim: 'answerQuality',
@@ -1052,8 +1210,12 @@ function scoreStructuredChecks(
 
   // 8. refusalExpected — CRITICAL: answer must contain refusal + must NOT contain affirmation
   if (exp.refusalExpected === true) {
-    const refusalMarkers = /없|존재하지|찾을\s*수\s*없|not\s+found|unavailable|해당\s*빈티지/i;
-    const affirmativeMarkers = /재고\s*있|구매\s*가능|in\s+stock|available|추천.*합니다/i;
+    // v4 fix: removed bare '없' (1-char → matches '맛없는', '타닌이 없고' — wine descriptors, not refusals).
+    // The specific multi-char patterns (존재하지, 찾을 수 없) already cover genuine refusal contexts.
+    // Fixed 'available' to exclude 'unavailable' via negative lookbehind.
+    // Fixed '추천.*합니다' greedy match → specific verb forms only.
+    const refusalMarkers = /존재하지|찾을\s*수\s*없|구할\s*수\s*없|not\s+found|unavailable|해당\s*빈티지|없습니다|없어요/i;
+    const affirmativeMarkers = /재고\s*있|구매\s*가능|in\s+stock|(?<!un)available|추천(?:해|합니다|드립니다)/i;
     if (!refusalMarkers.test(answer)) {
       diagnostics.push({
         dim: 'answerQuality',
@@ -1079,9 +1241,13 @@ function scoreStructuredChecks(
     // Extract wine-like proper nouns from the answer (capitalized multi-word sequences)
     const answerWineNames = extractProperNouns(answer);
     if (answerWineNames.length > 0) {
-      const observationText = execution.observations.join(' ').toLowerCase();
+      const observationText = normalizeObservations(execution.observations);
+      // v4 fix: NFKC-normalize extracted names before comparison. extractProperNouns
+      // returns raw text (possibly NFD from copy-paste), but normalizeObservations uses
+      // NFKC. Without this, "Château" in NFD won't match "Château" in NFKC → false
+      // UNCITED_WINE_NAMES penalty on correctly-cited accented wine names.
       const uncited = answerWineNames.filter(
-        (name) => !observationText.includes(name.toLowerCase()),
+        (name) => !observationText.includes(name.toLowerCase().normalize('NFKC')),
       );
       if (uncited.length > 0) {
         diagnostics.push({
@@ -1102,6 +1268,54 @@ function scoreStructuredChecks(
 // ─────────────────────────────────────────────────────────────────────
 // Structured check helpers
 // ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse drinking window status from structured observation text.
+ *
+ * Handles two observation formats produced by agent-tools.ts:
+ *
+ * 1. check_drinking_window output (exact status phrases):
+ *    "... As of YYYY: currently drinkable (peak: YYYY–YYYY)."
+ *    "... As of YYYY: not yet at peak — hold until YYYY."
+ *    "... As of YYYY: past peak (window closed YYYY)."
+ *
+ * 2. search_wines/compare_wines output (year range only):
+ *    "... | drink: YYYY-YYYY | ..."
+ *    Status inferred by comparing range to current year.
+ *
+ * Returns null when no drinking window data found (check is skipped).
+ */
+function parseDrinkingWindowFromObs(
+  obsText: string,
+  expected: 'now' | 'hold' | 'past',
+): boolean | null {
+  // Strategy 1: exact status phrases from check_drinking_window output
+  const STATUS_PHRASES: Record<string, RegExp> = {
+    now: /currently drinkable/i,
+    hold: /not yet at peak|hold until/i,
+    past: /past peak/i,
+  };
+  const anyStatusFound = Object.values(STATUS_PHRASES).some((re) => re.test(obsText));
+  if (anyStatusFound) {
+    return STATUS_PHRASES[expected]!.test(obsText);
+  }
+
+  // Strategy 2: parse "drink: YYYY-YYYY" year range and infer status
+  const CURRENT_YEAR = new Date().getFullYear();
+  const drinkRangeRe = /\bdrink:\s*(\d{4})\s*[-–]\s*(\d{4})\b/gi;
+  let match: RegExpExecArray | null;
+  let foundAny = false;
+  while ((match = drinkRangeRe.exec(obsText)) !== null) {
+    foundAny = true;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    const inferred = CURRENT_YEAR < start ? 'hold' : CURRENT_YEAR > end ? 'past' : 'now';
+    if (inferred === expected) return true;
+  }
+  if (foundAny) return false; // ranges found but none matched expected status
+
+  return null; // no drinking window data in observations
+}
 
 /** Extract Korean-style prices: "5만원", "100,000원", "50000원", "$50" */
 function extractKoreanPrices(text: string): number[] {
@@ -1129,14 +1343,46 @@ function extractKoreanPrices(text: string): number[] {
   return prices;
 }
 
+/** Drinking-window context keywords: a year preceded (within ~30 chars) by these
+ * is likely a drinking-window endpoint, not a wine vintage. Used by
+ * extractVintageYears to filter false positives like "best consumed 2025–2035"
+ * or "drink: 2024-2038". */
+const DRINK_WINDOW_CONTEXT_RE = /(?:drink(?:ing)?|음용|마시기|peak|hold\s*until|closed|셀러링?|적기|through|까지|~)\s*(?:window|기간)?\s*:?\s*$/iu;
+
 /** Extract 4-digit years that look like wine vintages (1600-2099).
  *  Range extended from 1800 to 1600 to cover rare historic bottles
  *  (pre-phylloxera Bordeaux, Madeira, Tokaji) found in collector queries.
- *  Uses Unicode-safe boundaries instead of \b (CLAUDE.md rule 8). */
+ *  Uses Unicode-safe boundaries instead of \b (CLAUDE.md rule 8).
+ *
+ *  v4: filters drinking-window years. A year whose left-context (30 chars) matches
+ *  DRINK_WINDOW_CONTEXT_RE is likely a drinking window endpoint, not a vintage.
+ *  Also filters the second year of a YYYY-YYYY or YYYY–YYYY dash pair when
+ *  the gap is 5-30 years (plausible drinking window span). */
 function extractVintageYears(text: string): number[] {
+  const CONTEXT_LOOKBACK = 30;
   const years: number[] = [];
+  const allMatches: { year: number; index: number }[] = [];
   for (const m of text.matchAll(/(?:^|[^\p{L}\p{N}])(1[6-9]\d{2}|20\d{2})(?=$|[^\p{L}\p{N}])/gu)) {
-    years.push(Number(m[1]));
+    allMatches.push({ year: Number(m[1]), index: m.index! });
+  }
+
+  for (let i = 0; i < allMatches.length; i++) {
+    const { year, index } = allMatches[i]!;
+    // Check left-context for drinking-window vocabulary
+    const leftContext = text.slice(Math.max(0, index - CONTEXT_LOOKBACK), index);
+    if (DRINK_WINDOW_CONTEXT_RE.test(leftContext)) continue;
+
+    // Check if this is the second year of a YYYY-YYYY dash pair (drinking window range)
+    if (i > 0) {
+      const prev = allMatches[i - 1]!;
+      const gap = year - prev.year;
+      const betweenText = text.slice(prev.index + 4, index).trim();
+      // Only filter if the gap looks like a drinking window (5-30 years)
+      // and the separator is a dash/endash
+      if (gap >= 5 && gap <= 30 && /^[-–]$/.test(betweenText)) continue;
+    }
+
+    years.push(year);
   }
   return years;
 }
@@ -1158,12 +1404,17 @@ function extractProperNouns(text: string): string[] {
   if (latinMatches) results.push(...latinMatches);
   // Korean wine names: sequences of 2+ Hangul syllables (오푸스원, 샤또마고, 바롤로)
   // Filter out common Korean grammar words to reduce false positives.
+  // v4 fix: added KOREAN_PREDICATE_SUFFIX_RE to catch compound phrases like
+  // "좋은와인입니다" that aren't in the finite stopword set but end with verb suffixes.
   const koreanMatches = text.match(/[\uAC00-\uD7A3]{2,}/g);
   if (koreanMatches) {
     for (const m of koreanMatches) {
-      if (!KOREAN_PROPER_NOUN_STOPWORDS.has(m) && m.length >= 3) {
-        results.push(m);
-      }
+      if (KOREAN_PROPER_NOUN_STOPWORDS.has(m)) continue;
+      if (m.length < 2) continue;
+      // Reject sequences ending with common predicate suffixes — these are grammatical
+      // phrases, not wine proper nouns. Real Korean wine names don't end with -합니다.
+      if (KOREAN_PREDICATE_SUFFIX_RE.test(m)) continue;
+      results.push(m);
     }
   }
   return results;
@@ -1229,7 +1480,10 @@ function scoreContextRelevance(
   diagnostics: Diagnostic[],
 ): number | null {
   if (execution.observations.length === 0) return null;
-  const obsText = execution.observations.join(' ');
+  // normalizeObservations() is the single source of truth for joining.
+  // Note: scoreContextRelevance uses the un-lowercased form for regex matching below,
+  // so we call join directly here but with the canonical '\n' separator.
+  const obsText = execution.observations.join('\n');
 
   const checks: { passed: boolean; label: string }[] = [];
 
@@ -1259,18 +1513,17 @@ function scoreContextRelevance(
     }
   }
 
-  // Drinking window status check
+  // Drinking window status check — v4: structured parsing replaces keyword heuristic.
+  // Observation text from agent-tools.ts has two deterministic formats:
+  //   search_wines:           "... | drink: YYYY-YYYY | ..."
+  //   check_drinking_window:  "... drinking window YYYY-YYYY. As of YEAR: currently drinkable ..."
+  // Parse these directly instead of keyword-matching free text (false positives on
+  // "peak", "aging", "young", "이르" which all appear in non-drinking-window contexts).
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
-    const keywords: Record<string, readonly RegExp[]> = {
-      now: [/drinkable|peak|optimal|currently|지금|마시기\s*좋|음용\s*적기|최적|피크/iu],
-      hold: [/hold|cellar|aging|young|숙성|보관|셀러|셀러링|더\s*기다|음용\s*전|아직|이르/iu],
-      past: [/past|over|decline|지남|지났|과거/iu],
-    };
-    const patterns = keywords[exp.drinkingWindowStatus] ?? [];
-    checks.push({
-      passed: patterns.some((re) => re.test(obsText)),
-      label: `dw_status_${exp.drinkingWindowStatus}`,
-    });
+    const dwResult = parseDrinkingWindowFromObs(obsText, exp.drinkingWindowStatus);
+    if (dwResult !== null) {
+      checks.push({ passed: dwResult, label: `dw_status_${exp.drinkingWindowStatus}` });
+    }
   }
 
   // Query-context alignment: check if the tool results mention keywords from
@@ -1282,7 +1535,7 @@ function scoreContextRelevance(
     const queryTerms = execution.toolsUsed
       .map((t) => {
         try {
-          const parsed = JSON.parse(t.input ?? '{}') as Record<string, unknown>;
+          const parsed = (JSON.parse(t.input ?? '{}') as unknown) as Record<string, unknown>;
           // Extract query-bearing fields from all tools:
           //   search_wines: query
           //   compare_wines: query_a, query_b
@@ -1300,37 +1553,68 @@ function scoreContextRelevance(
     if (queryTerms.length > 0) {
       // NFKC-normalize both sides so composed/decomposed Hangul match consistently.
       const lower = obsText.toLowerCase().normalize('NFKC');
-      const anyRelevant = queryTerms.some((q) => {
-        const normalizedQ = q.toLowerCase().normalize('NFKC');
-        const words = normalizedQ
-          // Split on whitespace OR Unicode punctuation — handles Korean without spaces.
-          .split(/[\s\p{P}]+/u)
-          .filter((w) => {
-            if (CONTEXT_RELEVANCE_STOPWORDS.has(w)) return false;
-            // Use lower min-length for Hangul-dominant tokens (2 chars) vs ASCII (3 chars).
-            // Korean 2-syllable words like "레드", "화이트" are content-bearing.
-            const isHangulToken = /\p{Script=Hangul}/u.test(w);
-            const minLen = isHangulToken ? CONTEXT_PRECISION_MIN_WORD_LEN_HANGUL : CONTEXT_PRECISION_MIN_WORD_LEN_ASCII;
-            return w.length >= minLen;
+
+      // Cross-lingual guard: if the agent query contains Hangul but the tool
+      // observation is English-only (no Hangul), direct term matching is meaningless —
+      // "이탈리아" ≠ "Italy", "레드" ≠ "red wine" in the data. Skip the check
+      // (pass by default) to avoid systematic false-negatives on Korean queries.
+      const HANGUL_RE = /\p{Script=Hangul}/u;
+      const queryHasHangul = queryTerms.some((q) => HANGUL_RE.test(q));
+      const obsHasHangul = HANGUL_RE.test(obsText);
+      if (queryHasHangul && !obsHasHangul) {
+        // Cross-lingual scenario: Korean query terms cannot be matched against
+        // English-only observations ("이탈리아" ≠ "Italy", "레드" ≠ "red wine").
+        // Skip this check entirely rather than auto-passing — auto-pass would make
+        // contextRelevance=1 for 96%+ of Korean scenarios regardless of retrieval
+        // quality, defeating the metric. null is more honest: "cannot measure".
+        // contextRelevance may still score via price/vintage/drinkingWindow checks.
+      } else {
+        // Extract meaningful (non-stopword, min-length) words from a query string.
+        // Returns an empty array when the query is all stopwords (no signal available).
+        const extractContentWords = (q: string): string[] =>
+          q.toLowerCase().normalize('NFKC')
+            // Split on whitespace OR Unicode punctuation — handles Korean without spaces.
+            .split(/[\s\p{P}]+/u)
+            .filter((w) => {
+              if (CONTEXT_RELEVANCE_STOPWORDS.has(w)) return false;
+              // Use lower min-length for Hangul-dominant tokens (2 chars) vs ASCII (3 chars).
+              // Korean 2-syllable words like "레드", "화이트" are content-bearing.
+              const isHangulToken = HANGUL_RE.test(w);
+              const minLen = isHangulToken ? CONTEXT_PRECISION_MIN_WORD_LEN_HANGUL : CONTEXT_PRECISION_MIN_WORD_LEN_ASCII;
+              return w.length >= minLen;
+            });
+
+        const allContentWords = queryTerms.map(extractContentWords);
+        // Only push the check when at least one query had meaningful content words.
+        // Queries that are entirely stopwords ("와인 추천해줘") produce no signal → skip.
+        const hasContentWords = allContentWords.some((words) => words.length > 0);
+        if (hasContentWords) {
+          const anyRelevant = allContentWords.some((words) => {
+            if (words.length === 0) return false; // stopword-only query → no information
+            const found = words.filter((w) => lower.includes(w));
+            return found.length / words.length >= CONTEXT_PRECISION_WORD_THRESHOLD;
           });
-        if (words.length === 0) return true; // no significant words → pass
-        const found = words.filter((w) => lower.includes(w));
-        return found.length / words.length >= CONTEXT_PRECISION_WORD_THRESHOLD;
-      });
-      checks.push({ passed: anyRelevant, label: 'query_terms_in_context' });
+          checks.push({ passed: anyRelevant, label: 'query_terms_in_context' });
+        }
+        // else: all queries are pure stopwords — skip this check (null if no other checks)
+      }
     }
   }
 
   if (checks.length === 0) return null; // no constraints to evaluate
 
-  // P1-B fix: price and vintage are HARD constraints — if the retrieval returned
-  // results outside the constraint, the context is wrong for that query regardless
-  // of how many soft checks passed. A single hard-constraint failure → score 0.
+  // P1-B fix: vintage is a HARD constraint — if the retrieval returned results
+  // outside the vintage range, the context is wrong regardless of soft checks.
   //
-  // Soft checks (query_terms_in_context, drinkingWindowStatus) are averaged
-  // independently and blended: hard-fail collapses the overall to 0.
+  // Price is intentionally SOFT: the search pipeline does not have a real price
+  // filter — max_price_krw is appended as a text hint (e.g. "50000원 이하") so
+  // Vespa can return out-of-range results. Penalising this as critical would
+  // collapse overall to 0% for a pipeline limitation, not an agent failure.
+  //
+  // Soft checks (query_terms_in_context, drinkingWindowStatus, price_in_range)
+  // are averaged: only vintage hard-fail collapses the overall to 0.
   const hardFailed = checks
-    .filter((c) => !c.passed && (c.label === 'price_in_range' || c.label === 'vintage_in_range'))
+    .filter((c) => !c.passed && c.label === 'vintage_in_range')
     .map((c) => c.label);
 
   const failed = checks.filter((c) => !c.passed).map((c) => c.label);
@@ -1356,21 +1640,25 @@ function scoreContextRelevance(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// RAGAS Context Recall (entity-ID overlap, no LLM needed)
+// RAGAS Context Recall (canonical-label keyword overlap, no LLM needed)
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Computes RAGAS Context Recall as entity-ID overlap.
+ * Computes RAGAS Context Recall as canonical-label keyword overlap.
  *
- * Recall = |retrieved_entity_ids ∩ goldenEntityIds| / |goldenEntityIds|
+ * Recall = |matched_keywords ∩ observations| / |goldenKeywords|
  *
- * "Retrieved" means: the entity ID appears as a substring in any
- * observation string from the agent's tool calls. This is a conservative
- * approximation — IDs are short, unique tokens that appear verbatim in
- * Vespa result JSON forwarded as observations.
+ * "Matched" means: the keyword appears (case-insensitive, NFKC-normalised)
+ * as a substring in the concatenated observation strings. Keywords are
+ * canonical-label fragments like "opus one", "château margaux" — these
+ * appear verbatim in the `(id: ...) producer: ...` lines of summarizeSearchResults().
+ *
+ * v3 note: this replaces the v2 goldenEntityIds approach which used slug-style
+ * IDs that never appeared in observations (real corpus uses vivino-hash IDs).
+ * Weight is 0 in DEFAULT_WEIGHTS — this is a DIAGNOSTIC metric only.
  *
  * Returns null when:
- *  - scenario.goldenEntityIds is absent or empty, OR
+ *  - scenario.goldenKeywords is absent or empty, OR
  *  - execution.observations is empty (no tool calls made)
  */
 function scoreContextRecall(
@@ -1378,31 +1666,35 @@ function scoreContextRecall(
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
 ): number | null {
-  if (
-    scenario.goldenEntityIds === undefined ||
-    scenario.goldenEntityIds.length === 0
-  ) {
+  if (scenario.goldenKeywords === undefined || scenario.goldenKeywords.length === 0) {
     return null;
   }
   if (execution.observations.length === 0) return null;
 
-  const obsText = execution.observations.join('\n');
-  const golden = scenario.goldenEntityIds;
+  const obsLower = normalizeObservations(execution.observations);
+  // Filter out empty strings — "".includes("") === true in JS, which would give
+  // a free +1 hit to every recall score regardless of what the agent retrieved.
+  // De-duplicate keywords: duplicate entries would inflate recall by counting
+  // the same keyword multiple times. e.g. ["opus","opus","ridge"] with "opus"
+  // in obs would score 2/3 instead of 1/2 (actual recall).
+  const goldenRaw = scenario.goldenKeywords.filter((kw) => kw.trim().length > 0);
+  const golden = [...new Set(goldenRaw.map((kw) => kw.toLowerCase().normalize('NFKC')))];
+  if (golden.length === 0) return null;
   let hitCount = 0;
-  for (const entityId of golden) {
-    if (obsText.includes(entityId)) {
+  for (const kw of golden) {
+    if (obsLower.includes(kw)) {
       hitCount++;
     }
   }
   const score = hitCount / golden.length;
 
   if (score < 1) {
-    const missing = golden.filter((id) => !obsText.includes(id));
+    const missing = golden.filter((kw) => !obsLower.includes(kw));
     diagnostics.push({
       dim: 'contextRecall',
       severity: 'warn',
       code: 'CONTEXT_RECALL_LOW',
-      message: `golden entity IDs missing from observations: ${missing.join(', ')}`,
+      message: `golden keywords missing from observations: ${missing.join(', ')}`,
       observed: score,
       expected: 1,
     });
@@ -1417,6 +1709,21 @@ function scoreTermination(
   diagnostics: Diagnostic[],
   _stepCount?: number,
 ): number {
+  // Explicit expectedBlocked=false: the scenario asserts the security gate must NOT fire.
+  // If it does, that's a false positive — surface it as critical so the benchmark signals
+  // that a legitimate query was incorrectly rejected.
+  if (exp.expectedBlocked === false && reason === 'blocked') {
+    diagnostics.push({
+      dim: 'terminationCorrectness',
+      severity: 'critical',
+      code: 'UNEXPECTED_BLOCKED',
+      message: `security gate fired on a scenario marked expectedBlocked=false (false positive)`,
+      observed: reason,
+      expected: 'answer or max_steps',
+    });
+    return 0;
+  }
+
   if (exp.expectedBlocked === true) {
     // Only 'blocked' is correct for adversarial/jailbreak scenarios.
     // 'answer' must NOT score 1 — a jailbreak scenario that produces an answer
@@ -1446,8 +1753,20 @@ function scoreTermination(
 
   if (exp.terminationReason === undefined) {
     if (reason === 'answer') return 1;
-    // Security gate fired: 'blocked' is always correct behavior for adversarial inputs.
-    // Score 1 so the security gate doesn't penalize correct rejection.
+    // Security gate fired with no explicit expectedBlocked expectation.
+    //
+    // Design decision: when terminationReason is undefined (scenario author didn't
+    // specify), we accept BOTH 'answer' and 'blocked' as correct. This is intentionally
+    // permissive: most non-adversarial scenarios don't set terminationReason at all,
+    // and penalizing blocked termination here would create false failures whenever
+    // the security gate fires on edge-case queries.
+    //
+    // To protect against false positives (security gate blocking legitimate queries),
+    // scenario authors should set `expectedBlocked: false` explicitly — that triggers
+    // the UNEXPECTED_BLOCKED critical failure path above (lines 1592-1605).
+    //
+    // TODO(benchmark): Consider requiring non-adversarial scenarios to set
+    // expectedBlocked: false for active false-positive detection.
     if (reason === 'blocked') return 1;
     if (reason === 'fallback') {
       diagnostics.push({
@@ -1508,9 +1827,13 @@ function scoreCostEfficiency(
   // and matches "user starts wondering if it's broken" UX threshold.
   const DEFAULT_MAX_DURATION_MS = 25_000;
   const DEFAULT_MAX_TOTAL_TOKENS = 12_000;
-  /** Overshoot ratio that escalates from `warn` to `critical`. 1.0 means
-   *  "the budget was exceeded by another full budget" — i.e. >2x the budget. */
-  const CRITICAL_OVERSHOOT_RATIO = 1.0;
+  /** Overshoot ratio threshold for severe cost diagnostics. 1.0 means >2x budget.
+   *  v4: severity is always 'warn', never 'critical'. Cost overshoots are engineering
+   *  failures, not correctness/security failures. Using 'critical' caused the
+   *  criticalFailure short-circuit to collapse overall to 0 for a 2x token overshoot,
+   *  which is disproportionate — the cost dimension already scores 0 at that point,
+   *  penalizing via the geometric mean without needing a hard collapse. */
+  const SEVERE_OVERSHOOT_RATIO = 1.0;
 
   const maxDuration = exp.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
   const maxTokens = exp.maxTotalTokens ?? DEFAULT_MAX_TOTAL_TOKENS;
@@ -1519,11 +1842,10 @@ function scoreCostEfficiency(
   let durOvershoot = 0;
   if (Number.isFinite(maxDuration) && execution.totalDurationMs > maxDuration) {
     durOvershoot = (execution.totalDurationMs - maxDuration) / maxDuration;
-    const severity: DiagnosticSeverity = durOvershoot >= CRITICAL_OVERSHOOT_RATIO ? 'critical' : 'warn';
     diagnostics.push({
       dim: 'costEfficiency',
-      severity,
-      code: severity === 'critical' ? 'LATENCY_BUDGET_BLOWN' : 'LATENCY_BUDGET_EXCEEDED',
+      severity: 'warn',
+      code: durOvershoot >= SEVERE_OVERSHOOT_RATIO ? 'LATENCY_BUDGET_BLOWN' : 'LATENCY_BUDGET_EXCEEDED',
       message: `duration ${execution.totalDurationMs}ms > budget ${maxDuration}ms`,
       observed: execution.totalDurationMs,
       expected: maxDuration,
@@ -1533,11 +1855,10 @@ function scoreCostEfficiency(
   let tokOvershoot = 0;
   if (Number.isFinite(maxTokens) && totalTokens > maxTokens) {
     tokOvershoot = (totalTokens - maxTokens) / maxTokens;
-    const severity: DiagnosticSeverity = tokOvershoot >= CRITICAL_OVERSHOOT_RATIO ? 'critical' : 'warn';
     diagnostics.push({
       dim: 'costEfficiency',
-      severity,
-      code: severity === 'critical' ? 'TOKEN_BUDGET_BLOWN' : 'TOKEN_BUDGET_EXCEEDED',
+      severity: 'warn',
+      code: tokOvershoot >= SEVERE_OVERSHOOT_RATIO ? 'TOKEN_BUDGET_BLOWN' : 'TOKEN_BUDGET_EXCEEDED',
       message: `tokens ${totalTokens} > budget ${maxTokens}`,
       observed: totalTokens,
       expected: maxTokens,
@@ -1579,17 +1900,25 @@ function renormaliseWeights(weights: Required<DimensionWeights>): Required<Dimen
 }
 
 /**
- * Weighted geometric mean with NEUTRAL IMPUTATION for missing dimensions.
+ * Weighted geometric mean with FIXED NEUTRAL IMPUTATION for missing dimensions.
  *
- * When a dimension's score is null (e.g. judge disabled), the previous
- * implementation skipped it AND renormalised remaining weights — but that
- * silently inflated overall by ~1/(1-w_missing). A `--no-judge` run scored
- * higher than the same run with judge=0.5, breaking comparability.
+ * When a dimension's score is null (e.g. judge disabled), the dimension is
+ * imputed with a fixed neutral value of 0.5 (maximum-entropy prior for [0,1]).
  *
- * The fix: impute the missing dim with the geo-mean of all PRESENT dims
- * (unbiased prior — "we have no information, so assume average"). The
- * weight stays in the denominator, so disabling a dimension is a true
- * no-op rather than a free uplift.
+ * WHY 0.5, not present-only mean:
+ * The previous approach imputed null dims with the geometric mean of all PRESENT
+ * dims. This creates a non-monotone coupling bug: adding judge=0.2 lowers the
+ * present-mean from ~0.90 to ~0.75, which cascades into LOWER imputation for
+ * unrelated null dims (faithfulness, contextRelevance). Adding real information
+ * about one dimension perversely lowered the overall score by up to 14%.
+ *
+ * Fixed approach: each null dim is independently imputed at 0.5, regardless of
+ * what other dims score. Adding information about any dim ONLY affects overall
+ * through that dim's contribution — never through side-effects on other dims.
+ * This makes the geo-mean monotone: score(x) ≥ score(x') when x ≥ x' for any dim.
+ *
+ * The weight stays in the denominator, so a disabled dimension is a true
+ * no-op when its real score equals 0.5. Scores >0.5 improve overall; <0.5 lower it.
  */
 /** Minimum score floor for non-critical dimensions before geo-mean computation.
  *  Prevents a single weak (but non-critical) dim from collapsing overall by >20x. */
@@ -1601,44 +1930,47 @@ const DIMENSION_FLOOR = 0.05;
  * or externally validated (judge) — flooring them would mask real 0-valued failures.
  * Defined at module scope: deterministic constant, no per-call allocation (rule 16).
  */
-const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>(['executionEfficiency', 'terminationCorrectness', 'judge']);
+const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>([
+  'executionEfficiency',
+  'terminationCorrectness',
+  'answerQuality',
+  'judge',
+  'costEfficiency',  // v4: 2x budget overshoot (score=0) is an engineering failure, not noise.
+                     // Flooring it to 0.05 reduced the log-space penalty by 10.8x.
+]);
+
+/** Fixed neutral imputation value for null dimensions (max-entropy prior for [0,1]).
+ * See weightedGeometricMean comment for the coupling-bug justification. */
+const NEUTRAL_IMPUTED_VALUE = 0.5;
 
 function weightedGeometricMean(
   dimScores: Record<string, number | null>,
   weights: Record<string, number>,
 ): number {
   const EPS = 1e-6;
-  // First pass: present-only mean for imputation.
-  let presentLogSum = 0;
-  let presentWeight = 0;
-  for (const key of Object.keys(weights)) {
-    const x = dimScores[key];
-    if (x === null || x === undefined) continue;
-    const w = weights[key]!;
-    presentLogSum += w * Math.log(clamp01(x) + EPS);
-    presentWeight += w;
-  }
-  if (presentWeight === 0) return 0;
-  // The neutral imputed value (in log-space) is the present-only mean.
-  // For a disabled dimension, this contributes weight·(presentMeanLog),
-  // making its contribution exactly equal to the running mean — effectively
-  // no change to overall.
-  const presentMeanLog = presentLogSum / presentWeight;
+  // Null dims are imputed at the fixed neutral value (0.5) independently of
+  // which other dims are present. This decouples imputation: adding a low score
+  // for dim A cannot lower the imputed value of unrelated null dim B.
+  const neutralLog = Math.log(NEUTRAL_IMPUTED_VALUE + EPS);
 
-  // Second pass: full denominator, present dims contribute their own log,
-  // absent dims contribute the imputed (mean) log.
   let weightedLogSum = 0;
   let totalWeight = 0;
+  let presentWeight = 0;
   for (const key of Object.keys(weights)) {
     const w = weights[key]!;
     const x = dimScores[key];
     const logX = (x === null || x === undefined)
-      ? presentMeanLog
+      ? neutralLog
       : Math.log(clamp01(x) + EPS);
     weightedLogSum += w * logX;
     totalWeight += w;
+    if (x !== null && x !== undefined) presentWeight += w;
   }
-  if (totalWeight === 0) return 0;
+  if (totalWeight === 0) return 0; // degenerate: no dims defined at all
+  // presentWeight === 0: ALL dims are null — every one gets imputed at NEUTRAL_IMPUTED_VALUE.
+  // Consistent with max-entropy prior: geo-mean of all 0.5s = 0.5, not 0.
+  // Returning 0 here would contradict the imputation philosophy (null ≠ failure).
+  if (presentWeight === 0) return NEUTRAL_IMPUTED_VALUE;
   // Do NOT subtract EPS here — EPS was added to log() inputs only to prevent
   // log(0)=-Infinity. Subtracting it from exp() output introduces a systematic
   // negative bias: for a perfect score (x=1), exp(log(1+1e-6))−1e-6 ≈ 0, which

@@ -37,14 +37,24 @@ const CONTAMINATION_SCORE_WEIGHT_LENGTH = 0.15;
 /**
  * Token words that are known marketplace noise — not part of any canonical
  * wine name and therefore count against the title's semantic quality.
+ *
+ * Removed false-positive-prone words (see contamination-detector audit):
+ *   - 'gold'    — appears in legitimate wine names: Goldwater, Gold Coast, Gold Label
+ *   - 'silver'  — appears in legitimate wine names: Silver Oak, Silverado
+ *   - 'limited' — "Limited Release" / "Limited Edition" are standard wine terms
+ *   - 'new'     — too generic; fires on "New Zealand", "New World"
  */
 const NOISE_VOCABULARY = new Set([
   // English marketplace noise
-  'ml', 'cl', 'l', 'bottle', 'bottles', 'pack', 'case', 'gift', 'box',
+  // Removed 'l' and 'cl': tokenizer strips apostrophes, so French "L'Ermitage"
+  // becomes ["l", "ermitage"]. Keeping 'l' caused false contamination flags on
+  // all French wines with L' prefix (L'Ermitage, L'Evangile, L'If, L'Aventure,
+  // L'Ecole). 'cl' never matched standalone anyway (e.g. "75cl" → one token).
+  'ml', 'bottle', 'bottles', 'pack', 'case', 'gift', 'box',
   'set', 'sale', 'offer', 'deal', 'buy', 'free', 'shipping', 'delivery',
-  'new', 'hot', 'best', 'top', 'special', 'limited', 'edition', 'import',
+  'hot', 'best', 'top', 'special', 'edition', 'import',
   'imported', 'authentic', 'original', 'genuine', 'certified', 'award',
-  'winning', 'gold', 'silver', 'medal', 'rated', 'points', 'score',
+  'winning', 'medal', 'rated', 'points', 'score',
   'recommended', 'exclusive', 'available', 'stock', 'price', 'discount',
   'rebate', 'promo', 'promotion', 'coupon', 'bundle', 'combo', 'value',
   // Korean marketplace noise

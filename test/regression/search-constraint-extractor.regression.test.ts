@@ -451,3 +451,119 @@ describe('constraint-to-sparse-filter-tokens — price_usd <= / >= operators', (
     expect(tokens).toContain('vintage_year_max:2020');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: reversed range inputs must be swapped (session 4 audit)
+// ---------------------------------------------------------------------------
+
+describe('search-constraint-extractor reversed range swap regression', () => {
+  it('R-RANGE-01: reversed price range "10~3만원" swaps to min=30000, max=100000', () => {
+    // Without the fix: minPriceKrw=100000 > maxPriceKrw=30000 — impossible YQL filter.
+    const c = extractSearchConstraints('10~3만원 레드 와인');
+    expect(c.minPriceKrw).toBe(30_000);
+    expect(c.maxPriceKrw).toBe(100_000);
+    expect(c.minPriceKrw).toBeLessThanOrEqual(c.maxPriceKrw!);
+  });
+
+  it('R-RANGE-02: normal price range "3~10만원" stays as min=30000, max=100000', () => {
+    const c = extractSearchConstraints('3~10만원 레드 와인');
+    expect(c.minPriceKrw).toBe(30_000);
+    expect(c.maxPriceKrw).toBe(100_000);
+    expect(c.minPriceKrw).toBeLessThanOrEqual(c.maxPriceKrw!);
+  });
+
+  it('R-RANGE-03: equal price range "5~5만원" stays as min=max=50000', () => {
+    const c = extractSearchConstraints('5~5만원 와인');
+    expect(c.minPriceKrw).toBe(50_000);
+    expect(c.maxPriceKrw).toBe(50_000);
+  });
+
+  it('R-RANGE-04: reversed vintage range "2022-2020" swaps to min=2020, max=2022', () => {
+    // Without the fix: vintageMin=2022 > vintageMax=2020 — impossible YQL filter.
+    const c = extractSearchConstraints('2022-2020 보르도 와인');
+    expect(c.vintageMin).toBe(2020);
+    expect(c.vintageMax).toBe(2022);
+    expect(c.vintageMin).toBeLessThanOrEqual(c.vintageMax!);
+  });
+
+  it('R-RANGE-05: normal vintage range "2018-2022" stays as min=2018, max=2022', () => {
+    const c = extractSearchConstraints('2018-2022 보르도 와인');
+    expect(c.vintageMin).toBe(2018);
+    expect(c.vintageMax).toBe(2022);
+    expect(c.vintageMin).toBeLessThanOrEqual(c.vintageMax!);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regression: comma-separated numbers and combined 만+천원 format
+// ---------------------------------------------------------------------------
+
+describe('search-constraint-extractor price parsing edge cases', () => {
+  it('R-PRICE-COMMA-01: "50,000원 이하" parses as maxPriceKrw=50000', () => {
+    const c = extractSearchConstraints('50,000원 이하 와인 추천');
+    expect(c.maxPriceKrw).toBe(50_000);
+  });
+
+  it('R-PRICE-COMMA-02: "100,000원 이하" parses as maxPriceKrw=100000', () => {
+    const c = extractSearchConstraints('100,000원 이하 보르도');
+    expect(c.maxPriceKrw).toBe(100_000);
+  });
+
+  it('R-PRICE-COMMA-03: "1,000원" without bound qualifier does not break parser', () => {
+    // Should not extract a price constraint — no 이하/이내/미만/이상 present for raw won
+    const c = extractSearchConstraints('보르도 와인 추천');
+    expect(c.maxPriceKrw).toBeUndefined();
+    expect(c.minPriceKrw).toBeUndefined();
+  });
+
+  it('R-PRICE-COMBINED-01: "5만5천원" parses as maxPriceKrw=55000', () => {
+    const c = extractSearchConstraints('5만5천원 와인 추천');
+    expect(c.maxPriceKrw).toBe(55_000);
+  });
+
+  it('R-PRICE-COMBINED-02: "5만5천원 이하" parses as maxPriceKrw=55000', () => {
+    const c = extractSearchConstraints('5만5천원 이하 화이트 와인');
+    expect(c.maxPriceKrw).toBe(55_000);
+  });
+
+  it('R-PRICE-COMBINED-03: "3만5천원" parses as maxPriceKrw=35000', () => {
+    const c = extractSearchConstraints('3만5천원 이하 가성비 와인');
+    expect(c.maxPriceKrw).toBe(35_000);
+  });
+
+  it('R-PRICE-COMBINED-04: plain "5만원" still works after combined-unit code is added', () => {
+    // Regression: combined-unit pattern must not intercept lone 만원 patterns
+    const c = extractSearchConstraints('5만원 이하 레드 와인');
+    expect(c.maxPriceKrw).toBe(50_000);
+  });
+
+  it('R-PRICE-COMBINED-05: "5만원대" band still works after combined-unit code is added', () => {
+    const c = extractSearchConstraints('5만원대 보르도 와인');
+    expect(c.maxPriceKrw).toBeGreaterThan(50_000);
+    expect(c.minPriceKrw).toBeLessThan(50_000);
+  });
+
+  it('R-PRICE-COMMA-GLOBAL-01: "1,23원" not incorrectly stripped (global comma removes it, raw won pattern still requires 이하)', () => {
+    // With global comma removal: "1,23원" → "123원" — no 이하 qualifier, so no price extracted.
+    // Verifies global removal doesn't create phantom price constraints.
+    const c = extractSearchConstraints('보르도 와인 1,23원');
+    expect(c.maxPriceKrw).toBeUndefined();
+  });
+
+  it('R-PRICE-RANGE-COMBINED-01: "3만5천원~5만원" extracts combined-unit lower bound (known limitation)', () => {
+    // "3만5천원~5만원" mixes combined-unit and 만원 notations in a range.
+    // The range regex only handles "X~Y만원" (uniform unit), so it cannot parse
+    // this mixed form. Combined-unit fires → maxPriceKrw=35000.
+    // Known limitation: mixed-notation ranges are not supported. Document, not fix.
+    const c = extractSearchConstraints('3만5천원~5만원 와인');
+    expect(c.maxPriceKrw).toBe(35_000);
+    expect(c.minPriceKrw).toBeUndefined();
+  });
+
+  it('R-PRICE-RANGE-COMBINED-02: standalone "3만5천원" still returns maxPriceKrw=35000', () => {
+    // Regression: reordering range before combined-unit must not break standalone combined-unit.
+    const c = extractSearchConstraints('3만5천원 레드 와인');
+    expect(c.maxPriceKrw).toBe(35_000);
+    expect(c.minPriceKrw).toBeUndefined();
+  });
+});

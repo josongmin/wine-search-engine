@@ -96,6 +96,14 @@ export default tseslint.config(
             'JSON.parse result must be cast to unknown first, then validated with Zod or a type guard. (CLAUDE.md rule 12)',
         },
         {
+          // JSON.parse(x) as unknown as T — double cast bypasses the single-cast rule above.
+          // Assign to `const x: unknown = JSON.parse(...)`, then validate and narrow.
+          selector:
+            'TSAsExpression > TSAsExpression[typeAnnotation.type="TSUnknownKeyword"] > CallExpression[callee.object.name="JSON"][callee.property.name="parse"]',
+          message:
+            'JSON.parse(...) as unknown as T bypasses the safety rule. Assign to a `const x: unknown` variable first, then validate shape. (CLAUDE.md rule 12)',
+        },
+        {
           // \b word boundary is ASCII-only — silently fails on Korean/accented Latin.
           // 50+ instances of this bug were found in audit rounds 22-27.
           // Use (?:^|[^\p{L}\p{N}])...(?=$|[^\p{L}\p{N}]) with /u flag instead.
@@ -109,6 +117,33 @@ export default tseslint.config(
           // Matches: /한글/ but not /한글/u — catches the class of bugs in CONSTRAINT_KEYWORDS.
           selector: 'Literal[regex.pattern=/[\\u0080-\\uFFFF]/][regex.flags!=/u/]',
           message: 'Regex containing non-ASCII characters must use the /u flag for correct Unicode semantics. (CLAUDE.md rule 8)',
+        },
+        {
+          // .includes("") always returns true — any string contains the empty string.
+          // Common bug: `arr.filter(kw => answer.includes(kw))` with empty-string keywords
+          // silently gives free hits. Guard with `kw.trim().length > 0` before .includes().
+          // Found in: scorer.ts goldenKeywords recall scoring (session audit).
+          selector: 'CallExpression[callee.property.name="includes"] > Literal[value=""]',
+          message: '.includes("") always returns true. Filter out empty strings before calling .includes(). (scorer.ts goldenKeywords bug)',
+        },
+        {
+          // .slice(0, N - X) without Math.max(0, ...) guard: when N < X, the subtraction
+          // is negative and .slice(0, -k) silently returns "" (empty string), then appending
+          // a suffix creates output LONGER than the intended limit.
+          // Always wrap: Math.max(0, N - X) before passing to .slice().
+          // Found in: agent-prompt.ts truncateObservation (session audit).
+          selector: 'CallExpression[callee.property.name="slice"] > BinaryExpression[operator="-"]:not(CallExpression[callee.object.name="Math"][callee.property.name="max"] > BinaryExpression[operator="-"])',
+          message: '.slice(0, N - X) can produce negative indices when N < X, returning "" then violating the length contract. Use Math.max(0, N - X). (truncateObservation bug)',
+        },
+        {
+          // \p{L}\p{N} without brackets means AND (two-char sequence), not OR.
+          // The correct form is [\p{L}\p{N}] (character class). This was the #1 bug
+          // found in the ingestion pipeline audit — vintage years parsed as volumes.
+          // NOTE: ESLint selectors cannot distinguish [\\p{L}\\p{N}] from \\p{L}\\p{N}
+          // in regex.pattern, so this rule uses a negative lookbehind for '[' to
+          // avoid false positives on the already-correct bracketed form.
+          selector: 'Literal[regex.pattern=/(?<!\\[)\\\\p\\{[LN]\\}\\\\p\\{[LN]\\}(?!\\])/]',
+          message: '\\p{L}\\p{N} without brackets means AND (letter then digit), not OR. Use [\\p{L}\\p{N}] character class instead. (Ingestion audit bug #1)',
         },
         // NOTE: Math.random() is NOT banned via lint — it has legitimate uses
         // for jitter/delay in retry logic. The CLAUDE.md quality bar prohibits
@@ -222,6 +257,54 @@ export default tseslint.config(
     ],
     rules: {
       'no-magic-numbers': 'off',
+    },
+  },
+  /**
+   * Scenario authoring safety rules — catch common scenario design bugs at lint time.
+   * These rules apply to all scenario definition files.
+   *
+   * Rules enforced:
+   *  1. goldenEntityIds is a removed field (v3 breaking change). Any reference is a bug.
+   *  2. answerMustNotMatch patterns that are bare Korean apology words (no anchor/verb-form)
+   *     produce false positives on polite preambles like "죄송합니다만, 추천드립니다".
+   *     Require verb-ending or sentence-terminal forms instead.
+   */
+  {
+    files: [
+      'test/benchmark/agent/scenarios.ts',
+      'test/benchmark/agent/scenarios.adversarial.ts',
+      'test/benchmark/agent/scenarios.coverage.ts',
+      'test/benchmark/agent/scenario.ts',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          // goldenEntityIds was removed in SOTA++ v3 — use goldenKeywords instead.
+          // Any property key or string literal with this name is a v2 leftover.
+          selector: 'Property[key.name="goldenEntityIds"], Property[key.value="goldenEntityIds"]',
+          message:
+            'goldenEntityIds was removed in SOTA++ v3 (entity IDs are vivino-hash, not slugs). Use goldenKeywords with canonical-label fragments instead.',
+        },
+        {
+          // Bare '죄송합니다' in answerMustNotMatch matches polite preambles like
+          // "죄송합니다만, 추천드립니다" — use anchored/verb-ending patterns instead.
+          // Detection: string literal containing '죄송합니다' without anchor chars (^$) or verb endings.
+          // This is a heuristic check; the comment explains the authoring rule.
+          selector:
+            "Literal[value=/죄송합니다/][value!=/[$.^]/]",
+          message:
+            "Bare '죄송합니다' in answerMustNotMatch matches polite preambles. Use anchored patterns like '죄송합니다[.！\\\\s]*$' or verb forms like '도와드리기\\\\s*어렵'. See scenario.ts answerMustNotMatch JSDoc.",
+        },
+        {
+          // Bare '모르겠어' matches "모르겠어도 추천드립니다" (concessive + recommendation).
+          // Use a verb-ending or sentence-terminal form.
+          selector:
+            "Literal[value=/모르겠어/][value!=/[$.^어요습]/]",
+          message:
+            "Bare '모르겠어' in answerMustNotMatch matches concessive clauses. Use terminal forms like '모르겠어요\\\\.' or '모르겠습니다[.！]*$'. See scenario.ts answerMustNotMatch JSDoc.",
+        },
+      ],
     },
   },
 );

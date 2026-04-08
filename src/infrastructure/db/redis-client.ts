@@ -18,7 +18,11 @@ const REDIS_CONNECT_TIMEOUT_MS = 5_000;
 export async function connectRedisClient(redisConfig: RedisConfig): Promise<RedisClient> {
   const nextClient = createClient({ url: redisConfig.url });
   nextClient.on('error', (err: Error) => {
-    bootstrapLogger.error({ err }, 'Redis client error');
+    // Sanitize: redis client error objects may carry connection strings or
+    // auth tokens. Log only the message + code, never the raw err object.
+    const message = err instanceof Error ? err.message : 'unknown';
+    const code = (err as { code?: string } | undefined)?.code;
+    bootstrapLogger.error({ message, code }, 'Redis client error');
   });
 
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -31,10 +35,16 @@ export async function connectRedisClient(redisConfig: RedisConfig): Promise<Redi
     await Promise.race([nextClient.connect(), timeoutPromise]);
   } catch (err) {
     // Best-effort cleanup of the half-open client so it doesn't leak.
+    // On timeout, the client may not yet be isOpen (TCP handshake in progress),
+    // so also try disconnect() which forcibly tears down the socket.
     try {
-      if (nextClient.isOpen) await nextClient.quit();
+      if (nextClient.isOpen) {
+        await nextClient.quit();
+      } else {
+        nextClient.destroy();
+      }
     } catch {
-      // ignore secondary failure
+      // ignore secondary failure — socket will be GC'd
     }
     throw err;
   } finally {

@@ -505,6 +505,38 @@ describe('overall score (weighted geometric mean)', () => {
     // Arithmetic mean would be 5/6 ≈ 0.833. Geometric should be lower.
     expect(r.scores.overall).toBeLessThan(0.83);
   });
+
+  it('monotonicity: adding judge=0.5 (neutral) does not change overall vs judge=null', () => {
+    // v4 fix: fixed 0.5 neutral imputation — null dims imputed at 0.5 independently.
+    // Adding judge=0.5 (exactly the neutral value) should leave overall unchanged
+    // because the imputation for null was already 0.5.
+    const baseExecution = makeExecution({
+      answer: 'Opus One 2018 is a great Napa Cabernet.',
+      observations: ['Found: Opus One 2018 | region: Napa Valley'],
+    });
+    const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, undefined, 0.8);
+    const withNeutralJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, 0.5, 0.8);
+    // judge=0.5 = neutral prior → overall should be equal (within float tolerance)
+    expect(withNeutralJudge.scores.overall).toBeCloseTo(withNullJudge.scores.overall, 2);
+  });
+
+  it('monotonicity: adding weak judge (0.2) lowers overall vs null but does not affect unrelated dims', () => {
+    // v4 fix: non-monotonicity bug was: adding judge=0.2 lowers presentMeanLog → cascades
+    // to LOWER imputed value for ALL other null dims (faithfulness, contextRelevance, etc).
+    // After fix: null dims always imputed at 0.5; judge=0.2 only affects the judge dim itself.
+    const baseExecution = makeExecution({
+      answer: 'Opus One 2018 is a great Napa Cabernet.',
+      observations: ['Found: Opus One 2018 | region: Napa Valley'],
+    });
+    const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, undefined, 0.8);
+    const withWeakJudge = scoreScenario(makeScenario({ maxSteps: 5 }), baseExecution, 0.2, 0.8);
+    // judge=0.2 < 0.5 neutral → should lower overall (judge dim contributes low)
+    expect(withWeakJudge.scores.overall).toBeLessThan(withNullJudge.scores.overall);
+    // But the drop should be proportional to judge weight (0.15), not cascaded into other dims.
+    // Before fix: drop was up to 14.5% due to coupling. After fix: drop ≈ 4-6% (judge weight only).
+    const drop = withNullJudge.scores.overall - withWeakJudge.scores.overall;
+    expect(drop).toBeLessThan(0.10); // bounded: judge weight 0.15 × log-scale effect < 10%
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -585,14 +617,43 @@ describe('criticalFailure short-circuit', () => {
     expect(r.scores.overall).toBe(0);
   });
 
-  it('answerMustNotMatch regex violation collapses overall to 0', () => {
+  it('answerMustNotMatch regex violation applies multiplicative penalty, NOT critical-fail', () => {
+    // SOTA++ v3: answerMustNotMatch is no longer a hard critical-fail.
+    // Judge still runs and can partially offset. criticalFailure stays false
+    // so the overall score reflects the combined penalty, not a zero-clamp.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, answerMustNotMatch: ['(SELECT|FROM)'] }),
       makeExecution({ answer: 'SELECT wines FROM database' }),
       1,
     );
-    expect(r.scores.criticalFailure).toBe(true);
-    expect(r.scores.overall).toBe(0);
+    expect(r.scores.criticalFailure).toBe(false);
+    expect(r.scores.overall).toBeGreaterThan(0);
+    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_MUST_NOT_MATCH_HIT')).toBe(true);
+    // The penalty is multiplicative (PENALTY_MUST_NOT_MATCH = 0.50) → answerQuality reduced
+    expect(r.scores.answerQuality).toBeLessThan(1);
+  });
+
+  it('answerMustNotMatch: polite Korean preamble before recommendation is NOT blocked', () => {
+    // "죄송합니다만, 추천드립니다" — apology as prefix, not as terminal refusal.
+    // The anchored pattern '죄송합니다[.。！!\\s]*$' should NOT match when text continues.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, answerMustNotMatch: ['죄송합니다[.。！!\\s]*$'] }),
+      makeExecution({ answer: '죄송합니다만, 이 와인을 추천드립니다: Opus One 2018.' }),
+      1,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_MUST_NOT_MATCH_HIT')).toBe(false);
+    expect(r.scores.answerQuality).toBeCloseTo(1, 1);
+  });
+
+  it('answerMustNotMatch: terminal refusal IS penalised', () => {
+    // "죄송합니다." as the complete answer — terminal refusal.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, answerMustNotMatch: ['죄송합니다[.。！!\\s]*$'] }),
+      makeExecution({ answer: '죄송합니다.' }),
+      1,
+    );
+    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_MUST_NOT_MATCH_HIT')).toBe(true);
+    expect(r.scores.answerQuality).toBeLessThan(1);
   });
 
   it('expectedBlocked but not blocked → criticalFailure', () => {
@@ -669,6 +730,57 @@ describe('null judge handling', () => {
     // The right behavior is "disabled judge contributes nothing", which means
     // it should never make overall LOWER than withZeroJudge.
     expect(withoutJudge.scores.overall).toBeGreaterThanOrEqual(withZeroJudge.scores.overall);
+  });
+
+  // ─── v4 monotonicity boundary cases ───────────────────────────────────
+
+  it('monotonicity: adding judge=1.0 strictly increases overall vs null', () => {
+    // v4 fix: fixed 0.5 neutral imputation — null dims imputed at 0.5.
+    // Adding judge=1.0 (above neutral) must raise overall.
+    const base = makeExecution({ answer: 'Opus One 2018 is a great Napa Cabernet.', observations: ['Found: Opus One 2018'] });
+    const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, undefined, 0.8);
+    const withPerfectJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, 1.0, 0.8);
+    expect(withPerfectJudge.scores.overall).toBeGreaterThan(withNullJudge.scores.overall);
+  });
+
+  it('monotonicity: adding judge=0.0 strictly decreases overall vs null', () => {
+    // judge=0.0 (below neutral 0.5) must lower overall.
+    const base = makeExecution({ answer: 'Opus One 2018 is a great Napa Cabernet.', observations: ['Found: Opus One 2018'] });
+    const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, undefined, 0.8);
+    const withZeroJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, 0, 0.8);
+    expect(withZeroJudge.scores.overall).toBeLessThan(withNullJudge.scores.overall);
+  });
+
+  it('monotonicity: weight=0 dim (contextRecall) null→non-null does not change overall', () => {
+    // contextRecall has weight=0 — transitioning from null to a real value must be inert.
+    // Both cases use the SAME observations so that contextRelevance (weight>0) is
+    // identical — the only variable is goldenKeywords presence (contextRecall).
+    const obs = ['Found 3 results: Wine A (Benchmark Winery), Wine B, Wine C'];
+    const scenarioNoKeywords = makeScenario({ maxSteps: 5 });
+    const scenarioWithKeywords = makeScenario({ maxSteps: 5, goldenKeywords: ['Wine A'] });
+    const exec = makeExecution({ answer: 'good answer', observations: obs });
+    const rNull = scoreScenario(scenarioNoKeywords, exec, 0.8, 0.8);
+    const rPresent = scoreScenario(scenarioWithKeywords, exec, 0.8, 0.8);
+    // Weight=0 → contextRecall change must not affect overall (within float tolerance)
+    expect(Math.abs(rPresent.scores.overall - rNull.scores.overall)).toBeLessThan(0.02);
+  });
+
+  it('presentWeight=0 (all dims null) → returns NEUTRAL_IMPUTED_VALUE (0.5) not 0', () => {
+    // When all dims are null, geo-mean of (all 0.5 imputed) = 0.5, not 0.
+    // This case is degenerate but semantically: "no information → neutral, not failure."
+    // In practice all-null is unreachable via normal scoreScenario() (answerQuality always fires),
+    // so test the mathematical property directly via weightedGeometricMean behavior:
+    // judge=null is imputed at 0.5; a scenario with all-1 dims plus null judge scores > 0.5.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good answer about wine vintage and region' }),
+      undefined, // judge null
+      undefined, // faithfulness null
+    );
+    // answerQuality and executionEfficiency are always computed (non-null), so presentWeight > 0.
+    // Score should be > 0 and finite.
+    expect(r.scores.overall).toBeGreaterThan(0);
+    expect(Number.isFinite(r.scores.overall)).toBe(true);
   });
 });
 
@@ -891,9 +1003,11 @@ describe('scoreStructuredChecks', () => {
   });
 
   it('requiredRegister: penalises wrong Korean register', () => {
+    // v4: casual markers now use multi-char patterns (줄게,건데,잖아,거든,거야,해줘,해봐...)
+    // and threshold is 3. This answer has 4 casual markers: 해줘, 거든, 잖아, 할게.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, requiredRegister: 'formal' }),
-      makeExecution({ answer: '이 와인 좋아. 한번 먹어봐. 괜찮은 거야.' }),
+      makeExecution({ answer: '이 와인 해줘. 맛있거든. 잖아 진짜 좋다니까. 다음에도 할게.' }),
       undefined,
     );
     expect(r.diagnostics?.some((d) => d.code === 'REGISTER_MISMATCH')).toBe(true);
@@ -909,9 +1023,10 @@ describe('scoreStructuredChecks', () => {
   });
 
   it('maxConfidence: penalises overconfident language', () => {
+    // v4: '확실히'/'분명히' removed (normal polite Korean). Use '틀림없이' (truly extreme).
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, maxConfidence: 0.3 }),
-      makeExecution({ answer: '확실히 이 와인이 최고입니다!' }),
+      makeExecution({ answer: '틀림없이 이 와인이 최고입니다!' }),
       undefined,
     );
     expect(r.diagnostics?.some((d) => d.code === 'OVERCONFIDENT_LANGUAGE')).toBe(true);
@@ -1141,24 +1256,62 @@ describe('RAGAS Context Relevance', () => {
     // "레드" from query should appear in observation ("레드" and Cabernet both present)
     expect(r.scores.contextRelevance).not.toBeNull();
   });
+
+  it('cross-lingual: Korean query + English-only observation → contextRelevance null (v4 honest skip)', () => {
+    // v4 fix: when query has Hangul but observation is English-only, we CANNOT
+    // assess term relevance ("이탈리아" ≠ "Italy"). Skip the check entirely (null),
+    // rather than auto-passing (true). null is honest: "insufficient info to assess".
+    // Previously auto-passed, which made 96%+ of Korean scenarios score contextRelevance=1
+    // regardless of retrieval quality, defeating the metric.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"이탈리아 레드 평점 좋고 지금 마실 수 있는"}')],
+        // English-only observation — no Hangul characters
+        observations: ['Found 5 results: 1. Barolo 2018 (id: wine-001) | producer: Giacomo Conterno | region: Piedmont, Italy | grapes: Nebbiolo | price: 80000-120000'],
+      }),
+      undefined,
+    );
+    // No structured constraints (no priceBandKrw, vintageRange, etc.)
+    // AND cross-lingual bypass skips query_terms_in_context → no checks at all → null
+    expect(r.scores.contextRelevance).toBeNull();
+  });
+
+  it('cross-lingual: English query + English observation → normal term-matching still applies', () => {
+    // English query + English observation: normal matching, not bypassed
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"Italian red high rating"}')],
+        observations: ['Found 2 results: 1. Barolo Nebbiolo 2018 | region: Piedmont, Italy | grapes: Nebbiolo'],
+      }),
+      undefined,
+    );
+    // Italian + red should partially match (Italian→not present, but "red" is a stopword; "rating" missing)
+    // Key point: this path goes through normal matching, not the cross-lingual bypass
+    expect(r.scores.contextRelevance).not.toBeUndefined();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
-// RAGAS Context Recall (entity-ID overlap)
+// RAGAS Context Recall (canonical-label keyword overlap — v3)
 // ─────────────────────────────────────────────────────────────────────
+// v3 breaking change: goldenEntityIds (slug-based) replaced by goldenKeywords
+// (canonical-label fragments). Observations contain "1. Opus One 2018 (id: vivino-xxx)"
+// so keyword "opus one" matches; slug "opus-one-2018" never matched.
 
 describe('RAGAS Context Recall', () => {
-  it('goldenEntityIds present and IDs appear in observations → recall > 0', () => {
+  it('goldenKeywords present and keywords appear in observations → recall = 1', () => {
     const scenario = makeScenario(
       { maxSteps: 5 },
-      { goldenEntityIds: ['wine-001', 'wine-002'] },
+      { goldenKeywords: ['opus one', 'ridge monte bello'] },
     );
     const r = scoreScenario(
       scenario,
       makeExecution({
         observations: [
-          'entityId: wine-001, name: Opus One',
-          'entityId: wine-002, name: Ridge Monte Bello',
+          '1. Opus One 2018 Robert Mondavi (id: vivino-abc123)',
+          '2. Ridge Monte Bello 2019 (id: vivino-def456)',
         ],
       }),
       undefined,
@@ -1166,15 +1319,15 @@ describe('RAGAS Context Recall', () => {
     expect(r.scores.contextRecall).toBe(1.0);
   });
 
-  it('goldenEntityIds present but none appear in observations → recall = 0', () => {
+  it('goldenKeywords present but none appear in observations → recall = 0, diagnostic emitted', () => {
     const scenario = makeScenario(
       { maxSteps: 5 },
-      { goldenEntityIds: ['wine-golden-001', 'wine-golden-002'] },
+      { goldenKeywords: ['château pétrus', 'screaming eagle'] },
     );
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['entityId: wine-other-999, name: Some Other Wine'],
+        observations: ['1. Some Other Wine (id: vivino-other999)'],
       }),
       undefined,
     );
@@ -1182,37 +1335,37 @@ describe('RAGAS Context Recall', () => {
     expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_RECALL_LOW')).toBe(true);
   });
 
-  it('scenario without goldenEntityIds → recall is null', () => {
+  it('scenario without goldenKeywords → recall is null (diagnostic only)', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({
-        observations: ['entityId: wine-001, name: Opus One'],
+        observations: ['1. Opus One 2018 (id: vivino-abc)'],
       }),
       undefined,
     );
     expect(r.scores.contextRecall).toBeNull();
   });
 
-  it('partial recall: only some golden IDs in observations → 0 < recall < 1', () => {
+  it('partial recall: only some keywords in observations → 0 < recall < 1', () => {
     const scenario = makeScenario(
       { maxSteps: 5 },
-      { goldenEntityIds: ['wine-a', 'wine-b', 'wine-c'] },
+      { goldenKeywords: ['opus one', 'almaviva', 'petrus'] },
     );
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['Found: wine-a and wine-b in results'],
+        observations: ['1. Opus One 2019 (id: vivino-1) · 2. Almaviva 2019 (id: vivino-2)'],
       }),
       undefined,
     );
-    // 2 of 3 golden IDs found → recall = 2/3 ≈ 0.667
+    // 2 of 3 keywords found → recall = 2/3 ≈ 0.667
     expect(r.scores.contextRecall).toBeCloseTo(2 / 3, 5);
   });
 
-  it('no observations with goldenEntityIds → recall is null', () => {
+  it('no observations with goldenKeywords → recall is null', () => {
     const scenario = makeScenario(
       { maxSteps: 5 },
-      { goldenEntityIds: ['wine-x'] },
+      { goldenKeywords: ['opus one'] },
     );
     const r = scoreScenario(
       scenario,
@@ -1221,13 +1374,97 @@ describe('RAGAS Context Recall', () => {
     );
     expect(r.scores.contextRecall).toBeNull();
   });
+
+  it('keyword matching is case-insensitive', () => {
+    // "Château Margaux" in obs vs lowercase "château margaux" in goldenKeywords — case only
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenKeywords: ['château margaux'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: ['1. Château Margaux 2018 (id: vivino-xyz)'],
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRecall).toBe(1.0);
+  });
+
+  it('keyword matching handles precomposed vs decomposed Unicode (NFKC)', () => {
+    // keyword uses precomposed é (U+00E9); observation uses decomposed e + combining accent (U+0301).
+    // NFKC normalization must convert both to the same form before matching.
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenKeywords: ['château margaux'] },  // precomposed é in château
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: ['1. Cha\u0302teau Margaux 2018 (id: vivino-xyz)'],  // â decomposed
+      }),
+      undefined,
+    );
+    // NFKC normalizes both to identical canonical form → match
+    expect(r.scores.contextRecall).toBe(1.0);
+  });
+
+  it('vintage-qualified goldenKeywords do not match different vintages', () => {
+    // scenario #1 uses 'opus one 2018' to avoid matching "Opus One Overture 2019"
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenKeywords: ['opus one 2018'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: ['1. Opus One Overture 2019 (id: vivino-xyz)'],  // wrong vintage
+      }),
+      undefined,
+    );
+    expect(r.scores.contextRecall).toBe(0);  // '2018' not in observation → miss
+  });
+
+  it('two-word phrase goldenKeyword prevents AOC-region false matches', () => {
+    // 'château margaux' (two words) won't match "Château Brane-Cantenac Margaux de Brane"
+    const scenario = makeScenario(
+      { maxSteps: 5 },
+      { goldenKeywords: ['château margaux'] },
+    );
+    const r = scoreScenario(
+      scenario,
+      makeExecution({
+        observations: ['1. Château Brane-Cantenac Margaux de Brane (id: vivino-aoc)'],
+      }),
+      undefined,
+    );
+    // "château margaux" NOT present as consecutive substring → recall = 0
+    expect(r.scores.contextRecall).toBe(0);
+  });
+
+  it('contextRecall weight is 0 in DEFAULT_WEIGHTS — does not affect overall', () => {
+    // Two identical scenarios except one has goldenKeywords with 0% hit.
+    // Both should produce the same overall score because weight=0.
+    const base = makeScenario({ maxSteps: 5 });
+    const withKeywords = makeScenario({ maxSteps: 5 }, { goldenKeywords: ['petrus'] });
+    const exec = makeExecution({ observations: ['1. Opus One (id: vivino-abc)'] });
+    const rBase = scoreScenario(base, exec, undefined);
+    const rWithKeywords = scoreScenario(withKeywords, exec, undefined);
+    // contextRecall=null (base) vs 0 (withKeywords) — overall must be equal
+    // since contextRecall weight=0.
+    expect(rWithKeywords.scores.contextRecall).toBe(0);
+    expect(rBase.scores.contextRecall).toBeNull();
+    expect(rWithKeywords.scores.overall).toBeCloseTo(rBase.scores.overall, 4);
+  });
 });
 
 describe('RAGAS weight integration', () => {
   it('DEFAULT_WEIGHTS includes faithfulness + contextRelevance + contextRecall + answerRelevancy and sums to 1.0', () => {
     expect(DEFAULT_WEIGHTS).toHaveProperty('faithfulness');
     expect(DEFAULT_WEIGHTS).toHaveProperty('contextRelevance');
+    // contextRecall is diagnostic-only in v3 — weight=0 is expected and correct
     expect(DEFAULT_WEIGHTS).toHaveProperty('contextRecall');
+    expect(DEFAULT_WEIGHTS.contextRecall).toBe(0);
     expect(DEFAULT_WEIGHTS).toHaveProperty('answerRelevancy');
     const sum = Object.values(DEFAULT_WEIGHTS).reduce((a, b) => a + b, 0);
     expect(Math.abs(sum - 1)).toBeLessThan(1e-9);
@@ -1298,39 +1535,33 @@ describe('answerRelevancy', () => {
     expect(r.scores.judge).toBe(0);
   });
 
-  it('1.0 when all answerMustMatch patterns satisfied and no judge', () => {
+  it('v4: always null even when answerMustMatch patterns match and no judge', () => {
+    // v4: answerRelevancy removed from scoring — always null regardless of patterns.
+    // answerMustMatch penalizes answerQuality via PENALTY_REGEX_MISS instead.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, answerMustMatch: ['Opus One', '\\d{4}'] }),
       makeExecution({ answer: 'I recommend Opus One 2018.' }),
       undefined,
     );
-    expect(r.scores.answerRelevancy).toBe(1.0);
+    expect(r.scores.answerRelevancy).toBeNull();
+    // answerMustMatch still affects answerQuality (no penalty since patterns matched)
+    expect(r.scores.answerQuality).toBeGreaterThan(0.9);
   });
 
-  it('P1-A fix: partial match → fractional score (not 0.5 floor)', () => {
-    // Before: any miss → 0.5 regardless of how many patterns matched.
-    // After: score = matchedCount / totalPatterns (1 of 2 = 0.5 happens to
-    // be the same here, but 0-of-2 is now 0.0 not 0.5).
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, answerMustMatch: ['Opus One', 'Napa'] }),
-      makeExecution({ answer: 'I recommend Opus One.' }),
-      undefined,
-    );
-    expect(r.scores.answerRelevancy).toBeCloseTo(0.5); // 1 of 2 matched
-  });
-
-  it('P1-A fix: zero-of-N miss → 0.0 (not the old 0.5 floor)', () => {
+  it('v4: always null when patterns miss and no judge (was 0.0 in v3)', () => {
+    // v4: answerRelevancy always null; penalty goes into answerQuality via PENALTY_REGEX_MISS.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, answerMustMatch: ['Barolo', 'Napa'] }),
       makeExecution({ answer: 'Try this Chardonnay.' }),
       undefined,
     );
-    expect(r.scores.answerRelevancy).toBe(0); // 0 of 2 matched
+    expect(r.scores.answerRelevancy).toBeNull();
+    // But answerQuality IS penalized for missing patterns (0.5 × 0.5 = 0.25)
+    expect(r.scores.answerQuality).toBeCloseTo(0.25);
   });
 
-  it('P0-A fix: judge present suppresses answerMustMatch heuristic entirely', () => {
-    // Before: judge=0.9 was used AS answerRelevancy. Now: answerRelevancy=null,
-    // judge dim carries the signal. The heuristic is not computed at all.
+  it('v4: always null when judge present', () => {
+    // judge dim carries the rubric signal; answerRelevancy stays null.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, answerMustMatch: ['Napa'] }),
       makeExecution({ answer: 'I recommend Opus One.' }),
@@ -1400,9 +1631,11 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
 
 describe('maxConfidence — handles all threshold values', () => {
   it('maxConfidence=0.7 with overconfident language → penalized', () => {
+    // v4: '확실히' removed from overconfident patterns (normal polite Korean).
+    // Use '틀림없이' (genuinely extreme) instead.
     const r = scoreScenario(
       makeScenario({ maxSteps: 2, maxConfidence: 0.7 }),
-      makeExecution({ answer: '확실히 이 와인이 최고입니다' }),
+      makeExecution({ answer: '틀림없이 이 와인이 최고입니다' }),
       undefined,
     );
     // Should be penalized even though 0.7 > 0.5
@@ -1454,10 +1687,17 @@ describe('multiple null dimensions — geo mean handles gracefully', () => {
 });
 
 describe('weightedGeometricMean imputation invariant', () => {
-  // Regression guard: a disabled (null) dimension must impute to the present-only
-  // weighted geometric mean — NOT to 1.0 (free uplift) and NOT to 0 (collapse).
-  // The invariant: disabling a dim should NOT change the overall score relative to
-  // a run where that dim equals the current present-only geo-mean.
+  // Regression guard (v4 — fixed 0.5 neutral imputation):
+  // A disabled (null) dimension is imputed at 0.5 (max-entropy prior for [0,1]).
+  // This is NOT the present-only geo-mean (v3 was present-mean, which caused
+  // non-monotone coupling: adding judge=0.2 lowered imputed value for unrelated
+  // null dims like faithfulness, dropping overall by up to 14%).
+  //
+  // Key invariants:
+  //   - null → imputed at 0.5 (independent of other dims' values)
+  //   - judge=0.5 → same as null (neutral, no change)
+  //   - judge=1.0 → strictly higher than null (above neutral)
+  //   - judge=0.0 → strictly lower than null (below neutral)
 
   it('null judge does not inflate overall compared to judge=present-mean', () => {
     // With judge null, overall is computed from the remaining dims.
@@ -1655,9 +1895,9 @@ describe('P0-B regression — DIMENSION_FLOOR exemptions', () => {
 // ─────────────────────────────────────────────────────────────────────
 
 describe('P1-B regression — contextRelevance hard constraint collapse', () => {
-  it('price out-of-range → score 0 (not 0.67 partial)', () => {
-    // Before fix: 1 price check fail + 2 soft checks pass = 2/3 = 0.67.
-    // After fix: price is hard constraint → 0.
+  it('price out-of-range → soft penalty (not critical)', () => {
+    // Price is a soft constraint (search pipeline has no real price filter).
+    // Out-of-range price docks contextRelevance but does NOT trigger critical failure.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, priceBandKrw: { min: 50_000, max: 100_000 } }),
       makeExecution({
@@ -1666,8 +1906,9 @@ describe('P1-B regression — contextRelevance hard constraint collapse', () => 
       }),
       undefined,
     );
-    expect(r.scores.contextRelevance).toBe(0);
-    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(true);
+    expect(r.scores.contextRelevance).toBeLessThan(1);
+    expect(r.scores.contextRelevance).toBeGreaterThan(0);
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(false);
   });
 
   it('vintage out-of-range → score 0', () => {
@@ -1719,7 +1960,7 @@ describe('P2 regression — extractKoreanPrices currency coverage', () => {
   });
 
   it('£ amounts are extracted and converted to KRW', () => {
-    // £100 × 1700 = 170,000 KRW — above 50k–100k range → hard fail
+    // £100 × 1700 = 170,000 KRW — above 50k–100k range → soft penalty (not critical)
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, priceBandKrw: { min: 50_000, max: 100_000 } }),
       makeExecution({
@@ -1727,8 +1968,9 @@ describe('P2 regression — extractKoreanPrices currency coverage', () => {
       }),
       undefined,
     );
-    expect(r.scores.contextRelevance).toBe(0);
-    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(true);
+    expect(r.scores.contextRelevance).toBeLessThan(1);
+    // Price is soft, not hard — no critical failure
+    expect(r.diagnostics?.some((d) => d.code === 'CONTEXT_HARD_CONSTRAINT_FAILED')).toBe(false);
   });
 });
 
@@ -1879,10 +2121,12 @@ describe('step-0 fallback exemptions for structured checks', () => {
   });
 
   it('requiredRegister IS checked for step-1+ fallback (agent ran, produced output)', () => {
+    // v4: casual markers now use multi-char patterns. This answer has 3 casual markers:
+    // 해줘, 건데, 잖아 — enough to exceed the threshold (≥3).
     const r = scoreScenario(
       makeScenario({ maxSteps: 3, requiredRegister: 'formal' }),
       makeExecution({
-        answer: '이거 어때, 괜찮아? 저렴하고 좋은 거 있어.',
+        answer: '이거 해줘. 맛있건데 좋잖아. 다음에도 할게.',
         stepCount: 1,
         toolsUsed: [tool('search_wines')],
         toolCallCount: 1,
@@ -1896,104 +2140,9 @@ describe('step-0 fallback exemptions for structured checks', () => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────
-// Answer length quality signal (Fix 1 + Fix 2)
-// ─────────────────────────────────────────────────────────────────────
-
-describe('answerQuality — length-based quality signal (heuristic mode)', () => {
-  it('long answer with wine-relevant term rescues a partial base score (no judge)', () => {
-    // answerContains partial match → base = 0.5; bonus applies → 0.55
-    const longAnswer =
-      'Château Margaux 2015 is a First Growth Bordeaux wine from the Margaux appellation. ' +
-      'It is a blend of Cabernet Sauvignon and Merlot. I recommend this wine highly.';
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, answerContains: ['Margaux', 'missing-keyword'] }),
-      makeExecution({ answer: longAnswer }),
-      undefined,
-    );
-    // base = 0.5, long+wine-term bonus = +0.05 → 0.55
-    expect(r.scores.answerQuality).toBeCloseTo(0.55, 5);
-  });
-
-  it('long answer WITHOUT wine-relevant term does NOT get the bonus', () => {
-    // Answer is long (>100 chars), contains 'unrelated' (matching one keyword),
-    // but has NO wine-relevant term → bonus should NOT apply → base stays at 0.5.
-    const longAnswer = 'This is a very long answer about something completely unrelated '.repeat(3);
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, answerContains: ['unrelated', 'missing-keyword'] }),
-      makeExecution({ answer: longAnswer }),
-      undefined,
-    );
-    // base = 1/2 = 0.5 (one keyword matched, one missed); no wine term → no bonus → 0.5
-    expect(r.scores.answerQuality).toBeCloseTo(0.5, 5);
-  });
-
-  it('trivially short non-refusal answer incurs penalty and emits ANSWER_TOO_SHORT', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ answer: 'yes' }),  // 3 chars < 20
-      undefined,
-    );
-    // base = 1.0, penalty = -0.1 → 0.9
-    expect(r.scores.answerQuality).toBeCloseTo(0.9, 5);
-    const diag = r.diagnostics?.find((d) => d.code === 'ANSWER_TOO_SHORT');
-    expect(diag).toBeDefined();
-    expect(diag?.severity).toBe('warn');
-    expect(diag?.dim).toBe('answerQuality');
-  });
-
-  it('ANSWER_TOO_SHORT diagnostic includes observed and expected fields', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ answer: 'ok' }),
-      undefined,
-    );
-    const diag = r.diagnostics?.find((d) => d.code === 'ANSWER_TOO_SHORT');
-    expect(diag?.observed).toBe('2 chars');
-    expect(diag?.expected).toBe('>= 100 chars');
-  });
-
-  it('trivially short answer for refusalExpected scenario does NOT get penalty', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, refusalExpected: true }),
-      makeExecution({ answer: '죄송합니다. 해당 정보는 없습니다.' }),
-      undefined,
-    );
-    // refusalExpected=true → length signal skipped → no ANSWER_TOO_SHORT
-    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_TOO_SHORT')).toBe(false);
-  });
-
-  it('length signal is NOT applied when judge is present', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ answer: 'ok' }),
-      0.9, // judge present → length signal skipped
-    );
-    // base = 1.0, no keyword constraints, no length penalty (judge present)
-    expect(r.scores.answerQuality).toBe(1);
-    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_TOO_SHORT')).toBe(false);
-  });
-
-  it('adjacent-case: 19 chars (just under ANSWER_TRIVIAL_CHARS=20) → penalty fires', () => {
-    const answer = 'a'.repeat(19);
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ answer }),
-      undefined,
-    );
-    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_TOO_SHORT')).toBe(true);
-  });
-
-  it('adjacent-case: 20 chars (at ANSWER_TRIVIAL_CHARS=20) → no penalty', () => {
-    const answer = 'a'.repeat(20);
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5 }),
-      makeExecution({ answer }),
-      undefined,
-    );
-    expect(r.diagnostics?.some((d) => d.code === 'ANSWER_TOO_SHORT')).toBe(false);
-  });
-});
+// v4: ANSWER_LENGTH_BONUS and ANSWER_TRIVIAL_PENALTY removed entirely.
+// scoreAnswerQuality is now purely contract-based. See scorer.ts removal comment.
+// The 8 tests below were deleted — they tested behavior that no longer exists.
 
 // ─────────────────────────────────────────────────────────────────────
 // TIER_WEIGHTS sum to 1.0 (Fix 3)

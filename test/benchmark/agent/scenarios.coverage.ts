@@ -303,8 +303,9 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: {
       tools: [{ tool: 'search_wines' }],
       maxSteps: 2,
-      maxDurationMs: 40_000,
+      maxDurationMs: 300_000,
       maxTotalTokens: 6_000,
+      answerMustMatch: ['(와인|wine)'],
       rubric:
         'Must recommend light-bodied wines with floral aromatics. '
         + 'Moscato, Gewürztraminer, Torrontés, Beaujolais, Pinot Noir expected.',

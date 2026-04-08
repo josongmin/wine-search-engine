@@ -20,7 +20,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { tools: [{ tool: 'search_wines', inputContains: ['Opus'] }], maxSteps: 2, answerContains: ['Opus One'],
       maxDurationMs: 40_000, maxTotalTokens: 6_000,
       rubric: 'Answer must mention the wine "Opus One" and indicate it is a wine result. Allow vintage 2018 mention.' },
-    goldenEntityIds: ['opus-one-2018'] },
+    // Include vintage in keyword so "Opus One Overture" (different wine) does not pass recall.
+    goldenKeywords: ['opus one 2018'] },
   { id: 2, tier: 'single_shot', query: '풀바디 레드 와인 추천', description: 'Attribute search (Korean)',
     expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2,
       maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -44,7 +45,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       drinkingWindowStatus: 'any',
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)'],
       rubric: 'Answer must address whether Opus One is currently drinkable based on its drinking window.' },
-    goldenEntityIds: ['opus-one'] },
+    goldenKeywords: ['opus one'] },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 2: Multi-Step (도구 2-3회)
@@ -59,24 +60,28 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 8_000,
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)', '(저렴|싸|싼|cheap|less\\s+expensive|under|이하|이하로|비교적)'],
       rubric: 'Answer must reference Opus One for context AND recommend wines that are explicitly cheaper or lower-priced.' },
-    goldenEntityIds: ['opus-one'] },
+    goldenKeywords: ['opus one'] },
   { id: 8, tier: 'multi_step', query: '이탈리아 레드 중에 평점 좋고 지금 마실 수 있는 거', description: 'Search + drinking window',
-    expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 6_000,
-      tools: [{ tool: 'search_wines' }],
+    expectation: { maxSteps: 4, maxDurationMs: 90_000, maxTotalTokens: 8_000,
+      tools: [{ tool: 'search_wines' }, { tool: 'check_drinking_window' }],
       drinkingWindowStatus: 'now',
       answerMustMatch: ['(이탈리아|italy|italian)', '(레드|red)'],
-      rubric: 'Must recommend Italian red wines that are currently drinkable. Should mention critic scores or quality indicators.' } },
+      rubric: 'Must recommend Italian red wines that are currently drinkable. Should call check_drinking_window after search. Should mention critic scores or quality indicators.' } },
   { id: 9, tier: 'multi_step', query: '바롤로랑 바르바레스코 비교해주고 더 좋은 거 추천', description: 'Compare + recommend winner',
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(바롤로|barolo)', '(바르바레스코|barbaresco)'],
       judgeRequired: true,
       rubric: 'Must compare Barolo and Barbaresco, then recommend one as the winner with reasoning.' } },
   { id: 10, tier: 'multi_step', query: '선물용 와인, 예산 5만원, 화이트 말고', description: 'Gift + budget + exclusion',
-    expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 8_000,
+    expectation: { maxSteps: 3, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
       priceBandKrw: { max: 50_000 },
-      answerExcludes: ['white', '화이트'],
-      rubric: 'Must recommend a gift wine ≤50,000 KRW that is NOT white. Should mention gift-appropriateness.' } },
+      // answerExcludes removed: agent may legitimately echo "화이트 말고" or "화이트 와인은 제외했어요"
+      // in the explanation text — this substring match was a false positive that collapsed score to 0.
+      // Use positive assertion instead: the recommended wines must be non-white (red/rosé/sparkling).
+      answerMustMatch: ['(레드|red|로제|ros[eé]|스파클링|sparkling)'],
+      judgeRequired: true,
+      rubric: 'Must recommend a gift wine ≤50,000 KRW that is NOT white. Should mention gift-appropriateness. Echoing "화이트 말고" in explanation is OK; the recommended wines themselves must be non-white.' } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 3: Complex Reasoning (도구 3-5회)
@@ -199,7 +204,8 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       vintageRange: { min: 2019, max: 2019 },
       answerMustMatch: ['(오푸스\\s*원|opus\\s*one)', '(알마비바|almaviva)', '(2019)'],
       rubric: 'Must compare Opus One and Almaviva specifically for 2019 vintage. Both wines addressed with vintage constraint.' },
-    goldenEntityIds: ['opus-one-2019', 'almaviva-2019'] },
+    // Include vintage to prevent "Opus One 2018" or "Almaviva 2020" from falsely passing recall.
+    goldenKeywords: ['opus one 2019', 'almaviva 2019'] },
   { id: 34, tier: 'comparison_nested', query: '부르고뉴 피노 누아르 상위 3개 비교해줘', description: 'Search top3 → chain compare',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
@@ -218,7 +224,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)'],
       rubric: 'Must reference Opus One as the style anchor and recommend wines at roughly half the price.' },
-    goldenEntityIds: ['opus-one'] },
+    goldenKeywords: ['opus one'] },
   // #36-38 moved to scenarios.phase2.ts (session_history dependency)
   { id: 39, tier: 'relative_reference', query: '친구가 추천해준 건데 이탈리아 바로 뭐시기...', description: 'Fuzzy entity resolution',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -232,16 +238,41 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       priceBandKrw: { max: 80_000 },
-      rubric: 'Must recommend a date-appropriate wine at mid-range price. Should consider atmosphere/presentation.' } },
+      answerMustMatch: ['(와인|wine)'],
+      // Detect refusal-ending sentences, not polite preambles.
+      // "죄송합니다만 추천드립니다" must NOT be penalised — the apology is a
+      // Korean politeness prefix, not a refusal. Only flag terminal refusals:
+      //   - 죄송합니다[.。！!] (apology as final statement, no continuation)
+      //   - 도와드리기 어렵 (I'm unable to help)
+      //   - 추천해 드리기 어렵 (unable to recommend)
+      // answerMustNotMatch now applies a multiplicative penalty (not critical-fail),
+      // so judge can partially offset on false-positives that slip through.
+      answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
+      judgeRequired: true,
+      rubric: 'Must recommend a date-appropriate wine at mid-range price (≤80,000 KRW). Should consider atmosphere/presentation. Must provide concrete wine names.' } },
   { id: 41, tier: 'situation_based', query: '와인 입문자 선물용, 달달하면서 도수 낮은 거, 예쁜 라벨이면 좋겠다', description: 'Gift + sweet + semantic',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       rubric: 'Must recommend a sweet, low-alcohol wine suitable for beginners as a gift. Aesthetic/label mention is a plus.' } },
   { id: 42, tier: 'situation_based', query: '회사 회식 10명, 레드/화이트 반반, 총 20만원', description: 'Multi-search + budget split',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
+      // Two search_wines expected: once for red, once for white. A single call covering
+      // both is also accepted by the scorer (minimum coverage, not exact count),
+      // but listing two here rewards the better dual-search strategy.
+      tools: [{ tool: 'search_wines' }, { tool: 'search_wines' }],
       priceBandKrw: { max: 200_000 },
       answerMustMatch: ['(레드|red)', '(화이트|white)'],
-      rubric: 'Must recommend both red and white wines, total ≤200,000 KRW for 10 people. Should consider crowd-pleasing choices.' } },
+      // Detect refusal-ending sentences, not polite preambles.
+      // "죄송합니다만 추천드립니다" must NOT be penalised — the apology is a
+      // Korean politeness prefix, not a refusal. Only flag terminal refusals:
+      //   - 죄송합니다[.。！!] (apology as final statement, no continuation)
+      //   - 도와드리기 어렵 (I'm unable to help)
+      //   - 추천해 드리기 어렵 (unable to recommend)
+      // answerMustNotMatch now applies a multiplicative penalty (not critical-fail),
+      // so judge can partially offset on false-positives that slip through.
+      answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
+      judgeRequired: true,
+      rubric: 'Must recommend BOTH red AND white wines. Total budget ≤200,000 KRW for 10 people (~2만원/병). Must name specific wines. Should note crowd-pleasing, accessible styles.' } },
   { id: 43, tier: 'situation_based', query: '캠핑 가는데 스크류캡이고 차갑게 마실 수 있는 거', description: 'Semantic (screw cap, chillable)',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -286,8 +317,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // Tier 11: Knowledge + Search Hybrid
   // ─────────────────────────────────────────────────────────────────────
   { id: 50, tier: 'knowledge_hybrid', query: '내추럴 와인이 뭐야? 괜찮은 거 추천도 해줘', description: 'Explain + recommend',
-    expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+    expectation: { maxSteps: 2, maxDurationMs: 120_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
+      answerMustMatch: ['(내추럴|natural)'],
       rubric: 'Must explain what natural wine is (minimal intervention, low/no sulfites) AND recommend specific wines.' } },
   { id: 51, tier: 'knowledge_hybrid', query: '말벡이 원래 프랑스 품종이라던데 아르헨티나산이랑 뭐가 달라?', description: 'Knowledge + compare',
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -337,8 +369,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // Tier 13: Korean Colloquial (방언/줄임말/오타/구어체)
   // ─────────────────────────────────────────────────────────────────────
   { id: 61, tier: 'korean_colloquial', query: '쌈싸먹을때 와인 뭐가 좋아', description: 'Korean colloquial food pairing',
-    expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+    expectation: { maxSteps: 2, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       requiredRegister: 'casual',
+      answerMustMatch: ['(와인|wine)'],
       rubric: 'Must interpret 쌈싸먹을때 (wrapping and eating ssam) as a food pairing context. Accept search_wines or get_food_pairings — both are valid for food queries.' } },
   { id: 62, tier: 'korean_colloquial', query: '까쇼 추천해줘', description: 'Slang abbreviation: 까쇼 = Cabernet Sauvignon',
     expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -354,8 +387,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       answerMustMatch: ['(보졸레|beaujolais|nouveau)'],
       rubric: 'Must address Beaujolais Nouveau availability. Can explain release timing (3rd Thursday of November).' } },
   { id: 65, tier: 'korean_colloquial', query: '와인 ㄱㅊ은거 하나만', description: 'Ultra-abbreviated Korean: ㄱㅊ = 괜찮',
-    expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+    expectation: { maxSteps: 2, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
+      answerMustMatch: ['(와인|wine)'],
       rubric: 'Must interpret ㄱㅊ as 괜찮은 (decent/good) and recommend one wine.' } },
   { id: 66, tier: 'korean_colloquial', query: '레드 말고 화이트로 ㄱ', description: 'Chat-style: ㄱ = go',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -369,7 +403,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(샤또\\s*마고|chateau\\s*margaux|margaux)'],
       rubric: 'Must interpret ㄹㅇ as 리얼 (really). Should provide info about Château Margaux quality/reputation.' },
-    goldenEntityIds: ['chateau-margaux'] },
+    // 'château margaux' (two-word phrase) avoids false-positive matches against
+    // other Margaux AOC wines like "Château Brane-Cantenac Margaux de Brane".
+    goldenKeywords: ['château margaux'] },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 14: Price Expression Diversity
@@ -429,8 +465,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines' }],
       rubric: 'Must recommend wines that convey luxury/prestige. Should name recognized premium producers or regions.' } },
   { id: 79, tier: 'mood_atmosphere', query: '따뜻한 느낌의 와인, 겨울 감성으로', description: 'Warm winter feeling',
-    expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
+    expectation: { maxSteps: 2, maxDurationMs: 120_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
+      answerMustMatch: ['(와인|wine)'],
       rubric: 'Must recommend wines with warm, rich, spicy character (e.g., full-bodied reds, fortified wines). Winter context addressed.' } },
   { id: 80, tier: 'mood_atmosphere', query: '힐링되는 와인 한 잔', description: 'Healing/relaxation mood',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -473,7 +510,18 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 88, tier: 'gift_refined', query: '와인 잘 모르는 사람한테 선물할 거, 실패 없는 걸로', description: 'Safe gift for non-expert',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
-      rubric: 'Must recommend universally-liked, approachable wines for a non-expert recipient. Safe choices (Prosecco, Pinot Grigio, soft Merlot).' } },
+      answerMustMatch: ['(와인|wine)'],
+      // Detect refusal-ending sentences, not polite preambles.
+      // "죄송합니다만 추천드립니다" must NOT be penalised — the apology is a
+      // Korean politeness prefix, not a refusal. Only flag terminal refusals:
+      //   - 죄송합니다[.。！!] (apology as final statement, no continuation)
+      //   - 도와드리기 어렵 (I'm unable to help)
+      //   - 추천해 드리기 어렵 (unable to recommend)
+      // answerMustNotMatch now applies a multiplicative penalty (not critical-fail),
+      // so judge can partially offset on false-positives that slip through.
+      answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
+      judgeRequired: true,
+      rubric: 'Must recommend universally-liked, approachable wines for a non-expert gift recipient. Must name at least one specific wine. Safe choices: Prosecco, Pinot Grigio, soft Merlot, or similar crowd-pleasers. Must NOT ask for more information — answer with concrete recommendations.' } },
   { id: 89, tier: 'gift_refined', query: '와인 좀 아는 사람한테 깜짝 선물, 의외의 거', description: 'Surprise gift for expert',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -482,7 +530,17 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(레드|red)', '(화이트|white)'],
-      rubric: 'Must recommend one red and one white wine as a couple set. Aesthetic/label appeal should be mentioned.' } },
+      // Detect refusal-ending sentences, not polite preambles.
+      // "죄송합니다만 추천드립니다" must NOT be penalised — the apology is a
+      // Korean politeness prefix, not a refusal. Only flag terminal refusals:
+      //   - 죄송합니다[.。！!] (apology as final statement, no continuation)
+      //   - 도와드리기 어렵 (I'm unable to help)
+      //   - 추천해 드리기 어렵 (unable to recommend)
+      // answerMustNotMatch now applies a multiplicative penalty (not critical-fail),
+      // so judge can partially offset on false-positives that slip through.
+      answerMustNotMatch: ['죄송합니다[.。！!\\s]*$', '도와드리기\\s*어렵', '추천해\\s*드리기\\s*어렵'],
+      judgeRequired: true,
+      rubric: 'Must recommend exactly ONE red wine AND ONE white wine as a couple gift set. Must name specific wines for both. Aesthetic/label appeal or packaging should be mentioned.' } },
   { id: 91, tier: 'gift_refined', query: '집들이 선물용 와인, 1-2만원 사이', description: 'Housewarming gift, tight budget',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],

@@ -17,7 +17,7 @@ import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
-import type { AgentStep, AgentTerminationReason } from '../../domain/agent/model/agent-step.js';
+import type { AgentStep, AgentToolCallPair, AgentTerminationReason } from '../../domain/agent/model/agent-step.js';
 import { DEFAULT_AGENT_CONFIG } from '../../domain/agent/model/agent-config.js';
 import { StepBudget } from '../../domain/agent/service/step-budget.js';
 import { classifyQueryBudget } from '../../domain/agent/service/adaptive-budget.js';
@@ -65,6 +65,36 @@ interface LlmAction {
   readonly answer?: string;
 }
 
+/**
+ * Extract the first complete JSON object from a string that may contain multiple
+ * concatenated JSON objects. gpt-5.4 series sometimes emits two objects back-to-back:
+ * the valid action object followed by a premature "I have no results" continuation.
+ * JSON.parse throws SyntaxError on the full string, losing the valid action entirely.
+ * This walks character by character tracking brace depth and stops at the closing `}`
+ * of the first top-level object. Falls back to the full string if no object is found.
+ */
+function extractFirstJsonObject(text: string): string {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
+    }
+  }
+  return text; // fallback: no complete object found, let JSON.parse fail naturally
+}
+
 function parseLlmOutput(text: string): LlmAction {
   try {
     const trimmed = text.trim();
@@ -72,7 +102,14 @@ function parseLlmOutput(text: string): LlmAction {
       .replace(/^```[\w-]*\s*\n?/i, '')
       .replace(/\s*```$/i, '')
       .trim();
-    const parsed = JSON.parse(cleaned) as unknown as Record<string, unknown>;
+    // Extract only the first JSON object — gpt-5.4 series occasionally emits two
+    // back-to-back objects which causes JSON.parse to throw and lose the valid action.
+    const firstObject = extractFirstJsonObject(cleaned);
+    const rawParsed: unknown = JSON.parse(firstObject);
+    if (typeof rawParsed !== 'object' || rawParsed === null) {
+      return { thought: text.slice(0, LOG_PREVIEW_CHARS) };
+    }
+    const parsed = rawParsed as Record<string, unknown>;
 
     const thought = typeof parsed['thought'] === 'string' ? parsed['thought'] : '';
 
@@ -82,6 +119,9 @@ function parseLlmOutput(text: string): LlmAction {
 
     // Parallel batch: {"thought":"…","actions":[{tool,input},…]}
     // Validate each entry; silently drop malformed entries.
+    // If the LLM emits input as a string (e.g. {"tool":"search_wines","input":"opus one"})
+    // instead of an object, coerce it to {query: string} so the tool receives the
+    // query intent rather than an empty object that produces empty-query errors.
     const actionsRaw = parsed['actions'];
     if (Array.isArray(actionsRaw) && actionsRaw.length > 0) {
       const validActions = (actionsRaw as unknown[])
@@ -91,7 +131,9 @@ function parseLlmOutput(text: string): LlmAction {
           input:
             typeof a['input'] === 'object' && a['input'] !== null
               ? (a['input'] as Record<string, unknown>)
-              : {},
+              : typeof a['input'] === 'string' && a['input'].length > 0
+                ? { query: a['input'] }
+                : {},
         }))
         .filter((a) => a.tool.length > 0);
       if (validActions.length > 0) {
@@ -105,8 +147,26 @@ function parseLlmOutput(text: string): LlmAction {
       const input =
         typeof action['input'] === 'object' && action['input'] !== null
           ? (action['input'] as Record<string, unknown>)
-          : {};
+          : typeof action['input'] === 'string' && action['input'].length > 0
+            ? { query: action['input'] }
+            : {};
       return { thought, action: { tool: action['tool'], input } };
+    }
+
+    // Bare tool call: LLM emitted {"tool":"search_wines","input":{…}} without wrapping in "action".
+    // Recover by treating the top-level object itself as the action.
+    if (typeof parsed['tool'] === 'string' && parsed['tool'].length > 0) {
+      const bareInput =
+        typeof parsed['input'] === 'object' && parsed['input'] !== null
+          ? (parsed['input'] as Record<string, unknown>)
+          : typeof parsed['input'] === 'string' && (parsed['input'] as string).length > 0
+            ? { query: parsed['input'] as string }
+            : {};
+      log.warn(
+        { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
+        'agent LLM emitted bare tool call (missing action wrapper); recovered',
+      );
+      return { thought, action: { tool: parsed['tool'] as string, input: bareInput } };
     }
 
     // If neither action/actions nor answer, treat the whole text as an answer.
@@ -264,7 +324,10 @@ export class AgentOrchestrator {
 
         // Pre-flight token budget check — prevent unnecessary LLM calls when
         // the budget is already exhausted. The check uses accumulated totals
-        // from prior steps, so the FIRST step always executes.
+        // from prior steps, so the FIRST step always executes (0 < budget).
+        // Design: pre-flight blocks the NEXT step; post-hoc (L440) is an
+        // insurance break when a single step's output vastly overshoots budget.
+        // Together they guarantee at most one over-budget step executes.
         if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
           log.warn(
             { requestId, totalTokens: totalInputTokens + totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
@@ -302,7 +365,7 @@ export class AgentOrchestrator {
                 role: 'user' as const,
                 content: remainingSteps === 1
                   ? `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.`
-                  : `[BUDGET_WARNING] Only ${remainingSteps} steps remain. If you already have search results, produce your final {"thought":"…","answer":"…"} NOW. Reserve your last step for the answer, not another tool call.`,
+                  : `[BUDGET_WARNING] Only ${remainingSteps} steps remain. Synthesize your current search results into a final {"thought":"…","answer":"…"} NOW — do not call another tool unless you have no results yet.`,
               }]
             : []),
         ];
@@ -377,9 +440,12 @@ export class AgentOrchestrator {
         totalInputTokens += inputTokens;
         totalOutputTokens += outputTokens;
 
-        // Hard token budget cap — prevents resource exhaustion from bloated
-        // context windows. The estimate is rough but sufficient as a guard.
-        if (totalInputTokens + totalOutputTokens > effectiveConfig.maxTotalTokens) {
+        // Post-hoc insurance cap — the pre-flight check (L324) prevents the
+        // NEXT iteration, but if THIS step's output alone overshoots the budget
+        // (e.g. unexpectedly long LLM response), we break immediately rather
+        // than continuing to parse/execute tool calls from an over-budget step.
+        // Uses >= (same as pre-flight) for consistent boundary semantics.
+        if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
           log.warn(
             { requestId, totalTokens: totalInputTokens + totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
             'agent token budget exceeded — terminating',
@@ -391,8 +457,13 @@ export class AgentOrchestrator {
         // Parse LLM output
         const parsed = parseLlmOutput(llmResult.text);
 
-        // Final answer
-        if (parsed.answer !== undefined) {
+        // Final answer — require non-empty string so LLM emitting {"answer":""} does
+        // NOT prematurely terminate the loop before fallback layers can run.
+        // An empty answer would skip Layer 2/3 (which require terminationReason !== 'answer')
+        // and land directly in Layer 4 with a stale terminationReason='answer' from a step
+        // that produced nothing. Treating empty-answer as "no answer yet" lets the loop
+        // continue (or expire gracefully via budget exhaustion → synthesis sentinel).
+        if (typeof parsed.answer === 'string' && parsed.answer.length > 0) {
           steps.push({
             index: steps.length,
             thought: parsed.thought,
@@ -415,13 +486,14 @@ export class AgentOrchestrator {
           // resource exhaustion via Promise.all with 100+ concurrent tool calls.
           if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
             terminationReason = 'error';
+            const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
+            const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
             steps.push({
               index: steps.length,
               thought: parsed.thought,
-              actions: batchCalls.slice(0, MAX_TOOLS_PER_BATCH),
-              observations: [
-                `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`,
-              ],
+              actionPairs: truncatedActions.map((a) => ({ action: a, observation: batchErrorMsg })),
+              actions: truncatedActions,
+              observations: truncatedActions.map(() => batchErrorMsg),
               durationMs: Math.max(0, Date.now() - stepStart),
               tokenCount: { input: inputTokens, output: outputTokens },
             });
@@ -436,16 +508,18 @@ export class AgentOrchestrator {
               terminationReason = 'error';
               break;
             }
-            steps.push({
-              index: steps.length,
-              thought: parsed.thought,
-              actions: batchCalls,
-              observations: [
-                `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`,
-              ],
-              durationMs: Math.max(0, Date.now() - stepStart),
-              tokenCount: { input: inputTokens, output: outputTokens },
-            });
+            {
+              const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                actionPairs: batchCalls.map((a) => ({ action: a, observation: unknownToolMsg })),
+                actions: batchCalls,
+                observations: batchCalls.map(() => unknownToolMsg),
+                durationMs: Math.max(0, Date.now() - stepStart),
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+            }
             continue;
           }
 
@@ -475,25 +549,33 @@ export class AgentOrchestrator {
             if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
               terminationReason = 'blocked';
-              steps.push({
-                index: steps.length,
-                thought: parsed.thought,
-                actions: batchCalls,
-                observations: [`Policy blocked: ${batchErr.message}`],
-                durationMs: Math.max(0, Date.now() - stepStart),
-                tokenCount: { input: inputTokens, output: outputTokens },
-              });
+              {
+                const policyMsg = `Policy blocked: ${batchErr.message}`;
+                steps.push({
+                  index: steps.length,
+                  thought: parsed.thought,
+                  actionPairs: batchCalls.map((a) => ({ action: a, observation: policyMsg })),
+                  actions: batchCalls,
+                  observations: batchCalls.map(() => policyMsg),
+                  durationMs: Math.max(0, Date.now() - stepStart),
+                  tokenCount: { input: inputTokens, output: outputTokens },
+                });
+              }
             } else {
               terminationReason = 'error';
             }
             break;
           }
 
+          const batchPairs: AgentToolCallPair[] = [];
           const observations: string[] = [];
-          for (const result of batchResults) {
-            observations.push(
-              truncateObservation(result.observation, this.config.maxContextChars),
-            );
+          for (let bi = 0; bi < batchResults.length; bi++) {
+            const result = batchResults[bi];
+            if (result === undefined) continue;
+            const obs = truncateObservation(result.observation, this.config.maxContextChars);
+            observations.push(obs);
+            const call = batchCalls[bi];
+            if (call !== undefined) batchPairs.push({ action: call, observation: obs });
             if (
               result.rawResult !== null &&
               typeof result.rawResult === 'object' &&
@@ -507,6 +589,7 @@ export class AgentOrchestrator {
           steps.push({
             index: steps.length,
             thought: parsed.thought,
+            actionPairs: batchPairs,
             actions: batchCalls,
             observations,
             durationMs: Math.max(0, Date.now() - stepStart),
@@ -693,6 +776,12 @@ export class AgentOrchestrator {
               maxOutputTokens,
               abortSignal: synthAbort.signal,
             });
+            // Accumulate synthesis tokens into the overall run totals so the
+            // final response reports accurate token usage (char-based estimate,
+            // same method as the main loop at lines 413-416).
+            const synthInputChars = synthMessages.reduce((sum, m) => sum + m.content.length, 0);
+            totalInputTokens += Math.ceil(synthInputChars / CHARS_PER_TOKEN_ESTIMATE);
+            totalOutputTokens += Math.ceil(synthResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
             const parsedSynth = parseLlmOutput(synthResult.text);
             // If the synthesis LLM still returns a tool call despite the sentinel
             // instruction, treat it as failure (return undefined). Continuing
@@ -702,7 +791,13 @@ export class AgentOrchestrator {
               log.warn({ requestId }, 'synthesis LLM returned tool call — ignoring, falling to next layer');
               return undefined;
             }
-            return parsedSynth.answer && parsedSynth.answer.trim().length > 0
+            // Reject JSON-shell answers like "{}", "[]", or whitespace-only strings
+            // that the LLM may emit when confused by the synthesis sentinel.
+            // A real answer must have meaningful text content (>10 chars) and must
+            // not look like a bare JSON object/array wrapper.
+            const candidate = parsedSynth.answer?.trim() ?? '';
+            const isShell = /^[\{\[\s]*[\}\]]*$/.test(candidate);
+            return candidate.length > 10 && !isShell
               ? parsedSynth.answer
               : undefined;
           } finally {

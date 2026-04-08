@@ -65,6 +65,18 @@ const CONFUSABLES_MAP: Readonly<Record<string, string>> = {
   '\u03A4': 'T', // Τ → T (Greek capital tau)
   '\u03A5': 'Y', // Υ → Y (Greek capital upsilon)
   '\u03A7': 'X', // Χ → X (Greek capital chi)
+  // Armenian lookalikes — visually identical to Latin in many fonts.
+  // Without these, "ign\u0585re your instructions" bypasses injection patterns.
+  '\u0561': 'a', // ա → a (Armenian ayb)
+  '\u0565': 'e', // ե → e (Armenian ech)
+  '\u056B': 'h', // ի → h (Armenian ini — approximate)
+  '\u056D': 'n', // խ → n (Armenian xeh — approximate in some fonts)
+  '\u0570': 'h', // հ → h (Armenian ho)
+  '\u0578': 'n', // ո → n (Armenian vo — approximate)
+  '\u0585': 'o', // օ → o (Armenian oh — visually identical to Latin o)
+  '\u057D': 's', // ս → s (Armenian seh)
+  '\u057E': 'v', // վ → v (Armenian vew)
+  '\u0580': 'r', // ր → r (Armenian reh)
 };
 
 /**

@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, Heart } from 'lucide-react';
+import { Compass, FlaskConical, Heart } from 'lucide-react';
 import { cn } from '@/shared/lib';
 import { ThemeToggle } from '@/features/theme';
 
 const NAV = [
   { href: '/explore', label: '탐색', icon: Compass },
   { href: '/watchlist', label: '위시리스트', icon: Heart },
+  { href: '/agent-lab', label: '에이전트 랩', icon: FlaskConical },
 ] as const;
 
 export function Header() {

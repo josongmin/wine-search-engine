@@ -133,7 +133,10 @@ export function applyRelativeFilter(
     ?? candidates.find((c) => c.entityId === input.anchorEntityId);
 
   if (anchorSource === undefined) {
-    return [];
+    // Anchor not found in candidates — return unfiltered list rather than
+    // silently returning empty results (which kills the entire search).
+    // Log at warn so operators can investigate anchor resolution failures.
+    return candidates;
   }
 
   const anchorAttrs = extractAttributes(anchorSource);

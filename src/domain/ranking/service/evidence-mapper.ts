@@ -2,13 +2,14 @@ import type { EvidenceItem, EvidenceStrength } from '../../shared/types/index.js
 import type { ComponentScores } from '../model/ranked-result.js';
 
 /**
- * Threshold above which a signal contribution is considered "high" strength.
+ * Evidence strength classification thresholds.
+ * Empirically calibrated from typical signal distributions across query classes:
+ *   >= 0.3 → "high" — signal dominates the ranking decision (e.g. exact entity match)
+ *   >= 0.1 → "medium" — signal contributes meaningfully but not decisively
+ *   <  0.1 → "low" — signal is background noise or tiebreaker
+ * These align with RFC-000 §9.3 directional magnitude buckets.
  */
 const HIGH_THRESHOLD = 0.3;
-
-/**
- * Threshold above which a signal contribution is considered "medium" strength.
- */
 const MEDIUM_THRESHOLD = 0.1;
 
 /**

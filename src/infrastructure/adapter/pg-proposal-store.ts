@@ -45,31 +45,80 @@ interface ThresholdProposalRow {
   updated_at: Date;
 }
 
+/** Narrow unknown to Record for JSONB field access (Rule 11). */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+/** Runtime guard for AliasProposalEvidence JSONB (Rule 11: never cast JSONB directly). */
+function toAliasProposalEvidence(raw: unknown): AliasProposalEvidence {
+  if (
+    isRecord(raw) &&
+    typeof raw['queryCount'] === 'number' &&
+    typeof raw['clickThroughRate'] === 'number' &&
+    typeof raw['sessionSuccessRate'] === 'number'
+  ) {
+    return {
+      queryCount: raw['queryCount'],
+      clickThroughRate: raw['clickThroughRate'],
+      sessionSuccessRate: raw['sessionSuccessRate'],
+    };
+  }
+  // Fallback: return safe defaults so the store doesn't crash on legacy/corrupted rows.
+  return { queryCount: 0, clickThroughRate: 0, sessionSuccessRate: 0 };
+}
+
 function rowToAliasProposal(row: AliasProposalRow): AliasProposal {
   return {
     proposalId: row.proposal_id,
     surfaceForm: row.surface_form,
     targetEntityId: createEntityId(row.target_entity_id),
     proposedType: toProposedAliasType(row.proposed_type),
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full AliasProposalEvidence Zod validation deferred
-    evidence: row.evidence as AliasProposalEvidence,
+    evidence: toAliasProposalEvidence(row.evidence),
     confidence: row.confidence,
     status: toAliasProposalStatus(row.status),
     createdAt: row.created_at,
   };
 }
 
+/** Runtime guard for ThresholdSet JSONB (Rule 11: never cast JSONB directly). */
+function toThresholdSet(raw: unknown): ThresholdSet {
+  if (
+    isRecord(raw) &&
+    typeof raw['tResolve'] === 'number' &&
+    typeof raw['tGap'] === 'number' &&
+    typeof raw['tFail'] === 'number'
+  ) {
+    return { tResolve: raw['tResolve'], tGap: raw['tGap'], tFail: raw['tFail'] };
+  }
+  return { tResolve: 0, tGap: 0, tFail: 0 };
+}
+
+/** Runtime guard for ThresholdProposalEvidence JSONB (Rule 11). */
+function toThresholdProposalEvidence(raw: unknown): ThresholdProposalEvidence {
+  if (
+    isRecord(raw) &&
+    typeof raw['evalCaseCount'] === 'number' &&
+    typeof raw['utilityBefore'] === 'number' &&
+    typeof raw['utilityAfter'] === 'number'
+  ) {
+    return {
+      evalCaseCount: raw['evalCaseCount'],
+      utilityBefore: raw['utilityBefore'],
+      utilityAfter: raw['utilityAfter'],
+    };
+  }
+  return { evalCaseCount: 0, utilityBefore: 0, utilityAfter: 0 };
+}
+
 function rowToThresholdProposal(row: ThresholdProposalRow): ThresholdProposal {
   return {
     proposalId: row.proposal_id,
     queryClass: isQueryClass(row.query_class) ? row.query_class : 'unknown',
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full ThresholdSet Zod validation deferred
-    proposedThresholds: row.proposed_thresholds as ThresholdSet,
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full ThresholdSet Zod validation deferred
-    currentThresholds: row.current_thresholds as ThresholdSet,
+    proposedThresholds: toThresholdSet(row.proposed_thresholds),
+    currentThresholds: toThresholdSet(row.current_thresholds),
     expectedUtilityDelta: row.expected_utility_delta,
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full ThresholdProposalEvidence Zod validation deferred
-    evidence: row.evidence as ThresholdProposalEvidence,
+    evidence: toThresholdProposalEvidence(row.evidence),
     status: toThresholdProposalStatus(row.status),
   };
 }

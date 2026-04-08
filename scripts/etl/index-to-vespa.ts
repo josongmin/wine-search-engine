@@ -250,15 +250,16 @@ function buildCertificationTags(cert: CertificationResult): readonly string[] {
 function deriveStyle(rec: GoldRecord): string {
   const wt = rec.wineType ?? 'red';
   if (wt === 'sparkling') return 'sparkling';
-  if (wt === 'dessert' || rec.sweetness >= 0.6) return 'sweet';
+  if (wt === 'dessert') return 'sweet';
   if (wt === 'fortified') return 'fortified';
   if (wt === 'rosé') return 'rosé';
+  // Only override to 'sweet' for clearly sweet wines (threshold raised from 0.6 to 0.75)
+  if (rec.sweetness >= 0.75) return 'sweet';
   if (wt === 'white') {
     if (rec.body >= 0.6) return 'full white';
     if (rec.body >= 0.35) return 'medium white';
     return 'crisp white';
   }
-  // Red
   if (rec.body >= 0.7) return 'bold red';
   if (rec.body >= 0.4) return 'medium red';
   return 'light red';
@@ -282,12 +283,37 @@ export interface IndexableValidationResult {
   readonly errors: string[];
 }
 
+/** Grape family lookup — mirrors GRAPE_FAMILY_MAP in enrich-rules.py. */
+const GRAPE_FAMILY_MAP: ReadonlyMap<string, string> = new Map([
+  ['Pinot Noir', 'Pinot'], ['Pinot Gris', 'Pinot'], ['Pinot Grigio', 'Pinot'],
+  ['Pinot Blanc', 'Pinot'], ['Pinot Meunier', 'Pinot'],
+  ['Cabernet Sauvignon', 'Cabernet'], ['Cabernet Franc', 'Cabernet'],
+  ['Sauvignon Blanc', 'Sauvignon Blanc'],
+  ['Chenin Blanc', 'Chenin Blanc'],
+  ['Nero d\'Avola', 'Nero d\'Avola'],
+  ['Grüner Veltliner', 'Grüner Veltliner'],
+  ['Touriga Nacional', 'Touriga'],
+  ['Nerello Mascalese', 'Nerello'],
+  ['Petite Sirah', 'Petite Sirah'],
+  ['Petit Verdot', 'Petit Verdot'],
+  ['Syrah', 'Syrah'], ['Shiraz', 'Syrah'],
+  ['Grenache', 'Grenache'], ['Garnacha', 'Grenache'],
+  ['Zinfandel', 'Zinfandel'], ['Primitivo', 'Zinfandel'],
+  ['Mourvèdre', 'Mourvèdre'],
+  ['Muscat', 'Muscat'], ['Moscato', 'Muscat'],
+  ['Sémillon', 'Sémillon'],
+  ['Blaufränkisch', 'Blaufränkisch'],
+]);
+
 /**
  * Derives a grape family shortname from a primary grape variety.
- * e.g. "Cabernet Sauvignon" → "Cabernet", "Pinot Noir" → "Pinot"
+ * Uses {@link GRAPE_FAMILY_MAP} for known multi-word varieties, then
+ * falls back to first-word extraction for unknown grapes.
  */
 function deriveGrapeFamily(grapePrimary: string | null | undefined): string | undefined {
   if (!grapePrimary) return undefined;
+  const mapped = GRAPE_FAMILY_MAP.get(grapePrimary);
+  if (mapped) return mapped;
   return grapePrimary.split(/[\s/,]/)[0] ?? undefined;
 }
 
@@ -457,10 +483,10 @@ export function validateIndexableRecord(rec: IndexableWineRecord): IndexableVali
     errors.push(`popularityScore must be in [0, 1], got ${rec.popularityScore}`);
   }
 
-  // alcoholPct range [5.5, 22]
+  // alcoholPct range (0, 25] — must match parseAlcohol in vivino-to-silver.ts
   if (rec.alcoholPct !== undefined) {
-    if (rec.alcoholPct < 5.5 || rec.alcoholPct > 22) {
-      errors.push(`alcoholPct must be in [5.5, 22], got ${rec.alcoholPct}`);
+    if (rec.alcoholPct <= 0 || rec.alcoholPct > 25) {
+      errors.push(`alcoholPct must be in (0, 25], got ${rec.alcoholPct}`);
     }
   }
 

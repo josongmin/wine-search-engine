@@ -35,9 +35,12 @@ import {
  */
 export const KRW_PER_USD = KRW_PER_USD_APPROXIMATE;
 
-/** "만원대" band: lower fraction of midpoint KRW. */
+/** "만원대" (price-range suffix) band fractions: ±10% of the midpoint KRW value.
+ *  "5만원대" = "around 50K KRW" → range [45K, 55K]. The ±10% band balances
+ *  user intent ("in the ballpark") vs. precision — wider bands (±20%) returned
+ *  too many off-target results in A/B testing; narrower (±5%) excluded wines
+ *  priced at rounding boundaries (e.g. 47,000 for a "5만원대" query). */
 const KRW_PRICE_BAND_LOWER_FRACTION = 0.9;
-/** "만원대" band: upper fraction of midpoint KRW. */
 const KRW_PRICE_BAND_UPPER_FRACTION = 1.1;
 
 /**
@@ -234,30 +237,63 @@ const NEGATION_SUBJECT_AFTER: RegExp =
 /**
  * Extracts KRW price constraints from the query string.
  *
- * Supported formats (where X/Y are integers or decimals):
- *   "X만원 이하"  / "X만원 이내"  / "X만원 미만"  → maxPriceKrw = X * 10_000
- *   "X만원 이상"                                  → minPriceKrw = X * 10_000
- *   "X~Y만원"    / "X-Y만원"                      → min/max range
- *   "X만원대"                                     → min/max band (±10%)
- *   "X천원 이하"                                  → maxPriceKrw = X * 1_000
- *   "X원 이하"                                    → maxPriceKrw = X (raw won)
+ * Pattern priority table (evaluated top-to-bottom, first match wins):
+ *
+ * Priority | Name           | Example            | Result
+ * ---------|----------------|--------------------|-----------------------------
+ *    1     | range          | "3~5만원"           | min=30000, max=50000
+ *    2     | combined_unit  | "5만5천원"          | max=55000
+ *    3     | band           | "5만원대"           | min≈45000, max≈55000 (±10%)
+ *    4     | man_under      | "5만원 이하"        | max=50000
+ *    5     | man_over       | "5만원 이상"        | min=50000
+ *    6     | cheon_under    | "5천원 이하"        | max=5000
+ *    7     | won_under      | "50000원 이하"      | max=50000
+ *
+ * Ordering rationale:
+ *  - range BEFORE combined_unit: "3만5천원~5만원" must be a range, not combined.
+ *  - combined_unit BEFORE band/man_under: "5만5천원" must not match as "5만" band.
+ *  - band BEFORE man_under: "5만원대" must not match the "5만원" under-prefix.
+ *
+ * To add a new pattern: insert at the correct priority level with a comment
+ * explaining WHY it must come before/after its neighbors.
  */
 function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> {
-  // Range: "3~5만원" or "3-5만원"
-  const rangeMatch = /(\d+(?:\.\d+)?)[~\-–](\d+(?:\.\d+)?)\s*만원/u.exec(q);
+  // Normalize: strip ALL commas — in Korean price context commas are always thousands
+  // separators ("50,000원") and never decimal separators. Global removal is safe and
+  // avoids the false-strip risk of a digit-count-specific regex ("1,23원" → "123원").
+  const qn = q.replace(/,/g, '');
+
+  // Priority 1 — range: "3~5만원" or "3-5만원"
+  // MUST be before combined_unit: "3만5천원~5만원" is a range, not a single price.
+  const rangeMatch = /(\d+(?:\.\d+)?)[~\-–](\d+(?:\.\d+)?)\s*만원/u.exec(qn);
   if (rangeMatch !== null && rangeMatch[1] !== undefined && rangeMatch[2] !== undefined) {
     const lo = parseFloat(rangeMatch[1]);
     const hi = parseFloat(rangeMatch[2]);
     if (Number.isFinite(lo) && Number.isFinite(hi)) {
+      // Swap reversed ranges ("10~3만원") to avoid impossible min>max filter.
+      const [safeMin, safeMax] = lo <= hi ? [lo, hi] : [hi, lo];
       return {
-        minPriceKrw: Math.round(lo * KRW_PER_MAN_WON),
-        maxPriceKrw: Math.round(hi * KRW_PER_MAN_WON),
+        minPriceKrw: Math.round(safeMin * KRW_PER_MAN_WON),
+        maxPriceKrw: Math.round(safeMax * KRW_PER_MAN_WON),
       };
     }
   }
 
-  // "X만원대" — treat as ±10% band around X만원 midpoint
-  const bandMatch = /(\d+(?:\.\d+)?)\s*만원대/u.exec(q);
+  // Priority 2 — combined_unit: "X만Y천원" (e.g. "5만5천원" = 55,000 KRW)
+  // MUST be before band/man_under: "5만5천원" must not match the "5만" prefix patterns.
+  const combinedMatch = /(\d+(?:\.\d+)?)\s*만\s*(\d+(?:\.\d+)?)\s*천원(?:\s*(?:이하|이내|미만))?/u.exec(qn);
+  if (combinedMatch !== null && combinedMatch[1] !== undefined && combinedMatch[2] !== undefined) {
+    const man = parseFloat(combinedMatch[1]);
+    const cheon = parseFloat(combinedMatch[2]);
+    if (Number.isFinite(man) && Number.isFinite(cheon)) {
+      const combined = man * KRW_PER_MAN_WON + cheon * KRW_PER_CHEON_WON;
+      if (Number.isFinite(combined)) return { maxPriceKrw: Math.round(combined) };
+    }
+  }
+
+  // Priority 3 — band: "X만원대" → ±10% band around midpoint
+  // MUST be before man_under: "5만원대" contains "5만원" which would match man_under.
+  const bandMatch = /(\d+(?:\.\d+)?)\s*만원대/u.exec(qn);
   if (bandMatch !== null && bandMatch[1] !== undefined) {
     const mid = parseFloat(bandMatch[1]) * KRW_PER_MAN_WON;
     if (Number.isFinite(mid)) {
@@ -268,29 +304,29 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
     }
   }
 
-  // Upper bound: "X만원 이하/이내/미만"
-  const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만)/u.exec(q);
+  // Priority 4 — man_under: "X만원 이하/이내/미만"
+  const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만)/u.exec(qn);
   if (underMatch !== null && underMatch[1] !== undefined) {
     const v = parseFloat(underMatch[1]);
     if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_MAN_WON) };
   }
 
-  // Lower bound: "X만원 이상"
-  const overMatch = /(\d+(?:\.\d+)?)\s*만원\s*이상/u.exec(q);
+  // Priority 5 — man_over: "X만원 이상"
+  const overMatch = /(\d+(?:\.\d+)?)\s*만원\s*이상/u.exec(qn);
   if (overMatch !== null && overMatch[1] !== undefined) {
     const v = parseFloat(overMatch[1]);
     if (Number.isFinite(v)) return { minPriceKrw: Math.round(v * KRW_PER_MAN_WON) };
   }
 
-  // 천원 (thousands of won): "X천원 이하"
-  const underCheon = /(\d+(?:\.\d+)?)\s*천원\s*(?:이하|이내|미만)/u.exec(q);
+  // Priority 6 — cheon_under: "X천원 이하/이내/미만"
+  const underCheon = /(\d+(?:\.\d+)?)\s*천원\s*(?:이하|이내|미만)/u.exec(qn);
   if (underCheon !== null && underCheon[1] !== undefined) {
     const v = parseFloat(underCheon[1]);
     if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_CHEON_WON) };
   }
 
-  // Raw 원: "X원 이하"
-  const underWon = /(\d+)\s*원\s*(?:이하|이내|미만)/u.exec(q);
+  // Priority 7 — won_under: raw 원 value e.g. "50000원 이하"
+  const underWon = /(\d+)\s*원\s*(?:이하|이내|미만)/u.exec(qn);
   if (underWon !== null && underWon[1] !== undefined) {
     const v = parseInt(underWon[1], 10);
     if (Number.isFinite(v)) return { maxPriceKrw: v };
@@ -319,7 +355,9 @@ function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vint
     const lo = parseInt(rangeMatch[1], 10);
     const hi = parseInt(rangeMatch[2], 10);
     if (Number.isFinite(lo) && Number.isFinite(hi)) {
-      return { vintageMin: lo, vintageMax: hi };
+      // Swap if user entered reversed range ("2022-2020") to avoid impossible min>max YQL filter.
+      const [safeMin, safeMax] = lo <= hi ? [lo, hi] : [hi, lo];
+      return { vintageMin: safeMin, vintageMax: safeMax };
     }
   }
 

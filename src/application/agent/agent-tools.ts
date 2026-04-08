@@ -20,6 +20,7 @@ import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
+import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
 
 // ---------------------------------------------------------------------------
 // Schema bounds — named constants so lint catches accidental magic numbers
@@ -42,6 +43,10 @@ const MAX_OBSERVATION_CHARS = 2_000;
 // Input schemas (same as tool-schemas.ts — reusing patterns)
 // ---------------------------------------------------------------------------
 
+/** Minimum vintage year for filter (no wines before this exist). */
+const VINTAGE_FILTER_MIN = 1600;
+/** Maximum vintage year for filter (future vintages not yet produced). */
+const VINTAGE_FILTER_MAX = 2100;
 const SearchInputSchema = z.object({
   query: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
   // .int() implies finite (no NaN/Infinity) per Zod semantics; .min/.max add domain bounds
@@ -53,6 +58,15 @@ const SearchInputSchema = z.object({
   exclude_regions: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
   max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
+  // ── Structured Vespa filters (direct YQL, bypass NL extraction) ──
+  /** Wine type filter: red, white, rosé, sparkling, etc. */
+  wine_type: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
+  /** Country filter (English canonical name). */
+  country: z.string().trim().min(1).max(100).optional(),
+  /** Minimum vintage year (inclusive). */
+  vintage_min: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
+  /** Maximum vintage year (inclusive). */
+  vintage_max: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
 });
 
 const CompareInputSchema = z.object({
@@ -158,8 +172,11 @@ const MIN_CONSTRAINTS_FOR_STAGED_HINT = 3;
  */
 const MAX_ENRICHED_QUERY_LEN = 700;
 
-/** Regex for diversity-intent detection. Korean included → /u flag required (rule 8). */
-const WANTS_DIVERSITY_RE = /(?:diverse|different|다른|다르게|각각|variety)/iu;
+/** Regex for diversity-intent detection. Korean included → /u flag required (rule 8).
+ *  Word boundaries use (?:^|[^\p{L}\p{N}])…(?=$|[^\p{L}\p{N}]) instead of \b so
+ *  Korean and accented Latin chars are matched correctly (rule 8: no \b on non-ASCII). */
+// eslint-disable-next-line no-restricted-syntax -- [^\p{L}\p{N}] is a character class (correct); rule targets bare \p{L}\p{N} AND-sequence outside brackets.
+const WANTS_DIVERSITY_RE = /(?:^|[^\p{L}\p{N}])(?:diverse|different|다른|다르게|각각|variety)(?=$|[^\p{L}\p{N}])/iu;
 
 /**
  * Keyword → label pairs for constraint detection.
@@ -227,6 +244,7 @@ const KOREAN_NEGATION_PREFIX_RE = /(?:비\s+|안\s+쓴\s+|대신\s+)(\S+)/gu;
  * Captures the term following "not", "without", "exclude", "no", "skip", "non-".
  * Uses \p{L}\p{N} character classes instead of \b to handle accented Latin/non-ASCII.
  */
+// eslint-disable-next-line no-restricted-syntax -- [\p{L}\p{N}] is a character class (correct OR), not the bare \p{L}\p{N} AND-sequence the rule targets.
 const ENGLISH_NEGATION_RE = /(?:not|without|exclude|no|skip|non-)\s+([\p{L}\p{N}][^,\n]*?)(?=\s*,|\s+and\s|\s*$)/giu;
 
 function extractNegationTerms(query: string): readonly string[] {
@@ -270,6 +288,12 @@ function appendStructuredQueryClauses(
   if (clauses.length === 0) {
     return baseQuery;
   }
+  // When baseQuery is empty (clauses exceeded MAX_ENRICHED_QUERY_LEN and
+  // base was dropped), omit the leading ", " to avoid malformed queries
+  // like ", not Cabernet, not Merlot".
+  if (baseQuery.length === 0) {
+    return clauses.join(', ');
+  }
   return `${baseQuery}, ${clauses.join(', ')}`;
 }
 
@@ -289,6 +313,50 @@ function buildStructuredSearchClauses(input: {
     clauses.push(`${input.max_price_krw}원 이하`);
   }
   return clauses;
+}
+
+/** Agent mapping version for structured filter provenance. */
+const AGENT_FILTER_VERSION = 'agent_v1';
+
+/**
+ * Converts agent tool structured params to NormalizedConstraints that flow
+ * directly to Vespa as hard YQL filters.
+ *
+ * Price is intentionally NOT a Vespa hard filter — many wines lack price_usd
+ * data, so a hard filter would silently drop valid results. Price filtering
+ * is handled by the agent-level post-filter instead.
+ */
+function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): readonly NormalizedConstraint[] {
+  const filters: NormalizedConstraint[] = [];
+  const v = AGENT_FILTER_VERSION;
+
+  // Exclusions
+  for (const grape of input.exclude_grapes ?? []) {
+    filters.push({ attribute: 'grape_primary', operator: 'exclude', value: grape, source_phrase: grape, confidence: 1.0, mapping_version: v });
+  }
+  for (const region of input.exclude_regions ?? []) {
+    filters.push({ attribute: 'region', operator: 'exclude', value: region, source_phrase: region, confidence: 1.0, mapping_version: v });
+  }
+
+  // Wine type
+  if (input.wine_type !== undefined) {
+    filters.push({ attribute: 'wine_type', operator: '=', value: input.wine_type, source_phrase: input.wine_type, confidence: 1.0, mapping_version: v });
+  }
+
+  // Country
+  if (input.country !== undefined) {
+    filters.push({ attribute: 'country', operator: '=', value: input.country, source_phrase: input.country, confidence: 1.0, mapping_version: v });
+  }
+
+  // Vintage range
+  if (input.vintage_min !== undefined) {
+    filters.push({ attribute: 'vintage_year', operator: '>=', value: input.vintage_min, source_phrase: `${input.vintage_min}년 이후`, confidence: 1.0, mapping_version: v });
+  }
+  if (input.vintage_max !== undefined) {
+    filters.push({ attribute: 'vintage_year', operator: '<=', value: input.vintage_max, source_phrase: `${input.vintage_max}년 이전`, confidence: 1.0, mapping_version: v });
+  }
+
+  return filters;
 }
 
 function collectExcludedTerms(input: {
@@ -364,6 +432,21 @@ export async function executeAgentToolsBatch(
   );
 }
 
+/**
+ * Strip null values from LLM tool inputs before Zod validation.
+ * LLMs routinely emit {"max_price_krw": null} for optional fields they don't
+ * intend to set. Zod's .optional() accepts undefined but rejects null, causing
+ * "Expected number, received null" parse failures. Stripping nulls here lets
+ * the schema stay strict (no .nullable()) while tolerating LLM output quirks.
+ */
+function stripNulls(input: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (v !== null) result[k] = v;
+  }
+  return result;
+}
+
 async function executeAgentToolInner(
   toolName: string,
   input: Record<string, unknown>,
@@ -372,7 +455,7 @@ async function executeAgentToolInner(
 ): Promise<AgentToolResult> {
   switch (toolName) {
     case 'search_wines': {
-      const parseResult = SearchInputSchema.safeParse(input);
+      const parseResult = SearchInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
         return { observation: `Invalid input for search_wines: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
@@ -380,18 +463,36 @@ async function executeAgentToolInner(
 
       // Enrich query with structured exclusion/price params so the existing
       // search pipeline (which understands natural language) applies them.
-      let enrichedQuery = appendStructuredQueryClauses(parsed.query, buildStructuredSearchClauses(parsed));
+      // Truncate the BASE query before appending clauses so that structured
+      // clauses (exclusions, price) are never silently truncated mid-token.
+      // Slicing the enriched string after appending can cut e.g. "not Cabern"
+      // (malformed exclusion) — truncating base-first guarantees clauses intact.
+      const clauses = buildStructuredSearchClauses(parsed);
+      const clausesStr = clauses.length > 0 ? `, ${clauses.join(', ')}` : '';
+      // Truncate BASE query so that the full enriched string never exceeds the limit.
+      // `Math.max(0, ...)` prevents negative slice when clauses alone exceed the limit;
+      // in that extreme case the base query is dropped and only clauses are kept (still
+      // bounded because appendStructuredQueryClauses just concatenates).
+      const maxBaseLen = Math.max(0, MAX_ENRICHED_QUERY_LEN - clausesStr.length);
+      const baseQueryCapped = parsed.query.slice(0, maxBaseLen);
+      // Hard clamp on the final string — handles the edge case where clauses
+      // themselves exceed MAX_ENRICHED_QUERY_LEN (very many exclusions).
+      const enrichedRaw = appendStructuredQueryClauses(baseQueryCapped, clauses);
+      const enrichedQuery = enrichedRaw.length > MAX_ENRICHED_QUERY_LEN
+        ? enrichedRaw.slice(0, MAX_ENRICHED_QUERY_LEN)
+        : enrichedRaw;
 
-      if (enrichedQuery.length > MAX_ENRICHED_QUERY_LEN) {
-        enrichedQuery = enrichedQuery.slice(0, MAX_ENRICHED_QUERY_LEN);
-      }
+      // Build structured hard constraints from agent params (price, exclusions)
+      // so they flow directly to Vespa as YQL filters.
+      const structuredFilters = buildStructuredFilters(parsed);
 
-      const response = await deps.searchUseCase.execute(
+      let response = await deps.searchUseCase.execute(
         {
           query: enrichedQuery,
           ...(parsed.retrieval_mode !== undefined
             ? { options: { mode: parsed.retrieval_mode, explain: false, clarification: false } }
             : {}),
+          ...(structuredFilters.length > 0 ? { filters: structuredFilters } : {}),
         },
         requestId,
       );
@@ -437,9 +538,17 @@ async function executeAgentToolInner(
         if (filtered.length < response.results.length) {
           const filteredResponse = { ...response, results: filtered } as typeof response;
           if (filtered.length === 0) {
+            // All results matched the negation filter — return the unfiltered results with
+            // a strong instruction to pick non-matching wines. This prevents the agent from
+            // giving up with "찾을 수 없었습니다" when the index has relevant wines.
+            // The agent MUST still exclude the negated items from its final recommendation.
             return {
-              observation: `검색 결과가 없습니다 (${response.results.length}개가 제외 조건과 일치). 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
-              rawResult: filteredResponse,
+              observation:
+                `[NEGATION_FALLBACK: All ${response.results.length} result(s) matched excluded terms (${negTerms.join(', ')}). `
+                + `Showing unfiltered results — YOU MUST skip any wine whose grape/region matches the excluded terms and recommend only the non-matching ones. `
+                + `If all wines match, tell the user and suggest broadening.]\n`
+                + summarizeSearchResults(response, wantsDiversity),
+              rawResult: response,
             };
           }
           return {
@@ -448,6 +557,27 @@ async function executeAgentToolInner(
               + `\n[Excluded ${response.results.length - filtered.length} result(s) matching negation terms: ${negTerms.join(', ')}]`,
             rawResult: filteredResponse,
           };
+        }
+      }
+
+      // Price post-filter: when agent specified max_price_krw, drop results whose
+      // priceRange exceeds the budget. The search pipeline does not have a native
+      // price filter — max_price_krw is a text hint — so out-of-range results can
+      // slip through. This post-filter gives the agent accurate budget-aware results.
+      if (parsed.max_price_krw !== undefined) {
+        const budgetKrw = parsed.max_price_krw;
+        const priceFiltered = response.results.filter((r) => {
+          const pr = r.entity.priceRange;
+          if (pr === undefined) return true; // no price data → keep (benefit of doubt)
+          const usdMatch = /^\$(\d+(?:\.\d+)?)$/.exec(pr);
+          if (usdMatch === null) return true; // unrecognised format → keep
+          const priceUsd = Number(usdMatch[1]);
+          if (!Number.isFinite(priceUsd)) return true; // guard: keep on parse failure
+          const priceKrw = priceUsd * KRW_PER_USD_APPROXIMATE;
+          return priceKrw <= budgetKrw;
+        });
+        if (priceFiltered.length < response.results.length) {
+          response = { ...response, results: priceFiltered } as typeof response;
         }
       }
 
@@ -474,7 +604,7 @@ async function executeAgentToolInner(
     }
 
     case 'compare_wines': {
-      const parseResult = CompareInputSchema.safeParse(input);
+      const parseResult = CompareInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
         return { observation: `Invalid input for compare_wines: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
@@ -496,7 +626,7 @@ async function executeAgentToolInner(
     }
 
     case 'check_drinking_window': {
-      const parseResult = DrinkingWindowInputSchema.safeParse(input);
+      const parseResult = DrinkingWindowInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
         return { observation: `Invalid input for check_drinking_window: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
@@ -570,7 +700,7 @@ async function executeAgentToolInner(
     }
 
     case 'get_food_pairings': {
-      const parseResult = FoodPairingInputSchema.safeParse(input);
+      const parseResult = FoodPairingInputSchema.safeParse(stripNulls(input));
       if (!parseResult.success) {
         return { observation: `Invalid input for get_food_pairings: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
@@ -703,7 +833,9 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
 }
 
 function summarizeComparison(response: ComparisonSearchResponse): string {
-  const sides = response.entities.map((e) => {
+  // Cap at 2 sides: compare_wines is defined as a 2-wine tool; guard against
+  // unexpected backend responses with more entities to prevent context window bloat.
+  const sides = response.entities.slice(0, 2).map((e) => {
     const top = e.topResult;
     if (top === null) return `${e.subQuery}: no result (status: ${e.resolutionStatus})`;
     const parts = [

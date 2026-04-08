@@ -373,4 +373,37 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
       await app.close();
     }
   });
+
+  it('returns benchmark quick scenarios when enableAgentBenchmarkUi is true', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      enableAgentBenchmarkUi: true,
+    });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/v1/agent/benchmark-scenarios' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body) as { scenarios: Array<{ id: number; profile: string }> };
+      expect(body.scenarios).toHaveLength(20);
+      expect(body.scenarios[0]?.profile).toBe('quick');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns 404 for benchmark scenarios when enableAgentBenchmarkUi is false', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      enableAgentBenchmarkUi: false,
+    });
+    try {
+      const res = await app.inject({ method: 'GET', url: '/v1/agent/benchmark-scenarios' });
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.body) as { error?: { code?: string } };
+      expect(body.error?.code).toBe('NOT_FOUND');
+    } finally {
+      await app.close();
+    }
+  });
 });

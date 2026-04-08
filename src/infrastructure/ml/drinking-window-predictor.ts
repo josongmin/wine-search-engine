@@ -321,7 +321,11 @@ export class DrinkingWindowPredictor {
       if (first === undefined || first.data[0] === undefined) {
         throw new Error('DrinkingWindowPredictor ONNX output was empty.');
       }
-      return first.data[0];
+      const value = first.data[0];
+      if (!Number.isFinite(value)) {
+        throw new Error(`DrinkingWindowPredictor ONNX output is not finite: ${String(value)}`);
+      }
+      return value;
     };
 
     const [startOffset, endOffset] = await Promise.all([

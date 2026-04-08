@@ -1,5 +1,6 @@
 import type { HttpRouteContract } from './route-contracts.js';
 import { AgentRouteContract } from './agent.route.js';
+import { AgentBenchmarkScenariosRouteContract } from './agent-benchmark-scenarios.route.js';
 import {
   BatchSearchRouteContract,
   ClaudeToolsExecuteRouteContract,
@@ -54,6 +55,7 @@ export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContrac
   { method: 'POST', url: '/v2/search/hybrid', contract: HybridV2RouteContract },
   { method: 'POST', url: '/v2/search/interpret', contract: InterpretV2RouteContract },
   { method: 'POST', url: '/v1/agent', contract: AgentRouteContract },
+  { method: 'GET', url: '/v1/agent/benchmark-scenarios', contract: AgentBenchmarkScenariosRouteContract },
 ] as const;
 
 function compareContracts(

@@ -1,5 +1,5 @@
 /**
- * Agent benchmark scenario definition (SOTA++ scoring contract v2).
+ * Agent benchmark scenario definition (SOTA++ scoring contract v3).
  *
  * Each scenario defines:
  *   - A user query
@@ -9,6 +9,12 @@
  *   - Adversarial expectations (must NOT call tools, expected block)
  *   - Grounding / fact-check / register / hallucination guards
  *   - Per-scenario dimension weight overrides
+ *
+ * v3 breaking change: `goldenEntityIds` removed — the field used slug-style IDs
+ * (e.g. "opus-one-2018") but the real Vespa corpus stores vivino-hash IDs
+ * (e.g. "vivino-36f895cf2938f29b"), making substring matching permanently 0%.
+ * Replaced by `goldenKeywords`: canonical-label fragments that DO appear verbatim
+ * in observation strings (e.g. "opus one", "château margaux").
  */
 
 export type ScenarioTier =
@@ -109,7 +115,20 @@ export interface ScenarioExpectation {
   readonly answerExcludes?: readonly string[];
   /** Regex patterns that ALL must match the answer. */
   readonly answerMustMatch?: readonly string[];
-  /** Regex patterns that MUST NOT match the answer. CRITICAL fail on hit. */
+  /**
+   * Regex patterns that MUST NOT match the answer.
+   * Each hit applies a multiplicative penalty (PENALTY_MUST_NOT_MATCH = 0.20)
+   * to answerQuality. NOT a critical-fail — judge scoring still runs and can
+   * partially offset the penalty.
+   *
+   * Pattern authoring rules (SOTA++ v3):
+   *  1. Anchor refusal patterns to sentence endings: `죄송합니다[.！\s]*$`
+   *     NOT bare substrings like `죄송합니다` (matches polite preambles).
+   *  2. Use specific verb forms, not bare nouns: `도와드리기\s*어렵`
+   *     NOT `어렵` (too broad).
+   *  3. Prefer `answerExcludes` for exact literal strings that must never appear.
+   *  4. Do NOT use `\b` — it is ASCII-only and breaks on Korean/accented text.
+   */
   readonly answerMustNotMatch?: readonly string[];
   /**
    * Free-form rubric for the LLM-as-judge dimension. The rubric is evaluated
@@ -180,12 +199,19 @@ export interface AgentBenchmarkScenario {
   readonly description: string;
   readonly expectation: ScenarioExpectation;
   /**
-   * Entity IDs that MUST appear in search results for the scenario to be
-   * considered correctly retrieved. Used to compute RAGAS contextRecall:
-   * |retrieved_entity_ids ∩ goldenEntityIds| / |goldenEntityIds|.
+   * Canonical-label keywords that MUST appear in agent observations for the
+   * scenario to be considered correctly retrieved. Used to compute RAGAS
+   * contextRecall: |matched_keywords ∩ observations| / |goldenKeywords|.
+   *
+   * These are lowercase canonical-label fragments that appear verbatim in the
+   * observation strings produced by summarizeSearchResults() — e.g. "opus one",
+   * "château margaux". Case-insensitive, NFKC-normalized matching.
+   *
+   * Replaces the v2 `goldenEntityIds` field which used slug-style IDs that
+   * never appeared in the actual Vespa corpus (corpus uses vivino-hash IDs).
    * When absent, contextRecall is null (excluded from geo-mean).
    */
-  readonly goldenEntityIds?: readonly string[];
+  readonly goldenKeywords?: readonly string[];
   /** Severity tag for triage / dashboard weighting. */
   readonly severity?: Severity;
   /** Skip this scenario (e.g., requires Phase 2 features). */

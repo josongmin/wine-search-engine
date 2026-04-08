@@ -85,7 +85,7 @@ const HealthResponseSchema = z.object({
   status: z.enum(['ok', 'degraded']),
   timestamp: z.string(),
   uptime: z.number(),
-});
+}).strict();
 
 const ReadyResponseSchema = z.object({
   ready: z.boolean(),
@@ -93,8 +93,8 @@ const ReadyResponseSchema = z.object({
   checks: z.record(z.object({
     status: z.enum(['up', 'down', 'skipped']),
     required: z.boolean(),
-  })),
-});
+  }).strict()),
+}).strict();
 
 const ClaudeToolsExecuteRequestSchema = z.object({
   tool_name: z.enum([
@@ -104,26 +104,29 @@ const ClaudeToolsExecuteRequestSchema = z.object({
     'compare_wines',
   ]),
   tool_input: z.record(z.unknown()).optional().default({}),
-  request_id: z.string().max(MAX_AUTHENTICATED_SUBJECT_CHARS).regex(/^[a-zA-Z0-9._-]+$/).optional(),
-});
+  // request_id must be non-empty when present; regex already enforces alphanumeric+._-
+  request_id: z.string().min(1).max(MAX_AUTHENTICATED_SUBJECT_CHARS).regex(/^[a-zA-Z0-9._-]+$/).optional(),
+}).strict();
 
 const ClaudeToolsExecuteResponseSchema = z.object({
   tool_name: z.string(),
   tool_result: z.unknown(),
   fallback_applied: z.string().optional(),
-  request_id: z.string(),
-});
+  request_id: z.string().min(1),
+}).strict();
 
 const ClaudeToolsErrorResponseSchema = z.object({
   error: z.string(),
   message: z.string(),
-  request_id: z.string(),
-});
+  request_id: z.string().min(1),
+}).strict();
 
 const ClaudeToolsListResponseSchema = z.object({
-  tools: z.array(z.unknown()),
-  request_id: z.string(),
-});
+  // Bounded to 100 — there are currently 4 tools; this cap prevents unbounded growth
+  // from misconfigured or malicious server responses.
+  tools: z.array(z.unknown()).max(100),
+  request_id: z.string().min(1),
+}).strict();
 
 export const HealthRouteContract = defineRouteContract({
   operationId: 'system.health',

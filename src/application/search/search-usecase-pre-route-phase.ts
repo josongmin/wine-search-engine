@@ -167,6 +167,26 @@ export async function runSearchPreRoutePhase(
     );
   }
 
+  // Merge caller-supplied structured filters (from agent tools / batch API)
+  // into the planner's hard constraints so they flow to Vespa as YQL filters.
+  if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
+    const existingAttrs = new Set(
+      plan.constraints.hard.map((c) => `${c.attribute}:${c.operator}:${String(c.value)}`),
+    );
+    const deduped = ctx.request.filters.filter(
+      (f) => !existingAttrs.has(`${f.attribute}:${f.operator}:${String(f.value)}`),
+    );
+    if (deduped.length > 0) {
+      plan = {
+        ...plan,
+        constraints: {
+          ...plan.constraints,
+          hard: [...plan.constraints.hard, ...deduped],
+        },
+      };
+    }
+  }
+
   logSearchEvent({
     runtime_correlation_ref: ctx.requestId,
     query_observability: planToObservabilitySlice(ctx.requestId, plan, compiled),

@@ -94,6 +94,10 @@ interface ScoredEntry {
   readonly grapePrimaryEnc?: number | undefined;
   readonly regionEnc?: number | undefined;
   readonly countryEnc?: number | undefined;
+
+  // Price data for agent/response surface
+  readonly priceBand?: string | undefined;
+  readonly priceUsd?: number | undefined;
 }
 
 function unique(values: readonly string[]): readonly string[] {
@@ -445,6 +449,8 @@ export class Ranker {
         ...(candidate.retrievalProvenance !== undefined
           ? { retrievalProvenance: candidate.retrievalProvenance }
           : {}),
+        ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
+        ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
         matchedConstraints: constraintState.matchedConstraints,
         unmetConstraints: constraintState.unmetConstraints,
         inferredConstraints: constraintState.inferredConstraints,
@@ -622,8 +628,10 @@ export class Ranker {
         ...(entry.sweetness !== undefined ? { sweetness: entry.sweetness } : {}),
         ...(entry.criticScoreNormalized !== undefined
           ? {
+              // Clamp locally: upstream signal-computer normalizes to [0,1] via clamp01(),
+              // but a mutation or NaN upstream could leak >1.0, producing scores >100.
               avgCriticProxyScore: Math.round(
-                CRITIC_PROXY_SCORE_DISPLAY_BASE + entry.criticScoreNormalized * CRITIC_PROXY_SCORE_DISPLAY_SPAN,
+                CRITIC_PROXY_SCORE_DISPLAY_BASE + Math.min(1, Math.max(0, entry.criticScoreNormalized)) * CRITIC_PROXY_SCORE_DISPLAY_SPAN,
               ),
               criticScoreNormalized: entry.criticScoreNormalized,
             }
@@ -631,6 +639,8 @@ export class Ranker {
         ...(entry.grapePrimaryEnc !== undefined ? { grapePrimaryEnc: entry.grapePrimaryEnc } : {}),
         ...(entry.regionEnc !== undefined ? { regionEnc: entry.regionEnc } : {}),
         ...(entry.countryEnc !== undefined ? { countryEnc: entry.countryEnc } : {}),
+        ...(entry.priceBand !== undefined ? { priceBand: entry.priceBand } : {}),
+        ...(entry.priceUsd !== undefined ? { priceUsd: entry.priceUsd } : {}),
       };
     });
 
@@ -766,7 +776,9 @@ export class Ranker {
     // a blended top-K score — producing rank inversions across the boundary.
     // Re-sorting fixes this and applies the same NaN-safe tie-break as the
     // primary sort.
-    const combined = [...rerankedTopK, ...rest];
+    // Use .concat() instead of spread — rest can be thousands of entries and
+    // spread pushes all elements onto the call stack (crashes at ~65K; Rule 9).
+    const combined = rerankedTopK.concat(rest);
     combined.sort((a, b) => {
       const aFinite = Number.isFinite(a.finalScore);
       const bFinite = Number.isFinite(b.finalScore);

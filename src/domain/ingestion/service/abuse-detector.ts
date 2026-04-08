@@ -35,6 +35,8 @@ const SEO_SPAM_REASON_ENTITY_PREVIEW_COUNT = 5;
 const SEO_SPAM_TITLE_CHAR_THRESHOLD = 200;
 /** Severity uses `high` when entity references exceed this count. */
 const SEO_SPAM_HIGH_SEVERITY_MIN_ENTITIES = 3;
+/** Minimum entity name length to consider for SEO spam matching. */
+const SEO_SPAM_MIN_ENTITY_LENGTH = 3;
 /** Truncate titles in anomaly reasons for logs/UI. */
 const TITLE_ANOMALY_REASON_SNIPPET_CHARS = 80;
 /** Multiplier vs default limits for mass-registration `high` severity. */
@@ -64,7 +66,14 @@ export class AbuseDetector {
     const matchedEntities: string[] = [];
 
     for (const entity of knownEntities) {
-      if (entity.length > 0 && lowerTitle.includes(entity)) {
+      if (entity.length < SEO_SPAM_MIN_ENTITY_LENGTH) continue;
+
+      const escaped = escapeRegExp(entity);
+      const pattern = new RegExp(
+        `(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`,
+        'u',
+      );
+      if (pattern.test(lowerTitle)) {
         matchedEntities.push(entity);
       }
     }
@@ -176,7 +185,8 @@ export class AbuseDetector {
 function tokenize(text: string): Set<string> {
   const tokens = text
     .toLowerCase()
-    .split(/[\s\-_,;:.()\u005b\u005d{}'"!?/]+/)
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
     .filter((t) => t.length > 0);
   return new Set(tokens);
 }
@@ -197,9 +207,16 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 }
 
 /**
+ * Escapes special regex characters in a string for safe interpolation.
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Truncates a string to a maximum length, appending "..." if truncated.
  */
 function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
-  return str.slice(0, maxLength - 3) + '...';
+  return str.slice(0, Math.max(0, maxLength - 3)) + '...';
 }

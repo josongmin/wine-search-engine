@@ -30,10 +30,10 @@ const PROMOTIONAL_PATTERNS: readonly RegExp[] = [
   // Unicode-aware boundaries replace \b (ASCII-only, silently fails on Korean/accented Latin).
   /\d+%\s*(?:off|할인|세일)/iu,
   /(?:free\s+shipping|무료\s*배송)/iu,
-  /(?<!\p{L}\p{N})(?:limited\s+(?:time|edition|offer))(?!\p{L}\p{N})/iu,
-  /(?<!\p{L}\p{N})(?:best\s+seller)(?!\p{L}\p{N})|(?:^|\s)베스트(?:\s|$)/iu,
-  /(?<!\p{L}\p{N})(?:hot\s+deal)(?!\p{L}\p{N})|(?:^|\s)(?:특가|행사)(?:\s|$)/iu,
-  /(?<!\p{L}\p{N})(?:buy\s+\d+\s+get)(?!\p{L}\p{N})/iu,
+  /(?<![\p{L}\p{N}])(?:limited\s+(?:time|edition|offer))(?![\p{L}\p{N}])/iu,
+  /(?<![\p{L}\p{N}])(?:best\s+seller)(?![\p{L}\p{N}])|(?:^|\s)베스트(?:\s|$)/iu,
+  /(?<![\p{L}\p{N}])(?:hot\s+deal)(?![\p{L}\p{N}])|(?:^|\s)(?:특가|행사)(?:\s|$)/iu,
+  /(?<![\p{L}\p{N}])(?:buy\s+\d+\s+get)(?![\p{L}\p{N}])/iu,
   /[!]{2,}/,
   /★+/u,
   /(?:^|\s)(?:추천|인기)(?:\s|$)/u,
@@ -79,6 +79,11 @@ export function stripNoiseTokens(title: string): NoiseStripResult {
 
   // Collapse resulting multiple spaces and trim
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // If stripping removed everything, keep the original to prevent empty titles
+  if (cleaned.length === 0) {
+    return { cleaned: title.replace(/\s+/g, ' ').trim(), noiseFlags: detectedFlags };
+  }
 
   return { cleaned, noiseFlags: detectedFlags };
 }

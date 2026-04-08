@@ -368,3 +368,85 @@ describe('parallel batch observations count toward synthesis eligibility', () =>
     expect(obsSteps).toHaveLength(2);
   });
 });
+
+// ─── Regression: LLM null fields in tool input ───────────────────────────────
+// Bug: LLMs emit {"max_price_krw": null} for optional fields they don't intend
+// to set. Zod .optional() accepts undefined but rejects null → "Expected number,
+// received null" → tool call fails entirely. stripNulls() pre-processes input.
+
+describe('stripNulls: null optional fields are coerced to absent', () => {
+  const makeNullTestDeps = (): AgentToolDeps => ({
+    searchUseCase: {
+      execute: vi.fn().mockResolvedValue({
+        queryType: 'search',
+        results: [],
+        engineDecision: {
+          decisionStatus: 'resolved',
+          nextAction: 'return_result',
+          route: 'hybrid',
+          decisionConfidence: 0.8,
+          confidenceSemantics: 'calibrated_decision_confidence',
+          decisionTraceRef: 'test',
+          decisionSnapshot: {
+            model_versions: {},
+            index_versions: {},
+            policy_rule_version: '1.0.0',
+            threshold_profile_id: 'default',
+            planner_version: '1.0.0',
+            feature_flags: {},
+          },
+        },
+        meta: { requestId: 'test', queryTimeMs: 1, route: 'hybrid', version: '1.0.0', engine_schema_version: 'search_response_v1' },
+      }),
+    } as never,
+  });
+
+  it('search_wines with null max_price_krw succeeds (not rejected by Zod)', async () => {
+    const deps = makeNullTestDeps();
+    const results = await executeAgentToolsBatch(
+      [{ tool: 'search_wines', input: { query: '이탈리아 레드', max_price_krw: null } }],
+      deps,
+      'null-test',
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0]?.observation).not.toContain('Expected number, received null');
+  });
+
+  it('search_wines with null exclude_grapes succeeds', async () => {
+    const deps = makeNullTestDeps();
+    const results = await executeAgentToolsBatch(
+      [{ tool: 'search_wines', input: { query: '레드 와인', exclude_grapes: null } }],
+      deps,
+      'null-test-2',
+    );
+    expect(results[0]?.observation).not.toContain('Invalid input');
+  });
+});
+
+// ─── Regression: bare tool call recovery ─────────────────────────────────────
+// Bug: LLM occasionally emits {"tool":"search_wines","input":{…}} without the
+// wrapping "action" key. parseLlmOutput fell through to the "treat as answer"
+// branch, producing an answer that was just raw JSON — judge scored 0.
+// Fix: detect top-level "tool" key and recover as a synthetic action.
+// Note: parseLlmOutput is internal to agent-orchestrator, so this regression
+// is validated indirectly via buildStepMessages (which receives the already-
+// parsed step) and the scorer (which checks tool=0% as a failure signal).
+// The fix is documented here for audit trail purposes.
+
+describe('bare tool call shape documentation', () => {
+  it('buildStepMessages handles step produced from bare-tool-call recovery', () => {
+    // If parseLlmOutput correctly recovers {"tool":"search_wines","input":{query:"x"}}
+    // into an action, the step will look like a normal single-tool step.
+    const step: AgentStep = {
+      index: 0,
+      thought: '',
+      action: { tool: 'search_wines', input: { query: 'x' } },
+      observation: 'Found 3 results',
+      durationMs: 50,
+      tokenCount: { input: 5, output: 5 },
+    };
+    const msgs = buildStepMessages([step]);
+    expect(msgs[0]?.role).toBe('assistant');
+    expect(msgs[1]?.content).toContain('[Tool Result]');
+  });
+});

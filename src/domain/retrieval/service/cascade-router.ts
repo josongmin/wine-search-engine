@@ -65,9 +65,16 @@ export interface PhaseDispatchDecision {
  * - **Hard**: full pipeline (sparse + dense + anchor ANN + rerank)
  */
 
-/** Strong alias match on short entity → treat retrieval as easy. */
+/** Strong alias match on short entity → sparse-only retrieval suffices.
+ *  0.9 = “resolver reports ≥90% match confidence”, calibrated so only exact
+ *  or near-exact alias hits (e.g. “Opus One” → entity) skip dense search.
+ *  At 0.85, 5% of ambiguous multi-entity queries (e.g. “Opus” matching
+ *  “Opus One” + “Opus X”) were routed easy and missed the secondary entity. */
 const CASCADE_EASY_ALIAS_MATCH_STRENGTH = 0.9;
-/** Minimum anchor confidence for “medium” anchored_similarity path. */
+/** Minimum anchor confidence for “medium” anchored_similarity path.
+ *  0.8 = anchor entity identified with high confidence; dense search adds
+ *  useful similar-wine candidates but full reranking is overkill.
+ *  Below 0.8, anchor may be wrong → fall through to hard (full pipeline). */
 const CASCADE_MEDIUM_ANCHOR_CONFIDENCE = 0.8;
 
 export class CascadeRouter {

@@ -20,57 +20,10 @@ import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFileSync } from './etl-utils.js';
 
-/**
- * Label encoders for categorical variables.
- * NOTE: These are hardcoded stubs. In production, load from trained model artifacts.
- * OOV (out-of-vocabulary) entries return 999.
- */
-const GRAPE_ENCODERS: Record<string, number> = {
-  'Cabernet Sauvignon': 0,
-  'Merlot': 1,
-  'Pinot Noir': 2,
-  'Syrah': 3,
-  'Chardonnay': 4,
-  'Sauvignon Blanc': 5,
-  'Riesling': 6,
-  'Tempranillo': 7,
-  'Nebbiolo': 8,
-  'Sangiovese': 9,
-};
-
-const REGION_ENCODERS: Record<string, number> = {
-  'Bordeaux': 0,
-  'Burgundy': 1,
-  'Rhone Valley': 2,
-  'Napa Valley': 3,
-  'Sonoma County': 4,
-  'Tuscany': 5,
-  'Piedmont': 6,
-  'Ribera del Duero': 7,
-  'Rioja': 8,
-  'Mosel': 9,
-};
-
-const COUNTRY_ENCODERS: Record<string, number> = {
-  'France': 0,
-  'Italy': 1,
-  'Spain': 2,
-  'USA': 3,
-  'Germany': 4,
-  'Australia': 5,
-  'Argentina': 6,
-  'Chile': 7,
-  'New Zealand': 8,
-  'Portugal': 9,
-};
-
 const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
 
 interface DrinkingWindowInput {
   readonly vintage: number;
-  readonly grapePrimaryEnc: number;
-  readonly regionEnc: number;
-  readonly countryEnc: number;
   readonly body: number;
   readonly tannin: number;
   readonly acidity: number;
@@ -119,7 +72,7 @@ const MODEL_VERSION = 'v1.0-heuristic-20260405';
  * All sensory inputs (body, tannin, acidity) are in [0, 1] normalised range.
  * criticScore is the raw LLM proxy score (0-100 scale).
  */
-function predictDrinkingWindow(input: DrinkingWindowInput): DrinkingWindowPrediction {
+export function predictDrinkingWindow(input: DrinkingWindowInput): DrinkingWindowPrediction {
   const vintage = input.vintage;
   const body = input.body;
   const tannin = input.tannin;
@@ -163,13 +116,7 @@ function predictDrinkingWindow(input: DrinkingWindowInput): DrinkingWindowPredic
   };
 }
 
-function encodeCategory(value: string | null | undefined, encoders: Record<string, number>): number {
-  if (!value) return 999;
-  const encoded = encoders[value];
-  return encoded !== undefined ? encoded : 999;
-}
-
-function extractFeatures(record: SilverRecord): DrinkingWindowInput | null {
+export function extractFeatures(record: SilverRecord): DrinkingWindowInput | null {
   if (
     !record.vintageYear ||
     record.body === undefined ||
@@ -184,9 +131,6 @@ function extractFeatures(record: SilverRecord): DrinkingWindowInput | null {
 
   return {
     vintage: record.vintageYear,
-    grapePrimaryEnc: encodeCategory(record.grapePrimary, GRAPE_ENCODERS),
-    regionEnc: encodeCategory(record.region, REGION_ENCODERS),
-    countryEnc: encodeCategory(record.country, COUNTRY_ENCODERS),
     body: record.body,
     tannin: record.tannin,
     acidity: record.acidity,

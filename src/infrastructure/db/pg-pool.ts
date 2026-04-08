@@ -21,10 +21,15 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
     // forever. statement_timeout aborts long-running queries server-side;
     // idle_in_transaction_session_timeout aborts open transactions left
     // dangling by an application crash.
+    //
+    // Timeout arithmetic (Rule 22):
+    //   statement_timeout  = 10s  (server kills query)
+    //   idle_in_transaction = 10s  (server kills idle txn)
+    //   query_timeout      = 12s  (client-side, 2s buffer above server timeout)
+    // The 2s client buffer ensures the server abort fires first (clean error
+    // code) before the client forcibly kills the socket (opaque error).
     statement_timeout: 10_000,
     idle_in_transaction_session_timeout: 10_000,
-    // Client-side safety net catching network partitions where server-side
-    // timers never fire (the connection vanished but the client still waits).
     query_timeout: 12_000,
   });
   nextPool.on('error', (err) => {

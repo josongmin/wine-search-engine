@@ -109,16 +109,16 @@ export function inferCertificationFromNotes(
   const notes = tastingNotes.toLowerCase();
 
   return {
-    organic: /\borganic\b|\borganisch\b|\bbiologique\b|\b유기농\b/.test(notes),
+    organic: /(?:^|[^\p{L}\p{N}])organic(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])organisch(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])biologique(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])유기농(?=$|[^\p{L}\p{N}])/u.test(notes),
     biodynamic:
-      /\bbiodynamic\b|\bbiodynam\b|\bdemeter\b|\bbiodyvin\b|\b생동력농법\b/.test(
+      /(?:^|[^\p{L}\p{N}])biodynamic(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])biodynam(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])demeter(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])biodyvin(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])생동력농법(?=$|[^\p{L}\p{N}])/u.test(
         notes,
       ),
-    vegan: /\bvegan\b|\bveganfriendly\b|\bno animal products\b|\b비건\b/.test(
+    vegan: /(?:^|[^\p{L}\p{N}])vegan(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])veganfriendly(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])no animal products(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])비건(?=$|[^\p{L}\p{N}])/u.test(
       notes,
     ),
     naturalWine:
-      /\bnatural wine\b|\bnatural ferment\b|\bminimal intervention\b|\bno[\s-]?added\b|\bnatural|\b자연와인\b/.test(
+      /(?:^|[^\p{L}\p{N}])natural wine(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])natural ferment(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])minimal intervention(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])no[\s-]?added(?=$|[^\p{L}\p{N}])|(?:^|[^\p{L}\p{N}])natural|(?:^|[^\p{L}\p{N}])자연와인(?=$|[^\p{L}\p{N}])/u.test(
         notes,
       ),
   };

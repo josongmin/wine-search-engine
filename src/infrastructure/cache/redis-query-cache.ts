@@ -61,12 +61,19 @@ export class RedisQueryCache implements QueryCachePort {
         return undefined;
       }
 
-      // Minimal structural validation — must look like SearchResponseV1.
-      // The pipeline performs schema validation downstream; here we only
-      // need to reject obviously corrupt entries.
+      // Structural validation — must look like SearchResponseV1 (Rule 11/12:
+      // never cast JSONB/JSON.parse directly; validate shape at runtime).
+      // Checks field presence AND types to reject obviously corrupt entries
+      // (e.g. {engineDecision: 123, results: "invalid", meta: null}).
+      const rec = typeof parsed === 'object' && parsed !== null
+        ? parsed as Record<string, unknown>
+        : undefined;
       if (
-        typeof parsed !== 'object' || parsed === null ||
-        !('engineDecision' in parsed) || !('results' in parsed) || !('meta' in parsed)
+        rec === undefined ||
+        !('engineDecision' in rec) || !('results' in rec) || !('meta' in rec) ||
+        typeof rec['engineDecision'] !== 'object' ||
+        !Array.isArray(rec['results']) ||
+        typeof rec['meta'] !== 'object'
       ) {
         log.warn({ key: cacheKey.redisKey, reason: 'shape_mismatch' }, 'query cache poisoned; treating as miss');
         await this.redis.incr(this.statsKeyMisses);
@@ -75,7 +82,7 @@ export class RedisQueryCache implements QueryCachePort {
       }
 
       await this.redis.incr(this.statsKeyHits);
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- structural validation above checks engineDecision, results, meta fields
+      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- structural validation above checks engineDecision (object), results (array), meta (object)
       return parsed as SearchResponseV1;
     } catch (error) {
       // On Redis errors, treat as miss (don't throw)

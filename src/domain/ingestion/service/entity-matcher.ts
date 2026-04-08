@@ -88,15 +88,24 @@ export class EntityMatcher {
 
     const { extracted } = candidate;
 
+    // Pre-fetch producer+label entities once for steps 2 & 3
+    let producerLabelEntities: readonly MatchableEntity[] | undefined;
+    if (extracted.producer !== undefined && extracted.wineLabel !== undefined) {
+      producerLabelEntities = await this.entityRepo.findByProducerAndLabel(
+        extracted.producer,
+        extracted.wineLabel,
+      );
+    }
+
     // Step 2: Producer + Label + Vintage
     if (
       extracted.producer !== undefined &&
       extracted.wineLabel !== undefined &&
-      extracted.vintage !== undefined
+      extracted.vintage !== undefined &&
+      producerLabelEntities !== undefined
     ) {
-      const result = await this.matchByProducerLabelVintage(
-        extracted.producer,
-        extracted.wineLabel,
+      const result = this.matchByProducerLabelVintage(
+        producerLabelEntities,
         extracted.vintage,
         trustProfile,
       );
@@ -104,10 +113,9 @@ export class EntityMatcher {
     }
 
     // Step 3: Producer + Label (without vintage)
-    if (extracted.producer !== undefined && extracted.wineLabel !== undefined) {
-      const result = await this.matchByProducerLabel(
-        extracted.producer,
-        extracted.wineLabel,
+    if (producerLabelEntities !== undefined && producerLabelEntities.length > 0) {
+      const result = this.matchByProducerLabel(
+        producerLabelEntities,
         trustProfile,
       );
       if (result !== null) return result;
@@ -165,15 +173,13 @@ export class EntityMatcher {
   }
 
   /**
-   * Matches by producer + label + vintage.
+   * Matches by producer + label + vintage using pre-fetched entities.
    */
-  private async matchByProducerLabelVintage(
-    producer: string,
-    label: string,
+  private matchByProducerLabelVintage(
+    entities: readonly MatchableEntity[],
     vintage: number,
     trustProfile: SourceTrustProfile,
-  ): Promise<EntityMatchResult | null> {
-    const entities = await this.entityRepo.findByProducerAndLabel(producer, label);
+  ): EntityMatchResult | null {
     const vintageMatches = entities.filter((e) => e.vintage === vintage);
 
     if (vintageMatches.length === 1) {
@@ -205,14 +211,12 @@ export class EntityMatcher {
   }
 
   /**
-   * Matches by producer + label (any vintage).
+   * Matches by producer + label (any vintage) using pre-fetched entities.
    */
-  private async matchByProducerLabel(
-    producer: string,
-    label: string,
+  private matchByProducerLabel(
+    entities: readonly MatchableEntity[],
     trustProfile: SourceTrustProfile,
-  ): Promise<EntityMatchResult | null> {
-    const entities = await this.entityRepo.findByProducerAndLabel(producer, label);
+  ): EntityMatchResult | null {
 
     if (entities.length === 1) {
       const confidence = this.applyTrustModifier(

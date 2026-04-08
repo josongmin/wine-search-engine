@@ -85,11 +85,17 @@ export class OpenAiChatLlm implements ChatLlmPort {
         content: m.content,
       })),
     };
+    // GPT-5.4 series (gpt-5, gpt-5.4, gpt-5.4-mini, gpt-5.4-nano, o-series):
+    //   - temperature: only default (1) supported — omit when caller passes 0
+    //   - token limit: must use max_completion_tokens, not max_tokens
+    // Earlier models (gpt-4o, gpt-4-turbo, gpt-3.5-turbo): standard params.
+    const isGpt5Series = /^(?:gpt-5|o\d)/i.test(model);
     if (request.temperature !== undefined) {
-      body['temperature'] = request.temperature;
+      if (!isGpt5Series) body['temperature'] = request.temperature;
+      // GPT-5 series: temperature param not supported (only default=1 allowed) — omit entirely.
     }
     if (request.maxOutputTokens !== undefined) {
-      body['max_tokens'] = request.maxOutputTokens;
+      body[isGpt5Series ? 'max_completion_tokens' : 'max_tokens'] = request.maxOutputTokens;
     }
     if (request.seed !== undefined) {
       body['seed'] = request.seed;

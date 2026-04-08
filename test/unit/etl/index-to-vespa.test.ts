@@ -132,6 +132,39 @@ describe('taxonomy field ingest contract', () => {
     expect(fields['grape_family']).toBe('Cabernet');
   });
 
+  // ── Round 2 audit regression: grape family map for multi-word varieties ──
+  it('maps "Nero d\'Avola" → "Nero d\'Avola" (multi-word identity mapping)', () => {
+    const record = makeEnrichedRecord({ grapePrimary: "Nero d'Avola" });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.grapeFamily).toBe("Nero d'Avola");
+    expect(fields['grape_family']).toBe("Nero d'Avola");
+  });
+
+  it('maps "Sauvignon Blanc" → "Sauvignon Blanc" (multi-word identity mapping)', () => {
+    const record = makeEnrichedRecord({ grapePrimary: 'Sauvignon Blanc' });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.grapeFamily).toBe('Sauvignon Blanc');
+    expect(fields['grape_family']).toBe('Sauvignon Blanc');
+  });
+
+  it('maps "Shiraz" → "Syrah" (synonym family mapping)', () => {
+    const record = makeEnrichedRecord({ grapePrimary: 'Shiraz' });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+
+    expect(doc.grapeFamily).toBe('Syrah');
+  });
+
+  it('falls back to first word for unknown grape ("Tempranillo Roriz")', () => {
+    const record = makeEnrichedRecord({ grapePrimary: 'Tempranillo Roriz' });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+
+    expect(doc.grapeFamily).toBe('Tempranillo');
+  });
+
   it('omits grape_family when grapePrimary is null', () => {
     const record = makeEnrichedRecord({ grapePrimary: null });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));

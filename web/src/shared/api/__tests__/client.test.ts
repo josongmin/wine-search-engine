@@ -98,6 +98,43 @@ describe('api client', () => {
     });
   });
 
+  describe('agent', () => {
+    it('listBenchmarkScenarios sends GET to /v1/agent/benchmark-scenarios', async () => {
+      mockFetch({ ok: true, status: 200 }, { scenarios: [{ id: 1, tier: 'single_shot', query: 'x', description: 'd', profile: 'quick' }] });
+
+      const result = await api.agent.listBenchmarkScenarios();
+      expect(result.scenarios).toHaveLength(1);
+
+      const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(String(url)).toContain('/v1/agent/benchmark-scenarios');
+      expect(options.method).toBe('GET');
+    });
+
+    it('execute sends POST to /v1/agent with body', async () => {
+      mockFetch(
+        { ok: true, status: 200 },
+        {
+          query_type: 'agent',
+          answer: 'ok',
+          steps: [],
+          meta: {
+            request_id: 'r1',
+            total_duration_ms: 1,
+            tool_call_count: 0,
+            termination_reason: 'answer',
+            fallback_applied: false,
+            total_tokens: { input: 0, output: 0 },
+          },
+        },
+      );
+
+      await api.agent.execute({ query: 'hello' });
+      const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(options.method).toBe('POST');
+      expect(JSON.parse(options.body)).toEqual({ query: 'hello' });
+    });
+  });
+
   describe('watchlist', () => {
     it('delete returns void on 204', async () => {
       mockFetch({ ok: true, status: 204 });

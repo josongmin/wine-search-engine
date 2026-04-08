@@ -5,6 +5,7 @@ import {
   MAX_QUERY_BUDGET_DENSE_CALLS,
   MAX_QUERY_BUDGET_LATENCY_MS,
   MAX_QUERY_BUDGET_RERANK_LIMIT,
+  MAX_SEARCH_RESULTS_PER_RESPONSE,
   MAX_SESSION_ENTITY_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
   MAX_WATCHLIST_ENTITY_ID_CHARS,
@@ -56,7 +57,7 @@ export const BatchSearchRequestItemSchema = z.object({
     .min(1, 'id must be a non-empty string')
     .max(MAX_WATCHLIST_ENTITY_ID_CHARS, `id must not exceed ${String(MAX_WATCHLIST_ENTITY_ID_CHARS)} characters`),
   query: QueryStringSchema,
-  limit: z.number().int().positive().optional(),
+  limit: z.number().int().positive().max(MAX_SEARCH_RESULTS_PER_RESPONSE).optional(),
   retrieval_mode: SearchModeSchema.optional(),
   context: SearchContextSchema.optional(),
   sessionContext: SessionContextSchema.optional(),

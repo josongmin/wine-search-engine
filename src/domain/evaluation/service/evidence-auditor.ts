@@ -64,7 +64,9 @@ export class EvidenceAuditor {
       const totalPositiveContribution = result.evidenceItems.reduce(
         (sum, e) => {
           const contribution = parseFloat(e.contribution);
-          return !isNaN(contribution) && contribution > 0 ? sum + contribution : sum;
+          // isFinite rejects both NaN AND Infinity (parseFloat("1e308") → Infinity
+          // would corrupt the sum and downstream ratio checks).
+          return Number.isFinite(contribution) && contribution > 0 ? sum + contribution : sum;
         },
         0,
       );
@@ -101,8 +103,11 @@ export class EvidenceAuditor {
       // Compute total absolute contribution of evidence
       const totalContribution = result.evidenceItems.reduce(
         (sum, e) => {
-          const contribution = Math.abs(parseFloat(e.contribution));
-          return !isNaN(contribution) ? sum + contribution : sum;
+          const raw = parseFloat(e.contribution);
+          // isFinite rejects NaN AND Infinity — a single Infinity contribution
+          // would make totalContribution Infinity, corrupting the ratio at L115.
+          const contribution = Number.isFinite(raw) ? Math.abs(raw) : 0;
+          return sum + contribution;
         },
         0,
       );

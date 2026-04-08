@@ -238,4 +238,44 @@ describe('executeAgentTool', () => {
     expect(filtered.results).toHaveLength(1);
     expect(filtered.results[0]?.entity.canonicalLabel).toBe('Syrah Reserve');
   });
+
+  it('returns NEGATION_FALLBACK with unfiltered results when all results match negation terms', async () => {
+    // Regression: previously returned "검색 결과가 없습니다" with empty rawResult when
+    // all results matched the exclusion filter. This caused the agent to give up with
+    // "찾을 수 없었습니다" even when relevant wines existed in the index (wrong grape listed).
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Chateau Margaux Cabernet Sauvignon',
+            type: 'wine',
+            grapes: ['Cabernet Sauvignon'],
+          },
+          relevanceScore: 0.9,
+          match: {
+            matchType: 'hybrid',
+            scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 },
+          },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool(
+      'search_wines',
+      { query: 'red wine not Cabernet Sauvignon', exclude_grapes: ['Cabernet Sauvignon'] },
+      deps,
+      'req-123',
+    );
+
+    // Must NOT return empty — returns unfiltered results with NEGATION_FALLBACK instruction.
+    expect(result.observation).toContain('NEGATION_FALLBACK');
+    expect(result.observation).toContain('YOU MUST skip');
+    // rawResult should contain the original (unfiltered) results so agent can find alternatives.
+    const raw = result.rawResult as SearchResponseV1;
+    expect(raw.results).toHaveLength(1);
+  });
 });

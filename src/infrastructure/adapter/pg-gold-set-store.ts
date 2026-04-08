@@ -119,6 +119,8 @@ export class PgGoldSetStore implements GoldSetStore {
 
     const result = await this.pool.query<{ iaa: string | null }>(query, params);
     const iaa = result.rows[0]?.iaa;
-    return iaa != null ? parseFloat(iaa) : 0;
+    if (iaa == null) return 0;
+    const parsed = parseFloat(iaa);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 }

@@ -265,5 +265,17 @@ describe('vivino-to-silver helpers', () => {
       const result = dedup(records);
       expect(result).toHaveLength(2);
     });
+
+    // ── Round 2 audit regression: NaN-safe dedup ──────────────────────────────
+    it('handles invalid scrapedAt dates without dropping records', () => {
+      const records = [
+        { externalId: 'a', vintageYear: 2020, ratingsCount: 10, scrapedAt: 'not-a-date', searchTextEn: 'first' },
+        { externalId: 'a', vintageYear: 2020, ratingsCount: 20, scrapedAt: '2024-06-01', searchTextEn: 'second' },
+      ] as Parameters<typeof dedup>[0];
+      const result = dedup(records);
+      expect(result).toHaveLength(1);
+      // Valid date should win over invalid
+      expect(result[0]!.ratingsCount).toBe(20);
+    });
   });
 });

@@ -9,6 +9,12 @@ const BARE_VOLUME_ASSUME_ML_MIN = 50;
 /** Largest plausible bare-number bottle volume (ml) before rejecting. */
 const BARE_VOLUME_ASSUME_ML_MAX = 5000;
 
+/** Absolute upper bound for unit-bearing volumes (ml). Nebuchadnezzar = 15L; 30L gives margin. */
+const MAX_VOLUME_ML = 30_000;
+
+/** Latest plausible vintage year: current year + 1 (en primeur releases). */
+const MAX_PLAUSIBLE_VINTAGE_YEAR = new Date().getFullYear() + 1;
+
 /**
  * Normalizes a free-text field by trimming, collapsing whitespace,
  * applying Unicode NFC normalization, and optionally stripping accents.
@@ -66,22 +72,30 @@ export function normalizeVolume(raw: string): number | null {
   }
 
   const numericValue = parseFloat(match[1]!);
+  // Guard: "750e308ml" → parseFloat → Infinity; must reject non-finite values
+  // to prevent Infinity propagating through ingestion pipeline.
+  if (!Number.isFinite(numericValue)) return null;
   const unit = match[2]!;
 
+  let ml: number;
   switch (unit) {
     case 'ml':
-      return numericValue;
+      ml = numericValue;
+      break;
     case 'cl':
-      return numericValue * 10;
+      ml = numericValue * 10;
+      break;
     case 'l':
     case 'litre':
     case 'liter':
     case 'litres':
     case 'liters':
-      return numericValue * 1000;
+      ml = numericValue * 1000;
+      break;
     default:
       return null;
   }
+  return ml > 0 && ml <= MAX_VOLUME_ML ? ml : null;
 }
 
 /**
@@ -97,15 +111,17 @@ export function normalizeYear(raw: string): number | null {
   if (trimmed.length === 0) return null;
 
   // Extract first four-digit sequence that looks like a plausible wine vintage
-  const match = trimmed.match(/(?<!\p{L}\p{N})(1[89]\d{2}|20[0-9]{2})(?!\p{L}\p{N})/u);
+  const match = trimmed.match(/(?<![\p{L}\p{N}])(1[89]\d{2}|20[0-9]{2})(?![\p{L}\p{N}])/u);
   if (match === null) {
     // Try without word boundary for cases like "2018년"
     const looseMatch = trimmed.match(/(1[89]\d{2}|20[0-9]{2})/);
     if (looseMatch === null) return null;
-    return parseInt(looseMatch[1]!, 10);
+    const looseYear = parseInt(looseMatch[1]!, 10);
+    return looseYear > MAX_PLAUSIBLE_VINTAGE_YEAR ? null : looseYear;
   }
 
-  return parseInt(match[1]!, 10);
+  const year = parseInt(match[1]!, 10);
+  return year > MAX_PLAUSIBLE_VINTAGE_YEAR ? null : year;
 }
 
 /**

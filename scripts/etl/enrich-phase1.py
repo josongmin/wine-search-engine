@@ -236,7 +236,7 @@ def detect_wine_type(label: str, region: str, grapes: list[str]) -> str:
     g = " ".join(grapes).lower()
     if any(s in t for s in SPARKLING_SIGNALS): return "sparkling"
     if any(s in t for s in FORTIFIED_SIGNALS): return "fortified"
-    if any(s in t for s in ROSE_SIGNALS): return "rose"
+    if any(s in t for s in ROSE_SIGNALS): return "rosé"
     if any(s in t for s in WHITE_SIGNALS): return "white"
     if any(s in g for s in ["chardonnay","riesling","sauvignon blanc","pinot gris",
                               "viognier","chenin blanc","pinot blanc","gewurz"]): return "white"
@@ -324,7 +324,7 @@ REGION_TASTE_BOOST: dict[str, dict[str, float]] = {
 TYPE_DEFAULTS: dict[str, tuple[float,float,float,float]] = {
     "red":        (0.65, 0.60, 0.62, 0.10),
     "white":      (0.48, 0.05, 0.68, 0.12),
-    "rose":       (0.42, 0.18, 0.68, 0.15),
+    "rosé":       (0.42, 0.18, 0.68, 0.15),
     "sparkling":  (0.38, 0.08, 0.78, 0.12),
     "fortified":  (0.85, 0.15, 0.45, 0.60),
 }
@@ -429,7 +429,7 @@ def get_flavors(grapes: list[str], region: str, wine_type: str) -> list[str]:
         defaults = {
             "red":       ["dark fruit", "earth", "tannin", "spice"],
             "white":     ["citrus", "apple", "mineral", "floral"],
-            "rose":      ["strawberry", "peach", "floral", "mineral"],
+            "rosé":      ["strawberry", "peach", "floral", "mineral"],
             "sparkling": ["brioche", "citrus", "mineral", "toast"],
             "fortified": ["dried fruit", "nuts", "caramel", "spice"],
         }
@@ -469,7 +469,7 @@ VARIETAL_PAIRINGS: dict[str, list[str]] = {
 TYPE_PAIRINGS: dict[str, list[str]] = {
     "red":       ["beef", "lamb", "hard cheese", "pasta"],
     "white":     ["seafood", "chicken", "salad", "soft cheese"],
-    "rose":      ["seafood", "salad", "mediterranean", "chicken"],
+    "rosé":      ["seafood", "salad", "mediterranean", "chicken"],
     "sparkling": ["oysters", "caviar", "appetizers", "celebration"],
     "fortified": ["dessert", "chocolate", "nuts", "blue cheese"],
 }
@@ -561,7 +561,7 @@ GRAPE_KO: dict[str, str] = {
 WINE_TYPE_KO: dict[str, str] = {
     "red": "레드 와인",
     "white": "화이트 와인",
-    "rose": "로제 와인",
+    "rosé": "로제 와인",
     "sparkling": "스파클링 와인",
     "fortified": "주정강화 와인",
 }

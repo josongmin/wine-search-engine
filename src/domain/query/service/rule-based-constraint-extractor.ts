@@ -11,9 +11,16 @@ import {
 export const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
 
 const DECIMAL_RADIX = 10;
-/** Rough KRW→USD when user says "만원" without explicit FX (soft banding only). */
+/** Rough KRW→USD factor when user says "만원" without explicit FX context.
+ *  Fixed at 7 for deterministic constraint extraction (not live FX).
+ *  1만원 ≈ $7 at KRW/USD ≈ 1,400 — intentionally rounded for soft banding. */
 const KRW_MANWON_TO_USD_HEURISTIC = 7;
-/** USD thresholds for mapping numeric under-$X hints to price_band. */
+/** USD thresholds for mapping numeric "under $X" hints to price_band labels.
+ *  Derived from Vivino/Wine-Searcher market segmentation (2024):
+ *    budget: ≤$20 (everyday wines, supermarket tier)
+ *    mid:    ≤$50 (restaurant-by-the-glass, enthusiast entry)
+ *    premium:≤$100 (cellar-worthy, boutique producers)
+ *    luxury: >$100 (fine wine, collector market) */
 const PRICE_BAND_BUDGET_MAX_USD = 20;
 const PRICE_BAND_MID_MAX_USD = 50;
 const PRICE_BAND_PREMIUM_MAX_USD = 100;
@@ -119,12 +126,28 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       confidence: 0.7,
       mapping_version: mv,
     });
-  } else if (!priceUnder && /(?:저렴|싼|가성비|입문)/u.test(q)) {
+  } else if (/(?:저렴|싼|입문)/u.test(q) && !priceUnder) {
+    // "저렴/싼/입문" without a numeric price → infer budget band.
+    // Guarded by !priceUnder because a numeric price already carries the intent.
     soft.push({
       attribute: 'price_band',
       operator: '=',
-      value: /가성비/u.test(q) ? 'mid' : 'budget',
-      source_phrase: '저렴/가성비',
+      value: 'budget',
+      source_phrase: '저렴/싼/입문',
+      confidence: 0.7,
+      mapping_version: mv,
+    });
+  }
+
+  // "가성비" (value-for-money) is ALWAYS added as a soft signal, even when a
+  // numeric price constraint is also present. The two intents are orthogonal:
+  // "가성비 10만원 이하" means "best value within 100k", not just "under 100k".
+  if (/가성비/u.test(q)) {
+    soft.push({
+      attribute: 'price_band',
+      operator: '=',
+      value: 'mid',
+      source_phrase: '가성비',
       confidence: 0.7,
       mapping_version: mv,
     });

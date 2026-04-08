@@ -252,7 +252,9 @@ export class SliceEvaluator {
       r.evidenceItems.some((e) => {
         if (e.type !== 'anchor_similarity') return false;
         const parsed = parseFloat(e.contribution);
-        if (Number.isNaN(parsed)) return false;
+        // isFinite rejects NaN AND Infinity — Infinity would always pass the
+        // threshold check, inflating the anchor preservation metric.
+        if (!Number.isFinite(parsed)) return false;
         return parsed >= SliceEvaluator.ANCHOR_PRESERVATION_THRESHOLD;
       }),
     ).length;

@@ -259,3 +259,53 @@ export interface WatchlistListResponse {
   entries: readonly WatchlistEntry[];
   total: number;
 }
+
+// ── Agent (POST /v1/agent) & benchmark lab (GET /v1/agent/benchmark-scenarios) ──
+
+export interface AgentBenchmarkUiScenarioDto {
+  id: number;
+  tier: string;
+  query: string;
+  description: string;
+  profile: 'quick';
+}
+
+export interface AgentBenchmarkScenariosResponse {
+  scenarios: readonly AgentBenchmarkUiScenarioDto[];
+}
+
+export interface AgentToolCallDto {
+  tool: string;
+  input: Record<string, unknown>;
+}
+
+export interface AgentStepDto {
+  index: number;
+  thought: string;
+  action?: AgentToolCallDto;
+  observation?: string;
+  actions?: readonly AgentToolCallDto[];
+  observations?: readonly string[];
+  answer?: string;
+  duration_ms: number;
+  token_count: { input: number; output: number };
+}
+
+export interface AgentExecuteResponse {
+  query_type: 'agent';
+  answer: string;
+  steps: readonly AgentStepDto[];
+  meta: {
+    request_id: string;
+    total_duration_ms: number;
+    tool_call_count: number;
+    termination_reason: string;
+    fallback_applied: boolean;
+    total_tokens: { input: number; output: number };
+  };
+}
+
+export interface AgentExecuteRequest {
+  query: string;
+  options?: { max_steps?: number };
+}

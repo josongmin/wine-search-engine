@@ -338,7 +338,9 @@ function trigramSet(s: string): Set<string> {
   //     because Korean syllables are information-dense and trigrams of 3
   //     Hangul chars give too few overlapping n-grams to detect near-dupes.
   //   - Longer ASCII-dominant: trigrams (n=3) for standard behaviour.
-  const isHangulDominant = countHangulChars(s) > s.length * HANGUL_DOMINANCE_RATIO;
+  // Use non-space length as denominator (mirrors the Jaccard threshold selection
+  // at line 155) so spaces between sorted tokens don't dilute the Hangul ratio.
+  const isHangulDominant = countHangulChars(s) > s.replace(/\s/g, '').length * HANGUL_DOMINANCE_RATIO;
   const isShort = s.length < SHORT_STRING_THRESHOLD; // 10 chars
   const n = (isHangulDominant || isShort) ? 2 : 3;
   for (let i = 0; i <= s.length - n; i++) {

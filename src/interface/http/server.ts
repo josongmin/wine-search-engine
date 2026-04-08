@@ -23,6 +23,7 @@ import { registerClaudeToolsRoute } from './routes/claude-tools.route.js';
 import { registerWatchlistRoute } from './routes/watchlist.route.js';
 import { registerFeedbackRoute } from './routes/feedback.route.js';
 import { registerAgentRoute } from './routes/agent.route.js';
+import { registerAgentBenchmarkScenariosRoute } from './routes/agent-benchmark-scenarios.route.js';
 import { registerOpenApiRoute } from './routes/openapi.route.js';
 import type { HttpServerDeps } from './routes/route-deps.js';
 import { getRequestId, resolveIncomingRequestId } from './request-id.js';
@@ -86,6 +87,11 @@ export interface ServerOptions {
    * @default 30000
    */
   readonly requestTimeout?: number;
+  /**
+   * Expose GET /v1/agent/benchmark-scenarios (quick-profile scenario list for web lab).
+   * When omitted, enabled for non-production NODE_ENV.
+   */
+  readonly enableAgentBenchmarkUi?: boolean;
 }
 
 async function registerCorsSupport(
@@ -234,6 +240,7 @@ export async function createServer(
   // In production: restrict to CORS_ALLOWED_ORIGINS env var.
   // Uses a manual hook instead of @fastify/cors to avoid an extra dependency.
   const nodeEnv = options?.nodeEnv ?? 'development';
+  const enableAgentBenchmarkUi = options?.enableAgentBenchmarkUi ?? nodeEnv !== 'production';
   const allowedOrigins = options?.corsAllowedOrigins ?? '';
   if (options?.enableCors ?? true) {
     await registerCorsSupport(app, { nodeEnv, allowedOrigins });
@@ -350,6 +357,7 @@ export async function createServer(
   if (deps.agentOrchestrator !== undefined) {
     registerAgentRoute(app, { agentOrchestrator: deps.agentOrchestrator });
   }
+  registerAgentBenchmarkScenariosRoute(app, { enabled: enableAgentBenchmarkUi });
   registerOpenApiRoute(app);
 
   // Epic 3: Optional evaluation run at startup (fire-and-forget)

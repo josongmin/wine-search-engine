@@ -311,6 +311,21 @@ describe('StepBudget Korean handling', () => {
     expect(b.recordStep('search_wines', { query: 'Opus One 와인' }).allowed).toBe(true);
     expect(b.recordStep('search_wines', { query: '풀바디 레드' }).allowed).toBe(true);
   });
+
+  it('trigramSet Hangul ratio uses non-space length (regression: space-heavy queries must still use bigrams)', () => {
+    // "가 나 다 라 마 바" normalized+sorted = "가 나 다 라 마 바" (12 chars, 6 spaces, 6 Hangul)
+    // WITH space-inclusive denominator: 6/12 = 0.50, NOT > 0.50 → trigrams (wrong)
+    // WITH non-space denominator: 6/6 = 1.00 > 0.50 → bigrams (correct)
+    // If trigrams are used, Jaccard for near-identical single-syllable queries
+    // would be nearly 0 (few 3-char windows), causing false-allow on duplicates.
+    // Verify: identical query must be blocked regardless of space density.
+    const b = new StepBudget(baseConfig);
+    expect(b.recordStep('search_wines', { query: '가 나 다 라 마 바' }).allowed).toBe(true);
+    // Exact duplicate must always be blocked (exact-key check fires first)
+    const dup = b.recordStep('search_wines', { query: '가 나 다 라 마 바' });
+    expect(dup.allowed).toBe(false);
+    expect(dup.reason).toBe('loop_detected');
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────

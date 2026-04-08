@@ -627,10 +627,12 @@ export function dedup(records: PreSilver[]): PreSilver[] {
     }
 
     // Prefer newer scrape
-    const existingTime = existing.scrapedAt
+    const rawExistingTime = existing.scrapedAt
       ? new Date(existing.scrapedAt).getTime()
       : 0;
-    const newTime = rec.scrapedAt ? new Date(rec.scrapedAt).getTime() : 0;
+    const existingTime = Number.isFinite(rawExistingTime) ? rawExistingTime : 0;
+    const rawNewTime = rec.scrapedAt ? new Date(rec.scrapedAt).getTime() : 0;
+    const newTime = Number.isFinite(rawNewTime) ? rawNewTime : 0;
     if (newTime > existingTime) {
       // Winner = rec; fill SOTA++ gaps from existing
       byKey.set(key, mergeSOTAPlusFields(rec, existing));

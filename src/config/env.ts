@@ -162,7 +162,7 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   /** Must include `/v1` for official API, e.g. `https://api.openai.com/v1` */
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
+  OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-5.4-mini'),
   /**
    * Embedding model for dense retrieval via OpenAI-compatible API.
    * Defaults to text-embedding-3-small — the most cost-effective option.
@@ -205,6 +205,12 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(DEFAULT_AGENT_PER_STEP_TIMEOUT_MS),
+
+  /**
+   * When true, GET /v1/agent/benchmark-scenarios returns the quick-profile scenario list.
+   * When false, that route responds with 404. When unset, defaults to on in non-production.
+   */
+  ENABLE_AGENT_BENCHMARK_UI: z.enum(['true', 'false']).optional(),
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -425,6 +431,17 @@ function buildConfig(parsed: EnvVars) {
       agentTimeoutMs: parsed.AGENT_TIMEOUT_MS,
       perStepTimeoutMs: parsed.AGENT_PER_STEP_TIMEOUT_MS,
     },
+
+    /**
+     * Web / tooling: benchmark scenario catalog (GET /v1/agent/benchmark-scenarios).
+     * Production default off unless ENABLE_AGENT_BENCHMARK_UI=true.
+     */
+    enableAgentBenchmarkUi:
+      parsed.ENABLE_AGENT_BENCHMARK_UI === 'true'
+        ? true
+        : parsed.ENABLE_AGENT_BENCHMARK_UI === 'false'
+          ? false
+          : parsed.NODE_ENV !== 'production',
 
     /** Kill switches for feature flags / circuit breakers. */
     killSwitch: {

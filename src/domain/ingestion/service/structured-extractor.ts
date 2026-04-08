@@ -137,7 +137,7 @@ function extractWineLabel(normalizedTitle: string, producer?: string): string | 
   }
 
   // Remove vintage year from label
-  label = label.replace(/(?<!\p{L}\p{N})(1[89]\d{2}|20[0-9]{2})(?!\p{L}\p{N})/u, '').trim();
+  label = label.replace(/(?<![\p{L}\p{N}])(1[89]\d{2}|20[0-9]{2})(?![\p{L}\p{N}])/u, '').trim();
 
   // Collapse whitespace
   label = label.replace(/\s+/g, ' ').trim();
@@ -181,7 +181,8 @@ function extractGrape(record: RawSourceRecord, locale?: string): readonly string
   const grapes = record.grapeText
     .split(/[,;/]/)
     .map((g) => normalizeField(g.trim(), locale))
-    .filter((g) => g.length > 0);
+    .filter((g) => g.length > 0)
+    .filter((g) => !/^\d+(?:\.\d+)?\s*%$/.test(g));
 
   return grapes.length > 0 ? grapes : undefined;
 }
@@ -196,7 +197,7 @@ function extractVolume(record: RawSourceRecord): number | undefined {
   }
 
   // Fallback: try to find volume in title
-  const titleMatch = record.rawTitle.match(/(\d+(?:\.\d+)?)\s*(ml|cl|l)(?!\p{L}\p{N})/iu);
+  const titleMatch = record.rawTitle.match(/(?<![\p{L}\p{N}])(\d+(?:\.\d+)?)\s*(ml|cl|l)(?![\p{L}\p{N}])/iu);
   if (titleMatch !== null) {
     const vol = normalizeVolume(`${titleMatch[1]}${titleMatch[2]}`);
     if (vol !== null) return vol;

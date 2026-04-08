@@ -1,3 +1,5 @@
+import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
+
 export interface SearchRequestContext {
   readonly locale: string;
   readonly currency: string;
@@ -36,4 +38,11 @@ export interface SearchRequest {
   readonly retrieval_mode?: 'auto' | 'entity' | 'hybrid' | 'mixed' | undefined;
   /** Maximum number of result items to return (batch / caller-specified cap). */
   readonly limit?: number | undefined;
+  /**
+   * Structured hard constraints injected by callers (agent tools, batch API).
+   * Merged into the planner's ConstraintBundle.hard so they flow directly to
+   * Vespa as YQL filter predicates — unlike text-encoded hints which depend
+   * on the constraint extractor's regex matching.
+   */
+  readonly filters?: readonly NormalizedConstraint[] | undefined;
 }

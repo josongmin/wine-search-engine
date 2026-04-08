@@ -17,6 +17,10 @@ const drinkingWindowLogger = bootstrapLogger.child({
 
 const DRINKING_WINDOW_CHECK_TIMEOUT_MS = 2_000;
 
+/** Neutral confidence when uncertaintyPenalty is NaN/unavailable.
+ *  0.5 = "no opinion" in [0,1] confidence space. */
+const UNCERTAINTY_CONFIDENCE_NEUTRAL = 0.5;
+
 async function withDrinkingWindowTimeout(
   predictionPromise: Promise<DrinkingWindowBlock>,
 ): Promise<DrinkingWindowBlock> {
@@ -138,6 +142,9 @@ export async function mapRankedResultsToResultItems(
         ...(r.grapePrimary !== undefined ? { grapes: [r.grapePrimary] } : {}),
         ...(r.vintageYear !== undefined ? { vintage: r.vintageYear } : {}),
         ...(r.producerPrestige !== undefined ? { producerPrestige: r.producerPrestige } : {}),
+        ...(r.priceBand !== undefined || r.priceUsd !== undefined
+          ? { priceRange: r.priceUsd !== undefined ? `$${r.priceUsd}` : r.priceBand }
+          : {}),
       },
       relevanceScore: r.finalScore,
       match: {
@@ -156,7 +163,11 @@ export async function mapRankedResultsToResultItems(
         inferred: inferredConstraints,
       },
       uncertainty: {
-        uncertaintyConfidence: Math.max(0, Math.min(1, 1 - r.componentScores.uncertaintyPenalty)),
+        // NaN guard: if uncertaintyPenalty is NaN (upstream bug), 1 - NaN → NaN,
+        // and Math.max/min do NOT filter NaN — they propagate it to the client.
+        uncertaintyConfidence: Number.isFinite(r.componentScores.uncertaintyPenalty)
+          ? Math.max(0, Math.min(1, 1 - r.componentScores.uncertaintyPenalty))
+          : UNCERTAINTY_CONFIDENCE_NEUTRAL,
         missingInfo: [],
         approximationUsed: false,
       },

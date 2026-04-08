@@ -180,6 +180,12 @@ export interface RankedResult {
   readonly producerPrestige?: number | undefined;
   readonly retrievalProvenance?: CandidateProvenance | undefined;
 
+  /** Human-readable price band (e.g. "$20-$30", "premium"). */
+  readonly priceBand?: string | undefined;
+
+  /** Price in USD (approximate, from Vivino or other data source). */
+  readonly priceUsd?: number | undefined;
+
   /**
    * Set to `true` when the policy stage demoted this result from a higher rank
    * (e.g. producer diversity rule). Consumers should use `rank` as the

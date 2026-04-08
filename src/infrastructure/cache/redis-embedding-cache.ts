@@ -69,7 +69,9 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       cached = await this.redis.get(cacheKey.redisKey);
     } catch (error) {
       log.error({ err: error }, 'redis get error');
-      await this.redis.incr(this.statsKeyMisses);
+      // Best-effort miss counter — if Redis itself is broken, incr will also
+      // fail; swallow to preserve "treat as miss" semantics.
+      try { await this.redis.incr(this.statsKeyMisses); } catch { /* metric is best-effort */ }
       return undefined;
     }
 

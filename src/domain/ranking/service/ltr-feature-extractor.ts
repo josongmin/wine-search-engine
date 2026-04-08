@@ -74,9 +74,13 @@ export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures 
     classMatchScore: scores.preferenceAlignment,
 
     // SOTA++ signals — now real values (previously zero sentinels)
-    // Fall back to 0.0 only when absent from the index (no data = neutral, not positive)
+    // recencyScore: 0.0 = "no recency data" which is intentionally neutral-to-negative
+    // (a wine with unknown vintage is not rewarded for recency).
     recencyScore: scores.recency ?? 0.0,
-    multilingualScore: scores.multilingualScore ?? 0.0,
+    // multilingualScore: 0.5 neutral when absent — a wine with no Korean alias data
+    // should not be penalised for missing indexing, only wines with confirmed
+    // non-Korean alias should score 0. Match the prestige default for consistency.
+    multilingualScore: scores.multilingualScore ?? 0.5,
 
     // bm25Score: Vespa BM25 not yet exposed per-candidate in query responses.
     // This remains 0.0 until Vespa custom rank features are wired to ranking input.

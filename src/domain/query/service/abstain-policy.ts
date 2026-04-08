@@ -10,7 +10,14 @@ export type AbstainDecision =
 
 export class AbstainPolicy {
   constructor(
+    /** Normalized Shannon entropy threshold above which retrieval scores are
+     *  considered indistinguishable (engine should abstain and request
+     *  clarification). 0.82 = "top-K scores are ~82% as uniform as a perfectly
+     *  flat distribution". Calibrated on 200-query gold set (RFC-013 §3):
+     *  precision@3 drops below 0.5 above this cutoff. */
     private readonly entropyThreshold: number = 0.82,
+    /** Minimum candidates required before entropy is meaningful. With <3
+     *  candidates entropy is dominated by sampling noise, not true ambiguity. */
     private readonly minCandidates: number = 3,
   ) {}
 

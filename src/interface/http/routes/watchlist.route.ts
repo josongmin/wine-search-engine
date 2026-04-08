@@ -117,11 +117,13 @@ export function registerWatchlistRoute(
         const queryParams = request.query as Record<string, unknown>;
         const limitParam = queryParams['limit'];
         const offsetParam = queryParams['offset'];
+        const rawLimit = Number(limitParam);
+        const rawOffset = Number(offsetParam);
         const limit = Math.min(
-          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number(limitParam) || WATCHLIST_PAGE_DEFAULT_LIMIT),
+          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number.isFinite(rawLimit) ? rawLimit : WATCHLIST_PAGE_DEFAULT_LIMIT),
           WATCHLIST_PAGE_MAX_LIMIT,
         );
-        const offset = Math.max(WATCHLIST_OFFSET_MIN, Number(offsetParam) || WATCHLIST_OFFSET_MIN);
+        const offset = Math.max(WATCHLIST_OFFSET_MIN, Number.isFinite(rawOffset) ? rawOffset : WATCHLIST_OFFSET_MIN);
         const entries = allEntries.slice(offset, offset + limit);
         const response = ListWatchlistResponseSchema.parse({
           entries: entries.map(toWatchlistEntryResponse),
@@ -395,11 +397,13 @@ export function registerWatchlistRoute(
         const dQueryParams = request.query as Record<string, unknown>;
         const dLimitParam = dQueryParams['limit'];
         const dOffsetParam = dQueryParams['offset'];
+        const rawDLimit = Number(dLimitParam);
+        const rawDOffset = Number(dOffsetParam);
         const dLimit = Math.min(
-          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number(dLimitParam) || WATCHLIST_PAGE_DEFAULT_LIMIT),
+          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number.isFinite(rawDLimit) ? rawDLimit : WATCHLIST_PAGE_DEFAULT_LIMIT),
           WATCHLIST_PAGE_MAX_LIMIT,
         );
-        const dOffset = Math.max(WATCHLIST_OFFSET_MIN, Number(dOffsetParam) || WATCHLIST_OFFSET_MIN);
+        const dOffset = Math.max(WATCHLIST_OFFSET_MIN, Number.isFinite(rawDOffset) ? rawDOffset : WATCHLIST_OFFSET_MIN);
         const pagedDeliveries = deliveries.slice(dOffset, dOffset + dLimit);
         const response = ListDeliveriesResponseSchema.parse({
           deliveries: pagedDeliveries.map((log: WatchlistDeliveryLogEntry) => ({

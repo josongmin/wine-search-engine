@@ -8,6 +8,9 @@ import type {
   WatchlistCreateRequest,
   WatchlistEntry,
   WatchlistListResponse,
+  AgentBenchmarkScenariosResponse,
+  AgentExecuteRequest,
+  AgentExecuteResponse,
 } from './types';
 import { getSubjectId } from '@/shared/lib/subject';
 
@@ -15,6 +18,8 @@ import { getSubjectId } from '@/shared/lib/subject';
 // Default: http://localhost:4000 (Fastify dev server)
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Agent loop can exceed default browser/fetch timeouts. */
+const AGENT_EXECUTE_TIMEOUT_MS = 180_000;
 
 export class ApiError extends Error {
   constructor(
@@ -158,6 +163,27 @@ export const api = {
         '/health',
         { externalSignal: opts.signal },
         5_000,
+      );
+    },
+  },
+
+  agent: {
+    listBenchmarkScenarios(opts: ApiCallOptions = {}) {
+      return request<AgentBenchmarkScenariosResponse>(
+        '/v1/agent/benchmark-scenarios',
+        { method: 'GET', externalSignal: opts.signal },
+      );
+    },
+
+    execute(body: AgentExecuteRequest, opts: ApiCallOptions = {}) {
+      return request<AgentExecuteResponse>(
+        '/v1/agent',
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+          externalSignal: opts.signal,
+        },
+        AGENT_EXECUTE_TIMEOUT_MS,
       );
     },
   },

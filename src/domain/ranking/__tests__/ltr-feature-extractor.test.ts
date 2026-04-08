@@ -18,11 +18,13 @@ describe('extractLTRFeatures', () => {
     expect(features.attributeMatchScore).toBe(0.7);
     expect(features.classMatchScore).toBe(0.45);
 
-    // No-data sentinels — always 0.0
-    expect(features.bm25Score).toBe(0.0);
-    expect(features.recencyScore).toBe(0.0);
-    expect(features.diversityScore).toBe(0.0);
-    expect(features.multilingualScore).toBe(0.0);
+    // No-data sentinels
+    expect(features.bm25Score).toBe(0.0);      // permanently 0: Vespa doesn't expose per-candidate BM25
+    expect(features.recencyScore).toBe(0.0);   // 0 = no vintage data; intentionally not neutral
+    expect(features.diversityScore).toBe(0.0); // permanently 0: set-level, not per-candidate
+    // multilingualScore: 0.5 neutral when absent — missing alias data should not
+    // penalise the candidate. Wines with confirmed non-Korean labels score 0.
+    expect(features.multilingualScore).toBe(0.5);
   });
 
   it('handles zero scores without producing NaN', () => {

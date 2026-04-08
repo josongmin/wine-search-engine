@@ -18,6 +18,10 @@ const VESPA_SEARCH_REQUEST_TIMEOUT_MS = 30_000;
 const VESPA_DOCUMENT_MUTATION_TIMEOUT_MS = 15_000;
 const VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS = 10_000;
 
+/** Fraction of hits that can be malformed before escalating from debug to warn.
+ *  >20% dropped hits indicates systematic Vespa schema corruption, not stray data. */
+const VESPA_HIT_DROP_WARN_THRESHOLD = 0.2;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -359,8 +363,12 @@ export class VespaClient {
       }
       if (validChildren.length !== rawChildren.length) {
         const dropped = rawChildren.length - validChildren.length;
-        pipelineDebug(
-          { step: PipelineDebugStep.VESPA_QUERY, dropped_malformed_hits: dropped },
+        const dropRatio = rawChildren.length > 0 ? dropped / rawChildren.length : 0;
+        // Escalate to warn when >20% of hits are malformed — indicates Vespa
+        // schema corruption or serialization regression, not just a stray hit.
+        const logFn = dropRatio > VESPA_HIT_DROP_WARN_THRESHOLD ? bootstrapLogger.warn.bind(bootstrapLogger) : pipelineDebug;
+        logFn(
+          { step: PipelineDebugStep.VESPA_QUERY, dropped_malformed_hits: dropped, dropRatio },
           'pipeline vespa hit validation dropped entries',
         );
       }

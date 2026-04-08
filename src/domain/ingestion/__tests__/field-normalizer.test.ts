@@ -152,6 +152,32 @@ describe('normalizeVolume', () => {
   it('whitespace-only → null', () => {
     expect(normalizeVolume('   ')).toBeNull();
   });
+
+  // ── Round 2 audit regression tests ────────────────────────────────────────
+  it('rejects 0ml (zero volume)', () => {
+    expect(normalizeVolume('0ml')).toBeNull();
+  });
+  it('rejects extremely large volumes ("99999ml")', () => {
+    expect(normalizeVolume('99999ml')).toBeNull();
+  });
+  it('"30000ml" → 30000 (max boundary)', () => {
+    expect(normalizeVolume('30000ml')).toBe(30000);
+  });
+  it('"30001ml" → null (above max)', () => {
+    expect(normalizeVolume('30001ml')).toBeNull();
+  });
+  it('"49" bare number → null (below 50 min)', () => {
+    expect(normalizeVolume('49')).toBeNull();
+  });
+  it('"5001" bare number → null (above 5000 max)', () => {
+    expect(normalizeVolume('5001')).toBeNull();
+  });
+  it('"0.375l" → 375 (half bottle)', () => {
+    expect(normalizeVolume('0.375l')).toBe(375);
+  });
+  it('"10cl" → 100', () => {
+    expect(normalizeVolume('10cl')).toBe(100);
+  });
 });
 
 describe('normalizeYear', () => {
@@ -195,5 +221,17 @@ describe('normalizeYear', () => {
     // 1800 = '1','8','0','0' → '18' matches 1[89], then '00' matches \d{2} → YES 1800 matches!
     // Let's test 1750 instead
     expect(normalizeYear('1750')).toBeNull();
+  });
+
+  // ── Round 2 audit regression tests ────────────────────────────────────────
+  it('"2099" → null (future year beyond plausible)', () => {
+    expect(normalizeYear('2099')).toBeNull();
+  });
+  it('"1800" → 1800 (valid historic vintage)', () => {
+    expect(normalizeYear('1800')).toBe(1800);
+  });
+  it('current year + 1 is accepted (en primeur)', () => {
+    const nextYear = new Date().getFullYear() + 1;
+    expect(normalizeYear(String(nextYear))).toBe(nextYear);
   });
 });

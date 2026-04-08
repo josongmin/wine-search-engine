@@ -22,7 +22,10 @@ const ZERO_SIGNALS: MatchSignalSet = {
   ambiguityPenalty: 0,
 };
 
-/** Down-weights fuzzy edit-distance channel vs exact alias confidence. */
+/** Down-weights fuzzy edit-distance matches by 20% relative to exact alias
+ *  confidence. Rationale: edit-distance matches have higher false-positive
+ *  rate (e.g. "Barolo" vs "Barossa"), so the confidence discount reflects
+ *  the additional ambiguity inherent in fuzzy matching. */
 const FUZZY_EDIT_DISTANCE_CONFIDENCE_FACTOR = 0.8;
 
 function inferAliasType(anchor: AnchorCandidate): AliasType {
