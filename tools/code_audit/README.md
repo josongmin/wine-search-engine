@@ -1,6 +1,6 @@
-# External audit archive
+# Code audit archive
 
-`make-audit-archive.sh` builds a **`.tar.gz`** suitable for third-party security or code review: dependencies, build output, local secrets, and most machine-local tooling paths are **excluded**, while **`.env.example`** and **`test/benchmark/agent/results/baseline.json`** stay included when present.
+`make-code-audit-archive.sh` builds a **`.tar.gz`** suitable for third-party code or security review: dependencies, build output, local secrets, and most machine-local tooling paths are **excluded**, while **`.env.example`** and **`test/benchmark/agent/results/baseline.json`** stay included when present.
 
 ## Requirements
 
@@ -12,28 +12,28 @@
 From the **repository root**:
 
 ```bash
-bash tools/audit/make-audit-archive.sh
+bash tools/code_audit/make-code-audit-archive.sh
 ```
 
-Default output: **`../wine-search-engine-audit-YYYYMMDD-HHMMSS.tgz`** (sibling of the repo folder, UTC timestamp).
+Default output: **`../wine-search-engine-code-audit-YYYYMMDD-HHMMSS.tgz`** (sibling of the repo folder, UTC timestamp).
 
 ```bash
 # Custom path
-bash tools/audit/make-audit-archive.sh -o ~/Desktop/wine-audit.tgz
+bash tools/code_audit/make-code-audit-archive.sh -o ~/Desktop/wine-code-audit.tgz
 
 # Drop web/ (backend-only bundle)
-bash tools/audit/make-audit-archive.sh --backend-only -o ./audit-backend.tgz
+bash tools/code_audit/make-code-audit-archive.sh --backend-only -o ./code-audit-backend.tgz
 
 # Include Git history (larger; agree with auditors first)
-bash tools/audit/make-audit-archive.sh --with-git -o ./audit-with-git.tgz
+bash tools/code_audit/make-code-audit-archive.sh --with-git -o ./code-audit-with-git.tgz
 
 # See what would be copied (no tarball)
-bash tools/audit/make-audit-archive.sh --dry-run
+bash tools/code_audit/make-code-audit-archive.sh --dry-run
 ```
 
 ## What the filter does
 
-Rules live in **`rsync-audit.filter`** and match the intent of root **`.gitignore`**, plus:
+Rules live in **`rsync-code-audit.filter`** and match the intent of root **`.gitignore`**, plus:
 
 - **No** `node_modules/`, `dist/`, `coverage/`, `.next/`, `.turbo/`, typical caches and logs
 - **No** `.git/` unless you pass **`--with-git`**
@@ -42,7 +42,7 @@ Rules live in **`rsync-audit.filter`** and match the intent of root **`.gitignor
 
 ## After generating the archive
 
-1. Copy **`AUDIT_PACKAGE.template.md`** to a non-committed file (or email body), fill in scope, build/test commands, contacts, and paste the printed **SHA-256**.
+1. Copy **`CODE_AUDIT_PACKAGE.template.md`** to a non-committed file (or email body), fill in scope, build/test commands, contacts, and paste the printed **SHA-256**.
 2. Send the tarball over your org’s approved channel; **do not** put real secrets in the template or email.
 
 ## Limitations

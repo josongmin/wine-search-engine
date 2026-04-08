@@ -1,7 +1,7 @@
 /**
  * Operators supported for normalized constraints.
  */
-export type ConstraintOperator = '=' | '<=' | '>=' | 'range' | 'in' | 'exclude';
+export type ConstraintOperator = '=' | '<=' | '>=' | 'range' | 'in' | 'exclude' | 'not_in';
 
 /**
  * A single normalized constraint extracted from a user query.

@@ -36,6 +36,9 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
+/** Wall-clock budget for the observation-based synthesis LLM call (Layer 1 fallback). */
+const SYNTHESIS_TIMEOUT_MS = 12_000;
+
 /** Parsed LLM output — either a tool call or a final answer. */
 interface LlmAction {
   readonly thought: string;
@@ -390,26 +393,40 @@ export class AgentOrchestrator {
             content: '[SYSTEM: You have gathered information but did not provide a final answer. Based on the tool results above, provide your final answer NOW.]',
           },
         ];
-        try {
+        const attemptSynthesis = async (maxOutputTokens: number): Promise<string | undefined> => {
           const synthAbort = new AbortController();
           const synthTimer = setTimeout(() => {
             synthAbort.abort();
-          }, 8_000);
-          const synthResult = await this.deps.chatLlm.complete({
-            messages: synthMessages,
-            temperature: 0,
-            maxOutputTokens: 512,
-            abortSignal: synthAbort.signal,
-          });
-          clearTimeout(synthTimer);
-          const parsed = parseLlmOutput(synthResult.text);
-          if (parsed.answer && parsed.answer.trim().length > 0) {
-            answer = parsed.answer;
+          }, SYNTHESIS_TIMEOUT_MS);
+          try {
+            const synthResult = await this.deps.chatLlm.complete({
+              messages: synthMessages,
+              temperature: 0,
+              maxOutputTokens,
+              abortSignal: synthAbort.signal,
+            });
+            const parsedSynth = parseLlmOutput(synthResult.text);
+            return parsedSynth.answer && parsedSynth.answer.trim().length > 0
+              ? parsedSynth.answer
+              : undefined;
+          } finally {
+            clearTimeout(synthTimer);
+          }
+        };
+        try {
+          let synthAnswer = await attemptSynthesis(512);
+          if (synthAnswer === undefined) {
+            // Retry once with shorter max tokens for faster response
+            log.info({ requestId, obsSteps: obsSteps.length }, 'synthesis attempt 1 returned empty — retrying with maxOutputTokens=256');
+            synthAnswer = await attemptSynthesis(256);
+          }
+          if (synthAnswer !== undefined) {
+            answer = synthAnswer;
             terminationReason = 'answer';
             log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
           }
         } catch (synthErr) {
-          log.warn({ synthErr, requestId }, 'observation synthesis failed, proceeding to fallback search');
+          log.error({ err: synthErr, requestId }, 'observation synthesis failed, proceeding to fallback search');
         }
       }
     }
@@ -442,13 +459,37 @@ export class AgentOrchestrator {
           lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
           fallbackApplied = true;
           terminationReason = 'fallback';
+        } else {
+          // Fallback search returned no results — construct a graceful template answer
+          answer = `"${query}"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.`;
+          fallbackApplied = true;
+          terminationReason = 'fallback';
         }
       } catch (err) {
         // Log so an outage of the fallback path is observable instead of silent.
-        log.warn({ err, requestId }, 'agent fallback search failed');
+        log.error({ err, requestId }, 'agent fallback search failed');
       } finally {
         clearTimeout(fallbackTimer);
       }
+    }
+
+    if (!policyBlocked && answer === '') {
+      // Layer 3: synthesize from last available observation (deterministic, no LLM)
+      const lastObs = steps.findLast((s) => s.observation !== undefined && s.observation.length > 0);
+      if (lastObs?.observation !== undefined) {
+        answer = `검색 결과 요약: ${lastObs.observation.slice(0, 300)}`;
+        fallbackApplied = true;
+        terminationReason = 'fallback';
+        log.warn({ requestId }, 'Layer 3 fallback: using last observation as answer');
+      }
+    }
+
+    if (answer === '') {
+      // Layer 4: absolute guarantee — no tool call is ALWAYS better than empty
+      answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
+      fallbackApplied = true;
+      terminationReason = 'fallback';
+      log.error({ requestId, query, steps: steps.length }, 'Layer 4 fallback: all synthesis paths exhausted — returning template answer');
     }
 
     log.info(

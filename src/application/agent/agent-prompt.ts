@@ -32,6 +32,12 @@ Combine ALL conditions into ONE search_wines query string rather than searching 
 - BAD: search("Italian red") → filter by price → filter by tannin (wastes 3 steps)
 - GOOD: search("Italian red wine under $50 low tannin") (1 step)
 
+**Multi-constraint queries**: When a query has 3+ hard constraints (e.g., low tannin + fruity + red + under 30,000 KRW), use a staged approach:
+1. First search with the MOST SELECTIVE constraint (usually price range or wine type)
+2. From those results, apply remaining constraints as filters
+3. If results are too few (<3), relax the LEAST important constraint and explain what was relaxed
+4. Always report which constraints were satisfied and which were relaxed
+
 **"vs" / "비교" / comparison queries:**
 ALWAYS use compare_wines when the user asks to compare two wines, regions, or vintages.
 - "보르도 vs 나파" → compare_wines("Bordeaux Cabernet", "Napa Cabernet")

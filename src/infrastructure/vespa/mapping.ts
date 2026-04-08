@@ -581,11 +581,17 @@ const yqlString = yqlEscapeString;
  * Whitelist of safe field names for `_in` (multi-value) sparse filter tokens.
  * Must match the producer in `domain/retrieval/service/constraint-to-sparse-filter-tokens.ts`.
  * Hoisted to module scope to avoid per-iteration allocation in `buildSparseFilters`.
+ *
+ * Includes both positive fields and their `not_` prefixed negation variants.
  */
 const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
   'wine_type', 'country', 'appellation', 'grape_primary', 'style',
   'price_band', 'flavor_profile', 'classification', 'certification',
   'soil_type', 'producer_type',
+  // Negation variants — used by not_<field>_in tokens
+  'not_wine_type', 'not_country', 'not_appellation', 'not_grape_primary', 'not_style',
+  'not_price_band', 'not_flavor_profile', 'not_classification', 'not_certification',
+  'not_soil_type', 'not_producer_type',
 ]);
 
 /**
@@ -619,6 +625,18 @@ const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
  * - `soil_type:<value>`         → `soil_type contains "value"`
  * - `producer_type:<value>`     → `producer_type contains "value"`
  * - `drinking_window_now:<year>` → `drinking_window_start <= n AND drinking_window_end >= n`
+ * - `not_wine_type:<value>`      → `!(wine_type contains "value")`
+ * - `not_country:<value>`        → `!(country contains "value")`
+ * - `not_appellation:<value>`    → `!(appellation contains "value")`
+ * - `not_grape_primary:<value>`  → `!(grape_primary contains "value")`
+ * - `not_style:<value>`          → `!(style contains "value")`
+ * - `not_price_band:<value>`     → `!(price_band contains "value")`
+ * - `not_flavor_profile:<value>` → `!(flavor_profiles contains "value")`
+ * - `not_classification:<value>` → `!(classification contains "value")`
+ * - `not_certification:<value>`  → `!(certifications contains "value")`
+ * - `not_soil_type:<value>`      → `!(soil_type contains "value")`
+ * - `not_producer_type:<value>`  → `!(producer_type contains "value")`
+ * - `not_<field>_in:<a>|<b>`    → `!(field contains "a") AND !(field contains "b")`
  *
  * @param filters - Array of filter token strings.
  * @returns A YQL fragment starting with ` AND ` for each token, or `""` if empty.
@@ -754,6 +772,46 @@ export function buildSparseFilters(filters: readonly string[]): string {
       case 'producer_type':
         clauses.push(`producer_type contains ${yqlString(value)}`);
         break;
+
+      // -----------------------------------------------------------------------
+      // Negation filters — emit Vespa NOT clauses: !(field contains "value")
+      // Vespa YQL supports !(field contains "x") for string exclusion.
+      // There is no NOT-IN shorthand; use individual NOT clauses per value.
+      // -----------------------------------------------------------------------
+      case 'not_wine_type':
+        clauses.push(`!(wine_type contains ${yqlString(value)})`);
+        break;
+      case 'not_country':
+        clauses.push(`!(country contains ${yqlString(value)})`);
+        break;
+      case 'not_appellation':
+        clauses.push(`!(appellation contains ${yqlString(value)})`);
+        break;
+      case 'not_grape_primary':
+        clauses.push(`!(grape_primary contains ${yqlString(value)})`);
+        break;
+      case 'not_style':
+        clauses.push(`!(style contains ${yqlString(value)})`);
+        break;
+      case 'not_price_band':
+        clauses.push(`!(price_band contains ${yqlString(value)})`);
+        break;
+      case 'not_flavor_profile':
+        clauses.push(`!(flavor_profiles contains ${yqlString(value)})`);
+        break;
+      case 'not_classification':
+        clauses.push(`!(classification contains ${yqlString(value)})`);
+        break;
+      case 'not_certification':
+        clauses.push(`!(certifications contains ${yqlString(value)})`);
+        break;
+      case 'not_soil_type':
+        clauses.push(`!(soil_type contains ${yqlString(value)})`);
+        break;
+      case 'not_producer_type':
+        clauses.push(`!(producer_type contains ${yqlString(value)})`);
+        break;
+
       case 'drinking_window_now': {
         const n = parseInt(value, 10);
         if (Number.isFinite(n)) {
@@ -765,15 +823,25 @@ export function buildSparseFilters(filters: readonly string[]): string {
       }
 
       default: {
-        // Multi-value IN tokens: key ends with _in, value is pipe-delimited.
-        // Produces a Vespa OR clause: (field contains "a" OR field contains "b").
-        // Field name is validated against a whitelist to prevent YQL injection.
+        // Multi-value IN / NOT-IN tokens: key ends with _in, value is pipe-delimited.
+        // Positive: produces a Vespa OR clause: (field contains "a" OR field contains "b").
+        // Negation: produces individual AND NOT clauses: !(field contains "a") AND !(field contains "b").
+        // Field name (with optional not_ prefix) is validated against a whitelist to prevent YQL injection.
         if (key.endsWith('_in')) {
-          const field = key.slice(0, -3); // strip '_in' suffix
-          if (!ALLOWED_SPARSE_IN_FIELDS.has(field)) break;
+          const fieldWithPrefix = key.slice(0, -3); // strip '_in' suffix
+          if (!ALLOWED_SPARSE_IN_FIELDS.has(fieldWithPrefix)) break;
           const vals = value.split('|').filter((v) => v.length > 0);
-          if (vals.length > 0) {
-            const disjuncts = vals.map((v) => `${field} contains ${yqlString(v)}`);
+          if (vals.length === 0) break;
+          if (fieldWithPrefix.startsWith('not_')) {
+            // Negation NOT-IN: !(field contains "v1") AND !(field contains "v2")
+            // Vespa has no NOT-IN shorthand; emit individual NOT clauses.
+            const actualField = fieldWithPrefix.slice(4); // strip 'not_' prefix
+            for (const v of vals) {
+              clauses.push(`!(${actualField} contains ${yqlString(v)})`);
+            }
+          } else {
+            // Positive IN: (field contains "a" OR field contains "b")
+            const disjuncts = vals.map((v) => `${fieldWithPrefix} contains ${yqlString(v)}`);
             clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
           }
         }

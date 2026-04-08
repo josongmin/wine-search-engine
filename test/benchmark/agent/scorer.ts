@@ -375,6 +375,7 @@ export function scoreScenario(
   const dimScores: Record<keyof Required<DimensionWeights>, number | null> = {
     executionEfficiency,
     answerQuality,
+    answerRelevancy,
     faithfulness,
     contextPrecision,
     terminationCorrectness,
@@ -382,9 +383,18 @@ export function scoreScenario(
     judge,
   };
 
+  // Apply DIMENSION_FLOOR to non-null scores before geo-mean. Critical failures
+  // stay at true 0 to preserve the security signal; for non-critical scenarios,
+  // clamp each present dim to at least DIMENSION_FLOOR so a single weak signal
+  // does not collapse the geo-mean by 20x relative to a zero.
+  const dimScoresFloored: Record<string, number | null> = {};
+  for (const [k, v] of Object.entries(dimScores)) {
+    dimScoresFloored[k] = v === null ? null : Math.max(v, DIMENSION_FLOOR);
+  }
+
   const overall = criticalFailure
     ? 0
-    : weightedGeometricMean(dimScores, weights);
+    : weightedGeometricMean(dimScoresFloored, weights);
 
   const diagnosticStrings = diagnostics.map((d) => {
     const head = `[${d.severity}] ${d.dim}/${d.code}: ${d.message}`;
@@ -411,6 +421,7 @@ export function scoreScenario(
       toolAccuracy,
       stepEfficiency,
       answerQuality,
+      answerRelevancy,
       terminationCorrectness,
       costEfficiency,
       faithfulness,
@@ -1273,11 +1284,15 @@ function renormaliseWeights(weights: Required<DimensionWeights>): Required<Dimen
  * weight stays in the denominator, so disabling a dimension is a true
  * no-op rather than a free uplift.
  */
+/** Minimum score floor for non-critical dimensions before geo-mean computation.
+ *  Prevents a single weak (but non-critical) dim from collapsing overall by >20x. */
+const DIMENSION_FLOOR = 0.05;
+
 function weightedGeometricMean(
   dimScores: Record<string, number | null>,
   weights: Record<string, number>,
 ): number {
-  const EPS = 0.05;
+  const EPS = 1e-6;
   // First pass: present-only mean for imputation.
   let presentLogSum = 0;
   let presentWeight = 0;

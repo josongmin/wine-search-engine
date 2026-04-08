@@ -1,5 +1,5 @@
-# Rsync merge filter for external audit archives (order matters: first match wins).
-# See tools/audit/README.md
+# Rsync merge filter for external code audit archives (order matters: first match wins).
+# See tools/code_audit/README.md
 
 # Keep env template; drop real env files
 + .env.example
@@ -16,6 +16,8 @@
 # Dependencies & build
 - node_modules/
 - web/node_modules/
+# dist may be a symlink to a local build dir — exclude the name, not only dist/
+- dist
 - dist/
 - coverage/
 - .next/
@@ -73,7 +75,7 @@
 - data/noisy-entity-eval-smoke-results.json
 - data/silver-quality-report.json
 
-# Do not bundle other audit archives produced locally
+# Do not bundle other archives produced locally
 - *.tar
 - *.tar.gz
 - *.tgz

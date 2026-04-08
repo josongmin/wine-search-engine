@@ -859,4 +859,1310 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         + 'Should address the sentimental/celebratory context.',
     },
   },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // negation — 26 additional scenarios (IDs 400-425) → tier total ≥ 30
+  // ═══════════════════════════════════════════════════════════════════════
+
+  {
+    id: 400,
+    tier: 'negation',
+    query: '스페인 와인 말고 추천해줘',
+    description: 'Region exclusion: not Spain',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines that are NOT from Spain. '
+        + 'Any other region (France, Italy, Chile, etc.) is acceptable. '
+        + 'The recommended wines must clearly come from a non-Spanish origin.',
+    },
+  },
+  {
+    id: 401,
+    tier: 'negation',
+    query: '이탈리아 아닌 레드 와인 추천',
+    description: 'Region exclusion: not Italian red',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(레드|red)'],
+      rubric:
+        'Must recommend red wines that are NOT from Italy. '
+        + 'Recommended wines must be explicitly from a non-Italian origin.',
+    },
+  },
+  {
+    id: 402,
+    tier: 'negation',
+    query: 'New World 아닌 피노 누아르 추천',
+    description: 'Exclude New World: Old World Pinot Noir only',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(피노\\s*누아르|pinot\\s*noir)'],
+      rubric:
+        'Must recommend Old World Pinot Noir only — Burgundy, Alsace, Germany, etc. '
+        + 'Must NOT recommend New World sources (California, Oregon, New Zealand, Chile, etc.). '
+        + 'Should explain the Old World vs New World stylistic difference.',
+    },
+  },
+  {
+    id: 403,
+    tier: 'negation',
+    query: '메를로 빼고 보르도 스타일 와인',
+    description: 'Grape exclusion within style: Bordeaux-style without Merlot',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerExcludes: ['Merlot', '메를로'],
+      rubric:
+        'Must recommend Bordeaux-style wines or blends that do NOT feature Merlot. '
+        + 'Cabernet Sauvignon-dominant Bordeaux, Pauillac, Médoc Crus expected.',
+    },
+  },
+  {
+    id: 404,
+    tier: 'negation',
+    query: '소비뇽 블랑 제외한 화이트 와인 추천',
+    description: 'Grape exclusion: no Sauvignon Blanc white',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(화이트|white)'],
+      answerExcludes: ['Sauvignon Blanc', '소비뇽 블랑'],
+      rubric:
+        'Must recommend white wines that are NOT Sauvignon Blanc. '
+        + 'Chardonnay, Riesling, Pinot Grigio, Albariño etc. are all acceptable.',
+    },
+  },
+  {
+    id: 405,
+    tier: 'negation',
+    query: '시라 없는 론 스타일 와인 추천해줘',
+    description: 'Grape exclusion within style: Rhône-style without Syrah',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerExcludes: ['Syrah', 'Shiraz', '시라', '쉬라'],
+      rubric:
+        'Must recommend Rhône-style wines that do NOT feature Syrah/Shiraz as the dominant grape. '
+        + 'Grenache-based blends (Châteauneuf-du-Pape without Syrah emphasis), Mourvèdre, Viognier expected.',
+    },
+  },
+  {
+    id: 406,
+    tier: 'negation',
+    query: '오크향 없는 샤르도네 추천',
+    description: 'Style exclusion: unoaked Chardonnay',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(샤르도네|샤도네이|chardonnay)'],
+      rubric:
+        'Must recommend unoaked or lightly oaked Chardonnay with no pronounced oak character. '
+        + 'Chablis, Mâcon, stainless-steel fermented examples expected. '
+        + 'Should mention the unoaked/crisp style explicitly.',
+    },
+  },
+  {
+    id: 407,
+    tier: 'negation',
+    query: '타닌 강한 거 말고 마시기 편한 레드',
+    description: 'Style exclusion: low-tannin red',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(레드|red)'],
+      rubric:
+        'Must recommend soft, approachable red wines with low tannin. '
+        + 'Pinot Noir, Gamay, Grenache, Dolcetto, lighter Merlot expected. '
+        + 'Should explicitly contrast with high-tannin wines.',
+    },
+  },
+  {
+    id: 408,
+    tier: 'negation',
+    query: '스위트 아닌 화이트 와인 추천',
+    description: 'Style exclusion: dry white only',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(화이트|white)'],
+      rubric:
+        'Must recommend dry white wines with no residual sweetness. '
+        + 'Should explicitly mention "dry" character. '
+        + 'Sauvignon Blanc, dry Riesling, Chablis, Pinot Grigio expected.',
+    },
+  },
+  {
+    id: 409,
+    tier: 'negation',
+    query: '프랑스도 이탈리아도 아닌 레드 와인',
+    description: 'Double region negation: not France, not Italy',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(레드|red)'],
+      rubric:
+        'Must recommend red wines from regions OTHER than France and Italy. '
+        + 'Spain, Portugal, Argentina, Chile, USA, Australia etc. are all acceptable. '
+        + 'Recommended wines must not originate from France or Italy.',
+    },
+  },
+  {
+    id: 410,
+    tier: 'negation',
+    query: '카베르네도 메를로도 아닌 풀바디 레드',
+    description: 'Double grape negation: full-bodied red without Cabernet or Merlot',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(레드|red|풀바디|full[\\s-]?body)'],
+      answerExcludes: ['Cabernet Sauvignon', '카베르네', 'Merlot', '메를로'],
+      rubric:
+        'Must recommend full-bodied red wines that feature NEITHER Cabernet Sauvignon NOR Merlot. '
+        + 'Syrah/Shiraz, Nebbiolo (Barolo), Tempranillo, Malbec, Amarone expected.',
+    },
+  },
+  {
+    id: 411,
+    tier: 'negation',
+    query: '채식주의자용 동물 성분 없이 만든 와인 추천',
+    description: 'Implicit negation: vegan wine (no animal fining agents)',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend vegan wines that use no animal-derived fining agents '
+        + '(no egg white, casein, gelatin, isinglass). '
+        + 'Should explain vegan winemaking briefly and name specific producers or wines.',
+    },
+  },
+  {
+    id: 412,
+    tier: 'negation',
+    query: '유기농만 추천해줘 와인',
+    description: 'Implicit negation: organic only (no conventional viticulture)',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend certified organic wines. '
+        + 'Should mention organic certification (EU Organic, USDA Organic, etc.) '
+        + 'and distinguish between organic grapes vs organic wine labeling.',
+    },
+  },
+  {
+    id: 413,
+    tier: 'negation',
+    query: '비건 와인만 추천해줘',
+    description: 'Implicit negation: vegan-certified only',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines certified or confirmed vegan (no animal products in production). '
+        + 'Should explain why standard wines may not be vegan. '
+        + 'Specific vegan producers or Vivino/Barnivore references are a plus.',
+    },
+  },
+  {
+    id: 414,
+    tier: 'negation',
+    query: '10만원 이상 말고 좋은 와인 추천해줘',
+    description: 'Price negation: exclude expensive tier',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 100_000 },
+      rubric:
+        'Must recommend wines priced UNDER 100,000 KRW. '
+        + 'Should frame these as genuinely good quality, not just budget picks. '
+        + 'Must not suggest anything over the 100,000 KRW ceiling.',
+    },
+  },
+  {
+    id: 415,
+    tier: 'negation',
+    query: '저가 말고 프리미엄 와인 추천',
+    description: 'Price negation: exclude cheap tier',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { min: 50_000 },
+      rubric:
+        'Must recommend premium wines clearly positioned above the entry-level tier (≥50,000 KRW or equivalent). '
+        + 'Should explain what makes these wines premium (craftsmanship, terroir, aging, scores).',
+    },
+  },
+  {
+    id: 416,
+    tier: 'negation',
+    query: '황산화물 적게 들어간 와인 있어?',
+    description: 'Implicit negation: low-sulfite wine',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend low-sulfite or no-added-sulfite wines. '
+        + 'Natural wine producers or specific low-SO2 labels expected. '
+        + 'Should mention that all wines contain some natural sulfites.',
+    },
+  },
+  {
+    id: 417,
+    tier: 'negation',
+    query: '알코올 도수 낮은 거 말고 뭔가 묵직한 거',
+    description: 'Implicit negation: exclude low-alcohol, want high-alcohol bold wine',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend bold, high-alcohol wines (typically 14%+ ABV). '
+        + 'Amarone, Zinfandel, Shiraz, Châteauneuf-du-Pape expected. '
+        + 'Should explicitly mention the higher alcohol or richness.',
+    },
+  },
+  {
+    id: 418,
+    tier: 'negation',
+    query: '칠레 아르헨티나 말고 남미 와인',
+    description: 'Double country exclusion within region: South America without Chile/Argentina',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend South American wines that are NOT from Chile and NOT from Argentina. '
+        + 'Uruguay (Tannat), Brazil, Bolivia expected. '
+        + 'Should acknowledge these are lesser-known but legitimate producers.',
+    },
+  },
+  {
+    id: 419,
+    tier: 'negation',
+    query: '무거운 거 말고 가벼운 레드 추천',
+    description: 'Body exclusion: exclude full-bodied red',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(레드|red)'],
+      rubric:
+        'Must recommend light-to-medium bodied red wines. '
+        + 'Beaujolais (Gamay), Pinot Noir, Barbera, Zweigelt, light Sangiovese expected. '
+        + 'Should explicitly contrast with heavy/full-bodied reds.',
+    },
+  },
+  {
+    id: 420,
+    tier: 'negation',
+    query: '샴페인 말고 기포 있는 거, 이탈리아도 말고',
+    description: 'Double exclusion: no Champagne, no Italian sparkling',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      answerMustMatch: ['(스파클링|sparkling|기포|fizz|effervescent)'],
+      rubric:
+        'Must recommend sparkling wines that are NOT Champagne and NOT Italian (no Prosecco, no Franciacorta). '
+        + 'Cava, Crémant, Sekt, English sparkling, South African MCC expected.',
+    },
+  },
+  {
+    id: 421,
+    tier: 'negation',
+    query: '가격 비싼 건 패스, 데일리로 매일 마실 수 있는 거',
+    description: 'Implicit price negation: daily drinker under budget',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 30_000 },
+      rubric:
+        'Must recommend affordable, everyday-drinking wines (≤30,000 KRW range). '
+        + 'Should position these as genuinely enjoyable daily options, not just cheap fallbacks.',
+    },
+  },
+  {
+    id: 422,
+    tier: 'negation',
+    query: '레드 말고 추천해줘, 화이트도 말고',
+    description: 'Color double exclusion: not red, not white',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines that are neither red nor white. '
+        + 'Rosé, orange wine, sparkling, or dessert wines expected. '
+        + 'Should clarify which category is being recommended.',
+    },
+  },
+  {
+    id: 423,
+    tier: 'negation',
+    query: '리저브 급 말고 일반급으로만',
+    description: 'Classification exclusion: no reserva/gran reserva tier',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend entry-level or standard-tier wines, NOT Reserva, Gran Reserva, or Riserva. '
+        + 'Should explain that these are accessible, everyday-quality wines without sacrificing character.',
+    },
+  },
+  {
+    id: 424,
+    tier: 'negation',
+    query: '포도품종 단일 아닌 블렌딩 와인만',
+    description: 'Implicit negation: blended wines only, no single-varietal',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend blended wines featuring two or more grape varieties. '
+        + 'Bordeaux blends, GSM (Grenache-Syrah-Mourvèdre), Super Tuscans, Meritage expected. '
+        + 'Should briefly explain the blending rationale.',
+    },
+  },
+  {
+    id: 425,
+    tier: 'negation',
+    query: '너무 신 건 싫어, 산도 낮은 와인 추천',
+    description: 'Style exclusion: low-acid preference',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines with naturally lower acidity for a smoother, rounder palate. '
+        + 'Viognier, Grenache, Merlot, oaked Chardonnay, Malbec expected. '
+        + 'Should contrast with high-acid varieties and explain the difference.',
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // nested_condition — 25 additional scenarios (IDs 430-454) → tier total ≥ 30
+  // ═══════════════════════════════════════════════════════════════════════
+
+  {
+    id: 430,
+    tier: 'nested_condition',
+    query: '이탈리아 피에몬테 지역 2016-2019년산 네비올로 10만원 이하',
+    description: 'Region + sub-region + vintage range + grape + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 100_000 },
+      vintageRange: { min: 2016, max: 2019 },
+      answerMustMatch: ['(네비올로|nebbiolo)', '(피에몬테|piedmont|piemonte)'],
+      rubric:
+        'Must recommend Nebbiolo wines from Piedmont (Langhe DOC, Nebbiolo d\'Alba, etc.) '
+        + 'from 2016-2019 vintage under 100,000 KRW. All 5 constraints must be addressed.',
+    },
+  },
+  {
+    id: 431,
+    tier: 'nested_condition',
+    query: '프랑스 부르고뉴 피노 누아 중에 산도 높고 5만원대',
+    description: 'Region + sub-region + grape + acidity + price band: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { min: 40_000, max: 69_000 },
+      answerMustMatch: ['(부르고뉴|burgundy|bourgogne)', '(피노\\s*누아|pinot\\s*noir)'],
+      rubric:
+        'Must recommend Burgundy Pinot Noir with high acidity in the 40,000–69,000 KRW range. '
+        + 'Village-level or premier cru options expected. '
+        + 'All constraints (region, grape, acidity, price band) must be respected.',
+    },
+  },
+  {
+    id: 432,
+    tier: 'nested_condition',
+    query: '스페인 리오하 템프라니요 2015년 이후 20만원 이하',
+    description: 'Region + sub-region + grape + vintage floor + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 200_000 },
+      vintageRange: { min: 2015 },
+      answerMustMatch: ['(리오하|rioja)', '(템프라니요|tempranillo)'],
+      rubric:
+        'Must recommend Rioja Tempranillo from vintage 2015 or later, under 200,000 KRW. '
+        + 'Reserva or Gran Reserva from this period expected. '
+        + 'All constraints must be satisfied.',
+    },
+  },
+  {
+    id: 433,
+    tier: 'nested_condition',
+    query: '호주 바로사 쉬라즈 풀바디 과일향 15만원 이하',
+    description: 'Country + sub-region + grape + body + aroma + price: 6 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 150_000 },
+      answerMustMatch: ['(바로사|barossa)', '(쉬라즈|shiraz)'],
+      rubric:
+        'Must recommend Barossa Valley Shiraz with full body and fruit-forward character under 150,000 KRW. '
+        + 'Penfolds Bin, Torbreck, or similar producers expected. '
+        + 'All 6 constraints must be addressed.',
+    },
+  },
+  {
+    id: 434,
+    tier: 'nested_condition',
+    query: '뉴질랜드 말보로 소비뇽 블랑 2020-2022년산 신선한 것',
+    description: 'Country + region + grape + vintage range + freshness: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      vintageRange: { min: 2020, max: 2022 },
+      answerMustMatch: ['(말보로|marlborough)', '(소비뇽\\s*블랑|sauvignon\\s*blanc)'],
+      rubric:
+        'Must recommend Marlborough Sauvignon Blanc from 2020-2022, emphasizing freshness and tropical character. '
+        + 'Cloudy Bay, Kim Crawford, Brancott Estate etc. expected. '
+        + 'All constraints must be satisfied.',
+    },
+  },
+  {
+    id: 435,
+    tier: 'nested_condition',
+    query: '독일 리슬링 드라이 스타일 5만원 이하',
+    description: 'Country + grape + style + price: 4 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 50_000 },
+      answerMustMatch: ['(리슬링|riesling)', '(독일|germany|german)'],
+      rubric:
+        'Must recommend dry-style German Riesling (Trocken) under 50,000 KRW. '
+        + 'Mosel, Rheingau, or Pfalz examples expected. '
+        + 'Should clarify the "dry" Riesling style vs off-dry/sweet versions.',
+    },
+  },
+  {
+    id: 436,
+    tier: 'nested_condition',
+    query: '3만원 이하 2019년산 칠레 카베르네 소비뇽',
+    description: 'Price + vintage + country + grape: 4 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 30_000 },
+      vintageRange: { min: 2019, max: 2019 },
+      answerMustMatch: ['(칠레|chile|chilean)', '(카베르네\\s*소비뇽|cabernet\\s*sauvignon)'],
+      rubric:
+        'Must recommend Chilean Cabernet Sauvignon from 2019 vintage under 30,000 KRW. '
+        + 'Maipo, Colchagua valley examples or major producers expected.',
+    },
+  },
+  {
+    id: 437,
+    tier: 'nested_condition',
+    query: '산도 높고 타닌 중간인 레드 7만원 이하',
+    description: 'Acidity + tannin level + color + price: 4 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 70_000 },
+      answerMustMatch: ['(레드|red)'],
+      rubric:
+        'Must recommend red wines with high acidity and medium tannin under 70,000 KRW. '
+        + 'Sangiovese (Chianti Classico), Barbera, Pinot Noir, Grenache expected. '
+        + 'All constraints (acidity, tannin, color, price) must be respected.',
+    },
+  },
+  {
+    id: 438,
+    tier: 'nested_condition',
+    query: '포르투갈 알렌테주 레드 2017-2020년산 10만원대',
+    description: 'Country + region + color + vintage range + price band: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { min: 100_000, max: 199_000 },
+      vintageRange: { min: 2017, max: 2020 },
+      answerMustMatch: ['(알렌테주|alentejo)', '(포르투갈|portugal)'],
+      rubric:
+        'Must recommend Alentejo red wines from 2017-2020 in the 100,000-199,000 KRW range. '
+        + 'Herdade do Esporão, Quinta do Crasto, Prats & Symington expected.',
+    },
+  },
+  {
+    id: 439,
+    tier: 'nested_condition',
+    query: '미국 소노마 카운티 피노 누아 2018년산 15만원 이하',
+    description: 'Country + county + grape + vintage + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 150_000 },
+      vintageRange: { min: 2018, max: 2018 },
+      answerMustMatch: ['(소노마|sonoma)', '(피노\\s*누아|pinot\\s*noir)'],
+      rubric:
+        'Must recommend Sonoma County Pinot Noir from 2018 vintage under 150,000 KRW. '
+        + 'Russian River Valley or Sonoma Coast producers expected.',
+    },
+  },
+  {
+    id: 440,
+    tier: 'nested_condition',
+    query: '아르헨티나 멘도사 말벡 2016-2018년 풀바디 20만원 이하',
+    description: 'Country + region + grape + vintage + body + price: 6 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 3,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 200_000 },
+      vintageRange: { min: 2016, max: 2018 },
+      answerMustMatch: ['(멘도사|mendoza)', '(말벡|malbec)'],
+      rubric:
+        'Must recommend Mendoza Malbec from 2016-2018, full-bodied, under 200,000 KRW. '
+        + 'Achaval Ferrer, Zuccardi, Catena Zapata expected. All 6 constraints must be respected.',
+    },
+  },
+  {
+    id: 441,
+    tier: 'nested_condition',
+    query: '오렌지 와인인데 조지아산 2019년 이후 5만원 이하',
+    description: 'Wine type + country + vintage floor + price: 4 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 50_000 },
+      vintageRange: { min: 2019 },
+      rubric:
+        'Must recommend Georgian orange (skin-contact) wines from 2019 or later under 50,000 KRW. '
+        + 'Rkatsiteli or Mtsvane in qvevri style expected. '
+        + 'Should explain the Georgian amber wine tradition briefly.',
+    },
+  },
+  {
+    id: 442,
+    tier: 'nested_condition',
+    query: '산지오베제 기반 와인 중에 키안티 클라시코 리제르바 2015년 이후 15만원 이하',
+    description: 'Grape + appellation + classification + vintage floor + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 150_000 },
+      vintageRange: { min: 2015 },
+      answerMustMatch: ['(키안티|chianti)', '(산지오베제|sangiovese)'],
+      rubric:
+        'Must recommend Chianti Classico Riserva based on Sangiovese from 2015+ under 150,000 KRW. '
+        + 'Antinori, Fèlsina, Castello di Fonterutoli expected.',
+    },
+  },
+  {
+    id: 443,
+    tier: 'nested_condition',
+    query: '부르고뉴 프리미에 크뤼 화이트 2017-2020 10만원 이하',
+    description: 'Region + classification + color + vintage + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 100_000 },
+      vintageRange: { min: 2017, max: 2020 },
+      answerMustMatch: ['(부르고뉴|burgundy|bourgogne)', '(화이트|white|blanc)'],
+      rubric:
+        'Must recommend Burgundy Premier Cru white (Chardonnay) from 2017-2020 under 100,000 KRW. '
+        + 'Meursault 1er Cru, Puligny-Montrachet 1er Cru, Chassagne-Montrachet 1er Cru expected.',
+    },
+  },
+  {
+    id: 444,
+    tier: 'nested_condition',
+    query: '나파 밸리 카베르네 2015년산 30만원 이하 고숙성 가능한 거',
+    description: 'Region + grape + vintage + price + aging potential: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 300_000 },
+      vintageRange: { min: 2015, max: 2015 },
+      answerMustMatch: ['(나파|napa)', '(카베르네|cabernet)'],
+      rubric:
+        'Must recommend 2015 Napa Cabernet Sauvignon with strong aging potential under 300,000 KRW. '
+        + 'Should mention tannic structure and cellaring recommendations. '
+        + 'Beringer Reserve, Jordan, Stag\'s Leap, etc. expected.',
+    },
+  },
+  {
+    id: 445,
+    tier: 'nested_condition',
+    query: '알자스 게뷔르츠트라미너 2018-2021 드라이 5만원대',
+    description: 'Region + grape + vintage + style + price band: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { min: 40_000, max: 69_000 },
+      vintageRange: { min: 2018, max: 2021 },
+      answerMustMatch: ['(알자스|alsace)', '(게뷔르츠트라미너|gewurztraminer|gewürztraminer)'],
+      rubric:
+        'Must recommend dry Alsace Gewürztraminer from 2018-2021 in the 40,000-69,000 KRW range. '
+        + 'Trimbach, Hugel, Zind-Humbrecht expected. '
+        + 'Should note the floral, spice character and low sugar level.',
+    },
+  },
+  {
+    id: 446,
+    tier: 'nested_condition',
+    query: '칠레 콜차과 밸리 카르메네르 2016년 이후 5만원 이하',
+    description: 'Country + valley + grape + vintage floor + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 50_000 },
+      vintageRange: { min: 2016 },
+      answerMustMatch: ['(카르메네르|carmenere|carménère)', '(칠레|chile)'],
+      rubric:
+        'Must recommend Colchagua Valley (or nearby Chilean region) Carménère from 2016+ under 50,000 KRW. '
+        + 'Montes, Viu Manent, Santa Rita expected.',
+    },
+  },
+  {
+    id: 447,
+    tier: 'nested_condition',
+    query: '그르나슈 기반 풀바디 레드 남프랑스 2017년산 8만원 이하',
+    description: 'Grape + body + region + vintage + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 80_000 },
+      vintageRange: { min: 2017, max: 2017 },
+      answerMustMatch: ['(그르나슈|grenache)', '(남프랑스|languedoc|roussillon|provence|rhône)'],
+      rubric:
+        'Must recommend Grenache-dominant full-bodied red from Southern France, 2017 vintage, under 80,000 KRW. '
+        + 'Châteauneuf-du-Pape, Gigondas, Vacqueyras or Languedoc examples expected.',
+    },
+  },
+  {
+    id: 448,
+    tier: 'nested_condition',
+    query: '스파클링 중에 빈티지 있는 거 브뤼 스타일 프랑스산 10만원 이하',
+    description: 'Type + vintage label + style + country + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 100_000 },
+      answerMustMatch: ['(스파클링|sparkling|champagne|크레망|crémant)', '(브뤼|brut)'],
+      rubric:
+        'Must recommend vintage-dated French sparkling wine in Brut style under 100,000 KRW. '
+        + 'Vintage Champagne (entry-level) or vintage Crémant expected. '
+        + 'Should clarify that vintage sparkling is different from NV.',
+    },
+  },
+  {
+    id: 449,
+    tier: 'nested_condition',
+    query: '로제 스파클링 프로방스 or 샴페인 2020년 이후 7만원 이하',
+    description: 'Color + type + region OR + vintage floor + price: 5 constraints with OR',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 70_000 },
+      answerMustMatch: ['(로제|rosé|rose)', '(스파클링|sparkling|champagne|프로방스|provence)'],
+      rubric:
+        'Must recommend rosé sparkling wine from either Provence or Champagne from 2020 or later under 70,000 KRW. '
+        + 'Champagne Rosé NV with 2020+ base wine or Crémant de Provence expected.',
+    },
+  },
+  {
+    id: 450,
+    tier: 'nested_condition',
+    query: '모스카토 다스티 스타일 저알코올 달달 스파클링 2021년 이후',
+    description: 'Style + alcohol + sweetness + type + vintage floor: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      vintageRange: { min: 2021 },
+      answerMustMatch: ['(모스카토|moscato|muscat)'],
+      rubric:
+        'Must recommend low-alcohol, sweet sparkling wines similar to Moscato d\'Asti from 2021 or later. '
+        + 'Moscato d\'Asti DOCG, other light-fizz Muscat styles expected. '
+        + 'Should note the ~5-7% ABV characteristic.',
+    },
+  },
+  {
+    id: 451,
+    tier: 'nested_condition',
+    query: '남아프리카공화국 스텔렌보스 카베르네 2018년 이후 풀바디 12만원 이하',
+    description: 'Country + region + grape + vintage + body + price: 6 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 3,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 120_000 },
+      vintageRange: { min: 2018 },
+      answerMustMatch: ['(스텔렌보스|stellenbosch)', '(카베르네|cabernet)'],
+      rubric:
+        'Must recommend Stellenbosch Cabernet Sauvignon from 2018 or later, full-bodied, under 120,000 KRW. '
+        + 'Kanonkop, Jordan, Rust en Vrede expected.',
+    },
+  },
+  {
+    id: 452,
+    tier: 'nested_condition',
+    query: '산도 높고 미네랄 느낌 드라이 화이트 부르고뉴 or 알자스 5만원 이하',
+    description: 'Acidity + mineral + style + region OR + price: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 50_000 },
+      answerMustMatch: ['(화이트|white|blanc)', '(부르고뉴|burgundy|bourgogne|알자스|alsace)'],
+      rubric:
+        'Must recommend dry white wines with high acidity and minerality from Burgundy or Alsace under 50,000 KRW. '
+        + 'Chablis, Mâcon, Alsace Riesling Trocken expected. '
+        + 'All constraints (acidity, mineral, dry, region, price) addressed.',
+    },
+  },
+  {
+    id: 453,
+    tier: 'nested_condition',
+    query: '식전주로 마실 가벼운 스파클링 이탈리아 5만원 이하 2020년대',
+    description: 'Occasion + body + type + country + price + decade: 6 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 50_000 },
+      vintageRange: { min: 2020 },
+      answerMustMatch: ['(이탈리아|italy|italian)', '(스파클링|sparkling|프로세코|prosecco|franciacorta)'],
+      rubric:
+        'Must recommend light Italian sparkling wine suitable as an aperitif, from 2020s, under 50,000 KRW. '
+        + 'Prosecco DOC, Franciacorta Brut, Asti Spumante expected.',
+    },
+  },
+  {
+    id: 454,
+    tier: 'nested_condition',
+    query: '타닌 강하고 오크향 있는 풀바디 레드 5년 이상 숙성 가능 10만원대',
+    description: 'Tannin + oak + body + aging + price band: 5 constraints',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 3,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { min: 100_000, max: 199_000 },
+      rubric:
+        'Must recommend full-bodied, tannic, oaked red wines with 5+ year aging potential in the 100,000-199,000 KRW range. '
+        + 'Barolo, Brunello, Napa Cabernet, Rioja Gran Reserva expected. '
+        + 'All 5 constraints must be satisfied.',
+    },
+  },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // situation_based — 25 additional scenarios (IDs 460-484) → tier total ≥ 30
+  // ═══════════════════════════════════════════════════════════════════════
+
+  {
+    id: 460,
+    tier: 'situation_based',
+    query: '와인바 첫 방문인데 초보인 친구랑 같이 갈 거야, 뭘 시켜야 해?',
+    description: 'Situation: first wine bar visit with a beginner friend',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      rubric:
+        'Must recommend approachable, crowd-pleasing wines suitable for a beginner at a wine bar. '
+        + 'Should address the social context (first visit, friend who is new to wine). '
+        + 'Avoid intimidating or highly tannic choices. Glass pours or by-the-bottle guidance expected.',
+    },
+  },
+  {
+    id: 461,
+    tier: 'situation_based',
+    query: '시댁에 드릴 추석 선물로 와인 추천해줘',
+    description: 'Situation: Chuseok holiday gift for in-laws',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      requiredRegister: 'formal',
+      rubric:
+        'Must recommend wines appropriate for gifting to in-laws during the Chuseok holiday. '
+        + 'Should suggest well-packaged, respectable options (not trendy or niche). '
+        + 'Formal presentation and gift-worthiness are key. '
+        + 'Mid-to-premium price range expected.',
+    },
+  },
+  {
+    id: 462,
+    tier: 'situation_based',
+    query: '남자친구 생일 깜짝 파티 준비하는데 와인 추천',
+    description: 'Situation: surprise birthday party for boyfriend',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend festive, celebratory wines suitable for a birthday surprise party. '
+        + 'Sparkling wine or impressive red expected. '
+        + 'Should consider the romantic/celebratory context.',
+    },
+  },
+  {
+    id: 463,
+    tier: 'situation_based',
+    query: '비 오는 날 혼자 마시기 좋은 와인',
+    description: 'Situation: rainy day solo drinking',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines suited for a cozy, introspective solo evening on a rainy day. '
+        + 'Warming reds, aromatic whites, or dessert wines expected. '
+        + 'Should evoke comfort and match the mood.',
+    },
+  },
+  {
+    id: 464,
+    tier: 'situation_based',
+    query: '독서할 때 곁들일 와인 추천해줘',
+    description: 'Situation: wine for quiet reading',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines conducive to quiet, focused enjoyment (not overpowering). '
+        + 'Light to medium-bodied wines, good acidity, easy-drinking character expected. '
+        + 'Should avoid loud, palate-fatiguing wines.',
+    },
+  },
+  {
+    id: 465,
+    tier: 'situation_based',
+    query: '요가 끝나고 가볍게 마실 와인',
+    description: 'Situation: post-yoga light drinking',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend light, refreshing wines suitable after exercise. '
+        + 'Low alcohol, high acidity, crisp profile preferred. '
+        + 'Sparkling, light whites, rosé, or low-ABV wines expected. '
+        + 'Should avoid heavy, tannic, or high-alcohol options.',
+    },
+  },
+  {
+    id: 466,
+    tier: 'situation_based',
+    query: '협상 성사 축하 자리에 낼 와인, 인상적인 거로',
+    description: 'Situation: deal-closing celebration wine',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { min: 100_000 },
+      rubric:
+        'Must recommend prestigious, impressive wines appropriate for celebrating a major business deal. '
+        + 'Premium Champagne, top Bordeaux, or equivalent expected. '
+        + 'Should convey achievement and quality. Price should reflect the importance of the occasion.',
+    },
+  },
+  {
+    id: 467,
+    tier: 'situation_based',
+    query: '이직 성공 기념 혼자 자축하는 와인 추천',
+    description: 'Situation: solo career celebration',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines suitable for a personal achievement celebration. '
+        + 'Should feel special and self-rewarding without being excessively expensive. '
+        + 'Sparkling or a meaningful bottle the user might not normally buy expected.',
+    },
+  },
+  {
+    id: 468,
+    tier: 'situation_based',
+    query: '해외여행 갈 때 선물로 가져갈 와인 추천',
+    description: 'Situation: wine as travel gift to bring abroad',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines suitable as gifts to bring when traveling abroad. '
+        + 'Should consider portability (no fragile labels, good closure), recognizable Korean terroir or interesting story. '
+        + 'Korean wine or iconic imports that could impress a foreign recipient expected.',
+    },
+  },
+  {
+    id: 469,
+    tier: 'situation_based',
+    query: '여름 바비큐 파티용 와인 뭐가 좋아?',
+    description: 'Situation: summer outdoor BBQ party',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines suitable for a summer outdoor BBQ party. '
+        + 'Should consider food (grilled meats), heat, and casual atmosphere. '
+        + 'Rosé, bold reds (Malbec, Zinfandel, Shiraz), or crisp whites expected. '
+        + 'Practical considerations (screw cap, chillable) are a plus.',
+    },
+  },
+  {
+    id: 470,
+    tier: 'situation_based',
+    query: '겨울 크리스마스 만찬에 낼 와인',
+    description: 'Situation: Christmas dinner wine',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      rubric:
+        'Must recommend wines suitable for a Christmas dinner celebration. '
+        + 'Should suggest both a sparkling aperitif option and a main course wine. '
+        + 'Festive character, warming reds or elegant whites for roast/game expected.',
+    },
+  },
+  {
+    id: 471,
+    tier: 'situation_based',
+    query: '와인 처음 마시는 부모님께 추천할 와인',
+    description: 'Situation: recommending wine to parents who have never tried it',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend beginner-friendly wines for parents who have never drunk wine before. '
+        + 'Sweet, fruity, low-tannin or low-acid options expected. '
+        + 'Should consider Korean taste preferences (not too dry, not too tannic). '
+        + 'Moscato, light rosé, or Beaujolais type expected.',
+    },
+  },
+  {
+    id: 472,
+    tier: 'situation_based',
+    query: '소믈리에 친구 집들이 선물로 줄 와인',
+    description: 'Situation: housewarming gift for a sommelier friend',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      rubric:
+        'Must recommend wines impressive enough to gift to a professional sommelier. '
+        + 'Should avoid obvious/common picks. Unusual terroir, rare grape varieties, or exceptional vintage expected. '
+        + 'The recommendation should demonstrate wine knowledge and thoughtfulness.',
+    },
+  },
+  {
+    id: 473,
+    tier: 'situation_based',
+    query: '데이트 전 와인 선물, 상대방이 뭘 좋아하는지 몰라',
+    description: 'Situation: date gift with unknown preference',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend crowd-pleasing, universally appealing wines suitable as a romantic gift when the recipient\'s preferences are unknown. '
+        + 'Should suggest safe but thoughtful options (a rosé, a light red, or a food-friendly white). '
+        + 'Pretty packaging or notable label is a plus.',
+    },
+  },
+  {
+    id: 474,
+    tier: 'situation_based',
+    query: '집에서 혼자 영화 볼 때 마실 와인',
+    description: 'Situation: solo movie night at home',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      priceBandKrw: { max: 30_000 },
+      rubric:
+        'Must recommend easy-drinking, affordable wines for a casual solo movie night. '
+        + 'Budget-friendly (under 30,000 KRW), low-fuss, approachable character expected. '
+        + 'Screw cap or practical packaging is a plus.',
+    },
+  },
+  {
+    id: 475,
+    tier: 'situation_based',
+    query: '직장 상사 승진 선물, 품격 있고 무난한 거',
+    description: 'Situation: promotion gift for senior colleague',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { min: 50_000, max: 150_000 },
+      requiredRegister: 'formal',
+      rubric:
+        'Must recommend dignified, universally respectable wines appropriate for gifting to a senior colleague on a promotion. '
+        + 'Price range 50,000-150,000 KRW. Should feel prestigious without being ostentatious. '
+        + 'Well-known producers or classic regions expected.',
+    },
+  },
+  {
+    id: 476,
+    tier: 'situation_based',
+    query: '친구들이랑 치맥 대신 와인, 4명이서 치킨이랑',
+    description: 'Situation: wine with Korean fried chicken for 4 friends',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines that pair well with fried chicken for a casual group of 4. '
+        + 'Should suggest fun, casual options (sparkling, light reds, crisp whites). '
+        + 'Gamay, Riesling, sparkling rosé, or similar expected. '
+        + 'Should acknowledge the 치맥 (chimaek) culture context.',
+    },
+  },
+  {
+    id: 477,
+    tier: 'situation_based',
+    query: '골프 라운딩 끝나고 클럽하우스에서 마실 와인',
+    description: 'Situation: post-golf clubhouse wine',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines suitable for post-golf socializing at a clubhouse. '
+        + 'Should be elegant, easy-drinking, and socially appropriate. '
+        + 'Rosé, light Pinot Noir, or crisp white expected. '
+        + 'Should fit an upscale but relaxed social context.',
+    },
+  },
+  {
+    id: 478,
+    tier: 'situation_based',
+    query: '명절 가족 모임에 들고 갈 와인, 어른들도 드실 거야',
+    description: 'Situation: holiday family gathering with elderly relatives',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      requiredRegister: 'formal',
+      rubric:
+        'Must recommend approachable, traditionally styled wines appropriate for a multi-generational Korean family gathering. '
+        + 'Should avoid overly trendy or niche wines. '
+        + 'Well-known brands in recognizable styles (Bordeaux, Burgundy, or equivalent) expected. '
+        + 'Gift presentation/packaging mentioned as a plus.',
+    },
+  },
+  {
+    id: 479,
+    tier: 'situation_based',
+    query: '친구 위로해주려고 집에 초대했는데 위로주 같은 와인',
+    description: 'Situation: comforting wine for a friend going through a hard time',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend warm, comforting wines suitable for consoling a friend. '
+        + 'Soft, approachable reds (Pinot Noir, Grenache), smooth whites, or dessert wines expected. '
+        + 'The recommendation should convey emotional warmth, not just technical quality.',
+    },
+  },
+  {
+    id: 480,
+    tier: 'situation_based',
+    query: '온라인 와인 시음회 준비, 참가자 모두가 살 수 있는 거 5만원 이하',
+    description: 'Situation: online tasting event with accessible wine for all participants',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      priceBandKrw: { max: 50_000 },
+      rubric:
+        'Must recommend wines under 50,000 KRW that are widely available for online tasting participants. '
+        + 'Should consider that participants may be at different locations but can access the same bottle. '
+        + 'Major supermarket or widely distributed brands expected.',
+    },
+  },
+  {
+    id: 481,
+    tier: 'situation_based',
+    query: '와인 공부 시작하는데 처음 마셔볼 교과서 같은 와인',
+    description: 'Situation: introductory educational wine for a beginner student',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      rubric:
+        'Must recommend "textbook" wines that exemplify their variety or region clearly — ideal for learning. '
+        + 'Should suggest a progression (beginner set). '
+        + 'Bordeaux Cabernet, Burgundy Pinot Noir, Chablis, Barolo, Rioja expected as canonical examples.',
+    },
+  },
+  {
+    id: 482,
+    tier: 'situation_based',
+    query: '프러포즈 할 건데 와인 뭐 들고 가야 해?',
+    description: 'Situation: wine for a marriage proposal',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 5_000,
+      rubric:
+        'Must recommend highly romantic and memorable wines appropriate for a marriage proposal. '
+        + 'Champagne or premium sparkling wine is the expected primary recommendation. '
+        + 'Should convey celebration, romance, and the magnitude of the occasion. '
+        + 'Specific prestigious labels (Taittinger, Billecart-Salmon, etc.) expected.',
+    },
+  },
+  {
+    id: 483,
+    tier: 'situation_based',
+    query: '개인 와인 셀러 처음 꾸리는데 시작 구성 추천',
+    description: 'Situation: building a first personal wine cellar',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 3,
+      maxDurationMs: 15_000,
+      maxTotalTokens: 6_000,
+      rubric:
+        'Must recommend a starter cellar composition (varied styles, regions, aging potential). '
+        + 'Should suggest wines to drink soon, wines to hold 3-5 years, and wines to hold 10+ years. '
+        + 'Should address how many bottles of each type and the rationale.',
+    },
+  },
+  {
+    id: 484,
+    tier: 'situation_based',
+    query: '졸업식 날 가족이랑 식당에서 마실 와인',
+    description: 'Situation: graduation celebration at a restaurant with family',
+    expectation: {
+      tools: [{ tool: 'search_wines' }],
+      maxSteps: 2,
+      maxDurationMs: 12_000,
+      maxTotalTokens: 4_000,
+      rubric:
+        'Must recommend wines suitable for a family graduation celebration at a restaurant. '
+        + 'Should be crowd-pleasing for mixed ages and tastes. '
+        + 'Start with sparkling for the toast, then suggest a food-friendly red or white. '
+        + 'Should feel festive but not excessively extravagant.',
+    },
+  },
 ];

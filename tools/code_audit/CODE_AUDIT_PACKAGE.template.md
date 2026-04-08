@@ -1,4 +1,4 @@
-# Audit package handoff
+# Code audit package handoff
 
 **Product / repository:** Wine Search Engine (replace with public codename if needed)  
 **Archive filename:** `________________________`  

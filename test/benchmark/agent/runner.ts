@@ -743,6 +743,9 @@ function filterScenarios(
   let filtered = all;
   if (args.tierFilter) filtered = filtered.filter((s) => s.tier === args.tierFilter);
   if (args.idFilter) filtered = filtered.filter((s) => args.idFilter!.includes(s.id));
+  if (args.profile === 'retrieval') {
+    filtered = filtered.filter((s) => s.expectation.expectedEntityIds !== undefined && s.expectation.expectedEntityIds.length > 0);
+  }
   return filtered;
 }
 
@@ -912,6 +915,9 @@ async function main(): Promise<void> {
   console.error('\n══════════════════════════════════════');
   console.error('  AGENT BENCHMARK SUMMARY (SOTA++)');
   console.error('══════════════════════════════════════');
+  if (args.profile !== undefined) {
+    console.error(`  Profile:      ${args.profile}`);
+  }
   console.error(`  Container:    ${report.container}`);
   console.error(`  Model:        ${report.model}`);
   console.error(`  Judge:        ${report.judgeModel ?? 'disabled'}${report.judgeSamples > 1 ? ` (N=${report.judgeSamples} median)` : ''}`);

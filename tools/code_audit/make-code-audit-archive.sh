@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Build a tarball for external (security / code) auditors.
+# Build a tarball for external code audit (security / third-party review).
 # Requires: rsync, tar, and either shasum (macOS) or sha256sum (Linux).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FILTER_BASE="$SCRIPT_DIR/rsync-audit.filter"
+FILTER_BASE="$SCRIPT_DIR/rsync-code-audit.filter"
+ARCHIVE_TOPDIR="wine-search-engine-code-audit"
 
 WITH_GIT=0
 BACKEND_ONLY=0
@@ -14,23 +15,23 @@ OUT_PATH=""
 
 usage() {
   sed -n '1,80p' <<'EOF'
-Usage: make-audit-archive.sh [options]
+Usage: make-code-audit-archive.sh [options]
 
 Creates a gzip-compressed tar of the repository under a single top-level
-directory "wine-search-engine-audit/", using rsync filters aligned with
-root .gitignore and external-audit practice (no node_modules, no secrets, etc.).
+directory "wine-search-engine-code-audit/", using rsync filters aligned with
+root .gitignore and external code-audit practice (no node_modules, no secrets, etc.).
 
 Options:
   -o, --output PATH   Output .tar.gz path (default: parent of repo,
-                      wine-search-engine-audit-YYYYMMDD-HHMMSS.tgz UTC)
+                      wine-search-engine-code-audit-YYYYMMDD-HHMMSS.tgz UTC)
   --with-git          Include .git (history). Default: exclude .git
   --backend-only      Exclude web/ entirely
   --dry-run           rsync -n -v only; no tar written
   -h, --help          This help
 
 Example:
-  ./tools/audit/make-audit-archive.sh
-  ./tools/audit/make-audit-archive.sh -o ~/Desktop/wine-audit.tgz
+  ./tools/code_audit/make-code-audit-archive.sh
+  ./tools/code_audit/make-code-audit-archive.sh -o ~/Desktop/wine-code-audit.tgz
 EOF
 }
 
@@ -75,7 +76,7 @@ fi
 
 if [[ -z "$OUT_PATH" ]]; then
   PARENT="$(dirname "$REPO_ROOT")"
-  OUT_PATH="$PARENT/wine-search-engine-audit-$(date -u +%Y%m%d-%H%M%S).tgz"
+  OUT_PATH="$PARENT/${ARCHIVE_TOPDIR}-$(date -u +%Y%m%d-%H%M%S).tgz"
 fi
 
 FILTER_MERGE=$(mktemp)
@@ -94,7 +95,7 @@ if [[ "$WITH_GIT" -eq 0 ]]; then
 fi
 
 STAGING=$(mktemp -d)
-TARGET="$STAGING/wine-search-engine-audit"
+TARGET="$STAGING/$ARCHIVE_TOPDIR"
 mkdir -p "$TARGET"
 
 RSYNC_FLAGS=(-a)
@@ -110,7 +111,7 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
 fi
 
 mkdir -p "$(dirname "$OUT_PATH")"
-tar -czf "$OUT_PATH" -C "$STAGING" wine-search-engine-audit
+tar -czf "$OUT_PATH" -C "$STAGING" "$ARCHIVE_TOPDIR"
 
 echo "Wrote: $OUT_PATH"
 if command -v shasum >/dev/null 2>&1; then

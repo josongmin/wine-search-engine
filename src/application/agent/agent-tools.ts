@@ -108,25 +108,102 @@ export function isKnownTool(name: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-constraint detection (for staged-search hints in search_wines)
+// ---------------------------------------------------------------------------
+
+/** Minimum number of detected constraint types to emit the staged-search hint. */
+const MIN_CONSTRAINTS_FOR_STAGED_HINT = 3;
+
+/**
+ * Keyword → label pairs for constraint detection.
+ * Module-scope to avoid per-call allocation (deterministic, never changes).
+ * All Korean patterns use /u flag and avoid \b (ASCII-only boundary).
+ */
+const CONSTRAINT_KEYWORDS: ReadonlyArray<[RegExp, string]> = [
+  [/타닌|tannin/iu, '타닌'],
+  [/과일향|fruity|fruit/iu, '과일향'],
+  [/오크|oak/iu, '오크'],
+  [/미네랄|mineral/iu, '미네랄'],
+  [/산도|acidity|acid/iu, '산도'],
+  [/바디|body/iu, '바디'],
+  [/당도|sweet/iu, '당도'],
+  [/[0-9]+\s*만?\s*원|[$€]\s*[0-9]+/u, '가격'],
+  [/비건|vegan/iu, '비건'],
+  [/유기농|organic/iu, '유기농'],
+  [/[0-9]{4}\s*년|vintage\s+[0-9]{4}/iu, '빈티지'],
+  [/이탈리아|프랑스|스페인|독일|한국|italy|france|spain|germany/iu, '국가'],
+  [/레드|화이트|스파클링|로제|red|white|sparkling|ros[eé]/iu, '와인타입'],
+];
+
+function detectConstraintKeywords(query: string): readonly string[] {
+  const found: string[] = [];
+  for (const [pattern, label] of CONSTRAINT_KEYWORDS) {
+    if (pattern.test(query) && !found.includes(label)) {
+      found.push(label);
+    }
+  }
+  return found;
+}
+
+// ---------------------------------------------------------------------------
 // Negation term extraction (for post-filter in search_wines)
 // ---------------------------------------------------------------------------
 
+/**
+ * Korean negation suffixes that follow the term being excluded.
+ * Pattern: <term><whitespace?><suffix>
+ * Uses Unicode-aware matchAll (no \b) per CLAUDE.md rule 8.
+ */
+const KOREAN_NEGATION_SUFFIX_RE = /(\S+)\s*(?:빼고|제외하고|제외|말고|아닌|없는|빼)/gu;
+
+/**
+ * Korean negation prefixes that precede the term being excluded.
+ * Pattern: <prefix><whitespace><term>
+ * Uses Unicode-aware matchAll (no \b) per CLAUDE.md rule 8.
+ * 비 (non-), 안 쓴 (not using), 대신 (instead of) are prefix-style negations.
+ */
+const KOREAN_NEGATION_PREFIX_RE = /(?:비\s+|안\s+쓴\s+|대신\s+)(\S+)/gu;
+
+/**
+ * English/Latin negation prefix pattern.
+ * Captures the term following "not", "without", "exclude", "no", "skip", "non-".
+ * Uses \p{L}\p{N} character classes instead of \b to handle accented Latin/non-ASCII.
+ */
+const ENGLISH_NEGATION_RE = /(?:not|without|exclude|no|skip|non-)\s+([\p{L}\p{N}][^,\n]*?)(?=\s*,|\s+and\s|\s*$)/giu;
+
 function extractNegationTerms(query: string): readonly string[] {
   const terms: string[] = [];
-  // Korean negation patterns: X 빼고, X 제외, X 말고, X 아닌, X 없는
-  const koreanNeg = query.match(/(\S+)\s*(?:빼고|제외|말고|아닌|없는)/g) ?? [];
-  for (const m of koreanNeg) {
-    const term = m.replace(/\s*(?:빼고|제외|말고|아닌|없는).*/, '').trim();
+
+  // Korean negation suffixes: X 빼고, X 제외, X 제외하고, X 말고, X 아닌, X 없는, X 빼
+  for (const m of query.matchAll(KOREAN_NEGATION_SUFFIX_RE)) {
+    const term = m[1]?.trim() ?? '';
     if (term.length > 0) terms.push(term);
   }
-  // English negation: not X, without X, exclude X, no X, skip X
-  const engNeg = query.match(/(?:not|without|exclude|no|skip)\s+([a-zA-Z가-힣\s]+?)(?:\s*,|\s+and|\s*$)/gi) ?? [];
-  for (const m of engNeg) {
-    const term = m.replace(/^(?:not|without|exclude|no|skip)\s+/i, '').trim();
+
+  // Korean negation prefixes: 비 X, 안 쓴 X, 대신 X
+  for (const m of query.matchAll(KOREAN_NEGATION_PREFIX_RE)) {
+    const term = m[1]?.trim() ?? '';
     if (term.length > 0) terms.push(term);
   }
+
+  // English negation: not X, without X, exclude X, no X, skip X, non-X
+  for (const m of query.matchAll(ENGLISH_NEGATION_RE)) {
+    const term = m[1]?.trim() ?? '';
+    if (term.length > 0) terms.push(term);
+  }
+
   return [...new Set(terms.map((t) => t.toLowerCase()))];
 }
+
+/**
+ * Additional entity fields checked for negation post-filter in search_wines.
+ * Excludes `canonicalLabel` (checked separately) and the `grapes` array (iterated separately).
+ * Covers identity-bearing string fields a user query might negate by name.
+ * Module-scope to avoid per-call allocation (deterministic, never changes).
+ */
+const NEGATION_ENTITY_STRING_FIELDS = [
+  'country', 'region', 'wineType', 'producer', 'style',
+] as const;
 
 export async function executeAgentTool(
   toolName: string,
@@ -182,17 +259,36 @@ export async function executeAgentTool(
       // Activate diversity dedup when query contains diversity hints
       const wantsDiversity = /(?:diverse|different|다른|다르게|각각|variety)/i.test(parsed.query);
 
-      // Negation post-filter: exclude results whose label or grapes contain negated terms.
+      // Negation post-filter: exclude results whose identity fields contain negated terms.
+      // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
       const negTerms = extractNegationTerms(parsed.query);
       if (negTerms.length > 0) {
         const filtered = response.results.filter((r) => {
-          const label = r.entity.canonicalLabel.toLowerCase();
-          const grape = (r.entity.grapes ?? []).join(' ').toLowerCase();
-          const check = label + ' ' + grape;
+          const entity = r.entity;
+          // Build a single lowercased string from all identity-bearing fields.
+          const parts: string[] = [entity.canonicalLabel.toLowerCase()];
+          // Grape varieties array
+          for (const g of entity.grapes ?? []) {
+            parts.push(g.toLowerCase());
+          }
+          // String fields from NEGATION_ENTITY_STRING_FIELDS
+          for (const field of NEGATION_ENTITY_STRING_FIELDS) {
+            const v = (entity as Record<string, unknown>)[field];
+            if (typeof v === 'string' && v.length > 0) {
+              parts.push(v.toLowerCase());
+            }
+          }
+          const check = parts.join(' ');
           return !negTerms.some((term) => check.includes(term));
         });
         if (filtered.length < response.results.length) {
           const filteredResponse = { ...response, results: filtered } as typeof response;
+          if (filtered.length === 0) {
+            return {
+              observation: `검색 결과가 없습니다 (${response.results.length}개가 제외 조건과 일치). 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
+              rawResult: filteredResponse,
+            };
+          }
           return {
             observation:
               summarizeSearchResults(filteredResponse, wantsDiversity)
@@ -202,8 +298,24 @@ export async function executeAgentTool(
         }
       }
 
+      // Zero-result escalation: guide the agent to relax constraints one by one.
+      if (response.results.length === 0) {
+        return {
+          observation: `검색 결과가 없습니다. 검색어: "${parsed.query}". 힌트: 조건을 하나씩 줄여서 재검색하세요 (예: 가격 조건 제거 → 품종만으로 재검색).`,
+          rawResult: response,
+        };
+      }
+
+      // Multi-constraint hint: when 3+ constraint types are detected, remind the
+      // agent it can relax constraints if results are insufficient.
+      let obs = summarizeSearchResults(response, wantsDiversity);
+      const constraintHints = detectConstraintKeywords(parsed.query);
+      if (constraintHints.length >= MIN_CONSTRAINTS_FOR_STAGED_HINT) {
+        obs += `\n[감지된 조건 ${constraintHints.length}개: ${constraintHints.join(', ')}. 결과가 부족하면 조건을 하나씩 제거하며 재검색하세요.]`;
+      }
+
       return {
-        observation: summarizeSearchResults(response, wantsDiversity),
+        observation: obs,
         rawResult: response,
       };
     }

@@ -710,6 +710,7 @@ describe('weight invariants', () => {
   const REQUIRED_KEYS = [
     'executionEfficiency',
     'answerQuality',
+    'answerRelevancy',
     'terminationCorrectness',
     'costEfficiency',
     'judge',
@@ -1058,17 +1059,19 @@ describe('RAGAS Context Precision', () => {
 });
 
 describe('RAGAS weight integration', () => {
-  it('DEFAULT_WEIGHTS includes faithfulness + contextPrecision and sums to 1.0', () => {
+  it('DEFAULT_WEIGHTS includes faithfulness + contextPrecision + answerRelevancy and sums to 1.0', () => {
     expect(DEFAULT_WEIGHTS).toHaveProperty('faithfulness');
     expect(DEFAULT_WEIGHTS).toHaveProperty('contextPrecision');
+    expect(DEFAULT_WEIGHTS).toHaveProperty('answerRelevancy');
     const sum = Object.values(DEFAULT_WEIGHTS).reduce((a, b) => a + b, 0);
     expect(Math.abs(sum - 1)).toBeLessThan(1e-9);
   });
 
-  it('every TIER_WEIGHTS entry includes faithfulness + contextPrecision', () => {
+  it('every TIER_WEIGHTS entry includes faithfulness + contextPrecision + answerRelevancy', () => {
     for (const [tier, weights] of Object.entries(TIER_WEIGHTS)) {
       expect(weights, `${tier} missing faithfulness`).toHaveProperty('faithfulness');
       expect(weights, `${tier} missing contextPrecision`).toHaveProperty('contextPrecision');
+      expect(weights, `${tier} missing answerRelevancy`).toHaveProperty('answerRelevancy');
       const sum = Object.values(weights).reduce((a, b) => a + b, 0);
       expect(Math.abs(sum - 1), `${tier} sum=${sum}`).toBeLessThan(1e-9);
     }
@@ -1088,6 +1091,76 @@ describe('RAGAS weight integration', () => {
     // With faithfulness=0.9 and weight preserved, overall should be healthy.
     expect(Number.isFinite(r.scores.overall)).toBe(true);
     expect(r.scores.faithfulness).toBe(0.9);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// answerRelevancy dimension
+// ─────────────────────────────────────────────────────────────────────
+
+describe('answerRelevancy', () => {
+  it('null when no judge and no answerMustMatch patterns', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'a wine recommendation' }),
+      undefined, // no judge
+    );
+    expect(r.scores.answerRelevancy).toBeNull();
+  });
+
+  it('equals judgeScore when judge is provided', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'a wine recommendation' }),
+      0.75, // judge
+    );
+    expect(r.scores.answerRelevancy).toBe(0.75);
+  });
+
+  it('judge=0 → answerRelevancy=0', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'a wine recommendation' }),
+      0,
+    );
+    expect(r.scores.answerRelevancy).toBe(0);
+  });
+
+  it('1.0 when all answerMustMatch patterns satisfied and no judge', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, answerMustMatch: ['Opus One', '\\d{4}'] }),
+      makeExecution({ answer: 'I recommend Opus One 2018.' }),
+      undefined,
+    );
+    expect(r.scores.answerRelevancy).toBe(1.0);
+  });
+
+  it('0.5 when any answerMustMatch pattern is missed and no judge', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, answerMustMatch: ['Opus One', 'Napa'] }),
+      makeExecution({ answer: 'I recommend Opus One.' }),
+      undefined,
+    );
+    expect(r.scores.answerRelevancy).toBe(0.5);
+  });
+
+  it('judge takes priority over answerMustMatch heuristic', () => {
+    // Even with a missed pattern, judge=0.9 wins
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5, answerMustMatch: ['Napa'] }),
+      makeExecution({ answer: 'I recommend Opus One.' }),
+      0.9, // judge present
+    );
+    expect(r.scores.answerRelevancy).toBe(0.9);
+  });
+
+  it('is included in scores object', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution(),
+      0.8,
+    );
+    expect(r.scores).toHaveProperty('answerRelevancy');
   });
 });
 
