@@ -65,6 +65,7 @@
     "benchmark:standard": "npx tsx test/benchmark/agent/runner.ts --container real --profile standard --no-judge",
     "benchmark:nightly": "npx tsx test/benchmark/agent/runner.ts --container real --profile nightly",
     "benchmark:mock": "npx tsx test/benchmark/agent/runner.ts --profile standard --no-judge",
+    "benchmark:retrieval": "tsx test/benchmark/agent/retrieval-runner.ts --profile retrieval",
     "test:all": "npm run test:unit && npm run test:integration && npm run test:watchlist && npm run test:meta && npm run test:e2e:contract && npm run test:ingest:contract && npm run test:quality",
     "test:all:full": "npm run test:all && npm run test:heavy && npm run test:e2e:runtime",
     "test:verification:vespa": "bash scripts/run-vespa-verification.sh",
