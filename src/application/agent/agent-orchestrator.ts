@@ -248,12 +248,16 @@ export class AgentOrchestrator {
           break;
         }
 
-        // Synthesize-before-exhaustion: when 1 step remains, nudge the LLM to
-        // produce a final answer rather than burning the last step on another
-        // tool call that will hit fallback. Fire regardless of whether
-        // observations exist — maxSteps=1 must also receive the nudge.
+        // Synthesize-before-exhaustion: when ≤2 steps remain, nudge the LLM to
+        // produce a final answer rather than burning remaining steps on another
+        // tool call that will hit fallback. "isLastStep" fires on both
+        // remainingSteps===1 (final step) and remainingSteps===2 (penultimate),
+        // because gpt-4o-mini reliably needs one step to actually produce the
+        // answer JSON — firing the nudge one step earlier reduces fallback rate.
+        // Fire regardless of whether observations exist — maxSteps=1 must also
+        // receive the nudge.
         const remainingSteps = effectiveConfig.maxSteps - budget.getStepCount();
-        const isLastStep = remainingSteps === 1;
+        const isLastStep = remainingSteps <= 2;
 
         // Pre-flight token budget check — prevent unnecessary LLM calls when
         // the budget is already exhausted. The check uses accumulated totals
@@ -291,7 +295,12 @@ export class AgentOrchestrator {
           // model saw the warning before its own tool history, which reduced
           // compliance. A trailing user message is the natural "now respond" turn.
           ...(isLastStep
-            ? [{ role: 'user' as const, content: `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.` }]
+            ? [{
+                role: 'user' as const,
+                content: remainingSteps === 1
+                  ? `[LAST_STEP] Step budget exhausted. You MUST produce a final {"thought":"…","answer":"…"} JSON now using the information above. Do NOT call another tool.`
+                  : `[BUDGET_WARNING] Only ${remainingSteps} steps remain. If you already have search results, produce your final {"thought":"…","answer":"…"} NOW. Reserve your last step for the answer, not another tool call.`,
+              }]
             : []),
         ];
 
