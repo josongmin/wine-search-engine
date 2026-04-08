@@ -196,13 +196,13 @@ function extractNegationTerms(query: string): readonly string[] {
 }
 
 /**
- * Additional entity fields checked for negation post-filter in search_wines.
- * Excludes `canonicalLabel` (checked separately) and the `grapes` array (iterated separately).
- * Covers identity-bearing string fields a user query might negate by name.
+ * Additional EntitySummary fields checked for negation post-filter in search_wines.
+ * Excludes `canonicalLabel` (checked separately) and `grapes` (iterated separately).
+ * Only fields actually present on EntitySummary are listed here.
  * Module-scope to avoid per-call allocation (deterministic, never changes).
  */
-const NEGATION_ENTITY_STRING_FIELDS = [
-  'country', 'region', 'wineType', 'producer', 'style',
+const NEGATION_ENTITY_STRING_FIELDS: ReadonlyArray<'region' | 'producer' | 'appellation'> = [
+  'region', 'producer', 'appellation',
 ] as const;
 
 export async function executeAgentTool(
@@ -271,9 +271,9 @@ export async function executeAgentTool(
           for (const g of entity.grapes ?? []) {
             parts.push(g.toLowerCase());
           }
-          // String fields from NEGATION_ENTITY_STRING_FIELDS
+          // Additional EntitySummary string fields from NEGATION_ENTITY_STRING_FIELDS
           for (const field of NEGATION_ENTITY_STRING_FIELDS) {
-            const v = (entity as Record<string, unknown>)[field];
+            const v = entity[field];
             if (typeof v === 'string' && v.length > 0) {
               parts.push(v.toLowerCase());
             }

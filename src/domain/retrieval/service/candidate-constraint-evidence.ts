@@ -181,6 +181,26 @@ function evaluateOperator(
       }
       return attrValue !== constraintValue;
     }
+
+    case 'not_in': {
+      // Exclude if the attribute value matches ANY of the listed values.
+      const excludeValues = Array.isArray(constraintValue)
+        ? constraintValue.filter((v): v is string => typeof v === 'string').map(normalizeString)
+        : typeof constraintValue === 'string'
+          ? [normalizeString(constraintValue)]
+          : [];
+      if (Array.isArray(attrValue)) {
+        const attrValues = attrValue
+          .filter((v): v is string => typeof v === 'string')
+          .map(normalizeString);
+        return attrValues.every((v) => !excludeValues.includes(v));
+      }
+      if (typeof attrValue === 'string') {
+        return !excludeValues.includes(normalizeString(attrValue));
+      }
+      return true;
+    }
+
     default: {
       // Exhaustiveness check: if a new operator is added, TypeScript will error here.
       operator satisfies never;

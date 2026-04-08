@@ -76,9 +76,11 @@ test/benchmark/agent/results/*.txt
 web/.next
 web/next-env.d.ts
 
-# Archives & local snapshots (do not commit dumps)
+# Compressed archives & local snapshots (do not commit dumps / code-audit bundles)
 *.tar
 *.tar.gz
+*.tar.bz2
+*.tar.xz
 *.tgz
 *.zip
 *.7z

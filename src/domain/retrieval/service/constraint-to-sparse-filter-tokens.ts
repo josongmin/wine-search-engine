@@ -34,17 +34,8 @@ function constraintToSparseFilterTokens(
       if (normalized.length > 1) return [`${key}_in:${normalized.join('|')}`];
       return [];
     }
-    // Negation operators: emit not_<key> tokens for downstream YQL NOT clauses.
     if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
-      return [`not_${key}:${value}`];
-    }
-    if (operator === 'not_in' && Array.isArray(value)) {
-      const normalized = value.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-      if (normalized.length === 1) return [`not_${key}:${normalized[0]}`];
-      // Multi-value NOT IN: emit pipe-delimited token so buildSparseFilters can
-      // produce individual Vespa NOT clauses for each value.
-      if (normalized.length > 1) return [`not_${key}_in:${normalized.join('|')}`];
-      return [];
+      return [`${key}_not:${value}`];
     }
     return [];
   };
@@ -54,9 +45,16 @@ function constraintToSparseFilterTokens(
       return stringEq('wine_type');
     case 'country':
       return stringEq('country');
+    case 'region':
+      return stringEq('region');
     case 'appellation':
       return stringEq('appellation');
     case 'grape_primary':
+      // For exclusion, emit NOT filters for both grape fields in the schema
+      // (grape_primary is a string field; grapes is an array<string> field).
+      if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
+        return [`grape_primary_not:${value}`, `grapes_not:${value}`];
+      }
       return stringEq('grape_primary');
     case 'style':
       return stringEq('style');
@@ -109,6 +107,12 @@ function constraintToSparseFilterTokens(
       if (operator === 'range' && isNumericRange(value)) {
         return [`price_usd_min:${value.min}`, `price_usd_max:${value.max}`];
       }
+      if (operator === '<=' && typeof value === 'number' && Number.isFinite(value)) {
+        return [`price_usd_max:${value}`];
+      }
+      if (operator === '>=' && typeof value === 'number' && Number.isFinite(value)) {
+        return [`price_usd_min:${value}`];
+      }
       return [];
     }
 
@@ -119,6 +123,12 @@ function constraintToSparseFilterTokens(
           `vintage_year_min:${Math.floor(value.min)}`,
           `vintage_year_max:${Math.floor(value.max)}`,
         ];
+      }
+      if (operator === '>=' && typeof value === 'number' && Number.isFinite(value)) {
+        return [`vintage_year_min:${Math.floor(value)}`];
+      }
+      if (operator === '<=' && typeof value === 'number' && Number.isFinite(value)) {
+        return [`vintage_year_max:${Math.floor(value)}`];
       }
       return [];
     }

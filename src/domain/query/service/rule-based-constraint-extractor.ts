@@ -1,4 +1,7 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
+import {
+  extractSearchConstraints,
+} from './search-constraint-extractor.js';
 
 /** Version tag applied to all rule-based constraints (RFC-004, RFC-005). */
 export const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
@@ -157,6 +160,109 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       value: 'sweet',
       source_phrase: 'sweet',
       confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Exclusion constraints via SearchConstraints
+  // -------------------------------------------------------------------------
+  // extractSearchConstraints handles negation patterns ("빼고", "제외", "말고",
+  // "without X", "no X", etc.) for grape, country, region, and style.
+  // These are emitted as hard `exclude` constraints so downstream filter
+  // injection can produce Vespa NOT-clauses.
+  const searchConstraints = extractSearchConstraints(q);
+
+  for (const grape of searchConstraints.excludeGrapes ?? []) {
+    hard.push({
+      attribute: 'grape_primary',
+      operator: 'exclude',
+      value: grape,
+      source_phrase: grape,
+      confidence: 0.9,
+      mapping_version: mv,
+    });
+  }
+
+  for (const country of searchConstraints.excludeCountries ?? []) {
+    hard.push({
+      attribute: 'country',
+      operator: 'exclude',
+      value: country,
+      source_phrase: country,
+      confidence: 0.88,
+      mapping_version: mv,
+    });
+  }
+
+  for (const region of searchConstraints.excludeRegions ?? []) {
+    hard.push({
+      attribute: 'region',
+      operator: 'exclude',
+      value: region,
+      source_phrase: region,
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  for (const style of searchConstraints.excludeStyles ?? []) {
+    hard.push({
+      attribute: 'style',
+      operator: 'exclude',
+      value: style,
+      source_phrase: style,
+      confidence: 0.85,
+      mapping_version: mv,
+    });
+  }
+
+  // KRW price range constraints → soft (price filters are user preferences,
+  // not hard requirements — a wine at 51,000₩ should not be excluded when
+  // the user asked for "5만원 이하").
+  if (searchConstraints.maxPriceKrw !== undefined) {
+    const maxUsd = Math.round((searchConstraints.maxPriceKrw / 1350) * 100) / 100;
+    soft.push({
+      attribute: 'price_usd',
+      operator: '<=',
+      value: maxUsd,
+      source_phrase: `${searchConstraints.maxPriceKrw / 10_000}만원 이하`,
+      confidence: 0.82,
+      mapping_version: mv,
+    });
+  }
+
+  if (searchConstraints.minPriceKrw !== undefined) {
+    const minUsd = Math.round((searchConstraints.minPriceKrw / 1350) * 100) / 100;
+    soft.push({
+      attribute: 'price_usd',
+      operator: '>=',
+      value: minUsd,
+      source_phrase: `${searchConstraints.minPriceKrw / 10_000}만원 이상`,
+      confidence: 0.82,
+      mapping_version: mv,
+    });
+  }
+
+  // Vintage range constraints → hard (explicit vintage = hard requirement).
+  if (searchConstraints.vintageMin !== undefined) {
+    hard.push({
+      attribute: 'vintage_year',
+      operator: '>=',
+      value: searchConstraints.vintageMin,
+      source_phrase: `${searchConstraints.vintageMin}년 이후`,
+      confidence: 0.9,
+      mapping_version: mv,
+    });
+  }
+
+  if (searchConstraints.vintageMax !== undefined) {
+    hard.push({
+      attribute: 'vintage_year',
+      operator: '<=',
+      value: searchConstraints.vintageMax,
+      source_phrase: `${searchConstraints.vintageMax}년 이전`,
+      confidence: 0.9,
       mapping_version: mv,
     });
   }
