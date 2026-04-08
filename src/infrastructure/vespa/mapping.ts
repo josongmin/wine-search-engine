@@ -599,13 +599,16 @@ function parseFilterToken(token: string): { key: string; value: string } {
  * `entity_id in ("${id}")`  // breaks if id contains " or \
  */
 export function yqlEscapeString(value: string): string {
-  // Strip ASCII control chars (U+0000–U+001F, U+007F), Unicode line-terminators
-  // (U+0085 NEL, U+2028 LS, U+2029 PS), and BOM/ZWNBSP (U+FEFF) before escaping.
-  // These have no legitimate use in wine entity names and could confuse YQL parsers,
-  // log aggregators, or inject newlines into structured log output.
-  // U+2028/U+2029 are valid JS line-terminators and can break YQL string literals.
+  // Strip control characters before escaping:
+  //   \x00-\x1F  — ASCII C0 control chars (NUL, TAB, LF, CR, …)
+  //   \x7F       — DEL
+  //   \x80-\x9F  — C1 control chars (U+0080–U+009F, includes U+0085 NEL)
+  //               Can confuse YQL parsers and terminal emulators; no legit use.
+  //   \u2028     — Unicode Line Separator (valid JS line-terminator, breaks YQL)
+  //   \u2029     — Unicode Paragraph Separator (same)
+  //   \uFEFF     — BOM / Zero Width No-Break Space
   // eslint-disable-next-line no-control-regex -- intentionally strips ASCII/Unicode control chars
-  const sanitized = value.replace(/[\x00-\x1F\x7F\x85\u2028\u2029\uFEFF]/gu, '');
+  const sanitized = value.replace(/[\x00-\x1F\x7F-\x9F\u2028\u2029\uFEFF]/gu, '');
   return `"${sanitized.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
