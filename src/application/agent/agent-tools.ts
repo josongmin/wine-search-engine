@@ -26,6 +26,12 @@ const SearchInputSchema = z.object({
   query: z.string().min(1).max(500),
   limit: z.number().int().min(1).max(20).optional(),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
+  /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]). */
+  exclude_grapes: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
+  /** Countries/regions to exclude (e.g. ["France", "프랑스"]). */
+  exclude_regions: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
+  /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
+  max_price_krw: z.number().int().min(0).max(100_000_000).optional(),
 });
 
 const CompareInputSchema = z.object({
@@ -40,7 +46,7 @@ const DrinkingWindowInputSchema = z.object({
 
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1),
-  max_price: z.number().optional(),
+  max_price: z.number().finite().optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
 });
 
@@ -101,6 +107,27 @@ export function isKnownTool(name: string): boolean {
   return KNOWN_TOOLS.has(name);
 }
 
+// ---------------------------------------------------------------------------
+// Negation term extraction (for post-filter in search_wines)
+// ---------------------------------------------------------------------------
+
+function extractNegationTerms(query: string): readonly string[] {
+  const terms: string[] = [];
+  // Korean negation patterns: X 빼고, X 제외, X 말고, X 아닌, X 없는
+  const koreanNeg = query.match(/(\S+)\s*(?:빼고|제외|말고|아닌|없는)/g) ?? [];
+  for (const m of koreanNeg) {
+    const term = m.replace(/\s*(?:빼고|제외|말고|아닌|없는).*/, '').trim();
+    if (term.length > 0) terms.push(term);
+  }
+  // English negation: not X, without X, exclude X, no X, skip X
+  const engNeg = query.match(/(?:not|without|exclude|no|skip)\s+([a-zA-Z가-힣\s]+?)(?:\s*,|\s+and|\s*$)/gi) ?? [];
+  for (const m of engNeg) {
+    const term = m.replace(/^(?:not|without|exclude|no|skip)\s+/i, '').trim();
+    if (term.length > 0) terms.push(term);
+  }
+  return [...new Set(terms.map((t) => t.toLowerCase()))];
+}
+
 export async function executeAgentTool(
   toolName: string,
   input: Record<string, unknown>,
@@ -114,9 +141,30 @@ export async function executeAgentTool(
         return { observation: `Invalid input for search_wines: ${parseResult.error.issues.map((i) => i.message).join(', ')}`, rawResult: null };
       }
       const parsed = parseResult.data;
+
+      // Enrich query with structured exclusion/price params so the existing
+      // search pipeline (which understands natural language) applies them.
+      let enrichedQuery = parsed.query;
+      if (parsed.exclude_grapes !== undefined && parsed.exclude_grapes.length > 0) {
+        enrichedQuery += `, exclude ${parsed.exclude_grapes.join(', ')}`;
+      }
+      if (parsed.exclude_regions !== undefined && parsed.exclude_regions.length > 0) {
+        enrichedQuery += `, not from ${parsed.exclude_regions.join(', ')}`;
+      }
+      if (parsed.max_price_krw !== undefined) {
+        enrichedQuery += `, under ${parsed.max_price_krw} KRW`;
+      }
+
+      // Cap enriched query length to prevent downstream issues. The original
+      // query is max 500 chars but exclusion/price params can add ~200 chars.
+      const MAX_ENRICHED_QUERY_LEN = 700;
+      if (enrichedQuery.length > MAX_ENRICHED_QUERY_LEN) {
+        enrichedQuery = enrichedQuery.slice(0, MAX_ENRICHED_QUERY_LEN);
+      }
+
       const response = await deps.searchUseCase.execute(
         {
-          query: parsed.query,
+          query: enrichedQuery,
           ...(parsed.retrieval_mode !== undefined
             ? { options: { mode: parsed.retrieval_mode, explain: false, clarification: false } }
             : {}),
@@ -133,6 +181,27 @@ export async function executeAgentTool(
 
       // Activate diversity dedup when query contains diversity hints
       const wantsDiversity = /(?:diverse|different|다른|다르게|각각|variety)/i.test(parsed.query);
+
+      // Negation post-filter: exclude results whose label or grapes contain negated terms.
+      const negTerms = extractNegationTerms(parsed.query);
+      if (negTerms.length > 0) {
+        const filtered = response.results.filter((r) => {
+          const label = r.entity.canonicalLabel.toLowerCase();
+          const grape = (r.entity.grapes ?? []).join(' ').toLowerCase();
+          const check = label + ' ' + grape;
+          return !negTerms.some((term) => check.includes(term));
+        });
+        if (filtered.length < response.results.length) {
+          const filteredResponse = { ...response, results: filtered } as typeof response;
+          return {
+            observation:
+              summarizeSearchResults(filteredResponse, wantsDiversity)
+              + `\n[Excluded ${response.results.length - filtered.length} result(s) matching negation terms: ${negTerms.join(', ')}]`,
+            rawResult: filteredResponse,
+          };
+        }
+      }
+
       return {
         observation: summarizeSearchResults(response, wantsDiversity),
         rawResult: response,
@@ -193,12 +262,12 @@ export async function executeAgentTool(
               : {}),
           };
           return {
-            observation: `${doc.canonicalLabel ?? parsed.entity_id}: drinking window ${start}-${end}, currently ${currentlyDrinkable ? 'drinkable' : 'not in window'}`,
+            observation: `${doc.canonicalLabel}: drinking window ${start}-${end}, currently ${currentlyDrinkable ? 'drinkable' : 'not in window'}`,
             rawResult: dw,
           };
         }
         return {
-          observation: `${doc.canonicalLabel ?? parsed.entity_id}: no drinking window data available.`,
+          observation: `${doc.canonicalLabel}: no drinking window data available.`,
           rawResult: null,
         };
       }
@@ -348,9 +417,7 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     if (top.drinkingWindow) {
       parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);
     }
-    // Include match type / style hints if available for richer comparison synthesis
-    const matchType = top.match?.matchType;
-    if (matchType) parts.push(`match: ${matchType}`);
+    parts.push(`match: ${top.match.matchType}`);
     return parts.join(' | ');
   });
 

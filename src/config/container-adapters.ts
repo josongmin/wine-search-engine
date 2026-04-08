@@ -120,10 +120,7 @@ export function buildCoreAdapterServices(
     if (config.killSwitch.denseRetrieval) {
       return new StubEmbeddingService(config.embedding.dimension);
     }
-    if (
-      config.openai.apiKey !== undefined &&
-      config.openai.embeddingModel !== undefined
-    ) {
+    if (config.openai.apiKey !== undefined) {
       return new OpenAiEmbeddingService({
         baseUrl: config.openai.baseUrl,
         apiKey: config.openai.apiKey,

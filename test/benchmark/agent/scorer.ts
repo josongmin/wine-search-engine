@@ -6,8 +6,8 @@
  *                             double-penalty when thrashing inflates both
  *   - answerQuality:          substring contract + Korean-aware matching
  *                             + structured fact / entity grounding
- *   - terminationCorrectness: matches expectation; fallback=0; expectedBlocked
- *                             handled symmetrically
+ *   - terminationCorrectness: matches expectation; fallback=0.25 (graceful degradation partial credit);
+ *                             expectedBlocked handled symmetrically
  *   - costEfficiency:         max-overshoot of latency + token budgets,
  *                             arithmetic (no sqrt floor) so single blowouts
  *                             aren't double-punished
@@ -56,6 +56,7 @@ export type DiagnosticDim =
   | 'toolAccuracy'
   | 'stepEfficiency'
   | 'answerQuality'
+  | 'answerRelevancy'
   | 'terminationCorrectness'
   | 'costEfficiency'
   | 'faithfulness'
@@ -88,6 +89,12 @@ export interface ScenarioScores {
    * the query constraints. null when no structured constraints to check.
    */
   readonly contextPrecision: number | null;
+  /**
+   * RAGAS Answer Relevancy: does the answer actually address the question asked?
+   * When judge is present, uses judgeScore as proxy. Otherwise, heuristic from
+   * answerMustMatch pattern satisfaction. null when no patterns and no judge.
+   */
+  readonly answerRelevancy: number | null;
   readonly judge: number | null; // null when judge disabled
   readonly overall: number;
   /** True when a hard / critical violation collapsed overall to 0. */
@@ -123,6 +130,7 @@ const ZERO_SCORES: ScenarioScores = {
   costEfficiency: 0,
   faithfulness: null,
   contextPrecision: null,
+  answerRelevancy: null,
   judge: null,
   overall: 0,
   criticalFailure: false,
@@ -140,8 +148,9 @@ export type DimensionWeights = Partial<Record<
 >>;
 
 export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
-  answerQuality: 0.25,
-  executionEfficiency: 0.25,
+  answerQuality: 0.20,
+  executionEfficiency: 0.20,
+  answerRelevancy: 0.10,
   faithfulness: 0.10,
   contextPrecision: 0.05,
   costEfficiency: 0.15,
@@ -164,60 +173,60 @@ export const DEFAULT_WEIGHTS: Required<DimensionWeights> = {
 export const TIER_WEIGHTS: Readonly<Record<string, Required<DimensionWeights>>> = {
   // Security-critical tiers — termination + execution dominant
   adversarial: {
-    terminationCorrectness: 0.25, executionEfficiency: 0.25, answerQuality: 0.15,
-    faithfulness: 0.05, contextPrecision: 0.05, costEfficiency: 0.10, judge: 0.15,
+    terminationCorrectness: 0.25, executionEfficiency: 0.20, answerQuality: 0.10,
+    answerRelevancy: 0.10, faithfulness: 0.05, contextPrecision: 0.05, costEfficiency: 0.10, judge: 0.15,
   },
   edge_case: {
-    terminationCorrectness: 0.20, executionEfficiency: 0.25, answerQuality: 0.15,
-    faithfulness: 0.10, contextPrecision: 0.05, costEfficiency: 0.15, judge: 0.10,
+    terminationCorrectness: 0.20, executionEfficiency: 0.20, answerQuality: 0.10,
+    answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05, costEfficiency: 0.15, judge: 0.10,
   },
   // Answer-quality + faithfulness dominant — grounding matters most
   knowledge_hybrid: {
-    answerQuality: 0.30, faithfulness: 0.15, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
   },
   negation: {
-    answerQuality: 0.30, faithfulness: 0.15, contextPrecision: 0.05,
-    executionEfficiency: 0.20, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.15, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
   },
   nested_condition: {
-    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.10,
-    executionEfficiency: 0.20, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.10,
+    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.10,
   },
   // Cost-sensitive tiers
   extreme: {
-    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.20, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.20, terminationCorrectness: 0.10, judge: 0.15,
   },
   comparison_nested: {
-    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.20, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.15, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.15,
   },
   // Korean-language nuance tiers — faithfulness + judge weighted
   korean_colloquial: {
-    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
   },
   korean_food_pairing: {
-    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.20,
   },
   // Subjective / situational tiers
   mood_atmosphere: {
-    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.25,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.25,
   },
   situation_based: {
-    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
   },
   gift_refined: {
-    answerQuality: 0.25, faithfulness: 0.10, contextPrecision: 0.05,
-    executionEfficiency: 0.15, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
+    answerQuality: 0.20, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.05,
+    executionEfficiency: 0.10, costEfficiency: 0.15, terminationCorrectness: 0.10, judge: 0.20,
   },
   price_expression: {
-    answerQuality: 0.30, faithfulness: 0.10, contextPrecision: 0.10,
-    executionEfficiency: 0.15, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
+    answerQuality: 0.25, answerRelevancy: 0.10, faithfulness: 0.10, contextPrecision: 0.10,
+    executionEfficiency: 0.10, costEfficiency: 0.10, terminationCorrectness: 0.10, judge: 0.15,
   },
 };
 
@@ -315,6 +324,24 @@ export function scoreScenario(
 
   // Judge: undefined → null (DROPPED from geo-mean, not 1.0).
   const judge: number | null = judgeScore === undefined ? null : clamp01(judgeScore);
+
+  // RAGAS Answer Relevancy: does the answer address the question asked?
+  // When judgeScore is provided, use it as the relevancy proxy (judge already
+  // assesses this). When no judge, use a heuristic: answerMustMatch patterns
+  // satisfied → 1.0, any miss → 0.5. No patterns and no judge → null.
+  let answerRelevancy: number | null = null;
+  if (judgeScore !== undefined) {
+    answerRelevancy = clamp01(judgeScore);
+  } else if (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) {
+    let allMatched = true;
+    for (const pattern of exp.answerMustMatch) {
+      try {
+        const re = new RegExp(pattern, 'i');
+        if (!re.test(execution.answer)) { allMatched = false; break; }
+      } catch { /* invalid regex — treat as miss */ allMatched = false; break; }
+    }
+    answerRelevancy = allMatched ? 1.0 : 0.5;
+  }
 
   // RAGAS Faithfulness: LLM-scored grounding of answer claims in tool results.
   // null when no observations (no tool calls → nothing to ground against).
@@ -616,7 +643,11 @@ function scoreAnswerQuality(
   // answerMustMatch: regex array, all must hit
   if (exp.answerMustMatch !== undefined && exp.answerMustMatch.length > 0) {
     for (const pattern of exp.answerMustMatch) {
-      const re = new RegExp(pattern, 'i');
+      let re: RegExp;
+      try { re = new RegExp(pattern, 'i'); } catch {
+        diagnostics.push({ dim: 'answerQuality', severity: 'warn', code: 'INVALID_REGEX', message: `invalid regex: ${pattern}` });
+        continue;
+      }
       if (!re.test(answer)) {
         diagnostics.push({
           dim: 'answerQuality',
@@ -632,7 +663,11 @@ function scoreAnswerQuality(
   // answerMustNotMatch: regex array, none may hit (critical)
   if (exp.answerMustNotMatch !== undefined && exp.answerMustNotMatch.length > 0) {
     for (const pattern of exp.answerMustNotMatch) {
-      const re = new RegExp(pattern, 'i');
+      let re: RegExp;
+      try { re = new RegExp(pattern, 'i'); } catch {
+        diagnostics.push({ dim: 'answerQuality', severity: 'warn', code: 'INVALID_REGEX', message: `invalid regex: ${pattern}` });
+        continue;
+      }
       if (re.test(answer)) {
         diagnostics.push({
           dim: 'answerQuality',
@@ -899,7 +934,9 @@ function extractVintageYears(text: string): number[] {
 function extractProperNouns(text: string): string[] {
   const results: string[] = [];
   // Latin proper nouns: "Opus One", "Château Margaux", "Screaming Eagle"
-  const latinMatches = text.match(/\b(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)\b/g);
+  // Unicode-aware boundary: \b is ASCII-only and silently fails on accented
+  // Latin names (Château, Côte). Use lookahead/lookbehind for non-word chars.
+  const latinMatches = text.match(/(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)(?=$|[\s,;:.)])/g);
   if (latinMatches) results.push(...latinMatches);
   // Korean wine names: sequences of 2+ Hangul syllables (오푸스원, 샤또마고, 바롤로)
   // Filter out common Korean grammar words to reduce false positives.
@@ -1021,7 +1058,12 @@ function scoreContextPrecision(
   // observations. Threshold: at least 30% of significant words should appear
   // for the context to be considered relevant.
   if (execution.toolsUsed.length > 0) {
-    const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'from', 'that', 'this', 'wine', 'wines', 'under', 'over', 'not']);
+    const STOPWORDS = new Set([
+      // English
+      'the', 'and', 'for', 'with', 'from', 'that', 'this', 'wine', 'wines', 'under', 'over', 'not',
+      // Korean common words that appear in queries but aren't content-bearing
+      '와인', '추천', '좋은', '이하', '이상', '해줘', '해주세요', '있는', '없는', '중에', '같은',
+    ]);
     const queryTerms = execution.toolsUsed
       .map((t) => {
         try {
@@ -1102,7 +1144,7 @@ function scoreTermination(
         code: 'FALLBACK_TERMINATION',
         message: 'fallback termination (max steps exhausted)',
       });
-      return 0;
+      return 0.25;
     }
     // Unknown / future enum value — push diagnostic so silent zeros are visible.
     diagnostics.push({
@@ -1235,7 +1277,7 @@ function weightedGeometricMean(
   dimScores: Record<string, number | null>,
   weights: Record<string, number>,
 ): number {
-  const EPS = 1e-3;
+  const EPS = 0.05;
   // First pass: present-only mean for imputation.
   let presentLogSum = 0;
   let presentWeight = 0;

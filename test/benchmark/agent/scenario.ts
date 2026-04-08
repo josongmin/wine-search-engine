@@ -30,7 +30,15 @@ export type ScenarioTier =
   | 'korean_food_pairing'
   | 'gift_refined'
   | 'seasonal_temporal'
-  | 'adversarial';
+  | 'adversarial'
+  | 'wine_name_lookup'
+  | 'taste_descriptor'
+  | 'rating_score'
+  | 'wine_type_basic'
+  | 'negation_complex'
+  | 'arithmetic_query'
+  | 'bilingual_mixed'
+  | 'cellar_aging';
 
 export type AttackType =
   | 'prompt_injection'

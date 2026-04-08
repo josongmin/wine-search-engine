@@ -174,15 +174,22 @@ function parseJudgeResponse(text: string): { score: number; rationale: string } 
       return null;
     }
     const obj = parsed as { score: unknown; rationale: unknown };
-    if (typeof obj.score !== 'number' || typeof obj.rationale !== 'string') {
+    if (typeof obj.rationale !== 'string') return null;
+    // Accept both number and string-typed scores — some LLM models emit "0.75" instead of 0.75.
+    let scoreNum: number;
+    if (typeof obj.score === 'number') {
+      scoreNum = obj.score;
+    } else if (typeof obj.score === 'string') {
+      scoreNum = parseFloat(obj.score);
+    } else {
       return null;
     }
-    if (!Number.isFinite(obj.score)) return null;
-    const clamped = Math.max(0, Math.min(1, obj.score));
+    if (!Number.isFinite(scoreNum)) return null;
+    const clamped = Math.max(0, Math.min(1, scoreNum));
     // Annotate rationale when the judge produced an out-of-range score so a
     // misbehaving judge model is visible in the rationale, not silently clipped.
-    const rationale = Math.abs(clamped - obj.score) > 0.01
-      ? `[clamped from ${obj.score.toFixed(2)}] ${obj.rationale}`
+    const rationale = Math.abs(clamped - scoreNum) > 0.01
+      ? `[clamped from ${scoreNum.toFixed(2)}] ${obj.rationale}`
       : obj.rationale;
     return { score: clamped, rationale };
   } catch {
@@ -210,8 +217,8 @@ function composeAutoRubric(
 
   if (exp.priceBandKrw !== undefined) {
     const parts: string[] = [];
-    if (exp.priceBandKrw.min !== undefined) parts.push(`≥${exp.priceBandKrw.min.toLocaleString()} KRW`);
-    if (exp.priceBandKrw.max !== undefined) parts.push(`≤${exp.priceBandKrw.max.toLocaleString()} KRW`);
+    if (exp.priceBandKrw.min !== undefined) parts.push(`≥${exp.priceBandKrw.min} KRW`);
+    if (exp.priceBandKrw.max !== undefined) parts.push(`≤${exp.priceBandKrw.max} KRW`);
     lines.push(`All recommended wines must be priced ${parts.join(' and ')}.`);
   }
 

@@ -78,6 +78,12 @@ export default tseslint.config(
           selector: 'CallExpression[callee.object.name="Math"][callee.property.name=/^(max|min)$/] > SpreadElement',
           message: 'Math.max/min with spread can overflow the call stack on large arrays. Use a loop.',
         },
+        {
+          // toLocaleString() produces locale-dependent output (e.g. "70.000" in de-DE).
+          // Never use in query strings, API calls, or serialization. See CLAUDE.md rule 21.
+          selector: 'CallExpression[callee.property.name="toLocaleString"]',
+          message: 'toLocaleString() is locale-dependent. Use .toString() or template literals for deterministic output. (CLAUDE.md rule 21)',
+        },
         // NOTE: Math.random() is NOT banned via lint — it has legitimate uses
         // for jitter/delay in retry logic. The CLAUDE.md quality bar prohibits
         // Math.random() for ID generation (use crypto.randomUUID() instead).
@@ -151,6 +157,18 @@ export default tseslint.config(
           ignoreDefaultValues: true,
         },
       ],
+    },
+  },
+  /** Agent benchmark drivers: many statistical literals; keep lint noise low. */
+  {
+    files: [
+      'test/benchmark/agent/judge.ts',
+      'test/benchmark/agent/runner.ts',
+      'test/benchmark/agent/scenarios.ts',
+      'test/benchmark/agent/scorer.ts',
+    ],
+    rules: {
+      'no-magic-numbers': 'off',
     },
   },
 );

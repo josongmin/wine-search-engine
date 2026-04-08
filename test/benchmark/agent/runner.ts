@@ -13,6 +13,10 @@
  *   npx tsx test/benchmark/agent/runner.ts --no-judge                         # disable LLM-as-judge
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
+ *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off
+ *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 106 main scenarios, concurrency 1, judge off
+ *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 200+ scenarios + phase2, judge on
+ *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # retrieval-only evaluation
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
  *
@@ -42,6 +46,7 @@ import type { AgentTerminationReason } from '../../../src/domain/agent/model/age
 // ─────────────────────────────────────────────────────────────────────
 
 interface CliArgs {
+  readonly profile?: 'quick' | 'standard' | 'nightly' | 'retrieval';
   readonly tierFilter?: ScenarioTier;
   readonly idFilter?: readonly number[];
   readonly container: 'mock' | 'real';
@@ -58,6 +63,12 @@ interface CliArgs {
   readonly outputPath?: string;
 }
 
+// 20 scenario IDs spread across tiers for the "quick" profile (~2 min PR smoke test).
+const QUICK_SCENARIO_IDS = new Set([
+  1, 4, 8, 12, 19, 25, 30, 35, 40, 45,  // core tiers
+  50, 56, 61, 65, 68, 75, 81, 88, 93, 98,  // language/adversarial
+]);
+
 function parseArgs(): CliArgs {
   const argv = process.argv.slice(2);
   const get = (flag: string): string | undefined => {
@@ -66,18 +77,27 @@ function parseArgs(): CliArgs {
   };
   const has = (flag: string): boolean => argv.includes(flag);
 
-  return {
+  const explicitId = get('--id');
+  const explicitConcurrency = get('--concurrency');
+  const explicitJudge = has('--no-judge');
+  const explicitJudgeSamples = get('--judge-samples');
+  const explicitPhase2 = has('--include-phase2');
+
+  const profile = get('--profile') as CliArgs['profile'];
+
+  let args: CliArgs = {
+    profile,
     tierFilter: get('--tier') as ScenarioTier | undefined,
-    idFilter: get('--id')?.split(',').map(Number),
+    idFilter: explicitId !== undefined ? explicitId.split(',').map(Number) : undefined,
     container: (get('--container') as 'mock' | 'real' | undefined) ?? 'mock',
-    concurrency: Number.parseInt(get('--concurrency') ?? '1', 10) || 1,
+    concurrency: Number.parseInt(explicitConcurrency ?? '1', 10) || 1,
     maxRetries: Number.parseInt(get('--max-retries') ?? '1', 10) || 1,
     seed: get('--seed') !== undefined ? Number.parseInt(get('--seed')!, 10) : undefined,
     model: get('--model'),
     judgeModel: get('--judge-model'),
-    enableJudge: !has('--no-judge'),
-    judgeSamples: Number.parseInt(get('--judge-samples') ?? '1', 10) || 1,
-    includePhase2: has('--include-phase2'),
+    enableJudge: !explicitJudge,
+    judgeSamples: Number.parseInt(explicitJudgeSamples ?? '1', 10) || 1,
+    includePhase2: explicitPhase2,
     baseline: get('--baseline'),
     failIfWorseThan:
       get('--fail-if-worse-than') !== undefined
@@ -85,6 +105,54 @@ function parseArgs(): CliArgs {
         : undefined,
     outputPath: get('--out'),
   };
+
+  // Apply profile defaults AFTER parsing individual flags so explicit flags still override.
+  if (profile === 'quick') {
+    if (explicitId === undefined) {
+      args = { ...args, idFilter: [...QUICK_SCENARIO_IDS] };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: 3 };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: false };
+    }
+  }
+
+  if (profile === 'standard') {
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: 1 };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: false };
+    }
+  }
+
+  if (profile === 'nightly') {
+    if (!explicitPhase2) {
+      args = { ...args, includePhase2: true };
+    }
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: 2 };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: true };
+    }
+    if (explicitJudgeSamples === undefined) {
+      args = { ...args, judgeSamples: 3 };
+    }
+  }
+
+  if (profile === 'retrieval') {
+    if (explicitConcurrency === undefined) {
+      args = { ...args, concurrency: 1 };
+    }
+    if (!explicitJudge) {
+      args = { ...args, enableJudge: false };
+    }
+  }
+
+  return args;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -269,6 +337,8 @@ function mapTerminationReason(reason: AgentTerminationReason): TerminationReason
       return 'timeout';
     case 'error':
       return 'error';
+    case 'blocked':
+      return 'blocked';
     case 'max_steps':
     case 'budget':
     case 'loop_detected':
@@ -878,6 +948,33 @@ async function main(): Promise<void> {
   const sortedTiers = Object.entries(s.byTier).sort((a, b) => b[1].avgScore - a[1].avgScore);
   for (const [tier, data] of sortedTiers) {
     console.error(`  ${tier.padEnd(22)} ${(data.avgScore * 100).toFixed(1)}% (${data.count})`);
+  }
+  // ────── worst 5 scenarios ──────
+  const executedResults = report.results.filter((r) => !r.skipped && r.error === undefined);
+  const worst5 = [...executedResults]
+    .sort((a, b) => a.scores.overall - b.scores.overall)
+    .slice(0, 5);
+  if (worst5.length > 0) {
+    console.error('  ────── worst 5 ─────────');
+    for (const w of worst5) {
+      const dims: string[] = [];
+      if (w.scores.toolAccuracy < 1) dims.push(`tool=${(w.scores.toolAccuracy * 100).toFixed(0)}%`);
+      if (w.scores.answerQuality < 1) dims.push(`ans=${(w.scores.answerQuality * 100).toFixed(0)}%`);
+      if (w.scores.terminationCorrectness < 1) dims.push(`term=${(w.scores.terminationCorrectness * 100).toFixed(0)}%`);
+      if (w.scores.costEfficiency < 1) dims.push(`cost=${(w.scores.costEfficiency * 100).toFixed(0)}%`);
+      const dimStr = dims.length > 0 ? ` [${dims.join(', ')}]` : '';
+      console.error(`  #${String(w.id).padEnd(4)} ${(w.scores.overall * 100).toFixed(1)}%  ${w.tier.padEnd(20)}${dimStr}`);
+    }
+  }
+
+  // ────── critical failures ──────
+  if (report.criticalFailureCount > 0) {
+    const criticals = executedResults.filter((r) => r.scores.criticalFailure);
+    console.error('  ────── critical fails ──');
+    for (const c of criticals) {
+      const diag = c.diagnosticStrings?.find((d) => d.includes('critical')) ?? c.diagnosticStrings?.[0] ?? '';
+      console.error(`  #${String(c.id).padEnd(4)} ${c.tier.padEnd(20)} ${diag.slice(0, 60)}`);
+    }
   }
   console.error('══════════════════════════════════════\n');
 

@@ -8,6 +8,7 @@
 
 import type { AgentBenchmarkScenario } from './scenario.js';
 import { ADVERSARIAL_SCENARIOS } from './scenarios.adversarial.js';
+import { COVERAGE_SCENARIOS } from './scenarios.coverage.js';
 import { PHASE2_SCENARIOS } from './scenarios.phase2.js';
 
 const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
@@ -531,17 +532,20 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
 
 /**
  * Aggregated benchmark suite. Order matters: main first (1-105), then
- * adversarial extensions (106-115). Phase-2 scenarios are NOT included by
- * default — runner.ts opts in via --include-phase2.
+ * adversarial extensions (106-116), then coverage expansion (200+).
+ * Phase-2 scenarios are NOT included by default — runner.ts opts in
+ * via --include-phase2.
  */
 export const AGENT_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   ...MAIN_SCENARIOS,
   ...ADVERSARIAL_SCENARIOS,
+  ...COVERAGE_SCENARIOS,
 ];
 
 /** Phase-2 scenarios — runner opts in via --include-phase2. */
 export const AGENT_SCENARIOS_WITH_PHASE2: readonly AgentBenchmarkScenario[] = [
   ...MAIN_SCENARIOS,
   ...ADVERSARIAL_SCENARIOS,
+  ...COVERAGE_SCENARIOS,
   ...PHASE2_SCENARIOS,
 ];

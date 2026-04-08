@@ -93,6 +93,18 @@ export class QuerySanitizer {
       /\|\s*\w+\s*(?:&&|;)/,           // Pipe followed by chaining operator
     ],
 
+    // PII / cross-tenant data extraction.
+    // Patterns are intentionally specific to avoid false positives:
+    // - "다른 와인" (other wine) must NOT trigger; only "다른 사용자/고객" triggers
+    // - "database schema" alone triggers; "wine database" does not (moved to sql_injection)
+    // - "create table" with SQL payload triggers (already in sql_injection); standalone removed
+    pii_extraction: [
+      /(?:다른\s*사용자|other\s*user|다른\s*고객|other\s*customer)/i,
+      /(?:개인\s*정보|personal\s*(?:info|data))\s*(?:보여|알려|줘|목록|조회|show|list|get|dump)/i,
+      /\b(?:show|list|dump|get|give)\s+(?:me\s+)?(?:all\s+)?(?:users?|customers?|accounts?|emails?|passwords?)\b/i,
+      /(?:api\s*key|secret\s*key|access\s*token)\b/i,
+    ],
+
     // Unicode / encoding tricks
     unicode_tricks: [
       /[\u200B-\u200D\uFEFF]/,          // Zero-width chars
@@ -178,7 +190,16 @@ export class QuerySanitizer {
       };
     }
 
-    // Layer 1g: Command injection — use the canonical INJECTION_PATTERNS entry so that
+    // Layer 1g: PII / cross-tenant data extraction
+    const piiMatch = this.matchPatterns(rawQuery, 'pii_extraction');
+    if (piiMatch !== undefined) {
+      return {
+        safe: false,
+        reason: 'PII_EXTRACTION',
+      };
+    }
+
+    // Layer 1h: Command injection — use the canonical INJECTION_PATTERNS entry so that
     // all command-injection patterns (shell names, exec/system/eval, backticks, command
     // substitution, chaining) are checked in one place.  The previous inline checks only
     // covered backticks and "both ; and && present", leaving shell names, exec(), and
@@ -220,9 +241,27 @@ export class QuerySanitizer {
    * Non-destructive — does not remove semantic content.
    */
   private normalizeWhitespace(query: string): string {
-    return query
-      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    return QuerySanitizer.stripDisallowedControlCharacters(query)
       .trim()
       .replace(/\s+/g, ' ');
+  }
+
+  /** Removes C0 controls except tab/newline/CR (same set as legacy regex). */
+  private static stripDisallowedControlCharacters(input: string): string {
+    let out = '';
+    for (let i = 0; i < input.length; i += 1) {
+      const c = input.charCodeAt(i);
+      if (
+        (c >= 0x00 && c <= 0x08) ||
+        c === 0x0b ||
+        c === 0x0c ||
+        (c >= 0x0e && c <= 0x1f) ||
+        c === 0x7f
+      ) {
+        continue;
+      }
+      out += input.charAt(i);
+    }
+    return out;
   }
 }

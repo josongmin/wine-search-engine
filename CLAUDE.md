@@ -77,7 +77,7 @@ For any non-trivial code change, follow this exact order:
 
 8. **For any regex containing Korean (한글) or accented Latin (é, ñ)**: DO NOT use `\b`. Use `(?:^|[^\p{L}\p{N}])...(?=$|[^\p{L}\p{N}])` with `/u` flag. `\b` is ASCII-only and **silently fails** on non-ASCII word boundaries — this was the #1 bug class (50+ instances).
 9. **For any `Math.max()` or `Math.min()` call**: NEVER use spread (`...array`). Use a loop. Spread pushes all elements onto the call stack and crashes on arrays > ~65K elements.
-10. **For any Zod `z.object()`**: ALWAYS chain `.strict()` unless you have an explicit documented reason to allow extra properties.
+10. **For any Zod `z.object()`**: ALWAYS chain `.strict()` unless you have an explicit documented reason to allow extra properties. **Exception**: Schemas that validate LLM-generated tool call input MUST NOT use `.strict()` — LLMs routinely emit extra fields (reasoning, confidence, metadata) and `.strict()` fails the entire validation on unrecognized keys, breaking the tool call.
 11. **For any JSONB column read from PostgreSQL**: NEVER cast directly with `as DomainType`. Use a runtime type guard or Zod schema validation. DB data can be corrupted by migrations, ETL bugs, or manual edits.
 12. **For any `JSON.parse()` result**: Cast to `unknown` first, then validate shape. NEVER `JSON.parse(x) as T`. Prefer `RedisCache.getValidated(key, schema)` over `.get<T>(key)`.
 13. **For any schema bound change** (`min`, `max`): The bound MUST reference a named domain constant (not a magic number). Add a contract parity test that the HTTP schema and domain parser agree on the same bound.
@@ -87,6 +87,11 @@ For any non-trivial code change, follow this exact order:
 16. **For any `new Set()`, `new Map()`, or large literal array/object**: If the value is deterministic (same every call), define it at module scope. Allocating inside a function body wastes memory and hides the invariant.
 17. **For any `for...of` loop with `break`**: Verify that breaking early is the correct semantic. If the loop should accumulate results from ALL iterations (penalties, violations, matches), removing `break` is almost certainly correct. Add a test with 2+ triggering elements to confirm.
 18. **For any `Math.ceil(N/2)` or `Math.floor(N/2)` used as a threshold**: Document whether you want "≥50%" (ceil) or "strict majority >50%" (floor+1). Add boundary tests for N=1,2,3,4 — off-by-one in majority logic is the #2 bug class in voting/consensus code.
+19. **For any `catch` block that sets a flag or state**: If the flag means "stop processing" (e.g. `policyBlocked`, `terminated`, `aborted`), add `break`/`return` immediately after. A flag without control flow is a silent bug — the loop continues executing with corrupted state. This was the #3 bug class (policy-blocked queries continued calling tools).
+20. **For any budget/guard check in a loop**: Place the check BEFORE the expensive operation (LLM call, DB query, HTTP request), not after. A post-hoc check always allows one extra operation beyond the limit. Pre-flight checks prevent the waste entirely.
+21. **For any `Number.toLocaleString()`**: NEVER use in code that generates machine-parseable output (queries, API calls, serialization). `toLocaleString()` is locale-dependent — produces `"70,000"` in en-US but `"70.000"` in de-DE. Use `.toString()` or template literal `${n}` for deterministic output.
+22. **For any config with multiple related limits** (e.g. `maxSteps` + `maxTotalTokens` + `perStepTimeoutMs`): Verify the limits are **mutually consistent** — a maxSteps of 5 with maxTotalTokens of 20K means ~4K tokens/step, which may be less than the system prompt alone. Add a comment showing the arithmetic.
+23. **For any security pattern (regex) that blocks queries**: Always add at least one false-positive test — a legitimate domain query that contains a substring of the blocked pattern. Example: blocking "other user" must NOT block "other wines". Without false-positive tests, overzealous patterns silently degrade user experience.
 
 Regression tests live under `test/regression/<topic>.regression.test.ts` and are append-only — never delete a regression test.
 
@@ -110,6 +115,9 @@ If any case is uncertain, add a regression test before declaring done. Audit-fir
 - Catch blocks in use-case code MUST NOT fabricate success-shaped (200 OK) responses from unexpected errors. Only enumerated, expected degradation paths may return degraded responses; unknown errors MUST throw to the HTTP error handler.
 - `Math.random()` MUST NOT be used for ID generation — use `crypto.randomUUID()`.
 - `\b` word boundary in regex MUST NOT be used with non-ASCII content — see rule 8 in test discipline.
+- When enriching/extending a validated string (e.g. appending query params to a search query), the **result** must be length-checked against downstream limits. Validation on the original input does NOT cover appended content.
+- When parsing LLM JSON output, accept both `number` and `string` for numeric fields — LLMs routinely emit `"0.75"` instead of `0.75`. Use `typeof x === 'string' ? parseFloat(x) : x` with `Number.isFinite()` guard.
+- Korean regex patterns in classifiers MUST avoid matching common syllables in isolation. `/원/` matches "원래" (originally); use `/\d+\s*원/` or `/만\s*원/` to require numeric context. Always test against 3+ common Korean words that contain the target syllable.
 
 ## Private notes
 

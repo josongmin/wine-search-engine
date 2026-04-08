@@ -10,6 +10,8 @@ export interface AgentConfig {
   readonly perStepTimeoutMs: number;
   /** Maximum phrases sent to LLM context per step. */
   readonly maxContextChars: number;
+  /** Hard cap on total tokens (input+output). Terminates agent when exceeded. */
+  readonly maxTotalTokens: number;
   /** Deterministic seed for LLM calls (propagated to ChatCompletionRequest.seed). */
   readonly seed?: number | undefined;
 }
@@ -19,4 +21,5 @@ export const DEFAULT_AGENT_CONFIG: AgentConfig = {
   agentTimeoutMs: 30_000,
   perStepTimeoutMs: 10_000,
   maxContextChars: 8_000,
+  maxTotalTokens: 50_000,
 } as const;

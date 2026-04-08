@@ -27,4 +27,5 @@ export type AgentTerminationReason =
   | 'budget'
   | 'error'
   | 'loop_detected'
-  | 'fallback';
+  | 'fallback'
+  | 'blocked';

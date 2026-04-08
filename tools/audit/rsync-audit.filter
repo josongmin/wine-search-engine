@@ -1,0 +1,82 @@
+# Rsync merge filter for external audit archives (order matters: first match wins).
+# See tools/audit/README.md
+
+# Keep env template; drop real env files
++ .env.example
+- .env
+- .env.*
+
+# Benchmark: keep committed baseline + .gitkeep; drop per-run artifacts
++ test/benchmark/agent/results/baseline.json
++ test/benchmark/agent/results/.gitkeep
+- test/benchmark/agent/results/*.json
+- test/benchmark/agent/results/*.log
+- test/benchmark/agent/results/*.txt
+
+# Dependencies & build
+- node_modules/
+- web/node_modules/
+- dist/
+- coverage/
+- .next/
+- web/.next/
+- .turbo/
+- *.tsbuildinfo
+- .tsbuildinfo.build
+
+# Logs & caches
+- *.log
+- npm-debug.log*
+- yarn-debug.log*
+- yarn-error.log*
+- .pnpm-debug.log*
+- .cache/
+- .parcel-cache/
+- .eslintcache
+
+# OS / editor noise
+- .DS_Store
+- Thumbs.db
+- .idea/
+- *.swp
+- *.swo
+- *~
+
+# Local / machine-specific (see root .gitignore)
+- .cursor/*.local.*
+- .cursor/mcp.json.local
+- .claude/settings.local.json
+- .claude/worktrees/
+- CLAUDE.local.md
+- .codex/config.local.toml
+- .cursor/cache/
+- .cursor/debug/
+- .cursor/browser-logs/
+- .codex/cache/
+- .codex/sessions/
+- .claude/debug/
+- .claude/cache/
+- .claude/sessions/
+
+# Test & report artifacts
+- test-results/
+- playwright-report/
+
+# Next.js generated (regenerable)
+- web/next-env.d.ts
+
+# Large local datasets (see root .gitignore)
+- data/silver-phase*.ndjson
+- data/silver-final.ndjson
+- data/eval-results.json
+- data/eval-with-reranker-bronze.json
+- data/noisy-entity-eval-smoke-results.json
+- data/silver-quality-report.json
+
+# Do not bundle other audit archives produced locally
+- *.tar
+- *.tar.gz
+- *.tgz
+- *.zip
+- *.7z
+- *.rar

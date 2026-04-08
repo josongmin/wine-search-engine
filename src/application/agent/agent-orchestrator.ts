@@ -115,6 +115,19 @@ export class AgentOrchestrator {
     // Caller-supplied overrides win; classifier only fires when override
     // absent. Returns undefined for queries without a clear class, falling
     // back to this.config.maxSteps.
+    // Empty query: return immediately without tool calls.
+    if (query.trim().length === 0) {
+      return {
+        answer: '검색어를 입력해주세요. 어떤 와인을 찾고 계신가요?',
+        steps: [],
+        totalDurationMs: 0,
+        totalTokens: { input: 0, output: 0 },
+        toolCallCount: 0,
+        fallbackApplied: false,
+        terminationReason: 'answer',
+      };
+    }
+
     const adaptive = overrides?.maxSteps === undefined ? classifyQueryBudget(query) : undefined;
     const effectiveConfig = {
       ...this.config,
@@ -143,7 +156,7 @@ export class AgentOrchestrator {
     const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
 
     try {
-      while (true) {
+      for (;;) {
         // Budget check — enforce BOTH step count AND wall-clock timeout.
         // The previous code only checked steps; a chain of perStepTimeoutMs
         // steps could exceed agentTimeoutMs without ever tripping canProceed.
@@ -153,10 +166,32 @@ export class AgentOrchestrator {
           break;
         }
 
+        // Synthesize-before-exhaustion: when 1 step remains and we already have
+        // observations, nudge the LLM to produce a final answer rather than
+        // burning the last step on another tool call that will hit fallback.
+        const remainingSteps = effectiveConfig.maxSteps - budget.getStepCount();
+        const hasObservations = steps.some((s) => s.observation !== undefined);
+        const isLastStep = remainingSteps === 1 && hasObservations;
+
+        // Pre-flight token budget check — prevent unnecessary LLM calls when
+        // the budget is already exhausted. The check uses accumulated totals
+        // from prior steps, so the FIRST step always executes.
+        if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
+          log.warn(
+            { requestId, totalTokens: totalInputTokens + totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
+            'agent token budget exhausted before LLM call — terminating',
+          );
+          terminationReason = 'budget';
+          break;
+        }
+
         // Build messages
+        const userMsg = buildUserMessage(query);
         const messages = [
           buildSystemMessage(),
-          buildUserMessage(query),
+          ...(isLastStep
+            ? [{ ...userMsg, content: userMsg.content + '\n\n[SYSTEM: This is your LAST step. You MUST provide a final answer NOW using the information you have gathered. Do NOT call another tool.]' }]
+            : [userMsg]),
           ...buildStepMessages(steps),
         ];
 
@@ -209,6 +244,17 @@ export class AgentOrchestrator {
         const outputTokens = Math.ceil(llmResult.text.length / 4);
         totalInputTokens += inputTokens;
         totalOutputTokens += outputTokens;
+
+        // Hard token budget cap — prevents resource exhaustion from bloated
+        // context windows. The estimate is rough but sufficient as a guard.
+        if (totalInputTokens + totalOutputTokens > effectiveConfig.maxTotalTokens) {
+          log.warn(
+            { requestId, totalTokens: totalInputTokens + totalOutputTokens, budget: effectiveConfig.maxTotalTokens },
+            'agent token budget exceeded — terminating',
+          );
+          terminationReason = 'budget';
+          break;
+        }
 
         // Parse LLM output
         const parsed = parseLlmOutput(llmResult.text);
@@ -273,10 +319,20 @@ export class AgentOrchestrator {
             observation = truncateObservation(toolResult.observation, this.config.maxContextChars);
             rawResult = toolResult.rawResult;
           } catch (toolErr) {
-            // Detect policy-block errors so the fallback doesn't re-run the
-            // raw query through the same security layer that already rejected it.
+            // Detect policy-block errors — terminate the loop immediately.
+            // The agent must NOT continue calling tools after a security block.
             if (toolErr instanceof DomainError && toolErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
+              terminationReason = 'blocked';
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                action: { tool, input },
+                observation: `Policy blocked: ${toolErr.message}`,
+                durationMs: Date.now() - stepStart,
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+              break;
             }
             observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
             rawResult = null;
@@ -304,9 +360,11 @@ export class AgentOrchestrator {
       }
     } catch (err) {
       log.error({ err, requestId }, 'Agent orchestrator unexpected error');
-      terminationReason = 'error';
       if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
         policyBlocked = true;
+        terminationReason = 'blocked';
+      } else {
+        terminationReason = 'error';
       }
     }
 
@@ -316,6 +374,45 @@ export class AgentOrchestrator {
     // security gate (or worse, slip through if the gate state changed).
     let fallbackApplied = false;
     let answer = steps.find((s) => s.answer !== undefined)?.answer ?? '';
+
+    // Observation-based synthesis: if we have tool results but no answer,
+    // try to synthesize from what we already gathered before doing a fresh search.
+    // This avoids the "agent ran 3 steps, got great results, then returned nothing" failure.
+    if (!policyBlocked && answer === '' && terminationReason !== 'answer') {
+      const obsSteps = steps.filter((s) => s.observation !== undefined && s.observation.length > 0);
+      if (obsSteps.length > 0) {
+        const synthMessages = [
+          buildSystemMessage(),
+          buildUserMessage(query),
+          ...buildStepMessages(steps),
+          {
+            role: 'user' as const,
+            content: '[SYSTEM: You have gathered information but did not provide a final answer. Based on the tool results above, provide your final answer NOW.]',
+          },
+        ];
+        try {
+          const synthAbort = new AbortController();
+          const synthTimer = setTimeout(() => {
+            synthAbort.abort();
+          }, 8_000);
+          const synthResult = await this.deps.chatLlm.complete({
+            messages: synthMessages,
+            temperature: 0,
+            maxOutputTokens: 512,
+            abortSignal: synthAbort.signal,
+          });
+          clearTimeout(synthTimer);
+          const parsed = parseLlmOutput(synthResult.text);
+          if (parsed.answer && parsed.answer.trim().length > 0) {
+            answer = parsed.answer;
+            terminationReason = 'answer';
+            log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
+          }
+        } catch (synthErr) {
+          log.warn({ synthErr, requestId }, 'observation synthesis failed, proceeding to fallback search');
+        }
+      }
+    }
 
     if (!policyBlocked && answer === '' && terminationReason !== 'answer') {
       // Cap the fallback search at a fixed wall-clock budget independent of

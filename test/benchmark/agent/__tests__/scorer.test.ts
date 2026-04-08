@@ -333,13 +333,13 @@ describe('scoreTermination', () => {
     expect(r.scores.terminationCorrectness).toBe(1);
   });
 
-  it('fallback termination → 0 (was 0.5 in old scorer)', () => {
+  it('fallback termination → 0.25 (graceful degradation partial credit)', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ terminationReason: 'fallback' }),
       undefined,
     );
-    expect(r.scores.terminationCorrectness).toBe(0);
+    expect(r.scores.terminationCorrectness).toBe(0.25);
   });
 
   it('error termination → 0', () => {
@@ -447,8 +447,8 @@ describe('overall score (weighted geometric mean)', () => {
     expect(r.scores.overall).toBeLessThan(0.5);
   });
 
-  it('one dim at 0 with rest at 1: clearly distinguishable from arithmetic mean', () => {
-    // termination=0 (fallback), answer/tool/step/cost/judge all at 1
+  it('fallback dim at 0.25 with rest at 1: clearly distinguishable from arithmetic mean', () => {
+    // termination=0.25 (fallback partial credit), answer/tool/step/cost/judge all at 1
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({ terminationReason: 'fallback' }),
@@ -696,8 +696,9 @@ describe('per-tier weights', () => {
       makeExecution({ terminationReason: 'fallback' }),
       1,
     );
-    // With termination weight 0.80 and termination=0, overall should be very low
-    expect(r.scores.overall).toBeLessThan(0.2);
+    // With termination weight 0.80 and termination=0.25 (fallback partial credit),
+    // overall is low but not collapsed due to EPS floor.
+    expect(r.scores.overall).toBeLessThan(0.4);
   });
 });
 
