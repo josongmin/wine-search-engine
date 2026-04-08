@@ -579,7 +579,11 @@ export class AgentOrchestrator {
     // In that case we avoid re-running a fresh search (Layer 2) and instead use
     // Layer 3 (raw observation) with terminationReason='answer' so the scorer does not
     // penalise correct tool execution as a complete failure.
-    const hasToolObservations = steps.some((s) => s.observation !== undefined && s.observation.length > 0);
+    const hasToolObservations = steps.some(
+      (s) =>
+        (s.observation !== undefined && s.observation.length > 0) ||
+        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+    );
 
     if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations && !(abortSignal?.aborted)) {
       // Layer 2: single-shot fallback search — only when the agent made NO tool calls.
@@ -640,9 +644,17 @@ export class AgentOrchestrator {
 
     if (!policyBlocked && answer === '') {
       // Layer 3: synthesize from last available observation (deterministic, no LLM)
-      const lastObs = steps.findLast((s) => s.observation !== undefined && s.observation.length > 0);
-      if (lastObs?.observation !== undefined) {
-        answer = `검색 결과 요약: ${lastObs.observation.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)}`;
+      // Check both sequential (observation) and parallel (observations[]) steps.
+      const lastObs = steps.findLast(
+        (s) =>
+          (s.observation !== undefined && s.observation.length > 0) ||
+          (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+      );
+      const lastObsText =
+        lastObs?.observation ??
+        lastObs?.observations?.find((o) => o.length > 0);
+      if (lastObsText !== undefined) {
+        answer = `검색 결과 요약: ${lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)}`;
         fallbackApplied = true;
         // When tool observations exist, the agent successfully called the right tools —
         // only the synthesis LLM call failed (infrastructure). Use terminationReason='answer'
@@ -666,7 +678,7 @@ export class AgentOrchestrator {
       {
         requestId,
         steps: steps.length,
-        toolCalls: steps.filter((s) => s.action !== undefined).length,
+        toolCalls: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actions?.length ?? 0), 0),
         terminationReason,
         totalDurationMs: budget.getElapsedMs(),
         fallbackApplied,
@@ -679,7 +691,7 @@ export class AgentOrchestrator {
       steps,
       totalDurationMs: budget.getElapsedMs(),
       totalTokens: { input: totalInputTokens, output: totalOutputTokens },
-      toolCallCount: steps.filter((s) => s.action !== undefined).length,
+      toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actions?.length ?? 0), 0),
       fallbackApplied,
       terminationReason,
       ...(lastSearchResult !== undefined ? { searchResults: lastSearchResult } : {}),
