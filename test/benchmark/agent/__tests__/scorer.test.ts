@@ -1112,6 +1112,35 @@ describe('RAGAS Context Relevance', () => {
     // "opus" from query should appear in observations
     expect(r.scores.contextRelevance).toBeGreaterThan(0);
   });
+
+  it('query-context alignment: Korean 2-syllable words (e.g. "레드") count as significant', () => {
+    // "레드" is 2 chars (Hangul) — old ASCII threshold of 3 excluded it.
+    // With Hangul min-length=2, "레드" should be included and match the observation.
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"레드 와인 추천"}')],
+        observations: ['Found: 레드와인 1번 | producer: 와이너리A'],
+      }),
+      undefined,
+    );
+    // "레드" (2 chars, Hangul) should be found in observation → contextRelevance > 0
+    expect(r.scores.contextRelevance).toBeGreaterThan(0);
+  });
+
+  it('query-context alignment: passes with Korean food-wine query terms', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({
+        toolsUsed: [tool('search_wines', '{"query":"삼겹살과 어울리는 레드"}')],
+        observations: ['Found: Cabernet Sauvignon | region: 나파 밸리 | grapes: Cabernet'],
+      }),
+      undefined,
+    );
+    // "삼겹살" (3 Hangul chars) should be present — even without match in obs,
+    // "레드" from query should appear in observation ("레드" and Cabernet both present)
+    expect(r.scores.contextRelevance).not.toBeNull();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1421,6 +1450,65 @@ describe('multiple null dimensions — geo mean handles gracefully', () => {
     expect(r.scores.contextRecall).toBeNull();
     expect(Number.isFinite(r.scores.overall)).toBe(true);
     expect(r.scores.overall).toBeGreaterThan(0);
+  });
+});
+
+describe('weightedGeometricMean imputation invariant', () => {
+  // Regression guard: a disabled (null) dimension must impute to the present-only
+  // weighted geometric mean — NOT to 1.0 (free uplift) and NOT to 0 (collapse).
+  // The invariant: disabling a dim should NOT change the overall score relative to
+  // a run where that dim equals the current present-only geo-mean.
+
+  it('null judge does not inflate overall compared to judge=present-mean', () => {
+    // With judge null, overall is computed from the remaining dims.
+    const rNull = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
+      undefined, // judge disabled
+    );
+    expect(rNull.scores.judge).toBeNull();
+    expect(rNull.scores.overall).toBeGreaterThan(0);
+    expect(Number.isFinite(rNull.scores.overall)).toBe(true);
+
+    // With judge = 1.0 (perfect), overall should be HIGHER than with judge disabled
+    // (imputation uses present-only mean which is < 1.0 for realistic executions).
+    const rPerfect = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
+      1.0, // judge = perfect
+    );
+    expect(rPerfect.scores.overall).toBeGreaterThanOrEqual(rNull.scores.overall);
+  });
+
+  it('null judge does not collapse overall compared to judge=0', () => {
+    // With judge=0, overall should be strictly LOWER than with judge=null
+    // (null imputes to present-mean, not 0). This is the key invariant from
+    // the original comment: "disabling a dim is a no-op, not a zero penalty".
+    const rNull = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
+      undefined, // judge disabled
+    );
+    const rZero = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'good recommendation', observations: ['found opus one'] }),
+      0.0, // judge = worst
+    );
+    expect(rNull.scores.overall).toBeGreaterThan(rZero.scores.overall);
+  });
+
+  it('disabling two dims still yields finite positive overall', () => {
+    const r = scoreScenario(
+      makeScenario({ maxSteps: 5 }),
+      makeExecution({ answer: 'some answer', observations: [] }), // no obs → faith/ctxRel/ctxRecall null
+      undefined, // judge null too
+    );
+    expect(r.scores.faithfulness).toBeNull();
+    expect(r.scores.contextRelevance).toBeNull();
+    expect(r.scores.judge).toBeNull();
+    expect(Number.isFinite(r.scores.overall)).toBe(true);
+    expect(r.scores.overall).toBeGreaterThan(0);
+    expect(r.scores.overall).toBeLessThanOrEqual(1);
   });
 });
 

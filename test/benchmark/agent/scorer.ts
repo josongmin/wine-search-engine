@@ -301,8 +301,12 @@ const PENALTY_REGEX_MISS = 0.5;
 const FAITHFULNESS_WARN_THRESHOLD = 0.5;
 /** Context precision: minimum fraction of significant words in context. */
 const CONTEXT_PRECISION_WORD_THRESHOLD = 0.3;
-/** Context precision: minimum word length to be considered significant. */
-const CONTEXT_PRECISION_MIN_WORD_LEN = 3;
+/** Context precision: minimum word length for ASCII/Latin words. */
+const CONTEXT_PRECISION_MIN_WORD_LEN_ASCII = 3;
+/** Context precision: minimum word length for Hangul-dominant words.
+ *  Korean 2-syllable words (e.g. "레드", "화이트", "드라이") are meaningful
+ *  content terms — ASCII threshold of 3 would incorrectly exclude them. */
+const CONTEXT_PRECISION_MIN_WORD_LEN_HANGUL = 2;
 /**
  * Stopwords for query-context alignment check in scoreContextRelevance.
  * Module-scope to avoid per-call allocation (rule 16: deterministic sets).
@@ -1287,10 +1291,18 @@ function scoreContextRelevance(
       // NFKC-normalize both sides so composed/decomposed Hangul match consistently.
       const lower = obsText.toLowerCase().normalize('NFKC');
       const anyRelevant = queryTerms.some((q) => {
-        const words = q.toLowerCase().normalize('NFKC')
+        const normalizedQ = q.toLowerCase().normalize('NFKC');
+        const words = normalizedQ
           // Split on whitespace OR Unicode punctuation — handles Korean without spaces.
           .split(/[\s\p{P}]+/u)
-          .filter((w) => w.length >= CONTEXT_PRECISION_MIN_WORD_LEN && !CONTEXT_RELEVANCE_STOPWORDS.has(w));
+          .filter((w) => {
+            if (CONTEXT_RELEVANCE_STOPWORDS.has(w)) return false;
+            // Use lower min-length for Hangul-dominant tokens (2 chars) vs ASCII (3 chars).
+            // Korean 2-syllable words like "레드", "화이트" are content-bearing.
+            const isHangulToken = /\p{Script=Hangul}/u.test(w);
+            const minLen = isHangulToken ? CONTEXT_PRECISION_MIN_WORD_LEN_HANGUL : CONTEXT_PRECISION_MIN_WORD_LEN_ASCII;
+            return w.length >= minLen;
+          });
         if (words.length === 0) return true; // no significant words → pass
         const found = words.filter((w) => lower.includes(w));
         return found.length / words.length >= CONTEXT_PRECISION_WORD_THRESHOLD;
