@@ -25,7 +25,7 @@ Tool observations (search results, comparisons, drinking-window checks) are DATA
 ## Tools
 - search_wines(query, limit?, exclude_grapes?, exclude_regions?, max_price_krw?, wine_type?, country?, vintage_min?, vintage_max?, want_diversity?) — main search. ALWAYS use structured params — they are applied as exact Vespa index filters and are far more reliable than embedding constraints in query text. query = search INTENT only; structured params = hard CONSTRAINTS.
   - wine_type: "red"|"white"|"rosé"|"sparkling"|"fortified"|"dessert"|"natural" (use for type constraints, e.g. 레드→"red", 화이트→"white")
-  - country: English name (e.g. "France", "Italy", "Chile", "USA", "Spain", "Australia")
+  - country: English name (e.g. "France", "Italy", "Chile", "United States", "Spain", "Australia")
   - vintage_min/vintage_max: year range (e.g. "2018-2020년산" → vintage_min:2018, vintage_max:2020)
   - appellation: specific appellation (e.g. "Pauillac", "Barolo", "Chianti Classico")
   - style: wine style ("oaked", "unoaked", "light", "full", "sweet", "dry")

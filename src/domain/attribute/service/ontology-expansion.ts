@@ -152,10 +152,22 @@ function keyOf(c: NormalizedConstraint): string {
   return `${c.attribute}|${c.operator}|${JSON.stringify(c.value)}`;
 }
 
-/** Simple Title Case for ontology labels (e.g. 'france' → 'France'). */
+/**
+ * Wine-domain-aware title case: lowercase Romance prepositions/articles
+ * (di, du, de, del, etc.) except when they start the string.
+ */
+const LOWERCASE_PREPOSITIONS: ReadonlySet<string> = new Set([
+  'di', 'du', 'de', 'del', 'della', 'delle', 'dei', 'des', 'da',
+  'la', 'le', 'les', 'los', 'las', 'el', 'al', 'do', 'das',
+]);
+
 function titleCase(s: string): string {
   return s
     .split(/\s+/)
-    .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
+    .map((w, i) => {
+      if (w.length === 0) return w;
+      if (i > 0 && LOWERCASE_PREPOSITIONS.has(w.toLowerCase())) return w.toLowerCase();
+      return w[0]!.toUpperCase() + w.slice(1);
+    })
     .join(' ');
 }
