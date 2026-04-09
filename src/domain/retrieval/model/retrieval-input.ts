@@ -3,6 +3,7 @@ import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { EntityId } from '../../shared/types/index.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import type { RetrievalPlan } from '../service/retrieval-plan-builder.js';
+import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 
 /**
  * Profile of the anchor entity used for similarity-based retrieval.
@@ -66,4 +67,12 @@ export interface HybridRetrievalInput {
    * relative filtering without inventing a new public retrieval mode.
    */
   readonly anchorEntityId?: EntityId | undefined;
+
+  /**
+   * Optional request-scoped execution context. When present, retrieval
+   * code may consult `requestContext.stageTimer` to record per-stage
+   * latency, or `requestContext.abortSignal` to abort in-flight work.
+   * Optional so non-HTTP callers (background jobs, unit tests) can omit it.
+   */
+  readonly requestContext?: RequestExecutionContext | undefined;
 }

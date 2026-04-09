@@ -3,6 +3,10 @@
  * Implements {@link ChatLlmPort}; compatible with OpenAI-compatible proxies (LiteLLM, Azure path-style base URLs).
  */
 
+import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
@@ -18,8 +22,16 @@ import {
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
+import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 
 const OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS = 240;
+
+/** Circuit breaker thresholds for the OpenAI chat endpoint — same tuning
+ *  as Anthropic so both providers share an equivalent failure budget. */
+const OPENAI_CHAT_BREAKER_FAILURE_THRESHOLD = 5;
+const OPENAI_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
+const OPENAI_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const OPENAI_CHAT_BREAKER_NAME = 'openai-chat';
 
 const OPENAI_RETRY_CONFIG: RetryConfig = {
   maxAttempts: 4,
@@ -79,19 +91,29 @@ export class OpenAiChatLlm implements ChatLlmPort {
   private readonly apiKey: string;
   private readonly defaultModel: string;
   private readonly httpTimeoutMs: number;
+  private readonly circuitBreaker: CircuitBreaker;
 
   constructor(options: OpenAiChatLlmOptions) {
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/chat/completions`;
     this.apiKey = options.apiKey;
     this.defaultModel = options.defaultModel;
     this.httpTimeoutMs = options.httpTimeoutMs;
+    this.circuitBreaker = createCircuitBreaker({
+      name: OPENAI_CHAT_BREAKER_NAME,
+      failureThreshold: OPENAI_CHAT_BREAKER_FAILURE_THRESHOLD,
+      recoveryTimeoutMs: OPENAI_CHAT_BREAKER_RECOVERY_TIMEOUT_MS,
+      halfOpenMaxAttempts: OPENAI_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
+    });
   }
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
     const model = request.model ?? this.defaultModel;
     return withGenAiSpan(
       { system: 'openai', requestModel: model, operation: 'chat' },
-      (recordResponse) => this.completeInner(request, model, recordResponse),
+      (recordResponse) =>
+        runUnderLlmBreaker(this.circuitBreaker, OPENAI_CHAT_BREAKER_NAME, () =>
+          this.completeInner(request, model, recordResponse),
+        ),
     );
   }
 

@@ -1,12 +1,37 @@
 import { createEntityId } from '../../shared/types/index.js';
 import { rrfFuse } from '../../shared/utils/rrf.js';
-import type { SparseHit, DenseHit } from '../port/search-index.port.js';
+import type {
+  SparseHit,
+  DenseHit,
+  RetrievalHitSummary,
+  RetrievalSummaryCarrier,
+} from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import {
-  mergeRetrievalHitSummariesForEntity,
+  mergeRetrievalHitSummaries,
+  normalizeRetrievalHitSummary,
   summaryToHybridCandidateFields,
 } from './hybrid-candidate-summary.js';
+
+/**
+ * Build a Map<entityId, normalized summary> from a hit list in a single pass.
+ *
+ * Avoids the quadratic scan pattern of calling
+ * `findRetrievalHitSummaryForEntity` once per entity per list — for the fusion
+ * path we iterate each list exactly once upfront and look up O(1) per entity.
+ */
+function buildSummaryMap(
+  hits: readonly RetrievalSummaryCarrier[],
+): ReadonlyMap<string, RetrievalHitSummary | undefined> {
+  const map = new Map<string, RetrievalHitSummary | undefined>();
+  for (const hit of hits) {
+    if (!map.has(hit.entityId)) {
+      map.set(hit.entityId, normalizeRetrievalHitSummary(hit.summary));
+    }
+  }
+  return map;
+}
 
 /** Standard RRF smoothing constant (rank + k in denominator). */
 const RECIPROCAL_RANK_FUSION_DEFAULT_K = 60;
@@ -113,6 +138,13 @@ export class FusionService {
       for (const hit of anchorHits) allEntityIds.add(hit.entityId);
     }
 
+    // Pre-index per-list summaries by entityId so merging is O(1) per
+    // candidate instead of a full scan over every hit list per entity.
+    const sparseSummaries = buildSummaryMap(sparseHits);
+    const denseSummaries = buildSummaryMap(denseHits);
+    const learnedSparseSummaries = buildSummaryMap(learnedSparseHits);
+    const anchorSummaries = anchorHits ? buildSummaryMap(anchorHits) : undefined;
+
     // Build candidates
     const candidates: HybridCandidate[] = [];
 
@@ -141,12 +173,11 @@ export class FusionService {
         candidateSources,
       };
 
-      const merged = mergeRetrievalHitSummariesForEntity(
-        createEntityId(entityId),
-        sparseHits,
-        denseHits,
-        learnedSparseHits,
-        anchorHits ?? [],
+      const merged = mergeRetrievalHitSummaries(
+        sparseSummaries.get(entityId),
+        denseSummaries.get(entityId),
+        learnedSparseSummaries.get(entityId),
+        anchorSummaries?.get(entityId),
       );
 
       candidates.push({
@@ -160,6 +191,7 @@ export class FusionService {
         anchorRank,
         ...(anchorRawScore !== undefined ? { anchorRawScore } : {}),
         retrievalFusionScore: fusionScore,
+        fusionRrfTotal: fusionScore,
         matchedConstraints: [],
         retrievalTrace: trace,
         ...summaryToHybridCandidateFields(merged),

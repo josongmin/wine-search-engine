@@ -8,6 +8,33 @@ import type { RetrievalTrace } from './retrieval-trace.js';
  * The {@link retrievalFusionScore} is a retrieval-stage ranking signal
  * derived from Reciprocal Rank Fusion (RRF). It is **never** a calibrated
  * decision confidence — that value is computed downstream by the Decision domain.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * Score semantic split (bugbash 2026-04-09, Group C)
+ * ──────────────────────────────────────────────────────────────────────
+ * Historically {@link retrievalFusionScore} was overloaded with two
+ * different semantics depending on the producer:
+ *   - Browse / Compare / similar retrievers stuffed the raw BM25 score
+ *     into it, because they bypass fusion.
+ *   - FusionService put the RRF total into it.
+ *
+ * Downstream LTR feature extraction then could not tell whether the
+ * field was a BM25 raw score or an RRF total — this was the #1
+ * contributor to LTR feature pollution.
+ *
+ * Migration plan:
+ *   1. (this change) Add {@link fusionRrfTotal} — populated ONLY by
+ *      FusionService.fuse(). Per-channel raw scores continue to live in
+ *      {@link sparseRawScore}, {@link denseRawScore}, etc.
+ *   2. Migrate read sites (signal-computer, ltr-features, mixed-solver,
+ *      candidate-pool envelope mapping) to prefer fusionRrfTotal /
+ *      sparseRawScore explicitly.
+ *   3. Stop writing {@link retrievalFusionScore} from non-fusion
+ *      retrievers (Browse / Compare / similar) — they should leave it
+ *      undefined and populate sparseRawScore instead.
+ *   4. Remove {@link retrievalFusionScore} once all read sites are
+ *      migrated.
+ * ──────────────────────────────────────────────────────────────────────
  */
 export interface HybridCandidate {
   /** Entity identifier for this candidate. */
@@ -140,8 +167,25 @@ export interface HybridCandidate {
   /**
    * Fused retrieval score from RRF across all contributing passes.
    * This is a retrieval-stage ranking signal — NOT decision_confidence.
+   *
+   * @deprecated This field is semantically overloaded: FusionService stores
+   * the RRF total here, but Browse/Compare/similar retrievers store the raw
+   * BM25 score here (they bypass fusion). Downstream consumers cannot tell
+   * which semantic applies.
+   *
+   * For RRF total, prefer {@link fusionRrfTotal}. For BM25 raw score,
+   * prefer {@link sparseRawScore}. This field will be removed once all
+   * consumers are migrated.
    */
   readonly retrievalFusionScore: number;
+
+  /**
+   * RRF total score (sum of weighted reciprocal rank contributions across
+   * channels). Distinct from per-channel raw scores. Set ONLY by
+   * FusionService.fuse() — non-fusion retrievers (Browse, Compare,
+   * similar) leave this undefined.
+   */
+  readonly fusionRrfTotal?: number | undefined;
 
   /** Constraint attribute names matched by this candidate. */
   readonly matchedConstraints: readonly string[];

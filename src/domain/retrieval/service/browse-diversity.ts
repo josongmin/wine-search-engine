@@ -1,6 +1,5 @@
 import type { SparseHit } from '../port/search-index.port.js';
-
-const VINTAGE_YEAR_IN_LABEL = /(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/gu;
+import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 
 /** BM25 multiplier weights for critic / prestige lifts (producer browse). */
 const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;
@@ -21,7 +20,7 @@ const BROWSE_SPARSE_FETCH_CEILING = 240;
 
 /** Strips 4-digit vintage tokens from a display label (product-line key). */
 export function stripVintageFromLabel(label: string): string {
-  return label.replace(VINTAGE_YEAR_IN_LABEL, ' ').replace(/\s+/g, ' ').trim();
+  return stripVintageYearsBounded(label).replace(/\s+/g, ' ').trim();
 }
 
 function normPart(s: string | undefined): string {

@@ -18,6 +18,11 @@ import {
   KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
 import { WINE_TYPE_ALL_TOKENS } from '../model/wine-type-patterns.js';
+import {
+  extractKoreanVintageAfter,
+  extractKoreanVintageBefore,
+  extractVintageRange,
+} from '../../shared/utils/vintage.js';
 
 // ---------------------------------------------------------------------------
 // KRW ↔ USD conversion
@@ -414,33 +419,22 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
  *   "YYYY-YYYY"           — year range
  */
 function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vintageMax'> {
-  // Year range: "2018-2022" or "2018~2022" (optionally followed by "년" etc.)
-  // Guard: use \d lookaround only — we don't want to block "2020년" (year suffix).
-  // The captured groups (19|20)\d{2} ensure we match 4-digit years starting with 19xx/20xx.
-  // Lookbehind ensures the first year isn't part of a longer number (e.g. "12015-2020").
-  const rangeMatch = /(?<!\d)((?:19|20)\d{2})[~\-–]((?:19|20)\d{2})(?!\d)/u.exec(q);
-  if (rangeMatch !== null && rangeMatch[1] !== undefined && rangeMatch[2] !== undefined) {
-    const lo = parseInt(rangeMatch[1], 10);
-    const hi = parseInt(rangeMatch[2], 10);
-    if (Number.isFinite(lo) && Number.isFinite(hi)) {
-      // Swap if user entered reversed range ("2022-2020") to avoid impossible min>max YQL filter.
-      const [safeMin, safeMax] = lo <= hi ? [lo, hi] : [hi, lo];
-      return { vintageMin: safeMin, vintageMax: safeMax };
-    }
+  // All vintage patterns delegate to the vintage SSoT
+  // (`@domain/shared/utils/vintage`). Range parsing returns a normalized
+  // {min,max} pair so callers do not need to swap reversed user input.
+  const range = extractVintageRange(q);
+  if (range !== null) {
+    return { vintageMin: range.min, vintageMax: range.max };
   }
 
-  // "YYYY년 이후" — after
-  const afterMatch = /((?:19|20)\d{2})년?\s*이후/u.exec(q);
-  if (afterMatch !== null && afterMatch[1] !== undefined) {
-    const v = parseInt(afterMatch[1], 10);
-    if (Number.isFinite(v)) return { vintageMin: v };
+  const after = extractKoreanVintageAfter(q);
+  if (after !== null) {
+    return { vintageMin: after };
   }
 
-  // "YYYY년 이전" — before
-  const beforeMatch = /((?:19|20)\d{2})년?\s*이전/u.exec(q);
-  if (beforeMatch !== null && beforeMatch[1] !== undefined) {
-    const v = parseInt(beforeMatch[1], 10);
-    if (Number.isFinite(v)) return { vintageMax: v };
+  const before = extractKoreanVintageBefore(q);
+  if (before !== null) {
+    return { vintageMax: before };
   }
 
   return {};

@@ -1,11 +1,10 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
-import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { ConstraintFilter } from './constraint-filter.js';
-import { summaryToHybridCandidateFields } from './hybrid-candidate-summary.js';
+import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
 import {
   browseSparseFetchLimit,
   dedupeSparseHitsByEntity,
@@ -24,26 +23,14 @@ function sparseHitsToBrowseCandidates(
   lexicalQueries: readonly string[],
   filtersApplied: readonly string[],
 ): readonly HybridCandidate[] {
-  return hits.map((hit, index) => {
-    const summary = hit.summary;
-    const trace: RetrievalTrace = {
-      retrievalProfile: profile,
-      lexicalQueriesUsed: lexicalQueries,
-      semanticQueriesUsed: [],
-      filtersApplied: [...filtersApplied],
-      candidateSources: [
-        'sparse_bm25',
-        profile === 'producer_browse' ? 'browse_producer' : 'browse_region',
-      ],
-    };
-    return {
-      entityId: hit.entityId,
-      ...summaryToHybridCandidateFields(summary),
-      sparseRank: index + 1,
-      retrievalFusionScore: hit.score,
-      matchedConstraints: [],
-      retrievalTrace: trace,
-    };
+  return sparseHitsToCandidates(hits, {
+    retrievalProfile: profile,
+    lexicalQueries,
+    filtersApplied,
+    candidateSources: [
+      'sparse_bm25',
+      profile === 'producer_browse' ? 'browse_producer' : 'browse_region',
+    ],
   });
 }
 

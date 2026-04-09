@@ -1,292 +1,34 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-/** Default Fastify listen port for local development. */
-const DEFAULT_SERVER_PORT = 3000;
-/** RFC-014 §13 default per-IP rate-limit window max before production tuning. */
-const DEFAULT_HTTP_RATE_LIMIT_MAX = 100;
-const KIBIBYTE = 1024;
-/** Fastify bodyLimit ceiling in MiB (generous for batch JSON; tunable via env). */
-const HTTP_BODY_LIMIT_MAX_MIB = 32;
-/** Fastify bodyLimit ceiling in bytes. */
-const HTTP_BODY_LIMIT_MAX_BYTES = HTTP_BODY_LIMIT_MAX_MIB * KIBIBYTE * KIBIBYTE;
-/** Default JSON body limit: 1 MiB. */
-const DEFAULT_HTTP_BODY_LIMIT_BYTES = 1_048_576;
-/** Minimum debug secret length so X-Debug-Key cannot be a trivial guess. */
-const ENV_HTTP_DEBUG_SECRET_MIN_LEN = 16;
-/** PostgreSQL default port. */
-const DEFAULT_PG_PORT = 5432;
-/** Default pool size per node (raised for 10K QPS target; tune vs max_connections). */
-const DEFAULT_PG_POOL_MAX = 40;
-const DEFAULT_PG_POOL_IDLE_TIMEOUT_MS = 30_000;
-const DEFAULT_PG_POOL_CONNECTION_TIMEOUT_MS = 5_000;
-const DEFAULT_EMBEDDING_HTTP_TIMEOUT_MS = 30_000;
-/** Cross-encoder blend: lower trusts external reranker less (domain default). */
-const DEFAULT_RERANK_BLEND_SCALE = 0.7;
-const DEFAULT_RERANKER_HTTP_TIMEOUT_MS = 30_000;
-const DEFAULT_LEARNED_MATCHER_HTTP_TIMEOUT_MS = 30_000;
-/** OpenAI-compatible client read timeout (chat/completions can be slow). */
-const DEFAULT_OPENAI_HTTP_TIMEOUT_MS = 120_000;
-const DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS = 5_000;
-const AGENT_MAX_STEPS_UPPER_BOUND = 10;
-const DEFAULT_AGENT_MAX_STEPS = 5;
-const DEFAULT_AGENT_TIMEOUT_MS = 30_000;
-const DEFAULT_AGENT_PER_STEP_TIMEOUT_MS = 10_000;
-/** Webhook HMAC secret minimum length (watchlist delivery signing). */
-const ENV_WEBHOOK_SECRET_MIN_LEN = 16;
+import { AgentEnvSchema } from './env-schemas/agent.schema.js';
+import { AiEnvSchema } from './env-schemas/ai.schema.js';
+import { CoreEnvSchema } from './env-schemas/core.schema.js';
+import { DbEnvSchema } from './env-schemas/db.schema.js';
+import { FeaturesEnvSchema } from './env-schemas/features.schema.js';
+import { HttpEnvSchema } from './env-schemas/http.schema.js';
+import { KillSwitchEnvSchema } from './env-schemas/kill-switch.schema.js';
+import { RetrievalEnvSchema } from './env-schemas/retrieval.schema.js';
+import { VespaEnvSchema } from './env-schemas/vespa.schema.js';
+
 /** sysexits.h EX_CONFIG — invalid configuration at startup. */
 const SYSEXITS_EX_CONFIG = 78;
 /** Default Anthropic model when ANTHROPIC_INJECTION_MODEL is unset. */
 const DEFAULT_ANTHROPIC_INJECTION_MODEL = 'claude-haiku-4-5-20251001';
-/** Vespa search API request timeout (aligned with previous VespaClient default). */
-const DEFAULT_VESPA_SEARCH_REQUEST_TIMEOUT_MS = 30_000;
-/** Vespa document POST/PUT mutation timeout. */
-const DEFAULT_VESPA_DOCUMENT_MUTATION_TIMEOUT_MS = 15_000;
-/** Vespa document GET/DELETE timeout. */
-const DEFAULT_VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS = 10_000;
 
 /**
  * Schema for all environment variables required by the Wine Intelligence Engine.
- * Uses Zod for runtime validation and type inference.
+ * Composed from per-domain subschemas under `./env-schemas/`.
  */
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.coerce.number().int().positive().default(DEFAULT_SERVER_PORT),
-  LOG_LEVEL: z
-    .enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace'])
-    .default('info'),
-
-  /** Per-IP request cap (RFC-014 §13). Set high for local offline eval; use 0 to disable. */
-  HTTP_RATE_LIMIT_MAX: z.coerce.number().int().nonnegative().default(DEFAULT_HTTP_RATE_LIMIT_MAX),
-
-  /**
-   * Trust `X-Forwarded-*` headers (client IP, proto) when behind a reverse proxy / load balancer.
-   * Set true in production behind ALB/nginx; keep false for direct-to-process local runs.
-   */
-  HTTP_TRUST_PROXY: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-
-  /** Max JSON body size in bytes (Fastify `bodyLimit`). Default 1 MiB. */
-  HTTP_BODY_LIMIT_BYTES: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(HTTP_BODY_LIMIT_MAX_BYTES)
-    .default(DEFAULT_HTTP_BODY_LIMIT_BYTES),
-
-  /**
-   * When set (≥16 chars), clients may send `X-Debug-Key: <same value>` for per-request log level `debug`.
-   */
-  HTTP_DEBUG_SECRET: z.string().min(ENV_HTTP_DEBUG_SECRET_MIN_LEN).optional(),
-
-  /** Register `@fastify/helmet` security headers (recommended on in production). */
-  HTTP_SECURITY_HEADERS: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('true'),
-
-  /** Comma-separated list of allowed CORS origins. Defaults to '*' in development. */
-  CORS_ALLOWED_ORIGINS: z.string().default(''),
-
-  /** Run evaluation on startup (fire-and-forget). */
-  EVAL_RUN_AT_STARTUP: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-
-  // PostgreSQL
-  PG_HOST: z.string().min(1).default('localhost'),
-  PG_PORT: z.coerce.number().int().positive().default(DEFAULT_PG_PORT),
-  PG_DATABASE: z.string().min(1).default('wine_engine'),
-  PG_USER: z.string().min(1).default('wine'),
-  PG_PASSWORD: z.string().default(''),
-  // 10K QPS production target: 10 connections per node caps at ~2K QPS
-  // before queueing. Default raised to 40 — tune against pg max_connections.
-  PG_POOL_MAX: z.coerce.number().int().positive().default(DEFAULT_PG_POOL_MAX),
-  PG_POOL_IDLE_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_PG_POOL_IDLE_TIMEOUT_MS),
-  PG_POOL_CONNECTION_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_PG_POOL_CONNECTION_TIMEOUT_MS),
-
-  // Redis
-  REDIS_URL: z.string().url().default('redis://localhost:6379'),
-
-  // Vespa
-  VESPA_URL: z.string().url().default('http://localhost:8080'),
-  VESPA_CONTENT_CLUSTER: z.string().min(1).default('wine_content'),
-  VESPA_SEARCH_REQUEST_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_VESPA_SEARCH_REQUEST_TIMEOUT_MS),
-  VESPA_DOCUMENT_MUTATION_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_VESPA_DOCUMENT_MUTATION_TIMEOUT_MS),
-  VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS),
-
-  // Embedding Service
-  // External embedding HTTP service (fallback when OpenAI embedding is not configured).
-  // No default — if neither OPENAI_EMBEDDING_MODEL nor EMBEDDING_SERVICE_URL is set
-  // and OPENAI_API_KEY is present, the system uses OpenAI embeddings. If neither key
-  // nor URL is set, dense retrieval is disabled via the kill switch guard below.
-  EMBEDDING_SERVICE_URL: z.string().url().optional(),
-  EMBEDDING_MODEL: z.string().min(1).default('bge-m3'),
-  /** Expected embedding vector dimension. When set, vectors with mismatched dimensions are rejected. */
-  EMBEDDING_DIMENSION: z.coerce.number().int().positive().optional(),
-  /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
-  EMBEDDING_HTTP_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_EMBEDDING_HTTP_TIMEOUT_MS),
-
-  // Reranker Service (optional external HTTP API)
-  RERANKER_SERVICE_URL: z.string().url().optional(),
-  /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
-  RERANK_BLEND_SCALE: z.coerce.number().finite().min(0).max(1).default(DEFAULT_RERANK_BLEND_SCALE),
-  /** Per-request HTTP timeout for reranker API calls (AbortSignal). */
-  RERANKER_HTTP_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_RERANKER_HTTP_TIMEOUT_MS),
-
-  // Cohere reranker (preferred managed reranking)
-  COHERE_API_KEY: z.string().optional(),
-  COHERE_RERANK_MODEL: z.string().min(1).default('rerank-v4.0-pro'),
-  COHERE_BASE_URL: z.string().url().default('https://api.cohere.ai/v2'),
-
-  // Learned Matcher Service (optional — omit to disable RFC-006 §5.2 ML blend)
-  LEARNED_MATCHER_SERVICE_URL: z.string().url().optional(),
-  /** Per-request HTTP timeout for learned matcher API calls (AbortSignal). */
-  LEARNED_MATCHER_HTTP_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_LEARNED_MATCHER_HTTP_TIMEOUT_MS),
-
-  // OpenAI API (optional — hexagonal ChatLlmPort + optional OpenAiEmbeddingService)
-  OPENAI_API_KEY: z.string().optional(),
-  /** Must include `/v1` for official API, e.g. `https://api.openai.com/v1` */
-  OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-5.4-mini'),
-  /**
-   * Embedding model for dense retrieval via OpenAI-compatible API.
-   * Defaults to text-embedding-3-small — the most cost-effective option.
-   * When OPENAI_API_KEY is set, this model is used automatically.
-   * Set to a different model (e.g. text-embedding-3-large) for higher quality.
-   */
-  OPENAI_EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
-  OPENAI_HTTP_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_OPENAI_HTTP_TIMEOUT_MS),
-  /** Enable LLM-backed query constraint extraction (requires OPENAI_API_KEY). */
-  LLM_QUERY_INTERPRETER: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  /** Timeout for LLM query interpreter calls (ms). */
-  LLM_QUERY_INTERPRETER_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS),
-
-  // Agent
-  /** Enable agentic multi-step search (requires OPENAI_API_KEY). */
-  AGENT_ENABLED: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  AGENT_MAX_STEPS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(AGENT_MAX_STEPS_UPPER_BOUND)
-    .default(DEFAULT_AGENT_MAX_STEPS),
-  AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(DEFAULT_AGENT_TIMEOUT_MS),
-  AGENT_PER_STEP_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(DEFAULT_AGENT_PER_STEP_TIMEOUT_MS),
-
-  /**
-   * When true, GET /v1/agent/benchmark-scenarios returns the quick-profile scenario list.
-   * When false, that route responds with 404. When unset, defaults to on in non-production.
-   */
-  ENABLE_AGENT_BENCHMARK_UI: z.enum(['true', 'false']).optional(),
-
-  // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
-  ANTHROPIC_API_KEY: z.string().optional(),
-  /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
-  ANTHROPIC_INJECTION_MODEL: z.string().min(1).optional(),
-  /** Allow LLM injection judge failures to bypass Layer 2 blocking. Defaults to safer fail-closed. */
-  INJECTION_JUDGE_FAIL_OPEN: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  /** Explicit production opt-in for heuristic-only drinking-window prediction. */
-  ALLOW_HEURISTIC_DRINKING_WINDOW: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  /** Optional directory containing `window_start.onnx` and `window_end.onnx`. */
-  DRINKING_WINDOW_MODEL_DIR: z.string().min(1).optional(),
-
-  // Watchlist webhook signing secret (Epic 17.1)
-  WATCHLIST_ENABLED: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .optional(),
-  WEBHOOK_SECRET: z.string().min(ENV_WEBHOOK_SECRET_MIN_LEN).optional(),
-
-  // Kill Switches
-  KILL_SWITCH_ALIAS_OVERLAY: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  KILL_SWITCH_LEARNING: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  KILL_SWITCH_DENSE_RETRIEVAL: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  /** Kill switch for LLM-based injection judge (Layer 2). Use only in emergencies. */
-  KILL_SWITCH_INJECTION_JUDGE: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-  /** Kill switch for query caching (Wave 4, Phase 3). */
-  KILL_SWITCH_QUERY_CACHE: z
-    .enum(['true', 'false'])
-    .transform((v) => v === 'true')
-    .default('false'),
-
-  /** Confidence refusal threshold for hallucination prevention (Epic 17.3).
-   * When set (in range [0, 1]), enables confidence-based refusal in AdmissionGate.
-   * Default: unset (confidence check disabled, backward compatible).
-   * Recommended: 0.45 (AURC-calibrated operating point). */
-  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().finite().min(0).max(1).optional(),
-});
+const envSchema = CoreEnvSchema
+  .merge(HttpEnvSchema)
+  .merge(FeaturesEnvSchema)
+  .merge(DbEnvSchema)
+  .merge(VespaEnvSchema)
+  .merge(RetrievalEnvSchema)
+  .merge(AiEnvSchema)
+  .merge(AgentEnvSchema)
+  .merge(KillSwitchEnvSchema);
 
 type EnvVars = z.infer<typeof envSchema>;
 

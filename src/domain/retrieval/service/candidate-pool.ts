@@ -14,6 +14,7 @@ import {
   preferCanonicalRetrievalChannelLabel,
   preferCanonicalRetrievalChannelLabels,
 } from '../model/retrieval-channel.js';
+import { rrfContribution } from '../../shared/utils/rrf.js';
 import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
@@ -371,12 +372,99 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       }
     };
 
-    const [sparseResult, learnedSparseResult, denseResult, anchorResult] = await Promise.all([
-      sparseTask(),
-      learnedSparseTask(),
-      denseTask(),
-      anchorTask(),
+    // Per-stage latency tracking. The stage timer is request-scoped and
+    // optional — callers without an HTTP request context (eval runs, unit
+    // tests, batch jobs) simply skip the increments. Stage names mirror
+    // the channel labels so the snapshot matches what `pipeline_debug`
+    // emits in `PipelineDebugStep`.
+    const stageTimer = input.requestContext?.stageTimer;
+    stageTimer?.start('retrieval.parallel_fanout');
+    const wrap = async <T>(name: string, task: () => Promise<T>): Promise<T> => {
+      stageTimer?.start(name);
+      try {
+        return await task();
+      } finally {
+        stageTimer?.end(name);
+      }
+    };
+
+    // Promise.allSettled instead of Promise.all so a single uncaught throw
+    // (e.g. an internal Promise rejection inside embed/cache code that
+    // escapes the per-task try-catch) cannot reject the whole retrieval
+    // pipeline. Each task already converts known failures into a graceful
+    // `degraded` result; this is a defense-in-depth fallback for the
+    // unknown-unknowns. Rejected entries are converted into a synthetic
+    // degradation report with severity:'error' and an empty hit set so
+    // downstream fusion sees the same shape as a normal degraded task.
+    const settled = await Promise.allSettled([
+      wrap('retrieval.sparse_bm25', sparseTask),
+      wrap('retrieval.learned_sparse', learnedSparseTask),
+      wrap('retrieval.dense_semantic', denseTask),
+      wrap('retrieval.anchor_similarity', anchorTask),
     ]);
+    stageTimer?.end('retrieval.parallel_fanout');
+
+    const sparseFallback: SparseResult = {
+      hits: [],
+      degraded: true,
+      degradation: {
+        component: 'sparse_bm25',
+        severity: 'error',
+        reason: 'sparse task threw uncaught error',
+        fallbackApplied: 'empty sparse hits',
+      },
+    };
+    const learnedSparseFallback: DenseLikeResult = {
+      hits: [],
+      degraded: false,
+      degradation: {
+        component: 'learned_sparse',
+        severity: 'warning',
+        reason: 'learned sparse task threw uncaught error',
+        fallbackApplied: 'continue without learned sparse',
+      },
+    };
+    const denseFallback: DenseLikeResult = {
+      hits: [],
+      degraded: true,
+      degradation: {
+        component: 'dense_semantic',
+        severity: 'error',
+        reason: 'dense task threw uncaught error',
+        fallbackApplied: 'sparse-only retrieval',
+      },
+    };
+    const anchorFallback: AnchorResult = {
+      hits: undefined,
+      degradation: {
+        component: 'anchor_similarity',
+        severity: 'warning',
+        reason: 'anchor task threw uncaught error',
+        fallbackApplied: 'no-anchor retrieval',
+      },
+    };
+
+    const settle = <T>(
+      result: PromiseSettledResult<T>,
+      fallback: T,
+      label: string,
+    ): T => {
+      if (result.status === 'fulfilled') return result.value;
+      bootstrapLogger.error(
+        {
+          err: result.reason,
+          channel: label,
+          queryClass: input.queryPlan.queryClass,
+        },
+        '[CandidatePool] Channel task rejected outside its try-catch — applying defensive fallback',
+      );
+      return fallback;
+    };
+
+    const sparseResult = settle(settled[0], sparseFallback, 'sparse');
+    const learnedSparseResult = settle(settled[1], learnedSparseFallback, 'learned_sparse');
+    const denseResult = settle(settled[2], denseFallback, 'dense');
+    const anchorResult = settle(settled[3], anchorFallback, 'anchor');
 
     // Report degradations on the single shared observer after the parallel
     // fan-in. Observer callbacks are invoked in a deterministic order
@@ -650,11 +738,6 @@ function buildAssemblyPolicy(maxTotal: number): AssemblyPolicy {
   };
 }
 
-function reciprocalRankContribution(rank: number, fusionK: number): number {
-  if (rank <= 0 || !Number.isFinite(rank)) return 0;
-  return 1 / (fusionK + rank);
-}
-
 function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {
   const channels: CandidateChannel[] = [];
   const seenChannels = new Set<CandidateChannel>();
@@ -797,37 +880,88 @@ function hybridCandidateToEnvelope(
   const channels = toCandidateChannels(candidate);
   const channelScores = [];
 
+  // Bugbash 2026-04-09 (Group C): per-channel raw scores must NOT fall
+  // back to retrievalFusionScore. That field is a fusion total (RRF) in
+  // some code paths and a raw BM25 score in others, and substituting it
+  // for a missing per-channel raw corrupts downstream LTR features.
+  // Contract: when a per-channel rank is present but the matching raw is
+  // missing, we log a warning and SKIP that channel entry rather than
+  // fabricating an incorrect rawScore.
   if (candidate.sparseRank !== undefined) {
-    channelScores.push({
-      channel: 'sparse_bm25' as const,
-      rawScore: candidate.sparseRawScore ?? candidate.retrievalFusionScore,
-      rank: candidate.sparseRank,
-      rrfContribution: reciprocalRankContribution(candidate.sparseRank, fusionK),
-    });
+    if (candidate.sparseRawScore !== undefined) {
+      channelScores.push({
+        channel: 'sparse_bm25' as const,
+        rawScore: candidate.sparseRawScore,
+        rank: candidate.sparseRank,
+        rrfContribution: rrfContribution(candidate.sparseRank, fusionK),
+      });
+    } else {
+      bootstrapLogger.warn(
+        {
+          entityId: candidate.entityId,
+          channel: 'sparse_bm25',
+          rank: candidate.sparseRank,
+        },
+        'hybridCandidateToEnvelope: sparse channel has rank but no rawScore — skipping channelScores entry (contract violation)',
+      );
+    }
   }
   if (candidate.denseRank !== undefined) {
-    channelScores.push({
-      channel: 'dense_semantic' as const,
-      rawScore: candidate.denseRawScore ?? candidate.retrievalFusionScore,
-      rank: candidate.denseRank,
-      rrfContribution: reciprocalRankContribution(candidate.denseRank, fusionK),
-    });
+    if (candidate.denseRawScore !== undefined) {
+      channelScores.push({
+        channel: 'dense_semantic' as const,
+        rawScore: candidate.denseRawScore,
+        rank: candidate.denseRank,
+        rrfContribution: rrfContribution(candidate.denseRank, fusionK),
+      });
+    } else {
+      bootstrapLogger.warn(
+        {
+          entityId: candidate.entityId,
+          channel: 'dense_semantic',
+          rank: candidate.denseRank,
+        },
+        'hybridCandidateToEnvelope: dense channel has rank but no rawScore — skipping channelScores entry (contract violation)',
+      );
+    }
   }
   if (candidate.learnedSparseRank !== undefined) {
-    channelScores.push({
-      channel: 'learned_sparse' as const,
-      rawScore: candidate.learnedSparseRawScore ?? candidate.retrievalFusionScore,
-      rank: candidate.learnedSparseRank,
-      rrfContribution: reciprocalRankContribution(candidate.learnedSparseRank, fusionK),
-    });
+    if (candidate.learnedSparseRawScore !== undefined) {
+      channelScores.push({
+        channel: 'learned_sparse' as const,
+        rawScore: candidate.learnedSparseRawScore,
+        rank: candidate.learnedSparseRank,
+        rrfContribution: rrfContribution(candidate.learnedSparseRank, fusionK),
+      });
+    } else {
+      bootstrapLogger.warn(
+        {
+          entityId: candidate.entityId,
+          channel: 'learned_sparse',
+          rank: candidate.learnedSparseRank,
+        },
+        'hybridCandidateToEnvelope: learned_sparse channel has rank but no rawScore — skipping channelScores entry (contract violation)',
+      );
+    }
   }
   if (candidate.anchorRank !== undefined) {
-    channelScores.push({
-      channel: 'anchor_similarity' as const,
-      rawScore: candidate.anchorRawScore ?? candidate.retrievalFusionScore,
-      rank: candidate.anchorRank,
-      rrfContribution: reciprocalRankContribution(candidate.anchorRank, fusionK),
-    });
+    if (candidate.anchorRawScore !== undefined) {
+      channelScores.push({
+        channel: 'anchor_similarity' as const,
+        rawScore: candidate.anchorRawScore,
+        rank: candidate.anchorRank,
+        rrfContribution: rrfContribution(candidate.anchorRank, fusionK),
+      });
+    } else {
+      bootstrapLogger.warn(
+        {
+          entityId: candidate.entityId,
+          channel: 'anchor_similarity',
+          rank: candidate.anchorRank,
+        },
+        'hybridCandidateToEnvelope: anchor channel has rank but no rawScore — skipping channelScores entry (contract violation)',
+      );
+    }
   }
 
   const provenance = {

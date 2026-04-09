@@ -18,6 +18,30 @@ import { getAgentExecutionMetricsCollector } from '../../../infrastructure/obser
 import { getRetrievalDegradationCollector } from '../../../infrastructure/observability/retrieval-degradation-metrics.js';
 import { getRequestId } from '../request-id.js';
 import { buildSearchErrorResponse } from '../errors/error-response.js';
+import { headerKeysEqualConstantTime } from '../middleware/http-debug-mode.js';
+
+/**
+ * Extracts the `X-Debug-Key` header (handling Fastify's `string | string[]`
+ * type) and compares it against the configured secret with constant-time
+ * equality. Returns `true` only when the secret is configured AND the header
+ * matches; returns `false` otherwise so callers can fall through to a
+ * generic 403 response without leaking which condition failed.
+ *
+ * Both `expectedSecret` validity and the comparison itself must avoid
+ * length-leaking branches. We early-return on missing/empty secret because
+ * those represent "feature disabled" rather than "wrong key" — they are
+ * already covered by `isValidMetricsSecret` upstream.
+ */
+function isMetricsHeaderAuthorized(
+  rawDebugKey: string | string[] | undefined,
+  expectedSecret: string,
+): boolean {
+  const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
+  if (typeof providedDebugKey !== 'string' || providedDebugKey.length === 0) {
+    return false;
+  }
+  return headerKeysEqualConstantTime(providedDebugKey, expectedSecret);
+}
 
 /**
  * Tracks the last time the event loop was responsive.
@@ -193,8 +217,6 @@ export function registerHealthRoutes(
     contract: AgentMetricsRouteContract,
     handler: async (request, reply) => {
       const expectedSecret = options?.metricsDebugSecret;
-      const rawDebugKey = request.headers['x-debug-key'];
-      const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
       if (!isValidMetricsSecret(expectedSecret)) {
         sendRouteContractResponse(
           request,
@@ -205,9 +227,7 @@ export function registerHealthRoutes(
         );
         return;
       }
-      if (
-        providedDebugKey !== expectedSecret
-      ) {
+      if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
         sendRouteContractResponse(
           request,
           reply,
@@ -251,8 +271,6 @@ export function registerHealthRoutes(
     contract: RetrievalDegradationMetricsRouteContract,
     handler: async (request, reply) => {
       const expectedSecret = options?.metricsDebugSecret;
-      const rawDebugKey = request.headers['x-debug-key'];
-      const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
       if (!isValidMetricsSecret(expectedSecret)) {
         sendRouteContractResponse(
           request,
@@ -263,9 +281,7 @@ export function registerHealthRoutes(
         );
         return;
       }
-      if (
-        providedDebugKey !== expectedSecret
-      ) {
+      if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
         sendRouteContractResponse(
           request,
           reply,

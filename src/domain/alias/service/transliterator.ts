@@ -1,4 +1,5 @@
 import type { AliasType } from '../model/alias.js';
+import { stripVintageYears } from '../../shared/utils/vintage.js';
 
 /**
  * Result of generating a transliterated alias.
@@ -472,11 +473,10 @@ export class Transliterator {
    * module free of cross-domain imports.
    */
   private static normalizeKoreanWineKey(s: string): string {
-    return s
-      .toLowerCase()
-      .normalize('NFKC')
-      // Strip 4-digit vintage years — they are never part of a wine identity label.
-      .replace(/(?:19|20)\d{2}/gu, '')
+    // Strip 4-digit vintage years — they are never part of a wine identity label.
+    // Delegates to the vintage SSoT (`@domain/shared/utils/vintage`).
+    const vintageStripped = stripVintageYears(s.toLowerCase().normalize('NFKC'));
+    return vintageStripped
       // Strip whitespace, punctuation, and Latin letters (vintage abbreviations may leak in).
       .replace(/[\s\-_.,()'"·]+/gu, '')
       // Apply the common "오퍼스" → "오푸스" typo normalization inline. This is the single

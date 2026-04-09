@@ -8,6 +8,7 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { VespaQueryResponseSchema } from './vespa-response.schema.js';
 
 const vespaLog = bootstrapLogger.child({ component: 'VespaClient' });
 
@@ -362,7 +363,10 @@ export class VespaClient {
 
       // Filter out malformed hits before downstream consumers see them.
       // A single hit missing `relevance` (NaN-by-omission) corrupts the
-      // sort comparator and downstream similarity normalization.
+      // sort comparator and downstream similarity normalization. We also
+      // require `source` here because the VespaHitSchema validates it as
+      // required (P1 audit gap T06-1) — dropping the bad hit is preferable
+      // to failing the whole response for a single stray entry.
       const rawChildren = Array.isArray(rootObj['children']) ? rootObj['children'] : [];
       const validChildren: unknown[] = [];
       for (const hit of rawChildren) {
@@ -371,7 +375,8 @@ export class VespaClient {
           typeof hit === 'object' &&
           typeof (hit as Record<string, unknown>)['id'] === 'string' &&
           typeof (hit as Record<string, unknown>)['relevance'] === 'number' &&
-          Number.isFinite((hit as Record<string, unknown>)['relevance'])
+          Number.isFinite((hit as Record<string, unknown>)['relevance']) &&
+          typeof (hit as Record<string, unknown>)['source'] === 'string'
         ) {
           validChildren.push(hit);
         }
@@ -389,7 +394,26 @@ export class VespaClient {
       }
       rootObj['children'] = validChildren;
 
-      const parsed = data as unknown as VespaQueryResponse;
+      // Runtime-validate the full response shape (Epic 06 T06-1).
+      // `safeParse` so we can log a structured validation error with a
+      // truncated preview before throwing — schema drift is operationally
+      // important to diagnose, not just to crash on.
+      const validation = VespaQueryResponseSchema.safeParse(data);
+      if (!validation.success) {
+        bootstrapLogger.error(
+          {
+            err: validation.error.format(),
+            preview: JSON.stringify(data).slice(0, 500),
+          },
+          '[VespaClient] Vespa response failed schema validation',
+        );
+        throw new Error('Vespa response shape is invalid');
+      }
+      // The runtime-validated shape is a superset of the declared
+      // VespaQueryResponse interface (both require root; parsed adds
+      // optional passthrough fields). Cast through unknown is safe here
+      // because every field the interface claims has been verified.
+      const parsed = validation.data as unknown as VespaQueryResponse;
       const hitCount = parsed.root.children?.length ?? 0;
       const totalCount = parsed.root.fields?.totalCount;
       pipelineDebug(

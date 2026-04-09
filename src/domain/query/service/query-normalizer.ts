@@ -1,5 +1,8 @@
 import { normalizeUnicodeWithHomoglyphs, stripAccents } from '../../shared/utils/unicode-normalize.js';
-import { isVintageYearToken } from '../../shared/utils/vintage.js';
+import {
+  canonicalizeVintageToken,
+  isPotentialVintageToken,
+} from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
@@ -88,35 +91,19 @@ const phoneticNormalized = (value: string): string =>
 const phoneticCompact = (value: string): string =>
   hasLatinCharacters(value) ? normalizePhoneticSkeleton(value).replace(LATIN_VOWEL_RE, '') : '';
 
-const canonicalizeVintageToken = (token: string): string => {
-  if (/^\d{4}$/.test(token)) {
-    return token;
-  }
-
-  if (/^\d{2}$/.test(token)) {
-    const year = Number(token);
-    if (Number.isFinite(year)) {
-      const currentCentury = Math.floor(new Date().getFullYear() / 100) * 100;
-      const pivot = new Date().getFullYear() % 100;
-      const canonicalYear = year <= pivot ? currentCentury + year : currentCentury - 100 + year;
-      return String(canonicalYear);
-    }
-  }
-
-  return token;
-};
-
+// Vintage canonicalization and stripping delegate to the vintage SSoT
+// (`@domain/shared/utils/vintage`). Any pivot/format change must happen
+// there so query normalization, ETL, and label parsing stay aligned.
 const canonicalizeVintage = (value: string): string => {
   const tokens = collapseWhitespace(value).split(' ');
-  return collapseWhitespace(tokens.map(canonicalizeVintageToken).join(' '));
+  return collapseWhitespace(tokens.map((token) => canonicalizeVintageToken(token)).join(' '));
 };
 
-const TWO_DIGIT_TOKEN_RE = /^\d{2}$/;
 const stripVintage = (value: string): string =>
   collapseWhitespace(
     collapseWhitespace(value)
       .split(' ')
-      .filter((token) => !isVintageYearToken(token) && !TWO_DIGIT_TOKEN_RE.test(token))
+      .filter((token) => !isPotentialVintageToken(token))
       .join(' '),
   );
 

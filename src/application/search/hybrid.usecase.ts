@@ -36,6 +36,7 @@ import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
+import { createStageTimer } from '../../observability/stage-timer.js';
 export type { HybridSearchRequest } from './hybrid-request.dto.js';
 export type { HybridExecutionOptions } from './port/search-route-usecases.port.js';
 
@@ -88,6 +89,12 @@ export class HybridUseCase {
 
     const startTime = Date.now();
     const searchRequest = toSearchRequest(request);
+    // Per-request stage timer. Threaded through the retrieval pipeline so
+    // CandidatePool can record per-channel latency under stable stage names.
+    // Snapshot is emitted via pipelineDebug at the end so callers reading
+    // the structured log can attribute time without scraping interleaved lines.
+    const stageTimer = createStageTimer();
+    stageTimer.start('hybrid.total');
 
     pipelineDebug(
       {
@@ -101,6 +108,7 @@ export class HybridUseCase {
     const preRoute = await runSearchPreRoutePhase({
       request: searchRequest,
       ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+      stageTimer,
       requestId,
       startTime,
       snapshotVersions: this.deps.snapshotVersions,
@@ -129,6 +137,7 @@ export class HybridUseCase {
     const { plan, compiled } = preRoute;
     let hybridPipelineResult: Awaited<ReturnType<typeof executeHybridRouteRankingPipeline>>;
     try {
+      stageTimer.start('hybrid.retrieval_and_ranking');
       hybridPipelineResult = await executeHybridRouteRankingPipeline(
         plan,
         {
@@ -142,7 +151,12 @@ export class HybridUseCase {
           entityLookup: this.deps.entityLookup,
         }),
         compiled,
+        {
+          stageTimer,
+          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+        },
       );
+      stageTimer.end('hybrid.retrieval_and_ranking');
     } catch (err) {
       // Propagate domain errors and abort signals to the global error handler
       // so they receive the correct HTTP status (e.g. 403 for POLICY_BLOCKED).
@@ -177,6 +191,15 @@ export class HybridUseCase {
         latency_ms_so_far: Date.now() - startTime,
       },
       'pipeline hybrid retrieval+rank done',
+    );
+
+    stageTimer.end('hybrid.total');
+    pipelineDebug(
+      {
+        step: 'hybrid.execute.stage_timings',
+        stages: stageTimer.snapshot(),
+      },
+      'pipeline hybrid stage timings',
     );
 
     return runSearchPostRoutePhase({

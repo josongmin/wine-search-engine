@@ -1,6 +1,7 @@
 import type { QueryClass } from '../../shared/types/index.js';
 import type { ResolverCandidate } from '../model/resolved-candidate.js';
 import type { AmbiguityState, AmbiguityType } from '../model/ambiguity-state.js';
+import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 
 /** Minimum number of strong candidates to trigger underspecified_short_form. */
 const SHORT_FORM_CANDIDATE_THRESHOLD = 3;
@@ -107,9 +108,9 @@ export class AmbiguityClassifier {
         const vintage = candidate.attributeHints?.['vintage'];
         if (typeof vintage === 'string' || typeof vintage === 'number') {
           // Strip 4-digit year from label for grouping so different vintages
-          // of the same wine converge to one key.
-          const label = candidate.canonicalLabel
-            .replace(/(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/gu, '')
+          // of the same wine converge to one key. Bounded strip preserves
+          // embedded numerals in product codes that are not vintages.
+          const label = stripVintageYearsBounded(candidate.canonicalLabel)
             .trim()
             .replace(/\s+/g, ' ');
           const vintages = wineByLabel.get(label) ?? new Set<string>();

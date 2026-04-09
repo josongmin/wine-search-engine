@@ -23,6 +23,7 @@ import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import { ConstraintCompiler } from './constraint-compiler.js';
+import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vintage.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import {
@@ -60,8 +61,8 @@ const UNCERTAINTY_AMBIGUITY_OVERALL_BUMP = 0.15;
 /** Overall uncertainty at or above this triggers raise_threshold decision effect. */
 const UNCERTAINTY_RAISE_THRESHOLD_OVERALL = 0.6;
 
-/** Vintage year pattern to detect explicit vintage specification. */
-const VINTAGE_YEAR_PATTERN = /(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/u;
+// Vintage detection delegates to the vintage SSoT
+// (`@domain/shared/utils/vintage`).
 
 /** Producer catalog browse: "Château X best wines" (Epic 7, golden `producer_browse`). */
 const PRODUCER_BROWSE_QUERY_PATTERN = /(?<!\p{L})(?<!\p{N})(?:best|top|great|famous)\s+wines(?!\p{L})(?!\p{N})/iu;
@@ -667,10 +668,10 @@ export class Planner {
     }
 
     // Check for explicit vintage year in query (e.g., "Margaux 2015").
-    const hasVintageYear = VINTAGE_YEAR_PATTERN.test(normalizedQuery);
+    const hasVintageYearInQuery = hasBoundedVintageYear(normalizedQuery);
 
     // If anchor and vintage year present → wine
-    if (anchors.length > 0 && hasVintageYear) {
+    if (anchors.length > 0 && hasVintageYearInQuery) {
       return 'wine';
     }
 
@@ -684,7 +685,7 @@ export class Planner {
 
     // If anchor but no vintage, no wine-specific terms → likely producer.
     // This covers queries like "안티노리" (Antinori) where we want producer set, not wine set.
-    if (anchors.length > 0 && !hasVintageYear) {
+    if (anchors.length > 0 && !hasVintageYearInQuery) {
       // Check for explicit wine type constraint (which would indicate wine query).
       const hasWineTypeConstraint = constraints.hard.some(
         (c) => c.attribute === 'wine_type',

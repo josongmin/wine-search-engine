@@ -9,6 +9,10 @@
  *   assistant → assistant turn
  */
 
+import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
@@ -25,11 +29,20 @@ import {
 } from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 import { AnthropicTransportError } from './anthropic-transport-error.js';
+import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const ERROR_PREVIEW_CHARS = 200;
 const ANTHROPIC_DEFAULT_MAX_TOKENS = 1024;
+
+/** Circuit breaker thresholds for the Anthropic chat endpoint.
+ *  Tuned for LLM latency: 5 consecutive service-health failures trip the breaker;
+ *  60s cool-off before probing; 3 consecutive probe successes re-close it. */
+const ANTHROPIC_CHAT_BREAKER_FAILURE_THRESHOLD = 5;
+const ANTHROPIC_CHAT_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
+const ANTHROPIC_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const ANTHROPIC_CHAT_BREAKER_NAME = 'anthropic-chat';
 
 const ANTHROPIC_RETRY_CONFIG: RetryConfig = {
   maxAttempts: 4,
@@ -77,19 +90,29 @@ export class AnthropicChatLlm implements ChatLlmPort {
   private readonly defaultModel: string;
   private readonly httpTimeoutMs: number;
   private readonly endpoint: string;
+  private readonly circuitBreaker: CircuitBreaker;
 
   constructor(options: AnthropicChatLlmOptions) {
     this.apiKey = options.apiKey;
     this.defaultModel = options.defaultModel;
     this.httpTimeoutMs = options.httpTimeoutMs;
     this.endpoint = `${ANTHROPIC_API_BASE}/v1/messages`;
+    this.circuitBreaker = createCircuitBreaker({
+      name: ANTHROPIC_CHAT_BREAKER_NAME,
+      failureThreshold: ANTHROPIC_CHAT_BREAKER_FAILURE_THRESHOLD,
+      recoveryTimeoutMs: ANTHROPIC_CHAT_BREAKER_RECOVERY_TIMEOUT_MS,
+      halfOpenMaxAttempts: ANTHROPIC_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
+    });
   }
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
     const model = request.model ?? this.defaultModel;
     return withGenAiSpan(
       { system: 'anthropic', requestModel: model, operation: 'chat' },
-      (recordResponse) => this.completeInner(request, model, recordResponse),
+      (recordResponse) =>
+        runUnderLlmBreaker(this.circuitBreaker, ANTHROPIC_CHAT_BREAKER_NAME, () =>
+          this.completeInner(request, model, recordResponse),
+        ),
     );
   }
 

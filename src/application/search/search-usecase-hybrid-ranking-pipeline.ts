@@ -18,6 +18,7 @@ import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candida
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 
 export interface HybridRankingRouteDeps {
   readonly candidatePool: CandidatePoolPort;
@@ -184,6 +185,7 @@ export async function executeHybridRouteRankingPipeline(
   deps: HybridRankingRouteDeps,
   resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
   compiled?: CompiledWineQuery,
+  requestContext?: RequestExecutionContext,
 ): Promise<SearchRouteExecutionResult> {
   const retrieval = await retrieveHybridCandidatesForPlan(
     plan,
@@ -194,6 +196,7 @@ export async function executeHybridRouteRankingPipeline(
     },
     resolveEntity,
     compiled,
+    requestContext,
   );
   const ranked = await runHybridRankingPipeline(plan, retrieval.candidates, deps.ranker, compiled);
   if (retrieval.routeDegradation === undefined) {

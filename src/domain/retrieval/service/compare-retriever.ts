@@ -1,13 +1,13 @@
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { EntityId } from '../../shared/types/index.js';
 import type { ConstraintBundle } from '../../shared/types/index.js';
-import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { dedupeSparseHitsByEntity } from './browse-diversity.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { ConstraintFilter } from './constraint-filter.js';
-import { summaryToHybridCandidateFields } from './hybrid-candidate-summary.js';
+import { sparseHitsToCandidates } from './sparse-hit-to-candidate.js';
+import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 
 /** Compatibility alias for older callers. */
 export type ComparisonCandidate = HybridCandidate;
@@ -24,23 +24,11 @@ export class CompareRetriever {
     lexicalQueries: readonly string[],
     filtersApplied: readonly string[],
   ): readonly HybridCandidate[] {
-    return hits.map((hit, index) => {
-      const summary = hit.summary;
-      const trace: RetrievalTrace = {
-        retrievalProfile: 'compare_default',
-        lexicalQueriesUsed: lexicalQueries,
-        semanticQueriesUsed: [],
-        filtersApplied: [...filtersApplied],
-        candidateSources: ['sparse_bm25', 'compare_anchor'],
-      };
-      return {
-        entityId: hit.entityId,
-        ...summaryToHybridCandidateFields(summary),
-        sparseRank: index + 1,
-        retrievalFusionScore: hit.score,
-        matchedConstraints: [],
-        retrievalTrace: trace,
-      };
+    return sparseHitsToCandidates(hits, {
+      retrievalProfile: 'compare_default',
+      lexicalQueries,
+      filtersApplied,
+      candidateSources: ['sparse_bm25', 'compare_anchor'],
     });
   }
 
@@ -54,7 +42,7 @@ export class CompareRetriever {
     readonly country?: string | undefined;
   }): readonly string[] {
     const queries = new Set<string>();
-    const compactLabel = anchor.canonicalLabel.replace(/(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/gu, '').trim();
+    const compactLabel = stripVintageYearsBounded(anchor.canonicalLabel).trim();
     if (compactLabel.length > 0) {
       queries.add(compactLabel);
     }

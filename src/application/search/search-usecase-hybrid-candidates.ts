@@ -14,6 +14,7 @@ import type { RankingDegradationSignal } from '../../domain/ranking/model/rankin
 import type { SpecializedFallbackReason } from './specialized-fallback-reason.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
@@ -75,6 +76,7 @@ export function buildHybridRetrievalInputForPlan(
   route: HybridRetrievalInput['route'] = 'hybrid',
   anchorEntityId?: EntityId,
   compiled?: CompiledWineQuery,
+  requestContext?: RequestExecutionContext,
 ): HybridRetrievalInput {
   const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
@@ -88,6 +90,7 @@ export function buildHybridRetrievalInputForPlan(
     softConstraints: plan.constraints.soft,
     retrievalPlan,
     ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
+    ...(requestContext !== undefined ? { requestContext } : {}),
   };
 }
 
@@ -162,6 +165,7 @@ export async function retrieveHybridCandidatesForPlan(
   ports: HybridCandidateRetrievalPorts,
   resolveEntity: (p: QueryPlanV1) => Promise<EntityResolveResult>,
   compiled?: CompiledWineQuery,
+  requestContext?: RequestExecutionContext,
 ): Promise<HybridCandidateRetrievalResult> {
   // E2-U4: compiled-first mode for specialised path dispatch
   const effectiveMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
@@ -308,6 +312,7 @@ export async function retrieveHybridCandidatesForPlan(
     'hybrid',
     fallbackAnchorEntityId,
     compiled,
+    requestContext,
   );
 
   pipelineDebug({ step: 'retrieval.candidate_pool.fallback' }, 'pipeline candidate pool generate');

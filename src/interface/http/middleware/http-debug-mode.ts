@@ -13,7 +13,12 @@ export interface HttpDebugModeOptions {
  * Both inputs are HMAC-hashed to a fixed 32-byte digest before comparison,
  * so timing is independent of input lengths.
  */
-function headerKeysEqualConstantTime(headerValue: string, secret: string): boolean {
+/**
+ * Exported so other admin endpoints (e.g. `/metrics/agent`) can reuse the
+ * same constant-time check instead of re-implementing string `===`, which
+ * leaks length and per-character information via timing side channels.
+ */
+export function headerKeysEqualConstantTime(headerValue: string, secret: string): boolean {
   const hmacKey = 'debug-key-compare';
   const a = createHmac('sha256', hmacKey).update(headerValue).digest();
   const b = createHmac('sha256', hmacKey).update(secret).digest();
