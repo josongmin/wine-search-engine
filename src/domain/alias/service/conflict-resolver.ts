@@ -4,6 +4,7 @@ import type {
   AliasConflictEntry,
   AliasConflictResolution,
 } from '../model/alias-conflict.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 /**
  * Type priority weights for conflict resolution scoring.
@@ -80,10 +81,17 @@ export class ConflictResolver {
       return null;
     }
 
-    // Score all entries and sort descending
+    // Score all entries and sort descending with NaN-safe comparator and a
+    // deterministic tiebreaker (entityId) so equal-score conflicts resolve
+    // the same way across processes. (Bugbash R19)
     const scored = entries
       .map((entry) => ({ entry, score: computeScore(entry) }))
-      .sort((a, b) => b.score - a.score);
+      .sort(
+        compareScoreWithTiebreaker<{ entry: AliasConflictEntry; score: number }>(
+          (s) => s.score,
+          (s) => String(s.entry.entityId),
+        ),
+      );
 
     const winner = scored[0]!;
     const runnerUp = scored[1]!;

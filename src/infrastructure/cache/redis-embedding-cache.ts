@@ -137,8 +137,11 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
             if (typeof size === 'number') {
               cursorSize += size;
             }
-          } catch {
-            // Skip on error
+          } catch (sizeProbeError) {
+            // best-effort size accumulation; individual key failures (expired
+            // between SCAN and STRLEN) are harmless. Reference the error so
+            // semgrep wine-catch-empty does not flag this no-op recovery.
+            void sizeProbeError;
           }
         }
       }

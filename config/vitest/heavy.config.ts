@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
-import { resolveMaxForks } from './parallelism.js';
+import { resolveMaxForks, vitestMemorySchedulerOptions } from './parallelism.js';
 
 const heavyTestInclude = [
   'test/integration/search-pipeline.test.ts',
@@ -8,6 +8,7 @@ const heavyTestInclude = [
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [...heavyTestInclude],
     pool: 'forks',

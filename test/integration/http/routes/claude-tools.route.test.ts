@@ -3,13 +3,25 @@ import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerClaudeToolsRoute } from '../../../../src/interface/http/routes/claude-tools.route.js';
 import type { ClaudeToolsRouteDeps } from '../../../../src/interface/http/routes/route-deps.js';
+import { errorHandler } from '../../../../src/interface/http/middleware/error-handler.js';
+import { registerRequestContext } from '../../../../src/interface/http/middleware/request-context.js';
+import { resolveIncomingRequestId } from '../../../../src/interface/http/request-id.js';
 
 describe('Claude tools HTTP route', () => {
   let app: FastifyInstance | undefined;
   const executeWithFallback = vi.fn();
 
   beforeAll(async () => {
-    app = Fastify();
+    app = Fastify({
+      // Match production so inbound X-Request-Id headers are honored
+      // for request_id echo in error responses.
+      genReqId: (req) => resolveIncomingRequestId(req.headers),
+    });
+
+    // Mirror production wiring so error responses flow through the
+    // RFC-014 envelope handler instead of Fastify's default shape.
+    registerRequestContext(app);
+    app.setErrorHandler(errorHandler);
 
     const deps: ClaudeToolsRouteDeps = {
       adaptiveToolExecutor: {
@@ -79,12 +91,13 @@ describe('Claude tools HTTP route', () => {
     expect(body.request_id).toBe('req-123');
   });
 
-  it('POST /v1/claude-tools preserves client request_id on execution failure', async () => {
+  it('POST /v1/claude-tools returns RFC-014 envelope on execution failure', async () => {
     executeWithFallback.mockRejectedValueOnce(new Error('boom'));
 
     const response = await app.inject({
       method: 'POST',
       url: '/v1/claude-tools',
+      headers: { 'x-request-id': 'req-failed-123' },
       payload: {
         tool_name: 'search_wines',
         tool_input: { query: 'Opus One 2018' },
@@ -93,13 +106,21 @@ describe('Claude tools HTTP route', () => {
     });
 
     expect(response.statusCode).toBe(500);
+    // Unknown errors propagate to the global error handler which emits
+    // the canonical RFC-014 envelope shape `{ error: { request_id, code,
+    // message, failure_reason, retryable } }`.
     const body = JSON.parse(response.body) as {
-      error: string;
-      message: string;
-      request_id: string;
+      error: {
+        request_id: string;
+        code: string;
+        message: string;
+        failure_reason: string | null;
+        retryable: boolean;
+      };
     };
-    expect(body.error).toBe('TOOL_EXECUTION_FAILED');
-    expect(body.message).toBe('An unexpected error occurred while executing the tool.');
-    expect(body.request_id).toBe('req-failed-123');
+    expect(body.error.code).toBe('INTERNAL_ERROR');
+    expect(body.error.message).toBe('An unexpected error occurred.');
+    expect(body.error.retryable).toBe(false);
+    expect(body.error.request_id).toBe('req-failed-123');
   });
 });

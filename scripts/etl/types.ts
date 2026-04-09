@@ -264,8 +264,32 @@ export interface AliasBundle {
 // Silver + Aliases combined (output of alias enrichment step)
 // ---------------------------------------------------------------------------
 
+/**
+ * Doc2Query generation provenance — recorded per record so the ETL step
+ * can skip records whose source text + model fingerprint are unchanged.
+ *
+ * The fingerprint is `sha256(canonicalLabel + '\n' + searchTextEn-trimmed)`
+ * computed at generation time. When the model id or content hash drifts,
+ * the next ETL run regenerates the queries.
+ */
+export interface Doc2QueryFingerprint {
+  readonly modelId: string;
+  readonly contentHash: string;
+  /** ISO-8601 generation timestamp. */
+  readonly generatedAt: string;
+}
+
 export interface EnrichedSilverRecord extends SilverWineRecord {
   readonly aliases: AliasBundle;
+  /**
+   * Doc2Query synthetic queries (Nogueira et al. 2019), produced by the
+   * `generate-doc-queries.ts` ETL step. Stored as a typed field on the
+   * record (NOT concatenated into searchTextEn) so downstream Vespa
+   * indexing can route the values into a dedicated `synthetic_queries`
+   * BM25 field with its own weight tuning.
+   */
+  readonly syntheticQueries?: readonly string[];
+  readonly doc2queryFingerprint?: Doc2QueryFingerprint;
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +402,8 @@ export interface IndexableWineRecord {
   readonly certifications?: readonly string[] | undefined;
   /** SPLADE-style learned sparse weights. Embedding is generated separately. */
   readonly learnedSparseWeights?: LearnedSparseVector | undefined;
+  /** Doc2Query synthetic query expansions (index-time generated). */
+  readonly syntheticQueries?: readonly string[] | undefined;
   /** Legal classification or tier designation (e.g. "Premier Cru", "Grand Cru"). */
   readonly classification?: string | undefined;
   /** Vineyard soil type (e.g. "clay", "limestone"). */

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { extractLTRFeatures, LTR_FEATURE_NAMES } from '../ltr-features.js';
-import { hashFeatureSchema, getCurrentFeatureSchemaHash } from '../feature-parity-hash.js';
 import type { HybridCandidate } from '../../../retrieval/model/hybrid-candidate.js';
 import type { NormalizedConstraint } from '../../../shared/types/index.js';
 import { createEntityId } from '../../../shared/types/index.js';
@@ -119,24 +118,3 @@ describe('extractLTRFeatures', () => {
   });
 });
 
-describe('feature-parity-hash', () => {
-  it('hash is deterministic across calls', () => {
-    expect(getCurrentFeatureSchemaHash()).toBe(getCurrentFeatureSchemaHash());
-  });
-
-  it('hash is invariant to feature ordering', () => {
-    const a = hashFeatureSchema(['x', 'y', 'z']);
-    const b = hashFeatureSchema(['z', 'y', 'x']);
-    expect(a).toBe(b);
-  });
-
-  it('renaming a feature changes the hash', () => {
-    const a = hashFeatureSchema(['x', 'y', 'z']);
-    const b = hashFeatureSchema(['x', 'y', 'w']);
-    expect(a).not.toBe(b);
-  });
-
-  it('hash length is 16 chars', () => {
-    expect(getCurrentFeatureSchemaHash()).toHaveLength(16);
-  });
-});

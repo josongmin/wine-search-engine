@@ -463,7 +463,7 @@ export async function executeAgentTool(
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
       throw err;
     }
-    bootstrapLogger.warn({ err: err instanceof Error ? err.message : String(err), tool: toolName }, '[agent-tools] tool execution failed');
+    bootstrapLogger.warn({ err, tool: toolName, requestId }, '[agent-tools] tool execution failed');
     return {
       observation: `Tool "${toolName}" encountered an unexpected error. Try a different approach or query.`,
       rawResult: null,

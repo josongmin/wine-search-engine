@@ -5,7 +5,7 @@
 **범위:** 플래너·보안·캐시·SAT 이후, **`effectiveRoute === 'hybrid'`** 일 때 **후보(`HybridCandidate[]`)를 만드는 경로**와, 그 직후 **랭킹·합성 리졸브**까지.  
 **비범위:** `entity` 전용 리졸브, `mixed` 솔버, `DecisionEngine`·`ResponseBuilder` 전체, HTTP 라우트 등록 — 필요 시 아래 “전후 단계”만 참조.
 
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-10
 
 ---
 
@@ -429,6 +429,76 @@ export function buildCompareRetriever(adapters: CoreAdapterServices): CompareRet
 ```
 
 **런타임 인덱스:** `VespaSearchIndex` (`src/infrastructure/vespa/vespa-search-index.ts`) — `SearchIndexPort` 구현.
+
+---
+
+## 8.1 Reranker 어댑터 + Doc2Query 자동 적용 (2026-04-10)
+
+> 결정/근거: [`doc2query-cohere-integration.md`](./doc2query-cohere-integration.md)
+
+랭킹 단계 직전 후보(top-K)에 적용되는 cross-encoder reranker는 도메인 포트 `RerankerPort` 한 개로 추상화되어 있고, DI에서 환경에 따라 한 개의 구현체가 선택된다.
+
+```162:173:src/config/container-adapters.ts
+    ...(config.cohere.apiKey !== undefined
+      ? {
+          reranker: new CohereReranker({
+            apiKey: config.cohere.apiKey,
+            baseUrl: config.cohere.baseUrl,
+            model: config.cohere.rerankModel,
+            httpTimeoutMs: config.reranker.httpTimeoutMs,
+          }),
+        }
+      : config.reranker.url !== undefined
+      ? { reranker: new HttpCrossEncoderReranker() }
+      : {}),
+```
+
+- **Primary**: `CohereReranker` (`COHERE_API_KEY` 있을 때).  
+- **Fallback**: 자체 호스트 `HttpCrossEncoderReranker` (`RERANKER_SERVICE_URL`).  
+- **Both unset**: reranker undefined → `Ranker`가 cross-encoder rerank를 skip하고 1차 fusion 결과를 그대로 반환.
+
+**Cohere CircuitBreaker (2026-04-10 추가)**
+
+`CohereReranker.rerank()`는 `runUnderLlmBreaker(this.circuitBreaker, ...)` 안에서 실행된다. OpenAI/Anthropic chat 어댑터와 동일 튜닝:
+
+| 파라미터 | 값 | 효과 |
+|---|---|---|
+| `failureThreshold` | 5 | 5회 연속 service-failure → OPEN |
+| `recoveryTimeoutMs` | 60_000 | OPEN 60초 후 HALF_OPEN |
+| `halfOpenMaxAttempts` | 3 | half-open probe 동시 3개까지 |
+| `name` | `cohere-rerank` | `globalCircuitBreakerRegistry` 등록 → `/health` 노출 |
+
+`runUnderLlmBreaker`는 4xx (caller-fault, 429 제외) 응답을 service-failure로 카운트하지 않으므로, 잘못된 페이로드가 다른 호출자를 DoS하지 못한다. OPEN 상태면 즉시 `CircuitBreakerOpenError`를 throw → `Ranker`가 reranker를 skip한 채 fusion 결과로 fallback.
+
+운영 스위치:
+- 즉시 비활성: `unset COHERE_API_KEY` → DI가 self-host fallback으로 자동 회귀.
+- Blend 무효화 (shadow run): `RERANK_BLEND_SCALE=0.0`.
+
+**`synthetic_queries` BM25 필드 자동 적용**
+
+런타임 코드 변경 0. Doc2Query 인덱싱 단계가 `synthetic_queries` array<string> 필드를 채워두면, Vespa rank profile `bm25_wine()` 안의 다음 한 줄이 모든 BM25 채널에서 자동으로 발화한다:
+
+```485:497:vespa/app/schemas/wine_entity.sd
+    function bm25_wine() {
+      expression {
+        bm25(canonical_label) * 4
+        + bm25(aliases_identity_safe) * 3
+        + bm25(aliases_noisy_recall) * 2
+        + bm25(flavor_profiles) * 1.8
+        + bm25(producer) * 1.5
+        + bm25(appellation) * 1.5
+        + bm25(classification) * 1.3
+        + bm25(grape_primary) * 1.2
+        + bm25(search_text_en)
+        + bm25(search_text_ko)
+        + bm25(synthetic_queries) * 0.6
+      }
+    }
+```
+
+`bm25_wine`은 `lexical` rank profile에 정의되고, `hybrid` / `wine_aware` / `prestige_hybrid` / `popularity_native`가 모두 `lexical` (또는 `hybrid`) 을 상속하므로 **모든 sparse_bm25 호출 경로가 +0.6 가중치 합성 쿼리 매칭을 자동으로 받는다**. agent flow의 `search_wines` 도구도 `SearchUseCase`를 그대로 재사용하므로 동일하게 적용.
+
+`match-features` 블록에도 `bm25(synthetic_queries)`가 포함되어 디버그/관측성 측정 가능.
 
 ---
 

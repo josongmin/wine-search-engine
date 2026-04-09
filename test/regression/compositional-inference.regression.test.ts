@@ -32,6 +32,9 @@ describe('RFC-019 regression: compositional inference', () => {
       (c) => c.attribute === 'tannin' && c.operator === '>=',
     );
     expect(tannin).toBeDefined();
+    // Strengthen: verify the inferred tannin threshold is a positive number
+    expect(tannin!.value).toBeTypeOf('number');
+    expect(tannin!.value as number).toBeGreaterThan(0);
   });
 
   it('Burgundy + red infers grape_family Pinot', () => {
@@ -53,11 +56,15 @@ describe('RFC-019 regression: compositional inference', () => {
       (c) => c.attribute === 'wine_type' && c.value === 'sparkling',
     );
     expect(sparkling).toBeDefined();
+    expect(sparkling!.operator).toBe('=');
 
     const acidity = result.inferred.find(
       (c) => c.attribute === 'acidity' && c.operator === '>=',
     );
     expect(acidity).toBeDefined();
+    // Strengthen: verify the inferred acidity threshold is a positive number
+    expect(acidity!.value).toBeTypeOf('number');
+    expect(acidity!.value as number).toBeGreaterThan(0);
   });
 
   it('no inference for unrecognized combination', () => {

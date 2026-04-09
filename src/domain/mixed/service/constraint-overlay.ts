@@ -4,6 +4,9 @@ import type {
   EntityId,
 } from '../../shared/types/index.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
+import { toFiniteNumber } from '../../shared/utils/safe-number.js';
+import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 /**
  * Weight multiplier for inferred constraints (lower than explicit constraints).
@@ -71,8 +74,15 @@ export class ConstraintOverlay {
       candidateAttributes,
     );
 
-    // Re-sort by adjusted score and re-assign ranks
-    filtered.sort((a, b) => b.finalScore - a.finalScore);
+    // Re-sort by adjusted score with NaN-safe + deterministic tiebreaker
+    // (entityId). Previously raw `b.finalScore - a.finalScore` propagated NaN
+    // and produced order-dependent ties. (Bugbash R19)
+    filtered.sort(
+      compareScoreWithTiebreaker<RankedResult>(
+        (r) => r.finalScore,
+        (r) => String(r.entityId),
+      ),
+    );
 
     return filtered.map((result, index) => ({
       ...result,
@@ -240,11 +250,19 @@ export class ConstraintOverlay {
           ConstraintOverlay.toComparableString(constraint.value).toLowerCase()
         );
 
-      case '<=':
-        return typeof value === 'number' && value <= Number(constraint.value);
+      case '<=': {
+        if (typeof value !== 'number') return false;
+        const bound = toFiniteNumber(constraint.value);
+        if (bound === null) return false;
+        return value <= bound;
+      }
 
-      case '>=':
-        return typeof value === 'number' && value >= Number(constraint.value);
+      case '>=': {
+        if (typeof value !== 'number') return false;
+        const bound = toFiniteNumber(constraint.value);
+        if (bound === null) return false;
+        return value >= bound;
+      }
 
       case 'range': {
         if (typeof value !== 'number') return false;
@@ -295,11 +313,12 @@ export class ConstraintOverlay {
     );
   }
 
-  /** Safe string form for comparing constraint operands (avoids `[object Object]`). */
+  /** Safe string form for comparing constraint operands (avoids `[object Object]`).
+   *  Uses canonicalJsonStringify so {min,max} and {max,min} compare equal. */
   private static toComparableString(v: unknown): string {
     if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
       return String(v);
     }
-    return JSON.stringify(v);
+    return canonicalJsonStringify(v);
   }
 }

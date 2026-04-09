@@ -6,6 +6,16 @@ import { z } from 'zod';
 
 const AGENT_MAX_STEPS_UPPER_BOUND = 10;
 const DEFAULT_AGENT_MAX_STEPS = 5;
+/**
+ * Total agent wall-clock budget. The orchestrator checks remaining time
+ * before each step (pre-flight), so steps beyond the budget are skipped.
+ *
+ * Arithmetic: DEFAULT_AGENT_MAX_STEPS (5) * DEFAULT_AGENT_PER_STEP_TIMEOUT_MS
+ * (10 000) = 50 000 ms > this value. That is intentional — most steps finish
+ * well under the per-step ceiling, and the per-step timeout is a *worst-case*
+ * guard. The total timeout prevents a chain of slow steps from blocking the
+ * request indefinitely.
+ */
 const DEFAULT_AGENT_TIMEOUT_MS = 30_000;
 const DEFAULT_AGENT_PER_STEP_TIMEOUT_MS = 10_000;
 

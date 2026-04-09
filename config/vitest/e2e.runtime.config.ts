@@ -1,9 +1,10 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
-import { resolveMaxForks } from './parallelism.js';
+import { resolveMaxForks, vitestMemorySchedulerOptions } from './parallelism.js';
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [
       'test/e2e/user-journeys.test.ts',

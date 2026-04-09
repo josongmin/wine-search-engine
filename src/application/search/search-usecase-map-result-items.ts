@@ -10,6 +10,7 @@ import {
   inferDrinkingWindowEvidenceLevel,
 } from './drinking-window-confidence.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { clamp01 } from '../../domain/shared/utils/clamp.js';
 
 const drinkingWindowLogger = bootstrapLogger.child({
   component: 'search-result-drinking-window',
@@ -82,9 +83,23 @@ function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSenso
 export async function mapRankedResultsToResultItems(
   rankedResults: readonly RankedResult[],
   drinkingWindow: DrinkingWindowUseCasePort | undefined,
-  targetYear: number = new Date().getFullYear(),
+  // targetYear is REQUIRED — no wall-clock fallback. A silent
+  // `new Date().getFullYear()` default here was a replay-determinism leak:
+  // identical queries with identical snapshots produced different
+  // `currentlyDrinkable` flags across New Year boundaries, breaking the
+  // RFC-009 §8 replay hash and the golden-set fidelity guarantee.
+  // Callers MUST source `targetYear` from a deterministic seam
+  // (request-start wall clock captured once, or an injected clock from the
+  // replay harness). See search-usecase-post-route-phase.ts for the canonical
+  // plumbing pattern.
+  targetYear: number,
   sensoryPriors?: QueryLevelSensoryPriors,
 ): Promise<readonly ResultItem[]> {
+  if (!Number.isFinite(targetYear)) {
+    throw new Error(
+      `mapRankedResultsToResultItems: targetYear must be a finite number, got ${String(targetYear)}`,
+    );
+  }
   const resultsPendingPrediction = rankedResults.filter(
     (r) => drinkingWindow !== undefined && needsDrinkingWindowPrediction(r, sensoryPriors),
   );
@@ -200,7 +215,7 @@ export async function mapRankedResultsToResultItems(
         // NaN guard: if uncertaintyPenalty is NaN (upstream bug), 1 - NaN → NaN,
         // and Math.max/min do NOT filter NaN — they propagate it to the client.
         uncertaintyConfidence: Number.isFinite(r.componentScores.uncertaintyPenalty)
-          ? Math.max(0, Math.min(1, 1 - r.componentScores.uncertaintyPenalty))
+          ? clamp01(1 - r.componentScores.uncertaintyPenalty)
           : UNCERTAINTY_CONFIDENCE_NEUTRAL,
         missingInfo: [],
         approximationUsed: false,

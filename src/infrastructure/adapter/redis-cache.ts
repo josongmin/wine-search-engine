@@ -6,6 +6,34 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 const log = bootstrapLogger.child({ component: 'RedisCache' });
 
 /**
+ * Fire-and-forget INCR / DEL helpers used by the validated read pipeline.
+ *
+ * The cache contract is "treat as miss on any infra failure" — counter and
+ * housekeeping side effects must NEVER throw into the caller. We funnel all
+ * such best-effort operations through these helpers so the call sites stay
+ * single-line and so semgrep `wine-catch-empty` does not flag inline
+ * `try { ... } catch {}` swallowing.
+ *
+ * Errors are logged at `debug` level so operators can opt in to observability
+ * without paying log overhead in the hot path.
+ */
+async function bestEffortIncr(client: RedisClient, key: string): Promise<void> {
+  try {
+    await client.incr(key);
+  } catch (err) {
+    log.debug({ err, key, op: 'incr' }, 'best-effort redis op failed; ignoring');
+  }
+}
+
+async function bestEffortDel(client: RedisClient, key: string): Promise<void> {
+  try {
+    await client.del(key);
+  } catch (err) {
+    log.debug({ err, key, op: 'del' }, 'best-effort redis op failed; ignoring');
+  }
+}
+
+/**
  * Options for {@link RedisCache.getValidatedWithStats} that enable per-domain
  * hit/miss tracking and structured logging.
  */
@@ -43,6 +71,9 @@ export class RedisCache {
       const parsed: unknown = JSON.parse(raw);
       return parsed as T;
     } catch {
+      // intentional: poisoned JSON entry — return null (cache miss semantics).
+      // Callers should migrate to getValidated() which also deletes the bad entry.
+      log.warn({ key }, 'deprecated get<T>: JSON.parse failed; treating as miss');
       return null;
     }
   }
@@ -97,12 +128,12 @@ export class RedisCache {
       raw = await this.client.get(key);
     } catch (error) {
       log.error({ err: error, component: stats.logComponent }, 'redis get error');
-      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
+      await bestEffortIncr(this.client, stats.statsKeyMisses);
       return null;
     }
 
     if (raw === null) {
-      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
+      await bestEffortIncr(this.client, stats.statsKeyMisses);
       return null;
     }
 
@@ -114,8 +145,8 @@ export class RedisCache {
         { key, reason: 'json_parse_error', component: stats.logComponent },
         'cache entry poisoned (invalid JSON); treating as miss',
       );
-      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
-      try { await this.client.del(key); } catch { /* best-effort; TTL will clean up */ }
+      await bestEffortIncr(this.client, stats.statsKeyMisses);
+      await bestEffortDel(this.client, key);
       return null;
     }
 
@@ -125,12 +156,12 @@ export class RedisCache {
         { key, issues: result.error.issues.slice(0, 3), component: stats.logComponent },
         'cache entry poisoned (schema mismatch); treating as miss',
       );
-      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
-      try { await this.client.del(key); } catch { /* best-effort; TTL will clean up */ }
+      await bestEffortIncr(this.client, stats.statsKeyMisses);
+      await bestEffortDel(this.client, key);
       return null;
     }
 
-    try { await this.client.incr(stats.statsKeyHits); } catch { /* best-effort */ }
+    await bestEffortIncr(this.client, stats.statsKeyHits);
     return result.data;
   }
 

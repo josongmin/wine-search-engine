@@ -305,7 +305,7 @@ describe('HTTP server route registration', () => {
       });
 
       expect(res.statusCode).toBe(403);
-      const body = res.json() as { error?: { code?: string } };
+      const body = res.json();
       expect(body.error?.code).toBe('FORBIDDEN');
     } finally {
       await app.close();

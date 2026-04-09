@@ -25,6 +25,11 @@ const RETRIEVAL_COVERAGE_THRESHOLD = 0.8;
 /** Ranking bottleneck threshold: efficiency below this = ranking problem. */
 const RANKING_EFFICIENCY_THRESHOLD = 0.8;
 
+/** Recall cutoffs reported on the retrieval-ceiling diagnostic. */
+const RECALL_K_TIGHT = 20;
+const RECALL_K_MID = 50;
+const RECALL_K_LOOSE = 100;
+
 export interface RetrievalCeilingMetrics {
   readonly recall_at_20: number;
   readonly recall_at_50: number;
@@ -128,9 +133,9 @@ export function computeRetrievalCeiling(
   relevantIds: ReadonlySet<string>,
 ): RetrievalCeilingMetrics {
   return {
-    recall_at_20: recallAtK(retrievedIds, relevantIds, 20),
-    recall_at_50: recallAtK(retrievedIds, relevantIds, 50),
-    recall_at_100: recallAtK(retrievedIds, relevantIds, 100),
+    recall_at_20: recallAtK(retrievedIds, relevantIds, RECALL_K_TIGHT),
+    recall_at_50: recallAtK(retrievedIds, relevantIds, RECALL_K_MID),
+    recall_at_100: recallAtK(retrievedIds, relevantIds, RECALL_K_LOOSE),
     oracle_ndcg_at_10: oracleNdcgAtK(retrievedIds, relevantIds, DEFAULT_K),
     oracle_mrr: oracleMrr(retrievedIds, relevantIds),
     retrieved_count: retrievedIds.length,

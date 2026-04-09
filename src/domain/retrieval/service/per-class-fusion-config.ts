@@ -155,9 +155,7 @@ export const PER_CLASS_FUSION: ReadonlyMap<QueryClass, FusionConfig> = new Map<
  * (including empty) fall back to {@link DEFAULT_FUSION_CONFIG} — this
  * keeps the call sites free of defensive branching.
  */
-export function getFusionConfig(
-  queryClass: QueryClass | string,
-): FusionConfig {
-  const found = PER_CLASS_FUSION.get(queryClass as QueryClass);
+export function getFusionConfig(queryClass: QueryClass): FusionConfig {
+  const found = PER_CLASS_FUSION.get(queryClass);
   return found ?? DEFAULT_FUSION_CONFIG;
 }

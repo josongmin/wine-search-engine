@@ -8,5 +8,9 @@ export {
   type ConstraintBundle,
 } from './constraint-bundle.js';
 export { type EvidenceStrength, type EvidenceItem } from './evidence-item.js';
-export { type DecisionSnapshot } from './decision-snapshot.js';
+export {
+  type DecisionSnapshot,
+  CORRUPTED_SNAPSHOT_ID,
+  isCorruptedSnapshot,
+} from './decision-snapshot.js';
 export { type SignalSet } from './signal-set.js';

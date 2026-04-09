@@ -157,7 +157,7 @@ function extractVintage(record: RawSourceRecord): number | undefined {
 
   // Fallback: extract from title
   const year = normalizeYear(record.rawTitle);
-  return year !== null ? year : undefined;
+  return year ?? undefined;
 }
 
 /**

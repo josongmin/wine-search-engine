@@ -3,6 +3,7 @@ import { AgentOrchestrator } from '../../../../src/application/agent/agent-orche
 import type { ChatLlmPort } from '../../../../src/domain/ai/port/chat-llm.port.js';
 import type { AgentToolDeps } from '../../../../src/application/agent/agent-tools.js';
 import { PolicyBlockedError } from '../../../../src/domain/shared/error/policy-blocked.js';
+import { CircuitBreakerOpenError } from '../../../../src/domain/shared/error/circuit-breaker-open-error.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
 
 function makeSearchResponse(): SearchResponseV1 {
@@ -476,5 +477,76 @@ describe('AgentOrchestrator', () => {
 
     expect(result.terminationReason).toBe('answer');
     expect(result.answer).toContain('Search result summary:');
+  });
+
+  it('skips all LLM synthesis attempts when the circuit breaker opens mid-run', async () => {
+    // First (and only) LLM call throws CircuitBreakerOpenError — every subsequent
+    // complete() call would fast-fail too, so synthesis attempts MUST be skipped.
+    // The agent should fall through to Layer 2 (single-shot search fallback)
+    // without calling chatLlm again.
+    const complete = vi.fn().mockRejectedValue(new CircuitBreakerOpenError('llm.openai.chat'));
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 2 });
+    const result = await orchestrator.execute('opus one', 'req-cb-open');
+
+    // Exactly ONE LLM call — synthesis attempts 1 and 2 were both skipped.
+    expect(complete).toHaveBeenCalledTimes(1);
+    // Layer 2 fallback (single-shot search) supplied the answer.
+    expect(result.fallbackApplied).toBe(true);
+    expect(result.answer).toContain('Opus One 2018');
+    // Termination is the Layer-2 outcome, not 'error'.
+    expect(result.terminationReason).toBe('fallback');
+  });
+
+  it('skips synthesis attempt 2 when attempt 1 pushed totals past maxTotalTokens', async () => {
+    // Attempt 1 returns a long malformed payload that drives totalTokens over the
+    // budget. Attempt 2 must be skipped per CLAUDE.md rule 20 (pre-flight check).
+    // We ensure there is exactly one tool call (step 0 LLM → search action) so
+    // synthesis layer actually fires.
+    const bigPadding = 'x'.repeat(40_000); // ~10k estimated tokens on its own
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'search first',
+          action: { tool: 'search_wines', input: { query: 'opus one' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      // Synthesis attempt 1: long garbage payload so parse returns no answer,
+      // but tokens get accumulated. We rely on the char-based estimate pushing
+      // totals past the tight maxTotalTokens cap set on the config.
+      .mockResolvedValueOnce({
+        text: bigPadding,
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+    };
+
+    // maxTotalTokens intentionally small so attempt 1's accumulated tokens cross it.
+    const orchestrator = new AgentOrchestrator(
+      { chatLlm, toolDeps },
+      { maxSteps: 1, maxTotalTokens: 5_000 },
+    );
+    const result = await orchestrator.execute('opus one', 'req-synth-budget');
+
+    // Step 0 LLM (1) + synthesis attempt 1 (1) = 2 calls total.
+    // Attempt 2 MUST be skipped because totals exceeded maxTotalTokens.
+    expect(complete).toHaveBeenCalledTimes(2);
+    // Layer 3 (raw observation slice) picks up and provides the answer since
+    // synthesis failed and Layer 2 is skipped (tool observations exist).
+    expect(result.fallbackApplied).toBe(true);
+    expect(result.answer.length).toBeGreaterThan(0);
   });
 });

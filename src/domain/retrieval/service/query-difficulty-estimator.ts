@@ -11,6 +11,8 @@
  * replaced by learned signals once sweep data is available.
  */
 
+import { clamp01 } from '../../shared/utils/clamp.js';
+
 export type QueryDifficulty = 'easy' | 'medium' | 'hard';
 
 export interface DifficultyEstimate {
@@ -94,12 +96,7 @@ function detectLanguageMix(query: string): LanguageMix {
   return hangul > 0 && latin > 0 ? 'mixed' : 'monolingual';
 }
 
-function clamp01(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  if (value < 0) return 0;
-  if (value > 1) return 1;
-  return value;
-}
+// clamp01: imported from @shared/utils/clamp (SSoT).
 
 /**
  * Estimate query difficulty from deterministic priors.
@@ -158,7 +155,11 @@ export function estimateQueryDifficulty(
   const anchorComponent = input.hasAnchor
     ? clamp01(1 - input.anchorConfidence)
     : 1;
-  const negationComponent = input.hasNegation ? 1 : 0;
+  // Negation already short-circuits to 'hard' above (line 152), so by the
+  // time we reach the medium-tier weighted score, hasNegation is always false.
+  // The component is kept at 0 here so the weight semantics stay symmetric
+  // with the other booleans (token / anchor / numeric / language).
+  const negationComponent = 0;
   const numericComponent = input.hasNumericConstraint ? 1 : 0;
   const languageComponent = languageMix === 'mixed' ? 1 : 0;
 

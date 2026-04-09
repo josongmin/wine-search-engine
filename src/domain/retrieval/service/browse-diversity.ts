@@ -1,5 +1,6 @@
 import type { SparseHit } from '../port/search-index.port.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 /** BM25 multiplier weights for critic / prestige lifts (producer browse). */
 const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;
@@ -191,7 +192,14 @@ export function diversifyRegionBrowseHits(
     ),
   );
 
-  const sorted = [...hits].sort((a, b) => regionBrowseRankScore(b) - regionBrowseRankScore(a));
+  // NaN-safe + entityId tiebreaker so equal-score hits resolve identically
+  // across processes. (Bugbash R22)
+  const sorted = [...hits].sort(
+    compareScoreWithTiebreaker<SparseHit>(
+      (h) => regionBrowseRankScore(h),
+      (h) => String(h.entityId),
+    ),
+  );
 
   const counts = new Map<string, number>();
   const producerKey = (hit: SparseHit): string => {
@@ -244,17 +252,54 @@ export function browseSparseFetchLimit(resultLimit: number): number {
 
 /**
  * OR-queries can return the same entity multiple times; keep the strongest hit.
+ *
+ * Determinism guarantees:
+ *  - NaN scores are treated as -Infinity so a NaN hit never sticks as "best"
+ *    against a finite competitor, and a NaN never replaces a finite value.
+ *  - Equal-score ties are broken by entityId (lexicographic) at BOTH the
+ *    dedup step (which hit to keep) and the final sort step (output order),
+ *    so the result is stable across input permutations. Previously the
+ *    strict `>` comparison plus map insertion order meant that two orderings
+ *    of the same input list could produce different `[...map.values()]`
+ *    sequences when scores tied — leaking input order into the output.
  */
 export function dedupeSparseHitsByEntity(
   hits: readonly SparseHit[],
 ): readonly SparseHit[] {
+  const normalizeScore = (s: number): number => (Number.isFinite(s) ? s : -Infinity);
   const map = new Map<string, SparseHit>();
   for (const h of hits) {
     const id = String(h.entityId);
     const cur = map.get(id);
-    if (cur === undefined || h.score > cur.score) {
+    if (cur === undefined) {
       map.set(id, h);
+      continue;
+    }
+    const hNorm = normalizeScore(h.score);
+    const curNorm = normalizeScore(cur.score);
+    if (hNorm > curNorm) {
+      map.set(id, h);
+      continue;
+    }
+    if (hNorm === curNorm) {
+      // Deterministic tiebreak: prefer the lexicographically smallest rank
+      // (if provided), else smallest entityId. This removes dependence on
+      // iteration order when two hits for the same entity share a score.
+      const hRank = Number.isFinite(h.rank) ? h.rank : Number.POSITIVE_INFINITY;
+      const curRank = Number.isFinite(cur.rank) ? cur.rank : Number.POSITIVE_INFINITY;
+      if (hRank < curRank) {
+        map.set(id, h);
+      }
     }
   }
-  return [...map.values()].sort((a, b) => b.score - a.score);
+  return [...map.values()].sort((a, b) => {
+    const aScore = normalizeScore(a.score);
+    const bScore = normalizeScore(b.score);
+    if (bScore !== aScore) return bScore - aScore;
+    const aId = String(a.entityId);
+    const bId = String(b.entityId);
+    if (aId < bId) return -1;
+    if (aId > bId) return 1;
+    return 0;
+  });
 }

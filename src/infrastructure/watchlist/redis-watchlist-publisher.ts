@@ -54,9 +54,7 @@ export class RedisWatchlistPublisher implements WatchlistPublisherPort {
    * Ensures a connected Redis client is available (lazy initialization).
    */
   private async ensureClient(): Promise<RedisClient> {
-    if (!this.client) {
-      this.client = await getRedisClient(this.redisConfig);
-    }
+    this.client ??= await getRedisClient(this.redisConfig);
     return this.client;
   }
 }

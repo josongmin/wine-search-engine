@@ -11,13 +11,19 @@ import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
 import { CandidateProvenanceV2Schema } from '../model/retrieval-contract-v2.js';
 import {
-  preferCanonicalRetrievalChannelLabel,
   preferCanonicalRetrievalChannelLabels,
+  toCanonicalCandidateChannel,
 } from '../model/retrieval-channel.js';
 import { rrfContribution } from '../../shared/utils/rrf.js';
 import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
+import {
+  getFusionConfig,
+  type QueryClass as FusionQueryClass,
+} from './per-class-fusion-config.js';
+import type { QueryClass as DomainQueryClass } from '../../shared/types/index.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
+import { estimateQueryDifficulty } from './query-difficulty-estimator.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
@@ -36,6 +42,43 @@ import { deriveQueryFamily } from '../../query/model/query-observability-vocab.j
 
 /** Default anchor confidence when plan omits explicit score (neutral). */
 const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
+
+/**
+ * Map the project's RFC-005 QueryClass vocabulary onto the fusion-config
+ * QueryClass vocabulary. Per-class fusion config is a foundation module
+ * that was standalone before this wire-up. getFusionConfig falls back to
+ * DEFAULT_FUSION_CONFIG (k=60) for unknown classes, so the change is
+ * behavior-preserving for queries outside the 5 mapped classes.
+ *
+ * Mapping rationale (domain alignment, not new logic):
+ *   - short_entity, ambiguous_short_form, anchored_similarity → specific_wine
+ *     (entity-anchored lookups where sparse/anchor channels should dominate)
+ *   - pure_constraint, semantic_preference → browse
+ *     (open-ended exploration where dense carries most of the signal)
+ *   - comparison_query → compare
+ *   - unknown → fallback (neutral k=60, equal weights)
+ *
+ * The fusion-config module does not define a 'pairing' mapping from any
+ * RFC-005 class — pairing intent is not surfaced as its own QueryClass
+ * today, so that config remains unused until an upstream pairing class
+ * lands.
+ */
+function mapToFusionQueryClass(qc: DomainQueryClass): FusionQueryClass {
+  switch (qc) {
+    case 'short_entity':
+    case 'ambiguous_short_form':
+    case 'anchored_similarity':
+      return 'specific_wine';
+    case 'pure_constraint':
+    case 'semantic_preference':
+      return 'browse';
+    case 'comparison_query':
+      return 'compare';
+    case 'unknown':
+    default:
+      return 'fallback';
+  }
+}
 /** Max expansion terms fed into retrieval query views. */
 const QUERY_EXPANSION_MAX_TERMS = 32;
 /** Weight increment per repeated token occurrence in expansion stats. */
@@ -118,6 +161,42 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       aliasMatchStrength,
       input.hardConstraints.length + input.softConstraints.length,
     );
+
+    // Epic-16 / T16-4 parallel wire-up: compute query difficulty via the
+    // deterministic estimator alongside the CascadeRouter's signal-based
+    // difficulty. The two estimators consume different signal shapes and
+    // cannot be substituted 1:1 without risk — this emits an agreement
+    // log so sweeps can quantify drift before a full replacement. No
+    // behavior change: the cascade continues to use dispatchDecision.
+    {
+      const normalizedQuery = input.queryPlan.normalizedQuery ?? '';
+      const tokenCount = normalizedQuery.trim().length === 0
+        ? 0
+        : normalizedQuery.trim().split(/\s+/).length;
+      const estimate = estimateQueryDifficulty({
+        normalizedQuery,
+        tokenCount,
+        hasAnchor: anchorConfidence > 0,
+        anchorConfidence,
+        hasNumericConstraint:
+          input.hardConstraints.length + input.softConstraints.length > 0,
+        // RFC-005 query classes do not surface a negation signal yet;
+        // pass false so the estimator never short-circuits to 'hard' on
+        // this axis. Revisit when a negation extractor lands.
+        hasNegation: false,
+      });
+      bootstrapLogger.debug(
+        {
+          event: 'retrieval.difficulty_parallel',
+          cascade_difficulty: dispatchDecision.difficulty,
+          estimator_difficulty: estimate.difficulty,
+          estimator_score: estimate.score,
+          agree: dispatchDecision.difficulty === estimate.difficulty,
+          query_class: input.queryPlan.queryClass,
+        },
+        'cascade vs estimator difficulty',
+      );
+    }
     const activeChannels = this.resolveActiveChannels(profile.channelMix, dispatchDecision, input);
     const allPhases: RetrievalPhase[] = [
       'sparse',
@@ -489,27 +568,45 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     const anchorHits = anchorResult.hits;
 
     // Step 4: Fuse via RRF
+    // Per-class fusion config is a foundation module (Epic-16 / T16-2) that
+    // was standalone before this wire-up. getFusionConfig falls back to
+    // DEFAULT_FUSION_CONFIG (k=60) for unknown classes, so the change is
+    // behavior-preserving for queries outside the 5 mapped classes. The
+    // profile.fusionK still acts as the ultimate fallback when the mapped
+    // class resolves to 'fallback' AND profile opts to a non-default k.
+    const fusionConfig = getFusionConfig(mapToFusionQueryClass(input.queryPlan.queryClass));
+    const effectiveFusionK = fusionConfig.rrfK;
     let candidates = this.fusionService.fuse(
       sparseHits,
       denseHits,
       anchorHits,
-      profile.fusionK,
+      effectiveFusionK,
       learnedSparseHits,
     );
 
-    // Enrich traces with pipeline context
-    const effectiveSkippedPhases = [
+    // Enrich traces with pipeline context.
+    // Perf: the query-level trace fields (lexical/semantic queries, filters,
+    // skipped phases, profile name) are IDENTICAL across every candidate.
+    // Build them once outside the loop and share the references — the
+    // previous implementation spread the full HybridCandidate (40+ fields)
+    // and allocated fresh defensive copies of lexicalQueries/semanticQueries
+    // per candidate, turning a 200-candidate pool into 10K+ unnecessary
+    // allocations (Rules: avoid per-candidate object spread, hoist
+    // deterministic constants).
+    const effectiveSkippedPhases: readonly RetrievalPhase[] = [
       ...skippedPhases,
       ...(sparseDegraded ? ['sparse' as RetrievalPhase] : []),
       ...(denseDegraded ? ['dense' as RetrievalPhase] : []),
     ];
+    const sharedLexicalQueries: readonly string[] = [...input.lexicalQueries];
+    const sharedSemanticQueries: readonly string[] = [...input.semanticQueries];
     candidates = candidates.map((c) => ({
       ...c,
       retrievalTrace: {
         ...c.retrievalTrace,
         retrievalProfile: profile.name,
-        lexicalQueriesUsed: [...input.lexicalQueries],
-        semanticQueriesUsed: [...input.semanticQueries],
+        lexicalQueriesUsed: sharedLexicalQueries,
+        semanticQueriesUsed: sharedSemanticQueries,
         filtersApplied: filters,
         skippedPhases: effectiveSkippedPhases,
       } satisfies RetrievalTrace,
@@ -552,7 +649,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
 
     // Step 6: Structured assembly + protected recall.
     const envelopes = candidates.map((candidate) =>
-      hybridCandidateToEnvelope(candidate, profile.fusionK));
+      hybridCandidateToEnvelope(candidate, effectiveFusionK));
     const protectedCandidates = applyProtectedRecallPolicy(envelopes);
     const accumulated = accumulateEvidence(protectedCandidates);
     const assembled = this.candidateAssembler.assemble(
@@ -762,10 +859,7 @@ function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {
   return channels;
 }
 
-function toCanonicalCandidateChannel(value: string): CandidateChannel | null {
-  const canonical = preferCanonicalRetrievalChannelLabel(value);
-  return isCandidateChannel(canonical) ? canonical : null;
-}
+// toCanonicalCandidateChannel + isCandidateChannel: imported from retrieval-channel.ts (SSoT)
 
 function normalizeCandidateChannelScores(
   channelScores: CandidateEnvelope['provenance']['channelScores'],
@@ -838,22 +932,6 @@ function toCandidateProvenance(
     fusionProfile: parsed.fusionProfile,
     fusionScore: parsed.fusionScore,
   };
-}
-
-function isCandidateChannel(value: string): value is CandidateChannel {
-  switch (value) {
-    case 'sparse_bm25':
-    case 'dense_semantic':
-    case 'learned_sparse':
-    case 'anchor_similarity':
-    case 'relative_filter':
-    case 'browse_producer':
-    case 'browse_region':
-    case 'compare_anchor':
-      return true;
-    default:
-      return false;
-  }
 }
 
 function hybridCandidateToEnvelope(
@@ -974,7 +1052,8 @@ function hybridCandidateToEnvelope(
       ? { failedHardConstraints: candidate.unmetHardConstraints }
       : {}),
     fusionProfile: candidate.retrievalTrace.retrievalProfile,
-    fusionScore: candidate.retrievalFusionScore,
+    // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback
+    fusionScore: candidate.fusionRrfTotal ?? candidate.retrievalFusionScore,
   } satisfies CandidateEnvelope['provenance'];
   const normalizedProvenance = toCandidateProvenance(provenance);
 

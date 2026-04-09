@@ -8,6 +8,8 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 
+const log = bootstrapLogger.child({ component: 'CacheLookup' });
+
 /** Runtime guard against corrupt or partially-written cached values. */
 function isCachedResponseValid(data: SearchResponseV1): boolean {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -34,6 +36,7 @@ export async function tryGetCachedSearchResponse(
   request: SearchRequest,
   snapshotVersions: SnapshotVersionInjection,
   runtimeState?: CacheLookupRuntimeState,
+  requestId?: string,
 ): Promise<SearchResponseV1 | undefined> {
   let cacheResult;
   try {
@@ -45,17 +48,17 @@ export async function tryGetCachedSearchResponse(
       compiled,
     );
   } catch (err: unknown) {
-    bootstrapLogger.warn(
-      { err, rawQuery: plan.rawQuery.slice(0, 100) },
-      '[CacheLookup] Cache read failed — treating as miss',
+    log.warn(
+      { err, requestId, rawQuery: plan.rawQuery.slice(0, 100) },
+      'cache read failed — treating as miss',
     );
     return undefined;
   }
   if (cacheResult.hit && cacheResult.data) {
     if (!isCachedResponseValid(cacheResult.data)) {
-      bootstrapLogger.warn(
-        { rawQuery: plan.rawQuery },
-        '[CacheLookup] Cached response missing required fields — treating as miss',
+      log.warn(
+        { requestId, rawQuery: plan.rawQuery },
+        'cached response missing required fields — treating as miss',
       );
       return undefined;
     }

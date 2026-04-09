@@ -8,7 +8,42 @@ import {
 } from '../port/search-index.port.js';
 import type { EntityId } from '../../shared/types/index.js';
 
-type HybridCandidateSummaryFields = Pick<HybridCandidate, RetrievalHitSummaryKey>;
+export type HybridCandidateSummaryFields = Pick<HybridCandidate, RetrievalHitSummaryKey>;
+
+/**
+ * Runtime-safe set of keys allowed in HybridCandidateSummaryFields.
+ * Used by {@link toSafeHybridCandidateSummaryFields} to strip unknown keys
+ * and validate value types, replacing the previous unsafe `as` cast.
+ */
+const SUMMARY_KEY_SET: ReadonlySet<string> = new Set(RETRIEVAL_HIT_SUMMARY_KEYS);
+
+/**
+ * Safely project a normalized summary into HybridCandidateSummaryFields
+ * by copying only known keys with valid value types (string, number,
+ * readonly string[]). Unknown keys and non-matching value types are dropped.
+ */
+function toSafeHybridCandidateSummaryFields(
+  summary: RetrievalHitSummary | undefined,
+): HybridCandidateSummaryFields {
+  const normalized = normalizeRetrievalHitSummary(summary);
+  if (normalized === undefined) return {} as HybridCandidateSummaryFields;
+
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(normalized)) {
+    if (!SUMMARY_KEY_SET.has(key)) continue;
+    const value = (normalized as Record<string, unknown>)[key];
+    if (value === undefined) continue;
+    // Accept string, number, and string[] — the three value families in RetrievalHitSummaryKey
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      (Array.isArray(value) && value.every((v) => typeof v === 'string'))
+    ) {
+      result[key] = value;
+    }
+  }
+  return result as HybridCandidateSummaryFields;
+}
 type NormalizableRetrievalHitSummary = {
   [Key in RetrievalHitSummaryKey]?: RetrievalHitSummary[Key] | undefined;
 };
@@ -147,7 +182,7 @@ export function mergeRetrievalHitSummariesForEntity(
 export function summaryToHybridCandidateFields(
   summary: RetrievalHitSummary | undefined,
 ): HybridCandidateSummaryFields {
-  return (normalizeRetrievalHitSummary(summary) ?? {}) as HybridCandidateSummaryFields;
+  return toSafeHybridCandidateSummaryFields(summary);
 }
 
 export function retrievalDocumentToHitSummary(doc: RetrievalDocument): RetrievalHitSummary {

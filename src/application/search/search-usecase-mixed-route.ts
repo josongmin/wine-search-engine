@@ -5,6 +5,7 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { buildRankedRouteResolveResult } from './search-usecase-ranked-route-resolve.js';
+import { clamp01 } from '../../domain/shared/utils/clamp.js';
 
 /**
  * Synthetic resolver output for the mixed query route (anchor + similarity + constraints).
@@ -21,7 +22,7 @@ export function buildMixedRouteResolveResult(
       : {
           entityId: rankedResults[0].entityId,
           canonicalLabel: rankedResults[0].canonicalLabel,
-          calibratedScore: Math.max(0, Math.min(1, rankedResults[0].finalScore)),
+          calibratedScore: clamp01(rankedResults[0].finalScore),
         },
   });
 }

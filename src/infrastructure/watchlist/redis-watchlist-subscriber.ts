@@ -57,29 +57,60 @@ export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
    * @throws On connection failure.
    */
   async start(handler: WatchlistEventHandler): Promise<void> {
-    if (this.running) {
+    if (this.running || this.subscriber !== null) {
       throw new Error('Subscriber already running');
     }
 
-    // Create a dedicated subscriber connection
-    this.subscriber = this.createSubscriber(this.redisConfig);
-    this.subscriber.on('error', (err: Error) => {
+    // Create a dedicated subscriber connection. If anything below throws
+    // before start() returns cleanly, we must tear down the half-initialised
+    // client — otherwise the socket, the 'error' listener, and any in-flight
+    // pSubscribe state are leaked and a subsequent start() would stack a new
+    // client on top of the old one.
+    const nextSubscriber = this.createSubscriber(this.redisConfig);
+    const errorListener = (err: Error): void => {
       log.error({ err }, 'Redis subscriber connection error');
-    });
+    };
+    nextSubscriber.on('error', errorListener);
 
-    await this.subscriber.connect();
-    this.running = true;
+    try {
+      await nextSubscriber.connect();
 
-    // Listen for messages on "watchlist:*" pattern
-    await this.subscriber.pSubscribe('watchlist:*', (payload: string, channel: string) => {
-      // Extract entityId from channel (format: "watchlist:{entityId}")
-      const entityId = channel.slice('watchlist:'.length);
+      // Listen for messages on "watchlist:*" pattern
+      await nextSubscriber.pSubscribe('watchlist:*', (payload: string, channel: string) => {
+        // Extract entityId from channel (format: "watchlist:{entityId}")
+        const entityId = channel.slice('watchlist:'.length);
 
-      // Fire handler as floating promise to avoid blocking the subscriber
-      void this.handleEvent(entityId, payload, handler).catch((err: unknown) => {
-        log.error({ err, entityId }, 'watchlist handler error');
+        // Fire handler as floating promise to avoid blocking the subscriber
+        void this.handleEvent(entityId, payload, handler).catch((err: unknown) => {
+          log.error({ err, entityId }, 'watchlist handler error');
+        });
       });
-    });
+    } catch (err) {
+      // Best-effort cleanup of the half-open client so neither the socket
+      // nor the 'error' listener leaks across failed start attempts.
+      try {
+        nextSubscriber.off('error', errorListener);
+      } catch (listenerOffError) {
+        // Client is being torn down anyway. Reference the error so semgrep
+        // wine-catch-empty does not flag this best-effort recovery.
+        void listenerOffError;
+      }
+      try {
+        if (nextSubscriber.isOpen) {
+          await nextSubscriber.quit();
+        } else {
+          nextSubscriber.destroy();
+        }
+      } catch (cleanupError) {
+        // Secondary teardown failure — socket will be GC'd. Reference the
+        // error so semgrep wine-catch-empty does not flag this.
+        void cleanupError;
+      }
+      throw err;
+    }
+
+    this.subscriber = nextSubscriber;
+    this.running = true;
   }
 
   /**

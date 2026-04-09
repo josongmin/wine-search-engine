@@ -11,6 +11,7 @@ import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
+import { isCorruptedSnapshot } from '../../shared/types/index.js';
 import type { QueryCachePort } from '../port/query-cache.port.js';
 import type { EmbeddingCachePort } from '../port/embedding-cache.port.js';
 import type { SearchResponseCachePort } from '../port/search-response-cache.port.js';
@@ -18,6 +19,7 @@ import type { CacheResult } from '../model/cache-result.js';
 import { QueryCacheKeyBuilder, EmbeddingCacheKeyBuilder } from '../model/cache-key.js';
 import { CacheEligibilityAnalyzer } from './cache-eligibility.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 import {
   decideResponseCachePolicy,
   decideResponseCacheReadPolicy,
@@ -41,7 +43,11 @@ function constraintValueString(value: unknown): string {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
-  return JSON.stringify(value);
+  // canonicalJsonStringify sorts object keys → range constraints
+  // ({min, max} vs {max, min}) hash to the same cache key. Plain
+  // JSON.stringify is order-dependent and produces a hidden cache miss.
+  // (Bugbash R19 critical re-audit)
+  return canonicalJsonStringify(value);
 }
 
 function buildSnapshotCachePolicyRef(snapshot: DecisionSnapshot): string {
@@ -111,6 +117,18 @@ export class CacheService implements SearchResponseCachePort {
     compiled?: CompiledWineQuery,
   ): Promise<CacheResult<SearchResponseV1>> {
     const startTime = Date.now();
+
+    // Corrupted snapshots must never participate in cache lookups — the
+    // sentinel snapshot_id ('__corrupted__') would either pollute a cache
+    // slot or return stale data keyed under a nonsense version string.
+    if (isCorruptedSnapshot(currentSnapshot)) {
+      log.warn('Skipping cache read: corrupted decision snapshot');
+      return {
+        hit: false,
+        reason: 'corrupted_snapshot',
+        durationMs: Date.now() - startTime,
+      };
+    }
 
     // Check circuit breaker
     if (this.isCircuitBreakerOpen()) {
@@ -234,6 +252,10 @@ export class CacheService implements SearchResponseCachePort {
     }
 
     const snapshot = response.meta.decisionSnapshot ?? response.engineDecision.decisionSnapshot;
+    if (isCorruptedSnapshot(snapshot)) {
+      log.warn('Skipping cache write: response contains corrupted decision snapshot');
+      return false;
+    }
     const policy = decideResponseCachePolicy({
       executionMode: response.meta.executionMode ?? response.engineDecision.executionMode ?? 'authoritative',
       snapshotId: buildSnapshotCachePolicyRef(snapshot),
@@ -338,7 +360,7 @@ export class CacheService implements SearchResponseCachePort {
         );
 
         const cached = await this.embeddingCache.get(cacheKey);
-        if (cached) {
+        if (cached != null && cached.length > 0) {
           results.push(cached);
         } else {
           results.push(null);
@@ -364,7 +386,7 @@ export class CacheService implements SearchResponseCachePort {
         // Store in cache
         for (const [j, idx] of uncachedIndices.entries()) {
           const embedding = mutableEmbeddings[j];
-          if (embedding) {
+          if (embedding !== undefined && embedding.length > 0) {
             results[idx] = embedding;
             const text = texts[idx];
             if (text) {

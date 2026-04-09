@@ -67,9 +67,6 @@ export class QueryEntrySecurityMetricsCollector implements QueryEntrySecurityObs
 let globalCollector: QueryEntrySecurityMetricsCollector | undefined;
 
 export function getQueryEntrySecurityMetricsCollector(): QueryEntrySecurityMetricsCollector {
-  if (globalCollector === undefined) {
-    globalCollector = new QueryEntrySecurityMetricsCollector();
-  }
-
+  globalCollector ??= new QueryEntrySecurityMetricsCollector();
   return globalCollector;
 }

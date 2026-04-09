@@ -2,6 +2,7 @@ import type { FastifyError, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { isAbortError } from '../../../domain/shared/cooperative-abort.js';
 import { DomainError } from '../../../domain/shared/error/domain-error.js';
+import { CIRCUIT_BREAKER_OPEN_CODE } from '../../../domain/shared/error/circuit-breaker-open-error.js';
 import { POLICY_BLOCKED_CODE } from '../../../domain/shared/error/policy-blocked.js';
 import { SnapshotMismatchError } from '../../../application/search/replay.usecase.js';
 import {
@@ -34,9 +35,17 @@ const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
   MISSING_SNAPSHOT: HTTP_STATUS_BAD_REQUEST,
   DETERMINISM_VIOLATION: HTTP_STATUS_CONFLICT,
   [POLICY_BLOCKED_CODE]: HTTP_STATUS_FORBIDDEN,
+  // Bugbash inventory #10: LLM circuit breaker OPEN fast-fails with a
+  // DomainError — surface as 503 Service Unavailable (retryable) instead
+  // of a generic 500. Callers (agent/search) can degrade gracefully
+  // downstream; the HTTP envelope communicates retryability to clients.
+  [CIRCUIT_BREAKER_OPEN_CODE]: HTTP_STATUS_SERVICE_UNAVAILABLE,
 };
 
-const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set(['BLOCKING_MISS']);
+const RETRYABLE_DOMAIN_CODES: ReadonlySet<string> = new Set([
+  'BLOCKING_MISS',
+  CIRCUIT_BREAKER_OPEN_CODE,
+]);
 
 /**
  * Generic, non-sensitive messages for each domain error code. Used in HTTP
@@ -51,6 +60,7 @@ const SAFE_DOMAIN_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   SNAPSHOT_MISMATCH: 'Replay snapshot does not match the current engine version.',
   MISSING_SNAPSHOT: 'Replay snapshot was not found.',
   DETERMINISM_VIOLATION: 'Replay produced a non-deterministic result.',
+  [CIRCUIT_BREAKER_OPEN_CODE]: 'A downstream dependency is temporarily degraded. Please retry shortly.',
 };
 
 /**

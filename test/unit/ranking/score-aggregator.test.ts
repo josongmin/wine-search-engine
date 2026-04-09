@@ -94,7 +94,7 @@ describe('ScoreAggregator', () => {
         uncertaintyPenalty: 100, // massive penalty
       });
       const result = aggregator.aggregate(scores, DEFAULT_WEIGHTS);
-      expect(result).toBeGreaterThanOrEqual(0); // clamped to 0
+      expect(result).toBe(0); // clamped to 0 — not just >= 0
     });
 
     it('anchorSimilarity=undefined treated as 0', () => {

@@ -143,3 +143,27 @@ export function preferCanonicalRetrievalChannelLabels(
   }
   return canonical;
 }
+
+// ---------------------------------------------------------------------------
+// CandidateChannel guard + canonicalization (SSoT — bugbash A fix)
+// CandidateChannel === RetrievalChannel (see candidate-envelope.ts).
+// Using RetrievalChannel here to avoid circular imports.
+// ---------------------------------------------------------------------------
+
+/**
+ * Type guard: is this string a known CandidateChannel (= RetrievalChannel)?
+ * Delegates to isRetrievalChannel.
+ */
+export function isCandidateChannel(value: string): value is RetrievalChannel {
+  return isRetrievalChannel(value);
+}
+
+/**
+ * Canonicalize a raw channel string to CandidateChannel, returning null if
+ * unrecognized. Used by candidate-pool and evidence-accumulator for
+ * provenance normalization.
+ */
+export function toCanonicalCandidateChannel(channel: string): RetrievalChannel | null {
+  const canonical = preferCanonicalRetrievalChannelLabel(channel);
+  return isCandidateChannel(canonical) ? canonical : null;
+}

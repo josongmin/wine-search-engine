@@ -14,13 +14,26 @@ export interface ExaminationModel {
   examineProbability(position: number): number;
 }
 
-/** Empirical position propensities — placeholder until click logs allow fitting. */
+/**
+ * Empirical position propensities — placeholder until click logs allow fitting.
+ *
+ * Each entry is the conditional probability that a user EXAMINES the result
+ * at that 0-indexed rank, normalized so position 0 = 1.0. The geometric-ish
+ * decay (1.0 → 0.6 → 0.4 → 0.3 → 0.2) matches typical web search examination
+ * curves (Joachims 2017, position-bias study). Will be replaced with fitted
+ * values from impression logs once Epic-18 click pipeline is wired.
+ */
+const POSITION_PROPENSITY_POS_0 = 1.0;
+const POSITION_PROPENSITY_POS_1 = 0.6;
+const POSITION_PROPENSITY_POS_2 = 0.4;
+const POSITION_PROPENSITY_POS_3 = 0.3;
+const POSITION_PROPENSITY_POS_4 = 0.2;
 const POSITION_PROPENSITIES: readonly number[] = [
-  1.0,  // pos 0
-  0.6,  // pos 1
-  0.4,  // pos 2
-  0.3,  // pos 3
-  0.2,  // pos 4
+  POSITION_PROPENSITY_POS_0,
+  POSITION_PROPENSITY_POS_1,
+  POSITION_PROPENSITY_POS_2,
+  POSITION_PROPENSITY_POS_3,
+  POSITION_PROPENSITY_POS_4,
 ];
 /** Floor for positions beyond the table — decays as 0.1 / (p - 3). */
 const TAIL_PROPENSITY_BASE = 0.1;

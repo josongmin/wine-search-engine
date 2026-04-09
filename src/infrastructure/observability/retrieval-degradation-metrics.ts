@@ -78,8 +78,6 @@ export class RetrievalDegradationMetricsCollector implements RetrievalDegradatio
 let globalCollector: RetrievalDegradationMetricsCollector | undefined;
 
 export function getRetrievalDegradationCollector(): RetrievalDegradationMetricsCollector {
-  if (globalCollector === undefined) {
-    globalCollector = new RetrievalDegradationMetricsCollector();
-  }
+  globalCollector ??= new RetrievalDegradationMetricsCollector();
   return globalCollector;
 }

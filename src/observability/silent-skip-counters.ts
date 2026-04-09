@@ -21,6 +21,7 @@ import { bootstrapLogger } from '../config/bootstrap-logger.js';
 export type SilentSkipKind =
   | 'embedding_dim_mismatch'
   | 'embedding_empty_vector'
+  | 'embedding_zero_norm_combined'
   | 'cache_write_failure'
   | 'cache_read_failure'
   | 'unknown_channel_fallback'
@@ -30,6 +31,7 @@ export type SilentSkipKind =
 const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'embedding_dim_mismatch',
   'embedding_empty_vector',
+  'embedding_zero_norm_combined',
   'cache_write_failure',
   'cache_read_failure',
   'unknown_channel_fallback',

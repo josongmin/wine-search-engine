@@ -35,7 +35,7 @@ function isValidThresholdProfile(value: unknown): value is ThresholdProfileV1 {
     return false;
   }
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks for property access
-  const v = value as Record<string, unknown>;
+  const v = value as Record<string, unknown>; // nosemgrep: wine-jsonb-as-cast
   if (typeof v['id'] !== 'string' || v['id'].length === 0) return false;
   if (typeof v['version'] !== 'string' || v['version'].length === 0) return false;
   if (typeof v['perQueryClass'] !== 'object' || v['perQueryClass'] === null) return false;

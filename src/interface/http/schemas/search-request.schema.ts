@@ -6,6 +6,7 @@ import {
   MAX_QUERY_BUDGET_RERANK_LIMIT,
   MAX_SEARCH_SHORT_STRING_LIST,
   MAX_SESSION_ENTITY_ID_CHARS,
+  MAX_SESSION_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
 } from '../constants.js';
 import {
@@ -20,7 +21,7 @@ import {
 } from './search-shared.schema.js';
 
 const SessionContextSnakeSchema = z.object({
-  session_id: z.string().min(1),
+  session_id: z.string().min(1).max(MAX_SESSION_ID_CHARS),
   previous_entities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES),
 }).strict().transform((value) => ({
   sessionContext: {
@@ -78,14 +79,10 @@ function withRequestAliases<T extends z.ZodRawShape>(shape: T) {
       ...rest,
       ...(sessionContext !== undefined
         ? { sessionContext }
-        : session_context !== undefined
-          ? session_context
-          : {}),
+        : session_context ?? {}),
       ...(queryBudget !== undefined
         ? { queryBudget }
-        : query_budget !== undefined
-          ? query_budget
-          : {}),
+        : query_budget ?? {}),
     };
   });
 }

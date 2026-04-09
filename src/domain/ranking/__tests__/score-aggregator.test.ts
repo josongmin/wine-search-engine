@@ -125,7 +125,7 @@ describe('ScoreAggregator', () => {
       const result = aggregator.aggregate(signals, weights);
       // entityIntegrity: 0.3 * 0.15 = 0.045; penalty: 1.0 * 0.05 = 0.05
       // score = 0.045 - 0.05 = -0.005 → clamped to 0
-      expect(result).toBeGreaterThanOrEqual(0);
+      expect(result).toBe(0);
     });
   });
 

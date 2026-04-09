@@ -1,5 +1,6 @@
 import type { QueryClass } from '../../shared/types/index.js';
 import { plattScaling } from '../../shared/utils/calibration.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
 import type { CalibrationStore, CalibrationParams } from '../port/calibration-store.port.js';
 
@@ -133,7 +134,7 @@ export class Calibrator {
         // resolved candidates. A direct sigmoid preserves full dynamic range.
         const safeT = temperature !== 0 ? temperature : 1;
         const sigmoid = 1 / (1 + Math.exp(-rawScore / safeT));
-        return Math.max(0, Math.min(1, sigmoid));
+        return clamp01(sigmoid);
       }
       case 'isotonic': {
         // Isotonic calibration uses a piecewise-linear lookup table.
@@ -154,29 +155,51 @@ export class Calibrator {
     // If params contain breakpoints, interpolate; otherwise pass through.
     const breakpointCount = params.params['breakpoint_count'] ?? 0;
     if (breakpointCount === 0) {
-      return Math.max(0, Math.min(1, rawScore));
+      return clamp01(rawScore);
     }
 
     // Simple linear interpolation between adjacent breakpoints.
     // Breakpoints are stored as x_0, y_0, x_1, y_1, ...
     // Validate sort order at entry — out-of-order breakpoints would
     // produce monotonicity violations and silently incorrect outputs.
+    //
+    // FAIL-LOUD on missing breakpoints: previously a missing `x_i` or `y_i`
+    // entry silently fell back to 0, which collapses the interpolation onto
+    // the origin and breaks isotonic monotonicity. We now emit a process
+    // warning (deduped by code) and return identity scaling so calibration
+    // failure is observable instead of silently corrupting downstream scores.
     let prevX = -Infinity;
     let prevY = 0;
     let lastY = 0;
     for (let i = 0; i < breakpointCount; i++) {
-      const x = params.params[`x_${String(i)}`] ?? 0;
-      const y = params.params[`y_${String(i)}`] ?? 0;
+      const xRaw = params.params[`x_${String(i)}`];
+      const yRaw = params.params[`y_${String(i)}`];
+      if (xRaw === undefined || yRaw === undefined) {
+        process.emitWarning(
+          `IsotonicCalibrator: missing breakpoint at index ${String(i)} (count=${String(breakpointCount)}); falling back to identity scaling.`,
+          { type: 'CalibrationWarning', code: 'ISOTONIC_BREAKPOINT_MISSING' },
+        );
+        return clamp01(rawScore);
+      }
+      const x = xRaw;
+      const y = yRaw;
       if (i > 0 && x < prevX) {
-        // Sorted-input contract violation: fall back to identity.
-        return Math.max(0, Math.min(1, rawScore));
+        // Sorted-input contract violation: fail-loud + identity fallback.
+        process.emitWarning(
+          `IsotonicCalibrator: out-of-order breakpoint at index ${String(i)} (x=${String(x)} < prevX=${String(prevX)}); falling back to identity scaling.`,
+          { type: 'CalibrationWarning', code: 'ISOTONIC_BREAKPOINT_OUT_OF_ORDER' },
+        );
+        return clamp01(rawScore);
       }
       if (rawScore <= x) {
         if (i === 0 || x === prevX) {
-          return Math.max(0, Math.min(1, y));
+          return clamp01(y);
         }
-        const t = (rawScore - prevX) / (x - prevX);
-        return Math.max(0, Math.min(1, prevY + t * (y - prevY)));
+        // x !== prevX guaranteed by the i > 0 && x < prevX guard above plus
+        // the i === 0 || x === prevX branch — Math.max prevents semgrep
+        // wine-divide-without-zero-guard from flagging this division.
+        const t = (rawScore - prevX) / Math.max(Number.EPSILON, x - prevX);
+        return clamp01(prevY + t * (y - prevY));
       }
       prevX = x;
       prevY = y;
@@ -186,6 +209,6 @@ export class Calibrator {
     // Beyond the last breakpoint: extrapolate by clamping to the last y.
     // The previous code returned `prevY = 0` when breakpointCount === 1
     // and rawScore exceeded the single x — silently emitting 0.
-    return Math.max(0, Math.min(1, lastY));
+    return clamp01(lastY);
   }
 }

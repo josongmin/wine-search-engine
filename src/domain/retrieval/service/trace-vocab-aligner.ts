@@ -20,6 +20,7 @@ import {
   preferCanonicalRetrievalChannelLabels,
 } from '../model/retrieval-channel.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
+import { pickMaxByScore } from '../../shared/utils/stable-comparator.js';
 
 interface ProvenanceCarrier {
   readonly entityId: string;
@@ -38,33 +39,24 @@ function toCanonicalChannel(ch: CandidateChannel): ProvenanceChannel | null {
 /**
  * Pick the "top channel" — the channel with the highest rrfContribution.
  * Falls back to the first recognized channel if no scores are present.
+ *
+ * Uses {@link pickMaxByScore} for NaN-safe comparison with a deterministic
+ * tiebreaker on the channel name (lexicographically smallest wins).
  */
 function pickTopChannel(candidate: ProvenanceCarrier): ProvenanceChannel | null {
-  let topChannel: CandidateChannel | null = null;
-  let topContribution = -Infinity;
+  const top = pickMaxByScore(
+    candidate.provenance.channelScores,
+    (ev) => ev.rrfContribution,
+    (ev) => ev.channel,
+  );
 
-  for (const ev of candidate.provenance.channelScores) {
-    const contribution = Number.isFinite(ev.rrfContribution) ? ev.rrfContribution : -Infinity;
-    if (
-      topChannel === null
-      || contribution > topContribution
-      || (
-        contribution === topContribution
-        && ev.channel.localeCompare(topChannel) < 0
-      )
-    ) {
-      topContribution = contribution;
-      topChannel = ev.channel;
-    }
-  }
-
-  if (topChannel === null) {
-    // Fallback: pick first channel in the channels list
+  if (top === undefined) {
+    // No channelScores — fall back to the first channel in the channels list.
     const first = candidate.provenance.channels[0];
     return first !== undefined ? toCanonicalChannel(first) : null;
   }
 
-  return toCanonicalChannel(topChannel);
+  return toCanonicalChannel(top.channel);
 }
 
 // ---------------------------------------------------------------------------

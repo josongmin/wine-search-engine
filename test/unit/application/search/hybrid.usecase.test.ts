@@ -226,6 +226,7 @@ function createCompareRetrieverResult(entityId: string) {
     entityId,
     canonicalLabel: 'Dominus 2021',
     retrievalFusionScore: 0.84,
+    sparseRawScore: 0.84,
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'compare_default',
@@ -357,6 +358,7 @@ describe('HybridUseCase', () => {
         entityId: createEntityId(),
         canonicalLabel: 'Ridge Monte Bello 2021',
         retrievalFusionScore: 0.88,
+        sparseRawScore: 0.88,
         matchedConstraints: [],
         retrievalTrace: {
           retrievalProfile: 'producer_browse',

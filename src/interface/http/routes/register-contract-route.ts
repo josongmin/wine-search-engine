@@ -1,5 +1,6 @@
 import type { FastifyInstance, RouteHandlerMethod } from 'fastify';
 import { runWithRequestPipelineDebug } from '../../../observability/request-pipeline-debug.js';
+import { toFiniteInteger } from '../../../domain/shared/utils/safe-number.js';
 import type { HttpRouteContract } from './route-contracts.js';
 import {
   HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
@@ -47,8 +48,11 @@ export function registerContractRoute(
     readonly handler: RouteHandlerMethod;
   },
 ): void {
+  // Status code keys are stringified integers; toFiniteInteger guards
+  // against contract corruption injecting NaN into the manifest.
   const responseStatusCodes = Object.keys(options.contract.responses)
-    .map((statusCode) => Number(statusCode))
+    .map((statusCode) => toFiniteInteger(statusCode))
+    .filter((n): n is number => n !== null)
     .sort((left, right) => left - right);
   const successStatusCodes = responseStatusCodes.filter(
     (statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,

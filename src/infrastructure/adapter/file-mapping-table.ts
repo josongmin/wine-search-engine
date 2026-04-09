@@ -13,7 +13,7 @@ const NLMappingSchema = z.object({
   phrase: z.string(),
   mappedAttribute: z.string(),
   operator: z.string(),
-  value: z.union([z.number(), z.string(), z.tuple([z.number(), z.number()])]),
+  value: z.union([z.number().finite(), z.string(), z.tuple([z.number().finite(), z.number().finite()])]),
   mappingConfidence: z.number().finite(),
   mappingVersion: z.string(),
   source: z.string(),
@@ -51,7 +51,7 @@ async function loadMappingStateFromFile(path: string): Promise<LoadedMappingStat
     // File missing or unreadable — start with empty mapping set.
     // Log at warn level so operators can detect corrupted/missing data files.
     bootstrapLogger.warn(
-      { path, message: err instanceof Error ? err.message : 'unknown' },
+      { err, path },
       'NL mapping file unavailable; starting with empty mapping set',
     );
     return EMPTY_STATE;

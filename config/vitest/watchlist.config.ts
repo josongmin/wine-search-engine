@@ -1,11 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
-import { resolveMaxThreads } from './parallelism.js';
+import { resolveMaxThreads, vitestMemorySchedulerOptions } from './parallelism.js';
 
 const maxWatchlistThreads = resolveMaxThreads(1);
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [
       'src/__tests__/container-watchlist.test.ts',

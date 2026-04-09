@@ -132,7 +132,7 @@ export class PgSnapshotStore implements SnapshotStore {
 function isStringRecord(value: unknown): value is Record<string, string> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks for Object.values iteration
-  for (const v of Object.values(value as Record<string, unknown>)) {
+  for (const v of Object.values(value as Record<string, unknown>)) { // nosemgrep: wine-jsonb-as-cast
     if (typeof v !== 'string') return false;
   }
   return true;
@@ -141,7 +141,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 function isBoolRecord(value: unknown): value is Record<string, boolean> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks for Object.values iteration
-  for (const v of Object.values(value as Record<string, unknown>)) {
+  for (const v of Object.values(value as Record<string, unknown>)) { // nosemgrep: wine-jsonb-as-cast
     if (typeof v !== 'boolean') return false;
   }
   return true;
@@ -157,7 +157,7 @@ function isNonEmptyString(value: unknown): value is string {
 function isValidDecisionSnapshot(raw: unknown): raw is DecisionSnapshot {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return false;
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks for property access
-  const obj = raw as Record<string, unknown>;
+  const obj = raw as Record<string, unknown>; // nosemgrep: wine-jsonb-as-cast
   // Required non-empty (and non-whitespace) string fields
   if (!isNonEmptyString(obj['snapshot_id'])) return false;
   if (!isNonEmptyString(obj['policy_rule_version'])) return false;
@@ -177,7 +177,7 @@ function extractSnapshot(raw: unknown): DecisionSnapshot | null {
     return null;
   }
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks for property access
-  const obj = raw as Record<string, unknown>;
+  const obj = raw as Record<string, unknown>; // nosemgrep: wine-jsonb-as-cast
   // Envelope: { snapshotId, snapshot: DecisionSnapshot }
   if ('snapshotId' in obj && 'snapshot' in obj) {
     const inner = obj['snapshot'];

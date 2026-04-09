@@ -1,6 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
-import { resolveMaxThreads } from './parallelism.js';
+import { resolveMaxThreads, vitestMemorySchedulerOptions } from './parallelism.js';
 
 const maxDevThreads = resolveMaxThreads(1);
 
@@ -19,6 +19,7 @@ const devTestInclude = [
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [...devTestInclude],
     exclude: [

@@ -20,9 +20,6 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { ZodError } from 'zod';
-import { DomainError } from '../../../domain/shared/error/domain-error.js';
-import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import type { ClaudeToolsRouteDeps } from './route-deps.js';
 import {
   parseContractBody,
@@ -33,11 +30,9 @@ import {
   ClaudeToolsExecuteRouteContract,
   ClaudeToolsListRouteContract,
 } from './route-contracts.js';
+import { WINE_SEARCH_TOOLS } from '../../claude-tools/tool-schemas.js';
 import { getRequestId, resolveRequestId } from '../request-id.js';
-import {
-  HTTP_STATUS_INTERNAL_SERVER_ERROR,
-  HTTP_STATUS_OK,
-} from '../constants.js';
+import { HTTP_STATUS_OK } from '../constants.js';
 
 /**
  * Register /v1/claude-tools endpoint.
@@ -54,34 +49,27 @@ export function registerClaudeToolsRoute(app: FastifyInstance, deps: ClaudeTools
     url: '/v1/claude-tools',
     contract: ClaudeToolsExecuteRouteContract,
     handler: async (request, reply) => {
-      let requestId = getRequestId(request);
-      try {
-        const parsed = parseContractBody(request, ClaudeToolsExecuteRouteContract);
-        requestId = resolveRequestId(request, parsed.request_id);
-        const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
-          parsed.tool_name,
-          parsed.tool_input,
-          requestId,
-        );
-        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, HTTP_STATUS_OK, {
-          tool_name: parsed.tool_name,
-          tool_result: executionResult.result,
-          request_id: requestId,
-          ...(executionResult.fallbackApplied !== undefined
-            ? { fallback_applied: executionResult.fallbackApplied }
-            : {}),
-        });
-      } catch (err) {
-        if (err instanceof ZodError || err instanceof DomainError) {
-          throw err;
-        }
-        request.log.error({ err, requestId }, 'claude_tools_execution_failed');
-        sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, HTTP_STATUS_INTERNAL_SERVER_ERROR, {
-          error: 'TOOL_EXECUTION_FAILED',
-          message: 'An unexpected error occurred while executing the tool.',
-          request_id: requestId,
-        });
-      }
+      // Unknown errors MUST propagate to the global error handler so the
+      // response body matches the RFC-014 envelope. A previous version of
+      // this handler fabricated a flat `{ error, message, request_id }`
+      // payload on catch-all errors — that shape violated the contract in
+      // CLAUDE.md ("catch blocks in use-case code MUST NOT fabricate
+      // success-shaped responses from unexpected errors").
+      const parsed = parseContractBody(request, ClaudeToolsExecuteRouteContract);
+      const requestId = resolveRequestId(request, parsed.request_id);
+      const executionResult = await deps.adaptiveToolExecutor.executeWithFallback(
+        parsed.tool_name,
+        parsed.tool_input,
+        requestId,
+      );
+      sendRouteContractResponse(request, reply, ClaudeToolsExecuteRouteContract, HTTP_STATUS_OK, {
+        tool_name: parsed.tool_name,
+        tool_result: executionResult.result,
+        request_id: requestId,
+        ...(executionResult.fallbackApplied !== undefined
+          ? { fallback_applied: executionResult.fallbackApplied }
+          : {}),
+      });
     },
   });
 

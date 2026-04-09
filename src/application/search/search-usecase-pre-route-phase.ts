@@ -288,6 +288,7 @@ export async function runSearchPreRoutePhase(
       ctx.request,
       ctx.snapshotVersions,
       ctx.cacheLookupRuntimeState,
+      ctx.requestId,
     );
     if (cached !== undefined) {
       pipelineDebug(

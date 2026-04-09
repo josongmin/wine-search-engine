@@ -126,10 +126,9 @@ export class InterpretUseCase {
       return plan;
     }
 
-    if (compiled === undefined) {
-      compiled = compileFromLegacyPlan(plan);
-    }
+    compiled ??= compileFromLegacyPlan(plan);
 
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: empty string after trim should fall through to generated ID
     const queryId = request.requestId?.trim() || `interpret-${Date.now()}`;
     const observabilitySlice = planToObservabilitySlice(queryId, plan, compiled);
     const activeChannels = retrievalProfileService.getChannelMix(

@@ -14,6 +14,7 @@
 import type { ChatLlmPort } from '../../domain/ai/port/chat-llm.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
+import { CIRCUIT_BREAKER_OPEN_CODE } from '../../domain/shared/error/circuit-breaker-open-error.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { AgentConfig } from '../../domain/agent/model/agent-config.js';
 import type { AgentResult } from '../../domain/agent/model/agent-result.js';
@@ -36,6 +37,7 @@ import {
 } from './agent-tools.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { containsHangul } from '../../domain/shared/utils/hangul.js';
 import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execution-observer.port.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
@@ -381,6 +383,14 @@ export class AgentOrchestrator {
      * search use case after the agent's protective layers said no.
      */
     let policyBlocked = false;
+    /**
+     * Set when the LLM circuit breaker opens mid-run. When true, all subsequent
+     * synthesis attempts are skipped — calling a fast-failing breaker again
+     * cannot succeed and only adds log noise + latency. Fallback layers that
+     * do not require the LLM (Layer 2 search, Layer 3 observation slice,
+     * Layer 4 template) still execute.
+     */
+    let llmCircuitOpen = false;
     let unknownToolAttempts = 0;
     const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
     const timeoutStats = {
@@ -543,6 +553,12 @@ export class AgentOrchestrator {
           if ((err as Error).message === 'Agent LLM step timed out') {
             timeoutStats.llmStep += 1;
             terminationReason = 'timeout';
+          } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
+            // LLM circuit breaker is OPEN — every subsequent complete() call
+            // will fast-fail synchronously. Mark the flag so the synthesis
+            // layer does not waste round-trips, and terminate cleanly.
+            llmCircuitOpen = true;
+            terminationReason = 'error';
           } else {
             terminationReason = 'error';
           }
@@ -905,6 +921,9 @@ export class AgentOrchestrator {
       if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
         policyBlocked = true;
         terminationReason = 'blocked';
+      } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
+        llmCircuitOpen = true;
+        terminationReason = 'error';
       } else {
         terminationReason = 'error';
       }
@@ -922,7 +941,7 @@ export class AgentOrchestrator {
     // This avoids the "agent ran 3 steps, got great results, then returned nothing" failure.
     // Skip entirely if caller already disconnected — synthesis costs 1-2 LLM round-trips
     // that nobody will receive.
-    if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !(abortSignal?.aborted)) {
+    if (!policyBlocked && !llmCircuitOpen && answer === '' && terminationReason !== 'answer' && !(abortSignal?.aborted)) {
       // Pre-flight token budget check BEFORE synthesis LLM call (CLAUDE.md rule 20).
       // Without this, synthesis fires even when the main loop exhausted the budget,
       // silently overrunning maxTotalTokens by 1-2x (synthesis ≈ same cost as one main step).
@@ -1013,15 +1032,32 @@ export class AgentOrchestrator {
         try {
           synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_1);
         } catch (synthErr1) {
+          // If the LLM circuit breaker opened during attempt 1, retrying is
+          // pointless — the breaker is OPEN and attempt 2 will fast-fail too.
+          // Mark the flag so downstream layers also skip LLM calls.
+          if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
+            llmCircuitOpen = true;
+          }
           log.error({ err: synthErr1, requestId }, `synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         }
-        // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw)
-        // Skip if caller disconnected between attempts.
-        if (synthAnswer === undefined && !(abortSignal?.aborted)) {
+        // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw).
+        // Skip when (a) caller disconnected, (b) LLM circuit breaker is OPEN
+        // (attempt 1 noted this), or (c) the token budget is now exhausted —
+        // attempt 1 accumulated tokens that may have crossed maxTotalTokens,
+        // and firing attempt 2 would silently overrun the budget (CLAUDE.md rule 20).
+        if (
+          synthAnswer === undefined
+          && !(abortSignal?.aborted)
+          && !llmCircuitOpen
+          && totalInputTokens + totalOutputTokens < effectiveConfig.maxTotalTokens
+        ) {
           try {
             log.info({ requestId, obsSteps: obsSteps.length }, `synthesis attempt 1 returned empty — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
             synthAnswer = await attemptSynthesis(SYNTHESIS_TOKENS_ATTEMPT_2);
           } catch (synthErr2) {
+            if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
+              llmCircuitOpen = true;
+            }
             log.error({ err: synthErr2, requestId }, 'synthesis attempt 2 threw — proceeding to fallback search');
           }
         }
@@ -1094,7 +1130,7 @@ export class AgentOrchestrator {
           // in the same language. Pre-fix this was a hardcoded English template, which
           // produced English responses for Korean queries on step-0 LLM failure (the most
           // common benchmark fallback path). Korean = Hangul Syllables block U+AC00..U+D7A3.
-          const queryHasHangul = /[\uAC00-\uD7A3]/.test(query);
+          const queryHasHangul = containsHangul(query);
           answer = queryHasHangul
             ? `검색 결과: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (참고: 처리 제약으로 간단히 표시되었습니다.)`
             : `Based on your query, I found: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (Note: simplified result due to processing constraints.)`;
@@ -1104,7 +1140,7 @@ export class AgentOrchestrator {
         } else {
           // Fallback search returned no results — construct a graceful template answer.
           // Language-aware: Korean for Hangul queries, English otherwise.
-          const queryHasHangul = /[\uAC00-\uD7A3]/.test(query);
+          const queryHasHangul = containsHangul(query);
           answer = queryHasHangul
             ? `"${query}"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.`
             : `No results found for "${query}". Try simplifying the query or using a different wine name or grape variety.`;
@@ -1133,7 +1169,7 @@ export class AgentOrchestrator {
         lastObs?.observation ??
         lastObs?.actionPairs?.find((p) => p.observation.length > 0)?.observation;
       if (lastObsText !== undefined) {
-        const queryHasHangul = /[\uAC00-\uD7A3]/.test(query);
+        const queryHasHangul = containsHangul(query);
         const preview = lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS);
         answer = queryHasHangul
           ? `검색 결과 요약: ${preview}`

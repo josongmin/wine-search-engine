@@ -232,7 +232,11 @@ export class Resolver {
       return String(a.candidate.entityId).localeCompare(String(b.candidate.entityId));
     });
 
-    // Step 4: Calibrate top scores
+    // Step 4: Calibrate top scores. Default to 0 when no second candidate
+    // exists — the gap (top1 - top2) is what the calibrator + ambiguity
+    // classifier consume to distinguish a confidently-resolved single
+    // candidate from a true ambiguity. (See resolver-learned-matcher-context
+    // regression test.)
     const top1RawScore = blendedScored[0]?.rawScore ?? 0;
     const top2RawScore = blendedScored[1]?.rawScore ?? 0;
 

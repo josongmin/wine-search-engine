@@ -2,6 +2,7 @@ import type { EntityId } from '../../shared/types/index.js';
 import type { Alias, AliasScope, AliasType } from '../model/alias.js';
 import type { AliasRepository } from '../port/alias-repository.port.js';
 import type { CharNgramIndex } from './char-ngram-index.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 /**
  * Result of matching a query string against the alias index.
@@ -339,7 +340,13 @@ export class AliasMatcher {
     results: readonly AliasMatchResult[],
     limit: number,
   ): readonly AliasMatchResult[] {
-    const sorted = [...results].sort((a, b) => b.weightedScore - a.weightedScore);
+    // NaN-safe + deterministic tiebreaker (entityId) — see stable-comparator.
+    const sorted = [...results].sort(
+      compareScoreWithTiebreaker<AliasMatchResult>(
+        (r) => r.weightedScore,
+        (r) => String(r.entityId),
+      ),
+    );
 
     // Deduplicate: keep only the best-scoring result per entityId.
     const seen = new Set<string>();

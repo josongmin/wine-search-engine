@@ -1,7 +1,67 @@
+import { z } from 'zod';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { CandidateAttributePort } from '../../domain/mixed/service/mixed-solver.js';
 import type { SimilarityCandidate } from '../../domain/mixed/service/similarity-scorer.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+const attrLog = bootstrapLogger.child({ component: 'VespaCandidateAttributes' });
+
+/**
+ * Zod schema for the ranker-critical fields returned by Vespa document fetch.
+ *
+ * Uses `.passthrough()` so unknown fields from index drift are preserved
+ * rather than rejected — callers may still read them via dynamic keys.
+ * The schema validates only the fields the downstream ranker/solver depends on.
+ */
+export const VespaCandidateAttributesSchema = z.object({
+  canonicalLabel: z.string().optional(),
+  region: z.string().optional(),
+  appellation: z.string().optional(),
+  country: z.string().optional(),
+  grapePrimary: z.string().optional(),
+  vintageYear: z.number().int().optional(),
+  criticScoreNormalized: z.number().finite().optional(),
+  priceUsd: z.number().finite().optional(),
+  producerPrestige: z.number().finite().optional(),
+  popularityScore: z.number().finite().optional(),
+  body: z.number().finite().optional(),
+  tannin: z.number().finite().optional(),
+  acidity: z.number().finite().optional(),
+  sweetness: z.number().finite().optional(),
+}).passthrough();
+
+/** Empty record returned when Vespa document validation fails (graceful degradation). */
+const EMPTY_ATTRIBUTES: Readonly<Record<string, unknown>> = Object.freeze({});
+/** Number of object keys included in the schema-failure log preview. */
+const SCHEMA_FAIL_PREVIEW_KEY_LIMIT = 8;
+
+/**
+ * Validate a raw Vespa document into a safe attribute record.
+ * On failure, logs a warning with a field preview and returns empty attributes
+ * so that a single malformed hit does not crash the entire request.
+ */
+function validateAttributes(
+  entityId: EntityId,
+  raw: unknown,
+): Readonly<Record<string, unknown>> {
+  const result = VespaCandidateAttributesSchema.safeParse(raw);
+  if (result.success) {
+    return result.data as Readonly<Record<string, unknown>>;
+  }
+
+  attrLog.warn(
+    {
+      entityId,
+      issues: result.error.issues.slice(0, 3),
+      preview: typeof raw === 'object' && raw !== null
+        ? Object.keys(raw).slice(0, SCHEMA_FAIL_PREVIEW_KEY_LIMIT)
+        : typeof raw,
+    },
+    'VespaCandidateAttributes: document failed schema validation, returning empty attributes',
+  );
+  return EMPTY_ATTRIBUTES;
+}
 
 /**
  * Vespa-backed implementation of {@link CandidateAttributePort}.
@@ -27,20 +87,23 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
     if (this.searchIndex.getDocuments !== undefined) {
       const docs = await this.searchIndex.getDocuments(entityIds);
       for (const [id, doc] of docs) {
-        map.set(id, doc as unknown as Record<string, unknown>);
+        map.set(id, validateAttributes(id, doc));
       }
       return map;
     }
 
-    const entries = await Promise.all(
+    // Use allSettled so a single Vespa/network error for one entity doesn't
+    // abort the entire attribute load — remaining entities are still useful
+    // for mixed-query scoring.
+    const settled = await Promise.allSettled(
       entityIds.map(async (id) => {
         const doc = await this.searchIndex.getDocument(id);
         return { id, doc };
       }),
     );
-    for (const { id, doc } of entries) {
-      if (doc !== null) {
-        map.set(id, doc as unknown as Record<string, unknown>);
+    for (const result of settled) {
+      if (result.status === 'fulfilled' && result.value.doc !== null) {
+        map.set(result.value.id, validateAttributes(result.value.id, result.value.doc));
       }
     }
     return map;

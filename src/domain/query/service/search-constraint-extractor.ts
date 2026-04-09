@@ -14,6 +14,7 @@
 
 import {
   KRW_PER_CHEON_WON,
+  KRW_PER_EOK_WON,
   KRW_PER_MAN_WON,
   KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
@@ -297,8 +298,11 @@ function koreanNumberWordToDigit(s: string): string {
   // OR a legitimate price continuation (원, 대). We MUST NOT rewrite when followed by arbitrary
   // Korean syllables like 한/하/해 ("오만한" = "arrogant" is NOT "5만한"). The lookahead below
   // whitelists only the valid continuations. \b is ASCII-only and cannot be used here.
+  // Units supported: 천(1,000), 만(10,000), 억(100,000,000). 억 is included because
+  // grand-cru wines in Korea retail above 1억원 ("일억원 이상 와인"). Without 억 support
+  // the downstream man_under/man_over regex never fires for all-Korean billion-won queries.
   return s.replace(
-    /([일이삼사오육칠팔구십백]+)\s*(만|천)(?=원|대|$|[^가-힣])/gu,
+    /([일이삼사오육칠팔구십백]+)\s*(억|만|천)(?=원|대|$|[^가-힣])/gu,
     (match, group: string, unit: string) => {
       // Parse left-to-right with positional multipliers: 백 = 100, 십 = 10.
       // A digit before 백/십 multiplies it; a bare 백/십 is treated as 1*100 / 1*10.
@@ -370,6 +374,19 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
         maxPriceKrw: Math.round(mid * KRW_PRICE_BAND_UPPER_FRACTION),
       };
     }
+  }
+
+  // Priority 3b — eok_under/over: "X억원 이하/이상". 1억 = 100M KRW.
+  // MUST be before man_under so "1억원" is not truncated as "1" + "억원".
+  const eokUnderMatch = /(\d+(?:\.\d+)?)\s*억원?\s*(?:이하|이내|미만)/u.exec(qn);
+  if (eokUnderMatch !== null && eokUnderMatch[1] !== undefined) {
+    const v = parseFloat(eokUnderMatch[1]);
+    if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_EOK_WON) };
+  }
+  const eokOverMatch = /(\d+(?:\.\d+)?)\s*억원?\s*이상/u.exec(qn);
+  if (eokOverMatch !== null && eokOverMatch[1] !== undefined) {
+    const v = parseFloat(eokOverMatch[1]);
+    if (Number.isFinite(v)) return { minPriceKrw: Math.round(v * KRW_PER_EOK_WON) };
   }
 
   // Priority 4 — man_under: "X만원 이하/이내/미만/정도/쯤/약"
@@ -461,7 +478,14 @@ function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vint
  * // → { excludeGrapes: ['Merlot'], excludeCountries: ['France'] }
  */
 export function extractSearchConstraints(query: string): SearchConstraints {
-  const q = query;
+  // NFC-normalize at the boundary so decomposed Hangul (NFD) inputs still
+  // match the 한글 regex patterns. Without this, a client that sends
+  // decomposed jamo (e.g. copy-pasted from an OS that uses NFD like macOS
+  // filesystem paths) silently bypasses every Korean negation/price/grape
+  // pattern — the regex expects precomposed 가 (U+AC00) but gets ㄱ+ㅏ.
+  // Also maps fullwidth space (U+3000) to ASCII so downstream \s+ handling
+  // and boundary lookarounds work uniformly.
+  const q = query.normalize('NFC').replace(/\u3000/g, ' ');
   const excludeGrapeSet = new Set<string>();
   const excludeCountrySet = new Set<string>();
   const excludeRegionSet = new Set<string>();

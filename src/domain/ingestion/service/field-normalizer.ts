@@ -14,8 +14,17 @@ const BARE_VOLUME_ASSUME_ML_MAX = 5000;
 /** Absolute upper bound for unit-bearing volumes (ml). Nebuchadnezzar = 15L; 30L gives margin. */
 const MAX_VOLUME_ML = 30_000;
 
-/** Latest plausible vintage year: current year + 1 (en primeur releases). */
-const MAX_PLAUSIBLE_VINTAGE_YEAR = new Date().getFullYear() + 1;
+/**
+ * Latest plausible vintage year: current year + 1 (en primeur releases).
+ *
+ * Recomputed per call (not a module-scoped constant) so long-lived ingestion
+ * processes do not reject legitimate vintages after a Dec 31 → Jan 1 rollover.
+ * A cached module constant would bake in the year at process start and
+ * silently drop the next en-primeur cohort until the process restarts.
+ */
+function maxPlausibleVintageYear(): number {
+  return new Date().getFullYear() + 1;
+}
 
 /**
  * Normalizes a free-text field by trimming, collapsing whitespace,
@@ -113,11 +122,11 @@ export function normalizeYear(raw: string): number | null {
     const looseMatch = trimmed.match(/(1[89]\d{2}|20[0-9]{2})/);
     if (looseMatch === null) return null;
     const looseYear = parseInt(looseMatch[1]!, 10);
-    return looseYear > MAX_PLAUSIBLE_VINTAGE_YEAR ? null : looseYear;
+    return looseYear > maxPlausibleVintageYear() ? null : looseYear;
   }
 
   const year = parseInt(match[1]!, 10);
-  return year > MAX_PLAUSIBLE_VINTAGE_YEAR ? null : year;
+  return year > maxPlausibleVintageYear() ? null : year;
 }
 
 /**

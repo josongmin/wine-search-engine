@@ -13,6 +13,7 @@ import type { SearchResponseV1 } from '../../../domain/response/model/search-res
 import type { ComparisonSearchResponse } from '../../../domain/response/model/comparison-response.js';
 import type { ResultItem } from '../../../domain/response/model/result-item.js';
 import type { SearchExecutorResult } from '../../../application/search/port/search-executor.port.js';
+import { clamp01 } from '../../../domain/shared/utils/clamp.js';
 import type {
   ResultItemV2Human,
   SearchResponseV2Human,
@@ -40,11 +41,9 @@ import type {
  * Clamp is defensive against upstream corruption; should be a no-op.
  */
 function normaliseConfidences(items: readonly ResultItem[]): readonly number[] {
-  return items.map((i) => {
-    const s = i.relevanceScore;
-    if (!Number.isFinite(s)) return 0;
-    return Math.max(0, Math.min(1, s));
-  });
+  // clamp01 already handles non-finite → 0; the explicit isFinite check is
+  // retained as documentation and to short-circuit the warning emission.
+  return items.map((i) => clamp01(i.relevanceScore));
 }
 
 // ---------------------------------------------------------------------------

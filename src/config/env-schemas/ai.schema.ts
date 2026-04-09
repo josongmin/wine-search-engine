@@ -16,6 +16,14 @@ export const AiEnvSchema = z.object({
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-5.4-mini'),
   /**
+   * Model used for index-time Doc2Query synthetic-query generation
+   * (`scripts/etl/generate-doc-queries.ts`). Decoupled from
+   * `OPENAI_CHAT_MODEL` so the ETL pass can run on a cheaper / different
+   * model than the runtime chat path without affecting query interpreter,
+   * agent, or any other in-request LLM call.
+   */
+  OPENAI_DOC2QUERY_MODEL: z.string().min(1).default('gpt-5.3-mini'),
+  /**
    * Embedding model for dense retrieval via OpenAI-compatible API.
    * Defaults to text-embedding-3-small — the most cost-effective option.
    * When OPENAI_API_KEY is set, this model is used automatically.
@@ -43,7 +51,14 @@ export const AiEnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
   ANTHROPIC_INJECTION_MODEL: z.string().min(1).optional(),
-  /** Allow LLM injection judge failures to bypass Layer 2 blocking. Defaults to safer fail-closed. */
+  /**
+   * Allow LLM injection judge failures to bypass Layer 2 blocking.
+   *
+   * Default: false (fail_closed). When the LLM judge is unavailable,
+   * queries are BLOCKED as a precaution. Set to 'true' (fail_open) in
+   * deployments where Layer 1 regex sanitizer alone provides sufficient
+   * protection and judge unavailability should not DoS the search service.
+   */
   INJECTION_JUDGE_FAIL_OPEN: z
     .enum(['true', 'false'])
     .transform((v) => v === 'true')

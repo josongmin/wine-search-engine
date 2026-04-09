@@ -1,8 +1,10 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
+import { vitestMemorySchedulerOptions } from './parallelism.js';
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [
       'test/unit/etl/ndjson.test.ts',

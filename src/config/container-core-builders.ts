@@ -87,6 +87,7 @@ export async function buildQueryPlanner(
         throw err;
       }
       // Alias table may not exist yet; proceed without fuzzy matching.
+      bootstrapLogger.info('[Planner] aliases table does not exist yet — fuzzy matching disabled');
     }
   }
 
@@ -137,6 +138,7 @@ export function buildCandidatePool(
     config.embedding.model,
     config.killSwitch.learning,
     getRetrievalDegradationCollector(),
+    config.killSwitch.denseRetrieval,
   );
 }
 

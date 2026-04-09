@@ -108,10 +108,6 @@ interface ScoredEntry {
   readonly priceUsd?: number | undefined;
 }
 
-function unique(values: readonly string[]): readonly string[] {
-  return [...new Set(values)];
-}
-
 const MODEL_STALENESS_THRESHOLD_DAYS = 30;
 
 const MILLISECONDS_PER_SECOND = 1000;
@@ -146,6 +142,27 @@ const RERANK_SCORE_NORMALIZED_NEUTRAL = 0.5;
  */
 const FINAL_SCORE_SORT_TIE_EPSILON = 1e-12;
 
+/**
+ * Non-penalty scoring weight fields — used to compute the mode-overlay
+ * normalisation factor. Hoisted to module scope so rank() does not
+ * re-allocate the 12-element tuple (and the two .reduce() closures that
+ * walk it) on every request. Rule 16: deterministic constants belong
+ * outside hot-path functions.
+ */
+const NON_PENALTY_WEIGHT_FIELDS = [
+  'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
+  'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
+  'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
+] as const;
+
+function sumNonPenaltyWeights(weights: ScoringWeights): number {
+  let total = 0;
+  for (const key of NON_PENALTY_WEIGHT_FIELDS) {
+    total += weights[key];
+  }
+  return total;
+}
+
 /** Descending sort by finalScore; NaN-safe; deterministic tie-break on entityId. */
 function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
   const aFinite = Number.isFinite(a.finalScore);
@@ -172,9 +189,20 @@ function applyLearnedLtrRerank(
     return { results: [...rankedResults], skippedDueToDimensionMismatch: false };
   }
 
-  const modelAgeMs = Date.now() - ltrModel.trainedAt.getTime();
+  // Guard against an Invalid Date `trainedAt` (e.g. JSONB corruption or a
+  // training record written with `new Date(undefined)`). Without this guard,
+  // `getTime()` returns NaN, `NaN > threshold` is false, and a stale model
+  // would silently bypass the freshness warning. Treat NaN as "unknown age"
+  // and log it so operators notice.
+  const trainedAtMs = ltrModel.trainedAt.getTime();
+  const modelAgeMs = Number.isFinite(trainedAtMs) ? Date.now() - trainedAtMs : Number.NaN;
   const modelAgeDays = modelAgeMs / MILLISECONDS_PER_DAY;
-  if (modelAgeDays > MODEL_STALENESS_THRESHOLD_DAYS) {
+  if (!Number.isFinite(modelAgeDays)) {
+    bootstrapLogger.warn(
+      { queryClass },
+      '[Ranker] LTR model has invalid trainedAt timestamp — treating as stale',
+    );
+  } else if (modelAgeDays > MODEL_STALENESS_THRESHOLD_DAYS) {
     bootstrapLogger.warn(
       {
         queryClass,
@@ -236,40 +264,83 @@ function applyLearnedLtrRerank(
   return { results, skippedDueToDimensionMismatch: false };
 }
 
+/**
+ * Query-level constraint context. Computed ONCE per rank() call and reused
+ * for every candidate, rather than rebuilding the inferred-attribute list,
+ * tracked-attribute Set, and soft-unmet derivation per-candidate.
+ *
+ * Allocation math (200-candidate query): previously ~7 intermediate arrays
+ * + 2 Sets per candidate = ~1800 allocations; now 1 Set + 1 array for the
+ * full request, plus only candidate-specific work in `buildConstraintState`.
+ */
+interface QueryConstraintContext {
+  readonly inferredConstraints: readonly string[];
+  readonly trackedAttributes: ReadonlySet<string>;
+  readonly softAttributes: readonly string[];
+}
+
+function buildQueryConstraintContext(input: RankingInput): QueryConstraintContext {
+  const inferredSeen = new Set<string>();
+  const inferredConstraints: string[] = [];
+  for (const constraint of input.constraints.inferred) {
+    if (!inferredSeen.has(constraint.attribute)) {
+      inferredSeen.add(constraint.attribute);
+      inferredConstraints.push(constraint.attribute);
+    }
+  }
+
+  const trackedAttributes = new Set<string>();
+  for (const c of input.constraints.hard) trackedAttributes.add(c.attribute);
+  for (const c of input.constraints.soft) trackedAttributes.add(c.attribute);
+  for (const a of inferredConstraints) trackedAttributes.add(a);
+
+  const softAttributes: string[] = new Array<string>(input.constraints.soft.length);
+  for (let i = 0; i < input.constraints.soft.length; i++) {
+    softAttributes[i] = input.constraints.soft[i]!.attribute;
+  }
+
+  return { inferredConstraints, trackedAttributes, softAttributes };
+}
+
 function buildConstraintState(
-  input: RankingInput,
   candidate: HybridCandidate,
+  queryCtx: QueryConstraintContext,
 ): {
   readonly matchedConstraints: readonly string[];
   readonly unmetConstraints: readonly string[];
   readonly inferredConstraints: readonly string[];
 } {
   const matchedSet = new Set(candidate.matchedConstraints);
-  const inferredConstraints = unique(
-    input.constraints.inferred.map((constraint) => constraint.attribute),
-  );
-  const softUnmet = input.constraints.soft
-    .map((constraint) => constraint.attribute)
-    .filter((attribute) => !matchedSet.has(attribute));
-  const inferredUnmet = inferredConstraints
-    .filter((attribute) => !matchedSet.has(attribute));
-  const unmetConstraints = unique([
-    ...(candidate.unmetHardConstraints ?? []),
-    ...softUnmet,
-    ...inferredUnmet,
-  ]);
-  const trackedAttributes = new Set([
-    ...input.constraints.hard.map((constraint) => constraint.attribute),
-    ...input.constraints.soft.map((constraint) => constraint.attribute),
-    ...inferredConstraints,
-  ]);
-  const matchedConstraints = candidate.matchedConstraints
-    .filter((attribute: string) => trackedAttributes.has(attribute));
+
+  // Collect unmet constraints into a single dedup set to avoid building
+  // 3 intermediate arrays (softUnmet, inferredUnmet, spread concat) then
+  // a 4th `[...new Set(...)]` over the concatenation.
+  const unmetSet = new Set<string>();
+  const unmetHard = candidate.unmetHardConstraints;
+  if (unmetHard !== undefined) {
+    for (const attr of unmetHard) unmetSet.add(attr);
+  }
+  for (const attr of queryCtx.softAttributes) {
+    if (!matchedSet.has(attr)) unmetSet.add(attr);
+  }
+  for (const attr of queryCtx.inferredConstraints) {
+    if (!matchedSet.has(attr)) unmetSet.add(attr);
+  }
+  const unmetConstraints: string[] = [];
+  for (const attr of unmetSet) unmetConstraints.push(attr);
+
+  // Filter matched constraints against the query-level tracked-attributes
+  // Set (built once per request in buildQueryConstraintContext).
+  const tracked = queryCtx.trackedAttributes;
+  const matchedConstraints: string[] = [];
+  for (const attribute of candidate.matchedConstraints) {
+    if (tracked.has(attribute)) matchedConstraints.push(attribute);
+  }
 
   return {
     matchedConstraints,
     unmetConstraints,
-    inferredConstraints,
+    inferredConstraints: queryCtx.inferredConstraints,
   };
 }
 
@@ -388,13 +459,8 @@ export class Ranker {
       producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
       recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
     };
-    const nonPenaltyFields = [
-      'entityIntegrity', 'anchorSimilarity', 'semantic', 'softConstraint',
-      'attributeAlignment', 'preferenceAlignment', 'popularity', 'availability',
-      'producerPrestige', 'recency', 'criticScore', 'multilingualScore',
-    ] as const;
-    const baseSum = nonPenaltyFields.reduce((s, k) => s + baseWeights[k], 0);
-    const overlaidSum = nonPenaltyFields.reduce((s, k) => s + overlaid[k], 0);
+    const baseSum = sumNonPenaltyWeights(baseWeights);
+    const overlaidSum = sumNonPenaltyWeights(overlaid);
     const modeNormFactor = overlaidSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
     const weights: ScoringWeights = modeNormFactor === 1 ? overlaid : {
       ...overlaid,
@@ -418,6 +484,12 @@ export class Ranker {
       queryPlan.rawQuery,
     );
 
+    // Build query-level constraint context ONCE before the per-candidate loop.
+    // Previously buildConstraintState() rebuilt the tracked-attribute Set and
+    // inferred-attribute list for every candidate (O(n_candidates × n_constraints)
+    // Sets allocated); now O(1) Set per request.
+    const queryConstraintCtx = buildQueryConstraintContext(input);
+
     for (const candidate of candidates) {
       const componentScores = this.signalComputer.computeAll(
         candidate,
@@ -428,7 +500,7 @@ export class Ranker {
         referenceYear,
         queryContainsHangul,
       );
-      const constraintState = buildConstraintState(input, candidate);
+      const constraintState = buildConstraintState(candidate, queryConstraintCtx);
 
       // Step 3: Aggregate signals into final score.
       // T5.3: Adjust weights based on which retrieval channels contributed

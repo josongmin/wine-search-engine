@@ -21,8 +21,13 @@ export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
 
 export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined {
   const strongestAnchor = [...plan.anchors].sort((left, right) => right.confidence - left.confidence)[0];
+  // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: empty string from trim() should fall through to normalizedForm
   const candidate = strongestAnchor?.surfaceForm.trim() || strongestAnchor?.normalizedForm.trim();
   return candidate !== undefined && candidate.length > 0 ? candidate : undefined;
+}
+
+function isReadonlyStringArray(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
 }
 
 export function extractRegionBrowseSeed(plan: QueryPlanV1): string | undefined {
@@ -38,9 +43,8 @@ export function extractRegionBrowseSeed(plan: QueryPlanV1): string | undefined {
     if (typeof regionConstraint.value === 'string' && regionConstraint.value.trim().length > 0) {
       return regionConstraint.value.trim();
     }
-    if (Array.isArray(regionConstraint.value) && regionConstraint.value[0] !== undefined) {
-      const [firstValue] = regionConstraint.value as readonly unknown[];
-      return typeof firstValue === 'string' ? firstValue : undefined;
+    if (isReadonlyStringArray(regionConstraint.value) && regionConstraint.value.length > 0) {
+      return regionConstraint.value[0];
     }
   }
 

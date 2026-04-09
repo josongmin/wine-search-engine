@@ -116,7 +116,14 @@ export interface AdaptiveBudget {
 }
 
 export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
-  const trimmed = query.trim();
+  // NFC-normalize first: the pure-Hangul SKU regex /^[\uAC00-\uD7A3]{4,}$/
+  // only matches precomposed syllables. Decomposed Hangul (NFD) is a sequence
+  // of jamo in U+1100–U+11FF and fails the class silently — a Hangul wine
+  // name like "오푸스원" copy-pasted from an NFD source would never classify
+  // as specific_sku and would get the default (larger) budget. Additionally,
+  // extractSearchConstraints downstream expects NFC-ready input for 만원/억원
+  // price matching.
+  const trimmed = query.normalize('NFC').trim();
   if (trimmed.length === 0) {
     // Empty query: agent should produce zero tool calls. The HTTP layer
     // would normally 400 this; benchmark scenario #21 expects 0 steps.

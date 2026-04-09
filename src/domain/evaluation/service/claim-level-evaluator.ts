@@ -49,6 +49,19 @@ const EMPTY_CATEGORY: CategoryDiagnostic = {
 Object.freeze(EMPTY_CATEGORY);
 
 /**
+ * Options for {@link evaluateClaims}.
+ */
+export interface EvaluateClaimsOptions {
+  /**
+   * Deterministic "current year" used as the upper bound for accepted vintage
+   * year claims. When omitted, falls back to `new Date().getFullYear()`.
+   * Replay harnesses MUST pin this value so eval results are bit-stable
+   * across a year boundary (see RFC-009 §8 / CLAUDE.md replay discipline).
+   */
+  readonly currentYear?: number;
+}
+
+/**
  * Evaluate an agent's answer at claim level.
  *
  * @param answer - The agent's answer text
@@ -56,6 +69,7 @@ Object.freeze(EMPTY_CATEGORY);
  * @param evidenceContext - Raw text of all tool observations
  * @param taskType - Task type for hard-fail policy selection
  * @param llm - LLM port for semantic verification (null to skip)
+ * @param options - Optional knobs (e.g. pinned currentYear for replay determinism)
  * @returns Complete diagnostic vector with claim-level breakdown
  */
 export async function evaluateClaims(
@@ -64,9 +78,13 @@ export async function evaluateClaims(
   evidenceContext: string,
   taskType: TaskType,
   llm: ChatLlmPort | null,
+  options?: EvaluateClaimsOptions,
 ): Promise<DiagnosticVector> {
   // ── Step 1: Extract claims ──────────────────────────────────────────
-  const claims = extractClaims(answer);
+  const claims = extractClaims(
+    answer,
+    options?.currentYear !== undefined ? { currentYear: options.currentYear } : undefined,
+  );
 
   if (claims.length === 0) {
     return emptyDiagnostic(claims, []);

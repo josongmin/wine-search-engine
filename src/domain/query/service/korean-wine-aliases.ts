@@ -32,9 +32,13 @@ export const KOREAN_WINE_ALIAS_CORRECTIONS: ReadonlyMap<string, string> = new Ma
 /**
  * Applies Korean wine alias corrections to a query string.
  * Replaces known typos/abbreviations with canonical forms.
+ *
+ * The input is NFC-normalized before matching so that decomposed Hangul
+ * (e.g. client sending 'ㅇ+ㅗ+ㅍ+ㅓ+ㅅ+ㅡ+ㅇ+ㅝ+ㄴ') still hits the typo table.
+ * Without NFC normalization the bare `includes()` check silently misses.
  */
 export function correctKoreanWineTypos(query: string): string {
-  let corrected = query;
+  let corrected = query.normalize('NFC');
   for (const [typo, canonical] of KOREAN_WINE_ALIAS_CORRECTIONS) {
     if (corrected.includes(typo)) {
       corrected = corrected.replaceAll(typo, canonical);

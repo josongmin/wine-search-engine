@@ -4,9 +4,17 @@ import type { EntityRepository } from '../../domain/entity/port/entity-repositor
 import type { Entity, EntityMetadata } from '../../domain/entity/model/entity.js';
 import type { EntityType } from '../../domain/entity/model/entity-type.js';
 import { isEntityType } from '../../domain/entity/model/entity-type.js';
-import type { Relations } from '../../domain/entity/model/relations.js';
-import type { EntityAttributes } from '../../domain/entity/model/attributes.js';
 import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import {
+  EntityRowSnapshotJsonbSchema,
+  parseRelationsJsonb,
+  parseEntityAttributesJsonb,
+} from './jsonb-schemas.js';
+
+const ROW_TO_ENTITY_CALLER = 'PgEntityRepository.rowToEntity';
+
+const entityRepoLog = bootstrapLogger.child({ component: 'PgEntityRepository' });
 
 interface EntityRow {
   entity_id: string;
@@ -27,12 +35,20 @@ interface SnapshotRow {
   created_at: Date;
 }
 
+/** Parse a JSONB date string, falling back to the PG row timestamp on invalid input (rule 28). */
+function parseDateOrFallback(raw: unknown, fallback: Date): Date {
+  if (typeof raw === 'string') {
+    const d = new Date(raw);
+    // Guard: new Date("not-a-date").getTime() → NaN; silently propagates through comparisons.
+    if (Number.isFinite(d.getTime())) return d;
+  }
+  return new Date(fallback);
+}
+
 function buildMetadata(metadata: Record<string, unknown>, row: EntityRow): EntityMetadata {
-  const rawCreated = metadata['createdAt'];
-  const rawUpdated = metadata['updatedAt'];
   const base: EntityMetadata = {
-    createdAt: new Date(typeof rawCreated === 'string' ? rawCreated : row.created_at),
-    updatedAt: new Date(typeof rawUpdated === 'string' ? rawUpdated : row.updated_at),
+    createdAt: parseDateOrFallback(metadata['createdAt'], row.created_at),
+    updatedAt: parseDateOrFallback(metadata['updatedAt'], row.updated_at),
   };
   const source = metadata['source'];
   const trustRaw = metadata['trustTier'];
@@ -62,13 +78,11 @@ function rowToEntity(row: EntityRow): Entity {
   // `Object.entries(obj)` would either crash or silently iterate string
   // characters / array indices.
   const metadata = isPlainObject(row.metadata) ? row.metadata : {};
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB validated as plain object; full Relations/EntityAttributes Zod validation deferred to domain layer
-  const relations = isPlainObject(row.relations) ? (row.relations as Relations) : ({} as Relations);
-  const attributes = isPlainObject(row.attributes)
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time
-    ? (row.attributes as EntityAttributes)
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- empty fallback for corrupt JSONB
-    : ({} as EntityAttributes);
+  // Rule 11: JSONB columns are validated via Zod safeParse — on failure the
+  // parser logs a warning and returns a safe empty default so downstream code
+  // never iterates a corrupted payload.
+  const relations = parseRelationsJsonb(row.relations, ROW_TO_ENTITY_CALLER);
+  const attributes = parseEntityAttributesJsonb(row.attributes, ROW_TO_ENTITY_CALLER);
   const entityType = isEntityType(row.entity_type) ? row.entity_type : 'wine';
   return {
     id: createEntityId(row.entity_id),
@@ -269,8 +283,15 @@ export class PgEntityRepository implements EntityRepository {
       // Collect entity_ids that were part of this snapshot
       const snapshotEntityIds = new Set<string>();
       for (const snap of snapResult.rows) {
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB snapshot_data schema validated at write time; full EntityRow Zod validation would be prohibitive
-        const data = snap.snapshot_data as EntityRow;
+        const parsed = EntityRowSnapshotJsonbSchema.safeParse(snap.snapshot_data);
+        if (!parsed.success) {
+          entityRepoLog.warn(
+            { snapshotId: snap.snapshot_id, issues: parsed.error.issues.slice(0, 3) },
+            'PgEntityRepository: snapshot_data JSONB failed validation; skipping entity in rollback',
+          );
+          continue;
+        }
+        const data = parsed.data;
         snapshotEntityIds.add(data.entity_id);
 
         // Restore entity to its snapshotted state

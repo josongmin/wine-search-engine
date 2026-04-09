@@ -14,9 +14,7 @@ let cachedDocument: ReturnType<typeof buildHttpRouteContractOpenApiBridge> | und
  */
 export function registerOpenApiRoute(app: FastifyInstance): void {
   app.get('/openapi.json', async (_request, reply) => {
-    if (cachedDocument === undefined) {
-      cachedDocument = buildHttpRouteContractOpenApiBridge();
-    }
+    cachedDocument ??= buildHttpRouteContractOpenApiBridge();
 
     await reply
       .header('content-type', 'application/json; charset=utf-8')

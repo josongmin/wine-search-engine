@@ -74,10 +74,11 @@ export function computeFunnelMetrics(
 
   // ── 3. meanFinalScore ─────────────────────────────────────────────────────
   // Arithmetic mean of the finalScore for all results. Zero when empty.
+  const resultCount = results.length;
   const meanFinalScore =
-    results.length === 0
+    resultCount === 0
       ? 0
-      : results.reduce((sum, r) => sum + r.finalScore, 0) / results.length;
+      : results.reduce((sum, r) => sum + r.finalScore, 0) / Math.max(1, resultCount);
 
   // ── 4. scoreGapRank1Rank2 ─────────────────────────────────────────────────
   // Difference between the top-ranked and second-ranked final scores.

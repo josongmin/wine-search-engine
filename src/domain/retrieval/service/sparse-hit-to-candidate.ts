@@ -36,13 +36,21 @@ export function sparseHitToCandidate(
     retrievalProfile: options.retrievalProfile,
     lexicalQueriesUsed: options.lexicalQueries,
     semanticQueriesUsed: [],
-    filtersApplied: [...options.filtersApplied],
-    candidateSources: [...options.candidateSources],
+    // Options are readonly — safe to reference directly without copying.
+    filtersApplied: options.filtersApplied as string[],
+    candidateSources: options.candidateSources as string[],
   };
   return {
     entityId: hit.entityId,
     ...summaryToHybridCandidateFields(hit.summary),
     sparseRank: rank,
+    // Browse/Compare bypass fusion — the BM25 raw score goes into
+    // sparseRawScore (canonical per-channel field) and the legacy
+    // retrievalFusionScore (for backward-compat fallback consumers).
+    // fusionRrfTotal is intentionally absent: these candidates were
+    // never fused, so fabricating a value would violate the semantic
+    // split contract (fusionRrfTotal ≡ RRF total, not BM25 raw).
+    sparseRawScore: hit.score,
     retrievalFusionScore: hit.score,
     matchedConstraints: [],
     retrievalTrace: trace,

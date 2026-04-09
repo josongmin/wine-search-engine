@@ -33,10 +33,15 @@ export class AbstainPolicy {
   }
 
   private normalizedEntropy(scores: readonly number[]): number {
+    // Early guard: empty or single-element distributions have entropy 0 by
+    // definition. Without this, intermediate steps below produce NaN
+    // (e/sumExp where sumExp=0) that propagates silently. (Bugbash R17)
+    if (scores.length < 2) return 0;
     let maxScore = -Infinity;
     for (const s of scores) { if (s > maxScore) maxScore = s; }
     const expScores = scores.map((s) => Math.exp(s - maxScore));
     const sumExp = expScores.reduce((a, b) => a + b, 0);
+    if (sumExp === 0) return 0;
     const probs = expScores.map((e) => e / sumExp);
     const rawEntropy = probs.reduce((h, p) => (p <= 0 ? h : h - p * Math.log2(p)), 0);
     const maxEntropy = Math.log2(scores.length);

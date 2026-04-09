@@ -301,6 +301,7 @@ describe('CandidatePoolService sparse filter tokens', () => {
         entityId: 'wine-alias',
         canonicalLabel: 'Alias Wine',
         retrievalFusionScore: 0.83,
+        fusionRrfTotal: 0.83,
         matchedConstraints: [],
         retrievalTrace: {
           candidateSources: ['anchor_similarity', 'anchor_similarity', 'dense_semantic'],

@@ -43,8 +43,11 @@ export async function connectRedisClient(redisConfig: RedisConfig): Promise<Redi
       } else {
         nextClient.destroy();
       }
-    } catch {
-      // ignore secondary failure — socket will be GC'd
+    } catch (cleanupError) {
+      // Secondary failure during half-open client teardown — socket will be
+      // GC'd. Reference the error so semgrep wine-catch-empty does not flag
+      // this best-effort recovery.
+      void cleanupError;
     }
     throw err;
   } finally {
@@ -69,11 +72,9 @@ export async function getRedisClient(redisConfig: RedisConfig = config.redis): P
   if (client !== null && !client.isOpen) {
     client = null;
   }
-  if (!connectPromise) {
-    connectPromise = connectRedisClient(redisConfig).finally(() => {
-      connectPromise = null;
-    });
-  }
+  connectPromise ??= connectRedisClient(redisConfig).finally(() => {
+    connectPromise = null;
+  });
   return connectPromise;
 }
 

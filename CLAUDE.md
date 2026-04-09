@@ -102,6 +102,10 @@ For any non-trivial code change, follow this exact order:
 27. **For any grape/wine-domain string splitting** (e.g. grape family from variety name): Use a lookup table for known multi-word terms before falling back to `split()[0]`. "Nero d'Avola" → "Nero" and "Sauvignon Blanc" → "Sauvignon" are wrong. Keep lookup tables in sync across Python and TypeScript ETL layers.
 28. **For any `new Date(input).getTime()` on external data**: Guard with `Number.isFinite()` before comparison. Invalid date strings produce `NaN`, and NaN comparisons are always `false`, silently dropping records or bypassing sort logic.
 29. **For any Python regex matching wine classification/producer terms**: Use `re.search(r'\b' + re.escape(term) + r'\b', text, re.IGNORECASE)` instead of `term in text`. Substring matching causes false positives: "Reserva" matches "Reservado", "Cave" matches "Excavation". Latin-only terms are safe with `\b`.
+30. **For any domain constant (FX rate, formula coefficient, RRF parameter, threshold, regex) used in 2+ files**: Extract to a single shared module and import from there. Duplicated constants drift silently — one file gets updated, the others don't. Rule 25 covers vocabulary lists; this rule covers ALL cross-module constants. Grep the codebase before adding a new constant.
+31. **For any field marked `@deprecated` in its type definition**: NEVER use the deprecated field alone. Always use a migration fallback pattern: `newField ?? deprecatedField`. Mark the deprecated access with a `// TODO(cleanup): remove after migration` comment. The `@typescript-eslint/no-deprecated` lint rule catches bare usage; fallback patterns with `??` are acceptable during migration windows.
+32. **For any truthy check on a typed array** (`if (arr)` / `if (embedding)` where type is `T[]` or `T[] | null | undefined`): NEVER use bare truthiness. An empty array `[]` is truthy but semantically empty. Use explicit checks: `arr != null && arr.length > 0` for "has elements", `arr != null` for "exists but may be empty". This was a recurring bug with embedding vectors — `if (embedding)` passed for `[]` (empty embedding), causing downstream NaN scores.
+33. **For any new module, service, or capability introduced in a session**: Before declaring done, verify it is **wired into production** — imported by a composition root, registered in a DI container, or called from an existing code path. Foundation code that compiles but is never imported is dead weight. Grep for the export name across `src/config/`, `src/application/`, and `src/interface/` to confirm at least one production import exists.
 
 Regression tests live under `test/regression/<topic>.regression.test.ts` and are append-only — never delete a regression test.
 
@@ -128,6 +132,40 @@ If any case is uncertain, add a regression test before declaring done. Audit-fir
 - When enriching/extending a validated string (e.g. appending query params to a search query), the **result** must be length-checked against downstream limits. Validation on the original input does NOT cover appended content.
 - When parsing LLM JSON output, accept both `number` and `string` for numeric fields — LLMs routinely emit `"0.75"` instead of `0.75`. Use `typeof x === 'string' ? parseFloat(x) : x` with `Number.isFinite()` guard.
 - Korean regex patterns in classifiers MUST avoid matching common syllables in isolation. `/원/` matches "원래" (originally); use `/\d+\s*원/` or `/만\s*원/` to require numeric context. Always test against 3+ common Korean words that contain the target syllable.
+
+## SSoT (Single Source of Truth) policy
+
+When adding or modifying shared logic (channel names, scoring formulae, type guards, vocabulary lists), **always** check whether an SSoT module already owns that concept:
+
+| Concept | SSoT module |
+|---------|-------------|
+| RRF formula (`1/(k+rank)`) | `src/domain/shared/utils/rrf.ts` |
+| RetrievalChannel enum + guards | `src/domain/retrieval/model/retrieval-channel.ts` |
+| CandidateChannel type | derived from `RetrievalChannel` in `candidate-envelope.ts` |
+| `isCandidateChannel`, `toCanonicalCandidateChannel` | `retrieval-channel.ts` (not candidate-pool or evidence-accumulator) |
+| Deterministic score comparators | `src/domain/shared/utils/stable-comparator.ts` |
+| Circuit breaker registry | `src/observability/circuit-breaker-registry.ts` |
+| Silent-skip counters | `src/observability/silent-skip-counters.ts` |
+| Sparse hit → HybridCandidate mapping | `src/domain/retrieval/service/sparse-hit-to-candidate.ts` |
+
+**Do NOT duplicate** these into private functions. Import from the SSoT module. If the SSoT module is missing a function you need, add it there — not locally.
+
+## Lint-enforced safety rules (eslint.config.js)
+
+These patterns are caught at lint time — no need to review manually:
+
+- `Math.max/min(...spread)` → use loop (stack overflow on large arrays)
+- `toLocaleString()` → use `.toString()` (locale-dependent output)
+- `JSON.parse(x) as T` → cast to `unknown` first, then validate
+- `\b` in regex → Unicode-unsafe, use `[\p{L}\p{N}]` boundaries
+- Non-ASCII regex without `/u` flag
+- `\p{L}\p{N}` without brackets (sequence vs character class)
+- `.includes("")` → always true
+- `value || default` → use `??` (prefer-nullish-coalescing)
+- `.sort()` without comparator → require-array-sort-compare
+- `as` casts in pg-*/redis-* → consistent-type-assertions
+- Magic numbers in src/ → no-magic-numbers
+- `console.*` in src/ → no-console
 
 ## Private notes
 

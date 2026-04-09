@@ -92,16 +92,26 @@ export async function buildResolverCandidatesFromPlan(
     }
   }
 
-  // Fetch all documents in parallel (eliminates N+1 sequential latency)
-  const docEntries = await Promise.all(
+  // Fetch all documents in parallel (eliminates N+1 sequential latency).
+  // Use allSettled so a single Vespa/network error doesn't abort the entire
+  // resolve step — remaining candidates are still useful for ranking.
+  const settled = await Promise.allSettled(
     [...allEntityIds].map(async (id) => {
       const doc = await entityLookup.getDocument(id);
       return [id, doc] as const;
     }),
   );
-  const docMap = new Map(
-    docEntries.filter((entry): entry is [EntityId, RetrievalDocument] => entry[1] != null),
-  );
+  const docMap = new Map<EntityId, RetrievalDocument>();
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      const [id, doc] = result.value;
+      if (doc != null) {
+        docMap.set(id, doc);
+      }
+    }
+    // rejected results are silently skipped — the candidate simply won't
+    // appear, which is the correct degradation behaviour.
+  }
 
   // Build candidates from the pre-fetched map (synchronous)
   const seen = new Set<EntityId>();

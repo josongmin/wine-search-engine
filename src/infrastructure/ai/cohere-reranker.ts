@@ -6,13 +6,26 @@ import type {
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
 import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
+import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
 
 const COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;
+
+/** Circuit breaker thresholds for the Cohere rerank endpoint — same tuning
+ *  as OpenAI/Anthropic chat so providers share an equivalent failure budget. */
+const COHERE_RERANK_BREAKER_FAILURE_THRESHOLD = 5;
+const COHERE_RERANK_BREAKER_RECOVERY_TIMEOUT_MS = 60_000;
+const COHERE_RERANK_BREAKER_HALF_OPEN_MAX_ATTEMPTS = 3;
+const COHERE_RERANK_BREAKER_NAME = 'cohere-rerank';
 
 export interface CohereRerankerOptions {
   readonly baseUrl: string;
@@ -52,12 +65,23 @@ export class CohereReranker implements RerankerPort {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly httpTimeoutMs: number;
+  private readonly circuitBreaker: CircuitBreaker;
 
   constructor(options: CohereRerankerOptions) {
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/rerank`;
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.httpTimeoutMs = options.httpTimeoutMs;
+    this.circuitBreaker = createCircuitBreaker({
+      name: COHERE_RERANK_BREAKER_NAME,
+      failureThreshold: COHERE_RERANK_BREAKER_FAILURE_THRESHOLD,
+      recoveryTimeoutMs: COHERE_RERANK_BREAKER_RECOVERY_TIMEOUT_MS,
+      halfOpenMaxAttempts: COHERE_RERANK_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
+    });
+    globalCircuitBreakerRegistry.register(
+      COHERE_RERANK_BREAKER_NAME,
+      this.circuitBreaker,
+    );
   }
 
   async rerank(
@@ -67,6 +91,16 @@ export class CohereReranker implements RerankerPort {
   ): Promise<readonly RerankResult[]> {
     if (candidates.length === 0) return [];
 
+    return runUnderLlmBreaker(this.circuitBreaker, COHERE_RERANK_BREAKER_NAME, () =>
+      this.rerankInner(query, candidates, limit),
+    );
+  }
+
+  private async rerankInner(
+    query: string,
+    candidates: readonly RerankCandidate[],
+    limit: number,
+  ): Promise<readonly RerankResult[]> {
     const httpStart = Date.now();
     let response: Response;
 
@@ -175,7 +209,11 @@ export class CohereReranker implements RerankerPort {
 
     scored.sort((a, b) => b.score - a.score);
 
-    return scored.map((item, index) => ({
+    // Defense-in-depth: Cohere honors `top_n: limit` server-side, but if the
+    // API ever returns more than `limit` items (version drift, proxy, bug),
+    // the port contract (`Maximum number of results to return`) would be
+    // violated. Slice locally to match HttpCrossEncoderReranker parity.
+    return scored.slice(0, limit).map((item, index) => ({
       entityId: item.entityId,
       score: item.score,
       rank: index + 1,

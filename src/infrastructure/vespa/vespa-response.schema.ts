@@ -19,6 +19,13 @@
 
 import { z } from 'zod';
 
+/**
+ * Upper bound for Vespa children array.
+ * Our largest query uses `limit 200`; 10_000 is a conservative safety cap
+ * that catches catastrophically broken responses without rejecting valid ones.
+ */
+const MAX_VESPA_HITS = 10_000;
+
 /** A single hit returned by the Vespa query API. */
 export const VespaHitSchema = z
   .object({
@@ -57,7 +64,7 @@ export const VespaRootSchema = z
     relevance: z.number().finite().optional(),
     fields: z.record(z.unknown()).optional(),
     coverage: VespaCoverageSchema.optional(),
-    children: z.array(VespaHitSchema).optional(),
+    children: z.array(VespaHitSchema).max(MAX_VESPA_HITS).optional(),
   })
   .passthrough();
 

@@ -61,7 +61,7 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     );
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        err: 'classifier offline',
+        err: expect.objectContaining({ message: 'classifier offline' }),
         judgeFailureMode: 'fail_open',
       }),
       '[QueryEntrySecurity] LLM judge error',
@@ -93,7 +93,7 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
     await blockedExpectation;
     expect(warnSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        err: 'injection_judge_timeout',
+        err: expect.objectContaining({ message: 'injection_judge_timeout' }),
         judgeFailureMode: 'fail_closed',
         timeout_ms: 5_000,
       }),

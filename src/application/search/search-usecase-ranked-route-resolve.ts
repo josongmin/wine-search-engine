@@ -2,10 +2,7 @@ import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import { computeConformalSetSize, DEFAULT_ALPHA } from '../../domain/resolver/service/resolver.js';
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
+import { clamp01 } from '../../domain/shared/utils/clamp.js';
 
 interface RankedRouteResolveOptions {
   readonly outcomeReasonCode: 'HYBRID_ROUTE' | 'MIXED_ROUTE';

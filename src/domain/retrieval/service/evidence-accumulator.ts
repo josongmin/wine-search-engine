@@ -8,9 +8,13 @@
 
 import type { CandidateEnvelope, CandidateChannel } from '../model/candidate-envelope.js';
 import {
-  preferCanonicalRetrievalChannelLabel,
   preferCanonicalRetrievalChannelLabels,
+  toCanonicalCandidateChannel,
 } from '../model/retrieval-channel.js';
+import {
+  pickMaxByScore,
+  compareScoreWithTiebreaker,
+} from '../../shared/utils/stable-comparator.js';
 
 const PROTECTION_PRIORITY: Readonly<Record<string, number>> = {
   known_item_lookup: 0,
@@ -79,22 +83,7 @@ function pickProtectedReason(group: readonly CandidateEnvelope[]) {
   return bestReason;
 }
 
-function toCanonicalCandidateChannel(channel: string): CandidateChannel | null {
-  const canonical = preferCanonicalRetrievalChannelLabel(channel);
-  switch (canonical) {
-    case 'sparse_bm25':
-    case 'dense_semantic':
-    case 'anchor_similarity':
-    case 'learned_sparse':
-    case 'relative_filter':
-    case 'browse_producer':
-    case 'browse_region':
-    case 'compare_anchor':
-      return canonical;
-    default:
-      return null;
-  }
-}
+// toCanonicalCandidateChannel: imported from retrieval-channel.ts (SSoT)
 
 // ---------------------------------------------------------------------------
 // Accumulator function
@@ -130,13 +119,14 @@ export function accumulateEvidence(
   const results: AccumulatedEvidence[] = [];
 
   for (const [entityId, group] of groups) {
-    // Find canonical envelope (best fusionScore)
-    let canonical = group[0]!;
-    for (const c of group) {
-      if (c.provenance.fusionScore > canonical.provenance.fusionScore) {
-        canonical = c;
-      }
-    }
+    // Find canonical envelope by best fusionScore. Use pickMaxByScore to get
+    // NaN-safe comparison + deterministic entityId tiebreaker on ties.
+    // (Bugbash R19 critical re-audit: previous `>`-only loop was order-sensitive.)
+    const canonical = pickMaxByScore(
+      group,
+      (c) => c.provenance.fusionScore,
+      (c) => c.entityId,
+    )!;
 
     // Union channels
     const channelSet = new Set<CandidateChannel>();
@@ -246,8 +236,14 @@ export function accumulateEvidence(
     });
   }
 
-  // Sort by bestFusionScore descending
-  results.sort((a, b) => b.bestFusionScore - a.bestFusionScore);
+  // Sort by bestFusionScore descending with NaN-safe + entityId tiebreaker.
+  // (Bugbash R22)
+  results.sort(
+    compareScoreWithTiebreaker<AccumulatedEvidence>(
+      (r) => r.bestFusionScore,
+      (r) => r.entityId,
+    ),
+  );
 
   return results;
 }

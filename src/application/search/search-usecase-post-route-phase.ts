@@ -13,6 +13,7 @@ import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
@@ -100,6 +101,16 @@ export interface RankedRouteDecisionPhaseContext {
   readonly compiled?: CompiledWineQuery | undefined;
   readonly requestId: string;
   readonly startTime: number;
+  /**
+   * Deterministic "current year" used for drinking-window currentlyDrinkable
+   * computation. When omitted, defaults to `new Date(startTime).getFullYear()`
+   * — a SINGLE wall-clock read per request, at the request boundary. Replay
+   * harnesses MUST provide this field (e.g. from the pinned snapshot) to
+   * guarantee byte-identical responses across replay runs; otherwise a query
+   * replayed across a year boundary would silently produce different
+   * `currentlyDrinkable` flags even with an identical decision snapshot.
+   */
+  readonly nowYear?: number | undefined;
   readonly resolveResult: EntityResolveResult;
   /**
    * Visible ranked results (after caller-specified limit). Used for the
@@ -126,6 +137,25 @@ export interface RankedRouteDecisionPhaseContext {
   readonly includeCounterfactuals?: boolean | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+}
+
+/**
+ * Resolves the target year for drinking-window `currentlyDrinkable` checks.
+ * Prefers the caller-injected `nowYear` (deterministic, replay-stable);
+ * otherwise derives from `ctx.startTime`, which captures wall-clock exactly
+ * ONCE per request at the pre-route phase entry. This funnels every
+ * wall-clock read through a single seam so replay harnesses can override it.
+ *
+ * Accepts the minimal {startTime, nowYear?} shape so both
+ * SearchPostRouteExecutionContext and RankedRouteDecisionPhaseContext can
+ * call it. nowYear is optional in both — only RankedRouteDecisionPhaseContext
+ * actually exposes it to replay harnesses today.
+ */
+function resolveTargetYear(ctx: { readonly startTime: number; readonly nowYear?: number | undefined }): number {
+  if (ctx.nowYear !== undefined && Number.isFinite(ctx.nowYear)) {
+    return ctx.nowYear;
+  }
+  return new Date(ctx.startTime).getFullYear();
 }
 
 function toAdmissionHonestyContract(
@@ -218,7 +248,7 @@ export async function runRankedRouteDecisionPhase(
   const results = await mapRankedResultsToResultItems(
     ctx.rankedResults,
     ctx.drinkingWindow,
-    undefined,
+    resolveTargetYear(ctx),
     sensoryPriors,
   );
   // Provenance slices and counterfactuals MUST use the full retrieval pool,
@@ -324,7 +354,7 @@ export async function runRankedRouteDecisionPhase(
   /* Unit tests may stub partial SearchResponseV1; skip structured log when snapshot missing. */
   const engineDecision = built.engineDecision as SearchResponseV1['engineDecision'] | undefined;
   const decisionSnapshot = engineDecision?.decisionSnapshot;
-  if (decisionSnapshot !== undefined) {
+  if (decisionSnapshot !== undefined && !isCorruptedSnapshot(decisionSnapshot)) {
     logSearchEvent({
       ...(built.meta.authorityTraceRef !== undefined
         ? { authority_trace_ref: built.meta.authorityTraceRef }
@@ -403,7 +433,7 @@ export async function runSearchPostRoutePhase(
     const results = await mapRankedResultsToResultItems(
       limitedRankedResults,
       ctx.drinkingWindow,
-      undefined,
+      resolveTargetYear(ctx),
       sensoryPriorsAbstain,
     );
     // Provenance slices and counterfactuals use the FULL ranked results, not

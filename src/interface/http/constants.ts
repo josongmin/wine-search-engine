@@ -91,6 +91,12 @@ export const MAX_SESSION_PREVIOUS_ENTITIES = 50;
 /** Session: single entity id string length. */
 export const MAX_SESSION_ENTITY_ID_CHARS = 256;
 
+/** Session id string length (client-supplied correlation id). */
+export const MAX_SESSION_ID_CHARS = 256;
+
+/** Response hash string length (hex SHA-256 = 64 chars, add headroom). */
+export const MAX_RESPONSE_HASH_CHARS = 128;
+
 /** Interpret/query budget transport (ms ceiling for client hints). */
 export const MAX_QUERY_BUDGET_LATENCY_MS = 30_000;
 

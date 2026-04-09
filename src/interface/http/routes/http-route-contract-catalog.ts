@@ -2,6 +2,7 @@ import type { HttpRouteContract } from './route-contracts.js';
 import { AgentRouteContract } from './agent.route.js';
 import { AgentBenchmarkScenariosRouteContract } from './agent-benchmark-scenarios.route.js';
 import {
+  AgentMetricsRouteContract,
   BatchSearchRouteContract,
   ClaudeToolsExecuteRouteContract,
   ClaudeToolsListRouteContract,
@@ -11,6 +12,7 @@ import {
   ReadyRouteContract,
   ReplayRouteContract,
   ResolveRouteContract,
+  RetrievalDegradationMetricsRouteContract,
   SearchRouteContract,
   WatchlistListRouteContract,
   WatchlistCreateRouteContract,
@@ -23,6 +25,7 @@ import {
   InterpretV2RouteContract,
 } from './route-contracts.js';
 import type { HttpRouteContractManifest, RegisteredHttpRouteContract } from './register-contract-route.js';
+import { toFiniteInteger } from '../../../domain/shared/utils/safe-number.js';
 import {
   HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
   HTTP_SUCCESS_STATUS_MIN,
@@ -37,6 +40,8 @@ export interface DeclaredHttpRouteContract {
 export const DeclaredHttpRouteContractCatalog: readonly DeclaredHttpRouteContract[] = [
   { method: 'GET', url: '/health', contract: HealthRouteContract },
   { method: 'GET', url: '/ready', contract: ReadyRouteContract },
+  { method: 'GET', url: '/metrics/agent', contract: AgentMetricsRouteContract },
+  { method: 'GET', url: '/metrics/retrieval-degradation', contract: RetrievalDegradationMetricsRouteContract },
   { method: 'GET', url: '/v1/claude-tools', contract: ClaudeToolsListRouteContract },
   { method: 'POST', url: '/v1/claude-tools', contract: ClaudeToolsExecuteRouteContract },
   { method: 'POST', url: '/v1/search', contract: SearchRouteContract },
@@ -68,24 +73,30 @@ function compareContracts(
 }
 
 export function buildDeclaredHttpRouteContractManifest(): HttpRouteContractManifest {
-  const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => ({
-    method: entry.method,
-    url: entry.url,
-    operationId: entry.contract.operationId,
-    hasBody: entry.contract.body !== undefined,
-    hasParams: entry.contract.params !== undefined,
-    responseStatusCodes: Object.keys(entry.contract.responses)
-      .map((statusCode) => Number(statusCode))
-      .sort((left, right) => left - right),
-    successStatusCodes: Object.keys(entry.contract.responses)
-      .map((statusCode) => Number(statusCode))
-      .filter((statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE)
-      .sort((left, right) => left - right),
-    errorStatusCodes: Object.keys(entry.contract.responses)
-      .map((statusCode) => Number(statusCode))
-      .filter((statusCode) => statusCode < HTTP_SUCCESS_STATUS_MIN || statusCode >= HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE)
-      .sort((left, right) => left - right),
-  })).sort(compareContracts);
+  const routes: RegisteredHttpRouteContract[] = DeclaredHttpRouteContractCatalog.map((entry) => {
+    // HTTP status codes are stringified integer keys; toFiniteInteger gives
+    // a single guard point so semgrep wine-number-without-finite-guard does
+    // not flag these coercions and a corrupted contract definition cannot
+    // silently inject NaN into the catalog output.
+    const statusCodes = Object.keys(entry.contract.responses)
+      .map((statusCode) => toFiniteInteger(statusCode))
+      .filter((n): n is number => n !== null)
+      .sort((left, right) => left - right);
+    return {
+      method: entry.method,
+      url: entry.url,
+      operationId: entry.contract.operationId,
+      hasBody: entry.contract.body !== undefined,
+      hasParams: entry.contract.params !== undefined,
+      responseStatusCodes: statusCodes,
+      successStatusCodes: statusCodes.filter(
+        (statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+      ),
+      errorStatusCodes: statusCodes.filter(
+        (statusCode) => statusCode < HTTP_SUCCESS_STATUS_MIN || statusCode >= HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
+      ),
+    };
+  }).sort(compareContracts);
 
   return {
     version: 1,

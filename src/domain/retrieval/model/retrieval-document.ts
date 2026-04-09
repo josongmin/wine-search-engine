@@ -109,6 +109,18 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Full-text search field in English. */
   readonly searchTextEn: string;
 
+  /**
+   * Doc2Query synthetic query expansions (Nogueira et al. 2019).
+   *
+   * Index-time generated queries that this document COULD answer. Stored
+   * in a dedicated Vespa BM25 field (`synthetic_queries`) so the weight
+   * can be tuned independently from the natural-text fields and IDF on
+   * the original `searchTextEn` is not polluted by synthetic content.
+   *
+   * Empty / omitted when no Doc2Query pass has been run for this entity.
+   */
+  readonly syntheticQueries?: readonly string[] | undefined;
+
   /** Natural-language summary used for semantic embedding. */
   readonly semanticSummary: string;
 

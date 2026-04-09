@@ -125,6 +125,75 @@ describe('Cache key collision prevention', () => {
     expect(key1.redisKey).toBe(key2.redisKey);
   });
 
+  it('absent locale does not collide with a caller-supplied "default" literal', () => {
+    // Previously the builder used `locale ?? 'default'`, so a user sending
+    // `locale: 'default'` silently shared cache buckets with unspecified
+    // locale — cross-locale poisoning with zero observable signal.
+    const keyAbsent = builder.build(
+      'test query',
+      'entity_lookup',
+      [],
+      [],
+      undefined,
+      undefined,
+    );
+    const keyDefaultLiteral = builder.build(
+      'test query',
+      'entity_lookup',
+      [],
+      [],
+      undefined,
+      'default',
+    );
+    expect(keyAbsent.redisKey).not.toBe(keyDefaultLiteral.redisKey);
+  });
+
+  it('different present locales produce different keys', () => {
+    const keyKo = builder.build(
+      'test query',
+      'entity_lookup',
+      [],
+      [],
+      undefined,
+      'ko-KR',
+    );
+    const keyEn = builder.build(
+      'test query',
+      'entity_lookup',
+      [],
+      [],
+      undefined,
+      'en-US',
+    );
+    expect(keyKo.redisKey).not.toBe(keyEn.redisKey);
+  });
+
+  it('caller-supplied locale that looks like the sentinel prefix does not collide with absent', () => {
+    // The absent sentinel is `l:-`. A caller passing `'l:-'` is still
+    // distinct from absent (they are different inputs), so confirm the
+    // encoding prefix cannot be spoofed.
+    const keyAbsent = builder.build(
+      'test query',
+      'entity_lookup',
+      [],
+      [],
+      undefined,
+      undefined,
+    );
+    const keySpoof = builder.build(
+      'test query',
+      'entity_lookup',
+      [],
+      [],
+      undefined,
+      'l:-',
+    );
+    // These SHOULD differ — an explicit caller-supplied 'l:-' is a
+    // different semantic input than "locale absent". The prefix treatment
+    // ensures caller=>`l:l:-` vs absent=>`l:-`.
+    expect(keyAbsent.redisKey).not.toBe(keySpoof.redisKey);
+  });
+
   it('constraint sort order does not affect key (order-independent)', () => {
     const key1 = builder.build(
       'test',

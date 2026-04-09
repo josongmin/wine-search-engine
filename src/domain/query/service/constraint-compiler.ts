@@ -11,6 +11,7 @@ import {
   inferComparisonImpliedWineType,
 } from '../../attribute/service/compositional-inference.js';
 import { buildRetrievalPlan, type RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 
 export interface ConstraintCompilerResult {
@@ -59,6 +60,7 @@ export class ConstraintCompiler {
           llmSkippedCount: 0,
           fallbackTriggered: true,
           source: 'fallback' as const,
+          fallbackReason: 'nlmapper_exception',
           llmLatencyMs: null,
           phraseCacheHits: 0,
           phraseCacheNegativeSkipped: 0,
@@ -206,7 +208,9 @@ function countBundleConstraints(bundle: ConstraintBundle): number {
 }
 
 function constraintKey(constraint: NormalizedConstraint): string {
-  return `${constraint.attribute}|${constraint.operator}|${JSON.stringify(constraint.value)}`;
+  // canonicalJsonStringify sorts object keys so range constraints
+  // ({min,max} vs {max,min}) produce the same dedup key. (Bugbash Round 18)
+  return `${constraint.attribute}|${constraint.operator}|${canonicalJsonStringify(constraint.value)}`;
 }
 
 function mergeConstraintBundleIntoLists(

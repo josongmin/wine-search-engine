@@ -7,6 +7,7 @@
 |------|--------|
 | [`retriever-pipeline.md`](./retriever-pipeline.md) | 런타임 **하이브리드 리트리버** — 후보 생성 → 랭킹까지 코드 앵커 |
 | [`ingestion-pipeline.md`](./ingestion-pipeline.md) | **배치 인입·ETL·인덱싱·평가 시딩** — `scripts/`·도구·제외 범위까지 |
+| [`doc2query-cohere-integration.md`](./doc2query-cohere-integration.md) | **Doc2Query (recall) + Cohere Rerank (precision)** 통합 결정·아키텍처·운영 가이드 |
 | [`wine-query-scenarios.md`](./wine-query-scenarios.md) | **SOTA++** 사용자 질의 매트릭스 — 플래너·`effectiveRoute` 승격·골든≠런타임 구분 |
 
 외부에 한 번만 열면 되는 것: 루트 [`CLAUDE.md`](../../CLAUDE.md), [`docs/http-contract-surface.md`](../http-contract-surface.md), [`docs/RFC-INDEX.md`](../RFC-INDEX.md).
@@ -67,4 +68,4 @@ flowchart LR
 
 ---
 
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-10

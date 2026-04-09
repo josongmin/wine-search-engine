@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
+import { vitestMemorySchedulerOptions } from './parallelism.js';
 
 const evalTestInclude = [
   'test/unit/eval/offline-eval-reporting.test.ts',
@@ -8,6 +9,7 @@ const evalTestInclude = [
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [...evalTestInclude],
     pool: 'forks',

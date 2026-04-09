@@ -93,14 +93,10 @@ export const BatchSearchRequestItemSchema = z.object({
     ...rest,
     ...(sessionContext !== undefined
       ? { sessionContext }
-      : session_context !== undefined
-        ? session_context
-        : {}),
+      : session_context ?? {}),
     ...(queryBudget !== undefined
       ? { queryBudget }
-      : query_budget !== undefined
-        ? query_budget
-        : {}),
+      : query_budget ?? {}),
   };
 });
 

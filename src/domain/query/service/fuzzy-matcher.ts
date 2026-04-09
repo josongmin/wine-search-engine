@@ -8,6 +8,7 @@
 
 import { BKTree } from './bk-tree.js';
 import { soundexEn, soundexKo } from './phonetic.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 export interface FuzzyMatchResult {
   readonly term: string;
@@ -64,8 +65,13 @@ export class FuzzyMatcher {
       combinedScore: this.combinedScore(query, r.term, r.editDistance),
     }));
 
-    // Sort by combined score descending (higher is better).
-    scored.sort((a, b) => b.combinedScore - a.combinedScore);
+    // NaN-safe + deterministic tiebreaker (term lex order). (Bugbash R22)
+    scored.sort(
+      compareScoreWithTiebreaker<FuzzyMatchResult>(
+        (r) => r.combinedScore,
+        (r) => r.term,
+      ),
+    );
 
     return scored;
   }

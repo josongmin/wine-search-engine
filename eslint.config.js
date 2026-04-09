@@ -62,9 +62,35 @@ export default tseslint.config(
         'error',
         { allowNumber: true },
       ],
+      /**
+       * Bugbash-derived: `value || default` silently replaces valid zero/empty-string.
+       * Use `??` (nullish coalescing) which only triggers on null/undefined.
+       * See CLAUDE.md rule 26.
+       */
+      '@typescript-eslint/prefer-nullish-coalescing': [
+        'error',
+        {
+          ignorePrimitives: { bigint: true, boolean: true },
+        },
+      ],
+      /**
+       * Bugbash-derived: Array.sort() without comparator uses lexicographic order,
+       * which silently mis-sorts numbers ([1,10,2] instead of [1,2,10]).
+       * See bugbash section F (tiebreaker/NaN policy).
+       */
+      '@typescript-eslint/require-array-sort-compare': [
+        'error',
+        { ignoreStringArrays: true },
+      ],
       /** DP / index-heavy code still uses `!`; tighten incrementally. */
       '@typescript-eslint/no-non-null-assertion': 'off',
-      'no-console': ['error', { allow: ['warn', 'error'] }],
+      /**
+       * Fully ban console in production src/ — use bootstrapLogger or
+       * a pino child logger instead. console.warn/error bypasses pino
+       * serializers (leaking SQL params, connection strings) and is
+       * invisible to structured-log tooling. (Bugbash pattern #2)
+       */
+      'no-console': 'error',
       /**
        * Bugbash-derived safety rules — prevent the top recurring bug classes.
        * Each pattern was found 10+ times across the codebase during the
@@ -150,6 +176,61 @@ export default tseslint.config(
         // for jitter/delay in retry logic. The CLAUDE.md quality bar prohibits
         // Math.random() for ID generation (use crypto.randomUUID() instead).
         // This is enforced via code review, not lint.
+        {
+          // Bugbash fallback/heuristic audit: catch `|| 0` on numeric values.
+          // `value || 0` replaces legitimate zero with 0 (tautology), losing
+          // the distinction between "zero" and "absent". Use `?? 0` instead.
+          // Already covered by prefer-nullish-coalescing for most cases, but
+          // this catches `|| 0` in direct numeric arithmetic that the TS rule
+          // may not flag (e.g. `x + (y || 0)`).
+          selector: 'LogicalExpression[operator="||"][right.value=0]',
+          message: '`|| 0` silently replaces legitimate zero values. Use `?? 0` (nullish coalescing) to only replace null/undefined. (CLAUDE.md rule 26)',
+        },
+        {
+          // Catch `score *= <number literal>` inside function bodies — magic
+          // multipliers in scoring logic are unauditable. CLAUDE.md rule 15:
+          // "Extract as named const with comment explaining the value."
+          selector: 'AssignmentExpression[operator="*="][right.type="Literal"][right.value!=-1][right.value!=0][right.value!=1][right.value!=2][right.value!=10][right.value!=100]',
+          message: 'Magic multiplier in scoring logic. Extract as a named const at module scope with a comment. (CLAUDE.md rule 15)',
+        },
+        {
+          // `|| <numeric literal>` on a non-zero literal — same class of bug as `|| 0`
+          // but for any "default value" pattern where 0 / '' / false should NOT
+          // collapse to the default. e.g. `confidence || 0.5` silently overrides
+          // a real 0.0 confidence with the neutral midpoint.
+          // (Phase B audit: ltr-features.ts DEFAULT_NEUTRAL_CONFIDENCE bug)
+          selector: 'LogicalExpression[operator="||"][right.type="Literal"][right.value!=0][right.raw!=/^["\'`]/]',
+          message: '`|| <number>` silently replaces legitimate 0/false/empty values with the literal. Use `?? <number>` (nullish coalescing) instead. (CLAUDE.md rule 26)',
+        },
+        {
+          // Truthy check on a value that is OBVIOUSLY a typed array
+          // (member access like `if (foo.embedding)` or `if (foo.results)`).
+          // This is a heuristic — not all bare member-access truthy checks are
+          // typed arrays — but the named ones below were the recurring bug class.
+          // (CLAUDE.md rule 32; Bugbash audit P1-9)
+          selector:
+            'IfStatement > MemberExpression[property.name=/^(embedding|embeddings|results|hits|candidates|matchedConstraints|aliases|grapes|pairing|occasion|softBoosts|inferredBoosts|filtersApplied|skippedPhases)$/]',
+          message: 'Truthy check on a typed array — empty array `[]` is truthy. Use `arr != null && arr.length > 0` for "has elements" or `arr != null` for "exists". (CLAUDE.md rule 32)',
+        },
+        {
+          // `new Date(x).getTime()` without `Number.isFinite` guard.
+          // Invalid date strings produce NaN, and NaN comparisons are always
+          // `false`, silently dropping records or bypassing validation.
+          // (CLAUDE.md rule 28; Phase A audit watchlist.schema.ts bug)
+          // This selector catches the .getTime() call directly on a `new Date(...)` expression.
+          // The fix is to assign to a variable, then guard with Number.isFinite before comparison.
+          selector:
+            'BinaryExpression > CallExpression[callee.object.type="NewExpression"][callee.object.callee.name="Date"][callee.property.name="getTime"]',
+          message: '`new Date(x).getTime()` produces NaN on invalid input — NaN comparisons silently return false. Assign to a variable, guard with Number.isFinite, then compare. (CLAUDE.md rule 28)',
+        },
+        {
+          // Empty catch block — `catch {}` or `catch (err) {}` with no body.
+          // The 30-round audit found these silently swallow real bugs. If the
+          // catch is intentional (speculative parse, optional cleanup), the body
+          // must reference the error: `catch (err) { void err; /* reason */ }`.
+          selector: 'CatchClause[body.body.length=0]',
+          message: 'Empty catch block silently swallows errors. Either log via bootstrapLogger, mark intentional with `void err; /* reason */`, or re-throw. (Bugbash silent-fallback class)',
+        },
       ],
       /**
        * Numeric constants in src/ must be named module-scope consts.
@@ -204,6 +285,12 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-return': 'off',
+      /**
+       * Tests legitimately exercise deprecated APIs to verify backward
+       * compatibility (dual-write parity, regression tests for migration
+       * fallbacks). Production src/ keeps no-deprecated as error.
+       */
+      '@typescript-eslint/no-deprecated': 'off',
       /**
        * Re-enabled for tests: unused variables in test code are dead leftovers
        * (e.g. seenIndices pushed-to but never read) that mask bugs.

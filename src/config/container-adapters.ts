@@ -10,6 +10,8 @@ import { VespaClient } from '../infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../infrastructure/vespa/vespa-search-index.js';
 import { OpenAiChatLlm } from '../infrastructure/ai/openai-chat-llm.js';
 import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-service.js';
+import { OpenAiDoc2QueryGenerator } from '../infrastructure/ai/openai-doc2query-generator.js';
+import { StubDoc2QueryGenerator } from '../infrastructure/adapter/stub-doc2query-generator.js';
 import { CohereReranker } from '../infrastructure/ai/cohere-reranker.js';
 import { HttpEmbeddingService } from '../infrastructure/vespa/embedding-service.js';
 import { HttpCrossEncoderReranker } from '../infrastructure/vespa/reranker.js';
@@ -38,6 +40,7 @@ import type {
 } from '../domain/mixed/port/mixed-query.port.js';
 import type { LearnedMatcherPort } from '../domain/resolver/port/learned-matcher.port.js';
 import type { RerankerPort } from '../domain/ranking/port/reranker.port.js';
+import type { Doc2QueryGeneratorPort } from '../domain/retrieval/port/doc2query-generator.port.js';
 import {
   StubAliasMatcher,
   StubAmbiguityDictionary,
@@ -53,6 +56,14 @@ export interface CoreAdapterServices {
   /** Present when `OPENAI_API_KEY` is set. */
   readonly chatLlm?: ChatLlmPort;
   readonly reranker?: RerankerPort;
+  /**
+   * Doc2Query generator used by index-time ETL only.
+   *
+   * Backed by the OpenAI chat LLM when `OPENAI_API_KEY` is set; otherwise
+   * a deterministic stub so dev / test environments can boot the
+   * container without an API key.
+   */
+  readonly doc2queryGenerator: Doc2QueryGeneratorPort;
   readonly blockingPort: BlockingPort;
   readonly calibrationStore: CalibrationStore;
   readonly ambiguityDict: AmbiguityDictionary;
@@ -155,9 +166,21 @@ export function buildCoreAdapterServices(
         })
       : undefined;
 
+  // Doc2Query generator (index-time only). Prefer the OpenAI-backed
+  // implementation when a chat adapter is available so it inherits the
+  // chat circuit breaker / retries; otherwise fall back to the
+  // deterministic stub so dev/test wiring keeps booting. Doc2Query uses
+  // its own model env (`OPENAI_DOC2QUERY_MODEL`) so the ETL pass can run
+  // on a cheaper model without affecting the runtime chat path.
+  const doc2queryGenerator: Doc2QueryGeneratorPort =
+    chatLlm !== undefined
+      ? new OpenAiDoc2QueryGenerator({ chatLlm, model: config.openai.doc2queryModel })
+      : new StubDoc2QueryGenerator();
+
   return {
     searchIndex,
     embeddingService,
+    doc2queryGenerator,
     ...(chatLlm !== undefined ? { chatLlm } : {}),
     ...(config.cohere.apiKey !== undefined
       ? {

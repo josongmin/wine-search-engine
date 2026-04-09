@@ -430,6 +430,9 @@ export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecor
     ...(rec.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: rec.learnedSparseWeights }
       : {}),
+    ...(rec.syntheticQueries !== undefined && rec.syntheticQueries.length > 0
+      ? { syntheticQueries: rec.syntheticQueries }
+      : {}),
   };
 }
 
@@ -553,6 +556,9 @@ export function silverToRetrievalDoc(
       : {}),
     ...(indexable.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: indexable.learnedSparseWeights }
+      : {}),
+    ...(indexable.syntheticQueries !== undefined && indexable.syntheticQueries.length > 0
+      ? { syntheticQueries: indexable.syntheticQueries }
       : {}),
     ...(indexable.alcoholPct !== undefined ? { alcoholPct: indexable.alcoholPct } : {}),
     ...(indexable.producerPrestige !== undefined

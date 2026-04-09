@@ -45,7 +45,7 @@ export function deconfuse(value: string): string {
   let result = '';
   for (const char of composed) {
     const replacement = HOMOGLYPH_MAP.get(char);
-    result += replacement !== undefined ? replacement : char;
+    result += replacement ?? char;
   }
   return result;
 }

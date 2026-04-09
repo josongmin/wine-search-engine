@@ -1,18 +1,12 @@
 import type { HybridCandidate } from './hybrid-candidate.js';
+import type { RetrievalChannel } from './retrieval-channel.js';
 
 /**
  * Channel sources for candidate provenance tracking.
- * Each value identifies which retrieval channel contributed the candidate.
+ * Derived from the single source of truth in retrieval-channel.ts.
+ * Previously this was a manually mirrored string union — bugbash A/SSoT fix.
  */
-export type CandidateChannel =
-  | 'sparse_bm25'
-  | 'dense_semantic'
-  | 'learned_sparse'    // future: Epic 4
-  | 'anchor_similarity' // future: Epic 4
-  | 'relative_filter'   // future: Epic 4
-  | 'browse_producer'
-  | 'browse_region'
-  | 'compare_anchor';
+export type CandidateChannel = RetrievalChannel;
 
 /**
  * Reason a candidate is "protected" — must survive assembly even if

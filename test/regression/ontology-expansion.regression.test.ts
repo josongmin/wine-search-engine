@@ -27,6 +27,9 @@ describe('RFC-019 regression: ontology expansion', () => {
       (c) => c.attribute === 'country' && c.value === 'France',
     );
     expect(countrySoft).toBeDefined();
+    // Strengthen: verify operator and that confidence is present
+    expect(countrySoft!.operator).toBe('=');
+    expect(countrySoft!.confidence).toBeGreaterThan(0);
   });
 
   it('region=Burgundy expands to soft country=France', () => {
@@ -37,6 +40,9 @@ describe('RFC-019 regression: ontology expansion', () => {
       (c) => c.attribute === 'country' && c.value === 'France',
     );
     expect(countrySoft).toBeDefined();
+    // Strengthen: verify operator and that confidence is present
+    expect(countrySoft!.operator).toBe('=');
+    expect(countrySoft!.confidence).toBeGreaterThan(0);
   });
 
   it('no expansion for unknown region', () => {

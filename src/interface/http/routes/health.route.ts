@@ -16,9 +16,12 @@ import {
 } from '../constants.js';
 import { getAgentExecutionMetricsCollector } from '../../../infrastructure/observability/agent-execution-metrics.js';
 import { getRetrievalDegradationCollector } from '../../../infrastructure/observability/retrieval-degradation-metrics.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+import { globalCircuitBreakerRegistry } from '../../../observability/circuit-breaker-registry.js';
 import { getRequestId } from '../request-id.js';
 import { buildSearchErrorResponse } from '../errors/error-response.js';
 import { headerKeysEqualConstantTime } from '../middleware/http-debug-mode.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Extracts the `X-Debug-Key` header (handling Fastify's `string | string[]`
@@ -73,7 +76,13 @@ export interface ReadinessCheck {
 
 export interface HealthRouteOptions {
   readonly readiness?: Readonly<Record<string, ReadinessCheck>>;
-  /** Optional secret to gate /metrics/agent (expects matching X-Debug-Key). */
+  /**
+   * Optional secret to gate /metrics/* endpoints (expects matching X-Debug-Key).
+   *
+   * When METRICS_DEBUG_SECRET is unset or empty, the metrics endpoints are OPEN
+   * (intended for local dev / read-only deploys). Set the secret to gate
+   * metrics behind the X-Debug-Key header in production.
+   */
   readonly metricsDebugSecret?: string | undefined;
 }
 
@@ -108,6 +117,8 @@ async function resolveStatus(readinessCheck?: ReadinessCheck): Promise<Readiness
   try {
     return await readinessCheck.check();
   } catch {
+    // intentional: individual probe implementations log their own failures;
+    // this is a last-resort guard so a throwing check() degrades to 'down'.
     return 'down';
   }
 }
@@ -138,6 +149,13 @@ export function registerHealthRoutes(
   app: FastifyInstance,
   options?: HealthRouteOptions,
 ): void {
+  if (!isValidMetricsSecret(options?.metricsDebugSecret) && process.env['NODE_ENV'] === 'production') {
+    bootstrapLogger.warn(
+      'METRICS_DEBUG_SECRET is unset or empty in production — /metrics/* endpoints are OPEN without authentication. '
+      + 'Set METRICS_DEBUG_SECRET to gate metrics behind the X-Debug-Key header.',
+    );
+  }
+
   registerContractRoute(app, {
     method: 'GET',
     url: '/health',
@@ -174,20 +192,41 @@ export function registerHealthRoutes(
           ...Object.keys(readinessChecks),
         ]),
       );
-      const checks = Object.fromEntries(
-        await Promise.all(
-          checkNames.map(async (checkName) => {
-            const readinessCheck = readinessChecks[checkName];
-            const status = await resolveStatus(readinessCheck);
-            // Default-required checks (postgres, redis) are required unless the
-            // caller explicitly opts them out via required:false in the readiness map.
-            const isDefaultCheck = (DEFAULT_READINESS_CHECKS as readonly string[]).includes(checkName);
-            return [checkName, {
+      // Use Promise.allSettled so that an unexpected throw from any single
+      // probe never collapses the entire readiness response. resolveStatus
+      // already catches its own errors and returns 'down'; the allSettled
+      // here is defense-in-depth against future probes that may not.
+      const settled = await Promise.allSettled(
+        checkNames.map(async (checkName) => {
+          const readinessCheck = readinessChecks[checkName];
+          const status = await resolveStatus(readinessCheck);
+          // Default-required checks (postgres, redis) are required unless the
+          // caller explicitly opts them out via required:false in the readiness map.
+          const isDefaultCheck = (DEFAULT_READINESS_CHECKS as readonly string[]).includes(checkName);
+          return [
+            checkName,
+            {
               status,
               required: readinessCheck?.required ?? isDefaultCheck,
-            }];
-          }),
-        ),
+            },
+          ] as const;
+        }),
+      );
+      const checks = Object.fromEntries(
+        settled.map((result, index) => {
+          if (result.status === 'fulfilled') return result.value;
+          // Probe threw despite resolveStatus's catch — surface as 'down'.
+          const checkName = checkNames[index] ?? 'unknown';
+          const readinessCheck = readinessChecks[checkName];
+          const isDefaultCheck = (DEFAULT_READINESS_CHECKS as readonly string[]).includes(checkName);
+          return [
+            checkName,
+            {
+              status: 'down' as const,
+              required: readinessCheck?.required ?? isDefaultCheck,
+            },
+          ] as const;
+        }),
       ) as ReadyResponse['checks'];
       // A required check blocks readiness only when its checker actively
       // reports 'down'. 'skipped' means no checker was registered — treat it
@@ -216,26 +255,21 @@ export function registerHealthRoutes(
     url: '/metrics/agent',
     contract: AgentMetricsRouteContract,
     handler: async (request, reply) => {
+      // When METRICS_DEBUG_SECRET is unset or empty, the metrics endpoint is
+      // OPEN (intended for local dev / read-only deploys). Set the secret to
+      // gate metrics behind the X-Debug-Key header.
       const expectedSecret = options?.metricsDebugSecret;
-      if (!isValidMetricsSecret(expectedSecret)) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          AgentMetricsRouteContract,
-          HTTP_STATUS_FORBIDDEN,
-          denyMetricsAccess(request),
-        );
-        return;
-      }
-      if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          AgentMetricsRouteContract,
-          HTTP_STATUS_FORBIDDEN,
-          denyMetricsAccess(request),
-        );
-        return;
+      if (isValidMetricsSecret(expectedSecret)) {
+        if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
+          sendRouteContractResponse(
+            request,
+            reply,
+            AgentMetricsRouteContract,
+            HTTP_STATUS_FORBIDDEN,
+            denyMetricsAccess(request),
+          );
+          return;
+        }
       }
       const metrics = getAgentExecutionMetricsCollector().getMetrics();
       sendRouteContractResponse(
@@ -270,28 +304,30 @@ export function registerHealthRoutes(
     url: '/metrics/retrieval-degradation',
     contract: RetrievalDegradationMetricsRouteContract,
     handler: async (request, reply) => {
+      // When METRICS_DEBUG_SECRET is unset or empty, the metrics endpoint is
+      // OPEN (intended for local dev / read-only deploys). Set the secret to
+      // gate metrics behind the X-Debug-Key header.
       const expectedSecret = options?.metricsDebugSecret;
-      if (!isValidMetricsSecret(expectedSecret)) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          RetrievalDegradationMetricsRouteContract,
-          HTTP_STATUS_FORBIDDEN,
-          denyMetricsAccess(request),
-        );
-        return;
-      }
-      if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
-        sendRouteContractResponse(
-          request,
-          reply,
-          RetrievalDegradationMetricsRouteContract,
-          HTTP_STATUS_FORBIDDEN,
-          denyMetricsAccess(request),
-        );
-        return;
+      if (isValidMetricsSecret(expectedSecret)) {
+        if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
+          sendRouteContractResponse(
+            request,
+            reply,
+            RetrievalDegradationMetricsRouteContract,
+            HTTP_STATUS_FORBIDDEN,
+            denyMetricsAccess(request),
+          );
+          return;
+        }
       }
       const metrics = getRetrievalDegradationCollector().getMetrics();
+      const silentSkips = globalSilentSkipCounter.snapshot();
+      const breakers = globalCircuitBreakerRegistry.snapshot().map((b) => ({
+        name: b.name,
+        state: b.state,
+        failure_count: b.metrics.failureCount,
+        open_count: b.metrics.openCount,
+      }));
       sendRouteContractResponse(
         request,
         reply,
@@ -305,6 +341,8 @@ export function registerHealthRoutes(
             degradation_rate: metrics.degradationRate,
             alerts: metrics.alerts,
           },
+          silent_skips: silentSkips,
+          circuit_breakers: breakers,
         },
       );
     },

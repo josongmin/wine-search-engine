@@ -5,9 +5,13 @@ import type {
   AggregatedFeedbackStats,
 } from '../../domain/learning/port/feedback-store.port.js';
 import type { FeedbackSignal, FeedbackType } from '../../domain/learning/model/feedback-signal.js';
-import type { DecisionSnapshot, EntityId, QueryClass } from '../../domain/shared/types/index.js';
-import { createEntityId } from '../../domain/shared/types/index.js';
+import type { EntityId, QueryClass } from '../../domain/shared/types/index.js';
+import { createEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { parseDecisionSnapshotJsonb } from './jsonb-schemas.js';
+
+const feedbackLog = bootstrapLogger.child({ component: 'PgFeedbackStore' });
 
 function toFeedbackType(value: string): FeedbackType {
   if (
@@ -47,8 +51,7 @@ function rowToSignal(row: FeedbackRow): FeedbackSignal {
     isPositive: row.is_positive,
     timestamp: row.created_at,
     sessionId: row.session_id,
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full DecisionSnapshot Zod validation deferred
-    decisionSnapshot: row.decision_snapshot as DecisionSnapshot,
+    decisionSnapshot: parseDecisionSnapshotJsonb(row.decision_snapshot, 'PgFeedbackStore'),
   };
 }
 
@@ -56,6 +59,13 @@ export class PgFeedbackStore implements FeedbackStore {
   constructor(private readonly pool: Pool) {}
 
   async saveFeedback(signal: FeedbackSignal): Promise<void> {
+    if (isCorruptedSnapshot(signal.decisionSnapshot)) {
+      feedbackLog.warn(
+        { signalId: signal.signalId },
+        'PgFeedbackStore: refusing to persist feedback with corrupted decision snapshot',
+      );
+      return;
+    }
     await this.pool.query(
       `INSERT INTO feedback_signals (
         signal_id, signal_type, query, query_class,

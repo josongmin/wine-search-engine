@@ -86,3 +86,66 @@ describe('WatchlistService', () => {
     })).resolves.toHaveLength(1);
   });
 });
+
+describe('InMemoryWatchlistStore.withTransaction (port parity)', () => {
+  it('rolls back mutations when the callback throws, matching PG semantics', async () => {
+    const store = new InMemoryWatchlistStore();
+
+    const baseline = {
+      id: 'w-baseline',
+      userId: 'u-1',
+      entityId: 'e-1',
+      triggerConditions: [],
+      callbackUrl: 'https://example.com/cb',
+      createdAt: new Date('2025-01-01T00:00:00Z'),
+      expiresAt: null,
+    };
+    await store.save(baseline);
+
+    await expect(
+      store.withTransaction(async (tx) => {
+        // Mutate inside the transaction, then throw — the rollback path must
+        // restore the pre-transaction snapshot. Without it, the in-memory
+        // adapter would silently commit partial state and diverge from the
+        // PG adapter, which runs BEGIN/ROLLBACK (see port JSDoc).
+        await tx.save({
+          ...baseline,
+          id: 'w-new',
+          entityId: 'e-2',
+        });
+        await tx.append({
+          id: 'log-1',
+          watchlistId: 'w-baseline',
+          attempt: 1,
+          statusCode: 500,
+          errorMessage: 'boom',
+          deliveredAt: new Date(),
+        });
+        throw new Error('fail-midway');
+      }),
+    ).rejects.toThrow('fail-midway');
+
+    await expect(store.findById('w-new')).resolves.toBeNull();
+    await expect(store.findById('w-baseline')).resolves.toEqual(baseline);
+    await expect(store.listByWatchlistId('w-baseline')).resolves.toEqual([]);
+  });
+
+  it('commits mutations when the callback resolves', async () => {
+    const store = new InMemoryWatchlistStore();
+
+    const result = await store.withTransaction(async (tx) => {
+      await tx.save({
+        id: 'w-commit',
+        userId: 'u-1',
+        entityId: 'e-commit',
+        triggerConditions: [],
+        callbackUrl: 'https://example.com/cb',
+        createdAt: new Date('2025-01-01T00:00:00Z'),
+        expiresAt: null,
+      });
+      return 'ok';
+    });
+    expect(result).toBe('ok');
+    await expect(store.findById('w-commit')).resolves.not.toBeNull();
+  });
+});

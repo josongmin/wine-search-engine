@@ -303,6 +303,12 @@ export function toVespaFields(
   if (doc.flavorProfiles !== undefined) fields['flavor_profiles'] = [...doc.flavorProfiles];
   if (doc.oakTreatment !== undefined) fields['oak_treatment'] = doc.oakTreatment;
 
+  // Doc2Query synthetic queries — emit only when non-empty so existing
+  // documents without an expansion pass don't carry an empty field.
+  if (doc.syntheticQueries !== undefined && doc.syntheticQueries.length > 0) {
+    fields['synthetic_queries'] = [...doc.syntheticQueries];
+  }
+
   // Learned sparse weights: serialize as Vespa mapped tensor cells.
   // Skip when entries is empty — an empty tensor cell array is a no-op in Vespa
   // and causes parseSparseWeightsTensor to return undefined on roundtrip anyway.
@@ -356,6 +362,10 @@ export function fromVespaFields(
   const flavorProfilesRaw = fields['flavor_profiles'];
   const flavorProfiles = isStringArray(flavorProfilesRaw) ? flavorProfilesRaw : undefined;
   const oakTreatment = getOptionalString(fields, 'oak_treatment');
+
+  // Doc2Query synthetic queries
+  const syntheticQueriesRaw = fields['synthetic_queries'];
+  const syntheticQueries = isStringArray(syntheticQueriesRaw) ? syntheticQueriesRaw : undefined;
 
   // Learned sparse weights
   const learnedSparseWeights = parseSparseWeightsTensor(fields['learned_sparse_weights']);
@@ -423,6 +433,7 @@ export function fromVespaFields(
     ...(summary.regionHierarchy !== undefined && { regionHierarchy: [...summary.regionHierarchy] }),
     ...(summary.priceBandNumeric !== undefined && { priceBandNumeric: summary.priceBandNumeric }),
     ...(learnedSparseWeights !== undefined && { learnedSparseWeights }),
+    ...(syntheticQueries !== undefined && { syntheticQueries }),
   };
 }
 

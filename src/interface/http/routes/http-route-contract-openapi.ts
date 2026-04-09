@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { DeclaredHttpRouteContractCatalog } from './http-route-contract-catalog.js';
 import { camelToSnake } from '../middleware/snake-case-hook.js';
+import { toFiniteInteger } from '../../../domain/shared/utils/safe-number.js';
 import {
   HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,
   HTTP_SUCCESS_STATUS_MIN,
@@ -192,8 +193,12 @@ export function buildHttpRouteContractOpenApiBridge(): OpenApiBridgeDocument {
   for (const entry of DeclaredHttpRouteContractCatalog) {
     const pathKey = toOpenApiPath(entry.url);
     const methodKey = entry.method.toLowerCase() as 'get' | 'post' | 'delete' | 'put' | 'patch';
+    // HTTP status codes are stringified integer keys; toFiniteInteger gives
+    // a single guard point so semgrep wine-number-without-finite-guard does
+    // not flag this coercion.
     const statusCodes = Object.keys(entry.contract.responses)
-      .map((statusCode) => Number(statusCode))
+      .map((statusCode) => toFiniteInteger(statusCode))
+      .filter((n): n is number => n !== null)
       .sort((left, right) => left - right);
     const successStatusCodes = statusCodes.filter(
       (statusCode) => statusCode >= HTTP_SUCCESS_STATUS_MIN && statusCode < HTTP_SUCCESS_STATUS_MAX_EXCLUSIVE,

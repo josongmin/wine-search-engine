@@ -10,6 +10,7 @@
 
 import type { FeedbackEvent } from '../model/feedback-event.js';
 import type { DebiasedRelevance } from './position-debias.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /** Default minimum impressions per (query, entity) before it becomes a label. */
 export const DEFAULT_MIN_IMPRESSIONS = 5;
@@ -37,12 +38,7 @@ export interface ExtractTrainingDataOptions {
   readonly now?: () => number;
 }
 
-function clamp01(x: number): number {
-  if (!Number.isFinite(x)) return 0;
-  if (x < 0) return 0;
-  if (x > 1) return 1;
-  return x;
-}
+// clamp01: imported from @shared/utils/clamp (SSoT).
 
 /**
  * Extract (query, entityId) training examples from feedback events.

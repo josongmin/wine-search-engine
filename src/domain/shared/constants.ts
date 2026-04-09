@@ -39,3 +39,9 @@ export const KRW_PER_MAN_WON = 10_000;
  * KRW in one "천원" (1,000 won) unit.
  */
 export const KRW_PER_CHEON_WON = 1_000;
+
+/**
+ * KRW in one "억원" (100,000,000 won) unit. Used for high-end wine
+ * price queries (e.g. "1억원 이상 그랑크뤼"). 1억 = 10^8 = 100 million.
+ */
+export const KRW_PER_EOK_WON = 100_000_000;

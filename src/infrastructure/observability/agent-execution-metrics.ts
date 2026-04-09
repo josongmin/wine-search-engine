@@ -101,8 +101,6 @@ export class AgentExecutionMetricsCollector implements AgentExecutionObserver {
 let globalCollector: AgentExecutionMetricsCollector | undefined;
 
 export function getAgentExecutionMetricsCollector(): AgentExecutionMetricsCollector {
-  if (globalCollector === undefined) {
-    globalCollector = new AgentExecutionMetricsCollector();
-  }
+  globalCollector ??= new AgentExecutionMetricsCollector();
   return globalCollector;
 }

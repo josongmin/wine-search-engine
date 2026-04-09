@@ -76,7 +76,7 @@ export async function evaluateQueryEntrySecurity(
       const isTimeout = err instanceof Error && err.message === 'injection_judge_timeout';
       bootstrapLogger.warn(
         {
-          err: err instanceof Error ? err.message : String(err),
+          err,
           judgeFailureMode,
           ...(isTimeout ? { timeout_ms: JUDGE_TIMEOUT_MS } : {}),
         },

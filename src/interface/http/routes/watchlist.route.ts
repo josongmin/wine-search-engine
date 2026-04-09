@@ -21,6 +21,7 @@ import {
 } from '../schemas/watchlist.schema.js';
 import type { WatchlistRouteDeps } from './route-deps.js';
 import { registerContractRoute } from './register-contract-route.js';
+import { toFiniteNumber } from '../../../domain/shared/utils/safe-number.js';
 import { parseContractBody, sendRouteContractResponse } from './contract-response.js';
 import {
   WatchlistCreateRouteContract,
@@ -115,15 +116,13 @@ export function registerWatchlistRoute(
       try {
         const allEntries = await deps.watchlistService.listByUserId(subject);
         const queryParams = request.query as Record<string, unknown>;
-        const limitParam = queryParams['limit'];
-        const offsetParam = queryParams['offset'];
-        const rawLimit = Number(limitParam);
-        const rawOffset = Number(offsetParam);
+        const rawLimit = toFiniteNumber(queryParams['limit']);
+        const rawOffset = toFiniteNumber(queryParams['offset']);
         const limit = Math.min(
-          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number.isFinite(rawLimit) ? rawLimit : WATCHLIST_PAGE_DEFAULT_LIMIT),
+          Math.max(WATCHLIST_PAGE_MIN_LIMIT, rawLimit ?? WATCHLIST_PAGE_DEFAULT_LIMIT),
           WATCHLIST_PAGE_MAX_LIMIT,
         );
-        const offset = Math.max(WATCHLIST_OFFSET_MIN, Number.isFinite(rawOffset) ? rawOffset : WATCHLIST_OFFSET_MIN);
+        const offset = Math.max(WATCHLIST_OFFSET_MIN, rawOffset ?? WATCHLIST_OFFSET_MIN);
         const entries = allEntries.slice(offset, offset + limit);
         const response = ListWatchlistResponseSchema.parse({
           entries: entries.map(toWatchlistEntryResponse),
@@ -395,15 +394,13 @@ export function registerWatchlistRoute(
         }
 
         const dQueryParams = request.query as Record<string, unknown>;
-        const dLimitParam = dQueryParams['limit'];
-        const dOffsetParam = dQueryParams['offset'];
-        const rawDLimit = Number(dLimitParam);
-        const rawDOffset = Number(dOffsetParam);
+        const rawDLimit = toFiniteNumber(dQueryParams['limit']);
+        const rawDOffset = toFiniteNumber(dQueryParams['offset']);
         const dLimit = Math.min(
-          Math.max(WATCHLIST_PAGE_MIN_LIMIT, Number.isFinite(rawDLimit) ? rawDLimit : WATCHLIST_PAGE_DEFAULT_LIMIT),
+          Math.max(WATCHLIST_PAGE_MIN_LIMIT, rawDLimit ?? WATCHLIST_PAGE_DEFAULT_LIMIT),
           WATCHLIST_PAGE_MAX_LIMIT,
         );
-        const dOffset = Math.max(WATCHLIST_OFFSET_MIN, Number.isFinite(rawDOffset) ? rawDOffset : WATCHLIST_OFFSET_MIN);
+        const dOffset = Math.max(WATCHLIST_OFFSET_MIN, rawDOffset ?? WATCHLIST_OFFSET_MIN);
         const pagedDeliveries = deliveries.slice(dOffset, dOffset + dLimit);
         const response = ListDeliveriesResponseSchema.parse({
           deliveries: pagedDeliveries.map((log: WatchlistDeliveryLogEntry) => ({

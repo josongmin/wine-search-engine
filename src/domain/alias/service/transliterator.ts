@@ -1,5 +1,6 @@
 import type { AliasType } from '../model/alias.js';
 import { stripVintageYears } from '../../shared/utils/vintage.js';
+import { containsHangul as sharedContainsHangul } from '../../shared/utils/hangul.js';
 
 /**
  * Result of generating a transliterated alias.
@@ -516,9 +517,7 @@ export class Transliterator {
    *   "unknown 와인"   → undefined
    */
   static romanizeWineTerm(koreanTerm: string): string | undefined {
-    if (Transliterator.KO_TO_LATIN_INDEX === undefined) {
-      Transliterator.KO_TO_LATIN_INDEX = Transliterator.buildKoToLatinIndex();
-    }
+    Transliterator.KO_TO_LATIN_INDEX ??= Transliterator.buildKoToLatinIndex();
     const key = Transliterator.normalizeKoreanWineKey(koreanTerm);
     if (key.length === 0) return undefined;
     return Transliterator.KO_TO_LATIN_INDEX.get(key);
@@ -527,10 +526,10 @@ export class Transliterator {
   /**
    * Test whether a string contains any Hangul (한글) syllables. Used by the
    * verifier to decide whether to attempt reverse romanization before comparing
-   * against Latin-only evidence.
+   * against Latin-only evidence. Delegates to @shared/utils/hangul (SSoT).
    */
   static containsHangul(s: string): boolean {
-    return /[\uAC00-\uD7A3]/u.test(s);
+    return sharedContainsHangul(s);
   }
 
   /**

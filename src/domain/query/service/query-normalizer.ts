@@ -17,6 +17,33 @@ const PHONETIC_NORMALIZATION_RULES: readonly [RegExp, string][] = [
   [/eau/g, 'o'],
   [/aux/g, 'o'],
 ] as const;
+/**
+ * Korean josa (particle) suffix stripper.
+ *
+ * Matches common noun particles attached to the end of a Hangul-syllable token:
+ *   은/는/이/가   subject markers
+ *   을/를         object markers
+ *   의            possessive
+ *   에/에서/에게  locative / dative
+ *   로/으로       directional
+ *   와/과/랑/이랑 "and/with"
+ *   부터/까지/도  range / additive
+ *   보다          comparison
+ *
+ * The regex requires at least 1 preceding Hangul syllable (U+AC00–U+D7A3) so
+ * we do not strip from Latin tokens (e.g. "data" must not lose "a"). It also
+ * uses the Unicode-safe boundary `(?=$|[^\p{L}\p{N}])` — \b is ASCII-only and
+ * would silently not match here.
+ *
+ * Honorific suffixes 님/씨 are included: they rarely apply to wines directly
+ * but appear in conversational wrappers like "샤또 무통 로칠드님".
+ */
+const KOREAN_JOSA_STRIP_RE =
+  /([\uAC00-\uD7A3])(은|는|이|가|을|를|의|에서|에게|에|으로|로|과|와|이랑|랑|부터|까지|보다|도|님|씨)(?=$|[^\p{L}\p{N}])/gu;
+
+const stripKoreanJosa = (value: string): string =>
+  value.replace(KOREAN_JOSA_STRIP_RE, '$1');
+
 const KOREAN_TRANSLITERATION_RULES: readonly [RegExp, string][] = [
   [/샤토\s*마고/gu, 'chateau margaux'],
   [/샤또\s*마고/gu, 'chateau margaux'],
@@ -197,6 +224,11 @@ export class QueryNormalizer {
     const compactView = compact(punctuationStripped);
     const vintageCanonicalized = canonicalizeVintage(punctuationStripped);
     const vintageStripped = stripVintage(vintageCanonicalized);
+    // Korean particle-stripped view: "보르도의 와인" → "보르도 와인",
+    // "샤또 무통 로칠드님" → "샤또 무통 로칠드". Applied AFTER vintage handling
+    // so vintage tokens remain numeric and unaffected. Only meaningful for
+    // Hangul-bearing queries; Latin-only queries are unchanged by the regex.
+    const josaStripped = collapseWhitespace(stripKoreanJosa(vintageStripped));
     const transliteratedVariants = buildTransliterationVariants(vintageStripped);
     const transliterated = transliteratedVariants[0];
     const transliteratedCompacts = transliteratedVariants.map((value) => compact(value));
@@ -236,6 +268,7 @@ export class QueryNormalizer {
         compactView,
         vintageCanonicalized,
         vintageStripped,
+        ...(josaStripped !== vintageStripped ? [josaStripped] : []),
         ...transliteratedVariants,
         ...transliteratedCompacts,
         ...(phoneticNormalizedView.length > 0 ? [phoneticNormalizedView] : []),

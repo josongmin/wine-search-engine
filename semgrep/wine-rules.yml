@@ -63,3 +63,454 @@ rules:
       exclude:
         - "**/*.test.ts"
         - "**/__tests__/**"
+
+  # =========================================================================
+  # Bugbash-derived rules (2026-04-09 audit rounds 1-10)
+  # =========================================================================
+
+  - id: wine-promise-all-multi-fetch
+    languages: [typescript]
+    message: >-
+      `Promise.all` with multiple independent fetches: if one fails, ALL results are lost.
+      Use `Promise.allSettled` and filter `status === 'fulfilled'` for graceful degradation.
+      Bugbash Round 2: found 3 instances causing total-failure on single-entity errors.
+    severity: WARNING
+    metadata:
+      category: correctness
+      references:
+        - docs/bugbash/2026-04-09-general.md
+    pattern: |
+      Promise.all($ITEMS.map(async ($X) => { ... }))
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - "**/test/**"
+
+  - id: wine-number-without-finite-guard
+    languages: [typescript]
+    message: >-
+      `Number($X)` on external input without `Number.isFinite()` guard.
+      Non-numeric strings produce NaN; NaN comparisons silently return false.
+      Use: `const n = Number(x); if (!Number.isFinite(n)) { ... }`
+      Bugbash Round 1: NaN propagation in constraint-overlay caused silent hard-filter failures.
+    severity: WARNING
+    metadata:
+      category: correctness
+    patterns:
+      - pattern: Number($X)
+      - pattern-not-inside: |
+          Number.isFinite(...)
+      - pattern-not-inside: |
+          const $Y: unknown = ...
+    paths:
+      include:
+        - src/infrastructure/**
+        - src/interface/**
+        - src/domain/mixed/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - "**/test/**"
+
+  - id: wine-new-date-without-finite
+    languages: [typescript]
+    message: >-
+      `new Date($INPUT).getTime()` without `Number.isFinite()` guard.
+      Invalid date strings produce NaN; NaN comparisons are always false.
+      CLAUDE.md rule 28.
+    severity: WARNING
+    metadata:
+      category: correctness
+    pattern: new Date($X).getTime()
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - "**/test/**"
+
+  - id: wine-jsonb-as-cast
+    languages: [typescript]
+    message: >-
+      Direct `as` cast on JSONB/external data. Use Zod `.safeParse()` or a
+      runtime type guard instead. CLAUDE.md rule 11.
+      Bugbash audit: this was the #1 type-safety violation class.
+    severity: WARNING
+    metadata:
+      category: correctness
+    pattern-either:
+      - pattern: ($X as Record<string, $T>)
+      - pattern: ($X as unknown as Record<string, $T>)
+    paths:
+      include:
+        - src/infrastructure/adapter/pg-*.ts
+        - src/infrastructure/cache/*.ts
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-catch-empty
+    languages: [typescript]
+    message: >-
+      Empty catch block swallows errors silently. Either log via bootstrapLogger/pino,
+      re-throw, or add `// intentional: <reason>` comment.
+    severity: WARNING
+    metadata:
+      category: correctness
+    pattern: |
+      try { ... } catch ($E) { }
+    paths:
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - "**/test/**"
+
+  # Note: .sort() without comparator is covered by ESLint
+  # @typescript-eslint/require-array-sort-compare, which has type-awareness
+  # to distinguish string arrays (lexicographic sort is correct) from numeric
+  # arrays (bug). Semgrep cannot access type info, so we rely on ESLint for this.
+
+  - id: wine-console-in-src
+    languages: [typescript]
+    message: >-
+      `console.*` bypasses pino serializers (leaking SQL params, connection strings).
+      Use bootstrapLogger (startup) or a pino child logger (runtime).
+    severity: ERROR
+    metadata:
+      category: best-practice
+    pattern-either:
+      - pattern: console.log(...)
+      - pattern: console.info(...)
+      - pattern: console.debug(...)
+    paths:
+      include:
+        - src/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-math-random-for-id
+    languages: [typescript]
+    message: >-
+      `Math.random()` for ID generation is predictable. Use `crypto.randomUUID()`.
+      CLAUDE.md schema quality bar.
+    severity: WARNING
+    metadata:
+      category: security
+    pattern: Math.random()
+    paths:
+      include:
+        - src/domain/**
+        - src/application/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-duplicate-ssot-rrf
+    languages: [typescript]
+    message: >-
+      Private `reciprocalRankContribution` function duplicates `rrfContribution`
+      from `@shared/utils/rrf.ts`. Import from the SSoT module instead.
+    severity: ERROR
+    metadata:
+      category: best-practice
+    pattern-either:
+      - pattern: |
+          function reciprocalRankContribution(...) { ... }
+      - pattern: |
+          const reciprocalRankContribution = (...) => ...
+    paths:
+      include:
+        - src/**
+      exclude:
+        - src/domain/shared/utils/rrf.ts
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  # =========================================================================
+  # Fallback / Heuristic Audit rules (2026-04-09 audit round 11+)
+  # =========================================================================
+
+  - id: wine-duplicate-ssot-vintage
+    languages: [typescript]
+    message: >-
+      Inline vintage regex `(19|20)\d{2}`. Import from
+      `@shared/utils/vintage.ts` (VINTAGE_YEAR_RAW or extractVintageYear)
+      to keep one single source of truth for vintage year patterns.
+      (Epic-01 SSoT)
+    severity: ERROR
+    metadata:
+      category: best-practice
+    pattern-regex: '\(19\|20\)\\d\{2\}'
+    paths:
+      include:
+        - src/**
+      exclude:
+        - src/domain/shared/utils/vintage.ts
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-no-string-equals-secret
+    languages: [typescript, javascript]
+    message: >-
+      Direct `===`/`!==` comparison on secret/key variables is timing-unsafe.
+      Use `headerKeysEqualConstantTime()` from `http-debug-mode.ts`
+      (wraps crypto.timingSafeEqual + HMAC for length-independent timing).
+      (Epic-08 security hardening)
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: 'CWE-208: Observable Timing Discrepancy'
+    pattern-either:
+      - pattern: $HEADER !== metricsDebugSecret
+      - pattern: metricsDebugSecret !== $HEADER
+      - pattern: $HEADER === metricsDebugSecret
+      - pattern: metricsDebugSecret === $HEADER
+      - pattern: $HEADER !== debugSecret
+      - pattern: debugSecret !== $HEADER
+      - pattern: $HEADER === debugSecret
+      - pattern: debugSecret === $HEADER
+    paths:
+      include:
+        - src/interface/http/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - src/interface/http/middleware/http-debug-mode.ts
+
+  - id: wine-deprecated-retrieval-fusion-score-read
+    languages: [typescript]
+    message: >-
+      `retrievalFusionScore` is deprecated (semantic overload: RRF total vs
+      BM25 raw). Use `fusionRrfTotal` for RRF total or `sparseRawScore`
+      for per-channel BM25 raw score. (Group C score semantic split)
+    severity: WARNING
+    metadata:
+      category: best-practice
+    pattern: $X.retrievalFusionScore
+    paths:
+      include:
+        - src/domain/ranking/**
+        - src/application/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  # NOTE: a semgrep rule for the "norm===0 → return first" embedding bug
+  # is hard to express without false positives. Coverage is provided by the
+  # vintage.test-style regression in semantic-embedding-combiner.test.ts.
+
+  # =========================================================================
+  # Bugbash Round 14-18 derived rules (2026-04-10 audit second wave)
+  # =========================================================================
+
+  # NOTE: wine-getfullyear-module-scope rule was removed.
+  # Semgrep cannot reliably distinguish module-scope `const X = new Date().getFullYear()`
+  # (a stale-constant bug) from function-scope `const X = new Date().getFullYear()`
+  # (recomputed per call, correct). All 6 matches in this codebase were
+  # function-scope and correct. Coverage of module-scope cases is provided
+  # by code review + the test/regression/date-time-audit.regression.test.ts
+  # year-rollover regression suite (Bugbash Round 12).
+
+  - id: wine-zod-parse-on-external-data
+    languages: [typescript]
+    message: >-
+      `.parse()` throws on validation failure — disruptive in HTTP/retrieval hot
+      paths and especially dangerous on JSONB/Redis/Vespa external boundaries.
+      Use `.safeParse()` and log+fallback so a single corrupted record does not
+      crash the request. Bugbash Round 16.
+    severity: WARNING
+    metadata:
+      category: correctness
+    pattern-either:
+      - pattern: $SCHEMA.parse(JSON.parse(...))
+      - pattern: |
+          const $X = JSON.parse($Y);
+          $SCHEMA.parse($X)
+    paths:
+      include:
+        - src/infrastructure/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-fabricated-error-response
+    languages: [typescript]
+    message: >-
+      HTTP catch block fabricates a response from an unexpected error instead of
+      throwing to the global error handler (which emits the RFC-014 envelope).
+      Per CLAUDE.md: only enumerated, expected degradation paths may return
+      degraded responses; unknown errors MUST throw.
+      NEW code MUST throw; existing watchlist/feedback routes are exempt during
+      cleanup window. Bugbash Round 13.
+    severity: INFO
+    metadata:
+      category: correctness
+    pattern: |
+      try { ... } catch ($E) { ... sendRouteContractResponse(...); ... }
+    paths:
+      include:
+        - src/interface/http/routes/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - src/interface/http/routes/feedback.route.ts
+        - src/interface/http/routes/watchlist.route.ts
+
+  - id: wine-private-canonical-channel
+    languages: [typescript]
+    message: >-
+      Private `toCanonicalCandidateChannel` or `isCandidateChannel` duplicates
+      the SSoT in `retrieval-channel.ts`. Import from there instead.
+      Bugbash Round 15 / SSoT policy.
+    severity: ERROR
+    metadata:
+      category: best-practice
+    pattern-either:
+      - pattern: |
+          function toCanonicalCandidateChannel(...) { ... }
+      - pattern: |
+          function isCandidateChannel(...) { ... }
+    paths:
+      include:
+        - src/**
+      exclude:
+        - src/domain/retrieval/model/retrieval-channel.ts
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-divide-without-zero-guard
+    languages: [typescript]
+    message: >-
+      Division operator without an explicit zero guard. If the denominator
+      can be 0, the result is Infinity (NaN if both operands are 0), which
+      silently propagates through downstream comparisons. Add an explicit
+      `if (denom === 0) return ...` or `(denom === 0) ? fallback : ...`.
+      Bugbash Round 17.
+    severity: INFO
+    metadata:
+      category: correctness
+    pattern-either:
+      - pattern: $NUM / $DEN.length
+      - pattern: $NUM / $DEN.size
+    paths:
+      include:
+        - src/domain/ranking/**
+        - src/domain/decision/**
+        - src/domain/calibration/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-spread-in-cache-key
+    languages: [typescript]
+    message: >-
+      Object spread or `{ ...obj }` directly in a cache key string is
+      non-deterministic across Node versions and field insertion order. Build
+      cache keys from sorted fields explicitly so the same logical input
+      always produces the same key string.
+      Bugbash Round 18.
+    severity: INFO
+    metadata:
+      category: correctness
+    pattern-either:
+      - pattern: |
+          `cache:${JSON.stringify({...$OBJ})}`
+      - pattern: |
+          'cache:' + JSON.stringify({...$OBJ})
+    paths:
+      include:
+        - src/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  # =========================================================================
+  # Phase 1-5 SOTA++ session — sentinel propagation & collector throw guards
+  # =========================================================================
+
+  # NOTE: corrupted-snapshot guard enforcement is too context-dependent for
+  # semgrep AST patterns (ternary guards, helper-function indirection, and
+  # builder vs consumer paths look identical to a regex). The audit-time
+  # check is owned by docs/bugbash/2026-04-09-general.md section G + the
+  # `isCorruptedSnapshot` regression test in
+  # test/regression/corrupted-snapshot-propagation.regression.test.ts.
+
+  - id: wine-feedback-collector-getall-no-try
+    languages: [typescript]
+    message: >-
+      `feedbackCollector.getAll()` can throw on storage I/O failures.
+      Wrap in try/catch and return a 'failed' status — a throwing collector
+      must NOT crash a cron-driven retrain orchestrator.
+      Bugbash Phase 5 audit gap.
+    severity: WARNING
+    metadata:
+      category: correctness
+      bugbash: collector-throw-resilience
+    patterns:
+      - pattern: $X.feedbackCollector.getAll()
+      - pattern-not-inside: |
+          try { ... } catch ($E) { ... }
+    paths:
+      include:
+        - "**/src/domain/learning/**"
+        - "**/src/application/**"
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  # NOTE: JSON.parse cast safety is enforced by ESLint no-restricted-syntax
+  # rule on TSAsExpression > CallExpression. The semgrep equivalent over-
+  # matches `JSON.parse(x) as unknown` (the safe pattern). Keeping ESLint as
+  # the single source of truth for this check.
+
+  # NOTE: zod-default-without-comment would noisily flag every legitimate
+  # `.default('info')` style enum-default. Drift is better caught by the
+  # parity tests in src/config/__tests__/query-entry-security-config.test.ts
+  # (which lock the runtime default via a unit assertion). Adding new
+  # security-sensitive defaults requires a parity test by convention.
+
+  # NOTE: async-port-method-no-await is enforced by ESLint
+  # @typescript-eslint/require-await — no semgrep rule needed.
+
+  # =========================================================================
+  # Phase B/4 SOTA++ session — SSoT util redefinition guards
+  # =========================================================================
+
+  - id: wine-no-local-clamp01-redef
+    languages: [typescript]
+    message: >-
+      Local `clamp01` definition shadows the SSoT in
+      `src/domain/shared/utils/clamp.ts`. Import the shared helper instead.
+      Multiple files used to redefine this and silently drift on the
+      [0, 1] semantics (NaN handling, half-open intervals, etc.).
+      CLAUDE.md rule 25 + 30: cross-module shared utilities have a single
+      source of truth.
+    severity: ERROR
+    metadata:
+      category: ssot
+      bugbash: clamp01-redef
+    pattern-either:
+      - pattern: |
+          function clamp01(...) { ... }
+      - pattern: |
+          const clamp01 = (...) => { ... }
+      - pattern: |
+          const clamp01 = function (...) { ... }
+    paths:
+      include:
+        - "**/src/**"
+      exclude:
+        - "**/src/domain/shared/utils/clamp.ts"
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  # NOTE: a generic `1 / (k + rank)` semgrep pattern over-fires on legitimate
+  # sigmoid (`1 / (1 + exp(-x))`) and rank-similarity (`1 / (1 + log(rank))`)
+  # math. RRF reintroduction is caught instead via:
+  #   1. ESLint no-magic-numbers (60 is the canonical k; bare literal in src/
+  #      forces a named const review)
+  #   2. The wine-no-local-clamp01-redef pattern which catches the broader
+  #      "redefined SSoT util" class
+  #   3. Code review on any new file under src/domain/retrieval/service/
+

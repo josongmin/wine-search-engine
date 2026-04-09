@@ -1,5 +1,5 @@
 import dotenv from 'dotenv';
-import { z } from 'zod';
+import { type z } from 'zod';
 
 import { AgentEnvSchema } from './env-schemas/agent.schema.js';
 import { AiEnvSchema } from './env-schemas/ai.schema.js';
@@ -157,6 +157,7 @@ function buildConfig(parsed: EnvVars) {
       apiKey: parsed.OPENAI_API_KEY,
       baseUrl: parsed.OPENAI_BASE_URL,
       chatModel: parsed.OPENAI_CHAT_MODEL,
+      doc2queryModel: parsed.OPENAI_DOC2QUERY_MODEL,
       embeddingModel: parsed.OPENAI_EMBEDDING_MODEL,
       httpTimeoutMs: parsed.OPENAI_HTTP_TIMEOUT_MS,
       llmQueryInterpreter: parsed.LLM_QUERY_INTERPRETER,

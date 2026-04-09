@@ -76,6 +76,15 @@ const DEFAULT_SNAPSHOT_PATH = 'data/entity-ontology.json';
 /** Maximum Zod validation issues to include in the error message. */
 const MAX_ZOD_ISSUES_IN_MESSAGE = 5;
 
+/** Max aliases per entity — no real entity has more than 50 names. */
+const MAX_ENTITY_ALIASES = 50;
+/** Max hierarchy depth — wine regions nest at most ~10 deep (country → … → appellation). */
+const MAX_HIERARCHY_DEPTH = 20;
+/** Max parent edges per entity in the flat array shape. */
+const MAX_ENTITY_PARENTS = 20;
+/** Max entities in a single snapshot — generous bound (~20K known entities). */
+const MAX_SNAPSHOT_ENTITIES = 50_000;
+
 /** Entity as it appears in the keyed `entities` map (preferred shape). */
 const KeyedEntitySchema = z
   .object({
@@ -83,8 +92,8 @@ const KeyedEntitySchema = z
     type: z.string().min(1),
     canonical: z.string().min(1),
     parent: z.string().nullable().optional(),
-    hierarchy: z.array(z.string()).optional(),
-    aliases: z.array(z.string()).default([]),
+    hierarchy: z.array(z.string()).max(MAX_HIERARCHY_DEPTH).optional(),
+    aliases: z.array(z.string()).max(MAX_ENTITY_ALIASES).default([]),
   })
   .passthrough();
 
@@ -94,8 +103,8 @@ const ArrayEntitySchema = z
     id: z.string().min(1),
     entityType: z.string().min(1),
     canonicalLabel: z.string().min(1),
-    aliases: z.array(z.string()).default([]),
-    parents: z.array(z.string()).optional(),
+    aliases: z.array(z.string()).max(MAX_ENTITY_ALIASES).default([]),
+    parents: z.array(z.string()).max(MAX_ENTITY_PARENTS).optional(),
   })
   .passthrough();
 
@@ -103,7 +112,7 @@ const SnapshotSchema = z
   .object({
     version: z.string().optional(),
     entities: z.record(KeyedEntitySchema).optional(),
-    nodes: z.array(ArrayEntitySchema).optional(),
+    nodes: z.array(ArrayEntitySchema).max(MAX_SNAPSHOT_ENTITIES).optional(),
     regionHierarchy: z.record(z.string()).optional(),
     grapeAliases: z.record(z.string()).optional(),
     wineTypeAliases: z.record(z.string()).optional(),
@@ -114,18 +123,49 @@ type Snapshot = z.infer<typeof SnapshotSchema>;
 
 export interface LoadSeedKGOptions {
   readonly filePath?: string;
+  /**
+   * When true (default), an ENOENT error returns an empty KG instead of
+   * crashing. Other errors (parse failure, schema violation, cycles) still
+   * propagate. This lets the application boot even when the snapshot is
+   * not yet generated, with KG-dependent features degrading to no-op.
+   */
+  readonly allowMissing?: boolean;
 }
+
+/** Empty KG returned when the snapshot file is missing and allowMissing=true. */
+const EMPTY_KG: WineKG = Object.freeze({
+  version: 'empty-fallback',
+  nodes: new Map(),
+  edges: [],
+});
 
 /**
  * Read and parse the ontology snapshot from disk, then materialize a WineKG.
  * Defaults to `data/entity-ontology.json` relative to the current working
  * directory.
+ *
+ * Missing-file behavior: by default returns an EMPTY KG with a warning log.
+ * Pass `allowMissing: false` to enforce strict mode (legacy/test path).
  */
 export async function loadSeedKG(
   options: LoadSeedKGOptions = {},
 ): Promise<WineKG> {
   const filePath = resolve(options.filePath ?? DEFAULT_SNAPSHOT_PATH);
-  const raw = await readFile(filePath, 'utf8');
+  const allowMissing = options.allowMissing ?? true;
+  let raw: string;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (err: unknown) {
+    const errno = (err as NodeJS.ErrnoException).code;
+    if (errno === 'ENOENT' && allowMissing) {
+      bootstrapLogger.warn(
+        { filePath },
+        '[wine-kg-loader] seed KG file not found — returning empty graph (KG-dependent features will degrade to no-op)',
+      );
+      return EMPTY_KG;
+    }
+    throw err;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

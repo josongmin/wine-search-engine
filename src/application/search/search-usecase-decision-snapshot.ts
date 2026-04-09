@@ -3,6 +3,7 @@ import { SNAPSHOT_ID_SCHEMA_VERSION } from '../../domain/decision/model/id-schem
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
+import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import { canonicalJsonStringify } from '../../domain/shared/utils/canonical-json.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
@@ -98,6 +99,11 @@ export function decisionSnapshotsMatch(
   expected: DecisionSnapshot,
   actual: DecisionSnapshot,
 ): boolean {
+  // Corrupted snapshots should never match anything — comparing two corrupted
+  // sentinels would return true and mask a real mismatch.
+  if (isCorruptedSnapshot(expected) || isCorruptedSnapshot(actual)) {
+    return false;
+  }
   return isDeepStrictEqual(
     toComparableDecisionSnapshot(expected),
     toComparableDecisionSnapshot(actual),

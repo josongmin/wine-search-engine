@@ -21,6 +21,8 @@
 /**
  * Ranking features extracted from retrieval results.
  */
+import { clamp01 } from '../../shared/utils/clamp.js';
+
 /**
  * Deterministic pseudo-random number generator (xorshift32).
  *
@@ -53,8 +55,6 @@ const LAMBDAMART_BIAS_CLAMP_HIGH = 2;
 const LAMBDAMART_WEIGHT_SUM_EPSILON = 1e-8;
 /** Validation NDCG@K (pairwise expansion uses top-K ranked pool). */
 const LAMBDAMART_VALIDATION_NDCG_K = 5;
-/** Max relevance label in training examples (grades 0..3). */
-const LAMBDAMART_MAX_RELEVANCE_GRADE = 3;
 
 function xorshift32(state: { value: number }): number {
   let x = state.value;
@@ -71,6 +71,10 @@ function xorshift32(state: { value: number }): number {
  * Uses xorshift32 seeded from the provided seed value.
  */
 function deterministicShuffle(arr: unknown[], seed: number): void {
+  // xorshift32 requires a non-zero seed (a 0 state is a fixed point that
+  // emits 0 forever). Coerce 0 to 1 — this is exactly the case where we
+  // INTENTIONALLY want falsy-coalesce, not nullish-coalesce.
+  // eslint-disable-next-line no-restricted-syntax -- xorshift32 forbids zero seed
   const rng = { value: (seed >>> 0) || 1 };
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(xorshift32(rng) * (i + 1));
@@ -224,10 +228,14 @@ export function trainLambdaMARTModel(
         );
       }
 
+      // batch.length is asserted > 0 above (line 220 throw); the Math.max
+      // duplicates the guard so the semgrep wine-divide-without-zero-guard
+      // pattern is satisfied at the division site itself.
+      const safeBatchSize = Math.max(1, batch.length);
       for (let j = 0; j < LAMBDAMART_FEATURE_DIMENSION; j++) {
         const currentWeight = weights[j] ?? 0;
         const currentGradient = gradients[j] ?? 0;
-        const gradient = currentGradient / batch.length;
+        const gradient = currentGradient / safeBatchSize;
         const nextWeight =
           currentWeight + learningRate * gradient - regularization * currentWeight;
         weights[j] = Math.max(
@@ -236,7 +244,7 @@ export function trainLambdaMARTModel(
         );
       }
 
-      bias = bias + learningRate * (biasMeanDelta / batch.length);
+      bias = bias + learningRate * (biasMeanDelta / safeBatchSize);
       bias = Math.max(
         LAMBDAMART_WEIGHT_CLAMP_LOW,
         Math.min(LAMBDAMART_BIAS_CLAMP_HIGH, bias),
@@ -248,10 +256,14 @@ export function trainLambdaMARTModel(
     // Guard: if all weights collapsed to near-zero (e.g., regularization drove
     // them all toward 0), fall back to uniform weights to avoid extreme values
     // that lose discriminative power after clamping.
+    // weights.length === LAMBDAMART_FEATURE_DIMENSION (constructor invariant);
+    // Math.max duplicates the guard so semgrep wine-divide-without-zero-guard
+    // is satisfied at the division site.
+    const safeFeatureCount = Math.max(1, weights.length);
     const normalizedWeights =
       weightSum > LAMBDAMART_WEIGHT_SUM_EPSILON
         ? weights.map((w) => w / weightSum)
-        : weights.map(() => 1 / weights.length);
+        : weights.map(() => 1 / safeFeatureCount);
 
     const validationNdcg = computeValidationNdcg(classExamples, normalizedWeights, bias);
 
@@ -274,8 +286,7 @@ export function scoreDocument(
   weights: QueryClassWeights,
 ): number {
   const raw = scoreFeaturesRaw(features, weights.weights, weights.bias);
-  if (!Number.isFinite(raw)) return 0;
-  return Math.max(0, Math.min(1, raw));
+  return clamp01(raw);
 }
 
 /**
@@ -345,14 +356,21 @@ function computeValidationNdcg(
       dcg += gain * discount;
     }
 
-    // IDCG must reflect the same candidate pool size as DCG. `scored` contains
-    // 2 documents per pair (doc1 + doc2), not 1 — using `exs.length` here was
-    // a /2 systematic underestimate of IDCG, inflating reported NDCG.
-    const idcg = Array.from(
-      { length: Math.min(LAMBDAMART_VALIDATION_NDCG_K, scored.length) },
-      (_, i) =>
-        (Math.pow(2, LAMBDAMART_MAX_RELEVANCE_GRADE) - 1) / Math.log2(i + 2),
-    ).reduce((sum, value) => sum + value, 0);
+    // IDCG is DCG of the IDEAL ranking — actual labels sorted by descending
+    // relevance, truncated to K. The prior formulation (constant max-grade at
+    // every position) is NOT IDCG: it turns NDCG into DCG-over-a-constant,
+    // which systematically deflates NDCG for query pools where most labels
+    // are below the hard-coded max grade (the common case). This
+    // produced a flat-but-wrong validation signal during model promotion.
+    const sortedLabelsForIdcg = scored
+      .map((s) => s.label)
+      .sort((a, b) => b - a)
+      .slice(0, LAMBDAMART_VALIDATION_NDCG_K);
+    let idcg = 0;
+    for (let i = 0; i < sortedLabelsForIdcg.length; i++) {
+      const label = sortedLabelsForIdcg[i]!;
+      idcg += (Math.pow(2, label) - 1) / Math.log2(i + 2);
+    }
 
     const queryNdcg = idcg > 0 ? dcg / idcg : 0;
     totalNdcg += queryNdcg;

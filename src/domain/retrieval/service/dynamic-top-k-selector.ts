@@ -125,10 +125,16 @@ function pickTier(
  *   - Latency budget is clamped to {@link MIN_LATENCY_BUDGET_MS}.
  */
 export function selectTopK(input: TopKInput): TopKSelection {
-  const latencyBudgetMs = Math.max(
-    MIN_LATENCY_BUDGET_MS,
-    Math.floor(input.latencyBudgetMs),
-  );
+  // Guard against NaN/Infinity: Math.floor(NaN) = NaN, and any NaN
+  // comparison (`<=`) returns false, which silently routed NaN budgets
+  // into the HARD tier (maximum recall spend) instead of the safest
+  // small-budget fallback. Non-finite inputs collapse to the minimum
+  // coherent budget so the selector fails closed.
+  const rawBudget = input.latencyBudgetMs;
+  const coercedBudget = Number.isFinite(rawBudget)
+    ? Math.floor(rawBudget)
+    : MIN_LATENCY_BUDGET_MS;
+  const latencyBudgetMs = Math.max(MIN_LATENCY_BUDGET_MS, coercedBudget);
 
   const tier = pickTier(input.difficulty, latencyBudgetMs);
 

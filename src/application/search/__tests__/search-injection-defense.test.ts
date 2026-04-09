@@ -223,8 +223,9 @@ describe('SearchUseCase with Injection Defense', () => {
 
       try {
         await useCase.execute(request, 'test-request-no-judge');
-      } catch {
+      } catch (downstreamMockError) {
         // downstream mocks are incomplete; reaching planner is enough
+        void downstreamMockError;
       }
 
       expect(plannerMock.plan).toHaveBeenCalled();
@@ -270,8 +271,9 @@ describe('SearchUseCase with Injection Defense', () => {
 
         try {
           await useCase.execute(request, `test-legit-${String(Math.random())}`);
-        } catch {
+        } catch (downstreamMockError) {
           // downstream mocks are incomplete; reaching planner is enough
+          void downstreamMockError;
         }
 
         expect(plannerMock.plan).toHaveBeenCalledWith(expect.stringContaining(query), expect.any(Object));

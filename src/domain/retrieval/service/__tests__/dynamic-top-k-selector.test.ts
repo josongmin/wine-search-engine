@@ -60,4 +60,37 @@ describe('dynamic-top-k-selector', () => {
     expect(highEasy.sparseTopK).toBe(50);
     expect(highEasy.denseTopK).toBe(20);
   });
+
+  it('fails closed on NaN/Infinity latency budget', () => {
+    // Before the fix, NaN budget bypassed the tier comparisons (all
+    // comparisons with NaN are false), silently routing into the HARD
+    // tier — the maximum recall spend. Non-finite budgets must instead
+    // collapse to the minimum coherent budget and the easy tier.
+    const nanBudget = selectTopK({
+      difficulty: 'hard',
+      latencyBudgetMs: Number.NaN,
+      hasAnchor: true,
+    });
+    expect(nanBudget.latencyBudgetMs).toBe(50);
+    expect(nanBudget.sparseTopK).toBe(50);
+    expect(nanBudget.denseTopK).toBe(20);
+    expect(nanBudget.anchorTopK).toBe(10);
+
+    const infBudget = selectTopK({
+      difficulty: 'hard',
+      latencyBudgetMs: Number.POSITIVE_INFINITY,
+      hasAnchor: true,
+    });
+    expect(infBudget.latencyBudgetMs).toBe(50);
+    expect(infBudget.sparseTopK).toBe(50);
+
+    // Negative budget: already finite, still clamped at the floor.
+    const negBudget = selectTopK({
+      difficulty: 'medium',
+      latencyBudgetMs: -100,
+      hasAnchor: true,
+    });
+    expect(negBudget.latencyBudgetMs).toBe(50);
+    expect(negBudget.sparseTopK).toBe(50);
+  });
 });

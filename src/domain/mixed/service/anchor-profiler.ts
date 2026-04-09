@@ -1,5 +1,6 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /** Optional slots counted toward profile completeness (grapes, body, sweetness, style). */
 const ANCHOR_PROFILE_OPTIONAL_ATTRIBUTE_SLOTS = 4;
@@ -126,9 +127,4 @@ export class AnchorProfiler {
   }
 }
 
-/**
- * Clamps a numeric value to the [0, 1] range.
- */
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
+// clamp01: imported from @shared/utils/clamp (SSoT).

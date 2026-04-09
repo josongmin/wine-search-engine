@@ -5,7 +5,7 @@
 
 **한 줄:** PostgreSQL Bronze → NDJSON Silver/Enriched → (선택 확장·Track C) → 품질 게이트 → Vespa 피드; 그 외 골든·평가·학습·시딩 스크립트는 **같은 문서에서 표로 끝**낸다.
 
-**Last updated:** 2026-04-06
+**Last updated:** 2026-04-10
 
 ---
 
@@ -38,8 +38,10 @@
 | **Bronze** | PostgreSQL `wine_pdp_snapshot` | 원천 스냅샷 + JSON `payload` |
 | **Silver** | NDJSON `SilverWineRecord` | `scripts/etl/types.ts` |
 | **Silver + alias** | NDJSON `EnrichedSilverRecord` | RFC-003 별칭 번들 |
-| **Silver + 확장** | NDJSON | doc2query, KO, Track C 필드 등 |
-| **Index** | Vespa `wine_entity` | `RetrievalDocument` + 임베딩 |
+| **Silver + KO** | NDJSON | 한국어 alias (Anthropic Haiku) |
+| **Silver + Doc2Query** | NDJSON | typed `syntheticQueries` + `doc2queryFingerprint` (OpenAI gpt-5.x) |
+| **Silver + Track C** | NDJSON | critic proxy / certifications / pairings / drinking-window |
+| **Index** | Vespa `wine_entity` | `RetrievalDocument` + 임베딩 + `synthetic_queries` BM25 필드 |
 
 ```mermaid
 flowchart TB
@@ -61,7 +63,7 @@ flowchart TB
 2. **`vivino-to-silver.ts`** → 기본 `data/silver.ndjson`  
 3. **`generate-aliases.ts`** → 기본 `data/silver-enriched.ndjson`  
 4. (선택) **`generate-korean-aliases.ts`** → `silver-enriched-ko.ndjson` — 인덱서는 **`index-to-vespa --input`** 으로 맞출 것  
-5. (선택) **`generate-doc-queries.ts`** → `silver-enriched-docquery.ndjson`  
+5. **`generate-doc-queries.ts`** → `silver-docquery.ndjson` — Doc2Query (typed `syntheticQueries` 필드 + `doc2queryFingerprint` 멱등성). 기본 입력은 `silver-ko.ndjson`. 자세한 동작은 [§6.1](#61-doc2query-단계-신규-방식)
 6. **Track C** — `run-track-c.ts`는 코드상 **`data/silver-docquery.ndjson`** 전제 → 파일명·스키마를 오케스트레이터와 **반드시** 일치  
 7. **`validate-silver.ts`** — 인덱싱할 NDJSON과 **`--input` 동일** 권장  
 8. **`index-to-vespa.ts`** — 기본 `silver-enriched.ndjson` → Vespa  
@@ -89,7 +91,7 @@ flowchart TB
 | `vivino-to-silver.ts` | PG → Silver NDJSON |
 | `generate-aliases.ts` | Silver → Enriched |
 | `generate-korean-aliases.ts` | Enriched → KO (`ANTHROPIC_API_KEY`) |
-| `generate-doc-queries.ts` | doc2query, BM25 확장 |
+| `generate-doc-queries.ts` | Doc2Query (typed `syntheticQueries` field, OpenAI gpt-5.x via port, fingerprint idempotency) → §6.1 |
 | `validate-silver.ts` | 품질 게이트 |
 | `index-to-vespa.ts` | Enriched → Vespa |
 | `run-track-c.ts` | Track C 오케스트레이터 |
@@ -162,6 +164,51 @@ const GATES = {
 ## 6. Vespa 인덱싱
 
 `scripts/etl/index-to-vespa.ts` — `EnrichedSilverRecord` → `silverToRetrievalDoc` → `toVespaFields` (`src/infrastructure/vespa/mapping.ts`) → `VespaClient.bulkFeed`.
+
+### 6.1 Doc2Query 단계 (신규 방식)
+
+> 통합 결정/근거: [`doc2query-cohere-integration.md`](./doc2query-cohere-integration.md)
+
+`scripts/etl/generate-doc-queries.ts` — Nogueira et al. 2019 Doc2Query를 와인 도메인에 적용. **2026-04-10에 typed-field + 포트 기반으로 재작성됨.**
+
+**예전 방식 (deprecated):** 합성 쿼리를 `searchTextEn`에 ` ||| ` delimiter로 concat → BM25 IDF 오염, Vespa rank profile에서 가중치 조절 불가능.
+
+**현재 방식:**
+- 출력은 `EnrichedSilverRecord.syntheticQueries: readonly string[]` (typed) + `doc2queryFingerprint: { modelId, contentHash, generatedAt }`. `searchTextEn`은 **그대로 보존**.
+- Vespa로 흘러갈 때 `index-to-vespa.ts`가 typed 필드를 그대로 전달 → `toVespaFields`가 `synthetic_queries` 라는 **별도 BM25 필드** (`array<string>`, `index: enable-bm25`) 에 씀. 가중치는 rank profile `bm25_wine()` 안에서 `bm25(synthetic_queries) * 0.6` 으로 따로 튜닝됨 (원문 1.0보다 약하게, alias 3.0보다 훨씬 약하게 — 합성 콘텐츠가 진짜 콘텐츠를 가리지 못하도록).
+- LLM 호출은 `Doc2QueryGeneratorPort` → `OpenAiDoc2QueryGenerator` → `OpenAiChatLlm` (런타임 chat 어댑터와 동일). 따라서 OpenAI **circuit breaker / retry / GenAI telemetry** 를 자동 상속.
+- 모델은 `OPENAI_DOC2QUERY_MODEL` env로 분리. 런타임 `OPENAI_CHAT_MODEL` 과 독립적으로 cheaper/different 모델 사용 가능.
+- 멱등성: `contentHash = sha256(canonicalLabel + producer + region + grape + style + price + searchTextEn[:240])`. 다음 ETL 실행 시 modelId + contentHash 둘 다 일치하면 자동 skip → 비용 0. `--force` 플래그로 override.
+- 빈 결과/에러는 prior record를 보존 (절대 ground 잃지 않음).
+- 7개 쿼리/와인 (영어 5 + 한국어 2). 한국어 정책은 시스템 프롬프트에 명시.
+
+**호출 예:**
+```bash
+# Dry-run sample
+npx tsx --env-file=.env.local scripts/etl/generate-doc-queries.ts \
+  --input data/silver-enriched-ko.ndjson \
+  --dry-run --limit 5
+
+# Real backfill (idempotent — safe to re-run)
+npx tsx --env-file=.env.local scripts/etl/generate-doc-queries.ts \
+  --input data/silver-enriched-ko.ndjson \
+  --output data/silver-docquery.ndjson
+
+# Force regenerate (e.g. model bump)
+npx tsx --env-file=.env.local scripts/etl/generate-doc-queries.ts --force
+```
+
+**관련 파일**
+- `scripts/etl/generate-doc-queries.ts` — CLI 진입점
+- `src/infrastructure/ai/openai-doc2query-generator.ts` — 어댑터 (시스템 프롬프트, JSON parsing, 길이 정규화)
+- `src/domain/retrieval/port/doc2query-generator.port.ts` — 포트 계약
+- `src/config/container-adapters.ts` (`doc2queryGenerator` 필드) — DI 선택 (OpenAI primary, Stub fallback)
+- `vespa/app/schemas/wine_entity.sd` — `synthetic_queries` 필드 + `bm25_wine()` 가중치
+- `src/infrastructure/vespa/mapping.ts` — `toVespaFields` / `fromVespaFields` 의 `synthetic_queries` 처리
+
+**범위 밖 (의도적으로 wired 안 됨):** SPLADE 인코더, ColBERT reranker — 스캐폴딩은 repo에 남아 있으나 composition root에서 import 0. [`doc2query-cohere-integration.md`](./doc2query-cohere-integration.md) 의 결정 배경 참조.
+
+### 6.2 RetrievalDocument 변환 코드
 
 ```172:208:scripts/etl/index-to-vespa.ts
 function silverToRetrievalDoc(

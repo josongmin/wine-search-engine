@@ -10,6 +10,7 @@
  * @see search-usecase-ranked-route-resolve.ts — single calibrator insertion point
  */
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
+import { isCorruptedSnapshot } from '../../shared/types/index.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE, computeDynamicGapThreshold } from '../../query/model/threshold-profile.js';
@@ -147,6 +148,57 @@ export class DecisionEngine {
    * @returns The binding decision output with full trace.
    */
   async decide(input: DecisionInput, snapshot: DecisionSnapshot): Promise<DecisionOutput> {
+    // Guard: corrupted snapshots must not reach identity hash, snapshot_ref,
+    // or admission gate logic — fail fast with a diagnostic trace.
+    if (isCorruptedSnapshot(snapshot)) {
+      bootstrapLogger.warn(
+        '[DecisionEngine] Corrupted decision snapshot passed to decide(); failing decision',
+      );
+      const failedTrace: DecisionTrace = {
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        inputs: {
+          queryClass: input.queryPlan.queryClass,
+          effectiveRoute: input.effectiveRoute ?? input.queryPlan.route,
+          policy: {
+            requireExact: input.policy.requireExact,
+            allowApproximate: input.policy.allowApproximate,
+            requireClarification: input.policy.requireClarification,
+            fallbackMode: input.policy.fallbackMode,
+          },
+        },
+        signals: { decisionConfidence: 0, calibratedGap: 0, ambiguity: false },
+        thresholds: { resolveThreshold: 0, gapThreshold: 0 },
+        versions: {
+          plannerVersion: input.queryPlan.plannerVersion,
+          policyRuleVersion: input.queryPlan.policyRuleVersion,
+          thresholdProfileId: input.queryPlan.thresholdProfileId,
+        },
+        rulesApplied: ['CORRUPTED_SNAPSHOT_REJECTED'],
+        finalReason: 'Decision rejected: corrupted decision snapshot (snapshot_id = __corrupted__).',
+      };
+      return {
+        decisionStatus: 'failed',
+        nextAction: 'fail',
+        decisionConfidence: 0,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        candidates: input.resolverResult.candidates,
+        signalSet: input.rankingSignals ?? {
+          entity_integrity_score: 0,
+          hard_constraint_pass: 0,
+          soft_constraint_score: 0,
+          semantic_relevance_score: 0,
+          preference_alignment_score: 0,
+          popularity_score: 0,
+          availability_score: 0,
+          uncertainty_penalty: 0,
+        },
+        evidenceItems: input.evidenceItems ?? [],
+        decisionTraceRef: 'corrupted_snapshot',
+        decisionSnapshot: snapshot,
+        decisionTrace: failedTrace,
+      };
+    }
     const thresholds = await this.loadThresholds(input);
     const rulesApplied: string[] = [];
 

@@ -12,6 +12,7 @@ import type { QueryDecompositionHint, DecompositionStrategy } from '../../domain
 import type { NormalizedConstraint } from '../../domain/shared/types/index.js';
 import type { InterpretResponseV2 } from '../../domain/response/model/result-item-v2.js';
 import { preferCanonicalRetrievalChannelLabels } from '../../domain/retrieval/model/retrieval-channel.js';
+import { clamp01 } from '../../domain/shared/utils/clamp.js';
 
 export interface ExplainAdapterV2Input {
   readonly queryId: string;
@@ -109,7 +110,7 @@ const NEUTRAL_CONFIDENCE_WHEN_UNCERTAINTY_INVALID = 0.5;
 function deriveConfidence(slice: QueryObservabilitySlice): number {
   const raw = 1 - slice.overallUncertainty;
   return Number.isFinite(raw)
-    ? Math.max(0, Math.min(1, raw))
+    ? clamp01(raw)
     : NEUTRAL_CONFIDENCE_WHEN_UNCERTAINTY_INVALID;
 }
 

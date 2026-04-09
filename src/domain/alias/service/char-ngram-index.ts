@@ -4,6 +4,8 @@
  * Handles collapsed whitespace, missing spaces, and partial matches.
  */
 
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
+
 export interface CharNgramMatch {
   readonly term: string;
   readonly similarity: number;
@@ -69,7 +71,13 @@ export class CharNgramIndex {
       }
     }
 
-    return results.sort((a, b) => b.similarity - a.similarity);
+    // NaN-safe + deterministic tiebreaker (term lex order). (Bugbash R22)
+    return results.sort(
+      compareScoreWithTiebreaker<{ term: string; similarity: number; sharedTrigrams: number }>(
+        (r) => r.similarity,
+        (r) => r.term,
+      ),
+    );
   }
 
   /**

@@ -68,13 +68,13 @@ export function buildProjection(entity: Entity, aliases: AliasSet): RetrievalDoc
   if (entity.attributes.region) {
     searchableParts.push(entity.attributes.region);
   }
-  if (entity.attributes.grapes) {
+  if (entity.attributes.grapes != null && entity.attributes.grapes.length > 0) {
     searchableParts.push(...entity.attributes.grapes);
   }
-  if (entity.attributes.pairing) {
+  if (entity.attributes.pairing != null && entity.attributes.pairing.length > 0) {
     searchableParts.push(...entity.attributes.pairing);
   }
-  if (entity.attributes.occasion) {
+  if (entity.attributes.occasion != null && entity.attributes.occasion.length > 0) {
     searchableParts.push(...entity.attributes.occasion);
   }
   if (entity.attributes.vintage != null) {

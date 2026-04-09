@@ -37,6 +37,7 @@ function makeCandidate(id: string): HybridCandidate {
   return {
     entityId: createEntityId(id),
     retrievalFusionScore: 0.5,
+    fusionRrfTotal: 0.5,
     matchedConstraints: [],
     unmetHardConstraints: [],
     retrievalTrace: {

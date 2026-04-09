@@ -136,6 +136,14 @@ describe('hasVintageYear', () => {
   it('returns true for Korean query with vintage', () => {
     expect(hasVintageYear('보르도 2018년 추천')).toBe(true);
   });
+
+  it('returns true for "Opus One 2018"', () => {
+    expect(hasVintageYear('Opus One 2018')).toBe(true);
+  });
+
+  it('returns false for "Opus One" (no vintage)', () => {
+    expect(hasVintageYear('Opus One')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -261,6 +269,18 @@ describe('isPotentialVintageToken', () => {
   it('rejects 3-digit number', () => {
     expect(isPotentialVintageToken('202')).toBe(false);
   });
+
+  it('accepts 2-digit "21"', () => {
+    expect(isPotentialVintageToken('21')).toBe(true);
+  });
+
+  it('accepts 4-digit "2021"', () => {
+    expect(isPotentialVintageToken('2021')).toBe(true);
+  });
+
+  it('rejects non-numeric "abc"', () => {
+    expect(isPotentialVintageToken('abc')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -280,6 +300,14 @@ describe('canonicalizeVintageToken', () => {
 
   it('converts recent 2-digit: "24" → "2024"', () => {
     expect(canonicalizeVintageToken('24', REF)).toBe('2024');
+  });
+
+  it('converts "21" → "2021" at reference year 2026 (≤ pivot)', () => {
+    expect(canonicalizeVintageToken('21', REF)).toBe('2021');
+  });
+
+  it('converts "99" → "1999" at reference year 2026 (> pivot)', () => {
+    expect(canonicalizeVintageToken('99', REF)).toBe('1999');
   });
 
   it('converts boundary pivot: "26" → "2026" (current year)', () => {

@@ -49,13 +49,13 @@ export class FusionService {
    * Fuse multiple retrieval result lists into a single ranked candidate list.
    *
    * Deduplicates by entityId and returns candidates sorted by
-   * descending retrievalFusionScore.
+   * descending fusionRrfTotal.
    *
    * @param sparseHits - Results from the BM25 / lexical pass.
    * @param denseHits - Results from the dense / embedding pass.
    * @param anchorHits - Optional results from the anchor neighbourhood pass.
    * @param k - RRF smoothing constant (default 60).
-   * @returns Fused candidates sorted by descending retrievalFusionScore.
+   * @returns Fused candidates sorted by descending fusionRrfTotal.
    */
   fuse(
     sparseHits: readonly SparseHit[],
@@ -198,16 +198,20 @@ export class FusionService {
       });
     }
 
-    // Sort descending by retrievalFusionScore; break ties by entityId (lexicographic ascending)
-    // for deterministic output ordering.
+    // Sort descending by fusionRrfTotal (canonical RRF score); break ties by
+    // entityId (lexicographic ascending) for deterministic output ordering.
     // NaN guard: treat non-finite scores as 0 so the comparator always returns a
     // well-defined numeric value and the sort remains deterministic.
+    // Perf: entityId is a branded string (see shared/types/entity-id.ts), so a
+    // direct `<`/`>` comparison produces the same lexicographic order as
+    // localeCompare for ASCII IDs without the allocation of `String(...)`
+    // wrappers or the heavy Intl collator path.
     candidates.sort((a, b) => {
-      const aScore = Number.isFinite(a.retrievalFusionScore) ? a.retrievalFusionScore : 0;
-      const bScore = Number.isFinite(b.retrievalFusionScore) ? b.retrievalFusionScore : 0;
+      const aScore = Number.isFinite(a.fusionRrfTotal) ? a.fusionRrfTotal! : 0;
+      const bScore = Number.isFinite(b.fusionRrfTotal) ? b.fusionRrfTotal! : 0;
       const diff = bScore - aScore;
       if (diff !== 0) return diff;
-      return String(a.entityId).localeCompare(String(b.entityId));
+      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
     });
 
     return candidates;

@@ -50,7 +50,7 @@ const toolLog = bootstrapLogger.child({ component: 'WineToolExecutor' });
  */
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1, 'Food must not be empty'),
-  max_price: z.number().positive().optional(),
+  max_price: z.number().finite().positive().optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
 });
 

@@ -32,6 +32,8 @@ const DEFAULT_VESPA_HTTP_TIMEOUTS: VespaHttpTimeouts = {
 /** Fraction of hits that can be malformed before escalating from debug to warn.
  *  >20% dropped hits indicates systematic Vespa schema corruption, not stray data. */
 const VESPA_HIT_DROP_WARN_THRESHOLD = 0.2;
+/** Max characters of the raw Vespa response included in schema-failure logs. */
+const VESPA_SCHEMA_FAIL_PREVIEW_CHARS = 500;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -403,7 +405,7 @@ export class VespaClient {
         bootstrapLogger.error(
           {
             err: validation.error.format(),
-            preview: JSON.stringify(data).slice(0, 500),
+            preview: JSON.stringify(data).slice(0, VESPA_SCHEMA_FAIL_PREVIEW_CHARS),
           },
           '[VespaClient] Vespa response failed schema validation',
         );

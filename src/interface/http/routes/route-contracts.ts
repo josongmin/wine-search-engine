@@ -68,6 +68,14 @@ const AGENT_METRICS_ALERTS_MAX = 20;
 const RETRIEVAL_DEGRADATION_ALERTS_MAX = 20;
 /** Upper bound for component count in degradation metrics (6 known components + headroom). */
 const RETRIEVAL_DEGRADATION_COMPONENTS_MAX = 12;
+/** Upper bound for circuit breaker registry entries. The registry currently
+ *  tracks ~10 breakers (llm, embedding, vespa, pg, redis, etc.); 64 gives
+ *  ample headroom without allowing unbounded memory growth on serialization. */
+const CIRCUIT_BREAKER_REGISTRY_MAX = 64;
+/** Upper bound for breaker name/state identifier strings. Breaker names are
+ *  short snake_case identifiers ("llm_embedding", "vespa_query"); 128 chars
+ *  is comfortably above the longest known breaker id. */
+const CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS = 128;
 
 export interface HttpRouteContract {
   readonly operationId: string;
@@ -139,11 +147,11 @@ const ClaudeToolsExecuteResponseSchema = z.object({
   request_id: z.string().min(1),
 }).strict();
 
-const ClaudeToolsErrorResponseSchema = z.object({
-  error: z.string(),
-  message: z.string(),
-  request_id: z.string().min(1),
-}).strict();
+// Claude tools error responses now use the shared RFC-014 envelope
+// (ErrorResponseSchema). The previously hand-rolled flat shape
+// `{ error, message, request_id }` violated the contract in CLAUDE.md:
+// every 4xx/5xx MUST be `{ error: { request_id, code, message, failure_reason,
+// retryable } }`. Keeping this comment as a grep target for future migrations.
 
 const ClaudeToolsListResponseSchema = z.object({
   // Bounded to 100 — there are currently 4 tools; this cap prevents unbounded growth
@@ -187,6 +195,15 @@ const RetrievalDegradationMetricsResponseSchema = z.object({
     degradation_rate: z.number().finite().min(0),
     alerts: z.array(z.string()).max(RETRIEVAL_DEGRADATION_ALERTS_MAX),
   }).strict(),
+  /** Silent skip counters from src/observability/silent-skip-counters.ts. */
+  silent_skips: z.record(z.number().int().nonnegative()).optional(),
+  /** Circuit breaker registry snapshot. */
+  circuit_breakers: z.array(z.object({
+    name: z.string().min(1).max(CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS),
+    state: z.string().min(1).max(CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS),
+    failure_count: z.number().int().nonnegative(),
+    open_count: z.number().int().nonnegative(),
+  }).strict()).max(CIRCUIT_BREAKER_REGISTRY_MAX).optional(),
 }).strict();
 
 export const RetrievalDegradationMetricsRouteContract = defineRouteContract({
@@ -202,8 +219,8 @@ export const ClaudeToolsExecuteRouteContract = defineRouteContract({
   body: ClaudeToolsExecuteRequestSchema,
   responses: {
     [HTTP_STATUS_OK]: ClaudeToolsExecuteResponseSchema,
-    [HTTP_STATUS_BAD_REQUEST]: ClaudeToolsErrorResponseSchema,
-    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ClaudeToolsErrorResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
   },
 });
 

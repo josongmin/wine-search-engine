@@ -1,0 +1,3 @@
+{"queryId":"scenario-13","query":"이번 주말 바비큐 파티, 10명분, 레드/화이트 섞어서 30만원 예산","entityId":"wine_type:red","canonicalLabel":"red","grade":0,"confidence":0.4,"source":"llm_silver","labelerModel":"stub-labeler-v1","rationale":"stub: deterministic rotation (reject)"}
+{"queryId":"scenario-13","query":"이번 주말 바비큐 파티, 10명분, 레드/화이트 섞어서 30만원 예산","entityId":"wine_type:white","canonicalLabel":"white","grade":0,"confidence":0.4,"source":"llm_silver","labelerModel":"stub-labeler-v1","rationale":"stub: deterministic rotation (reject)"}
+{"queryId":"scenario-42","query":"회사 회식 10명, 레드/화이트 반반, 총 20만원","entityId":"wine_type:white","canonicalLabel":"white","grade":0,"confidence":0.4,"source":"llm_silver","labelerModel":"stub-labeler-v1","rationale":"stub: deterministic rotation (reject)"}

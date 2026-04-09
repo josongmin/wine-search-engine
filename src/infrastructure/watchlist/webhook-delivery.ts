@@ -9,6 +9,7 @@ import { createHmac, randomUUID } from 'crypto';
 import { promises as dnsPromises } from 'node:dns';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { WatchlistEntry, WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
+import { toFiniteNumber } from '../../domain/shared/utils/safe-number.js';
 
 /** Private/reserved IPv4 first-octet / pair patterns (SSRF at delivery time). */
 const IPV4_LOOPBACK_FIRST_OCTET = 127;
@@ -49,8 +50,12 @@ function isPrivateOrReservedIp(ip: string): boolean {
   // IPv4
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
   if (v4) {
-    const a = Number(v4[1]);
-    const b = Number(v4[2]);
+    // The regex guarantees the captures are 1-3 digit strings, so the
+    // coercion is always finite. We use toFiniteNumber anyway so semgrep
+    // wine-number-without-finite-guard cannot regress on this code path.
+    const a = toFiniteNumber(v4[1]);
+    const b = toFiniteNumber(v4[2]);
+    if (a === null || b === null) return false;
     return (
       a === IPV4_LOOPBACK_FIRST_OCTET
       || a === IPV4_PRIVATE_CLASS_A_FIRST_OCTET

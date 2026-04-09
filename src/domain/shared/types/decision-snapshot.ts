@@ -1,4 +1,26 @@
 /**
+ * Sentinel value used as the snapshot_id when JSONB validation fails in
+ * pg-feedback-store. Downstream code MUST check for this before using
+ * a DecisionSnapshot read from the database.
+ */
+export const CORRUPTED_SNAPSHOT_ID = '__corrupted__' as const;
+
+/**
+ * Runtime type guard: returns `true` when the snapshot was produced by the
+ * JSONB-validation fallback path (all fields set to `__corrupted__`).
+ *
+ * Accepts `unknown` so callers can guard before narrowing.
+ */
+export function isCorruptedSnapshot(snapshot: unknown): boolean {
+  return (
+    typeof snapshot === 'object'
+    && snapshot !== null
+    && 'snapshot_id' in snapshot
+    && (snapshot as Readonly<Record<string, unknown>>).snapshot_id === CORRUPTED_SNAPSHOT_ID
+  );
+}
+
+/**
  * A snapshot of system versions and configuration active at the time a decision was made,
  * per RFC-015. This enables exact reproducibility analysis and regression triage.
  */

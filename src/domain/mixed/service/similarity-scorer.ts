@@ -1,4 +1,5 @@
 import type { AnchorProfile } from '../model/anchor-profile.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /** Region adjacency map match score (not identical but neighboring). */
 const REGION_ADJACENCY_MATCH_SCORE = 0.6;
@@ -315,9 +316,4 @@ export class SimilarityScorer {
   }
 }
 
-/**
- * Clamps a numeric value to the [0, 1] range.
- */
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
+// clamp01: imported from @shared/utils/clamp (SSoT).

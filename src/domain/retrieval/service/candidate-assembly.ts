@@ -13,6 +13,10 @@
  */
 
 import type { CandidateEnvelope, CandidateChannel } from '../model/candidate-envelope.js';
+import {
+  pickMaxByScore,
+  compareScoreWithTiebreaker,
+} from '../../shared/utils/stable-comparator.js';
 
 // ---------------------------------------------------------------------------
 // Policy
@@ -100,34 +104,66 @@ export class CandidateAssembler {
     const afterHardFilter = hardFiltered.length;
 
     // --- Step 2: Dedup by entityId, keeping highest fusionScore among valid candidates ---
-    const byEntityId = new Map<string, CandidateEnvelope>();
+    //
+    // Group by entityId, then pick the canonical envelope per group via
+    // pickMaxByScore: NaN scores treated as -Infinity, ties broken by a
+    // stable secondary key (fusion profile name). Previously this used a
+    // strict `>` comparison whose winner depended on retrieval-channel
+    // arrival order — not deterministic. (Bugbash R19 critical re-audit)
+    const groupsByEntityId = new Map<string, CandidateEnvelope[]>();
     for (const c of hardFiltered) {
-      const existing = byEntityId.get(c.entityId);
-      if (existing === undefined || c.provenance.fusionScore > existing.provenance.fusionScore) {
-        byEntityId.set(c.entityId, c);
+      const list = groupsByEntityId.get(c.entityId);
+      if (list !== undefined) {
+        list.push(c);
+      } else {
+        groupsByEntityId.set(c.entityId, [c]);
       }
     }
-    const deduped = [...byEntityId.values()];
+    const deduped: CandidateEnvelope[] = [];
+    for (const group of groupsByEntityId.values()) {
+      const winner = pickMaxByScore(
+        group,
+        (c) => c.provenance.fusionScore,
+        // Secondary tiebreaker: fusionProfile is a stable enum-like value
+        // that produces the same ordering across processes regardless of
+        // which retrieval channel arrived first.
+        (c) => c.provenance.fusionProfile,
+      );
+      if (winner !== undefined) deduped.push(winner);
+    }
     const afterDedup = deduped.length;
 
-    // --- Step 3: Sort by fusionScore descending ---
-    const sorted = [...deduped].sort(
-      (a, b) => b.provenance.fusionScore - a.provenance.fusionScore,
+    // --- Step 3: Sort by fusionScore descending with deterministic tiebreaker ---
+    // Use compareScoreWithTiebreaker so equal-score candidates preserve a
+    // stable order (entityId lexicographic) instead of insertion order.
+    deduped.sort(
+      compareScoreWithTiebreaker<CandidateEnvelope>(
+        (c) => c.provenance.fusionScore,
+        (c) => c.entityId,
+      ),
     );
+    const sorted = deduped;
 
     // --- Step 4: Separate protected and non-protected candidates ---
-    const isProtected = (c: CandidateEnvelope): boolean => {
-      if (policy.protectExactMatches && c.provenance.protectedInclusionReason !== undefined) {
-        return true;
+    // Single pass: previously called isProtected twice per candidate (once
+    // per filter call) which also double-allocated closure scopes. Walking
+    // `sorted` once and pushing into two arrays halves the per-candidate
+    // predicate evaluations and is O(n) vs 2×O(n).
+    const protectExactMatches = policy.protectExactMatches;
+    const protectAnchorConditioned = policy.protectAnchorConditioned;
+    const protected_: CandidateEnvelope[] = [];
+    const nonProtected: CandidateEnvelope[] = [];
+    for (const c of sorted) {
+      const prov = c.provenance;
+      const isProtected =
+        (protectExactMatches && prov.protectedInclusionReason !== undefined) ||
+        (protectAnchorConditioned && prov.anchorConditioned);
+      if (isProtected) {
+        protected_.push(c);
+      } else {
+        nonProtected.push(c);
       }
-      if (policy.protectAnchorConditioned && c.provenance.anchorConditioned) {
-        return true;
-      }
-      return false;
-    };
-
-    const protected_ = sorted.filter(isProtected);
-    const nonProtected = sorted.filter((c) => !isProtected(c));
+    }
     const protectedCount = protected_.length;
 
     // --- Step 5: Build final set applying quotas ---
@@ -143,30 +179,38 @@ export class CandidateAssembler {
       }
     }
 
-    // Producer slot tracking (by first channel's raw match — use entityId prefix heuristic)
+    // Producer slot tracking: uses the `producer` field from
+    // legacyCandidate (Vespa projection), not channel raw signals.
     // Full producer diversity logic would require knowledge of entity relationships;
     // here we use a simple first-producer-wins approach.
     const producerCounts = new Map<string, number>();
 
-    const remainingBudget = () => policy.maxTotal - assembled.length;
+    const maxTotal = policy.maxTotal;
+    // Pre-index channel quotas as a Map so the per-candidate check is a
+    // single O(channels) walk instead of O(quotas × channels) with
+    // Array.prototype.includes in the inner loop.
+    const quotaByChannel: ReadonlyMap<CandidateChannel, number> | undefined =
+      policy.channelQuotas !== undefined
+        ? new Map(policy.channelQuotas.map((cq) => [cq.channel, cq.maxSlots]))
+        : undefined;
 
     for (const c of nonProtected) {
-      if (remainingBudget() <= 0) {
+      if (assembled.length >= maxTotal) {
         cappedBy = 'maxTotal';
         break;
       }
 
       // Channel quota check
-      if (policy.channelQuotas !== undefined) {
+      if (quotaByChannel !== undefined) {
         let blockedByQuota = false;
-        for (const cq of policy.channelQuotas) {
-          if (c.provenance.channels.includes(cq.channel)) {
-            const count = channelCounts.get(cq.channel) ?? 0;
-            if (count >= cq.maxSlots) {
-              blockedByQuota = true;
-              cappedBy = 'channelQuota';
-              break;
-            }
+        for (const ch of c.provenance.channels) {
+          const maxSlots = quotaByChannel.get(ch);
+          if (maxSlots === undefined) continue;
+          const count = channelCounts.get(ch) ?? 0;
+          if (count >= maxSlots) {
+            blockedByQuota = true;
+            cappedBy = 'channelQuota';
+            break;
           }
         }
         if (blockedByQuota) continue;
@@ -197,8 +241,15 @@ export class CandidateAssembler {
       assembled.push(c);
     }
 
-    // Re-sort assembled by fusionScore (protected candidates may have lower scores)
-    assembled.sort((a, b) => b.provenance.fusionScore - a.provenance.fusionScore);
+    // Re-sort assembled by fusionScore (protected candidates may have lower
+    // scores) with NaN-safe + entityId tiebreaker so output order is stable.
+    // (Bugbash R22)
+    assembled.sort(
+      compareScoreWithTiebreaker<CandidateEnvelope>(
+        (c) => c.provenance.fusionScore,
+        (c) => c.entityId,
+      ),
+    );
 
     return {
       candidates: assembled,

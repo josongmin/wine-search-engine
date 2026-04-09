@@ -43,7 +43,7 @@ const VALID_LINEAGE_SOURCE_TYPES: ReadonlySet<string> = new Set([
 function isLineagePayload(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
   // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowing after typeof/null/Array checks; object indexing requires Record type
-  const obj = value as Record<string, unknown>;
+  const obj = value as Record<string, unknown>; // nosemgrep: wine-jsonb-as-cast
   // Required string fields
   if (typeof obj['sourceRecordId'] !== 'string') return false;
   if (typeof obj['sourceType'] !== 'string') return false;

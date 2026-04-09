@@ -40,21 +40,27 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     return this.inner.getDocument(...args);
   }
 
-  getDocuments(entityIds: readonly EntityId[]): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+  async getDocuments(entityIds: readonly EntityId[]): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
     if (this.inner.getDocuments !== undefined) {
       return this.inner.getDocuments(entityIds);
     }
-    return Promise.all(
+    // Use allSettled so a single getDocument failure doesn't abort the entire
+    // batch — remaining documents are still useful for event comparison.
+    const settled = await Promise.allSettled(
       entityIds.map(async (entityId) => [entityId, await this.inner.getDocument(entityId)] as const),
-    ).then((rows) => {
-      const docs = new Map<EntityId, RetrievalDocument>();
-      for (const [entityId, doc] of rows) {
+    );
+    const docs = new Map<EntityId, RetrievalDocument>();
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        const [entityId, doc] = result.value;
         if (doc !== null) {
           docs.set(entityId, doc);
         }
+      } else {
+        log.warn({ err: result.reason }, 'getDocuments: single document fetch failed');
       }
-      return docs;
-    });
+    }
+    return docs;
   }
 
   async upsertDocument(doc: RetrievalDocument): Promise<void> {
@@ -68,7 +74,10 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
 
     await this.inner.bulkUpsert(docs);
 
-    await Promise.all(
+    // Use allSettled so a single doc's event publish failure does not
+    // prevent the other docs' change events from firing. Per-doc failures
+    // are already logged inside publishEvents. (Bugbash audit 11)
+    await Promise.allSettled(
       docs.map(async (doc) => {
         const previous = previousById.get(doc.entityId) ?? null;
         await this.publishEvents(previous, doc);

@@ -171,6 +171,135 @@ describe('VespaSearchIndex', () => {
     });
   });
 
+  describe('YQL numeric-interpolation safety', () => {
+    // Regression: the YQL `limit N`, `{targetHits: N}`, and
+    // `hnsw.exploreAdditionalHits: N` clauses must never emit `NaN`,
+    // `Infinity`, or a negative / fractional value — even if a misbehaving
+    // caller passes a non-integer `number` at runtime. The port type is
+    // `number`, which TypeScript does not enforce at runtime.
+    function makeCapturingClient(): {
+      client: VespaClient;
+      queries: string[];
+    } {
+      const queries: string[] = [];
+      const client = {
+        query: vi.fn().mockImplementation((yql: string) => {
+          queries.push(yql);
+          return Promise.resolve(makeQueryResponse([]));
+        }),
+      } as unknown as VespaClient;
+      return { client, queries };
+    }
+
+    it('coerces NaN limit to a safe integer in sparseSearch', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.sparseSearch(['bordeaux'], [], Number.NaN);
+      expect(queries).toHaveLength(1);
+      expect(queries[0]).not.toContain('NaN');
+      expect(queries[0]).toMatch(/ limit \d+$/);
+    });
+
+    it('coerces Infinity limit to the MAX_YQL_LIMIT cap in sparseSearch', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.sparseSearch(['bordeaux'], [], Number.POSITIVE_INFINITY);
+      expect(queries[0]).not.toContain('Infinity');
+      expect(queries[0]).toMatch(/ limit \d+$/);
+    });
+
+    it('coerces negative limit to MIN_YQL_LIMIT in sparseSearch', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.sparseSearch(['bordeaux'], [], -5);
+      expect(queries[0]).toMatch(/ limit 1$/);
+    });
+
+    it('floors fractional limit in sparseSearch (no fractional YQL literal)', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.sparseSearch(['bordeaux'], [], 17.9);
+      expect(queries[0]).toMatch(/ limit 17$/);
+    });
+
+    it('coerces NaN limit in denseSearch without emitting NaN into targetHits/limit', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.denseSearch([0.1, 0.2, 0.3], [], Number.NaN);
+      expect(queries).toHaveLength(1);
+      expect(queries[0]).not.toContain('NaN');
+      // Both {targetHits: N} and `limit N` must be integers
+      expect(queries[0]).toMatch(/targetHits: \d+/);
+      expect(queries[0]).toMatch(/hnsw\.exploreAdditionalHits: \d+/);
+      expect(queries[0]).toMatch(/ limit \d+$/);
+    });
+
+    it('coerces Infinity limit in denseSearch without emitting Infinity', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.denseSearch([0.1, 0.2, 0.3], [], Number.POSITIVE_INFINITY);
+      expect(queries[0]).not.toContain('Infinity');
+      expect(queries[0]).toMatch(/targetHits: \d+/);
+    });
+
+    it('coerces NaN limit in searchLearnedSparse without emitting NaN', async () => {
+      const { client, queries } = makeCapturingClient();
+      const index = new VespaSearchIndex(client);
+      await index.searchLearnedSparse(
+        [{ token: 'wine', weight: 1 }],
+        [],
+        Number.NaN,
+      );
+      expect(queries).toHaveLength(1);
+      expect(queries[0]).not.toContain('NaN');
+      expect(queries[0]).toMatch(/targetHits: \d+/);
+      expect(queries[0]).toMatch(/ limit \d+$/);
+    });
+  });
+
+  describe('yqlEscapeString SSoT usage in fetchWithHitSummary', () => {
+    // Regression: the local duplicate `yqlEscapeString` previously defined in
+    // vespa-search-index.ts did NOT strip control characters, so an entity ID
+    // containing a NUL byte (\x00), line separator (\u2028), or BOM (\uFEFF)
+    // would reach Vespa intact and could break parsing. The fix imports the
+    // SSoT from mapping.ts which strips ASCII/Unicode control characters
+    // before escaping.
+    it('strips ASCII control characters from entity IDs', async () => {
+      const controlId = 'wine\x00\x01\x1funsafe';
+      const capturedQueries: string[] = [];
+      const client = {
+        query: vi.fn().mockImplementation((yql: string) => {
+          capturedQueries.push(yql);
+          return Promise.resolve(makeQueryResponse([]));
+        }),
+      } as unknown as VespaClient;
+      const index = new VespaSearchIndex(client);
+      await index.fetchWithHitSummary([createEntityId(controlId)]);
+      const yql = capturedQueries[0]!;
+      expect(yql).not.toContain('\x00');
+      expect(yql).not.toContain('\x01');
+      expect(yql).not.toContain('\x1f');
+      expect(yql).toContain('"wineunsafe"');
+    });
+
+    it('strips Unicode line-separator (U+2028) and BOM (U+FEFF)', async () => {
+      const unicodeId = 'wine\u2028mid\uFEFFend';
+      const capturedQueries: string[] = [];
+      const client = {
+        query: vi.fn().mockImplementation((yql: string) => {
+          capturedQueries.push(yql);
+          return Promise.resolve(makeQueryResponse([]));
+        }),
+      } as unknown as VespaClient;
+      const index = new VespaSearchIndex(client);
+      await index.fetchWithHitSummary([createEntityId(unicodeId)]);
+      const yql = capturedQueries[0]!;
+      expect(yql).not.toContain('\u2028');
+      expect(yql).not.toContain('\uFEFF');
+      expect(yql).toContain('"winemidend"');
+    });
+  });
+
   it('passes structured query feature params to Vespa sparse search', async () => {
     let capturedParams: Record<string, unknown> | undefined;
     const client = {

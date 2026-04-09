@@ -38,6 +38,7 @@ import { deterministicHash } from '../../shared/utils/hash.js';
 import type { SpecializedRouteObservability } from '../model/specialized-route.js';
 import { toSpecializedRouteMeta } from '../model/specialized-route.js';
 import { EvidenceObligationError } from '../../shared/error/domain-error.js';
+import { isCorruptedSnapshot } from '../../shared/types/index.js';
 
 /**
  * Parameters required by {@link ResponseBuilder.build}.
@@ -140,15 +141,19 @@ export class ResponseBuilder {
     const snapshot = params.decisionOutput.decisionSnapshot;
     const topEntityId = params.decisionOutput.selectedEntity?.entityId ?? '';
     const debugRefs = this.buildDebugRefs(params.decisionOutput);
+    // Guard: corrupted snapshot would produce a fake response hash and pollute
+    // downstream consumers. Use empty strings for hash inputs so the hash is
+    // still deterministic but distinguishable from a real snapshot hash.
+    const snapshotCorrupted = isCorruptedSnapshot(snapshot);
     const responseHash = deterministicHash(
       params.decisionOutput.decisionStatus,
       params.decisionOutput.nextAction,
       params.decisionOutput.decisionConfidence.toFixed(RESPONSE_HASH_CONFIDENCE_DECIMAL_PLACES),
       String(enrichedResults.length),
       topEntityId,
-      snapshot.policy_rule_version,
-      snapshot.threshold_profile_id,
-      snapshot.planner_version,
+      snapshotCorrupted ? '' : snapshot.policy_rule_version,
+      snapshotCorrupted ? '' : snapshot.threshold_profile_id,
+      snapshotCorrupted ? '' : snapshot.planner_version,
     );
 
     const meta: ResponseMeta = {

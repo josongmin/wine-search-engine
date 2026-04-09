@@ -2,8 +2,10 @@ import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { EvalResultStore, EvalResultFilter } from '../../domain/evaluation/port/eval-result-store.port.js';
 import type { EvalResult } from '../../domain/evaluation/model/eval-result.js';
-import { createEntityId } from '../../domain/shared/types/index.js';
-import type { DecisionStatus, DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
+import { createEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
+import type { DecisionStatus } from '../../domain/shared/types/index.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { parseDecisionSnapshotJsonb, parseEvidenceItemsJsonb } from './jsonb-schemas.js';
 function toDecisionStatus(value: string): DecisionStatus {
   if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;
   return 'failed';
@@ -36,11 +38,9 @@ function rowToEvalResult(row: EvalResultRow): EvalResult {
     isWrongResolve: row.is_wrong_resolve,
     isSafeAbstain: row.is_safe_abstain,
     isAvoidableAbstain: row.is_avoidable_abstain,
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB array schema validated at write time; full EvidenceItem[] Zod validation deferred
-    evidenceItems: (Array.isArray(row.evidence_items) ? row.evidence_items : []) as readonly EvidenceItem[],
+    evidenceItems: parseEvidenceItemsJsonb(row.evidence_items, 'PgEvalResultStore'),
     latencyMs: row.latency_ms,
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- JSONB schema validated at write time; full DecisionSnapshot Zod validation deferred
-    decisionSnapshot: row.decision_snapshot as DecisionSnapshot,
+    decisionSnapshot: parseDecisionSnapshotJsonb(row.decision_snapshot, 'PgEvalResultStore'),
   };
   if (row.predicted_entity_id != null) {
     return { ...base, predictedEntityId: createEntityId(row.predicted_entity_id) };
@@ -52,6 +52,10 @@ export class PgEvalResultStore implements EvalResultStore {
   constructor(private readonly pool: Pool) {}
 
   async saveResult(result: EvalResult): Promise<void> {
+    if (isCorruptedSnapshot(result.decisionSnapshot)) {
+      bootstrapLogger.warn({ caseId: result.caseId }, '[PgEvalResultStore] Skipping save — corrupted decision snapshot');
+      return;
+    }
     const resultId = nanoid();
     await this.pool.query(
       `INSERT INTO eval_results (

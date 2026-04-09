@@ -231,13 +231,22 @@ export class EvalRunner {
   private readonly calibrationEvaluator: CalibrationEvaluator;
   private readonly evidenceAuditor: EvidenceAuditor;
   private readonly sliceEvaluator: SliceEvaluator;
+  /**
+   * Injected clock for `evaluatedAt` stamping. Defaults to `() => new Date()`
+   * for production; tests (and any determinism-sensitive replay harness) pass
+   * a pinned clock so eval reports are bit-stable across runs. Per CLAUDE.md
+   * "All replay paths must use injected clock, not Date.now()".
+   */
+  private readonly now: () => Date;
 
   constructor(
     private readonly goldSetStore: GoldSetStore,
     private readonly evalResultStore: EvalResultStore,
     private readonly searchPipeline: SearchPipelinePort,
     private readonly releaseGates: ReleaseGates = DEFAULT_RELEASE_GATES,
+    clock?: { readonly now: () => Date },
   ) {
+    this.now = clock?.now ?? (() => new Date());
     this.utilityScorer = new UtilityScorer();
     this.selectivePredictor = new SelectivePredictor();
     this.calibrationEvaluator = new CalibrationEvaluator();
@@ -304,7 +313,7 @@ export class EvalRunner {
       flaggedSlices,
       releaseGateResult,
       caseCount: cases.length,
-      evaluatedAt: new Date(),
+      evaluatedAt: this.now(),
     };
   }
 

@@ -20,6 +20,7 @@ import type {
 } from '../../domain/retrieval/port/search-index.port.js';
 import { type VespaClient } from './vespa-client.js';
 import type { VespaHit } from './vespa-client.js';
+import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import {
   toVespaFields,
   fromVespaFields,
@@ -28,6 +29,7 @@ import {
   readRawVespaRetrievalSummary,
   parseHitSummary,
   parseFeatureSummary,
+  yqlEscapeString,
 } from './mapping.js';
 import {
   normalizeRetrievalHitSummary,
@@ -78,8 +80,40 @@ function isString(v: unknown): v is string {
   return typeof v === 'string';
 }
 
-function yqlEscapeString(value: string): string {
-  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+/**
+ * Lower bound for any YQL `limit` / `targetHits` / `exploreAdditionalHits` value.
+ * Zero is a legal Vespa limit (returns no hits) but we treat anything below 1 as
+ * a caller bug and force at least 1 so the query shape stays valid.
+ */
+const MIN_YQL_LIMIT = 1;
+/**
+ * Absolute upper bound on any YQL `limit` clause. Vespa's default
+ * `maxHits` is 400; values beyond this typically come from caller bugs
+ * (NaN, Infinity, or integer overflow from upstream arithmetic) and
+ * would either be rejected by Vespa or exhaust memory.
+ */
+const MAX_YQL_LIMIT = 10_000;
+
+/**
+ * Coerces a runtime-unknown number into a safe non-negative integer suitable
+ * for direct interpolation into a YQL `limit` / `targetHits` /
+ * `hnsw.exploreAdditionalHits` clause.
+ *
+ * TypeScript's `number` type does NOT guarantee integrality or finiteness at
+ * runtime — external callers can pass `NaN`, `Infinity`, negative numbers, or
+ * fractional values. Interpolating those directly into YQL produces invalid
+ * queries (e.g. `limit NaN`) or, worse, unexpected behavior.
+ *
+ * This helper clamps to `[MIN_YQL_LIMIT, MAX_YQL_LIMIT]` and rounds to the
+ * nearest integer. It replaces the implicit trust we previously placed on
+ * upstream callers to respect the port contract.
+ */
+function sanitizeYqlIntLimit(value: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback;
+  const rounded = Math.floor(value);
+  if (rounded < MIN_YQL_LIMIT) return MIN_YQL_LIMIT;
+  if (rounded > MAX_YQL_LIMIT) return MAX_YQL_LIMIT;
+  return rounded;
 }
 
 const STRUCTURED_QUERY_STRENGTH_MULTIPLIER = 0.35;
@@ -203,11 +237,10 @@ function extractMatchedFields(fields: Record<string, unknown>): readonly string[
  * already returns values in [0, 1], where 1 means perfect similarity.
  */
 function normaliseSimilarity(score: number): number {
-  // NaN/Infinity guard FIRST: Math.min/Math.max do not guard non-finite
-  // values — Math.max(0, Math.min(1, NaN)) → NaN. A NaN here propagates
-  // into provenance and breaks the deterministic sort downstream.
-  if (!Number.isFinite(score)) return 0;
-  return Math.max(0, Math.min(1, score));
+  // clamp01 handles NaN/Infinity → 0 (Math.min/max alone do NOT, since
+  // NaN propagates through both). NaN here would corrupt provenance and
+  // break the deterministic downstream sort.
+  return clamp01(score);
 }
 
 /**
@@ -254,7 +287,10 @@ export class VespaSearchIndex implements SearchIndexPort {
     limit?: number,
     rankProfile: string = 'hybrid',
   ): Promise<readonly SparseHit[]> {
-    const hits = limit ?? DEFAULT_SPARSE_LIMIT;
+    // Sanitize limit BEFORE interpolating into YQL: the port type is `number`
+    // but at runtime a buggy caller can pass NaN / Infinity / negatives, and
+    // `limit NaN` is invalid YQL.
+    const hits = sanitizeYqlIntLimit(limit ?? DEFAULT_SPARSE_LIMIT, DEFAULT_SPARSE_LIMIT);
     const effectiveFilters = filters ?? [];
     const filterClause = buildSparseFilters(effectiveFilters);
 
@@ -336,7 +372,8 @@ export class VespaSearchIndex implements SearchIndexPort {
     limit?: number,
     rankProfile: string = 'hybrid',
   ): Promise<readonly DenseHit[]> {
-    const requestedLimit = limit ?? DEFAULT_DENSE_LIMIT;
+    // Sanitize limit BEFORE interpolating into YQL (see sparseSearch).
+    const requestedLimit = sanitizeYqlIntLimit(limit ?? DEFAULT_DENSE_LIMIT, DEFAULT_DENSE_LIMIT);
     const effectiveFilters = filters ?? [];
     const filterClause = buildDenseFilters(effectiveFilters);
     // Filter starvation defense: when filters are present, the HNSW pass
@@ -348,11 +385,20 @@ export class VespaSearchIndex implements SearchIndexPort {
     // candidate pool can survive filter pruning.
     const hasFilters = filterClause.length > 0;
     const filterMultiplier = hasFilters ? DENSE_FILTER_TARGET_HITS_MULTIPLIER : 1;
-    const targetHits = Math.min(DENSE_TARGET_HITS_ABSOLUTE_CAP, requestedLimit * filterMultiplier);
+    // Both inputs are integers so the product is an integer; sanitize once more
+    // as a belt-and-braces guard against any future arithmetic drift that might
+    // reintroduce NaN / Infinity into the YQL interpolation path.
+    const targetHits = sanitizeYqlIntLimit(
+      Math.min(DENSE_TARGET_HITS_ABSOLUTE_CAP, requestedLimit * filterMultiplier),
+      DEFAULT_DENSE_LIMIT,
+    );
     // exploreAdditionalHits raises ef_search beyond targetHits so the HNSW
     // graph explores more neighbours at query time, improving ANN recall at
     // a small latency cost. Cap at 200 to avoid tail spikes on large corpora.
-    const exploreAdditional = Math.min(targetHits, DENSE_HNSW_EXPLORE_ADDITIONAL_CAP);
+    const exploreAdditional = sanitizeYqlIntLimit(
+      Math.min(targetHits, DENSE_HNSW_EXPLORE_ADDITIONAL_CAP),
+      MIN_YQL_LIMIT,
+    );
     const yql =
       `select * from ${SCHEMA} where ` +
       `({targetHits: ${targetHits}, hnsw.exploreAdditionalHits: ${exploreAdditional}} ` +
@@ -411,7 +457,8 @@ export class VespaSearchIndex implements SearchIndexPort {
       return [];
     }
 
-    const targetHits = limit ?? DEFAULT_DENSE_LIMIT;
+    // Sanitize limit BEFORE interpolating into YQL (see sparseSearch).
+    const targetHits = sanitizeYqlIntLimit(limit ?? DEFAULT_DENSE_LIMIT, DEFAULT_DENSE_LIMIT);
     const filterClause = buildDenseFilters(filters ?? []);
 
     // Build the query tensor as a Vespa mapped tensor cell array.
@@ -562,51 +609,16 @@ export class VespaSearchIndex implements SearchIndexPort {
   async fetchWithHitSummary(
     entityIds: readonly EntityId[],
   ): Promise<readonly RetrievalHitProjection[]> {
-    if (entityIds.length === 0) return [];
-    // Hard cap to prevent caller-driven Vespa DoS via 100k+ ID lists.
-    if (entityIds.length > MAX_BULK_FETCH_IDS) {
-      throw new Error(`fetchWithHitSummary: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
-    }
-
-    // Batch large ID lists to avoid unbounded YQL IN-clause size.
-    // Entity IDs are escaped via yqlEscapeString to prevent YQL injection.
-    // Batches run in parallel via Promise.allSettled — a single batch
-    // failure does not discard the rest. Results are then re-keyed by
-    // entity_id and emitted in input order so positional contracts hold.
-    const batches: EntityId[][] = [];
-    for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
-      batches.push([...entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE)]);
-    }
-    const settled = await Promise.allSettled(batches.map(async (batch) => {
-      const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
-      const yql =
-        `select entity_id, canonical_label, producer, region, appellation,` +
-        ` grape_primary, vintage_year, search_text_en, producer_prestige` +
-        ` from ${SCHEMA} where entity_id in (${idList})` +
-        ` limit ${batch.length}`;
-      const response = await this.client.query(yql, {
-        'presentation.summary': 'hit_summary',
-      });
-      const children = response.root.children ?? [];
-      return children.map((hit) => parseHitSummary(hit.fields));
-    }));
-
-    // Build a Map<entityId, projection> from successful batches.
-    const projectionMap = new Map<string, RetrievalHitProjection>();
-    for (const result of settled) {
-      if (result.status === 'fulfilled') {
-        for (const proj of result.value) {
-          projectionMap.set(String(proj.entityId), proj);
-        }
-      }
-    }
-    // Emit in the input order, dropping IDs that did not return a doc.
-    const ordered: RetrievalHitProjection[] = [];
-    for (const id of entityIds) {
-      const proj = projectionMap.get(String(id));
-      if (proj !== undefined) ordered.push(proj);
-    }
-    return ordered;
+    return this.batchFetchBySummary({
+      entityIds,
+      callerName: 'fetchWithHitSummary',
+      selectFields:
+        'entity_id, canonical_label, producer, region, appellation,' +
+        ' grape_primary, vintage_year, search_text_en, producer_prestige',
+      summaryName: 'hit_summary',
+      parseHit: (fields) => parseHitSummary(fields),
+      entityIdOf: (proj) => String(proj.entityId),
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -626,12 +638,45 @@ export class VespaSearchIndex implements SearchIndexPort {
   async fetchWithFeatureSummary(
     entityIds: readonly EntityId[],
   ): Promise<readonly RetrievalFeatureProjection[]> {
+    return this.batchFetchBySummary({
+      entityIds,
+      callerName: 'fetchWithFeatureSummary',
+      selectFields:
+        'entity_id, body, tannin, acidity, sweetness, critic_score_normalized,' +
+        ' drinking_window_start, drinking_window_end, drinking_window_model_version',
+      summaryName: 'feature_summary',
+      parseHit: (fields) => parseFeatureSummary(fields),
+      entityIdOf: (proj) => proj.entityId !== undefined ? String(proj.entityId) : undefined,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Common batch-fetch helper (bugbash P2-5 SSoT extraction)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Shared implementation for fetchWithHitSummary / fetchWithFeatureSummary.
+   *
+   * Batches entity IDs into chunks of FETCH_SUMMARY_BATCH_SIZE, runs batches
+   * in parallel via Promise.allSettled, re-keys results by entity_id, and
+   * emits in input order. A single batch failure does not discard the rest.
+   */
+  private async batchFetchBySummary<T>(opts: {
+    entityIds: readonly EntityId[];
+    callerName: string;
+    selectFields: string;
+    summaryName: string;
+    parseHit: (fields: Record<string, unknown>) => T;
+    entityIdOf: (parsed: T) => string | undefined;
+  }): Promise<readonly T[]> {
+    const { entityIds, callerName, selectFields, summaryName, parseHit, entityIdOf } = opts;
     if (entityIds.length === 0) return [];
     if (entityIds.length > MAX_BULK_FETCH_IDS) {
-      throw new Error(`fetchWithFeatureSummary: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
+      throw new Error(`${callerName}: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
     }
 
-    // Same parallel + ordered pattern as fetchWithHitSummary.
+    // Batch large ID lists to avoid unbounded YQL IN-clause size.
+    // Entity IDs are escaped via yqlEscapeString to prevent YQL injection.
     const batches: EntityId[][] = [];
     for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
       batches.push([...entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE)]);
@@ -639,28 +684,30 @@ export class VespaSearchIndex implements SearchIndexPort {
     const settled = await Promise.allSettled(batches.map(async (batch) => {
       const idList = batch.map((id) => yqlEscapeString(id)).join(', ');
       const yql =
-        `select entity_id, body, tannin, acidity, sweetness, critic_score_normalized,` +
-        ` drinking_window_start, drinking_window_end, drinking_window_model_version` +
+        `select ${selectFields}` +
         ` from ${SCHEMA} where entity_id in (${idList})` +
         ` limit ${batch.length}`;
       const response = await this.client.query(yql, {
-        'presentation.summary': 'feature_summary',
+        'presentation.summary': summaryName,
       });
       const children = response.root.children ?? [];
-      return children.map((hit) => parseFeatureSummary(hit.fields));
+      return children.map((hit) => parseHit(hit.fields));
     }));
 
-    const projectionMap = new Map<string, RetrievalFeatureProjection>();
+    // Build Map<entityId, projection> from successful batches.
+    const projectionMap = new Map<string, T>();
     for (const result of settled) {
       if (result.status === 'fulfilled') {
         for (const proj of result.value) {
-          if (proj.entityId !== undefined) {
-            projectionMap.set(String(proj.entityId), proj);
+          const eid = entityIdOf(proj);
+          if (eid !== undefined) {
+            projectionMap.set(eid, proj);
           }
         }
       }
     }
-    const ordered: RetrievalFeatureProjection[] = [];
+    // Emit in input order, dropping IDs that did not return a doc.
+    const ordered: T[] = [];
     for (const id of entityIds) {
       const proj = projectionMap.get(String(id));
       if (proj !== undefined) ordered.push(proj);

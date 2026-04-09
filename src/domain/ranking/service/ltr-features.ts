@@ -13,12 +13,25 @@
  */
 
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
+import { containsHangul } from '../../shared/utils/hangul.js';
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 
 /** Default neutral confidence when a signal cannot be measured. */
 const DEFAULT_NEUTRAL_CONFIDENCE = 0.5;
+/** Score for partial label match: query contains canonical label as substring. */
+const PARTIAL_LABEL_MATCH_SCORE = 0.5;
 /** Hangul Syllables block — used to detect Korean queries. */
-const HANGUL_RE = /[\uAC00-\uD7A3]/u;
+// Hangul detection delegates to @shared/utils/hangul (SSoT).
+/**
+ * Returns the current calendar year. Recomputed per call to avoid a
+ * year-rollover bug for long-lived processes: a module-scope constant
+ * initialized at load time would go stale on Dec 31 → Jan 1 and mis-classify
+ * drinking-window ranges for an entire year until the process restarts.
+ * `new Date().getFullYear()` is cheap enough to call N times per query.
+ */
+function ltrCurrentYear(): number {
+  return new Date().getFullYear();
+}
 
 export interface LTRFeatureVector {
   // Retrieval signals (5)
@@ -81,14 +94,10 @@ function safeNumber(value: unknown, fallback = 0): number {
 }
 
 function countSatisfiedConstraints(
-  candidate: HybridCandidate,
+  matchedSet: ReadonlySet<string>,
   constraints: readonly NormalizedConstraint[],
 ): { satisfied: number; total: number } {
   if (constraints.length === 0) return { satisfied: 0, total: 0 };
-  // Use the candidate's matchedConstraints set if present (it's already
-  // computed by ConstraintFilter / annotateCandidateConstraintEvidenceBatch).
-  const matched = (candidate as { matchedConstraints?: readonly string[] }).matchedConstraints ?? [];
-  const matchedSet = new Set(matched);
   let satisfied = 0;
   for (const c of constraints) {
     if (matchedSet.has(c.attribute)) satisfied++;
@@ -108,30 +117,44 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
   const c = input.candidate;
   const q = input.normalizedQuery;
   const qTokens = q.length === 0 ? 0 : q.split(/\s+/u).filter((s) => s.length > 0).length;
-  const hasKorean = HANGUL_RE.test(input.query) ? 1 : 0;
+  const hasKorean = containsHangul(input.query) ? 1 : 0;
 
   // Retrieval signals
   const bm25 = safeNumber((c as { sparseRawScore?: number }).sparseRawScore, 0);
   const dense = safeNumber((c as { denseRawScore?: number }).denseRawScore, 0);
   const anchor = safeNumber((c as { anchorRawScore?: number }).anchorRawScore, 0);
-  const fusion = safeNumber((c as { retrievalFusionScore?: number }).retrievalFusionScore, 0);
+  // fusionRrfTotal is the canonical RRF total, set only by FusionService.
+  // Browse/Compare candidates bypass fusion → fusionRrfTotal absent → 0.
+  // 0 is correct: absence of fusion data means "no multi-channel agreement"
+  // which the LTR model can learn to weight accordingly.
+  const fusion = safeNumber(
+    (c as { fusionRrfTotal?: number }).fusionRrfTotal,
+    0,
+  );
   let crossChannel = 0;
   if ((c as { sparseRank?: number }).sparseRank !== undefined) crossChannel++;
   if ((c as { denseRank?: number }).denseRank !== undefined) crossChannel++;
   if ((c as { anchorRank?: number }).anchorRank !== undefined) crossChannel++;
   if ((c as { learnedSparseRank?: number }).learnedSparseRank !== undefined) crossChannel++;
 
-  // Constraint match signals
-  const hardMatch = countSatisfiedConstraints(c, input.hardConstraints);
-  const softMatch = countSatisfiedConstraints(c, input.softConstraints);
-  const inferredMatch = countSatisfiedConstraints(c, input.inferredConstraints ?? []);
+  // Constraint match signals — precompute matched set once (Rule 16: avoid
+  // per-function Set allocation when the same data is reused across calls).
+  const matchedSet = new Set(c.matchedConstraints);
+  const hardMatch = countSatisfiedConstraints(matchedSet, input.hardConstraints);
+  const softMatch = countSatisfiedConstraints(matchedSet, input.softConstraints);
+  const inferredMatch = countSatisfiedConstraints(matchedSet, input.inferredConstraints ?? []);
   const violationList = (c as { unmetHardConstraints?: readonly unknown[] }).unmetHardConstraints ?? [];
 
-  // Entity signals
-  const labelMatch = c.canonicalLabel !== undefined && c.canonicalLabel.toLowerCase().includes(q.toLowerCase()) ? 1 :
-    c.canonicalLabel !== undefined && q.toLowerCase().includes(c.canonicalLabel.toLowerCase()) ? 0.5 : 0;
-  const producerMatch = c.producer !== undefined && q.toLowerCase().includes(c.producer.toLowerCase()) ? 1 : 0;
-  const regionMatch = c.region !== undefined && q.toLowerCase().includes(c.region.toLowerCase()) ? 1 : 0;
+  // Entity signals — lowercase query once, reuse across all comparisons
+  // (avoids N string allocations per candidate for each .toLowerCase() call)
+  const qLower = q.toLowerCase();
+  const labelLower = c.canonicalLabel?.toLowerCase();
+  const labelMatch = labelLower !== undefined && labelLower.includes(qLower) ? 1 :
+    labelLower !== undefined && qLower.includes(labelLower) ? PARTIAL_LABEL_MATCH_SCORE : 0;
+  const producerLower = c.producer?.toLowerCase();
+  const producerMatch = producerLower !== undefined && qLower.includes(producerLower) ? 1 : 0;
+  const regionLower = c.region?.toLowerCase();
+  const regionMatch = regionLower !== undefined && qLower.includes(regionLower) ? 1 : 0;
 
   // Quality signals
   const critic = safeNumber((c as { criticScoreNormalized?: number }).criticScoreNormalized, 0);
@@ -139,7 +162,7 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
   const popularity = safeNumber((c as { popularityScore?: number }).popularityScore, 0);
   const dwStart = safeNumber(c.drinkingWindowStart, 0);
   const dwEnd = safeNumber(c.drinkingWindowEnd, 0);
-  const currentYear = new Date().getFullYear();
+  const currentYear = ltrCurrentYear();
   const dwInRange = dwStart > 0 && dwEnd > 0 && currentYear >= dwStart && currentYear <= dwEnd ? 1 : 0;
 
   // Korean alias match
@@ -165,9 +188,13 @@ export function extractLTRFeatures(input: LTRFeatureExtractionInput): LTRFeature
     soft_constraint_match_ratio: ratio(softMatch.satisfied, softMatch.total),
     inferred_constraint_match_ratio: ratio(inferredMatch.satisfied, inferredMatch.total),
     constraint_violation_count: violationList.length,
+    // When zero hard constraints exist, satisfaction is trivially perfect (1.0):
+    // there are no constraints to violate. DEFAULT_NEUTRAL_CONFIDENCE (0.5)
+    // was incorrect here — it penalized unconstrained queries as if they were
+    // 50% unsatisfied. Identified in Phase B audit round 3.
     constraint_satisfaction_confidence: hardMatch.total > 0
       ? hardMatch.satisfied / hardMatch.total
-      : DEFAULT_NEUTRAL_CONFIDENCE,
+      : 1.0,
 
     entity_link_confidence: safeNumber(input.entityLinkConfidence, DEFAULT_NEUTRAL_CONFIDENCE),
     canonical_label_match: labelMatch,

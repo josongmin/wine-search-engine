@@ -7,7 +7,7 @@ import type {
   TransactionalWatchlistStore,
 } from '../../domain/watchlist/port/watchlist-repository.port.js';
 
-export class InMemoryWatchlistStore implements WatchlistStoragePort {
+export class InMemoryWatchlistStore implements WatchlistStoragePort, TransactionalWatchlistStore {
   private readonly watchlists = new Map<string, WatchlistEntry>();
   private readonly deliveryLogs = new Map<string, WatchlistDeliveryLogEntry[]>();
 
@@ -68,7 +68,29 @@ export class InMemoryWatchlistStore implements WatchlistStoragePort {
   }
 
   async withTransaction<T>(fn: (tx: TransactionalWatchlistStore) => Promise<T>): Promise<T> {
-    // In-memory: no real transaction needed; pass self as the transactional store
-    return fn(this);
+    // Parity with PgWatchlistStore: the port JSDoc says "Commits on success,
+    // rolls back on error". In production the rollback happens via PG's
+    // BEGIN/ROLLBACK; for in-memory parity we snapshot the maps before fn()
+    // runs and restore them if fn() throws. Without this, tests that use
+    // the in-memory adapter would observe partial mutations on error while
+    // production (PG) would see none — a silent stub-vs-prod drift.
+    const watchlistsSnapshot = new Map(this.watchlists);
+    const deliveryLogsSnapshot = new Map<string, WatchlistDeliveryLogEntry[]>();
+    for (const [k, v] of this.deliveryLogs) {
+      deliveryLogsSnapshot.set(k, [...v]);
+    }
+    try {
+      return await fn(this);
+    } catch (err) {
+      this.watchlists.clear();
+      for (const [k, v] of watchlistsSnapshot) {
+        this.watchlists.set(k, v);
+      }
+      this.deliveryLogs.clear();
+      for (const [k, v] of deliveryLogsSnapshot) {
+        this.deliveryLogs.set(k, v);
+      }
+      throw err;
+    }
   }
 }

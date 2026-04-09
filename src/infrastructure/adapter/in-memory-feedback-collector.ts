@@ -12,12 +12,14 @@ export class InMemoryFeedbackCollector implements FeedbackCollectorPort {
   private readonly events: FeedbackEvent[] = [];
   private readonly seenIds = new Set<string>();
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- async to satisfy port contract; in-memory variant has no I/O
   async record(event: FeedbackEvent): Promise<void> {
     if (this.seenIds.has(event.eventId)) return;
     this.seenIds.add(event.eventId);
     this.events.push(event);
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- async to satisfy port contract; in-memory variant has no I/O
   async recordBatch(events: readonly FeedbackEvent[]): Promise<void> {
     for (const e of events) {
       if (this.seenIds.has(e.eventId)) continue;

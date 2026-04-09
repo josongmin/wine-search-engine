@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
+import { vitestMemorySchedulerOptions } from './parallelism.js';
 
 const metaTestInclude = [
   'test/unit/replay-fixtures/replay-fixture-lane-truth.test.ts',
@@ -14,6 +15,7 @@ const metaTestInclude = [
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [...metaTestInclude],
     pool: 'forks',

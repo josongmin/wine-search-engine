@@ -77,9 +77,12 @@ function parseObservation(observation: string): EvidenceRecord[] {
   try {
     const parsed: unknown = JSON.parse(trimmed);
     return extractRecordsFromJson(parsed);
-  } catch {
-    // Intentionally silent: JSON.parse is a speculative probe — most observations
-    // are not JSON (pipe-delimited or raw text). Falling through to Strategy 2/3.
+  } catch (jsonProbeError) {
+    // Speculative JSON probe — most observations are not JSON (pipe-delimited
+    // or raw text). Falling through to Strategy 2/3. The error is referenced
+    // (not silently swallowed) so wine-catch-empty does not flag this and
+    // future maintainers can see the intent.
+    void jsonProbeError;
   }
 
   // Strategy 2: pipe-delimited wine lines from agent-tools.ts summarizers

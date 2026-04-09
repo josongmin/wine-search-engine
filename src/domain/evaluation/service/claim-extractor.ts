@@ -13,6 +13,7 @@
 
 import crypto from 'node:crypto';
 import { KRW_PER_MAN_WON, KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
+import { containsHangul } from '../../shared/utils/hangul.js';
 import type { ExtractedClaim, ClaimCategory, WineField } from '../model/claim.js';
 import { resolveGrapeAlias, normalizeWineType } from './wine-ontology.js';
 
@@ -128,10 +129,8 @@ const VINTAGE_WINDOW_GAP_MAX = 30;
 /** Prefix length for claim ID (sha256 hex truncated to first N chars). */
 const CLAIM_ID_PREFIX_LEN = 16;
 
-/** Hangul (Korean) syllable range check. */
-function isHangul(s: string): boolean {
-  return /[\uAC00-\uD7A3]/.test(s);
-}
+/** Hangul (Korean) syllable range check. Delegates to @shared/utils/hangul (SSoT). */
+const isHangul = containsHangul;
 
 /** Unicode-aware word containment check.
  *  Latin: "napa" in "napa cabbage" → true (would be wrong for region)
@@ -157,17 +156,38 @@ function containsAsWord(haystack: string, needle: string): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Options for {@link extractClaims}.
+ */
+export interface ExtractClaimsOptions {
+  /**
+   * Deterministic "current year" used as the upper bound for accepted vintage
+   * years (vintages > currentYear + 1 are rejected as implausible). When
+   * omitted, falls back to `new Date().getFullYear()`. Replay harnesses and
+   * golden-set fixtures MUST pin this value to keep claim extraction
+   * byte-stable across runs; otherwise a claim like "2026" would be accepted
+   * in 2026 but rejected in 2025, silently changing eval metrics across a
+   * year boundary.
+   */
+  readonly currentYear?: number;
+}
+
+/**
  * Extract typed claims from an agent's answer.
  *
  * @param answer - The agent's answer text
+ * @param options - Optional extraction options (e.g. pinned currentYear for replay determinism)
  * @returns Array of extracted claims, deduplicated by (category, field, normalizedValue)
  */
-export function extractClaims(answer: string): ExtractedClaim[] {
+export function extractClaims(
+  answer: string,
+  options?: ExtractClaimsOptions,
+): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
+  const currentYear = options?.currentYear ?? new Date().getFullYear();
 
   claims.push(...extractRegionClaims(answer));
   claims.push(...extractIdentityClaims(answer));
-  claims.push(...extractVintageClaims(answer));
+  claims.push(...extractVintageClaims(answer, currentYear));
   claims.push(...extractPriceClaims(answer));
   claims.push(...extractGrapeClaims(answer));
   claims.push(...extractWineTypeClaims(answer));
@@ -224,7 +244,7 @@ function extractIdentityClaims(text: string): ExtractedClaim[] {
 // Core structured claims
 // ─────────────────────────────────────────────────────────────────────────────
 
-function extractVintageClaims(text: string): ExtractedClaim[] {
+function extractVintageClaims(text: string, currentYear: number): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
   const allMatches: { year: number; yearStart: number; yearEnd: number }[] = [];
   for (const m of text.matchAll(VINTAGE_RE)) {
@@ -255,7 +275,7 @@ function extractVintageClaims(text: string): ExtractedClaim[] {
       if (gap >= 1 && gap <= VINTAGE_WINDOW_GAP_MAX && /^[-–~]$/u.test(between)) continue;
     }
 
-    const maxYear = new Date().getFullYear() + 1;
+    const maxYear = currentYear + 1;
     if (year > maxYear) continue;
 
     claims.push(makeClaim('core_structured_claim', 'vintage_year', String(year), String(year)));

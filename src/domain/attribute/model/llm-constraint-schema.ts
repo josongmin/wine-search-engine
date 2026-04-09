@@ -43,7 +43,7 @@ export const LlmConstraintItemSchema = z.object({
     z.object({ min: z.number().finite(), max: z.number().finite() }),
     z.array(z.string()).max(MAX_CONSTRAINT_IN_VALUES),
   ]),
-  confidence: z.number().min(0).max(1),
+  confidence: z.number().finite().min(0).max(1),
 });
 
 /** Max constraints per LLM response — single query rarely needs more than 20 constraints. */

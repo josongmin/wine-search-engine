@@ -43,9 +43,7 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
 }
 
 export function getPgPool(pgConfig: PgPoolConfig = config.pg): Pool {
-  if (!pool) {
-    pool = createPgPool(pgConfig);
-  }
+  pool ??= createPgPool(pgConfig);
   return pool;
 }
 

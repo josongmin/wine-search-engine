@@ -1270,7 +1270,7 @@ function scoreStructuredChecks(
           const parsed = (JSON.parse(call.input ?? '{}') as unknown) as Record<string, unknown>;
           const value = getNestedValue(parsed, argSpec.argPath);
           return evaluatePredicate(value, argSpec.predicate, argSpec.value);
-        } catch (err) {
+        } catch {
           diagnostics.push({
             dim: 'toolAccuracy',
             severity: 'warn',

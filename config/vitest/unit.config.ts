@@ -1,10 +1,10 @@
 import { defineConfig } from 'vitest/config';
 import { vitestResolveAliases } from './aliases.js';
-import { resolveMaxThreads } from './parallelism.js';
+import { resolveMaxThreads, vitestMemorySchedulerOptions } from './parallelism.js';
 
 const isCoverageRun = process.argv.includes('--coverage') || process.env.VITEST_COVERAGE === '1';
 
-const maxUnitThreads = resolveMaxThreads();
+const maxUnitThreads = resolveMaxThreads(1);
 
 const testInclude = [
   'test/unit/**/*.test.ts',
@@ -37,6 +37,7 @@ const watchlistTestExclude = [
 
 export default defineConfig({
   test: {
+    ...vitestMemorySchedulerOptions(),
     globals: true,
     include: [...testInclude],
     exclude: [

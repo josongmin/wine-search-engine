@@ -408,6 +408,7 @@ export function toHybridCandidate(
     denseRank: anchorRank,
     anchorRank,
     retrievalFusionScore,
+    fusionRrfTotal: retrievalFusionScore,
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile,

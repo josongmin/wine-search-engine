@@ -121,6 +121,7 @@ function buildHybridCandidate(
     denseRank: rank,
     anchorRank: rank,
     retrievalFusionScore: retrievalScore,
+    fusionRrfTotal: retrievalScore,
     matchedConstraints: [],
     retrievalTrace: {
       retrievalProfile: 'fusion',

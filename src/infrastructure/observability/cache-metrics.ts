@@ -189,8 +189,6 @@ let globalMetricsCollector: CacheMetricsCollector | undefined;
  * Get or create the global metrics collector.
  */
 export function getMetricsCollector(): CacheMetricsCollector {
-  if (!globalMetricsCollector) {
-    globalMetricsCollector = new CacheMetricsCollector();
-  }
+  globalMetricsCollector ??= new CacheMetricsCollector();
   return globalMetricsCollector;
 }

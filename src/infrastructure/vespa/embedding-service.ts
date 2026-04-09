@@ -172,7 +172,13 @@ export class HttpEmbeddingService implements EmbeddingServicePort {
 
     const data: unknown = await response.json();
     try {
-      const vectors = embeddingsFromOpenAiResponse(data);
+      // Parity with OpenAiEmbeddingService: pass batchSize so partial responses
+      // (length/index mismatches) throw rather than silently mis-aligning
+      // text→vector pairs. Some LiteLLM/Azure proxies drop or re-number items,
+      // and without this check the vespa-path HTTP adapter would accept them
+      // while the OpenAI-path adapter would reject them — stub-vs-prod drift
+      // across two implementations of the same EmbeddingServicePort.
+      const vectors = embeddingsFromOpenAiResponse(data, batchSize);
 
       // Validate embedding vectors before returning:
       // 1. Non-finite values (NaN, ±Infinity) in vectors cause Vespa ANN to produce

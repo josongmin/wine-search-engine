@@ -135,26 +135,29 @@ function evaluateOperator(
 
     case 'in': {
       if (Array.isArray(attrValue)) {
-        const attrValues = attrValue
-          .filter((value): value is string => typeof value === 'string')
-          .map(normalizeString);
+        const attrValueSet = new Set(
+          attrValue
+            .filter((value): value is string => typeof value === 'string')
+            .map(normalizeString),
+        );
         if (Array.isArray(constraintValue)) {
           return constraintValue
             .filter((value): value is string => typeof value === 'string')
-            .map(normalizeString)
-            .some((value) => attrValues.includes(value));
+            .some((value) => attrValueSet.has(normalizeString(value)));
         }
         return typeof constraintValue === 'string' &&
-          attrValues.includes(normalizeString(constraintValue));
+          attrValueSet.has(normalizeString(constraintValue));
       }
       if (Array.isArray(constraintValue)) {
         if (typeof attrValue !== 'string') {
           return false;
         }
-        return constraintValue
-          .filter((value): value is string => typeof value === 'string')
-          .map(normalizeString)
-          .includes(normalizeString(attrValue));
+        const constraintSet = new Set(
+          constraintValue
+            .filter((value): value is string => typeof value === 'string')
+            .map(normalizeString),
+        );
+        return constraintSet.has(normalizeString(attrValue));
       }
       if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
         return normalizeString(attrValue) === normalizeString(constraintValue);
@@ -164,17 +167,18 @@ function evaluateOperator(
 
     case 'exclude': {
       if (Array.isArray(attrValue)) {
-        const attrValues = attrValue
-          .filter((value): value is string => typeof value === 'string')
-          .map(normalizeString);
+        const attrValueSet = new Set(
+          attrValue
+            .filter((value): value is string => typeof value === 'string')
+            .map(normalizeString),
+        );
         if (Array.isArray(constraintValue)) {
           return constraintValue
             .filter((value): value is string => typeof value === 'string')
-            .map(normalizeString)
-            .every((value) => !attrValues.includes(value));
+            .every((value) => !attrValueSet.has(normalizeString(value)));
         }
         return typeof constraintValue !== 'string' ||
-          !attrValues.includes(normalizeString(constraintValue));
+          !attrValueSet.has(normalizeString(constraintValue));
       }
       if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
         return normalizeString(attrValue) !== normalizeString(constraintValue);
@@ -184,19 +188,21 @@ function evaluateOperator(
 
     case 'not_in': {
       // Exclude if the attribute value matches ANY of the listed values.
-      const excludeValues = Array.isArray(constraintValue)
-        ? constraintValue.filter((v): v is string => typeof v === 'string').map(normalizeString)
-        : typeof constraintValue === 'string'
-          ? [normalizeString(constraintValue)]
-          : [];
+      // Use Set for O(1) lookup instead of Array.includes O(n).
+      const excludeSet = new Set(
+        Array.isArray(constraintValue)
+          ? constraintValue.filter((v): v is string => typeof v === 'string').map(normalizeString)
+          : typeof constraintValue === 'string'
+            ? [normalizeString(constraintValue)]
+            : [],
+      );
       if (Array.isArray(attrValue)) {
-        const attrValues = attrValue
+        return attrValue
           .filter((v): v is string => typeof v === 'string')
-          .map(normalizeString);
-        return attrValues.every((v) => !excludeValues.includes(v));
+          .every((v) => !excludeSet.has(normalizeString(v)));
       }
       if (typeof attrValue === 'string') {
-        return !excludeValues.includes(normalizeString(attrValue));
+        return !excludeSet.has(normalizeString(attrValue));
       }
       return true;
     }
@@ -237,7 +243,6 @@ export function annotateCandidateConstraintEvidence(
   candidate: HybridCandidate,
   constraints: ConstraintBundle,
 ): HybridCandidate {
-  const { unmetHardConstraints: _ignored, ...rest } = candidate;
   const matched = new Set(candidate.matchedConstraints);
   const unmetHard: string[] = [];
 
@@ -261,11 +266,21 @@ export function annotateCandidateConstraintEvidence(
     }
   }
 
-  return {
-    ...rest,
-    matchedConstraints: [...matched],
-    ...(unmetHard.length > 0 ? { unmetHardConstraints: unmetHard } : {}),
-  };
+  // Use Object.assign on a fresh object to avoid destructuring + spreading
+  // the full HybridCandidate (~40 fields). The result shares property
+  // references with the original (safe: all fields are readonly primitives,
+  // readonly arrays, or readonly objects).
+  const result = Object.assign(
+    Object.create(null) as HybridCandidate,
+    candidate,
+    { matchedConstraints: [...matched] },
+  );
+  if (unmetHard.length > 0) {
+    (result as { unmetHardConstraints: readonly string[] }).unmetHardConstraints = unmetHard;
+  } else {
+    delete (result as { unmetHardConstraints?: readonly string[] }).unmetHardConstraints;
+  }
+  return result;
 }
 
 export function annotateCandidateConstraintEvidenceBatch(

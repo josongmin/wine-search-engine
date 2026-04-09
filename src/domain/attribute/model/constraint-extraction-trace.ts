@@ -62,4 +62,17 @@ export interface ConstraintExtractionTrace {
   readonly semanticConstraintRecall?: number | undefined;
   readonly entityLinkingAccuracy?: number | undefined;
   readonly missedPhrases: readonly string[];
+  /**
+   * When `source === 'fallback'`, this field distinguishes WHY the fallback
+   * fired. Absent when the pipeline produced constraints normally.
+   *
+   * - `nlmapper_exception`: NLMapper.mapConstraints threw (LLM timeout, API error, etc.)
+   * - `llm_schema_validation`: LLM returned parseable JSON that failed Zod validation
+   * - `llm_empty_response`: LLM returned a valid but empty constraint set
+   */
+  readonly fallbackReason?:
+    | 'nlmapper_exception'
+    | 'llm_schema_validation'
+    | 'llm_empty_response'
+    | undefined;
 }

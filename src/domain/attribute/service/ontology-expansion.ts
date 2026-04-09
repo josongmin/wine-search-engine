@@ -25,6 +25,7 @@ import type {
 } from '../../shared/types/constraint-bundle.js';
 import { regionAncestors, REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
 import { wineTitleCase } from '../../shared/utils/title-case.js';
+import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 
 /** Version identifier embedded in generated constraints for replay parity. */
 const ONTOLOGY_EXPANSION_VERSION = 'ontology-v1.0';
@@ -150,6 +151,8 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
 }
 
 function keyOf(c: NormalizedConstraint): string {
-  return `${c.attribute}|${c.operator}|${JSON.stringify(c.value)}`;
+  // canonicalJsonStringify sorts object keys so range constraints
+  // ({min,max} vs {max,min}) produce the same dedup key. (Bugbash Round 18)
+  return `${c.attribute}|${c.operator}|${canonicalJsonStringify(c.value)}`;
 }
 

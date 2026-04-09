@@ -1,23 +1,46 @@
 #!/usr/bin/env tsx
 /**
- * Document Expansion (doc2query): Generates synthetic search queries per wine
- * document and appends them to searchTextEn for improved sparse recall.
+ * Document Expansion (Doc2Query): generates synthetic search queries per
+ * wine and writes them to a typed `syntheticQueries` field on the Silver
+ * record. Downstream `index-to-vespa.ts` routes the values into a
+ * dedicated Vespa BM25 field (`synthetic_queries`) so the weight is
+ * tuned independently of the natural-text fields.
  *
- * Each wine gets 5-10 synthetic queries that a user might type to find it.
- * These expand the BM25 vocabulary coverage dramatically.
+ * Why a typed field instead of concatenation:
+ *   The previous implementation appended queries to `searchTextEn` with a
+ *   delimiter. That polluted the BM25 IDF on the original text and made
+ *   the synthetic content's weight uncontrollable. The typed field gives
+ *   the rank profile authority over how much synthetic recall to spend.
+ *
+ * Idempotency:
+ *   Each record carries a `doc2queryFingerprint = { modelId, contentHash }`.
+ *   When the source text and modelId are unchanged the record is skipped,
+ *   so re-running the script costs only the records that actually drift.
+ *   Use `--force` to override and regenerate everything.
  *
  * Usage:
  *   npx tsx --env-file=.env scripts/etl/generate-doc-queries.ts
  *   npx tsx --env-file=.env scripts/etl/generate-doc-queries.ts --dry-run --limit 5
+ *   npx tsx --env-file=.env scripts/etl/generate-doc-queries.ts --force --limit 100
  *
- * Requires: ANTHROPIC_API_KEY in environment.
+ * Requires: OPENAI_API_KEY (gpt-5.4-mini by default).
  */
 
 import 'dotenv/config';
 import fs from 'node:fs/promises';
-import type { EnrichedSilverRecord } from './types.js';
-import { parseNdjson } from './ndjson.js';
+import crypto from 'node:crypto';
+
+import type {
+  Doc2QueryGeneratorPort,
+  Doc2QueryInput,
+} from '../../src/domain/retrieval/port/doc2query-generator.port.js';
+import { OpenAiChatLlm } from '../../src/infrastructure/ai/openai-chat-llm.js';
+import { OpenAiDoc2QueryGenerator } from '../../src/infrastructure/ai/openai-doc2query-generator.js';
+import { OpenAiEmbeddingService } from '../../src/infrastructure/ai/openai-embedding-service.js';
+import { loadConfig } from '../../src/config/env.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import type { EnrichedSilverRecord, Doc2QueryFingerprint } from './types.js';
+import { parseNdjson } from './ndjson.js';
 import { atomicWriteFile } from './etl-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -26,216 +49,407 @@ import { atomicWriteFile } from './etl-utils.js';
 
 const DEFAULT_INPUT = resolveDataPath('data/silver-ko.ndjson');
 const DEFAULT_OUTPUT = resolveDataPath('data/silver-docquery.ndjson');
-const BATCH_SIZE = 10;
-const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-haiku-4-5-20251001';
-const DOC_QUERY_DELIMITER = ' ||| '; // separates original text from synthetic queries
+
+/**
+ * Synthetic queries per wine — 15 slots (SOTA++ contract).
+ *
+ * Covers exact-entity (EN/KO), typo/spacing variants, region/grape,
+ * style (EN + Korean colloquial), food pairing (EN + Korean native),
+ * price tier (₩), occasion, beginner, hashtag, and a full-sentence
+ * Korean discovery question. See `openai-doc2query-generator.ts` for
+ * the exact slot taxonomy and evidence behind it.
+ */
+const QUERIES_PER_WINE = 15;
+
+/**
+ * Concurrent in-flight LLM calls. With ~3s p50 latency per call against
+ * gpt-5-series models, serial execution would take 6+ hours for the full
+ * 7K-wine corpus. Tier 5 OpenAI accounts support 10K+ RPM, so a pool of
+ * 100 stays well under the rate limit while turning a 6-hour job into
+ * a few minutes. Override at runtime with `--concurrency N`. The OpenAI
+ * adapter already retries 429s with exponential backoff, so a brief
+ * overshoot self-corrects.
+ */
+const DEFAULT_CONCURRENCY = 100;
+
+/** Progress checkpoint frequency (records). */
+const PROGRESS_LOG_EVERY = 100;
+
+/** Persist partial result to disk every N completions (resume safety). */
+const CHECKPOINT_EVERY = 500;
 
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
 interface Args {
-  input: string;
-  output: string;
-  dryRun: boolean;
-  limit: number;
+  readonly input: string;
+  readonly output: string;
+  readonly dryRun: boolean;
+  readonly limit: number;
+  readonly force: boolean;
+  readonly concurrency: number;
 }
 
-function parseArgs(argv: string[]): Args {
-  const out: Args = { input: DEFAULT_INPUT, output: DEFAULT_OUTPUT, dryRun: false, limit: 0 };
-  for (let i = 0; i < argv.length; i++) {
+function parseArgs(argv: readonly string[]): Args {
+  let input = DEFAULT_INPUT;
+  let output = DEFAULT_OUTPUT;
+  let dryRun = false;
+  let limit = 0;
+  let force = false;
+  let concurrency = DEFAULT_CONCURRENCY;
+  for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
-    if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
-    else if (a === '--output' || a === '-o') out.output = argv[++i] ?? DEFAULT_OUTPUT;
-    else if (a === '--dry-run') out.dryRun = true;
-    else if (a === '--limit') out.limit = Math.max(1, Number(argv[++i] ?? '0'));
+    if ((a === '--input' || a === '-i') && argv[i + 1] !== undefined) {
+      input = argv[++i] ?? DEFAULT_INPUT;
+    } else if ((a === '--output' || a === '-o') && argv[i + 1] !== undefined) {
+      output = argv[++i] ?? DEFAULT_OUTPUT;
+    } else if (a === '--dry-run') {
+      dryRun = true;
+    } else if (a === '--limit' && argv[i + 1] !== undefined) {
+      limit = Math.max(1, Number(argv[++i] ?? '0'));
+    } else if (a === '--force') {
+      force = true;
+    } else if (a === '--concurrency' && argv[i + 1] !== undefined) {
+      concurrency = Math.max(1, Number(argv[++i] ?? String(DEFAULT_CONCURRENCY)));
+    }
+  }
+  return { input, output, dryRun, limit, force, concurrency };
+}
+
+// ---------------------------------------------------------------------------
+// Source-text + fingerprint
+// ---------------------------------------------------------------------------
+
+/**
+ * Regex for detecting Hangul characters in alias strings so we can
+ * filter the Korean aliases out of the full RFC-003 alias bundle.
+ */
+const HANGUL_REGEX = /[\u3131-\u318E\uAC00-\uD7A3]/u;
+
+/** Hard cap on Korean aliases injected into the Doc2Query prompt. */
+const MAX_KOREAN_ALIASES_PER_WINE = 8;
+
+/**
+ * Extract Korean aliases from the enriched record's RFC-003 alias
+ * bundle. `generate-korean-aliases.ts` stores validated Korean
+ * romanizations alongside other alias types; we pull just the Hangul
+ * ones so the Doc2Query prompt can reuse them verbatim without
+ * hallucinating new romanizations.
+ */
+function extractKoreanAliases(rec: EnrichedSilverRecord): readonly string[] {
+  const proposed = rec.aliases?.proposed ?? [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const a of proposed) {
+    const v = (a as { value?: unknown }).value;
+    if (typeof v !== 'string') continue;
+    if (!HANGUL_REGEX.test(v)) continue;
+    const trimmed = v.trim();
+    if (trimmed.length === 0) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+    if (out.length >= MAX_KOREAN_ALIASES_PER_WINE) break;
   }
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// Prompt
-// ---------------------------------------------------------------------------
-
-const SYSTEM_PROMPT = `You are a wine search query generator. For each wine document, generate 7 realistic search queries that someone might type to find this wine. Include:
-- Style/body queries ("full bodied red wine")
-- Occasion queries ("wine for steak dinner")
-- Region/grape queries ("napa cabernet")
-- Price-tier queries ("premium red under 200")
-- Comparison queries ("top bordeaux first growth")
-- Korean queries if the wine is notable (2 Korean queries)
-- Natural language discovery queries
-
-Output ONLY a JSON array of arrays: [[wine1_q1, wine1_q2, ...], [wine2_q1, ...]]
-No explanation, no markdown.`;
-
-function buildPrompt(records: readonly EnrichedSilverRecord[]): string {
-  return records
-    .map(
-      (r) =>
-        `Wine: ${r.canonicalLabel}\nProducer: ${r.producer}\nRegion: ${r.region}, ${r.country}\nGrape: ${r.grapePrimary ?? 'blend'}\nStyle: body=${r.body.toFixed(2)}, tannin=${r.tannin.toFixed(2)}\nPrice: $${r.priceUsd ?? 'unknown'}\nNotes: ${r.searchTextEn.slice(0, 200)}`,
-    )
-    .join('\n---\n');
-}
-
-const MAX_RETRIES = 5;
-
-async function callClaude(prompt: string): Promise<string[][]> {
-  const apiKey = process.env['ANTHROPIC_API_KEY'];
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 4096,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (response.status === 429) {
-      // Rate limited — wait and retry with exponential backoff
-      const wait = Math.min(60_000, 2_000 * Math.pow(2, attempt));
-      console.warn(`  Rate limited (429), waiting ${(wait / 1000).toFixed(0)}s before retry ${attempt + 1}/${MAX_RETRIES}`);
-      await new Promise((r) => setTimeout(r, wait));
-      continue;
-    }
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(`Claude API error [${response.status}]: ${text.slice(0, 200)}`);
-    }
-
-    // Success — parse below
-    return parseClaudeResponse(response);
-  }
-
-  console.warn('  Max retries reached, skipping batch');
-  return [];
-}
-
-async function parseClaudeResponse(response: Response): Promise<string[][]> {
-
-  const data = (await response.json()) as {
-    content: { type: string; text: string }[];
+/**
+ * Build the structured Doc2Query input from an enriched Silver record.
+ * The field order is fixed so the fingerprint stays stable across runs
+ * when unrelated fields drift.
+ */
+function buildGeneratorInput(
+  rec: EnrichedSilverRecord,
+  numQueries: number,
+): Doc2QueryInput {
+  return {
+    canonicalLabel: rec.canonicalLabel,
+    producer: rec.producer,
+    region: rec.region,
+    country: rec.country ?? '',
+    grapePrimary: rec.grapePrimary ?? null,
+    grapes: rec.grapes ?? [],
+    body: rec.body,
+    tannin: rec.tannin,
+    priceUsd:
+      rec.priceUsd !== null && rec.priceUsd !== undefined
+        ? Number(rec.priceUsd)
+        : null,
+    priceBand: rec.priceBand,
+    vintageYear: rec.vintageYear ?? null,
+    alcoholPct: rec.alcoholPct ?? null,
+    flavorProfiles: rec.flavorProfiles ?? [],
+    pairingTags: rec.pairingTags ?? [],
+    drinkingWindowStart: null,
+    drinkingWindowEnd: null,
+    isTopRated: rec.isTopRated ?? false,
+    koreanAliases: extractKoreanAliases(rec),
+    numQueries,
   };
-  const text = data.content[0]?.text ?? '[]';
+}
 
-  // Find the outermost JSON array by bracket balancing.
-  let depth = 0;
-  let start = -1;
-  let end = -1;
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '[') {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (text[i] === ']') {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        end = i + 1;
-        break;
-      }
-    }
-  }
+/**
+ * Content hash material — a deterministic string built from the
+ * structured input. Stable across runs so idempotent skip works as long
+ * as the underlying Silver record hasn't drifted.
+ */
+function fingerprintMaterial(input: Doc2QueryInput): string {
+  return [
+    input.canonicalLabel,
+    input.producer,
+    input.region,
+    input.country,
+    input.grapePrimary ?? '',
+    input.grapes.join(','),
+    input.body.toFixed(3),
+    input.tannin.toFixed(3),
+    input.priceUsd !== null ? input.priceUsd.toFixed(2) : '',
+    input.priceBand,
+    input.vintageYear !== null ? String(input.vintageYear) : '',
+    input.alcoholPct !== null ? input.alcoholPct.toFixed(2) : '',
+    input.flavorProfiles.join(','),
+    input.pairingTags.join(','),
+    input.koreanAliases.join('|'),
+    String(input.numQueries),
+  ].join('\n');
+}
 
-  if (start < 0 || end < 0) return [];
+function fingerprintFor(modelId: string, input: Doc2QueryInput): Doc2QueryFingerprint {
+  const material = fingerprintMaterial(input);
+  const contentHash = crypto.createHash('sha256').update(material).digest('hex');
+  return {
+    modelId,
+    contentHash,
+    generatedAt: new Date().toISOString(),
+  };
+}
 
-  try {
-    const parsed: unknown = JSON.parse(text.slice(start, end));
-    if (!Array.isArray(parsed)) return [];
-    return parsed as string[][];
-  } catch {
-    console.warn('  Warning: failed to parse LLM JSON response, skipping batch');
-    return [];
-  }
+/**
+ * Returns true when the existing fingerprint matches the current modelId
+ * + content hash (derived from the structured input). Skipped records
+ * carry their previous syntheticQueries unchanged.
+ */
+function isFingerprintFresh(
+  rec: EnrichedSilverRecord,
+  modelId: string,
+  input: Doc2QueryInput,
+): boolean {
+  const fp = rec.doc2queryFingerprint;
+  if (fp === undefined) return false;
+  if (fp.modelId !== modelId) return false;
+  const contentHash = crypto
+    .createHash('sha256')
+    .update(fingerprintMaterial(input))
+    .digest('hex');
+  return fp.contentHash === contentHash;
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
+interface RunStats {
+  readonly total: number;
+  readonly skipped: number;
+  readonly generated: number;
+  readonly failed: number;
+  readonly totalQueries: number;
+}
+
+/**
+ * Process one record: skip if fingerprint fresh, otherwise call the LLM.
+ * Always returns a valid record — on error/empty, returns the prior record
+ * unchanged so we never lose ground on transient failures.
+ */
+async function processRecord(
+  rec: EnrichedSilverRecord,
+  generator: Doc2QueryGeneratorPort,
+  force: boolean,
+): Promise<{ rec: EnrichedSilverRecord; outcome: 'skipped' | 'generated' | 'failed'; queryCount: number }> {
+  const input = buildGeneratorInput(rec, QUERIES_PER_WINE);
+
+  if (!force && isFingerprintFresh(rec, generator.modelId, input)) {
+    return { rec, outcome: 'skipped', queryCount: 0 };
+  }
+
+  try {
+    const queries = await generator.generate(input);
+    if (queries.length > 0) {
+      const next: EnrichedSilverRecord = {
+        ...rec,
+        syntheticQueries: queries,
+        doc2queryFingerprint: fingerprintFor(generator.modelId, input),
+      };
+      return { rec: next, outcome: 'generated', queryCount: queries.length };
+    }
+    return { rec, outcome: 'failed', queryCount: 0 };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  Failed for ${rec.sourceId}: ${msg}`);
+    return { rec, outcome: 'failed', queryCount: 0 };
+  }
+}
+
+/**
+ * Run `processRecord` over the corpus with a fixed-size in-flight pool.
+ *
+ * Implementation: maintain `CONCURRENCY` workers reading from a shared
+ * cursor. Output order is preserved by writing each result into a
+ * pre-allocated slot indexed by the record's input position. Each
+ * `flushIntervalMs`-aligned milestone the partial result is written to
+ * disk via `atomicWriteFile` so a mid-run crash leaves a valid NDJSON
+ * checkpoint that the next run can resume from (idempotency does the
+ * skip work).
+ */
+async function generateForBatch(
+  records: readonly EnrichedSilverRecord[],
+  generator: Doc2QueryGeneratorPort,
+  force: boolean,
+  outputPath: string,
+  checkpointEvery: number,
+  concurrency: number,
+): Promise<{ updated: EnrichedSilverRecord[]; stats: RunStats }> {
+  const total = records.length;
+  const updated: EnrichedSilverRecord[] = records.slice();
+  let cursor = 0;
+  let completed = 0;
+  let skipped = 0;
+  let generated = 0;
+  let failed = 0;
+  let totalQueries = 0;
+  let lastCheckpoint = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const idx = cursor;
+      cursor += 1;
+      if (idx >= total) return;
+
+      const rec = records[idx]!;
+      const result = await processRecord(rec, generator, force);
+      updated[idx] = result.rec;
+
+      if (result.outcome === 'skipped') skipped += 1;
+      else if (result.outcome === 'generated') {
+        generated += 1;
+        totalQueries += result.queryCount;
+      } else {
+        failed += 1;
+      }
+
+      completed += 1;
+
+      if (completed % PROGRESS_LOG_EVERY === 0) {
+        console.log(
+          `  Progress: ${completed}/${total}  generated=${generated} skipped=${skipped} failed=${failed} queries=${totalQueries}`,
+        );
+      }
+
+      // Checkpoint every N completions — written by whichever worker
+      // crosses the threshold first. Imperfect concurrency here is fine:
+      // worst case we write twice in close succession.
+      if (completed - lastCheckpoint >= checkpointEvery) {
+        lastCheckpoint = completed;
+        try {
+          const lines = updated.map((r) => JSON.stringify(r)).join('\n');
+          await atomicWriteFile(outputPath, lines + '\n');
+          console.log(`  Checkpoint: ${completed}/${total} → ${outputPath}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`  Checkpoint write failed (continuing): ${msg}`);
+        }
+      }
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, total) }, () => worker());
+  await Promise.all(workers);
+
+  return {
+    updated,
+    stats: {
+      total,
+      skipped,
+      generated,
+      failed,
+      totalQueries,
+    },
+  };
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const config = loadConfig();
+
+  if (config.openai.apiKey === undefined) {
+    throw new Error(
+      'generate-doc-queries: OPENAI_API_KEY must be set — Doc2Query requires the OpenAI chat adapter',
+    );
+  }
+
+  const chatLlm = new OpenAiChatLlm({
+    baseUrl: config.openai.baseUrl,
+    apiKey: config.openai.apiKey,
+    defaultModel: config.openai.chatModel,
+    httpTimeoutMs: config.openai.httpTimeoutMs,
+  });
+  // Round-trip embedding filter uses text-embedding-3-small by default —
+  // cheap ($0.02/MTok) and accurate enough to reject generic synthetic
+  // queries. Override by pointing config.openai.embeddingModel at another
+  // OpenAI-compatible endpoint if a different checkpoint is preferred.
+  const embeddingService = new OpenAiEmbeddingService({
+    baseUrl: config.openai.baseUrl,
+    apiKey: config.openai.apiKey,
+    model: config.openai.embeddingModel,
+    httpTimeoutMs: config.openai.httpTimeoutMs,
+  });
+  const generator: Doc2QueryGeneratorPort = new OpenAiDoc2QueryGenerator({
+    chatLlm,
+    embeddingService,
+    model: config.openai.doc2queryModel,
+  });
 
   console.log(`Reading enriched Silver from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');
   let records = parseNdjson<EnrichedSilverRecord>(content, args.input).records;
 
   if (args.limit > 0) records = records.slice(0, args.limit);
-  console.log(`  Records: ${records.length}`);
+  console.log(
+    `  Records: ${records.length}  modelId=${generator.modelId}  force=${args.force}  concurrency=${args.concurrency}`,
+  );
 
   if (args.dryRun) {
-    console.log('  DRY RUN — showing sample prompt:');
-    console.log(buildPrompt(records.slice(0, 2)));
+    console.log('  DRY RUN — sample generator input:');
+    const sample = records[0];
+    if (sample !== undefined) {
+      const input = buildGeneratorInput(sample, QUERIES_PER_WINE);
+      console.log(JSON.stringify(input, null, 2));
+    }
     return;
   }
 
-  // Process in batches
-  const docQueryMap = new Map<string, string[]>();
-  const batches = [];
-  for (let i = 0; i < records.length; i += BATCH_SIZE) {
-    batches.push(records.slice(i, i + BATCH_SIZE));
-  }
+  const startedAt = Date.now();
+  const { updated, stats } = await generateForBatch(
+    records,
+    generator,
+    args.force,
+    args.output,
+    CHECKPOINT_EVERY,
+    args.concurrency,
+  );
+  const elapsedMs = Date.now() - startedAt;
+  const llmCalls = stats.generated + stats.failed;
+  const throughput = llmCalls > 0 ? (llmCalls / (elapsedMs / 1000)).toFixed(2) : '0';
+  console.log(
+    `  Done: total=${stats.total} generated=${stats.generated} skipped=${stats.skipped} failed=${stats.failed} totalQueries=${stats.totalQueries}`,
+  );
+  console.log(
+    `  Elapsed: ${(elapsedMs / 1000).toFixed(1)}s  llmCalls=${llmCalls}  throughput=${throughput} calls/sec`,
+  );
 
-  let totalQueries = 0;
-  for (let bi = 0; bi < batches.length; bi++) {
-    const batch = batches[bi]!;
-    const prompt = buildPrompt(batch);
-
-    try {
-      const result = await callClaude(prompt);
-      for (let ri = 0; ri < batch.length; ri++) {
-        const queries = (result[ri] ?? []).filter(
-          (q): q is string => typeof q === 'string' && q.length > 0,
-        );
-        if (queries.length > 0) {
-          docQueryMap.set(batch[ri]!.sourceId, queries);
-          totalQueries += queries.length;
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`  Batch ${bi + 1} failed: ${msg}`);
-    }
-
-    if ((bi + 1) % 5 === 0 || bi === batches.length - 1) {
-      console.log(`  Progress: ${bi + 1}/${batches.length} batches  (${totalQueries} queries)`);
-    }
-
-    // Inter-batch delay: 1.5s to stay under 10K output tokens/min rate limit.
-    // Each batch ≈ 10 wines × 7 queries × ~10 tokens = ~700 output tokens.
-    // At 1.5s/batch → ~40 batches/min → ~28K tokens/min → may still hit limit,
-    // but the 429 retry handler above catches any overflow.
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-  }
-
-  console.log(`  Total doc-queries generated: ${totalQueries}`);
-
-  // Merge: append synthetic queries to searchTextEn with delimiter
-  const enriched = records.map((rec) => {
-    const queries = docQueryMap.get(rec.sourceId);
-    if (!queries || queries.length === 0) return rec;
-
-    return {
-      ...rec,
-      searchTextEn: rec.searchTextEn + DOC_QUERY_DELIMITER + queries.join('. '),
-    };
-  });
-
-  const withQueries = enriched.filter((r) =>
-    r.searchTextEn.includes(DOC_QUERY_DELIMITER),
-  ).length;
-  console.log(`  Records with doc-queries: ${withQueries}/${enriched.length}`);
-
-  const lines = enriched.map((r) => JSON.stringify(r)).join('\n');
+  const lines = updated.map((r) => JSON.stringify(r)).join('\n');
   await atomicWriteFile(args.output, lines + '\n');
   console.log(`  Written to: ${args.output}`);
 }

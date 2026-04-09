@@ -259,7 +259,8 @@ export class MixedSolver {
     // could survive while top-scoring ones from the same producer were
     // dropped.
     const sorted = [...excluded].sort(
-      (a, b) => b.retrievalFusionScore - a.retrievalFusionScore,
+      // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback
+      (a, b) => (b.fusionRrfTotal ?? b.retrievalFusionScore) - (a.fusionRrfTotal ?? a.retrievalFusionScore),
     );
 
     // Step 3: Apply producer diversity (max 2 per producer).
@@ -268,11 +269,14 @@ export class MixedSolver {
     const producerSlots = new Map<string, number>();
     const filtered: HybridCandidate[] = [];
     for (const candidate of sorted) {
-      const key = candidate.producer;
-      if (key === undefined || key === '') {
+      const rawKey = candidate.producer;
+      if (rawKey === undefined || rawKey === '') {
         filtered.push(candidate);
         continue;
       }
+      // Case-insensitive grouping: Vespa producer strings may vary in casing
+      // across ingestion sources (e.g. "Château Margaux" vs "château margaux").
+      const key = rawKey.trim().toLowerCase();
       const used = producerSlots.get(key) ?? 0;
       if (used < 2) {
         filtered.push(candidate);
@@ -302,19 +306,33 @@ export class MixedSolver {
 
     // Parallel-load all candidates instead of sequentially awaiting one at a
     // time. For 50 results × ~5ms each, this drops 250ms → ~5ms per query.
-    const loaded = await Promise.all(
+    // Use allSettled so a single entity load failure does not discard the
+    // entire preservation computation. (Bugbash audit 11: resilience)
+    const settled = await Promise.allSettled(
       results.map((r) => this.candidateAttributes.loadSimilarityCandidate(r.entityId)),
     );
 
     let preservedCount = 0;
     let scoredCount = 0;
-    for (const candidate of loaded) {
+    let rejectedCount = 0;
+    for (const result of settled) {
+      if (result.status !== 'fulfilled') {
+        rejectedCount++;
+        continue;
+      }
+      const candidate = result.value;
       if (candidate === undefined) continue;
       scoredCount++;
       const similarity = this.similarityScorer.score(candidate, anchorProfile);
       if (similarity >= PRESERVATION_THRESHOLD) {
         preservedCount++;
       }
+    }
+    if (rejectedCount > 0) {
+      bootstrapLogger.warn(
+        { rejectedCount, totalCandidates: results.length },
+        'mixed-solver: similarity candidate loads rejected — preservation rate computed on survivors',
+      );
     }
 
     // Normalize over candidates that were actually scored. Using

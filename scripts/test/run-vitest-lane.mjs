@@ -2,6 +2,24 @@
 
 import { spawn } from 'node:child_process';
 
+function augmentEnvWithVitestNodeHeap(baseEnv) {
+  const mbRaw = baseEnv.VITEST_NODE_MAX_OLD_SPACE_SIZE_MB;
+  if (mbRaw === undefined || mbRaw === '') {
+    return baseEnv;
+  }
+  const mb = Number.parseInt(String(mbRaw), 10);
+  if (!Number.isFinite(mb) || mb <= 0) {
+    return baseEnv;
+  }
+  const flag = `--max-old-space-size=${Math.trunc(mb)}`;
+  const existing = baseEnv.NODE_OPTIONS ?? '';
+  const trimmed = existing.trim();
+  return {
+    ...baseEnv,
+    NODE_OPTIONS: trimmed ? `${trimmed} ${flag}` : flag,
+  };
+}
+
 const rawArgs = process.argv.slice(2);
 let emptyExitCode = null;
 const forwardedCliArgs = [];
@@ -38,7 +56,7 @@ const child = spawn(
   {
     stdio: ['inherit', 'pipe', 'pipe'],
     cwd: process.cwd(),
-    env: process.env,
+    env: augmentEnvWithVitestNodeHeap(process.env),
   },
 );
 

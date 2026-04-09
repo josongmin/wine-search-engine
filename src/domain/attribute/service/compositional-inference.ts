@@ -27,6 +27,7 @@ import type {
   ConstraintBundle,
   NormalizedConstraint,
 } from '../../shared/types/constraint-bundle.js';
+import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 
 const COMPOSITIONAL_VERSION = 'compositional-v1.0';
 const COMPOSITIONAL_CONFIDENCE = 0.75;
@@ -309,5 +310,9 @@ export function applyCompositionalInference(
 }
 
 function keyOf(c: NormalizedConstraint): string {
-  return `${c.attribute}|${c.operator}|${JSON.stringify(c.value)}`;
+  // canonicalJsonStringify sorts object keys so range constraints
+  // ({min,max} vs {max,min}) produce the same dedup key. Plain JSON.stringify
+  // would key-order-depend on the original constructor and silently let
+  // duplicates through. (Bugbash Round 18: determinism)
+  return `${c.attribute}|${c.operator}|${canonicalJsonStringify(c.value)}`;
 }

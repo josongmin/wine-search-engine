@@ -31,9 +31,12 @@ export interface RollbackDecision {
   readonly reasons: readonly string[];
 }
 
+/** Decimal places for formatted thresholds in rollback reason strings. */
+const ROLLBACK_REASON_DECIMAL_PLACES = 4;
+
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return 'NaN';
-  return n.toFixed(4);
+  return n.toFixed(ROLLBACK_REASON_DECIMAL_PLACES);
 }
 
 /**

@@ -142,6 +142,20 @@ describe('buildSeedKGFromSnapshot', () => {
     expect(kg.version).toBe('v0');
   });
 
+  it('returns an empty KG when the snapshot file is missing (allowMissing default)', async () => {
+    // Bugbash inventory item #9: missing KG file should degrade, not crash.
+    const kg = await loadSeedKG({ filePath: '/nonexistent/path/entity-ontology.json' });
+    expect(kg.nodes.size).toBe(0);
+    expect(kg.edges).toHaveLength(0);
+    expect(kg.version).toBe('empty-fallback');
+  });
+
+  it('throws ENOENT when allowMissing=false (strict mode)', async () => {
+    await expect(
+      loadSeedKG({ filePath: '/nonexistent/path/entity-ontology.json', allowMissing: false }),
+    ).rejects.toThrow(/ENOENT|no such file/i);
+  });
+
   it('loadSeedKG materializes the real data/entity-ontology.json snapshot', async () => {
     const kg = await loadSeedKG();
     expect(kg.nodes.size).toBeGreaterThan(100);

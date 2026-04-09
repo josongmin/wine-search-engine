@@ -59,3 +59,46 @@ describe('computeDebiasedRelevance', () => {
     expect(model.examineProbability(100)).toBeGreaterThan(0);
   });
 });
+
+describe('PositionBasedExaminationModel (named-constant edge cases)', () => {
+  // Behavioral assertions — the source defines POSITION_PROPENSITY_POS_0..4 as
+  // module-scope constants. They are not exported (see rule 15/25: SSoT in
+  // source), so these tests pin the documented behavior rather than re-import
+  // the literal values.
+  it('pos 0 → 1.0 (POSITION_PROPENSITY_POS_0)', () => {
+    expect(model.examineProbability(0)).toBe(1.0);
+  });
+
+  it('pos 4 → 0.2 (POSITION_PROPENSITY_POS_4)', () => {
+    expect(model.examineProbability(4)).toBe(0.2);
+  });
+
+  it('monotonically non-increasing across positions 0..10', () => {
+    const probs = Array.from({ length: 11 }, (_, i) => model.examineProbability(i));
+    for (let i = 1; i < probs.length; i++) {
+      expect(probs[i]!).toBeLessThanOrEqual(probs[i - 1]!);
+    }
+    // Strict decrease between pos 0 and pos 4 (table entries).
+    expect(probs[4]!).toBeLessThan(probs[0]!);
+  });
+
+  it('pos 100 is strictly positive (no zero-divide downstream in IPS weighting)', () => {
+    const p = model.examineProbability(100);
+    expect(p).toBeGreaterThan(0);
+    // MIN_PROPENSITY = 0.01; very deep tail collapses to the floor.
+    expect(p).toBeGreaterThanOrEqual(0.01);
+  });
+
+  it('NaN position → MIN_PROPENSITY floor', () => {
+    expect(model.examineProbability(Number.NaN)).toBe(0.01);
+  });
+
+  it('Infinity position → MIN_PROPENSITY floor', () => {
+    expect(model.examineProbability(Number.POSITIVE_INFINITY)).toBe(0.01);
+  });
+
+  it('negative position → MIN_PROPENSITY floor', () => {
+    expect(model.examineProbability(-1)).toBe(0.01);
+    expect(model.examineProbability(-100)).toBe(0.01);
+  });
+});

@@ -6,6 +6,7 @@
 
 import { z } from 'zod';
 import { AUTHENTICATED_SUBJECT_HEADER } from '../authenticated-subject.js';
+import { toFiniteNumber } from '../../../domain/shared/utils/safe-number.js';
 import {
   MAX_AUTHENTICATED_SUBJECT_CHARS,
   MAX_HTTPS_CALLBACK_URL_CHARS,
@@ -67,8 +68,8 @@ function normalizeObfuscatedIPv4(host: string): string | null {
 
   // Decimal integer (e.g. 2130706433 → 127.0.0.1)
   if (/^\d+$/.test(host)) {
-    const n = Number(host);
-    if (Number.isFinite(n) && n >= 0 && n <= UINT32_MAX) {
+    const n = toFiniteNumber(host);
+    if (n !== null && n >= 0 && n <= UINT32_MAX) {
       return [
         (n >>> SHIFT_LAST_OCTET) & IPV4_OCTET_MASK,
         (n >>> SHIFT_THIRD_OCTET) & IPV4_OCTET_MASK,
@@ -242,11 +243,23 @@ const HttpsUrlSchema = z.string().url().max(MAX_HTTPS_CALLBACK_URL_CHARS).refine
 );
 const FutureDateTimeSchema = z.string().datetime().refine(
   (value) => {
-    const ts = new Date(value).getTime();
-    return Number.isFinite(ts) && ts > Date.now();
+    // Wrap new Date().getTime() in a helper boundary so semgrep
+    // wine-new-date-without-finite is satisfied at the call site itself.
+    const ts = parseFutureTimestampMs(value);
+    return ts !== null && ts > Date.now();
   },
   'expires_at must be in the future',
 );
+
+/**
+ * Parse an ISO-8601 datetime string to milliseconds since epoch, returning
+ * `null` for unparseable input. Centralized so semgrep boundary rules
+ * (wine-new-date-without-finite) only need to inspect one call site.
+ */
+function parseFutureTimestampMs(value: string): number | null {
+  const ts = new Date(value).getTime(); // nosemgrep: wine-new-date-without-finite -- guarded by Number.isFinite below
+  return Number.isFinite(ts) ? ts : null;
+}
 
 const NewVintageTriggerRequestSchema = z.union([
   z.object({
@@ -392,11 +405,15 @@ export const ListDeliveriesResponseSchema = z.object({
 
 export type ListDeliveriesResponse = z.infer<typeof ListDeliveriesResponseSchema>;
 
+// RFC-014 error envelope. `request_id` is REQUIRED (clients need it for
+// support correlation). `failure_reason` and `retryable` are retained as
+// optional for now because existing watchlist handlers omit them; any new
+// 4xx/5xx branch SHOULD populate both to match `ErrorResponseSchema`.
 export const WatchlistErrorResponseSchema = z.object({
   error: z.object({
     code: z.string(),
     message: z.string(),
-    request_id: z.string().optional(),
+    request_id: z.string().min(1),
     failure_reason: z.string().nullable().optional(),
     retryable: z.boolean().optional(),
   }).strict(),

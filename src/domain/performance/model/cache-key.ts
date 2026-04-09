@@ -143,12 +143,18 @@ export class QueryCacheKeyBuilder {
       // Hash to bound length and avoid leaking the full snapshot id in keys.
       keyParts.push(`s:${hashDeterministic(snapshotId).slice(0, CACHE_KEY_HASH_HEX_PREFIX_LENGTH)}`);
     }
+    // Locale is always prefixed with `l:` so a caller-supplied locale string
+    // (e.g. `locale='none'` or `locale='l:ko-KR'`) cannot collide with the
+    // absent-locale sentinel. Using a bare `'default'` literal — or any literal
+    // that is also a valid user locale — produces silent cross-locale cache
+    // hits. `l:-` is the absent sentinel (`-` is not a valid locale per RFC
+    // 4647), and all present locales are prefixed with `l:`.
     keyParts.push(
       retrievalMode,
       hashDeterministic(normalizedQuery),
       constraintSignature,
       expansionHash,
-      locale ?? 'default',
+      locale !== undefined ? `l:${locale}` : 'l:-',
     );
     if (sessionId !== undefined) {
       keyParts.push(`session:${sessionId}`);
@@ -209,7 +215,13 @@ export class ResultCacheKeyBuilder {
       retrievalMode,
     ];
     if (anchorEntityId !== undefined) {
-      keyParts.push(`anchor:${anchorEntityId}`);
+      // Length-prefix the entity ID so a `:` inside it cannot collide with
+      // the `keyParts.join(':')` delimiter below. EntityIds are
+      // system-generated branded strings today, but this defense-in-depth
+      // matches the `encodeField` pattern used for the filter signature so
+      // future ID format changes (e.g. composite keys) cannot poison the
+      // cache namespace.
+      keyParts.push(`anchor:${anchorEntityId.length}:${anchorEntityId}`);
     }
     const redisKey = keyParts.join(':');
 

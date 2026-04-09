@@ -3,6 +3,7 @@ import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 import { RelativeQueryExtractor } from './relative-query-extractor.js';
+import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
 
 /**
  * Result returned by an {@link AliasMatcher} lookup.
@@ -97,8 +98,15 @@ export class AnchorExtractor {
       source: 'alias' as const,
     }));
 
-    // Sort by confidence descending for deterministic ordering.
-    candidates.sort((a, b) => b.confidence - a.confidence);
+    // Sort by confidence descending with NaN-safe + deterministic tiebreaker
+    // (canonical id) so equal-confidence candidates resolve identically across
+    // processes. (Bugbash R22)
+    candidates.sort(
+      compareScoreWithTiebreaker<typeof candidates[number]>(
+        (c) => c.confidence,
+        (c) => c.surfaceForm,
+      ),
+    );
 
     return candidates;
   }

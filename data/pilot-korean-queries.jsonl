@@ -1,0 +1,50 @@
+{"qid":"pilot-ko-001","slot":"exact_ko_alias","query":"사씨카이아 2001","difficulty":"easy","notes":"한글 음차 + vintage. corpus에 Sassicaia 2001 존재"}
+{"qid":"pilot-ko-002","slot":"typo_ko_spacing","query":"오퓨스원 오버처","difficulty":"medium","notes":"띄어쓰기 생략. Opus One Overture 존재"}
+{"qid":"pilot-ko-003","slot":"exact_ko_alias","query":"오퓨스 원 2019","difficulty":"easy","notes":"정상 띄어쓰기. vintage 포함"}
+{"qid":"pilot-ko-004","slot":"price_tier_ko","query":"10만원대 레드 와인 추천","difficulty":"easy","expected_price_range":[53,90]}
+{"qid":"pilot-ko-005","slot":"price_tier_ko","query":"3만원 이하 가성비 레드","difficulty":"easy","expected_price_range":[1,25]}
+{"qid":"pilot-ko-006","slot":"occasion_ko","query":"선물용 고급 보르도 와인","difficulty":"medium","expected_region":"Bordeaux"}
+{"qid":"pilot-ko-007","slot":"occasion_ko","query":"기념일에 마실 레드 와인","difficulty":"easy","expected_price_band":"premium_or_luxury"}
+{"qid":"pilot-ko-008","slot":"korean_food_pairing","query":"삼겹살과 어울리는 레드 와인","difficulty":"hard","notes":"한식 페어링 — 문서 원문 0회"}
+{"qid":"pilot-ko-009","slot":"korean_food_pairing","query":"한우 스테이크에 어울리는 와인","difficulty":"hard","notes":"한우 키워드"}
+{"qid":"pilot-ko-010","slot":"korean_food_pairing","query":"치즈랑 먹기 좋은 와인","difficulty":"medium"}
+{"qid":"pilot-ko-011","slot":"region_grape_ko","query":"부르고뉴 피노누아","difficulty":"easy","expected_region":"Bourgogne","expected_grape":"Pinot"}
+{"qid":"pilot-ko-012","slot":"region_grape_ko","query":"나파 카베르네","difficulty":"easy"}
+{"qid":"pilot-ko-013","slot":"region_grape_ko","query":"바롤로 추천","difficulty":"easy","expected_region":"Barolo"}
+{"qid":"pilot-ko-014","slot":"region_grape_ko","query":"아르헨티나 말벡","difficulty":"easy","expected_region":"Argentina"}
+{"qid":"pilot-ko-015","slot":"style_colloquial_ko","query":"부드러운 레드 와인","difficulty":"hard","notes":"구어체 style, body feature=0.5 default"}
+{"qid":"pilot-ko-016","slot":"style_colloquial_ko","query":"묵직한 풀바디 레드","difficulty":"hard"}
+{"qid":"pilot-ko-017","slot":"style_colloquial_ko","query":"떫지 않은 레드 와인","difficulty":"hard","notes":"negation style"}
+{"qid":"pilot-ko-018","slot":"beginner_ko","query":"와린이 데일리 와인 추천","difficulty":"hard","expected_price_band":"value_or_mid"}
+{"qid":"pilot-ko-019","slot":"hashtag_ko","query":"슈퍼 투스칸","difficulty":"medium","expected_region":"Toscana"}
+{"qid":"pilot-ko-020","slot":"hashtag_ko","query":"보르도 1등급","difficulty":"medium","expected_price_band":"luxury"}
+{"qid":"pilot-ko-021","slot":"typo_ko_spacing","query":"샤토마고","difficulty":"medium","notes":"띄어쓰기 생략. Margaux appellation 매칭 기대"}
+{"qid":"pilot-ko-022","slot":"typo_ko_spacing","query":"샤토 라피트","difficulty":"hard","notes":"존재 안 할 가능성"}
+{"qid":"pilot-ko-023","slot":"exact_ko_alias","query":"도멘 드 라 로마네 콩티","difficulty":"hard","notes":"DRC — corpus에 0개. 실패 기대(negative test)"}
+{"qid":"pilot-ko-024","slot":"style_colloquial_ko","query":"달달한 레드","difficulty":"hard","notes":"달달함은 sweetness 계열. corpus 전부 red dry"}
+{"qid":"pilot-ko-025","slot":"style_colloquial_ko","query":"상큼한 와인","difficulty":"hard","notes":"화이트 키워드. corpus 전부 red"}
+{"qid":"pilot-ko-026","slot":"korean_food_pairing","query":"김치찌개 와인","difficulty":"hard","notes":"매운 한식. 공격적 pairing"}
+{"qid":"pilot-ko-027","slot":"korean_food_pairing","query":"피자랑 마시기 좋은 와인","difficulty":"medium"}
+{"qid":"pilot-ko-028","slot":"beginner_ko","query":"와인 초보자 추천","difficulty":"medium"}
+{"qid":"pilot-ko-029","slot":"beginner_ko","query":"처음 마시는 와인","difficulty":"medium"}
+{"qid":"pilot-ko-030","slot":"region_grape_ko","query":"토스카나 키안티","difficulty":"easy","expected_region":"Tuscany_or_Toscana"}
+{"qid":"pilot-ko-031","slot":"region_grape_ko","query":"리오하 템프라니요","difficulty":"easy","expected_region":"Rioja"}
+{"qid":"pilot-ko-032","slot":"region_grape_ko","query":"호주 쉬라즈","difficulty":"easy","expected_region":"Australia"}
+{"qid":"pilot-ko-033","slot":"region_grape_ko","query":"포르투갈 레드 와인","difficulty":"medium","expected_country":"Portugal"}
+{"qid":"pilot-ko-034","slot":"region_grape_ko","query":"칠레 카르미네르","difficulty":"medium","expected_region":"Chile"}
+{"qid":"pilot-ko-035","slot":"occasion_ko","query":"집들이 선물 와인","difficulty":"medium"}
+{"qid":"pilot-ko-036","slot":"occasion_ko","query":"파티용 레드 와인","difficulty":"medium"}
+{"qid":"pilot-ko-037","slot":"occasion_ko","query":"홈술 레드","difficulty":"medium"}
+{"qid":"pilot-ko-038","slot":"price_tier_ko","query":"20만원대 프리미엄","difficulty":"easy","expected_price_range":[130,180]}
+{"qid":"pilot-ko-039","slot":"price_tier_ko","query":"50만원 이상 고급","difficulty":"easy","expected_price_band":"luxury"}
+{"qid":"pilot-ko-040","slot":"natural_ko","query":"스페인 와인 중에 5만원 이하 가성비 레드 추천해줘","difficulty":"hard","notes":"긴 자연어, 조건 결합"}
+{"qid":"pilot-ko-041","slot":"natural_ko","query":"선물용으로 좋은 10만원대 부르고뉴 추천","difficulty":"hard","notes":"긴 자연어"}
+{"qid":"pilot-ko-042","slot":"natural_ko","query":"스테이크랑 먹기 좋은 묵직한 레드 와인","difficulty":"hard"}
+{"qid":"pilot-ko-043","slot":"hashtag_ko","query":"그랑 크뤼","difficulty":"medium","expected_region":"Bourgogne"}
+{"qid":"pilot-ko-044","slot":"hashtag_ko","query":"나파 밸리 카베르네","difficulty":"easy"}
+{"qid":"pilot-ko-045","slot":"typo_en","query":"opus 1 napa","difficulty":"medium","notes":"Opus One 변형"}
+{"qid":"pilot-ko-046","slot":"typo_en","query":"chateau margo","difficulty":"medium","notes":"Château Margaux 오기"}
+{"qid":"pilot-ko-047","slot":"mixed_enko","query":"Bordeaux 10만원 이하","difficulty":"medium","notes":"영한 혼용"}
+{"qid":"pilot-ko-048","slot":"mixed_enko","query":"피노누아 under 50","difficulty":"medium"}
+{"qid":"pilot-ko-049","slot":"style_colloquial_ko","query":"과일향 가득한 레드","difficulty":"medium"}
+{"qid":"pilot-ko-050","slot":"style_colloquial_ko","query":"오크향 진한 와인","difficulty":"medium"}
