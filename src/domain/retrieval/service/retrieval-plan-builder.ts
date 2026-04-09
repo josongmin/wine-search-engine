@@ -9,7 +9,8 @@
  *   3. INFERRED expansion tokens (ranking features + sensory priors) — priors
  *
  * The existing pipeline conflates soft and inferred: both flow to
- * `computeSoftConstraint()` with inferred at 0.5x weight. This module separates
+ * `computeSoftConstraint()` with inferred at INFERRED_CONSTRAINT_WEIGHT_MULTIPLIER
+ * (currently 0.7x) weight. This module separates
  * them structurally so the ranker can weight them independently and so the
  * downstream RFC-018 drinking window predictor can consume inferred sensory
  * priors as fallbacks for missing index values.

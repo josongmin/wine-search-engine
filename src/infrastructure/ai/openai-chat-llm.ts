@@ -7,6 +7,7 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
@@ -104,6 +105,7 @@ export class OpenAiChatLlm implements ChatLlmPort {
       recoveryTimeoutMs: OPENAI_CHAT_BREAKER_RECOVERY_TIMEOUT_MS,
       halfOpenMaxAttempts: OPENAI_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
     });
+    globalCircuitBreakerRegistry.register(OPENAI_CHAT_BREAKER_NAME, this.circuitBreaker);
   }
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {

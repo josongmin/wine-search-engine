@@ -29,15 +29,27 @@ export const VINTAGE_YEAR_RAW = '(?:19|20)\\d{2}';
 /** Strip-mode regex (global, no boundaries) for label cleanup. */
 const VINTAGE_STRIP_RE = /(?:19|20)\d{2}/gu;
 
-/** Strip-mode regex with Unicode word boundaries (preserves embedded digits). */
+/**
+ * Strip-mode regex with Unicode word boundaries (preserves embedded digits).
+ * Korean year suffixes (년, 년산, 년대) are consumed if adjacent.
+ */
 const VINTAGE_STRIP_BOUNDED_RE =
-  /(?<![\p{L}\p{N}])(?:19|20)\d{2}(?![\p{L}\p{N}])/gu;
+  /(?<![\p{L}\p{N}])(?:19|20)\d{2}(?:년산?|년대)?(?![\p{L}\p{N}])/gu;
 
-/** Extract-mode regex with Unicode word boundaries (no letter/digit adjacent). */
-const VINTAGE_EXTRACT_RE = /(?<![\p{L}\p{N}])((?:19|20)\d{2})(?![\p{L}\p{N}])/u;
+/**
+ * Extract-mode regex with Unicode word boundaries (no letter/digit adjacent).
+ *
+ * Korean exception: allows `년`, `년산`, `년대` directly after the year
+ * because these suffixes are part of the vintage expression ("2020년",
+ * "2020년산", "2020년대"). The lookahead permits an optional Korean year
+ * suffix before requiring a non-word boundary.
+ */
+const VINTAGE_EXTRACT_RE =
+  /(?<![\p{L}\p{N}])((?:19|20)\d{2})(?:년산?|년대)?(?![\p{L}\p{N}])/u;
 
-/** Detect-mode regex (single, with Unicode word boundaries). Same as extract pattern. */
-const VINTAGE_DETECT_RE = /(?<![\p{L}\p{N}])(?:19|20)\d{2}(?![\p{L}\p{N}])/u;
+/** Detect-mode regex (single, with Unicode word boundaries + Korean year suffix). */
+const VINTAGE_DETECT_RE =
+  /(?<![\p{L}\p{N}])(?:19|20)\d{2}(?:년산?|년대)?(?![\p{L}\p{N}])/u;
 
 /**
  * Range-mode regex with digit-only lookbehind. Matches "2018-2022", "2018~2022",

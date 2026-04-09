@@ -13,6 +13,7 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 import type {
   ChatCompletionRequest,
   ChatCompletionResult,
@@ -103,6 +104,7 @@ export class AnthropicChatLlm implements ChatLlmPort {
       recoveryTimeoutMs: ANTHROPIC_CHAT_BREAKER_RECOVERY_TIMEOUT_MS,
       halfOpenMaxAttempts: ANTHROPIC_CHAT_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
     });
+    globalCircuitBreakerRegistry.register(ANTHROPIC_CHAT_BREAKER_NAME, this.circuitBreaker);
   }
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {

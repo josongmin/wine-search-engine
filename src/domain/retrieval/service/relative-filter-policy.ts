@@ -118,8 +118,10 @@ function matchesAnchorAttributes(
  *    include `'relative_filter'` if not already present.
  *
  * When the anchor entity is absent from the pool (not yet resolved or not
- * retrieved), the function returns an empty array so that the caller sees a
- * clear signal that filtering intent could not be satisfied.
+ * retrieved), the function returns the UNFILTERED candidate list as a graceful
+ * degradation — returning empty would kill the entire search UX. The caller
+ * (CandidatePool) detects this via length comparison and emits a degradation
+ * warning to the observer.
  *
  * @param candidates - The fused candidate pool from the retrieval pipeline.
  * @param input      - Anchor entity and constraint context for the filter pass.

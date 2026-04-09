@@ -4,6 +4,7 @@ import {
   createCircuitBreaker,
   type CircuitBreaker,
 } from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 import type {
   LLMInjectionClassifierOptions,
   LLMInjectionClassifierPort,
@@ -119,6 +120,7 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
       recoveryTimeoutMs: ANTHROPIC_INJECTION_BREAKER_RECOVERY_TIMEOUT_MS,
       halfOpenMaxAttempts: ANTHROPIC_INJECTION_BREAKER_HALF_OPEN_MAX_ATTEMPTS,
     });
+    globalCircuitBreakerRegistry.register(ANTHROPIC_INJECTION_BREAKER_NAME, this.circuitBreaker);
   }
 
   async classify(query: string, options?: LLMInjectionClassifierOptions): Promise<boolean> {

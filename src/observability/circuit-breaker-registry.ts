@@ -1,0 +1,39 @@
+/**
+ * Process-wide circuit breaker registry.
+ *
+ * Each adapter that creates a CircuitBreaker registers it here so the
+ * /metrics/degradation endpoint can expose all breaker states in a single
+ * snapshot. The registry is intentionally a module-scope singleton —
+ * one process has one set of breakers.
+ */
+
+import type { CircuitBreaker } from '../domain/shared/circuit-breaker/circuit-breaker.js';
+
+export interface CircuitBreakerSnapshot {
+  readonly name: string;
+  readonly state: string;
+  readonly metrics: ReturnType<CircuitBreaker['getMetrics']>;
+}
+
+export class CircuitBreakerRegistry {
+  private readonly breakers = new Map<string, CircuitBreaker>();
+
+  register(name: string, breaker: CircuitBreaker): void {
+    this.breakers.set(name, breaker);
+  }
+
+  snapshot(): readonly CircuitBreakerSnapshot[] {
+    const out: CircuitBreakerSnapshot[] = [];
+    for (const [name, breaker] of this.breakers) {
+      out.push({ name, state: breaker.state, metrics: breaker.getMetrics() });
+    }
+    return out;
+  }
+
+  /** Test helper — clear all registrations. */
+  clear(): void {
+    this.breakers.clear();
+  }
+}
+
+export const globalCircuitBreakerRegistry = new CircuitBreakerRegistry();
