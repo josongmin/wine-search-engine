@@ -1,5 +1,6 @@
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
+import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { ComponentScores } from '../model/ranked-result.js';
@@ -197,9 +198,16 @@ export class SignalComputer {
   computeSoftConstraint(
     candidate: HybridCandidate,
     constraints: ConstraintBundle,
+    retrievalPlan?: RetrievalPlan,
   ): number {
     const softConstraints = constraints.soft;
-    if (softConstraints.length === 0) {
+    const structuredSoftBoosts = retrievalPlan?.softBoosts ?? [];
+    const structuredInferredBoosts = retrievalPlan?.inferredBoosts ?? [];
+    if (
+      softConstraints.length === 0
+      && structuredSoftBoosts.length === 0
+      && structuredInferredBoosts.length === 0
+    ) {
       return 1.0; // No soft constraints → perfect score
     }
 
@@ -215,9 +223,25 @@ export class SignalComputer {
       }
     }
 
-    // Also consider inferred constraints at reduced weight
-    for (const constraint of constraints.inferred) {
-      const weight = constraint.confidence * INFERRED_CONSTRAINT_WEIGHT_FACTOR;
+    for (const boost of structuredSoftBoosts) {
+      totalWeight += boost.weight;
+      if (matchedSet.has(boost.attribute)) {
+        weightedSum += boost.weight;
+      }
+    }
+
+    const inferredSignals = structuredInferredBoosts.length > 0
+      ? structuredInferredBoosts.map((boost) => ({
+        attribute: boost.attribute,
+        weight: boost.weight,
+      }))
+      : constraints.inferred.map((constraint) => ({
+        attribute: constraint.attribute,
+        weight: constraint.confidence * INFERRED_CONSTRAINT_WEIGHT_FACTOR,
+      }));
+
+    for (const constraint of inferredSignals) {
+      const weight = constraint.weight;
       totalWeight += weight;
       if (matchedSet.has(constraint.attribute)) {
         weightedSum += weight;
@@ -468,6 +492,7 @@ export class SignalComputer {
     queryPlan: QueryPlanV1,
     constraints: ConstraintBundle,
     anchorProfile?: AnchorProfile,
+    retrievalPlan?: RetrievalPlan,
     referenceYear: number = new Date().getFullYear(),
     queryContainsHangul = false,
   ): ComponentScores {
@@ -480,7 +505,7 @@ export class SignalComputer {
         : undefined,
       semantic: this.computeSemanticScore(candidate),
       hardConstraintPass: this.evaluateHardConstraints(candidate, constraints),
-      softConstraint: this.computeSoftConstraint(candidate, constraints),
+      softConstraint: this.computeSoftConstraint(candidate, constraints, retrievalPlan),
       attributeAlignment: this.computeAttributeAlignment(candidate, queryPlan),
       preferenceAlignment: PREFERENCE_ALIGNMENT_NEUTRAL,
       popularity: this.computePopularity(candidate),

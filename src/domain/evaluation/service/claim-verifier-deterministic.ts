@@ -50,6 +50,7 @@ const LABEL_CONTAINMENT_FORWARD_FLOOR = 0.7;
 const LABEL_CONTAINMENT_REVERSE_FLOOR = 0.6;
 /** Score at/above which a match is considered partial entailment. */
 const PARTIAL_THRESHOLD = 0.5;
+const CROSS_SCRIPT_DICTIONARY_SCORE = 0.95;
 import {
   regionHierarchyDepth,
   grapesEquivalent,
@@ -289,16 +290,31 @@ function matchFieldValue(
       // romanized form before the containment check. Covers the long tail of
       // well-known wines that dominate benchmark scenarios.
       let claimForMatch = claimNorm;
-      let crossScriptNote = '';
+      let crossScriptHit = false;
       if (Transliterator.containsHangul(claimNorm)) {
         const romanized = Transliterator.romanizeWineTerm(claimNorm);
         if (romanized !== undefined) {
           claimForMatch = romanized.toLowerCase().normalize('NFKC').trim();
-          crossScriptNote = ` (romanized from "${claimNorm}")`;
+          crossScriptHit = true;
         }
       }
 
-      // Substring containment for partial label matches.
+      // Cross-script dictionary hit: if the claim was romanized via the curated
+      // exception dictionary AND the romanized form is contained in the evidence
+      // label (either direction), this is a high-confidence identity match. We
+      // emit CROSS_SCRIPT_DICTIONARY_SCORE (0.95) so the verdict becomes
+      // `entailed` without needing to clear the containment ratio threshold —
+      // that threshold is calibrated for noisy Latin labels and would under-score
+      // a perfect dictionary hit.
+      if (crossScriptHit && (evStr.includes(claimForMatch) || claimForMatch.includes(evStr))) {
+        return {
+          type: 'normalized_match',
+          score: CROSS_SCRIPT_DICTIONARY_SCORE,
+          details: `cross-script dictionary: "${claimNorm}" → "${claimForMatch}" matches "${evStr}"`,
+        };
+      }
+
+      // Substring containment for partial label matches (Latin-to-Latin path).
       // A claim like "Opus One" (8 chars) inside evidence "opus one 2015" (13 chars)
       // is a strong signal that the wine is correctly referenced even if the
       // ratio is low — the claim text appears verbatim in the canonical label.
@@ -308,7 +324,7 @@ function matchFieldValue(
           return {
             type: 'normalized_match',
             score: Math.max(LABEL_CONTAINMENT_FORWARD_FLOOR, ratio),
-            details: `claim "${claimForMatch}"${crossScriptNote} contained in evidence "${evStr}"`,
+            details: `claim "${claimForMatch}" contained in evidence "${evStr}"`,
           };
         }
       }
@@ -318,7 +334,7 @@ function matchFieldValue(
           return {
             type: 'normalized_match',
             score: Math.max(LABEL_CONTAINMENT_REVERSE_FLOOR, ratio),
-            details: `evidence "${evStr}" contained in claim "${claimForMatch}"${crossScriptNote}`,
+            details: `evidence "${evStr}" contained in claim "${claimForMatch}"`,
           };
         }
       }

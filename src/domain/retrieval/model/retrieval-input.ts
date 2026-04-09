@@ -2,6 +2,7 @@ import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { EntityId } from '../../shared/types/index.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
+import type { RetrievalPlan } from '../service/retrieval-plan-builder.js';
 
 /**
  * Profile of the anchor entity used for similarity-based retrieval.
@@ -52,6 +53,9 @@ export interface HybridRetrievalInput {
 
   /** Soft constraints that SHOULD be satisfied (used for scoring, not filtering). */
   readonly softConstraints: readonly NormalizedConstraint[];
+
+  /** Structured retrieval plan (filter + boost + inferred priors) derived from the query. */
+  readonly retrievalPlan?: RetrievalPlan | undefined;
 
   /** Optional anchor profile for similarity-based ("wines like X") queries. */
   readonly anchorProfile?: AnchorProfile | undefined;

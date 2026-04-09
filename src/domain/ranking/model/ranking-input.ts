@@ -3,6 +3,7 @@ import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
+import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import type { ConstraintBundle, EntityId } from '../../shared/types/index.js';
 
 /**
@@ -40,6 +41,9 @@ export interface RankingInput {
 
   /** Hard, soft, and inferred constraints to enforce during ranking. */
   readonly constraints: ConstraintBundle;
+
+  /** Structured retrieval plan used by SOTA++ ranking/priors integration. */
+  readonly retrievalPlan?: RetrievalPlan | undefined;
 
   /** Optional user context for preference-based signals. */
   readonly userContext?: UserContext | undefined;

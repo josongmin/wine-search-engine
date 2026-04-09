@@ -13,6 +13,7 @@ import type {
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { SpecializedFallbackReason } from './specialized-fallback-reason.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
+import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
@@ -75,6 +76,7 @@ export function buildHybridRetrievalInputForPlan(
   anchorEntityId?: EntityId,
   compiled?: CompiledWineQuery,
 ): HybridRetrievalInput {
+  const retrievalPlan = buildRetrievalPlan(plan.constraints);
   return {
     queryPlan: plan,
     route,
@@ -83,6 +85,7 @@ export function buildHybridRetrievalInputForPlan(
     semanticQueries: [plan.rawQuery],
     hardConstraints: plan.constraints.hard,
     softConstraints: plan.constraints.soft,
+    retrievalPlan,
     ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
   };
 }

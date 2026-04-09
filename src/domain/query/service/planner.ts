@@ -82,6 +82,13 @@ const REGION_KEYWORDS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
+const SOFT_CONSTRAINT_ATTRIBUTES = new Set([
+  'body', 'sweetness', 'acidity', 'tannin', 'style',
+  'price_band', 'occasion',
+]);
+
+/** Cap on span text samples for unresolved-span diagnostics (keeps mapper trace compact). */
+const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 
 /**
  * Context passed to the planner alongside the raw query.
@@ -455,10 +462,7 @@ export class Planner {
    * price_band and occasion are also soft — they guide ranking rather than
    * absolutely excluding candidates.
    */
-  private static readonly SOFT_ATTRIBUTES = new Set([
-    'body', 'sweetness', 'acidity', 'tannin', 'style',
-    'price_band', 'occasion',
-  ]);
+  private static readonly SOFT_ATTRIBUTES = SOFT_CONSTRAINT_ATTRIBUTES;
 
   /**
   /**
@@ -512,7 +516,7 @@ export class Planner {
       abortSignal !== undefined ? { abortSignal } : undefined,
     );
     const matched = mapped.constraints;
-    const constraintExtraction = mapped.constraintExtraction;
+    const mapperTrace = mapped.constraintExtraction;
 
     const hard: ConstraintBundle['hard'][number][] = [];
     const soft: ConstraintBundle['soft'][number][] = [];
@@ -533,27 +537,64 @@ export class Planner {
     // Longest-match priority: resolveOverlaps ensures "cabernet sauvignon"
     // wins over both "cabernet" and "sauvignon" when all three match.
     const coveredPhrases = new Set(matched.map((c) => c.source_phrase.toLowerCase()));
-    const resolverCandidates: { span: Span; resolved: ResolvedEntity | null }[] = [];
+    const matchedAttributesByPhrase = new Map<string, Set<string>>();
+    for (const constraint of matched) {
+      const key = constraint.source_phrase.toLowerCase();
+      const existing = matchedAttributesByPhrase.get(key) ?? new Set<string>();
+      existing.add(constraint.attribute);
+      matchedAttributesByPhrase.set(key, existing);
+    }
+
+    const resolverCandidates: {
+      span: Span;
+      resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } | null;
+    }[] = [];
     for (const span of spans) {
-      if (coveredPhrases.has(span.text)) {
-        resolverCandidates.push({ span, resolved: null });
+      const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true });
+      if (!coveredPhrases.has(span.text)) {
+        resolverCandidates.push({
+          span,
+          resolved: preferredEntity !== null
+            ? { entity: preferredEntity, kind: 'primary' }
+            : null,
+        });
         continue;
       }
-      resolverCandidates.push({ span, resolved: resolveEntity(span.text) });
+      const coveredAttributes = matchedAttributesByPhrase.get(span.text) ?? new Set<string>();
+      if (
+        preferredEntity !== null
+        && preferredEntity.entityType !== 'wine_type'
+        && !coveredAttributes.has(preferredEntity.entityType)
+      ) {
+        resolverCandidates.push({
+          span,
+          resolved: { entity: preferredEntity, kind: 'shadow' },
+        });
+      } else {
+        resolverCandidates.push({ span, resolved: null });
+      }
     }
     const resolvedNonOverlap = resolveOverlaps(resolverCandidates)
-      .filter((e): e is { span: Span; resolved: ResolvedEntity } => e.resolved !== null);
+      .filter((e): e is {
+        span: Span;
+        resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+      } => e.resolved !== null);
+
+    let resolvedEntityCount = 0;
 
     for (const { resolved } of resolvedNonOverlap) {
+      resolvedEntityCount++;
       const constraint = {
-        attribute: resolved.entityType,
+        attribute: resolved.entity.entityType,
         operator: '=' as const,
-        value: resolved.canonicalValue,
-        source_phrase: `entity_resolver(${resolved.matchedSurface})`,
-        confidence: resolved.confidence,
+        value: resolved.entity.canonicalValue,
+        source_phrase: resolved.kind === 'shadow'
+          ? `entity_shadow(${resolved.entity.matchedSurface})`
+          : `entity_resolver(${resolved.entity.matchedSurface})`,
+        confidence: resolved.entity.confidence,
         mapping_version: `entity-resolver-v1.0`,
       };
-      if (Planner.SOFT_ATTRIBUTES.has(resolved.entityType)) {
+      if (Planner.SOFT_ATTRIBUTES.has(resolved.entity.entityType)) {
         soft.push(constraint);
       } else {
         hard.push(constraint);
@@ -568,7 +609,24 @@ export class Planner {
       // RFC-019 Stage 3+5: Apply ontology expansion and compositional inference
       // on the fallback bundle too, so inferred constraints are populated
       // consistently across paths.
-      const expanded = applyCompositionalInference(expandWithOntology(fallbackBundle));
+      const ontologyExpanded = expandWithOntology(fallbackBundle);
+      const expanded = applyCompositionalInference(ontologyExpanded);
+      const fallbackConstraintCount =
+        fallbackBundle.hard.length + fallbackBundle.soft.length + fallbackBundle.inferred.length;
+      const constraintExtraction = buildPlannerConstraintExtractionTrace({
+        baseTrace: mapperTrace,
+        spans,
+        matched,
+        resolvedEntityCount,
+        finalBundle: expanded,
+        ontologyAddedCount:
+          countBundleConstraints(ontologyExpanded) - countBundleConstraints(fallbackBundle),
+        compositionalAddedCount:
+          countBundleConstraints(expanded) - countBundleConstraints(ontologyExpanded),
+        fallbackConstraintCount,
+        unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
+        unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
+      });
       return {
         bundle: expanded,
         ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
@@ -583,6 +641,18 @@ export class Planner {
     // RFC-019 Stage 5: Compositional inference — apply composition rules
     // (region + wine_type → structure prior) to populate inferred bundle.
     const finalBundle = applyCompositionalInference(expanded);
+    const constraintExtraction = buildPlannerConstraintExtractionTrace({
+      baseTrace: mapperTrace,
+      spans,
+      matched,
+      resolvedEntityCount,
+      finalBundle,
+      ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
+      compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
+      fallbackConstraintCount: 0,
+      unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
+      unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
+    });
 
     return {
       bundle: finalBundle,
@@ -779,4 +849,121 @@ export class Planner {
     // No clear signal detected.
     return undefined;
   }
+}
+
+function countBundleConstraints(bundle: ConstraintBundle): number {
+  return bundle.hard.length + bundle.soft.length + bundle.inferred.length;
+}
+
+function collectUnresolvedSpanSamples(
+  spans: readonly Span[],
+  coveredPhrases: ReadonlySet<string>,
+  resolved: readonly {
+    span: Span;
+    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+  }[],
+): readonly string[] {
+  const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
+  const samples: string[] = [];
+  const seen = new Set<string>();
+  for (const span of spans) {
+    if (coveredPhrases.has(span.text) || resolvedKeys.has(spanKey(span)) || seen.has(span.text)) {
+      continue;
+    }
+    seen.add(span.text);
+    samples.push(span.text);
+    if (samples.length >= MAX_UNRESOLVED_SPAN_SAMPLE_COUNT) {
+      break;
+    }
+  }
+  return samples;
+}
+
+function countUnresolvedSpans(
+  spans: readonly Span[],
+  coveredPhrases: ReadonlySet<string>,
+  resolved: readonly {
+    span: Span;
+    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
+  }[],
+): number {
+  const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
+  let count = 0;
+  for (const span of spans) {
+    if (!coveredPhrases.has(span.text) && !resolvedKeys.has(spanKey(span))) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function spanKey(span: Span): string {
+  return `${span.startChar}:${span.endChar}:${span.text}`;
+}
+
+function uniqueCoveredCategories(bundle: ConstraintBundle): readonly string[] {
+  const categories = new Set<string>();
+  for (const constraint of [...bundle.hard, ...bundle.soft, ...bundle.inferred]) {
+    categories.add(constraint.attribute);
+  }
+  return [...categories].sort((left, right) => left.localeCompare(right));
+}
+
+function buildPlannerConstraintExtractionTrace(args: {
+  readonly baseTrace?: ConstraintExtractionTrace | undefined;
+  readonly spans: readonly Span[];
+  readonly matched: readonly NormalizedConstraint[];
+  readonly resolvedEntityCount: number;
+  readonly finalBundle: ConstraintBundle;
+  readonly ontologyAddedCount: number;
+  readonly compositionalAddedCount: number;
+  readonly fallbackConstraintCount: number;
+  readonly unresolvedSpanCount: number;
+  readonly unresolvedSpanSamples: readonly string[];
+}): ConstraintExtractionTrace | undefined {
+  const {
+    baseTrace,
+    spans,
+    matched,
+    resolvedEntityCount,
+    finalBundle,
+    ontologyAddedCount,
+    compositionalAddedCount,
+    fallbackConstraintCount,
+    unresolvedSpanCount,
+    unresolvedSpanSamples,
+  } = args;
+  if (baseTrace === undefined) {
+    return undefined;
+  }
+
+  const llmLinkedEntityCount = baseTrace.llmLinkedEntityCount ?? 0;
+  const source: ConstraintExtractionTrace['source'] =
+    resolvedEntityCount > 0 && (baseTrace.llmHitCount > 0 || llmLinkedEntityCount > 0)
+      ? 'resolver_plus_llm'
+      : resolvedEntityCount > 0
+        ? 'resolver'
+        : baseTrace.source;
+
+  return {
+    ...baseTrace,
+    source,
+    candidateSpanCount: spans.length,
+    resolvedEntityCount,
+    directHardConstraintCount: matched.filter((constraint) =>
+      !SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)).length + resolvedEntityCount,
+    ontologyExpandedConstraintCount: ontologyAddedCount,
+    compositionalInferenceCount: compositionalAddedCount,
+    phrasesByTier: {
+      tier1_default_mapping: baseTrace.ruleTableHitCount,
+      tier2_entity_resolver: resolvedEntityCount,
+      tier3_ontology_expansion: ontologyAddedCount,
+      tier4_compositional_inference: compositionalAddedCount,
+      tier5_llm_linker: llmLinkedEntityCount,
+      tier6_regex_fallback: fallbackConstraintCount,
+      unmapped: unresolvedSpanCount,
+    },
+    categoriesCovered: uniqueCoveredCategories(finalBundle),
+    unresolvedSpanSamples,
+  };
 }

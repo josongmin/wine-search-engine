@@ -17,6 +17,7 @@ import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js'
 import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
+import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 
 export interface HybridRankingRouteDeps {
   readonly candidatePool: CandidatePoolPort;
@@ -127,10 +128,12 @@ export async function runHybridRankingPipeline(
   ranker: RankingPort,
   compiled?: CompiledWineQuery,
 ): Promise<SearchRouteExecutionResult> {
+  const retrievalPlan = buildRetrievalPlan(plan.constraints);
   const rankingInput: RankingInput = {
     queryPlan: plan,
     candidates,
     constraints: plan.constraints,
+    retrievalPlan,
     ...(compiled !== undefined ? { compiled } : {}),
   };
 

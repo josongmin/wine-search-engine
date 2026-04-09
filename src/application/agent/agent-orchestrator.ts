@@ -376,6 +376,11 @@ export class AgentOrchestrator {
     let policyBlocked = false;
     let unknownToolAttempts = 0;
     const MAX_UNKNOWN_TOOL_ATTEMPTS = 2;
+    const timeoutStats = {
+      llmStep: 0,
+      tool: 0,
+      parallelBatch: 0,
+    };
     /**
      * Hard cap on parallel tools per batch step. An adversarially-prompted LLM
      * can emit {"actions":[...100 tools...]} to trigger 100 concurrent Promise.all
@@ -528,7 +533,12 @@ export class AgentOrchestrator {
           llmResult = racedResult;
         } catch (err) {
           log.warn({ err, requestId, stepIndex: steps.length }, 'Agent LLM call failed');
-          terminationReason = 'error';
+          if ((err as Error).message === 'Agent LLM step timed out') {
+            timeoutStats.llmStep += 1;
+            terminationReason = 'timeout';
+          } else {
+            terminationReason = 'error';
+          }
           break;
         } finally {
           abortSignal?.removeEventListener('abort', propagateAbort);
@@ -699,7 +709,9 @@ export class AgentOrchestrator {
             );
           } catch (batchErr) {
             if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
+              timeoutStats.parallelBatch += 1;
               batchAbortController.abort();
+              terminationReason = 'timeout';
             }
             if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
@@ -717,7 +729,9 @@ export class AgentOrchestrator {
                 });
               }
             } else {
-              terminationReason = 'error';
+              if (terminationReason !== 'timeout') {
+                terminationReason = 'error';
+              }
             }
             break;
           } finally {
@@ -821,6 +835,7 @@ export class AgentOrchestrator {
             rawResult = timedToolResult.rawResult;
           } catch (toolErr) {
             if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
+              timeoutStats.tool += 1;
               toolAbortController.abort();
             }
             // Detect policy-block errors — terminate the loop immediately.
@@ -1146,6 +1161,12 @@ export class AgentOrchestrator {
         steps: steps.length,
         toolCalls: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
         terminationReason,
+        timeoutStats,
+        failureTags: [
+          ...(timeoutStats.llmStep > 0 ? ['llm_step_timeout'] : []),
+          ...(timeoutStats.parallelBatch > 0 ? ['parallel_batch_timeout'] : []),
+          ...(timeoutStats.tool > 0 ? ['tool_timeout'] : []),
+        ],
         totalDurationMs: budget.getElapsedMs(),
         fallbackApplied,
       },
