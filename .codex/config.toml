@@ -4,6 +4,7 @@
 #
 # Architecture & commands: see ../CLAUDE.md (repo root).
 # HTTP debug / LLM trace playbook: ../.ai/llm-debugging-playbook.md — setup: ../.ai/debug-mode.md — steps: ../src/observability/pipeline-debug-steps.ts
+# Default quality bar: do not introduce heuristic shortcuts unless the user explicitly approves them first; if heuristics seem necessary, stop and ask. Baseline work should target the best known SOTA++ direction regardless of ROI unless the user asks for a cheaper/simpler trade-off.
 
 model = "gpt-5.4"
 approval_policy = "on-request"

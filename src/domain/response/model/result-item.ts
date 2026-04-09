@@ -40,6 +40,39 @@ export interface EntitySummary {
   /** Producer prestige from the index (0–1 or 0–100 scale from source). */
   readonly producerPrestige?: number | undefined;
 
+  /** Style descriptor (e.g. "bold", "elegant"). */
+  readonly style?: string | undefined;
+
+  /** Classification tier or legal designation. */
+  readonly classification?: string | undefined;
+
+  /** Critic score normalized to [0, 1]. */
+  readonly criticScore?: number | undefined;
+
+  /** Alcohol percentage. */
+  readonly alcoholPct?: number | undefined;
+
+  /** Certifications (e.g. "organic", "biodynamic"). */
+  readonly certifications?: readonly string[] | undefined;
+
+  /** Food pairing tags. */
+  readonly pairingTags?: readonly string[] | undefined;
+
+  /** Occasion suggestions. */
+  readonly occasion?: readonly string[] | undefined;
+
+  /** Wine body intensity (1–5 ordinal scale). */
+  readonly body?: number | undefined;
+
+  /** Tannin structure (1–5 ordinal scale). */
+  readonly tannin?: number | undefined;
+
+  /** Acidity level (1–5 ordinal scale). */
+  readonly acidity?: number | undefined;
+
+  /** Sweetness (1–5 ordinal scale). */
+  readonly sweetness?: number | undefined;
+
   /** Vintage year, when applicable. */
   readonly vintage?: number | undefined;
 

@@ -92,6 +92,8 @@ describe('OpenAiChatLlm', () => {
 
     it('respects Retry-After header on 429', async () => {
       vi.useFakeTimers();
+      // Pin Math.random to 0 for deterministic timing: jitter = 0, delay = exactly retryAfterMs.
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0);
       let callCount = 0;
       vi.stubGlobal(
         'fetch',
@@ -116,22 +118,29 @@ describe('OpenAiChatLlm', () => {
 
       const resultPromise = llm.complete({ messages: [{ role: 'user', content: 'hi' }] });
 
-      // Should NOT resolve before 10s (Retry-After header)
+      // Should NOT resolve before 10s (Retry-After header; jitter=0 → exactly 10s)
       await vi.advanceTimersByTimeAsync(9_000);
       // Still waiting — fetch called only once so far
       expect(callCount).toBe(1);
 
-      // Advance past the 10s mark
+      // Advance past the 10s mark (jitter=0 so exactly 10s is the floor)
       await vi.advanceTimersByTimeAsync(1_500);
       const result = await resultPromise;
       expect(result.text).toBe('ok');
       expect(callCount).toBe(2);
+      randomSpy.mockRestore();
     });
 
-    it('uses exponential backoff: makes exactly 4 attempts across the 2s+4s+8s window', async () => {
+    it('uses jittered exponential backoff: 4 attempts complete within the worst-case window', async () => {
+      // v4: 429 backoff uses full jitter [0, 2^attempt × base], not fixed exponential.
+      // The deterministic timing test (cross the 2s/4s/8s thresholds exactly) was
+      // replaced because jitter randomizes timing within the upper bound.
+      // We pin jitter to its MAXIMUM by mocking Math.random() to return 1.0,
+      // making the test deterministic at the worst-case (maximum) delay.
       vi.useFakeTimers();
-      let callCount = 0;
+      const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.9999); // jitter near max
 
+      let callCount = 0;
       vi.stubGlobal(
         'fetch',
         vi.fn(async () => {
@@ -147,8 +156,6 @@ describe('OpenAiChatLlm', () => {
         baseUrl: 'https://api.openai.com/v1',
         apiKey: 'sk-test',
         defaultModel: 'gpt-4o-mini',
-        // Use a large httpTimeoutMs (60s) so fetchWithTimeout's internal timer
-        // does not interfere with the rate-limit sleep timers.
         httpTimeoutMs: 60_000,
       });
 
@@ -157,32 +164,21 @@ describe('OpenAiChatLlm', () => {
       // Attempt 1 fires immediately.
       expect(callCount).toBe(1);
 
-      // Not enough time for attempt 2 (needs 2s).
-      await vi.advanceTimersByTimeAsync(1_500);
-      expect(callCount).toBe(1);
-
-      // Cross the 2s threshold → attempt 2.
-      await vi.advanceTimersByTimeAsync(600);
+      // Worst-case backoff at attempt 1: ~2s × 0.9999 ≈ 2s. Cross it.
+      await vi.advanceTimersByTimeAsync(2_100);
       expect(callCount).toBe(2);
 
-      // Not enough time for attempt 3 (needs another 4s from attempt 2).
-      await vi.advanceTimersByTimeAsync(3_500);
-      expect(callCount).toBe(2);
-
-      // Cross the 4s threshold → attempt 3.
-      await vi.advanceTimersByTimeAsync(600);
+      // Worst-case at attempt 2: ~4s × 0.9999 ≈ 4s.
+      await vi.advanceTimersByTimeAsync(4_100);
       expect(callCount).toBe(3);
 
-      // Not enough time for attempt 4 (needs another 8s from attempt 3).
-      await vi.advanceTimersByTimeAsync(7_500);
-      expect(callCount).toBe(3);
-
-      // Cross the 8s threshold → attempt 4 (success).
-      await vi.advanceTimersByTimeAsync(600);
+      // Worst-case at attempt 3: ~8s × 0.9999 ≈ 8s.
+      await vi.advanceTimersByTimeAsync(8_100);
       expect(callCount).toBe(4);
 
       const result = await resultPromise;
       expect(result.text).toBe('ok');
+      randomSpy.mockRestore();
     });
 
     it('throws after exhausting all retries on persistent 429', async () => {

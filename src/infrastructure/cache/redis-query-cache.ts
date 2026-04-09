@@ -66,6 +66,7 @@ export class RedisQueryCache implements QueryCachePort {
       // Checks field presence AND types to reject obviously corrupt entries
       // (e.g. {engineDecision: 123, results: "invalid", meta: null}).
       const rec = typeof parsed === 'object' && parsed !== null
+        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
         ? parsed as Record<string, unknown>
         : undefined;
       if (

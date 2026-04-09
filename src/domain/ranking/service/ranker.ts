@@ -95,6 +95,14 @@ interface ScoredEntry {
   readonly regionEnc?: number | undefined;
   readonly countryEnc?: number | undefined;
 
+  // Display metadata for new entity summary fields
+  readonly style?: string | undefined;
+  readonly classification?: string | undefined;
+  readonly alcoholPct?: number | undefined;
+  readonly certifications?: readonly string[] | undefined;
+  readonly pairingTags?: readonly string[] | undefined;
+  readonly occasion?: readonly string[] | undefined;
+
   // Price data for agent/response surface
   readonly priceBand?: string | undefined;
   readonly priceUsd?: number | undefined;
@@ -449,6 +457,12 @@ export class Ranker {
         ...(candidate.retrievalProvenance !== undefined
           ? { retrievalProvenance: candidate.retrievalProvenance }
           : {}),
+        ...(candidate.style !== undefined ? { style: candidate.style } : {}),
+        ...(candidate.classification !== undefined ? { classification: candidate.classification } : {}),
+        ...(candidate.alcoholPct !== undefined ? { alcoholPct: candidate.alcoholPct } : {}),
+        ...(candidate.certifications !== undefined ? { certifications: candidate.certifications } : {}),
+        ...(candidate.pairing !== undefined ? { pairingTags: candidate.pairing } : {}),
+        ...(candidate.occasion !== undefined ? { occasion: candidate.occasion } : {}),
         ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
         ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
         matchedConstraints: constraintState.matchedConstraints,
@@ -639,6 +653,12 @@ export class Ranker {
         ...(entry.grapePrimaryEnc !== undefined ? { grapePrimaryEnc: entry.grapePrimaryEnc } : {}),
         ...(entry.regionEnc !== undefined ? { regionEnc: entry.regionEnc } : {}),
         ...(entry.countryEnc !== undefined ? { countryEnc: entry.countryEnc } : {}),
+        ...(entry.style !== undefined ? { style: entry.style } : {}),
+        ...(entry.classification !== undefined ? { classification: entry.classification } : {}),
+        ...(entry.alcoholPct !== undefined ? { alcoholPct: entry.alcoholPct } : {}),
+        ...(entry.certifications !== undefined ? { certifications: entry.certifications } : {}),
+        ...(entry.pairingTags !== undefined ? { pairingTags: entry.pairingTags } : {}),
+        ...(entry.occasion !== undefined ? { occasion: entry.occasion } : {}),
         ...(entry.priceBand !== undefined ? { priceBand: entry.priceBand } : {}),
         ...(entry.priceUsd !== undefined ? { priceUsd: entry.priceUsd } : {}),
       };

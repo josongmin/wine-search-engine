@@ -191,35 +191,35 @@ describe('extractFeatures', () => {
 
   // 14. Missing vintageYear → null
   it('returns null when vintageYear is missing', () => {
-    const { vintageYear, ...rest } = validRecord;
+    const { vintageYear: _vintageYear, ...rest } = validRecord;
     expect(extractFeatures(rest)).toBeNull();
   });
 
   // 15. Missing body → null
   it('returns null when body is missing', () => {
-    const { body, ...rest } = validRecord;
+    const { body: _body, ...rest } = validRecord;
     expect(extractFeatures(rest)).toBeNull();
   });
 
   // Also verify other required fields
   it('returns null when tannin is missing', () => {
-    const { tannin, ...rest } = validRecord;
+    const { tannin: _tannin, ...rest } = validRecord;
     expect(extractFeatures(rest)).toBeNull();
   });
 
   it('returns null when acidity is missing', () => {
-    const { acidity, ...rest } = validRecord;
+    const { acidity: _acidity, ...rest } = validRecord;
     expect(extractFeatures(rest)).toBeNull();
   });
 
   it('returns null when sweetness is missing', () => {
-    const { sweetness, ...rest } = validRecord;
+    const { sweetness: _sweetness, ...rest } = validRecord;
     expect(extractFeatures(rest)).toBeNull();
   });
 
   // 16. Missing criticProxy → avgCriticProxyScore defaults to 0
   it('defaults avgCriticProxyScore to 0 when criticProxy is missing', () => {
-    const { criticProxy, ...rest } = validRecord;
+    const { criticProxy: _criticProxy, ...rest } = validRecord;
     const result = extractFeatures(rest);
     expect(result).not.toBeNull();
     expect(result!.avgCriticProxyScore).toBe(0);

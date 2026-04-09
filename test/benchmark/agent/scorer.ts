@@ -1,5 +1,5 @@
 /**
- * SOTA++ benchmark scorer (v4 — 0.5 neutral imputation, answerRelevancy removed).
+ * SOTA++ benchmark scorer (v4 — null-drop scoring, answerRelevancy removed).
  *
  * Scoring dimensions (each 0..1):
  *   - executionEfficiency:    merged tool accuracy + step efficiency to remove
@@ -31,6 +31,8 @@ import type {
   ScenarioExpectation,
   TerminationReason,
 } from './scenario.js';
+import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../../src/domain/shared/constants.js';
 
 export interface ToolCallTrace {
   readonly tool: string;
@@ -175,6 +177,19 @@ export interface ScenarioResult {
    * Omitted when judge was not run or failed.
    */
   readonly judgeReasoning?: string;
+  /**
+   * Claim-level diagnostic vector (RFC-020 SOTA++).
+   * Provides per-claim verdict breakdown, contradiction rate, critical error rate,
+   * provenance coverage, and per-category aggregates.
+   *
+   * Shadow-mode in current release: populated when the benchmark runner
+   * invokes the claim-level evaluator alongside the existing scorer; does
+   * NOT yet feed into the geometric mean. Phase 2 will split faithfulness
+   * into claim-grounded faithfulness + accuracy dimensions.
+   *
+   * Omitted when claim-level evaluation is disabled or fails.
+   */
+  readonly claimDiagnostics?: DiagnosticVector;
 }
 
 const ZERO_SCORES: ScenarioScores = {
@@ -355,9 +370,9 @@ const PENALTY_DRINKING_WINDOW_MISMATCH = 0.8;
  * too mild — milder than price band violations (30%) despite being a more
  * fundamental error. Now aligned with other structural check penalties. */
 const PENALTY_TOOL_ARG_MISSING = 0.7;
-const PENALTY_HEDGING_MISSING = 0.7;
-const PENALTY_REGISTER_MISMATCH = 0.8;
-const PENALTY_OVERCONFIDENT = 0.8;
+// v4: PENALTY_HEDGING_MISSING, PENALTY_REGISTER_MISMATCH, PENALTY_OVERCONFIDENT
+// removed — these dimensions are now evaluated by the LLM judge exclusively.
+// See scoreStructuredChecks comment block for the structural rationale.
 const PENALTY_UNCITED_WINE_NAMES = 0.5;
 /** Answer quality: 50% penalty per regex miss in answerMustMatch. */
 const PENALTY_REGEX_MISS = 0.5;
@@ -405,11 +420,13 @@ const MAN_WON_MULTIPLIER = 10_000;
  * scorer rejects prices that the pipeline correctly surfaced (3.7% systematic bias
  * at the old 1,400 vs production's 1,350). If the shared constant changes, update here too.
  */
-const USD_TO_KRW_APPROX = 1_350;
+const USD_TO_KRW_APPROX = KRW_PER_USD_APPROXIMATE;
 /** Approximate EUR→KRW rate for price extraction (€1 ≈ ₩1,500). */
 const EUR_TO_KRW_APPROX = 1_500;
 /** Approximate GBP→KRW rate for price extraction (£1 ≈ ₩1,700). */
 const GBP_TO_KRW_APPROX = 1_700;
+/** Fixed reference year for deterministic benchmark scoring of drink windows. */
+const BENCHMARK_REFERENCE_YEAR = 2026;
 
 // v4 removal: ANSWER_LENGTH_BONUS, ANSWER_TRIVIAL_PENALTY, ANSWER_WINE_RELEVANT_TERMS
 // were removed entirely. The length bonus (+0.05 for answers ≥100 chars with wine terms)
@@ -421,21 +438,10 @@ const GBP_TO_KRW_APPROX = 1_700;
 // scoreAnswerQuality purely contract-based: answerContains, answerMustMatch,
 // answerExcludes, answerMustNotMatch, and structured checks.
 
-/** Korean stopwords for extractProperNouns — module-level to avoid per-call allocation.
- * v4 expanded: added predicate endings and common descriptive phrases that were
- * incorrectly extracted as wine names (e.g., "좋은와인입니다" → UNCITED penalty). */
-const KOREAN_PROPER_NOUN_STOPWORDS = new Set([
-  '추천합니다', '추천해', '추천드립니다', '권장합니다',
-  '와인을', '와인이', '와인은', '와인같은', '와인이라고',
-  '입니다', '있습니다', '없습니다', '합니다', '습니다', '드립니다',
-  '같은', '비슷한', '좋은', '마시기', '좋습니다', '좋아요',
-  '맛있습니다', '맛있어요', '훌륭합니다', '완벽합니다', '최고입니다',
-]);
-/** Korean predicate suffix pattern — Hangul sequences ending with these verb/adjective
- * endings are grammatical phrases, not wine proper nouns. Used in extractProperNouns
- * as a second filter after the stopword set to catch compound phrases that aren't in
- * the finite stopword list. */
-const KOREAN_PREDICATE_SUFFIX_RE = /(?:합니다|습니다|니다|어요|아요|해요|에요|인데|거든|잖아|네요|군요|지요|세요|겠어|이고|하고|하며|입니|이며)$/;
+// v4: KOREAN_PROPER_NOUN_STOPWORDS and KOREAN_PREDICATE_SUFFIX_RE removed.
+// extractProperNouns is now Latin-only — Korean wine name grounding is handled
+// by the judge's mustCiteFromToolResults rubric criterion. See extractProperNouns
+// docstring for the rationale.
 
 export function scoreScenario(
   scenario: AgentBenchmarkScenario,
@@ -445,6 +451,10 @@ export function scoreScenario(
   error?: string,
   steps?: readonly StepTrace[],
   judgeReasoning?: string,
+  /** RFC-020 claim-level diagnostic. When provided, attached to ScenarioResult
+   *  for downstream reporting. v5+: faithfulness dim derives from
+   *  DiagnosticVector.faithfulnessScore (more granular than judgeFaithfulness). */
+  claimDiagnostics?: DiagnosticVector,
 ): ScenarioResult {
   if (scenario.skip !== undefined) {
     return {
@@ -611,10 +621,10 @@ export function scoreScenario(
   //   - executionEfficiency: tool selection + step budget signal
   //   - terminationCorrectness: binary safety net
   //   - answerQuality: primary user-facing outcome — genuine 0 must stay 0
-  //   - judge: LLM rubric — a judge score of 0 means the rubric explicitly failed
+  //   - costEfficiency: engineering/SLA failure, not measurement noise
   //
   // Dims that DO get the floor (genuinely noisy secondary signals):
-  //   - faithfulness, contextRelevance, contextRecall, costEfficiency, answerRelevancy
+  //   - faithfulness, contextRelevance, contextRecall, answerRelevancy, judge
   //     These are approximations (heuristics / sparse LLM samples). A 0.01 here
   //     is more likely measurement noise than a true catastrophic failure.
   // NO_FLOOR_DIMS is module-scope (rule 16: deterministic sets should not be allocated per-call).
@@ -678,6 +688,7 @@ export function scoreScenario(
     judgeRequiredButSkipped,
     ...(steps !== undefined && steps.length > 0 ? { steps } : {}),
     ...(judgeReasoning !== undefined ? { judgeReasoning } : {}),
+    ...(claimDiagnostics !== undefined ? { claimDiagnostics } : {}),
   };
 }
 
@@ -1004,7 +1015,7 @@ function scoreAnswerQuality(
   //
   // Severity is 'warn' (not 'critical') so it does NOT trigger the
   // criticalFailure short-circuit that collapses overall to 0.
-  // The penalty (PENALTY_MUST_NOT_MATCH) is 0.20 — strong enough to flag a
+  // The penalty (PENALTY_MUST_NOT_MATCH) is 0.50 — strong enough to flag a
   // genuine refusal but not so extreme that a polite preamble annihilates a
   // correct recommendation.
   if (exp.answerMustNotMatch !== undefined && exp.answerMustNotMatch.length > 0) {
@@ -1051,7 +1062,6 @@ function scoreStructuredChecks(
   diagnostics: Diagnostic[],
 ): number {
   let multiplier = 1;
-  const lowerAnswer = answer.toLowerCase();
   // When the LLM was unavailable (step-0 fallback), the fallback answer embeds the
   // user's query text verbatim. Register and drinkingWindow checks on that text would
   // score the USER's language, not the AGENT's. Skip those dims to avoid false positives.
@@ -1150,96 +1160,64 @@ function scoreStructuredChecks(
     }
   }
 
-  // 5. requireHedging — must contain hedging language
-  // Skip for step-0 fallback: the generic fallback answer never contains hedging,
-  // but this is an infra failure not an agent failure.
-  if (exp.requireHedging === true && !isStep0Fallback) {
-    // v4 fix: removed '명확'/'구체적' (mean CLEAR/SPECIFIC — opposite of hedging),
-    // '다양' (means DIVERSE — confident, not hedging), '어떤' (too broad).
-    // Added stronger Korean hedging forms that are unambiguous.
-    const hedging = /아마도|어쩌면|혹시|수도\s*있|을\s*수\s*있|일\s*수\s*있|여러\s*후보|perhaps|might|maybe|could\s+be|it\s+seems/i;
-    if (!hedging.test(answer)) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'HEDGING_MISSING',
-        message: 'answer lacks required hedging language for ambiguous query',
-      });
-      multiplier *= PENALTY_HEDGING_MISSING;
-    }
-  }
-
-  // 6. requiredRegister — Korean formal vs casual
-  // Skip when the answer is from the fallback path (step-0 LLM unavailable):
-  // the fallback embeds the user's query text verbatim, which carries the user's
-  // register (casual or formal) — not the agent's. Checking it would score the
-  // USER's register, not the agent's, producing false REGISTER_MISMATCH failures.
-  if (exp.requiredRegister !== undefined && !isStep0Fallback) {
-    const formalMarkers = (lowerAnswer.match(/합니다|습니다|드립니다|하세요|겠습니다/g) ?? []).length;
-    // v4 fix: 1-char Korean casual markers ('해','야','거') produce massive false positives
-    // because they appear as substrings in formal words: 추천해드립니다→'해', 해당→'해',
-    // 거품→'거', 야생→'야'. Use multi-char patterns that only match true casual sentence
-    // endings, not word-internal substrings. Threshold raised from 2→3 to reduce noise.
-    const casualMarkers = (lowerAnswer.match(/줄게|건데|잖아|거든|할게|할래|해줘|해봐|먹자|가자|하자|인데|거야|잖아요/g) ?? []).length;
-    const dominant = formalMarkers >= casualMarkers ? 'formal' : 'casual';
-    // Only penalise if the answer has enough Korean to judge and the register is wrong.
-    const totalMarkers = formalMarkers + casualMarkers;
-    if (totalMarkers >= 3 && dominant !== exp.requiredRegister) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'REGISTER_MISMATCH',
-        message: `expected ${exp.requiredRegister} register but detected ${dominant}`,
-        observed: dominant,
-        expected: exp.requiredRegister,
-      });
-      multiplier *= PENALTY_REGISTER_MISMATCH;
-    }
-  }
-
-  // 7. maxConfidence — penalise overconfident language. Threshold applies to
-  //    all maxConfidence values (not just <0.5) to match auto-rubric coverage.
-  if (exp.maxConfidence !== undefined) {
-    // v4 fix: removed '확실히'/'분명히' — standard polite Korean ("확실히 좋은 와인입니다"
-    // is normal sommelier language, not overconfidence). Kept genuinely extreme markers.
-    const overconfident = /틀림없이|무조건|절대\s*(?!적|값)|100%|absolutely|undoubtedly|without\s+(?:a\s+)?doubt/i;
-    if (overconfident.test(answer)) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'warn',
-        code: 'OVERCONFIDENT_LANGUAGE',
-        message: 'overconfident language detected despite low maxConfidence',
-      });
-      multiplier *= PENALTY_OVERCONFIDENT;
-    }
-  }
+  // 5/6/7: requireHedging / requiredRegister / maxConfidence
+  //
+  // v4 STRUCTURAL FIX: removed regex-based heuristic checks for these three
+  // semantic dimensions. They are now evaluated EXCLUSIVELY by the LLM judge
+  // via composeAutoRubric (judge.ts), which generates rubric criteria from
+  // these scenario fields and lets the judge evaluate semantically.
+  //
+  // Why removed (the heuristic-tightening trap):
+  // - hedging regex /아마도|어쩌면|.../ — Korean hedging is context-dependent;
+  //   formal sommelier writing can hedge without these tokens, casual chat can
+  //   use them in non-hedging contexts. Pattern enumeration is endless.
+  // - register markers (formal=합니다/습니다, casual=줄게/건데/잖아...) — Korean
+  //   register is a morphosyntactic property, not a token bag count. Elliptical
+  //   formal writing has no markers; mixed-register text isn't binary.
+  // - overconfident regex /틀림없이|무조건|.../ — overconfidence is pragmatic
+  //   stance, not vocabulary. "확실히 좋은 와인" was a known false positive; the
+  //   real fix isn't enumerating safe vs unsafe words, it's semantic judgment.
+  //
+  // The judge already evaluates these scenarios (composeAutoRubric emits
+  // bilingual rubric criteria for each). Removing the regex layer eliminates
+  // false positives AND the heuristic-tightening cycle (every new edge case
+  // required another regex tweak). For these three dims, the judge IS the
+  // evaluator — not an offset to a heuristic.
+  //
+  // Note: scenarios with these fields SHOULD have judgeRequired:true to ensure
+  // the judge runs. The NO_QUALITY_CONSTRAINTS diagnostic surfaces gaps.
+  //
+  // PENALTY_HEDGING_MISSING, PENALTY_REGISTER_MISMATCH, PENALTY_OVERCONFIDENT
+  // constants removed (no callers).
 
   // 8. refusalExpected — CRITICAL: answer must contain refusal + must NOT contain affirmation
   if (exp.refusalExpected === true) {
-    // v4 fix: removed bare '없' (1-char → matches '맛없는', '타닌이 없고' — wine descriptors, not refusals).
-    // The specific multi-char patterns (존재하지, 찾을 수 없) already cover genuine refusal contexts.
-    // Fixed 'available' to exclude 'unavailable' via negative lookbehind.
-    // Fixed '추천.*합니다' greedy match → specific verb forms only.
-    const refusalMarkers = /존재하지|찾을\s*수\s*없|구할\s*수\s*없|not\s+found|unavailable|해당\s*빈티지|없습니다|없어요/i;
-    const affirmativeMarkers = /재고\s*있|구매\s*가능|in\s+stock|(?<!un)available|추천(?:해|합니다|드립니다)/i;
-    if (!refusalMarkers.test(answer)) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'critical',
-        code: 'REFUSAL_MISSING',
-        message: 'answer should refuse but contains no refusal markers',
-      });
-      return 0;
-    }
-    if (affirmativeMarkers.test(answer)) {
-      diagnostics.push({
-        dim: 'answerQuality',
-        severity: 'critical',
-        code: 'REFUSAL_CONTRADICTED',
-        message: 'answer should refuse but contains affirmative markers',
-      });
-      return 0;
-    }
+    // v4 STRUCTURAL FIX: regex-based refusal detection removed. Replaced with
+    // judge-driven semantic evaluation via composeAutoRubric.
+    //
+    // Old regex (removed): /존재하지|찾을 수 없|.../ for refusal markers and
+    // /재고 있|구매 가능|.../ for affirmative markers. Both produced false positives:
+    //
+    // - '맛없는' (tasteless), '타닌이 없고' (low tannin), '오크 없는' (unoaked) all
+    //   match '없' as a wine descriptor, not a refusal. The previous fix was to
+    //   tighten patterns ('없습니다'/'없어요') but Korean wine vocabulary will keep
+    //   producing edge cases (없는, 없이, 없네, ...).
+    // - '추천(?:해|합니다|드립니다)' matches "I recommend you NOT buy this" — the
+    //   regex sees affirmation in a refusal context.
+    // - 'available' vs 'unavailable' negative lookbehind solved one case but not
+    //   'nonavailable', 'unavailably', etc.
+    //
+    // The judge already evaluates refusal scenarios via composeAutoRubric:
+    //   "The answer must refuse or indicate that the requested item does not
+    //    exist. Must NOT fabricate availability or details."
+    //
+    // For these scenarios, the judge IS the evaluator. The only remaining
+    // fail-safe is the empty-answer check at the top of scoreAnswerQuality
+    // (which already returns 0 with EMPTY_ANSWER critical diagnostic).
+    //
+    // Scenarios with refusalExpected:true SHOULD have judgeRequired:true.
+    // Without judge, this dimension produces no signal — but that's honest
+    // (we can't reliably detect refusal via regex).
   }
 
   // 9. mustCiteFromToolResults — wine names in answer must appear in observations
@@ -1306,8 +1284,9 @@ function parseDrinkingWindowFromObs(
     return STATUS_PHRASES[expected]!.test(obsText);
   }
 
-  // Strategy 2: parse "drink: YYYY-YYYY" year range and infer status
-  const CURRENT_YEAR = new Date().getFullYear();
+  // Strategy 2: parse "drink: YYYY-YYYY" year range and infer status.
+  // Use a fixed benchmark reference year so the same saved run scores the same
+  // way next year; otherwise this metric drifts with wall-clock time.
   const drinkRangeRe = /\bdrink:\s*(\d{4})\s*[-–]\s*(\d{4})\b/gi;
   let match: RegExpExecArray | null;
   let foundAny = false;
@@ -1315,7 +1294,7 @@ function parseDrinkingWindowFromObs(
     foundAny = true;
     const start = Number(match[1]);
     const end = Number(match[2]);
-    const inferred = CURRENT_YEAR < start ? 'hold' : CURRENT_YEAR > end ? 'past' : 'now';
+    const inferred = BENCHMARK_REFERENCE_YEAR < start ? 'hold' : BENCHMARK_REFERENCE_YEAR > end ? 'past' : 'now';
     if (inferred === expected) return true;
   }
   if (foundAny) return false; // ranges found but none matched expected status
@@ -1394,36 +1373,34 @@ function extractVintageYears(text: string): number[] {
 }
 
 /**
- * Extract wine-name-like sequences from text. Handles both Latin proper nouns
- * (capitalized multi-word) and Korean wine names (2+ Hangul syllables that
- * look like entity names). This is an approximation — false positives on
- * common Korean phrases are acceptable because the grounding check only
- * penalizes names NOT found in observations, so a false extraction that IS
- * in observations is harmless.
+ * Extract wine-name-like sequences from text. Handles ONLY Latin proper nouns
+ * (capitalized multi-word). Korean transliterations of wine names are NOT
+ * extracted because:
+ *
+ * 1. Wine database entries are Latin (Opus One, Château Margaux), and observations
+ *    emit them in Latin. Korean transliterations in the agent answer ('오푸스 원')
+ *    would need a transliteration map to match — neither side can do this
+ *    reliably with a regex.
+ * 2. The Korean Hangul-block extraction (`[\uAC00-\uD7A3]{2,}`) was producing
+ *    massive false positives ('좋은와인입니다', '맛있습니다', '추천드립니다'),
+ *    which required progressively more stopwords and predicate-suffix filters —
+ *    the textbook regex-tightening trap.
+ * 3. For mustCiteFromToolResults the Latin path catches the canonical wine names
+ *    (e.g., the agent writes "Opus One"); for citation grounding of Korean-named
+ *    wines, an LLM judge with the rubric "Every wine mentioned must have appeared
+ *    in tool results" handles cross-script matching semantically.
+ *
+ * v4 STRUCTURAL FIX: removed Korean Hangul extraction + KOREAN_PROPER_NOUN_STOPWORDS
+ * + KOREAN_PREDICATE_SUFFIX_RE filter. The function is now Latin-only and
+ * deterministic. Korean wine name grounding is delegated to the judge's
+ * mustCiteFromToolResults rubric criterion.
  */
 function extractProperNouns(text: string): string[] {
-  const results: string[] = [];
   // Latin proper nouns: "Opus One", "Château Margaux", "Screaming Eagle"
   // Unicode-aware boundary: \b is ASCII-only and silently fails on accented
   // Latin names (Château, Côte). Use lookahead/lookbehind for non-word chars.
   const latinMatches = text.match(/(?:^|(?<=[\s,;:(]))(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+(?:\s+[A-Z][a-zA-Z'\u00C0-\u017F-]+)*)(?=$|[\s,;:.)])/g);
-  if (latinMatches) results.push(...latinMatches);
-  // Korean wine names: sequences of 2+ Hangul syllables (오푸스원, 샤또마고, 바롤로)
-  // Filter out common Korean grammar words to reduce false positives.
-  // v4 fix: added KOREAN_PREDICATE_SUFFIX_RE to catch compound phrases like
-  // "좋은와인입니다" that aren't in the finite stopword set but end with verb suffixes.
-  const koreanMatches = text.match(/[\uAC00-\uD7A3]{2,}/g);
-  if (koreanMatches) {
-    for (const m of koreanMatches) {
-      if (KOREAN_PROPER_NOUN_STOPWORDS.has(m)) continue;
-      if (m.length < 2) continue;
-      // Reject sequences ending with common predicate suffixes — these are grammatical
-      // phrases, not wine proper nouns. Real Korean wine names don't end with -합니다.
-      if (KOREAN_PREDICATE_SUFFIX_RE.test(m)) continue;
-      results.push(m);
-    }
-  }
-  return results;
+  return latinMatches ?? [];
 }
 
 /** Navigate a nested object by dot-path: "filters.priceMaxKrw" */
@@ -1667,12 +1644,79 @@ function scoreContextRelevance(
  *  - scenario.goldenKeywords is absent or empty, OR
  *  - execution.observations is empty (no tool calls made)
  */
+/**
+ * Infer golden keywords from a scenario's answerMustMatch regex groups.
+ *
+ * answerMustMatch patterns like "(바롤로|barolo)" contain the canonical
+ * keywords the final answer must reference. Those same keywords SHOULD
+ * appear in the tool observations — if they don't, retrieval failed.
+ *
+ * This closes the measurement gap where only 6/95 scenarios had explicit
+ * goldenKeywords. Inferred keywords are less precise than hand-curated
+ * ones, but meaningfully better than returning null (unmeasurable).
+ *
+ * Heuristics:
+ * - Extract alternation groups `(a|b|c)` → each alternative as a keyword
+ * - Strip regex metacharacters and normalize to lowercase
+ * - Drop overly generic tokens (length < 3, common words) that would
+ *   match any observation and inflate recall artificially
+ */
+function inferGoldenKeywordsFromExpectation(
+  exp: ScenarioExpectation,
+): readonly string[] | undefined {
+  const patterns = exp.answerMustMatch;
+  if (patterns === undefined || patterns.length === 0) return undefined;
+
+  // Generic tokens that match too many observations — drop to avoid inflation.
+  // These are high-frequency words in wine descriptions (almost every obs).
+  const GENERIC_TOKENS = new Set<string>([
+    'wine', '와인', 'red', '레드', 'white', '화이트', 'recommend', 'recommendation',
+    'pairing', 'good', 'nice', 'party', 'gift', 'day', '추천', '좋은',
+  ]);
+
+  const keywords = new Set<string>();
+  for (const pattern of patterns) {
+    // Extract alternation groups: "(a|b|c)" → ["a", "b", "c"]
+    const groupMatches = pattern.matchAll(/\(([^)]+)\)/g);
+    for (const match of groupMatches) {
+      const group = match[1];
+      if (group === undefined) continue;
+      for (const alt of group.split('|')) {
+        // Strip common regex metacharacters and whitespace escapes.
+        const cleaned = alt
+          .replace(/\\s\*?/g, ' ')
+          .replace(/\\[dDwWsS]/g, '')
+          .replace(/[\\^$*+?.(){}[\]]/g, '')
+          .trim()
+          .toLowerCase();
+        if (cleaned.length >= 3 && !GENERIC_TOKENS.has(cleaned)) {
+          keywords.add(cleaned);
+        }
+      }
+    }
+  }
+
+  return keywords.size > 0 ? [...keywords] : undefined;
+}
+
 function scoreContextRecall(
   scenario: AgentBenchmarkScenario,
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
 ): number | null {
-  if (scenario.goldenKeywords === undefined || scenario.goldenKeywords.length === 0) {
+  // Explicit goldenKeywords take precedence. If absent, attempt auto-inference
+  // from answerMustMatch regex groups (e.g. "(바롤로|barolo)" → ["barolo"]) so
+  // scenarios without hand-curated keywords still get measured — context recall
+  // coverage otherwise sits at 6.3% (6/95 scenarios), making the metric useless.
+  const explicitGolden = scenario.goldenKeywords;
+  const inferredGolden = explicitGolden === undefined || explicitGolden.length === 0
+    ? inferGoldenKeywordsFromExpectation(scenario.expectation)
+    : undefined;
+  const effectiveGolden = explicitGolden && explicitGolden.length > 0
+    ? explicitGolden
+    : inferredGolden;
+
+  if (effectiveGolden === undefined || effectiveGolden.length === 0) {
     return null;
   }
   if (execution.observations.length === 0) return null;
@@ -1683,7 +1727,7 @@ function scoreContextRecall(
   // De-duplicate keywords: duplicate entries would inflate recall by counting
   // the same keyword multiple times. e.g. ["opus","opus","ridge"] with "opus"
   // in obs would score 2/3 instead of 1/2 (actual recall).
-  const goldenRaw = scenario.goldenKeywords.filter((kw) => kw.trim().length > 0);
+  const goldenRaw = effectiveGolden.filter((kw) => kw.trim().length > 0);
   const golden = [...new Set(goldenRaw.map((kw) => kw.toLowerCase().normalize('NFKC')))];
   if (golden.length === 0) return null;
   let hitCount = 0;
@@ -2006,8 +2050,8 @@ const DIMENSION_FLOOR = 0.05;
 
 /**
  * Dimensions that intentionally receive NO floor treatment before geo-mean.
- * These are either binary/discrete (terminationCorrectness, executionEfficiency)
- * or externally validated (judge) — flooring them would mask real 0-valued failures.
+ * These are primary outcome / safety dimensions where flooring would hide a
+ * real failure signal instead of merely smoothing noisy measurement.
  * Defined at module scope: deterministic constant, no per-call allocation (rule 16).
  */
 const NO_FLOOR_DIMS: ReadonlySet<string> = new Set<string>([

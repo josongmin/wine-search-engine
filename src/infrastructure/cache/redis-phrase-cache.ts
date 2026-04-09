@@ -100,9 +100,11 @@ export class RedisPhraseCache implements PhraseCachePort {
         this.redis.get(STATS_KEY_HITS),
         this.redis.get(STATS_KEY_MISSES),
       ]);
+      const hitsInt = hitsRaw === null ? NaN : Number.parseInt(hitsRaw, 10);
+      const missesInt = missesRaw === null ? NaN : Number.parseInt(missesRaw, 10);
       return {
-        hits: hitsRaw === null ? 0 : Number.parseInt(hitsRaw, 10) || 0,
-        misses: missesRaw === null ? 0 : Number.parseInt(missesRaw, 10) || 0,
+        hits: Number.isFinite(hitsInt) ? hitsInt : 0,
+        misses: Number.isFinite(missesInt) ? missesInt : 0,
       };
     } catch (err) {
       log.warn({ err }, 'phrase cache stats read error');

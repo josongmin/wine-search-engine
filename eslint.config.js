@@ -140,9 +140,10 @@ export default tseslint.config(
           // The correct form is [\p{L}\p{N}] (character class). This was the #1 bug
           // found in the ingestion pipeline audit — vintage years parsed as volumes.
           // NOTE: ESLint selectors cannot distinguish [\\p{L}\\p{N}] from \\p{L}\\p{N}
-          // in regex.pattern, so this rule uses a negative lookbehind for '[' to
-          // avoid false positives on the already-correct bracketed form.
-          selector: 'Literal[regex.pattern=/(?<!\\[)\\\\p\\{[LN]\\}\\\\p\\{[LN]\\}(?!\\])/]',
+          // in regex.pattern, so this rule uses a negative lookbehind for '[' and '^'
+          // to avoid false positives on already-correct bracketed forms including
+          // negative character classes like [^\\p{L}\\p{N}].
+          selector: 'Literal[regex.pattern=/(?<![\\[^])\\\\p\\{[LN]\\}\\\\p\\{[LN]\\}(?!\\])/]',
           message: '\\p{L}\\p{N} without brackets means AND (letter then digit), not OR. Use [\\p{L}\\p{N}] character class instead. (Ingestion audit bug #1)',
         },
         // NOTE: Math.random() is NOT banned via lint — it has legitimate uses

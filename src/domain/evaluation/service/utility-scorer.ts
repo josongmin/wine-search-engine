@@ -126,15 +126,6 @@ export class UtilityScorer {
       isSafeAbstain: false,
       isAvoidableAbstain: true,
     };
-
-    // Unreachable for valid DecisionStatus, but handle gracefully
-    return {
-      utilityScore: UTILITY_WEIGHTS.FAILED,
-      isCorrectResolve: false,
-      isWrongResolve: false,
-      isSafeAbstain: false,
-      isAvoidableAbstain: false,
-    };
   }
 
   /**

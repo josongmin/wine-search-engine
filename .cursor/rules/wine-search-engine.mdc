@@ -9,6 +9,8 @@ alwaysApply: true
 
 - **Developer-facing replies**: Explain, summarize, and discuss in **Korean (한국어)** unless the user explicitly asks for another language.
 - **Codebase conventions**: Keep **source code**, **identifiers**, **comments that match surrounding files**, and **git commit messages** consistent with existing repo practice (mostly English in this project).
+- **Heuristics policy**: Do **not** introduce heuristic shortcuts, heuristic fallbacks, or rule-of-thumb approximations unless the user explicitly approves them first. If heuristics seem necessary, stop and ask before proceeding.
+- **Execution baseline**: Unless the user explicitly asks for a cheaper/faster trade-off, treat the baseline as pursuing the strongest known **SOTA++** direction regardless of ROI.
 
 ## Stack
 

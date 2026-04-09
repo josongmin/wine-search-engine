@@ -10,12 +10,11 @@
  *   npx tsx test/benchmark/agent/retrieval-runner.ts --limit 20
  *   npx tsx test/benchmark/agent/retrieval-runner.ts --tier single_shot
  *   npx tsx test/benchmark/agent/retrieval-runner.ts --verbose
- *   npx tsx test/benchmark/agent/retrieval-runner.ts --profile retrieval
  *
  * Metrics computed (for scenarios with expectedEntityIds):
  *   - Recall@K  (K = 1, 3, 5, 10)
  *   - MRR       (Mean Reciprocal Rank, first golden in top-10)
- *   - NDCG@5    (graded: 3=exact match, 1=partial, 0=no match)
+ *   - NDCG@5    (graded: 3=exact ID match, 0=no match)
  *
  * For scenarios without expectedEntityIds, reports coverage (≥1 result returned).
  *
@@ -26,6 +25,7 @@
 
 import type { AgentBenchmarkScenario, ScenarioTier } from './scenario.js';
 import { AGENT_SCENARIOS } from './scenarios.js';
+import { isBenchmarkRunnerCliEntrypoint } from './runner-cli-entry.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -44,7 +44,6 @@ const NDCG_CUTOFF = 5;
 
 /** Graded relevance scores for NDCG computation. */
 const RELEVANCE_EXACT = 3;
-const RELEVANCE_PARTIAL = 1;
 const RELEVANCE_NONE = 0;
 
 /** Fetch timeout for individual search API calls (ms). */
@@ -77,12 +76,9 @@ interface RetrievalCliArgs {
   readonly limit?: number;
   readonly tierFilter?: ScenarioTier;
   readonly verbose: boolean;
-  /** Forwarded from the agent runner's --profile flag; kept for compat. */
-  readonly profile?: string;
 }
 
-function parseArgs(): RetrievalCliArgs {
-  const argv = process.argv.slice(2);
+export function parseRetrievalRunnerArgs(argv: readonly string[]): RetrievalCliArgs {
   const get = (flag: string): string | undefined => {
     const idx = argv.indexOf(flag);
     return idx >= 0 && idx + 1 < argv.length ? argv[idx + 1] : undefined;
@@ -105,8 +101,11 @@ function parseArgs(): RetrievalCliArgs {
     limit,
     tierFilter: get('--tier') as ScenarioTier | undefined,
     verbose: has('--verbose'),
-    profile: get('--profile'),
   };
+}
+
+function parseArgs(): RetrievalCliArgs {
+  return parseRetrievalRunnerArgs(process.argv.slice(2));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,19 +218,20 @@ async function callSearchApi(
 
 /**
  * Returns the graded relevance of a result entity_id against golden IDs.
- * - RELEVANCE_EXACT   (3): exact string match
- * - RELEVANCE_PARTIAL (1): one ID is a substring of the other
- * - RELEVANCE_NONE    (0): no relation
+ * Entity IDs are opaque identifiers, so matching is exact after trim.
  */
-function gradedRelevance(resultId: string, goldens: readonly string[]): number {
+export function entityIdsMatch(resultId: string, goldenId: string): boolean {
+  return resultId.trim() === goldenId.trim();
+}
+
+export function gradedRelevance(resultId: string, goldens: readonly string[]): number {
   for (const golden of goldens) {
-    if (resultId === golden) return RELEVANCE_EXACT;
-    if (resultId.includes(golden) || golden.includes(resultId)) return RELEVANCE_PARTIAL;
+    if (entityIdsMatch(resultId, golden)) return RELEVANCE_EXACT;
   }
   return RELEVANCE_NONE;
 }
 
-/** Whether a result entity_id is a golden hit (exact or partial). */
+/** Whether a result entity_id is a golden hit. */
 function isGoldenHit(resultId: string, goldens: readonly string[]): boolean {
   return gradedRelevance(resultId, goldens) > RELEVANCE_NONE;
 }
@@ -243,7 +243,7 @@ function recallAtK(resultIds: readonly string[], goldens: readonly string[], k: 
   let hits = 0;
   for (const golden of goldens) {
     for (const resultId of topK) {
-      if (resultId === golden || resultId.includes(golden) || golden.includes(resultId)) {
+      if (entityIdsMatch(resultId, golden)) {
         hits++;
         break;
       }
@@ -531,7 +531,9 @@ async function runRetrievalBenchmark(): Promise<void> {
   }
 }
 
-runRetrievalBenchmark().catch((err: unknown) => {
-  console.error('Fatal error in retrieval runner:', err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+if (isBenchmarkRunnerCliEntrypoint(process.argv[1], import.meta.url)) {
+  runRetrievalBenchmark().catch((err: unknown) => {
+    console.error('Fatal error in retrieval runner:', err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}

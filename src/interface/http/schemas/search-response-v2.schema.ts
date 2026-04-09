@@ -90,7 +90,7 @@ export const ResultItemV2HumanSchema = z.object({
   /** Human-readable explanation of why this result was returned. */
   evidenceSummary: z.string().min(1),
   /** Per-result confidence in [0, 1]. */
-  confidence: z.number().min(0).max(1),
+  confidence: z.number().finite().min(0).max(1),
   version: z.literal('2'),
   responseType: z.literal('human'),
 }).strict();
@@ -242,7 +242,7 @@ export const InterpretResponseV2Schema = z.object({
   /** Ranking signal names that influenced scoring for this query. */
   rankingSignals: z.array(z.string().min(1)).max(MAX_SEARCH_METADATA_OBJECT_KEYS),
   /** Planner confidence in the detected intent, in [0, 1]. */
-  confidence: z.number().min(0).max(1),
+  confidence: z.number().finite().min(0).max(1),
   version: z.literal('2'),
   responseType: z.literal('interpret'),
 }).strict();

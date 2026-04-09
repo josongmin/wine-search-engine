@@ -1,3 +1,46 @@
+import { describe, expect, it } from 'vitest';
+import { StepBudget } from '../step-budget.js';
+import { DEFAULT_AGENT_CONFIG } from '../../model/agent-config.js';
+
+describe('StepBudget.recordParallelBatch', () => {
+  it('rejects an oversized batch without consuming step budget', () => {
+    const budget = new StepBudget({
+      ...DEFAULT_AGENT_CONFIG,
+      maxSteps: 1,
+    });
+
+    const check = budget.recordParallelBatch([
+      { tool: 'search_wines', input: { query: 'Barolo' } },
+      { tool: 'search_wines', input: { query: 'Burgundy' } },
+    ], { skipNearDuplicate: true });
+
+    expect(check).toEqual({ allowed: false, reason: 'max_steps' });
+    expect(budget.getStepCount()).toBe(0);
+
+    const singleCheck = budget.recordStep('search_wines', { query: 'Barolo' });
+    expect(singleCheck).toEqual({ allowed: true });
+    expect(budget.getStepCount()).toBe(1);
+  });
+
+  it('fails atomically when a later batch call is rejected', () => {
+    const budget = new StepBudget({
+      ...DEFAULT_AGENT_CONFIG,
+      maxSteps: 5,
+    });
+
+    const check = budget.recordParallelBatch([
+      { tool: 'search_wines', input: { query: 'Opus One' } },
+      { tool: 'search_wines', input: { query: 'Opus One' } },
+    ], { skipNearDuplicate: true });
+
+    expect(check).toEqual({ allowed: false, reason: 'loop_detected' });
+    expect(budget.getStepCount()).toBe(0);
+
+    const singleCheck = budget.recordStep('search_wines', { query: 'Opus One' });
+    expect(singleCheck).toEqual({ allowed: true });
+    expect(budget.getStepCount()).toBe(1);
+  });
+});
 /**
  * Regression tests for StepBudget loop detection (post-SOTA++ audit).
  *

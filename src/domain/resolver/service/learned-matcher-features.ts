@@ -66,7 +66,7 @@ function tokenize(text: string): readonly string[] {
  * Extracts a 4-digit vintage year from a string, if present.
  */
 function extractVintage(text: string): number | null {
-  const match = /(?<!\p{L}\p{N})((?:19|20)\d{2})(?!\p{L}\p{N})/u.exec(text);
+  const match = /(?<!\p{L})(?<!\p{N})((?:19|20)\d{2})(?!\p{L})(?!\p{N})/u.exec(text);
   if (match?.[1] === undefined) return null;
   return Number.parseInt(match[1], 10);
 }

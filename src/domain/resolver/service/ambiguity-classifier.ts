@@ -109,7 +109,7 @@ export class AmbiguityClassifier {
           // Strip 4-digit year from label for grouping so different vintages
           // of the same wine converge to one key.
           const label = candidate.canonicalLabel
-            .replace(/(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/gu, '')
+            .replace(/(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/gu, '')
             .trim()
             .replace(/\s+/g, ' ');
           const vintages = wineByLabel.get(label) ?? new Set<string>();

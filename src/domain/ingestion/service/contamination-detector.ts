@@ -50,6 +50,13 @@ const NOISE_VOCABULARY = new Set([
   // becomes ["l", "ermitage"]. Keeping 'l' caused false contamination flags on
   // all French wines with L' prefix (L'Ermitage, L'Evangile, L'If, L'Aventure,
   // L'Ecole). 'cl' never matched standalone anyway (e.g. "75cl" → one token).
+  // Note on sync with noise-stripper.ts NOISE_TOKENS (rule 25):
+  //   - 'premium' intentionally absent: legitimate in wine names ("Opus One Premium Reserve")
+  //   - '750ml' intentionally absent: tokenizer keeps alphanumeric runs intact, so
+  //     "750ml" (no space) becomes the single token "750ml" rather than "750"+"ml";
+  //     only "750 ml" (with space) would produce standalone "ml". The 'ml' token
+  //     here covers the space-separated form.
+  //   - '선물세트', '프리미엄' added: Korean compound words survive tokenization intact.
   'ml', 'bottle', 'bottles', 'pack', 'case', 'gift', 'box',
   'set', 'sale', 'offer', 'deal', 'buy', 'free', 'shipping', 'delivery',
   'hot', 'best', 'top', 'special', 'edition', 'import',
@@ -57,9 +64,9 @@ const NOISE_VOCABULARY = new Set([
   'winning', 'medal', 'rated', 'points', 'score',
   'recommended', 'exclusive', 'available', 'stock', 'price', 'discount',
   'rebate', 'promo', 'promotion', 'coupon', 'bundle', 'combo', 'value',
-  // Korean marketplace noise
-  '선물', '세트', '박스', '배송', '무료', '특가', '할인', '프로모션',
-  '정품', '수입', '인기', '추천', '베스트', '행사', '이벤트', '사은품',
+  // Korean marketplace noise (synced with NOISE_TOKENS in noise-stripper.ts)
+  '선물', '세트', '선물세트', '박스', '배송', '무료', '특가', '할인', '프로모션',
+  '프리미엄', '정품', '수입', '인기', '추천', '베스트', '행사', '이벤트', '사은품',
   '사은', '증정', '구성', '패키지', '케이스', '병', '잔', '잔세트',
 ]);
 

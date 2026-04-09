@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { EntityId } from '../../shared/types/index.js';
 import type { SourceTrustProfile } from '../model/source-trust-profile.js';
-import type { CanonicalizationCandidate, ExternalRef } from '../model/canonicalization-candidate.js';
+import type { CanonicalizationCandidate } from '../model/canonicalization-candidate.js';
 import { EntityMatcher, type EntityRepository, type MatchableEntity } from '../service/entity-matcher.js';
 
 // ---------------------------------------------------------------------------

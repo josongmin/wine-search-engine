@@ -92,11 +92,16 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   const priceUnder =
-    /(?<!\p{L}\p{N})under\s+\$?(\d+)(?!\p{L}\p{N})/iu.exec(q) ??
+    // (?<!\p{L})(?<!\p{N}) = two separate lookbehinds ("not preceded by letter" AND "not preceded by digit").
+    // (?<!\p{L})(?<!\p{N}) was wrong: AND-sequence checks for letter THEN digit (2-char seq), never matches anything.
+    /(?<!\p{L})(?<!\p{N})under\s+\$?(\d+)(?!\p{L})(?!\p{N})/iu.exec(q) ??
     /(\d+)\s*(?:달러|dollar)\s*이하/iu.exec(q) ??
     /(\d+)\s*만원\s*(?:이하|미만|대)/iu.exec(q);
   if (priceUnder?.[1] !== undefined) {
     const priceValue = parseInt(priceUnder[1], DECIMAL_RADIX);
+    // Guard: parseInt can return NaN on malformed capture group (edge case with regex backtracking).
+    // NaN would propagate into band comparison (always false) and corrupt soft constraints. (CLAUDE.md rule 28)
+    if (!Number.isFinite(priceValue)) return { hard, soft, inferred: [] };
     const usd = /만원/u.test(q) ? priceValue * KRW_MANWON_TO_USD_HEURISTIC : priceValue;
     const band =
       usd <= PRICE_BAND_BUDGET_MAX_USD

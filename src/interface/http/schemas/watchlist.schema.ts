@@ -262,8 +262,8 @@ const NewVintageTriggerRequestSchema = z.union([
 const PriceDropTriggerRequestSchema = z.union([
   z.object({
     type: z.literal('price_drop'),
-    threshold: z.number().gt(0).max(MAX_PERCENT_SCALE),
-    baseline_price: z.number().positive(),
+    threshold: z.number().finite().gt(0).max(MAX_PERCENT_SCALE),
+    baseline_price: z.number().finite().positive(),
   }).strict().transform((value) => ({
     type: value.type,
     threshold: value.threshold,
@@ -271,8 +271,8 @@ const PriceDropTriggerRequestSchema = z.union([
   })),
   z.object({
     type: z.literal('price_drop'),
-    threshold: z.number().gt(0).max(MAX_PERCENT_SCALE),
-    baselinePrice: z.number().positive(),
+    threshold: z.number().finite().gt(0).max(MAX_PERCENT_SCALE),
+    baselinePrice: z.number().finite().positive(),
   }).strict(),
 ]);
 
@@ -292,7 +292,7 @@ const StockAvailableTriggerRequestSchema = z.union([
 
 const CriticScoreAboveTriggerRequestSchema = z.object({
   type: z.literal('critic_score_above'),
-  threshold: z.number().min(0).max(MAX_PERCENT_SCALE),
+  threshold: z.number().finite().min(0).max(MAX_PERCENT_SCALE),
 }).strict();
 
 export const WatchlistTriggerSchema = z.union([
@@ -309,8 +309,8 @@ export const WatchlistTriggerResponseSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     type: z.literal('price_drop'),
-    threshold: z.number().gt(0).max(MAX_PERCENT_SCALE),
-    baseline_price: z.number().positive(),
+    threshold: z.number().finite().gt(0).max(MAX_PERCENT_SCALE),
+    baseline_price: z.number().finite().positive(),
   }).strict(),
   z.object({
     type: z.literal('stock_available'),
@@ -318,7 +318,7 @@ export const WatchlistTriggerResponseSchema = z.discriminatedUnion('type', [
   }).strict(),
   z.object({
     type: z.literal('critic_score_above'),
-    threshold: z.number().min(0).max(MAX_PERCENT_SCALE),
+    threshold: z.number().finite().min(0).max(MAX_PERCENT_SCALE),
   }).strict(),
 ]);
 

@@ -346,10 +346,7 @@ export class SignalComputer {
     candidate: HybridCandidate,
     queryPlan: QueryPlanV1,
   ): number {
-    // Guard: uncertainty.overall may be undefined if the query plan was produced
-    // by an older planner version or a test stub. Treat missing as 0 (no penalty)
-    // rather than propagating NaN through the arithmetic below.
-    const queryUncertainty = queryPlan.uncertainty.overall ?? 0;
+    const queryUncertainty = queryPlan.uncertainty.overall;
 
     // Candidate-level uncertainty: fewer matched constraints = more uncertain
     const totalConstraints =

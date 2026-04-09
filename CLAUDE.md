@@ -6,6 +6,8 @@ This repository is a **wine intelligence / search engine** backend: typed TypeSc
 
 **Assistant ↔ developer:** Use **Korean (한국어)** for natural-language explanations unless the user asks otherwise; keep code and identifiers consistent with existing English-heavy repo style.
 
+**Execution baseline:** Do **not** introduce heuristic shortcuts, heuristic fallbacks, or rule-of-thumb approximations unless the user explicitly approves that direction first. If a heuristic seems necessary, stop and ask. Unless the user requests a cheaper/faster trade-off, the default baseline is to pursue the strongest known **SOTA++** direction regardless of ROI.
+
 ## Commands
 
 | Command | Purpose |

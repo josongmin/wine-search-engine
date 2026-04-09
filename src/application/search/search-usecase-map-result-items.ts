@@ -41,30 +41,52 @@ async function withDrinkingWindowTimeout(
   }
 }
 
-function needsDrinkingWindowPrediction(r: RankedResult): boolean {
-  return (
-    r.drinkingWindowStart === undefined &&
-    r.vintageYear !== undefined &&
-    r.body !== undefined &&
-    r.tannin !== undefined &&
-    r.acidity !== undefined &&
-    r.sweetness !== undefined &&
-    r.grapePrimaryEnc !== undefined &&
-    r.regionEnc !== undefined &&
-    r.countryEnc !== undefined
-  );
+/**
+ * RFC-019 Phase 7: Sensory priors injected from planner's compositional
+ * inference. These are query-level fallbacks for wines missing indexed sensory
+ * attributes — e.g. a "Barolo" query derives `tannin≥0.65` even for wines
+ * whose Vespa document lacks the `tannin` field.
+ */
+export interface QueryLevelSensoryPriors {
+  readonly body?: number | undefined;
+  readonly tannin?: number | undefined;
+  readonly acidity?: number | undefined;
+  readonly sweetness?: number | undefined;
+}
+
+function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSensoryPriors): boolean {
+  if (r.drinkingWindowStart !== undefined) return false;
+  if (r.vintageYear === undefined) return false;
+  if (r.grapePrimaryEnc === undefined) return false;
+  if (r.regionEnc === undefined) return false;
+  if (r.countryEnc === undefined) return false;
+
+  // Sensory fields: accept either indexed value OR query-level prior.
+  // This widens predictor coverage: wines with sparse sensory data still get
+  // predictions when the compositional inference provides a fallback.
+  const hasBody = r.body !== undefined || priors?.body !== undefined;
+  const hasTannin = r.tannin !== undefined || priors?.tannin !== undefined;
+  const hasAcidity = r.acidity !== undefined || priors?.acidity !== undefined;
+  const hasSweetness = r.sweetness !== undefined || priors?.sweetness !== undefined;
+
+  return hasBody && hasTannin && hasAcidity && hasSweetness;
 }
 
 /**
  * Maps ranked rows to API {@link ResultItem}s; enriches drinking window from cache or predictor.
+ *
+ * RFC-019 Phase 7: Optional `sensoryPriors` parameter carries query-level
+ * compositional inference defaults (e.g. "Barolo" → tannin≥0.65) that
+ * substitute for missing indexed sensory values, widening predictor coverage.
  */
 export async function mapRankedResultsToResultItems(
   rankedResults: readonly RankedResult[],
   drinkingWindow: DrinkingWindowUseCasePort | undefined,
   targetYear: number = new Date().getFullYear(),
+  sensoryPriors?: QueryLevelSensoryPriors,
 ): Promise<readonly ResultItem[]> {
   const resultsPendingPrediction = rankedResults.filter(
-    (r) => drinkingWindow !== undefined && needsDrinkingWindowPrediction(r),
+    (r) => drinkingWindow !== undefined && needsDrinkingWindowPrediction(r, sensoryPriors),
   );
 
   const predictions = await Promise.allSettled(
@@ -75,10 +97,11 @@ export async function mapRankedResultsToResultItems(
           grapePrimaryEnc: r.grapePrimaryEnc!,
           regionEnc: r.regionEnc!,
           countryEnc: r.countryEnc!,
-          body: r.body!,
-          tannin: r.tannin!,
-          acidity: r.acidity!,
-          sweetness: r.sweetness!,
+          // Indexed sensory values take precedence; priors fill gaps.
+          body: r.body ?? sensoryPriors?.body ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
+          tannin: r.tannin ?? sensoryPriors?.tannin ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
+          acidity: r.acidity ?? sensoryPriors?.acidity ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
+          sweetness: r.sweetness ?? sensoryPriors?.sweetness ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
           avgCriticProxyScore:
             r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
           targetYear,
@@ -145,6 +168,17 @@ export async function mapRankedResultsToResultItems(
         ...(r.priceBand !== undefined || r.priceUsd !== undefined
           ? { priceRange: r.priceUsd !== undefined ? `$${r.priceUsd}` : r.priceBand }
           : {}),
+        ...(r.style !== undefined ? { style: r.style } : {}),
+        ...(r.classification !== undefined ? { classification: r.classification } : {}),
+        ...(r.criticScoreNormalized !== undefined ? { criticScore: r.criticScoreNormalized } : {}),
+        ...(r.alcoholPct !== undefined ? { alcoholPct: r.alcoholPct } : {}),
+        ...(r.certifications !== undefined ? { certifications: r.certifications } : {}),
+        ...(r.pairingTags !== undefined ? { pairingTags: r.pairingTags } : {}),
+        ...(r.occasion !== undefined ? { occasion: r.occasion } : {}),
+        ...(r.body !== undefined ? { body: r.body } : {}),
+        ...(r.tannin !== undefined ? { tannin: r.tannin } : {}),
+        ...(r.acidity !== undefined ? { acidity: r.acidity } : {}),
+        ...(r.sweetness !== undefined ? { sweetness: r.sweetness } : {}),
       },
       relevanceScore: r.finalScore,
       match: {

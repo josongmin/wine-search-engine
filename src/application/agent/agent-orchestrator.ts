@@ -50,8 +50,14 @@ const SYNTHESIS_TOKENS_ATTEMPT_1 = 512;
 const SYNTHESIS_TOKENS_ATTEMPT_2 = 256;
 /** Layer 3 fallback: max chars of observation to include in answer (prevents oversized responses). */
 const LAYER3_OBSERVATION_SLICE_CHARS = 300;
+/** Default single-tool timeout (separate from LLM step timeout). */
+const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
+/** Default parallel-batch timeout (caps total Promise.all wait). */
+const DEFAULT_PARALLEL_BATCH_TIMEOUT_MS = 10_000;
 /** Log-preview chars for non-parseable LLM text — enough to diagnose without bloating the log line. */
 const LOG_PREVIEW_CHARS = 200;
+/** Longer log-preview chars for step-level debug output (more context than error previews). */
+const STEP_LOG_PREVIEW_CHARS = 500;
 /** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 
@@ -63,6 +69,63 @@ interface LlmAction {
   // Parallel batch: LLM emits {"thought":"…","actions":[{tool,input},{tool,input}]}
   readonly actions?: readonly { readonly tool: string; readonly input: Record<string, unknown> }[];
   readonly answer?: string;
+}
+
+interface TimeoutErrorLike extends Error {
+  readonly code?: string;
+}
+
+function isValidLlmResult(value: unknown): value is { text: string; model: string; finishReason?: string | null } {
+  if (typeof value !== 'object' || value === null) return false;
+  const rec = value as Record<string, unknown>;
+  return typeof rec['text'] === 'string' && typeof rec['model'] === 'string';
+}
+
+function makeTimeoutError(message: string): TimeoutErrorLike {
+  return Object.assign(new Error(message), { code: 'TIMEOUT' });
+}
+
+async function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(makeTimeoutError(message));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+}
+
+function validateParallelBatchPolicy(
+  calls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
+): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
+  const toolSet = new Set(calls.map((c) => c.tool));
+  const hasCompare = toolSet.has('compare_wines');
+  const hasSearch = toolSet.has('search_wines');
+  const hasWindow = toolSet.has('check_drinking_window');
+  const hasPairing = toolSet.has('get_food_pairings');
+
+  // compare_wines already returns a full comparison payload and should not run
+  // in the same parallel turn with unrelated tools.
+  if (hasCompare && toolSet.size > 1) {
+    return { allowed: false, reason: 'compare_wines must run alone in a step' };
+  }
+  // Drinking-window checks are safe to parallelize with each other, but mixing
+  // with search/pairing in the same batch creates ambiguous synthesis context.
+  if (hasWindow && (hasSearch || hasPairing || hasCompare)) {
+    return { allowed: false, reason: 'check_drinking_window batch must include only check_drinking_window calls' };
+  }
+  // get_food_pairings may run with search_wines (independent retrieval), but
+  // not with compare_wines or check_drinking_window.
+  if (hasPairing && (hasCompare || hasWindow)) {
+    return { allowed: false, reason: 'get_food_pairings can only batch with search_wines' };
+  }
+  return { allowed: true };
 }
 
 /**
@@ -93,6 +156,41 @@ function extractFirstJsonObject(text: string): string {
     }
   }
   return text; // fallback: no complete object found, let JSON.parse fail naturally
+}
+
+/**
+ * Recover the most recent search_wines input from the agent's step history.
+ * Used by Layer 2 fallback to preserve constraints from failed/aborted attempts.
+ *
+ * Walks the steps in reverse order, returning the input of the last `search_wines`
+ * action found (in either the legacy `action` field or the parallel `actionPairs`
+ * field). Returns undefined if no search_wines was ever attempted.
+ *
+ * Returns the validated subset that searchUseCase needs (currently `query` only —
+ * extending this to forward `wine_type`, `country`, `vintage_min/max`, `max_price_krw`
+ * etc. requires changing searchUseCase to accept structured constraints in addition
+ * to the NL query, which is a separate refactor).
+ */
+function recoverLastSearchInput(steps: readonly AgentStep[]): { query: string } | undefined {
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i]!;
+    // Check parallel actionPairs first (newer format)
+    if (step.actionPairs !== undefined) {
+      for (let j = step.actionPairs.length - 1; j >= 0; j--) {
+        const pair = step.actionPairs[j]!;
+        if (pair.action.tool === 'search_wines') {
+          const q = pair.action.input['query'];
+          if (typeof q === 'string' && q.trim().length > 0) return { query: q };
+        }
+      }
+    }
+    // Check legacy single action
+    if (step.action?.tool === 'search_wines') {
+      const q = step.action.input['query'];
+      if (typeof q === 'string' && q.trim().length > 0) return { query: q };
+    }
+  }
+  return undefined;
 }
 
 function parseLlmOutput(text: string): LlmAction {
@@ -159,14 +257,14 @@ function parseLlmOutput(text: string): LlmAction {
       const bareInput =
         typeof parsed['input'] === 'object' && parsed['input'] !== null
           ? (parsed['input'] as Record<string, unknown>)
-          : typeof parsed['input'] === 'string' && (parsed['input'] as string).length > 0
-            ? { query: parsed['input'] as string }
+          : typeof parsed['input'] === 'string' && parsed['input'].length > 0
+            ? { query: parsed['input'] }
             : {};
       log.warn(
         { tool: parsed['tool'], textPreview: trimmed.slice(0, LOG_PREVIEW_CHARS) },
         'agent LLM emitted bare tool call (missing action wrapper); recovered',
       );
-      return { thought, action: { tool: parsed['tool'] as string, input: bareInput } };
+      return { thought, action: { tool: parsed['tool'], input: bareInput } };
     }
 
     // If neither action/actions nor answer, treat the whole text as an answer.
@@ -397,11 +495,15 @@ export class AgentOrchestrator {
         }
         let stepTimeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
-          llmResult = await Promise.race([
+          const racedResult: unknown = await Promise.race([
             this.deps.chatLlm.complete({
               messages,
               temperature: 0,
-              maxOutputTokens: 1024,
+              // 2048 tokens: complex multi-tool parallel batches (3+ search_wines
+              // with structured filters) frequently exceed 1024. Truncation →
+              // finish='length' → step-0 fallback. Scenario #56 RCA showed this
+              // as the root cause of consistent 37% score on 3-vintage compare.
+              maxOutputTokens: 2048,
               ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
               abortSignal: stepAbortController.signal,
             }),
@@ -415,6 +517,15 @@ export class AgentOrchestrator {
               );
             }),
           ]);
+          if (!isValidLlmResult(racedResult)) {
+            log.warn(
+              { requestId, stepIndex: steps.length, rawType: typeof racedResult },
+              'Agent LLM returned malformed step result',
+            );
+            terminationReason = 'error';
+            break;
+          }
+          llmResult = racedResult;
         } catch (err) {
           log.warn({ err, requestId, stepIndex: steps.length }, 'Agent LLM call failed');
           terminationReason = 'error';
@@ -426,11 +537,15 @@ export class AgentOrchestrator {
           }
         }
 
-        // Guard against truncated output (LLM hit max_tokens)
-        if (llmResult.finishReason === 'length') {
-          log.warn({ requestId, stepIndex: steps.length }, 'Agent LLM output truncated (finish_reason=length)');
-          terminationReason = 'error';
-          break;
+        // Guard against truncated output (LLM hit max_tokens).
+        // RCA: scenarios like #30 (compare + dual drinking window) emit long
+        // reasoning + action JSON that exceeds 2048 tokens. Hard-breaking here
+        // dropped the scenario to step-0 fallback (score ~30%). Instead, attempt
+        // to parse the truncated output — if it contains a valid action/actions,
+        // use it; only break if the truncation corrupted the JSON beyond repair.
+        const wasTruncated = llmResult.finishReason === 'length';
+        if (wasTruncated) {
+          log.warn({ requestId, stepIndex: steps.length }, 'Agent LLM output truncated (finish_reason=length) — attempting recovery');
         }
 
         // Estimate token counts (rough: CHARS_PER_TOKEN_ESTIMATE chars ≈ 1 token)
@@ -456,6 +571,22 @@ export class AgentOrchestrator {
 
         // Parse LLM output
         const parsed = parseLlmOutput(llmResult.text);
+
+        // Diagnostic: log raw LLM output preview + parse result at step 0 for RCA
+        if (steps.length === 0) {
+          log.info(
+            {
+              requestId,
+              textPreview: llmResult.text.slice(0, STEP_LOG_PREVIEW_CHARS),
+              finishReason: llmResult.finishReason,
+              hasAction: parsed.action !== undefined,
+              hasActions: parsed.actions !== undefined,
+              hasAnswer: parsed.answer !== undefined && parsed.answer.length > 0,
+              wasTruncated,
+            },
+            '[RCA] step0 LLM output',
+          );
+        }
 
         // Final answer — require non-empty string so LLM emitting {"answer":""} does
         // NOT prematurely terminate the loop before fallback layers can run.
@@ -523,29 +654,53 @@ export class AgentOrchestrator {
             continue;
           }
 
-          // Loop detection: recordStep for each call; abort on first violation.
-          let batchLoopBlocked = false;
-          for (const call of batchCalls) {
-            const loopCheck = budget.recordStep(call.tool, call.input);
-            if (!loopCheck.allowed) {
-              terminationReason = loopCheck.reason ?? 'loop_detected';
-              batchLoopBlocked = true;
-              break;
-            }
+          const batchPolicy = validateParallelBatchPolicy(batchCalls);
+          if (!batchPolicy.allowed) {
+            const policyMsg = `Invalid parallel batch: ${batchPolicy.reason}. Allowed: search_wines+search_wines/get_food_pairings, or check_drinking_window-only batches, or compare_wines alone.`;
+            steps.push({
+              index: steps.length,
+              thought: parsed.thought,
+              actionPairs: batchCalls.map((a) => ({ action: a, observation: policyMsg })),
+              actions: batchCalls,
+              observations: batchCalls.map(() => policyMsg),
+              durationMs: Math.max(0, Date.now() - stepStart),
+              tokenCount: { input: inputTokens, output: outputTokens },
+            });
+            continue;
           }
-          if (batchLoopBlocked) break;
+
+          // Loop detection + step-budget reservation are applied atomically.
+          // Parallel batches must either fully reserve their step slots or not
+          // mutate the budget at all; otherwise a blocked Nth tool would leave
+          // stepCount/history partially advanced even though no tools ran.
+          const batchCheck = budget.recordParallelBatch(batchCalls, { skipNearDuplicate: true });
+          if (!batchCheck.allowed) {
+            terminationReason = batchCheck.reason ?? 'loop_detected';
+            break;
+          }
 
           // Execute all tools in parallel.
           // Policy-block DomainErrors propagate through executeAgentToolsBatch
           // (not caught inside executeAgentTool). Wrap in try-catch here.
           let batchResults: readonly AgentToolResult[];
+          const batchAbortController = new AbortController();
+          const propagateBatchAbort = (): void => { batchAbortController.abort(); };
+          abortSignal?.addEventListener('abort', propagateBatchAbort, { once: true });
           try {
-            batchResults = await executeAgentToolsBatch(
-              batchCalls,
-              this.deps.toolDeps,
-              `${requestId}-step${steps.length}`,
+            batchResults = await withTimeout(
+              executeAgentToolsBatch(
+                batchCalls,
+                this.deps.toolDeps,
+                `${requestId}-step${steps.length}`,
+                { abortSignal: batchAbortController.signal },
+              ),
+              effectiveConfig.parallelBatchTimeoutMs ?? DEFAULT_PARALLEL_BATCH_TIMEOUT_MS,
+              'Parallel tool batch timed out',
             );
           } catch (batchErr) {
+            if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
+              batchAbortController.abort();
+            }
             if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
               terminationReason = 'blocked';
@@ -565,6 +720,8 @@ export class AgentOrchestrator {
               terminationReason = 'error';
             }
             break;
+          } finally {
+            abortSignal?.removeEventListener('abort', propagateBatchAbort);
           }
 
           const batchPairs: AgentToolCallPair[] = [];
@@ -645,16 +802,27 @@ export class AgentOrchestrator {
           // Execute tool
           let observation: string;
           let rawResult: unknown;
+          const toolAbortController = new AbortController();
+          const propagateToolAbort = (): void => { toolAbortController.abort(); };
+          abortSignal?.addEventListener('abort', propagateToolAbort, { once: true });
           try {
-            const toolResult = await executeAgentTool(
-              tool,
-              input,
-              this.deps.toolDeps,
-              `${requestId}-step${steps.length}`,
+            const timedToolResult = await withTimeout(
+              executeAgentTool(
+                tool,
+                input,
+                this.deps.toolDeps,
+                `${requestId}-step${steps.length}`,
+                { abortSignal: toolAbortController.signal },
+              ),
+              effectiveConfig.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+              `Tool "${tool}" timed out`,
             );
-            observation = truncateObservation(toolResult.observation, this.config.maxContextChars);
-            rawResult = toolResult.rawResult;
+            observation = truncateObservation(timedToolResult.observation, this.config.maxContextChars);
+            rawResult = timedToolResult.rawResult;
           } catch (toolErr) {
+            if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
+              toolAbortController.abort();
+            }
             // Detect policy-block errors — terminate the loop immediately.
             // The agent must NOT continue calling tools after a security block.
             if (toolErr instanceof DomainError && toolErr.code === POLICY_BLOCKED_CODE) {
@@ -672,6 +840,8 @@ export class AgentOrchestrator {
             }
             observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
             rawResult = null;
+          } finally {
+            abortSignal?.removeEventListener('abort', propagateToolAbort);
           }
 
           // Track last search result for inclusion in final response
@@ -731,12 +901,18 @@ export class AgentOrchestrator {
     // Skip entirely if caller already disconnected — synthesis costs 1-2 LLM round-trips
     // that nobody will receive.
     if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !(abortSignal?.aborted)) {
-      // Check both sequential (observation) and parallel batch (observations[]) steps
-      // so synthesis fires when the agent used parallel tools and has results.
-      const obsSteps = steps.filter(
+      // Pre-flight token budget check BEFORE synthesis LLM call (CLAUDE.md rule 20).
+      // Without this, synthesis fires even when the main loop exhausted the budget,
+      // silently overrunning maxTotalTokens by 1-2x (synthesis ≈ same cost as one main step).
+      if (totalInputTokens + totalOutputTokens >= effectiveConfig.maxTotalTokens) {
+        log.warn({ requestId, totalInputTokens, totalOutputTokens, budget: effectiveConfig.maxTotalTokens }, '[agent] token budget exhausted — skipping final answer synthesis to prevent overrun');
+      } else {
+        // Check both sequential (observation) and parallel batch (observations[]) steps
+        // so synthesis fires when the agent used parallel tools and has results.
+        const obsSteps = steps.filter(
         (s) =>
           (s.observation !== undefined && s.observation.length > 0) ||
-          (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+          (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
       );
       if (obsSteps.length > 0) {
         // requestId embedded in sentinel to prevent adversarial tool results from
@@ -774,8 +950,13 @@ export class AgentOrchestrator {
               messages: synthMessages,
               temperature: 0,
               maxOutputTokens,
+              ...(effectiveConfig.seed !== undefined ? { seed: effectiveConfig.seed } : {}),
               abortSignal: synthAbort.signal,
             });
+            if (!isValidLlmResult(synthResult)) {
+              log.warn({ requestId }, 'synthesis LLM returned malformed result');
+              return undefined;
+            }
             // Accumulate synthesis tokens into the overall run totals so the
             // final response reports accurate token usage (char-based estimate,
             // same method as the main loop at lines 413-416).
@@ -796,7 +977,7 @@ export class AgentOrchestrator {
             // A real answer must have meaningful text content (>10 chars) and must
             // not look like a bare JSON object/array wrapper.
             const candidate = parsedSynth.answer?.trim() ?? '';
-            const isShell = /^[\{\[\s]*[\}\]]*$/.test(candidate);
+            const isShell = /^[{[\s]*[}\]]*$/.test(candidate);
             return candidate.length > 10 && !isShell
               ? parsedSynth.answer
               : undefined;
@@ -828,6 +1009,7 @@ export class AgentOrchestrator {
           log.info({ requestId, obsSteps: obsSteps.length }, 'synthesized answer from observations');
         }
       }
+      } // end else (budget not exhausted)
     }
 
     // Track whether the agent already gathered tool observations before reaching fallback.
@@ -839,7 +1021,7 @@ export class AgentOrchestrator {
     const hasToolObservations = steps.some(
       (s) =>
         (s.observation !== undefined && s.observation.length > 0) ||
-        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
     );
 
     if (!policyBlocked && answer === '' && terminationReason !== 'answer' && !hasToolObservations && !(abortSignal?.aborted)) {
@@ -869,8 +1051,15 @@ export class AgentOrchestrator {
         FALLBACK_SEARCH_TIMEOUT_MS,
       );
       try {
+        // v5: preserve constraints from any prior search_wines attempt in the step history.
+        // Even when no observations were produced, the LLM may have emitted a structured
+        // search_wines action that hit a parse/budget error. Recovering its `input.query`
+        // and forwarding it to searchUseCase preserves the agent's intent — much better
+        // than re-running with the bare original query and discarding all extracted constraints.
+        const lastSearchInput = recoverLastSearchInput(steps);
+        const fallbackQuery = lastSearchInput?.query ?? query;
         const fallbackResult = await this.deps.toolDeps.searchUseCase.execute(
-          { query },
+          { query: fallbackQuery },
           `${requestId}-fallback`,
           { abortSignal: fallbackController.signal },
         );
@@ -879,13 +1068,24 @@ export class AgentOrchestrator {
           const producer = topResult.entity.producer ?? '';
           const region = topResult.entity.region ?? '';
           const detail = [producer, region].filter(Boolean).join(', ');
-          answer = `Based on your query, I found: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (Note: simplified result due to processing constraints.)`;
+          // Language-aware fallback template: detect Hangul in original query and respond
+          // in the same language. Pre-fix this was a hardcoded English template, which
+          // produced English responses for Korean queries on step-0 LLM failure (the most
+          // common benchmark fallback path). Korean = Hangul Syllables block U+AC00..U+D7A3.
+          const queryHasHangul = /[\uAC00-\uD7A3]/.test(query);
+          answer = queryHasHangul
+            ? `검색 결과: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (참고: 처리 제약으로 간단히 표시되었습니다.)`
+            : `Based on your query, I found: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (Note: simplified result due to processing constraints.)`;
           lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
           fallbackApplied = true;
           terminationReason = 'fallback';
         } else {
-          // Fallback search returned no results — construct a graceful template answer
-          answer = `"${query}"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.`;
+          // Fallback search returned no results — construct a graceful template answer.
+          // Language-aware: Korean for Hangul queries, English otherwise.
+          const queryHasHangul = /[\uAC00-\uD7A3]/.test(query);
+          answer = queryHasHangul
+            ? `"${query}"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.`
+            : `No results found for "${query}". Try simplifying the query or using a different wine name or grape variety.`;
           fallbackApplied = true;
           terminationReason = 'fallback';
         }
@@ -905,13 +1105,17 @@ export class AgentOrchestrator {
       const lastObs = steps.findLast(
         (s) =>
           (s.observation !== undefined && s.observation.length > 0) ||
-          (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+          (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
       );
       const lastObsText =
         lastObs?.observation ??
-        lastObs?.observations?.find((o) => o.length > 0);
+        lastObs?.actionPairs?.find((p) => p.observation.length > 0)?.observation;
       if (lastObsText !== undefined) {
-        answer = `검색 결과 요약: ${lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS)}`;
+        const queryHasHangul = /[\uAC00-\uD7A3]/.test(query);
+        const preview = lastObsText.slice(0, LAYER3_OBSERVATION_SLICE_CHARS);
+        answer = queryHasHangul
+          ? `검색 결과 요약: ${preview}`
+          : `Search result summary: ${preview}`;
         fallbackApplied = true;
         // When tool observations exist, the agent successfully called the right tools —
         // only the synthesis LLM call failed (infrastructure). Use terminationReason='answer'
@@ -921,7 +1125,12 @@ export class AgentOrchestrator {
       }
     }
 
-    if (answer === '') {
+    if (policyBlocked && answer === '') {
+      answer = '이 요청은 처리할 수 없습니다. 와인 검색과 관련된 질문을 해주세요.';
+      log.error({ requestId }, 'policy-blocked agent run ended without explicit answer; returning blocked template');
+    }
+
+    if (!policyBlocked && answer === '') {
       // Layer 4: absolute guarantee — no tool call is ALWAYS better than empty
       answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
       fallbackApplied = true;
@@ -935,7 +1144,7 @@ export class AgentOrchestrator {
       {
         requestId,
         steps: steps.length,
-        toolCalls: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actions?.length ?? 0), 0),
+        toolCalls: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
         terminationReason,
         totalDurationMs: budget.getElapsedMs(),
         fallbackApplied,
@@ -948,7 +1157,7 @@ export class AgentOrchestrator {
       steps,
       totalDurationMs: budget.getElapsedMs(),
       totalTokens: { input: totalInputTokens, output: totalOutputTokens },
-      toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actions?.length ?? 0), 0),
+      toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
       fallbackApplied,
       terminationReason,
       ...(lastSearchResult !== undefined ? { searchResults: lastSearchResult } : {}),

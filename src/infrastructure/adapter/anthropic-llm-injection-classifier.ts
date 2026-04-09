@@ -138,6 +138,12 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
     query: string,
     options?: LLMInjectionClassifierOptions,
   ): Promise<boolean> {
+    // NOTE: Anthropic prompt caching requires a minimum of 2048 input tokens for Haiku
+    // (1024 for Sonnet/Opus). Our SYSTEM_PROMPT is ~450 tokens, well under that floor,
+    // so requesting cache_control here is a silent no-op — the API accepts the flag
+    // but never actually caches, and we get no cost reduction. We keep the system prompt
+    // as a plain string to avoid giving the impression caching is active when it isn't.
+    // Reference: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#cache-limitations
     const response = await this.client.messages.create(
       {
         model: this.model,

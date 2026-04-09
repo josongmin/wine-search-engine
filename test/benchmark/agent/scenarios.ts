@@ -281,7 +281,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       requiredRegister: 'formal',
-      rubric: 'Must address the 60th birthday significance. If 1960 vintage unavailable, suggest meaningful alternatives (birth-year concept, prestigious producers). Formal tone expected.' } },
+      // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
+      judgeRequired: true,
+      rubric: 'Must address the 60th birthday significance. If 1960 vintage unavailable, suggest meaningful alternatives (birth-year concept, prestigious producers). Formal Korean tone (합니다/습니다) required for gift to parents.' } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 10: Negation/Exclusion
@@ -371,8 +373,12 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 61, tier: 'korean_colloquial', query: '쌈싸먹을때 와인 뭐가 좋아', description: 'Korean colloquial food pairing',
     expectation: { maxSteps: 2, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       requiredRegister: 'casual',
-      answerMustMatch: ['(와인|wine)'],
-      rubric: 'Must interpret 쌈싸먹을때 (wrapping and eating ssam) as a food pairing context. Accept search_wines or get_food_pairings — both are valid for food queries.' } },
+      // v4: removed answerMustMatch keyword pattern — semantic check moved to judge.
+      // The token-matching approach (regex on '와인'|wine|grape varieties) was a heuristic
+      // layering: agent may recommend wine without writing literal '와인', and an exhaustive
+      // grape variety enum is biased toward popular varieties. Judge handles this semantically.
+      judgeRequired: true,
+      rubric: 'Must interpret 쌈싸먹을때 (wrapping and eating ssam) as a food pairing context. Must recommend at least one specific wine that pairs with Korean ssam (rice wraps with meat). Accept search_wines or get_food_pairings — both are valid for food queries. Casual Korean register expected.' } },
   { id: 62, tier: 'korean_colloquial', query: '까쇼 추천해줘', description: 'Slang abbreviation: 까쇼 = Cabernet Sauvignon',
     expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(카베르네\\s*소비뇽|cabernet\\s*sauvignon|까쇼|Cab\\s*(?:Sauv|Sauvignon))'],
@@ -389,8 +395,10 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   { id: 65, tier: 'korean_colloquial', query: '와인 ㄱㅊ은거 하나만', description: 'Ultra-abbreviated Korean: ㄱㅊ = 괜찮',
     expectation: { maxSteps: 2, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
-      answerMustMatch: ['(와인|wine)'],
-      rubric: 'Must interpret ㄱㅊ as 괜찮은 (decent/good) and recommend one wine.' } },
+      // v4: removed answerMustMatch — agent may recommend a specific wine name without
+      // writing literal '와인'/Pinot/etc. Judge handles "did the agent recommend a wine?" semantically.
+      judgeRequired: true,
+      rubric: 'Must interpret ㄱㅊ as 괜찮은 (decent/good) and recommend exactly one specific wine (with name). The recommendation must be a real wine, not a generic suggestion.' } },
   { id: 66, tier: 'korean_colloquial', query: '레드 말고 화이트로 ㄱ', description: 'Chat-style: ㄱ = go',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -550,7 +558,9 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       requiredRegister: 'formal',
-      rubric: 'Must recommend a prestigious, formal wine appropriate for a retirement gift to a superior. Formal Korean tone required.' } },
+      // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
+      judgeRequired: true,
+      rubric: 'Must recommend a prestigious, formal wine appropriate for a retirement gift to a superior. Formal Korean tone (합니다/습니다) required.' } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 18: Seasonal/Temporal

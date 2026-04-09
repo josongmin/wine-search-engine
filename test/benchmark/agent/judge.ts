@@ -5,7 +5,7 @@
  * satisfies the scenario's free-form rubric. Returns a 0..1 median score
  * across N samples to reduce LLM variance.
  *
- * The judge is intentionally STATELESS and DETERMINISTIC: temperature 0,
+ * The judge is intentionally STATELESS and low-variance: temperature 0.1,
  * single-shot prompt with strict JSON output. Failures return `score: null`
  * so the scorer DROPS the judge dimension from the geometric mean (no
  * inflation, no false penalty).
@@ -264,33 +264,29 @@ function composeAutoRubric(
   }
 
   if (exp.drinkingWindowStatus !== undefined && exp.drinkingWindowStatus !== 'any') {
-    // v4: bilingual status descriptions matching scorer.ts keyword patterns
+    // v4: semantic description (no keyword enumeration). Judge evaluates whether
+    // the answer correctly conveys the drinking window status — across both
+    // English and Korean phrasings — using its own language understanding.
     const statusText: Record<string, string> = {
-      now: 'currently drinkable / at peak (Korean: 마시기 좋, 음용 적기, 최적, 피크, 지금)',
-      hold: 'needs further aging / too young (Korean: 숙성, 보관, 셀러, 더 기다, 음용 전, 아직, 이르)',
-      past: 'past peak / over the hill (Korean: 지남, 지났, 과거)',
+      now: 'currently at its drinking peak — ready to drink now',
+      hold: 'too young, needs further cellaring before peak',
+      past: 'past its peak, in decline or no longer recommended for current consumption',
     };
-    lines.push(`The answer must indicate that the wine is ${statusText[exp.drinkingWindowStatus] ?? exp.drinkingWindowStatus}.`);
+    lines.push(`The answer must communicate that the wine is ${statusText[exp.drinkingWindowStatus] ?? exp.drinkingWindowStatus}. Evaluate the meaning of the answer, not specific keywords.`);
   }
 
   if (exp.requireHedging === true) {
-    // v4: bilingual hedging markers matching scorer.ts v4 regex
-    lines.push(
-      'The answer must use hedging language because the query is ambiguous. ' +
-      'Korean hedging markers: 아마도, 어쩌면, 혹시, ~수도 있, ~을 수 있, ~일 수 있, 여러 후보. ' +
-      'English: maybe, perhaps, might, could be, it seems, several candidates.',
-    );
+    // v4: ask the judge for semantic evaluation of epistemic stance, not pattern enumeration.
+    // Hedging is about CONFIDENCE expression, not specific tokens — judge handles this holistically.
+    lines.push('The answer must express appropriate epistemic uncertainty (hedging) because the query is ambiguous. The answer should NOT make confident assertions; it should acknowledge alternatives, qualify recommendations, or ask for clarification. Evaluate semantically, not by keyword matching.');
   }
 
   if (exp.requiredRegister === 'formal') {
-    lines.push('The answer must use formal Korean register (합니다/습니다/드립니다/하세요/겠습니다 endings).');
+    // v4: scorer no longer enforces register via regex — judge is the sole evaluator.
+    // Ask for holistic semantic judgment, not token enumeration.
+    lines.push('The answer must use formal Korean register (polite, professional sommelier-style speech). Evaluate the overall register holistically — do not count individual word patterns.');
   } else if (exp.requiredRegister === 'casual') {
-    // v4: synced with scorer.ts v4 casual markers (multi-char patterns, not 1-char 해/야/거)
-    lines.push(
-      'The answer may use casual Korean register. ' +
-      'Casual markers: 줄게, 건데, 잖아, 거든, 할게, 할래, 해줘, 해봐, 먹자, 가자, 하자, 인데, 거야, 잖아요. ' +
-      'Formal markers (합니다, 습니다, 드립니다, 하세요, 겠습니다) should be absent or rare.',
-    );
+    lines.push('The answer should use casual Korean register (friendly, conversational, informal speech — appropriate for chatting with a friend). Evaluate the overall register holistically — do not count individual word patterns.');
   }
 
   if (exp.refusalExpected === true) {

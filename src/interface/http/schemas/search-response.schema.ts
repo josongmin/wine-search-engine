@@ -97,7 +97,7 @@ export const ConstraintEvaluationSchema = z.object({
 }).strict();
 
 export const UncertaintyBlockSchema = z.object({
-  uncertainty_confidence: z.number().min(0).max(1),
+  uncertainty_confidence: z.number().finite().min(0).max(1),
   missing_info: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST),
   approximation_used: z.boolean(),
   ambiguity_flags: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST).optional(),
@@ -160,7 +160,7 @@ export const EngineDecisionSchema = z.object({
   decision_status: z.enum(['resolved', 'ambiguous', 'failed']),
   next_action: z.enum(['return_result', 'clarify', 'hybrid_search', 'fail']),
   route: z.string().min(1),
-  decision_confidence: z.number().min(0).max(1),
+  decision_confidence: z.number().finite().min(0).max(1),
   confidence_semantics: z.literal('calibrated_decision_confidence'),
   decision_trace_ref: z
     .string()
@@ -197,7 +197,7 @@ export const ParsedConstraintsExternSchema = z.object({
 
 export const SearchResponseMetaSchema = z.object({
   request_id: z.string().min(1).optional(),
-  query_time_ms: z.number().min(0),
+  query_time_ms: z.number().finite().min(0),
   route: z.string().min(1),
   version: z.string().min(1),
   engine_schema_version: z.literal('search_response_v1'),
@@ -350,7 +350,7 @@ export const ComparisonSearchResponseSchema = z.object({
   request_id: z.string().min(1),
   authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtime_correlation_ref: z.string().min(1).optional(),
-  execution_time_ms: z.number().min(0),
+  execution_time_ms: z.number().finite().min(0),
 }).strict().superRefine((value, ctx) => {
   if (
     value.runtime_correlation_ref !== undefined
@@ -436,7 +436,7 @@ export const ResolveCandidateSchema = z.object({
   entity_id: z.string().min(1),
   canonical_label: z.string().min(1),
   rank: z.number().int().positive(),
-  calibrated_score: z.number().min(0).max(1),
+  calibrated_score: z.number().finite().min(0).max(1),
   evidence_refs: z.array(z.string().min(1)).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
   match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
   metadata: z.record(z.string(), z.unknown()).refine(
@@ -448,7 +448,7 @@ export const ResolveCandidateSchema = z.object({
 export const ResolveTopEntitySchema = z.object({
   entity_id: z.string().min(1),
   canonical_label: z.string().min(1),
-  calibrated_score: z.number().min(0).max(1),
+  calibrated_score: z.number().finite().min(0).max(1),
 }).strict();
 
 export const ResolveResponseSchema = z.object({

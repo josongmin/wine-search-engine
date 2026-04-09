@@ -38,16 +38,19 @@ import {
 } from '../model/llm-constraint-schema.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { abortError, throwIfAborted } from '../../shared/cooperative-abort.js';
+import { resolveEntity } from './entity-resolver.js';
 
 const log = bootstrapLogger.child({ component: 'LlmNLMapper' });
 
 const LLM_MAPPING_VERSION = 'llm-v1.0';
 const LLM_CONFIDENCE_THRESHOLD = 0.5;
 const LLM_TIMEOUT_MS = 5_000;
+const LLM_ENTITY_LINKER_VERSION = 'llm-linker-v1.0';
 /** Prefix length of SHA-1 hex in prompt fingerprint (cache namespace). */
 const PROMPT_FINGERPRINT_HEX_PREFIX_CHARS = 8;
 /** Truncate raw LLM text in schema-validation failure logs. */
 const LLM_SCHEMA_FAIL_RAW_TEXT_PREVIEW_CHARS = 200;
+const ENTITY_LIKE_ATTRIBUTES = new Set(['country', 'region', 'appellation', 'grape_primary']);
 
 const SYSTEM_PROMPT = `You are a wine search query constraint parser. Given Korean or English wine search phrases, extract structured attribute constraints.
 
@@ -151,6 +154,7 @@ export class LlmNLMapper extends NLMapper {
     let phraseCacheHits = 0;
     let phraseCacheNegativeSkipped = 0;
     let phraseCacheMisses = 0;
+    let llmLinkedEntityCount = 0;
     const llmPhrases = missedPhrases.slice(0, MAX_LLM_PHRASES);
 
     if (llmPhrases.length > 0) {
@@ -174,7 +178,9 @@ export class LlmNLMapper extends NLMapper {
               const beforeCount = llmResults.length;
               for (const item of cached) {
                 if (LLM_ALLOWED_ATTRIBUTES.has(item.attribute) && item.confidence >= LLM_CONFIDENCE_THRESHOLD) {
-                  llmResults.push(llmItemToConstraint(item));
+                  const normalized = llmItemToConstraint(item);
+                  llmResults.push(normalized.constraint);
+                  llmLinkedEntityCount += normalized.linkedEntity ? 1 : 0;
                 }
               }
               // Only count as a useful cache hit if ≥1 item survived filtering.
@@ -236,7 +242,9 @@ export class LlmNLMapper extends NLMapper {
               llmSkippedCount++;
               continue;
             }
-            llmResults.push(llmItemToConstraint(item));
+            const normalized = llmItemToConstraint(item);
+            llmResults.push(normalized.constraint);
+            llmLinkedEntityCount += normalized.linkedEntity ? 1 : 0;
           }
         } catch (err) {
           if (options?.abortSignal?.aborted) {
@@ -276,6 +284,7 @@ export class LlmNLMapper extends NLMapper {
       phraseCacheHits,
       phraseCacheNegativeSkipped,
       phraseCacheMisses,
+      ...(llmLinkedEntityCount > 0 ? { llmLinkedEntityCount } : {}),
       missedPhrases: missedPhrases.filter(
         (p) => !llmResults.some((r) => r.source_phrase === p),
       ),
@@ -375,23 +384,48 @@ export class LlmNLMapper extends NLMapper {
   }
 }
 
-function llmItemToConstraint(item: LlmConstraintItem): NormalizedConstraint {
+function llmItemToConstraint(item: LlmConstraintItem): {
+  readonly constraint: NormalizedConstraint;
+  readonly linkedEntity: boolean;
+} {
   // Range objects (`{min, max}`) are normalized into a discriminated form;
   // strings, numbers, and string-arrays pass through unchanged. The Zod
   // schema (LlmConstraintItemSchema) guarantees `value` is non-null, so the
   // discriminator is purely typeof + Array.isArray.
   const rawValue = item.value;
+  const canonicalized = canonicalizeEntityLikeValue(item);
   const value: NormalizedConstraint['value'] =
-    typeof rawValue === 'object' && !Array.isArray(rawValue)
-      ? { min: rawValue.min, max: rawValue.max }
-      : rawValue;
+    canonicalized !== null
+      ? canonicalized.value
+      : (typeof rawValue === 'object' && !Array.isArray(rawValue)
+          ? { min: rawValue.min, max: rawValue.max }
+          : rawValue);
 
   return {
-    attribute: item.attribute,
-    operator: item.operator,
-    value,
-    source_phrase: item.phrase,
-    confidence: item.confidence,
-    mapping_version: LLM_MAPPING_VERSION,
+    constraint: {
+      attribute: item.attribute,
+      operator: item.operator,
+      value,
+      source_phrase: canonicalized !== null ? `llm_linker(${item.phrase})` : item.phrase,
+      confidence: item.confidence,
+      mapping_version: canonicalized !== null ? LLM_ENTITY_LINKER_VERSION : LLM_MAPPING_VERSION,
+    },
+    linkedEntity: canonicalized !== null,
   };
+}
+
+function canonicalizeEntityLikeValue(
+  item: LlmConstraintItem,
+): { readonly value: string } | null {
+  if (!ENTITY_LIKE_ATTRIBUTES.has(item.attribute)) {
+    return null;
+  }
+  if (typeof item.value !== 'string') {
+    return null;
+  }
+  const resolved = resolveEntity(item.value, { preferEntityOverStyle: true });
+  if (resolved === null || resolved.entityType !== item.attribute) {
+    return null;
+  }
+  return { value: resolved.canonicalValue };
 }

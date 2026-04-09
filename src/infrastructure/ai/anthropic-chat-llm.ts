@@ -18,6 +18,7 @@ import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
+import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const ANTHROPIC_API_VERSION = '2023-06-01';
@@ -44,11 +45,19 @@ interface AnthropicMessage {
   readonly content: string;
 }
 
+interface AnthropicUsage {
+  readonly input_tokens?: number;
+  readonly output_tokens?: number;
+  readonly cache_creation_input_tokens?: number;
+  readonly cache_read_input_tokens?: number;
+}
+
 interface AnthropicResponse {
   readonly id: string;
   readonly model: string;
   readonly stop_reason: string | null;
   readonly content: ReadonlyArray<{ readonly type: string; readonly text?: string }>;
+  readonly usage?: AnthropicUsage;
 }
 
 function isAnthropicResponse(v: unknown): v is AnthropicResponse {
@@ -72,7 +81,17 @@ export class AnthropicChatLlm implements ChatLlmPort {
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
     const model = request.model ?? this.defaultModel;
+    return withGenAiSpan(
+      { system: 'anthropic', requestModel: model, operation: 'chat' },
+      (recordResponse) => this.completeInner(request, model, recordResponse),
+    );
+  }
 
+  private async completeInner(
+    request: ChatCompletionRequest,
+    model: string,
+    recordResponse: (resp: GenAiResponseAttributes) => void,
+  ): Promise<ChatCompletionResult> {
     // Split system message from conversation turns.
     // Anthropic requires system as a top-level param, not a message turn.
     let systemPrompt: string | undefined;
@@ -101,7 +120,19 @@ export class AnthropicChatLlm implements ChatLlmPort {
       max_tokens: request.maxOutputTokens ?? ANTHROPIC_DEFAULT_MAX_TOKENS,
     };
     if (systemPrompt !== undefined) {
-      body['system'] = systemPrompt;
+      // v5: Anthropic prompt caching enabled on the system prompt.
+      // The agent system prompt is ~2-2.5K tokens and identical across all queries
+      // (after the date refactor — see agent-prompt.ts buildSystemPrompt). With
+      // ephemeral cache (5-minute TTL), virtually every concurrent benchmark request
+      // hits the cache, reducing input cost by ~90%.
+      // Reference: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
+      body['system'] = [
+        {
+          type: 'text',
+          text: systemPrompt,
+          cache_control: { type: 'ephemeral' },
+        },
+      ];
     }
     if (request.temperature !== undefined) {
       body['temperature'] = request.temperature;
@@ -170,6 +201,30 @@ export class AnthropicChatLlm implements ChatLlmPort {
 
       const textBlock = data.content.find((b) => b.type === 'text');
       const text = textBlock?.text ?? '';
+
+      // Record GenAI response attributes for the wrapping span (OTEL gen_ai.*)
+      // Anthropic's usage exposes cache_read_input_tokens (cache hit) and
+      // cache_creation_input_tokens (first time prompt was cached, charged at 1.25x).
+      const usage = data.usage;
+      const cacheReadTokens = usage?.cache_read_input_tokens ?? 0;
+      const cacheCreationTokens = usage?.cache_creation_input_tokens ?? 0;
+      // For cost accounting: cache_read = cached input (10% of normal),
+      // cache_creation = uncached input (charged once at 1.25x in Anthropic but
+      // approximated as 1x here for conservatism).
+      const baseInputTokens = (usage?.input_tokens ?? 0) + cacheCreationTokens;
+      recordResponse({
+        responseModel: data.model,
+        ...(data.stop_reason !== null ? { finishReason: data.stop_reason } : {}),
+        ...(usage !== undefined
+          ? {
+              usage: {
+                inputTokens: baseInputTokens,
+                outputTokens: usage.output_tokens ?? 0,
+                ...(cacheReadTokens > 0 ? { cachedInputTokens: cacheReadTokens } : {}),
+              },
+            }
+          : {}),
+      });
 
       return {
         text,

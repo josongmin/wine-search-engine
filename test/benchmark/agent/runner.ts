@@ -15,11 +15,11 @@
  *   npx tsx test/benchmark/agent/runner.ts --no-judge                         # disable LLM-as-judge
  *   npx tsx test/benchmark/agent/runner.ts --max-retries 2
  *   npx tsx test/benchmark/agent/runner.ts --seed 42
- *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off
+ *   npx tsx test/benchmark/agent/runner.ts --profile quick                     # 20 key scenarios, concurrency 3, judge off, retries 1
  *   npx tsx test/benchmark/agent/runner.ts --profile quick-realdata             # 60 high-signal scenarios, concurrency 7, judge on (~5-8 min)
  *   npx tsx test/benchmark/agent/runner.ts --profile standard                  # 80 curated scenarios, concurrency 3, judge on
  *   npx tsx test/benchmark/agent/runner.ts --profile nightly                   # all 233 scenarios, concurrency 3, judge on (3 samples)
- *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # retrieval-only evaluation
+ *   npx tsx test/benchmark/agent/runner.ts --profile retrieval                 # agent benchmark on scenarios with golden retrieval IDs
  *
  * Outputs JSON report to stdout, human-readable summary to stderr.
  * Wall-clock profiling: `wallClock` in JSON + "wall clock" section on stderr
@@ -47,7 +47,9 @@ import { QuerySanitizer } from '../../../src/domain/security/service/query-sanit
 import { AGENT_SCENARIOS, STANDARD_SCENARIO_IDS } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTrace } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
+import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
+import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
 import type { ChatLlmPort } from '../../../src/domain/ai/port/chat-llm.port.js';
 import { buildSystemMessage } from '../../../src/application/agent/agent-prompt.js';
@@ -125,8 +127,22 @@ const QUICK_REALDATA_SCENARIO_IDS = new Set([
   20, 21,
 ]);
 
-function parseArgs(): CliArgs {
-  const argv = process.argv.slice(2);
+function parseOptionalInt(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseIdFilter(raw: string | undefined): readonly number[] | undefined {
+  if (raw === undefined) return undefined;
+  const ids = raw
+    .split(',')
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((id) => Number.isFinite(id));
+  return ids.length > 0 ? ids : undefined;
+}
+
+export function parseRunnerArgs(argv: readonly string[]): CliArgs {
   const get = (flag: string): string | undefined => {
     const idx = argv.indexOf(flag);
     return idx >= 0 && idx + 1 < argv.length ? argv[idx + 1] : undefined;
@@ -146,15 +162,19 @@ function parseArgs(): CliArgs {
   let args: CliArgs = {
     profile,
     tierFilter: get('--tier') as ScenarioTier | undefined,
-    idFilter: explicitId !== undefined ? explicitId.split(',').map(Number) : undefined,
+    idFilter: parseIdFilter(explicitId),
     container: 'real',
-    concurrency: Number.parseInt(explicitConcurrency ?? '3', 10) || 3,
-    maxRetries: Number.parseInt(get('--max-retries') ?? '1', 10) || 1,
+    concurrency: parseOptionalInt(explicitConcurrency, 3),
+    // v4: default is 1 (no retry). The OpenAI client already does 4 inner retries
+    // with Retry-After header support — adding scenario-level retries was redundant
+    // and wasteful (re-runs all completed steps). The real fix for 429s lives in
+    // the LLM client (sleepWithJitter for 429s eliminates synchronized retry storms).
+    maxRetries: parseOptionalInt(get('--max-retries'), 1),
     seed: get('--seed') !== undefined ? Number.parseInt(get('--seed')!, 10) : undefined,
     model: get('--model'),
     judgeModel: get('--judge-model'),
     enableJudge: !explicitNoJudge,
-    judgeSamples: Number.parseInt(explicitJudgeSamples ?? '3', 10) || 3,
+    judgeSamples: parseOptionalInt(explicitJudgeSamples, 3),
     baseline: get('--baseline'),
     failIfWorseThan:
       get('--fail-if-worse-than') !== undefined
@@ -226,6 +246,10 @@ function parseArgs(): CliArgs {
   }
 
   return args;
+}
+
+function parseArgs(): CliArgs {
+  return parseRunnerArgs(process.argv.slice(2));
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -359,7 +383,15 @@ async function runWithConcurrency<T, R>(
   // two workers read the same index before either increments (JS is single-
   // threaded but await yields control, so cursor++ is NOT atomic across awaits).
   const queue: number[] = Array.from({ length: items.length }, (_, i) => i);
-  const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
+  // v4: worker startup jitter to break the thundering herd at T=0.
+  // Without this, N workers fire their first LLM call in the same millisecond,
+  // saturating provider RPM/TPM in a single burst → cascading 429s. Spread the
+  // initial workers across a 1-second window so the first calls are decorrelated.
+  const STARTUP_JITTER_MS_PER_WORKER = 333;
+  const workers = Array.from({ length: Math.max(1, concurrency) }, async (_, workerIdx) => {
+    if (workerIdx > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, workerIdx * STARTUP_JITTER_MS_PER_WORKER));
+    }
     while (true) {
       const i = queue.shift();
       if (i === undefined) break;
@@ -655,6 +687,7 @@ export interface BenchmarkReport {
    */
   readonly judgeRequiredExcludedCount: number;
   readonly judgeFailCount: number;
+  readonly judgeAttemptCount: number;
   /** Wall-clock breakdown for the whole CLI run (profiling). */
   readonly wallClock: BenchmarkWallClock;
   readonly results: readonly ScenarioResult[];
@@ -677,6 +710,18 @@ export interface BenchmarkReport {
     readonly contextRecall: number | null;
     /** Mean judge score across scenarios that produced a non-null judge value. */
     readonly judge: number | null;
+    /** RFC-020 claim-level faithfulness (deterministic + LLM hybrid). null when no claim eval ran. */
+    readonly claimFaithfulness: number | null;
+    /** RFC-020 claim-level contradiction rate (claims contradicted by evidence). null when no claim eval. */
+    readonly claimContradictionRate: number | null;
+    /** RFC-020 critical-error rate on identity + structured claims. null when no claim eval. */
+    readonly claimCriticalErrorRate: number | null;
+    /** RFC-020 provenance coverage: fraction of claims with FieldAnchor. null when no claim eval. */
+    readonly claimProvenanceCoverage: number | null;
+    /** RFC-020 hard-fail count: scenarios where critical claim violation triggered hard fail. */
+    readonly claimHardFailCount: number;
+    /** Number of scenarios that received claim-level evaluation. */
+    readonly claimEvaluatedCount: number;
     readonly avgSteps: number;
     readonly latencyMs: LatencyStats;
     /** Latency SLA KPI assessment. */
@@ -797,6 +842,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   const initDoneAt = Date.now();
 
   let judgeFailCount = 0;
+  let judgeAttemptCount = 0;
   let scenarioWallMsSum = 0;
   let scenarioWallSampleCount = 0;
   let completedCount = 0;
@@ -830,8 +876,8 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         );
 
         const toolsUsed = result.steps.flatMap((s) => {
-          if (s.actions !== undefined) {
-            return s.actions.map((a) => ({ tool: a.tool, input: JSON.stringify(a.input) }));
+          if (s.actionPairs !== undefined) {
+            return s.actionPairs.map((p) => ({ tool: p.action.tool, input: JSON.stringify(p.action.input) }));
           }
           if (s.action !== undefined) {
             return [{ tool: s.action.tool, input: JSON.stringify(s.action.input) }];
@@ -840,7 +886,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
         });
 
         const observations = result.steps.flatMap((s) => {
-          if (s.observations !== undefined) return s.observations.filter((o) => o.length > 0);
+          if (s.actionPairs !== undefined) return s.actionPairs.map((p) => p.observation).filter((o) => o.length > 0);
           if (s.observation !== undefined) return [s.observation];
           return [];
         });
@@ -865,22 +911,25 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
             tokenCount: s.tokenCount,
             ...(s.action !== undefined ? { action: { tool: s.action.tool, input: s.action.input as Record<string, unknown> } } : {}),
             ...(s.observation !== undefined ? { observation: s.observation } : {}),
-            ...(s.actions !== undefined ? { actions: s.actions.map((a) => ({ tool: a.tool, input: a.input as Record<string, unknown> })) } : {}),
-            ...(s.observations !== undefined ? { observations: s.observations } : {}),
+            ...(s.actionPairs !== undefined ? { actions: s.actionPairs.map((p) => ({ tool: p.action.tool, input: p.action.input as Record<string, unknown> })) } : {}),
+            ...(s.actionPairs !== undefined ? { observations: s.actionPairs.map((p) => p.observation) } : {}),
             ...(s.answer !== undefined ? { answer: s.answer } : {}),
           };
           return trace;
         });
 
         // LLM judges (optional). Run in parallel — no data dependency between
-        // rubric judge and faithfulness judge. ~2x speedup on judge-heavy runs.
+        // rubric judge, faithfulness judge, and claim-level evaluator (RFC-020).
+        // ~3x speedup on judge-heavy runs.
         let judgeScore: number | undefined;
         let judgeReasoning: string | undefined;
         let faithScore: number | undefined;
+        let claimDiagnostics: DiagnosticVector | undefined;
         if (judgeLlm !== null) {
           const judgePromises: Promise<void>[] = [];
           // Answer quality judge (rubric-based or structured fields via auto-rubric)
           if (hasJudgeMaterial(scenario.expectation)) {
+            judgeAttemptCount++;
             judgePromises.push(
               judgeAnswerN(judgeLlm, scenario, result.answer, args.judgeSamples).then((r) => {
                 if (r.score !== null) judgeScore = r.score;
@@ -902,7 +951,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           //   5. terminationReason='blocked' (security gate fired) → policy-grounded
           //      refusal; no tool calls expected even if not explicitly flagged. Score 1.0.
           //   6. Infra failure (step-0 fallback, LLM rate-limit) → agent never ran.
-          //      Leave faithScore undefined → scorer imputes at 0.5 neutral.
+          //      Leave faithScore undefined → scorer drops the dim from the geo-mean.
           //   7. All other cases → agent answered without tool calls when tools were
           //      expected. Claims are ungrounded. Score 0.0.
           //
@@ -925,8 +974,9 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
               // All answer claims are ungrounded — zero faithfulness.
               faithScore = 0.0;
             }
-            // isInfraFailure: leave faithScore undefined → scorer imputes at 0.5 neutral
+            // isInfraFailure: leave faithScore undefined so scorer null-drops the dim
           } else if (observations.length > 0) {
+            judgeAttemptCount++;
             judgePromises.push(
               judgeFaithfulness(judgeLlm, result.answer, observations, args.judgeSamples).then((r) => {
                 if (r.score !== null) faithScore = r.score;
@@ -934,16 +984,36 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
               }),
             );
           }
+
+          // RFC-020 claim-level evaluator: deterministic + LLM hybrid faithfulness
+          // measurement. Runs in parallel with the rubric/faithfulness judges.
+          // Returns a DiagnosticVector with per-category claim breakdown,
+          // contradictionRate, criticalErrorRate, and provenanceCoverage.
+          // Skipped when there are no observations (no evidence to verify against).
+          if (observations.length > 0 && execution.answer.trim().length > 0) {
+            judgePromises.push(
+              evaluateScenarioClaims(scenario, execution, judgeLlm)
+                .then((dv) => { claimDiagnostics = dv; })
+                .catch((err: unknown) => {
+                  // Failure is non-fatal: log and leave claimDiagnostics undefined.
+                  // Other dimensions still score; just no claim-level signal for this run.
+                  console.error(`  [CLAIM-EVAL] #${scenario.id} failed: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
+                }),
+            );
+          }
           await Promise.all(judgePromises);
         }
 
-        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning);
+        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics);
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
         const sc = scored.scores;
         const judgePart = judgeScore !== undefined ? ` judge=${judgeScore.toFixed(2)}` : '';
         const faithPart = faithScore !== undefined ? ` faith=${faithScore.toFixed(2)}` : '';
+        const claimPart = claimDiagnostics !== undefined
+          ? ` claims=${claimDiagnostics.claims.length}/${claimDiagnostics.faithfulnessScore.toFixed(2)}${claimDiagnostics.hardFail ? '⚠' : ''}`
+          : '';
         const dimParts = [
           `tool=${(sc.toolAccuracy * 100).toFixed(0)}%`,
           `ans=${(sc.answerQuality * 100).toFixed(0)}%`,
@@ -955,7 +1025,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           + `[${scenario.tier.slice(0, 16).padEnd(16)}] `
           + `score=${(sc.overall * 100).toFixed(1).padStart(5)}% `
           + `tools=${execution.toolCallCount} steps=${scored.stepCount} `
-          + `${dimParts}${judgePart}${faithPart} `
+          + `${dimParts}${judgePart}${faithPart}${claimPart} `
           + `${(elapsed / 1000).toFixed(1)}s `
           + `[${completedCount}/${totalToRun}]`,
         );
@@ -1034,7 +1104,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     );
   }
 
-  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, wallClock);
+  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock);
 }
 
 function filterScenarios(
@@ -1059,6 +1129,7 @@ function buildReport(
   apiBaseDomain: string,
   args: CliArgs,
   judgeFailCount: number,
+  judgeAttemptCount: number,
   wallClock: BenchmarkWallClock,
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
@@ -1103,6 +1174,24 @@ function buildReport(
 
   const ctxRecallScores = executedForAggregate.map((r) => r.scores.contextRecall).filter((s): s is number => s !== null);
   const ctxRecallMean = ctxRecallScores.length > 0 ? ctxRecallScores.reduce((s, v) => s + v, 0) / ctxRecallScores.length : null;
+
+  // RFC-020 claim-level diagnostic aggregation across executed scenarios.
+  // Reports faithfulness (claim-grounded), contradiction rate, critical-error rate,
+  // and hard-fail count — supplements the LLM judge faithfulness with structured signal.
+  const claimEvaluated = executedForAggregate.filter((r) => r.claimDiagnostics !== undefined);
+  const claimFaithfulnessMean = claimEvaluated.length > 0
+    ? claimEvaluated.reduce((s, r) => s + (r.claimDiagnostics?.faithfulnessScore ?? 0), 0) / claimEvaluated.length
+    : null;
+  const claimContradictionMean = claimEvaluated.length > 0
+    ? claimEvaluated.reduce((s, r) => s + (r.claimDiagnostics?.contradictionRate ?? 0), 0) / claimEvaluated.length
+    : null;
+  const claimCriticalErrorMean = claimEvaluated.length > 0
+    ? claimEvaluated.reduce((s, r) => s + (r.claimDiagnostics?.criticalErrorRate ?? 0), 0) / claimEvaluated.length
+    : null;
+  const claimProvenanceMean = claimEvaluated.length > 0
+    ? claimEvaluated.reduce((s, r) => s + (r.claimDiagnostics?.provenanceCoverage ?? 0), 0) / claimEvaluated.length
+    : null;
+  const claimHardFailCount = claimEvaluated.filter((r) => r.claimDiagnostics?.hardFail === true).length;
 
   const judgeRequiredButSkippedCount = executed.filter((r) => r.judgeRequiredButSkipped).length;
   // judgeRequiredExcludedCount already computed above (judgeRequiredExcluded.length).
@@ -1166,6 +1255,7 @@ function buildReport(
     judgeRequiredButSkippedCount,
     judgeRequiredExcludedCount,
     judgeFailCount,
+    judgeAttemptCount,
     wallClock,
     results,
     summary: {
@@ -1182,6 +1272,12 @@ function buildReport(
       contextRelevance: ctxRelMean,
       contextRecall: ctxRecallMean,
       judge: judgeMean,
+      claimFaithfulness: claimFaithfulnessMean,
+      claimContradictionRate: claimContradictionMean,
+      claimCriticalErrorRate: claimCriticalErrorMean,
+      claimProvenanceCoverage: claimProvenanceMean,
+      claimHardFailCount,
+      claimEvaluatedCount: claimEvaluated.length,
       avgSteps:
         executed.length > 0
           ? executed.reduce((s, r) => s + (r.stepCount ?? 0), 0) / executed.length
@@ -1281,7 +1377,10 @@ async function main(): Promise<void> {
   console.error('  AGENT BENCHMARK SUMMARY (SOTA++)');
   console.error('══════════════════════════════════════');
   if (args.profile !== undefined) {
-    console.error(`  Profile:      ${args.profile}`);
+    const profileLabel = args.profile === 'retrieval'
+      ? 'retrieval (agent mode, golden-ID scenarios only)'
+      : args.profile;
+    console.error(`  Profile:      ${profileLabel}`);
   }
   console.error('  ────── run profile ─────');
   console.error(`  Model:        ${report.model}`);
@@ -1311,9 +1410,8 @@ async function main(): Promise<void> {
     console.error(`  ⚠ Critical:   ${report.criticalFailureCount} scenario(s) had a critical failure (overall=0)`);
   }
   if (report.judgeFailCount > 0) {
-    // Warn loudly when >10% of judge calls failed — the overall score may be
-    // unreliable because failed dims are silently imputed to the present-dim mean.
-    const judgeCallsTotal = report.executedCount * (report.judgeModel !== null ? 2 : 0); // answer + faithfulness
+    // Warn loudly when >10% of actual judge attempts failed.
+    const judgeCallsTotal = report.judgeAttemptCount;
     const failRate = judgeCallsTotal > 0 ? report.judgeFailCount / judgeCallsTotal : 0;
     const failSymbol = failRate >= 0.1 ? '⚠ ' : '  ';
     console.error(`  ${failSymbol}Judge fails: ${report.judgeFailCount}${failRate >= 0.1 ? ` (${(failRate * 100).toFixed(0)}% — scores may be unreliable, re-run or check API quota)` : ''}`);
@@ -1344,6 +1442,17 @@ async function main(): Promise<void> {
   console.error(`  Term Corr:    ${(s.terminationCorrectness * 100).toFixed(1)}%`);
   console.error(`  Cost Eff:     ${(s.costEfficiency * 100).toFixed(1)}%`);
   console.error(`  Judge:        ${s.judge !== null ? `${(s.judge * 100).toFixed(1)}%` : 'disabled'}`);
+  // RFC-020 claim-level diagnostic block
+  if (s.claimEvaluatedCount > 0) {
+    console.error('  ────── claims (RFC-020) ──');
+    console.error(`  Faithful (claim): ${(s.claimFaithfulness! * 100).toFixed(1)}%   (${s.claimEvaluatedCount} scenarios evaluated)`);
+    console.error(`  Contradiction:    ${(s.claimContradictionRate! * 100).toFixed(1)}%`);
+    console.error(`  Critical errors:  ${(s.claimCriticalErrorRate! * 100).toFixed(1)}%`);
+    console.error(`  Provenance cov:   ${(s.claimProvenanceCoverage! * 100).toFixed(1)}%`);
+    if (s.claimHardFailCount > 0) {
+      console.error(`  ⚠ Hard fails:     ${s.claimHardFailCount} scenario(s) had critical claim violations`);
+    }
+  }
   console.error('  ────── execution ───────');
   console.error(`  Avg Steps:    ${s.avgSteps.toFixed(1)}`);
   const p50Tag = s.latencySla.p50Pass ? 'PASS' : 'FAIL';

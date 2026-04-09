@@ -180,6 +180,24 @@ export interface RankedResult {
   readonly producerPrestige?: number | undefined;
   readonly retrievalProvenance?: CandidateProvenance | undefined;
 
+  /** Style descriptor (e.g. "bold", "elegant"). */
+  readonly style?: string | undefined;
+
+  /** Classification tier or legal designation. */
+  readonly classification?: string | undefined;
+
+  /** Alcohol percentage. */
+  readonly alcoholPct?: number | undefined;
+
+  /** Certifications (e.g. "organic", "biodynamic"). */
+  readonly certifications?: readonly string[] | undefined;
+
+  /** Food pairing tags. */
+  readonly pairingTags?: readonly string[] | undefined;
+
+  /** Occasion suggestions. */
+  readonly occasion?: readonly string[] | undefined;
+
   /** Human-readable price band (e.g. "$20-$30", "premium"). */
   readonly priceBand?: string | undefined;
 

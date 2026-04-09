@@ -339,7 +339,8 @@ describe('LlmNLMapper phrase cache', () => {
     // LLM should be called once with at most 20 phrases.
     expect(llm.callCount).toBe(1);
     const userMsg = llm.lastRequest?.messages.find((m) => m.role === 'user')?.content ?? '';
-    const sentPhrases = JSON.parse(userMsg) as unknown as string[];
+    const sentPhrasesRaw: unknown = JSON.parse(userMsg);
+    const sentPhrases = sentPhrasesRaw as string[];
     expect(sentPhrases).toHaveLength(20);
     // Earlier phrases retained, later phrases dropped (slice semantics).
     expect(sentPhrases).toContain('zzz_unknown_0');

@@ -168,8 +168,11 @@ export function buildEmbedText(rec: EnrichedSilverRecord): string {
     .join('. ');
 }
 
-/** Regex matching any Hangul syllable or Jamo character. */
-const HANGUL_RE = /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/;
+/** Regex matching any Hangul syllable or Jamo character.
+ *  v4: standardized to U+AC00..U+D7A3 (matches scorer.ts, step-budget.ts, phonetic.ts).
+ *  Previously U+AC00..U+D7AF, which included 12 unassigned code points (U+D7A4..U+D7AF)
+ *  that are not part of the Hangul Syllables block. The standard end is U+D7A3 (힣). */
+const HANGUL_RE = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F]/;
 
 /**
  * Build Korean search text from the canonical label + any Korean aliases

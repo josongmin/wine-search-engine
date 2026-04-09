@@ -1,6 +1,6 @@
 import type { SparseHit } from '../port/search-index.port.js';
 
-const VINTAGE_YEAR_IN_LABEL = /(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/gu;
+const VINTAGE_YEAR_IN_LABEL = /(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/gu;
 
 /** BM25 multiplier weights for critic / prestige lifts (producer browse). */
 const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;

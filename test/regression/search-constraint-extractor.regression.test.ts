@@ -566,4 +566,48 @@ describe('search-constraint-extractor price parsing edge cases', () => {
     expect(c.maxPriceKrw).toBe(35_000);
     expect(c.minPriceKrw).toBeUndefined();
   });
+
+  // ---------------------------------------------------------------------------
+  // Korean Sino-numeral word parsing (koreanNumberWordToDigit)
+  // ---------------------------------------------------------------------------
+
+  it('R-PRICE-KORNUM-01: "오만원 이하" → maxPriceKrw=50000', () => {
+    const c = extractSearchConstraints('오만원 이하 레드 와인');
+    expect(c.maxPriceKrw).toBe(50_000);
+  });
+
+  it('R-PRICE-KORNUM-02: "십만원 이하" → maxPriceKrw=100000 (bare 십 = 10)', () => {
+    const c = extractSearchConstraints('십만원 이하 와인');
+    expect(c.maxPriceKrw).toBe(100_000);
+  });
+
+  it('R-PRICE-KORNUM-03: "이십만원 이하" → maxPriceKrw=200000', () => {
+    const c = extractSearchConstraints('이십만원 이하 와인');
+    expect(c.maxPriceKrw).toBe(200_000);
+  });
+
+  it('R-PRICE-KORNUM-04: "백만원 이하" → maxPriceKrw=1000000 (bare 백 = 100)', () => {
+    const c = extractSearchConstraints('백만원 이하 와인');
+    expect(c.maxPriceKrw).toBe(1_000_000);
+  });
+
+  it('R-PRICE-KORNUM-05: "삼백오십만원 이하" → maxPriceKrw=3500000 (compound 백+십)', () => {
+    // This is the critical bug case from the R4 audit: prior regex with rigid
+    // ordering produced "삼백오" + leftover "십만원", corrupting the parse.
+    const c = extractSearchConstraints('삼백오십만원 이하 프리미엄 와인');
+    expect(c.maxPriceKrw).toBe(3_500_000);
+  });
+
+  it('R-PRICE-KORNUM-06: "오만 정도" → maxPriceKrw=50000 (soft approximate bound)', () => {
+    const c = extractSearchConstraints('오만원 정도 레드');
+    expect(c.maxPriceKrw).toBe(50_000);
+  });
+
+  it('R-PRICE-KORNUM-07: "오만한 사람" does NOT get rewritten (word boundary)', () => {
+    // "오만하다" = "arrogant"; 만 here is part of a Korean adjective, not a price unit.
+    // The (?![가-힣]) boundary after the unit must prevent rewriting.
+    const c = extractSearchConstraints('오만한 사람을 위한 와인');
+    expect(c.maxPriceKrw).toBeUndefined();
+    expect(c.minPriceKrw).toBeUndefined();
+  });
 });

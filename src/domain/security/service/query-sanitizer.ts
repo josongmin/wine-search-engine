@@ -139,7 +139,7 @@ export class QuerySanitizer {
     // System prompt / instruction hijacking
     system_prompt: [
       // Unicode-aware boundaries: two separate lookbehinds (?<!\p{L})(?<!\p{N}) are
-      // required because a single combined (?<!\p{L}\p{N}) only blocks when BOTH
+      // required because a single combined (?<!\p{L})(?<!\p{N}) only blocks when BOTH
       // a letter AND digit precede — "시스템ignore" would slip through.
       // Separate lookbehinds block when EITHER a letter OR digit precedes.
       /(?<!\p{L})(?<!\p{N})ignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,

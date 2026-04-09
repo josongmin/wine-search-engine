@@ -112,6 +112,42 @@ export class StepBudget {
   }
 
   /**
+   * Validate and record a parallel batch atomically.
+   *
+   * The batch either fully commits or leaves the budget untouched. This prevents
+   * partial state pollution when the Nth tool in a batch is loop-blocked after
+   * the first N-1 entries already advanced counters in a dry-run-unaware loop.
+   */
+  recordParallelBatch(
+    calls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
+    options?: { readonly skipNearDuplicate?: boolean },
+  ): BudgetCheck {
+    if (this.stepCount + calls.length > this.config.maxSteps) {
+      return { allowed: false, reason: 'max_steps' };
+    }
+
+    const candidate = {
+      stepCount: this.stepCount,
+      seenActions: new Set(this.seenActions),
+      perToolCallCounts: new Map(this.perToolCallCounts),
+      perToolNormalizedQueries: clonePerToolNormalizedQueries(this.perToolNormalizedQueries),
+    };
+
+    for (const call of calls) {
+      const check = evaluateAndRecordStep(candidate, this.perToolCallCap, call.tool, call.input, options);
+      if (!check.allowed) {
+        return check;
+      }
+    }
+
+    this.stepCount = candidate.stepCount;
+    replaceSetContents(this.seenActions, candidate.seenActions);
+    replaceMapContents(this.perToolCallCounts, candidate.perToolCallCounts);
+    replaceMapContents(this.perToolNormalizedQueries, candidate.perToolNormalizedQueries);
+    return { allowed: true };
+  }
+
+  /**
    * Record a step and check for loops.
    *
    * DRY-RUN PATTERN: every check runs against current state without mutation.
@@ -121,65 +157,28 @@ export class StepBudget {
    * steps consumed the agent's budget early and made later identical calls
    * misclassify as "exact loop" when they were really "per-tool cap exceeded".
    */
-  recordStep(tool: string, input: Record<string, unknown>): BudgetCheck {
-    // Canonical serialization for exact-key dedup.
-    const sortedInput = canonicalizeForLoopKey(input);
-    const key = `${tool}:${sortedInput}`;
-    if (this.seenActions.has(key)) {
-      return { allowed: false, reason: 'loop_detected' };
+  recordStep(
+    tool: string,
+    input: Record<string, unknown>,
+    options?: { readonly skipNearDuplicate?: boolean },
+  ): BudgetCheck {
+    if (this.stepCount + 1 > this.config.maxSteps) {
+      return { allowed: false, reason: 'max_steps' };
     }
-
-    // Per-tool call cap — catches reformulation thrashing that exact-key
-    // dedup misses (e.g. search_wines("Opus One"), search_wines("Opus 2018"),
-    // search_wines("Opus One wine") all distinct under canonical key).
-    const projectedPerToolCount = (this.perToolCallCounts.get(tool) ?? 0) + 1;
-    if (projectedPerToolCount > this.perToolCallCap) {
-      return { allowed: false, reason: 'loop_detected' };
+    const candidate: MutableBudgetState = {
+      stepCount: this.stepCount,
+      seenActions: new Set(this.seenActions),
+      perToolCallCounts: new Map(this.perToolCallCounts),
+      perToolNormalizedQueries: clonePerToolNormalizedQueries(this.perToolNormalizedQueries),
+    };
+    const check = evaluateAndRecordStep(candidate, this.perToolCallCap, tool, input, options);
+    if (!check.allowed) {
+      return check;
     }
-
-    // Near-duplicate check: trigram Jaccard ≥ threshold against any prior call
-    // to the same tool, restricted to query-bearing keys (anti-padding).
-    // Three-tier threshold: short→0.6, Hangul-dominant→0.92, ASCII→0.85.
-    // The higher Hangul threshold prevents false-positives on price-relaxation
-    // queries like "30만원 이하 레드 와인" vs "50만원 이하 레드 와인" where
-    // only the numeric prefix differs but bigram overlap is ~90%.
-    // Hangul dominance check uses non-space length as denominator so spaces in
-    // the normalized string (e.g. "30만원 레드 와인 이하") don't inflate the
-    // denominator and undercount Hangul ratio.
-    const normalizedQuery = normalizeQueryForLoopDetection(input);
-    if (normalizedQuery.length > 0) {
-      const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
-      let threshold: number;
-      if (normalizedQuery.length < SHORT_STRING_THRESHOLD) {
-        threshold = NEAR_DUPLICATE_JACCARD_SHORT;
-      } else if (countHangulChars(normalizedQuery) > normalizedQuery.replace(/\s/g, '').length * HANGUL_DOMINANCE_RATIO) {
-        threshold = NEAR_DUPLICATE_JACCARD_LONG_HANGUL;
-      } else {
-        threshold = NEAR_DUPLICATE_JACCARD_LONG_ASCII;
-      }
-      for (const prior of priorQueries) {
-        const similarity = trigramJaccard(normalizedQuery, prior);
-        if (similarity >= threshold) {
-          return { allowed: false, reason: 'loop_detected' };
-        }
-      }
-    }
-
-    // ALL CHECKS PASSED — now mutate state.
-    this.stepCount++;
-    this.seenActions.add(key);
-    this.perToolCallCounts.set(tool, projectedPerToolCount);
-    if (normalizedQuery.length > 0) {
-      const priorQueries = this.perToolNormalizedQueries.get(tool) ?? [];
-      priorQueries.push(normalizedQuery);
-      // Bound history to perToolCallCap entries — older entries can never
-      // affect a future allow/deny decision because the cap fires first.
-      while (priorQueries.length > this.perToolCallCap) {
-        priorQueries.shift();
-      }
-      this.perToolNormalizedQueries.set(tool, priorQueries);
-    }
-
+    this.stepCount = candidate.stepCount;
+    replaceSetContents(this.seenActions, candidate.seenActions);
+    replaceMapContents(this.perToolCallCounts, candidate.perToolCallCounts);
+    replaceMapContents(this.perToolNormalizedQueries, candidate.perToolNormalizedQueries);
     return { allowed: true };
   }
 
@@ -189,6 +188,95 @@ export class StepBudget {
 
   getStepCount(): number {
     return this.stepCount;
+  }
+}
+
+interface MutableBudgetState {
+  stepCount: number;
+  seenActions: Set<string>;
+  perToolCallCounts: Map<string, number>;
+  perToolNormalizedQueries: Map<string, string[]>;
+}
+
+function evaluateAndRecordStep(
+  state: MutableBudgetState,
+  perToolCallCap: number,
+  tool: string,
+  input: Record<string, unknown>,
+  options?: { readonly skipNearDuplicate?: boolean },
+): BudgetCheck {
+  // Canonical serialization for exact-key dedup.
+  const sortedInput = canonicalizeForLoopKey(input);
+  const key = `${tool}:${sortedInput}`;
+  if (state.seenActions.has(key)) {
+    return { allowed: false, reason: 'loop_detected' };
+  }
+
+  // Per-tool call cap — catches reformulation thrashing that exact-key
+  // dedup misses (e.g. search_wines("Opus One"), search_wines("Opus 2018"),
+  // search_wines("Opus One wine") all distinct under canonical key).
+  const projectedPerToolCount = (state.perToolCallCounts.get(tool) ?? 0) + 1;
+  if (projectedPerToolCount > perToolCallCap) {
+    return { allowed: false, reason: 'loop_detected' };
+  }
+
+  // Near-duplicate check: trigram Jaccard ≥ threshold against any prior call
+  // to the same tool, restricted to query-bearing keys (anti-padding).
+  // Three-tier threshold: short→0.6, Hangul-dominant→0.92, ASCII→0.85.
+  // Skipped when skipNearDuplicate=true (parallel batches are intentionally
+  // similar — e.g. "Bordeaux 2015" + "Bordeaux 2016" are NOT a thrashing loop).
+  const normalizedQuery = normalizeQueryForLoopDetection(input);
+  if (normalizedQuery.length > 0 && options?.skipNearDuplicate !== true) {
+    const priorQueries = state.perToolNormalizedQueries.get(tool) ?? [];
+    let threshold: number;
+    if (normalizedQuery.length < SHORT_STRING_THRESHOLD) {
+      threshold = NEAR_DUPLICATE_JACCARD_SHORT;
+    } else if (countHangulChars(normalizedQuery) > normalizedQuery.replace(/\s/g, '').length * HANGUL_DOMINANCE_RATIO) {
+      threshold = NEAR_DUPLICATE_JACCARD_LONG_HANGUL;
+    } else {
+      threshold = NEAR_DUPLICATE_JACCARD_LONG_ASCII;
+    }
+    for (const prior of priorQueries) {
+      const similarity = trigramJaccard(normalizedQuery, prior);
+      if (similarity >= threshold) {
+        return { allowed: false, reason: 'loop_detected' };
+      }
+    }
+  }
+
+  // ALL CHECKS PASSED — now mutate state.
+  state.stepCount++;
+  state.seenActions.add(key);
+  state.perToolCallCounts.set(tool, projectedPerToolCount);
+  if (normalizedQuery.length > 0) {
+    const priorQueries = state.perToolNormalizedQueries.get(tool) ?? [];
+    priorQueries.push(normalizedQuery);
+    while (priorQueries.length > perToolCallCap) {
+      priorQueries.shift();
+    }
+    state.perToolNormalizedQueries.set(tool, priorQueries);
+  }
+
+  return { allowed: true };
+}
+
+function clonePerToolNormalizedQueries(source: ReadonlyMap<string, readonly string[]>): Map<string, string[]> {
+  return new Map(
+    Array.from(source.entries(), ([tool, queries]) => [tool, [...queries]]),
+  );
+}
+
+function replaceSetContents<T>(target: Set<T>, source: ReadonlySet<T>): void {
+  target.clear();
+  for (const item of source) {
+    target.add(item);
+  }
+}
+
+function replaceMapContents<K, V>(target: Map<K, V>, source: ReadonlyMap<K, V>): void {
+  target.clear();
+  for (const [key, value] of source) {
+    target.set(key, value);
   }
 }
 

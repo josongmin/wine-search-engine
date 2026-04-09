@@ -692,9 +692,9 @@ describe('null judge handling', () => {
       0, // judge says 0
     );
     expect(r.scores.judge).toBe(0);
-    // P0-B fix: judge dim has NO_FLOOR treatment — a judge score of 0 is a true
-    // rubric failure (not noise). judge weight=0.07, no floor, so overall can
-    // be driven very low by geo-mean. The exact value depends on other dims but
+    // Judge receives DIMENSION_FLOOR treatment (0 -> 0.05) because rubric scoring
+    // is treated as somewhat noisy. Even so, a 0 judge must still lower overall
+    // meaningfully. The exact value depends on other dims but
     // must be < 0.95 and > 0 (not total collapse — other dims are fine).
     expect(r.scores.overall).toBeLessThan(0.95);
     expect(r.scores.overall).toBeGreaterThan(0);
@@ -720,8 +720,8 @@ describe('null judge handling', () => {
   // ─── v4 monotonicity boundary cases ───────────────────────────────────
 
   it('monotonicity: adding judge=1.0 strictly increases overall vs null', () => {
-    // v4 fix: fixed 0.5 neutral imputation — null dims imputed at 0.5.
-    // Adding judge=1.0 (above neutral) must raise overall.
+    // Null judge is dropped from the geo-mean entirely.
+    // Adding judge=1.0 must raise overall.
     const base = makeExecution({ answer: 'Opus One 2018 is a great Napa Cabernet.', observations: ['Found: Opus One 2018'] });
     const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, undefined, 0.8);
     const withPerfectJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, 1.0, 0.8);
@@ -729,7 +729,7 @@ describe('null judge handling', () => {
   });
 
   it('monotonicity: adding judge=0.0 strictly decreases overall vs null', () => {
-    // judge=0.0 (below neutral 0.5) must lower overall.
+    // judge=0.0 must lower overall relative to null-drop.
     const base = makeExecution({ answer: 'Opus One 2018 is a great Napa Cabernet.', observations: ['Found: Opus One 2018'] });
     const withNullJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, undefined, 0.8);
     const withZeroJudge = scoreScenario(makeScenario({ maxSteps: 5 }), base, 0, 0.8);
@@ -966,72 +966,48 @@ describe('scoreStructuredChecks', () => {
     expect(r.diagnostics?.some((d) => d.code === 'DRINKING_WINDOW_MISMATCH')).toBeFalsy();
   });
 
-  it('requireHedging: penalises when answer lacks hedging language', () => {
+  // v4 STRUCTURAL FIX: requireHedging, requiredRegister, maxConfidence, refusalExpected
+  // are evaluated EXCLUSIVELY by the LLM judge via composeAutoRubric. The regex
+  // path was removed (false positives + heuristic-tightening trap). The dimension
+  // requires judgeRequired:true to produce a signal.
+
+  it('requireHedging: no regex check (judge handles semantically) — no diagnostic emitted', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, requireHedging: true }),
       makeExecution({ answer: 'The best wine is Opus One. Buy it now.' }),
       undefined,
     );
-    expect(r.diagnostics?.some((d) => d.code === 'HEDGING_MISSING')).toBe(true);
-  });
-
-  it('requireHedging: passes when hedging present', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, requireHedging: true }),
-      makeExecution({ answer: '여러 후보가 있는데, perhaps Opus One or Screaming Eagle' }),
-      undefined,
-    );
     expect(r.diagnostics?.some((d) => d.code === 'HEDGING_MISSING')).toBeFalsy();
   });
 
-  it('requiredRegister: penalises wrong Korean register', () => {
-    // v4: casual markers now use multi-char patterns (줄게,건데,잖아,거든,거야,해줘,해봐...)
-    // and threshold is 3. This answer has 4 casual markers: 해줘, 거든, 잖아, 할게.
+  it('requiredRegister: no regex check (judge handles semantically) — no diagnostic emitted', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, requiredRegister: 'formal' }),
       makeExecution({ answer: '이 와인 해줘. 맛있거든. 잖아 진짜 좋다니까. 다음에도 할게.' }),
       undefined,
     );
-    expect(r.diagnostics?.some((d) => d.code === 'REGISTER_MISMATCH')).toBe(true);
-  });
-
-  it('requiredRegister: passes correct register', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, requiredRegister: 'formal' }),
-      makeExecution({ answer: '이 와인을 추천합니다. 품질이 우수합니다.' }),
-      undefined,
-    );
     expect(r.diagnostics?.some((d) => d.code === 'REGISTER_MISMATCH')).toBeFalsy();
   });
 
-  it('maxConfidence: penalises overconfident language', () => {
-    // v4: '확실히'/'분명히' removed (normal polite Korean). Use '틀림없이' (truly extreme).
+  it('maxConfidence: no regex check (judge handles semantically) — no diagnostic emitted', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, maxConfidence: 0.3 }),
       makeExecution({ answer: '틀림없이 이 와인이 최고입니다!' }),
       undefined,
     );
-    expect(r.diagnostics?.some((d) => d.code === 'OVERCONFIDENT_LANGUAGE')).toBe(true);
+    expect(r.diagnostics?.some((d) => d.code === 'OVERCONFIDENT_LANGUAGE')).toBeFalsy();
   });
 
-  it('refusalExpected: critical fail when no refusal markers', () => {
+  it('refusalExpected: no regex check (judge handles semantically) — no critical fail from missing markers', () => {
+    // Previously REFUSAL_MISSING/REFUSAL_CONTRADICTED were critical regex checks.
+    // Now: judge evaluates whether the agent actually refused appropriately.
     const r = scoreScenario(
       makeScenario({ maxSteps: 5, refusalExpected: true }),
       makeExecution({ answer: 'Here is a great 1962 Screaming Eagle!' }),
       undefined,
     );
-    expect(r.scores.criticalFailure).toBe(true);
-    expect(r.scores.overall).toBe(0);
-  });
-
-  it('refusalExpected: passes when refusal markers present', () => {
-    const r = scoreScenario(
-      makeScenario({ maxSteps: 5, refusalExpected: true }),
-      makeExecution({ answer: '해당 빈티지는 존재하지 않습니다. Screaming Eagle은 1992년부터 생산됩니다.' }),
-      undefined,
-    );
-    expect(r.scores.criticalFailure).toBe(false);
-    expect(r.scores.answerQuality).toBe(1);
+    expect(r.diagnostics?.some((d) => d.code === 'REFUSAL_MISSING')).toBeFalsy();
+    expect(r.diagnostics?.some((d) => d.code === 'REFUSAL_CONTRADICTED')).toBeFalsy();
   });
 
   it('mustCiteFromToolResults: penalises uncited wine names', () => {
@@ -1612,16 +1588,16 @@ describe('TOOL_DUPLICATE_CALLS — all violations penalized', () => {
 });
 
 describe('maxConfidence — handles all threshold values', () => {
-  it('maxConfidence=0.7 with overconfident language → penalized', () => {
-    // v4: '확실히' removed from overconfident patterns (normal polite Korean).
-    // Use '틀림없이' (genuinely extreme) instead.
+  it('maxConfidence: regex check removed (judge handles semantically) — no answerQuality penalty', () => {
+    // v4: scorer no longer uses regex for overconfident language detection.
+    // The judge evaluates this semantically via composeAutoRubric.
     const r = scoreScenario(
       makeScenario({ maxSteps: 2, maxConfidence: 0.7 }),
       makeExecution({ answer: '틀림없이 이 와인이 최고입니다' }),
       undefined,
     );
-    // Should be penalized even though 0.7 > 0.5
-    expect(r.scores.answerQuality).toBeLessThan(1);
+    // No regex penalty applied; answerQuality stays at 1 (no other constraints).
+    expect(r.scores.answerQuality).toBe(1);
   });
 
   it('maxConfidence=0.8 without overconfident language → no penalty', () => {
@@ -2089,9 +2065,9 @@ describe('step-0 fallback exemptions for structured checks', () => {
     expect(hasHedgingMissing).toBe(false);
   });
 
-  it('requiredRegister IS checked for step-1+ fallback (agent ran, produced output)', () => {
-    // v4: casual markers now use multi-char patterns. This answer has 3 casual markers:
-    // 해줘, 건데, 잖아 — enough to exceed the threshold (≥3).
+  it('requiredRegister regex check removed in v4 (judge handles semantically) — no diagnostic from this path', () => {
+    // v4 STRUCTURAL FIX: requiredRegister regex check removed. Even on step-1+ fallback,
+    // there is no REGISTER_MISMATCH diagnostic emitted from scorer — the judge alone evaluates this.
     const r = scoreScenario(
       makeScenario({ maxSteps: 3, requiredRegister: 'formal' }),
       makeExecution({
@@ -2103,9 +2079,8 @@ describe('step-0 fallback exemptions for structured checks', () => {
       }),
       undefined,
     );
-    // step=1 → agent ran → register IS checked
     const hasRegisterMismatch = (r.diagnostics ?? []).some((d) => d.code === 'REGISTER_MISMATCH');
-    expect(hasRegisterMismatch).toBe(true);
+    expect(hasRegisterMismatch).toBe(false);
   });
 });
 

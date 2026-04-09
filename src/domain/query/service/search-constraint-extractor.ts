@@ -177,7 +177,9 @@ const KOREAN_COUNTRY_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/스페인|spain|spanish/iu, 'Spain'],
   [/호주|australia|australian/iu, 'Australia'],
   [/칠레|chile|chilean/iu, 'Chile'],
-  [/미국|미(?!\p{L}\p{N})|usa|united\s+states|american/iu, 'USA'],
+  // (?![\p{L}\p{N}]) = lookahead character class: not followed by letter OR digit. (rule 24)
+  // (?!\p{L})(?!\p{N}) was wrong: AND-sequence, never blocks anything useful.
+  [/미국|미(?![\p{L}\p{N}])|usa|united\s+states|american/iu, 'USA'],
   [/아르헨티나|argentina|argentinian/iu, 'Argentina'],
   [/독일|germany|german/iu, 'Germany'],
   [/포르투갈|portugal|portuguese/iu, 'Portugal'],
@@ -257,11 +259,71 @@ const NEGATION_SUBJECT_AFTER: RegExp =
  * To add a new pattern: insert at the correct priority level with a comment
  * explaining WHY it must come before/after its neighbors.
  */
+/**
+ * Convert Korean number words to digit form. Handles Sino-Korean numerals up to
+ * 만(10,000) units, which covers all realistic wine price expressions.
+ *
+ * Examples:
+ *   "오만원" → "5만원"
+ *   "십오만원" → "15만원"
+ *   "이십만원" → "20만원"
+ *   "백만원" → "100만원"
+ *   "오만 정도" → "5만 정도"
+ *
+ * Supports compound forms: "오만 오천원" → "5만 5천원" (handled by space-separated parsing).
+ *
+ * Algorithm: scan for digit-word sequences immediately followed by 만/천 and replace
+ * with the parsed integer. Conservative — only replaces when followed by a unit suffix
+ * to avoid corrupting unrelated Korean text (e.g., "오늘" should NOT become "5늘").
+ */
+function koreanNumberWordToDigit(s: string): string {
+  // Sino-Korean digit map (일/이/삼/사/오/육/칠/팔/구) + ten/hundred multipliers
+  const DIGIT: Record<string, number> = {
+    '일': 1, '이': 2, '삼': 3, '사': 4, '오': 5,
+    '육': 6, '칠': 7, '팔': 8, '구': 9,
+  };
+  // Match any sequence of Sino-Korean digit/십/백 chars followed by a 만|천 unit.
+  // The character class must be inclusive — we parse the sequence in a dedicated
+  // tokenizer below, NOT via regex ordering. Using `+` (not a rigid `[d]?[십]?...` chain)
+  // correctly handles arbitrary orderings like "삼백오십만" (3*100 + 5*10 = 350).
+  //
+  // Word boundary: after the unit syllable we MUST see end-of-string, whitespace, punctuation,
+  // OR a legitimate price continuation (원, 대). We MUST NOT rewrite when followed by arbitrary
+  // Korean syllables like 한/하/해 ("오만한" = "arrogant" is NOT "5만한"). The lookahead below
+  // whitelists only the valid continuations. \b is ASCII-only and cannot be used here.
+  return s.replace(
+    /([일이삼사오육칠팔구십백]+)\s*(만|천)(?=원|대|$|[^가-힣])/gu,
+    (match, group: string, unit: string) => {
+      // Parse left-to-right with positional multipliers: 백 = 100, 십 = 10.
+      // A digit before 백/십 multiplies it; a bare 백/십 is treated as 1*100 / 1*10.
+      // A digit after the last 십/백 (or with no 십/백) is added as units.
+      let total = 0;
+      let pending = 0; // current digit waiting for a multiplier or to become units
+      for (const ch of group) {
+        if (ch === '백') {
+          total += (pending === 0 ? 1 : pending) * 100;
+          pending = 0;
+        } else if (ch === '십') {
+          total += (pending === 0 ? 1 : pending) * 10;
+          pending = 0;
+        } else {
+          const d = DIGIT[ch];
+          if (d !== undefined) pending = d;
+        }
+      }
+      total += pending; // trailing units
+      return total > 0 ? `${total}${unit}` : match;
+    },
+  );
+}
+
 function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> {
   // Normalize: strip ALL commas — in Korean price context commas are always thousands
   // separators ("50,000원") and never decimal separators. Global removal is safe and
   // avoids the false-strip risk of a digit-count-specific regex ("1,23원" → "123원").
-  const qn = q.replace(/,/g, '');
+  // Then convert Korean number words (오만원 → 5만원) so the digit-based regexes downstream
+  // catch them via the standard "X만원" / "X만원 이하" patterns.
+  const qn = koreanNumberWordToDigit(q.replace(/,/g, ''));
 
   // Priority 1 — range: "3~5만원" or "3-5만원"
   // MUST be before combined_unit: "3만5천원~5만원" is a range, not a single price.
@@ -304,8 +366,10 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
     }
   }
 
-  // Priority 4 — man_under: "X만원 이하/이내/미만"
-  const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만)/u.exec(qn);
+  // Priority 4 — man_under: "X만원 이하/이내/미만/정도/쯤/약"
+  // 정도/쯤/약 are "approximate around" markers — treated as soft upper bound
+  // (the band logic at priority 3 handles the explicit "대" form with ±10%).
+  const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만|정도|쯤|약)/u.exec(qn);
   if (underMatch !== null && underMatch[1] !== undefined) {
     const v = parseFloat(underMatch[1]);
     if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_MAN_WON) };
@@ -349,8 +413,11 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
  *   "YYYY-YYYY"           — year range
  */
 function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vintageMax'> {
-  // Year range: "2018-2022" or "2018~2022"
-  const rangeMatch = /(?<!\p{L}\p{N})((?:19|20)\d{2})[~\-–]((?:19|20)\d{2})(?!\p{L}\p{N})/u.exec(q);
+  // Year range: "2018-2022" or "2018~2022" (optionally followed by "년" etc.)
+  // Guard: use \d lookaround only — we don't want to block "2020년" (year suffix).
+  // The captured groups (19|20)\d{2} ensure we match 4-digit years starting with 19xx/20xx.
+  // Lookbehind ensures the first year isn't part of a longer number (e.g. "12015-2020").
+  const rangeMatch = /(?<!\d)((?:19|20)\d{2})[~\-–]((?:19|20)\d{2})(?!\d)/u.exec(q);
   if (rangeMatch !== null && rangeMatch[1] !== undefined && rangeMatch[2] !== undefined) {
     const lo = parseInt(rangeMatch[1], 10);
     const hi = parseInt(rangeMatch[2], 10);

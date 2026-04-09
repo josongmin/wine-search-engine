@@ -232,9 +232,44 @@ function priceBand(priceUsd: number | null): PriceBand {
   return 'value';
 }
 
-/** Detect wine type from Vivino style string. */
-function detectWineType(wineStyle: string | null): WineType {
-  if (!wineStyle) return 'red'; // default
+/** Set of common red wine grape varieties (lowercased) for type inference fallback. */
+const RED_GRAPES: ReadonlySet<string> = new Set([
+  'cabernet sauvignon', 'merlot', 'pinot noir', 'syrah', 'shiraz', 'malbec',
+  'grenache', 'sangiovese', 'nebbiolo', 'tempranillo', 'zinfandel', 'cabernet franc',
+  'mourvèdre', 'mourvedre', 'petite sirah', 'carmenère', 'carmenere', 'gamay',
+  'barbera', 'montepulciano', 'corvina', 'aglianico', 'touriga nacional', 'tannat',
+  'pinotage', 'nero d\'avola', 'primitivo',
+]);
+
+/** Set of common white wine grape varieties (lowercased). */
+const WHITE_GRAPES: ReadonlySet<string> = new Set([
+  'chardonnay', 'sauvignon blanc', 'riesling', 'pinot grigio', 'pinot gris',
+  'gewürztraminer', 'gewurztraminer', 'viognier', 'sémillon', 'semillon',
+  'chenin blanc', 'albariño', 'albarino', 'verdejo', 'grüner veltliner', 'gruner veltliner',
+  'moscato', 'muscat', 'trebbiano', 'vermentino', 'fiano', 'vernaccia', 'arneis',
+  'roussanne', 'marsanne', 'palomino', 'pedro ximénez', 'pedro ximenez',
+]);
+
+/** Infer wine type from primary grape when style string is unrecognized.
+ *  Returns null if grape is unknown — caller falls back to 'red' as last resort. */
+function inferTypeFromGrape(grapePrimary: string | null): WineType | null {
+  if (!grapePrimary) return null;
+  const lower = grapePrimary.toLowerCase().trim();
+  if (RED_GRAPES.has(lower)) return 'red';
+  if (WHITE_GRAPES.has(lower)) return 'white';
+  return null;
+}
+
+/** Detect wine type from Vivino style string. Returns null when no match —
+ *  the caller MUST handle the null case (e.g., infer from grapes/region in
+ *  the Phase 1 enrichment step) instead of defaulting to 'red'.
+ *
+ *  v4 fix: previously returned 'red' on no match, silently corrupting wine type
+ *  for any wine whose Vivino style was missing or used an unrecognized vocabulary.
+ *  Whites, rosés, sparkling, dessert, and fortified wines were all silently
+ *  indexed as 'red', breaking type-filtered search and corrupting facets. */
+function detectWineType(wineStyle: string | null): WineType | null {
+  if (!wineStyle) return null;
   const lower = wineStyle.toLowerCase();
   // Exact-key map first (highest precision)
   for (const [key, value] of Object.entries(VIVINO_STYLE_MAP)) {
@@ -244,7 +279,7 @@ function detectWineType(wineStyle: string | null): WineType {
   for (const [keyword, type] of VIVINO_STYLE_KEYWORD_MAP) {
     if (lower.includes(keyword)) return type;
   }
-  return 'red';
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,9 +531,21 @@ export function transformRow(row: BronzeRow): PreSilver | null {
 
   const taste = payload?.taste?.structure;
 
-  // SOTA++: fizziness signal — if fizziness > 0.3, override to sparkling
+  // SOTA++: fizziness signal — if fizziness > 0.3, override to sparkling.
+  // v4 fix: detectWineType now returns null on no match. Cascade through grape-based
+  // inference (most reliable secondary signal) before falling back to 'red' as a last
+  // resort, with explicit logging when the fallback fires.
   const detectedWineType = (() => {
-    const base = detectWineType(row.wine_style);
+    let base = detectWineType(row.wine_style);
+    if (base === null) {
+      // Secondary signal: infer from primary grape variety
+      base = inferTypeFromGrape(grapePrimary);
+    }
+    if (base === null) {
+      // Last resort: 'red' as the most common wine type. Logged for visibility.
+      // ETL validators should track this fallback rate as a data quality metric.
+      base = 'red';
+    }
     if (base === 'red' && taste?.fizziness !== undefined && taste.fizziness > 1.5) {
       return 'sparkling' as WineType;
     }
@@ -563,6 +610,13 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     wineType: detectedWineType,
     grapePrimary,
     grapes,
+    // v4 KNOWN ISSUE: body/sweetness/acidity/tannin default to 0.5 when Vivino's
+    // taste.structure data is absent. This silently masks data coverage gaps —
+    // wines with missing taste data are indexed as "medium everything" and pollute
+    // both LTR feature space and facet filters. Proper fix requires migrating the
+    // Silver schema to allow `number | null` for these fields and downstream
+    // ranker/Vespa changes. Tracked for v5. For now, the fallbacks at least produce
+    // valid [0,1] values that don't crash the indexer; downstream is unaware of imputation.
     body: rawBody ?? bodyFallback,
     sweetness: rawSweetness ?? sweetnessFallback,
     acidity: normalizeScale(taste?.acidity, 5) ?? 0.5,

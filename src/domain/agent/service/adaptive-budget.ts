@@ -38,8 +38,8 @@ const ADAPTIVE_BUDGET_NESTED_REASON_CHARS = 20;
 /** Minimum hard-constraint count to allocate iterative-refinement step budget. */
 const CONSTRAINT_COUNT_FOR_ITERATIVE_REFINEMENT = 4;
 
-const PROPER_NOUN_PATTERN = /(?<!\p{L}\p{N})(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+\s+){0,3}[A-Z][a-zA-Z'\u00C0-\u017F-]+(?!\p{L}\p{N})/u;
-const VINTAGE_PATTERN = /(?<!\p{L}\p{N})(?:18|19|20)\d{2}(?!\p{L}\p{N})/u;
+const PROPER_NOUN_PATTERN = /(?<!\p{L})(?<!\p{N})(?:[A-Z][a-zA-Z'\u00C0-\u017F-]+\s+){0,3}[A-Z][a-zA-Z'\u00C0-\u017F-]+(?!\p{L})(?!\p{N})/u;
+const VINTAGE_PATTERN = /(?<!\p{L})(?<!\p{N})(?:18|19|20)\d{2}(?!\p{L})(?!\p{N})/u;
 /** Hangul wine name patterns: 3+ consecutive Hangul syllables that look like
  *  a wine entity name (not common Korean words). The previous 2+ char pattern
  *  matched "와인", "년산" etc. causing false positives on generic queries like

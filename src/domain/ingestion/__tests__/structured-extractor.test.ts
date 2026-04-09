@@ -77,7 +77,7 @@ describe('structured-extractor / extract', () => {
     if (result.extracted.wineLabel !== undefined) {
       expect(result.extracted.wineLabel).not.toContain('2015');
       expect(result.extracted.wineLabel.toLowerCase()).not.toMatch(
-        /^château margaux/,
+        /^château margaux/u,
       );
     }
   });

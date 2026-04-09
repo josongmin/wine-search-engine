@@ -14,6 +14,10 @@ export interface AgentConfig {
   readonly maxTotalTokens: number;
   /** Deterministic seed for LLM calls (propagated to ChatCompletionRequest.seed). */
   readonly seed?: number | undefined;
+  /** Per-tool execution timeout (ms) for single tool calls in the loop. */
+  readonly toolTimeoutMs?: number | undefined;
+  /** Parallel batch timeout (ms) for Promise.all tool batches. */
+  readonly parallelBatchTimeoutMs?: number | undefined;
 }
 
 /**

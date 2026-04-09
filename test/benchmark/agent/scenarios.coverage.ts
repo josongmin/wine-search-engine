@@ -1782,10 +1782,12 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       requiredRegister: 'formal',
+      // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
+      judgeRequired: true,
       rubric:
         'Must recommend wines appropriate for gifting to in-laws during the Chuseok holiday. '
         + 'Should suggest well-packaged, respectable options (not trendy or niche). '
-        + 'Formal presentation and gift-worthiness are key. '
+        + 'Formal Korean tone (합니다/습니다) required for gift to in-laws. '
         + 'Mid-to-premium price range expected.',
     },
   },
@@ -2013,9 +2015,12 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxTotalTokens: 5_000,
       priceBandKrw: { min: 50_000, max: 150_000 },
       requiredRegister: 'formal',
+      // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
+      judgeRequired: true,
       rubric:
         'Must recommend dignified, universally respectable wines appropriate for gifting to a senior colleague on a promotion. '
         + 'Price range 50,000-150,000 KRW. Should feel prestigious without being ostentatious. '
+        + 'Formal Korean tone (합니다/습니다) required. '
         + 'Well-known producers or classic regions expected.',
     },
   },
@@ -2063,11 +2068,13 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 40_000,
       maxTotalTokens: 5_000,
       requiredRegister: 'formal',
+      // v4: requiredRegister regex check removed; judgeRequired needed for tone evaluation
+      judgeRequired: true,
       rubric:
         'Must recommend approachable, traditionally styled wines appropriate for a multi-generational Korean family gathering. '
         + 'Should avoid overly trendy or niche wines. '
-        + 'Well-known brands in recognizable styles (Bordeaux, Burgundy, or equivalent) expected. '
-        + 'Gift presentation/packaging mentioned as a plus.',
+        + 'Formal Korean tone (합니다/습니다) required for gift to elders. '
+        + 'Well-known brands in recognizable styles (Bordeaux, Burgundy, or equivalent) expected.',
     },
   },
   {

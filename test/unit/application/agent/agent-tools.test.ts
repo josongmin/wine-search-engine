@@ -82,6 +82,45 @@ describe('executeAgentTool', () => {
     expect(parsed.excludeCountries).toContain('France');
   });
 
+  it('forwards search_wines limit to the search use case', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '레드 와인 추천',
+        limit: 3,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.limit).toBe(3);
+  });
+
+  it('forwards abortSignal to search use case execution context', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([]),
+    );
+    const controller = new AbortController();
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '레드 와인 추천',
+      },
+      deps,
+      'req-123',
+      { abortSignal: controller.signal },
+    );
+
+    const call = vi.mocked(mockSearchUseCase.execute).mock.calls[0];
+    expect(call?.[2]).toEqual({ abortSignal: controller.signal });
+  });
+
   it('serializes pairing budgets into parser-compatible KRW text', async () => {
     vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
       makeSearchResponse([]),

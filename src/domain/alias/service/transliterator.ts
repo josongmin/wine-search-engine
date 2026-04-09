@@ -431,6 +431,99 @@ export class Transliterator {
     ['chave', '샤브'],
   ]);
 
+  // ---------------------------------------------------------------------------
+  // Reverse transliteration (Korean → Latin) for claim verification
+  // ---------------------------------------------------------------------------
+  //
+  // The claim verifier (RFC-020) needs to match Korean-surface wine claims like
+  // "오퍼스 원 2018" against Latin-surface evidence like "opus one 2018". The
+  // forward transliterator above is a many-to-one function (multiple Latin forms
+  // can produce the same Korean output), so a perfect inverse does not exist —
+  // but for verification we do not need one. We only need to recognize that the
+  // Korean phrase IS a known wine term, and the Latin canonical form of it.
+  //
+  // Strategy: build an inverse index from EXCEPTIONS (curated, high-confidence
+  // Korean↔Latin pairs) at first use, keyed on the whitespace-stripped Korean
+  // form so "오푸스원" and "오푸스 원" both match. This mirrors the retrieval-side
+  // alias infrastructure but keeps the verifier dependency-free.
+  //
+  // What this does NOT do: invert rule-based transliteration. Rule inversion is
+  // ambiguous (e.g. "이" could be 'i'/'e'/'y'), would need a language model to
+  // disambiguate, and the verifier has no LLM budget. Curated dictionary covers
+  // the long tail of well-known names which is exactly the verification target.
+
+  /** Lazily-populated inverse index: normalized Korean → canonical Latin. */
+  private static KO_TO_LATIN_INDEX: ReadonlyMap<string, string> | undefined;
+
+  /**
+   * Normalize a Korean wine term for inverse lookup: strip whitespace, punctuation,
+   * and year tokens so "오퍼스 원 2018" and "오푸스원" collide on the same key.
+   * Also applies the Korean wine typo correction table (e.g. 오퍼스 → 오푸스)
+   * when it is imported, but we inline the minimal mapping here to keep this
+   * module free of cross-domain imports.
+   */
+  private static normalizeKoreanWineKey(s: string): string {
+    return s
+      .toLowerCase()
+      .normalize('NFKC')
+      // Strip 4-digit vintage years — they are never part of a wine identity label.
+      .replace(/(?:19|20)\d{2}/gu, '')
+      // Strip whitespace, punctuation, and Latin letters (vintage abbreviations may leak in).
+      .replace(/[\s\-_.,()'"·]+/gu, '')
+      // Apply the common "오퍼스" → "오푸스" typo normalization inline. This is the single
+      // Korean→Korean misspelling that appears in real benchmark scenarios for Opus One.
+      // Keeping it inline avoids a dependency on korean-wine-aliases.ts.
+      .replace(/오퍼스/gu, '오푸스');
+  }
+
+  private static buildKoToLatinIndex(): ReadonlyMap<string, string> {
+    const index = new Map<string, string>();
+    for (const [latin, korean] of Transliterator.EXCEPTIONS) {
+      const key = Transliterator.normalizeKoreanWineKey(korean);
+      if (key.length === 0) continue;
+      // First write wins. Multiple Latin forms may share the same Korean (e.g.
+      // "château margaux" and "chateau margaux" both → "샤또 마고") — the de-accented
+      // form is simpler for downstream matching so we prefer whichever appears first
+      // in the dictionary (deterministic iteration order of Map).
+      if (!index.has(key)) {
+        index.set(key, latin);
+      }
+    }
+    return index;
+  }
+
+  /**
+   * Look up the canonical Latin form of a Korean wine term using the curated
+   * exception dictionary. Returns `undefined` when no match is found.
+   *
+   * The input may contain punctuation, vintage years, and whitespace — they are
+   * stripped before lookup. Matching is exact on the normalized key (no partial
+   * match) because verification requires strong identity signal, not recall.
+   *
+   * Examples:
+   *   "오푸스 원 2018"  → "opus one"
+   *   "오퍼스원"       → "opus one"  (typo corrected)
+   *   "돔 페리뇽"      → "dom pérignon"
+   *   "unknown 와인"   → undefined
+   */
+  static romanizeWineTerm(koreanTerm: string): string | undefined {
+    if (Transliterator.KO_TO_LATIN_INDEX === undefined) {
+      Transliterator.KO_TO_LATIN_INDEX = Transliterator.buildKoToLatinIndex();
+    }
+    const key = Transliterator.normalizeKoreanWineKey(koreanTerm);
+    if (key.length === 0) return undefined;
+    return Transliterator.KO_TO_LATIN_INDEX.get(key);
+  }
+
+  /**
+   * Test whether a string contains any Hangul (한글) syllables. Used by the
+   * verifier to decide whether to attempt reverse romanization before comparing
+   * against Latin-only evidence.
+   */
+  static containsHangul(s: string): boolean {
+    return /[\uAC00-\uD7A3]/u.test(s);
+  }
+
   /**
    * Transliterates a wine-domain string from the given source language to Korean.
    *

@@ -47,8 +47,25 @@ const MAX_OBSERVATION_CHARS = 2_000;
 const VINTAGE_FILTER_MIN = 1600;
 /** Maximum vintage year for filter (future vintages not yet produced). */
 const VINTAGE_FILTER_MAX = 2100;
+/** Maximum length for style/certification filter strings (e.g. "oaked", "biodynamic"). */
+const STYLE_FILTER_MAX_LEN = 50;
+
+/**
+ * Placeholder patterns that LLMs sometimes emit instead of real values.
+ * Caught at schema validation to prevent multi-step reasoning failures where
+ * the agent "invents" an id template instead of copying a real id from prior
+ * tool results. Observed patterns in bench logs: __TO_BE_FILLED__,
+ * <top_result_entity_id>, {{id}}, TBD, TODO, PLACEHOLDER.
+ */
+const PLACEHOLDER_PATTERN = /__[a-z_]+__|<[a-z_]+>|\{\{[^}]+\}\}|^(tbd|todo|placeholder|to_be_filled|unknown)$/i;
+
 const SearchInputSchema = z.object({
-  query: z.string().min(1).max(SEARCH_QUERY_MAX_LEN),
+  query: z.string()
+    .min(1)
+    .max(SEARCH_QUERY_MAX_LEN)
+    .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
+      message: 'query cannot be a placeholder. Use actual search terms.',
+    }),
   // .int() implies finite (no NaN/Infinity) per Zod semantics; .min/.max add domain bounds
   limit: z.number().int().min(1).max(SEARCH_LIMIT_MAX).optional(),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
@@ -69,6 +86,12 @@ const SearchInputSchema = z.object({
   vintage_min: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
   /** Maximum vintage year (inclusive). */
   vintage_max: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
+  /** Appellation filter (e.g. "Pauillac", "Chianti Classico"). */
+  appellation: z.string().trim().min(1).max(100).optional(),
+  /** Style filter (e.g. "oaked", "unoaked", "light", "full"). */
+  style: z.string().trim().min(1).max(STYLE_FILTER_MAX_LEN).optional(),
+  /** Certification filter (e.g. "organic", "biodynamic"). */
+  certification: z.string().trim().min(1).max(STYLE_FILTER_MAX_LEN).optional(),
   /** When true, activate diversity dedup to spread results across grapes/regions/styles.
    *  Use when user says "다양하게", "각각", "종류별로", "different styles", etc. */
   want_diversity: z.boolean().optional(),
@@ -88,7 +111,12 @@ const DRINKING_WINDOW_MIN_YEAR = 1700;
 const DRINKING_WINDOW_MAX_YEAR = 2200;
 
 const DrinkingWindowInputSchema = z.object({
-  entity_id: z.string().min(1).max(ENTITY_ID_MAX_LEN),
+  entity_id: z.string()
+    .min(1)
+    .max(ENTITY_ID_MAX_LEN)
+    .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
+      message: 'entity_id cannot be a placeholder. Copy the actual id (e.g. "vivino-xxx") from a prior search_wines result.',
+    }),
   target_year: z.number().int().min(DRINKING_WINDOW_MIN_YEAR).max(DRINKING_WINDOW_MAX_YEAR).optional(),
 });
 
@@ -114,6 +142,10 @@ export interface AgentToolResult {
   readonly observation: string;
   /** Raw structured result (for inclusion in final response). */
   readonly rawResult: unknown;
+}
+
+export interface AgentToolExecutionOptions {
+  readonly abortSignal?: AbortSignal | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +400,21 @@ function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): reado
     filters.push({ attribute: 'vintage_year', operator: '<=', value: input.vintage_max, source_phrase: `${input.vintage_max}년 이전`, confidence: 1.0, mapping_version: v });
   }
 
+  // Appellation
+  if (input.appellation !== undefined) {
+    filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: v });
+  }
+
+  // Style
+  if (input.style !== undefined) {
+    filters.push({ attribute: 'style', operator: '=', value: input.style, source_phrase: input.style, confidence: 1.0, mapping_version: v });
+  }
+
+  // Certification
+  if (input.certification !== undefined) {
+    filters.push({ attribute: 'certification', operator: '=', value: input.certification, source_phrase: input.certification, confidence: 1.0, mapping_version: v });
+  }
+
   return filters;
 }
 
@@ -404,9 +451,10 @@ export async function executeAgentTool(
   input: Record<string, unknown>,
   deps: AgentToolDeps,
   requestId: string,
+  options?: AgentToolExecutionOptions,
 ): Promise<AgentToolResult> {
   try {
-    const result = await executeAgentToolInner(toolName, input, deps, requestId);
+    const result = await executeAgentToolInner(toolName, input, deps, requestId, options);
     return { ...result, observation: capObservation(result.observation) };
   } catch (err) {
     // Policy-block errors MUST propagate — they are security decisions, not
@@ -436,10 +484,11 @@ export async function executeAgentToolsBatch(
   toolCalls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
   deps: AgentToolDeps,
   baseRequestId: string,
+  options?: AgentToolExecutionOptions,
 ): Promise<readonly AgentToolResult[]> {
   return Promise.all(
     toolCalls.map((call, i) =>
-      executeAgentTool(call.tool, call.input, deps, `${baseRequestId}-p${i}`),
+      executeAgentTool(call.tool, call.input, deps, `${baseRequestId}-p${i}`, options),
     ),
   );
 }
@@ -464,6 +513,7 @@ async function executeAgentToolInner(
   input: Record<string, unknown>,
   deps: AgentToolDeps,
   requestId: string,
+  options?: AgentToolExecutionOptions,
 ): Promise<AgentToolResult> {
   switch (toolName) {
     case 'search_wines': {
@@ -501,12 +551,14 @@ async function executeAgentToolInner(
       let response = await deps.searchUseCase.execute(
         {
           query: enrichedQuery,
+          ...(parsed.limit !== undefined ? { limit: parsed.limit } : {}),
           ...(parsed.retrieval_mode !== undefined
             ? { options: { mode: parsed.retrieval_mode, explain: false, clarification: false } }
             : {}),
           ...(structuredFilters.length > 0 ? { filters: structuredFilters } : {}),
         },
         requestId,
+        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
       );
 
       if (response.queryType === 'comparison') {
@@ -698,12 +750,12 @@ async function executeAgentToolInner(
               ? `not yet at peak — hold until ${start}`
               : `past peak (window closed ${end})`;
           return {
-            observation: `${doc.canonicalLabel}: drinking window ${start}-${end}. As of ${targetYear}: ${statusLabel}.`,
+            observation: `${sanitizeObservationField(doc.canonicalLabel)}: drinking window ${start}-${end}. As of ${targetYear}: ${statusLabel}.`,
             rawResult: dw,
           };
         }
         return {
-          observation: `${doc.canonicalLabel}: no drinking window data available.`,
+          observation: `${sanitizeObservationField(doc.canonicalLabel)}: no drinking window data available.`,
           rawResult: null,
         };
       }
@@ -712,6 +764,7 @@ async function executeAgentToolInner(
       const searchResult = await deps.searchUseCase.execute(
         { query: parsed.entity_id, options: { mode: 'entity', explain: false, clarification: false } },
         requestId,
+        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
       );
       const firstResult = searchResult.queryType === 'search' ? searchResult.results[0] : undefined;
       if (firstResult === undefined) {
@@ -725,12 +778,12 @@ async function executeAgentToolInner(
             ? `not yet at peak — hold until ${dw.drinkingWindowStart}`
             : `past peak (window closed ${dw.drinkingWindowEnd})`;
         return {
-          observation: `${firstResult.entity.canonicalLabel}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}. As of ${targetYear}: ${statusLabelFallback}. Confidence: ${dw.confidence}`,
+          observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: drinking window ${dw.drinkingWindowStart}-${dw.drinkingWindowEnd}. As of ${targetYear}: ${statusLabelFallback}. Confidence: ${dw.confidence}`,
           rawResult: dw,
         };
       }
       return {
-        observation: `${firstResult.entity.canonicalLabel}: no drinking window data available.`,
+        observation: `${sanitizeObservationField(firstResult.entity.canonicalLabel)}: no drinking window data available.`,
         rawResult: null,
       };
     }
@@ -760,14 +813,18 @@ async function executeAgentToolInner(
         queryBase,
         budgetKrw !== undefined ? [`${budgetKrw}원 이하`] : [],
       );
-      const response = await deps.searchUseCase.execute({ query }, requestId);
+      const responseWithContext = await deps.searchUseCase.execute(
+        { query },
+        requestId,
+        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+      );
 
-      if (response.queryType !== 'search') {
-        return { observation: 'Unexpected response type for pairing search.', rawResult: response };
+      if (responseWithContext.queryType !== 'search') {
+        return { observation: 'Unexpected response type for pairing search.', rawResult: responseWithContext };
       }
       // Enrich with pairing context so the LLM gives a richer answer that
       // explains WHY each wine pairs with the food (not just "here are results").
-      const baseObs = summarizeSearchResults(response);
+      const baseObs = summarizeSearchResults(responseWithContext);
       const pairingHint = [
         '',
         `PAIRING_CONTEXT: These wines were matched for "${parsed.food}" pairing.`,
@@ -776,7 +833,7 @@ async function executeAgentToolInner(
       ].join('\n');
       return {
         observation: baseObs + pairingHint,
-        rawResult: response,
+        rawResult: responseWithContext,
       };
     }
 
@@ -788,6 +845,63 @@ async function executeAgentToolInner(
 // ---------------------------------------------------------------------------
 // Observation summarizers (compact for LLM context)
 // ---------------------------------------------------------------------------
+
+/**
+ * Indirect prompt-injection defense for tool observations (Spotlighting,
+ * Hines et al. 2024). Escapes instruction-look-alike tokens that could appear
+ * in wine database fields (label, producer, region, etc.) and attempt to
+ * hijack the LLM via role/system markers.
+ *
+ * The fields we sanitize are NOT user input — they come from the wine database
+ * — but they can be poisoned at the data layer (e.g., a malicious producer name
+ * in a scraped review). This is the "indirect prompt injection" attack vector
+ * (Greshake et al. 2023; OWASP LLM Top 10 2025 #1).
+ *
+ * Escape strategy:
+ *   1. ChatML role markers (<|im_start|>, <|im_end|>, <|system|>) — replace with [REDACTED_MARKER]
+ *   2. Square-bracket directives ([SYSTEM:, [INST:, [/INST]) — replace with safe form
+ *   3. XML-style instruction tags (<system>, <instructions>) — replace with [REDACTED]
+ *   4. Newlines that could break out of the pipe-delimited line format — replace with space
+ *
+ * The function preserves wine semantics (region names, producer names) while
+ * removing structural markers that the LLM treats as control tokens.
+ */
+/**
+ * Unicode bidi / invisible control characters that can reorder or hide injection
+ * text inside an otherwise innocuous-looking field. Greshake et al. 2023
+ * (indirect prompt injection) and OWASP LLM01 both flag bidi-override attacks.
+ * All these codepoints are stripped before any other sanitization.
+ */
+const BIDI_INVISIBLE_CHARS = /[\u202A-\u202E\u2066-\u2069\u200B-\u200F\uFEFF]/gu;
+
+function sanitizeObservationField(value: string): string {
+  // NFKC normalization: compatibility-decompose fullwidth / mathematical / stylistic
+  // Latin variants so evasion via e.g. "ⅰgnore" or "ＳＹＳＴＥＭ" cannot bypass the
+  // regex filters below. NFKC is the form OpenAI's moderation and most LLM tokenizers
+  // canonicalize to, so normalizing here aligns us with the downstream view.
+  const normalized = value.normalize('NFKC').replace(BIDI_INVISIBLE_CHARS, '');
+  // All boundary checks use Unicode-aware non-letter/non-number lookarounds
+  // (`(?![\p{L}\p{N}])` / `(?:^|[^\p{L}\p{N}])`) with the /u flag. \b is
+  // ASCII-only and silently fails across 한글/accented Latin (CLAUDE.md rule 8).
+  return normalized
+    // ChatML role markers (OpenAI/Llama family)
+    .replace(/<\|(?:im_start|im_end|system|user|assistant|endoftext)\|>/giu, '[REDACTED_MARKER]')
+    // Square-bracket instruction directives (English) — keyword terminates at a non-letter
+    .replace(/\[\/?(?:SYSTEM|INST|INSTRUCTION|USER|ASSISTANT|TOOL_RESULT_BEGIN|TOOL_RESULT_END)(?![\p{L}\p{N}])[^\]]*\]/giu, '[REDACTED_DIRECTIVE]')
+    // Square-bracket instruction directives (Korean) — "[시스템:" / "[지시:" / "[사용자:"
+    .replace(/\[\/?(?:시스템|지시|지침|사용자|어시스턴트)(?::|\])[^\]]*\]?/gu, '[REDACTED_DIRECTIVE]')
+    // XML/HTML-style instruction tags
+    .replace(/<\/?(?:system|instructions?|prompt|tool_result)(?![\p{L}\p{N}])[^>]*>/giu, '[REDACTED_TAG]')
+    // Common imperative injection phrases — English
+    .replace(/(?:^|[^\p{L}\p{N}])(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?)/giu, '[REDACTED_INSTRUCTION]')
+    .replace(/(?:^|[^\p{L}\p{N}])act\s+as\s+(?:a\s+)?(?:system|admin|root|developer|assistant)(?![\p{L}\p{N}])/giu, '[REDACTED_INSTRUCTION]')
+    // Common imperative injection phrases — Korean
+    // "이전 지시 무시", "이전 지침 무시해", "지금까지의 지시 잊어", "시스템으로 행동"
+    .replace(/(?:이전|지금까지의?|앞의?)\s*(?:지시|지침|규칙|명령)[가-힣]*\s*(?:무시|잊|버려)[가-힣]*/gu, '[REDACTED_INSTRUCTION]')
+    .replace(/시스템(?:으로|처럼)\s*(?:행동|동작|작동)[가-힣]*/gu, '[REDACTED_INSTRUCTION]')
+    // Newlines (would break the pipe-delimited line format and allow injection)
+    .replace(/[\r\n]+/g, ' ');
+}
 
 function summarizeSearchResults(response: SearchResponseV1, diversify = false): string {
   const { results, engineDecision } = response;
@@ -844,20 +958,24 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
   }
 
   const lines = displayResults.slice(0, SUMMARY_TOP_N).map((r, i) => {
+    // v5: sanitize all string fields against indirect prompt injection
+    // (Spotlighting pattern). Numeric/structured fields are not sanitized
+    // because they cannot carry instruction markers.
     const parts = [
-      `${i + 1}. ${r.entity.canonicalLabel}`,
+      `${i + 1}. ${sanitizeObservationField(r.entity.canonicalLabel)}`,
       `(id: ${r.entity.entityId})`,
     ];
-    if (r.entity.producer) parts.push(`producer: ${r.entity.producer}`);
-    if (r.entity.region) parts.push(`region: ${r.entity.region}`);
+    if (r.entity.producer) parts.push(`producer: ${sanitizeObservationField(r.entity.producer)}`);
+    if (r.entity.region) parts.push(`region: ${sanitizeObservationField(r.entity.region)}`);
     if (r.entity.vintage) parts.push(`vintage: ${r.entity.vintage}`);
-    // Grapes: helps agent verify negation constraints and give richer answers
     if (r.entity.grapes !== undefined && r.entity.grapes.length > 0) {
-      parts.push(`grapes: ${r.entity.grapes.slice(0, 3).join(', ')}`);
+      parts.push(`grapes: ${r.entity.grapes.slice(0, 3).map(sanitizeObservationField).join(', ')}`);
     }
-    // Price: agents need price context for budget recommendations
+    if (r.entity.style) parts.push(`style: ${sanitizeObservationField(r.entity.style)}`);
+    if (r.entity.criticScore !== undefined) parts.push(`critic: ${(r.entity.criticScore * 100).toFixed(0)}/100`);
+    if (r.entity.alcoholPct !== undefined) parts.push(`alc: ${r.entity.alcoholPct}%`);
     if (r.entity.priceRange !== undefined) {
-      parts.push(`price: ${r.entity.priceRange}`);
+      parts.push(`price: ${sanitizeObservationField(r.entity.priceRange)}`);
     }
     if (r.drinkingWindow) {
       parts.push(`drink: ${r.drinkingWindow.drinkingWindowStart}-${r.drinkingWindow.drinkingWindowEnd}`);
@@ -873,19 +991,23 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
   // unexpected backend responses with more entities to prevent context window bloat.
   const sides = response.entities.slice(0, 2).map((e) => {
     const top = e.topResult;
-    if (top === null) return `${e.subQuery}: no result (status: ${e.resolutionStatus})`;
+    if (top === null) return `${sanitizeObservationField(e.subQuery)}: no result (status: ${e.resolutionStatus})`;
+    // v5: sanitize all string fields against indirect prompt injection
     const parts = [
-      `${e.subQuery}: ${top.entity.canonicalLabel}`,
+      `${sanitizeObservationField(e.subQuery)}: ${sanitizeObservationField(top.entity.canonicalLabel)}`,
       `entity_id: ${top.entity.entityId}`,
     ];
-    if (top.entity.producer) parts.push(`producer: ${top.entity.producer}`);
-    if (top.entity.region) parts.push(`region: ${top.entity.region}`);
+    if (top.entity.producer) parts.push(`producer: ${sanitizeObservationField(top.entity.producer)}`);
+    if (top.entity.region) parts.push(`region: ${sanitizeObservationField(top.entity.region)}`);
     if (top.entity.vintage) parts.push(`vintage: ${top.entity.vintage}`);
     if (top.entity.grapes !== undefined && top.entity.grapes.length > 0) {
-      parts.push(`grapes: ${top.entity.grapes.slice(0, 3).join(', ')}`);
+      parts.push(`grapes: ${top.entity.grapes.slice(0, 3).map(sanitizeObservationField).join(', ')}`);
     }
+    if (top.entity.style) parts.push(`style: ${sanitizeObservationField(top.entity.style)}`);
+    if (top.entity.criticScore !== undefined) parts.push(`critic: ${(top.entity.criticScore * 100).toFixed(0)}/100`);
+    if (top.entity.alcoholPct !== undefined) parts.push(`alc: ${top.entity.alcoholPct}%`);
     if (top.entity.priceRange !== undefined) {
-      parts.push(`price: ${top.entity.priceRange}`);
+      parts.push(`price: ${sanitizeObservationField(top.entity.priceRange)}`);
     }
     if (top.drinkingWindow) {
       parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);

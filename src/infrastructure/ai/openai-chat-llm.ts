@@ -12,6 +12,7 @@ import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
+import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 
 /** Total fetch attempts (initial + retries) for transient OpenAI failures. */
 const OPENAI_CHAT_MAX_ATTEMPTS = 4;
@@ -28,6 +29,9 @@ const HTTP_STATUS_5XX_MAX_EXCLUSIVE = 600;
 const OPENAI_CHAT_HTTP_ERROR_PREVIEW_CHARS = 200;
 const OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS = 240;
 const MILLISECONDS_PER_SECOND = 1000;
+/** Jitter fraction added to server-mandated Retry-After: 25% of the retry delay.
+ *  Spreads retries from concurrent requests to prevent synchronized retry storms. */
+const RATE_LIMIT_JITTER_FRACTION = 0.25;
 
 export interface OpenAiChatLlmOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
@@ -52,9 +56,19 @@ interface ChatCompletionsChoice {
   readonly finish_reason: string | null;
 }
 
+interface ChatCompletionsUsage {
+  readonly prompt_tokens?: number;
+  readonly completion_tokens?: number;
+  readonly total_tokens?: number;
+  readonly prompt_tokens_details?: {
+    readonly cached_tokens?: number;
+  };
+}
+
 interface ChatCompletionsResponse {
   readonly model: string;
   readonly choices: readonly ChatCompletionsChoice[];
+  readonly usage?: ChatCompletionsUsage;
 }
 
 function isChatCompletionsResponse(v: unknown): v is ChatCompletionsResponse {
@@ -78,6 +92,17 @@ export class OpenAiChatLlm implements ChatLlmPort {
 
   async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
     const model = request.model ?? this.defaultModel;
+    return withGenAiSpan(
+      { system: 'openai', requestModel: model, operation: 'chat' },
+      (recordResponse) => this.completeInner(request, model, recordResponse),
+    );
+  }
+
+  private async completeInner(
+    request: ChatCompletionRequest,
+    model: string,
+    recordResponse: (resp: GenAiResponseAttributes) => void,
+  ): Promise<ChatCompletionResult> {
     const body: Record<string, unknown> = {
       model,
       messages: request.messages.map((m) => ({
@@ -158,16 +183,38 @@ export class OpenAiChatLlm implements ChatLlmPort {
         if (isTransient && attempt < OPENAI_CHAT_MAX_ATTEMPTS) {
           lastError = new Error(`OpenAI chat HTTP ${status}: ${text.slice(0, OPENAI_CHAT_HTTP_ERROR_PREVIEW_CHARS)}`);
           if (isRateLimit) {
-            // Parse Retry-After header (OpenAI sends integer seconds).
-            // Fall back to exponential: 2s, 4s, 8s, 16s (capped at 30s).
+            // v4 fix: 429 backoff uses jitter (not fixed sleep) to break
+            // synchronized retry storms across concurrent callers. TWO regimes:
+            //
+            // 1. Retry-After header present (server says "wait at least N seconds"):
+            //    Honor the floor strictly (sleep ≥ retry-after) and add a small
+            //    jitter on top to decorrelate retries. delay ∈ [retryAfterMs,
+            //    retryAfterMs + jitterMs] where jitterMs is bounded to 25% of base.
+            //    This preserves the contract (don't retry early) while still
+            //    decorrelating concurrent waiters.
+            //
+            // 2. No Retry-After: full exponential jitter ∈ [0, baseExpMs]. Pure
+            //    decorrelation, lets the TPM window recover at random times across
+            //    the calling pool.
             const retryAfterHeader = response.headers.get('Retry-After');
             const retryAfterSec = retryAfterHeader !== null ? parseFloat(retryAfterHeader) : NaN;
-            const delayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
-              ? Math.min(retryAfterSec * MILLISECONDS_PER_SECOND, OPENAI_CHAT_RATE_LIMIT_BACKOFF_CAP_MS)
-              : Math.min(
+            let delayMs: number;
+            if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
+              const retryAfterMs = Math.min(
+                retryAfterSec * MILLISECONDS_PER_SECOND,
+                OPENAI_CHAT_RATE_LIMIT_BACKOFF_CAP_MS,
+              );
+              // Server-mandated floor + small additive jitter (25% of mandate).
+              const jitterCeil = Math.floor(retryAfterMs * RATE_LIMIT_JITTER_FRACTION);
+              delayMs = retryAfterMs + Math.floor(Math.random() * jitterCeil);
+            } else {
+              const baseExpMs = Math.min(
                 OPENAI_CHAT_RATE_LIMIT_BACKOFF_BASE_MS * 2 ** (attempt - 1),
                 OPENAI_CHAT_RATE_LIMIT_BACKOFF_CAP_MS,
               );
+              // Full jitter — uniform in [0, baseExpMs].
+              delayMs = Math.floor(Math.random() * baseExpMs);
+            }
             await this.sleepFixed(delayMs, request.abortSignal);
           } else {
             await this.sleepWithJitter(
@@ -197,6 +244,26 @@ export class OpenAiChatLlm implements ChatLlmPort {
           : content == null
             ? ''
             : String(content);
+
+      // Record GenAI response attributes for the wrapping span (OTEL gen_ai.*)
+      const usage = data.usage;
+      recordResponse({
+        responseModel: data.model,
+        ...(choice?.finish_reason !== null && choice?.finish_reason !== undefined
+          ? { finishReason: choice.finish_reason }
+          : {}),
+        ...(usage !== undefined
+          ? {
+              usage: {
+                inputTokens: usage.prompt_tokens ?? 0,
+                outputTokens: usage.completion_tokens ?? 0,
+                ...(usage.prompt_tokens_details?.cached_tokens !== undefined
+                  ? { cachedInputTokens: usage.prompt_tokens_details.cached_tokens }
+                  : {}),
+              },
+            }
+          : {}),
+      });
 
       return {
         text,

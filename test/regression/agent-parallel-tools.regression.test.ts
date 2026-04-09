@@ -292,17 +292,16 @@ describe('executeAgentToolsBatch', () => {
 // Fix: obsSteps now checks both s.observation and s.observations[].
 
 describe('parallel batch observations count toward synthesis eligibility', () => {
-  it('parallel step with non-empty observations[] is counted as an obs step', () => {
-    // Simulate a step with parallel observations[] and verify it would be
+  it('parallel step with non-empty actionPairs is counted as an obs step', () => {
+    // Simulate a step with parallel actionPairs and verify it would be
     // selected by the corrected obsSteps filter.
     const parallelStep: AgentStep = {
       index: 0,
       thought: 'searched in parallel',
-      actions: [
-        { tool: 'search_wines', input: { query: 'Bordeaux' } },
-        { tool: 'get_food_pairings', input: { food: 'steak' } },
+      actionPairs: [
+        { action: { tool: 'search_wines', input: { query: 'Bordeaux' } }, observation: 'Found 5 results (showing top 5):\n1. Château Margaux' },
+        { action: { tool: 'get_food_pairings', input: { food: 'steak' } }, observation: 'Cabernet Sauvignon pairs well with steak.' },
       ],
-      observations: ['Found 5 results (showing top 5):\n1. Château Margaux', 'Cabernet Sauvignon pairs well with steak.'],
       durationMs: 150,
       tokenCount: { input: 20, output: 5 },
     };
@@ -312,7 +311,7 @@ describe('parallel batch observations count toward synthesis eligibility', () =>
     const obsSteps = steps.filter(
       (s) =>
         (s.observation !== undefined && s.observation.length > 0) ||
-        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
     );
 
     // The parallel step MUST be included in obsSteps — synthesis should fire.
@@ -320,12 +319,13 @@ describe('parallel batch observations count toward synthesis eligibility', () =>
     expect(obsSteps[0]).toBe(parallelStep);
   });
 
-  it('parallel step with empty observations[] is NOT counted as an obs step', () => {
+  it('parallel step with empty actionPairs observations is NOT counted as an obs step', () => {
     const emptyParallelStep: AgentStep = {
       index: 0,
       thought: 'searched but empty',
-      actions: [{ tool: 'search_wines', input: { query: 'xyz' } }],
-      observations: [''],
+      actionPairs: [
+        { action: { tool: 'search_wines', input: { query: 'xyz' } }, observation: '' },
+      ],
       durationMs: 50,
       tokenCount: { input: 5, output: 5 },
     };
@@ -334,7 +334,7 @@ describe('parallel batch observations count toward synthesis eligibility', () =>
     const obsSteps = steps.filter(
       (s) =>
         (s.observation !== undefined && s.observation.length > 0) ||
-        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
     );
 
     expect(obsSteps).toHaveLength(0);
@@ -352,8 +352,9 @@ describe('parallel batch observations count toward synthesis eligibility', () =>
     const parStep: AgentStep = {
       index: 1,
       thought: 'parallel',
-      actions: [{ tool: 'get_food_pairings', input: { food: 'duck' } }],
-      observations: ['Duck pairs with Pinot Noir.'],
+      actionPairs: [
+        { action: { tool: 'get_food_pairings', input: { food: 'duck' } }, observation: 'Duck pairs with Pinot Noir.' },
+      ],
       durationMs: 80,
       tokenCount: { input: 8, output: 4 },
     };
@@ -362,7 +363,7 @@ describe('parallel batch observations count toward synthesis eligibility', () =>
     const obsSteps = steps.filter(
       (s) =>
         (s.observation !== undefined && s.observation.length > 0) ||
-        (s.observations !== undefined && s.observations.some((o) => o.length > 0)),
+        (s.actionPairs !== undefined && s.actionPairs.some((p) => p.observation.length > 0)),
     );
 
     expect(obsSteps).toHaveLength(2);

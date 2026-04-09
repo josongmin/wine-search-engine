@@ -21,6 +21,10 @@ import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
+import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
+import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
+import { applyCompositionalInference } from '../../attribute/service/compositional-inference.js';
+import { resolveEntity, type ResolvedEntity } from '../../attribute/service/entity-resolver.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
@@ -60,10 +64,10 @@ const UNCERTAINTY_AMBIGUITY_OVERALL_BUMP = 0.15;
 const UNCERTAINTY_RAISE_THRESHOLD_OVERALL = 0.6;
 
 /** Vintage year pattern to detect explicit vintage specification. */
-const VINTAGE_YEAR_PATTERN = /(?<!\p{L}\p{N})(19|20)\d{2}(?!\p{L}\p{N})/u;
+const VINTAGE_YEAR_PATTERN = /(?<!\p{L})(?<!\p{N})(19|20)\d{2}(?!\p{L})(?!\p{N})/u;
 
 /** Producer catalog browse: "Château X best wines" (Epic 7, golden `producer_browse`). */
-const PRODUCER_BROWSE_QUERY_PATTERN = /(?<!\p{L}\p{N})(?:best|top|great|famous)\s+wines(?!\p{L}\p{N})/iu;
+const PRODUCER_BROWSE_QUERY_PATTERN = /(?<!\p{L})(?<!\p{N})(?:best|top|great|famous)\s+wines(?!\p{L})(?!\p{N})/iu;
 
 /** Region path: hierarchical "A / B / C" (Epic 7, golden `region_browse`). */
 function regionHierarchySlashCount(normalizedQuery: string): number {
@@ -72,8 +76,8 @@ function regionHierarchySlashCount(normalizedQuery: string): number {
 
 /** Region/location keywords for geographic entity detection. */
 const REGION_KEYWORDS: readonly RegExp[] = [
-  /(?<!\p{L}\p{N})(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)(?!\p{L}\p{N})/iu,
-  /(?<!\p{L}\p{N})(?:valley|region|appellation|aoc|doc|doca|côtes|côte)(?!\p{L}\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:napa|sonoma|bordeaux|burgundy|tuscany|champagne)(?!\p{L})(?!\p{N})/iu,
+  /(?<!\p{L})(?<!\p{N})(?:valley|region|appellation|aoc|doc|doca|côtes|côte)(?!\p{L})(?!\p{N})/iu,
   /(?:^|[^\p{L}\p{N}])(?:나파|샤블리|보르도|투지|롱글로|토스카나)(?=$|[^\p{L}\p{N}])/u,
   /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
@@ -457,11 +461,6 @@ export class Planner {
   ]);
 
   /**
-   * Maximum n-gram size (in whitespace-delimited tokens) to probe against
-   * the NL mapping table. Covers all known multi-word phrases.
-   */
-  private static readonly MAX_NGRAM_TOKENS = 3;
-
   /**
    * Parses constraints from the normalized query by scanning for known
    * natural-language phrases via the NLMapper.
@@ -503,22 +502,10 @@ export class Planner {
     readonly bundle: ConstraintBundle;
     readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   }> {
-    const tokens = normalizedQuery.split(/\s+/);
-    const candidatePhrases: string[] = [];
-
-    for (
-      let i = 0;
-      i < tokens.length;
-      i++
-    ) {
-      const maxEnd = Math.min(
-        tokens.length,
-        i + Planner.MAX_NGRAM_TOKENS,
-      );
-      for (let j = i + 1; j <= maxEnd; j++) {
-        candidatePhrases.push(tokens.slice(i, j).join(' '));
-      }
-    }
+    // RFC-019 Stage 1: Span-based parsing (replaces naive n-gram loop).
+    // Preserves character positions for downstream overlap resolution.
+    const spans = parseSpans(normalizedQuery);
+    const candidatePhrases = spans.map((s) => s.text);
 
     const mapped = await this.nlMapper.mapConstraints(
       candidatePhrases,
@@ -538,18 +525,67 @@ export class Planner {
       }
     }
 
+    // RFC-019 Stage 2: Entity Resolver fallback for spans the NLMapper missed.
+    // Resolves aliases (grape/region/country/wine_type) via the unified
+    // canonical registry. Applied only to spans NOT already covered by a
+    // NLMapper hit, preventing double-counting.
+    //
+    // Longest-match priority: resolveOverlaps ensures "cabernet sauvignon"
+    // wins over both "cabernet" and "sauvignon" when all three match.
+    const coveredPhrases = new Set(matched.map((c) => c.source_phrase.toLowerCase()));
+    const resolverCandidates: { span: Span; resolved: ResolvedEntity | null }[] = [];
+    for (const span of spans) {
+      if (coveredPhrases.has(span.text)) {
+        resolverCandidates.push({ span, resolved: null });
+        continue;
+      }
+      resolverCandidates.push({ span, resolved: resolveEntity(span.text) });
+    }
+    const resolvedNonOverlap = resolveOverlaps(resolverCandidates)
+      .filter((e): e is { span: Span; resolved: ResolvedEntity } => e.resolved !== null);
+
+    for (const { resolved } of resolvedNonOverlap) {
+      const constraint = {
+        attribute: resolved.entityType,
+        operator: '=' as const,
+        value: resolved.canonicalValue,
+        source_phrase: `entity_resolver(${resolved.matchedSurface})`,
+        confidence: resolved.confidence,
+        mapping_version: `entity-resolver-v1.0`,
+      };
+      if (Planner.SOFT_ATTRIBUTES.has(resolved.entityType)) {
+        soft.push(constraint);
+      } else {
+        hard.push(constraint);
+      }
+    }
+
     // RFC-005: When NLMapper returns nothing (e.g. noOpMappingTable in test
     // or cold-start configs), fall back to rule-based extraction so that
     // wine_type, country, and sensory constraints are never silently dropped.
     if (hard.length === 0 && soft.length === 0) {
+      const fallbackBundle = extractRuleBasedConstraints(normalizedQuery);
+      // RFC-019 Stage 3+5: Apply ontology expansion and compositional inference
+      // on the fallback bundle too, so inferred constraints are populated
+      // consistently across paths.
+      const expanded = applyCompositionalInference(expandWithOntology(fallbackBundle));
       return {
-        bundle: extractRuleBasedConstraints(normalizedQuery),
+        bundle: expanded,
         ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
       };
     }
 
+    // RFC-019 Stage 3: Ontology expansion — derive soft/inferred constraints
+    // from region/appellation ancestors (e.g. region=Pauillac → country=France).
+    const baseBundle: ConstraintBundle = { hard, soft, inferred: [] };
+    const expanded = expandWithOntology(baseBundle);
+
+    // RFC-019 Stage 5: Compositional inference — apply composition rules
+    // (region + wine_type → structure prior) to populate inferred bundle.
+    const finalBundle = applyCompositionalInference(expanded);
+
     return {
-      bundle: { hard, soft, inferred: [] },
+      bundle: finalBundle,
       ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
     };
   }
