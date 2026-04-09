@@ -876,39 +876,25 @@ export class Planner {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// RFC-019 Phase 3 helper functions (used by parseConstraints pipeline)
+// ─────────────────────────────────────────────────────────────────────
+
 function countBundleConstraints(bundle: ConstraintBundle): number {
   return bundle.hard.length + bundle.soft.length + bundle.inferred.length;
 }
 
-function constraintKey(constraint: NormalizedConstraint): string {
-  return `${constraint.attribute}|${constraint.operator}|${JSON.stringify(constraint.value)}`;
-}
-
 function mergeConstraintBundleIntoLists(
-  bundle: ConstraintBundle,
-  hard: ConstraintBundle['hard'][number][],
-  soft: ConstraintBundle['soft'][number][],
+  source: ConstraintBundle,
+  hard: NormalizedConstraint[],
+  soft: NormalizedConstraint[],
 ): number {
-  const existing = new Set<string>([
-    ...hard.map(constraintKey),
-    ...soft.map(constraintKey),
-  ]);
   let added = 0;
-  for (const constraint of bundle.hard) {
-    const key = constraintKey(constraint);
-    if (existing.has(key)) {
-      continue;
-    }
-    existing.add(key);
+  for (const constraint of source.hard) {
     hard.push(constraint);
     added++;
   }
-  for (const constraint of bundle.soft) {
-    const key = constraintKey(constraint);
-    if (existing.has(key)) {
-      continue;
-    }
-    existing.add(key);
+  for (const constraint of source.soft) {
     soft.push(constraint);
     added++;
   }
@@ -961,14 +947,6 @@ function spanKey(span: Span): string {
   return `${span.startChar}:${span.endChar}:${span.text}`;
 }
 
-function uniqueCoveredCategories(bundle: ConstraintBundle): readonly string[] {
-  const categories = new Set<string>();
-  for (const constraint of [...bundle.hard, ...bundle.soft, ...bundle.inferred]) {
-    categories.add(constraint.attribute);
-  }
-  return [...categories].sort((left, right) => left.localeCompare(right));
-}
-
 function buildPlannerConstraintExtractionTrace(args: {
   readonly baseTrace?: ConstraintExtractionTrace | undefined;
   readonly spans: readonly Span[];
@@ -981,49 +959,24 @@ function buildPlannerConstraintExtractionTrace(args: {
   readonly unresolvedSpanCount: number;
   readonly unresolvedSpanSamples: readonly string[];
 }): ConstraintExtractionTrace | undefined {
-  const {
-    baseTrace,
-    spans,
-    matched,
-    resolvedEntityCount,
-    finalBundle,
-    ontologyAddedCount,
-    compositionalAddedCount,
-    tier6ConstraintCount,
-    unresolvedSpanCount,
-    unresolvedSpanSamples,
-  } = args;
-  if (baseTrace === undefined) {
-    return undefined;
-  }
-
-  const llmLinkedEntityCount = baseTrace.llmLinkedEntityCount ?? 0;
-  const source: ConstraintExtractionTrace['source'] =
-    resolvedEntityCount > 0 && (baseTrace.llmHitCount > 0 || llmLinkedEntityCount > 0)
-      ? 'resolver_plus_llm'
-      : resolvedEntityCount > 0
-        ? 'resolver'
-        : baseTrace.source;
-
+  const base = args.baseTrace;
+  if (base === undefined) return undefined;
   return {
-    ...baseTrace,
-    source,
-    candidateSpanCount: spans.length,
-    resolvedEntityCount,
-    directHardConstraintCount: matched.filter((constraint) =>
-      !SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)).length + resolvedEntityCount,
-    ontologyExpandedConstraintCount: ontologyAddedCount,
-    compositionalInferenceCount: compositionalAddedCount,
-    phrasesByTier: {
-      tier1_default_mapping: baseTrace.ruleTableHitCount,
-      tier2_entity_resolver: resolvedEntityCount,
-      tier3_ontology_expansion: ontologyAddedCount,
-      tier4_compositional_inference: compositionalAddedCount,
-      tier5_llm_linker: llmLinkedEntityCount,
-      tier6_regex_fallback: tier6ConstraintCount,
-      unmapped: unresolvedSpanCount,
-    },
-    categoriesCovered: uniqueCoveredCategories(finalBundle),
-    unresolvedSpanSamples,
+    ...base,
+    candidateSpanCount: args.spans.length,
+    resolvedEntityCount: args.resolvedEntityCount,
+    directHardConstraintCount: args.finalBundle.hard.length,
+    ontologyExpandedConstraintCount: args.ontologyAddedCount,
+    compositionalInferenceCount: args.compositionalAddedCount,
+    unresolvedSpanSamples: args.unresolvedSpanSamples,
+    categoriesCovered: uniqueCoveredCategories(args.finalBundle),
   };
+}
+
+function uniqueCoveredCategories(bundle: ConstraintBundle): readonly string[] {
+  const categories = new Set<string>();
+  for (const constraint of [...bundle.hard, ...bundle.soft, ...bundle.inferred]) {
+    categories.add(constraint.attribute);
+  }
+  return [...categories].sort((left, right) => left.localeCompare(right));
 }

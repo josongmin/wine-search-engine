@@ -1,7 +1,7 @@
 {
   "version": "ontology-snapshot-v1.0",
-  "generatedAt": "2026-04-09T09:20:06.624Z",
-  "mappingCount": 197,
+  "generatedAt": "2026-04-09T10:18:21.639Z",
+  "mappingCount": 205,
   "mappings": [
     {
       "surface": "abruzzo",
@@ -120,7 +120,7 @@
     {
       "surface": "brunello di montalcino",
       "entityId": "appellation:brunello di montalcino",
-      "canonical": "Brunello Di Montalcino",
+      "canonical": "Brunello di Montalcino",
       "entityType": "appellation"
     },
     {
@@ -276,13 +276,13 @@
     {
       "surface": "côte de beaune",
       "entityId": "region:côte de beaune",
-      "canonical": "Côte De Beaune",
+      "canonical": "Côte de Beaune",
       "entityType": "region"
     },
     {
       "surface": "côte de nuits",
       "entityId": "region:côte de nuits",
-      "canonical": "Côte De Nuits",
+      "canonical": "Côte de Nuits",
       "entityType": "region"
     },
     {
@@ -294,7 +294,7 @@
     {
       "surface": "côtes du rhône",
       "entityId": "region:côtes du rhône",
-      "canonical": "Côtes Du Rhône",
+      "canonical": "Côtes du Rhône",
       "entityType": "region"
     },
     {
@@ -774,7 +774,7 @@
     {
       "surface": "ribera del duero",
       "entityId": "region:ribera del duero",
-      "canonical": "Ribera Del Duero",
+      "canonical": "Ribera del Duero",
       "entityType": "region"
     },
     {
@@ -1060,6 +1060,30 @@
       "entityType": "region"
     },
     {
+      "surface": "남아공",
+      "entityId": "country:south africa",
+      "canonical": "South Africa",
+      "entityType": "country"
+    },
+    {
+      "surface": "남아프리카",
+      "entityId": "country:south africa",
+      "canonical": "South Africa",
+      "entityType": "country"
+    },
+    {
+      "surface": "뉴질랜드",
+      "entityId": "country:new zealand",
+      "canonical": "New Zealand",
+      "entityType": "country"
+    },
+    {
+      "surface": "독일",
+      "entityId": "country:germany",
+      "canonical": "Germany",
+      "entityType": "country"
+    },
+    {
       "surface": "디저트",
       "entityId": "wine_type:dessert",
       "canonical": "dessert",
@@ -1102,6 +1126,12 @@
       "entityType": "region"
     },
     {
+      "surface": "미국",
+      "entityId": "country:united states",
+      "canonical": "United States",
+      "entityType": "country"
+    },
+    {
       "surface": "바롤로",
       "entityId": "appellation:barolo",
       "canonical": "Barolo",
@@ -1122,7 +1152,7 @@
     {
       "surface": "브루넬로",
       "entityId": "appellation:brunello di montalcino",
-      "canonical": "Brunello Di Montalcino",
+      "canonical": "Brunello di Montalcino",
       "entityType": "appellation"
     },
     {
@@ -1136,6 +1166,18 @@
       "entityId": "wine_type:sparkling",
       "canonical": "sparkling",
       "entityType": "wine_type"
+    },
+    {
+      "surface": "스페인",
+      "entityId": "country:spain",
+      "canonical": "Spain",
+      "entityType": "country"
+    },
+    {
+      "surface": "아르헨티나",
+      "entityId": "country:argentina",
+      "canonical": "Argentina",
+      "entityType": "country"
     },
     {
       "surface": "이탈리아",
@@ -1160,6 +1202,12 @@
       "entityId": "region:tuscany",
       "canonical": "Tuscany",
       "entityType": "region"
+    },
+    {
+      "surface": "포르투갈",
+      "entityId": "country:portugal",
+      "canonical": "Portugal",
+      "entityType": "country"
     },
     {
       "surface": "포트",

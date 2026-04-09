@@ -268,6 +268,19 @@ describe('ExecutionCompiler', () => {
     expect(result.query.constraintExtraction).toEqual(extraction);
   });
 
+  it('forwards plan.retrievalPlan onto compiled.query', () => {
+    const retrievalPlan = {
+      hardFilterTokens: ['region:Bordeaux'],
+      softBoosts: [],
+      inferredBoosts: [],
+      sensoryPriors: [],
+      planVersion: 'retrieval-plan-v1.0',
+    };
+    const plan = { ...makeMinimalPlan(), retrievalPlan };
+    const result = compiler.compile({ plan });
+    expect(result.query.retrievalPlan).toEqual(retrievalPlan);
+  });
+
   // Extra: attribute_search has correct budget defaults
   it('sets correct defaults for attribute_search mode', () => {
     const plan = makeMinimalPlan({

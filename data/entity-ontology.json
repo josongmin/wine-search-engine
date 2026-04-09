@@ -1,6 +1,6 @@
 {
   "version": "ontology-snapshot-v1.0",
-  "generatedAt": "2026-04-09T09:19:56.452Z",
+  "generatedAt": "2026-04-09T10:18:16.175Z",
   "nodes": [
     {
       "id": "appellation:barbaresco",
@@ -29,9 +29,9 @@
     {
       "id": "appellation:brunello di montalcino",
       "entityType": "appellation",
-      "canonicalLabel": "Brunello Di Montalcino",
+      "canonicalLabel": "Brunello di Montalcino",
       "aliases": [
-        "Brunello Di Montalcino"
+        "Brunello di Montalcino"
       ],
       "parents": [
         "Tuscany",
@@ -552,7 +552,7 @@
         "Chambolle-musigny"
       ],
       "parents": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ]
@@ -576,7 +576,7 @@
         "Chassagne-montrachet"
       ],
       "parents": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ]
@@ -656,9 +656,9 @@
     {
       "id": "region:côte de beaune",
       "entityType": "region",
-      "canonicalLabel": "Côte De Beaune",
+      "canonicalLabel": "Côte de Beaune",
       "aliases": [
-        "Côte De Beaune"
+        "Côte de Beaune"
       ],
       "parents": [
         "Burgundy",
@@ -668,9 +668,9 @@
     {
       "id": "region:côte de nuits",
       "entityType": "region",
-      "canonicalLabel": "Côte De Nuits",
+      "canonicalLabel": "Côte de Nuits",
       "aliases": [
-        "Côte De Nuits"
+        "Côte de Nuits"
       ],
       "parents": [
         "Burgundy",
@@ -693,9 +693,9 @@
     {
       "id": "region:côtes du rhône",
       "entityType": "region",
-      "canonicalLabel": "Côtes Du Rhône",
+      "canonicalLabel": "Côtes du Rhône",
       "aliases": [
-        "Côtes Du Rhône"
+        "Côtes du Rhône"
       ],
       "parents": [
         "Rhône Valley",
@@ -757,7 +757,7 @@
         "Gevrey-chambertin"
       ],
       "parents": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ]
@@ -947,7 +947,7 @@
         "Meursault"
       ],
       "parents": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ]
@@ -960,7 +960,7 @@
         "Morey-saint-denis"
       ],
       "parents": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ]
@@ -1020,7 +1020,7 @@
         "Nuits-saint-georges"
       ],
       "parents": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ]
@@ -1126,7 +1126,7 @@
         "Pommard"
       ],
       "parents": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ]
@@ -1174,7 +1174,7 @@
         "Puligny-montrachet"
       ],
       "parents": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ]
@@ -1227,9 +1227,9 @@
     {
       "id": "region:ribera del duero",
       "entityType": "region",
-      "canonicalLabel": "Ribera Del Duero",
+      "canonicalLabel": "Ribera del Duero",
       "aliases": [
-        "Ribera Del Duero"
+        "Ribera del Duero"
       ],
       "parents": [
         "Spain"
@@ -1479,7 +1479,7 @@
         "Volnay"
       ],
       "parents": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ]
@@ -1492,7 +1492,7 @@
         "Vosne-romanée"
       ],
       "parents": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ]
@@ -1636,14 +1636,14 @@
     "appellation:brunello di montalcino": {
       "id": "appellation:brunello di montalcino",
       "type": "appellation",
-      "canonical": "Brunello Di Montalcino",
+      "canonical": "Brunello di Montalcino",
       "parent": "Tuscany",
       "hierarchy": [
         "Tuscany",
         "Italy"
       ],
       "aliases": [
-        "Brunello Di Montalcino",
+        "Brunello di Montalcino",
         "브루넬로"
       ]
     },
@@ -1724,7 +1724,8 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "Argentina"
+        "Argentina",
+        "아르헨티나"
       ]
     },
     "country:australia": {
@@ -1767,7 +1768,8 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "Germany"
+        "Germany",
+        "독일"
       ]
     },
     "country:italy": {
@@ -1788,7 +1790,8 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "New Zealand"
+        "New Zealand",
+        "뉴질랜드"
       ]
     },
     "country:portugal": {
@@ -1798,7 +1801,8 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "Portugal"
+        "Portugal",
+        "포르투갈"
       ]
     },
     "country:south africa": {
@@ -1808,7 +1812,9 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "South Africa"
+        "South Africa",
+        "남아공",
+        "남아프리카"
       ]
     },
     "country:spain": {
@@ -1818,7 +1824,8 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "Spain"
+        "Spain",
+        "스페인"
       ]
     },
     "country:united states": {
@@ -1828,7 +1835,8 @@
       "parent": null,
       "hierarchy": [],
       "aliases": [
-        "United States"
+        "United States",
+        "미국"
       ]
     },
     "grape_primary:albariño": {
@@ -2212,9 +2220,9 @@
       "id": "region:chambolle-musigny",
       "type": "region",
       "canonical": "Chambolle-musigny",
-      "parent": "Côte De Nuits",
+      "parent": "Côte de Nuits",
       "hierarchy": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ],
@@ -2239,9 +2247,9 @@
       "id": "region:chassagne-montrachet",
       "type": "region",
       "canonical": "Chassagne-montrachet",
-      "parent": "Côte De Beaune",
+      "parent": "Côte de Beaune",
       "hierarchy": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ],
@@ -2330,27 +2338,27 @@
     "region:côte de beaune": {
       "id": "region:côte de beaune",
       "type": "region",
-      "canonical": "Côte De Beaune",
+      "canonical": "Côte de Beaune",
       "parent": "Burgundy",
       "hierarchy": [
         "Burgundy",
         "France"
       ],
       "aliases": [
-        "Côte De Beaune"
+        "Côte de Beaune"
       ]
     },
     "region:côte de nuits": {
       "id": "region:côte de nuits",
       "type": "region",
-      "canonical": "Côte De Nuits",
+      "canonical": "Côte de Nuits",
       "parent": "Burgundy",
       "hierarchy": [
         "Burgundy",
         "France"
       ],
       "aliases": [
-        "Côte De Nuits"
+        "Côte de Nuits"
       ]
     },
     "region:côte-rôtie": {
@@ -2370,14 +2378,14 @@
     "region:côtes du rhône": {
       "id": "region:côtes du rhône",
       "type": "region",
-      "canonical": "Côtes Du Rhône",
+      "canonical": "Côtes du Rhône",
       "parent": "Rhône Valley",
       "hierarchy": [
         "Rhône Valley",
         "France"
       ],
       "aliases": [
-        "Côtes Du Rhône"
+        "Côtes du Rhône"
       ]
     },
     "region:crozes-hermitage": {
@@ -2435,9 +2443,9 @@
       "id": "region:gevrey-chambertin",
       "type": "region",
       "canonical": "Gevrey-chambertin",
-      "parent": "Côte De Nuits",
+      "parent": "Côte de Nuits",
       "hierarchy": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ],
@@ -2643,9 +2651,9 @@
       "id": "region:meursault",
       "type": "region",
       "canonical": "Meursault",
-      "parent": "Côte De Beaune",
+      "parent": "Côte de Beaune",
       "hierarchy": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ],
@@ -2657,9 +2665,9 @@
       "id": "region:morey-saint-denis",
       "type": "region",
       "canonical": "Morey-saint-denis",
-      "parent": "Côte De Nuits",
+      "parent": "Côte de Nuits",
       "hierarchy": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ],
@@ -2725,9 +2733,9 @@
       "id": "region:nuits-saint-georges",
       "type": "region",
       "canonical": "Nuits-saint-georges",
-      "parent": "Côte De Nuits",
+      "parent": "Côte de Nuits",
       "hierarchy": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ],
@@ -2840,9 +2848,9 @@
       "id": "region:pommard",
       "type": "region",
       "canonical": "Pommard",
-      "parent": "Côte De Beaune",
+      "parent": "Côte de Beaune",
       "hierarchy": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ],
@@ -2892,9 +2900,9 @@
       "id": "region:puligny-montrachet",
       "type": "region",
       "canonical": "Puligny-montrachet",
-      "parent": "Côte De Beaune",
+      "parent": "Côte de Beaune",
       "hierarchy": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ],
@@ -2954,13 +2962,13 @@
     "region:ribera del duero": {
       "id": "region:ribera del duero",
       "type": "region",
-      "canonical": "Ribera Del Duero",
+      "canonical": "Ribera del Duero",
       "parent": "Spain",
       "hierarchy": [
         "Spain"
       ],
       "aliases": [
-        "Ribera Del Duero"
+        "Ribera del Duero"
       ]
     },
     "region:rioja": {
@@ -3225,9 +3233,9 @@
       "id": "region:volnay",
       "type": "region",
       "canonical": "Volnay",
-      "parent": "Côte De Beaune",
+      "parent": "Côte de Beaune",
       "hierarchy": [
-        "Côte De Beaune",
+        "Côte de Beaune",
         "Burgundy",
         "France"
       ],
@@ -3239,9 +3247,9 @@
       "id": "region:vosne-romanée",
       "type": "region",
       "canonical": "Vosne-romanée",
-      "parent": "Côte De Nuits",
+      "parent": "Côte de Nuits",
       "hierarchy": [
-        "Côte De Nuits",
+        "Côte de Nuits",
         "Burgundy",
         "France"
       ],
@@ -3379,18 +3387,18 @@
     "Graves": "Bordeaux",
     "Sauternes": "Bordeaux",
     "Bordeaux": "France",
-    "Gevrey-chambertin": "Côte De Nuits",
-    "Chambolle-musigny": "Côte De Nuits",
-    "Vosne-romanée": "Côte De Nuits",
-    "Nuits-saint-georges": "Côte De Nuits",
-    "Morey-saint-denis": "Côte De Nuits",
-    "Côte De Nuits": "Burgundy",
-    "Pommard": "Côte De Beaune",
-    "Volnay": "Côte De Beaune",
-    "Meursault": "Côte De Beaune",
-    "Puligny-montrachet": "Côte De Beaune",
-    "Chassagne-montrachet": "Côte De Beaune",
-    "Côte De Beaune": "Burgundy",
+    "Gevrey-chambertin": "Côte de Nuits",
+    "Chambolle-musigny": "Côte de Nuits",
+    "Vosne-romanée": "Côte de Nuits",
+    "Nuits-saint-georges": "Côte de Nuits",
+    "Morey-saint-denis": "Côte de Nuits",
+    "Côte de Nuits": "Burgundy",
+    "Pommard": "Côte de Beaune",
+    "Volnay": "Côte de Beaune",
+    "Meursault": "Côte de Beaune",
+    "Puligny-montrachet": "Côte de Beaune",
+    "Chassagne-montrachet": "Côte de Beaune",
+    "Côte de Beaune": "Burgundy",
     "Chablis": "Burgundy",
     "Burgundy": "France",
     "Bourgogne": "France",
@@ -3403,7 +3411,7 @@
     "Gigondas": "Southern Rhône",
     "Southern Rhône": "Rhône Valley",
     "Rhône Valley": "France",
-    "Côtes Du Rhône": "Rhône Valley",
+    "Côtes du Rhône": "Rhône Valley",
     "Champagne": "France",
     "Alsace": "France",
     "Loire": "France",
@@ -3417,7 +3425,7 @@
     "Langhe": "Piedmont",
     "Piedmont": "Italy",
     "Piemonte": "Italy",
-    "Brunello Di Montalcino": "Tuscany",
+    "Brunello di Montalcino": "Tuscany",
     "Chianti": "Tuscany",
     "Chianti Classico": "Chianti",
     "Bolgheri": "Tuscany",
@@ -3431,7 +3439,7 @@
     "Sicily": "Italy",
     "Abruzzo": "Italy",
     "Rioja": "Spain",
-    "Ribera Del Duero": "Spain",
+    "Ribera del Duero": "Spain",
     "Priorat": "Catalonia",
     "Penedès": "Catalonia",
     "Catalonia": "Spain",

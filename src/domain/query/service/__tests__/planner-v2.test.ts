@@ -237,6 +237,43 @@ describe('planV2ToUnderstandingSnapshot', () => {
     expect(snapshot.constraintExtraction).toEqual(extraction);
   });
 
+  it('forwards retrievalPlan from QueryPlanV2 onto the snapshot', () => {
+    const retrievalPlan = {
+      hardFilterTokens: ['region:Bordeaux'],
+      softBoosts: [],
+      inferredBoosts: [],
+      sensoryPriors: [],
+      planVersion: 'retrieval-plan-v1.0',
+    };
+    const plan: QueryPlanV2 = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      intent: 'semantic_discovery',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.9,
+        anchorConfidence: 0,
+        constraintConfidence: 0.5,
+      },
+      queryClass: 'semantic_preference',
+      plannerVersion: '1.0.0',
+      policyRuleVersion: '1.0.0',
+      thresholdProfileId: 'default',
+      suggestedRoute: 'hybrid',
+      suggestedRetrievalMode: 'attribute_search',
+      retrievalPlan,
+    };
+    const snapshot = planV2ToUnderstandingSnapshot(plan);
+    expect(snapshot.retrievalPlan).toEqual(retrievalPlan);
+  });
+
   it('snapshot does NOT include suggestedRoute, suggestedRetrievalMode, or admission_context', () => {
     const plan: QueryPlanV2 = {
       rawQuery: 'test',

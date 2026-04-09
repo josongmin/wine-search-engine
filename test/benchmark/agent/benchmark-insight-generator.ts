@@ -66,6 +66,15 @@ const THRESHOLDS = {
   meanHardConstraints: { good: 2.5, warn: 1.5 },
 } as const;
 
+/** ELA near-target band lower bound: warn-level floor up to the TAC-KBP good target. */
+const ELA_NEAR_TARGET_LOWER_BOUND = THRESHOLDS.ela1.warn;
+/** SCR inferred must not collapse below this floor, otherwise compositional rules likely not firing. */
+const SCR_INFERRED_LOWER_BOUND = 0.20;
+/** Minimum annotated scenarios required for stable SCR/ELA/Slot-F1 interpretation. */
+const MIN_ANNOTATION_SAMPLES = 10;
+/** Need enough worst-scenario samples before claiming judge variance patterns. */
+const MIN_SCENARIOS_FOR_VARIANCE = 5;
+
 const DETERMINISTIC_RULES: readonly InsightRule[] = [
   // ── Overall health ──
   {
