@@ -34,6 +34,7 @@ import { SliceEvaluator, type FlaggedSlice } from './slice-evaluator.js';
 import { SelectivePredictor } from './selective-predictor.js';
 import { CalibrationEvaluator } from './calibration-evaluator.js';
 import { EvidenceAuditor } from './evidence-auditor.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * E5-U1: Eval Feature Delta List
@@ -266,9 +267,12 @@ export class EvalRunner {
       try {
         result = await this.evaluateCase(evalCase);
       } catch (err) {
-        console.error(
-          `[EvalRunner] case ${evalCase.caseId} threw — recording as error result:`,
-          err,
+        bootstrapLogger.error(
+          {
+            err,
+            caseId: evalCase.caseId,
+          },
+          '[EvalRunner] case threw; recording as error result',
         );
         result = this.buildErrorResult(evalCase);
       }

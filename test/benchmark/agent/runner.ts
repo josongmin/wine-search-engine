@@ -445,7 +445,7 @@ async function runWithConcurrency<T, R>(
     while (true) {
       const i = queue.shift();
       if (i === undefined) break;
-      results[i] = await fn(items[i] as T, i);
+      results[i] = await fn(items[i]!, i);
     }
   });
   await Promise.all(workers);
@@ -1671,6 +1671,7 @@ async function main(): Promise<void> {
       const openaiKey = process.env['OPENAI_API_KEY'];
       if (openaiKey !== undefined && openaiKey.length > 0) {
         insightLlm = new OpenAiChatLlm({
+          baseUrl: process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1',
           apiKey: openaiKey,
           defaultModel: 'gpt-5.4-mini',
           httpTimeoutMs: 30_000,

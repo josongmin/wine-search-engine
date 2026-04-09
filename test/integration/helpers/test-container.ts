@@ -234,7 +234,14 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
   };
 
   // Use cases — same DecomposedSearchAdapter cycle as production container-usecases.
-  const decomposedAdapter = new DecomposedSearchAdapter();
+  const decomposedRef: { impl?: DecomposedSearchUseCase } = {};
+  const decomposedAdapter = new DecomposedSearchAdapter(() => {
+    const impl = decomposedRef.impl;
+    if (impl === undefined) {
+      throw new Error('[DecomposedSearchAdapter] wiring incomplete — impl not set');
+    }
+    return impl;
+  });
 
   const searchUseCase = new SearchUseCase({
     queryPlanner,
@@ -254,8 +261,8 @@ export function createTestContainer(options: TestContainerOptions = {}): TestCon
     ...(options.drinkingWindowPredictor !== undefined ? { drinkingWindow: drinkingWindowUseCase } : {}),
   });
 
-  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  decomposedAdapter.setDelegate(decomposedSearchUseCase);
+  decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
+  const decomposedSearchUseCase = decomposedRef.impl;
   const batchSearchUseCase = new BatchSearchUseCase(searchUseCase);
 
   const replayUseCase = new ReplayUseCase({

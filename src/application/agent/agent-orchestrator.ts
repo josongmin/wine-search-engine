@@ -241,7 +241,11 @@ function parseLlmOutput(text: string): LlmAction {
     }
 
     // Single tool call (sequential)
-    const action = parsed['action'] as Record<string, unknown> | undefined;
+    const rawAction = parsed['action'];
+    const action =
+      typeof rawAction === 'object' && rawAction !== null && !Array.isArray(rawAction)
+        ? (rawAction as Record<string, unknown>)
+        : undefined;
     if (action !== undefined && typeof action['tool'] === 'string' && action['tool'].length > 0) {
       const input =
         typeof action['input'] === 'object' && action['input'] !== null
@@ -1081,7 +1085,7 @@ export class AgentOrchestrator {
           `${requestId}-fallback`,
           { abortSignal: fallbackController.signal },
         );
-        const topResult = fallbackResult.queryType === 'search' ? fallbackResult.results[0] : undefined;
+        const topResult = fallbackResult.queryType === 'search' ? fallbackResult.results.at(0) : undefined;
         if (topResult !== undefined) {
           const producer = topResult.entity.producer ?? '';
           const region = topResult.entity.region ?? '';

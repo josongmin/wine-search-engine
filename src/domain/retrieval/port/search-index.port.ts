@@ -201,6 +201,14 @@ export interface SearchIndexPort {
   getDocument(entityId: EntityId): Promise<RetrievalDocument | null>;
 
   /**
+   * Retrieve multiple documents by entity IDs.
+   *
+   * Returned map contains only found documents; missing IDs are omitted.
+   * Implementations should prefer backend-native batching over N single fetches.
+   */
+  getDocuments?(entityIds: readonly EntityId[]): Promise<ReadonlyMap<EntityId, RetrievalDocument>>;
+
+  /**
    * Insert or update a single document in the index.
    *
    * @param doc - The document to upsert.

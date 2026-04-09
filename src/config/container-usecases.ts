@@ -43,8 +43,14 @@ export function buildUseCaseContainerServices(
 
   // T1.3b: Use DecomposedSearchAdapter to break the circular dependency.
   // SearchUseCase needs decomposedSearch; DecomposedSearchUseCase needs SearchUseCase.
-  // The adapter holds a delegate ref that is set after both are constructed.
-  const decomposedAdapter = new DecomposedSearchAdapter();
+  const decomposedRef: { impl?: DecomposedSearchUseCase } = {};
+  const decomposedAdapter = new DecomposedSearchAdapter(() => {
+    const impl = decomposedRef.impl;
+    if (impl === undefined) {
+      throw new Error('[DecomposedSearchAdapter] wiring incomplete — impl not set');
+    }
+    return impl;
+  });
 
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
@@ -70,8 +76,8 @@ export function buildUseCaseContainerServices(
     decomposedSearch: decomposedAdapter,
   });
 
-  const decomposedSearchUseCase = new DecomposedSearchUseCase(searchUseCase);
-  decomposedAdapter.setDelegate(decomposedSearchUseCase);
+  decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
+  const decomposedSearchUseCase = decomposedRef.impl;
 
   return {
     searchUseCase,

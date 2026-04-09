@@ -12,6 +12,7 @@
  */
 
 import crypto from 'node:crypto';
+import { KRW_PER_MAN_WON, KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import type { ExtractedClaim, ClaimCategory, WineField } from '../model/claim.js';
 import { resolveGrapeAlias, normalizeWineType } from './wine-ontology.js';
 
@@ -265,18 +266,15 @@ function extractVintageClaims(text: string): ExtractedClaim[] {
 
 function extractPriceClaims(text: string): ExtractedClaim[] {
   const claims: ExtractedClaim[] = [];
-  const MAN_WON = 10000;
-  const USD_TO_KRW = 1350;
-
   for (const m of text.matchAll(PRICE_MAN_WON_RE)) {
     const krw = Number(m[1]);
     if (!Number.isFinite(krw)) continue;
-    claims.push(makeClaim('core_structured_claim', 'price_usd', (krw * MAN_WON / USD_TO_KRW).toFixed(2), m[0]));
+    claims.push(makeClaim('core_structured_claim', 'price_usd', (krw * KRW_PER_MAN_WON / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
   }
   for (const m of text.matchAll(PRICE_PLAIN_WON_RE)) {
     const krw = Number(m[1]!.replace(/,/g, ''));
     if (!Number.isFinite(krw)) continue;
-    claims.push(makeClaim('core_structured_claim', 'price_usd', (krw / USD_TO_KRW).toFixed(2), m[0]));
+    claims.push(makeClaim('core_structured_claim', 'price_usd', (krw / KRW_PER_USD_APPROXIMATE).toFixed(2), m[0]));
   }
   for (const m of text.matchAll(PRICE_USD_RE)) {
     claims.push(makeClaim('core_structured_claim', 'price_usd', m[1]!, m[0]));

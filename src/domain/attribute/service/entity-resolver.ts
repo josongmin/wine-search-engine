@@ -27,6 +27,8 @@ import {
 } from '../../evaluation/service/wine-ontology.js';
 import { listDefaultEntityAliasMappings } from './nl-mapper.js';
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
+import type { FuzzyMatcherPort } from '../../query/port/fuzzy-matcher.port.js';
+import { wineTitleCase } from '../../shared/utils/title-case.js';
 
 export type EntityType =
   | 'wine_type'
@@ -47,6 +49,11 @@ const CONFIDENCE_REGION = 0.9;
 /** Grape aliases — lowest auto tier (short names can be ambiguous). */
 const CONFIDENCE_GRAPE = 0.88;
 
+/** Minimum combinedScore from FuzzyMatcher to consider a fuzzy fallback hit. */
+const FUZZY_MIN_CONFIDENCE = 0.7;
+/** Discount applied to fuzzy matches relative to exact matches. */
+const FUZZY_CONFIDENCE_DISCOUNT = 0.85;
+
 export interface ResolvedEntity {
   /** Resolved canonical display label (e.g. 'Bordeaux', 'Cabernet Sauvignon'). */
   readonly canonicalValue: string;
@@ -62,7 +69,8 @@ export interface ResolvedEntity {
     | 'wine_type_aliases'
     | 'region_parents'
     | 'country_derived'
-    | 'nl_mapper_defaults';
+    | 'nl_mapper_defaults'
+    | 'fuzzy_fallback';
 }
 
 const RESOLVER_VERSION = 'entity-resolver-v1.0';
@@ -120,7 +128,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
   for (const country of discoveredCountries) {
     const lower = country.toLowerCase();
     register(lower, {
-      canonicalValue: titleCase(country),
+      canonicalValue: wineTitleCase(country),
       entityType: 'country',
       confidence: CONFIDENCE_COUNTRY_DERIVED,
       provenance: 'country_derived',
@@ -135,7 +143,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
     const lower = regionKey.toLowerCase();
     if (discoveredCountries.has(lower)) continue;
     register(lower, {
-      canonicalValue: titleCase(regionKey),
+      canonicalValue: wineTitleCase(regionKey),
       entityType: 'region',
       confidence: CONFIDENCE_REGION,
       provenance: 'region_parents',
@@ -147,7 +155,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
   // already claimed by a more specific entity type) ──
   for (const [surface, canonical] of GRAPE_ALIASES) {
     register(surface, {
-      canonicalValue: titleCase(canonical),
+      canonicalValue: wineTitleCase(canonical),
       entityType: 'grape_primary',
       confidence: CONFIDENCE_GRAPE,
       provenance: 'grape_aliases',
@@ -206,18 +214,47 @@ const RESOLVER_COMPACT_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = ((
 export function resolveEntity(
   spanText: string,
   options?: ResolveEntityOptions,
+  fuzzyMatcher?: FuzzyMatcherPort,
 ): ResolvedEntity | null {
   const key = normalizeResolverKey(spanText);
   if (key.length === 0) return null;
   const hits = RESOLVER_INDEX.get(key) ?? RESOLVER_COMPACT_INDEX.get(compactResolverKey(key));
-  if (hits === undefined || hits.length === 0) return null;
-  const selected = [...hits].sort((left, right) => {
-    const byType = entityPriority(right.entityType, options) - entityPriority(left.entityType, options);
-    if (byType !== 0) return byType;
-    return right.confidence - left.confidence;
-  })[0];
-  if (selected === undefined) return null;
-  return { ...selected, matchedSurface: spanText };
+  if (hits !== undefined && hits.length > 0) {
+    const selected = [...hits].sort((left, right) => {
+      const byType = entityPriority(right.entityType, options) - entityPriority(left.entityType, options);
+      if (byType !== 0) return byType;
+      return right.confidence - left.confidence;
+    })[0];
+    if (selected !== undefined) return { ...selected, matchedSurface: spanText };
+  }
+
+  // ── Fuzzy fallback: re-lookup best fuzzy match in RESOLVER_INDEX ──
+  if (fuzzyMatcher !== undefined) {
+    const MAX_FUZZY_EDIT_DISTANCE = 2;
+    const fuzzyHits = fuzzyMatcher.match(spanText, MAX_FUZZY_EDIT_DISTANCE);
+    for (const hit of fuzzyHits) {
+      if (hit.combinedScore < FUZZY_MIN_CONFIDENCE) break; // sorted desc — no further hits will pass
+      const fuzzyKey = normalizeResolverKey(hit.term);
+      const resolved = RESOLVER_INDEX.get(fuzzyKey);
+      if (resolved !== undefined && resolved.length > 0) {
+        const selected = [...resolved].sort((left, right) => {
+          const byType = entityPriority(right.entityType, options) - entityPriority(left.entityType, options);
+          if (byType !== 0) return byType;
+          return right.confidence - left.confidence;
+        })[0];
+        if (selected !== undefined) {
+          return {
+            ...selected,
+            matchedSurface: spanText,
+            confidence: hit.combinedScore * FUZZY_CONFIDENCE_DISCOUNT,
+            provenance: 'fuzzy_fallback',
+          };
+        }
+      }
+    }
+  }
+
+  return null;
 }
 
 /** Version identifier embedded in traces for replay parity. */
@@ -234,12 +271,6 @@ export function resolverEntryCount(): number {
   return count;
 }
 
-function titleCase(s: string): string {
-  return s
-    .split(/\s+/)
-    .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
-    .join(' ');
-}
 
 function normalizeResolverKey(surface: string): string {
   return surface

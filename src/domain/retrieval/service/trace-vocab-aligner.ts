@@ -44,8 +44,16 @@ function pickTopChannel(candidate: ProvenanceCarrier): ProvenanceChannel | null 
   let topContribution = -Infinity;
 
   for (const ev of candidate.provenance.channelScores) {
-    if (ev.rrfContribution > topContribution) {
-      topContribution = ev.rrfContribution;
+    const contribution = Number.isFinite(ev.rrfContribution) ? ev.rrfContribution : -Infinity;
+    if (
+      topChannel === null
+      || contribution > topContribution
+      || (
+        contribution === topContribution
+        && ev.channel.localeCompare(topChannel) < 0
+      )
+    ) {
+      topContribution = contribution;
       topChannel = ev.channel;
     }
   }
@@ -140,6 +148,16 @@ export function validateTraceVocab(candidate: CandidateEnvelope): readonly strin
   for (const ch of candidate.provenance.channels) {
     if (!isProvenanceChannel(ch)) {
       unrecognized.push(ch);
+    }
+  }
+  for (const score of candidate.provenance.channelScores) {
+    if (!isProvenanceChannel(score.channel)) {
+      unrecognized.push(score.channel);
+    }
+  }
+  for (const match of candidate.provenance.queryViewMatches) {
+    if (!isProvenanceChannel(match.channel)) {
+      unrecognized.push(match.channel);
     }
   }
   return unrecognized;

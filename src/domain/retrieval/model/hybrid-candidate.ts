@@ -119,15 +119,23 @@ export interface HybridCandidate {
 
   /** Rank from the sparse (BM25) retrieval pass, if present. */
   readonly sparseRank?: number | undefined;
+  /** Raw BM25 score from sparse retrieval pass. */
+  readonly sparseRawScore?: number | undefined;
 
   /** Rank from the dense (embedding) retrieval pass, if present. */
   readonly denseRank?: number | undefined;
+  /** Raw ANN score from dense retrieval pass. */
+  readonly denseRawScore?: number | undefined;
 
   /** Rank from the learned-sparse retrieval pass, if present. */
   readonly learnedSparseRank?: number | undefined;
+  /** Raw learned-sparse score from learned_sparse retrieval pass. */
+  readonly learnedSparseRawScore?: number | undefined;
 
   /** Rank from the anchor-neighbourhood retrieval pass, if present. */
   readonly anchorRank?: number | undefined;
+  /** Raw ANN score from anchor-neighbourhood retrieval pass. */
+  readonly anchorRawScore?: number | undefined;
 
   /**
    * Fused retrieval score from RRF across all contributing passes.

@@ -11,6 +11,7 @@
  */
 
 import type { ConstraintBundle } from '../../domain/shared/types/index.js';
+import type { RetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { QueryLevelSensoryPriors } from './search-usecase-map-result-items.js';
 
 const SENSORY_KEYS: ReadonlySet<string> = new Set(['body', 'tannin', 'acidity', 'sweetness']);
@@ -28,6 +29,22 @@ export function extractSensoryPriorsFromConstraints(
     // First-writer wins for a given attribute (priors are deterministic).
     if (out[key] !== undefined) continue;
     out[key] = c.value;
+    found = true;
+  }
+  return found ? (out as QueryLevelSensoryPriors) : undefined;
+}
+
+export function extractSensoryPriorsFromRetrievalPlan(
+  retrievalPlan: RetrievalPlan | undefined,
+): QueryLevelSensoryPriors | undefined {
+  if (retrievalPlan === undefined || retrievalPlan.sensoryPriors.length === 0) {
+    return undefined;
+  }
+  const out: { -readonly [K in keyof QueryLevelSensoryPriors]: number } = {};
+  let found = false;
+  for (const prior of retrievalPlan.sensoryPriors) {
+    if (out[prior.attribute] !== undefined) continue;
+    out[prior.attribute] = prior.value;
     found = true;
   }
   return found ? (out as QueryLevelSensoryPriors) : undefined;

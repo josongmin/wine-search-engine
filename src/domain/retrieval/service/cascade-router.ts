@@ -22,8 +22,7 @@ export type RetrievalPhase =
   | 'learned_sparse'
   | 'dense'
   | 'anchor_neighborhood'
-  | 'relative'
-  | 'rerank';
+  | 'relative';
 
 /**
  * T4.1: Channel-phase mapping.
@@ -37,7 +36,6 @@ export const PHASE_TO_CHANNEL: Readonly<Record<RetrievalPhase, RetrievalChannel 
   dense: 'dense_semantic',
   anchor_neighborhood: 'anchor_similarity',
   relative: 'relative_filter',
-  rerank: null,
 } as const;
 
 /**
@@ -62,7 +60,7 @@ export interface PhaseDispatchDecision {
  *
  * - **Easy**: sparse only -> top-K -> decision
  * - **Medium**: sparse + dense -> RRF -> top-K
- * - **Hard**: full pipeline (sparse + dense + anchor ANN + rerank)
+ * - **Hard**: full pipeline (sparse + dense + anchor ANN)
  */
 
 /** Strong alias match on short entity → sparse-only retrieval suffices.
@@ -138,7 +136,7 @@ export class CascadeRouter {
       case 'medium':
         return ['sparse', 'dense'] as const;
       case 'hard':
-        return ['sparse', 'dense', 'anchor_neighborhood', 'rerank'] as const;
+        return ['sparse', 'dense', 'anchor_neighborhood'] as const;
     }
   }
 
@@ -166,7 +164,6 @@ export class CascadeRouter {
       'dense',
       'anchor_neighborhood',
       'relative',
-      'rerank',
     ];
     const phasesToExecute = this.getPhases(difficulty);
     const phaseSet = new Set<RetrievalPhase>(phasesToExecute);

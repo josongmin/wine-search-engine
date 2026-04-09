@@ -3,16 +3,7 @@ import type { AnchorProfile } from '../../domain/mixed/model/anchor-profile.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
 import { summaryToHybridCandidateFields } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
-
-/**
- * Reciprocal Rank Fusion smoothing constant (standard value).
- * Prevents scores from exploding when rank = 1.
- */
-const RRF_K = 60;
-
-function rrfScore(rank: number): number {
-  return 1 / (RRF_K + rank);
-}
+import { rrfContribution } from '../../domain/shared/utils/rrf.js';
 
 /**
  * Vespa-backed implementation of {@link SimilarRetrievalPort}.
@@ -48,7 +39,8 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
       (hit): HybridCandidate => ({
         entityId: hit.entityId,
         denseRank: hit.rank,
-        retrievalFusionScore: rrfScore(hit.rank),
+        denseRawScore: hit.score,
+        retrievalFusionScore: rrfContribution(hit.rank),
         matchedConstraints: [],
         retrievalTrace: {
           retrievalProfile: 'similar_anchor',

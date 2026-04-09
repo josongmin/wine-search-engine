@@ -1,8 +1,16 @@
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
+
 export function combineSemanticEmbeddings(
   embeddings: readonly (readonly number[])[],
 ): readonly number[] | undefined {
   const first = embeddings[0];
   if (first === undefined || first.length === 0) {
+    if (first !== undefined && first.length === 0) {
+      globalSilentSkipCounter.increment('embedding_empty_vector', {
+        position: 0,
+        expected: 'non-empty',
+      });
+    }
     return undefined;
   }
   if (embeddings.length === 1) {
@@ -12,6 +20,10 @@ export function combineSemanticEmbeddings(
   const combined = new Array<number>(first.length).fill(0);
   for (const embedding of embeddings) {
     if (embedding.length !== first.length) {
+      globalSilentSkipCounter.increment('embedding_dim_mismatch', {
+        expected: first.length,
+        got: embedding.length,
+      });
       continue;
     }
     for (let i = 0; i < embedding.length; i++) {

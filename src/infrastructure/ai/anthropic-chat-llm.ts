@@ -24,6 +24,7 @@ import {
   type RetryConfig,
 } from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
+import { AnthropicTransportError } from './anthropic-transport-error.js';
 
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const ANTHROPIC_API_VERSION = '2023-06-01';
@@ -167,7 +168,11 @@ export class AnthropicChatLlm implements ChatLlmPort {
             abortErr.name = 'AbortError';
             throw abortErr;
           }
-          throw err;
+          const cause = err instanceof Error ? err : new Error(String(err));
+          throw new AnthropicTransportError(
+            `Anthropic chat: transport failure — ${cause.message}`,
+            { cause },
+          );
         }
 
         if (!response.ok) {

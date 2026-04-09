@@ -248,11 +248,17 @@ export interface EntityLinkingScore {
 }
 
 /**
- * Compute Entity Linking Accuracy (TAC KBP-style).
+ * Compute Entity Linking Accuracy (TAC KBP-style) — Resolver Coverage Rate.
  *
- * For each expected entity, resolve the `surface` through the Entity Resolver
- * and check if the resolved canonical + type match the expected values.
- * Returns precision/recall/F1 and ELA@1.
+ * Measures whether the Entity Resolver can correctly resolve each expected
+ * entity's surface form to the right canonical + type. This is a **resolver
+ * capability** metric (can the resolver link this term?), NOT an extraction
+ * accuracy metric (did the pipeline actually extract this term from a query?).
+ *
+ * When `extracted` is provided, it is checked first (surface match); the
+ * resolver is used as a fallback for unmatched expected entities only.
+ *
+ * Returns precision/recall/F1 and ELA@1 (= recall).
  */
 export function scoreEntityLinkingAccuracy(
   expected: readonly ExpectedEntity[] | undefined,
@@ -407,6 +413,8 @@ function constraintEvidenced(constraint: NormalizedConstraint, observations: rea
   }
 
   if (Array.isArray(val)) {
+    // Empty array → no evidence required → treat as NOT evidenced (avoid vacuous truth inflation)
+    if (val.length === 0) return false;
     return val.every((item) => {
       if (typeof item === 'string') {
         return haystack.includes(item.normalize('NFKC').toLowerCase());
@@ -512,6 +520,8 @@ export function scoreUDCG(
   k?: number,
 ): number | null {
   if (relevantEntityIds.size === 0 || observationEntityIds.length === 0) return null;
+  // Explicit k must be positive; k=0 or negative is invalid (no docs to rank).
+  if (k !== undefined && k <= 0) return null;
 
   const cutoff = k ?? observationEntityIds.length;
   const n = Math.min(cutoff, observationEntityIds.length);

@@ -76,7 +76,7 @@ export function buildHybridRetrievalInputForPlan(
   anchorEntityId?: EntityId,
   compiled?: CompiledWineQuery,
 ): HybridRetrievalInput {
-  const retrievalPlan = buildRetrievalPlan(plan.constraints);
+  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
   return {
     queryPlan: plan,
@@ -311,7 +311,9 @@ export async function retrieveHybridCandidatesForPlan(
   );
 
   pipelineDebug({ step: 'retrieval.candidate_pool.fallback' }, 'pipeline candidate pool generate');
-  const candidates = await ports.candidatePool.generate(retrievalInput);
+  const candidates = ports.candidatePool.execute !== undefined
+    ? await ports.candidatePool.execute(retrievalInput)
+    : await ports.candidatePool.generate(retrievalInput);
   return {
     candidates,
     ...(degradationReasons.size > 0

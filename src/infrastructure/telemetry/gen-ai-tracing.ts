@@ -59,9 +59,11 @@ export function computeGenAiCost(model: string, usage: GenAiUsage): number | und
   if (pricing === undefined) {
     if (!UNKNOWN_MODEL_WARNED.has(model)) {
       UNKNOWN_MODEL_WARNED.add(model);
-      // stderr instead of a logger import to keep this module dependency-free
-      // (it's imported by low-level adapters that must not pull in pino).
-      console.warn(`[gen-ai-tracing] No pricing for model "${model}" — cost attribution disabled.`);
+      // Keep this module dependency-free; emit process warnings instead of
+      // pulling the bootstrap logger into low-level telemetry helpers.
+      process.emitWarning(
+        `[gen-ai-tracing] No pricing for model "${model}" — cost attribution disabled.`,
+      );
     }
     return undefined;
   }

@@ -1,4 +1,5 @@
 import { normalizeUnicodeWithHomoglyphs, stripAccents } from '../../shared/utils/unicode-normalize.js';
+import { isVintageYearToken } from '../../shared/utils/vintage.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
@@ -110,11 +111,12 @@ const canonicalizeVintage = (value: string): string => {
   return collapseWhitespace(tokens.map(canonicalizeVintageToken).join(' '));
 };
 
+const TWO_DIGIT_TOKEN_RE = /^\d{2}$/;
 const stripVintage = (value: string): string =>
   collapseWhitespace(
     collapseWhitespace(value)
       .split(' ')
-      .filter((token) => !/^(?:19|20)\d{2}$/.test(token) && !/^\d{2}$/.test(token))
+      .filter((token) => !isVintageYearToken(token) && !TWO_DIGIT_TOKEN_RE.test(token))
       .join(' '),
   );
 
@@ -172,7 +174,7 @@ const buildReorderedVariants = (value: string): readonly string[] => {
     return [];
   }
   const permutations: string[] = [];
-  const permute = (arr: string[], current: string[]): void => {
+  const permute = (arr: readonly string[], current: readonly string[]): void => {
     if (arr.length === 0) {
       permutations.push(current.join(' '));
       return;

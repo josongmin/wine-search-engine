@@ -35,11 +35,16 @@ IMPORTANT RULES:
 
 Classify this query:`;
 
-function isRetriableAnthropicError(err: unknown): boolean {
-  if (err === null || typeof err !== 'object') {
-    return false;
+function getHttpStatus(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null && 'status' in err) {
+    const s = (err as Record<string, unknown>)['status'];
+    return typeof s === 'number' ? s : undefined;
   }
-  const status = (err as { status?: number }).status;
+  return undefined;
+}
+
+function isRetriableAnthropicError(err: unknown): boolean {
+  const status = getHttpStatus(err);
   return status === ANTHROPIC_RETRIABLE_HTTP_TOO_MANY_REQUESTS
     || status === ANTHROPIC_RETRIABLE_HTTP_SERVICE_UNAVAILABLE
     || status === ANTHROPIC_RETRIABLE_HTTP_OVERLOADED;
@@ -159,11 +164,9 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
       options?.abortSignal !== undefined ? { signal: options.abortSignal } : undefined,
     );
 
-    const textBlock = response.content.find((block) => block.type === 'text') as
-      | { type: 'text'; text: string }
-      | undefined;
+    const textBlock = response.content.find((block) => block.type === 'text');
 
-    if (!textBlock) {
+    if (!textBlock || !('text' in textBlock) || typeof textBlock.text !== 'string') {
       bootstrapLogger.error('[AnthropicLLMInjectionClassifier] No text content in Claude response');
       return true;
     }

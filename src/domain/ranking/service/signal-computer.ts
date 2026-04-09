@@ -141,12 +141,12 @@ export class SignalComputer {
     // Use anchor rank as a proxy for anchor similarity.
     // Lower anchor rank = higher similarity.
     const anchorRank = candidate.anchorRank;
-    if (anchorRank === undefined) {
+    if (anchorRank === undefined || anchorRank <= 0) {
       return 0;
     }
 
-    // Rank-based similarity: 1/(1 + log(rank))
-    const rankSimilarity = 1 / (1 + (anchorRank > 0 ? Math.log(anchorRank) : 0));
+    // Rank-based similarity: 1/(1 + log(rank)), rank ≥ 1 guaranteed by guard above
+    const rankSimilarity = 1 / (1 + Math.log(anchorRank));
 
     // Scale by anchor confidence — less confident anchor means less
     // reliable similarity signal
@@ -166,6 +166,7 @@ export class SignalComputer {
   evaluateHardConstraints(
     candidate: HybridCandidate,
     constraints: ConstraintBundle,
+    matchedSet?: ReadonlySet<string>,
   ): boolean {
     // If there are no hard constraints, the gate passes trivially
     if (constraints.hard.length === 0) {
@@ -179,9 +180,9 @@ export class SignalComputer {
     }
 
     // Verify the candidate matches all hard constraint attributes
-    const matchedSet = new Set(candidate.matchedConstraints);
+    const effective = matchedSet ?? new Set(candidate.matchedConstraints);
     return constraints.hard.every(
-      (c: NormalizedConstraint) => matchedSet.has(c.attribute),
+      (c: NormalizedConstraint) => effective.has(c.attribute),
     );
   }
 
@@ -199,6 +200,7 @@ export class SignalComputer {
     candidate: HybridCandidate,
     constraints: ConstraintBundle,
     retrievalPlan?: RetrievalPlan,
+    precomputedMatchedSet?: ReadonlySet<string>,
   ): number {
     const softConstraints = constraints.soft;
     const structuredSoftBoosts = retrievalPlan?.softBoosts ?? [];
@@ -211,7 +213,7 @@ export class SignalComputer {
       return 1.0; // No soft constraints → perfect score
     }
 
-    const matchedSet = new Set(candidate.matchedConstraints);
+    const matchedSet = precomputedMatchedSet ?? new Set(candidate.matchedConstraints);
     let weightedSum = 0;
     let totalWeight = 0;
 
@@ -289,6 +291,7 @@ export class SignalComputer {
   computeAttributeAlignment(
     candidate: HybridCandidate,
     queryPlan: QueryPlanV1,
+    precomputedMatchedSet?: ReadonlySet<string>,
   ): number {
     const expectedAttributes = new Set<string>();
 
@@ -308,7 +311,7 @@ export class SignalComputer {
       return ATTRIBUTE_ALIGNMENT_NEUTRAL;
     }
 
-    const matchedSet = new Set(candidate.matchedConstraints);
+    const matchedSet = precomputedMatchedSet ?? new Set(candidate.matchedConstraints);
     let matchCount = 0;
     for (const attr of expectedAttributes) {
       if (matchedSet.has(attr)) {
@@ -499,6 +502,8 @@ export class SignalComputer {
     referenceYear: number = new Date().getFullYear(),
     queryContainsHangul = false,
   ): ComponentScores {
+    // Precompute matched constraint set once (Rule 16: avoid per-function Set allocation)
+    const matchedConstraintSet = new Set(candidate.matchedConstraints);
     const recency = this.computeRecency(candidate, referenceYear);
     const criticScore = this.computeCriticScore(candidate);
     return {
@@ -507,9 +512,9 @@ export class SignalComputer {
         ? this.computeAnchorSimilarity(candidate, anchorProfile)
         : undefined,
       semantic: this.computeSemanticScore(candidate),
-      hardConstraintPass: this.evaluateHardConstraints(candidate, constraints),
-      softConstraint: this.computeSoftConstraint(candidate, constraints, retrievalPlan),
-      attributeAlignment: this.computeAttributeAlignment(candidate, queryPlan),
+      hardConstraintPass: this.evaluateHardConstraints(candidate, constraints, matchedConstraintSet),
+      softConstraint: this.computeSoftConstraint(candidate, constraints, retrievalPlan, matchedConstraintSet),
+      attributeAlignment: this.computeAttributeAlignment(candidate, queryPlan, matchedConstraintSet),
       preferenceAlignment: PREFERENCE_ALIGNMENT_NEUTRAL,
       popularity: this.computePopularity(candidate),
       availability: this.computeAvailability(candidate),

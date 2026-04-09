@@ -117,8 +117,10 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       // Get hit/miss counters
       const hitsStr = await redis.get(STATS_KEY_HITS);
       const missesStr = await redis.get(STATS_KEY_MISSES);
-      const hits = hitsStr ? parseInt(hitsStr, 10) : 0;
-      const misses = missesStr ? parseInt(missesStr, 10) : 0;
+      const hitsRaw = hitsStr ? parseInt(hitsStr, 10) : NaN;
+      const missesRaw = missesStr ? parseInt(missesStr, 10) : NaN;
+      const hits = Number.isFinite(hitsRaw) ? hitsRaw : 0;
+      const misses = Number.isFinite(missesRaw) ? missesRaw : 0;
 
       // Count entries and compute size
       let entriesCount = 0;

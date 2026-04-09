@@ -24,6 +24,7 @@ import type {
   NormalizedConstraint,
 } from '../../shared/types/constraint-bundle.js';
 import { regionAncestors, REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
+import { wineTitleCase } from '../../shared/utils/title-case.js';
 
 /** Version identifier embedded in generated constraints for replay parity. */
 const ONTOLOGY_EXPANSION_VERSION = 'ontology-v1.0';
@@ -96,7 +97,7 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
         pushIfNew(newSoft, {
           attribute: 'country',
           operator: '=',
-          value: titleCase(ancestor),
+          value: wineTitleCase(ancestor),
           source_phrase: `ontology(${hard.value}→${ancestor})`,
           confidence: hard.confidence * ONTOLOGY_SOFT_CONFIDENCE,
           mapping_version: ONTOLOGY_EXPANSION_VERSION,
@@ -108,7 +109,7 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
         pushIfNew(newInferred, {
           attribute: 'region',
           operator: '=',
-          value: titleCase(ancestor),
+          value: wineTitleCase(ancestor),
           source_phrase: `ontology(${hard.value}⊂${ancestor})`,
           confidence: hard.confidence * ONTOLOGY_INFERRED_CONFIDENCE,
           mapping_version: ONTOLOGY_EXPANSION_VERSION,
@@ -133,7 +134,7 @@ export function expandWithOntology(bundle: ConstraintBundle): ConstraintBundle {
       pushIfNew(isCountry ? newSoft : newInferred, {
         attribute: isCountry ? 'country' : 'region',
         operator: '=',
-        value: titleCase(ancestor),
+        value: wineTitleCase(ancestor),
         source_phrase: `ontology(appellation:${hard.value}→${ancestor})`,
         confidence: hard.confidence * (isCountry ? ONTOLOGY_SOFT_CONFIDENCE : ONTOLOGY_INFERRED_CONFIDENCE),
         mapping_version: ONTOLOGY_EXPANSION_VERSION,
@@ -152,22 +153,3 @@ function keyOf(c: NormalizedConstraint): string {
   return `${c.attribute}|${c.operator}|${JSON.stringify(c.value)}`;
 }
 
-/**
- * Wine-domain-aware title case: lowercase Romance prepositions/articles
- * (di, du, de, del, etc.) except when they start the string.
- */
-const LOWERCASE_PREPOSITIONS: ReadonlySet<string> = new Set([
-  'di', 'du', 'de', 'del', 'della', 'delle', 'dei', 'des', 'da',
-  'la', 'le', 'les', 'los', 'las', 'el', 'al', 'do', 'das',
-]);
-
-function titleCase(s: string): string {
-  return s
-    .split(/\s+/)
-    .map((w, i) => {
-      if (w.length === 0) return w;
-      if (i > 0 && LOWERCASE_PREPOSITIONS.has(w.toLowerCase())) return w.toLowerCase();
-      return w[0]!.toUpperCase() + w.slice(1);
-    })
-    .join(' ');
-}

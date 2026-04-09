@@ -21,16 +21,10 @@ import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
-import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
-import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
-import {
-  applyCompositionalInference,
-  inferComparisonImpliedWineType,
-} from '../../attribute/service/compositional-inference.js';
-import { resolveEntity, type ResolvedEntity } from '../../attribute/service/entity-resolver.js';
+import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import { ConstraintCompiler } from './constraint-compiler.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
-import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import {
   ANCHOR_PRESENT_CONFIDENCE,
   detectQueryIntent,
@@ -85,14 +79,6 @@ const REGION_KEYWORDS: readonly RegExp[] = [
   /(?:^|[^\p{L}\p{N}])(?:지역|지방|아펠라시옹|지역명)(?=$|[^\p{L}\p{N}])/u,
 ] as const;
 
-const SOFT_CONSTRAINT_ATTRIBUTES = new Set([
-  'body', 'sweetness', 'acidity', 'tannin', 'style',
-  'price_band', 'occasion',
-]);
-
-/** Cap on span text samples for unresolved-span diagnostics (keeps mapper trace compact). */
-const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
-
 /**
  * Context passed to the planner alongside the raw query.
  */
@@ -117,14 +103,17 @@ export interface PlannerContext extends RequestExecutionContext {
  */
 export class Planner {
   private readonly queryNormalizer = new QueryNormalizer();
+  private readonly constraintCompiler: ConstraintCompiler;
 
   constructor(
     private readonly ambiguityDict: AmbiguityDictionary,
     private readonly anchorExtractor: AnchorExtractor,
     private readonly expansionBuilder: ExpansionBuilder,
-    private readonly nlMapper: NLMapper,
+    nlMapper: NLMapper,
     private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
-  ) {}
+  ) {
+    this.constraintCompiler = new ConstraintCompiler(nlMapper, fuzzyMatcher);
+  }
 
   /**
    * Plans a query by executing the full planning pipeline.
@@ -149,7 +138,21 @@ export class Planner {
     // Defense-in-depth: cap query length to prevent ReDoS in downstream regex extractors.
     // Aligned with HTTP-layer MAX_QUERY_LENGTH so the planner never receives larger.
     const safeQuery = query.length > MAX_QUERY_LENGTH ? query.slice(0, MAX_QUERY_LENGTH) : query;
+    return this.materializeQueryPlan(safeQuery, query, context);
+  }
 
+  /**
+   * Runs normalization, routing, constraint parsing, expansions, and uncertainty
+   * for a length-capped query surface.
+   *
+   * @param safeQuery - Possibly truncated query string for NLP/regex work.
+   * @param originalQuery - Full client query for diagnostics and raw plan fields.
+   */
+  private async materializeQueryPlan(
+    safeQuery: string,
+    originalQuery: string,
+    context?: PlannerContext,
+  ): Promise<QueryPlanV2> {
     // 1. Normalize + Korean typo correction.
     const typoFixed = correctKoreanWineTypos(safeQuery);
     const queryViews = this.queryNormalizer.normalize(typoFixed);
@@ -251,10 +254,10 @@ export class Planner {
       requires_constraint_evidence: constraints.hard.length > 0,
       requires_anchor_evidence: route === 'mixed' && anchors.length > 0,
     };
-    const decompositionHint = analyzeQueryDecomposition(query).hint;
+    const decompositionHint = analyzeQueryDecomposition(originalQuery).hint;
 
     return {
-      rawQuery: query,
+      rawQuery: originalQuery,
       normalizedQuery,
       normalizedQueryViews: queryViews,
       intent,
@@ -276,6 +279,9 @@ export class Planner {
       ...(targetEntityType !== undefined && { targetEntityType }),
       ...(parsed.constraintExtraction !== undefined
         ? { constraintExtraction: parsed.constraintExtraction }
+        : {}),
+      ...(parsed.retrievalPlan !== undefined
+        ? { retrievalPlan: parsed.retrievalPlan }
         : {}),
     };
   }
@@ -457,18 +463,6 @@ export class Planner {
   }
 
   /**
-   * Attributes whose constraints are treated as soft (preference-level).
-   *
-   * NL-phrase-derived wine sensory attributes (body, sweetness, acidity, tannin,
-   * style) are soft because they express user preferences from natural language.
-   * Hard constraints are reserved for explicit API-level mandatory filters.
-   * price_band and occasion are also soft — they guide ranking rather than
-   * absolutely excluding candidates.
-   */
-  private static readonly SOFT_ATTRIBUTES = SOFT_CONSTRAINT_ATTRIBUTES;
-
-  /**
-  /**
    * Parses constraints from the normalized query by scanning for known
    * natural-language phrases via the NLMapper.
    *
@@ -504,185 +498,14 @@ export class Planner {
 
   private async parseConstraints(
     normalizedQuery: string,
-    intent: QueryIntent,
+    _intent: QueryIntent,
     abortSignal?: AbortSignal,
   ): Promise<{
     readonly bundle: ConstraintBundle;
+    readonly retrievalPlan?: RetrievalPlan | undefined;
     readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   }> {
-    // RFC-019 Stage 1: Span-based parsing (replaces naive n-gram loop).
-    // Preserves character positions for downstream overlap resolution.
-    const spans = parseSpans(normalizedQuery);
-    const candidatePhrases = spans.map((s) => s.text);
-
-    const mapped = await this.nlMapper.mapConstraints(
-      candidatePhrases,
-      abortSignal !== undefined ? { abortSignal } : undefined,
-    );
-    const matched = mapped.constraints;
-    const mapperTrace = mapped.constraintExtraction;
-
-    const hard: ConstraintBundle['hard'][number][] = [];
-    const soft: ConstraintBundle['soft'][number][] = [];
-
-    for (const constraint of matched) {
-      const isLlmSourced =
-        (constraint.mapping_version?.startsWith('llm-') ?? false)
-        || constraint.source_phrase.startsWith('llm_linker(');
-      if (isLlmSourced || Planner.SOFT_ATTRIBUTES.has(constraint.attribute)) {
-        soft.push(constraint);
-      } else {
-        hard.push(constraint);
-      }
-    }
-
-    // RFC-019 Tier 2: Entity Resolver — augments Tier 1 (NLMapper) by resolving
-    // spans that symbolic lookup didn't cover. Part of the 6-tier deterministic
-    // cascade pipeline, NOT a fallback. Resolves aliases via the unified
-    // canonical registry. Applied only to spans NOT already covered by a
-    // NLMapper hit, preventing double-counting.
-    //
-    // Longest-match priority: resolveOverlaps ensures "cabernet sauvignon"
-    // wins over both "cabernet" and "sauvignon" when all three match.
-    const coveredPhrases = new Set(matched.map((c) => c.source_phrase.toLowerCase()));
-    const matchedAttributesByPhrase = new Map<string, Set<string>>();
-    for (const constraint of matched) {
-      const key = constraint.source_phrase.toLowerCase();
-      const existing = matchedAttributesByPhrase.get(key) ?? new Set<string>();
-      existing.add(constraint.attribute);
-      matchedAttributesByPhrase.set(key, existing);
-    }
-
-    const resolverCandidates: {
-      span: Span;
-      resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } | null;
-    }[] = [];
-    for (const span of spans) {
-      const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true });
-      if (!coveredPhrases.has(span.text)) {
-        resolverCandidates.push({
-          span,
-          resolved: preferredEntity !== null
-            ? { entity: preferredEntity, kind: 'primary' }
-            : null,
-        });
-        continue;
-      }
-      const coveredAttributes = matchedAttributesByPhrase.get(span.text) ?? new Set<string>();
-      if (
-        preferredEntity !== null
-        && preferredEntity.entityType !== 'wine_type'
-        && !coveredAttributes.has(preferredEntity.entityType)
-      ) {
-        resolverCandidates.push({
-          span,
-          resolved: { entity: preferredEntity, kind: 'shadow' },
-        });
-      } else {
-        resolverCandidates.push({ span, resolved: null });
-      }
-    }
-    const resolvedNonOverlap = resolveOverlaps(resolverCandidates)
-      .filter((e): e is {
-        span: Span;
-        resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
-      } => e.resolved !== null);
-
-    let resolvedEntityCount = 0;
-
-    for (const { resolved } of resolvedNonOverlap) {
-      resolvedEntityCount++;
-      const constraint = {
-        attribute: resolved.entity.entityType,
-        operator: '=' as const,
-        value: resolved.entity.canonicalValue,
-        source_phrase: resolved.kind === 'shadow'
-          ? `entity_shadow(${resolved.entity.matchedSurface})`
-          : `entity_resolver(${resolved.entity.matchedSurface})`,
-        confidence: resolved.entity.confidence,
-        mapping_version: `entity-resolver-v1.0`,
-      };
-      if (Planner.SOFT_ATTRIBUTES.has(resolved.entity.entityType)) {
-        soft.push(constraint);
-      } else {
-        hard.push(constraint);
-      }
-    }
-
-    const tier12Empty = hard.length === 0 && soft.length === 0;
-    // Tier 6: regex/rule extractor contributes numeric, exclusion, and fallback
-    // constraints even when Tier 1/2 already found entity constraints.
-    const tier6Bundle = extractRuleBasedConstraints(normalizedQuery);
-    const tier6AddedCount = mergeConstraintBundleIntoLists(
-      tier6Bundle,
-      hard,
-      soft,
-    );
-
-    // If all earlier tiers still produced zero constraints, Tier 6 is the sole
-    // contributor and must still flow through ontology + composition.
-    if (tier12Empty) {
-      // RFC-019 Stage 3+5: Apply ontology expansion and compositional inference
-      // on the Tier 6 bundle too, so inferred constraints are populated
-      // consistently across all paths.
-      const ontologyExpanded = expandWithOntology(tier6Bundle);
-      const expanded = applyCompositionalInference(
-        ontologyExpanded,
-        { impliedWineType: inferComparisonImpliedWineType(ontologyExpanded, normalizedQuery) },
-      );
-      const constraintExtraction = buildPlannerConstraintExtractionTrace({
-        baseTrace: mapperTrace,
-        spans,
-        matched,
-        resolvedEntityCount,
-        finalBundle: expanded,
-        ontologyAddedCount:
-          countBundleConstraints(ontologyExpanded) - countBundleConstraints(tier6Bundle),
-        compositionalAddedCount:
-          countBundleConstraints(expanded) - countBundleConstraints(ontologyExpanded),
-        tier6ConstraintCount: tier6AddedCount,
-        unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
-        unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
-      });
-      return {
-        bundle: expanded,
-        ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
-      };
-    }
-
-    // RFC-019 Stage 3: Ontology expansion — derive soft/inferred constraints
-    // from region/appellation ancestors (e.g. region=Pauillac → country=France).
-    const baseBundle: ConstraintBundle = { hard, soft, inferred: [] };
-    const expanded = expandWithOntology(baseBundle);
-
-    // RFC-019 Stage 5: Compositional inference — apply composition rules
-    // (region + wine_type → structure prior) to populate inferred bundle.
-    const finalBundle = applyCompositionalInference(
-      expanded,
-      {
-        impliedWineType:
-          intent === 'comparison_search'
-            ? inferComparisonImpliedWineType(expanded, normalizedQuery)
-            : undefined,
-      },
-    );
-    const constraintExtraction = buildPlannerConstraintExtractionTrace({
-      baseTrace: mapperTrace,
-      spans,
-      matched,
-      resolvedEntityCount,
-      finalBundle,
-      ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
-      compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
-      tier6ConstraintCount: tier6AddedCount,
-      unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
-      unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
-    });
-
-    return {
-      bundle: finalBundle,
-      ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
-    };
+    return this.constraintCompiler.compile(normalizedQuery, abortSignal);
   }
 
   /**
@@ -876,107 +699,3 @@ export class Planner {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// RFC-019 Phase 3 helper functions (used by parseConstraints pipeline)
-// ─────────────────────────────────────────────────────────────────────
-
-function countBundleConstraints(bundle: ConstraintBundle): number {
-  return bundle.hard.length + bundle.soft.length + bundle.inferred.length;
-}
-
-function mergeConstraintBundleIntoLists(
-  source: ConstraintBundle,
-  hard: NormalizedConstraint[],
-  soft: NormalizedConstraint[],
-): number {
-  let added = 0;
-  for (const constraint of source.hard) {
-    hard.push(constraint);
-    added++;
-  }
-  for (const constraint of source.soft) {
-    soft.push(constraint);
-    added++;
-  }
-  return added;
-}
-
-function collectUnresolvedSpanSamples(
-  spans: readonly Span[],
-  coveredPhrases: ReadonlySet<string>,
-  resolved: readonly {
-    span: Span;
-    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
-  }[],
-): readonly string[] {
-  const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
-  const samples: string[] = [];
-  const seen = new Set<string>();
-  for (const span of spans) {
-    if (coveredPhrases.has(span.text) || resolvedKeys.has(spanKey(span)) || seen.has(span.text)) {
-      continue;
-    }
-    seen.add(span.text);
-    samples.push(span.text);
-    if (samples.length >= MAX_UNRESOLVED_SPAN_SAMPLE_COUNT) {
-      break;
-    }
-  }
-  return samples;
-}
-
-function countUnresolvedSpans(
-  spans: readonly Span[],
-  coveredPhrases: ReadonlySet<string>,
-  resolved: readonly {
-    span: Span;
-    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' };
-  }[],
-): number {
-  const resolvedKeys = new Set(resolved.map((entry) => spanKey(entry.span)));
-  let count = 0;
-  for (const span of spans) {
-    if (!coveredPhrases.has(span.text) && !resolvedKeys.has(spanKey(span))) {
-      count++;
-    }
-  }
-  return count;
-}
-
-function spanKey(span: Span): string {
-  return `${span.startChar}:${span.endChar}:${span.text}`;
-}
-
-function buildPlannerConstraintExtractionTrace(args: {
-  readonly baseTrace?: ConstraintExtractionTrace | undefined;
-  readonly spans: readonly Span[];
-  readonly matched: readonly NormalizedConstraint[];
-  readonly resolvedEntityCount: number;
-  readonly finalBundle: ConstraintBundle;
-  readonly ontologyAddedCount: number;
-  readonly compositionalAddedCount: number;
-  readonly tier6ConstraintCount: number;
-  readonly unresolvedSpanCount: number;
-  readonly unresolvedSpanSamples: readonly string[];
-}): ConstraintExtractionTrace | undefined {
-  const base = args.baseTrace;
-  if (base === undefined) return undefined;
-  return {
-    ...base,
-    candidateSpanCount: args.spans.length,
-    resolvedEntityCount: args.resolvedEntityCount,
-    directHardConstraintCount: args.finalBundle.hard.length,
-    ontologyExpandedConstraintCount: args.ontologyAddedCount,
-    compositionalInferenceCount: args.compositionalAddedCount,
-    unresolvedSpanSamples: args.unresolvedSpanSamples,
-    categoriesCovered: uniqueCoveredCategories(args.finalBundle),
-  };
-}
-
-function uniqueCoveredCategories(bundle: ConstraintBundle): readonly string[] {
-  const categories = new Set<string>();
-  for (const constraint of [...bundle.hard, ...bundle.soft, ...bundle.inferred]) {
-    categories.add(constraint.attribute);
-  }
-  return [...categories].sort((left, right) => left.localeCompare(right));
-}

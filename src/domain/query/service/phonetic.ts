@@ -14,26 +14,26 @@
 /** Classic Soundex output width (letter + three digits). */
 const SOUNDEX_ENCODED_LENGTH = 4;
 
+const SOUNDEX_CODES: Readonly<Record<string, string>> = {
+  B: '1', F: '1', P: '1', V: '1',
+  C: '2', G: '2', J: '2', K: '2', Q: '2', S: '2', X: '2', Z: '2',
+  D: '3', T: '3',
+  L: '4',
+  M: '5', N: '5',
+  R: '6',
+};
+
 export function soundexEn(word: string): string {
   const upper = word.toUpperCase().replace(/[^A-Z]/g, '');
   if (upper.length === 0) return '0000';
 
-  const CODES: Record<string, string> = {
-    B: '1', F: '1', P: '1', V: '1',
-    C: '2', G: '2', J: '2', K: '2', Q: '2', S: '2', X: '2', Z: '2',
-    D: '3', T: '3',
-    L: '4',
-    M: '5', N: '5',
-    R: '6',
-  };
-
   let result = upper[0] ?? '';
-  let lastCode = CODES[result] ?? '0';
+  let lastCode = SOUNDEX_CODES[result] ?? '0';
 
   for (let i = 1; i < upper.length && result.length < SOUNDEX_ENCODED_LENGTH; i++) {
     const ch = upper[i];
     if (ch === undefined) continue;
-    const code = CODES[ch];
+    const code = SOUNDEX_CODES[ch];
     if (code !== undefined && code !== lastCode) {
       result += code;
       lastCode = code;

@@ -923,3 +923,165 @@ golden query에 대해 다음 GT를 부착한다.
 - `scripts/etl/generate-korean-aliases.ts`
 - `test/benchmark/agent/results/quick-v15-final-full.log`
 - `test/benchmark/agent/results/quick-v16-structural-stderr.txt`
+
+---
+
+## 16. 2026-04-09 Audit Update (standard, judge 포함)
+
+실행 커맨드:
+
+- `npx tsx test/benchmark/agent/runner.ts --profile standard`
+
+핵심 결과(104 scenarios, judge on):
+
+- Overall: **82.5%**
+- Faithful: **79.8%**
+- Judge: **61.3%**
+- SCR overall: **57.7%** (`hard 52.6 / soft 70.6 / inferred 50.0`)
+- ELA@1: **90.3%** (TAC KBP 92% 목표 근접)
+- Slot F1 strict/relaxed: **37.6% / 39.4%**
+
+### 16.1 Audit Findings (우선순위)
+
+1) **[P0] Tool-action schema 안정성 부족 (tool=0% 케이스 잔존)**
+
+- 증상:
+  - worst bucket에서 `tool=0%`가 반복 (`#5`, `#52`, `#202`).
+  - 일부 step에서 잘못된 structured input이 전달됨 (예: `exclude_grapes: [""]`).
+- 영향:
+  - 올바른 retrieval/grounding 이전 단계에서 실패하여 judge 급락.
+- 구조적 개선:
+  - Agent action JSON을 실행 전 **강제 정규화/정합화 레이어**로 통과:
+    - 빈 문자열 배열 항목 제거
+    - 상호배타/불필요 필드 정리
+    - tool별 strict input contract 재검증 후 실행
+  - `Invalid input for search_wines` 발생 시 즉시 재시도 가능한 **자동 교정 branch**를 orchestrator에 추가.
+
+2) **[P0] Judge/Faithfulness 갭이 큰 시나리오군 존재 (근거-응답 매핑 약함)**
+
+- 증상:
+  - gift/nested/comparison 일부에서 judge=0.00이 반복 (`#34`, `#88`, `#25` 포함).
+  - Faithful 79.8% 대비 Judge 61.3%로 격차 큼.
+- 영향:
+  - “도구는 썼지만 답변이 평가 기준에 맞게 grounded되지 않음”.
+- 구조적 개선:
+  - `GROUNDING_JSON`을 최종 답변 생성 시 **필수 참조 포맷**으로 강제.
+  - answer 렌더링 전 claim-level 검증에서
+    - evidence anchor 없는 문장/개체명 차단
+    - tool observation에 없는 속성(가격/지역/스타일) 자동 삭제 또는 “확인 불가”로 강등.
+
+3) **[P1] Hard constraint 밀도 부족**
+
+- 증상:
+  - benchmark insight에서 `Mean hard constraints` 저평가 경고 지속.
+  - SCR hard(52.6)와 Slot F1(37.6) 동반 저조.
+- 영향:
+  - 쿼리 의도 대비 retrieval filter가 약해 precision 저하.
+- 구조적 개선:
+  - soft-only로 남는 제약 중 “검색 필수 제약”을 hard 승격하는 정책 재정의:
+    - wine_type / negation / explicit price cap / explicit vintage 범위
+  - planner trace에 “hard 승격 이유”를 남기고 회귀 테스트로 고정.
+
+4) **[P1] ELA@1 90.3% — 마지막 alias gap**
+
+- 증상:
+  - 92% 목표 직전에서 정체.
+- 영향:
+  - 한국어 붙여쓰기/축약형에서 canonical miss 가능.
+- 구조적 개선:
+  - alias SSOT를 유지한 채,
+    - `DEFAULT_MAPPINGS` ↔ resolver 동기화 경로를 계속 사용
+    - compact key + 한글 축약형(도메인 빈도 상위) 확장
+  - 신규 alias는 반드시 regression + benchmark annotated scenario로 동시 검증.
+
+### 16.2 즉시 반영 가능한 Backlog
+
+- [ ] `agent-tools` 입력 정규화 모듈 추가 (빈 문자열/중복/금지값 제거)
+- [ ] orchestrator에 “tool input invalid → auto-repair 1회” 경로 추가
+- [ ] answer synthesis 단계에서 `GROUNDING_JSON` 기반 whitelist renderer 적용
+- [ ] claim verifier noise token 필터(문법 토큰/조사/메타문구) 강화
+- [ ] benchmark scenario annotation 확장 (현재 constraint evaluated coverage 확대)
+- [ ] ELA 잔여 miss surface 수집 후 alias pack v2 반영
+
+### 16.3 운영 원칙
+
+- 단순 phrase 추가가 아니라 **파이프라인 계층(입력 정규화 → 제약 강제 → 근거 렌더링)**으로 고친다.
+- 모든 개선은:
+  1. 회귀 테스트 추가
+  2. benchmark 재실행(quick + standard)
+  3. 지표 변화 기록
+  순서로 반영한다.
+
+---
+
+## 17. 2026-04-09 Audit Update #2 (로그 패턴 기반 추가 점검)
+
+동일 실행(`standard`, judge on)에서 추가로 관찰된 패턴:
+
+- `agent LLM emitted bare tool call (missing action wrapper); recovered`가 반복
+- `agent LLM produced non-JSON output; falling back to raw text`가 반복
+- `#34`에서 `terminationReason=fallback` + `term=25%`
+- `conformalSetSize=0` 경고가 다수 쿼리 클래스에서 반복
+- 부트 단계에서 `nl-mappings.json` 부재 및 `LTR models empty` 경고
+- 지표 간 괴리: `Faithful 79.8%` vs `Faithful (claim) 1.3%`
+
+### 17.1 추가 Findings
+
+1) **[P0] LLM 출력 포맷 안정성 부족 (JSON contract drift)**
+
+- 증상:
+  - bare tool-call / non-JSON output이 반복적으로 복구 경로를 탐.
+- 영향:
+  - 복구는 되지만, step budget 소모/의도 손실/termination miss 가능성이 증가.
+- 개선:
+  - orchestrator 응답 파서 앞단에 **JSON schema gate**를 두고,
+    - 불완전 JSON은 재질의(1회) 후 실행
+    - bare tool-call은 허용하되 telemetry로 별도 집계해 품질 게이트화.
+
+2) **[P0] Fallback termination 품질 이슈**
+
+- 증상:
+  - `#34`가 fallback 종료로 term score 하락.
+- 영향:
+  - 비교형 시나리오에서 tool-flow가 시작도 못 하고 종료될 수 있음.
+- 개선:
+  - comparison intent에서 step0 fallback 금지 가드 추가:
+    - 최소 1회 `compare_wines` 또는 2-way `search_wines` 실행 보장 후 종료 허용.
+
+3) **[P1] Conformal gate 신호 약화 (`conformalSetSize=0`)**
+
+- 증상:
+  - 다양한 queryClass에서 empty conformal set 경고 반복.
+- 영향:
+  - authoritative 판단 신뢰 저하, heuristic 경로 비중 증가.
+- 개선:
+  - conformal calibration 데이터 재생성 + queryClass별 최소 표본수 보장.
+  - empty-set 발생 시 deterministic backup threshold를 명시적으로 적용.
+
+4) **[P1] 런타임 아티팩트 의존성 누락**
+
+- 증상:
+  - `nl-mappings.json` 없음, LTR 모델 없음.
+- 영향:
+  - alias/LTR 품질이 baseline 대비 저하될 가능성.
+- 개선:
+  - 벤치 시작 전 **artifact preflight**를 강제:
+    - 필수 파일/모델 누락 시 hard-fail 또는 degraded-run 라벨링.
+
+5) **[P1] Faithfulness 메트릭 체계 불일치**
+
+- 증상:
+  - sentence-level faithfulness와 claim-level faithfulness가 크게 분리.
+- 영향:
+  - 실제 개선 우선순위 판단이 흔들림.
+- 개선:
+  - claim extractor의 토큰 노이즈 필터(조사/메타문구) 강화
+  - claim-level verdict를 최종 faithfulness 계산에 반영하는 가중 규칙 재정의.
+
+### 17.2 추가 Backlog
+
+- [ ] `AgentOrchestrator` JSON gate + retry-on-malformed(1회) 구현
+- [ ] comparison intent fallback guard 회귀 테스트 추가
+- [ ] conformal empty-set 발생률 리포트(클래스별) + 캘리브레이션 잡 재구성
+- [ ] benchmark preflight(check artifacts) 도입
+- [ ] claim extractor 노이즈 토큰 stoplist + claim-level faithfulness 재보정

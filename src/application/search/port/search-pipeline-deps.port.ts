@@ -48,6 +48,7 @@ export interface EntityResolverPort {
 }
 
 export interface CandidatePoolPort {
+  execute?(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
   generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
 }
 

@@ -38,6 +38,12 @@ const ENV_WEBHOOK_SECRET_MIN_LEN = 16;
 const SYSEXITS_EX_CONFIG = 78;
 /** Default Anthropic model when ANTHROPIC_INJECTION_MODEL is unset. */
 const DEFAULT_ANTHROPIC_INJECTION_MODEL = 'claude-haiku-4-5-20251001';
+/** Vespa search API request timeout (aligned with previous VespaClient default). */
+const DEFAULT_VESPA_SEARCH_REQUEST_TIMEOUT_MS = 30_000;
+/** Vespa document POST/PUT mutation timeout. */
+const DEFAULT_VESPA_DOCUMENT_MUTATION_TIMEOUT_MS = 15_000;
+/** Vespa document GET/DELETE timeout. */
+const DEFAULT_VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS = 10_000;
 
 /**
  * Schema for all environment variables required by the Wine Intelligence Engine.
@@ -116,6 +122,21 @@ const envSchema = z.object({
   // Vespa
   VESPA_URL: z.string().url().default('http://localhost:8080'),
   VESPA_CONTENT_CLUSTER: z.string().min(1).default('wine_content'),
+  VESPA_SEARCH_REQUEST_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_VESPA_SEARCH_REQUEST_TIMEOUT_MS),
+  VESPA_DOCUMENT_MUTATION_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_VESPA_DOCUMENT_MUTATION_TIMEOUT_MS),
+  VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(DEFAULT_VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS),
 
   // Embedding Service
   // External embedding HTTP service (fallback when OpenAI embedding is not configured).
@@ -136,7 +157,7 @@ const envSchema = z.object({
   // Reranker Service (optional external HTTP API)
   RERANKER_SERVICE_URL: z.string().url().optional(),
   /** Multiplies query-class rerank blend weights; lower = trust cross-encoder less (0–1). */
-  RERANK_BLEND_SCALE: z.coerce.number().min(0).max(1).default(DEFAULT_RERANK_BLEND_SCALE),
+  RERANK_BLEND_SCALE: z.coerce.number().finite().min(0).max(1).default(DEFAULT_RERANK_BLEND_SCALE),
   /** Per-request HTTP timeout for reranker API calls (AbortSignal). */
   RERANKER_HTTP_TIMEOUT_MS: z.coerce
     .number()
@@ -264,7 +285,7 @@ const envSchema = z.object({
    * When set (in range [0, 1]), enables confidence-based refusal in AdmissionGate.
    * Default: unset (confidence check disabled, backward compatible).
    * Recommended: 0.45 (AURC-calibrated operating point). */
-  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().min(0).max(1).optional(),
+  CONFIDENCE_REFUSAL_THRESHOLD: z.coerce.number().finite().min(0).max(1).optional(),
 });
 
 type EnvVars = z.infer<typeof envSchema>;
@@ -354,6 +375,11 @@ function buildConfig(parsed: EnvVars) {
     vespa: {
       url: parsed.VESPA_URL,
       contentCluster: parsed.VESPA_CONTENT_CLUSTER,
+      timeouts: {
+        searchRequestMs: parsed.VESPA_SEARCH_REQUEST_TIMEOUT_MS,
+        documentMutationMs: parsed.VESPA_DOCUMENT_MUTATION_TIMEOUT_MS,
+        documentGetDeleteMs: parsed.VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS,
+      },
     },
 
     /** Embedding service settings. */

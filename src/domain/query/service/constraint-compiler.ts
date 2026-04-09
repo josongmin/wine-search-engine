@@ -1,8 +1,10 @@
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../shared/types/index.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { NLMapper } from '../../attribute/service/nl-mapper.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
 import { resolveEntity, type ResolvedEntity } from '../../attribute/service/entity-resolver.js';
+import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
 import {
   applyCompositionalInference,
@@ -25,7 +27,10 @@ const SOFT_CONSTRAINT_ATTRIBUTES = new Set([
 const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 
 export class ConstraintCompiler {
-  constructor(private readonly nlMapper: NLMapper) {}
+  constructor(
+    private readonly nlMapper: NLMapper,
+    private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
+  ) {}
 
   async compile(
     normalizedQuery: string,
@@ -34,10 +39,34 @@ export class ConstraintCompiler {
     const spans = parseSpans(normalizedQuery);
     const candidatePhrases = spans.map((s) => s.text);
 
-    const mapped = await this.nlMapper.mapConstraints(
-      candidatePhrases,
-      abortSignal !== undefined ? { abortSignal } : undefined,
-    );
+    let mapped: Awaited<ReturnType<NLMapper['mapConstraints']>>;
+    try {
+      mapped = await this.nlMapper.mapConstraints(
+        candidatePhrases,
+        abortSignal !== undefined ? { abortSignal } : undefined,
+      );
+    } catch (err: unknown) {
+      // NLMapper failure must not crash the query. Degrade to empty mapping
+      // so entity resolver, ontology expansion, and regex fallback still fire.
+      bootstrapLogger.warn({ err: err instanceof Error ? err.message : String(err) }, '[constraint-compiler] NLMapper.mapConstraints failed — degrading to empty mapping');
+      mapped = {
+        constraints: [],
+        constraintExtraction: {
+          candidatePhraseCount: candidatePhrases.length,
+          candidateSpanCount: spans.length,
+          ruleTableHitCount: 0,
+          llmHitCount: 0,
+          llmSkippedCount: 0,
+          fallbackTriggered: true,
+          source: 'fallback' as const,
+          llmLatencyMs: null,
+          phraseCacheHits: 0,
+          phraseCacheNegativeSkipped: 0,
+          phraseCacheMisses: 0,
+          missedPhrases: candidatePhrases,
+        },
+      };
+    }
     const matched = mapped.constraints;
     const mapperTrace = mapped.constraintExtraction;
 
@@ -69,7 +98,7 @@ export class ConstraintCompiler {
       resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } | null;
     }[] = [];
     for (const span of spans) {
-      const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true });
+      const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true }, this.fuzzyMatcher);
       if (!coveredPhrases.has(span.text)) {
         resolverCandidates.push({
           span,

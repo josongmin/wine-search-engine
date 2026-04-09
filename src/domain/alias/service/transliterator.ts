@@ -431,6 +431,15 @@ export class Transliterator {
     ['chave', '샤브'],
   ]);
 
+  private static readonly FR_SORTED_KEYS: readonly string[] =
+    [...Transliterator.FR_KO_RULES.keys()].sort((a, b) => b.length - a.length);
+  private static readonly ES_SORTED_KEYS: readonly string[] =
+    [...Transliterator.ES_KO_RULES.keys()].sort((a, b) => b.length - a.length);
+  private static readonly EN_SORTED_KEYS: readonly string[] =
+    [...Transliterator.EN_KO_RULES.keys()].sort((a, b) => b.length - a.length);
+  private static readonly IT_SORTED_KEYS: readonly string[] =
+    [...Transliterator.IT_KO_RULES.keys()].sort((a, b) => b.length - a.length);
+
   // ---------------------------------------------------------------------------
   // Reverse transliteration (Korean → Latin) for claim verification
   // ---------------------------------------------------------------------------
@@ -613,8 +622,7 @@ export class Transliterator {
    */
   private applyRules(word: string, sourceLang: SourceLang): string {
     const rules = this.getRulesForLang(sourceLang);
-    // Sort keys by length descending for greedy matching
-    const sortedKeys = [...rules.keys()].sort((a, b) => b.length - a.length);
+    const sortedKeys = this.getSortedKeysForLang(sourceLang);
 
     let result = '';
     let i = 0;
@@ -659,6 +667,20 @@ export class Transliterator {
       case 'fr':
       default:
         return Transliterator.FR_KO_RULES;
+    }
+  }
+
+  private getSortedKeysForLang(lang: SourceLang): readonly string[] {
+    switch (lang) {
+      case 'it':
+        return Transliterator.IT_SORTED_KEYS;
+      case 'es':
+        return Transliterator.ES_SORTED_KEYS;
+      case 'en':
+        return Transliterator.EN_SORTED_KEYS;
+      case 'fr':
+      default:
+        return Transliterator.FR_SORTED_KEYS;
     }
   }
 }

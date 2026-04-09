@@ -35,6 +35,7 @@ import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
 import type { RuntimeSupportServices } from './container-runtime-support.js';
 import { bootstrapLogger } from './bootstrap-logger.js';
+import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
 import type {
   BrowseRetrieverPort,
   CompareRetrieverPort,
@@ -99,7 +100,7 @@ export async function buildQueryPlanner(
     );
   }
   const nlMapper = llmQueryInterpreter && chatLlm !== undefined
-    ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache)
+    ? new LlmNLMapper(adapters.mappingTable, chatLlm, llmQueryInterpreterTimeoutMs, phraseCache, fuzzyMatcher)
     : new NLMapper(adapters.mappingTable);
 
   return new Planner(
@@ -135,6 +136,7 @@ export function buildCandidatePool(
     support.cacheService,
     config.embedding.model,
     config.killSwitch.learning,
+    getRetrievalDegradationCollector(),
   );
 }
 

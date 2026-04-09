@@ -98,7 +98,7 @@ describe('RetrievalProfileService (T4.1)', () => {
 describe('resolveChannelMix (T4.6)', () => {
   it('covers every QUERY_FAMILY_LABELS entry without throwing', () => {
     for (const family of QUERY_FAMILY_LABELS) {
-      const decision = resolveChannelMix(family, 'hybrid');
+      const decision = resolveChannelMix(family);
       expect(decision.profileName).toBeTruthy();
       expect(decision.channelMix.length).toBeGreaterThan(0);
       expect(decision.reason.length).toBeGreaterThan(0);
@@ -106,30 +106,30 @@ describe('resolveChannelMix (T4.6)', () => {
   });
 
   it('comparison family → compare_default profile with compare_anchor channel', () => {
-    const decision = resolveChannelMix('comparison', 'hybrid');
+    const decision = resolveChannelMix('comparison');
     expect(decision.profileName).toBe('compare_default');
     expect(decision.channelMix).toContain('compare_anchor');
   });
 
   it('recommendation family → mixed_anchor profile', () => {
-    const decision = resolveChannelMix('recommendation', 'hybrid');
+    const decision = resolveChannelMix('recommendation');
     expect(decision.profileName).toBe('mixed_anchor');
     expect(decision.channelMix).toContain('anchor_similarity');
   });
 
   it('entity_exact family → exact_safe_fallback profile', () => {
-    const decision = resolveChannelMix('entity_exact', 'hybrid');
+    const decision = resolveChannelMix('entity_exact');
     expect(decision.profileName).toBe('exact_safe_fallback');
   });
 
   it('producer_browse family → browse_default profile', () => {
-    const decision = resolveChannelMix('producer_browse', 'hybrid');
+    const decision = resolveChannelMix('producer_browse');
     expect(decision.profileName).toBe('browse_default');
   });
 
   it('no_match, ambiguous, unknown families → hybrid_default profile', () => {
     for (const family of ['no_match', 'ambiguous', 'unknown'] as const) {
-      const decision = resolveChannelMix(family, 'hybrid');
+      const decision = resolveChannelMix(family);
       expect(decision.profileName).toBe('hybrid_default');
     }
   });

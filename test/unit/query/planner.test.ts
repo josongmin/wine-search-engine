@@ -52,11 +52,12 @@ const noOpNLMapper: NLMapper = {
 function makePlanner(
   entries: Map<string, AliasMatchResult> = new Map(),
   dict: AmbiguityDictionary = noAmbiguityDict,
+  nlMapper: NLMapper = noOpNLMapper,
 ): Planner {
   const aliasMatcher = new StubAliasMatcher(entries);
   const anchorExtractor = new AnchorExtractor(aliasMatcher);
   const expansionBuilder = new ExpansionBuilder();
-  return new Planner(dict, anchorExtractor, expansionBuilder, noOpNLMapper);
+  return new Planner(dict, anchorExtractor, expansionBuilder, nlMapper);
 }
 
 // ── Query normalization ────────────────────────────────────────────────────────
@@ -125,6 +126,22 @@ describe('Planner – plannerVersion', () => {
     const plan = await planner.plan('Opus One');
     expect(typeof plan.plannerVersion).toBe('string');
     expect(plan.plannerVersion.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Planner – NLMapper resilience', () => {
+  it('completes when mapConstraints throws (Tier 6 + resolver still run)', async () => {
+    const throwingMapper = {
+      mapPhrase: async () => null,
+      mapConstraints: async () => {
+        throw new Error('simulated mapping repository failure');
+      },
+    } as unknown as NLMapper;
+    const planner = makePlanner(new Map(), noAmbiguityDict, throwingMapper);
+    await expect(planner.plan('pinot under 40')).resolves.toMatchObject({
+      rawQuery: 'pinot under 40',
+      normalizedQuery: expect.any(String),
+    });
   });
 });
 

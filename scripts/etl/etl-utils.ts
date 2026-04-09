@@ -171,7 +171,8 @@ export class Checkpoint {
   static async load(filePath: string): Promise<Checkpoint> {
     try {
       const raw = await fsp.readFile(filePath, 'utf8');
-      const ids = JSON.parse(raw) as string[];
+      const parsed: unknown = JSON.parse(raw);
+      const ids = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
       return new Checkpoint(filePath, new Set(ids));
     } catch {
       return new Checkpoint(filePath, new Set());

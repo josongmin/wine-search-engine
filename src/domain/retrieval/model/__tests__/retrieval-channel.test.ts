@@ -74,11 +74,11 @@ describe('RetrievalChannel vocabulary', () => {
 });
 
 describe('PHASE_TO_CHANNEL mapping', () => {
-  it('re-exports from retrieval-channel', () => {
-    // cascade-router should import from retrieval-channel
+  it('maps each cascade phase to the canonical retrieval channel', () => {
     expect(CASCADE_PHASE_TO_CHANNEL.sparse).toBe('sparse_bm25');
+    expect(CASCADE_PHASE_TO_CHANNEL.learned_sparse).toBe('learned_sparse');
     expect(CASCADE_PHASE_TO_CHANNEL.dense).toBe('dense_semantic');
     expect(CASCADE_PHASE_TO_CHANNEL.anchor_neighborhood).toBe('anchor_similarity');
-    expect(CASCADE_PHASE_TO_CHANNEL.rerank).toBeNull();
+    expect(CASCADE_PHASE_TO_CHANNEL.relative).toBe('relative_filter');
   });
 });

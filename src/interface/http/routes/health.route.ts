@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   sendRouteContractResponse,
 } from './contract-response.js';
@@ -7,6 +7,7 @@ import {
   AgentMetricsRouteContract,
   HealthRouteContract,
   ReadyRouteContract,
+  RetrievalDegradationMetricsRouteContract,
 } from './route-contracts.js';
 import {
   HTTP_STATUS_FORBIDDEN,
@@ -14,6 +15,7 @@ import {
   HTTP_STATUS_SERVICE_UNAVAILABLE,
 } from '../constants.js';
 import { getAgentExecutionMetricsCollector } from '../../../infrastructure/observability/agent-execution-metrics.js';
+import { getRetrievalDegradationCollector } from '../../../infrastructure/observability/retrieval-degradation-metrics.js';
 import { getRequestId } from '../request-id.js';
 import { buildSearchErrorResponse } from '../errors/error-response.js';
 
@@ -84,6 +86,22 @@ async function resolveStatus(readinessCheck?: ReadinessCheck): Promise<Readiness
   } catch {
     return 'down';
   }
+}
+
+function isValidMetricsSecret(secret: string | undefined): secret is string {
+  return typeof secret === 'string' && secret.length > 0;
+}
+
+function denyMetricsAccess(
+  request: FastifyRequest,
+): ReturnType<typeof buildSearchErrorResponse> {
+  return buildSearchErrorResponse(
+    getRequestId(request),
+    'FORBIDDEN',
+    'Metrics endpoint requires a valid X-Debug-Key and an enabled metrics secret.',
+    null,
+    false,
+  );
 }
 
 /**
@@ -177,9 +195,17 @@ export function registerHealthRoutes(
       const expectedSecret = options?.metricsDebugSecret;
       const rawDebugKey = request.headers['x-debug-key'];
       const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
+      if (!isValidMetricsSecret(expectedSecret)) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          AgentMetricsRouteContract,
+          HTTP_STATUS_FORBIDDEN,
+          denyMetricsAccess(request),
+        );
+        return;
+      }
       if (
-        typeof expectedSecret === 'string' &&
-        expectedSecret.length > 0 &&
         providedDebugKey !== expectedSecret
       ) {
         sendRouteContractResponse(
@@ -187,13 +213,7 @@ export function registerHealthRoutes(
           reply,
           AgentMetricsRouteContract,
           HTTP_STATUS_FORBIDDEN,
-          buildSearchErrorResponse(
-            getRequestId(request),
-            'FORBIDDEN',
-            'Metrics endpoint requires a valid X-Debug-Key.',
-            null,
-            false,
-          ),
+          denyMetricsAccess(request),
         );
         return;
       }
@@ -218,6 +238,55 @@ export function registerHealthRoutes(
               parallel_batch: metrics.timeouts.parallelBatch,
               event_rate_per_run: metrics.timeouts.eventRatePerRun,
             },
+            alerts: metrics.alerts,
+          },
+        },
+      );
+    },
+  });
+
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/metrics/retrieval-degradation',
+    contract: RetrievalDegradationMetricsRouteContract,
+    handler: async (request, reply) => {
+      const expectedSecret = options?.metricsDebugSecret;
+      const rawDebugKey = request.headers['x-debug-key'];
+      const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
+      if (!isValidMetricsSecret(expectedSecret)) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          RetrievalDegradationMetricsRouteContract,
+          HTTP_STATUS_FORBIDDEN,
+          denyMetricsAccess(request),
+        );
+        return;
+      }
+      if (
+        providedDebugKey !== expectedSecret
+      ) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          RetrievalDegradationMetricsRouteContract,
+          HTTP_STATUS_FORBIDDEN,
+          denyMetricsAccess(request),
+        );
+        return;
+      }
+      const metrics = getRetrievalDegradationCollector().getMetrics();
+      sendRouteContractResponse(
+        request,
+        reply,
+        RetrievalDegradationMetricsRouteContract,
+        HTTP_STATUS_OK,
+        {
+          timestamp: new Date().toISOString(),
+          retrieval: {
+            total_retrievals: metrics.totalRetrievals,
+            degradations: metrics.degradations,
+            degradation_rate: metrics.degradationRate,
             alerts: metrics.alerts,
           },
         },

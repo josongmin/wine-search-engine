@@ -217,7 +217,8 @@ async function callJudgeOnce(
       maxOutputTokens: 300,
     });
     return parseJudgeResponse(result.text);
-  } catch {
+  } catch (err) {
+    console.error('[judge] callJudgeOnce failed:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }

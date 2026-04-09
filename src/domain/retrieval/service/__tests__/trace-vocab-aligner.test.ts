@@ -98,6 +98,18 @@ describe('traceToEvalSlice', () => {
     expect(slice!.topChannel).toBe('dense_semantic');
   });
 
+  it('falls back deterministically when rrfContribution contains NaN', () => {
+    const c = makeCandidate('e1', {
+      channels: ['dense_semantic', 'anchor_similarity'],
+      channelScores: [
+        { channel: 'dense_semantic', rawScore: 0.5, rank: 2, rrfContribution: Number.NaN },
+        { channel: 'anchor_similarity', rawScore: 0.9, rank: 1, rrfContribution: 0.01 },
+      ],
+    });
+    const slice = traceToEvalSlice('q1', 1, c);
+    expect(slice!.topChannel).toBe('anchor_similarity');
+  });
+
   it('sets protected=true when protectedInclusionReason is set', () => {
     const c = makeCandidate('e1', {
       protectedInclusionReason: 'exact_alias_match',
@@ -161,6 +173,21 @@ describe('validateTraceVocab', () => {
     });
     const errors = validateTraceVocab(c);
     expect(errors).toContain('invalid_channel');
+  });
+
+  it('validates channels used in channelScores and queryViewMatches too', () => {
+    const c = makeCandidate('e1', {
+      channelScores: [
+        { channel: 'sparse_bm25', rawScore: 0.8, rank: 1, rrfContribution: 0.8 },
+        { channel: 'invalid_score_channel' as never, rawScore: 0.1, rank: 9, rrfContribution: 0.001 },
+      ],
+      queryViewMatches: [
+        { viewName: 'strict', matchedText: 'opus one', channel: 'invalid_match_channel' as never },
+      ],
+    });
+    const errors = validateTraceVocab(c);
+    expect(errors).toContain('invalid_score_channel');
+    expect(errors).toContain('invalid_match_channel');
   });
 });
 

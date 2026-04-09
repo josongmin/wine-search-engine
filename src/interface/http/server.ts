@@ -259,9 +259,9 @@ export async function createServer(
   }
 
   // CORS headers (G-46).
-  // In development/test: allow all origins, echoing the request origin when present.
-  // In production: restrict to CORS_ALLOWED_ORIGINS env var.
-  // Uses a manual hook instead of @fastify/cors to avoid an extra dependency.
+  // In development/test: allow only localhost origins.
+  // In production: allow only explicit CORS_ALLOWED_ORIGINS entries.
+  // Uses @fastify/cors via registerCorsSupport.
   const nodeEnv = options?.nodeEnv ?? 'development';
   const enableAgentBenchmarkUi = options?.enableAgentBenchmarkUi ?? nodeEnv !== 'production';
   const allowedOrigins = options?.corsAllowedOrigins ?? '';
@@ -390,6 +390,11 @@ export async function createServer(
   // Runs when env var EVAL_RUN_AT_STARTUP=true (requires Postgres)
   // MUST NOT block server readiness — eval can take minutes on large gold sets.
   if (options?.runEvalAtStartup === true) {
+    if (nodeEnv === 'production') {
+      throw new Error(
+        'EVAL_RUN_AT_STARTUP=true is not permitted in production (startup workload contention risk).',
+      );
+    }
     if (deps.evalRunner) {
       const evalRunnerRef: EvalRunnerContract = deps.evalRunner;
       app.addHook('onReady', () => {

@@ -5,6 +5,8 @@
  * for use as input signals to the learned matcher model (RFC-006 section 5.2).
  */
 
+import { extractVintageYear } from '../../shared/utils/vintage.js';
+
 export interface MatcherFeatureVector {
   readonly charNgramOverlap: number;
   readonly tokenCoverage: number;
@@ -64,11 +66,10 @@ function tokenize(text: string): readonly string[] {
 
 /**
  * Extracts a 4-digit vintage year from a string, if present.
+ * Delegates to the SSoT vintage utility for the regex source.
  */
 function extractVintage(text: string): number | null {
-  const match = /(?<!\p{L})(?<!\p{N})((?:19|20)\d{2})(?!\p{L})(?!\p{N})/u.exec(text);
-  if (match?.[1] === undefined) return null;
-  return Number.parseInt(match[1], 10);
+  return extractVintageYear(text);
 }
 
 // Unicode block detection

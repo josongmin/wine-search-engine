@@ -46,6 +46,7 @@ const VINTAGE_PATTERN = /(?<!\p{L})(?<!\p{N})(?:18|19|20)\d{2}(?!\p{L})(?!\p{N})
  *  "와인 2018". Requiring 3+ chars reduces false positives while still catching
  *  "오푸스원", "바롤로", "브루넬로", "샤토마고" etc. */
 const HANGUL_SKU_PATTERN = /[\uAC00-\uD7A3]{3,}/;
+const ALL_LOWERCASE_PROPER_NOUN_RE = /(?:^|(?<=\s))[a-z][a-z'\u00C0-\u017F-]{2,}(?:\s+[a-z][a-z'\u00C0-\u017F-]{2,})+/u;
 
 /**
  * Adaptive-budget reuses the canonical QuerySanitizer for blocked-input
@@ -197,7 +198,6 @@ export function classifyQueryBudget(query: string): AdaptiveBudget | undefined {
   // (single word before vintage) or "2018 wine" (word after vintage).
   // Only applied to the vintage path; the no-vintage path keeps original behavior
   // to avoid misclassifying generic queries like "2018 wine" or single-word queries.
-  const ALL_LOWERCASE_PROPER_NOUN_RE = /(?:^|(?<=\s))[a-z][a-z'\u00C0-\u017F-]{2,}(?:\s+[a-z][a-z'\u00C0-\u017F-]{2,})+/u;
   const hasLowercaseProperNoun = ALL_LOWERCASE_PROPER_NOUN_RE.test(trimmed) && !/[A-Z\uAC00-\uD7A3]/.test(trimmed);
   const hasProperNoun = PROPER_NOUN_PATTERN.test(trimmed) || HANGUL_SKU_PATTERN.test(trimmed);
   // For vintage+lowercase queries, also check hasLowercaseProperNoun

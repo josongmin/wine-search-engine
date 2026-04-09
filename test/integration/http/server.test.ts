@@ -291,7 +291,7 @@ describe('HTTP server route registration', () => {
     }
   });
 
-  it('exposes agent execution metrics endpoint with contract-safe payload', async () => {
+  it('blocks /metrics/agent when debug secret is not configured', async () => {
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',
       nodeEnv: 'test',
@@ -304,25 +304,9 @@ describe('HTTP server route registration', () => {
         url: '/metrics/agent',
       });
 
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toMatchObject({
-        timestamp: expect.any(String),
-        agent: {
-          runs: expect.any(Number),
-          by_termination_reason: expect.any(Object),
-          fallback_runs: expect.any(Number),
-          fallback_rate: expect.any(Number),
-          total_tool_calls: expect.any(Number),
-          avg_duration_ms: expect.any(Number),
-          timeouts: {
-            llm_step: expect.any(Number),
-            tool: expect.any(Number),
-            parallel_batch: expect.any(Number),
-            event_rate_per_run: expect.any(Number),
-          },
-          alerts: expect.any(Array),
-        },
-      });
+      expect(res.statusCode).toBe(403);
+      const body = res.json() as { error?: { code?: string } };
+      expect(body.error?.code).toBe('FORBIDDEN');
     } finally {
       await app.close();
     }
@@ -350,9 +334,35 @@ describe('HTTP server route registration', () => {
         headers: { 'x-debug-key': debugSecret },
       });
       expect(allowed.statusCode).toBe(200);
+      expect(allowed.json()).toMatchObject({
+        timestamp: expect.any(String),
+        agent: {
+          runs: expect.any(Number),
+          by_termination_reason: expect.any(Object),
+          fallback_runs: expect.any(Number),
+          fallback_rate: expect.any(Number),
+          total_tool_calls: expect.any(Number),
+          avg_duration_ms: expect.any(Number),
+          timeouts: {
+            llm_step: expect.any(Number),
+            tool: expect.any(Number),
+            parallel_batch: expect.any(Number),
+            event_rate_per_run: expect.any(Number),
+          },
+          alerts: expect.any(Array),
+        },
+      });
     } finally {
       await app.close();
     }
+  });
+
+  it('refuses startup when eval-on-startup is enabled in production', async () => {
+    await expect(createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'production',
+      runEvalAtStartup: true,
+    })).rejects.toThrow(/EVAL_RUN_AT_STARTUP=true is not permitted in production/);
   });
 
   it('echoes a valid inbound X-Request-Id on the response', async () => {

@@ -22,7 +22,10 @@ import { buildSearchDecisionInput } from './search-usecase-decision-input.js';
 import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
 import { rankedResultsToEvalProvenanceSlices } from './search-usecase-eval-provenance.js';
 import { mapRankedResultsToResultItems } from './search-usecase-map-result-items.js';
-import { extractSensoryPriorsFromConstraints } from './extract-sensory-priors.js';
+import {
+  extractSensoryPriorsFromConstraints,
+  extractSensoryPriorsFromRetrievalPlan,
+} from './extract-sensory-priors.js';
 import { topKFinalScores } from './search-usecase-ranking-scores.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
@@ -209,7 +212,9 @@ export async function runRankedRouteDecisionPhase(
   // RFC-019 Phase 7: Extract query-level sensory priors from compositional
   // inference so wines with sparse indexed sensory attributes can still
   // trigger drinking window prediction.
-  const sensoryPriors = extractSensoryPriorsFromConstraints(ctx.plan.constraints);
+  const sensoryPriors =
+    extractSensoryPriorsFromRetrievalPlan(ctx.compiled?.query.retrievalPlan)
+    ?? extractSensoryPriorsFromConstraints(ctx.plan.constraints);
   const results = await mapRankedResultsToResultItems(
     ctx.rankedResults,
     ctx.drinkingWindow,
@@ -392,7 +397,9 @@ export async function runSearchPostRoutePhase(
       'pipeline entropy abstain',
     );
     // RFC-019 Phase 7: query-level sensory priors for drinking window fallback.
-    const sensoryPriorsAbstain = extractSensoryPriorsFromConstraints(ctx.plan.constraints);
+    const sensoryPriorsAbstain =
+      extractSensoryPriorsFromRetrievalPlan(ctx.compiled?.query.retrievalPlan)
+      ?? extractSensoryPriorsFromConstraints(ctx.plan.constraints);
     const results = await mapRankedResultsToResultItems(
       limitedRankedResults,
       ctx.drinkingWindow,

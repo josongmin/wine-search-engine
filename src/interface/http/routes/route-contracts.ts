@@ -65,6 +65,9 @@ type SearchRouteCapability =
   | 'resolver_only';
 
 const AGENT_METRICS_ALERTS_MAX = 20;
+const RETRIEVAL_DEGRADATION_ALERTS_MAX = 20;
+/** Upper bound for component count in degradation metrics (6 known components + headroom). */
+const RETRIEVAL_DEGRADATION_COMPONENTS_MAX = 12;
 
 export interface HttpRouteContract {
   readonly operationId: string;
@@ -169,6 +172,27 @@ export const AgentMetricsRouteContract = defineRouteContract({
   operationId: 'system.agentMetrics',
   responses: {
     [HTTP_STATUS_OK]: AgentMetricsResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+  },
+});
+
+const RetrievalDegradationMetricsResponseSchema = z.object({
+  timestamp: z.string(),
+  retrieval: z.object({
+    total_retrievals: z.number().int().nonnegative(),
+    degradations: z.record(z.number().int().nonnegative()).refine(
+      (rec) => Object.keys(rec).length <= RETRIEVAL_DEGRADATION_COMPONENTS_MAX,
+      { message: `degradations record must not exceed ${RETRIEVAL_DEGRADATION_COMPONENTS_MAX} keys` },
+    ),
+    degradation_rate: z.number().finite().min(0),
+    alerts: z.array(z.string()).max(RETRIEVAL_DEGRADATION_ALERTS_MAX),
+  }).strict(),
+}).strict();
+
+export const RetrievalDegradationMetricsRouteContract = defineRouteContract({
+  operationId: 'system.retrievalDegradationMetrics',
+  responses: {
+    [HTTP_STATUS_OK]: RetrievalDegradationMetricsResponseSchema,
     [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
   },
 });

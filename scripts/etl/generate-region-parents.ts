@@ -133,7 +133,8 @@ function deriveRegionParents(records: readonly RegionSnapshotRecord[]): Map<stri
     let bestParents: readonly string[] | undefined;
     let bestVotes = -1;
     for (const [chainKey, votes] of chains) {
-      const parsed = JSON.parse(chainKey) as string[];
+      const rawParsed: unknown = JSON.parse(chainKey);
+      const parsed = Array.isArray(rawParsed) ? rawParsed as string[] : [];
       if (
         votes > bestVotes ||
         (votes === bestVotes && (bestParents === undefined || parsed.length > bestParents.length)) ||

@@ -128,7 +128,7 @@ export async function runHybridRankingPipeline(
   ranker: RankingPort,
   compiled?: CompiledWineQuery,
 ): Promise<SearchRouteExecutionResult> {
-  const retrievalPlan = buildRetrievalPlan(plan.constraints);
+  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
   const rankingInput: RankingInput = {
     queryPlan: plan,
     candidates,

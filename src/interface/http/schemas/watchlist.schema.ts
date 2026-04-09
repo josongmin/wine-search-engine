@@ -241,7 +241,10 @@ const HttpsUrlSchema = z.string().url().max(MAX_HTTPS_CALLBACK_URL_CHARS).refine
   'callback_url must not target private or reserved network addresses',
 );
 const FutureDateTimeSchema = z.string().datetime().refine(
-  (value) => new Date(value).getTime() > Date.now(),
+  (value) => {
+    const ts = new Date(value).getTime();
+    return Number.isFinite(ts) && ts > Date.now();
+  },
   'expires_at must be in the future',
 );
 

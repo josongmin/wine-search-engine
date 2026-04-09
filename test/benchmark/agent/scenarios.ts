@@ -62,7 +62,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         // derivation from region hierarchy is trustworthy enough for soft tier.
         soft: [
           { attribute: 'country', operator: '=', value: 'France' },
-          { attribute: 'country', operator: '=', value: 'USA' },
+          { attribute: 'country', operator: '=', value: 'United States' },
         ],
         // Compositional inference: bordeaux+red variant fires even without
         // explicit wine_type because compare query implies both sides.

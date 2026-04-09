@@ -1,8 +1,26 @@
 import { readFileSync } from 'node:fs';
+import { z } from 'zod';
 import type { MappingTablePort } from '../../domain/attribute/port/mapping-table.port.js';
 import type { NLMapping } from '../../domain/attribute/model/nl-mapping.js';
 import { resolveDataPath } from '../../shared/utils/data-paths.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+/**
+ * Zod schema for validating individual NL mapping entries read from JSON.
+ * Ensures external data matches the NLMapping interface at runtime (Rule 12).
+ */
+const NLMappingSchema = z.object({
+  phrase: z.string(),
+  mappedAttribute: z.string(),
+  operator: z.string(),
+  value: z.union([z.number(), z.string(), z.tuple([z.number(), z.number()])]),
+  mappingConfidence: z.number().finite(),
+  mappingVersion: z.string(),
+  source: z.string(),
+});
+
+/** Max mappings to accept from a single file (domain bound: ~500 entities × 3 aliases). */
+const MAX_MAPPINGS_FROM_FILE = 2000;
 
 /**
  * File-backed implementation of {@link MappingTablePort}.
@@ -32,7 +50,15 @@ export class FileMappingTableAdapter implements MappingTablePort {
         ? parsed as Record<string, unknown>
         : undefined;
       this.version = typeof obj?.['version'] === 'string' ? obj['version'] : 'v1.0';
-      this.mappings = Array.isArray(obj?.['mappings']) ? obj['mappings'] as NLMapping[] : [];
+      const rawMappings = Array.isArray(obj?.['mappings']) ? obj['mappings'] as unknown[] : [];
+      const validated: NLMapping[] = [];
+      for (const item of rawMappings.slice(0, MAX_MAPPINGS_FROM_FILE)) {
+        const result = NLMappingSchema.safeParse(item);
+        if (result.success) {
+          validated.push(result.data as NLMapping);
+        }
+      }
+      this.mappings = validated;
     } catch (err) {
       // File missing or unreadable — start with empty mapping set.
       // Log at warn level so operators can detect corrupted/missing data files.

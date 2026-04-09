@@ -34,6 +34,8 @@ export class RedisCache {
    * against a Zod schema. The unchecked generic cast on `get<T>` returns
    * silently-typed garbage when cache contents drift or are corrupted.
    */
+  /** @deprecated Use {@link getValidated} with a Zod schema instead. This method
+   *  casts JSON.parse output directly to T without runtime validation. */
   async get<T>(key: string): Promise<T | null> {
     const raw = await this.client.get(key);
     if (raw == null) return null;

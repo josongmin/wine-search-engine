@@ -13,6 +13,12 @@ const HIGH_THRESHOLD = 0.3;
 const MEDIUM_THRESHOLD = 0.1;
 
 /**
+ * Signals at or below this absolute magnitude are treated as zero for evidence
+ * rows (avoids spurious rows from float noise; still allows explicit zeros where needed).
+ */
+const EVIDENCE_SIGNAL_NEAR_ZERO = 1e-12;
+
+/**
  * Maps component scores to evidence items for the audit trail.
  *
  * Each non-zero component becomes one {@link EvidenceItem} with a signed
@@ -135,15 +141,16 @@ export class EvidenceMapper {
       });
     }
 
-    if (scores.uncertaintyPenalty > 0) {
-      items.push({
-        type: 'uncertainty_penalty',
-        source: 'ranking_signal_computer',
-        contribution: formatContribution(-scores.uncertaintyPenalty),
-        strength: classifyStrength(scores.uncertaintyPenalty),
-        provenance: 'Penalty for query ambiguity and missing candidate information',
-      });
-    }
+    items.push({
+      type: 'uncertainty_penalty',
+      source: 'ranking_signal_computer',
+      contribution: formatContribution(-scores.uncertaintyPenalty),
+      strength:
+        Math.abs(scores.uncertaintyPenalty) > EVIDENCE_SIGNAL_NEAR_ZERO
+          ? classifyStrength(scores.uncertaintyPenalty)
+          : 'low',
+      provenance: 'Penalty for query ambiguity and missing candidate information',
+    });
 
     return items;
   }
@@ -160,7 +167,7 @@ export class EvidenceMapper {
       readonly provenance: string;
     },
   ): void {
-    if (entry.value === 0) {
+    if (!Number.isFinite(entry.value) || Math.abs(entry.value) <= EVIDENCE_SIGNAL_NEAR_ZERO) {
       return;
     }
 

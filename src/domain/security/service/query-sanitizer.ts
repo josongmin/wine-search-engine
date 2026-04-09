@@ -55,6 +55,24 @@ function applyNormalization(input: string): string {
   return nfkc.replace(CONFUSABLES_REGEX, (ch) => SECURITY_CONFUSABLES_MAP.get(ch) ?? ch);
 }
 
+/**
+ * Defense-in-depth upper bound on raw input length BEFORE any regex runs.
+ *
+ * The regex patterns in {@link QuerySanitizer.INJECTION_PATTERNS} are
+ * designed to be linear-time, but catastrophic backtracking can still occur
+ * on pathological inputs with nested quantifiers. This cap ensures that
+ * even if a pattern is accidentally made vulnerable, an attacker cannot
+ * exploit it by submitting a multi-megabyte payload.
+ *
+ * This bound is DELIBERATELY much larger than the user-facing
+ * {@link MAX_QUERY_LENGTH} (500) — legitimate queries never approach this
+ * size, so anything above it is almost certainly an attack. Truncating
+ * (rather than rejecting immediately) preserves the existing error path:
+ * the downstream length check will still reject the (truncated) input with
+ * {@link InjectionResult}`.reason = 'LENGTH_EXCEEDED'`.
+ */
+const MAX_QUERY_LENGTH_FOR_REDOS_GUARD = 2_000;
+
 /** C0 controls stripped through U+0008 (preserve tab U+0009). */
 const UNICODE_C0_CONTROL_STRIP_END = 0x08;
 const UNICODE_VERTICAL_TAB = 0x0b;
@@ -172,7 +190,7 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})exec(?:ute)?\s*\(/iu,
       /(?<!\p{L})(?<!\p{N})(?:db|database)\s+schema(?!\p{L})(?!\p{N})/iu,
       /--\s*$/,                          // SQL comment at end
-      /\/\*[\s\S]*?\*\//,                // Block comment (cross-line)
+      /\/\*[\s\S]{0,1000}?\*\//,          // Block comment (cross-line, bounded to prevent ReDoS)
       // Bare DML/DDL statements — `select wines from Bordeaux` is natural
       // language, but `SELECT * FROM`, `SELECT col FROM`, and explicit
       // DML/DDL keywords are not. Match SELECT...FROM with column-style
@@ -270,6 +288,20 @@ export class QuerySanitizer {
       return {
         safe: false,
         reason: 'EMPTY_QUERY',
+      };
+    }
+
+    // Defense-in-depth ReDoS guard: reject anything larger than the
+    // catastrophic-backtracking protection bound BEFORE any regex runs.
+    // Legitimate queries are bounded by MAX_QUERY_LENGTH (500); this cap
+    // (MAX_QUERY_LENGTH_FOR_REDOS_GUARD = 2_000) is intentionally 4x larger
+    // so a genuine oversize query still gets the normal LENGTH_EXCEEDED
+    // rejection below after normalization, while obvious attacks
+    // (megabyte payloads) are refused in O(1) before touching any regex.
+    if (rawQuery.length > MAX_QUERY_LENGTH_FOR_REDOS_GUARD) {
+      return {
+        safe: false,
+        reason: 'LENGTH_EXCEEDED',
       };
     }
 

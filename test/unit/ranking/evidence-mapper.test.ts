@@ -145,11 +145,13 @@ describe('EvidenceMapper', () => {
   });
 
   describe('uncertainty penalty inclusion', () => {
-    it('uncertaintyPenalty=0 → no uncertainty_penalty evidence item', () => {
+    it('uncertaintyPenalty=0 → uncertainty_penalty row still present for audit trail', () => {
       const scores = makeScores({ entityIntegrity: 0.5, uncertaintyPenalty: 0 });
       const items = mapper.mapToEvidence(scores);
       const item = items.find((i) => i.type === 'uncertainty_penalty');
-      expect(item).toBeUndefined();
+      expect(item).toBeDefined();
+      expect(item!.contribution).toBe('+0.00');
+      expect(item!.strength).toBe('low');
     });
 
     it('uncertaintyPenalty > 0 → uncertainty_penalty evidence item included', () => {

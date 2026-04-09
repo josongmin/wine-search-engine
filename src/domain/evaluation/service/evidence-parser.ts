@@ -12,6 +12,30 @@
 import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 import type { EvidenceRecord } from './claim-verifier-deterministic.js';
 
+// ── Module-scope regex constants (CLAUDE.md rule 16) ─────────────────────
+/** Match "N. <label>" or "Side A/B: <subQuery>: <label>" at start of pipe-delimited line. */
+const LABEL_LINE_RE = /^(?:\d+\.\s*|Side\s+[AB]:\s*[^:]*:\s*)(.+)$/u;
+/** Match "(id: xxx)" entity ID format. */
+const ENTITY_ID_PAREN_RE = /^\(?id:\s*([^)]+)\)?$/u;
+/** Match "entity_id: xxx" compare format. */
+const ENTITY_ID_COLON_RE = /^entity_id:\s*(\S+)$/u;
+/** Match "key: value" pairs in pipe-delimited observation. */
+const KV_PAIR_RE = /^([a-z_]+):\s*(.+)$/u;
+/** Match "95/100" critic score format → normalized 0..1. */
+const CRITIC_SCORE_RE = /^(\d+(?:\.\d+)?)\s*\/\s*100/u;
+/** Match "14.5%" alcohol percentage. */
+const ALCOHOL_PCT_RE = /^(\d+(?:\.\d+)?)\s*%/u;
+/** Match "$42.50" USD price. */
+const PRICE_USD_RE = /^\$\s*([0-9]+(?:\.[0-9]+)?)/u;
+/** Match "₩50,000" KRW price. */
+const PRICE_KRW_RE = /^₩\s*([0-9][0-9,]*)/u;
+/** Match "value|mid|premium|luxury" price band label. */
+const PRICE_BAND_RE = /^(value|mid|premium|luxury)$/iu;
+/** Match "2024-2038" drinking window year range. */
+const DRINKING_WINDOW_RANGE_RE = /^(\d{4})\s*[-–]\s*(\d{4})$/u;
+/** Match "<label>: drinking window <start>-<end>" sentence. */
+const DRINKING_WINDOW_SENTENCE_RE = /^(.+?):\s*drinking window\s*(\d{4})\s*[-–]\s*(\d{4})/u;
+
 /**
  * Parse an array of tool observation strings into EvidenceRecord array.
  * Each observation may yield 0..N records (a search result with N wines = N records).
@@ -54,7 +78,8 @@ function parseObservation(observation: string): EvidenceRecord[] {
     const parsed: unknown = JSON.parse(trimmed);
     return extractRecordsFromJson(parsed);
   } catch {
-    // not JSON — try pipe-delimited next
+    // Intentionally silent: JSON.parse is a speculative probe — most observations
+    // are not JSON (pipe-delimited or raw text). Falling through to Strategy 2/3.
   }
 
   // Strategy 2: pipe-delimited wine lines from agent-tools.ts summarizers
@@ -103,7 +128,7 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
     const record: Record<string, string | number | readonly string[]> = {};
 
     // First part: either "N. <label>" (search result) or "Side X: <subQuery>: <label>" (compare)
-    const labelMatch = /^(?:\d+\.\s*|Side\s+[AB]:\s*[^:]*:\s*)(.+)$/u.exec(parts[0]!);
+    const labelMatch = LABEL_LINE_RE.exec(parts[0]!);
     if (labelMatch?.[1] !== undefined) {
       record['canonical_label'] = labelMatch[1].trim();
     } else if (parts[0]!.length > 0) {
@@ -114,19 +139,19 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i]!.trim();
       // (id: vivino-abc)
-      const idMatch = /^\(?id:\s*([^)]+)\)?$/u.exec(part);
+      const idMatch = ENTITY_ID_PAREN_RE.exec(part);
       if (idMatch?.[1] !== undefined) {
         record['entity_id'] = idMatch[1].trim();
         continue;
       }
       // entity_id: vivino-abc (compare format)
-      const entityIdMatch = /^entity_id:\s*(\S+)$/u.exec(part);
+      const entityIdMatch = ENTITY_ID_COLON_RE.exec(part);
       if (entityIdMatch?.[1] !== undefined) {
         record['entity_id'] = entityIdMatch[1].trim();
         continue;
       }
       // key: value
-      const kvMatch = /^([a-z_]+):\s*(.+)$/u.exec(part);
+      const kvMatch = KV_PAIR_RE.exec(part);
       if (kvMatch !== null) {
         const key = kvMatch[1]!.toLowerCase();
         const value = kvMatch[2]!.trim();
@@ -155,7 +180,7 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
             break;
           case 'critic': {
             // "95/100" → 0.95
-            const cm = /^(\d+(?:\.\d+)?)\s*\/\s*100/u.exec(value);
+            const cm = CRITIC_SCORE_RE.exec(value);
             if (cm?.[1] !== undefined) {
               const score = parseFloat(cm[1]) / 100;
               if (Number.isFinite(score)) record['critic_score_normalized'] = score;
@@ -164,7 +189,7 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
           }
           case 'alc': {
             // "14%" or "14.5%"
-            const am = /^(\d+(?:\.\d+)?)\s*%/u.exec(value);
+            const am = ALCOHOL_PCT_RE.exec(value);
             if (am?.[1] !== undefined) {
               const pct = parseFloat(am[1]);
               if (Number.isFinite(pct)) record['alcohol_pct'] = pct;
@@ -180,13 +205,13 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
             // via the shared KRW_PER_USD_APPROXIMATE constant so evaluation parses
             // prices on the same scale as the extractor. Free-form text falls back to
             // `price_text`.
-            const usdMatch = /^\$\s*([0-9]+(?:\.[0-9]+)?)/u.exec(value);
+            const usdMatch = PRICE_USD_RE.exec(value);
             if (usdMatch?.[1] !== undefined) {
               const n = parseFloat(usdMatch[1]);
               if (Number.isFinite(n)) record['price_usd'] = n;
               break;
             }
-            const krwMatch = /^₩\s*([0-9][0-9,]*)/u.exec(value);
+            const krwMatch = PRICE_KRW_RE.exec(value);
             if (krwMatch?.[1] !== undefined) {
               const krw = parseInt(krwMatch[1].replace(/,/gu, ''), 10);
               if (Number.isFinite(krw)) {
@@ -194,7 +219,7 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
               }
               break;
             }
-            if (/^(value|mid|premium|luxury)$/iu.test(value)) {
+            if (PRICE_BAND_RE.test(value)) {
               record['price_band'] = value.toLowerCase();
               break;
             }
@@ -203,7 +228,7 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
           }
           case 'drink': {
             // "2024-2038" or "2024-2038"
-            const dm = /^(\d{4})\s*[-–]\s*(\d{4})$/u.exec(value);
+            const dm = DRINKING_WINDOW_RANGE_RE.exec(value);
             if (dm?.[1] !== undefined && dm[2] !== undefined) {
               const start = parseInt(dm[1], 10);
               const end = parseInt(dm[2], 10);
@@ -237,7 +262,7 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
  */
 function parseDrinkingWindowSentence(line: string): EvidenceRecord | undefined {
   // Match: "<label>: drinking window <start>-<end>. As of <year>: <status>."
-  const m = /^(.+?):\s*drinking window\s*(\d{4})\s*[-–]\s*(\d{4})/u.exec(line);
+  const m = DRINKING_WINDOW_SENTENCE_RE.exec(line);
   if (m?.[1] === undefined || m[2] === undefined || m[3] === undefined) return undefined;
   const start = parseInt(m[2], 10);
   const end = parseInt(m[3], 10);
@@ -263,7 +288,7 @@ function extractRecordsFromJson(value: unknown): EvidenceRecord[] {
   if (Array.isArray(value)) {
     const records: EvidenceRecord[] = [];
     for (const item of value) {
-      if (typeof item === 'object' && item !== null) {
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
         records.push(flattenRecord(item as Record<string, unknown>));
       }
     }

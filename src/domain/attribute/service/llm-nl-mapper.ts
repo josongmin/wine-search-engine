@@ -39,6 +39,7 @@ import {
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { abortError, throwIfAborted } from '../../shared/cooperative-abort.js';
 import { resolveEntity } from './entity-resolver.js';
+import type { FuzzyMatcherPort } from '../../query/port/fuzzy-matcher.port.js';
 
 const log = bootstrapLogger.child({ component: 'LlmNLMapper' });
 
@@ -51,6 +52,73 @@ const PROMPT_FINGERPRINT_HEX_PREFIX_CHARS = 8;
 /** Truncate raw LLM text in schema-validation failure logs. */
 const LLM_SCHEMA_FAIL_RAW_TEXT_PREVIEW_CHARS = 200;
 const ENTITY_LIKE_ATTRIBUTES = new Set(['country', 'region', 'appellation', 'grape_primary']);
+
+/**
+ * Hard cap on individual phrase length before it is interpolated into the
+ * LLM prompt. Legitimate wine phrases are short (a few words); anything
+ * longer is either noise or a prompt-overflow attack attempting to push
+ * the system prompt out of the context window.
+ */
+const MAX_LLM_PHRASE_LENGTH = 120;
+
+/**
+ * Prompt-injection marker patterns stripped from user phrases before
+ * interpolation into the LLM prompt body. These are well-known tokens that
+ * attempt to break out of the user-turn boundary and inject a pseudo-system
+ * instruction into the model. This is defense-in-depth only — the sanitizer
+ * also rejects phrases containing newlines (which can synthetically create
+ * a new role turn) rather than trying to scrub them.
+ *
+ * Keep this list conservative: false positives here silently drop real
+ * phrases. The regex must cover ASCII only — phrases with Korean/accented
+ * content are left untouched.
+ */
+const LLM_PROMPT_INJECTION_MARKERS: readonly RegExp[] = [
+  /\[(?:SYSTEM|INST|ASSISTANT|USER|SYS)[^\]]*\]/gi,
+  /<\|(?:im_start|im_end|system|user|assistant|endoftext)\|>/gi,
+  /<<SYS>>|<<\/SYS>>/gi,
+  /\[\/?INST\]/gi,
+];
+
+/**
+ * Sanitizes a user phrase before interpolation into the LLM prompt.
+ *
+ * - Rejects phrases containing `\n` or `\r` — newline chars can synthetically
+ *   create a new role turn in chat prompt formats and break out of the
+ *   user-turn JSON string the phrase is embedded in.
+ * - Strips known prompt-injection markers ([SYSTEM:, <|im_start|>, <<SYS>>, …)
+ *   even though the phrase is JSON-stringified, so that a cached/logged
+ *   phrase cannot surface these tokens downstream.
+ * - Truncates to {@link MAX_LLM_PHRASE_LENGTH} to prevent prompt-overflow
+ *   attacks that try to push the system prompt out of context.
+ *
+ * Returns `null` if the phrase is rejected outright (newline content, or
+ * empty after sanitization); otherwise returns the cleaned phrase.
+ *
+ * @internal exported for tests.
+ */
+export function sanitizeLlmPhrase(phrase: string): string | null {
+  if (phrase.length === 0) {
+    return null;
+  }
+  // Reject newlines — they can synthesize a new role turn even inside a
+  // JSON-encoded user message when the provider is permissive.
+  if (/[\r\n]/.test(phrase)) {
+    return null;
+  }
+  let cleaned = phrase;
+  for (const pattern of LLM_PROMPT_INJECTION_MARKERS) {
+    cleaned = cleaned.replace(pattern, '');
+  }
+  cleaned = cleaned.trim();
+  if (cleaned.length === 0) {
+    return null;
+  }
+  if (cleaned.length > MAX_LLM_PHRASE_LENGTH) {
+    cleaned = cleaned.slice(0, MAX_LLM_PHRASE_LENGTH);
+  }
+  return cleaned;
+}
 
 const SYSTEM_PROMPT = `You are a wine search query constraint parser. Given Korean or English wine search phrases, extract structured attribute constraints.
 
@@ -104,6 +172,7 @@ export class LlmNLMapper extends NLMapper {
     private readonly chatLlm: ChatLlmPort,
     private readonly llmTimeoutMs: number = LLM_TIMEOUT_MS,
     private readonly phraseCache?: PhraseCachePort,
+    private readonly fuzzyMatcher?: FuzzyMatcherPort | undefined,
   ) {
     super(mappingTable);
   }
@@ -178,7 +247,7 @@ export class LlmNLMapper extends NLMapper {
               const beforeCount = llmResults.length;
               for (const item of cached) {
                 if (LLM_ALLOWED_ATTRIBUTES.has(item.attribute) && item.confidence >= LLM_CONFIDENCE_THRESHOLD) {
-                  const normalized = llmItemToConstraint(item);
+                  const normalized = llmItemToConstraint(item, this.fuzzyMatcher);
                   llmResults.push(normalized.constraint);
                   llmLinkedEntityCount += normalized.linkedEntity ? 1 : 0;
                 }
@@ -242,7 +311,7 @@ export class LlmNLMapper extends NLMapper {
               llmSkippedCount++;
               continue;
             }
-            const normalized = llmItemToConstraint(item);
+            const normalized = llmItemToConstraint(item, this.fuzzyMatcher);
             llmResults.push(normalized.constraint);
             llmLinkedEntityCount += normalized.linkedEntity ? 1 : 0;
           }
@@ -319,7 +388,21 @@ export class LlmNLMapper extends NLMapper {
     phrases: readonly string[],
     externalSignal?: AbortSignal,
   ): Promise<LlmConstraintItem[]> {
-    const userMessage = JSON.stringify(phrases);
+    // Prompt-injection hardening: sanitize each phrase before interpolation.
+    // Phrases that fail the sanitizer (newlines, empty after stripping markers)
+    // are dropped — we do NOT log the raw phrase to avoid leaking attack
+    // payloads into observability pipelines.
+    const safePhrases: string[] = [];
+    for (const phrase of phrases) {
+      const sanitized = sanitizeLlmPhrase(phrase);
+      if (sanitized !== null) {
+        safePhrases.push(sanitized);
+      }
+    }
+    if (safePhrases.length === 0) {
+      return [];
+    }
+    const userMessage = JSON.stringify(safePhrases);
     const timeoutController = new AbortController();
     const timeoutHandle = setTimeout(() => {
       timeoutController.abort();
@@ -384,7 +467,10 @@ export class LlmNLMapper extends NLMapper {
   }
 }
 
-function llmItemToConstraint(item: LlmConstraintItem): {
+function llmItemToConstraint(
+  item: LlmConstraintItem,
+  fuzzyMatcher?: FuzzyMatcherPort,
+): {
   readonly constraint: NormalizedConstraint;
   readonly linkedEntity: boolean;
 } {
@@ -393,7 +479,7 @@ function llmItemToConstraint(item: LlmConstraintItem): {
   // schema (LlmConstraintItemSchema) guarantees `value` is non-null, so the
   // discriminator is purely typeof + Array.isArray.
   const rawValue = item.value;
-  const canonicalized = canonicalizeEntityLikeValue(item);
+  const canonicalized = canonicalizeEntityLikeValue(item, fuzzyMatcher);
   const value: NormalizedConstraint['value'] =
     canonicalized !== null
       ? canonicalized.value
@@ -416,6 +502,7 @@ function llmItemToConstraint(item: LlmConstraintItem): {
 
 function canonicalizeEntityLikeValue(
   item: LlmConstraintItem,
+  fuzzyMatcher?: FuzzyMatcherPort,
 ): { readonly value: string } | null {
   if (!ENTITY_LIKE_ATTRIBUTES.has(item.attribute)) {
     return null;
@@ -423,7 +510,7 @@ function canonicalizeEntityLikeValue(
   if (typeof item.value !== 'string') {
     return null;
   }
-  const resolved = resolveEntity(item.value, { preferEntityOverStyle: true });
+  const resolved = resolveEntity(item.value, { preferEntityOverStyle: true }, fuzzyMatcher);
   if (resolved === null || resolved.entityType !== item.attribute) {
     return null;
   }

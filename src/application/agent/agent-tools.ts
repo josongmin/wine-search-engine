@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
@@ -462,6 +463,7 @@ export async function executeAgentTool(
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
       throw err;
     }
+    bootstrapLogger.warn({ err: err instanceof Error ? err.message : String(err), tool: toolName }, '[agent-tools] tool execution failed');
     return {
       observation: `Tool "${toolName}" encountered an unexpected error. Try a different approach or query.`,
       rawResult: null,

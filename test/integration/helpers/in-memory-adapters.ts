@@ -207,6 +207,19 @@ export class InMemorySearchIndex implements SearchIndexPort {
     return this.docs.get(entityId) ?? null;
   }
 
+  async getDocuments(
+    entityIds: readonly EntityId[],
+  ): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+    const docs = new Map<EntityId, RetrievalDocument>();
+    for (const entityId of entityIds) {
+      const doc = this.docs.get(entityId);
+      if (doc !== undefined) {
+        docs.set(entityId, doc);
+      }
+    }
+    return docs;
+  }
+
   async upsertDocument(doc: RetrievalDocument): Promise<void> {
     this.docs.set(doc.entityId, doc);
   }

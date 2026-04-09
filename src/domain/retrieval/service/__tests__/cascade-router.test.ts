@@ -32,7 +32,7 @@ describe('CascadeRouter', () => {
     });
 
     it('hard → full pipeline', () => {
-      expect(router.getPhases('hard')).toEqual(['sparse', 'dense', 'anchor_neighborhood', 'rerank']);
+      expect(router.getPhases('hard')).toEqual(['sparse', 'dense', 'anchor_neighborhood']);
     });
   });
 
@@ -55,7 +55,6 @@ describe('CascadeRouter', () => {
       expect(decision.channelsToActivate).toContain('sparse_bm25');
       expect(decision.channelsToActivate).toContain('dense_semantic');
       expect(decision.channelsToActivate).toContain('anchor_similarity');
-      // rerank is a ranking stage, not a channel
       expect(decision.channelsToActivate).not.toContain(null);
     });
 

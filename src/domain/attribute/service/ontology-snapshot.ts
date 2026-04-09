@@ -4,6 +4,7 @@ import {
   WINE_TYPE_ALIASES,
 } from '../../evaluation/service/wine-ontology.js';
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
+import { wineTitleCase } from '../../shared/utils/title-case.js';
 
 export interface OntologySnapshotNode {
   readonly id: string;
@@ -56,8 +57,8 @@ export function buildOntologySnapshot(
     nodes.push({
       id: `country:${country}`,
       entityType: 'country',
-      canonicalLabel: titleCase(country),
-      aliases: [titleCase(country)],
+      canonicalLabel: wineTitleCase(country),
+      aliases: [wineTitleCase(country)],
       parents: [],
     });
   }
@@ -68,9 +69,9 @@ export function buildOntologySnapshot(
     nodes.push({
       id: `${entityType}:${region}`,
       entityType,
-      canonicalLabel: titleCase(region),
-      aliases: [titleCase(region)],
-      parents: parents.map((parent) => titleCase(parent)),
+      canonicalLabel: wineTitleCase(region),
+      aliases: [wineTitleCase(region)],
+      parents: parents.map((parent) => wineTitleCase(parent)),
     });
   }
 
@@ -78,8 +79,8 @@ export function buildOntologySnapshot(
     nodes.push({
       id: `grape_primary:${canonical}`,
       entityType: 'grape_primary',
-      canonicalLabel: titleCase(canonical),
-      aliases: alias.map((entry) => titleCase(entry)),
+      canonicalLabel: wineTitleCase(canonical),
+      aliases: alias.map((entry) => wineTitleCase(entry)),
       parents: [],
     });
   }
@@ -126,7 +127,7 @@ export function buildOntologySnapshot(
   const regionHierarchy: Record<string, string> = {};
   for (const [region, parents] of REGION_PARENTS) {
     if (parents.length > 0) {
-      regionHierarchy[titleCase(region)] = titleCase(parents[0]!);
+      regionHierarchy[wineTitleCase(region)] = wineTitleCase(parents[0]!);
     }
   }
 
@@ -201,18 +202,3 @@ function inferRegionEntityType(region: string): OntologySnapshotNode['entityType
  * Wine-domain-aware title case: lowercase Romance prepositions/articles
  * (di, du, de, del, etc.) except when they start the string.
  */
-const LOWERCASE_PREPOSITIONS: ReadonlySet<string> = new Set([
-  'di', 'du', 'de', 'del', 'della', 'delle', 'dei', 'des', 'da',
-  'la', 'le', 'les', 'los', 'las', 'el', 'al', 'do', 'das',
-]);
-
-function titleCase(value: string): string {
-  return value
-    .split(/\s+/)
-    .map((w, i) => {
-      if (w.length === 0) return w;
-      if (i > 0 && LOWERCASE_PREPOSITIONS.has(w.toLowerCase())) return w.toLowerCase();
-      return w[0]!.toUpperCase() + w.slice(1);
-    })
-    .join(' ');
-}

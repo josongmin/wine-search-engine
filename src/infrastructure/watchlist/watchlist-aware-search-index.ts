@@ -1,4 +1,5 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
@@ -39,6 +40,23 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     return this.inner.getDocument(...args);
   }
 
+  getDocuments(entityIds: readonly EntityId[]): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+    if (this.inner.getDocuments !== undefined) {
+      return this.inner.getDocuments(entityIds);
+    }
+    return Promise.all(
+      entityIds.map(async (entityId) => [entityId, await this.inner.getDocument(entityId)] as const),
+    ).then((rows) => {
+      const docs = new Map<EntityId, RetrievalDocument>();
+      for (const [entityId, doc] of rows) {
+        if (doc !== null) {
+          docs.set(entityId, doc);
+        }
+      }
+      return docs;
+    });
+  }
+
   async upsertDocument(doc: RetrievalDocument): Promise<void> {
     const previous = await this.inner.getDocument(doc.entityId);
     await this.inner.upsertDocument(doc);
@@ -46,10 +64,7 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
   }
 
   async bulkUpsert(docs: readonly RetrievalDocument[]): Promise<void> {
-    const previousDocuments = await Promise.all(
-      docs.map(async (doc) => [doc.entityId, await this.inner.getDocument(doc.entityId)] as const),
-    );
-    const previousById = new Map(previousDocuments);
+    const previousById = await this.getDocuments(docs.map((doc) => doc.entityId));
 
     await this.inner.bulkUpsert(docs);
 

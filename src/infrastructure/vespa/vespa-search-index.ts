@@ -469,6 +469,28 @@ export class VespaSearchIndex implements SearchIndexPort {
     return fromVespaFields(fields);
   }
 
+  async getDocuments(
+    entityIds: readonly EntityId[],
+  ): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+    if (entityIds.length === 0) {
+      return new Map<EntityId, RetrievalDocument>();
+    }
+    if (entityIds.length > MAX_BULK_FETCH_IDS) {
+      throw new Error(`getDocuments: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
+    }
+    const settled = await Promise.allSettled(entityIds.map(async (entityId) => {
+      const doc = await this.getDocument(entityId);
+      return doc === null ? null : [entityId, doc] as const;
+    }));
+    const docs = new Map<EntityId, RetrievalDocument>();
+    for (const result of settled) {
+      if (result.status === 'fulfilled' && result.value !== null) {
+        docs.set(result.value[0], result.value[1]);
+      }
+    }
+    return docs;
+  }
+
   // -------------------------------------------------------------------------
   // upsertDocument
   // -------------------------------------------------------------------------

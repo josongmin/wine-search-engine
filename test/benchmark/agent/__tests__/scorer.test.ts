@@ -2239,6 +2239,24 @@ describe('scoreConstraintSatisfactionRate', () => {
     // Overall = (1*0.6 + 0*0.2) / (0.6+0.2) = 0.75
     expect(result.csrOverall).toBeCloseTo(0.75, 5);
   });
+
+  it('inferred constraints contribute to overall with 0.2 weight', () => {
+    const bundle: ConstraintBundle = {
+      hard: [],
+      soft: [],
+      inferred: [
+        { attribute: 'grape_family', operator: '=', value: 'Cabernet' },
+        { attribute: 'tannin', operator: '=', value: 'high' },
+      ],
+    };
+    // Only 'cabernet' evidenced, not 'high' for tannin
+    const observations = ['Wine: Cabernet blend, medium tannin'];
+    const result = scoreConstraintSatisfactionRate(bundle, observations);
+    expect(result.csrHard).toBeNull();
+    expect(result.csrSoft).toBeNull();
+    expect(result.csrInferred).toBe(0.5); // 1/2 satisfied
+    expect(result.csrOverall).toBe(0.5);   // only inferred bucket → overall = inferred
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────

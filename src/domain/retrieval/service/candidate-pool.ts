@@ -9,6 +9,7 @@ import type {
 } from '../model/candidate-envelope.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
+import { CandidateProvenanceV2Schema } from '../model/retrieval-contract-v2.js';
 import {
   preferCanonicalRetrievalChannelLabel,
   preferCanonicalRetrievalChannelLabels,
@@ -24,7 +25,10 @@ import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
 import { accumulateEvidence } from './evidence-accumulator.js';
 import { applyRelativeFilter } from './relative-filter-policy.js';
 import { combineSemanticEmbeddings } from './semantic-embedding-combiner.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 import type { CacheService } from '../../performance/index.js';
+import type { RetrievalDegradationObserver } from '../port/retrieval-degradation-observer.port.js';
+import type { RetrievalExecutorV2Port } from '../port/retrieval-executor-v2.port.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { pipelineDebug } from '../../../observability/request-pipeline-debug.js';
 import { deriveQueryFamily } from '../../query/model/query-observability-vocab.js';
@@ -35,8 +39,10 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
 const QUERY_EXPANSION_MAX_TERMS = 32;
 /** Weight increment per repeated token occurrence in expansion stats. */
 const QUERY_EXPANSION_TERM_WEIGHT_STEP = 0.25;
-/** Disabled until Vespa learned_sparse rank-profile is re-enabled in schema. */
-const LEARNED_SPARSE_CHANNEL_ENABLED = false;
+// W0-2: Removed LEARNED_SPARSE_CHANNEL_ENABLED compile-time flag.
+// The single source of truth is now `killSwitchLearning` (constructor arg) wired
+// from `config.killSwitch.learning`. This enables SPLADE / learned_sparse
+// experiments by toggling a runtime flag instead of recompiling.
 
 /**
  * Orchestrates the full hybrid retrieval pipeline (RFC-012).
@@ -51,7 +57,7 @@ const LEARNED_SPARSE_CHANNEL_ENABLED = false;
  *
  * Dependencies injected for testability and loose coupling (SOLID - D principle).
  */
-export class CandidatePoolService {
+export class CandidatePoolService implements RetrievalExecutorV2Port {
   private readonly profileService: RetrievalProfileService;
   private readonly cascadeRouter: CascadeRouter;
   private readonly constraintFilter: ConstraintFilter;
@@ -64,6 +70,17 @@ export class CandidatePoolService {
     private readonly cacheService?: CacheService | undefined,
     private readonly embeddingModelId: string = 'bge-m3',
     private readonly killSwitchLearning: boolean = false,
+    private readonly degradationObserver?: RetrievalDegradationObserver | undefined,
+    /**
+     * T02-2: Dense kill switch pre-flight guard.
+     * When true, the dense retrieval channel (and anchor-similarity, which
+     * also requires an embedding) is SKIPPED entirely — no embedding fetch,
+     * no denseSearch call. This prevents wasted embedding API spend/latency
+     * when dense is administratively disabled, and is distinct from a
+     * per-request runtime degradation (which still attempts the call and
+     * falls back).
+     */
+    private readonly killSwitchDenseRetrieval: boolean = false,
   ) {
     this.profileService = new RetrievalProfileService();
     this.cascadeRouter = new CascadeRouter();
@@ -77,7 +94,8 @@ export class CandidatePoolService {
    * @param input - The retrieval input derived from the query plan.
    * @returns Fused, filtered, and ranked candidates.
    */
-  async generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
+  async execute(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
+    this.degradationObserver?.onRetrievalStarted();
     const queryFamily = deriveQueryFamily(input.queryPlan);
     const retrievalMode = this.resolveRuntimeRetrievalMode(input);
     // Specialized routing (producer_browse / region_browse / compare_candidates)
@@ -106,7 +124,6 @@ export class CandidatePoolService {
       'dense',
       'anchor_neighborhood',
       'relative',
-      'rerank',
     ];
     const skippedPhases = allPhases.filter((phase) => !this.shouldExecutePhase(phase, activeChannels));
 
@@ -120,19 +137,55 @@ export class CandidatePoolService {
     // at the Vespa native-ranking stage, reducing post-retrieval re-ranking load.
     const vespaRankProfile = resolveVespaRankProfile(retrievalMode);
 
-    // Step 1: Sparse search
-    // Degrade to empty rather than crashing the pipeline — dense/anchor
-    // channels may still return results for the query.
-    let sparseHits: readonly SparseHit[] = [];
-    let sparseDegraded = false;
-    if (activeChannels.has('sparse_bm25')) {
+    // Steps 1–3: Run sparse, learned-sparse, dense (with embedding), and
+    // anchor-neighbourhood channels CONCURRENTLY.
+    //
+    // The four channels are data-independent once `filters`, `anchorProfile`,
+    // and `activeChannels` are resolved above. Embedding fetches remain
+    // sequential WITHIN their own channel task (dense: semantic embed →
+    // denseSearch; anchor: anchor embed → denseSearch) but the entire dense
+    // path runs in parallel with sparse/learned-sparse/anchor.
+    //
+    // Each task returns a structured result with its hits, degradation flag,
+    // and (optional) degradation report so that the caller can merge them
+    // without races on shared mutable state.
+
+    const filtersOrUndefined = filters.length > 0 ? filters : undefined;
+
+    type DegradationReport = {
+      readonly component: 'sparse_bm25' | 'learned_sparse' | 'dense_semantic' | 'embedding_combiner' | 'anchor_similarity';
+      readonly severity: 'error' | 'warning';
+      readonly reason: string;
+      readonly fallbackApplied: string;
+    };
+
+    type SparseResult = {
+      readonly hits: readonly SparseHit[];
+      readonly degraded: boolean;
+      readonly degradation?: DegradationReport;
+    };
+    type DenseLikeResult = {
+      readonly hits: readonly DenseHit[];
+      readonly degraded: boolean;
+      readonly degradation?: DegradationReport;
+    };
+    type AnchorResult = {
+      readonly hits: readonly DenseHit[] | undefined;
+      readonly degradation?: DegradationReport;
+    };
+
+    const sparseTask = async (): Promise<SparseResult> => {
+      if (!activeChannels.has('sparse_bm25')) {
+        return { hits: [], degraded: false };
+      }
       try {
-        sparseHits = await this.searchIndex.sparseSearch(
+        const hits = await this.searchIndex.sparseSearch(
           input.lexicalQueries,
-          filters.length > 0 ? filters : undefined,
+          filtersOrUndefined,
           profile.sparseTopN,
           vespaRankProfile,
         );
+        return { hits, degraded: false };
       } catch (sparseErr) {
         bootstrapLogger.warn(
           {
@@ -141,20 +194,33 @@ export class CandidatePoolService {
           },
           '[CandidatePool] Sparse search failed — degrading to dense-only retrieval',
         );
-        sparseDegraded = true;
+        return {
+          hits: [],
+          degraded: true,
+          degradation: {
+            component: 'sparse_bm25',
+            severity: 'error',
+            reason: sparseErr instanceof Error ? sparseErr.message : 'sparse search failed',
+            fallbackApplied: 'dense-only retrieval',
+          },
+        };
       }
-    }
+    };
 
-    // Step 1b: Learned sparse search
-    let learnedSparseHits: readonly DenseHit[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (activeChannels.has('learned_sparse') && LEARNED_SPARSE_CHANNEL_ENABLED) {
+    const learnedSparseTask = async (): Promise<DenseLikeResult> => {
+      // W0-2: single gate via killSwitchLearning. Active channel resolution
+      // already excludes learned_sparse when killSwitchLearning is true (see
+      // resolveActiveChannels), so this guard is the canonical channel check.
+      if (!activeChannels.has('learned_sparse')) {
+        return { hits: [], degraded: false };
+      }
       try {
-        learnedSparseHits = await this.searchIndex.searchLearnedSparse(
+        const hits = await this.searchIndex.searchLearnedSparse(
           buildLearnedSparseQueryWeights(input),
-          filters.length > 0 ? filters : undefined,
+          filtersOrUndefined,
           profile.sparseTopN,
         );
+        return { hits, degraded: false };
       } catch (learnedErr) {
         bootstrapLogger.warn(
           {
@@ -163,17 +229,38 @@ export class CandidatePoolService {
           },
           '[CandidatePool] Learned sparse search failed — continuing without learned sparse',
         );
+        return {
+          hits: [],
+          degraded: false,
+          degradation: {
+            component: 'learned_sparse',
+            severity: 'warning',
+            reason: learnedErr instanceof Error ? learnedErr.message : 'learned sparse search failed',
+            fallbackApplied: 'continue without learned sparse',
+          },
+        };
       }
-    }
+    };
 
-    // Step 2: Dense search (with embedding cache via CacheService when wired)
-    // Degrading to sparse-only (rather than throwing) when the embedding call
-    // fails prevents a transient embedding service outage from blocking the
-    // entire search. The sparse + learned sparse results are still returned;
-    // the dense signal is simply absent for this request.
-    let denseHits: readonly DenseHit[] = [];
-    let denseDegraded = false;
-    if (activeChannels.has('dense_semantic') && input.semanticQueries.length > 0) {
+    const denseTask = async (): Promise<DenseLikeResult> => {
+      // T02-2: Dense kill switch pre-flight guard. Skip embedding fetch +
+      // denseSearch entirely so we don't pay embedding API cost when dense
+      // is administratively disabled. Distinct from per-request degradation.
+      if (this.killSwitchDenseRetrieval) {
+        return {
+          hits: [],
+          degraded: true,
+          degradation: {
+            component: 'dense_semantic',
+            severity: 'warning',
+            reason: 'dense kill switch enabled',
+            fallbackApplied: 'sparse-only retrieval',
+          },
+        };
+      }
+      if (!(activeChannels.has('dense_semantic') && input.semanticQueries.length > 0)) {
+        return { hits: [], degraded: false };
+      }
       try {
         const embeddings = this.cacheService
           ? await this.cacheService.getOrEmbedBatch(
@@ -190,6 +277,10 @@ export class CandidatePoolService {
         // Reject both undefined AND empty embeddings — an empty Float32Array
         // is truthy but produces nonsense ANN results / Vespa errors downstream.
         if (!primaryEmbedding || primaryEmbedding.length === 0) {
+          globalSilentSkipCounter.increment('embedding_empty_vector', {
+            queryClass: input.queryPlan.queryClass,
+            semanticQueryCount: input.semanticQueries.length,
+          });
           bootstrapLogger.error(
             {
               queryClass: input.queryPlan.queryClass,
@@ -199,15 +290,24 @@ export class CandidatePoolService {
             },
             '[CandidatePool] Dense retrieval expected a non-empty embedding',
           );
-          denseDegraded = true;
-        } else {
-          denseHits = await this.searchIndex.denseSearch(
-            primaryEmbedding,
-            filters.length > 0 ? filters : undefined,
-            profile.denseTopN,
-            vespaRankProfile,
-          );
+          return {
+            hits: [],
+            degraded: true,
+            degradation: {
+              component: 'embedding_combiner',
+              severity: 'error',
+              reason: !primaryEmbedding ? 'embedding_undefined' : 'embedding_empty',
+              fallbackApplied: 'skip dense retrieval',
+            },
+          };
         }
+        const hits = await this.searchIndex.denseSearch(
+          primaryEmbedding,
+          filtersOrUndefined,
+          profile.denseTopN,
+          vespaRankProfile,
+        );
+        return { hits, degraded: false };
       } catch (denseErr) {
         bootstrapLogger.warn(
           {
@@ -217,27 +317,39 @@ export class CandidatePoolService {
           },
           '[CandidatePool] Dense retrieval failed — degrading to sparse-only retrieval',
         );
-        denseDegraded = true;
+        return {
+          hits: [],
+          degraded: true,
+          degradation: {
+            component: 'dense_semantic',
+            severity: 'error',
+            reason: denseErr instanceof Error ? denseErr.message : 'dense retrieval failed',
+            fallbackApplied: 'sparse-only retrieval',
+          },
+        };
       }
-    }
+    };
 
-    // Step 3: Anchor neighbourhood search
-    // Degrading to no-anchor (rather than throwing) when the embedding call
-    // fails prevents a transient embedding service outage from blocking the
-    // entire search.  The sparse + dense results are still returned; the
-    // neighbourhood signal is simply absent for this request.
-    let anchorHits: readonly DenseHit[] | undefined;
-    if (activeChannels.has('anchor_similarity') && anchorProfile !== undefined) {
+    const anchorTask = async (): Promise<AnchorResult> => {
+      // T02-2: anchor similarity also uses an embedding (anchor.semanticSummary
+      // → embed → denseSearch), so it's gated by the same kill switch.
+      if (this.killSwitchDenseRetrieval) {
+        return { hits: undefined };
+      }
+      if (!(activeChannels.has('anchor_similarity') && anchorProfile !== undefined)) {
+        return { hits: undefined };
+      }
       try {
         const anchorEmbedding = anchorProfile.embedding
           ?? await this.embeddingService.embed(anchorProfile.semanticSummary);
 
-        anchorHits = await this.searchIndex.denseSearch(
+        const hits = await this.searchIndex.denseSearch(
           anchorEmbedding,
-          filters.length > 0 ? filters : undefined,
+          filtersOrUndefined,
           profile.denseTopN,
           vespaRankProfile,
         );
+        return { hits };
       } catch (anchorErr) {
         bootstrapLogger.warn(
           {
@@ -247,9 +359,46 @@ export class CandidatePoolService {
           },
           '[CandidatePool] Anchor embedding failed — degrading to no-anchor retrieval',
         );
-        // anchorHits remains undefined; pipeline continues without anchor channel.
+        return {
+          hits: undefined,
+          degradation: {
+            component: 'anchor_similarity',
+            severity: 'warning',
+            reason: anchorErr instanceof Error ? anchorErr.message : 'anchor embedding failed',
+            fallbackApplied: 'no-anchor retrieval',
+          },
+        };
+      }
+    };
+
+    const [sparseResult, learnedSparseResult, denseResult, anchorResult] = await Promise.all([
+      sparseTask(),
+      learnedSparseTask(),
+      denseTask(),
+      anchorTask(),
+    ]);
+
+    // Report degradations on the single shared observer after the parallel
+    // fan-in. Observer callbacks are invoked in a deterministic order
+    // (sparse → learned-sparse → dense → anchor) to preserve log/trace
+    // ordering that downstream assertions may rely on.
+    for (const report of [
+      sparseResult.degradation,
+      learnedSparseResult.degradation,
+      denseResult.degradation,
+      anchorResult.degradation,
+    ]) {
+      if (report !== undefined) {
+        this.degradationObserver?.onDegradation(report);
       }
     }
+
+    const sparseHits = sparseResult.hits;
+    const sparseDegraded = sparseResult.degraded;
+    const learnedSparseHits = learnedSparseResult.hits;
+    const denseHits = denseResult.hits;
+    const denseDegraded = denseResult.degraded;
+    const anchorHits = anchorResult.hits;
 
     // Step 4: Fuse via RRF
     let candidates = this.fusionService.fuse(
@@ -279,11 +428,27 @@ export class CandidatePoolService {
     }));
 
     if (activeChannels.has('relative_filter') && input.anchorEntityId !== undefined) {
+      const preFilterCount = candidates.length;
       candidates = applyRelativeFilter(candidates, {
         anchorEntityId: input.anchorEntityId,
         constraints: filters,
         ...(anchorDocument !== undefined ? { anchorDocument } : {}),
       });
+      // Detect anchor-not-found fallback: if the anchor entity is absent from
+      // both the candidate pool and the loaded anchorDocument, applyRelativeFilter
+      // returns the unfiltered list — same length, no filtering applied.
+      if (
+        anchorDocument === undefined &&
+        !candidates.some((c) => c.entityId === input.anchorEntityId) &&
+        candidates.length === preFilterCount
+      ) {
+        this.degradationObserver?.onDegradation({
+          component: 'relative_filter',
+          severity: 'warning',
+          reason: 'anchor entity not found in candidate pool or document store',
+          fallbackApplied: 'unfiltered candidate list',
+        });
+      }
     }
 
     candidates = annotateCandidateConstraintEvidenceBatch(candidates, {
@@ -327,6 +492,13 @@ export class CandidatePoolService {
       ...candidate.legacyCandidate,
       retrievalProvenance: candidate.provenance,
     }));
+  }
+
+  /**
+   * @deprecated Use execute() for RetrievalExecutorV2 contract.
+   */
+  async generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]> {
+    return this.execute(input);
   }
 
   /**
@@ -405,8 +577,6 @@ export class CandidatePoolService {
         return activeChannels.has('anchor_similarity');
       case 'relative':
         return activeChannels.has('relative_filter');
-      case 'rerank':
-        return false;
     }
   }
 
@@ -487,15 +657,22 @@ function reciprocalRankContribution(rank: number, fusionK: number): number {
 
 function toCandidateChannels(candidate: HybridCandidate): CandidateChannel[] {
   const channels: CandidateChannel[] = [];
-  if (candidate.sparseRank !== undefined) channels.push('sparse_bm25');
-  if (candidate.denseRank !== undefined) channels.push('dense_semantic');
-  if (candidate.learnedSparseRank !== undefined) channels.push('learned_sparse');
-  if (candidate.anchorRank !== undefined) channels.push('anchor_similarity');
+  const seenChannels = new Set<CandidateChannel>();
+  const pushChannel = (channel: CandidateChannel): void => {
+    if (!seenChannels.has(channel)) {
+      seenChannels.add(channel);
+      channels.push(channel);
+    }
+  };
+  if (candidate.sparseRank !== undefined) pushChannel('sparse_bm25');
+  if (candidate.denseRank !== undefined) pushChannel('dense_semantic');
+  if (candidate.learnedSparseRank !== undefined) pushChannel('learned_sparse');
+  if (candidate.anchorRank !== undefined) pushChannel('anchor_similarity');
 
   for (const source of candidate.retrievalTrace.candidateSources) {
     const canonicalSource = toCanonicalCandidateChannel(source);
-    if (canonicalSource !== null && !channels.includes(canonicalSource)) {
-      channels.push(canonicalSource);
+    if (canonicalSource !== null) {
+      pushChannel(canonicalSource);
     }
   }
 
@@ -542,9 +719,11 @@ function normalizeCandidateProvenance(
   provenance: CandidateEnvelope['provenance'],
 ): CandidateEnvelope['provenance'] {
   const channels: CandidateChannel[] = [];
+  const seenChannels = new Set<CandidateChannel>();
   for (const channel of provenance.channels) {
     const canonical = toCanonicalCandidateChannel(channel);
-    if (canonical !== null && !channels.includes(canonical)) {
+    if (canonical !== null && !seenChannels.has(canonical)) {
+      seenChannels.add(canonical);
       channels.push(canonical);
     }
   }
@@ -554,6 +733,27 @@ function normalizeCandidateProvenance(
     channels,
     channelScores: normalizeCandidateChannelScores(provenance.channelScores),
     queryViewMatches: normalizeCandidateQueryViewMatches(provenance.queryViewMatches),
+  };
+}
+
+function toCandidateProvenance(
+  provenance: CandidateEnvelope['provenance'],
+): CandidateEnvelope['provenance'] {
+  const parsed = CandidateProvenanceV2Schema.parse(normalizeCandidateProvenance(provenance));
+  return {
+    channels: parsed.channels,
+    channelScores: parsed.channelScores,
+    queryViewMatches: parsed.queryViewMatches,
+    anchorConditioned: parsed.anchorConditioned,
+    matchedFilterConstraints: parsed.matchedFilterConstraints,
+    ...(parsed.failedHardConstraints !== undefined
+      ? { failedHardConstraints: parsed.failedHardConstraints }
+      : {}),
+    ...(parsed.protectedInclusionReason !== undefined
+      ? { protectedInclusionReason: parsed.protectedInclusionReason }
+      : {}),
+    fusionProfile: parsed.fusionProfile,
+    fusionScore: parsed.fusionScore,
   };
 }
 
@@ -578,7 +778,7 @@ function hybridCandidateToEnvelope(
   fusionK: number,
 ): CandidateEnvelope {
   if (candidate.retrievalProvenance !== undefined) {
-    const provenance = normalizeCandidateProvenance(candidate.retrievalProvenance);
+    const provenance = toCandidateProvenance(candidate.retrievalProvenance);
     return {
       entityId: candidate.entityId,
       provenance,
@@ -600,7 +800,7 @@ function hybridCandidateToEnvelope(
   if (candidate.sparseRank !== undefined) {
     channelScores.push({
       channel: 'sparse_bm25' as const,
-      rawScore: candidate.retrievalFusionScore,
+      rawScore: candidate.sparseRawScore ?? candidate.retrievalFusionScore,
       rank: candidate.sparseRank,
       rrfContribution: reciprocalRankContribution(candidate.sparseRank, fusionK),
     });
@@ -608,7 +808,7 @@ function hybridCandidateToEnvelope(
   if (candidate.denseRank !== undefined) {
     channelScores.push({
       channel: 'dense_semantic' as const,
-      rawScore: candidate.retrievalFusionScore,
+      rawScore: candidate.denseRawScore ?? candidate.retrievalFusionScore,
       rank: candidate.denseRank,
       rrfContribution: reciprocalRankContribution(candidate.denseRank, fusionK),
     });
@@ -616,7 +816,7 @@ function hybridCandidateToEnvelope(
   if (candidate.learnedSparseRank !== undefined) {
     channelScores.push({
       channel: 'learned_sparse' as const,
-      rawScore: candidate.retrievalFusionScore,
+      rawScore: candidate.learnedSparseRawScore ?? candidate.retrievalFusionScore,
       rank: candidate.learnedSparseRank,
       rrfContribution: reciprocalRankContribution(candidate.learnedSparseRank, fusionK),
     });
@@ -624,7 +824,7 @@ function hybridCandidateToEnvelope(
   if (candidate.anchorRank !== undefined) {
     channelScores.push({
       channel: 'anchor_similarity' as const,
-      rawScore: candidate.retrievalFusionScore,
+      rawScore: candidate.anchorRawScore ?? candidate.retrievalFusionScore,
       rank: candidate.anchorRank,
       rrfContribution: reciprocalRankContribution(candidate.anchorRank, fusionK),
     });
@@ -642,7 +842,7 @@ function hybridCandidateToEnvelope(
     fusionProfile: candidate.retrievalTrace.retrievalProfile,
     fusionScore: candidate.retrievalFusionScore,
   } satisfies CandidateEnvelope['provenance'];
-  const normalizedProvenance = normalizeCandidateProvenance(provenance);
+  const normalizedProvenance = toCandidateProvenance(provenance);
 
   return {
     entityId: candidate.entityId,

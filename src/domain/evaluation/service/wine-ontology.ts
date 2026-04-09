@@ -7,6 +7,8 @@
  * Module-scope Maps per CLAUDE.md rule 16 (deterministic collections at module scope).
  */
 
+import { KRW_PER_USD_APPROXIMATE, KRW_PER_MAN_WON } from '../../shared/constants.js';
+
 /** Fold a string for accent-insensitive lookup: NFD decomposition + diacritic removal. */
 function foldKey(s: string): string {
   return s
@@ -308,10 +310,6 @@ export function normalizeWineType(wineType: string): string {
 // Price normalization (Korean 만원 → number)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Approximate USD→KRW for price range matching. */
-const USD_TO_KRW = 1350;
-/** KRW per 만원 (Korean ten-thousand won unit). */
-const KRW_PER_MAN_WON = 10000;
 /** Approximate EUR→USD exchange factor for price matching (not live FX). */
 const EUR_TO_USD = 1.08;
 /** Approximate GBP→USD for fractional currency conversion. */
@@ -340,19 +338,19 @@ export function parseKoreanPrice(text: string): number | null {
   const usd = trimmed.match(/\$\s*(\d+(?:\.\d+)?)/u);
   if (usd?.[1]) {
     const v = Number(usd[1]);
-    if (Number.isFinite(v)) return v * USD_TO_KRW;
+    if (Number.isFinite(v)) return v * KRW_PER_USD_APPROXIMATE;
   }
   // €N
   const eur = trimmed.match(/€\s*(\d+(?:\.\d+)?)/u);
   if (eur?.[1]) {
     const v = Number(eur[1]);
-    if (Number.isFinite(v)) return v * USD_TO_KRW * EUR_TO_USD;
+    if (Number.isFinite(v)) return v * KRW_PER_USD_APPROXIMATE * EUR_TO_USD;
   }
   // £N
   const gbp = trimmed.match(/£\s*(\d+(?:\.\d+)?)/u);
   if (gbp?.[1]) {
     const v = Number(gbp[1]);
-    if (Number.isFinite(v)) return v * USD_TO_KRW * GBP_TO_USD;
+    if (Number.isFinite(v)) return v * KRW_PER_USD_APPROXIMATE * GBP_TO_USD;
   }
   return null;
 }

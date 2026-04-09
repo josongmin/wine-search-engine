@@ -822,7 +822,7 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
           { attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' },
         ],
         inferred: [
-          { attribute: 'country', operator: '=', value: 'USA' },
+          { attribute: 'country', operator: '=', value: 'United States' },
         ],
       },
       expectedEntities: [

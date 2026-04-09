@@ -11,6 +11,8 @@
  *  - STRUCTURAL family: anchor_similarity, relative_filter
  *  - SPECIALIZED family: browse_producer, browse_region, compare_anchor
  */
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 
 // ---------------------------------------------------------------------------
 // Channel enum
@@ -103,7 +105,14 @@ export function toRetrievalChannel(raw: string): RetrievalChannel {
   if (isRetrievalChannel(raw)) return raw;
   const alias = LEGACY_CHANNEL_ALIAS[raw];
   if (alias !== undefined) return alias;
-  console.warn(`[toRetrievalChannel] Unknown channel '${raw}'; falling back to 'sparse_bm25'`);
+  globalSilentSkipCounter.increment('unknown_channel_fallback', {
+    rawChannel: raw,
+    fallback: 'sparse_bm25',
+  });
+  bootstrapLogger.warn(
+    { rawChannel: raw, fallback: 'sparse_bm25' },
+    '[toRetrievalChannel] unknown channel; falling back to sparse_bm25',
+  );
   return 'sparse_bm25';
 }
 
@@ -123,10 +132,12 @@ export function preferCanonicalRetrievalChannelLabel(channel: string): string {
 export function preferCanonicalRetrievalChannelLabels(
   channels: readonly string[],
 ): string[] {
+  const seen = new Set<string>();
   const canonical: string[] = [];
   for (const channel of channels) {
     const next = preferCanonicalRetrievalChannelLabel(channel);
-    if (!canonical.includes(next)) {
+    if (!seen.has(next)) {
+      seen.add(next);
       canonical.push(next);
     }
   }

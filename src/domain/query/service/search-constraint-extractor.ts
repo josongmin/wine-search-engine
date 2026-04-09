@@ -468,10 +468,10 @@ function extractVintage(q: string): Pick<SearchConstraints, 'vintageMin' | 'vint
  */
 export function extractSearchConstraints(query: string): SearchConstraints {
   const q = query;
-  const excludeGrapes: string[] = [];
-  const excludeCountries: string[] = [];
-  const excludeRegions: string[] = [];
-  const excludeStyles: string[] = [];
+  const excludeGrapeSet = new Set<string>();
+  const excludeCountrySet = new Set<string>();
+  const excludeRegionSet = new Set<string>();
+  const excludeStyleSet = new Set<string>();
 
   // Collect all negated subject tokens from both negation patterns.
   const subjectTokens: string[] = [];
@@ -500,13 +500,13 @@ export function extractSearchConstraints(query: string): SearchConstraints {
   for (const token of subjectTokens) {
     const grape = normalizeGrapeName(token);
     if (grape !== undefined) {
-      if (!excludeGrapes.includes(grape)) excludeGrapes.push(grape);
+      excludeGrapeSet.add(grape);
       continue;
     }
 
     const country = normalizeCountryName(token);
     if (country !== undefined) {
-      if (!excludeCountries.includes(country)) excludeCountries.push(country);
+      excludeCountrySet.add(country);
       continue;
     }
 
@@ -516,18 +516,21 @@ export function extractSearchConstraints(query: string): SearchConstraints {
       WINE_TYPE_ALL_TOKENS.has(token.toLowerCase()) ||
       /^(?:oaked?|sweet|sweeter|탄닌|오크)$/iu.test(token)
     ) {
-      if (!excludeStyles.includes(token.toLowerCase())) {
-        excludeStyles.push(token.toLowerCase());
-      }
+      excludeStyleSet.add(token.toLowerCase());
       continue;
     }
 
     // Anything else treated as region exclusion (free-form)
-    if (!excludeRegions.includes(token)) excludeRegions.push(token);
+    excludeRegionSet.add(token);
   }
 
   const price = extractKrwPrice(q);
   const vintage = extractVintage(q);
+
+  const excludeGrapes = [...excludeGrapeSet];
+  const excludeCountries = [...excludeCountrySet];
+  const excludeRegions = [...excludeRegionSet];
+  const excludeStyles = [...excludeStyleSet];
 
   return {
     ...(excludeGrapes.length > 0 ? { excludeGrapes } : {}),

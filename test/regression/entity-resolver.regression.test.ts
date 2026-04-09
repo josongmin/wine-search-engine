@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { resolveEntity } from '../../src/domain/attribute/service/entity-resolver.js';
+import type { FuzzyMatcherPort } from '../../src/domain/query/port/fuzzy-matcher.port.js';
 
 describe('RFC-019 regression: entity resolver', () => {
   it.each([
@@ -41,5 +42,61 @@ describe('RFC-019 regression: entity resolver', () => {
     expect(result).not.toBeNull();
     expect(result!.entityType).toBe('region');
     expect(result!.canonicalValue).toBe('Napa Valley');
+  });
+
+  describe('fuzzy fallback', () => {
+    const stubFuzzyMatcher: FuzzyMatcherPort = {
+      match(query: string) {
+        // Simulates a BK-tree that knows "bordeaux" and returns it for typo "bordeux"
+        if (query === 'bordeux') {
+          return [{ term: 'bordeaux', editDistance: 1, combinedScore: 0.85 }];
+        }
+        // Below threshold
+        if (query === 'xyzfoo') {
+          return [{ term: 'bordeaux', editDistance: 5, combinedScore: 0.3 }];
+        }
+        // Term not in RESOLVER_INDEX
+        if (query === 'typoterm') {
+          return [{ term: 'nonexistent_alias_xyz', editDistance: 1, combinedScore: 0.9 }];
+        }
+        return [];
+      },
+    };
+
+    it('resolves typo via fuzzy fallback when exact match fails', () => {
+      // "bordeux" is not in RESOLVER_INDEX, but fuzzy returns "bordeaux" which is
+      const withoutFuzzy = resolveEntity('bordeux');
+      expect(withoutFuzzy).toBeNull();
+
+      const withFuzzy = resolveEntity('bordeux', undefined, stubFuzzyMatcher);
+      expect(withFuzzy).not.toBeNull();
+      expect(withFuzzy!.canonicalValue).toBe('Bordeaux');
+      expect(withFuzzy!.matchedSurface).toBe('bordeux');
+      expect(withFuzzy!.provenance).toBe('fuzzy_fallback');
+      // confidence = 0.85 * 0.85 = 0.7225
+      expect(withFuzzy!.confidence).toBeCloseTo(0.85 * 0.85, 4);
+    });
+
+    it('does not use fuzzy fallback when exact match succeeds', () => {
+      const result = resolveEntity('bordeaux', undefined, stubFuzzyMatcher);
+      expect(result).not.toBeNull();
+      // Should be exact match, not fuzzy
+      expect(result!.provenance).not.toBe('fuzzy_fallback');
+    });
+
+    it('rejects fuzzy hits below FUZZY_MIN_CONFIDENCE (0.7)', () => {
+      const result = resolveEntity('xyzfoo', undefined, stubFuzzyMatcher);
+      expect(result).toBeNull();
+    });
+
+    it('rejects fuzzy hits whose term is not in RESOLVER_INDEX', () => {
+      const result = resolveEntity('typoterm', undefined, stubFuzzyMatcher);
+      expect(result).toBeNull();
+    });
+
+    it('returns null without fuzzyMatcher even for near-miss terms', () => {
+      const result = resolveEntity('bordeux');
+      expect(result).toBeNull();
+    });
   });
 });

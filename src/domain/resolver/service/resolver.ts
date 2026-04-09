@@ -483,10 +483,11 @@ export class Resolver {
     if (candidates !== undefined) {
       const topN = candidates.slice(0, 10);
       for (const candidate of topN) {
-        const vintage =
+        const vintageRaw =
           candidate.attributeHints?.['vintage'] !== undefined
             ? Number(candidate.attributeHints['vintage'])
             : undefined;
+        const vintage = vintageRaw !== undefined && Number.isFinite(vintageRaw) ? vintageRaw : undefined;
         const features = computeMatcherFeatures(
           input.normalizedQuery,
           candidate.canonicalLabel,

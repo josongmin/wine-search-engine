@@ -13,6 +13,7 @@ import type { NormalizedQueryViews } from './query-views.js';
 import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.js';
 import type { QueryDecompositionHint } from './query-decomposition.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
+import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -142,6 +143,8 @@ export interface QueryPlanV2 {
   readonly decompositionHint?: QueryDecompositionHint;
   /** NL constraint extraction provenance (rule vs LLM); request-scoped, not read from singletons. */
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
+  /** Structured retrieval plan built from compiled constraints. */
+  readonly retrievalPlan?: RetrievalPlan | undefined;
 
   // --- Admission context (planner still populates this) ---
   readonly admission_context?: {
@@ -178,5 +181,6 @@ export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstan
     ...(plan.queryBudget !== undefined && { queryBudget: plan.queryBudget }),
     ...(plan.decompositionHint !== undefined && { decompositionHint: plan.decompositionHint }),
     ...(plan.constraintExtraction !== undefined && { constraintExtraction: plan.constraintExtraction }),
+    ...(plan.retrievalPlan !== undefined && { retrievalPlan: plan.retrievalPlan }),
   };
 }

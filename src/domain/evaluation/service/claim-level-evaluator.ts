@@ -110,10 +110,18 @@ function aggregate(
       continue;
     }
 
-    const entailedCount = catVerifications.filter((v) => v.verdict === 'entailed').length;
-    const partiallyEntailedCount = catVerifications.filter((v) => v.verdict === 'partially_entailed').length;
-    const notEntailedCount = catVerifications.filter((v) => v.verdict === 'not_entailed').length;
-    const contradictedCount = catVerifications.filter((v) => v.verdict === 'contradicted').length;
+    let entailedCount = 0;
+    let partiallyEntailedCount = 0;
+    let notEntailedCount = 0;
+    let contradictedCount = 0;
+    for (const v of catVerifications) {
+      switch (v.verdict) {
+        case 'entailed': entailedCount++; break;
+        case 'partially_entailed': partiallyEntailedCount++; break;
+        case 'not_entailed': notEntailedCount++; break;
+        case 'contradicted': contradictedCount++; break;
+      }
+    }
 
     const avgConfidence = catVerifications.length > 0
       ? catVerifications.reduce((sum, v) => sum + v.confidence, 0) / catVerifications.length

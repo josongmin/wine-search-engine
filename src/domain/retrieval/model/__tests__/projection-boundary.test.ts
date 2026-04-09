@@ -60,7 +60,7 @@ function makeFullRetrievalDoc(): RetrievalDocument {
     drinkingWindowStart: 2024,
     drinkingWindowEnd: 2040,
     drinkingWindowModelVersion: 'v1',
-    country: 'USA',
+    country: 'United States',
     wineType: 'red',
     classification: 'Napa Valley AVA',
     alcoholPct: 14.5,

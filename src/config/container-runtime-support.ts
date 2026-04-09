@@ -42,7 +42,18 @@ class InMemoryJudgmentCacheAdapter implements JudgmentCachePort {
   // implement true LRU semantics (delete-then-set moves the entry to the tail).
   private readonly store = new Map<string, { value: string; expiresAt: number }>();
 
+  /** Removes TTL-expired rows so stale allow/deny decisions cannot accumulate unbounded. */
+  private pruneExpiredEntries(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.store) {
+      if (now > entry.expiresAt) {
+        this.store.delete(key);
+      }
+    }
+  }
+
   get(key: string): Promise<string | null> {
+    this.pruneExpiredEntries();
     const entry = this.store.get(key);
     if (entry === undefined) return Promise.resolve(null);
     if (Date.now() > entry.expiresAt) {
@@ -56,6 +67,7 @@ class InMemoryJudgmentCacheAdapter implements JudgmentCachePort {
   }
 
   setEx(key: string, ttlSeconds: number, value: string): Promise<void> {
+    this.pruneExpiredEntries();
     // Always remove existing entry first so updates also refresh recency.
     this.store.delete(key);
     // Evict oldest entry when at capacity.

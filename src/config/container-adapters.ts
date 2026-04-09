@@ -102,7 +102,11 @@ export function buildCoreAdapterServices(
     );
   }
 
-  const vespaClient = new VespaClient(config.vespa.url, 'wine', 'wine_entity');
+  const vespaClient = new VespaClient(config.vespa.url, 'wine', 'wine_entity', {
+    searchRequestMs: config.vespa.timeouts.searchRequestMs,
+    documentMutationMs: config.vespa.timeouts.documentMutationMs,
+    documentGetDeleteMs: config.vespa.timeouts.documentGetDeleteMs,
+  });
   const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
   const searchIndex: SearchIndexPort = isWatchlistEnabled(config)
     ? new WatchlistAwareSearchIndex({

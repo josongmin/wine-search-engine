@@ -51,24 +51,32 @@ export class FusionService {
 
     // Build rank maps for RRF
     const sparseRankMap = new Map<string, number>();
+    const sparseScoreMap = new Map<string, number>();
     for (const hit of sparseHits) {
       sparseRankMap.set(hit.entityId, hit.rank);
+      sparseScoreMap.set(hit.entityId, hit.score);
     }
 
     const denseRankMap = new Map<string, number>();
+    const denseScoreMap = new Map<string, number>();
     for (const hit of denseHits) {
       denseRankMap.set(hit.entityId, hit.rank);
+      denseScoreMap.set(hit.entityId, hit.score);
     }
 
     const learnedSparseRankMap = new Map<string, number>();
+    const learnedSparseScoreMap = new Map<string, number>();
     for (const hit of learnedSparseHits) {
       learnedSparseRankMap.set(hit.entityId, hit.rank);
+      learnedSparseScoreMap.set(hit.entityId, hit.score);
     }
 
     const anchorRankMap = new Map<string, number>();
+    const anchorScoreMap = new Map<string, number>();
     if (anchorHits) {
       for (const hit of anchorHits) {
         anchorRankMap.set(hit.entityId, hit.rank);
+        anchorScoreMap.set(hit.entityId, hit.score);
       }
     }
 
@@ -111,9 +119,13 @@ export class FusionService {
     for (const entityId of allEntityIds) {
       const fusionScore = fusedScores.get(entityId) ?? 0;
       const sparseRank = sparseRankMap.get(entityId);
+      const sparseRawScore = sparseScoreMap.get(entityId);
       const denseRank = denseRankMap.get(entityId);
+      const denseRawScore = denseScoreMap.get(entityId);
       const learnedSparseRank = learnedSparseRankMap.get(entityId);
+      const learnedSparseRawScore = learnedSparseScoreMap.get(entityId);
       const anchorRank = anchorRankMap.get(entityId);
+      const anchorRawScore = anchorScoreMap.get(entityId);
 
       const candidateSources: string[] = [];
       if (sparseRank !== undefined) candidateSources.push('sparse_bm25');
@@ -140,9 +152,13 @@ export class FusionService {
       candidates.push({
         entityId: createEntityId(entityId),
         sparseRank,
+        ...(sparseRawScore !== undefined ? { sparseRawScore } : {}),
         denseRank,
+        ...(denseRawScore !== undefined ? { denseRawScore } : {}),
         learnedSparseRank,
+        ...(learnedSparseRawScore !== undefined ? { learnedSparseRawScore } : {}),
         anchorRank,
+        ...(anchorRawScore !== undefined ? { anchorRawScore } : {}),
         retrievalFusionScore: fusionScore,
         matchedConstraints: [],
         retrievalTrace: trace,

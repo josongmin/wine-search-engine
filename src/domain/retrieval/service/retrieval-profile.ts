@@ -246,7 +246,7 @@ export class RetrievalProfileService {
     // T4.6: Query family policy — defers to family mapping when no explicit
     // retrievalMode is set, so that mode overrides always take precedence.
     if (queryFamily !== undefined && retrievalMode === undefined) {
-      const decision = resolveChannelMix(queryFamily, route);
+      const decision = resolveChannelMix(queryFamily);
       switch (decision.profileName) {
         case 'compare_default':    return COMPARE_DEFAULT;
         case 'mixed_anchor':       return MIXED_ANCHOR;

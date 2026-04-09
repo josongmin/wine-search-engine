@@ -2,12 +2,17 @@
  * T1.3b: DecomposedSearchAdapter
  *
  * Breaks the circular dependency between SearchUseCase and DecomposedSearchUseCase.
- * Pattern: adapter holds a mutable delegate ref set after both use cases are constructed.
+ * The delegate is resolved lazily via a closure set at container bootstrap so the
+ * reference is never undefined at execute() time (after wiring completes).
  *
  * Usage in container-usecases.ts:
- *   const adapter = new DecomposedSearchAdapter();
- *   // ... construct searchUseCase passing adapter ...
- *   adapter.setDelegate(decomposedSearchUseCase);
+ *   const decomposedRef: { impl?: DecomposedSearchUseCase } = {};
+ *   const adapter = new DecomposedSearchAdapter(() => {
+ *     if (decomposedRef.impl === undefined) throw new Error('...');
+ *     return decomposedRef.impl;
+ *   });
+ *   const searchUseCase = new SearchUseCase({ ..., decomposedSearch: adapter });
+ *   decomposedRef.impl = new DecomposedSearchUseCase(searchUseCase);
  */
 
 import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.port.js';
@@ -18,15 +23,9 @@ import type {
 } from './port/search-route-usecases.port.js';
 
 export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
-  private delegate: DecomposedSearchUseCasePort | undefined;
-
-  /**
-   * Set the concrete delegate after it is constructed.
-   * Must be called before any execute() invocation.
-   */
-  setDelegate(delegate: DecomposedSearchUseCasePort): void {
-    this.delegate = delegate;
-  }
+  constructor(
+    private readonly resolveDelegate: () => DecomposedSearchUseCasePort,
+  ) {}
 
   async execute(
     subQueries: [string, string],
@@ -37,12 +36,7 @@ export class DecomposedSearchAdapter implements DecomposedSearchUseCasePort {
     parentContext?: DecomposedSearchParentContext,
     options?: DecomposedSearchExecutionOptions,
   ): Promise<ComparisonSearchResponse> {
-    if (this.delegate === undefined) {
-      throw new Error(
-        '[DecomposedSearchAdapter] delegate not set — call setDelegate() before execute()',
-      );
-    }
-    return this.delegate.execute(
+    return this.resolveDelegate().execute(
       subQueries,
       comparisonIntent,
       originalQuery,

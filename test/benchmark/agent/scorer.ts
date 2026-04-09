@@ -469,7 +469,7 @@ const CTX_COUNTRY_MAP: ReadonlyArray<readonly [RegExp, string]> = [
   [/스페인/u, 'Spain'],
   [/호주/u, 'Australia'],
   [/칠레/u, 'Chile'],
-  [/미국/u, 'USA'],
+  [/미국/u, 'United States'],
   [/아르헨티나/u, 'Argentina'],
   [/독일/u, 'Germany'],
   [/포르투갈/u, 'Portugal'],
@@ -613,7 +613,7 @@ export function scoreScenario(
 
   const baseAnswerQuality = scoreAnswerQuality(exp, execution.answer, diagnostics, judgeScore);
   // Structured checks multiply into answerQuality — each failed check docks a %.
-  const structuredMultiplier = scoreStructuredChecks(exp, execution.answer, execution, diagnostics);
+  const structuredMultiplier = scoreStructuredChecks(exp, execution.answer, execution, diagnostics, judgeScore);
   const answerQuality = clamp01(baseAnswerQuality * structuredMultiplier);
   const terminationCorrectness = scoreTermination(
     exp,
@@ -1183,6 +1183,7 @@ function scoreStructuredChecks(
   answer: string,
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
+  judgeScore?: number,
 ): number {
   let multiplier = 1;
   // When the LLM was unavailable (step-0 fallback), the fallback answer embeds the
@@ -1269,7 +1270,15 @@ function scoreStructuredChecks(
           const parsed = (JSON.parse(call.input ?? '{}') as unknown) as Record<string, unknown>;
           const value = getNestedValue(parsed, argSpec.argPath);
           return evaluatePredicate(value, argSpec.predicate, argSpec.value);
-        } catch { return false; }
+        } catch (err) {
+          diagnostics.push({
+            dim: 'toolAccuracy',
+            severity: 'warn',
+            code: 'TOOL_ARG_PARSE_FAILED',
+            message: 'Failed to parse tool input JSON for expectedToolArgs check',
+          });
+          return false;
+        }
       });
       if (!anyMatch) {
         diagnostics.push({
@@ -1341,6 +1350,14 @@ function scoreStructuredChecks(
     // Scenarios with refusalExpected:true SHOULD have judgeRequired:true.
     // Without judge, this dimension produces no signal — but that's honest
     // (we can't reliably detect refusal via regex).
+    if (judgeScore === undefined) {
+      diagnostics.push({
+        dim: 'judge',
+        severity: 'warn',
+        code: 'REFUSAL_NO_JUDGE_SIGNAL',
+        message: 'refusalExpected=true but judge is disabled — no signal to verify refusal',
+      });
+    }
   }
 
   // 9. mustCiteFromToolResults — wine names in answer must appear in observations
@@ -1425,8 +1442,9 @@ function parseDrinkingWindowFromObs(
   return null; // no drinking window data in observations
 }
 
-/** Extract Korean-style prices: "5만원", "100,000원", "50000원", "$50" */
-function extractKoreanPrices(text: string): number[] {
+/** Extract Korean-style prices: "5만원", "100,000원", "50000원", "$50"
+ * @internal exported for direct unit testing of the extractor. */
+export function extractKoreanPrices(text: string): number[] {
   const prices: number[] = [];
   // N만원 pattern (만 = 10,000)
   for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*만\s*원/gu)) {
@@ -1466,7 +1484,8 @@ const DRINK_WINDOW_CONTEXT_RE = /(?:drink(?:ing)?|음용|마시기|peak|hold\s*u
  *  DRINK_WINDOW_CONTEXT_RE is likely a drinking window endpoint, not a vintage.
  *  Also filters the second year of a YYYY-YYYY or YYYY–YYYY dash pair when
  *  the gap is 5-30 years (plausible drinking window span). */
-function extractVintageYears(text: string): number[] {
+/** @internal exported for direct unit testing of the extractor. */
+export function extractVintageYears(text: string): number[] {
   const CONTEXT_LOOKBACK = 30;
   const years: number[] = [];
   const allMatches: { year: number; index: number }[] = [];
@@ -1518,7 +1537,8 @@ function extractVintageYears(text: string): number[] {
  * deterministic. Korean wine name grounding is delegated to the judge's
  * mustCiteFromToolResults rubric criterion.
  */
-function extractProperNouns(text: string): string[] {
+/** @internal exported for direct unit testing of the extractor. */
+export function extractProperNouns(text: string): string[] {
   // Latin proper nouns: "Opus One", "Château Margaux", "Screaming Eagle"
   // Unicode-aware boundary: \b is ASCII-only and silently fails on accented
   // Latin names (Château, Côte). Use lookahead/lookbehind for non-word chars.
@@ -1536,8 +1556,9 @@ function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
-/** Evaluate a predicate against a value */
-function evaluatePredicate(
+/** Evaluate a predicate against a value
+ * @internal exported for direct unit testing of predicate branches. */
+export function evaluatePredicate(
   actual: unknown,
   predicate: 'equals' | 'lte' | 'gte' | 'contains' | 'exists',
   expected?: unknown,
@@ -1701,7 +1722,10 @@ function scoreContextRelevance(
           const qa = typeof parsed['query_a'] === 'string' ? parsed['query_a'] : '';
           const qb = typeof parsed['query_b'] === 'string' ? parsed['query_b'] : '';
           return [qa, qb].filter((s) => s.length > 0).join(' ');
-        } catch { return ''; }
+        } catch (err) {
+          console.error('[scorer] query term extraction failed:', err instanceof Error ? err.message : String(err));
+          return '';
+        }
       })
       .filter((q) => q.length > 0);
     if (queryTerms.length > 0) {

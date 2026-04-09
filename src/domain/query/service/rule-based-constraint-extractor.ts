@@ -1,6 +1,7 @@
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import {
   KRW_PER_MAN_WON,
+  KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
 import { WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
@@ -12,10 +13,6 @@ import {
 export const RULE_BASED_CONSTRAINT_MAPPING_VERSION = 'rule-based-v1.0';
 
 const DECIMAL_RADIX = 10;
-/** Rough KRW→USD factor when user says "만원" without explicit FX context.
- *  Fixed at 7 for deterministic constraint extraction (not live FX).
- *  1만원 ≈ $7 at KRW/USD ≈ 1,400 — intentionally rounded for soft banding. */
-const KRW_MANWON_TO_USD_HEURISTIC = 7;
 /** USD thresholds for mapping numeric "under $X" hints to price_band labels.
  *  Derived from Vivino/Wine-Searcher market segmentation (2024):
  *    budget: ≤$20 (everyday wines, supermarket tier)
@@ -91,7 +88,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     // Guard: parseInt can return NaN on malformed capture group (edge case with regex backtracking).
     // NaN would propagate into band comparison (always false) and corrupt soft constraints. (CLAUDE.md rule 28)
     if (!Number.isFinite(priceValue)) return { hard, soft, inferred: [] };
-    const usd = /만원/u.test(q) ? priceValue * KRW_MANWON_TO_USD_HEURISTIC : priceValue;
+    const usd = /만원/u.test(q) ? priceValue * KRW_PER_MAN_WON / KRW_PER_USD_APPROXIMATE : priceValue;
     const band =
       usd <= PRICE_BAND_BUDGET_MAX_USD
         ? 'budget'

@@ -131,10 +131,36 @@ const PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT = 5;
 const CRITIC_PROXY_SCORE_DISPLAY_BASE = 80;
 const CRITIC_PROXY_SCORE_DISPLAY_SPAN = 20;
 
-/** Treat reranker batch as degenerate when max-min below this (use neutral norm). */
-const RERANK_SCORE_MIN_MAX_RANGE_EPSILON = 1e-8;
+/**
+ * Treat reranker batch as degenerate when max-min below this (use neutral norm).
+ * Logit-scale scores can differ by ~1e-7 from floating-point noise; 1e-8 was
+ * overly tight and collapsed distinct candidates to the neutral blend.
+ */
+const RERANK_SCORE_MIN_MAX_RANGE_EPSILON = 1e-6;
 /** Neutral normalized rerank score when range is unusable. */
 const RERANK_SCORE_NORMALIZED_NEUTRAL = 0.5;
+
+/**
+ * Final-score comparisons treat values within this epsilon as tied so ordering
+ * falls through to entityId (deterministic tie-break, RFC-009/015).
+ */
+const FINAL_SCORE_SORT_TIE_EPSILON = 1e-12;
+
+/** Descending sort by finalScore; NaN-safe; deterministic tie-break on entityId. */
+function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
+  const aFinite = Number.isFinite(a.finalScore);
+  const bFinite = Number.isFinite(b.finalScore);
+  if (!aFinite && !bFinite) {
+    return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+  }
+  if (!aFinite) return 1;
+  if (!bFinite) return -1;
+  const scoreDiff = b.finalScore - a.finalScore;
+  if (Math.abs(scoreDiff) > FINAL_SCORE_SORT_TIE_EPSILON) {
+    return scoreDiff > 0 ? 1 : -1;
+  }
+  return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
+}
 
 function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
@@ -518,18 +544,7 @@ export class Ranker {
     // Array.sort treats as "equal" in implementation-defined order. Force
     // any NaN candidate to lose to a real number so determinism is preserved
     // even under upstream score corruption.
-    viable.sort((a, b) => {
-      const aFinite = Number.isFinite(a.finalScore);
-      const bFinite = Number.isFinite(b.finalScore);
-      if (!aFinite && !bFinite) {
-        return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-      }
-      if (!aFinite) return 1;  // a (NaN) loses to b (finite)
-      if (!bFinite) return -1; // b (NaN) loses to a (finite)
-      const scoreDiff = b.finalScore - a.finalScore;
-      if (scoreDiff !== 0) return scoreDiff;
-      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-    });
+    viable.sort(compareScoredEntriesByFinalScoreDesc);
 
     // T5.6: Capture top-5 entity IDs after primary sort, before any reranking.
     // RankingStagePipeline reads this snapshot to compute rerankChangedTopK.
@@ -800,18 +815,7 @@ export class Ranker {
     // Use .concat() instead of spread — rest can be thousands of entries and
     // spread pushes all elements onto the call stack (crashes at ~65K; Rule 9).
     const combined = rerankedTopK.concat(rest);
-    combined.sort((a, b) => {
-      const aFinite = Number.isFinite(a.finalScore);
-      const bFinite = Number.isFinite(b.finalScore);
-      if (!aFinite && !bFinite) {
-        return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-      }
-      if (!aFinite) return 1;
-      if (!bFinite) return -1;
-      const scoreDiff = b.finalScore - a.finalScore;
-      if (scoreDiff !== 0) return scoreDiff;
-      return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
-    });
+    combined.sort(compareScoredEntriesByFinalScoreDesc);
     return combined;
   }
 }

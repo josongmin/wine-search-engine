@@ -14,9 +14,19 @@ const vespaLog = bootstrapLogger.child({ component: 'VespaClient' });
 const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
 const HTTP_STATUS_NOT_FOUND = 404;
 const HTTP_STATUS_SERVER_ERROR_MIN = 500;
-const VESPA_SEARCH_REQUEST_TIMEOUT_MS = 30_000;
-const VESPA_DOCUMENT_MUTATION_TIMEOUT_MS = 15_000;
-const VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS = 10_000;
+
+/** Default Vespa HTTP timeouts (override via env / {@link VespaClient} constructor). */
+export interface VespaHttpTimeouts {
+  readonly searchRequestMs: number;
+  readonly documentMutationMs: number;
+  readonly documentGetDeleteMs: number;
+}
+
+const DEFAULT_VESPA_HTTP_TIMEOUTS: VespaHttpTimeouts = {
+  searchRequestMs: 30_000,
+  documentMutationMs: 15_000,
+  documentGetDeleteMs: 10_000,
+};
 
 /** Fraction of hits that can be malformed before escalating from debug to warn.
  *  >20% dropped hits indicates systematic Vespa schema corruption, not stray data. */
@@ -242,11 +252,16 @@ async function withRetry<T>(
  * include the HTTP status code on failure.
  */
 export class VespaClient {
+  private readonly timeouts: VespaHttpTimeouts;
+
   constructor(
     private readonly baseUrl: string,
     private readonly namespace: string,
     private readonly appName: string,
-  ) {}
+    timeouts?: Partial<VespaHttpTimeouts>,
+  ) {
+    this.timeouts = { ...DEFAULT_VESPA_HTTP_TIMEOUTS, ...timeouts };
+  }
 
   // -------------------------------------------------------------------------
   // Internal helpers
@@ -320,7 +335,7 @@ export class VespaClient {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        VESPA_SEARCH_REQUEST_TIMEOUT_MS,
+        this.timeouts.searchRequestMs,
       );
 
       if (!response.ok) {
@@ -418,7 +433,7 @@ export class VespaClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: payload }),
       },
-      VESPA_DOCUMENT_MUTATION_TIMEOUT_MS,
+      this.timeouts.documentMutationMs,
     );
 
     if (!response.ok) {
@@ -471,7 +486,7 @@ export class VespaClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fields: assignFields }),
       },
-      VESPA_DOCUMENT_MUTATION_TIMEOUT_MS,
+      this.timeouts.documentMutationMs,
     );
 
     if (!response.ok) {
@@ -492,7 +507,7 @@ export class VespaClient {
     const response = await this.fetchWithTimeout(
       url,
       { method: 'DELETE' },
-      VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS,
+      this.timeouts.documentGetDeleteMs,
     );
 
     // 404 is acceptable — the document simply did not exist.
@@ -512,7 +527,7 @@ export class VespaClient {
    */
   async get(docId: string): Promise<Record<string, unknown> | null> {
     const url = this.docUrl(this.appName, docId);
-    const response = await this.fetchWithTimeout(url, {}, VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS);
+    const response = await this.fetchWithTimeout(url, {}, this.timeouts.documentGetDeleteMs);
 
     if (response.status === HTTP_STATUS_NOT_FOUND) return null;
 

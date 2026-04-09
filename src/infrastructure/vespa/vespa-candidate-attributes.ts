@@ -15,17 +15,31 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
   async loadAttributes(
     entityIds: readonly EntityId[],
   ): Promise<ReadonlyMap<EntityId, Readonly<Record<string, unknown>>>> {
+    if (entityIds.length === 0) {
+      return new Map();
+    }
+
+    const map = new Map<EntityId, Readonly<Record<string, unknown>>>();
+
+    // Epic-07 T07-2: prefer backend-native batch fetch over N single GETs.
+    // Falls back to per-id concurrent fetches when the adapter doesn't
+    // implement the optional `getDocuments` contract (e.g. in tests).
+    if (this.searchIndex.getDocuments !== undefined) {
+      const docs = await this.searchIndex.getDocuments(entityIds);
+      for (const [id, doc] of docs) {
+        map.set(id, doc as unknown as Record<string, unknown>);
+      }
+      return map;
+    }
+
     const entries = await Promise.all(
       entityIds.map(async (id) => {
         const doc = await this.searchIndex.getDocument(id);
         return { id, doc };
       }),
     );
-
-    const map = new Map<EntityId, Readonly<Record<string, unknown>>>();
     for (const { id, doc } of entries) {
       if (doc !== null) {
-        // Cast via unknown: RetrievalDocument satisfies Record<string, unknown>
         map.set(id, doc as unknown as Record<string, unknown>);
       }
     }

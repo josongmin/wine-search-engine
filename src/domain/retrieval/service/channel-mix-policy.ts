@@ -163,26 +163,18 @@ const FAMILY_POLICY: Record<QueryFamily, { profile: ProfileName; reason: string 
 /**
  * Resolve a channel mix policy decision for a given query family.
  *
- * The `route` and `retrievalMode` parameters are accepted for future
- * override hooks (e.g., force a specific profile for a given route)
- * but do not yet alter the mapping — the family label is the primary
- * driver.
+ * The family label is the sole driver today. Route/retrieval-mode
+ * override hooks previously lived here as `void`-marked parameters;
+ * they were removed (T02-4) because unused parameters misled readers
+ * into thinking the policy was route-aware. Reintroduce them as
+ * explicit parameters when a real override lands — not before.
  *
  * @param queryFamily    - Bucketed family label from observability vocab.
- * @param route          - Execution route (e.g. 'hybrid', 'mixed').
- * @param retrievalMode  - Optional execution retrieval mode for future overrides.
  * @returns              A {@link ChannelMixDecision} with profile name, channels, and reason.
  */
 export function resolveChannelMix(
   queryFamily: QueryFamily,
-  route: string,
-  retrievalMode?: string,
 ): ChannelMixDecision {
-  // Future: route/mode-specific overrides can be inserted here before
-  // falling through to the family policy map.
-  void route;
-  void retrievalMode;
-
   const policy = FAMILY_POLICY[queryFamily];
   return {
     profileName: policy.profile,
