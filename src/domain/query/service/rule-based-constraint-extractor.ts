@@ -56,7 +56,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     [/(?:^|[^\p{L}\p{N}])(?:french|france|프랑스)(?=$|[^\p{L}\p{N}])/iu, 'France'],
     [/(?:^|[^\p{L}\p{N}])(?:italian|italy|이탈리아)(?=$|[^\p{L}\p{N}])/iu, 'Italy'],
     [/(?:^|[^\p{L}\p{N}])(?:spanish|spain|스페인)(?=$|[^\p{L}\p{N}])/iu, 'Spain'],
-    [/(?:^|[^\p{L}\p{N}])(?:american|usa|us wine|california|napa|sonoma|oregon|미국)(?=$|[^\p{L}\p{N}])/iu, 'USA'],
+    [/(?:^|[^\p{L}\p{N}])(?:american|usa|us wine|california|napa|sonoma|oregon|미국)(?=$|[^\p{L}\p{N}])/iu, 'United States'],
     [/(?:^|[^\p{L}\p{N}])(?:australian|australia|호주)(?=$|[^\p{L}\p{N}])/iu, 'Australia'],
     [/(?:^|[^\p{L}\p{N}])(?:argentinian|argentina|아르헨티나)(?=$|[^\p{L}\p{N}])/iu, 'Argentina'],
     [/(?:^|[^\p{L}\p{N}])(?:chilean|chile|칠레)(?=$|[^\p{L}\p{N}])/iu, 'Chile'],
@@ -179,6 +179,30 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
+  // "low tannin" intent
+  if (/(?:타닌\s*약(?:한|하게)?|타닌감?\s*약(?:한|하게)?|부드러(?:운|움|운편)?)/u.test(q)) {
+    soft.push({
+      attribute: 'tannin',
+      operator: '<=',
+      value: 0.4,
+      source_phrase: '타닌 약',
+      confidence: 0.8,
+      mapping_version: mv,
+    });
+  }
+
+  // "fruity" intensity intent
+  if (/(?:과일향\s*풍부(?:한|하게)?|과일향\s*진하(?:다|한|게)?|fruity)/iu.test(q)) {
+    soft.push({
+      attribute: 'fruit_intensity',
+      operator: '>=',
+      value: 0.6,
+      source_phrase: '과일향 풍부',
+      confidence: 0.78,
+      mapping_version: mv,
+    });
+  }
+
   if (/(?:^|[^\p{L}\p{N}])(?:dry wine|드라이|brut|extra[\s-]?brut)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
     soft.push({
       attribute: 'sweetness',
@@ -258,6 +282,14 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   if (searchConstraints.maxPriceKrw !== undefined) {
     const maxUsd = krwToUsd(searchConstraints.maxPriceKrw);
     soft.push({
+      attribute: 'max_price_krw',
+      operator: '<=',
+      value: searchConstraints.maxPriceKrw,
+      source_phrase: `${searchConstraints.maxPriceKrw / KRW_PER_MAN_WON}만원 이하`,
+      confidence: 0.85,
+      mapping_version: mv,
+    });
+    soft.push({
       attribute: 'price_usd',
       operator: '<=',
       value: maxUsd,
@@ -269,6 +301,14 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
 
   if (searchConstraints.minPriceKrw !== undefined) {
     const minUsd = krwToUsd(searchConstraints.minPriceKrw);
+    soft.push({
+      attribute: 'min_price_krw',
+      operator: '>=',
+      value: searchConstraints.minPriceKrw,
+      source_phrase: `${searchConstraints.minPriceKrw / KRW_PER_MAN_WON}만원 이상`,
+      confidence: 0.85,
+      mapping_version: mv,
+    });
     soft.push({
       attribute: 'price_usd',
       operator: '>=',

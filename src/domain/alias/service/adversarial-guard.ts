@@ -39,8 +39,11 @@ const SOURCE_TRUST_GATES: Readonly<Record<AliasType, number>> = {
  * before passing existing aliases to {@link AdversarialGuard.checkHomoglyph}.
  */
 export function deconfuse(value: string): string {
+  // NFC first: ensures combining character sequences are pre-composed
+  // so per-codepoint map lookup matches single chars correctly.
+  const composed = value.normalize('NFC');
   let result = '';
-  for (const char of value) {
+  for (const char of composed) {
     const replacement = HOMOGLYPH_MAP.get(char);
     result += replacement !== undefined ? replacement : char;
   }
@@ -51,7 +54,8 @@ export function deconfuse(value: string): string {
  * Detects whether a string contains any Unicode homoglyph characters.
  */
 function containsHomoglyphs(value: string): boolean {
-  for (const char of value) {
+  const composed = value.normalize('NFC');
+  for (const char of composed) {
     if (HOMOGLYPH_MAP.has(char)) {
       return true;
     }

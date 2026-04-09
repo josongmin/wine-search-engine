@@ -323,7 +323,25 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 5, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       drinkingWindowStatus: 'now',
       answerMustMatch: ['(바롤로|barolo)', '(브루넬로|brunello)'],
-      rubric: 'Must compare Barolo and Brunello, then select the one currently at drinking peak. Must address drinking window for both.' } },
+      rubric: 'Must compare Barolo and Brunello, then select the one currently at drinking peak. Must address drinking window for both.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'appellation', operator: '=', value: 'Barolo' },
+          { attribute: 'appellation', operator: '=', value: 'Brunello di Montalcino' },
+        ],
+        soft: [
+          { attribute: 'country', operator: '=', value: 'Italy' },
+        ],
+        inferred: [
+          { attribute: 'grape_primary', operator: '=', value: 'Nebbiolo' },
+          { attribute: 'grape_primary', operator: '=', value: 'Sangiovese' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '바롤로', canonical: 'Barolo', type: 'appellation' },
+        { surface: '브루넬로', canonical: 'Brunello di Montalcino', type: 'appellation' },
+      ],
+    } },
   { id: 31, tier: 'comparison_nested', query: '나파 카베르네 vs 보르도 카베르네, 10만원 이하로만', description: 'Compare + price filter',
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 3, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       priceBandKrw: { max: 100_000 },
@@ -531,10 +549,13 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       expectedConstraints: {
         hard: [
           { attribute: 'region', operator: '=', value: 'Bordeaux' },
-          { attribute: 'vintage_year', operator: 'in', value: [2015, 2016, 2018] },
         ],
-        inferred: [
+        soft: [
           { attribute: 'country', operator: '=', value: 'France' },
+        ],
+        // Compositional: bordeaux → Cabernet/Merlot family
+        inferred: [
+          { attribute: 'grape_family', operator: 'in', value: ['Cabernet', 'Merlot'] },
         ],
       },
       expectedEntities: [

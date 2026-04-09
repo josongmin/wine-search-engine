@@ -7,7 +7,8 @@ describe('RFC-019 regression: entity resolver', () => {
     ['샤르도네', 'grape_primary', 'Chardonnay'],
     ['프랑스', 'country', 'France'],
     ['부르고뉴', 'region', 'Burgundy'],
-    ['샴페인', 'region', 'Champagne'],
+    ['카베르네 소비뇽', 'grape_primary', 'Cabernet Sauvignon'],
+    ['소비뇽 블랑', 'grape_primary', 'Sauvignon Blanc'],
   ])('resolves %s → %s:%s', (span, expectedType, expectedValue) => {
     const result = resolveEntity(span);
     expect(result).not.toBeNull();
@@ -33,5 +34,12 @@ describe('RFC-019 regression: entity resolver', () => {
     const result = resolveEntity('champagne');
     expect(result).not.toBeNull();
     expect(result!.entityType).toBe('wine_type');
+  });
+
+  it('matches compact Korean alias variants without manual duplicates', () => {
+    const result = resolveEntity('나파밸리');
+    expect(result).not.toBeNull();
+    expect(result!.entityType).toBe('region');
+    expect(result!.canonicalValue).toBe('Napa Valley');
   });
 });

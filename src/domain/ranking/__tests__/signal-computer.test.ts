@@ -156,4 +156,43 @@ describe('SignalComputer specialized signals', () => {
 
     expect(score).toBeCloseTo(1, 5);
   });
+
+  it('does not double-count duplicated soft constraints when retrievalPlan mirrors bundle.soft', () => {
+    const retrievalPlan: RetrievalPlan = {
+      hardFilterTokens: [],
+      softBoosts: [
+        {
+          attribute: 'region',
+          operator: '=',
+          value: 'Bordeaux',
+          weight: 0.9,
+          source: 'test',
+        },
+      ],
+      inferredBoosts: [],
+      sensoryPriors: [],
+      planVersion: 'test',
+    };
+
+    const score = computer.computeSoftConstraint(
+      makeCandidate({ matchedConstraints: ['region'] }),
+      {
+        hard: [],
+        soft: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Bordeaux',
+            source_phrase: '보르도',
+            confidence: 0.9,
+            mapping_version: 'test',
+          },
+        ],
+        inferred: [],
+      },
+      retrievalPlan,
+    );
+
+    expect(score).toBeCloseTo(1, 5);
+  });
 });

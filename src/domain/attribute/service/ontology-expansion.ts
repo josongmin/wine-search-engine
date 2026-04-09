@@ -23,7 +23,7 @@ import type {
   ConstraintBundle,
   NormalizedConstraint,
 } from '../../shared/types/constraint-bundle.js';
-import { regionAncestors } from '../../evaluation/service/wine-ontology.js';
+import { regionAncestors, REGION_PARENTS } from '../../evaluation/service/wine-ontology.js';
 
 /** Version identifier embedded in generated constraints for replay parity. */
 const ONTOLOGY_EXPANSION_VERSION = 'ontology-v1.0';
@@ -42,11 +42,16 @@ const ONTOLOGY_INFERRED_CONFIDENCE = 0.7;
  * detect it structurally rather than maintaining a separate country list here.
  * This keeps the two tables in sync automatically.
  */
-const KNOWN_COUNTRY_ROOTS: ReadonlySet<string> = new Set([
-  'france', 'italy', 'spain', 'germany', 'portugal', 'austria',
-  'usa', 'united states', 'chile', 'argentina', 'australia',
-  'new zealand', 'south africa',
-]);
+const KNOWN_COUNTRY_ROOTS: ReadonlySet<string> = (() => {
+  const roots = new Set<string>();
+  for (const parents of REGION_PARENTS.values()) {
+    const last = parents[parents.length - 1];
+    if (last !== undefined) {
+      roots.add(last);
+    }
+  }
+  return roots;
+})();
 
 /**
  * Expand a constraint bundle with ontology-derived constraints.

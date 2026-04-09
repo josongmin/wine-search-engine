@@ -86,7 +86,7 @@ function defineRouteContract<T extends HttpRouteContract>(contract: T): T {
 const HealthResponseSchema = z.object({
   status: z.enum(['ok', 'degraded']),
   timestamp: z.string(),
-  uptime: z.number(),
+  uptime: z.number().finite(),
 }).strict();
 
 const ReadyResponseSchema = z.object({

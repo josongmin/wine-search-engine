@@ -30,6 +30,8 @@ import { resolveEntity, type ResolvedEntity } from '../../../src/domain/attribut
 import { expandWithOntology } from '../../../src/domain/attribute/service/ontology-expansion.js';
 import { applyCompositionalInference } from '../../../src/domain/attribute/service/compositional-inference.js';
 import { extractRuleBasedConstraints } from '../../../src/domain/query/service/rule-based-constraint-extractor.js';
+import { QueryNormalizer } from '../../../src/domain/query/service/query-normalizer.js';
+import { correctKoreanWineTypos } from '../../../src/domain/query/service/korean-wine-aliases.js';
 
 /**
  * Minimal no-op mapping table adapter for the offline rig. Returns empty
@@ -51,6 +53,14 @@ function getSharedMapper(): NLMapper {
   return sharedMapper;
 }
 
+let sharedNormalizer: QueryNormalizer | null = null;
+function getSharedNormalizer(): QueryNormalizer {
+  if (sharedNormalizer === null) {
+    sharedNormalizer = new QueryNormalizer();
+  }
+  return sharedNormalizer;
+}
+
 /** Result of offline constraint extraction for a single query. */
 export interface ExtractionResult {
   readonly bundle: ConstraintBundle;
@@ -70,9 +80,11 @@ export interface ExtractionResult {
  */
 export async function runConstraintExtraction(query: string): Promise<ExtractionResult> {
   const mapper = getSharedMapper();
+  const normalizer = getSharedNormalizer();
+  const normalizedQuery = normalizer.normalize(correctKoreanWineTypos(query)).accentless;
 
   // Stage 1: Span parsing (RFC-019 Phase 1/4)
-  const spans = parseSpans(query);
+  const spans = parseSpans(normalizedQuery);
   const candidatePhrases = spans.map((s) => s.text);
 
   // Stage 2a: NLMapper symbolic lookup
@@ -93,29 +105,59 @@ export async function runConstraintExtraction(query: string): Promise<Extraction
 
   // Stage 2b: Entity Resolver for uncovered spans (RFC-019 Phase 2)
   const coveredPhrases = new Set(matched.map((c) => c.source_phrase.toLowerCase()));
-  const resolverCandidates: { span: Span; resolved: ResolvedEntity | null }[] = [];
+  const matchedAttributesByPhrase = new Map<string, Set<string>>();
+  for (const constraint of matched) {
+    const key = constraint.source_phrase.toLowerCase();
+    const existing = matchedAttributesByPhrase.get(key) ?? new Set<string>();
+    existing.add(constraint.attribute);
+    matchedAttributesByPhrase.set(key, existing);
+  }
+  const resolverCandidates: {
+    span: Span;
+    resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } | null;
+  }[] = [];
   for (const span of spans) {
-    if (coveredPhrases.has(span.text)) {
-      resolverCandidates.push({ span, resolved: null });
+    const preferredEntity = resolveEntity(span.text, { preferEntityOverStyle: true });
+    if (!coveredPhrases.has(span.text)) {
+      resolverCandidates.push({
+        span,
+        resolved: preferredEntity !== null
+          ? { entity: preferredEntity, kind: 'primary' }
+          : null,
+      });
+      continue;
+    }
+    const coveredAttributes = matchedAttributesByPhrase.get(span.text) ?? new Set<string>();
+    if (
+      preferredEntity !== null
+      && preferredEntity.entityType !== 'wine_type'
+      && !coveredAttributes.has(preferredEntity.entityType)
+    ) {
+      resolverCandidates.push({
+        span,
+        resolved: { entity: preferredEntity, kind: 'shadow' },
+      });
     } else {
-      resolverCandidates.push({ span, resolved: resolveEntity(span.text) });
+      resolverCandidates.push({ span, resolved: null });
     }
   }
   const resolvedNonOverlap = resolveOverlaps(resolverCandidates)
-    .filter((e): e is { span: Span; resolved: ResolvedEntity } => e.resolved !== null);
+    .filter((e): e is { span: Span; resolved: { entity: ResolvedEntity; kind: 'primary' | 'shadow' } } => e.resolved !== null);
 
   const resolvedEntities: ResolvedEntity[] = [];
   for (const { resolved } of resolvedNonOverlap) {
-    resolvedEntities.push(resolved);
+    resolvedEntities.push(resolved.entity);
     const constraint: NormalizedConstraint = {
-      attribute: resolved.entityType,
+      attribute: resolved.entity.entityType,
       operator: '=',
-      value: resolved.canonicalValue,
-      source_phrase: `entity_resolver(${resolved.matchedSurface})`,
-      confidence: resolved.confidence,
+      value: resolved.entity.canonicalValue,
+      source_phrase: resolved.kind === 'shadow'
+        ? `entity_shadow(${resolved.entity.matchedSurface})`
+        : `entity_resolver(${resolved.entity.matchedSurface})`,
+      confidence: resolved.entity.confidence,
       mapping_version: 'entity-resolver-v1.0',
     };
-    if (SOFT_ATTRIBUTES.has(resolved.entityType)) soft.push(constraint);
+    if (SOFT_ATTRIBUTES.has(resolved.entity.entityType)) soft.push(constraint);
     else hard.push(constraint);
   }
 
@@ -123,12 +165,18 @@ export async function runConstraintExtraction(query: string): Promise<Extraction
   let baseBundle: ConstraintBundle;
   let expanded: ConstraintBundle;
   let finalBundle: ConstraintBundle;
+  const tier12Empty = hard.length === 0 && soft.length === 0;
+  const regexExtracted = extractRuleBasedConstraints(normalizedQuery);
+  const tier6ConstraintCount = mergeConstraintBundleIntoLists(
+    regexExtracted,
+    hard,
+    soft,
+  );
 
-  if (hard.length === 0 && soft.length === 0) {
+  if (tier12Empty) {
     // Tier 6 sole-extraction: Tier 1+2 produced 0 constraints, so Tier 6
     // regex extractor is the sole contributor (NOT a "fallback" — it's
     // the last tier of the deterministic cascade pipeline).
-    const regexExtracted = extractRuleBasedConstraints(query);
     expanded = expandWithOntology(regexExtracted);
     finalBundle = applyCompositionalInference(expanded);
     baseBundle = regexExtracted;
@@ -160,7 +208,7 @@ export async function runConstraintExtraction(query: string): Promise<Extraction
       tier3_ontology_expansion: countBundle(expanded) - countBundle(baseBundle),
       tier4_compositional_inference: countBundle(finalBundle) - countBundle(expanded),
       tier5_llm_linker: 0,
-      tier6_regex_fallback: hard.length === 0 && soft.length === 0 ? countBundle(baseBundle) : 0,
+      tier6_regex_fallback: tier6ConstraintCount,
       unmapped: spans.filter((s) => !coveredPhrases.has(s.text) && !resolverCandidates.some((rc) => rc.span === s && rc.resolved !== null)).length,
     },
     missedPhrases: mapperTrace?.missedPhrases ?? [],
@@ -176,4 +224,35 @@ export async function runConstraintExtraction(query: string): Promise<Extraction
 
 function countBundle(b: ConstraintBundle): number {
   return b.hard.length + b.soft.length + b.inferred.length;
+}
+
+function mergeConstraintBundleIntoLists(
+  bundle: ConstraintBundle,
+  hard: NormalizedConstraint[],
+  soft: NormalizedConstraint[],
+): number {
+  const seen = new Set<string>([
+    ...hard.map(constraintKey),
+    ...soft.map(constraintKey),
+  ]);
+  let added = 0;
+  for (const constraint of bundle.hard) {
+    const key = constraintKey(constraint);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hard.push(constraint);
+    added++;
+  }
+  for (const constraint of bundle.soft) {
+    const key = constraintKey(constraint);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    soft.push(constraint);
+    added++;
+  }
+  return added;
+}
+
+function constraintKey(constraint: NormalizedConstraint): string {
+  return `${constraint.attribute}|${constraint.operator}|${JSON.stringify(constraint.value)}`;
 }

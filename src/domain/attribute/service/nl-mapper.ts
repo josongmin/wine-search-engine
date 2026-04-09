@@ -449,6 +449,49 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['gewürztraminer', { phrase: 'gewürztraminer', mappedAttribute: 'grape_primary', operator: '=', value: 'Gewürztraminer', mappingConfidence: 0.95, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 ]);
 
+type ResolverCompatibleAttribute =
+  | 'wine_type'
+  | 'country'
+  | 'region'
+  | 'appellation'
+  | 'grape_primary';
+
+export interface DefaultEntityAliasMapping {
+  readonly phrase: string;
+  readonly mappedAttribute: ResolverCompatibleAttribute;
+  readonly canonicalValue: string;
+  readonly mappingConfidence: number;
+}
+
+/**
+ * Returns resolver-compatible entity aliases sourced from DEFAULT_MAPPINGS.
+ *
+ * This keeps NL mapper phrase coverage and Entity Resolver coverage in sync so
+ * new entity aliases are not accidentally added to one layer only.
+ */
+export function listDefaultEntityAliasMappings(): readonly DefaultEntityAliasMapping[] {
+  const aliases: DefaultEntityAliasMapping[] = [];
+  for (const mapping of DEFAULT_MAPPINGS.values()) {
+    if (mapping.operator !== '=' || typeof mapping.value !== 'string') continue;
+    if (!isResolverCompatibleAttribute(mapping.mappedAttribute)) continue;
+    aliases.push({
+      phrase: mapping.phrase,
+      mappedAttribute: mapping.mappedAttribute,
+      canonicalValue: mapping.value,
+      mappingConfidence: mapping.mappingConfidence,
+    });
+  }
+  return aliases;
+}
+
+function isResolverCompatibleAttribute(value: string): value is ResolverCompatibleAttribute {
+  return value === 'wine_type'
+    || value === 'country'
+    || value === 'region'
+    || value === 'appellation'
+    || value === 'grape_primary';
+}
+
 /**
  * Converts an {@link NLMapping} to a {@link NormalizedConstraint}.
  */
@@ -536,10 +579,16 @@ export class NLMapper {
     throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
 
     const results: NormalizedConstraint[] = [];
+    const seenPhrases = new Set<string>();
 
     for (const phrase of phrases) {
       throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
-      const mapping = await this.mapPhrase(phrase);
+      const normalizedPhrase = phrase.trim();
+      if (normalizedPhrase.length === 0 || seenPhrases.has(normalizedPhrase)) {
+        continue;
+      }
+      seenPhrases.add(normalizedPhrase);
+      const mapping = await this.mapPhrase(normalizedPhrase);
       if (mapping !== null) {
         results.push(toNormalizedConstraint(mapping));
       }
@@ -558,7 +607,7 @@ export class NLMapper {
       phraseCacheHits: 0,
       phraseCacheNegativeSkipped: 0,
       phraseCacheMisses: 0,
-      missedPhrases: phrases.filter(
+      missedPhrases: [...seenPhrases].filter(
         (p) => !results.some((r) => r.source_phrase === p),
       ),
     };

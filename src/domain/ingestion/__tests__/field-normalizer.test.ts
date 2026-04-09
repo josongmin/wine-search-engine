@@ -28,6 +28,21 @@ describe('normalizeField', () => {
     });
   });
 
+  // ── Homoglyph non-application regression ──────────────────────────────────
+  // Ingestion must preserve original script — homoglyph replacement is lossy
+  // and would corrupt non-Latin wine labels (e.g. Cyrillic "Массандра",
+  // Greek "Αγιωργίτικο"). See normalizeUnicodeWithHomoglyphs for query-time
+  // deconfusion.
+  describe('does NOT apply homoglyph replacement', () => {
+    it('Cyrillic input is preserved (Массандра stays Массандра)', () => {
+      expect(normalizeField('Массандра')).toBe('Массандра');
+    });
+
+    it('Greek α stays α (not replaced with Latin a)', () => {
+      expect(normalizeField('α')).toBe('α');
+    });
+  });
+
   describe('Korean locale handling', () => {
     it('full-width space (U+3000) → ASCII space with Korean locale', () => {
       // U+3000 is ideographic space

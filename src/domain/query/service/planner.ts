@@ -522,7 +522,10 @@ export class Planner {
     const soft: ConstraintBundle['soft'][number][] = [];
 
     for (const constraint of matched) {
-      if (Planner.SOFT_ATTRIBUTES.has(constraint.attribute)) {
+      const isLlmSourced =
+        (constraint.mapping_version?.startsWith('llm-') ?? false)
+        || constraint.source_phrase.startsWith('llm_linker(');
+      if (isLlmSourced || Planner.SOFT_ATTRIBUTES.has(constraint.attribute)) {
         soft.push(constraint);
       } else {
         hard.push(constraint);
@@ -602,18 +605,24 @@ export class Planner {
       }
     }
 
-    // Tier 6 sole-extraction: when Tier 1 (NLMapper) + Tier 2 (Entity Resolver)
-    // produce zero constraints, Tier 6 regex extractor becomes the sole contributor.
-    // This is the last tier of the deterministic cascade, not a "fallback".
-    if (hard.length === 0 && soft.length === 0) {
-      const tier6Bundle = extractRuleBasedConstraints(normalizedQuery);
+    const tier12Empty = hard.length === 0 && soft.length === 0;
+    // Tier 6: regex/rule extractor contributes numeric, exclusion, and fallback
+    // constraints even when Tier 1/2 already found entity constraints.
+    const tier6Bundle = extractRuleBasedConstraints(normalizedQuery);
+    const tier6AddedCount = mergeConstraintBundleIntoLists(
+      tier6Bundle,
+      hard,
+      soft,
+    );
+
+    // If all earlier tiers still produced zero constraints, Tier 6 is the sole
+    // contributor and must still flow through ontology + composition.
+    if (tier12Empty) {
       // RFC-019 Stage 3+5: Apply ontology expansion and compositional inference
       // on the Tier 6 bundle too, so inferred constraints are populated
       // consistently across all paths.
       const ontologyExpanded = expandWithOntology(tier6Bundle);
       const expanded = applyCompositionalInference(ontologyExpanded);
-      const tier6ConstraintCount =
-        tier6Bundle.hard.length + tier6Bundle.soft.length + tier6Bundle.inferred.length;
       const constraintExtraction = buildPlannerConstraintExtractionTrace({
         baseTrace: mapperTrace,
         spans,
@@ -624,7 +633,7 @@ export class Planner {
           countBundleConstraints(ontologyExpanded) - countBundleConstraints(tier6Bundle),
         compositionalAddedCount:
           countBundleConstraints(expanded) - countBundleConstraints(ontologyExpanded),
-        tier6ConstraintCount,
+        tier6ConstraintCount: tier6AddedCount,
         unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
         unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
       });
@@ -650,7 +659,7 @@ export class Planner {
       finalBundle,
       ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
       compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
-      tier6ConstraintCount: 0,
+      tier6ConstraintCount: tier6AddedCount,
       unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
       unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
     });
@@ -854,6 +863,41 @@ export class Planner {
 
 function countBundleConstraints(bundle: ConstraintBundle): number {
   return bundle.hard.length + bundle.soft.length + bundle.inferred.length;
+}
+
+function constraintKey(constraint: NormalizedConstraint): string {
+  return `${constraint.attribute}|${constraint.operator}|${JSON.stringify(constraint.value)}`;
+}
+
+function mergeConstraintBundleIntoLists(
+  bundle: ConstraintBundle,
+  hard: ConstraintBundle['hard'][number][],
+  soft: ConstraintBundle['soft'][number][],
+): number {
+  const existing = new Set<string>([
+    ...hard.map(constraintKey),
+    ...soft.map(constraintKey),
+  ]);
+  let added = 0;
+  for (const constraint of bundle.hard) {
+    const key = constraintKey(constraint);
+    if (existing.has(key)) {
+      continue;
+    }
+    existing.add(key);
+    hard.push(constraint);
+    added++;
+  }
+  for (const constraint of bundle.soft) {
+    const key = constraintKey(constraint);
+    if (existing.has(key)) {
+      continue;
+    }
+    existing.add(key);
+    soft.push(constraint);
+    added++;
+  }
+  return added;
 }
 
 function collectUnresolvedSpanSamples(

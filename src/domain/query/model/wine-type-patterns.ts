@@ -35,6 +35,16 @@ export const WINE_TYPE_RULES: readonly (readonly [RegExp, WineTypeValue])[] = [
 ] as const;
 
 /**
+ * Set of all canonical wine type values (lowercase) derived from {@link WINE_TYPE_RULES}.
+ *
+ * Used for membership checks — e.g. "is this token a wine type rather than a
+ * style/flavor descriptor?" — without duplicating the wine type vocabulary.
+ */
+export const WINE_TYPE_VALUES: ReadonlySet<string> = new Set<string>(
+  WINE_TYPE_RULES.map(([, value]) => value),
+);
+
+/**
  * Quick-check patterns for intent detection: "does the query mention ANY wine type?"
  * Derived from WINE_TYPE_RULES — these are intentionally broader (no canonical value needed).
  *
@@ -42,3 +52,35 @@ export const WINE_TYPE_RULES: readonly (readonly [RegExp, WineTypeValue])[] = [
  */
 export const WINE_TYPE_DETECTION_PATTERNS: readonly RegExp[] =
   WINE_TYPE_RULES.map(([pattern]) => pattern);
+
+/**
+ * Non-canonical aliases accepted for enum matching (e.g. user input "rose" → canonical "rosé").
+ * Only add entries where the canonical value itself is NOT sufficient for string comparison.
+ */
+const WINE_TYPE_ALIASES: Partial<Record<WineTypeValue, readonly string[]>> = {
+  'rosé': ['rose'],
+};
+
+/**
+ * All recognized wine type tokens — canonical values + aliases.
+ * Used by search-constraint-extractor for membership checks (e.g. "is 'rose' a wine type?").
+ * Includes accent-less aliases so "not rose" is correctly identified as a wine type exclusion.
+ */
+export const WINE_TYPE_ALL_TOKENS: ReadonlySet<string> = new Set<string>([
+  ...WINE_TYPE_VALUES,
+  ...Object.values(WINE_TYPE_ALIASES).flat(),
+]);
+
+/**
+ * Mutual exclusivity groups for wine types, derived from WINE_TYPE_RULES.
+ *
+ * Each group is an array of accepted string values for one canonical wine type.
+ * Two constraints whose values fall in different groups are contradictory.
+ *
+ * Used by ConstraintSAT — kept here to stay in sync with the canonical type list.
+ */
+export const WINE_TYPE_EXCLUSIVITY_GROUPS: readonly (readonly string[])[] =
+  WINE_TYPE_RULES.map(([, canonical]) => {
+    const aliases = WINE_TYPE_ALIASES[canonical];
+    return aliases ? [canonical, ...aliases] : [canonical];
+  });

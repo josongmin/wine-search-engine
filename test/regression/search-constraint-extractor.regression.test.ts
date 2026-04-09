@@ -129,9 +129,9 @@ describe('extractSearchConstraints — country exclusion', () => {
     expect(c.excludeCountries).toContain('Australia');
   });
 
-  it('maps 미국 → USA', () => {
+  it('maps 미국 → United States', () => {
     const c = extractSearchConstraints('미국 빼고');
-    expect(c.excludeCountries).toContain('USA');
+    expect(c.excludeCountries).toContain('United States');
   });
 
   it('extracts repeated English exclusions used by agent tool serialization', () => {
@@ -366,6 +366,36 @@ describe('end-to-end: Korean exclusion query → YQL NOT filter', () => {
     );
     expect(vintageConstraint).toBeDefined();
     expect(vintageConstraint?.value).toBe(2018);
+  });
+});
+
+describe('rule-based soft slot extraction regression', () => {
+  it('extracts max_price_krw soft constraint from "5만원 이하"', () => {
+    const bundle = extractRuleBasedConstraints('5만원 이하 화이트 와인');
+    const c = bundle.soft.find((item) => item.attribute === 'max_price_krw' && item.operator === '<=');
+    expect(c).toBeDefined();
+    expect(c?.value).toBe(50_000);
+  });
+
+  it('extracts min_price_krw soft constraint from "10만원 이상"', () => {
+    const bundle = extractRuleBasedConstraints('10만원 이상 레드 와인');
+    const c = bundle.soft.find((item) => item.attribute === 'min_price_krw' && item.operator === '>=');
+    expect(c).toBeDefined();
+    expect(c?.value).toBe(100_000);
+  });
+
+  it('extracts tannin low soft constraint from Korean intent', () => {
+    const bundle = extractRuleBasedConstraints('타닌 약한 레드 와인 추천');
+    const c = bundle.soft.find((item) => item.attribute === 'tannin' && item.operator === '<=');
+    expect(c).toBeDefined();
+    expect(c?.value).toBe(0.4);
+  });
+
+  it('extracts fruit_intensity soft constraint from Korean intent', () => {
+    const bundle = extractRuleBasedConstraints('과일향 풍부한 와인');
+    const c = bundle.soft.find((item) => item.attribute === 'fruit_intensity' && item.operator === '>=');
+    expect(c).toBeDefined();
+    expect(c?.value).toBe(0.6);
   });
 });
 

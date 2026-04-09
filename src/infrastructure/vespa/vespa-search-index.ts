@@ -84,6 +84,20 @@ function yqlEscapeString(value: string): string {
 
 const STRUCTURED_QUERY_STRENGTH_MULTIPLIER = 0.35;
 const FILTER_STRENGTH_MULTIPLIER = 0.2;
+const STRUCTURED_QUERY_VALUE_MATCH_CAP = 3;
+
+function countStructuredFilterMatches(
+  filters: readonly string[],
+  prefixes: readonly string[],
+): number {
+  let count = 0;
+  for (const filter of filters) {
+    if (prefixes.some((prefix) => filter.startsWith(prefix))) {
+      count++;
+    }
+  }
+  return count;
+}
 
 function buildStructuredQueryFeatureParams(
   queries: readonly string[],
@@ -91,27 +105,40 @@ function buildStructuredQueryFeatureParams(
 ): Record<string, number> {
   const structuredQueryCount = Math.max(0, queries.length - STRUCTURED_QUERY_BASELINE_COUNT);
   const normalizedQueries = queries.map((query) => query.toLowerCase());
-  const regionBoost = normalizedQueries.some((query) =>
+  const regionBoostFromQuery = normalizedQueries.some((query) =>
     query.includes('bordeaux')
     || query.includes('burgundy')
     || query.includes('napa')
     || query.includes('champagne')
     || query.includes('rioja')
   ) ? 1 : 0;
-  const countryBoost = normalizedQueries.some((query) =>
+  const countryBoostFromQuery = normalizedQueries.some((query) =>
     query.includes('france')
     || query.includes('italy')
     || query.includes('spain')
     || query.includes('usa')
   ) ? 1 : 0;
-  const grapeBoost = normalizedQueries.some((query) =>
+  const grapeBoostFromQuery = normalizedQueries.some((query) =>
     query.includes('cabernet')
     || query.includes('merlot')
     || query.includes('pinot')
     || query.includes('chardonnay')
     || query.includes('riesling')
   ) ? 1 : 0;
-  const structuredStrength = Math.min(1, structuredQueryCount * STRUCTURED_QUERY_STRENGTH_MULTIPLIER);
+  const regionFilterCount = countStructuredFilterMatches(filters, ['region:', 'appellation:']);
+  const countryFilterCount = countStructuredFilterMatches(filters, ['country:']);
+  const grapeFilterCount = countStructuredFilterMatches(filters, ['grape_primary:', 'grape_family:']);
+  const regionBoost = Math.min(1, regionBoostFromQuery + regionFilterCount);
+  const countryBoost = Math.min(1, countryBoostFromQuery + countryFilterCount);
+  const grapeBoost = Math.min(1, grapeBoostFromQuery + grapeFilterCount);
+  const structuredStrength = Math.min(
+    1,
+    structuredQueryCount * STRUCTURED_QUERY_STRENGTH_MULTIPLIER
+      + Math.min(
+        STRUCTURED_QUERY_VALUE_MATCH_CAP,
+        regionFilterCount + countryFilterCount + grapeFilterCount,
+      ) * FILTER_STRENGTH_MULTIPLIER,
+  );
   const filterStrength = Math.min(1, filters.length * FILTER_STRENGTH_MULTIPLIER);
 
   return {

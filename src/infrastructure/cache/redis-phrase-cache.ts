@@ -74,7 +74,13 @@ export class RedisPhraseCache implements PhraseCachePort {
   ): Promise<void> {
     const safeTtl = clampTtl(ttlSeconds);
     try {
-      await this.cache.set(REDIS_KEY_PREFIX + phrase, items, safeTtl);
+      await this.cache.setValidated(
+        REDIS_KEY_PREFIX + phrase,
+        items,
+        LlmConstraintResponseSchema,
+        'RedisPhraseCache',
+        safeTtl,
+      );
     } catch (err) {
       log.warn({ err, phrase }, 'phrase cache write error; ignoring');
     }

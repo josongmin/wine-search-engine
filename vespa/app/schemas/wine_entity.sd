@@ -546,9 +546,18 @@ schema wine_entity {
 
     function structured_attribute_boost() {
       expression {
-        query(structured_region_boost) * if(attribute(region) != "", 1.0, 0.0)
-        + query(structured_country_boost) * if(attribute(country) != "", 1.0, 0.0)
-        + query(structured_grape_boost) * if(attribute(grape_primary) != "" or attribute(grape_family) != "", 1.0, 0.0)
+        query(structured_region_boost)
+        * (
+            bm25(region_hierarchy) / (bm25(region_hierarchy) + 10)
+            + bm25(appellation) / (bm25(appellation) + 10)
+          )
+        + query(structured_country_boost)
+        * (bm25(region_hierarchy) / (bm25(region_hierarchy) + 10))
+        + query(structured_grape_boost)
+        * (
+            bm25(grape_primary) / (bm25(grape_primary) + 10)
+            + bm25(grape_family) / (bm25(grape_family) + 10)
+          )
       }
     }
 
@@ -582,6 +591,8 @@ schema wine_entity {
       bm25(producer)
       bm25(appellation)
       bm25(grape_primary)
+      bm25(grape_family)
+      bm25(region_hierarchy)
       bm25(flavor_profiles)
       bm25(classification)
       closeness(field, embedding)
@@ -661,6 +672,8 @@ schema wine_entity {
       bm25(producer)
       bm25(appellation)
       bm25(grape_primary)
+      bm25(grape_family)
+      bm25(region_hierarchy)
       bm25(flavor_profiles)
       bm25(classification)
       closeness(field, embedding)

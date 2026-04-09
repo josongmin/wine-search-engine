@@ -215,18 +215,21 @@ export class SignalComputer {
     let weightedSum = 0;
     let totalWeight = 0;
 
-    for (const constraint of softConstraints) {
-      const weight = constraint.confidence;
+    const softSignals = structuredSoftBoosts.length > 0
+      ? structuredSoftBoosts.map((boost) => ({
+        attribute: boost.attribute,
+        weight: boost.weight,
+      }))
+      : softConstraints.map((constraint) => ({
+        attribute: constraint.attribute,
+        weight: constraint.confidence,
+      }));
+
+    for (const constraint of softSignals) {
+      const weight = constraint.weight;
       totalWeight += weight;
       if (matchedSet.has(constraint.attribute)) {
         weightedSum += weight;
-      }
-    }
-
-    for (const boost of structuredSoftBoosts) {
-      totalWeight += boost.weight;
-      if (matchedSet.has(boost.attribute)) {
-        weightedSum += boost.weight;
       }
     }
 

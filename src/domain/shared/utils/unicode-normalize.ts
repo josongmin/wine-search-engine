@@ -48,6 +48,7 @@ export const HOMOGLYPH_MAP: ReadonlyMap<string, string> = new Map([
   ['\u0444', 'f'], // ф → f  (approximate — critical for "forget" injection bypass)
   ['\u0424', 'F'], // Ф → F
   ['\u0413', 'G'], // Г → G  (approximate — visually similar in some sans-serif fonts)
+  ['\u0434', 'd'], // д → d  (lowercase — critical for "default"/"disregard" injection bypass)
   ['\u0414', 'D'], // Д → D  (approximate — visually similar in italic)
 
   // ── Cyrillic extended ──
@@ -144,7 +145,8 @@ export function normalizeUnicode(input: string): string {
  */
 export function normalizeUnicodeWithHomoglyphs(input: string): string {
   let result = input.normalize('NFC');
-  result = normalizeHomoglyphs(result);
+  // Skip the NFC inside normalizeHomoglyphs — already NFC-composed above.
+  result = replaceHomoglyphs(result);
   result = result.trim().replace(/\s+/g, ' ');
   return result;
 }
@@ -175,7 +177,11 @@ export function stripAccents(input: string): string {
 export function normalizeHomoglyphs(input: string): string {
   // NFC first: ensures combining character sequences (e.g. e + \u0301) are
   // pre-composed so per-codepoint map lookup matches single chars correctly.
-  const composed = input.normalize('NFC');
+  return replaceHomoglyphs(input.normalize('NFC'));
+}
+
+/** Inner loop — assumes input is already NFC-composed. */
+function replaceHomoglyphs(composed: string): string {
   let result = '';
   for (const char of composed) {
     const replacement = HOMOGLYPH_MAP.get(char);

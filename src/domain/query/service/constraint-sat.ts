@@ -1,4 +1,5 @@
 import type { NormalizedConstraint, ConstraintBundle } from '../../shared/types/index.js';
+import { WINE_TYPE_EXCLUSIVITY_GROUPS } from '../model/wine-type-patterns.js';
 
 export type ContradictionResult =
   | { contradicted: false }
@@ -79,10 +80,10 @@ export class ConstraintSAT {
 
   private enumValuesDisjoint(a: NormalizedConstraint, b: NormalizedConstraint): boolean {
     if (a.operator !== '=' || b.operator !== '=') return false;
-    const MUTUALLY_EXCLUSIVE: Record<string, string[][]> = {
+    const MUTUALLY_EXCLUSIVE: Record<string, readonly (readonly string[])[]> = {
       sweetness: [['dry', 'brut'], ['sweet', 'demi-sec', 'doux', 'dolce']],
       color: [['red'], ['white'], ['rosé', 'rose']],
-      wine_type: [['red'], ['white'], ['rosé', 'rose'], ['sparkling'], ['fortified'], ['dessert']],
+      wine_type: WINE_TYPE_EXCLUSIVITY_GROUPS,
     };
     const groups = MUTUALLY_EXCLUSIVE[a.attribute];
     if (!groups) return false;

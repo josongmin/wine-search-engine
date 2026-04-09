@@ -74,4 +74,17 @@ describe('Planner RFC-019 semantic compiler path', () => {
       expect.arrayContaining(['country', 'region', 'wine_type']),
     );
   });
+
+  it('merges Tier 6 numeric constraints even when entity constraints already matched', async () => {
+    const planner = makePlanner();
+    const plan = await planner.plan('보르도 2018년 이후 추천');
+
+    expect(plan.constraints.hard).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ attribute: 'region', value: 'Bordeaux' }),
+        expect.objectContaining({ attribute: 'vintage_year', operator: '>=', value: 2018 }),
+      ]),
+    );
+    expect(plan.constraintExtraction?.phrasesByTier?.tier6_regex_fallback).toBeGreaterThan(0);
+  });
 });

@@ -35,6 +35,8 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
 const QUERY_EXPANSION_MAX_TERMS = 32;
 /** Weight increment per repeated token occurrence in expansion stats. */
 const QUERY_EXPANSION_TERM_WEIGHT_STEP = 0.25;
+/** Disabled until Vespa learned_sparse rank-profile is re-enabled in schema. */
+const LEARNED_SPARSE_CHANNEL_ENABLED = false;
 
 /**
  * Orchestrates the full hybrid retrieval pipeline (RFC-012).
@@ -145,7 +147,8 @@ export class CandidatePoolService {
 
     // Step 1b: Learned sparse search
     let learnedSparseHits: readonly DenseHit[] = [];
-    if (activeChannels.has('learned_sparse')) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (activeChannels.has('learned_sparse') && LEARNED_SPARSE_CHANNEL_ENABLED) {
       try {
         learnedSparseHits = await this.searchIndex.searchLearnedSparse(
           buildLearnedSparseQueryWeights(input),

@@ -49,6 +49,7 @@ import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTr
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
 import { runConstraintExtraction } from './constraint-extraction-eval.js';
+import { printBenchmarkInsights, type BenchmarkReportSlice } from './benchmark-insight-generator.js';
 import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
 import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
@@ -387,7 +388,10 @@ async function computeConstraintMetricsForScenario(
     ? scoreSemanticConstraintRecall(extraction.bundle, scenario.expectation.expectedConstraints)
     : { scrOverall: null, scrHard: null, scrSoft: null, scrInferred: null };
   const ela = hasExpectedEntities && scenario.expectation.expectedEntities
-    ? scoreEntityLinkingAccuracy(scenario.expectation.expectedEntities)
+    ? scoreEntityLinkingAccuracy(
+      scenario.expectation.expectedEntities,
+      extraction.resolvedEntities,
+    )
     : { ela1: null };
   const slot = hasExpectedConstraints && scenario.expectation.expectedConstraints
     ? scoreSlotF1(extraction.bundle, scenario.expectation.expectedConstraints)
@@ -410,6 +414,8 @@ async function computeConstraintMetricsForScenario(
     slotF1Relaxed: slot.relaxed,
     csrOverall: csr.csrOverall,
     csrHard: csr.csrHard,
+    csrSoft: csr.csrSoft,
+    csrInferred: csr.csrInferred,
   };
 }
 
@@ -784,6 +790,10 @@ export interface BenchmarkReport {
     readonly csrOverall: number | null;
     /** RFC-020 P4: CSR hard tier mean. */
     readonly csrHard: number | null;
+    /** RFC-020 P4: CSR soft tier mean. */
+    readonly csrSoft: number | null;
+    /** RFC-020 P4: CSR inferred tier mean. */
+    readonly csrInferred: number | null;
     /** Number of scenarios that received constraint extraction evaluation. */
     readonly constraintEvaluatedCount: number;
     readonly avgSteps: number;
@@ -1286,6 +1296,8 @@ function buildReport(
   const slotF1RelaxedScores = executedForAggregate.map((r) => r.scores.slotF1Relaxed);
   const csrOverallScores = executedForAggregate.map((r) => r.scores.csrOverall);
   const csrHardScores = executedForAggregate.map((r) => r.scores.csrHard);
+  const csrSoftScores = executedForAggregate.map((r) => r.scores.csrSoft);
+  const csrInferredScores = executedForAggregate.map((r) => r.scores.csrInferred);
   const constraintEvaluatedCount = executedForAggregate.filter(
     (r) => r.scores.semanticConstraintRecall !== null || r.scores.entityLinkingAccuracy !== null,
   ).length;
@@ -1384,6 +1396,8 @@ function buildReport(
       slotF1Relaxed: nullableMean(slotF1RelaxedScores),
       csrOverall: nullableMean(csrOverallScores),
       csrHard: nullableMean(csrHardScores),
+      csrSoft: nullableMean(csrSoftScores),
+      csrInferred: nullableMean(csrInferredScores),
       constraintEvaluatedCount,
       avgSteps:
         executed.length > 0
@@ -1567,7 +1581,7 @@ async function main(): Promise<void> {
     console.error(`  SCR overall:  ${fmt(s.scrOverall)}   SCR hard: ${fmt(s.scrHard)}   SCR soft: ${fmt(s.scrSoft)}   SCR inferred: ${fmt(s.scrInferred)}`);
     console.error(`  ELA@1:        ${fmt(s.entityLinkingAccuracy)}`);
     console.error(`  Slot F1 strict: ${fmt(s.slotF1Strict)}   relaxed: ${fmt(s.slotF1Relaxed)}`);
-    console.error(`  CSR overall:  ${fmt(s.csrOverall)}   CSR hard: ${fmt(s.csrHard)}`);
+    console.error(`  CSR overall:  ${fmt(s.csrOverall)}   CSR hard: ${fmt(s.csrHard)}   CSR soft: ${fmt(s.csrSoft)}   CSR inferred: ${fmt(s.csrInferred)}`);
     console.error(`  Evaluated:    ${s.constraintEvaluatedCount} scenario(s)`);
   }
   console.error('  ────── execution ───────');
@@ -1616,7 +1630,59 @@ async function main(): Promise<void> {
       console.error(`  #${String(c.id).padEnd(4)} ${c.tier.padEnd(20)} ${diag.slice(0, 60)}`);
     }
   }
-  console.error('══════════════════════════════════════\n');
+  console.error('══════════════════════════════════════');
+
+  // ── RFC-020: Benchmark Insights (deterministic rules + LLM analysis) ──
+  {
+    const insightSlice: BenchmarkReportSlice = {
+      overallScore: s.overallScore,
+      overallCi95Lower: s.overallBootstrapCi95?.lower ?? s.overallCi95.lower,
+      overallCi95Upper: s.overallBootstrapCi95?.upper ?? s.overallCi95.upper,
+      executionEfficiency: s.executionEfficiency,
+      answerQuality: s.answerQuality,
+      faithfulness: s.faithfulness,
+      contextRelevance: s.contextRelevance,
+      contextRecall: s.contextRecall,
+      judge: s.judge,
+      latencyP50Ms: s.latencyMs.p50,
+      latencyP95Ms: s.latencyMs.p95,
+      tier6SoleExtractionRate: null, // TODO: aggregate from query logs
+      meanHardConstraints: 0, // TODO: aggregate from query logs
+      scrOverall: s.scrOverall ?? null,
+      scrHard: s.scrHard ?? null,
+      scrSoft: s.scrSoft ?? null,
+      scrInferred: s.scrInferred ?? null,
+      entityLinkingAccuracy: s.entityLinkingAccuracy ?? null,
+      slotF1Strict: s.slotF1Strict ?? null,
+      constraintEvaluatedCount: s.constraintEvaluatedCount ?? 0,
+      scenarioCount: report.executedCount,
+      criticalFailureCount: report.criticalFailureCount,
+      worstScenarios: report.results
+        .filter((r) => !r.skipped && r.error === undefined)
+        .sort((a, b) => a.scores.overall - b.scores.overall)
+        .slice(0, 5)
+        .map((r) => ({ id: r.id, tier: r.tier, score: r.scores.overall, judge: r.scores.judge })),
+    };
+    // LLM insight: create a dedicated gpt-5.4-mini instance for analysis.
+    // Separate from the judge LLM (which lives inside runBenchmark scope).
+    // Cost: ~1 LLM call ($0.001) at the very end — negligible vs judge cost.
+    let insightLlm: ChatLlmPort | undefined;
+    try {
+      const openaiKey = process.env['OPENAI_API_KEY'];
+      if (openaiKey !== undefined && openaiKey.length > 0) {
+        insightLlm = new OpenAiChatLlm({
+          apiKey: openaiKey,
+          defaultModel: 'gpt-5.4-mini',
+          httpTimeoutMs: 30_000,
+        });
+      }
+    } catch {
+      // Non-fatal: insight LLM creation failure → skip LLM analysis
+    }
+    await printBenchmarkInsights(insightSlice, insightLlm);
+  }
+
+  console.error('');
 
   // Baseline comparison gate
   if (args.baseline !== undefined) {

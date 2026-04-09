@@ -17,6 +17,7 @@ import {
   KRW_PER_MAN_WON,
   KRW_PER_USD_APPROXIMATE,
 } from '../../shared/constants.js';
+import { WINE_TYPE_ALL_TOKENS } from '../model/wine-type-patterns.js';
 
 // ---------------------------------------------------------------------------
 // KRW ↔ USD conversion
@@ -179,7 +180,7 @@ const KOREAN_COUNTRY_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/칠레|chile|chilean/iu, 'Chile'],
   // (?![\p{L}\p{N}]) = lookahead character class: not followed by letter OR digit. (rule 24)
   // (?!\p{L})(?!\p{N}) was wrong: AND-sequence, never blocks anything useful.
-  [/미국|미(?![\p{L}\p{N}])|usa|united\s+states|american/iu, 'USA'],
+  [/미국|미(?![\p{L}\p{N}])|usa|united\s+states|american/iu, 'United States'],
   [/아르헨티나|argentina|argentinian/iu, 'Argentina'],
   [/독일|germany|german/iu, 'Germany'],
   [/포르투갈|portugal|portuguese/iu, 'Portugal'],
@@ -509,8 +510,12 @@ export function extractSearchConstraints(query: string): SearchConstraints {
       continue;
     }
 
-    // Style exclusion: recognize common descriptors
-    if (/^(?:oaked?|sweet|sweeter|dessert|fortified|sparkling|탄닌|오크)$/iu.test(token)) {
+    // Style exclusion: wine type terms (from canonical WINE_TYPE_ALL_TOKENS SSOT)
+    // plus style/flavor descriptors that are not wine types themselves.
+    if (
+      WINE_TYPE_ALL_TOKENS.has(token.toLowerCase()) ||
+      /^(?:oaked?|sweet|sweeter|탄닌|오크)$/iu.test(token)
+    ) {
       if (!excludeStyles.includes(token.toLowerCase())) {
         excludeStyles.push(token.toLowerCase());
       }

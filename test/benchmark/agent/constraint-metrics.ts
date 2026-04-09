@@ -15,6 +15,20 @@ import type { ExpectedConstraint, ExpectedEntity } from './scenario.js';
 import { resolveEntity } from '../../../src/domain/attribute/service/entity-resolver.js';
 
 // ─────────────────────────────────────────────────────────────────────────
+// Shared tier weights (Rule 25: single source-of-truth for SCR + CSR)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Tier weights for bucket-weighted overall computation.
+ * Hard constraints dominate because they are mandatory retrieval filters;
+ * soft and inferred carry equal secondary weight.
+ * Used by both SCR (P1) and CSR (P4) to keep tier aggregation consistent.
+ */
+export const TIER_WEIGHT_HARD = 0.6;
+export const TIER_WEIGHT_SOFT = 0.2;
+export const TIER_WEIGHT_INFERRED = 0.2;
+
+// ─────────────────────────────────────────────────────────────────────────
 // Constraint matching primitive
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -22,9 +36,21 @@ import { resolveEntity } from '../../../src/domain/attribute/service/entity-reso
  * Normalized equality check: matches industry practice (case-insensitive +
  * NFKC fold + whitespace trim). Used by both SCR and Slot F1.
  */
+const STRING_CANONICAL_EQUIVALENTS: ReadonlyMap<string, string> = new Map<string, string>([
+  ['usa', 'united states'],
+  ['u.s.a', 'united states'],
+  ['u.s.', 'united states'],
+  ['us', 'united states'],
+]);
+
+function normalizeComparableString(value: string): string {
+  const normalized = value.trim().normalize('NFKC').toLowerCase();
+  return STRING_CANONICAL_EQUIVALENTS.get(normalized) ?? normalized;
+}
+
 function stringMatches(a: unknown, b: unknown): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
-  return a.trim().normalize('NFKC').toLowerCase() === b.trim().normalize('NFKC').toLowerCase();
+  return normalizeComparableString(a) === normalizeComparableString(b);
 }
 
 /**
@@ -113,9 +139,9 @@ export function constraintMatches(
 
   // Array vs array (subset inclusion)
   if (Array.isArray(a) && Array.isArray(e)) {
-    const aSet = new Set(a.map((v) => (typeof v === 'string' ? v.normalize('NFKC').toLowerCase() : v)));
+    const aSet = new Set(a.map((v) => (typeof v === 'string' ? normalizeComparableString(v) : v)));
     for (const ev of e) {
-      const normalized = typeof ev === 'string' ? ev.normalize('NFKC').toLowerCase() : ev;
+      const normalized = typeof ev === 'string' ? normalizeComparableString(ev) : ev;
       if (!aSet.has(normalized)) return false;
     }
     return true;
@@ -187,12 +213,11 @@ export function scoreSemanticConstraintRecall(
   const scrInferred = bucketScore(extracted.inferred, expected.inferred);
 
   // Weighted overall — hard is most important for retrieval correctness
-  const weights = { hard: 0.6, soft: 0.2, inferred: 0.2 };
   let weightedSum = 0;
   let totalWeight = 0;
-  if (scrHard !== null) { weightedSum += scrHard * weights.hard; totalWeight += weights.hard; }
-  if (scrSoft !== null) { weightedSum += scrSoft * weights.soft; totalWeight += weights.soft; }
-  if (scrInferred !== null) { weightedSum += scrInferred * weights.inferred; totalWeight += weights.inferred; }
+  if (scrHard !== null) { weightedSum += scrHard * TIER_WEIGHT_HARD; totalWeight += TIER_WEIGHT_HARD; }
+  if (scrSoft !== null) { weightedSum += scrSoft * TIER_WEIGHT_SOFT; totalWeight += TIER_WEIGHT_SOFT; }
+  if (scrInferred !== null) { weightedSum += scrInferred * TIER_WEIGHT_INFERRED; totalWeight += TIER_WEIGHT_INFERRED; }
 
   const scrOverall = totalWeight > 0 ? weightedSum / totalWeight : null;
 
@@ -231,6 +256,7 @@ export interface EntityLinkingScore {
  */
 export function scoreEntityLinkingAccuracy(
   expected: readonly ExpectedEntity[] | undefined,
+  extracted?: readonly Pick<ResolvedEntity, 'matchedSurface' | 'canonicalValue' | 'entityType'>[],
 ): EntityLinkingScore {
   if (expected === undefined || expected.length === 0) {
     return {
@@ -247,7 +273,9 @@ export function scoreEntityLinkingAccuracy(
   const errors: { expected: ExpectedEntity; actualCanonical: string | null }[] = [];
 
   for (const exp of expected) {
-    const resolved = resolveEntity(exp.surface.toLowerCase().normalize('NFKC'));
+    const resolved = extracted?.find((entity) =>
+      stringMatches(entity.matchedSurface, exp.surface))
+      ?? resolveEntity(exp.surface.toLowerCase().normalize('NFKC'));
     if (resolved === null) {
       errors.push({ expected: exp, actualCanonical: null });
       continue;
@@ -355,10 +383,7 @@ export interface ConstraintSatisfactionScore {
   readonly csrOverall: number | null;
 }
 
-/** SCR-aligned tier weights for CSR overall computation. */
-const CSR_WEIGHT_HARD = 0.6;
-const CSR_WEIGHT_SOFT = 0.2;
-const CSR_WEIGHT_INFERRED = 0.2;
+// CSR uses the same tier weights as SCR (TIER_WEIGHT_HARD/SOFT/INFERRED above).
 
 /**
  * Check whether a single constraint is evidenced by any observation text.
@@ -442,9 +467,9 @@ export function scoreConstraintSatisfactionRate(
   // Weighted overall — mirrors SCR weighting scheme
   let weightedSum = 0;
   let totalWeight = 0;
-  if (csrHard !== null) { weightedSum += csrHard * CSR_WEIGHT_HARD; totalWeight += CSR_WEIGHT_HARD; }
-  if (csrSoft !== null) { weightedSum += csrSoft * CSR_WEIGHT_SOFT; totalWeight += CSR_WEIGHT_SOFT; }
-  if (csrInferred !== null) { weightedSum += csrInferred * CSR_WEIGHT_INFERRED; totalWeight += CSR_WEIGHT_INFERRED; }
+  if (csrHard !== null) { weightedSum += csrHard * TIER_WEIGHT_HARD; totalWeight += TIER_WEIGHT_HARD; }
+  if (csrSoft !== null) { weightedSum += csrSoft * TIER_WEIGHT_SOFT; totalWeight += TIER_WEIGHT_SOFT; }
+  if (csrInferred !== null) { weightedSum += csrInferred * TIER_WEIGHT_INFERRED; totalWeight += TIER_WEIGHT_INFERRED; }
 
   const csrOverall = totalWeight > 0 ? weightedSum / totalWeight : null;
 

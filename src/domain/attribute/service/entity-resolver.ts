@@ -25,6 +25,7 @@ import {
   REGION_PARENTS,
   WINE_TYPE_ALIASES,
 } from '../../evaluation/service/wine-ontology.js';
+import { listDefaultEntityAliasMappings } from './nl-mapper.js';
 import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
 
 export type EntityType =
@@ -33,6 +34,18 @@ export type EntityType =
   | 'region'
   | 'appellation'
   | 'grape_primary';
+
+// ── Confidence tiers for auto-derived entries (Rule 15: named constants) ──
+// Higher = less ambiguous source. Curated aliases (entity-alias-registry.ts)
+// use their own per-entry confidence; these are for the auto-populated index.
+/** Wine type aliases are categorical & unambiguous (red, white, sparkling). */
+const CONFIDENCE_WINE_TYPE = 0.95;
+/** Countries derived from REGION_PARENTS chain terminus — high confidence. */
+const CONFIDENCE_COUNTRY_DERIVED = 0.92;
+/** Region keys from REGION_PARENTS — slightly lower (sub-region ambiguity). */
+const CONFIDENCE_REGION = 0.9;
+/** Grape aliases — lowest auto tier (short names can be ambiguous). */
+const CONFIDENCE_GRAPE = 0.88;
 
 export interface ResolvedEntity {
   /** Resolved canonical display label (e.g. 'Bordeaux', 'Cabernet Sauvignon'). */
@@ -44,10 +57,17 @@ export interface ResolvedEntity {
   /** Confidence derived from source table type. */
   readonly confidence: number;
   /** Provenance tag — which source table provided this resolution. */
-  readonly provenance: 'grape_aliases' | 'wine_type_aliases' | 'region_parents' | 'country_derived';
+  readonly provenance:
+    | 'grape_aliases'
+    | 'wine_type_aliases'
+    | 'region_parents'
+    | 'country_derived'
+    | 'nl_mapper_defaults';
 }
 
 const RESOLVER_VERSION = 'entity-resolver-v1.0';
+
+type ResolverEntry = Omit<ResolvedEntity, 'matchedSurface'>;
 
 export interface ResolveEntityOptions {
   /**
@@ -66,14 +86,16 @@ export interface ResolveEntityOptions {
  * (more specific entity types take precedence to avoid "Pinot" being
  * classified as grape when a user wrote "pinot noir from burgundy").
  */
-const RESOLVER_INDEX: ReadonlyMap<string, readonly Omit<ResolvedEntity, 'matchedSurface'>[]> = (() => {
-  const map = new Map<string, Omit<ResolvedEntity, 'matchedSurface'>[]>();
+const RESOLVER_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
+  const map = new Map<string, ResolverEntry[]>();
   const register = (
     surface: string,
-    resolved: Omit<ResolvedEntity, 'matchedSurface'>,
+    resolved: ResolverEntry,
   ): void => {
-    const existing = map.get(surface) ?? [];
-    map.set(surface, [...existing, resolved]);
+    const key = normalizeResolverKey(surface);
+    if (key.length === 0) return;
+    const existing = map.get(key) ?? [];
+    map.set(key, [...existing, resolved]);
   };
 
   // ── Wine types (highest priority: categorical, unambiguous) ──
@@ -81,7 +103,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly Omit<ResolvedEntity, 'matched
     register(surface, {
       canonicalValue: canonical,
       entityType: 'wine_type',
-      confidence: 0.95,
+      confidence: CONFIDENCE_WINE_TYPE,
       provenance: 'wine_type_aliases',
     });
   }
@@ -100,7 +122,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly Omit<ResolvedEntity, 'matched
     register(lower, {
       canonicalValue: titleCase(country),
       entityType: 'country',
-      confidence: 0.92,
+      confidence: CONFIDENCE_COUNTRY_DERIVED,
       provenance: 'country_derived',
     });
   }
@@ -115,7 +137,7 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly Omit<ResolvedEntity, 'matched
     register(lower, {
       canonicalValue: titleCase(regionKey),
       entityType: 'region',
-      confidence: 0.9,
+      confidence: CONFIDENCE_REGION,
       provenance: 'region_parents',
     });
   }
@@ -127,13 +149,13 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly Omit<ResolvedEntity, 'matched
     register(surface, {
       canonicalValue: titleCase(canonical),
       entityType: 'grape_primary',
-      confidence: 0.88,
+      confidence: CONFIDENCE_GRAPE,
       provenance: 'grape_aliases',
     });
   }
 
   for (const alias of CURATED_ENTITY_ALIASES) {
-    register(alias.surface.toLowerCase(), {
+    register(alias.surface, {
       canonicalValue: alias.canonicalValue,
       entityType: alias.entityType,
       confidence: alias.confidence,
@@ -141,7 +163,34 @@ const RESOLVER_INDEX: ReadonlyMap<string, readonly Omit<ResolvedEntity, 'matched
     });
   }
 
+  // Keep resolver aliases structurally in sync with NL mapper defaults.
+  // This prevents one-sided alias additions (DEFAULT_MAPPINGS updated, resolver stale).
+  for (const mapping of listDefaultEntityAliasMappings()) {
+    register(mapping.phrase, {
+      canonicalValue: mapping.canonicalValue,
+      entityType: toEntityType(mapping.mappedAttribute),
+      confidence: mapping.mappingConfidence,
+      provenance: 'nl_mapper_defaults',
+    });
+  }
+
   return map;
+})();
+
+const RESOLVER_COMPACT_INDEX: ReadonlyMap<string, readonly ResolverEntry[]> = (() => {
+  const compactMap = new Map<string, ResolverEntry[]>();
+  const registerCompact = (surface: string, resolved: ResolverEntry): void => {
+    const compact = compactResolverKey(surface);
+    if (compact.length === 0 || compact === surface) return;
+    const existing = compactMap.get(compact) ?? [];
+    compactMap.set(compact, [...existing, resolved]);
+  };
+  for (const [surface, entries] of RESOLVER_INDEX.entries()) {
+    for (const entry of entries) {
+      registerCompact(surface, entry);
+    }
+  }
+  return compactMap;
 })();
 
 /**
@@ -158,12 +207,15 @@ export function resolveEntity(
   spanText: string,
   options?: ResolveEntityOptions,
 ): ResolvedEntity | null {
-  const key = spanText.trim().toLowerCase();
+  const key = normalizeResolverKey(spanText);
   if (key.length === 0) return null;
-  const hits = RESOLVER_INDEX.get(key);
+  const hits = RESOLVER_INDEX.get(key) ?? RESOLVER_COMPACT_INDEX.get(compactResolverKey(key));
   if (hits === undefined || hits.length === 0) return null;
-  const selected = [...hits].sort((left, right) =>
-    entityPriority(right.entityType, options) - entityPriority(left.entityType, options))[0];
+  const selected = [...hits].sort((left, right) => {
+    const byType = entityPriority(right.entityType, options) - entityPriority(left.entityType, options);
+    if (byType !== 0) return byType;
+    return right.confidence - left.confidence;
+  })[0];
   if (selected === undefined) return null;
   return { ...selected, matchedSurface: spanText };
 }
@@ -187,6 +239,18 @@ function titleCase(s: string): string {
     .split(/\s+/)
     .map((w) => (w.length === 0 ? w : w[0]!.toUpperCase() + w.slice(1)))
     .join(' ');
+}
+
+function normalizeResolverKey(surface: string): string {
+  return surface
+    .normalize('NFKC')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function compactResolverKey(surface: string): string {
+  return normalizeResolverKey(surface).replace(/\s+/g, '');
 }
 
 const PRIORITY_5 = 5;
@@ -225,5 +289,23 @@ function entityPriority(
       return PRIORITY_2;
     case 'grape_primary':
       return PRIORITY_1;
+  }
+}
+
+function toEntityType(attribute: string): EntityType {
+  switch (attribute) {
+    case 'wine_type':
+      return 'wine_type';
+    case 'country':
+      return 'country';
+    case 'region':
+      return 'region';
+    case 'appellation':
+      return 'appellation';
+    case 'grape_primary':
+      return 'grape_primary';
+    default: {
+      throw new Error(`unsupported resolver attribute: ${attribute}`);
+    }
   }
 }

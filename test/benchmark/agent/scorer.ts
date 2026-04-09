@@ -165,6 +165,10 @@ export interface ScenarioScores {
   readonly csrOverall: number | null;
   /** CSR hard tier (P4). null when no hard constraints or no observations. */
   readonly csrHard: number | null;
+  /** CSR soft tier (P4). null when no soft constraints or no observations. */
+  readonly csrSoft: number | null;
+  /** CSR inferred tier (P4). null when no inferred constraints or no observations. */
+  readonly csrInferred: number | null;
 }
 
 export interface ScenarioResult {
@@ -236,6 +240,8 @@ const ZERO_SCORES: ScenarioScores = {
   slotF1Relaxed: null,
   csrOverall: null,
   csrHard: null,
+  csrSoft: null,
+  csrInferred: null,
 };
 
 /**
@@ -539,6 +545,10 @@ export interface ConstraintExtractionMetricsInput {
   readonly csrOverall: number | null;
   /** P4: CSR hard tier [0,1]. null when no hard constraints or no observations. */
   readonly csrHard: number | null;
+  /** P4: CSR soft tier [0,1]. null when no soft constraints or no observations. */
+  readonly csrSoft: number | null;
+  /** P4: CSR inferred tier [0,1]. null when no inferred constraints or no observations. */
+  readonly csrInferred: number | null;
 }
 
 export function scoreScenario(
@@ -794,6 +804,8 @@ export function scoreScenario(
       slotF1Relaxed: constraintMetrics?.slotF1Relaxed ?? null,
       csrOverall: constraintMetrics?.csrOverall ?? null,
       csrHard: constraintMetrics?.csrHard ?? null,
+      csrSoft: constraintMetrics?.csrSoft ?? null,
+      csrInferred: constraintMetrics?.csrInferred ?? null,
     },
     ...(diagnostics.length > 0 ? { diagnostics, diagnosticStrings } : {}),
     judgeRequiredButSkipped,
@@ -1648,6 +1660,23 @@ function scoreContextRelevance(
     if (queryNfkc.includes(korean)) {
       checks.push({ passed: obsNfkc.includes(english), label: `region_${english}` });
       break;
+    }
+  }
+
+  // RFC-020: expectedConstraints-based checks — if the scenario specifies
+  // ground-truth hard constraints for wine_type/country/region, verify the
+  // observation contains those values. These are SOFT checks (averaged, not
+  // hard-failing) because the value may appear implicitly in wine descriptions.
+  if (exp.expectedConstraints?.hard) {
+    for (const constraint of exp.expectedConstraints.hard) {
+      if (typeof constraint.value !== 'string') continue;
+      const valueLower = constraint.value.normalize('NFKC').toLowerCase();
+      if (constraint.attribute === 'wine_type' || constraint.attribute === 'country' || constraint.attribute === 'region' || constraint.attribute === 'appellation') {
+        checks.push({
+          passed: obsNfkc.includes(valueLower),
+          label: `${constraint.attribute}_constraint_${constraint.value}`,
+        });
+      }
     }
   }
 

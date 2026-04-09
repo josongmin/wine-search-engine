@@ -138,6 +138,33 @@ export class RedisCache {
     await this.client.set(key, serialized, { EX: ttl });
   }
 
+  /**
+   * Write with pre-flight schema validation.
+   * Prevents cache-poison loops where an oversized value is written unvalidated,
+   * then rejected on read by `getValidatedWithStats`, deleted, and re-fetched
+   * in an infinite cycle.
+   *
+   * Returns `true` if the write succeeded, `false` if validation rejected the value.
+   */
+  async setValidated<T>(
+    key: string,
+    value: unknown,
+    schema: ZodType<T>,
+    logComponent: string,
+    ttlSeconds?: number,
+  ): Promise<boolean> {
+    const result = schema.safeParse(value);
+    if (!result.success) {
+      log.warn(
+        { component: logComponent, key, issues: result.error.issues.slice(0, 3) },
+        'cache write rejected (schema validation failed)',
+      );
+      return false;
+    }
+    await this.set(key, value, ttlSeconds);
+    return true;
+  }
+
   async del(key: string): Promise<void> {
     await this.client.del(key);
   }

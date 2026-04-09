@@ -124,4 +124,12 @@ describe('LlmConstraintItemSchema — confidence bounds', () => {
   it('rejects NaN', () => {
     expect(LlmConstraintItemSchema.safeParse({ ...VALID_BASE, confidence: Number.NaN }).success).toBe(false);
   });
+
+  it('rejects Infinity', () => {
+    expect(LlmConstraintItemSchema.safeParse({ ...VALID_BASE, confidence: Number.POSITIVE_INFINITY }).success).toBe(false);
+  });
+
+  it('rejects -Infinity', () => {
+    expect(LlmConstraintItemSchema.safeParse({ ...VALID_BASE, confidence: Number.NEGATIVE_INFINITY }).success).toBe(false);
+  });
 });
