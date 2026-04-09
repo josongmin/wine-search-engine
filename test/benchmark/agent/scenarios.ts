@@ -26,7 +26,21 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { tools: [{ tool: 'search_wines' }], maxSteps: 2,
       maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(red|레드|풀바디|full[\\s-]?body)'],
-      rubric: 'Answer must recommend a full-bodied red wine, not white/sparkling/light. May include 2-3 examples.' } },
+      rubric: 'Answer must recommend a full-bodied red wine, not white/sparkling/light. May include 2-3 examples.',
+      // RFC-020 P1: SCR ground truth
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+        ],
+        soft: [
+          { attribute: 'body', operator: '>=', value: 0.7 },
+        ],
+      },
+      // RFC-020 P2: ELA ground truth
+      expectedEntities: [
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
+    } },
   { id: 3, tier: 'single_shot', query: '스테이크에 어울리는 와인', description: 'Food pairing',
     expectation: { tools: [{ tool: 'get_food_pairings' }], maxSteps: 2,
       maxDurationMs: 40_000, maxTotalTokens: 6_000,
@@ -37,7 +51,31 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       maxDurationMs: 40_000, maxTotalTokens: 8_000,
       answerMustMatch: ['(보르도|bordeaux)', '(나파|napa)'],
       judgeRequired: true,
-      rubric: 'Answer must compare Bordeaux and Napa Cabernet — not just describe one. Mention at least one stylistic difference.' } },
+      rubric: 'Answer must compare Bordeaux and Napa Cabernet — not just describe one. Mention at least one stylistic difference.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Bordeaux' },
+          { attribute: 'region', operator: '=', value: 'Napa Valley' },
+          { attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' },
+        ],
+        // Ontology expansion places country in SOFT (not inferred) — country
+        // derivation from region hierarchy is trustworthy enough for soft tier.
+        soft: [
+          { attribute: 'country', operator: '=', value: 'France' },
+          { attribute: 'country', operator: '=', value: 'USA' },
+        ],
+        // Compositional inference: bordeaux+red variant fires even without
+        // explicit wine_type because compare query implies both sides.
+        inferred: [
+          { attribute: 'grape_family', operator: 'in', value: ['Cabernet', 'Merlot'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '보르도', canonical: 'Bordeaux', type: 'region' },
+        { surface: '나파', canonical: 'Napa Valley', type: 'region' },
+        { surface: '카베르네', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+      ],
+    } },
   { id: 5, tier: 'single_shot', query: '오푸스원 지금 마시기 좋아?', description: 'Drinking window',
     expectation: {
       tools: [{ tool: 'check_drinking_window' }],
@@ -55,7 +93,13 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       priceBandKrw: { max: 100_000 },
       answerMustMatch: ['(스테이크|steak|beef)'],
       answerMustNotMatch: ['(\\d{2,3}만원\\s*(이상|초과)|\\$\\d{3,})'],
-      rubric: 'All recommended wines must be ≤100,000 KRW and pair with steak. Reject if any wine is clearly over budget.' } },
+      rubric: 'All recommended wines must be ≤100,000 KRW and pair with steak. Reject if any wine is clearly over budget.',
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 100000 },
+        ],
+      },
+    } },
   { id: 7, tier: 'multi_step', query: 'Opus One이랑 비슷한데 더 싼 거', description: 'Similar + cheaper',
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 8_000,
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)', '(저렴|싸|싼|cheap|less\\s+expensive|under|이하|이하로|비교적)'],
@@ -66,12 +110,47 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines' }, { tool: 'check_drinking_window' }],
       drinkingWindowStatus: 'now',
       answerMustMatch: ['(이탈리아|italy|italian)', '(레드|red)'],
-      rubric: 'Must recommend Italian red wines that are currently drinkable. Should call check_drinking_window after search. Should mention critic scores or quality indicators.' } },
+      rubric: 'Must recommend Italian red wines that are currently drinkable. Should call check_drinking_window after search. Should mention critic scores or quality indicators.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'country', operator: '=', value: 'Italy' },
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+        ],
+        soft: [
+          { attribute: 'critic_score', operator: '>=', value: 0.7 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '이탈리아', canonical: 'Italy', type: 'country' },
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
+    } },
   { id: 9, tier: 'multi_step', query: '바롤로랑 바르바레스코 비교해주고 더 좋은 거 추천', description: 'Compare + recommend winner',
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(바롤로|barolo)', '(바르바레스코|barbaresco)'],
       judgeRequired: true,
-      rubric: 'Must compare Barolo and Barbaresco, then recommend one as the winner with reasoning.' } },
+      rubric: 'Must compare Barolo and Barbaresco, then recommend one as the winner with reasoning.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'appellation', operator: '=', value: 'Barolo' },
+          { attribute: 'appellation', operator: '=', value: 'Barbaresco' },
+        ],
+        // Ontology expansion: appellation → country (soft tier).
+        soft: [
+          { attribute: 'country', operator: '=', value: 'Italy' },
+        ],
+        // Compositional inference: barolo/barbaresco → Nebbiolo + structure.
+        inferred: [
+          { attribute: 'grape_primary', operator: '=', value: 'Nebbiolo' },
+          { attribute: 'tannin', operator: '>=', value: 0.65 },
+          { attribute: 'acidity', operator: '>=', value: 0.6 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '바롤로', canonical: 'Barolo', type: 'appellation' },
+        { surface: '바르바레스코', canonical: 'Barbaresco', type: 'appellation' },
+      ],
+    } },
   { id: 10, tier: 'multi_step', query: '선물용 와인, 예산 5만원, 화이트 말고', description: 'Gift + budget + exclusion',
     expectation: { maxSteps: 3, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
@@ -81,7 +160,19 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // Use positive assertion instead: the recommended wines must be non-white (red/rosé/sparkling).
       answerMustMatch: ['(레드|red|로제|ros[eé]|스파클링|sparkling)'],
       judgeRequired: true,
-      rubric: 'Must recommend a gift wine ≤50,000 KRW that is NOT white. Should mention gift-appropriateness. Echoing "화이트 말고" in explanation is OK; the recommended wines themselves must be non-white.' } },
+      rubric: 'Must recommend a gift wine ≤50,000 KRW that is NOT white. Should mention gift-appropriateness. Echoing "화이트 말고" in explanation is OK; the recommended wines themselves must be non-white.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: 'exclude', value: ['white'] },
+        ],
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 50000 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+      ],
+    } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 3: Complex Reasoning (도구 3-5회)
@@ -92,7 +183,13 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines' }],
       vintageRange: { min: 2015, max: 2015 },
       drinkingWindowStatus: 'now',
-      rubric: 'Must recommend 2015 vintage wines at peak drinking window. Should acknowledge the anniversary occasion.' } },
+      rubric: 'Must recommend 2015 vintage wines at peak drinking window. Should acknowledge the anniversary occasion.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'vintage_year', operator: '=', value: 2015 },
+        ],
+      },
+    } },
   { id: 13, tier: 'complex_reasoning', query: '이번 주말 바비큐 파티, 10명분, 레드/화이트 섞어서 30만원 예산', description: 'Multi-course + budget split',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       priceBandKrw: { max: 300_000 },
@@ -161,7 +258,23 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       tools: [{ tool: 'search_wines' }],
       priceBandKrw: { max: 30_000 },
       answerMustMatch: ['(레드|red)'],
-      rubric: 'Must recommend red wines with low tannin, fruity profile, ≤30,000 KRW. All 4 constraints should be addressed.' } },
+      rubric: 'Must recommend red wines with low tannin, fruity profile, ≤30,000 KRW. All 4 constraints should be addressed.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+        ],
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 30000 },
+          { attribute: 'tannin', operator: '<=', value: 0.4 },
+        ],
+        inferred: [
+          { attribute: 'fruit_intensity', operator: '>=', value: 0.6 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
+    } },
   { id: 26, tier: 'nested_condition', query: '이탈리아산인데 프랑스 스타일인 거 있어?', description: 'Country + style semantic',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -171,7 +284,16 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       vintageRange: { min: 2018, max: 2020 },
-      rubric: 'All recommended wines must be 2018-2020 vintage with full body and oak character.' } },
+      rubric: 'All recommended wines must be 2018-2020 vintage with full body and oak character.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'vintage_year', operator: 'range', value: { min: 2018, max: 2020 } },
+        ],
+        soft: [
+          { attribute: 'body', operator: '>=', value: 0.7 },
+        ],
+      },
+    } },
   { id: 28, tier: 'nested_condition', query: '비건 인증이고 유기농이면서 15달러 이하', description: 'Certification + price',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -180,7 +302,19 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 3, maxDurationMs: 90_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(화이트|white)'],
-      rubric: 'Must recommend white wines with high acidity and mineral character that pair with oysters.' } },
+      rubric: 'Must recommend white wines with high acidity and mineral character that pair with oysters.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'white' },
+        ],
+        soft: [
+          { attribute: 'acidity', operator: '>=', value: 0.7 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+      ],
+    } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 7: Comparison + Condition Nested
@@ -194,7 +328,21 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 3, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       priceBandKrw: { max: 100_000 },
       answerMustMatch: ['(나파|napa)', '(보르도|bordeaux)'],
-      rubric: 'Must compare Napa and Bordeaux Cabernet with a ≤100,000 KRW constraint. Both sides addressed.' } },
+      rubric: 'Must compare Napa and Bordeaux Cabernet with a ≤100,000 KRW constraint. Both sides addressed.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' },
+        ],
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 100000 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '나파', canonical: 'Napa Valley', type: 'region' },
+        { surface: '보르도', canonical: 'Bordeaux', type: 'region' },
+        { surface: '카베르네', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+      ],
+    } },
   { id: 32, tier: 'comparison_nested', query: '피노 누아르 vs 가메이, 어떤 게 치킨에 더 맞아?', description: 'Compare + pairing evaluation',
     expectation: { tools: [{ tool: 'compare_wines' }], maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(피노\\s*누아르|pinot\\s*noir)', '(가메이|gamay)', '(치킨|chicken)'],
@@ -295,7 +443,21 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // Judge rubric handles the constraint precisely (recommended wine != Cabernet).
       answerMustMatch: ['(레드|red|풀바디|full[\\s-]?body)'],
       judgeRequired: true,
-      rubric: 'Agent must recommend a full-bodied red whose primary grape is NOT Cabernet Sauvignon. Referencing Cabernet for context (e.g., "instead of Cabernet, try Syrah") is OK; the RECOMMENDED wine itself must not be Cabernet.' } },
+      rubric: 'Agent must recommend a full-bodied red whose primary grape is NOT Cabernet Sauvignon. Referencing Cabernet for context (e.g., "instead of Cabernet, try Syrah") is OK; the RECOMMENDED wine itself must not be Cabernet.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+          { attribute: 'exclude_grapes', operator: 'exclude', value: ['Cabernet Sauvignon'] },
+        ],
+        soft: [
+          { attribute: 'body', operator: '>=', value: 0.7 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '카베르네 소비뇽', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
+    } },
   { id: 46, tier: 'negation', query: '프랑스 말고 유럽 와인으로', description: 'Exclude country',
     expectation: { maxSteps: 2, maxDurationMs: 50_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -303,12 +465,30 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       // France for context ("unlike French wines, ..."). Judge rubric handles
       // the constraint more precisely.
       judgeRequired: true,
-      rubric: 'Must recommend European wines that are NOT French. The recommended wines must come from non-French European countries (Italy, Spain, Germany, Portugal, etc.). Mentioning France for context/comparison is OK but the recommended wines must not be French.' } },
+      rubric: 'Must recommend European wines that are NOT French. The recommended wines must come from non-French European countries (Italy, Spain, Germany, Portugal, etc.). Mentioning France for context/comparison is OK but the recommended wines must not be French.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'exclude_regions', operator: 'exclude', value: ['France'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '프랑스', canonical: 'France', type: 'country' },
+      ],
+    } },
   { id: 47, tier: 'negation', query: '오크 안 쓴 샤도네이', description: 'Unoaked constraint',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       answerMustMatch: ['(샤도네이|chardonnay)'],
-      rubric: 'Must recommend unoaked Chardonnay specifically. Should mention the unoaked/stainless steel style.' } },
+      rubric: 'Must recommend unoaked Chardonnay specifically. Should mention the unoaked/stainless steel style.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'grape_primary', operator: '=', value: 'Chardonnay' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '샤도네이', canonical: 'Chardonnay', type: 'grape_primary' },
+      ],
+    } },
   { id: 48, tier: 'negation', query: '달지 않은 스파클링, 근데 브뤼는 너무 드라이해서 좀 중간으로', description: 'Sweetness range',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -347,12 +527,35 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 5, maxDurationMs: 90_000, maxTotalTokens: 12_000,
       drinkingWindowStatus: 'now',
       answerMustMatch: ['(2015)', '(2016)', '(2018)', '(보르도|bordeaux)'],
-      rubric: 'Must compare three Bordeaux vintages, filter by current drinkability, and sort by price.' } },
+      rubric: 'Must compare three Bordeaux vintages, filter by current drinkability, and sort by price.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Bordeaux' },
+          { attribute: 'vintage_year', operator: 'in', value: [2015, 2016, 2018] },
+        ],
+        inferred: [
+          { attribute: 'country', operator: '=', value: 'France' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '보르도', canonical: 'Bordeaux', type: 'region' },
+      ],
+    } },
   { id: 57, tier: 'extreme', query: '결혼기념일 디너에 코스요리 나오는데, 에피타이저용 화이트, 메인(소고기)용 레드, 디저트용 스위트 각각 추천해줘. 총 15만원 이내', description: '3-course pairing + budget split',
     expectation: { maxSteps: 5, maxDurationMs: 90_000, maxTotalTokens: 12_000,
       priceBandKrw: { max: 150_000 },
       answerMustMatch: ['(화이트|white)', '(레드|red)', '(스위트|sweet|dessert)'],
-      rubric: 'Must recommend 3 wines (white appetizer, red main, sweet dessert) totaling ≤150,000 KRW for an anniversary dinner.' } },
+      rubric: 'Must recommend 3 wines (white appetizer, red main, sweet dessert) totaling ≤150,000 KRW for an anniversary dinner.',
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 150000 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
+    } },
   { id: 58, tier: 'extreme', query: '피노 누아르 좋아하는 친구한테 생일 선물, 근데 이미 DRC는 마셔봤대, 비슷한 급인데 잘 모르는 거로', description: 'Premium + exclude + hidden gem',
     expectation: { maxSteps: 4, maxDurationMs: 60_000, maxTotalTokens: 8_000,
       tools: [{ tool: 'search_wines' }],
@@ -405,7 +608,18 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       answerMustMatch: ['(화이트|white)'],
       // answerExcludes '레드' removed: "레드 말고" echo in answer is legitimate context.
       judgeRequired: true,
-      rubric: 'Must interpret ㄱ as "go/let us" and recommend white wines. The recommended wines must NOT be red. Echoing "레드 말고" from the user query is OK.' } },
+      rubric: 'Must interpret ㄱ as "go/let us" and recommend white wines. The recommended wines must NOT be red. Echoing "레드 말고" from the user query is OK.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'white' },
+          { attribute: 'wine_type', operator: 'exclude', value: ['red'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
+    } },
   { id: 67, tier: 'korean_colloquial', query: '샤또 마고 ㄹㅇ 맛있어?', description: 'ㄹㅇ = 리얼 (really)',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -427,7 +641,13 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       priceBandKrw: { min: 100_000, max: 199_999 },
-      rubric: 'All recommendations must be in the 100,000-199,999 KRW range (10만원대 means "100,000-something thousand").' } },
+      rubric: 'All recommendations must be in the 100,000-199,999 KRW range (10만원대 means "100,000-something thousand").',
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: 'range', value: { min: 100000, max: 199999 } },
+        ],
+      },
+    } },
   { id: 70, tier: 'price_expression', query: '10만원 언저리로', description: 'Approximate price: around 100k',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
@@ -451,7 +671,13 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 3, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       priceBandKrw: { max: 50_000 },
-      rubric: 'Must recommend 3 DIFFERENT wines, each ≤50,000 KRW. Should emphasize variety (different grapes, regions, or styles).' } },
+      rubric: 'Must recommend 3 DIFFERENT wines, each ≤50,000 KRW. Should emphasize variety (different grapes, regions, or styles).',
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 50000 },
+        ],
+      },
+    } },
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 15: Mood/Atmosphere-Based

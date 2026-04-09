@@ -529,8 +529,9 @@ export class Planner {
       }
     }
 
-    // RFC-019 Stage 2: Entity Resolver fallback for spans the NLMapper missed.
-    // Resolves aliases (grape/region/country/wine_type) via the unified
+    // RFC-019 Tier 2: Entity Resolver — augments Tier 1 (NLMapper) by resolving
+    // spans that symbolic lookup didn't cover. Part of the 6-tier deterministic
+    // cascade pipeline, NOT a fallback. Resolves aliases via the unified
     // canonical registry. Applied only to spans NOT already covered by a
     // NLMapper hit, preventing double-counting.
     //
@@ -601,18 +602,18 @@ export class Planner {
       }
     }
 
-    // RFC-005: When NLMapper returns nothing (e.g. noOpMappingTable in test
-    // or cold-start configs), fall back to rule-based extraction so that
-    // wine_type, country, and sensory constraints are never silently dropped.
+    // Tier 6 sole-extraction: when Tier 1 (NLMapper) + Tier 2 (Entity Resolver)
+    // produce zero constraints, Tier 6 regex extractor becomes the sole contributor.
+    // This is the last tier of the deterministic cascade, not a "fallback".
     if (hard.length === 0 && soft.length === 0) {
-      const fallbackBundle = extractRuleBasedConstraints(normalizedQuery);
+      const tier6Bundle = extractRuleBasedConstraints(normalizedQuery);
       // RFC-019 Stage 3+5: Apply ontology expansion and compositional inference
-      // on the fallback bundle too, so inferred constraints are populated
-      // consistently across paths.
-      const ontologyExpanded = expandWithOntology(fallbackBundle);
+      // on the Tier 6 bundle too, so inferred constraints are populated
+      // consistently across all paths.
+      const ontologyExpanded = expandWithOntology(tier6Bundle);
       const expanded = applyCompositionalInference(ontologyExpanded);
-      const fallbackConstraintCount =
-        fallbackBundle.hard.length + fallbackBundle.soft.length + fallbackBundle.inferred.length;
+      const tier6ConstraintCount =
+        tier6Bundle.hard.length + tier6Bundle.soft.length + tier6Bundle.inferred.length;
       const constraintExtraction = buildPlannerConstraintExtractionTrace({
         baseTrace: mapperTrace,
         spans,
@@ -620,10 +621,10 @@ export class Planner {
         resolvedEntityCount,
         finalBundle: expanded,
         ontologyAddedCount:
-          countBundleConstraints(ontologyExpanded) - countBundleConstraints(fallbackBundle),
+          countBundleConstraints(ontologyExpanded) - countBundleConstraints(tier6Bundle),
         compositionalAddedCount:
           countBundleConstraints(expanded) - countBundleConstraints(ontologyExpanded),
-        fallbackConstraintCount,
+        tier6ConstraintCount,
         unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
         unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
       });
@@ -649,7 +650,7 @@ export class Planner {
       finalBundle,
       ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
       compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
-      fallbackConstraintCount: 0,
+      tier6ConstraintCount: 0,
       unresolvedSpanCount: countUnresolvedSpans(spans, coveredPhrases, resolvedNonOverlap),
       unresolvedSpanSamples: collectUnresolvedSpanSamples(spans, coveredPhrases, resolvedNonOverlap),
     });
@@ -917,7 +918,7 @@ function buildPlannerConstraintExtractionTrace(args: {
   readonly finalBundle: ConstraintBundle;
   readonly ontologyAddedCount: number;
   readonly compositionalAddedCount: number;
-  readonly fallbackConstraintCount: number;
+  readonly tier6ConstraintCount: number;
   readonly unresolvedSpanCount: number;
   readonly unresolvedSpanSamples: readonly string[];
 }): ConstraintExtractionTrace | undefined {
@@ -929,7 +930,7 @@ function buildPlannerConstraintExtractionTrace(args: {
     finalBundle,
     ontologyAddedCount,
     compositionalAddedCount,
-    fallbackConstraintCount,
+    tier6ConstraintCount,
     unresolvedSpanCount,
     unresolvedSpanSamples,
   } = args;
@@ -960,7 +961,7 @@ function buildPlannerConstraintExtractionTrace(args: {
       tier3_ontology_expansion: ontologyAddedCount,
       tier4_compositional_inference: compositionalAddedCount,
       tier5_llm_linker: llmLinkedEntityCount,
-      tier6_regex_fallback: fallbackConstraintCount,
+      tier6_regex_fallback: tier6ConstraintCount,
       unmapped: unresolvedSpanCount,
     },
     categoriesCovered: uniqueCoveredCategories(finalBundle),

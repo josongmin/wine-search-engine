@@ -18,21 +18,26 @@ import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
+import {
+  retryWithBackoff,
+  parseRetryAfterHeader,
+  type RetryConfig,
+} from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const ANTHROPIC_API_VERSION = '2023-06-01';
-const ANTHROPIC_CHAT_MAX_ATTEMPTS = 4;
-const ANTHROPIC_TRANSIENT_BACKOFF_BASE_MS = 250;
-const ANTHROPIC_TRANSIENT_BACKOFF_CAP_MS = 2_000;
-const ANTHROPIC_RATE_LIMIT_BACKOFF_BASE_MS = 2_000;
-const ANTHROPIC_RATE_LIMIT_BACKOFF_CAP_MS = 30_000;
-const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
-const HTTP_STATUS_5XX_MIN = 500;
-const HTTP_STATUS_5XX_MAX_EXCLUSIVE = 600;
 const ERROR_PREVIEW_CHARS = 200;
-const MILLISECONDS_PER_SECOND = 1000;
 const ANTHROPIC_DEFAULT_MAX_TOKENS = 1024;
+
+const ANTHROPIC_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 4,
+  transientBackoffBaseMs: 250,
+  transientBackoffCapMs: 2_000,
+  rateLimitBackoffBaseMs: 2_000,
+  rateLimitBackoffCapMs: 30_000,
+  label: 'Anthropic chat',
+};
 
 export interface AnthropicChatLlmOptions {
   readonly apiKey: string;
@@ -138,126 +143,87 @@ export class AnthropicChatLlm implements ChatLlmPort {
       body['temperature'] = request.temperature;
     }
 
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= ANTHROPIC_CHAT_MAX_ATTEMPTS; attempt++) {
-      if (request.abortSignal?.aborted === true) {
-        throw new Error('Anthropic chat: aborted');
-      }
-
-      let response: Response;
-      try {
-        response = await fetchWithTimeout(
-          this.endpoint,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': this.apiKey,
-              'anthropic-version': ANTHROPIC_API_VERSION,
-            },
-            body: JSON.stringify(body),
-          },
-          this.httpTimeoutMs,
-          request.abortSignal,
-        );
-      } catch (err) {
-        if (isAbortError(err)) {
-          throw new Error(`Anthropic chat: request timed out after ${this.httpTimeoutMs}ms`);
-        }
-        lastError = err;
-        if (attempt < ANTHROPIC_CHAT_MAX_ATTEMPTS) {
-          await this.sleepWithJitter(attempt, ANTHROPIC_TRANSIENT_BACKOFF_BASE_MS, ANTHROPIC_TRANSIENT_BACKOFF_CAP_MS, request.abortSignal);
-          continue;
-        }
-        throw err;
-      }
-
-      if (!response.ok) {
-        const status = response.status;
-        const text = await response.text().catch(() => '');
-        const isRateLimit = status === HTTP_STATUS_TOO_MANY_REQUESTS;
-        const isTransient = isRateLimit || (status >= HTTP_STATUS_5XX_MIN && status < HTTP_STATUS_5XX_MAX_EXCLUSIVE);
-        if (isTransient && attempt < ANTHROPIC_CHAT_MAX_ATTEMPTS) {
-          lastError = new Error(`Anthropic chat HTTP ${status}: ${text.slice(0, ERROR_PREVIEW_CHARS)}`);
-          if (isRateLimit) {
-            const retryAfterHeader = response.headers.get('retry-after');
-            const retryAfterSec = retryAfterHeader !== null ? parseFloat(retryAfterHeader) : NaN;
-            const delayMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
-              ? Math.min(retryAfterSec * MILLISECONDS_PER_SECOND, ANTHROPIC_RATE_LIMIT_BACKOFF_CAP_MS)
-              : Math.min(ANTHROPIC_RATE_LIMIT_BACKOFF_BASE_MS * 2 ** (attempt - 1), ANTHROPIC_RATE_LIMIT_BACKOFF_CAP_MS);
-            await this.sleepFixed(delayMs, request.abortSignal);
-          } else {
-            await this.sleepWithJitter(attempt, ANTHROPIC_TRANSIENT_BACKOFF_BASE_MS, ANTHROPIC_TRANSIENT_BACKOFF_CAP_MS, request.abortSignal);
-          }
-          continue;
-        }
-        throw new Error(`Anthropic chat failed [HTTP ${status}]: ${text.slice(0, ERROR_PREVIEW_CHARS)}`);
-      }
-
-      const data: unknown = await response.json();
-      if (!isAnthropicResponse(data)) {
-        throw new Error(`Anthropic chat: unexpected response — ${JSON.stringify(data).slice(0, ERROR_PREVIEW_CHARS)}`);
-      }
-
-      const textBlock = data.content.find((b) => b.type === 'text');
-      const text = textBlock?.text ?? '';
-
-      // Record GenAI response attributes for the wrapping span (OTEL gen_ai.*)
-      // Anthropic's usage exposes cache_read_input_tokens (cache hit) and
-      // cache_creation_input_tokens (first time prompt was cached, charged at 1.25x).
-      const usage = data.usage;
-      const cacheReadTokens = usage?.cache_read_input_tokens ?? 0;
-      const cacheCreationTokens = usage?.cache_creation_input_tokens ?? 0;
-      // For cost accounting: cache_read = cached input (10% of normal),
-      // cache_creation = uncached input (charged once at 1.25x in Anthropic but
-      // approximated as 1x here for conservatism).
-      const baseInputTokens = (usage?.input_tokens ?? 0) + cacheCreationTokens;
-      recordResponse({
-        responseModel: data.model,
-        ...(data.stop_reason !== null ? { finishReason: data.stop_reason } : {}),
-        ...(usage !== undefined
-          ? {
-              usage: {
-                inputTokens: baseInputTokens,
-                outputTokens: usage.output_tokens ?? 0,
-                ...(cacheReadTokens > 0 ? { cachedInputTokens: cacheReadTokens } : {}),
+    return retryWithBackoff(
+      async () => {
+        let response: Response;
+        try {
+          response = await fetchWithTimeout(
+            this.endpoint,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': this.apiKey,
+                'anthropic-version': ANTHROPIC_API_VERSION,
               },
-            }
-          : {}),
-      });
-
-      return {
-        text,
-        model: data.model,
-        finishReason: data.stop_reason,
-      };
-    }
-
-    throw lastError instanceof Error
-      ? lastError
-      : new Error('Anthropic chat: retry budget exhausted');
-  }
-
-  private sleepWithJitter(attempt: number, baseMs: number, maxMs: number, signal: AbortSignal | undefined): Promise<void> {
-    const expDelay = Math.min(baseMs * 2 ** (attempt - 1), maxMs);
-    const delay = Math.floor(Math.random() * expDelay);
-    return this.sleepFixed(delay, signal);
-  }
-
-  private sleepFixed(ms: number, signal: AbortSignal | undefined): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { resolve(); }, ms);
-      if (signal) {
-        const onAbort = (): void => {
-          clearTimeout(timer);
-          reject(new Error('Anthropic chat: aborted'));
-        };
-        if (signal.aborted) {
-          onAbort();
-        } else {
-          signal.addEventListener('abort', onAbort, { once: true });
+              body: JSON.stringify(body),
+            },
+            this.httpTimeoutMs,
+            request.abortSignal,
+          );
+        } catch (err) {
+          if (isAbortError(err)) {
+            const abortErr = new Error(`Anthropic chat: request timed out after ${this.httpTimeoutMs}ms`);
+            abortErr.name = 'AbortError';
+            throw abortErr;
+          }
+          throw err;
         }
-      }
-    });
+
+        if (!response.ok) {
+          const status = response.status;
+          const text = await response.text().catch(() => '');
+          return {
+            kind: 'http-error' as const,
+            status,
+            bodyText: text,
+            retryAfterSec: parseRetryAfterHeader(response),
+          };
+        }
+
+        const data: unknown = await response.json();
+        if (!isAnthropicResponse(data)) {
+          throw new Error(`Anthropic chat: unexpected response — ${JSON.stringify(data).slice(0, ERROR_PREVIEW_CHARS)}`);
+        }
+
+        const textBlock = data.content.find((b) => b.type === 'text');
+        const text = textBlock?.text ?? '';
+
+        // Record GenAI response attributes for the wrapping span (OTEL gen_ai.*)
+        // Anthropic's usage exposes cache_read_input_tokens (cache hit) and
+        // cache_creation_input_tokens (first time prompt was cached, charged at 1.25x).
+        const usage = data.usage;
+        const cacheReadTokens = usage?.cache_read_input_tokens ?? 0;
+        const cacheCreationTokens = usage?.cache_creation_input_tokens ?? 0;
+        // For cost accounting: cache_read = cached input (10% of normal),
+        // cache_creation = uncached input (charged once at 1.25x in Anthropic but
+        // approximated as 1x here for conservatism).
+        const baseInputTokens = (usage?.input_tokens ?? 0) + cacheCreationTokens;
+        recordResponse({
+          responseModel: data.model,
+          ...(data.stop_reason !== null ? { finishReason: data.stop_reason } : {}),
+          ...(usage !== undefined
+            ? {
+                usage: {
+                  inputTokens: baseInputTokens,
+                  outputTokens: usage.output_tokens ?? 0,
+                  ...(cacheReadTokens > 0 ? { cachedInputTokens: cacheReadTokens } : {}),
+                },
+              }
+            : {}),
+        });
+
+        return {
+          kind: 'success' as const,
+          value: {
+            text,
+            model: data.model,
+            finishReason: data.stop_reason,
+          } satisfies ChatCompletionResult,
+        };
+      },
+      ANTHROPIC_RETRY_CONFIG,
+      request.abortSignal,
+    );
   }
 }

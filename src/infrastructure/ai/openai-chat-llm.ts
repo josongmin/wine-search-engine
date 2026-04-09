@@ -12,26 +12,23 @@ import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
+import {
+  retryWithBackoff,
+  parseRetryAfterHeader,
+  type RetryConfig,
+} from '../http/retry-with-backoff.js';
 import { withGenAiSpan, type GenAiResponseAttributes } from '../telemetry/gen-ai-tracing.js';
 
-/** Total fetch attempts (initial + retries) for transient OpenAI failures. */
-const OPENAI_CHAT_MAX_ATTEMPTS = 4;
-/** Fast backoff for 5xx / network blips. */
-const OPENAI_CHAT_TRANSIENT_BACKOFF_BASE_MS = 250;
-const OPENAI_CHAT_TRANSIENT_BACKOFF_CAP_MS = 2_000;
-/** Slower exponential backoff for 429 quota windows. */
-const OPENAI_CHAT_RATE_LIMIT_BACKOFF_BASE_MS = 2_000;
-const OPENAI_CHAT_RATE_LIMIT_BACKOFF_CAP_MS = 30_000;
-const HTTP_STATUS_TOO_MANY_REQUESTS = 429;
-const HTTP_STATUS_5XX_MIN = 500;
-const HTTP_STATUS_5XX_MAX_EXCLUSIVE = 600;
-/** Truncate error bodies in thrown messages / logs. */
-const OPENAI_CHAT_HTTP_ERROR_PREVIEW_CHARS = 200;
 const OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS = 240;
-const MILLISECONDS_PER_SECOND = 1000;
-/** Jitter fraction added to server-mandated Retry-After: 25% of the retry delay.
- *  Spreads retries from concurrent requests to prevent synchronized retry storms. */
-const RATE_LIMIT_JITTER_FRACTION = 0.25;
+
+const OPENAI_RETRY_CONFIG: RetryConfig = {
+  maxAttempts: 4,
+  transientBackoffBaseMs: 250,
+  transientBackoffCapMs: 2_000,
+  rateLimitBackoffBaseMs: 2_000,
+  rateLimitBackoffCapMs: 30_000,
+  label: 'OpenAI chat',
+};
 
 export interface OpenAiChatLlmOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
@@ -126,185 +123,90 @@ export class OpenAiChatLlm implements ChatLlmPort {
       body['seed'] = request.seed;
     }
 
-    // Retry on transient failures (429, 5xx, network).
-    //
-    // 429 (TPM / RPM throttling) uses slow exponential backoff: TPM windows
-    // reset every 60 s, so millisecond-scale retries just hit the same wall.
-    //   base: 2 s → 4 s → 8 s → 16 s (capped at MAX_RATE_LIMIT_DELAY_MS = 30 s)
-    // Retry-After header from OpenAI overrides the computed delay.
-    //
-    // 5xx / network errors use fast jittered backoff (250 ms base, 2 s cap) —
-    // these are infrastructure blips, not quota exhaustion.
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= OPENAI_CHAT_MAX_ATTEMPTS; attempt++) {
-      // Honor caller cancellation between attempts.
-      if (request.abortSignal?.aborted === true) {
-        throw new Error('OpenAI chat: aborted');
-      }
-      let response: Response;
-      try {
-        response = await fetchWithTimeout(
-          this.endpoint,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${this.apiKey}`,
+    return retryWithBackoff(
+      async () => {
+        let response: Response;
+        try {
+          response = await fetchWithTimeout(
+            this.endpoint,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${this.apiKey}`,
+              },
+              body: JSON.stringify(body),
             },
-            body: JSON.stringify(body),
-          },
-          this.httpTimeoutMs,
-          request.abortSignal,
-        );
-      } catch (err) {
-        if (isAbortError(err)) {
-          throw new Error(`OpenAI chat: request timed out after ${this.httpTimeoutMs}ms`);
-        }
-        // Network-level error: retry on attempts < MAX
-        lastError = err;
-        if (attempt < OPENAI_CHAT_MAX_ATTEMPTS) {
-          await this.sleepWithJitter(
-            attempt,
-            OPENAI_CHAT_TRANSIENT_BACKOFF_BASE_MS,
-            OPENAI_CHAT_TRANSIENT_BACKOFF_CAP_MS,
+            this.httpTimeoutMs,
             request.abortSignal,
           );
-          continue;
-        }
-        throw err;
-      }
-
-      if (!response.ok) {
-        const status = response.status;
-        const text = await response.text().catch(() => '');
-        const isRateLimit = status === HTTP_STATUS_TOO_MANY_REQUESTS;
-        const isTransient = isRateLimit
-          || (status >= HTTP_STATUS_5XX_MIN && status < HTTP_STATUS_5XX_MAX_EXCLUSIVE);
-        if (isTransient && attempt < OPENAI_CHAT_MAX_ATTEMPTS) {
-          lastError = new Error(`OpenAI chat HTTP ${status}: ${text.slice(0, OPENAI_CHAT_HTTP_ERROR_PREVIEW_CHARS)}`);
-          if (isRateLimit) {
-            // v4 fix: 429 backoff uses jitter (not fixed sleep) to break
-            // synchronized retry storms across concurrent callers. TWO regimes:
-            //
-            // 1. Retry-After header present (server says "wait at least N seconds"):
-            //    Honor the floor strictly (sleep ≥ retry-after) and add a small
-            //    jitter on top to decorrelate retries. delay ∈ [retryAfterMs,
-            //    retryAfterMs + jitterMs] where jitterMs is bounded to 25% of base.
-            //    This preserves the contract (don't retry early) while still
-            //    decorrelating concurrent waiters.
-            //
-            // 2. No Retry-After: full exponential jitter ∈ [0, baseExpMs]. Pure
-            //    decorrelation, lets the TPM window recover at random times across
-            //    the calling pool.
-            const retryAfterHeader = response.headers.get('Retry-After');
-            const retryAfterSec = retryAfterHeader !== null ? parseFloat(retryAfterHeader) : NaN;
-            let delayMs: number;
-            if (Number.isFinite(retryAfterSec) && retryAfterSec > 0) {
-              const retryAfterMs = Math.min(
-                retryAfterSec * MILLISECONDS_PER_SECOND,
-                OPENAI_CHAT_RATE_LIMIT_BACKOFF_CAP_MS,
-              );
-              // Server-mandated floor + small additive jitter (25% of mandate).
-              const jitterCeil = Math.floor(retryAfterMs * RATE_LIMIT_JITTER_FRACTION);
-              delayMs = retryAfterMs + Math.floor(Math.random() * jitterCeil);
-            } else {
-              const baseExpMs = Math.min(
-                OPENAI_CHAT_RATE_LIMIT_BACKOFF_BASE_MS * 2 ** (attempt - 1),
-                OPENAI_CHAT_RATE_LIMIT_BACKOFF_CAP_MS,
-              );
-              // Full jitter — uniform in [0, baseExpMs].
-              delayMs = Math.floor(Math.random() * baseExpMs);
-            }
-            await this.sleepFixed(delayMs, request.abortSignal);
-          } else {
-            await this.sleepWithJitter(
-              attempt,
-              OPENAI_CHAT_TRANSIENT_BACKOFF_BASE_MS,
-              OPENAI_CHAT_TRANSIENT_BACKOFF_CAP_MS,
-              request.abortSignal,
-            );
+        } catch (err) {
+          if (isAbortError(err)) {
+            const abortErr = new Error(`OpenAI chat: request timed out after ${this.httpTimeoutMs}ms`);
+            abortErr.name = 'AbortError';
+            throw abortErr;
           }
-          continue;
+          throw err;
         }
-        throw new Error(`OpenAI chat failed [HTTP ${status}]: ${text.slice(0, OPENAI_CHAT_HTTP_ERROR_PREVIEW_CHARS)}`);
-      }
 
-      const data: unknown = await response.json();
-      if (!isChatCompletionsResponse(data)) {
-        throw new Error(
-          `OpenAI chat: unexpected response — ${JSON.stringify(data).slice(0, OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS)}`,
-        );
-      }
+        if (!response.ok) {
+          const status = response.status;
+          const text = await response.text().catch(() => '');
+          return {
+            kind: 'http-error' as const,
+            status,
+            bodyText: text,
+            retryAfterSec: parseRetryAfterHeader(response),
+          };
+        }
 
-      const choice = data.choices[0];
-      const content = choice?.message?.content;
-      const text =
-        typeof content === 'string'
-          ? content
-          : content == null
-            ? ''
-            : String(content);
+        const data: unknown = await response.json();
+        if (!isChatCompletionsResponse(data)) {
+          throw new Error(
+            `OpenAI chat: unexpected response — ${JSON.stringify(data).slice(0, OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS)}`,
+          );
+        }
 
-      // Record GenAI response attributes for the wrapping span (OTEL gen_ai.*)
-      const usage = data.usage;
-      recordResponse({
-        responseModel: data.model,
-        ...(choice?.finish_reason !== null && choice?.finish_reason !== undefined
-          ? { finishReason: choice.finish_reason }
-          : {}),
-        ...(usage !== undefined
-          ? {
-              usage: {
-                inputTokens: usage.prompt_tokens ?? 0,
-                outputTokens: usage.completion_tokens ?? 0,
-                ...(usage.prompt_tokens_details?.cached_tokens !== undefined
-                  ? { cachedInputTokens: usage.prompt_tokens_details.cached_tokens }
-                  : {}),
-              },
-            }
-          : {}),
-      });
+        const choice = data.choices[0];
+        const content = choice?.message?.content;
+        const text =
+          typeof content === 'string'
+            ? content
+            : content == null
+              ? ''
+              : String(content);
 
-      return {
-        text,
-        model: data.model,
-        finishReason: choice?.finish_reason ?? null,
-      };
-    }
+        // Record GenAI response attributes for the wrapping span (OTEL gen_ai.*)
+        const usage = data.usage;
+        recordResponse({
+          responseModel: data.model,
+          ...(choice?.finish_reason !== null && choice?.finish_reason !== undefined
+            ? { finishReason: choice.finish_reason }
+            : {}),
+          ...(usage !== undefined
+            ? {
+                usage: {
+                  inputTokens: usage.prompt_tokens ?? 0,
+                  outputTokens: usage.completion_tokens ?? 0,
+                  ...(usage.prompt_tokens_details?.cached_tokens !== undefined
+                    ? { cachedInputTokens: usage.prompt_tokens_details.cached_tokens }
+                    : {}),
+                },
+              }
+            : {}),
+        });
 
-    // Exhausted all retries
-    throw lastError instanceof Error
-      ? lastError
-      : new Error('OpenAI chat: retry budget exhausted');
-  }
-
-  /** Exponential backoff with full jitter — used for 5xx / network errors. */
-  private sleepWithJitter(
-    attempt: number,
-    baseMs: number,
-    maxMs: number,
-    signal: AbortSignal | undefined,
-  ): Promise<void> {
-    const expDelay = Math.min(baseMs * 2 ** (attempt - 1), maxMs);
-    const delay = Math.floor(Math.random() * expDelay);
-    return this.sleepFixed(delay, signal);
-  }
-
-  /** Fixed-duration sleep, abortable via signal — used for rate-limit (429) waits. */
-  private sleepFixed(ms: number, signal: AbortSignal | undefined): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { resolve(); }, ms);
-      if (signal) {
-        const onAbort = () => {
-          clearTimeout(timer);
-          reject(new Error('OpenAI chat: aborted'));
+        return {
+          kind: 'success' as const,
+          value: {
+            text,
+            model: data.model,
+            finishReason: choice?.finish_reason ?? null,
+          } satisfies ChatCompletionResult,
         };
-        if (signal.aborted) {
-          onAbort();
-        } else {
-          signal.addEventListener('abort', onAbort, { once: true });
-        }
-      }
-    });
+      },
+      OPENAI_RETRY_CONFIG,
+      request.abortSignal,
+    );
   }
 }

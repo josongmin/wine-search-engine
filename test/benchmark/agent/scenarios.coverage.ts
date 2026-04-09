@@ -458,6 +458,16 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must recommend sparkling wines that are NOT Champagne (Prosecco, Cava, Crémant, etc.). '
         + 'Should note they are more affordable alternatives.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'sparkling' },
+          { attribute: 'exclude_regions', operator: 'exclude', value: ['Champagne'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '스파클링', canonical: 'sparkling', type: 'wine_type' },
+        { surface: '샴페인', canonical: 'Champagne', type: 'appellation' },
+      ],
     },
   },
   {
@@ -540,6 +550,17 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must recommend red wines with very low tannin and no oak aging. '
         + 'Beaujolais (Gamay), carbonic maceration reds, light Pinot Noir expected.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+        ],
+        soft: [
+          { attribute: 'tannin', operator: '<=', value: 0.3 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
     },
   },
   {
@@ -558,6 +579,21 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         'Must recommend full-bodied European reds whose PRIMARY grape is NOT Cabernet Sauvignon and whose origin is NOT France. '
         + 'Mentioning Cabernet/France for contrast is OK. '
         + 'Italian (Barolo, Amarone), Spanish (Tempranillo), Portuguese expected.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+          { attribute: 'exclude_regions', operator: 'exclude', value: ['France'] },
+          { attribute: 'exclude_grapes', operator: 'exclude', value: ['Cabernet Sauvignon'] },
+        ],
+        soft: [
+          { attribute: 'body', operator: '>=', value: 0.7 },
+        ],
+      },
+      expectedEntities: [
+        { surface: '프랑스', canonical: 'France', type: 'country' },
+        { surface: '카베르네', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
     },
   },
   {
@@ -574,6 +610,18 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must recommend white wines that are NOT Chardonnay, NOT Sauvignon Blanc, NOT Riesling. '
         + 'Pinot Grigio, Albariño, Viognier, Grüner Veltliner, Vermentino expected.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'white' },
+          { attribute: 'exclude_grapes', operator: 'exclude', value: ['Chardonnay', 'Sauvignon Blanc', 'Riesling'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '화이트', canonical: 'white', type: 'wine_type' },
+        { surface: '샤도네이', canonical: 'Chardonnay', type: 'grape_primary' },
+        { surface: '소비뇽 블랑', canonical: 'Sauvignon Blanc', type: 'grape_primary' },
+        { surface: '리슬링', canonical: 'Riesling', type: 'grape_primary' },
+      ],
     },
   },
   {
@@ -590,6 +638,16 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must recommend dry sparkling wines that are NOT Champagne and NOT Italian (no Prosecco). '
         + 'Spanish Cava, Crémant d\'Alsace, English sparkling, South African MCC expected.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'sparkling' },
+          { attribute: 'exclude_regions', operator: 'exclude', value: ['Champagne', 'Italy'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '스파클링', canonical: 'sparkling', type: 'wine_type' },
+        { surface: '샴페인', canonical: 'Champagne', type: 'appellation' },
+      ],
     },
   },
   {
@@ -758,6 +816,21 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must handle redundant bilingual input (same query in English + Korean). '
         + 'Should not search twice. Recommend Napa Cabernet Sauvignon wines.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'region', operator: '=', value: 'Napa Valley' },
+          { attribute: 'grape_primary', operator: '=', value: 'Cabernet Sauvignon' },
+        ],
+        inferred: [
+          { attribute: 'country', operator: '=', value: 'USA' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '나파밸리', canonical: 'Napa Valley', type: 'region' },
+        { surface: 'Napa Valley', canonical: 'Napa Valley', type: 'region' },
+        { surface: '카베르네', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+        { surface: 'Cab Sauv', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+      ],
     },
   },
   {
@@ -809,6 +882,11 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must recommend wines with 10+ year aging potential under 200,000 KRW. '
         + 'Structured reds (Barolo, Bordeaux, Brunello) or sweet wines expected.',
+      expectedConstraints: {
+        soft: [
+          { attribute: 'max_price_krw', operator: '<=', value: 200000 },
+        ],
+      },
     },
   },
   {
@@ -896,6 +974,16 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       rubric:
         'Must recommend red wines that are NOT from Italy. '
         + 'Recommended wines must be explicitly from a non-Italian origin.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'wine_type', operator: '=', value: 'red' },
+          { attribute: 'exclude_regions', operator: 'exclude', value: ['Italy'] },
+        ],
+      },
+      expectedEntities: [
+        { surface: '이탈리아', canonical: 'Italy', type: 'country' },
+        { surface: '레드', canonical: 'red', type: 'wine_type' },
+      ],
     },
   },
   {
@@ -913,6 +1001,14 @@ export const COVERAGE_SCENARIOS: readonly AgentBenchmarkScenario[] = [
         'Must recommend Old World Pinot Noir only — Burgundy, Alsace, Germany, etc. '
         + 'Must NOT recommend New World sources (California, Oregon, New Zealand, Chile, etc.). '
         + 'Should explain the Old World vs New World stylistic difference.',
+      expectedConstraints: {
+        hard: [
+          { attribute: 'grape_primary', operator: '=', value: 'Pinot Noir' },
+        ],
+      },
+      expectedEntities: [
+        { surface: '피노 누아르', canonical: 'Pinot Noir', type: 'grape_primary' },
+      ],
     },
   },
   {

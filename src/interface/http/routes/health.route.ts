@@ -4,10 +4,18 @@ import {
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import {
+  AgentMetricsRouteContract,
   HealthRouteContract,
   ReadyRouteContract,
 } from './route-contracts.js';
-import { HTTP_STATUS_OK, HTTP_STATUS_SERVICE_UNAVAILABLE } from '../constants.js';
+import {
+  HTTP_STATUS_FORBIDDEN,
+  HTTP_STATUS_OK,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
+} from '../constants.js';
+import { getAgentExecutionMetricsCollector } from '../../../infrastructure/observability/agent-execution-metrics.js';
+import { getRequestId } from '../request-id.js';
+import { buildSearchErrorResponse } from '../errors/error-response.js';
 
 /**
  * Tracks the last time the event loop was responsive.
@@ -39,6 +47,8 @@ export interface ReadinessCheck {
 
 export interface HealthRouteOptions {
   readonly readiness?: Readonly<Record<string, ReadinessCheck>>;
+  /** Optional secret to gate /metrics/agent (expects matching X-Debug-Key). */
+  readonly metricsDebugSecret?: string | undefined;
 }
 
 /**
@@ -155,6 +165,62 @@ export function registerHealthRoutes(
         ReadyRouteContract,
         ready ? HTTP_STATUS_OK : HTTP_STATUS_SERVICE_UNAVAILABLE,
         body,
+      );
+    },
+  });
+
+  registerContractRoute(app, {
+    method: 'GET',
+    url: '/metrics/agent',
+    contract: AgentMetricsRouteContract,
+    handler: async (request, reply) => {
+      const expectedSecret = options?.metricsDebugSecret;
+      const rawDebugKey = request.headers['x-debug-key'];
+      const providedDebugKey = Array.isArray(rawDebugKey) ? rawDebugKey[0] : rawDebugKey;
+      if (
+        typeof expectedSecret === 'string' &&
+        expectedSecret.length > 0 &&
+        providedDebugKey !== expectedSecret
+      ) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          AgentMetricsRouteContract,
+          HTTP_STATUS_FORBIDDEN,
+          buildSearchErrorResponse(
+            getRequestId(request),
+            'FORBIDDEN',
+            'Metrics endpoint requires a valid X-Debug-Key.',
+            null,
+            false,
+          ),
+        );
+        return;
+      }
+      const metrics = getAgentExecutionMetricsCollector().getMetrics();
+      sendRouteContractResponse(
+        request,
+        reply,
+        AgentMetricsRouteContract,
+        HTTP_STATUS_OK,
+        {
+          timestamp: new Date().toISOString(),
+          agent: {
+            runs: metrics.runs,
+            by_termination_reason: metrics.byTerminationReason,
+            fallback_runs: metrics.fallbackRuns,
+            fallback_rate: metrics.fallbackRate,
+            total_tool_calls: metrics.totalToolCalls,
+            avg_duration_ms: metrics.avgDurationMs,
+            timeouts: {
+              llm_step: metrics.timeouts.llmStep,
+              tool: metrics.timeouts.tool,
+              parallel_batch: metrics.timeouts.parallelBatch,
+              event_rate_per_run: metrics.timeouts.eventRatePerRun,
+            },
+            alerts: metrics.alerts,
+          },
+        },
       );
     },
   });

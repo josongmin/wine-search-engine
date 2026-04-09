@@ -190,6 +190,90 @@ export interface ScenarioExpectation {
    * criterion (e.g. negation: "recommended wine must not be Cabernet").
    */
   readonly judgeRequired?: boolean;
+
+  // ─────────────────────────────────────────────────────────────────────
+  // RFC-020: Constraint extraction ground truth
+  // ─────────────────────────────────────────────────────────────────────
+
+  /**
+   * RFC-020 P1: Semantic Constraint Recall (SCR) ground truth.
+   *
+   * Hand-curated expected constraints that a correct NL Mapper + ontology
+   * expansion + compositional inference pipeline should produce for this query.
+   * Used by `scoreSemanticConstraintRecall()` to compute hard/soft/inferred
+   * SCR bucket scores.
+   *
+   * Example for "보르도 2018 레드":
+   * ```
+   * expectedConstraints: {
+   *   hard: [
+   *     { attribute: 'region', value: 'Bordeaux', operator: '=' },
+   *     { attribute: 'wine_type', value: 'red', operator: '=' },
+   *     { attribute: 'vintage_year', value: 2018, operator: '>=' },
+   *   ],
+   *   soft: [
+   *     { attribute: 'country', value: 'France', operator: '=' },  // ontology
+   *   ],
+   *   inferred: [
+   *     { attribute: 'grape_family', value: ['Cabernet', 'Merlot'], operator: 'in' }, // compositional
+   *     { attribute: 'tannin', value: 0.55, operator: '>=' },
+   *   ],
+   * }
+   * ```
+   *
+   * Matching rules:
+   * - Attribute + operator + value all must match (value is normalized NFKC lowercase for strings)
+   * - Numeric ranges allow overlap (expected [30000, 50000] matches extracted [20000, 50000])
+   * - Leave bucket undefined to skip that tier; leave whole field off to skip SCR entirely
+   */
+  readonly expectedConstraints?: {
+    readonly hard?: readonly ExpectedConstraint[];
+    readonly soft?: readonly ExpectedConstraint[];
+    readonly inferred?: readonly ExpectedConstraint[];
+  };
+
+  /**
+   * RFC-020 P2: Entity Linking Accuracy (ELA) ground truth.
+   *
+   * Hand-curated entity mentions expected from the raw query. Measured against
+   * EntityResolver (RFC-019 Phase 2) output.
+   *
+   * Example for "보르도 vs 나파 카베르네":
+   * ```
+   * expectedEntities: [
+   *   { surface: '보르도',   canonical: 'Bordeaux',           type: 'region' },
+   *   { surface: '나파',     canonical: 'Napa Valley',        type: 'region' },
+   *   { surface: '카베르네', canonical: 'Cabernet Sauvignon', type: 'grape_primary' },
+   * ]
+   * ```
+   */
+  readonly expectedEntities?: readonly ExpectedEntity[];
+}
+
+/**
+ * RFC-020 P1: A single ground-truth constraint.
+ *
+ * Intentionally looser than domain NormalizedConstraint — `value` accepts any
+ * primitive / object, and `operator` uses string literal to decouple scenario
+ * file authoring from domain types.
+ */
+export interface ExpectedConstraint {
+  readonly attribute: string;
+  readonly operator: '=' | '<=' | '>=' | 'range' | 'in' | 'exclude';
+  readonly value: string | number | readonly string[] | readonly number[] | { readonly min?: number; readonly max?: number };
+}
+
+/**
+ * RFC-020 P2: A single ground-truth entity mention.
+ *
+ * `surface` = the raw text as it appears in the query (Korean or English).
+ * `canonical` = the expected canonical label (e.g., 'Bordeaux', 'Cabernet Sauvignon').
+ * `type` = which entity category; matches RFC-019 Phase 2 EntityType.
+ */
+export interface ExpectedEntity {
+  readonly surface: string;
+  readonly canonical: string;
+  readonly type: 'wine_type' | 'country' | 'region' | 'appellation' | 'grape_primary';
 }
 
 export interface AgentBenchmarkScenario {

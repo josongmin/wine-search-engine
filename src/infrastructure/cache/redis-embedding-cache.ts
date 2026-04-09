@@ -2,7 +2,8 @@
  * Redis-backed Embedding Cache Implementation.
  *
  * Stores dense embedding vectors as JSON for simplicity and compatibility.
- * Uses node-redis for distributed caching.
+ * Uses {@link RedisCache.getValidatedWithStats} for the read → parse →
+ * validate → stats pipeline, eliminating duplicated poisoned-entry handling.
  *
  * Implements EmbeddingCachePort from domain (dependency inversion).
  *
@@ -12,13 +13,35 @@
  * - Still memory-efficient for typical embedding sizes (384-1024 dims)
  */
 
+import { z } from 'zod';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EmbeddingCacheKey } from '../../domain/performance/model/cache-key.js';
 import type { EmbeddingCachePort } from '../../domain/performance/port/embedding-cache.port.js';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
+import { RedisCache } from '../adapter/redis-cache.js';
+import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
 
 const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
+
+/**
+ * Zod schema for cached embedding vectors: non-empty array of finite numbers.
+ * Replaces the manual isArray + per-element loop validation that was previously
+ * inlined in the get() method.
+ *
+ * Upper bound: 4096 dims covers all production models (bge-m3 = 1024, text-embedding-3-large = 3072).
+ */
+const MAX_EMBEDDING_DIMENSIONS = 4096;
+const EmbeddingVectorSchema = z.array(z.number().finite()).min(1).max(MAX_EMBEDDING_DIMENSIONS);
+
+const STATS_KEY_HITS = 'cache:stats:embedding:hits';
+const STATS_KEY_MISSES = 'cache:stats:embedding:misses';
+
+const EMBEDDING_STATS: GetValidatedStatsOptions = {
+  statsKeyHits: STATS_KEY_HITS,
+  statsKeyMisses: STATS_KEY_MISSES,
+  logComponent: 'RedisEmbeddingCache',
+};
 
 /**
  * Redis embedding cache: Store dense vectors efficiently.
@@ -29,79 +52,20 @@ const log = bootstrapLogger.child({ component: 'RedisEmbeddingCache' });
  * - TTL: 7200s (embeddings very stable, only change on model upgrade)
  */
 export class RedisEmbeddingCache implements EmbeddingCachePort {
-  private readonly redis: RedisClient;
-  private readonly statsKeyHits = 'cache:stats:embedding:hits';
-  private readonly statsKeyMisses = 'cache:stats:embedding:misses';
+  private readonly cache: RedisCache;
 
   constructor(redis: RedisClient) {
-    this.redis = redis;
-  }
-
-  /**
-   * Single source of truth for poisoned-entry handling: bumps the miss counter,
-   * fires-and-forgets a DEL on the key, and returns undefined. Used by all three
-   * failure paths (parse error, shape error, element error) so they stay consistent.
-   */
-  private async handlePoisoned(
-    cacheKey: EmbeddingCacheKey,
-    reason: string,
-  ): Promise<undefined> {
-    log.warn({ key: cacheKey.redisKey, reason }, 'embedding cache poisoned; treating as miss');
-    // Wrap miss counter + delete in try/catch so a synchronous redis throw
-    // (closed client, broken socket) doesn't reject this promise and propagate
-    // up to the caller — defeating the "treat as miss" semantics.
-    try {
-      await this.redis.incr(this.statsKeyMisses);
-    } catch {
-      // metric increment is best-effort
-    }
-    try {
-      await this.redis.del(cacheKey.redisKey);
-    } catch {
-      // delete is best-effort; the entry's TTL will eventually clean it up
-    }
-    return undefined;
+    // defaultTtlSeconds unused (TTL always explicit), but required by RedisCache.
+    this.cache = new RedisCache(redis, 0);
   }
 
   async get(cacheKey: EmbeddingCacheKey): Promise<readonly number[] | undefined> {
-    let cached: string | null;
-    try {
-      cached = await this.redis.get(cacheKey.redisKey);
-    } catch (error) {
-      log.error({ err: error }, 'redis get error');
-      // Best-effort miss counter — if Redis itself is broken, incr will also
-      // fail; swallow to preserve "treat as miss" semantics.
-      try { await this.redis.incr(this.statsKeyMisses); } catch { /* metric is best-effort */ }
-      return undefined;
-    }
-
-    if (cached === null) {
-      await this.redis.incr(this.statsKeyMisses);
-      return undefined;
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(cached);
-    } catch {
-      // Non-JSON poisoning: also delete so reads don't keep paying.
-      return this.handlePoisoned(cacheKey, 'json_parse_error');
-    }
-
-    // Validate shape: must be a non-empty array of finite numbers.
-    // CRITICAL: increment hits ONLY after validation passes; otherwise
-    // the hit-rate metric is inflated by poisoned reads.
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      return this.handlePoisoned(cacheKey, 'not_an_array_or_empty');
-    }
-    for (const v of parsed) {
-      if (typeof v !== 'number' || !Number.isFinite(v)) {
-        return this.handlePoisoned(cacheKey, 'non_numeric_element');
-      }
-    }
-    await this.redis.incr(this.statsKeyHits);
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- array validated above: isArray, length > 0, all elements finite numbers
-    return parsed as readonly number[];
+    const result = await this.cache.getValidatedWithStats(
+      cacheKey.redisKey,
+      EmbeddingVectorSchema,
+      EMBEDDING_STATS,
+    );
+    return result ?? undefined;
   }
 
   async set(
@@ -114,8 +78,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       // return Float32Array whose JSON representation is {"0":...} (an
       // object, not array), which the read path rejects as poisoned.
       const embedding = Array.isArray(rawEmbedding) ? rawEmbedding : Array.from(rawEmbedding);
-      const serialized = JSON.stringify(embedding);
-      await this.redis.set(cacheKey.redisKey, serialized, { EX: ttlSeconds });
+      await this.cache.set(cacheKey.redisKey, embedding, ttlSeconds);
     } catch (error) {
       log.error({ err: error }, 'write error');
     }
@@ -123,7 +86,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
 
   async delete(cacheKey: EmbeddingCacheKey): Promise<void> {
     try {
-      await this.redis.del(cacheKey.redisKey);
+      await this.cache.del(cacheKey.redisKey);
     } catch (error) {
       log.error({ err: error }, 'delete error');
     }
@@ -134,7 +97,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       // Escape Redis glob metacharacters in modelId to prevent pattern injection
       const safeModelId = modelId.replace(/[*?[\]\\]/g, '\\$&');
       return await deleteRedisKeysMatchingPattern(
-        this.redis,
+        this.cache.redis,
         `embedding:${safeModelId}:*`,
       );
     } catch (error) {
@@ -149,17 +112,18 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
     readonly size: number;
     readonly entriesCount: number;
   }> {
+    const redis = this.cache.redis;
     try {
       // Get hit/miss counters
-      const hitsStr = await this.redis.get(this.statsKeyHits);
-      const missesStr = await this.redis.get(this.statsKeyMisses);
+      const hitsStr = await redis.get(STATS_KEY_HITS);
+      const missesStr = await redis.get(STATS_KEY_MISSES);
       const hits = hitsStr ? parseInt(hitsStr, 10) : 0;
       const misses = missesStr ? parseInt(missesStr, 10) : 0;
 
       // Count entries and compute size
       let entriesCount = 0;
       let cursorSize = 0;
-      for await (const key of this.redis.scanIterator({
+      for await (const key of redis.scanIterator({
         MATCH: 'embedding:*',
         COUNT: 100,
       })) {
@@ -167,7 +131,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
         if (!keyStr.startsWith('embedding:cache:stats')) {
           entriesCount++;
           try {
-            const size = await this.redis.strLen(keyStr);
+            const size = await redis.strLen(keyStr);
             if (typeof size === 'number') {
               cursorSize += size;
             }
@@ -191,7 +155,7 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
 
   async clear(): Promise<number> {
     try {
-      return await deleteRedisKeysMatchingPattern(this.redis, 'embedding:*');
+      return await deleteRedisKeysMatchingPattern(this.cache.redis, 'embedding:*');
     } catch (error) {
       log.error({ err: error }, 'clear error');
       return 0;

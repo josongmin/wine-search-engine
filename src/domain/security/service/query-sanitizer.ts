@@ -1,91 +1,40 @@
+import { HOMOGLYPH_MAP } from '../../shared/utils/unicode-normalize.js';
 import type { InjectionResult } from '../model/injection-result.js';
 import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
 
 /**
- * Confusables map: Cyrillic and Greek lookalikes → ASCII Latin equivalents.
- * Based on Unicode TR39 (https://www.unicode.org/reports/tr39/) confusables.
- * These characters are visually identical to Latin letters but have different
- * code points, so NFKC normalization does NOT map them — explicit replacement
- * is required to close the cross-script bypass vector.
+ * Security-specific overrides on top of the shared HOMOGLYPH_MAP.
  *
- * NFKC handles fullwidth/half-width and compatibility variants (e.g. ｆ→f,
- * ² →2) but NOT cross-script homoglyphs. This map covers the most common
- * attack characters used in prompt injection bypass attempts.
+ * The shared map uses TR39 visual-similarity mappings (Cyrillic Р→P, р→p).
+ * For security pattern matching, Cyrillic р must map to 'r' so that
+ * "fo\u0440get" normalizes to "forget" (not "fopget"), enabling injection
+ * detection. Similarly Cyrillic Р → 'R'.
+ *
+ * These overrides are applied AFTER the shared map during security
+ * normalization only — they do NOT affect ingestion/indexing normalization.
  */
-const CONFUSABLES_MAP: Readonly<Record<string, string>> = {
-  // Cyrillic lookalikes (most common injection bypass chars)
-  '\u0430': 'a', // а → a
-  '\u0435': 'e', // е → e
-  '\u0456': 'i', // і → i
-  '\u0458': 'j', // ј → j
-  '\u043A': 'k', // к → k (Cyrillic small ka — visually identical to Latin k)
-  '\u043C': 'm', // м → m (Cyrillic small em — bypass "mode", "mode override")
-  '\u043D': 'n', // н → n (Cyrillic small en — bypass "jailbreak", "instructions")
-  '\u043F': 'p', // п → p (Cyrillic small pe — bypass "prompt")
-  '\u043E': 'o', // о → o
-  '\u0440': 'r', // р → r
-  '\u0441': 'c', // с → c
-  '\u0442': 't', // т → t (Cyrillic small te — bypass "system", "instructions")
-  '\u0445': 'x', // х → x
-  '\u0443': 'y', // у → y
-  '\u0410': 'A', // А → A
-  '\u0412': 'B', // В → B
-  '\u0415': 'E', // Е → E
-  '\u041A': 'K', // К → K
-  '\u041C': 'M', // М → M
-  '\u041D': 'H', // Н → H
-  '\u041E': 'O', // О → O
-  '\u0420': 'R', // Р → R
-  '\u0421': 'C', // С → C
-  '\u0422': 'T', // Т → T
-  '\u0425': 'X', // Х → X
-  '\u0443\u0301': 'y', // у́ (with accent) → y
-  // Greek lookalikes
-  '\u03B1': 'a', // α → a (Greek small alpha)
-  '\u03B7': 'h', // η → h (Greek small eta — visually similar to Latin h)
-  '\u03BF': 'o', // ο → o (Greek small omicron)
-  '\u03B5': 'e', // ε → e (Greek small epsilon — approximate)
-  '\u03B9': 'i', // ι → i (Greek small iota)
-  '\u03BA': 'k', // κ → k (Greek small kappa)
-  '\u03BD': 'v', // ν → v (Greek small nu)
-  '\u03C1': 'r', // ρ → r (Greek small rho — visually identical to Latin r, NOT p)
-  '\u03C4': 't', // τ → t (Greek small tau — visually similar, bypass "system", "instructions")
-  '\u03C5': 'u', // υ → u (Greek small upsilon)
-  '\u0391': 'A', // Α → A (Greek capital alpha)
-  '\u0392': 'B', // Β → B (Greek capital beta)
-  '\u0395': 'E', // Ε → E (Greek capital epsilon)
-  '\u0396': 'Z', // Ζ → Z (Greek capital zeta)
-  '\u0397': 'H', // Η → H (Greek capital eta)
-  '\u0399': 'I', // Ι → I (Greek capital iota)
-  '\u039A': 'K', // Κ → K (Greek capital kappa)
-  '\u039C': 'M', // Μ → M (Greek capital mu)
-  '\u039D': 'N', // Ν → N (Greek capital nu)
-  '\u039F': 'O', // Ο → O (Greek capital omicron)
-  '\u03A1': 'P', // Ρ → P (Greek capital rho)
-  '\u03A4': 'T', // Τ → T (Greek capital tau)
-  '\u03A5': 'Y', // Υ → Y (Greek capital upsilon)
-  '\u03A7': 'X', // Χ → X (Greek capital chi)
-  // Armenian lookalikes — visually identical to Latin in many fonts.
-  // Without these, "ign\u0585re your instructions" bypasses injection patterns.
-  '\u0561': 'a', // ա → a (Armenian ayb)
-  '\u0565': 'e', // ե → e (Armenian ech)
-  '\u056B': 'h', // ի → h (Armenian ini — approximate)
-  '\u056D': 'n', // խ → n (Armenian xeh — approximate in some fonts)
-  '\u0570': 'h', // հ → h (Armenian ho)
-  '\u0578': 'n', // ո → n (Armenian vo — approximate)
-  '\u0585': 'o', // օ → o (Armenian oh — visually identical to Latin o)
-  '\u057D': 's', // ս → s (Armenian seh)
-  '\u057E': 'v', // վ → v (Armenian vew)
-  '\u0580': 'r', // ր → r (Armenian reh)
-};
+const SECURITY_OVERRIDES: ReadonlyMap<string, string> = new Map([
+  ['\u0420', 'R'], // Cyrillic Р → R (shared map: P)
+  ['\u0440', 'r'], // Cyrillic р → r (shared map: p)
+]);
 
 /**
- * Pre-compiled regex that matches any character in CONFUSABLES_MAP.
- * Defined at module scope to avoid per-call RegExp allocation.
+ * Merged confusables map for security normalization.
+ * Combines the shared HOMOGLYPH_MAP with security-specific overrides.
+ * Defined at module scope to avoid per-call allocation (rule 16).
+ */
+const SECURITY_CONFUSABLES_MAP: ReadonlyMap<string, string> = new Map([
+  ...HOMOGLYPH_MAP,
+  ...SECURITY_OVERRIDES,
+]);
+
+/**
+ * Pre-compiled regex that matches any single character present in the
+ * security confusables map. Defined at module scope to avoid per-call
+ * RegExp allocation.
  */
 const CONFUSABLES_REGEX = new RegExp(
-  // eslint-disable-next-line no-misleading-character-class -- individual confusable chars, not combining sequences
-  `[${Object.keys(CONFUSABLES_MAP).join('')}]`,
+  `[${[...SECURITY_CONFUSABLES_MAP.keys()].join('')}]`,
   'gu',
 );
 
@@ -103,7 +52,7 @@ function applyNormalization(input: string): string {
   // Step 1: NFKC — resolves fullwidth Latin, superscripts, ligatures, etc.
   const nfkc = input.normalize('NFKC');
   // Step 2: Confusables substitution — replaces cross-script homoglyphs
-  return nfkc.replace(CONFUSABLES_REGEX, (ch) => CONFUSABLES_MAP[ch] ?? ch);
+  return nfkc.replace(CONFUSABLES_REGEX, (ch) => SECURITY_CONFUSABLES_MAP.get(ch) ?? ch);
 }
 
 /** C0 controls stripped through U+0008 (preserve tab U+0009). */

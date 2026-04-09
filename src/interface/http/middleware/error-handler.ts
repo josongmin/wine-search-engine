@@ -274,6 +274,8 @@ export function errorHandler(
     // validation, hand-roll a minimal contract-shaped JSON via the raw socket
     // so the client never sees a Fastify default envelope.
     request.log.error({ requestId, err: sendErr }, 'error_handler_send_failed');
+    // Hard-coded safe defaults — never reuse `body` which may have caused
+    // the validation failure in sendSearchErrorResponse above.
     void reply
       .status(HTTP_STATUS_INTERNAL_SERVER_ERROR)
       .header('Content-Type', 'application/json; charset=utf-8')

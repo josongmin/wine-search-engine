@@ -1,0 +1,1189 @@
+{
+  "version": "ontology-snapshot-v1.0",
+  "generatedAt": "2026-04-09T09:20:06.624Z",
+  "mappingCount": 197,
+  "mappings": [
+    {
+      "surface": "abruzzo",
+      "entityId": "region:abruzzo",
+      "canonical": "Abruzzo",
+      "entityType": "region"
+    },
+    {
+      "surface": "albarino",
+      "entityId": "grape_primary:albariño",
+      "canonical": "Albariño",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "albariño",
+      "entityId": "grape_primary:albariño",
+      "canonical": "Albariño",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "alentejo",
+      "entityId": "region:alentejo",
+      "canonical": "Alentejo",
+      "entityType": "region"
+    },
+    {
+      "surface": "alsace",
+      "entityId": "region:alsace",
+      "canonical": "Alsace",
+      "entityType": "region"
+    },
+    {
+      "surface": "amarone",
+      "entityId": "region:amarone",
+      "canonical": "Amarone",
+      "entityType": "region"
+    },
+    {
+      "surface": "argentina",
+      "entityId": "country:argentina",
+      "canonical": "Argentina",
+      "entityType": "country"
+    },
+    {
+      "surface": "australia",
+      "entityId": "country:australia",
+      "canonical": "Australia",
+      "entityType": "country"
+    },
+    {
+      "surface": "barbaresco",
+      "entityId": "appellation:barbaresco",
+      "canonical": "Barbaresco",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "barolo",
+      "entityId": "appellation:barolo",
+      "canonical": "Barolo",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "barossa valley",
+      "entityId": "region:barossa valley",
+      "canonical": "Barossa Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "bianco",
+      "entityId": "wine_type:white",
+      "canonical": "white",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "blanc",
+      "entityId": "wine_type:white",
+      "canonical": "white",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "blanco",
+      "entityId": "wine_type:white",
+      "canonical": "white",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "blaufrankisch",
+      "entityId": "grape_primary:blaufränkisch",
+      "canonical": "Blaufränkisch",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "blaufränkisch",
+      "entityId": "grape_primary:blaufränkisch",
+      "canonical": "Blaufränkisch",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "bolgheri",
+      "entityId": "region:bolgheri",
+      "canonical": "Bolgheri",
+      "entityType": "region"
+    },
+    {
+      "surface": "bordeaux",
+      "entityId": "region:bordeaux",
+      "canonical": "Bordeaux",
+      "entityType": "region"
+    },
+    {
+      "surface": "bourgogne",
+      "entityId": "region:bourgogne",
+      "canonical": "Bourgogne",
+      "entityType": "region"
+    },
+    {
+      "surface": "brunello di montalcino",
+      "entityId": "appellation:brunello di montalcino",
+      "canonical": "Brunello Di Montalcino",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "burgundy",
+      "entityId": "region:burgundy",
+      "canonical": "Burgundy",
+      "entityType": "region"
+    },
+    {
+      "surface": "cab franc",
+      "entityId": "grape_primary:cabernet franc",
+      "canonical": "Cabernet Franc",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "cab sauv",
+      "entityId": "grape_primary:cabernet sauvignon",
+      "canonical": "Cabernet Sauvignon",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "cabernet franc",
+      "entityId": "grape_primary:cabernet franc",
+      "canonical": "Cabernet Franc",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "cabernet sauvignon",
+      "entityId": "grape_primary:cabernet sauvignon",
+      "canonical": "Cabernet Sauvignon",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "california",
+      "entityId": "region:california",
+      "canonical": "California",
+      "entityType": "region"
+    },
+    {
+      "surface": "carmenere",
+      "entityId": "grape_primary:carmenère",
+      "canonical": "Carmenère",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "carmenère",
+      "entityId": "grape_primary:carmenère",
+      "canonical": "Carmenère",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "casablanca valley",
+      "entityId": "region:casablanca valley",
+      "canonical": "Casablanca Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "catalonia",
+      "entityId": "region:catalonia",
+      "canonical": "Catalonia",
+      "entityType": "region"
+    },
+    {
+      "surface": "central otago",
+      "entityId": "region:central otago",
+      "canonical": "Central Otago",
+      "entityType": "region"
+    },
+    {
+      "surface": "chablis",
+      "entityId": "region:chablis",
+      "canonical": "Chablis",
+      "entityType": "region"
+    },
+    {
+      "surface": "chambolle-musigny",
+      "entityId": "region:chambolle-musigny",
+      "canonical": "Chambolle-musigny",
+      "entityType": "region"
+    },
+    {
+      "surface": "champagne",
+      "entityId": "region:champagne",
+      "canonical": "Champagne",
+      "entityType": "region"
+    },
+    {
+      "surface": "champagne",
+      "entityId": "wine_type:sparkling",
+      "canonical": "sparkling",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "chassagne-montrachet",
+      "entityId": "region:chassagne-montrachet",
+      "canonical": "Chassagne-montrachet",
+      "entityType": "region"
+    },
+    {
+      "surface": "châteauneuf-du-pape",
+      "entityId": "region:châteauneuf-du-pape",
+      "canonical": "Châteauneuf-du-pape",
+      "entityType": "region"
+    },
+    {
+      "surface": "chianti",
+      "entityId": "appellation:chianti",
+      "canonical": "Chianti",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "chianti classico",
+      "entityId": "appellation:chianti classico",
+      "canonical": "Chianti Classico",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "chile",
+      "entityId": "country:chile",
+      "canonical": "Chile",
+      "entityType": "country"
+    },
+    {
+      "surface": "clare valley",
+      "entityId": "region:clare valley",
+      "canonical": "Clare Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "colchagua valley",
+      "entityId": "region:colchagua valley",
+      "canonical": "Colchagua Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "columbia valley",
+      "entityId": "region:columbia valley",
+      "canonical": "Columbia Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "constantia",
+      "entityId": "region:constantia",
+      "canonical": "Constantia",
+      "entityType": "region"
+    },
+    {
+      "surface": "cornas",
+      "entityId": "region:cornas",
+      "canonical": "Cornas",
+      "entityType": "region"
+    },
+    {
+      "surface": "côte de beaune",
+      "entityId": "region:côte de beaune",
+      "canonical": "Côte De Beaune",
+      "entityType": "region"
+    },
+    {
+      "surface": "côte de nuits",
+      "entityId": "region:côte de nuits",
+      "canonical": "Côte De Nuits",
+      "entityType": "region"
+    },
+    {
+      "surface": "côte-rôtie",
+      "entityId": "region:côte-rôtie",
+      "canonical": "Côte-rôtie",
+      "entityType": "region"
+    },
+    {
+      "surface": "côtes du rhône",
+      "entityId": "region:côtes du rhône",
+      "canonical": "Côtes Du Rhône",
+      "entityType": "region"
+    },
+    {
+      "surface": "crozes-hermitage",
+      "entityId": "region:crozes-hermitage",
+      "canonical": "Crozes-hermitage",
+      "entityType": "region"
+    },
+    {
+      "surface": "dão",
+      "entityId": "region:dão",
+      "canonical": "Dão",
+      "entityType": "region"
+    },
+    {
+      "surface": "dessert",
+      "entityId": "wine_type:dessert",
+      "canonical": "dessert",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "douro",
+      "entityId": "region:douro",
+      "canonical": "Douro",
+      "entityType": "region"
+    },
+    {
+      "surface": "etna",
+      "entityId": "region:etna",
+      "canonical": "Etna",
+      "entityType": "region"
+    },
+    {
+      "surface": "fortified",
+      "entityId": "wine_type:fortified",
+      "canonical": "fortified",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "france",
+      "entityId": "country:france",
+      "canonical": "France",
+      "entityType": "country"
+    },
+    {
+      "surface": "garnacha",
+      "entityId": "grape_primary:grenache",
+      "canonical": "Grenache",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "germany",
+      "entityId": "country:germany",
+      "canonical": "Germany",
+      "entityType": "country"
+    },
+    {
+      "surface": "gevrey-chambertin",
+      "entityId": "region:gevrey-chambertin",
+      "canonical": "Gevrey-chambertin",
+      "entityType": "region"
+    },
+    {
+      "surface": "gewurztraminer",
+      "entityId": "grape_primary:gewurztraminer",
+      "canonical": "Gewurztraminer",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "gewürztraminer",
+      "entityId": "grape_primary:gewurztraminer",
+      "canonical": "Gewurztraminer",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "gigondas",
+      "entityId": "region:gigondas",
+      "canonical": "Gigondas",
+      "entityType": "region"
+    },
+    {
+      "surface": "graves",
+      "entityId": "region:graves",
+      "canonical": "Graves",
+      "entityType": "region"
+    },
+    {
+      "surface": "grenache",
+      "entityId": "grape_primary:grenache",
+      "canonical": "Grenache",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "grenache noir",
+      "entityId": "grape_primary:grenache",
+      "canonical": "Grenache",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "gruner veltliner",
+      "entityId": "grape_primary:grüner veltliner",
+      "canonical": "Grüner Veltliner",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "grüner veltliner",
+      "entityId": "grape_primary:grüner veltliner",
+      "canonical": "Grüner Veltliner",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "haut-médoc",
+      "entityId": "region:haut-médoc",
+      "canonical": "Haut-médoc",
+      "entityType": "region"
+    },
+    {
+      "surface": "hawke's bay",
+      "entityId": "region:hawke's bay",
+      "canonical": "Hawke's Bay",
+      "entityType": "region"
+    },
+    {
+      "surface": "hermitage",
+      "entityId": "region:hermitage",
+      "canonical": "Hermitage",
+      "entityType": "region"
+    },
+    {
+      "surface": "hunter valley",
+      "entityId": "region:hunter valley",
+      "canonical": "Hunter Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "italy",
+      "entityId": "country:italy",
+      "canonical": "Italy",
+      "entityType": "country"
+    },
+    {
+      "surface": "langhe",
+      "entityId": "region:langhe",
+      "canonical": "Langhe",
+      "entityType": "region"
+    },
+    {
+      "surface": "languedoc",
+      "entityId": "region:languedoc",
+      "canonical": "Languedoc",
+      "entityType": "region"
+    },
+    {
+      "surface": "loire",
+      "entityId": "region:loire",
+      "canonical": "Loire",
+      "entityType": "region"
+    },
+    {
+      "surface": "madeira",
+      "entityId": "wine_type:fortified",
+      "canonical": "fortified",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "maipo valley",
+      "entityId": "region:maipo valley",
+      "canonical": "Maipo Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "margaret river",
+      "entityId": "region:margaret river",
+      "canonical": "Margaret River",
+      "entityType": "region"
+    },
+    {
+      "surface": "margaux",
+      "entityId": "appellation:margaux",
+      "canonical": "Margaux",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "marlborough",
+      "entityId": "region:marlborough",
+      "canonical": "Marlborough",
+      "entityType": "region"
+    },
+    {
+      "surface": "mclaren vale",
+      "entityId": "region:mclaren vale",
+      "canonical": "Mclaren Vale",
+      "entityType": "region"
+    },
+    {
+      "surface": "médoc",
+      "entityId": "region:médoc",
+      "canonical": "Médoc",
+      "entityType": "region"
+    },
+    {
+      "surface": "mencia",
+      "entityId": "grape_primary:mencía",
+      "canonical": "Mencía",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "mencía",
+      "entityId": "grape_primary:mencía",
+      "canonical": "Mencía",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "mendoza",
+      "entityId": "region:mendoza",
+      "canonical": "Mendoza",
+      "entityType": "region"
+    },
+    {
+      "surface": "meursault",
+      "entityId": "region:meursault",
+      "canonical": "Meursault",
+      "entityType": "region"
+    },
+    {
+      "surface": "monastrell",
+      "entityId": "grape_primary:mourvèdre",
+      "canonical": "Mourvèdre",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "morey-saint-denis",
+      "entityId": "region:morey-saint-denis",
+      "canonical": "Morey-saint-denis",
+      "entityType": "region"
+    },
+    {
+      "surface": "moscatel",
+      "entityId": "grape_primary:muscat",
+      "canonical": "Muscat",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "moscato",
+      "entityId": "grape_primary:muscat",
+      "canonical": "Muscat",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "mosel",
+      "entityId": "region:mosel",
+      "canonical": "Mosel",
+      "entityType": "region"
+    },
+    {
+      "surface": "mourvedre",
+      "entityId": "grape_primary:mourvèdre",
+      "canonical": "Mourvèdre",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "mourvèdre",
+      "entityId": "grape_primary:mourvèdre",
+      "canonical": "Mourvèdre",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "muscadet",
+      "entityId": "region:muscadet",
+      "canonical": "Muscadet",
+      "entityType": "region"
+    },
+    {
+      "surface": "muscat",
+      "entityId": "grape_primary:muscat",
+      "canonical": "Muscat",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "muscat blanc",
+      "entityId": "grape_primary:muscat",
+      "canonical": "Muscat",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "napa valley",
+      "entityId": "region:napa valley",
+      "canonical": "Napa Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "new zealand",
+      "entityId": "country:new zealand",
+      "canonical": "New Zealand",
+      "entityType": "country"
+    },
+    {
+      "surface": "northern rhône",
+      "entityId": "region:northern rhône",
+      "canonical": "Northern Rhône",
+      "entityType": "region"
+    },
+    {
+      "surface": "nuits-saint-georges",
+      "entityId": "region:nuits-saint-georges",
+      "canonical": "Nuits-saint-georges",
+      "entityType": "region"
+    },
+    {
+      "surface": "oregon",
+      "entityId": "region:oregon",
+      "canonical": "Oregon",
+      "entityType": "region"
+    },
+    {
+      "surface": "paso robles",
+      "entityId": "region:paso robles",
+      "canonical": "Paso Robles",
+      "entityType": "region"
+    },
+    {
+      "surface": "pauillac",
+      "entityId": "appellation:pauillac",
+      "canonical": "Pauillac",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "penedès",
+      "entityId": "region:penedès",
+      "canonical": "Penedès",
+      "entityType": "region"
+    },
+    {
+      "surface": "pessac-léognan",
+      "entityId": "region:pessac-léognan",
+      "canonical": "Pessac-léognan",
+      "entityType": "region"
+    },
+    {
+      "surface": "petit sirah",
+      "entityId": "grape_primary:petite sirah",
+      "canonical": "Petite Sirah",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "petite sirah",
+      "entityId": "grape_primary:petite sirah",
+      "canonical": "Petite Sirah",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "pfalz",
+      "entityId": "region:pfalz",
+      "canonical": "Pfalz",
+      "entityType": "region"
+    },
+    {
+      "surface": "piedmont",
+      "entityId": "region:piedmont",
+      "canonical": "Piedmont",
+      "entityType": "region"
+    },
+    {
+      "surface": "piemonte",
+      "entityId": "region:piemonte",
+      "canonical": "Piemonte",
+      "entityType": "region"
+    },
+    {
+      "surface": "pinot bianco",
+      "entityId": "grape_primary:pinot blanc",
+      "canonical": "Pinot Blanc",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "pinot blanc",
+      "entityId": "grape_primary:pinot blanc",
+      "canonical": "Pinot Blanc",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "pinot grigio",
+      "entityId": "grape_primary:pinot gris",
+      "canonical": "Pinot Gris",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "pinot gris",
+      "entityId": "grape_primary:pinot gris",
+      "canonical": "Pinot Gris",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "pomerol",
+      "entityId": "region:pomerol",
+      "canonical": "Pomerol",
+      "entityType": "region"
+    },
+    {
+      "surface": "pommard",
+      "entityId": "region:pommard",
+      "canonical": "Pommard",
+      "entityType": "region"
+    },
+    {
+      "surface": "port",
+      "entityId": "wine_type:fortified",
+      "canonical": "fortified",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "portugal",
+      "entityId": "country:portugal",
+      "canonical": "Portugal",
+      "entityType": "country"
+    },
+    {
+      "surface": "pouilly-fumé",
+      "entityId": "region:pouilly-fumé",
+      "canonical": "Pouilly-fumé",
+      "entityType": "region"
+    },
+    {
+      "surface": "primitivo",
+      "entityId": "grape_primary:zinfandel",
+      "canonical": "Zinfandel",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "priorat",
+      "entityId": "region:priorat",
+      "canonical": "Priorat",
+      "entityType": "region"
+    },
+    {
+      "surface": "provence",
+      "entityId": "region:provence",
+      "canonical": "Provence",
+      "entityType": "region"
+    },
+    {
+      "surface": "puligny-montrachet",
+      "entityId": "region:puligny-montrachet",
+      "canonical": "Puligny-montrachet",
+      "entityType": "region"
+    },
+    {
+      "surface": "red",
+      "entityId": "wine_type:red",
+      "canonical": "red",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "rheingau",
+      "entityId": "region:rheingau",
+      "canonical": "Rheingau",
+      "entityType": "region"
+    },
+    {
+      "surface": "rheinhessen",
+      "entityId": "region:rheinhessen",
+      "canonical": "Rheinhessen",
+      "entityType": "region"
+    },
+    {
+      "surface": "rhône valley",
+      "entityId": "region:rhône valley",
+      "canonical": "Rhône Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "rías baixas",
+      "entityId": "region:rías baixas",
+      "canonical": "Rías Baixas",
+      "entityType": "region"
+    },
+    {
+      "surface": "ribera del duero",
+      "entityId": "region:ribera del duero",
+      "canonical": "Ribera Del Duero",
+      "entityType": "region"
+    },
+    {
+      "surface": "rioja",
+      "entityId": "region:rioja",
+      "canonical": "Rioja",
+      "entityType": "region"
+    },
+    {
+      "surface": "rose",
+      "entityId": "wine_type:rosé",
+      "canonical": "rosé",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "rosé",
+      "entityId": "wine_type:rosé",
+      "canonical": "rosé",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "rosso",
+      "entityId": "wine_type:red",
+      "canonical": "red",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "rouge",
+      "entityId": "wine_type:red",
+      "canonical": "red",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "rueda",
+      "entityId": "region:rueda",
+      "canonical": "Rueda",
+      "entityType": "region"
+    },
+    {
+      "surface": "russian river valley",
+      "entityId": "region:russian river valley",
+      "canonical": "Russian River Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "saint-émilion",
+      "entityId": "appellation:saint-émilion",
+      "canonical": "Saint-émilion",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "saint-estèphe",
+      "entityId": "region:saint-estèphe",
+      "canonical": "Saint-estèphe",
+      "entityType": "region"
+    },
+    {
+      "surface": "saint-julien",
+      "entityId": "region:saint-julien",
+      "canonical": "Saint-julien",
+      "entityType": "region"
+    },
+    {
+      "surface": "sancerre",
+      "entityId": "region:sancerre",
+      "canonical": "Sancerre",
+      "entityType": "region"
+    },
+    {
+      "surface": "santa barbara",
+      "entityId": "region:santa barbara",
+      "canonical": "Santa Barbara",
+      "entityType": "region"
+    },
+    {
+      "surface": "sauternes",
+      "entityId": "region:sauternes",
+      "canonical": "Sauternes",
+      "entityType": "region"
+    },
+    {
+      "surface": "semillon",
+      "entityId": "grape_primary:sémillon",
+      "canonical": "Sémillon",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "sémillon",
+      "entityId": "grape_primary:sémillon",
+      "canonical": "Sémillon",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "sherry",
+      "entityId": "wine_type:fortified",
+      "canonical": "fortified",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "shiraz",
+      "entityId": "grape_primary:syrah",
+      "canonical": "Syrah",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "sicily",
+      "entityId": "region:sicily",
+      "canonical": "Sicily",
+      "entityType": "region"
+    },
+    {
+      "surface": "soave",
+      "entityId": "region:soave",
+      "canonical": "Soave",
+      "entityType": "region"
+    },
+    {
+      "surface": "sonoma county",
+      "entityId": "region:sonoma county",
+      "canonical": "Sonoma County",
+      "entityType": "region"
+    },
+    {
+      "surface": "south africa",
+      "entityId": "country:south africa",
+      "canonical": "South Africa",
+      "entityType": "country"
+    },
+    {
+      "surface": "south australia",
+      "entityId": "region:south australia",
+      "canonical": "South Australia",
+      "entityType": "region"
+    },
+    {
+      "surface": "southern rhône",
+      "entityId": "region:southern rhône",
+      "canonical": "Southern Rhône",
+      "entityType": "region"
+    },
+    {
+      "surface": "spain",
+      "entityId": "country:spain",
+      "canonical": "Spain",
+      "entityType": "country"
+    },
+    {
+      "surface": "sparkling",
+      "entityId": "wine_type:sparkling",
+      "canonical": "sparkling",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "stellenbosch",
+      "entityId": "region:stellenbosch",
+      "canonical": "Stellenbosch",
+      "entityType": "region"
+    },
+    {
+      "surface": "swartland",
+      "entityId": "region:swartland",
+      "canonical": "Swartland",
+      "entityType": "region"
+    },
+    {
+      "surface": "sweet",
+      "entityId": "wine_type:dessert",
+      "canonical": "dessert",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "syrah",
+      "entityId": "grape_primary:syrah",
+      "canonical": "Syrah",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "tinto",
+      "entityId": "wine_type:red",
+      "canonical": "red",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "torrontes",
+      "entityId": "grape_primary:torrontés",
+      "canonical": "Torrontés",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "torrontés",
+      "entityId": "grape_primary:torrontés",
+      "canonical": "Torrontés",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "toscana",
+      "entityId": "region:toscana",
+      "canonical": "Toscana",
+      "entityType": "region"
+    },
+    {
+      "surface": "tuscany",
+      "entityId": "region:tuscany",
+      "canonical": "Tuscany",
+      "entityType": "region"
+    },
+    {
+      "surface": "uco valley",
+      "entityId": "region:uco valley",
+      "canonical": "Uco Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "united states",
+      "entityId": "country:united states",
+      "canonical": "United States",
+      "entityType": "country"
+    },
+    {
+      "surface": "valpolicella",
+      "entityId": "region:valpolicella",
+      "canonical": "Valpolicella",
+      "entityType": "region"
+    },
+    {
+      "surface": "veneto",
+      "entityId": "region:veneto",
+      "canonical": "Veneto",
+      "entityType": "region"
+    },
+    {
+      "surface": "volnay",
+      "entityId": "region:volnay",
+      "canonical": "Volnay",
+      "entityType": "region"
+    },
+    {
+      "surface": "vosne-romanée",
+      "entityId": "region:vosne-romanée",
+      "canonical": "Vosne-romanée",
+      "entityType": "region"
+    },
+    {
+      "surface": "washington",
+      "entityId": "region:washington",
+      "canonical": "Washington",
+      "entityType": "region"
+    },
+    {
+      "surface": "white",
+      "entityId": "wine_type:white",
+      "canonical": "white",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "willamette valley",
+      "entityId": "region:willamette valley",
+      "canonical": "Willamette Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "yarra valley",
+      "entityId": "region:yarra valley",
+      "canonical": "Yarra Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "zinfandel",
+      "entityId": "grape_primary:zinfandel",
+      "canonical": "Zinfandel",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "나파",
+      "entityId": "region:napa valley",
+      "canonical": "Napa Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "나파 밸리",
+      "entityId": "region:napa valley",
+      "canonical": "Napa Valley",
+      "entityType": "region"
+    },
+    {
+      "surface": "디저트",
+      "entityId": "wine_type:dessert",
+      "canonical": "dessert",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "레드",
+      "entityId": "wine_type:red",
+      "canonical": "red",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "로제",
+      "entityId": "wine_type:rosé",
+      "canonical": "rosé",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "리오하",
+      "entityId": "region:rioja",
+      "canonical": "Rioja",
+      "entityType": "region"
+    },
+    {
+      "surface": "말버러",
+      "entityId": "region:marlborough",
+      "canonical": "Marlborough",
+      "entityType": "region"
+    },
+    {
+      "surface": "멘도사",
+      "entityId": "region:mendoza",
+      "canonical": "Mendoza",
+      "entityType": "region"
+    },
+    {
+      "surface": "모젤",
+      "entityId": "region:mosel",
+      "canonical": "Mosel",
+      "entityType": "region"
+    },
+    {
+      "surface": "바롤로",
+      "entityId": "appellation:barolo",
+      "canonical": "Barolo",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "보르도",
+      "entityId": "region:bordeaux",
+      "canonical": "Bordeaux",
+      "entityType": "region"
+    },
+    {
+      "surface": "부르고뉴",
+      "entityId": "region:burgundy",
+      "canonical": "Burgundy",
+      "entityType": "region"
+    },
+    {
+      "surface": "브루넬로",
+      "entityId": "appellation:brunello di montalcino",
+      "canonical": "Brunello Di Montalcino",
+      "entityType": "appellation"
+    },
+    {
+      "surface": "샴페인",
+      "entityId": "region:champagne",
+      "canonical": "Champagne",
+      "entityType": "region"
+    },
+    {
+      "surface": "스파클링",
+      "entityId": "wine_type:sparkling",
+      "canonical": "sparkling",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "이탈리아",
+      "entityId": "country:italy",
+      "canonical": "Italy",
+      "entityType": "country"
+    },
+    {
+      "surface": "칠레",
+      "entityId": "country:chile",
+      "canonical": "Chile",
+      "entityType": "country"
+    },
+    {
+      "surface": "카베르네",
+      "entityId": "grape_primary:cabernet sauvignon",
+      "canonical": "Cabernet Sauvignon",
+      "entityType": "grape_primary"
+    },
+    {
+      "surface": "토스카나",
+      "entityId": "region:tuscany",
+      "canonical": "Tuscany",
+      "entityType": "region"
+    },
+    {
+      "surface": "포트",
+      "entityId": "wine_type:fortified",
+      "canonical": "fortified",
+      "entityType": "wine_type"
+    },
+    {
+      "surface": "프랑스",
+      "entityId": "country:france",
+      "canonical": "France",
+      "entityType": "country"
+    },
+    {
+      "surface": "호주",
+      "entityId": "country:australia",
+      "canonical": "Australia",
+      "entityType": "country"
+    },
+    {
+      "surface": "화이트",
+      "entityId": "wine_type:white",
+      "canonical": "white",
+      "entityType": "wine_type"
+    }
+  ]
+}

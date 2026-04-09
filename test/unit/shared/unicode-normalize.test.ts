@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeUnicode,
+  normalizeUnicodeWithHomoglyphs,
   stripAccents,
   normalizeHomoglyphs,
 } from '../../../src/domain/shared/utils/unicode-normalize.js';
@@ -30,20 +31,37 @@ describe('normalizeUnicode', () => {
     expect(result).toBe('hello');
   });
 
-  it('replaces Cyrillic А (U+0410) with Latin A', () => {
+  it('preserves Cyrillic chars (no homoglyph replacement)', () => {
     const cyrillicA = '\u0410'; // Cyrillic А
     const result = normalizeUnicode(cyrillicA + 'BC');
-    expect(result).toBe('ABC');
+    expect(result).toBe('\u0410BC');
   });
 
-  it('replaces Cyrillic о (U+043E) with Latin o', () => {
+  it('preserves Cyrillic о (U+043E) without replacement', () => {
     const input = 'h\u043Eme'; // Cyrillic о embedded
     const result = normalizeUnicode(input);
-    expect(result).toBe('home');
+    expect(result).toBe('h\u043Eme');
   });
 
   it('handles empty string', () => {
     expect(normalizeUnicode('')).toBe('');
+  });
+});
+
+describe('normalizeUnicodeWithHomoglyphs', () => {
+  it('replaces Cyrillic А (U+0410) with Latin A', () => {
+    const result = normalizeUnicodeWithHomoglyphs('\u0410BC');
+    expect(result).toBe('ABC');
+  });
+
+  it('replaces Cyrillic о (U+043E) with Latin o', () => {
+    const result = normalizeUnicodeWithHomoglyphs('h\u043Eme');
+    expect(result).toBe('home');
+  });
+
+  it('also applies NFC and whitespace collapse', () => {
+    const result = normalizeUnicodeWithHomoglyphs('  \u0410  B  ');
+    expect(result).toBe('A B');
   });
 });
 

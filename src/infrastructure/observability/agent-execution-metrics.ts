@@ -7,14 +7,22 @@ export interface AgentExecutionMetrics {
   readonly runs: number;
   readonly byTerminationReason: Readonly<Record<string, number>>;
   readonly fallbackRuns: number;
+  readonly fallbackRate: number;
   readonly totalToolCalls: number;
   readonly avgDurationMs: number;
   readonly timeouts: {
     readonly llmStep: number;
     readonly tool: number;
     readonly parallelBatch: number;
+    readonly eventRatePerRun: number;
   };
+  readonly alerts: readonly string[];
 }
+
+const MIN_RUNS_FOR_ALERT = 20;
+const FALLBACK_RATE_ALERT_THRESHOLD = 0.3;
+const TIMEOUT_EVENT_RATE_ALERT_THRESHOLD = 0.2;
+const PARALLEL_BATCH_TIMEOUT_RATE_ALERT_THRESHOLD = 0.1;
 
 export class AgentExecutionMetricsCollector implements AgentExecutionObserver {
   private runs = 0;
@@ -45,17 +53,36 @@ export class AgentExecutionMetricsCollector implements AgentExecutionObserver {
     for (const [k, v] of this.byTerminationReason.entries()) {
       byReason[k] = v;
     }
+    const fallbackRate = this.runs > 0 ? this.fallbackRuns / this.runs : 0;
+    const timeoutEventTotal = this.timeoutLlmStep + this.timeoutTool + this.timeoutParallelBatch;
+    const timeoutEventRatePerRun = this.runs > 0 ? timeoutEventTotal / this.runs : 0;
+    const parallelBatchTimeoutRate = this.runs > 0 ? this.timeoutParallelBatch / this.runs : 0;
+    const alerts: string[] = [];
+    if (this.runs >= MIN_RUNS_FOR_ALERT) {
+      if (fallbackRate >= FALLBACK_RATE_ALERT_THRESHOLD) {
+        alerts.push('agent_fallback_rate_high');
+      }
+      if (timeoutEventRatePerRun >= TIMEOUT_EVENT_RATE_ALERT_THRESHOLD) {
+        alerts.push('agent_timeout_event_rate_high');
+      }
+      if (parallelBatchTimeoutRate >= PARALLEL_BATCH_TIMEOUT_RATE_ALERT_THRESHOLD) {
+        alerts.push('agent_parallel_batch_timeout_rate_high');
+      }
+    }
     return {
       runs: this.runs,
       byTerminationReason: byReason,
       fallbackRuns: this.fallbackRuns,
+      fallbackRate,
       totalToolCalls: this.totalToolCalls,
       avgDurationMs: this.runs > 0 ? this.totalDurationMs / this.runs : 0,
       timeouts: {
         llmStep: this.timeoutLlmStep,
         tool: this.timeoutTool,
         parallelBatch: this.timeoutParallelBatch,
+        eventRatePerRun: timeoutEventRatePerRun,
       },
+      alerts,
     };
   }
 

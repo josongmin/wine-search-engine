@@ -4,6 +4,8 @@
  * All functions are pure and side-effect free.
  */
 
+import { normalizeUnicode } from '@domain/shared/utils/unicode-normalize.js';
+
 /** Smallest plausible bare-number bottle volume (ml) for heuristic parse. */
 const BARE_VOLUME_ASSUME_ML_MIN = 50;
 /** Largest plausible bare-number bottle volume (ml) before rejecting. */
@@ -26,14 +28,8 @@ const MAX_PLAUSIBLE_VINTAGE_YEAR = new Date().getFullYear() + 1;
 export function normalizeField(raw: string, locale?: string): string {
   if (raw.length === 0) return '';
 
-  // Unicode NFC normalization
-  let result = raw.normalize('NFC');
-
-  // Trim leading/trailing whitespace
-  result = result.trim();
-
-  // Collapse internal whitespace runs to a single space
-  result = result.replace(/\s+/g, ' ');
+  // Shared SSOT: NFC normalization + homoglyph replacement + trim + whitespace collapse
+  let result = normalizeUnicode(raw);
 
   // Korean locale: apply Korean-specific normalization
   if (locale !== undefined && isKoreanLocale(locale)) {

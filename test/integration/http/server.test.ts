@@ -291,6 +291,70 @@ describe('HTTP server route registration', () => {
     }
   });
 
+  it('exposes agent execution metrics endpoint with contract-safe payload', async () => {
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+    });
+
+    try {
+      await app.ready();
+      const res = await app.inject({
+        method: 'GET',
+        url: '/metrics/agent',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        timestamp: expect.any(String),
+        agent: {
+          runs: expect.any(Number),
+          by_termination_reason: expect.any(Object),
+          fallback_runs: expect.any(Number),
+          fallback_rate: expect.any(Number),
+          total_tool_calls: expect.any(Number),
+          avg_duration_ms: expect.any(Number),
+          timeouts: {
+            llm_step: expect.any(Number),
+            tool: expect.any(Number),
+            parallel_batch: expect.any(Number),
+            event_rate_per_run: expect.any(Number),
+          },
+          alerts: expect.any(Array),
+        },
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('protects /metrics/agent with X-Debug-Key when debug secret is configured', async () => {
+    const debugSecret = 'metrics-debug-secret';
+    const app = await createServer(createHttpServerDeps(), {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      httpDebugSecret: debugSecret,
+    });
+
+    try {
+      await app.ready();
+      const forbidden = await app.inject({
+        method: 'GET',
+        url: '/metrics/agent',
+      });
+      expect(forbidden.statusCode).toBe(403);
+
+      const allowed = await app.inject({
+        method: 'GET',
+        url: '/metrics/agent',
+        headers: { 'x-debug-key': debugSecret },
+      });
+      expect(allowed.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('echoes a valid inbound X-Request-Id on the response', async () => {
     const app = await createServer(createHttpServerDeps(), {
       logLevel: 'silent',

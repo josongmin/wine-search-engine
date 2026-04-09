@@ -64,6 +64,8 @@ type SearchRouteCapability =
   | 'planner_only'
   | 'resolver_only';
 
+const AGENT_METRICS_ALERTS_MAX = 20;
+
 export interface HttpRouteContract {
   readonly operationId: string;
   readonly body?: z.ZodTypeAny;
@@ -94,6 +96,25 @@ const ReadyResponseSchema = z.object({
     status: z.enum(['up', 'down', 'skipped']),
     required: z.boolean(),
   }).strict()),
+}).strict();
+
+const AgentMetricsResponseSchema = z.object({
+  timestamp: z.string(),
+  agent: z.object({
+    runs: z.number().int().nonnegative(),
+    by_termination_reason: z.record(z.number().int().nonnegative()),
+    fallback_runs: z.number().int().nonnegative(),
+    fallback_rate: z.number().finite().min(0),
+    total_tool_calls: z.number().int().nonnegative(),
+    avg_duration_ms: z.number().finite().nonnegative(),
+    timeouts: z.object({
+      llm_step: z.number().int().nonnegative(),
+      tool: z.number().int().nonnegative(),
+      parallel_batch: z.number().int().nonnegative(),
+      event_rate_per_run: z.number().finite().min(0),
+    }).strict(),
+    alerts: z.array(z.string()).max(AGENT_METRICS_ALERTS_MAX),
+  }).strict(),
 }).strict();
 
 const ClaudeToolsExecuteRequestSchema = z.object({
@@ -141,6 +162,14 @@ export const ReadyRouteContract = defineRouteContract({
   responses: {
     [HTTP_STATUS_OK]: ReadyResponseSchema,
     [HTTP_STATUS_SERVICE_UNAVAILABLE]: ReadyResponseSchema,
+  },
+});
+
+export const AgentMetricsRouteContract = defineRouteContract({
+  operationId: 'system.agentMetrics',
+  responses: {
+    [HTTP_STATUS_OK]: AgentMetricsResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
   },
 });
 

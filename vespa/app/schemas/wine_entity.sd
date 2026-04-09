@@ -528,17 +528,48 @@ schema wine_entity {
   rank-profile hybrid inherits lexical {
     inputs {
       query(query_embedding) tensor<float>(x[1024])
+      query(weight_lexical) double: 0.4
+      query(weight_semantic) double: 0.3
+      query(weight_attribute) double: 0.2
+      query(weight_popularity) double: 0.1
+      query(structured_query_terms_count) double: 0
+      query(structured_query_strength) double: 0.0
+      query(structured_region_boost) double: 0.0
+      query(structured_country_boost) double: 0.0
+      query(structured_grape_boost) double: 0.0
+      query(filter_strength) double: 0.0
     }
 
     function bm25_normalized() {
       expression: bm25_wine / (bm25_wine + 25)
     }
 
+    function structured_attribute_boost() {
+      expression {
+        query(structured_region_boost) * if(attribute(region) != "", 1.0, 0.0)
+        + query(structured_country_boost) * if(attribute(country) != "", 1.0, 0.0)
+        + query(structured_grape_boost) * if(attribute(grape_primary) != "" or attribute(grape_family) != "", 1.0, 0.0)
+      }
+    }
+
+    function structured_query_bonus() {
+      expression {
+        query(weight_attribute)
+        * (
+            0.6 * query(structured_query_strength)
+            + 0.25 * min(1.0, query(structured_query_terms_count) / 4.0)
+            + 0.15 * min(1.0, query(filter_strength))
+          )
+        * structured_attribute_boost
+      }
+    }
+
     first-phase {
       expression {
-        0.65 * bm25_normalized
-        + 0.25 * closeness(field, embedding)
-        + 0.10 * attribute(popularity_score)
+        query(weight_lexical) * bm25_normalized
+        + query(weight_semantic) * closeness(field, embedding)
+        + query(weight_popularity) * attribute(popularity_score)
+        + structured_query_bonus
       }
     }
 
@@ -569,13 +600,24 @@ schema wine_entity {
     inputs {
       query(query_embedding) tensor<float>(x[1024])
       query(current_year) double: 2024
+      query(weight_lexical) double: 0.55
+      query(weight_semantic) double: 0.30
+      query(weight_attribute) double: 0.15
+      query(weight_popularity) double: 0.15
+      query(structured_query_terms_count) double: 0
+      query(structured_query_strength) double: 0.0
+      query(structured_region_boost) double: 0.0
+      query(structured_country_boost) double: 0.0
+      query(structured_grape_boost) double: 0.0
+      query(filter_strength) double: 0.0
     }
 
     first-phase {
       expression {
-        0.55 * bm25_normalized
-        + 0.30 * closeness(field, embedding)
-        + 0.15 * attribute(popularity_score)
+        query(weight_lexical) * bm25_normalized
+        + query(weight_semantic) * closeness(field, embedding)
+        + query(weight_popularity) * attribute(popularity_score)
+        + structured_query_bonus
       }
     }
 
@@ -644,10 +686,22 @@ schema wine_entity {
   rank-profile prestige_hybrid inherits hybrid {
     inputs {
       query(query_embedding) tensor<float>(x[1024])
+      query(weight_lexical) double: 0.40
+      query(weight_semantic) double: 0.40
+      query(weight_attribute) double: 0.20
+      query(weight_popularity) double: 0.0
+      query(structured_query_terms_count) double: 0
+      query(structured_query_strength) double: 0.0
+      query(structured_region_boost) double: 0.0
+      query(structured_country_boost) double: 0.0
+      query(structured_grape_boost) double: 0.0
+      query(filter_strength) double: 0.0
     }
     first-phase {
       expression {
-        0.40 * (0.5 * bm25_normalized + 0.5 * closeness(field, embedding))
+        query(weight_lexical) * bm25_normalized
+        + query(weight_semantic) * closeness(field, embedding)
+        + structured_query_bonus
         + 0.35 * if(isNan(attribute(critic_score_normalized)), 0, attribute(critic_score_normalized))
         + 0.25 * if(isNan(attribute(producer_prestige)), 0, attribute(producer_prestige))
       }

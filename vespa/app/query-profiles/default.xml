@@ -35,5 +35,11 @@
   <field name="ranking.features.query(weight_semantic)">0.3</field>
   <field name="ranking.features.query(weight_attribute)">0.2</field>
   <field name="ranking.features.query(weight_popularity)">0.1</field>
+  <field name="ranking.features.query(structured_query_terms_count)">0</field>
+  <field name="ranking.features.query(structured_query_strength)">0.0</field>
+  <field name="ranking.features.query(structured_region_boost)">0.0</field>
+  <field name="ranking.features.query(structured_country_boost)">0.0</field>
+  <field name="ranking.features.query(structured_grape_boost)">0.0</field>
+  <field name="ranking.features.query(filter_strength)">0.0</field>
 
 </query-profile>

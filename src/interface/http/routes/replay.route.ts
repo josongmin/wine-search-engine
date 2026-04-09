@@ -9,7 +9,7 @@ import { ReplayRouteContract } from './route-contracts.js';
 import { toReplayRequest } from './search-request-mappers.js';
 import { getRequestId } from '../request-id.js';
 import { abortSignalFromFastifyRequest } from '../request-abort-signal.js';
-import { ErrorResponseSchema } from '../schemas/search-response.schema.js';
+import { buildSearchErrorResponse } from '../errors/error-response.js';
 import { HTTP_STATUS_FORBIDDEN, HTTP_STATUS_OK } from '../constants.js';
 
 /**
@@ -58,15 +58,13 @@ export function registerReplayRoute(
           reply,
           ReplayRouteContract,
           HTTP_STATUS_FORBIDDEN,
-          ErrorResponseSchema.parse({
-            error: {
-              request_id: requestId,
-              code: 'REPLAY_FORBIDDEN',
-              message: 'Replay endpoint requires X-Debug-Key authorization.',
-              failure_reason: null,
-              retryable: false,
-            },
-          }),
+          buildSearchErrorResponse(
+            requestId,
+            'REPLAY_FORBIDDEN',
+            'Replay endpoint requires X-Debug-Key authorization.',
+            null,
+            false,
+          ),
         );
         return;
       }

@@ -2,17 +2,50 @@
  * Redis-backed Query Cache Implementation.
  *
  * Stores complete SearchResponseV1 objects with deterministic TTL.
- * Uses node-redis for distributed caching, with automatic JSON serialization.
+ * Uses {@link RedisCache.getValidatedWithStats} for the read → parse →
+ * validate → stats pipeline, eliminating duplicated poisoned-entry handling.
  *
  * Implements QueryCachePort from domain (dependency inversion).
  */
 
+import { z } from 'zod';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { QueryCacheKey } from '../../domain/performance/model/cache-key.js';
 import type { QueryCachePort } from '../../domain/performance/port/query-cache.port.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { deleteRedisKeysMatchingPattern } from '../db/redis-delete-by-pattern.js';
+import { RedisCache } from '../adapter/redis-cache.js';
+import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
+
+/**
+ * Lightweight Zod schema for cached SearchResponseV1 structural validation.
+ *
+ * This validates the same three fields the original manual check enforced:
+ * engineDecision (object), results (array), meta (object). Using `.passthrough()`
+ * allows all other fields to pass without enumeration — this is a cache
+ * integrity check, not an API contract schema.
+ *
+ * Note: NOT `.strict()` — cached responses may contain extra fields added by
+ * newer code versions, and rejecting them would cause unnecessary cache misses
+ * during rolling deployments.
+ */
+/** Max cached results per response — Vespa hard limit is 400, adding headroom for future expansion. */
+const MAX_CACHED_RESULTS = 500;
+const SearchResponseCacheSchema = z.object({
+  engineDecision: z.record(z.unknown()),
+  results: z.array(z.unknown()).max(MAX_CACHED_RESULTS),
+  meta: z.record(z.unknown()),
+}).passthrough();
+
+const STATS_KEY_HITS = 'cache:stats:query:hits';
+const STATS_KEY_MISSES = 'cache:stats:query:misses';
+
+const QUERY_STATS: GetValidatedStatsOptions = {
+  statsKeyHits: STATS_KEY_HITS,
+  statsKeyMisses: STATS_KEY_MISSES,
+  logComponent: 'RedisQueryCache',
+};
 
 /**
  * Redis query cache: Store complete search responses.
@@ -29,68 +62,21 @@ import type { RedisClient } from '../db/redis-client.js';
 const log = bootstrapLogger.child({ component: 'RedisQueryCache' });
 
 export class RedisQueryCache implements QueryCachePort {
-  private readonly redis: RedisClient;
-  private readonly statsKeyHits = 'cache:stats:query:hits';
-  private readonly statsKeyMisses = 'cache:stats:query:misses';
+  private readonly cache: RedisCache;
 
   constructor(redis: RedisClient) {
-    this.redis = redis;
+    // defaultTtlSeconds unused (TTL always explicit), but required by RedisCache.
+    this.cache = new RedisCache(redis, 0);
   }
 
   async get(cacheKey: QueryCacheKey): Promise<SearchResponseV1 | undefined> {
-    try {
-      const cached = await this.redis.get(cacheKey.redisKey);
-
-      if (cached === null) {
-        // Cache miss
-        await this.redis.incr(this.statsKeyMisses);
-        return undefined;
-      }
-
-      // Parse and validate shape before counting as a hit. A poisoned or
-      // schema-drifted entry must NOT be reported as a hit (would inflate
-      // hit-rate metrics) and must be removed so subsequent reads don't
-      // keep paying the parse cost.
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(cached);
-      } catch {
-        log.warn({ key: cacheKey.redisKey, reason: 'json_parse_error' }, 'query cache poisoned; treating as miss');
-        await this.redis.incr(this.statsKeyMisses);
-        void this.redis.del(cacheKey.redisKey).catch(() => undefined);
-        return undefined;
-      }
-
-      // Structural validation — must look like SearchResponseV1 (Rule 11/12:
-      // never cast JSONB/JSON.parse directly; validate shape at runtime).
-      // Checks field presence AND types to reject obviously corrupt entries
-      // (e.g. {engineDecision: 123, results: "invalid", meta: null}).
-      const rec = typeof parsed === 'object' && parsed !== null
-        // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-        ? parsed as Record<string, unknown>
-        : undefined;
-      if (
-        rec === undefined ||
-        !('engineDecision' in rec) || !('results' in rec) || !('meta' in rec) ||
-        typeof rec['engineDecision'] !== 'object' ||
-        !Array.isArray(rec['results']) ||
-        typeof rec['meta'] !== 'object'
-      ) {
-        log.warn({ key: cacheKey.redisKey, reason: 'shape_mismatch' }, 'query cache poisoned; treating as miss');
-        await this.redis.incr(this.statsKeyMisses);
-        void this.redis.del(cacheKey.redisKey).catch(() => undefined);
-        return undefined;
-      }
-
-      await this.redis.incr(this.statsKeyHits);
-      // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- structural validation above checks engineDecision (object), results (array), meta (object)
-      return parsed as SearchResponseV1;
-    } catch (error) {
-      // On Redis errors, treat as miss (don't throw)
-      log.error({ err: error }, 'redis get error');
-      await this.redis.incr(this.statsKeyMisses);
-      return undefined;
-    }
+    const result = await this.cache.getValidatedWithStats(
+      cacheKey.redisKey,
+      SearchResponseCacheSchema,
+      QUERY_STATS,
+    );
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- SearchResponseCacheSchema validates structural shape (engineDecision=object, results=array, meta=object) with passthrough; full type coverage is the serializer's responsibility
+    return (result as SearchResponseV1 | null) ?? undefined;
   }
 
   async set(
@@ -99,8 +85,7 @@ export class RedisQueryCache implements QueryCachePort {
     ttlSeconds: number,
   ): Promise<void> {
     try {
-      const serialized = JSON.stringify(response);
-      await this.redis.set(cacheKey.redisKey, serialized, { EX: ttlSeconds });
+      await this.cache.set(cacheKey.redisKey, response, ttlSeconds);
     } catch (error) {
       // On serialization/write error, log and continue
       log.error({ err: error }, 'write error');
@@ -109,7 +94,7 @@ export class RedisQueryCache implements QueryCachePort {
 
   async delete(cacheKey: QueryCacheKey): Promise<void> {
     try {
-      await this.redis.del(cacheKey.redisKey);
+      await this.cache.del(cacheKey.redisKey);
     } catch (error) {
       log.error({ err: error }, 'delete error');
     }
@@ -117,7 +102,7 @@ export class RedisQueryCache implements QueryCachePort {
 
   async deletePattern(pattern: string): Promise<number> {
     try {
-      return await deleteRedisKeysMatchingPattern(this.redis, pattern);
+      return await deleteRedisKeysMatchingPattern(this.cache.redis, pattern);
     } catch (error) {
       log.error({ err: error }, 'delete pattern error');
       return 0;
@@ -130,10 +115,11 @@ export class RedisQueryCache implements QueryCachePort {
     readonly size: number;
     readonly entriesCount: number;
   }> {
+    const redis = this.cache.redis;
     try {
       // Get hit/miss counters
-      const hitsStr = await this.redis.get(this.statsKeyHits);
-      const missesStr = await this.redis.get(this.statsKeyMisses);
+      const hitsStr = await redis.get(STATS_KEY_HITS);
+      const missesStr = await redis.get(STATS_KEY_MISSES);
       const hits = hitsStr ? parseInt(hitsStr, 10) : 0;
       const misses = missesStr ? parseInt(missesStr, 10) : 0;
 
@@ -141,7 +127,7 @@ export class RedisQueryCache implements QueryCachePort {
       // `cache:stats:query:*`, not `query:*`, so the SCAN naturally excludes
       // them — no extra filter needed.
       let entriesCount = 0;
-      for await (const _key of this.redis.scanIterator({
+      for await (const _key of redis.scanIterator({
         MATCH: 'query:*',
         COUNT: 100,
       })) {
@@ -152,7 +138,7 @@ export class RedisQueryCache implements QueryCachePort {
       // Approximate size from Redis INFO (production would use more accurate measurement)
       let usedMemory = 0;
       try {
-        const infoRaw: unknown = await this.redis.info('memory');
+        const infoRaw: unknown = await redis.info('memory');
         const infoStr =
           typeof infoRaw === 'string'
             ? infoRaw
@@ -195,10 +181,11 @@ export class RedisQueryCache implements QueryCachePort {
    * explicitly only when starting a new measurement window.
    */
   async resetStats(): Promise<void> {
+    const redis = this.cache.redis;
     try {
       await Promise.all([
-        this.redis.del(this.statsKeyHits),
-        this.redis.del(this.statsKeyMisses),
+        redis.del(STATS_KEY_HITS),
+        redis.del(STATS_KEY_MISSES),
       ]);
     } catch (error) {
       log.error({ err: error }, 'reset stats error');

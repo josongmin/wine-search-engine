@@ -367,7 +367,10 @@ export async function createServer(
   });
 
   // Register routes
-  registerHealthRoutes(app, options?.health);
+  registerHealthRoutes(app, {
+    ...(options?.health ?? {}),
+    ...(options?.httpDebugSecret !== undefined ? { metricsDebugSecret: options.httpDebugSecret } : {}),
+  });
   registerClaudeToolsRoute(app, deps);
   registerSearchRoute(app, deps);
   registerBatchSearchRoute(app, deps);

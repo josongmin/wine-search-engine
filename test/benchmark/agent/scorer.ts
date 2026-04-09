@@ -145,6 +145,26 @@ export interface ScenarioScores {
   readonly overall: number;
   /** True when a hard / critical violation collapsed overall to 0. */
   readonly criticalFailure: boolean;
+
+  // ── RFC-020 constraint extraction metrics ───────────────────────
+  /** Semantic Constraint Recall (P1) — weighted bucket mean [0,1]. null when no expectedConstraints. */
+  readonly semanticConstraintRecall: number | null;
+  /** SCR hard bucket [0,1] or null. */
+  readonly scrHard: number | null;
+  /** SCR soft bucket [0,1] or null. */
+  readonly scrSoft: number | null;
+  /** SCR inferred bucket [0,1] or null. */
+  readonly scrInferred: number | null;
+  /** Entity Linking Accuracy @1 (P2). null when no expectedEntities. */
+  readonly entityLinkingAccuracy: number | null;
+  /** Slot F1 entity-level strict mode (P3). null when no expectedConstraints. */
+  readonly slotF1Strict: number | null;
+  /** Slot F1 entity-level relaxed mode (P3). null when no expectedConstraints. */
+  readonly slotF1Relaxed: number | null;
+  /** Constraint Satisfaction Rate weighted overall (P4). null when no observations or no constraints. */
+  readonly csrOverall: number | null;
+  /** CSR hard tier (P4). null when no hard constraints or no observations. */
+  readonly csrHard: number | null;
 }
 
 export interface ScenarioResult {
@@ -206,6 +226,16 @@ const ZERO_SCORES: ScenarioScores = {
   judge: null,
   overall: 0,
   criticalFailure: false,
+  // RFC-020: null by default — populated only when scenario has ground truth
+  semanticConstraintRecall: null,
+  scrHard: null,
+  scrSoft: null,
+  scrInferred: null,
+  entityLinkingAccuracy: null,
+  slotF1Strict: null,
+  slotF1Relaxed: null,
+  csrOverall: null,
+  csrHard: null,
 };
 
 /**
@@ -411,6 +441,55 @@ const CONTEXT_RELEVANCE_STOPWORDS: ReadonlySet<string> = new Set([
   '정도', '주세요', '원하는', '원해요', '알려줘', '알려주세요', '찾아줘', '찾아주세요',
 ]);
 
+/**
+ * Korean wine type → English canonical. Used by scoreContextRelevance to check
+ * that observations match the query's wine type. Module-scope (rule 16).
+ */
+const CTX_WINE_TYPE_MAP: ReadonlyArray<readonly [string, string]> = [
+  ['레드', 'red'],
+  ['화이트', 'white'],
+  ['스파클링', 'sparkling'],
+  ['로제', 'rosé'],
+];
+
+/**
+ * Korean country name patterns → English canonical. Aligned with
+ * KOREAN_COUNTRY_ALIASES in search-constraint-extractor.ts (rule 25: single
+ * source of truth). Module-scope (rule 16).
+ */
+const CTX_COUNTRY_MAP: ReadonlyArray<readonly [RegExp, string]> = [
+  [/프랑스/u, 'France'],
+  [/이탈리아/u, 'Italy'],
+  [/스페인/u, 'Spain'],
+  [/호주/u, 'Australia'],
+  [/칠레/u, 'Chile'],
+  [/미국/u, 'USA'],
+  [/아르헨티나/u, 'Argentina'],
+  [/독일/u, 'Germany'],
+  [/포르투갈/u, 'Portugal'],
+  [/뉴질랜드/u, 'New Zealand'],
+  [/남아공/u, 'South Africa'],
+  [/오스트리아/u, 'Austria'],
+];
+
+/**
+ * Korean region name → lowercase English canonical. Used by scoreContextRelevance.
+ * Aligned with entity-resolver.ts and nl-mapper.ts region entries (rule 25).
+ * Module-scope (rule 16).
+ */
+const CTX_REGION_MAP: ReadonlyArray<readonly [string, string]> = [
+  ['보르도', 'bordeaux'],
+  ['부르고뉴', 'burgundy'],
+  ['나파', 'napa'],
+  ['바롤로', 'barolo'],
+  ['토스카나', 'tuscany'],
+  ['리오하', 'rioja'],
+  ['샴페인', 'champagne'],
+  ['모젤', 'mosel'],
+  ['론', 'rhone'],
+  ['피에몬테', 'piedmont'],
+];
+
 /** Korean 만원 multiplier for price extraction. */
 const MAN_WON_MULTIPLIER = 10_000;
 /**
@@ -443,6 +522,25 @@ const BENCHMARK_REFERENCE_YEAR = 2026;
 // by the judge's mustCiteFromToolResults rubric criterion. See extractProperNouns
 // docstring for the rationale.
 
+/**
+ * RFC-020: constraint extraction metrics pre-computed by the benchmark runner
+ * via the offline eval rig (`runConstraintExtraction`). When provided, these
+ * values populate the ScenarioScores constraint dimensions.
+ */
+export interface ConstraintExtractionMetricsInput {
+  readonly semanticConstraintRecall: number | null;
+  readonly scrHard: number | null;
+  readonly scrSoft: number | null;
+  readonly scrInferred: number | null;
+  readonly entityLinkingAccuracy: number | null;
+  readonly slotF1Strict: number | null;
+  readonly slotF1Relaxed: number | null;
+  /** P4: Constraint Satisfaction Rate — weighted overall [0,1]. null when no observations. */
+  readonly csrOverall: number | null;
+  /** P4: CSR hard tier [0,1]. null when no hard constraints or no observations. */
+  readonly csrHard: number | null;
+}
+
 export function scoreScenario(
   scenario: AgentBenchmarkScenario,
   execution: ScenarioExecution | null,
@@ -455,6 +553,9 @@ export function scoreScenario(
    *  for downstream reporting. v5+: faithfulness dim derives from
    *  DiagnosticVector.faithfulnessScore (more granular than judgeFaithfulness). */
   claimDiagnostics?: DiagnosticVector,
+  /** RFC-020: pre-computed constraint extraction metrics. null-safe — each
+   *  field is nullable and only populated for scenarios with ground truth. */
+  constraintMetrics?: ConstraintExtractionMetricsInput,
 ): ScenarioResult {
   if (scenario.skip !== undefined) {
     return {
@@ -552,7 +653,7 @@ export function scoreScenario(
   // RAGAS Context Relevance: rule-based check of tool result relevance
   // against scenario's structured constraints (priceBandKrw, vintageRange, etc.).
   // null when no structured constraints or no observations.
-  const contextRelevance = scoreContextRelevance(exp, execution, diagnostics);
+  const contextRelevance = scoreContextRelevance(scenario, exp, execution, diagnostics);
 
   // RAGAS Context Recall: fraction of goldenKeywords that appeared in
   // agent observations. null when no goldenKeywords on the scenario or
@@ -683,6 +784,16 @@ export function scoreScenario(
       judge,
       overall,
       criticalFailure,
+      // RFC-020: constraint extraction metrics (null-safe pass-through)
+      semanticConstraintRecall: constraintMetrics?.semanticConstraintRecall ?? null,
+      scrHard: constraintMetrics?.scrHard ?? null,
+      scrSoft: constraintMetrics?.scrSoft ?? null,
+      scrInferred: constraintMetrics?.scrInferred ?? null,
+      entityLinkingAccuracy: constraintMetrics?.entityLinkingAccuracy ?? null,
+      slotF1Strict: constraintMetrics?.slotF1Strict ?? null,
+      slotF1Relaxed: constraintMetrics?.slotF1Relaxed ?? null,
+      csrOverall: constraintMetrics?.csrOverall ?? null,
+      csrHard: constraintMetrics?.csrHard ?? null,
     },
     ...(diagnostics.length > 0 ? { diagnostics, diagnosticStrings } : {}),
     judgeRequiredButSkipped,
@@ -1458,6 +1569,7 @@ function evaluatePredicate(
  * to align with RAGAS v2 terminology. The algorithm is unchanged.
  */
 function scoreContextRelevance(
+  scenario: AgentBenchmarkScenario,
   exp: ScenarioExpectation,
   execution: ScenarioExecution,
   diagnostics: Diagnostic[],
@@ -1506,6 +1618,36 @@ function scoreContextRelevance(
     const dwResult = parseDrinkingWindowFromObs(obsText, exp.drinkingWindowStatus);
     if (dwResult !== null) {
       checks.push({ passed: dwResult, label: `dw_status_${exp.drinkingWindowStatus}` });
+    }
+  }
+
+  // Cross-domain checks: wine_type, country, region.
+  // If the scenario query mentions a Korean term, verify the observation
+  // contains the corresponding English canonical value.
+  const queryNfkc = scenario.query.toLowerCase().normalize('NFKC');
+  const obsNfkc = normalizeObservations(execution.observations);
+
+  // Wine type check
+  for (const [korean, english] of CTX_WINE_TYPE_MAP) {
+    if (queryNfkc.includes(korean)) {
+      checks.push({ passed: obsNfkc.includes(english), label: `wine_type_${english}` });
+      break;
+    }
+  }
+
+  // Country check
+  for (const [pattern, canonical] of CTX_COUNTRY_MAP) {
+    if (pattern.test(queryNfkc)) {
+      checks.push({ passed: obsNfkc.includes(canonical.toLowerCase()), label: `country_${canonical}` });
+      break;
+    }
+  }
+
+  // Region check
+  for (const [korean, english] of CTX_REGION_MAP) {
+    if (queryNfkc.includes(korean)) {
+      checks.push({ passed: obsNfkc.includes(english), label: `region_${english}` });
+      break;
     }
   }
 

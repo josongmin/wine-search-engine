@@ -5,11 +5,29 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'RedisCache' });
 
+/**
+ * Options for {@link RedisCache.getValidatedWithStats} that enable per-domain
+ * hit/miss tracking and structured logging.
+ */
+export interface GetValidatedStatsOptions {
+  /** Redis key incremented on cache hit (after successful validation). */
+  readonly statsKeyHits: string;
+  /** Redis key incremented on cache miss (including poisoned entries). */
+  readonly statsKeyMisses: string;
+  /** Logging component name for poisoned-entry warnings. */
+  readonly logComponent: string;
+}
+
 export class RedisCache {
   constructor(
     private readonly client: RedisClient,
     private readonly defaultTtlSeconds: number,
   ) {}
+
+  /** Expose the underlying Redis client for domain-specific operations. */
+  get redis(): RedisClient {
+    return this.client;
+  }
 
   /**
    * @deprecated Prefer {@link getValidated} which validates the parsed value
@@ -51,6 +69,66 @@ export class RedisCache {
       void this.client.del(key).catch(() => undefined);
       return null;
     }
+    return result.data;
+  }
+
+  /**
+   * Validated cache read **with hit/miss stats tracking**.
+   *
+   * Single source of truth for the read → parse → validate → stats pipeline
+   * that every domain-specific cache needs. Handles:
+   * 1. Redis GET (returns null on miss after incrementing miss counter)
+   * 2. JSON.parse (deletes poisoned entry + miss counter on failure)
+   * 3. Zod validation (deletes schema-drifted entry + miss counter on failure)
+   * 4. Hit counter increment only after successful validation
+   *
+   * All Redis errors (GET, INCR, DEL) are swallowed to preserve "treat as miss"
+   * semantics — callers never see infrastructure errors.
+   */
+  async getValidatedWithStats<T>(
+    key: string,
+    schema: ZodType<T>,
+    stats: GetValidatedStatsOptions,
+  ): Promise<T | null> {
+    let raw: string | null;
+    try {
+      raw = await this.client.get(key);
+    } catch (error) {
+      log.error({ err: error, component: stats.logComponent }, 'redis get error');
+      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
+      return null;
+    }
+
+    if (raw === null) {
+      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
+      return null;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      log.warn(
+        { key, reason: 'json_parse_error', component: stats.logComponent },
+        'cache entry poisoned (invalid JSON); treating as miss',
+      );
+      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
+      try { await this.client.del(key); } catch { /* best-effort; TTL will clean up */ }
+      return null;
+    }
+
+    const result = schema.safeParse(parsed);
+    if (!result.success) {
+      log.warn(
+        { key, issues: result.error.issues.slice(0, 3), component: stats.logComponent },
+        'cache entry poisoned (schema mismatch); treating as miss',
+      );
+      try { await this.client.incr(stats.statsKeyMisses); } catch { /* best-effort */ }
+      try { await this.client.del(key); } catch { /* best-effort; TTL will clean up */ }
+      return null;
+    }
+
+    try { await this.client.incr(stats.statsKeyHits); } catch { /* best-effort */ }
     return result.data;
   }
 

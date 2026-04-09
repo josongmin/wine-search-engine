@@ -23,6 +23,7 @@ import { CandidateAssembler, type AssemblyPolicy } from './candidate-assembly.js
 import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
 import { accumulateEvidence } from './evidence-accumulator.js';
 import { applyRelativeFilter } from './relative-filter-policy.js';
+import { combineSemanticEmbeddings } from './semantic-embedding-combiner.js';
 import type { CacheService } from '../../performance/index.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { pipelineDebug } from '../../../observability/request-pipeline-debug.js';
@@ -179,7 +180,10 @@ export class CandidatePoolService {
             )
           : await this.embeddingService.embedBatch(input.semanticQueries);
 
-        const primaryEmbedding = embeddings[0];
+        const validEmbeddings = embeddings.filter(
+          (embedding): embedding is readonly number[] => embedding !== null,
+        );
+        const primaryEmbedding = combineSemanticEmbeddings(validEmbeddings);
         // Reject both undefined AND empty embeddings — an empty Float32Array
         // is truthy but produces nonsense ANN results / Vespa errors downstream.
         if (!primaryEmbedding || primaryEmbedding.length === 0) {
@@ -714,3 +718,4 @@ function tokenizeRetrievalValue(value: string): readonly string[] {
     .map((part) => part.trim())
     .filter((part) => part.length >= 2);
 }
+

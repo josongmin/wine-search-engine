@@ -1,4 +1,4 @@
-import { normalizeUnicode, stripAccents } from '../../shared/utils/unicode-normalize.js';
+import { normalizeUnicodeWithHomoglyphs, stripAccents } from '../../shared/utils/unicode-normalize.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
 
 const PUNCTUATION_STRIP_RE = /[^\p{L}\p{N}\s]+/gu;
@@ -201,7 +201,7 @@ const buildReorderedVariants = (value: string): readonly string[] => {
 export class QueryNormalizer {
   normalize(query: string): NormalizedQueryViews {
     const raw = query;
-    const strict = collapseWhitespace(normalizeUnicode(query)).toLowerCase();
+    const strict = collapseWhitespace(normalizeUnicodeWithHomoglyphs(query)).toLowerCase();
     const accentless = stripAccents(strict);
     const collapsedWhitespace = collapseWhitespace(accentless);
     const punctuationStripped = stripPunctuation(accentless);

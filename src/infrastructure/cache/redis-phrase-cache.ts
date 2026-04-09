@@ -13,7 +13,7 @@
  *
  * Observability:
  * - hit/miss counters live in Redis (`cache:stats:phrase:hits|misses`)
- *   matching the convention in {@link RedisEmbeddingCache}.
+ *   via {@link RedisCache.getValidatedWithStats}.
  * - getStats() exposes hit/miss/entries for /metrics consumers.
  *
  * Failure mode: All Redis errors are swallowed and surfaced as cache misses
@@ -25,6 +25,8 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { PhraseCachePort } from '../../domain/attribute/port/phrase-cache.port.js';
 import type { LlmConstraintItem } from '../../domain/attribute/model/llm-constraint-schema.js';
 import { LlmConstraintResponseSchema } from '../../domain/attribute/model/llm-constraint-schema.js';
+import { RedisCache } from '../adapter/redis-cache.js';
+import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
 
 const log = bootstrapLogger.child({ component: 'RedisPhraseCache' });
@@ -43,38 +45,26 @@ const PHRASE_CACHE_MAX_TTL_DAYS = 7;
 const PHRASE_CACHE_MAX_TTL_SECONDS =
   PHRASE_CACHE_MAX_TTL_DAYS * HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE;
 
+const PHRASE_STATS: GetValidatedStatsOptions = {
+  statsKeyHits: STATS_KEY_HITS,
+  statsKeyMisses: STATS_KEY_MISSES,
+  logComponent: 'RedisPhraseCache',
+};
+
 export class RedisPhraseCache implements PhraseCachePort {
-  constructor(private readonly redis: RedisClient) {}
+  private readonly cache: RedisCache;
+
+  constructor(redis: RedisClient) {
+    // defaultTtlSeconds is unused for phrase cache (TTL always explicit), but required by RedisCache.
+    this.cache = new RedisCache(redis, 0);
+  }
 
   async get(phrase: string): Promise<LlmConstraintItem[] | null> {
-    try {
-      const raw = await this.redis.get(REDIS_KEY_PREFIX + phrase);
-      if (raw === null) {
-        // Fire-and-forget stats; never block the cache path on counter errors.
-        this.redis.incr(STATS_KEY_MISSES).catch(() => undefined);
-        return null;
-      }
-      const parsed: unknown = JSON.parse(raw);
-      // Re-validate to defend against schema drift across deploys: a key
-      // written by an old binary may not match the current item shape.
-      // The cost is bounded by MAX_LLM_PHRASES (=20) per request, so the
-      // schema-drift insurance is worth the per-hit overhead.
-      const validated = LlmConstraintResponseSchema.safeParse(parsed);
-      if (!validated.success) {
-        log.warn(
-          { phrase, issues: validated.error.issues.slice(0, 3) },
-          'cached phrase entry failed schema validation; treating as miss',
-        );
-        this.redis.incr(STATS_KEY_MISSES).catch(() => undefined);
-        return null;
-      }
-      this.redis.incr(STATS_KEY_HITS).catch(() => undefined);
-      return validated.data;
-    } catch (err) {
-      log.warn({ err, phrase }, 'phrase cache read error; treating as miss');
-      this.redis.incr(STATS_KEY_MISSES).catch(() => undefined);
-      return null;
-    }
+    return this.cache.getValidatedWithStats(
+      REDIS_KEY_PREFIX + phrase,
+      LlmConstraintResponseSchema,
+      PHRASE_STATS,
+    );
   }
 
   async set(
@@ -84,21 +74,21 @@ export class RedisPhraseCache implements PhraseCachePort {
   ): Promise<void> {
     const safeTtl = clampTtl(ttlSeconds);
     try {
-      const serialized = JSON.stringify(items);
-      await this.redis.set(REDIS_KEY_PREFIX + phrase, serialized, { EX: safeTtl });
+      await this.cache.set(REDIS_KEY_PREFIX + phrase, items, safeTtl);
     } catch (err) {
       log.warn({ err, phrase }, 'phrase cache write error; ignoring');
     }
   }
 
   /**
-   * Operator-facing hit/miss counters. Mirrors RedisEmbeddingCache.getStats().
+   * Operator-facing hit/miss counters.
    */
   async getStats(): Promise<{ hits: number; misses: number }> {
     try {
+      const redis = this.cache.redis;
       const [hitsRaw, missesRaw] = await Promise.all([
-        this.redis.get(STATS_KEY_HITS),
-        this.redis.get(STATS_KEY_MISSES),
+        redis.get(STATS_KEY_HITS),
+        redis.get(STATS_KEY_MISSES),
       ]);
       const hitsInt = hitsRaw === null ? NaN : Number.parseInt(hitsRaw, 10);
       const missesInt = missesRaw === null ? NaN : Number.parseInt(missesRaw, 10);

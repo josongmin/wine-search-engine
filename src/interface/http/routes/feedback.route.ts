@@ -7,7 +7,7 @@ import {
 } from './contract-response.js';
 import { registerContractRoute } from './register-contract-route.js';
 import { FeedbackSubmitRouteContract } from './route-contracts.js';
-import { ErrorResponseSchema } from '../schemas/search-response.schema.js';
+import { buildSearchErrorResponse } from '../errors/error-response.js';
 import type { FeedbackSignal, FeedbackType } from '../../../domain/learning/model/feedback-signal.js';
 import { isQueryClass, type QueryClass } from '../../../domain/shared/types/query-class.js';
 import { createEntityId } from '../../../domain/shared/types/index.js';
@@ -82,15 +82,13 @@ export function registerFeedbackRoute(
           reply,
           FeedbackSubmitRouteContract,
           HTTP_STATUS_SERVICE_UNAVAILABLE,
-          ErrorResponseSchema.parse({
-            error: {
-              request_id: requestId,
-              code: 'FEEDBACK_UNAVAILABLE',
-              message: 'Feedback ingestion is disabled or Postgres is not configured.',
-              failure_reason: null,
-              retryable: true,
-            },
-          }),
+          buildSearchErrorResponse(
+            requestId,
+            'FEEDBACK_UNAVAILABLE',
+            'Feedback ingestion is disabled or Postgres is not configured.',
+            null,
+            true,
+          ),
         );
         return;
       }
@@ -132,15 +130,13 @@ export function registerFeedbackRoute(
           reply,
           FeedbackSubmitRouteContract,
           HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          ErrorResponseSchema.parse({
-            error: {
-              request_id: requestId,
-              code: 'INTERNAL_ERROR',
-              message: 'Failed to persist feedback signal.',
-              failure_reason: null,
-              retryable: true,
-            },
-          }),
+          buildSearchErrorResponse(
+            requestId,
+            'INTERNAL_ERROR',
+            'Failed to persist feedback signal.',
+            null,
+            true,
+          ),
         );
         return;
       }

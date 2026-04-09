@@ -47,6 +47,7 @@ const DENSE_FILTER_TARGET_HITS_MULTIPLIER = 5;
 const DENSE_TARGET_HITS_ABSOLUTE_CAP = 1000;
 /** Cap exploreAdditionalHits to limit HNSW graph exploration tail latency. */
 const DENSE_HNSW_EXPLORE_ADDITIONAL_CAP = 200;
+const STRUCTURED_QUERY_BASELINE_COUNT = 1;
 /**
  * Hard cap on entity-id count for bulk fetch helpers. Prevents a buggy or
  * malicious caller from issuing thousands of parallel Vespa batches that
@@ -79,6 +80,48 @@ function isString(v: unknown): v is string {
 
 function yqlEscapeString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+const STRUCTURED_QUERY_STRENGTH_MULTIPLIER = 0.35;
+const FILTER_STRENGTH_MULTIPLIER = 0.2;
+
+function buildStructuredQueryFeatureParams(
+  queries: readonly string[],
+  filters: readonly string[],
+): Record<string, number> {
+  const structuredQueryCount = Math.max(0, queries.length - STRUCTURED_QUERY_BASELINE_COUNT);
+  const normalizedQueries = queries.map((query) => query.toLowerCase());
+  const regionBoost = normalizedQueries.some((query) =>
+    query.includes('bordeaux')
+    || query.includes('burgundy')
+    || query.includes('napa')
+    || query.includes('champagne')
+    || query.includes('rioja')
+  ) ? 1 : 0;
+  const countryBoost = normalizedQueries.some((query) =>
+    query.includes('france')
+    || query.includes('italy')
+    || query.includes('spain')
+    || query.includes('usa')
+  ) ? 1 : 0;
+  const grapeBoost = normalizedQueries.some((query) =>
+    query.includes('cabernet')
+    || query.includes('merlot')
+    || query.includes('pinot')
+    || query.includes('chardonnay')
+    || query.includes('riesling')
+  ) ? 1 : 0;
+  const structuredStrength = Math.min(1, structuredQueryCount * STRUCTURED_QUERY_STRENGTH_MULTIPLIER);
+  const filterStrength = Math.min(1, filters.length * FILTER_STRENGTH_MULTIPLIER);
+
+  return {
+    'ranking.features.query(structured_query_terms_count)': structuredQueryCount,
+    'ranking.features.query(structured_query_strength)': structuredStrength,
+    'ranking.features.query(structured_region_boost)': regionBoost,
+    'ranking.features.query(structured_country_boost)': countryBoost,
+    'ranking.features.query(structured_grape_boost)': grapeBoost,
+    'ranking.features.query(filter_strength)': filterStrength,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,7 +228,8 @@ export class VespaSearchIndex implements SearchIndexPort {
     rankProfile: string = 'hybrid',
   ): Promise<readonly SparseHit[]> {
     const hits = limit ?? DEFAULT_SPARSE_LIMIT;
-    const filterClause = buildSparseFilters(filters ?? []);
+    const effectiveFilters = filters ?? [];
+    const filterClause = buildSparseFilters(effectiveFilters);
 
     // Per-query clause:
     //   userInput(@queryN)                             — general multi-term match via WAND
@@ -223,6 +267,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     const queryParams: Record<string, unknown> = {
       'ranking.profile': rankProfile,
       'presentation.summary': 'default',
+      ...buildStructuredQueryFeatureParams(queries, effectiveFilters),
     };
     for (let i = 0; i < queries.length; i++) {
       queryParams[`query${i}`] = queries[i];
@@ -265,7 +310,8 @@ export class VespaSearchIndex implements SearchIndexPort {
     rankProfile: string = 'hybrid',
   ): Promise<readonly DenseHit[]> {
     const requestedLimit = limit ?? DEFAULT_DENSE_LIMIT;
-    const filterClause = buildDenseFilters(filters ?? []);
+    const effectiveFilters = filters ?? [];
+    const filterClause = buildDenseFilters(effectiveFilters);
     // Filter starvation defense: when filters are present, the HNSW pass
     // returns `targetHits` candidates whose ordering is based on cosine
     // similarity ALONE — then `availability = true` and any custom filters
@@ -292,6 +338,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       'ranking.profile': rankProfile,
       'presentation.summary': 'default',
       'input.query(query_embedding)': embedding,
+      ...buildStructuredQueryFeatureParams([], effectiveFilters),
     });
 
     const children = response.root.children ?? [];

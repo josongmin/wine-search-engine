@@ -1,0 +1,3544 @@
+{
+  "version": "ontology-snapshot-v1.0",
+  "generatedAt": "2026-04-09T09:19:56.452Z",
+  "nodes": [
+    {
+      "id": "appellation:barbaresco",
+      "entityType": "appellation",
+      "canonicalLabel": "Barbaresco",
+      "aliases": [
+        "Barbaresco"
+      ],
+      "parents": [
+        "Piedmont",
+        "Italy"
+      ]
+    },
+    {
+      "id": "appellation:barolo",
+      "entityType": "appellation",
+      "canonicalLabel": "Barolo",
+      "aliases": [
+        "Barolo"
+      ],
+      "parents": [
+        "Piedmont",
+        "Italy"
+      ]
+    },
+    {
+      "id": "appellation:brunello di montalcino",
+      "entityType": "appellation",
+      "canonicalLabel": "Brunello Di Montalcino",
+      "aliases": [
+        "Brunello Di Montalcino"
+      ],
+      "parents": [
+        "Tuscany",
+        "Italy"
+      ]
+    },
+    {
+      "id": "appellation:chianti",
+      "entityType": "appellation",
+      "canonicalLabel": "Chianti",
+      "aliases": [
+        "Chianti"
+      ],
+      "parents": [
+        "Tuscany",
+        "Italy"
+      ]
+    },
+    {
+      "id": "appellation:chianti classico",
+      "entityType": "appellation",
+      "canonicalLabel": "Chianti Classico",
+      "aliases": [
+        "Chianti Classico"
+      ],
+      "parents": [
+        "Chianti",
+        "Tuscany",
+        "Italy"
+      ]
+    },
+    {
+      "id": "appellation:margaux",
+      "entityType": "appellation",
+      "canonicalLabel": "Margaux",
+      "aliases": [
+        "Margaux"
+      ],
+      "parents": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "appellation:pauillac",
+      "entityType": "appellation",
+      "canonicalLabel": "Pauillac",
+      "aliases": [
+        "Pauillac"
+      ],
+      "parents": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "appellation:saint-émilion",
+      "entityType": "appellation",
+      "canonicalLabel": "Saint-émilion",
+      "aliases": [
+        "Saint-émilion"
+      ],
+      "parents": [
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "country:argentina",
+      "entityType": "country",
+      "canonicalLabel": "Argentina",
+      "aliases": [
+        "Argentina"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:australia",
+      "entityType": "country",
+      "canonicalLabel": "Australia",
+      "aliases": [
+        "Australia"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:chile",
+      "entityType": "country",
+      "canonicalLabel": "Chile",
+      "aliases": [
+        "Chile"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:france",
+      "entityType": "country",
+      "canonicalLabel": "France",
+      "aliases": [
+        "France"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:germany",
+      "entityType": "country",
+      "canonicalLabel": "Germany",
+      "aliases": [
+        "Germany"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:italy",
+      "entityType": "country",
+      "canonicalLabel": "Italy",
+      "aliases": [
+        "Italy"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:new zealand",
+      "entityType": "country",
+      "canonicalLabel": "New Zealand",
+      "aliases": [
+        "New Zealand"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:portugal",
+      "entityType": "country",
+      "canonicalLabel": "Portugal",
+      "aliases": [
+        "Portugal"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:south africa",
+      "entityType": "country",
+      "canonicalLabel": "South Africa",
+      "aliases": [
+        "South Africa"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:spain",
+      "entityType": "country",
+      "canonicalLabel": "Spain",
+      "aliases": [
+        "Spain"
+      ],
+      "parents": []
+    },
+    {
+      "id": "country:united states",
+      "entityType": "country",
+      "canonicalLabel": "United States",
+      "aliases": [
+        "United States"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:albariño",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Albariño",
+      "aliases": [
+        "Albarino",
+        "Albariño"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:blaufränkisch",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Blaufränkisch",
+      "aliases": [
+        "Blaufrankisch",
+        "Blaufränkisch"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:cabernet franc",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Cabernet Franc",
+      "aliases": [
+        "Cab Franc",
+        "Cabernet Franc"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:cabernet sauvignon",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Cabernet Sauvignon",
+      "aliases": [
+        "Cab Sauv",
+        "Cabernet Sauvignon"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:carmenère",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Carmenère",
+      "aliases": [
+        "Carmenere",
+        "Carmenère"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:gewurztraminer",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Gewurztraminer",
+      "aliases": [
+        "Gewurztraminer",
+        "Gewürztraminer"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:grenache",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Grenache",
+      "aliases": [
+        "Garnacha",
+        "Grenache",
+        "Grenache Noir"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:grüner veltliner",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Grüner Veltliner",
+      "aliases": [
+        "Gruner Veltliner",
+        "Grüner Veltliner"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:mencía",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Mencía",
+      "aliases": [
+        "Mencia",
+        "Mencía"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:mourvèdre",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Mourvèdre",
+      "aliases": [
+        "Monastrell",
+        "Mourvedre",
+        "Mourvèdre"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:muscat",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Muscat",
+      "aliases": [
+        "Moscatel",
+        "Moscato",
+        "Muscat",
+        "Muscat Blanc"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:petite sirah",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Petite Sirah",
+      "aliases": [
+        "Petit Sirah",
+        "Petite Sirah"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:pinot blanc",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Pinot Blanc",
+      "aliases": [
+        "Pinot Bianco",
+        "Pinot Blanc"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:pinot gris",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Pinot Gris",
+      "aliases": [
+        "Pinot Grigio",
+        "Pinot Gris"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:sémillon",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Sémillon",
+      "aliases": [
+        "Semillon",
+        "Sémillon"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:syrah",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Syrah",
+      "aliases": [
+        "Shiraz",
+        "Syrah"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:torrontés",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Torrontés",
+      "aliases": [
+        "Torrontes",
+        "Torrontés"
+      ],
+      "parents": []
+    },
+    {
+      "id": "grape_primary:zinfandel",
+      "entityType": "grape_primary",
+      "canonicalLabel": "Zinfandel",
+      "aliases": [
+        "Primitivo",
+        "Zinfandel"
+      ],
+      "parents": []
+    },
+    {
+      "id": "region:abruzzo",
+      "entityType": "region",
+      "canonicalLabel": "Abruzzo",
+      "aliases": [
+        "Abruzzo"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:alentejo",
+      "entityType": "region",
+      "canonicalLabel": "Alentejo",
+      "aliases": [
+        "Alentejo"
+      ],
+      "parents": [
+        "Portugal"
+      ]
+    },
+    {
+      "id": "region:alsace",
+      "entityType": "region",
+      "canonicalLabel": "Alsace",
+      "aliases": [
+        "Alsace"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:amarone",
+      "entityType": "region",
+      "canonicalLabel": "Amarone",
+      "aliases": [
+        "Amarone"
+      ],
+      "parents": [
+        "Veneto",
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:barossa valley",
+      "entityType": "region",
+      "canonicalLabel": "Barossa Valley",
+      "aliases": [
+        "Barossa Valley"
+      ],
+      "parents": [
+        "South Australia",
+        "Australia"
+      ]
+    },
+    {
+      "id": "region:bolgheri",
+      "entityType": "region",
+      "canonicalLabel": "Bolgheri",
+      "aliases": [
+        "Bolgheri"
+      ],
+      "parents": [
+        "Tuscany",
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:bordeaux",
+      "entityType": "region",
+      "canonicalLabel": "Bordeaux",
+      "aliases": [
+        "Bordeaux"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:bourgogne",
+      "entityType": "region",
+      "canonicalLabel": "Bourgogne",
+      "aliases": [
+        "Bourgogne"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:burgundy",
+      "entityType": "region",
+      "canonicalLabel": "Burgundy",
+      "aliases": [
+        "Burgundy"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:california",
+      "entityType": "region",
+      "canonicalLabel": "California",
+      "aliases": [
+        "California"
+      ],
+      "parents": [
+        "United States"
+      ]
+    },
+    {
+      "id": "region:casablanca valley",
+      "entityType": "region",
+      "canonicalLabel": "Casablanca Valley",
+      "aliases": [
+        "Casablanca Valley"
+      ],
+      "parents": [
+        "Chile"
+      ]
+    },
+    {
+      "id": "region:catalonia",
+      "entityType": "region",
+      "canonicalLabel": "Catalonia",
+      "aliases": [
+        "Catalonia"
+      ],
+      "parents": [
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:central otago",
+      "entityType": "region",
+      "canonicalLabel": "Central Otago",
+      "aliases": [
+        "Central Otago"
+      ],
+      "parents": [
+        "New Zealand"
+      ]
+    },
+    {
+      "id": "region:chablis",
+      "entityType": "region",
+      "canonicalLabel": "Chablis",
+      "aliases": [
+        "Chablis"
+      ],
+      "parents": [
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:chambolle-musigny",
+      "entityType": "region",
+      "canonicalLabel": "Chambolle-musigny",
+      "aliases": [
+        "Chambolle-musigny"
+      ],
+      "parents": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:champagne",
+      "entityType": "region",
+      "canonicalLabel": "Champagne",
+      "aliases": [
+        "Champagne"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:chassagne-montrachet",
+      "entityType": "region",
+      "canonicalLabel": "Chassagne-montrachet",
+      "aliases": [
+        "Chassagne-montrachet"
+      ],
+      "parents": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:châteauneuf-du-pape",
+      "entityType": "region",
+      "canonicalLabel": "Châteauneuf-du-pape",
+      "aliases": [
+        "Châteauneuf-du-pape"
+      ],
+      "parents": [
+        "Southern Rhône",
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:clare valley",
+      "entityType": "region",
+      "canonicalLabel": "Clare Valley",
+      "aliases": [
+        "Clare Valley"
+      ],
+      "parents": [
+        "South Australia",
+        "Australia"
+      ]
+    },
+    {
+      "id": "region:colchagua valley",
+      "entityType": "region",
+      "canonicalLabel": "Colchagua Valley",
+      "aliases": [
+        "Colchagua Valley"
+      ],
+      "parents": [
+        "Chile"
+      ]
+    },
+    {
+      "id": "region:columbia valley",
+      "entityType": "region",
+      "canonicalLabel": "Columbia Valley",
+      "aliases": [
+        "Columbia Valley"
+      ],
+      "parents": [
+        "Washington",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:constantia",
+      "entityType": "region",
+      "canonicalLabel": "Constantia",
+      "aliases": [
+        "Constantia"
+      ],
+      "parents": [
+        "South Africa"
+      ]
+    },
+    {
+      "id": "region:cornas",
+      "entityType": "region",
+      "canonicalLabel": "Cornas",
+      "aliases": [
+        "Cornas"
+      ],
+      "parents": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:côte de beaune",
+      "entityType": "region",
+      "canonicalLabel": "Côte De Beaune",
+      "aliases": [
+        "Côte De Beaune"
+      ],
+      "parents": [
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:côte de nuits",
+      "entityType": "region",
+      "canonicalLabel": "Côte De Nuits",
+      "aliases": [
+        "Côte De Nuits"
+      ],
+      "parents": [
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:côte-rôtie",
+      "entityType": "region",
+      "canonicalLabel": "Côte-rôtie",
+      "aliases": [
+        "Côte-rôtie"
+      ],
+      "parents": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:côtes du rhône",
+      "entityType": "region",
+      "canonicalLabel": "Côtes Du Rhône",
+      "aliases": [
+        "Côtes Du Rhône"
+      ],
+      "parents": [
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:crozes-hermitage",
+      "entityType": "region",
+      "canonicalLabel": "Crozes-hermitage",
+      "aliases": [
+        "Crozes-hermitage"
+      ],
+      "parents": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:dão",
+      "entityType": "region",
+      "canonicalLabel": "Dão",
+      "aliases": [
+        "Dão"
+      ],
+      "parents": [
+        "Portugal"
+      ]
+    },
+    {
+      "id": "region:douro",
+      "entityType": "region",
+      "canonicalLabel": "Douro",
+      "aliases": [
+        "Douro"
+      ],
+      "parents": [
+        "Portugal"
+      ]
+    },
+    {
+      "id": "region:etna",
+      "entityType": "region",
+      "canonicalLabel": "Etna",
+      "aliases": [
+        "Etna"
+      ],
+      "parents": [
+        "Sicily",
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:gevrey-chambertin",
+      "entityType": "region",
+      "canonicalLabel": "Gevrey-chambertin",
+      "aliases": [
+        "Gevrey-chambertin"
+      ],
+      "parents": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:gigondas",
+      "entityType": "region",
+      "canonicalLabel": "Gigondas",
+      "aliases": [
+        "Gigondas"
+      ],
+      "parents": [
+        "Southern Rhône",
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:graves",
+      "entityType": "region",
+      "canonicalLabel": "Graves",
+      "aliases": [
+        "Graves"
+      ],
+      "parents": [
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:haut-médoc",
+      "entityType": "region",
+      "canonicalLabel": "Haut-médoc",
+      "aliases": [
+        "Haut-médoc"
+      ],
+      "parents": [
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:hawke's bay",
+      "entityType": "region",
+      "canonicalLabel": "Hawke's Bay",
+      "aliases": [
+        "Hawke's Bay"
+      ],
+      "parents": [
+        "New Zealand"
+      ]
+    },
+    {
+      "id": "region:hermitage",
+      "entityType": "region",
+      "canonicalLabel": "Hermitage",
+      "aliases": [
+        "Hermitage"
+      ],
+      "parents": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:hunter valley",
+      "entityType": "region",
+      "canonicalLabel": "Hunter Valley",
+      "aliases": [
+        "Hunter Valley"
+      ],
+      "parents": [
+        "New South Wales",
+        "Australia"
+      ]
+    },
+    {
+      "id": "region:langhe",
+      "entityType": "region",
+      "canonicalLabel": "Langhe",
+      "aliases": [
+        "Langhe"
+      ],
+      "parents": [
+        "Piedmont",
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:languedoc",
+      "entityType": "region",
+      "canonicalLabel": "Languedoc",
+      "aliases": [
+        "Languedoc"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:loire",
+      "entityType": "region",
+      "canonicalLabel": "Loire",
+      "aliases": [
+        "Loire"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:maipo valley",
+      "entityType": "region",
+      "canonicalLabel": "Maipo Valley",
+      "aliases": [
+        "Maipo Valley"
+      ],
+      "parents": [
+        "Chile"
+      ]
+    },
+    {
+      "id": "region:margaret river",
+      "entityType": "region",
+      "canonicalLabel": "Margaret River",
+      "aliases": [
+        "Margaret River"
+      ],
+      "parents": [
+        "Western Australia",
+        "Australia"
+      ]
+    },
+    {
+      "id": "region:marlborough",
+      "entityType": "region",
+      "canonicalLabel": "Marlborough",
+      "aliases": [
+        "Marlborough"
+      ],
+      "parents": [
+        "New Zealand"
+      ]
+    },
+    {
+      "id": "region:mclaren vale",
+      "entityType": "region",
+      "canonicalLabel": "Mclaren Vale",
+      "aliases": [
+        "Mclaren Vale"
+      ],
+      "parents": [
+        "South Australia",
+        "Australia"
+      ]
+    },
+    {
+      "id": "region:médoc",
+      "entityType": "region",
+      "canonicalLabel": "Médoc",
+      "aliases": [
+        "Médoc"
+      ],
+      "parents": [
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:mendoza",
+      "entityType": "region",
+      "canonicalLabel": "Mendoza",
+      "aliases": [
+        "Mendoza"
+      ],
+      "parents": [
+        "Argentina"
+      ]
+    },
+    {
+      "id": "region:meursault",
+      "entityType": "region",
+      "canonicalLabel": "Meursault",
+      "aliases": [
+        "Meursault"
+      ],
+      "parents": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:morey-saint-denis",
+      "entityType": "region",
+      "canonicalLabel": "Morey-saint-denis",
+      "aliases": [
+        "Morey-saint-denis"
+      ],
+      "parents": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:mosel",
+      "entityType": "region",
+      "canonicalLabel": "Mosel",
+      "aliases": [
+        "Mosel"
+      ],
+      "parents": [
+        "Germany"
+      ]
+    },
+    {
+      "id": "region:muscadet",
+      "entityType": "region",
+      "canonicalLabel": "Muscadet",
+      "aliases": [
+        "Muscadet"
+      ],
+      "parents": [
+        "Loire",
+        "France"
+      ]
+    },
+    {
+      "id": "region:napa valley",
+      "entityType": "region",
+      "canonicalLabel": "Napa Valley",
+      "aliases": [
+        "Napa Valley"
+      ],
+      "parents": [
+        "California",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:northern rhône",
+      "entityType": "region",
+      "canonicalLabel": "Northern Rhône",
+      "aliases": [
+        "Northern Rhône"
+      ],
+      "parents": [
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:nuits-saint-georges",
+      "entityType": "region",
+      "canonicalLabel": "Nuits-saint-georges",
+      "aliases": [
+        "Nuits-saint-georges"
+      ],
+      "parents": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:oregon",
+      "entityType": "region",
+      "canonicalLabel": "Oregon",
+      "aliases": [
+        "Oregon"
+      ],
+      "parents": [
+        "United States"
+      ]
+    },
+    {
+      "id": "region:paso robles",
+      "entityType": "region",
+      "canonicalLabel": "Paso Robles",
+      "aliases": [
+        "Paso Robles"
+      ],
+      "parents": [
+        "California",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:penedès",
+      "entityType": "region",
+      "canonicalLabel": "Penedès",
+      "aliases": [
+        "Penedès"
+      ],
+      "parents": [
+        "Catalonia",
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:pessac-léognan",
+      "entityType": "region",
+      "canonicalLabel": "Pessac-léognan",
+      "aliases": [
+        "Pessac-léognan"
+      ],
+      "parents": [
+        "Graves",
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:pfalz",
+      "entityType": "region",
+      "canonicalLabel": "Pfalz",
+      "aliases": [
+        "Pfalz"
+      ],
+      "parents": [
+        "Germany"
+      ]
+    },
+    {
+      "id": "region:piedmont",
+      "entityType": "region",
+      "canonicalLabel": "Piedmont",
+      "aliases": [
+        "Piedmont"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:piemonte",
+      "entityType": "region",
+      "canonicalLabel": "Piemonte",
+      "aliases": [
+        "Piemonte"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:pomerol",
+      "entityType": "region",
+      "canonicalLabel": "Pomerol",
+      "aliases": [
+        "Pomerol"
+      ],
+      "parents": [
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:pommard",
+      "entityType": "region",
+      "canonicalLabel": "Pommard",
+      "aliases": [
+        "Pommard"
+      ],
+      "parents": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:pouilly-fumé",
+      "entityType": "region",
+      "canonicalLabel": "Pouilly-fumé",
+      "aliases": [
+        "Pouilly-fumé"
+      ],
+      "parents": [
+        "Loire",
+        "France"
+      ]
+    },
+    {
+      "id": "region:priorat",
+      "entityType": "region",
+      "canonicalLabel": "Priorat",
+      "aliases": [
+        "Priorat"
+      ],
+      "parents": [
+        "Catalonia",
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:provence",
+      "entityType": "region",
+      "canonicalLabel": "Provence",
+      "aliases": [
+        "Provence"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:puligny-montrachet",
+      "entityType": "region",
+      "canonicalLabel": "Puligny-montrachet",
+      "aliases": [
+        "Puligny-montrachet"
+      ],
+      "parents": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:rheingau",
+      "entityType": "region",
+      "canonicalLabel": "Rheingau",
+      "aliases": [
+        "Rheingau"
+      ],
+      "parents": [
+        "Germany"
+      ]
+    },
+    {
+      "id": "region:rheinhessen",
+      "entityType": "region",
+      "canonicalLabel": "Rheinhessen",
+      "aliases": [
+        "Rheinhessen"
+      ],
+      "parents": [
+        "Germany"
+      ]
+    },
+    {
+      "id": "region:rhône valley",
+      "entityType": "region",
+      "canonicalLabel": "Rhône Valley",
+      "aliases": [
+        "Rhône Valley"
+      ],
+      "parents": [
+        "France"
+      ]
+    },
+    {
+      "id": "region:rías baixas",
+      "entityType": "region",
+      "canonicalLabel": "Rías Baixas",
+      "aliases": [
+        "Rías Baixas"
+      ],
+      "parents": [
+        "Galicia",
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:ribera del duero",
+      "entityType": "region",
+      "canonicalLabel": "Ribera Del Duero",
+      "aliases": [
+        "Ribera Del Duero"
+      ],
+      "parents": [
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:rioja",
+      "entityType": "region",
+      "canonicalLabel": "Rioja",
+      "aliases": [
+        "Rioja"
+      ],
+      "parents": [
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:rueda",
+      "entityType": "region",
+      "canonicalLabel": "Rueda",
+      "aliases": [
+        "Rueda"
+      ],
+      "parents": [
+        "Spain"
+      ]
+    },
+    {
+      "id": "region:russian river valley",
+      "entityType": "region",
+      "canonicalLabel": "Russian River Valley",
+      "aliases": [
+        "Russian River Valley"
+      ],
+      "parents": [
+        "Sonoma County",
+        "California",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:saint-estèphe",
+      "entityType": "region",
+      "canonicalLabel": "Saint-estèphe",
+      "aliases": [
+        "Saint-estèphe"
+      ],
+      "parents": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:saint-julien",
+      "entityType": "region",
+      "canonicalLabel": "Saint-julien",
+      "aliases": [
+        "Saint-julien"
+      ],
+      "parents": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:sancerre",
+      "entityType": "region",
+      "canonicalLabel": "Sancerre",
+      "aliases": [
+        "Sancerre"
+      ],
+      "parents": [
+        "Loire",
+        "France"
+      ]
+    },
+    {
+      "id": "region:santa barbara",
+      "entityType": "region",
+      "canonicalLabel": "Santa Barbara",
+      "aliases": [
+        "Santa Barbara"
+      ],
+      "parents": [
+        "California",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:sauternes",
+      "entityType": "region",
+      "canonicalLabel": "Sauternes",
+      "aliases": [
+        "Sauternes"
+      ],
+      "parents": [
+        "Bordeaux",
+        "France"
+      ]
+    },
+    {
+      "id": "region:sicily",
+      "entityType": "region",
+      "canonicalLabel": "Sicily",
+      "aliases": [
+        "Sicily"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:soave",
+      "entityType": "region",
+      "canonicalLabel": "Soave",
+      "aliases": [
+        "Soave"
+      ],
+      "parents": [
+        "Veneto",
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:sonoma county",
+      "entityType": "region",
+      "canonicalLabel": "Sonoma County",
+      "aliases": [
+        "Sonoma County"
+      ],
+      "parents": [
+        "California",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:south australia",
+      "entityType": "region",
+      "canonicalLabel": "South Australia",
+      "aliases": [
+        "South Australia"
+      ],
+      "parents": [
+        "Australia"
+      ]
+    },
+    {
+      "id": "region:southern rhône",
+      "entityType": "region",
+      "canonicalLabel": "Southern Rhône",
+      "aliases": [
+        "Southern Rhône"
+      ],
+      "parents": [
+        "Rhône Valley",
+        "France"
+      ]
+    },
+    {
+      "id": "region:stellenbosch",
+      "entityType": "region",
+      "canonicalLabel": "Stellenbosch",
+      "aliases": [
+        "Stellenbosch"
+      ],
+      "parents": [
+        "South Africa"
+      ]
+    },
+    {
+      "id": "region:swartland",
+      "entityType": "region",
+      "canonicalLabel": "Swartland",
+      "aliases": [
+        "Swartland"
+      ],
+      "parents": [
+        "South Africa"
+      ]
+    },
+    {
+      "id": "region:toscana",
+      "entityType": "region",
+      "canonicalLabel": "Toscana",
+      "aliases": [
+        "Toscana"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:tuscany",
+      "entityType": "region",
+      "canonicalLabel": "Tuscany",
+      "aliases": [
+        "Tuscany"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:uco valley",
+      "entityType": "region",
+      "canonicalLabel": "Uco Valley",
+      "aliases": [
+        "Uco Valley"
+      ],
+      "parents": [
+        "Mendoza",
+        "Argentina"
+      ]
+    },
+    {
+      "id": "region:valpolicella",
+      "entityType": "region",
+      "canonicalLabel": "Valpolicella",
+      "aliases": [
+        "Valpolicella"
+      ],
+      "parents": [
+        "Veneto",
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:veneto",
+      "entityType": "region",
+      "canonicalLabel": "Veneto",
+      "aliases": [
+        "Veneto"
+      ],
+      "parents": [
+        "Italy"
+      ]
+    },
+    {
+      "id": "region:volnay",
+      "entityType": "region",
+      "canonicalLabel": "Volnay",
+      "aliases": [
+        "Volnay"
+      ],
+      "parents": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:vosne-romanée",
+      "entityType": "region",
+      "canonicalLabel": "Vosne-romanée",
+      "aliases": [
+        "Vosne-romanée"
+      ],
+      "parents": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ]
+    },
+    {
+      "id": "region:washington",
+      "entityType": "region",
+      "canonicalLabel": "Washington",
+      "aliases": [
+        "Washington"
+      ],
+      "parents": [
+        "United States"
+      ]
+    },
+    {
+      "id": "region:willamette valley",
+      "entityType": "region",
+      "canonicalLabel": "Willamette Valley",
+      "aliases": [
+        "Willamette Valley"
+      ],
+      "parents": [
+        "Oregon",
+        "United States"
+      ]
+    },
+    {
+      "id": "region:yarra valley",
+      "entityType": "region",
+      "canonicalLabel": "Yarra Valley",
+      "aliases": [
+        "Yarra Valley"
+      ],
+      "parents": [
+        "Victoria",
+        "Australia"
+      ]
+    },
+    {
+      "id": "wine_type:dessert",
+      "entityType": "wine_type",
+      "canonicalLabel": "dessert",
+      "aliases": [
+        "dessert",
+        "sweet",
+        "디저트"
+      ],
+      "parents": []
+    },
+    {
+      "id": "wine_type:fortified",
+      "entityType": "wine_type",
+      "canonicalLabel": "fortified",
+      "aliases": [
+        "fortified",
+        "madeira",
+        "port",
+        "sherry",
+        "포트"
+      ],
+      "parents": []
+    },
+    {
+      "id": "wine_type:red",
+      "entityType": "wine_type",
+      "canonicalLabel": "red",
+      "aliases": [
+        "red",
+        "rosso",
+        "rouge",
+        "tinto",
+        "레드"
+      ],
+      "parents": []
+    },
+    {
+      "id": "wine_type:rosé",
+      "entityType": "wine_type",
+      "canonicalLabel": "rosé",
+      "aliases": [
+        "rose",
+        "rosé",
+        "로제"
+      ],
+      "parents": []
+    },
+    {
+      "id": "wine_type:sparkling",
+      "entityType": "wine_type",
+      "canonicalLabel": "sparkling",
+      "aliases": [
+        "champagne",
+        "sparkling",
+        "스파클링"
+      ],
+      "parents": []
+    },
+    {
+      "id": "wine_type:white",
+      "entityType": "wine_type",
+      "canonicalLabel": "white",
+      "aliases": [
+        "bianco",
+        "blanc",
+        "blanco",
+        "white",
+        "화이트"
+      ],
+      "parents": []
+    }
+  ],
+  "entities": {
+    "appellation:barbaresco": {
+      "id": "appellation:barbaresco",
+      "type": "appellation",
+      "canonical": "Barbaresco",
+      "parent": "Piedmont",
+      "hierarchy": [
+        "Piedmont",
+        "Italy"
+      ],
+      "aliases": [
+        "Barbaresco"
+      ]
+    },
+    "appellation:barolo": {
+      "id": "appellation:barolo",
+      "type": "appellation",
+      "canonical": "Barolo",
+      "parent": "Piedmont",
+      "hierarchy": [
+        "Piedmont",
+        "Italy"
+      ],
+      "aliases": [
+        "Barolo",
+        "바롤로"
+      ]
+    },
+    "appellation:brunello di montalcino": {
+      "id": "appellation:brunello di montalcino",
+      "type": "appellation",
+      "canonical": "Brunello Di Montalcino",
+      "parent": "Tuscany",
+      "hierarchy": [
+        "Tuscany",
+        "Italy"
+      ],
+      "aliases": [
+        "Brunello Di Montalcino",
+        "브루넬로"
+      ]
+    },
+    "appellation:chianti": {
+      "id": "appellation:chianti",
+      "type": "appellation",
+      "canonical": "Chianti",
+      "parent": "Tuscany",
+      "hierarchy": [
+        "Tuscany",
+        "Italy"
+      ],
+      "aliases": [
+        "Chianti"
+      ]
+    },
+    "appellation:chianti classico": {
+      "id": "appellation:chianti classico",
+      "type": "appellation",
+      "canonical": "Chianti Classico",
+      "parent": "Chianti",
+      "hierarchy": [
+        "Chianti",
+        "Tuscany",
+        "Italy"
+      ],
+      "aliases": [
+        "Chianti Classico"
+      ]
+    },
+    "appellation:margaux": {
+      "id": "appellation:margaux",
+      "type": "appellation",
+      "canonical": "Margaux",
+      "parent": "Haut-médoc",
+      "hierarchy": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Margaux"
+      ]
+    },
+    "appellation:pauillac": {
+      "id": "appellation:pauillac",
+      "type": "appellation",
+      "canonical": "Pauillac",
+      "parent": "Haut-médoc",
+      "hierarchy": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Pauillac"
+      ]
+    },
+    "appellation:saint-émilion": {
+      "id": "appellation:saint-émilion",
+      "type": "appellation",
+      "canonical": "Saint-émilion",
+      "parent": "Bordeaux",
+      "hierarchy": [
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Saint-émilion"
+      ]
+    },
+    "country:argentina": {
+      "id": "country:argentina",
+      "type": "country",
+      "canonical": "Argentina",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Argentina"
+      ]
+    },
+    "country:australia": {
+      "id": "country:australia",
+      "type": "country",
+      "canonical": "Australia",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Australia",
+        "호주"
+      ]
+    },
+    "country:chile": {
+      "id": "country:chile",
+      "type": "country",
+      "canonical": "Chile",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Chile",
+        "칠레"
+      ]
+    },
+    "country:france": {
+      "id": "country:france",
+      "type": "country",
+      "canonical": "France",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "France",
+        "프랑스"
+      ]
+    },
+    "country:germany": {
+      "id": "country:germany",
+      "type": "country",
+      "canonical": "Germany",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Germany"
+      ]
+    },
+    "country:italy": {
+      "id": "country:italy",
+      "type": "country",
+      "canonical": "Italy",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Italy",
+        "이탈리아"
+      ]
+    },
+    "country:new zealand": {
+      "id": "country:new zealand",
+      "type": "country",
+      "canonical": "New Zealand",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "New Zealand"
+      ]
+    },
+    "country:portugal": {
+      "id": "country:portugal",
+      "type": "country",
+      "canonical": "Portugal",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Portugal"
+      ]
+    },
+    "country:south africa": {
+      "id": "country:south africa",
+      "type": "country",
+      "canonical": "South Africa",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "South Africa"
+      ]
+    },
+    "country:spain": {
+      "id": "country:spain",
+      "type": "country",
+      "canonical": "Spain",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Spain"
+      ]
+    },
+    "country:united states": {
+      "id": "country:united states",
+      "type": "country",
+      "canonical": "United States",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "United States"
+      ]
+    },
+    "grape_primary:albariño": {
+      "id": "grape_primary:albariño",
+      "type": "grape_primary",
+      "canonical": "Albariño",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Albarino",
+        "Albariño"
+      ]
+    },
+    "grape_primary:blaufränkisch": {
+      "id": "grape_primary:blaufränkisch",
+      "type": "grape_primary",
+      "canonical": "Blaufränkisch",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Blaufrankisch",
+        "Blaufränkisch"
+      ]
+    },
+    "grape_primary:cabernet franc": {
+      "id": "grape_primary:cabernet franc",
+      "type": "grape_primary",
+      "canonical": "Cabernet Franc",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Cab Franc",
+        "Cabernet Franc"
+      ]
+    },
+    "grape_primary:cabernet sauvignon": {
+      "id": "grape_primary:cabernet sauvignon",
+      "type": "grape_primary",
+      "canonical": "Cabernet Sauvignon",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Cab Sauv",
+        "Cabernet Sauvignon",
+        "카베르네"
+      ]
+    },
+    "grape_primary:carmenère": {
+      "id": "grape_primary:carmenère",
+      "type": "grape_primary",
+      "canonical": "Carmenère",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Carmenere",
+        "Carmenère"
+      ]
+    },
+    "grape_primary:gewurztraminer": {
+      "id": "grape_primary:gewurztraminer",
+      "type": "grape_primary",
+      "canonical": "Gewurztraminer",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Gewurztraminer",
+        "Gewürztraminer"
+      ]
+    },
+    "grape_primary:grenache": {
+      "id": "grape_primary:grenache",
+      "type": "grape_primary",
+      "canonical": "Grenache",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Garnacha",
+        "Grenache",
+        "Grenache Noir"
+      ]
+    },
+    "grape_primary:grüner veltliner": {
+      "id": "grape_primary:grüner veltliner",
+      "type": "grape_primary",
+      "canonical": "Grüner Veltliner",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Gruner Veltliner",
+        "Grüner Veltliner"
+      ]
+    },
+    "grape_primary:mencía": {
+      "id": "grape_primary:mencía",
+      "type": "grape_primary",
+      "canonical": "Mencía",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Mencia",
+        "Mencía"
+      ]
+    },
+    "grape_primary:mourvèdre": {
+      "id": "grape_primary:mourvèdre",
+      "type": "grape_primary",
+      "canonical": "Mourvèdre",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Monastrell",
+        "Mourvedre",
+        "Mourvèdre"
+      ]
+    },
+    "grape_primary:muscat": {
+      "id": "grape_primary:muscat",
+      "type": "grape_primary",
+      "canonical": "Muscat",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Moscatel",
+        "Moscato",
+        "Muscat",
+        "Muscat Blanc"
+      ]
+    },
+    "grape_primary:petite sirah": {
+      "id": "grape_primary:petite sirah",
+      "type": "grape_primary",
+      "canonical": "Petite Sirah",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Petit Sirah",
+        "Petite Sirah"
+      ]
+    },
+    "grape_primary:pinot blanc": {
+      "id": "grape_primary:pinot blanc",
+      "type": "grape_primary",
+      "canonical": "Pinot Blanc",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Pinot Bianco",
+        "Pinot Blanc"
+      ]
+    },
+    "grape_primary:pinot gris": {
+      "id": "grape_primary:pinot gris",
+      "type": "grape_primary",
+      "canonical": "Pinot Gris",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Pinot Grigio",
+        "Pinot Gris"
+      ]
+    },
+    "grape_primary:sémillon": {
+      "id": "grape_primary:sémillon",
+      "type": "grape_primary",
+      "canonical": "Sémillon",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Semillon",
+        "Sémillon"
+      ]
+    },
+    "grape_primary:syrah": {
+      "id": "grape_primary:syrah",
+      "type": "grape_primary",
+      "canonical": "Syrah",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Shiraz",
+        "Syrah"
+      ]
+    },
+    "grape_primary:torrontés": {
+      "id": "grape_primary:torrontés",
+      "type": "grape_primary",
+      "canonical": "Torrontés",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Torrontes",
+        "Torrontés"
+      ]
+    },
+    "grape_primary:zinfandel": {
+      "id": "grape_primary:zinfandel",
+      "type": "grape_primary",
+      "canonical": "Zinfandel",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "Primitivo",
+        "Zinfandel"
+      ]
+    },
+    "region:abruzzo": {
+      "id": "region:abruzzo",
+      "type": "region",
+      "canonical": "Abruzzo",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Abruzzo"
+      ]
+    },
+    "region:alentejo": {
+      "id": "region:alentejo",
+      "type": "region",
+      "canonical": "Alentejo",
+      "parent": "Portugal",
+      "hierarchy": [
+        "Portugal"
+      ],
+      "aliases": [
+        "Alentejo"
+      ]
+    },
+    "region:alsace": {
+      "id": "region:alsace",
+      "type": "region",
+      "canonical": "Alsace",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Alsace"
+      ]
+    },
+    "region:amarone": {
+      "id": "region:amarone",
+      "type": "region",
+      "canonical": "Amarone",
+      "parent": "Veneto",
+      "hierarchy": [
+        "Veneto",
+        "Italy"
+      ],
+      "aliases": [
+        "Amarone"
+      ]
+    },
+    "region:barossa valley": {
+      "id": "region:barossa valley",
+      "type": "region",
+      "canonical": "Barossa Valley",
+      "parent": "South Australia",
+      "hierarchy": [
+        "South Australia",
+        "Australia"
+      ],
+      "aliases": [
+        "Barossa Valley"
+      ]
+    },
+    "region:bolgheri": {
+      "id": "region:bolgheri",
+      "type": "region",
+      "canonical": "Bolgheri",
+      "parent": "Tuscany",
+      "hierarchy": [
+        "Tuscany",
+        "Italy"
+      ],
+      "aliases": [
+        "Bolgheri"
+      ]
+    },
+    "region:bordeaux": {
+      "id": "region:bordeaux",
+      "type": "region",
+      "canonical": "Bordeaux",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Bordeaux",
+        "보르도"
+      ]
+    },
+    "region:bourgogne": {
+      "id": "region:bourgogne",
+      "type": "region",
+      "canonical": "Bourgogne",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Bourgogne"
+      ]
+    },
+    "region:burgundy": {
+      "id": "region:burgundy",
+      "type": "region",
+      "canonical": "Burgundy",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Burgundy",
+        "부르고뉴"
+      ]
+    },
+    "region:california": {
+      "id": "region:california",
+      "type": "region",
+      "canonical": "California",
+      "parent": "United States",
+      "hierarchy": [
+        "United States"
+      ],
+      "aliases": [
+        "California"
+      ]
+    },
+    "region:casablanca valley": {
+      "id": "region:casablanca valley",
+      "type": "region",
+      "canonical": "Casablanca Valley",
+      "parent": "Chile",
+      "hierarchy": [
+        "Chile"
+      ],
+      "aliases": [
+        "Casablanca Valley"
+      ]
+    },
+    "region:catalonia": {
+      "id": "region:catalonia",
+      "type": "region",
+      "canonical": "Catalonia",
+      "parent": "Spain",
+      "hierarchy": [
+        "Spain"
+      ],
+      "aliases": [
+        "Catalonia"
+      ]
+    },
+    "region:central otago": {
+      "id": "region:central otago",
+      "type": "region",
+      "canonical": "Central Otago",
+      "parent": "New Zealand",
+      "hierarchy": [
+        "New Zealand"
+      ],
+      "aliases": [
+        "Central Otago"
+      ]
+    },
+    "region:chablis": {
+      "id": "region:chablis",
+      "type": "region",
+      "canonical": "Chablis",
+      "parent": "Burgundy",
+      "hierarchy": [
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Chablis"
+      ]
+    },
+    "region:chambolle-musigny": {
+      "id": "region:chambolle-musigny",
+      "type": "region",
+      "canonical": "Chambolle-musigny",
+      "parent": "Côte De Nuits",
+      "hierarchy": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Chambolle-musigny"
+      ]
+    },
+    "region:champagne": {
+      "id": "region:champagne",
+      "type": "region",
+      "canonical": "Champagne",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Champagne",
+        "샴페인"
+      ]
+    },
+    "region:chassagne-montrachet": {
+      "id": "region:chassagne-montrachet",
+      "type": "region",
+      "canonical": "Chassagne-montrachet",
+      "parent": "Côte De Beaune",
+      "hierarchy": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Chassagne-montrachet"
+      ]
+    },
+    "region:châteauneuf-du-pape": {
+      "id": "region:châteauneuf-du-pape",
+      "type": "region",
+      "canonical": "Châteauneuf-du-pape",
+      "parent": "Southern Rhône",
+      "hierarchy": [
+        "Southern Rhône",
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Châteauneuf-du-pape"
+      ]
+    },
+    "region:clare valley": {
+      "id": "region:clare valley",
+      "type": "region",
+      "canonical": "Clare Valley",
+      "parent": "South Australia",
+      "hierarchy": [
+        "South Australia",
+        "Australia"
+      ],
+      "aliases": [
+        "Clare Valley"
+      ]
+    },
+    "region:colchagua valley": {
+      "id": "region:colchagua valley",
+      "type": "region",
+      "canonical": "Colchagua Valley",
+      "parent": "Chile",
+      "hierarchy": [
+        "Chile"
+      ],
+      "aliases": [
+        "Colchagua Valley"
+      ]
+    },
+    "region:columbia valley": {
+      "id": "region:columbia valley",
+      "type": "region",
+      "canonical": "Columbia Valley",
+      "parent": "Washington",
+      "hierarchy": [
+        "Washington",
+        "United States"
+      ],
+      "aliases": [
+        "Columbia Valley"
+      ]
+    },
+    "region:constantia": {
+      "id": "region:constantia",
+      "type": "region",
+      "canonical": "Constantia",
+      "parent": "South Africa",
+      "hierarchy": [
+        "South Africa"
+      ],
+      "aliases": [
+        "Constantia"
+      ]
+    },
+    "region:cornas": {
+      "id": "region:cornas",
+      "type": "region",
+      "canonical": "Cornas",
+      "parent": "Northern Rhône",
+      "hierarchy": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Cornas"
+      ]
+    },
+    "region:côte de beaune": {
+      "id": "region:côte de beaune",
+      "type": "region",
+      "canonical": "Côte De Beaune",
+      "parent": "Burgundy",
+      "hierarchy": [
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Côte De Beaune"
+      ]
+    },
+    "region:côte de nuits": {
+      "id": "region:côte de nuits",
+      "type": "region",
+      "canonical": "Côte De Nuits",
+      "parent": "Burgundy",
+      "hierarchy": [
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Côte De Nuits"
+      ]
+    },
+    "region:côte-rôtie": {
+      "id": "region:côte-rôtie",
+      "type": "region",
+      "canonical": "Côte-rôtie",
+      "parent": "Northern Rhône",
+      "hierarchy": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Côte-rôtie"
+      ]
+    },
+    "region:côtes du rhône": {
+      "id": "region:côtes du rhône",
+      "type": "region",
+      "canonical": "Côtes Du Rhône",
+      "parent": "Rhône Valley",
+      "hierarchy": [
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Côtes Du Rhône"
+      ]
+    },
+    "region:crozes-hermitage": {
+      "id": "region:crozes-hermitage",
+      "type": "region",
+      "canonical": "Crozes-hermitage",
+      "parent": "Northern Rhône",
+      "hierarchy": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Crozes-hermitage"
+      ]
+    },
+    "region:dão": {
+      "id": "region:dão",
+      "type": "region",
+      "canonical": "Dão",
+      "parent": "Portugal",
+      "hierarchy": [
+        "Portugal"
+      ],
+      "aliases": [
+        "Dão"
+      ]
+    },
+    "region:douro": {
+      "id": "region:douro",
+      "type": "region",
+      "canonical": "Douro",
+      "parent": "Portugal",
+      "hierarchy": [
+        "Portugal"
+      ],
+      "aliases": [
+        "Douro"
+      ]
+    },
+    "region:etna": {
+      "id": "region:etna",
+      "type": "region",
+      "canonical": "Etna",
+      "parent": "Sicily",
+      "hierarchy": [
+        "Sicily",
+        "Italy"
+      ],
+      "aliases": [
+        "Etna"
+      ]
+    },
+    "region:gevrey-chambertin": {
+      "id": "region:gevrey-chambertin",
+      "type": "region",
+      "canonical": "Gevrey-chambertin",
+      "parent": "Côte De Nuits",
+      "hierarchy": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Gevrey-chambertin"
+      ]
+    },
+    "region:gigondas": {
+      "id": "region:gigondas",
+      "type": "region",
+      "canonical": "Gigondas",
+      "parent": "Southern Rhône",
+      "hierarchy": [
+        "Southern Rhône",
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Gigondas"
+      ]
+    },
+    "region:graves": {
+      "id": "region:graves",
+      "type": "region",
+      "canonical": "Graves",
+      "parent": "Bordeaux",
+      "hierarchy": [
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Graves"
+      ]
+    },
+    "region:haut-médoc": {
+      "id": "region:haut-médoc",
+      "type": "region",
+      "canonical": "Haut-médoc",
+      "parent": "Médoc",
+      "hierarchy": [
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Haut-médoc"
+      ]
+    },
+    "region:hawke's bay": {
+      "id": "region:hawke's bay",
+      "type": "region",
+      "canonical": "Hawke's Bay",
+      "parent": "New Zealand",
+      "hierarchy": [
+        "New Zealand"
+      ],
+      "aliases": [
+        "Hawke's Bay"
+      ]
+    },
+    "region:hermitage": {
+      "id": "region:hermitage",
+      "type": "region",
+      "canonical": "Hermitage",
+      "parent": "Northern Rhône",
+      "hierarchy": [
+        "Northern Rhône",
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Hermitage"
+      ]
+    },
+    "region:hunter valley": {
+      "id": "region:hunter valley",
+      "type": "region",
+      "canonical": "Hunter Valley",
+      "parent": "New South Wales",
+      "hierarchy": [
+        "New South Wales",
+        "Australia"
+      ],
+      "aliases": [
+        "Hunter Valley"
+      ]
+    },
+    "region:langhe": {
+      "id": "region:langhe",
+      "type": "region",
+      "canonical": "Langhe",
+      "parent": "Piedmont",
+      "hierarchy": [
+        "Piedmont",
+        "Italy"
+      ],
+      "aliases": [
+        "Langhe"
+      ]
+    },
+    "region:languedoc": {
+      "id": "region:languedoc",
+      "type": "region",
+      "canonical": "Languedoc",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Languedoc"
+      ]
+    },
+    "region:loire": {
+      "id": "region:loire",
+      "type": "region",
+      "canonical": "Loire",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Loire"
+      ]
+    },
+    "region:maipo valley": {
+      "id": "region:maipo valley",
+      "type": "region",
+      "canonical": "Maipo Valley",
+      "parent": "Chile",
+      "hierarchy": [
+        "Chile"
+      ],
+      "aliases": [
+        "Maipo Valley"
+      ]
+    },
+    "region:margaret river": {
+      "id": "region:margaret river",
+      "type": "region",
+      "canonical": "Margaret River",
+      "parent": "Western Australia",
+      "hierarchy": [
+        "Western Australia",
+        "Australia"
+      ],
+      "aliases": [
+        "Margaret River"
+      ]
+    },
+    "region:marlborough": {
+      "id": "region:marlborough",
+      "type": "region",
+      "canonical": "Marlborough",
+      "parent": "New Zealand",
+      "hierarchy": [
+        "New Zealand"
+      ],
+      "aliases": [
+        "Marlborough",
+        "말버러"
+      ]
+    },
+    "region:mclaren vale": {
+      "id": "region:mclaren vale",
+      "type": "region",
+      "canonical": "Mclaren Vale",
+      "parent": "South Australia",
+      "hierarchy": [
+        "South Australia",
+        "Australia"
+      ],
+      "aliases": [
+        "Mclaren Vale"
+      ]
+    },
+    "region:médoc": {
+      "id": "region:médoc",
+      "type": "region",
+      "canonical": "Médoc",
+      "parent": "Bordeaux",
+      "hierarchy": [
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Médoc"
+      ]
+    },
+    "region:mendoza": {
+      "id": "region:mendoza",
+      "type": "region",
+      "canonical": "Mendoza",
+      "parent": "Argentina",
+      "hierarchy": [
+        "Argentina"
+      ],
+      "aliases": [
+        "Mendoza",
+        "멘도사"
+      ]
+    },
+    "region:meursault": {
+      "id": "region:meursault",
+      "type": "region",
+      "canonical": "Meursault",
+      "parent": "Côte De Beaune",
+      "hierarchy": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Meursault"
+      ]
+    },
+    "region:morey-saint-denis": {
+      "id": "region:morey-saint-denis",
+      "type": "region",
+      "canonical": "Morey-saint-denis",
+      "parent": "Côte De Nuits",
+      "hierarchy": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Morey-saint-denis"
+      ]
+    },
+    "region:mosel": {
+      "id": "region:mosel",
+      "type": "region",
+      "canonical": "Mosel",
+      "parent": "Germany",
+      "hierarchy": [
+        "Germany"
+      ],
+      "aliases": [
+        "Mosel",
+        "모젤"
+      ]
+    },
+    "region:muscadet": {
+      "id": "region:muscadet",
+      "type": "region",
+      "canonical": "Muscadet",
+      "parent": "Loire",
+      "hierarchy": [
+        "Loire",
+        "France"
+      ],
+      "aliases": [
+        "Muscadet"
+      ]
+    },
+    "region:napa valley": {
+      "id": "region:napa valley",
+      "type": "region",
+      "canonical": "Napa Valley",
+      "parent": "California",
+      "hierarchy": [
+        "California",
+        "United States"
+      ],
+      "aliases": [
+        "Napa Valley",
+        "나파",
+        "나파 밸리"
+      ]
+    },
+    "region:northern rhône": {
+      "id": "region:northern rhône",
+      "type": "region",
+      "canonical": "Northern Rhône",
+      "parent": "Rhône Valley",
+      "hierarchy": [
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Northern Rhône"
+      ]
+    },
+    "region:nuits-saint-georges": {
+      "id": "region:nuits-saint-georges",
+      "type": "region",
+      "canonical": "Nuits-saint-georges",
+      "parent": "Côte De Nuits",
+      "hierarchy": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Nuits-saint-georges"
+      ]
+    },
+    "region:oregon": {
+      "id": "region:oregon",
+      "type": "region",
+      "canonical": "Oregon",
+      "parent": "United States",
+      "hierarchy": [
+        "United States"
+      ],
+      "aliases": [
+        "Oregon"
+      ]
+    },
+    "region:paso robles": {
+      "id": "region:paso robles",
+      "type": "region",
+      "canonical": "Paso Robles",
+      "parent": "California",
+      "hierarchy": [
+        "California",
+        "United States"
+      ],
+      "aliases": [
+        "Paso Robles"
+      ]
+    },
+    "region:penedès": {
+      "id": "region:penedès",
+      "type": "region",
+      "canonical": "Penedès",
+      "parent": "Catalonia",
+      "hierarchy": [
+        "Catalonia",
+        "Spain"
+      ],
+      "aliases": [
+        "Penedès"
+      ]
+    },
+    "region:pessac-léognan": {
+      "id": "region:pessac-léognan",
+      "type": "region",
+      "canonical": "Pessac-léognan",
+      "parent": "Graves",
+      "hierarchy": [
+        "Graves",
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Pessac-léognan"
+      ]
+    },
+    "region:pfalz": {
+      "id": "region:pfalz",
+      "type": "region",
+      "canonical": "Pfalz",
+      "parent": "Germany",
+      "hierarchy": [
+        "Germany"
+      ],
+      "aliases": [
+        "Pfalz"
+      ]
+    },
+    "region:piedmont": {
+      "id": "region:piedmont",
+      "type": "region",
+      "canonical": "Piedmont",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Piedmont"
+      ]
+    },
+    "region:piemonte": {
+      "id": "region:piemonte",
+      "type": "region",
+      "canonical": "Piemonte",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Piemonte"
+      ]
+    },
+    "region:pomerol": {
+      "id": "region:pomerol",
+      "type": "region",
+      "canonical": "Pomerol",
+      "parent": "Bordeaux",
+      "hierarchy": [
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Pomerol"
+      ]
+    },
+    "region:pommard": {
+      "id": "region:pommard",
+      "type": "region",
+      "canonical": "Pommard",
+      "parent": "Côte De Beaune",
+      "hierarchy": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Pommard"
+      ]
+    },
+    "region:pouilly-fumé": {
+      "id": "region:pouilly-fumé",
+      "type": "region",
+      "canonical": "Pouilly-fumé",
+      "parent": "Loire",
+      "hierarchy": [
+        "Loire",
+        "France"
+      ],
+      "aliases": [
+        "Pouilly-fumé"
+      ]
+    },
+    "region:priorat": {
+      "id": "region:priorat",
+      "type": "region",
+      "canonical": "Priorat",
+      "parent": "Catalonia",
+      "hierarchy": [
+        "Catalonia",
+        "Spain"
+      ],
+      "aliases": [
+        "Priorat"
+      ]
+    },
+    "region:provence": {
+      "id": "region:provence",
+      "type": "region",
+      "canonical": "Provence",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Provence"
+      ]
+    },
+    "region:puligny-montrachet": {
+      "id": "region:puligny-montrachet",
+      "type": "region",
+      "canonical": "Puligny-montrachet",
+      "parent": "Côte De Beaune",
+      "hierarchy": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Puligny-montrachet"
+      ]
+    },
+    "region:rheingau": {
+      "id": "region:rheingau",
+      "type": "region",
+      "canonical": "Rheingau",
+      "parent": "Germany",
+      "hierarchy": [
+        "Germany"
+      ],
+      "aliases": [
+        "Rheingau"
+      ]
+    },
+    "region:rheinhessen": {
+      "id": "region:rheinhessen",
+      "type": "region",
+      "canonical": "Rheinhessen",
+      "parent": "Germany",
+      "hierarchy": [
+        "Germany"
+      ],
+      "aliases": [
+        "Rheinhessen"
+      ]
+    },
+    "region:rhône valley": {
+      "id": "region:rhône valley",
+      "type": "region",
+      "canonical": "Rhône Valley",
+      "parent": "France",
+      "hierarchy": [
+        "France"
+      ],
+      "aliases": [
+        "Rhône Valley"
+      ]
+    },
+    "region:rías baixas": {
+      "id": "region:rías baixas",
+      "type": "region",
+      "canonical": "Rías Baixas",
+      "parent": "Galicia",
+      "hierarchy": [
+        "Galicia",
+        "Spain"
+      ],
+      "aliases": [
+        "Rías Baixas"
+      ]
+    },
+    "region:ribera del duero": {
+      "id": "region:ribera del duero",
+      "type": "region",
+      "canonical": "Ribera Del Duero",
+      "parent": "Spain",
+      "hierarchy": [
+        "Spain"
+      ],
+      "aliases": [
+        "Ribera Del Duero"
+      ]
+    },
+    "region:rioja": {
+      "id": "region:rioja",
+      "type": "region",
+      "canonical": "Rioja",
+      "parent": "Spain",
+      "hierarchy": [
+        "Spain"
+      ],
+      "aliases": [
+        "Rioja",
+        "리오하"
+      ]
+    },
+    "region:rueda": {
+      "id": "region:rueda",
+      "type": "region",
+      "canonical": "Rueda",
+      "parent": "Spain",
+      "hierarchy": [
+        "Spain"
+      ],
+      "aliases": [
+        "Rueda"
+      ]
+    },
+    "region:russian river valley": {
+      "id": "region:russian river valley",
+      "type": "region",
+      "canonical": "Russian River Valley",
+      "parent": "Sonoma County",
+      "hierarchy": [
+        "Sonoma County",
+        "California",
+        "United States"
+      ],
+      "aliases": [
+        "Russian River Valley"
+      ]
+    },
+    "region:saint-estèphe": {
+      "id": "region:saint-estèphe",
+      "type": "region",
+      "canonical": "Saint-estèphe",
+      "parent": "Haut-médoc",
+      "hierarchy": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Saint-estèphe"
+      ]
+    },
+    "region:saint-julien": {
+      "id": "region:saint-julien",
+      "type": "region",
+      "canonical": "Saint-julien",
+      "parent": "Haut-médoc",
+      "hierarchy": [
+        "Haut-médoc",
+        "Médoc",
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Saint-julien"
+      ]
+    },
+    "region:sancerre": {
+      "id": "region:sancerre",
+      "type": "region",
+      "canonical": "Sancerre",
+      "parent": "Loire",
+      "hierarchy": [
+        "Loire",
+        "France"
+      ],
+      "aliases": [
+        "Sancerre"
+      ]
+    },
+    "region:santa barbara": {
+      "id": "region:santa barbara",
+      "type": "region",
+      "canonical": "Santa Barbara",
+      "parent": "California",
+      "hierarchy": [
+        "California",
+        "United States"
+      ],
+      "aliases": [
+        "Santa Barbara"
+      ]
+    },
+    "region:sauternes": {
+      "id": "region:sauternes",
+      "type": "region",
+      "canonical": "Sauternes",
+      "parent": "Bordeaux",
+      "hierarchy": [
+        "Bordeaux",
+        "France"
+      ],
+      "aliases": [
+        "Sauternes"
+      ]
+    },
+    "region:sicily": {
+      "id": "region:sicily",
+      "type": "region",
+      "canonical": "Sicily",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Sicily"
+      ]
+    },
+    "region:soave": {
+      "id": "region:soave",
+      "type": "region",
+      "canonical": "Soave",
+      "parent": "Veneto",
+      "hierarchy": [
+        "Veneto",
+        "Italy"
+      ],
+      "aliases": [
+        "Soave"
+      ]
+    },
+    "region:sonoma county": {
+      "id": "region:sonoma county",
+      "type": "region",
+      "canonical": "Sonoma County",
+      "parent": "California",
+      "hierarchy": [
+        "California",
+        "United States"
+      ],
+      "aliases": [
+        "Sonoma County"
+      ]
+    },
+    "region:south australia": {
+      "id": "region:south australia",
+      "type": "region",
+      "canonical": "South Australia",
+      "parent": "Australia",
+      "hierarchy": [
+        "Australia"
+      ],
+      "aliases": [
+        "South Australia"
+      ]
+    },
+    "region:southern rhône": {
+      "id": "region:southern rhône",
+      "type": "region",
+      "canonical": "Southern Rhône",
+      "parent": "Rhône Valley",
+      "hierarchy": [
+        "Rhône Valley",
+        "France"
+      ],
+      "aliases": [
+        "Southern Rhône"
+      ]
+    },
+    "region:stellenbosch": {
+      "id": "region:stellenbosch",
+      "type": "region",
+      "canonical": "Stellenbosch",
+      "parent": "South Africa",
+      "hierarchy": [
+        "South Africa"
+      ],
+      "aliases": [
+        "Stellenbosch"
+      ]
+    },
+    "region:swartland": {
+      "id": "region:swartland",
+      "type": "region",
+      "canonical": "Swartland",
+      "parent": "South Africa",
+      "hierarchy": [
+        "South Africa"
+      ],
+      "aliases": [
+        "Swartland"
+      ]
+    },
+    "region:toscana": {
+      "id": "region:toscana",
+      "type": "region",
+      "canonical": "Toscana",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Toscana"
+      ]
+    },
+    "region:tuscany": {
+      "id": "region:tuscany",
+      "type": "region",
+      "canonical": "Tuscany",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Tuscany",
+        "토스카나"
+      ]
+    },
+    "region:uco valley": {
+      "id": "region:uco valley",
+      "type": "region",
+      "canonical": "Uco Valley",
+      "parent": "Mendoza",
+      "hierarchy": [
+        "Mendoza",
+        "Argentina"
+      ],
+      "aliases": [
+        "Uco Valley"
+      ]
+    },
+    "region:valpolicella": {
+      "id": "region:valpolicella",
+      "type": "region",
+      "canonical": "Valpolicella",
+      "parent": "Veneto",
+      "hierarchy": [
+        "Veneto",
+        "Italy"
+      ],
+      "aliases": [
+        "Valpolicella"
+      ]
+    },
+    "region:veneto": {
+      "id": "region:veneto",
+      "type": "region",
+      "canonical": "Veneto",
+      "parent": "Italy",
+      "hierarchy": [
+        "Italy"
+      ],
+      "aliases": [
+        "Veneto"
+      ]
+    },
+    "region:volnay": {
+      "id": "region:volnay",
+      "type": "region",
+      "canonical": "Volnay",
+      "parent": "Côte De Beaune",
+      "hierarchy": [
+        "Côte De Beaune",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Volnay"
+      ]
+    },
+    "region:vosne-romanée": {
+      "id": "region:vosne-romanée",
+      "type": "region",
+      "canonical": "Vosne-romanée",
+      "parent": "Côte De Nuits",
+      "hierarchy": [
+        "Côte De Nuits",
+        "Burgundy",
+        "France"
+      ],
+      "aliases": [
+        "Vosne-romanée"
+      ]
+    },
+    "region:washington": {
+      "id": "region:washington",
+      "type": "region",
+      "canonical": "Washington",
+      "parent": "United States",
+      "hierarchy": [
+        "United States"
+      ],
+      "aliases": [
+        "Washington"
+      ]
+    },
+    "region:willamette valley": {
+      "id": "region:willamette valley",
+      "type": "region",
+      "canonical": "Willamette Valley",
+      "parent": "Oregon",
+      "hierarchy": [
+        "Oregon",
+        "United States"
+      ],
+      "aliases": [
+        "Willamette Valley"
+      ]
+    },
+    "region:yarra valley": {
+      "id": "region:yarra valley",
+      "type": "region",
+      "canonical": "Yarra Valley",
+      "parent": "Victoria",
+      "hierarchy": [
+        "Victoria",
+        "Australia"
+      ],
+      "aliases": [
+        "Yarra Valley"
+      ]
+    },
+    "wine_type:dessert": {
+      "id": "wine_type:dessert",
+      "type": "wine_type",
+      "canonical": "dessert",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "dessert",
+        "sweet",
+        "디저트"
+      ]
+    },
+    "wine_type:fortified": {
+      "id": "wine_type:fortified",
+      "type": "wine_type",
+      "canonical": "fortified",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "fortified",
+        "madeira",
+        "port",
+        "sherry",
+        "포트"
+      ]
+    },
+    "wine_type:red": {
+      "id": "wine_type:red",
+      "type": "wine_type",
+      "canonical": "red",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "red",
+        "rosso",
+        "rouge",
+        "tinto",
+        "레드"
+      ]
+    },
+    "wine_type:rosé": {
+      "id": "wine_type:rosé",
+      "type": "wine_type",
+      "canonical": "rosé",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "rose",
+        "rosé",
+        "로제"
+      ]
+    },
+    "wine_type:sparkling": {
+      "id": "wine_type:sparkling",
+      "type": "wine_type",
+      "canonical": "sparkling",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "champagne",
+        "sparkling",
+        "스파클링"
+      ]
+    },
+    "wine_type:white": {
+      "id": "wine_type:white",
+      "type": "wine_type",
+      "canonical": "white",
+      "parent": null,
+      "hierarchy": [],
+      "aliases": [
+        "bianco",
+        "blanc",
+        "blanco",
+        "white",
+        "화이트"
+      ]
+    }
+  },
+  "regionHierarchy": {
+    "Pauillac": "Haut-médoc",
+    "Margaux": "Haut-médoc",
+    "Saint-julien": "Haut-médoc",
+    "Saint-estèphe": "Haut-médoc",
+    "Haut-médoc": "Médoc",
+    "Médoc": "Bordeaux",
+    "Pomerol": "Bordeaux",
+    "Saint-émilion": "Bordeaux",
+    "Pessac-léognan": "Graves",
+    "Graves": "Bordeaux",
+    "Sauternes": "Bordeaux",
+    "Bordeaux": "France",
+    "Gevrey-chambertin": "Côte De Nuits",
+    "Chambolle-musigny": "Côte De Nuits",
+    "Vosne-romanée": "Côte De Nuits",
+    "Nuits-saint-georges": "Côte De Nuits",
+    "Morey-saint-denis": "Côte De Nuits",
+    "Côte De Nuits": "Burgundy",
+    "Pommard": "Côte De Beaune",
+    "Volnay": "Côte De Beaune",
+    "Meursault": "Côte De Beaune",
+    "Puligny-montrachet": "Côte De Beaune",
+    "Chassagne-montrachet": "Côte De Beaune",
+    "Côte De Beaune": "Burgundy",
+    "Chablis": "Burgundy",
+    "Burgundy": "France",
+    "Bourgogne": "France",
+    "Côte-rôtie": "Northern Rhône",
+    "Hermitage": "Northern Rhône",
+    "Crozes-hermitage": "Northern Rhône",
+    "Cornas": "Northern Rhône",
+    "Northern Rhône": "Rhône Valley",
+    "Châteauneuf-du-pape": "Southern Rhône",
+    "Gigondas": "Southern Rhône",
+    "Southern Rhône": "Rhône Valley",
+    "Rhône Valley": "France",
+    "Côtes Du Rhône": "Rhône Valley",
+    "Champagne": "France",
+    "Alsace": "France",
+    "Loire": "France",
+    "Sancerre": "Loire",
+    "Pouilly-fumé": "Loire",
+    "Muscadet": "Loire",
+    "Languedoc": "France",
+    "Provence": "France",
+    "Barolo": "Piedmont",
+    "Barbaresco": "Piedmont",
+    "Langhe": "Piedmont",
+    "Piedmont": "Italy",
+    "Piemonte": "Italy",
+    "Brunello Di Montalcino": "Tuscany",
+    "Chianti": "Tuscany",
+    "Chianti Classico": "Chianti",
+    "Bolgheri": "Tuscany",
+    "Tuscany": "Italy",
+    "Toscana": "Italy",
+    "Amarone": "Veneto",
+    "Valpolicella": "Veneto",
+    "Soave": "Veneto",
+    "Veneto": "Italy",
+    "Etna": "Sicily",
+    "Sicily": "Italy",
+    "Abruzzo": "Italy",
+    "Rioja": "Spain",
+    "Ribera Del Duero": "Spain",
+    "Priorat": "Catalonia",
+    "Penedès": "Catalonia",
+    "Catalonia": "Spain",
+    "Rueda": "Spain",
+    "Rías Baixas": "Galicia",
+    "Douro": "Portugal",
+    "Dão": "Portugal",
+    "Alentejo": "Portugal",
+    "Mosel": "Germany",
+    "Rheingau": "Germany",
+    "Pfalz": "Germany",
+    "Rheinhessen": "Germany",
+    "Napa Valley": "California",
+    "Sonoma County": "California",
+    "Russian River Valley": "Sonoma County",
+    "Paso Robles": "California",
+    "Santa Barbara": "California",
+    "California": "United States",
+    "Willamette Valley": "Oregon",
+    "Oregon": "United States",
+    "Columbia Valley": "Washington",
+    "Washington": "United States",
+    "Barossa Valley": "South Australia",
+    "Mclaren Vale": "South Australia",
+    "Clare Valley": "South Australia",
+    "South Australia": "Australia",
+    "Margaret River": "Western Australia",
+    "Yarra Valley": "Victoria",
+    "Hunter Valley": "New South Wales",
+    "Marlborough": "New Zealand",
+    "Central Otago": "New Zealand",
+    "Hawke's Bay": "New Zealand",
+    "Mendoza": "Argentina",
+    "Uco Valley": "Mendoza",
+    "Maipo Valley": "Chile",
+    "Colchagua Valley": "Chile",
+    "Casablanca Valley": "Chile",
+    "Stellenbosch": "South Africa",
+    "Swartland": "South Africa",
+    "Constantia": "South Africa"
+  },
+  "grapeAliases": {
+    "shiraz": "syrah",
+    "syrah": "syrah",
+    "garnacha": "grenache",
+    "grenache": "grenache",
+    "grenache noir": "grenache",
+    "pinot grigio": "pinot gris",
+    "pinot gris": "pinot gris",
+    "pinot bianco": "pinot blanc",
+    "pinot blanc": "pinot blanc",
+    "primitivo": "zinfandel",
+    "zinfandel": "zinfandel",
+    "moscato": "muscat",
+    "muscat": "muscat",
+    "muscat blanc": "muscat",
+    "moscatel": "muscat",
+    "cab sauv": "cabernet sauvignon",
+    "cabernet sauvignon": "cabernet sauvignon",
+    "cabernet franc": "cabernet franc",
+    "cab franc": "cabernet franc",
+    "petit sirah": "petite sirah",
+    "petite sirah": "petite sirah",
+    "mourvèdre": "mourvèdre",
+    "mourvedre": "mourvèdre",
+    "monastrell": "mourvèdre",
+    "albariño": "albariño",
+    "albarino": "albariño",
+    "grüner veltliner": "grüner veltliner",
+    "gruner veltliner": "grüner veltliner",
+    "gewürztraminer": "gewurztraminer",
+    "gewurztraminer": "gewurztraminer",
+    "torrontés": "torrontés",
+    "torrontes": "torrontés",
+    "carmenère": "carmenère",
+    "carmenere": "carmenère",
+    "mencía": "mencía",
+    "mencia": "mencía",
+    "blaufränkisch": "blaufränkisch",
+    "blaufrankisch": "blaufränkisch",
+    "sémillon": "sémillon",
+    "semillon": "sémillon"
+  },
+  "wineTypeAliases": {
+    "red": "red",
+    "레드": "red",
+    "rouge": "red",
+    "rosso": "red",
+    "tinto": "red",
+    "white": "white",
+    "화이트": "white",
+    "blanc": "white",
+    "bianco": "white",
+    "blanco": "white",
+    "rosé": "rosé",
+    "rose": "rosé",
+    "로제": "rosé",
+    "sparkling": "sparkling",
+    "스파클링": "sparkling",
+    "champagne": "sparkling",
+    "dessert": "dessert",
+    "디저트": "dessert",
+    "sweet": "dessert",
+    "fortified": "fortified",
+    "포트": "fortified",
+    "port": "fortified",
+    "sherry": "fortified",
+    "madeira": "fortified"
+  }
+}

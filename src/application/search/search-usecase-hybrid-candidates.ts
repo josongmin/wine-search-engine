@@ -77,17 +77,77 @@ export function buildHybridRetrievalInputForPlan(
   compiled?: CompiledWineQuery,
 ): HybridRetrievalInput {
   const retrievalPlan = buildRetrievalPlan(plan.constraints);
+  const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
   return {
     queryPlan: plan,
     route,
     ...(compiled !== undefined ? { compiledRetrievalMode: compiled.execution.effectiveRetrievalMode } : {}),
-    lexicalQueries: [plan.normalizedQuery],
-    semanticQueries: [plan.rawQuery],
+    lexicalQueries: uniqueStrings([plan.normalizedQuery, ...structuredQueries.lexical]),
+    semanticQueries: uniqueStrings([plan.rawQuery, ...structuredQueries.semantic]),
     hardConstraints: plan.constraints.hard,
     softConstraints: plan.constraints.soft,
     retrievalPlan,
     ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
   };
+}
+
+function buildStructuredQueryExpansions(
+  plan: QueryPlanV1,
+  retrievalPlan: ReturnType<typeof buildRetrievalPlan>,
+): {
+  readonly lexical: readonly string[];
+  readonly semantic: readonly string[];
+} {
+  const lexical: string[] = [];
+  const semantic: string[] = [];
+  for (const constraint of plan.constraints.hard) {
+    const phrase = retrievalValueToPhrase(constraint.value);
+    if (phrase !== undefined) {
+      lexical.push(phrase);
+      if (constraint.attribute === 'region' || constraint.attribute === 'country' || constraint.attribute === 'appellation') {
+        semantic.push(phrase);
+      }
+    }
+  }
+  for (const boost of [...retrievalPlan.softBoosts, ...retrievalPlan.inferredBoosts]) {
+    const phrase = retrievalValueToPhrase(boost.value);
+    if (phrase === undefined) {
+      continue;
+    }
+    lexical.push(phrase);
+    if (boost.attribute === 'region' || boost.attribute === 'country' || boost.attribute === 'grape_family') {
+      semantic.push(phrase);
+    }
+  }
+  return { lexical: uniqueStrings(lexical), semantic: uniqueStrings(semantic) };
+}
+
+function retrievalValueToPhrase(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value.trim().length > 0 ? value.trim() : undefined;
+  }
+  if (typeof value === 'number') {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    const parts = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+    return parts.length > 0 ? parts.join(' ') : undefined;
+  }
+  if (
+    typeof value === 'object'
+    && value !== null
+    && 'min' in value
+    && 'max' in value
+  ) {
+    const min = typeof value.min === 'number' ? value.min.toString() : undefined;
+    const max = typeof value.max === 'number' ? value.max.toString() : undefined;
+    return [min, max].filter((entry): entry is string => entry !== undefined).join(' ');
+  }
+  return undefined;
+}
+
+function uniqueStrings(values: readonly string[]): readonly string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
 /**

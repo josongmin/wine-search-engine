@@ -170,4 +170,27 @@ describe('VespaSearchIndex', () => {
       },
     });
   });
+
+  it('passes structured query feature params to Vespa sparse search', async () => {
+    let capturedParams: Record<string, unknown> | undefined;
+    const client = {
+      query: vi.fn().mockImplementation((_yql: string, params?: Record<string, unknown>) => {
+        capturedParams = params;
+        return Promise.resolve(makeQueryResponse(['structured-1']));
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await index.sparseSearch(
+      ['bordeaux red wine', 'Cabernet Merlot'],
+      ['country:France', 'region:Bordeaux'],
+      5,
+    );
+
+    expect(capturedParams?.['ranking.features.query(structured_query_terms_count)']).toBe(1);
+    expect(capturedParams?.['ranking.features.query(structured_query_strength)']).toBeGreaterThan(0);
+    expect(capturedParams?.['ranking.features.query(structured_region_boost)']).toBe(1);
+    expect(capturedParams?.['ranking.features.query(structured_grape_boost)']).toBe(1);
+    expect(capturedParams?.['ranking.features.query(filter_strength)']).toBeGreaterThan(0);
+  });
 });

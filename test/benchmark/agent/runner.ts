@@ -48,6 +48,9 @@ import { AGENT_SCENARIOS, STANDARD_SCENARIO_IDS } from './scenarios.js';
 import { scoreScenario, type ScenarioResult, type ScenarioExecution, type StepTrace } from './scorer.js';
 import { judgeAnswerN, judgeFaithfulness } from './judge.js';
 import { evaluateScenarioClaims } from './claim-evaluator-adapter.js';
+import { runConstraintExtraction } from './constraint-extraction-eval.js';
+import { scoreSemanticConstraintRecall, scoreEntityLinkingAccuracy, scoreSlotF1, scoreConstraintSatisfactionRate } from './constraint-metrics.js';
+import type { ConstraintExtractionMetricsInput } from './scorer.js';
 import type { AgentBenchmarkScenario, ScenarioExpectation, ScenarioTier, TerminationReason } from './scenario.js';
 import type { DiagnosticVector } from '../../../src/domain/evaluation/model/claim.js';
 import type { AgentToolDeps } from '../../../src/application/agent/agent-tools.js';
@@ -367,6 +370,47 @@ function mapTerminationReason(reason: AgentTerminationReason): TerminationReason
     default:
       return 'fallback';
   }
+}
+
+async function computeConstraintMetricsForScenario(
+  scenario: AgentBenchmarkScenario,
+  observations: readonly string[],
+): Promise<ConstraintExtractionMetricsInput | undefined> {
+  const hasExpectedConstraints = scenario.expectation.expectedConstraints !== undefined;
+  const hasExpectedEntities = scenario.expectation.expectedEntities !== undefined;
+  if (!hasExpectedConstraints && !hasExpectedEntities) {
+    return undefined;
+  }
+
+  const extraction = await runConstraintExtraction(scenario.query);
+  const scr = hasExpectedConstraints && scenario.expectation.expectedConstraints
+    ? scoreSemanticConstraintRecall(extraction.bundle, scenario.expectation.expectedConstraints)
+    : { scrOverall: null, scrHard: null, scrSoft: null, scrInferred: null };
+  const ela = hasExpectedEntities && scenario.expectation.expectedEntities
+    ? scoreEntityLinkingAccuracy(scenario.expectation.expectedEntities)
+    : { ela1: null };
+  const slot = hasExpectedConstraints && scenario.expectation.expectedConstraints
+    ? scoreSlotF1(extraction.bundle, scenario.expectation.expectedConstraints)
+    : { strict: null, relaxed: null };
+
+  // P4: Constraint Satisfaction Rate — measures whether retrieval results
+  // actually satisfy the constraints that the NL extraction pipeline produced.
+  // Requires observations (agent tool results) to check evidence.
+  const csr = observations.length > 0
+    ? scoreConstraintSatisfactionRate(extraction.bundle, observations)
+    : { csrHard: null, csrSoft: null, csrInferred: null, csrOverall: null };
+
+  return {
+    semanticConstraintRecall: scr.scrOverall,
+    scrHard: scr.scrHard,
+    scrSoft: scr.scrSoft,
+    scrInferred: scr.scrInferred,
+    entityLinkingAccuracy: ela.ela1,
+    slotF1Strict: slot.strict,
+    slotF1Relaxed: slot.relaxed,
+    csrOverall: csr.csrOverall,
+    csrHard: csr.csrHard,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -722,6 +766,26 @@ export interface BenchmarkReport {
     readonly claimHardFailCount: number;
     /** Number of scenarios that received claim-level evaluation. */
     readonly claimEvaluatedCount: number;
+    /** RFC-020 P1: Semantic Constraint Recall overall (weighted bucket mean). null when no scenarios have ground truth. */
+    readonly scrOverall: number | null;
+    /** RFC-020 P1: SCR hard bucket mean. */
+    readonly scrHard: number | null;
+    /** RFC-020 P1: SCR soft bucket mean. */
+    readonly scrSoft: number | null;
+    /** RFC-020 P1: SCR inferred bucket mean. */
+    readonly scrInferred: number | null;
+    /** RFC-020 P2: Entity Linking Accuracy @1 mean. */
+    readonly entityLinkingAccuracy: number | null;
+    /** RFC-020 P3: Slot F1 strict mode mean. */
+    readonly slotF1Strict: number | null;
+    /** RFC-020 P3: Slot F1 relaxed mode mean. */
+    readonly slotF1Relaxed: number | null;
+    /** RFC-020 P4: Constraint Satisfaction Rate weighted overall mean. */
+    readonly csrOverall: number | null;
+    /** RFC-020 P4: CSR hard tier mean. */
+    readonly csrHard: number | null;
+    /** Number of scenarios that received constraint extraction evaluation. */
+    readonly constraintEvaluatedCount: number;
     readonly avgSteps: number;
     readonly latencyMs: LatencyStats;
     /** Latency SLA KPI assessment. */
@@ -1004,13 +1068,26 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           await Promise.all(judgePromises);
         }
 
-        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics);
+        let constraintMetrics: ConstraintExtractionMetricsInput | undefined;
+        try {
+          constraintMetrics = await computeConstraintMetricsForScenario(scenario, observations);
+        } catch (err) {
+          console.error(`  [CONSTRAINT-EVAL] #${scenario.id} failed: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
+        }
+
+        const scored = scoreScenario(scenario, execution, judgeScore, faithScore, undefined, stepTraces, judgeReasoning, claimDiagnostics, constraintMetrics);
         const elapsed = Date.now() - start;
         scenarioWallMsSum += elapsed;
         scenarioWallSampleCount++;
         const sc = scored.scores;
         const judgePart = judgeScore !== undefined ? ` judge=${judgeScore.toFixed(2)}` : '';
         const faithPart = faithScore !== undefined ? ` faith=${faithScore.toFixed(2)}` : '';
+        const scrPart = constraintMetrics?.semanticConstraintRecall !== null && constraintMetrics?.semanticConstraintRecall !== undefined
+          ? ` scr=${constraintMetrics.semanticConstraintRecall.toFixed(2)}`
+          : '';
+        const elaPart = constraintMetrics?.entityLinkingAccuracy !== null && constraintMetrics?.entityLinkingAccuracy !== undefined
+          ? ` ela=${constraintMetrics.entityLinkingAccuracy.toFixed(2)}`
+          : '';
         const claimPart = claimDiagnostics !== undefined
           ? ` claims=${claimDiagnostics.claims.length}/${claimDiagnostics.faithfulnessScore.toFixed(2)}${claimDiagnostics.hardFail ? '⚠' : ''}`
           : '';
@@ -1025,7 +1102,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           + `[${scenario.tier.slice(0, 16).padEnd(16)}] `
           + `score=${(sc.overall * 100).toFixed(1).padStart(5)}% `
           + `tools=${execution.toolCallCount} steps=${scored.stepCount} `
-          + `${dimParts}${judgePart}${faithPart}${claimPart} `
+          + `${dimParts}${judgePart}${faithPart}${scrPart}${elaPart}${claimPart} `
           + `${(elapsed / 1000).toFixed(1)}s `
           + `[${completedCount}/${totalToRun}]`,
         );
@@ -1193,6 +1270,26 @@ function buildReport(
     : null;
   const claimHardFailCount = claimEvaluated.filter((r) => r.claimDiagnostics?.hardFail === true).length;
 
+  // RFC-020: Constraint extraction metric aggregation across executed scenarios.
+  // Each metric is averaged only over scenarios that produced non-null values
+  // (scenarios without expectedConstraints/expectedEntities are excluded).
+  const nullableMean = (scores: readonly (number | null)[]): number | null => {
+    const present = scores.filter((s): s is number => s !== null);
+    return present.length > 0 ? present.reduce((sum, v) => sum + v, 0) / present.length : null;
+  };
+  const scrOverallScores = executedForAggregate.map((r) => r.scores.semanticConstraintRecall);
+  const scrHardScores = executedForAggregate.map((r) => r.scores.scrHard);
+  const scrSoftScores = executedForAggregate.map((r) => r.scores.scrSoft);
+  const scrInferredScores = executedForAggregate.map((r) => r.scores.scrInferred);
+  const elaScores = executedForAggregate.map((r) => r.scores.entityLinkingAccuracy);
+  const slotF1StrictScores = executedForAggregate.map((r) => r.scores.slotF1Strict);
+  const slotF1RelaxedScores = executedForAggregate.map((r) => r.scores.slotF1Relaxed);
+  const csrOverallScores = executedForAggregate.map((r) => r.scores.csrOverall);
+  const csrHardScores = executedForAggregate.map((r) => r.scores.csrHard);
+  const constraintEvaluatedCount = executedForAggregate.filter(
+    (r) => r.scores.semanticConstraintRecall !== null || r.scores.entityLinkingAccuracy !== null,
+  ).length;
+
   const judgeRequiredButSkippedCount = executed.filter((r) => r.judgeRequiredButSkipped).length;
   // judgeRequiredExcludedCount already computed above (judgeRequiredExcluded.length).
 
@@ -1278,6 +1375,16 @@ function buildReport(
       claimProvenanceCoverage: claimProvenanceMean,
       claimHardFailCount,
       claimEvaluatedCount: claimEvaluated.length,
+      scrOverall: nullableMean(scrOverallScores),
+      scrHard: nullableMean(scrHardScores),
+      scrSoft: nullableMean(scrSoftScores),
+      scrInferred: nullableMean(scrInferredScores),
+      entityLinkingAccuracy: nullableMean(elaScores),
+      slotF1Strict: nullableMean(slotF1StrictScores),
+      slotF1Relaxed: nullableMean(slotF1RelaxedScores),
+      csrOverall: nullableMean(csrOverallScores),
+      csrHard: nullableMean(csrHardScores),
+      constraintEvaluatedCount,
       avgSteps:
         executed.length > 0
           ? executed.reduce((s, r) => s + (r.stepCount ?? 0), 0) / executed.length
@@ -1452,6 +1559,16 @@ async function main(): Promise<void> {
     if (s.claimHardFailCount > 0) {
       console.error(`  ⚠ Hard fails:     ${s.claimHardFailCount} scenario(s) had critical claim violations`);
     }
+  }
+  // RFC-020 constraint extraction metric block
+  if (s.constraintEvaluatedCount > 0) {
+    const fmt = (v: number | null): string => v !== null ? (v * 100).toFixed(1).padStart(5) + '%' : '  n/a';
+    console.error('  ────── constraint extraction (RFC-020) ──────');
+    console.error(`  SCR overall:  ${fmt(s.scrOverall)}   SCR hard: ${fmt(s.scrHard)}   SCR soft: ${fmt(s.scrSoft)}   SCR inferred: ${fmt(s.scrInferred)}`);
+    console.error(`  ELA@1:        ${fmt(s.entityLinkingAccuracy)}`);
+    console.error(`  Slot F1 strict: ${fmt(s.slotF1Strict)}   relaxed: ${fmt(s.slotF1Relaxed)}`);
+    console.error(`  CSR overall:  ${fmt(s.csrOverall)}   CSR hard: ${fmt(s.csrHard)}`);
+    console.error(`  Evaluated:    ${s.constraintEvaluatedCount} scenario(s)`);
   }
   console.error('  ────── execution ───────');
   console.error(`  Avg Steps:    ${s.avgSteps.toFixed(1)}`);

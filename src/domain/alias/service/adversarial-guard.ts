@@ -1,3 +1,4 @@
+import { HOMOGLYPH_MAP } from '../../shared/utils/unicode-normalize.js';
 import type { EntityId } from '../../shared/types/index.js';
 import type { Alias, AliasType } from '../model/alias.js';
 
@@ -30,45 +31,6 @@ const SOURCE_TRUST_GATES: Readonly<Record<AliasType, number>> = {
   observed_query_alias: 0.4,
   catalog_noise_alias: 0.3,
 };
-
-/**
- * Set of Unicode confusable character pairs (homoglyphs).
- * Maps each confusable codepoint to its ASCII equivalent.
- */
-const HOMOGLYPH_MAP: ReadonlyMap<string, string> = new Map([
-  ['\u0410', 'A'], // Cyrillic А → Latin A
-  ['\u0412', 'B'], // Cyrillic В → Latin B
-  ['\u0421', 'C'], // Cyrillic С → Latin C
-  ['\u0415', 'E'], // Cyrillic Е → Latin E
-  ['\u041D', 'H'], // Cyrillic Н → Latin H
-  ['\u041A', 'K'], // Cyrillic К → Latin K
-  ['\u041C', 'M'], // Cyrillic М → Latin M
-  ['\u041E', 'O'], // Cyrillic О → Latin O
-  ['\u0420', 'P'], // Cyrillic Р → Latin P
-  ['\u0422', 'T'], // Cyrillic Т → Latin T
-  ['\u0425', 'X'], // Cyrillic Х → Latin X
-  ['\u0430', 'a'], // Cyrillic а → Latin a
-  ['\u0435', 'e'], // Cyrillic е → Latin e
-  ['\u043E', 'o'], // Cyrillic о → Latin o
-  ['\u0440', 'p'], // Cyrillic р → Latin p
-  ['\u0441', 'c'], // Cyrillic с → Latin c
-  ['\u0443', 'y'], // Cyrillic у → Latin y
-  ['\u0445', 'x'], // Cyrillic х → Latin x
-  ['\u0455', 's'], // Cyrillic ѕ → Latin s
-  ['\u0456', 'i'], // Cyrillic і → Latin i
-  ['\u0458', 'j'], // Cyrillic ј → Latin j
-  ['\u0501', 'd'], // Cyrillic ԁ → Latin d
-  ['\u051B', 'q'], // Cyrillic ԛ → Latin q
-  ['\u051D', 'w'], // Cyrillic ԝ → Latin w
-  ['\uFF21', 'A'], // Fullwidth Ａ → Latin A
-  ['\uFF22', 'B'], // Fullwidth Ｂ → Latin B
-  ['\uFF23', 'C'], // Fullwidth Ｃ → Latin C
-  ['\u2010', '-'], // Hyphen → ASCII hyphen
-  ['\u2011', '-'], // Non-breaking hyphen
-  ['\u2012', '-'], // Figure dash
-  ['\u2013', '-'], // En dash
-  ['\u2014', '-'], // Em dash
-]);
 
 /**
  * Normalizes a string by replacing known homoglyphs with their ASCII equivalents.

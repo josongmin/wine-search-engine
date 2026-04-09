@@ -77,6 +77,9 @@ describe('buildHybridRetrievalInputForPlan', () => {
 
     expect(input.retrievalPlan?.hardFilterTokens.length).toBeGreaterThan(0);
     expect(input.retrievalPlan?.inferredBoosts).toHaveLength(1);
+    expect(input.lexicalQueries).toEqual(
+      expect.arrayContaining(['q', 'Bordeaux', 'Cabernet Merlot']),
+    );
   });
 });
 

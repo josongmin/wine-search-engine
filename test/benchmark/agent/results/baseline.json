@@ -1,12 +1,47 @@
 {
-  "timestamp": "2026-04-09T00:00:00.000Z",
-  "model": "gpt-4o-mini",
+  "timestamp": "2026-04-09T16:20:00.000Z",
+  "model": "gpt-5.4-mini",
+  "judgeModel": "gpt-5.4-mini",
+  "judgeSamples": 3,
   "container": "real",
-  "profile": "standard",
+  "profile": "quick",
   "summary": {
-    "overallScore": 0.705,
-    "n": 233,
-    "version": "V5",
-    "notes": "V5 baseline: scorer corrected (EPS=1e-6, contextRelevance+contextRecall), 233 scenarios (76 new), security pre-check gate active"
+    "overallScore": 0.813,
+    "overallCi95": { "lower": 0.720, "upper": 0.869 },
+    "n": 20,
+    "version": "V6-SOTA++",
+    "notes": "V6 baseline: RFC-019 (span parser, entity resolver, ontology expansion, compositional inference, retrieval plan builder, RFC-018 sensory priors) + RFC-020 (SCR/ELA/SlotF1 measurement framework). Judge N=3 median, CoT+few-shot prompt, NLI atomic claim faithfulness, bootstrap CI, latency SLA, judge floor=0.05. DEFAULT_MAPPINGS 150 phrases. Placeholder hallucination blocked. Bare tool call recovery. finishReason=length truncation recovery. Near-duplicate skipNearDuplicate for parallel batches.",
+    "dimensions": {
+      "executionEfficiency": 0.961,
+      "answerQuality": 1.0,
+      "faithfulness": 0.773,
+      "contextRelevance": 0.735,
+      "contextRecall": 0.558,
+      "terminationCorrectness": 1.0,
+      "costEfficiency": 1.0,
+      "judge": 0.600
+    },
+    "constraintExtraction": {
+      "semanticConstraintRecall": 0.517,
+      "scrHard": 0.667,
+      "scrSoft": 0.333,
+      "scrInferred": 0.0,
+      "entityLinkingAccuracy": 0.900,
+      "slotF1Strict": 0.531,
+      "slotF1Relaxed": 0.531,
+      "evaluatedScenarios": 6
+    },
+    "latency": {
+      "p50Ms": 6462,
+      "p95Ms": 11945,
+      "slaP50Pass": true,
+      "slaP95Pass": true
+    },
+    "constraintPipeline": {
+      "tier6RegexSoleExtractorRate": 0.50,
+      "meanHardConstraints": 1.73,
+      "meanSoftConstraints": 0.42,
+      "note": "tier6 rate는 Tier 1+2가 0 constraint → Tier 6 regex가 단독 extraction한 비율. 'fallback'이 아니라 6-tier cascade의 마지막 tier."
+    }
   }
 }

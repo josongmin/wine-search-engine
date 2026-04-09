@@ -25,6 +25,7 @@ import {
   REGION_PARENTS,
   WINE_TYPE_ALIASES,
 } from '../../evaluation/service/wine-ontology.js';
+import { CURATED_ENTITY_ALIASES } from './entity-alias-registry.js';
 
 export type EntityType =
   | 'wine_type'
@@ -55,36 +56,6 @@ export interface ResolveEntityOptions {
    */
   readonly preferEntityOverStyle?: boolean | undefined;
 }
-
-const CURATED_ENTITY_ALIASES: readonly {
-  readonly surface: string;
-  readonly canonicalValue: string;
-  readonly entityType: EntityType;
-  readonly confidence: number;
-  readonly provenance: ResolvedEntity['provenance'];
-}[] = [
-  { surface: '프랑스', canonicalValue: 'France', entityType: 'country', confidence: 0.95, provenance: 'country_derived' },
-  { surface: '이탈리아', canonicalValue: 'Italy', entityType: 'country', confidence: 0.95, provenance: 'country_derived' },
-  { surface: '미국', canonicalValue: 'USA', entityType: 'country', confidence: 0.95, provenance: 'country_derived' },
-  { surface: '칠레', canonicalValue: 'Chile', entityType: 'country', confidence: 0.95, provenance: 'country_derived' },
-  { surface: '호주', canonicalValue: 'Australia', entityType: 'country', confidence: 0.95, provenance: 'country_derived' },
-  { surface: '보르도', canonicalValue: 'Bordeaux', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '부르고뉴', canonicalValue: 'Burgundy', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '나파', canonicalValue: 'Napa Valley', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '나파 밸리', canonicalValue: 'Napa Valley', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '토스카나', canonicalValue: 'Tuscany', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '샴페인', canonicalValue: 'Champagne', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '모젤', canonicalValue: 'Mosel', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '리오하', canonicalValue: 'Rioja', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '멘도사', canonicalValue: 'Mendoza', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '말버러', canonicalValue: 'Marlborough', entityType: 'region', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '바롤로', canonicalValue: 'Barolo', entityType: 'appellation', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '브루넬로', canonicalValue: 'Brunello di Montalcino', entityType: 'appellation', confidence: 0.95, provenance: 'region_parents' },
-  { surface: '카베르네', canonicalValue: 'Cabernet Sauvignon', entityType: 'grape_primary', confidence: 0.9, provenance: 'grape_aliases' },
-  { surface: '메를로', canonicalValue: 'Merlot', entityType: 'grape_primary', confidence: 0.95, provenance: 'grape_aliases' },
-  { surface: '피노', canonicalValue: 'Pinot Noir', entityType: 'grape_primary', confidence: 0.85, provenance: 'grape_aliases' },
-  { surface: '샤르도네', canonicalValue: 'Chardonnay', entityType: 'grape_primary', confidence: 0.95, provenance: 'grape_aliases' },
-] as const;
 
 /**
  * Precomputed index: lowercase alias → ResolvedEntity (minus matchedSurface).

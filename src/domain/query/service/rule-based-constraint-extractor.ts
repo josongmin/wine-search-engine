@@ -2,6 +2,7 @@ import type { ConstraintBundle } from '../../shared/types/index.js';
 import {
   KRW_PER_MAN_WON,
 } from '../../shared/constants.js';
+import { WINE_TYPE_RULES } from '../model/wine-type-patterns.js';
 import {
   extractSearchConstraints,
   krwToUsd,
@@ -37,19 +38,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   const q = normalizedQuery;
   const mv = RULE_BASED_CONSTRAINT_MAPPING_VERSION;
 
-  const wineTypeRules: [RegExp, string][] = [
-    [/(?:^|[^\p{L}\p{N}])(?:red|rouge|레드|적포도주)(?=$|[^\p{L}\p{N}])/iu, 'red'],
-    [/(?:^|[^\p{L}\p{N}])(?:white|blanc|화이트|백포도주)(?=$|[^\p{L}\p{N}])/iu, 'white'],
-    // Use lookarounds (not \b) because \b is ASCII-aware and 'é' is not a word char,
-    // which would break the trailing word boundary on "rosé".
-    [/(?:^|[^\p{L}\p{N}])(?:ros[eé]|로제)(?=$|[^\p{L}\p{N}])/iu, 'rosé'],
-    [/(?:^|[^\p{L}\p{N}])(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)(?=$|[^\p{L}\p{N}])/iu, 'sparkling'],
-    [/(?:^|[^\p{L}\p{N}])(?:natural wine|내추럴 와인|내추럴)(?=$|[^\p{L}\p{N}])/iu, 'natural'],
-    [/(?:^|[^\p{L}\p{N}])(?:dessert wine|디저트 와인|sauternes|icewine)(?=$|[^\p{L}\p{N}])/iu, 'dessert'],
-    [/(?:^|[^\p{L}\p{N}])(?:fortified|주정강화|port|sherry|madeira|marsala)(?=$|[^\p{L}\p{N}])/iu, 'fortified'],
-    [/(?:^|[^\p{L}\p{N}])(?:orange wine|오렌지 와인|amber wine)(?=$|[^\p{L}\p{N}])/iu, 'orange'],
-  ];
-  for (const [pattern, value] of wineTypeRules) {
+  for (const [pattern, value] of WINE_TYPE_RULES) {
     if (pattern.test(q)) {
       hard.push({
         attribute: 'wine_type',
