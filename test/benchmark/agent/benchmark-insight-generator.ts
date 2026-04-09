@@ -264,7 +264,8 @@ Produce 3 actionable insights.`;
       maxOutputTokens: 800,
     });
     return result.text;
-  } catch {
+  } catch (err) {
+    console.error(`  [INSIGHT-LLM] Error: ${err instanceof Error ? err.message.slice(0, 100) : String(err)}`);
     return null;
   }
 }

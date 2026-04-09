@@ -350,6 +350,27 @@ describe('executeAgentTool', () => {
 
     const result = await executeAgentTool('search_wines', { query: '레드 와인 추천' }, deps, 'req-123');
     expect(result.observation).toContain('RETRIEVAL_QUALITY: reliable');
+    expect(result.observation).toContain('GROUNDING_JSON:');
+  });
+
+  it('includes structured GROUNDING_JSON with returned wine labels', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-1', canonicalLabel: 'Wine A', type: 'wine', region: 'Bordeaux', grapes: ['Merlot'] },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '보르도 추천' }, deps, 'req-123');
+    expect(result.observation).toContain('GROUNDING_JSON:');
+    expect(result.observation).toContain('"canonical_label":"Wine A"');
+    expect(result.observation).toContain('"region":"Bordeaux"');
   });
 
   it('tags observation with RETRIEVAL_QUALITY: unreliable when 0 results', async () => {

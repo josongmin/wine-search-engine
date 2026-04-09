@@ -983,7 +983,8 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     return parts.join(' | ');
   });
 
-  return `Found ${results.length} results (showing top ${Math.min(SUMMARY_TOP_N, displayResults.length)}):\n${lines.join('\n')}`;
+  const summary = `Found ${results.length} results (showing top ${Math.min(SUMMARY_TOP_N, displayResults.length)}):\n${lines.join('\n')}`;
+  return `${summary}\n${buildGroundingJsonFromSearch(response, displayResults)}`;
 }
 
 function summarizeComparison(response: ComparisonSearchResponse): string {
@@ -1028,5 +1029,74 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     '',
     'COMPARISON_COMPLETE: Both wines are fully described above. You now have ALL data needed to synthesize your comparison answer. Do NOT call search_wines — the comparison result already contains everything.',
   ];
-  return summary.join('\n');
+  return `${summary.join('\n')}\n${buildGroundingJsonFromComparison(response)}`;
+}
+
+interface GroundingWineFact {
+  readonly entity_id: string;
+  readonly canonical_label: string;
+  readonly producer?: string;
+  readonly region?: string;
+  readonly vintage?: number;
+  readonly grapes?: readonly string[];
+  readonly style?: string;
+  readonly critic_score_100?: number;
+  readonly price?: string;
+}
+
+function buildGroundingJsonFromSearch(
+  response: SearchResponseV1,
+  displayResults: readonly SearchResponseV1['results'][number][],
+): string {
+  const facts: GroundingWineFact[] = displayResults.slice(0, SUMMARY_TOP_N).map((r) => {
+    const base: GroundingWineFact = {
+      entity_id: r.entity.entityId,
+      canonical_label: sanitizeObservationField(r.entity.canonicalLabel),
+      ...(r.entity.producer !== undefined ? { producer: sanitizeObservationField(r.entity.producer) } : {}),
+      ...(r.entity.region !== undefined ? { region: sanitizeObservationField(r.entity.region) } : {}),
+      ...(r.entity.vintage !== undefined ? { vintage: r.entity.vintage } : {}),
+      ...(r.entity.grapes !== undefined
+        ? { grapes: r.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
+        : {}),
+      ...(r.entity.style !== undefined ? { style: sanitizeObservationField(r.entity.style) } : {}),
+      ...(r.entity.criticScore !== undefined ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
+      ...(r.entity.priceRange !== undefined ? { price: sanitizeObservationField(r.entity.priceRange) } : {}),
+    };
+    return base;
+  });
+
+  return `GROUNDING_JSON: ${JSON.stringify({
+    query_type: response.queryType,
+    total_results: response.results.length,
+    wines: facts,
+  })}`;
+}
+
+function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): string {
+  const wines: GroundingWineFact[] = response.entities
+    .slice(0, 2)
+    .flatMap((entry) => {
+      const top = entry.topResult;
+      if (top === null) return [];
+      const fact: GroundingWineFact = {
+        entity_id: top.entity.entityId,
+        canonical_label: sanitizeObservationField(top.entity.canonicalLabel),
+        ...(top.entity.producer !== undefined ? { producer: sanitizeObservationField(top.entity.producer) } : {}),
+        ...(top.entity.region !== undefined ? { region: sanitizeObservationField(top.entity.region) } : {}),
+        ...(top.entity.vintage !== undefined ? { vintage: top.entity.vintage } : {}),
+        ...(top.entity.grapes !== undefined
+          ? { grapes: top.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
+          : {}),
+        ...(top.entity.style !== undefined ? { style: sanitizeObservationField(top.entity.style) } : {}),
+        ...(top.entity.criticScore !== undefined ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
+        ...(top.entity.priceRange !== undefined ? { price: sanitizeObservationField(top.entity.priceRange) } : {}),
+      };
+      return [fact];
+    });
+
+  return `GROUNDING_JSON: ${JSON.stringify({
+    query_type: 'comparison',
+    total_results: wines.length,
+    wines,
+  })}`;
 }

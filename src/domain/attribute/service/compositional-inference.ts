@@ -57,8 +57,70 @@ interface CompositionContext {
   readonly grapePrimary: string | undefined;
 }
 
+export interface CompositionalInferenceOptions {
+  /** Optional parser hint for implicit wine type (e.g. comparison query). */
+  readonly impliedWineType?: 'red' | 'white' | 'sparkling' | undefined;
+}
+
+const COMPARISON_MARKER_PATTERN = /(?:^|[^\p{L}\p{N}])(?:vs|versus|비교)(?=$|[^\p{L}\p{N}])/u;
+
+function normalizedStringValues(
+  bundle: ConstraintBundle,
+  attribute: string,
+): readonly string[] {
+  const values: string[] = [];
+  for (const list of [bundle.hard, bundle.soft]) {
+    for (const c of list) {
+      if (c.attribute !== attribute || c.operator !== '=' || typeof c.value !== 'string') continue;
+      values.push(c.value.toLowerCase());
+    }
+  }
+  return values;
+}
+
+/**
+ * Infer an implicit wine_type from comparison-style queries that provide
+ * region+grape cues but omit explicit wine_type tokens.
+ *
+ * This is intentionally conservative: only known domain combinations map to
+ * an implied wine type.
+ */
+export function inferComparisonImpliedWineType(
+  bundle: ConstraintBundle,
+  normalizedQuery: string,
+): CompositionalInferenceOptions['impliedWineType'] {
+  const hasExplicitWineType = normalizedStringValues(bundle, 'wine_type').length > 0;
+  if (hasExplicitWineType || !COMPARISON_MARKER_PATTERN.test(normalizedQuery)) {
+    return undefined;
+  }
+
+  const grapePrimary = new Set(normalizedStringValues(bundle, 'grape_primary'));
+  const regions = new Set(normalizedStringValues(bundle, 'region'));
+  const appellations = new Set(normalizedStringValues(bundle, 'appellation'));
+
+  const hasCabernet = grapePrimary.has('cabernet sauvignon');
+  const hasBordeauxOrNapaRegion = regions.has('bordeaux') || regions.has('napa valley') || regions.has('napa');
+  if (hasCabernet && hasBordeauxOrNapaRegion) {
+    return 'red';
+  }
+
+  const hasBaroloFamily =
+    appellations.has('barolo')
+    || appellations.has('barbaresco')
+    || appellations.has('brunello di montalcino')
+    || appellations.has('brunello');
+  if (hasBaroloFamily) {
+    return 'red';
+  }
+
+  return undefined;
+}
+
 /** Extracts a CompositionContext from a bundle (hard + soft). */
-function extractContext(bundle: ConstraintBundle): CompositionContext {
+function extractContext(
+  bundle: ConstraintBundle,
+  options?: CompositionalInferenceOptions,
+): CompositionContext {
   const findString = (attribute: string): string | undefined => {
     for (const list of [bundle.hard, bundle.soft]) {
       for (const c of list) {
@@ -72,7 +134,7 @@ function extractContext(bundle: ConstraintBundle): CompositionContext {
   return {
     region: findString('region')?.toLowerCase(),
     appellation: findString('appellation')?.toLowerCase(),
-    wineType: findString('wine_type')?.toLowerCase(),
+    wineType: findString('wine_type')?.toLowerCase() ?? options?.impliedWineType,
     country: findString('country')?.toLowerCase(),
     grapePrimary: findString('grape_primary'),
   };
@@ -212,8 +274,11 @@ const RULES: readonly CompositionRule[] = [
  * Apply all composition rules to the bundle and return a new bundle with
  * additional inferred constraints. Hard/soft bundles are unchanged.
  */
-export function applyCompositionalInference(bundle: ConstraintBundle): ConstraintBundle {
-  const ctx = extractContext(bundle);
+export function applyCompositionalInference(
+  bundle: ConstraintBundle,
+  options?: CompositionalInferenceOptions,
+): ConstraintBundle {
+  const ctx = extractContext(bundle, options);
 
   const existingKeys = new Set<string>([
     ...bundle.hard.map(keyOf),

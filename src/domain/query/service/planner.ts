@@ -23,7 +23,10 @@ import { type NLMapper } from '../../attribute/service/nl-mapper.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import { parseSpans, resolveOverlaps, type Span } from '../../attribute/service/span-parser.js';
 import { expandWithOntology } from '../../attribute/service/ontology-expansion.js';
-import { applyCompositionalInference } from '../../attribute/service/compositional-inference.js';
+import {
+  applyCompositionalInference,
+  inferComparisonImpliedWineType,
+} from '../../attribute/service/compositional-inference.js';
 import { resolveEntity, type ResolvedEntity } from '../../attribute/service/entity-resolver.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
@@ -188,7 +191,7 @@ export class Planner {
     );
 
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
-    const parsed = await this.parseConstraints(normalizedQuery, context?.abortSignal);
+    const parsed = await this.parseConstraints(normalizedQuery, intent, context?.abortSignal);
     const constraints = this.mergePairingIntoBundle(
       parsed.bundle,
       normalizedQuery,
@@ -501,6 +504,7 @@ export class Planner {
 
   private async parseConstraints(
     normalizedQuery: string,
+    intent: QueryIntent,
     abortSignal?: AbortSignal,
   ): Promise<{
     readonly bundle: ConstraintBundle;
@@ -622,7 +626,10 @@ export class Planner {
       // on the Tier 6 bundle too, so inferred constraints are populated
       // consistently across all paths.
       const ontologyExpanded = expandWithOntology(tier6Bundle);
-      const expanded = applyCompositionalInference(ontologyExpanded);
+      const expanded = applyCompositionalInference(
+        ontologyExpanded,
+        { impliedWineType: inferComparisonImpliedWineType(ontologyExpanded, normalizedQuery) },
+      );
       const constraintExtraction = buildPlannerConstraintExtractionTrace({
         baseTrace: mapperTrace,
         spans,
@@ -650,7 +657,15 @@ export class Planner {
 
     // RFC-019 Stage 5: Compositional inference — apply composition rules
     // (region + wine_type → structure prior) to populate inferred bundle.
-    const finalBundle = applyCompositionalInference(expanded);
+    const finalBundle = applyCompositionalInference(
+      expanded,
+      {
+        impliedWineType:
+          intent === 'comparison_search'
+            ? inferComparisonImpliedWineType(expanded, normalizedQuery)
+            : undefined,
+      },
+    );
     const constraintExtraction = buildPlannerConstraintExtractionTrace({
       baseTrace: mapperTrace,
       spans,

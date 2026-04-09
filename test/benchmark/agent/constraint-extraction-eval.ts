@@ -28,7 +28,10 @@ import type { MappingTablePort } from '../../../src/domain/attribute/port/mappin
 import { parseSpans, resolveOverlaps, type Span } from '../../../src/domain/attribute/service/span-parser.js';
 import { resolveEntity, type ResolvedEntity } from '../../../src/domain/attribute/service/entity-resolver.js';
 import { expandWithOntology } from '../../../src/domain/attribute/service/ontology-expansion.js';
-import { applyCompositionalInference } from '../../../src/domain/attribute/service/compositional-inference.js';
+import {
+  applyCompositionalInference,
+  inferComparisonImpliedWineType,
+} from '../../../src/domain/attribute/service/compositional-inference.js';
 import { extractRuleBasedConstraints } from '../../../src/domain/query/service/rule-based-constraint-extractor.js';
 import { QueryNormalizer } from '../../../src/domain/query/service/query-normalizer.js';
 import { correctKoreanWineTypos } from '../../../src/domain/query/service/korean-wine-aliases.js';
@@ -178,12 +181,18 @@ export async function runConstraintExtraction(query: string): Promise<Extraction
     // regex extractor is the sole contributor (NOT a "fallback" — it's
     // the last tier of the deterministic cascade pipeline).
     expanded = expandWithOntology(regexExtracted);
-    finalBundle = applyCompositionalInference(expanded);
+    finalBundle = applyCompositionalInference(
+      expanded,
+      { impliedWineType: inferComparisonImpliedWineType(expanded, normalizedQuery) },
+    );
     baseBundle = regexExtracted;
   } else {
     baseBundle = { hard, soft, inferred: [] };
     expanded = expandWithOntology(baseBundle);
-    finalBundle = applyCompositionalInference(expanded);
+    finalBundle = applyCompositionalInference(
+      expanded,
+      { impliedWineType: inferComparisonImpliedWineType(expanded, normalizedQuery) },
+    );
   }
 
   // Build trace (matches planner.ts buildPlannerConstraintExtractionTrace)

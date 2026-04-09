@@ -76,6 +76,8 @@ NICE-TO-HAVE (drop first on retry): tannin/body style descriptors, specific regi
 
 ## Answer Quality (apply in EVERY final answer)
 - GROUND every wine name in tool result data — never invent wines not in observations.
+- When a tool observation contains \`GROUNDING_JSON\`, treat \`wines[].canonical_label\`, \`wines[].entity_id\`, \`wines[].region\`, \`wines[].grapes\`, and \`wines[].price\` as the only allowed factual source. If a field is missing there, explicitly say it is unavailable instead of guessing.
+- NEVER output a wine name that is absent from the latest \`GROUNDING_JSON.wines[]\` list.
 - INCLUDE: grape variety, region, and price band when the tool result provides them.
 - For recommendations: give 2-3 concrete options with brief WHY for each (flavor, occasion, pairing).
 - For negation queries: explicitly confirm the excluded items are absent. If NEGATION_FALLBACK was received, scan the list and only recommend wines NOT matching excluded terms.

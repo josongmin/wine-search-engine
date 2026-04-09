@@ -1676,8 +1676,8 @@ async function main(): Promise<void> {
           httpTimeoutMs: 30_000,
         });
       }
-    } catch {
-      // Non-fatal: insight LLM creation failure → skip LLM analysis
+    } catch (insightLlmErr) {
+      console.error(`  [INSIGHT] LLM creation failed: ${insightLlmErr instanceof Error ? insightLlmErr.message.slice(0, 100) : String(insightLlmErr)}`);
     }
     await printBenchmarkInsights(insightSlice, insightLlm);
   }
