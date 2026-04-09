@@ -32,6 +32,7 @@ import type { AdaptiveToolExecutorContract } from './container-tool-contracts.js
 import type { ChatLlmPort } from '../domain/ai/port/chat-llm.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
 import { AgentOrchestrator } from '../application/agent/agent-orchestrator.js';
+import { getAgentExecutionMetricsCollector } from '../infrastructure/observability/agent-execution-metrics.js';
 
 export interface Container extends LearningContainerServices {
   /** OpenAI-compatible chat when `OPENAI_API_KEY` is set. */
@@ -104,6 +105,7 @@ export async function createContainer(
             {
               chatLlm: core.chatLlm,
               querySanitizer: core.querySanitizer,
+              executionObserver: getAgentExecutionMetricsCollector(),
               toolDeps: {
                 searchUseCase: features.searchUseCase,
                 decomposedSearchExecute: async (subQueries, comparisonIntent, originalQuery, requestId, startTime) =>

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { topKFinalScores } from '../../../../src/application/search/search-usecase-ranking-scores.js';
 import { buildEntityResolverInputFromPlan } from '../../../../src/application/search/search-usecase-entity-resolver-input.js';
+import { buildHybridRetrievalInputForPlan } from '../../../../src/application/search/search-usecase-hybrid-candidates.js';
 import { tryGetCachedSearchResponse } from '../../../../src/application/search/search-usecase-cache-lookup.js';
 import { buildConstraintContradictionExitParams } from '../../../../src/application/search/search-usecase-constraint-early-exit.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
@@ -41,6 +42,41 @@ describe('buildEntityResolverInputFromPlan', () => {
     const input = buildEntityResolverInputFromPlan(plan);
     expect(input.rawQuery).toBe('q');
     expect(input.candidateEntities).toEqual([]);
+  });
+});
+
+describe('buildHybridRetrievalInputForPlan', () => {
+  it('attaches a structured retrieval plan derived from constraints', () => {
+    const plan = {
+      ...minimalPlan(),
+      constraints: {
+        hard: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Bordeaux',
+            source_phrase: '보르도',
+            confidence: 0.95,
+            mapping_version: 'test',
+          },
+        ],
+        soft: [],
+        inferred: [
+          {
+            attribute: 'grape_family',
+            operator: 'in',
+            value: ['Cabernet', 'Merlot'],
+            source_phrase: 'composition(bordeaux+red)',
+            confidence: 0.75,
+            mapping_version: 'test',
+          },
+        ],
+      },
+    } as QueryPlanV1;
+    const input = buildHybridRetrievalInputForPlan(plan);
+
+    expect(input.retrievalPlan?.hardFilterTokens.length).toBeGreaterThan(0);
+    expect(input.retrievalPlan?.inferredBoosts).toHaveLength(1);
   });
 });
 

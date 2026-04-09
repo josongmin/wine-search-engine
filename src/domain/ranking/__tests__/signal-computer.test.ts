@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { SignalComputer } from '../service/signal-computer.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
+import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
   return {
@@ -120,5 +121,39 @@ describe('SignalComputer specialized signals', () => {
     );
 
     expect(score).toBeGreaterThan(0.8);
+  });
+
+  it('uses structured retrieval-plan boosts for soft constraint scoring', () => {
+    const retrievalPlan: RetrievalPlan = {
+      hardFilterTokens: [],
+      softBoosts: [
+        {
+          attribute: 'region',
+          operator: '=',
+          value: 'Bordeaux',
+          weight: 0.9,
+          source: 'test',
+        },
+      ],
+      inferredBoosts: [
+        {
+          attribute: 'grape_family',
+          operator: 'in',
+          value: ['Cabernet', 'Merlot'],
+          weight: 0.7,
+          source: 'test',
+        },
+      ],
+      sensoryPriors: [],
+      planVersion: 'test',
+    };
+
+    const score = computer.computeSoftConstraint(
+      makeCandidate({ matchedConstraints: ['region', 'grape_family'] }),
+      { hard: [], soft: [], inferred: [] },
+      retrievalPlan,
+    );
+
+    expect(score).toBeCloseTo(1, 5);
   });
 });

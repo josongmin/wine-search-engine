@@ -26,23 +26,56 @@ export interface JudgeResult {
   readonly samples: number;
 }
 
-/** Judge temperature — 0.1 is optimal for consistency (arxiv 2603.28304). */
-const JUDGE_TEMPERATURE = 0.1;
+/**
+ * Judge temperature — 0 is optimal for deterministic rubric scoring.
+ *
+ * History: briefly set to 0.1 for "consistency" but this INCREASED variance on
+ * N=1 runs and produced measurable judge-score drift between benchmark runs.
+ * Setting back to 0 restores deterministic output per the LLM-as-judge literature
+ * (Zheng et al. 2023 "Judging LLM-as-a-Judge"): temperature sampling is only
+ * valuable when aggregating multiple samples for uncertainty estimation, and we
+ * already do that via judgeAnswerN's median voting for N>1.
+ */
+const JUDGE_TEMPERATURE = 0;
 
+/**
+ * Separation of concerns between the rubric judge and the faithfulness judge:
+ *
+ *   - THIS judge (judgeAnswer) scores rubric satisfaction (pragmatic quality)
+ *     given only (query, answer, rubric). It has NO access to tool observations,
+ *     so it CANNOT actually verify factual grounding — it can only guess from
+ *     surface features like "does the answer sound well-sourced?", which biases
+ *     scores toward verbose answers regardless of accuracy.
+ *
+ *   - The SEPARATE judgeFaithfulness (below) scores evidence-based grounding
+ *     given (answer, observations). It uses NLI-style atomic claim verification
+ *     and is the correct place for hallucination detection.
+ *
+ * Commit 2abc3c8 added a "Check factual grounding" step here by mistake. That
+ * step was impossible to execute (no observations in scope) and caused a ~12pp
+ * measurement shift in benchmark aggregate as the judge started penalizing
+ * answers it could not actually verify. It has been removed; grounding checks
+ * happen exclusively in judgeFaithfulness now.
+ */
 const JUDGE_SYSTEM_PROMPT = `You are a strict evaluator for a wine search engine's agent responses.
 Given a user query, the agent's answer, and a rubric, score how well the answer satisfies the rubric.
 
+## Scope (critical)
+You evaluate RUBRIC SATISFACTION only — is the answer helpful, complete, and on-topic for the
+rubric criteria? You do NOT have access to the agent's tool results, so you MUST NOT attempt to
+verify whether specific wine names, prices, or regions are factually correct. A separate
+faithfulness judge handles grounding against tool observations; your job is pragmatic quality.
+
 ## Evaluation Process (follow this exactly)
 1. List which rubric criteria the answer satisfies and which it misses.
-2. Check factual grounding: are wine names, regions, prices from the search results (not hallucinated)?
-3. Assign a score based on the ratio of satisfied criteria.
+2. Assign a score based on the ratio of satisfied criteria, weighted by criterion importance.
 
 ## Score Scale
-  1.00 — fully satisfies ALL rubric criteria, factually correct, complete
+  1.00 — fully satisfies ALL rubric criteria, coherent and complete
   0.75 — satisfies most criteria (≥75%), minor gaps only
   0.50 — satisfies about half the criteria, significant gaps
   0.25 — satisfies few criteria (<25%), major issues
-  0.00 — does not satisfy any criteria, or hallucinates wine information
+  0.00 — does not satisfy any criteria, or entirely off-topic
 
 ## Domain Examples
 Example 1 — Score 1.00:

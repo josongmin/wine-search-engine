@@ -36,6 +36,7 @@ import {
 } from './agent-tools.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execution-observer.port.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
 
@@ -285,6 +286,8 @@ function parseLlmOutput(text: string): LlmAction {
 export interface AgentOrchestratorDeps {
   readonly chatLlm: ChatLlmPort;
   readonly toolDeps: AgentToolDeps;
+  /** Optional observer for run-level metrics/telemetry emission. */
+  readonly executionObserver?: AgentExecutionObserver | undefined;
   /**
    * Optional pre-execution security gate. When provided, queries that fail
    * sanitization (injection, jailbreak, PII extraction, etc.) are refused
@@ -1172,6 +1175,14 @@ export class AgentOrchestrator {
       },
       'Agent execution complete',
     );
+
+    this.deps.executionObserver?.onExecutionComplete({
+      terminationReason,
+      fallbackApplied,
+      toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
+      totalDurationMs: budget.getElapsedMs(),
+      timeoutStats,
+    });
 
     return {
       answer,

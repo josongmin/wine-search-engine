@@ -669,6 +669,16 @@ function buildLearnedSparseQueryWeights(
     }
   }
 
+  for (const boost of [
+    ...(input.retrievalPlan?.softBoosts ?? []),
+    ...(input.retrievalPlan?.inferredBoosts ?? []),
+  ]) {
+    const boostTokens = retrievalValueToTokens(boost.value);
+    for (const token of boostTokens) {
+      counts.set(token, (counts.get(token) ?? 0) + Math.max(1, boost.weight));
+    }
+  }
+
   return [...counts.entries()]
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
     .slice(0, QUERY_EXPANSION_MAX_TERMS)
@@ -676,4 +686,31 @@ function buildLearnedSparseQueryWeights(
       token,
       weight: 1 + (count - 1) * QUERY_EXPANSION_TERM_WEIGHT_STEP,
     }));
+}
+
+function retrievalValueToTokens(value: HybridRetrievalInput['hardConstraints'][number]['value']): readonly string[] {
+  if (typeof value === 'string') {
+    return tokenizeRetrievalValue(value);
+  }
+  if (typeof value === 'number') {
+    return [value.toString()];
+  }
+  if (Array.isArray(value)) {
+    const tokens: string[] = [];
+    for (const entry of value) {
+      if (typeof entry === 'string') {
+        tokens.push(...tokenizeRetrievalValue(entry));
+      }
+    }
+    return tokens;
+  }
+  return [];
+}
+
+function tokenizeRetrievalValue(value: string): readonly string[] {
+  return value
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 2);
 }

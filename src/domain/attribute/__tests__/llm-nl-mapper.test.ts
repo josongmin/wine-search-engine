@@ -404,4 +404,27 @@ describe('LlmNLMapper phrase cache', () => {
     expect(userMsg).toContain('banana');
     expect(userMsg).not.toContain('apple');
   });
+
+  it('canonicalizes entity-like LLM outputs through the deterministic linker', async () => {
+    const llm = new StubChatLlm([
+      {
+        phrase: '나파 카베',
+        attribute: 'region',
+        operator: '=',
+        value: 'napa valley',
+        confidence: 0.9,
+      },
+    ]);
+    const mapper = new LlmNLMapper(new NullMappingTable(), llm, 5_000);
+
+    const { constraints: result, constraintExtraction: trace } = await mapper.mapConstraints([
+      '나파 카베',
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.attribute).toBe('region');
+    expect(result[0]?.value).toBe('Napa Valley');
+    expect(result[0]?.mapping_version).toBe('llm-linker-v1.0');
+    expect(trace?.llmLinkedEntityCount).toBe(1);
+  });
 });

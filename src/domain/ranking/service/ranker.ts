@@ -398,6 +398,7 @@ export class Ranker {
         queryPlan,
         constraints,
         anchorProfile,
+        input.retrievalPlan,
         referenceYear,
         queryContainsHangul,
       );

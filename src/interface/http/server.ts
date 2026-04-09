@@ -2,7 +2,13 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import { type Span, SpanStatusCode, type Tracer } from '@opentelemetry/api';
+import {
+  context as otelContext,
+  trace,
+  type Span,
+  SpanStatusCode,
+  type Tracer,
+} from '@opentelemetry/api';
 import { getTracer } from '../../infrastructure/telemetry/tracer.js';
 import { registerHttpDebugMode } from './middleware/http-debug-mode.js';
 import { registerRequestContext } from './middleware/request-context.js';
@@ -148,6 +154,22 @@ function registerTelemetryHooks(app: FastifyInstance, tracer: Tracer): void {
   // already populated. If it were registered before registerRequestContext we
   // would have to fall back to request.id (which Fastify always sets via
   // genReqId before any onRequest hook runs).
+  //
+  // OTEL context propagation:
+  //   1. Create the HTTP span with `tracer.startSpan` (not startActiveSpan) —
+  //      we need to end it manually in the onResponse hook.
+  //   2. Derive a Context with the span installed via `trace.setSpan`.
+  //   3. Invoke `done()` INSIDE `otelContext.with(ctx, done)` so the rest of
+  //      the request lifecycle (preHandler → handler → onResponse) inherits the
+  //      context through Node's AsyncLocalStorage-backed context manager
+  //      (sdk-node installs AsyncHooksContextManager by default, which tracks
+  //      async_hooks init events and propagates context across await points).
+  //   4. Child spans created inside handlers via `tracer.startActiveSpan` will
+  //      find the HTTP span as `trace.getActiveSpan()` and parent to it.
+  //
+  // Without step 3 the HTTP span exists but is not in the active context, so
+  // the GenAI spans created in src/infrastructure/telemetry/gen-ai-tracing.ts
+  // become orphan root spans instead of children of the HTTP request.
   app.addHook('onRequest', (request, _reply, done) => {
     const spanName = `${request.method} ${request.url}`;
     const span = tracer.startSpan(spanName, {
@@ -161,7 +183,8 @@ function registerTelemetryHooks(app: FastifyInstance, tracer: Tracer): void {
       },
     });
     request.otelSpan = span;
-    done();
+    const ctx = trace.setSpan(otelContext.active(), span);
+    otelContext.with(ctx, done);
   });
 
   app.addHook('onResponse', (request, reply, done) => {
