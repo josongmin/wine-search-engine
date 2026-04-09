@@ -229,6 +229,103 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
   - a temporary test not wired into any default lane
   - a narrowly scoped heavy-lane regression with strong assertions
 
+## Benchmark & eval lanes
+
+벤치마크/품질 측정은 목적에 따라 4개 시나리오로 구분된다. **어떤 외부 서비스를 사용하는지**가 측정값의 의미를 결정한다.
+
+---
+
+### 시나리오 A — 코드 회귀 방지 (in-memory, 외부 서비스 없음)
+
+**언제:** PR 전, 리팩터링 후, 라우팅/응답 형식 변경 시  
+**목적:** 검색 경로 파손 여부 확인 (실제 품질 측정 아님)  
+**외부 서비스:** 없음 (Vespa in-memory stub, embedding hash stub, Cohere 없음)
+
+```bash
+npm run test:quality          # golden-set + user-journeys + specialized-modes
+npm run test:e2e:runtime      # full in-memory e2e
+npm run eval:offline:local    # in-memory로 NDCG/MRR 계산 (stub 기반이라 숫자 무의미)
+```
+
+> ⚠️ 여기서 나오는 NDCG/MRR 수치는 stub embedding 기반이라 실제 품질과 무관. 회귀 방지용.
+
+---
+
+### 시나리오 B — Vespa 랭킹 품질 (실제 Vespa, stub embedding/rerank)
+
+**언제:** Vespa 스키마 변경, BM25 weight 조정, YQL 필터 변경 후  
+**목적:** Vespa 인덱스 위에서 랭킹 정확도 확인  
+**외부 서비스:** 실제 Vespa ✅ | Embedding: fake ML service ❌ | Cohere rerank: 없음 ❌
+
+```bash
+npm run test:quality:vespa    # search-quality.test.ts + search-correctness.test.ts
+npm run test:e2e:vespa        # full vespa e2e suite
+npm run test:e2e:vespa:smoke  # quick availability smoke
+```
+
+> ⚠️ Cohere rerank이 켜지지 않음 → `pure_constraint` / `semantic_preference` 쿼리 품질 측정 불가.  
+> ⚠️ Embedding이 fake → dense retrieval 품질 측정 불가.  
+> BM25 / YQL 필터 동작 확인에만 신뢰 가능.
+
+---
+
+### 시나리오 C — 실제 end-to-end 품질 (전체 스택, dev 서버 필요)
+
+**언제:** Cohere rerank 변경, embedding 모델 변경, 리랭킹 게이트 조정, gold judgment 기반 NDCG 측정  
+**목적:** 실제 사용자 경험에 가장 가까운 품질 측정  
+**외부 서비스:** 실제 Vespa ✅ | 실제 OpenAI embedding ✅ | 실제 Cohere rerank ✅
+
+```bash
+# 1. dev 서버 켜기 (별도 터미널)
+npm run dev
+
+# 2. 오프라인 eval (bronze 500-query set, NDCG/MRR/Recall)
+npm run eval:offline:bronze           # → data/eval-results.json
+npm run eval:offline:assert-baseline  # 베이스라인 대비 회귀 확인
+
+# 3. LLM judge 기반 NDCG (40 Korean queries × 300 wines)
+npx tsx --env-file=.env.local scripts/eval/llm-judge-ndcg.ts \
+  --queries data/vivino-gold-queries.jsonl \
+  --corpus /tmp/test300-v3.ndjson \
+  --output /tmp/llm-judge-labels.jsonl
+
+# 4. noisy entity eval
+npm run eval:noisy:validate
+```
+
+> ✅ 이 시나리오만 Cohere rerank 품질을 측정할 수 있다.  
+> `pure_constraint` → `rerankGateReason: 'pure_constraint'` 로그 확인으로 rerank 동작 검증 가능.
+
+---
+
+### 시나리오 D — 에이전트 벤치마크 (LLM + 전체 스택)
+
+**언제:** Agent 프롬프트 변경, tool 추가/수정, 다중 턴 플로우 변경  
+**목적:** Agent의 답변 품질, 제약 조건 만족도, faithfulness 측정  
+**외부 서비스:** 실제 LLM (Anthropic/OpenAI) ✅ | 실제 검색 스택 ✅
+
+```bash
+npm run benchmark:quick     # 20 시나리오, judge off, ~2분
+npm run benchmark:standard  # 80 시나리오, judge off
+npm run benchmark:nightly   # 233 시나리오, 3 samples, full judge, 3시간+
+npm run bench:agent         # default full profile
+```
+
+---
+
+### 요약 매트릭스
+
+| 시나리오 | Vespa | Embedding | Cohere rerank | LLM | 소요시간 | 신뢰도 |
+|---|---|---|---|---|---|---|
+| **A. 코드 회귀** | stub | stub | 없음 | 없음 | 초~분 | 경로 파손 감지만 |
+| **B. Vespa 랭킹** | 실제 | fake | 없음 | 없음 | 분 | BM25/YQL만 |
+| **C. E2E 품질** | 실제 | 실제 | 실제 | 실제 | 분~10분 | ✅ 실제 품질 |
+| **D. 에이전트** | 실제 | 실제 | 실제 | 실제 | 10분~3시간 | ✅ 에이전트 품질 |
+
+**규칙:** Cohere rerank / embedding 변경 후에는 반드시 시나리오 C로 검증. A/B만으로는 rerank 품질 변화 측정 불가.
+
+---
+
 ## Current policy
 
 - The old diagnostic tests (`live-search`, `debug-search`, `trace-pipeline`, `root-cause-trace`) were intentionally removed from automated lanes because they were expensive and low-signal.

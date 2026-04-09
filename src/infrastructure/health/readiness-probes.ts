@@ -26,12 +26,14 @@ export async function withProbeTimeout(
 export async function probeJsonPostEndpoint(
   url: string,
   payload: Record<string, unknown>,
+  extraHeaders?: Record<string, string>,
 ): Promise<ReadinessStatus> {
   return withProbeTimeout(async (signal) => {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        ...extraHeaders,
       },
       body: JSON.stringify(payload),
       signal,

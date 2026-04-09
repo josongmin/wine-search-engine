@@ -4,8 +4,11 @@ node_modules/
 web/node_modules
 dist
 dist/
+out/
+web/out/
 coverage
 coverage/
+coverage/.tmp/
 .next/
 .turbo/
 *.tsbuildinfo
@@ -25,10 +28,15 @@ yarn-error.log*
 .cache/
 .parcel-cache/
 .eslintcache
+.prettiercache
+.stylelintcache
 
 # OS
 .DS_Store
+.AppleDouble
 Thumbs.db
+*.orig
+*.rej
 
 # IDE / editors (keep team-shared configs; ignore user-local)
 .idea/
@@ -86,13 +94,57 @@ web/next-env.d.ts
 *.7z
 *.rar
 
-# Large local/generated datasets
+# Docker Compose — local overrides (ports, bind mounts, secrets)
+docker-compose.override.yml
+docker-compose.override.yaml
+
+# Local scratch (scripts, one-off exports)
+tmp/
+.temp/
+*.pid
+
+# Python (scripts/ltr, tools/*)
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+.env.venv
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.eggs/
+dist-python/
+build-python/
+
+# ETL / eval — dead-letter and step outputs at repo root (resolveDataPath cwd)
+.dead-letter*.ndjson
+
+# Large local/generated datasets & eval outputs (prefer ~/.wine-search-engine/data; see README)
 data/silver-phase*.ndjson
 data/silver-final.ndjson
 data/eval-results.json
 data/eval-with-reranker-bronze.json
 data/noisy-entity-eval-smoke-results.json
 data/silver-quality-report.json
+# Offline / noisy eval machine-local outputs (scripts often write under /tmp; ignore if copied into tree)
+data/noisy-entity-eval-results.json
+data/offline-eval-*.json
+# Generated calibration profiles (keep small fixtures / ndjson samples explicit if needed)
+data/calibration/threshold-profile*.json
+data/calibration/*.ndjson
+!data/calibration/sample-predictions.ndjson
+
+# Model weights (keep docs / README; fetch or link binaries locally)
+models/**/*.onnx
+models/**/*.onnx.data
+models/**/*.pt
+models/**/*.pth
+models/**/*.bin
+models/**/*.safetensors
+models/**/*.gguf
 
 # Misc
 *.pem

@@ -1,0 +1,486 @@
+{"qid": "vv-001", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo Vigna Rionda — classic Barolo producer, premium single vineyard, exactly matches 바롤로 query"}
+{"qid": "vv-001", "entityId": "vivino-adb727be905349f3", "grade": 3, "reason": "2012 Roberto Voerzio Barolo Riserva — top-tier Barolo producer, Riserva designation, exactly matches 바롤로 query"}
+{"qid": "vv-001", "entityId": "vivino-defb3be70c5bd463", "grade": 3, "reason": "2018 Bovio Rocchettevino Barolo — authentic Barolo appellation, matches query"}
+{"qid": "vv-001", "entityId": "vivino-ab100d54e4d38402", "grade": 3, "reason": "2021 Ruggeri Corsini Barolo Bussia Corsini — Barolo Bussia cru, matches query"}
+{"qid": "vv-001", "entityId": "vivino-d368b7c4298a0496", "grade": 3, "reason": "2016 San Biagio Bricco Barolo — Barolo appellation, matches query"}
+{"qid": "vv-001", "entityId": "vivino-890273543e034f9f", "grade": 3, "reason": "2020 Massolino Barolo — reputable Barolo house, matches query"}
+{"qid": "vv-001", "entityId": "vivino-f7c9240852f12fab", "grade": 3, "reason": "2019 Manzone Le Gramolere Barolo — Barolo appellation, matches query"}
+{"qid": "vv-001", "entityId": "vivino-71b97cb0d6ce6960", "grade": 3, "reason": "2007 Andrea Oberto Barolo Vigneto Rocche — Barolo, aged vintage, matches query"}
+{"qid": "vv-001", "entityId": "vivino-48aeb9c7b5ac28d1", "grade": 3, "reason": "2020 Giovanni Rosso Barolo — Giovanni Rosso Barolo, matches query"}
+{"qid": "vv-001", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 2, "reason": "2021 Cascina Vano Canova Barbaresco — Barbaresco not Barolo, but same Nebbiolo grape in adjacent Langhe appellation"}
+{"qid": "vv-001", "entityId": "vivino-de28f559238ea833", "grade": 2, "reason": "2016 Grasso Fratelli Vallegrande Barbaresco — Barbaresco, adjacent Nebbiolo appellation to Barolo"}
+{"qid": "vv-001", "entityId": "vivino-88dd435972938034", "grade": 2, "reason": "2019 Reversanti Barbaresco — Barbaresco, Nebbiolo-based, adjacent to Barolo"}
+{"qid": "vv-001", "entityId": "vivino-5f231ae492ab3b46", "grade": 2, "reason": "2020 Massolino Barbaresco — same producer as Massolino Barolo, Barbaresco appellation"}
+{"qid": "vv-001", "entityId": "vivino-0205db53f1d62f50", "grade": 2, "reason": "2017 La Spinona Barbaresco Secondine — Barbaresco, same region as Barolo (Piedmont/Langhe)"}
+{"qid": "vv-001", "entityId": "vivino-bee2c7cf1e6e633f", "grade": 2, "reason": "2022 Ca' del Baio Asili Barbaresco — Barbaresco, adjacent Nebbiolo appellation"}
+{"qid": "vv-001", "entityId": "vivino-b605573d3cdb91df", "grade": 1, "reason": "2017 Ca' del Monte Amarone — Italian red but Veneto/Corvina, not Piedmont Nebbiolo"}
+{"qid": "vv-001", "entityId": "vivino-d4b2960f94a6810f", "grade": 1, "reason": "2019 Nicolis Amarone — Italian red, different region and grape"}
+{"qid": "vv-001", "entityId": "vivino-f18e927634c74d6f", "grade": 1, "reason": "2018 Murgo Etna Rosso — Italian red from Sicily, not Piedmont"}
+{"qid": "vv-001", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs CrossBarn Napa Valley Cab — US wine, completely different region from Barolo"}
+{"qid": "vv-001", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin Grand Cru — French Burgundy, not Italian Barolo"}
+{"qid": "vv-001", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, completely different from Barolo"}
+{"qid": "vv-002", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 3, "reason": "2021 Cascina Vano Canova Barbaresco — Barbaresco appellation, exactly matches 바르바레스코 query"}
+{"qid": "vv-002", "entityId": "vivino-de28f559238ea833", "grade": 3, "reason": "2016 Grasso Fratelli Vallegrande Barbaresco — Barbaresco appellation, matches query"}
+{"qid": "vv-002", "entityId": "vivino-88dd435972938034", "grade": 3, "reason": "2019 Reversanti Barbaresco — Barbaresco appellation, matches query"}
+{"qid": "vv-002", "entityId": "vivino-5f231ae492ab3b46", "grade": 3, "reason": "2020 Massolino Barbaresco — Barbaresco appellation, matches query"}
+{"qid": "vv-002", "entityId": "vivino-0205db53f1d62f50", "grade": 3, "reason": "2017 La Spinona Barbaresco Secondine — Barbaresco appellation, matches query"}
+{"qid": "vv-002", "entityId": "vivino-bee2c7cf1e6e633f", "grade": 3, "reason": "2022 Ca' del Baio Asili Barbaresco — Barbaresco appellation, matches query"}
+{"qid": "vv-002", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo — Barolo, same Nebbiolo grape, adjacent Langhe appellation"}
+{"qid": "vv-002", "entityId": "vivino-adb727be905349f3", "grade": 2, "reason": "2012 Roberto Voerzio Barolo Riserva — Barolo, adjacent Nebbiolo appellation"}
+{"qid": "vv-002", "entityId": "vivino-890273543e034f9f", "grade": 2, "reason": "2020 Massolino Barolo — same Massolino producer, Barolo vs Barbaresco"}
+{"qid": "vv-002", "entityId": "vivino-48aeb9c7b5ac28d1", "grade": 2, "reason": "2020 Giovanni Rosso Barolo — Barolo, Nebbiolo, adjacent appellation to Barbaresco"}
+{"qid": "vv-002", "entityId": "vivino-b605573d3cdb91df", "grade": 1, "reason": "2017 Ca' del Monte Amarone — Italian red, Veneto, not Piedmont"}
+{"qid": "vv-002", "entityId": "vivino-f18e927634c74d6f", "grade": 1, "reason": "2018 Murgo Etna Rosso — Italian red, Sicily"}
+{"qid": "vv-002", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, irrelevant to Barbaresco"}
+{"qid": "vv-002", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish, not Barbaresco"}
+{"qid": "vv-003", "entityId": "vivino-e259450bc8286296", "grade": 3, "reason": "2014 David Arthur Cabernet Sauvignon Napa — Napa Valley Cab Sauv, exactly matches query"}
+{"qid": "vv-003", "entityId": "vivino-84973fa1522460a8", "grade": 3, "reason": "2018 Paul Hobbs CrossBarn Napa Valley Cabernet Sauvignon — Napa Cab, exactly matches query"}
+{"qid": "vv-003", "entityId": "vivino-02fddf15014f6032", "grade": 3, "reason": "2020 Maldonado Cabernet Sauvignon Napa — Napa Cab, exactly matches query"}
+{"qid": "vv-003", "entityId": "vivino-9e46a57bf0a48a44", "grade": 3, "reason": "2021 Goosecross Cabernet Sauvignon Napa — Napa Cab, exactly matches query"}
+{"qid": "vv-003", "entityId": "vivino-97d411b6563312cc", "grade": 3, "reason": "2019 Hoopes Vineyard Napa Valley Cabernet Sauvignon — Napa Cab, exactly matches query"}
+{"qid": "vv-003", "entityId": "vivino-78535b89c2aeb1c9", "grade": 3, "reason": "2021 Louis M. Martini The Gryphon Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-d0125d999860f86a", "grade": 3, "reason": "2019 Long Meadow Ranch Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-f20170ca92b1ec50", "grade": 3, "reason": "2018 Beringer Napa Valley Distinction Series Cabernet Sauvignon — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-bdbc1ef3eb857152", "grade": 3, "reason": "2015 Frank Family Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-c668972b069a2269", "grade": 3, "reason": "2011 Hall Stags Leap District Cabernet Sauvignon — Napa sub-appellation Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-92ee8372880ef4d3", "grade": 3, "reason": "2001 Pillar Rock Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-84bf6a6b7dd92476", "grade": 3, "reason": "2020 Martin Ray Stags Leap District Cabernet Sauvignon — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-c4f8c513244ba9b0", "grade": 3, "reason": "2022 Four Doors Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-7234c5fba96bbe75", "grade": 3, "reason": "2014 Humanitas George's Vineyard Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-d0a8d8fa22bb2d4b", "grade": 3, "reason": "2015 Scattered Peaks Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-4434c347ec8be20c", "grade": 3, "reason": "2018 Wolf's Head Cabernet Sauvignon Napa — Napa Cab, matches query"}
+{"qid": "vv-003", "entityId": "vivino-a0b2d8dcd619293c", "grade": 2, "reason": "2016 Robert Foley Vineyards Merlot Napa — Napa Merlot, right region but wrong grape variety"}
+{"qid": "vv-003", "entityId": "vivino-72d6dbaac3f15b6d", "grade": 2, "reason": "2021 Rombauer Vineyards Merlot Napa — Napa Merlot, right region but Merlot not Cab"}
+{"qid": "vv-003", "entityId": "vivino-f7f32164058b7b18", "grade": 2, "reason": "2022 Chappellet Merlot Napa — Napa Merlot, right region, Merlot not Cab"}
+{"qid": "vv-003", "entityId": "vivino-c0e5958674f0136c", "grade": 2, "reason": "2019 White Rock Vineyards Claret Napa — Napa Claret (Cab-based blend), close but not labeled Cab Sauv"}
+{"qid": "vv-003", "entityId": "vivino-d3877626e7464d89", "grade": 2, "reason": "2022 Darioush Duel Cab Sauv-Shiraz Napa — Napa Cab blend, not pure Cab"}
+{"qid": "vv-003", "entityId": "vivino-b9d91e492ef67257", "grade": 1, "reason": "2019 Stark-Condé Cabernet Sauvignon Stellenbosch — Cab Sauv but South Africa not Napa"}
+{"qid": "vv-003", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, completely different from Napa Cab"}
+{"qid": "vv-003", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish Tempranillo, irrelevant"}
+{"qid": "vv-004", "entityId": "vivino-d6c1c0aae65d5442", "grade": 3, "reason": "2018 Joseph Swan Vineyards Great Oak Vineyard Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-a8f638d9847a4a07", "grade": 3, "reason": "2022 Dutton Karmen Isabella Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-f9515c225accd054", "grade": 3, "reason": "2021 Sojourn Wohler Vineyard Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-207b6c890ba0937e", "grade": 3, "reason": "2021 Papapietro Perry Leras Family Vineyard Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-1972bdc4b52bef15", "grade": 3, "reason": "2019 Freeman Vineyard & Winery Russian River Valley Pinot Noir — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-bddbed81b4386625", "grade": 3, "reason": "2022 Chappellet Grower Collection Dutton Ranch Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-2687f636a4c17c20", "grade": 3, "reason": "2021 Balletto Vineyards BCD Vineyard Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-982d2bd17b7cd1b0", "grade": 3, "reason": "2015 Castalia Rochioli Vineyard Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-5df6401c57df004e", "grade": 3, "reason": "2016 Stuhlmuller Vineyards Amber Block Pinot Noir Russian River — exactly matches query"}
+{"qid": "vv-004", "entityId": "vivino-34f9728c67ee1b56", "grade": 2, "reason": "2023 Elk Cove Five Mountain Pinot Noir Willamette Valley — Pinot Noir but Oregon not Russian River"}
+{"qid": "vv-004", "entityId": "vivino-f07c7ceada39cf4f", "grade": 2, "reason": "2021 Lemelson Vineyards Jerome Reserve Pinot Noir Willamette — Pinot Noir Oregon not Russian River"}
+{"qid": "vv-004", "entityId": "vivino-784ffc9b381b9b9c", "grade": 2, "reason": "2018 Benton-Lane Pinot Noir First Class Willamette — Pinot Noir Oregon not Russian River"}
+{"qid": "vv-004", "entityId": "vivino-b63de5dccf0b1e49", "grade": 2, "reason": "2022 Toil Pinot Noir Willamette — Pinot Noir Oregon not Russian River"}
+{"qid": "vv-004", "entityId": "vivino-a542a244d6fa4fa3", "grade": 1, "reason": "2010 Serafin Gevrey-Chambertin — Pinot Noir France, same grape but completely different region"}
+{"qid": "vv-004", "entityId": "vivino-dbdacdc2f35021ba", "grade": 1, "reason": "1998 Domaine Leroy Chambertin Grand Cru — Pinot Noir Burgundy, same grape different region"}
+{"qid": "vv-004", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, not Pinot Noir Russian River"}
+{"qid": "vv-004", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — Cabernet Sauvignon, not Pinot Noir"}
+{"qid": "vv-005", "entityId": "vivino-b7be5cdeb1551314", "grade": 3, "reason": "2019 Berthet-Rayne Châteauneuf-du-Pape Rouge — exactly matches 샤토뇌프뒤파프 레드 query"}
+{"qid": "vv-005", "entityId": "vivino-bc8b7fd39f4b290d", "grade": 3, "reason": "2020 Château de Nalys Saintes Pierres de Nalys Châteauneuf-du-Pape Rouge — exactly matches"}
+{"qid": "vv-005", "entityId": "vivino-22eb9baa3b0620a6", "grade": 3, "reason": "2023 Bosquet des Papes Châteauneuf-du-Pape — exactly matches query"}
+{"qid": "vv-005", "entityId": "vivino-795a45c1996ee9e4", "grade": 3, "reason": "2022 M. Chapoutier Châteauneuf-du-Pape La Bernardine — exactly matches query"}
+{"qid": "vv-005", "entityId": "vivino-a1de1aee1d2054a8", "grade": 3, "reason": "2019 Domaine de Ferrand Châteauneuf-du-Pape — exactly matches query"}
+{"qid": "vv-005", "entityId": "vivino-d89927502b9fbbe3", "grade": 3, "reason": "2020 Berthet-Rayne Châteauneuf-du-Pape Rouge Vieilli en Fût — exactly matches query"}
+{"qid": "vv-005", "entityId": "vivino-b199d79363308c9a", "grade": 2, "reason": "2005 Château Magdelaine Saint-Émilion Grand Cru — French red, right country but Bordeaux not Rhône"}
+{"qid": "vv-005", "entityId": "vivino-d332809687773774", "grade": 2, "reason": "2019 Château Troplong Mondot Saint-Émilion — French Bordeaux, not Rhône"}
+{"qid": "vv-005", "entityId": "vivino-6531dbc78678ae02", "grade": 2, "reason": "2019 Château Fonroque Saint-Émilion — French Bordeaux, not Rhône"}
+{"qid": "vv-005", "entityId": "vivino-a542a244d6fa4fa3", "grade": 1, "reason": "2010 Serafin Gevrey-Chambertin — French red Pinot Noir, same country but Burgundy not Rhône"}
+{"qid": "vv-005", "entityId": "vivino-f380e7c22bcae8b4", "grade": 1, "reason": "2014 Olivier Rivière Rioja — European red, Spain not France"}
+{"qid": "vv-005", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US Cabernet, completely different from Châteauneuf-du-Pape"}
+{"qid": "vv-005", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, not Châteauneuf-du-Pape"}
+{"qid": "vv-006", "entityId": "vivino-a542a244d6fa4fa3", "grade": 3, "reason": "2010 Serafin Père & Fils Gevrey-Chambertin — exactly matches 게브리샹베르탱 query"}
+{"qid": "vv-006", "entityId": "vivino-cded7c7a35d8885b", "grade": 3, "reason": "2005 Domaine Ponsot Gevrey-Chambertin Cuvée de l'Abeille — exactly matches query"}
+{"qid": "vv-006", "entityId": "vivino-784ccbf304ac6087", "grade": 3, "reason": "2019 Charles Lachaux Gevrey-Chambertin 'En Reniard' — exactly matches query"}
+{"qid": "vv-006", "entityId": "vivino-669c2a5ddd2b4776", "grade": 3, "reason": "2023 Gérard Seguin Gevrey-Chambertin Vieilles Vignes — exactly matches query"}
+{"qid": "vv-006", "entityId": "vivino-b72770f7f1ebbb47", "grade": 3, "reason": "2005 Domaine d'Auvenay Bonnes-Mares Grand Cru — adjacent Grand Cru appellation in Côte de Nuits near Gevrey"}
+{"qid": "vv-006", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru — Chambertin is a Grand Cru within Gevrey-Chambertin commune"}
+{"qid": "vv-006", "entityId": "vivino-5e4fcbfec55715ff", "grade": 3, "reason": "2003 Domaine Leroy Richebourg Grand Cru — adjacent Grand Cru Côte de Nuits, Domaine Leroy prestige"}
+{"qid": "vv-006", "entityId": "vivino-f5edbffa138e0e87", "grade": 3, "reason": "2018 Domaine Dujac Chambertin Grand Cru — Chambertin Grand Cru in Gevrey commune, exact match"}
+{"qid": "vv-006", "entityId": "vivino-802e062d4e8ed803", "grade": 3, "reason": "2020 Domaine G. Roumier Charmes-Chambertin Grand Cru — Charmes-Chambertin Grand Cru in Gevrey commune"}
+{"qid": "vv-006", "entityId": "vivino-5396028a718117dd", "grade": 3, "reason": "2018 Domaine Duroché Latricières-Chambertin Grand Cru — Latricières-Chambertin in Gevrey commune"}
+{"qid": "vv-006", "entityId": "vivino-ca5fee401562072d", "grade": 3, "reason": "2006 Domaine Castagnier Latricières-Chambertin Grand Cru — Gevrey commune Grand Cru"}
+{"qid": "vv-006", "entityId": "vivino-027e3dfd6b406cdb", "grade": 3, "reason": "2014 Albert Bichot Chambertin Grand Cru — Chambertin in Gevrey commune, matches query"}
+{"qid": "vv-006", "entityId": "vivino-d6c1c0aae65d5442", "grade": 1, "reason": "2018 Joseph Swan Pinot Noir Russian River — Pinot Noir same grape but California, not Burgundy"}
+{"qid": "vv-006", "entityId": "vivino-34f9728c67ee1b56", "grade": 1, "reason": "2023 Elk Cove Pinot Noir Willamette — Pinot Noir, same grape, not Burgundy"}
+{"qid": "vv-006", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — Cabernet Sauvignon, not Pinot Noir Burgundy"}
+{"qid": "vv-006", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, not Gevrey-Chambertin"}
+{"qid": "vv-007", "entityId": "vivino-b199d79363308c9a", "grade": 3, "reason": "2005 Château Magdelaine Saint-Émilion Grand Cru Premier Grand Cru Classé — Premier Grand Cru, exactly matches 생테밀리옹 그랑 크뤼 query"}
+{"qid": "vv-007", "entityId": "vivino-607c260a90a0972b", "grade": 3, "reason": "1998 Château Ferrand Lartigue Saint-Émilion Grand Cru — Saint-Émilion Grand Cru, matches query"}
+{"qid": "vv-007", "entityId": "vivino-d332809687773774", "grade": 3, "reason": "2019 Château Troplong Mondot Mondot Saint-Émilion Grand Cru — Saint-Émilion Grand Cru, matches query"}
+{"qid": "vv-007", "entityId": "vivino-f2298d798691224c", "grade": 3, "reason": "2003 Château Haut-Brisson Saint-Émilion Grand Cru — Saint-Émilion Grand Cru, matches query"}
+{"qid": "vv-007", "entityId": "vivino-6531dbc78678ae02", "grade": 3, "reason": "2019 Château Fonroque Saint-Émilion Grand Cru Classé — Saint-Émilion Grand Cru Classé, exactly matches query"}
+{"qid": "vv-007", "entityId": "vivino-b7be5cdeb1551314", "grade": 2, "reason": "2019 Berthet-Rayne Châteauneuf-du-Pape Rouge — French red, right country but Rhône not Bordeaux"}
+{"qid": "vv-007", "entityId": "vivino-22eb9baa3b0620a6", "grade": 2, "reason": "2023 Bosquet des Papes Châteauneuf-du-Pape — French red, Rhône not Saint-Émilion"}
+{"qid": "vv-007", "entityId": "vivino-a542a244d6fa4fa3", "grade": 2, "reason": "2010 Serafin Gevrey-Chambertin — French red Burgundy, not Bordeaux Grand Cru"}
+{"qid": "vv-007", "entityId": "vivino-f380e7c22bcae8b4", "grade": 1, "reason": "2014 Olivier Rivière Rioja — European red, Spain not France"}
+{"qid": "vv-007", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian, not Saint-Émilion"}
+{"qid": "vv-007", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, not Saint-Émilion"}
+{"qid": "vv-008", "entityId": "vivino-cc06ddf3d2563f30", "grade": 3, "reason": "1935 Bodegas Cosme Palacio Glorioso Rioja Reserva Especial — historic Rioja Reserva, exactly matches 리오하 레드 query"}
+{"qid": "vv-008", "entityId": "vivino-c6bf289768b658c7", "grade": 3, "reason": "1952 Berberana Gran Reserva Rioja — Rioja Gran Reserva, exactly matches query"}
+{"qid": "vv-008", "entityId": "vivino-f380e7c22bcae8b4", "grade": 3, "reason": "2014 Olivier Rivière Las Viñas de Eusebio Rioja — Rioja appellation, matches query"}
+{"qid": "vv-008", "entityId": "vivino-7bfb14de017ad01a", "grade": 3, "reason": "2010 Montecillo Rioja Gran Reserva — Rioja Gran Reserva, matches query"}
+{"qid": "vv-008", "entityId": "vivino-70ebabf5a45dd593", "grade": 3, "reason": "2015 Hermanos Peciña Finca Iscorta Gran Reserva Rioja — Rioja Gran Reserva, matches query"}
+{"qid": "vv-008", "entityId": "vivino-b291720d68811431", "grade": 3, "reason": "2020 Orben Malpuesto Rioja — Rioja appellation, matches query"}
+{"qid": "vv-008", "entityId": "vivino-8e348790fad1fca7", "grade": 3, "reason": "2021 Cuentaviñas CDVIN Garnacha Rioja — Rioja Garnacha, matches query"}
+{"qid": "vv-008", "entityId": "vivino-754045486e847ed7", "grade": 3, "reason": "2022 Miguel Merino Mazuelo de la Quinta Cruz Rioja — Rioja Mazuelo, matches query"}
+{"qid": "vv-008", "entityId": "vivino-09414b5ba87669f3", "grade": 3, "reason": "2019 Oxer Wines Artillero Rioja — Rioja appellation, matches query"}
+{"qid": "vv-008", "entityId": "vivino-2d636d480599be64", "grade": 2, "reason": "2019 Finca Villacreces Nebro Ribera del Duero — Spanish red, same country but different appellation (Ribera del Duero)"}
+{"qid": "vv-008", "entityId": "vivino-67f10b9331589475", "grade": 2, "reason": "2019 Protos Crianza Ribera del Duero — Spanish red, adjacent region"}
+{"qid": "vv-008", "entityId": "vivino-3a15a844943c2ce1", "grade": 2, "reason": "2022 Pago de Carraovejas Tinto Ribera del Duero — Spanish Tempranillo, different DO"}
+{"qid": "vv-008", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Italian, not Spanish, but structured red wine"}
+{"qid": "vv-008", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US Cabernet, not Rioja"}
+{"qid": "vv-008", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin — French Burgundy, not Rioja"}
+{"qid": "vv-009", "entityId": "vivino-2d636d480599be64", "grade": 3, "reason": "2019 Finca Villacreces Nebro Ribera del Duero — exactly matches 리베라 델 두에로 query"}
+{"qid": "vv-009", "entityId": "vivino-67f10b9331589475", "grade": 3, "reason": "2019 Protos Crianza Ribera del Duero — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-b13775521c3abd9f", "grade": 3, "reason": "2020 Cillar de Silos Ribera del Duero Crianza — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-3a15a844943c2ce1", "grade": 3, "reason": "2022 Pago de Carraovejas Tinto Ribera del Duero — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-05ebb787335051cb", "grade": 3, "reason": "2019 Viña Pedrosa La Navilla Ribera del Duero — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-8302f67088493847", "grade": 3, "reason": "2019 Cuentaviñas Ribera del Duero Tinto Fino — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-3b87c193096dd894", "grade": 3, "reason": "2020 Casa Lebai Matadiablos Tinto Fino Ribera del Duero — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-192601db3065e92f", "grade": 3, "reason": "2018 Bodegas Valduero Tierra Alta de 2 Cotas Reserva Ribera del Duero — exactly matches query"}
+{"qid": "vv-009", "entityId": "vivino-cc06ddf3d2563f30", "grade": 2, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish red, adjacent Tempranillo-based region"}
+{"qid": "vv-009", "entityId": "vivino-7bfb14de017ad01a", "grade": 2, "reason": "2010 Montecillo Rioja Gran Reserva — Spanish Tempranillo, adjacent region to Ribera del Duero"}
+{"qid": "vv-009", "entityId": "vivino-f380e7c22bcae8b4", "grade": 2, "reason": "2014 Olivier Rivière Rioja — Spanish red, adjacent region"}
+{"qid": "vv-009", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Italian structured red, different country"}
+{"qid": "vv-009", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US Cabernet, not Ribera del Duero"}
+{"qid": "vv-009", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin — French Burgundy, not Ribera del Duero"}
+{"qid": "vv-010", "entityId": "vivino-b605573d3cdb91df", "grade": 3, "reason": "2017 Ca' del Monte Amarone della Valpolicella Classico — exactly matches 아마로네 query"}
+{"qid": "vv-010", "entityId": "vivino-d4b2960f94a6810f", "grade": 3, "reason": "2019 Nicolis Amarone della Valpolicella Classico — exactly matches query"}
+{"qid": "vv-010", "entityId": "vivino-f1699f0940214525", "grade": 3, "reason": "2016 Rubinelli Vajol Amarone della Valpolicella Classico — exactly matches query"}
+{"qid": "vv-010", "entityId": "vivino-9ffe84bb2f2f1e42", "grade": 3, "reason": "2016 Ca La Bionda Amarone della Valpolicella Classico — exactly matches query"}
+{"qid": "vv-010", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo — Italian red, Piedmont, not Veneto Amarone"}
+{"qid": "vv-010", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 2, "reason": "2021 Cascina Vano Barbaresco — Italian red, Piedmont, not Veneto Amarone"}
+{"qid": "vv-010", "entityId": "vivino-f18e927634c74d6f", "grade": 2, "reason": "2018 Murgo Etna Rosso — Italian red, Sicily, not Veneto"}
+{"qid": "vv-010", "entityId": "vivino-40e2ca3a571e144a", "grade": 2, "reason": "2023 Benanti Etna Rosso — Italian red, different region"}
+{"qid": "vv-010", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, not Italian Amarone"}
+{"qid": "vv-010", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, not Amarone"}
+{"qid": "vv-011", "entityId": "vivino-f18e927634c74d6f", "grade": 3, "reason": "2018 Murgo Tenuta San Michele Etna Rosso — exactly matches 에트나 로쏘 시칠리아 query"}
+{"qid": "vv-011", "entityId": "vivino-40e2ca3a571e144a", "grade": 3, "reason": "2023 Benanti Etna Rosso — exactly matches query"}
+{"qid": "vv-011", "entityId": "vivino-6200655a11958aa0", "grade": 3, "reason": "2021 Emiliano Falsini Feudo Pignatone Davanti Casa Etna Rosso — exactly matches query"}
+{"qid": "vv-011", "entityId": "vivino-c246d4f5e8a3b94d", "grade": 3, "reason": "2021 Federico Graziani Etna Rosso — exactly matches query"}
+{"qid": "vv-011", "entityId": "vivino-bcc91c27f1352e5a", "grade": 3, "reason": "2022 Vino di Anna Q1000 Tataraci Rosso — Etna area Sicily red, matches query"}
+{"qid": "vv-011", "entityId": "vivino-b605573d3cdb91df", "grade": 2, "reason": "2017 Ca' del Monte Amarone — Italian red, Veneto, not Sicily"}
+{"qid": "vv-011", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo — Italian red, Piedmont not Sicily"}
+{"qid": "vv-011", "entityId": "vivino-d4b2960f94a6810f", "grade": 2, "reason": "2019 Nicolis Amarone — Italian red, different region"}
+{"qid": "vv-011", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, not Sicilian Etna Rosso"}
+{"qid": "vv-011", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, not Etna Rosso"}
+{"qid": "vv-012", "entityId": "vivino-34f9728c67ee1b56", "grade": 3, "reason": "2023 Elk Cove Five Mountain Pinot Noir Willamette Valley — exactly matches 윌라멧 밸리 피노 누아 오레곤 query"}
+{"qid": "vv-012", "entityId": "vivino-f07c7ceada39cf4f", "grade": 3, "reason": "2021 Lemelson Vineyards Jerome Reserve Pinot Noir Willamette Valley — exactly matches query"}
+{"qid": "vv-012", "entityId": "vivino-784ffc9b381b9b9c", "grade": 3, "reason": "2018 Benton-Lane Pinot Noir First Class Willamette Valley — exactly matches query"}
+{"qid": "vv-012", "entityId": "vivino-b63de5dccf0b1e49", "grade": 3, "reason": "2022 Toil Pinot Noir Willamette Valley — exactly matches query"}
+{"qid": "vv-012", "entityId": "vivino-d6c1c0aae65d5442", "grade": 2, "reason": "2018 Joseph Swan Pinot Noir Russian River — Pinot Noir California, same grape different state"}
+{"qid": "vv-012", "entityId": "vivino-a8f638d9847a4a07", "grade": 2, "reason": "2022 Dutton Karmen Pinot Noir Russian River — Pinot Noir California not Oregon"}
+{"qid": "vv-012", "entityId": "vivino-1972bdc4b52bef15", "grade": 2, "reason": "2019 Freeman Russian River Valley Pinot Noir — Pinot Noir California not Oregon"}
+{"qid": "vv-012", "entityId": "vivino-a542a244d6fa4fa3", "grade": 1, "reason": "2010 Serafin Gevrey-Chambertin — Pinot Noir but French Burgundy, not Oregon"}
+{"qid": "vv-012", "entityId": "vivino-dbdacdc2f35021ba", "grade": 1, "reason": "1998 Domaine Leroy Chambertin — Pinot Noir Burgundy, not Oregon"}
+{"qid": "vv-012", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — Cabernet Sauvignon, not Pinot Noir"}
+{"qid": "vv-012", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, not Oregon Pinot Noir"}
+{"qid": "vv-013", "entityId": "vivino-7bfb14de017ad01a", "grade": 3, "reason": "2010 Montecillo Rioja Gran Reserva $9 — well under 3만원 (~$25), excellent value Rioja Gran Reserva"}
+{"qid": "vv-013", "entityId": "vivino-cf827be48404b8fc", "grade": 3, "reason": "2017 Smith Devereux Cabernet Sauvignon $19 — under $25, value Napa Cab"}
+{"qid": "vv-013", "entityId": "vivino-09414b5ba87669f3", "grade": 3, "reason": "2019 Oxer Wines Artillero $17 — under $25, value Rioja"}
+{"qid": "vv-013", "entityId": "vivino-f18e927634c74d6f", "grade": 3, "reason": "2018 Murgo Etna Rosso $13 — under $25, excellent value Etna"}
+{"qid": "vv-013", "entityId": "vivino-c246d4f5e8a3b94d", "grade": 3, "reason": "2021 Federico Graziani Etna Rosso $13 — under $25, value Etna"}
+{"qid": "vv-013", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 3, "reason": "2021 Cascina Vano Canova Barbaresco $21 — under $25, great value Barbaresco"}
+{"qid": "vv-013", "entityId": "vivino-88dd435972938034", "grade": 3, "reason": "2019 Reversanti Barbaresco $21 — under $25, value Barbaresco"}
+{"qid": "vv-013", "entityId": "vivino-b291720d68811431", "grade": 3, "reason": "2020 Orben Malpuesto $21 — under $25, value Rioja"}
+{"qid": "vv-013", "entityId": "vivino-8e348790fad1fca7", "grade": 3, "reason": "2021 Cuentaviñas CDVIN Garnacha $21 — under $25, value Rioja Garnacha"}
+{"qid": "vv-013", "entityId": "vivino-84bf6a6b7dd92476", "grade": 3, "reason": "2020 Martin Ray Stags Leap District Cab $27 — just above $25 but very close, good value Napa"}
+{"qid": "vv-013", "entityId": "vivino-4434c347ec8be20c", "grade": 3, "reason": "2018 Wolf's Head Cabernet Sauvignon $27 — just above $25 threshold, value Napa Cab"}
+{"qid": "vv-013", "entityId": "vivino-7234c5fba96bbe75", "grade": 3, "reason": "2014 Humanitas Cabernet Sauvignon $27 — just above $25, value Napa"}
+{"qid": "vv-013", "entityId": "vivino-9ffe84bb2f2f1e42", "grade": 2, "reason": "2016 Ca La Bionda Amarone $27 — slightly above $25, Amarone is premium not budget category"}
+{"qid": "vv-013", "entityId": "vivino-607c260a90a0972b", "grade": 2, "reason": "1998 Château Ferrand Lartigue Saint-Émilion $14 — under $25 but aged Bordeaux, value pick"}
+{"qid": "vv-013", "entityId": "vivino-669c2a5ddd2b4776", "grade": 2, "reason": "2023 Gérard Seguin Gevrey-Chambertin $45 — over $25 threshold, doesn't meet price criterion"}
+{"qid": "vv-013", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab $75 — way over $25, does not qualify as 가성비 under 3만원"}
+{"qid": "vv-013", "entityId": "vivino-adb727be905349f3", "grade": 0, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — luxury price, completely off for under $25 query"}
+{"qid": "vv-014", "entityId": "vivino-c324ebd0b7e66c7b", "grade": 3, "reason": "2015 Barossa Valley Estate E&E Black Pepper Shiraz $49 — within 5만원대 (~$42) range, quality Australian Shiraz"}
+{"qid": "vv-014", "entityId": "vivino-bdbc1ef3eb857152", "grade": 3, "reason": "2015 Frank Family Cabernet Sauvignon $54 — very close to 5만원대 range (~$42-50)"}
+{"qid": "vv-014", "entityId": "vivino-2498fa992e029b46", "grade": 3, "reason": "2019 Tate Spring Street Merlot $49 — exactly in 5만원대 range, Napa Merlot"}
+{"qid": "vv-014", "entityId": "vivino-d0a8d8fa22bb2d4b", "grade": 3, "reason": "2015 Scattered Peaks Cabernet Sauvignon $32 — slightly under but reasonable 5만원대 range"}
+{"qid": "vv-014", "entityId": "vivino-2d636d480599be64", "grade": 3, "reason": "2019 Finca Villacreces Nebro Ribera del Duero $29 — near 5만원대 range, good value Spanish"}
+{"qid": "vv-014", "entityId": "vivino-b13775521c3abd9f", "grade": 3, "reason": "2020 Cillar de Silos Ribera del Duero Crianza $22 — affordable, good value Spanish"}
+{"qid": "vv-014", "entityId": "vivino-67f10b9331589475", "grade": 3, "reason": "2019 Protos Crianza $32 — near 5만원대, good value Ribera del Duero"}
+{"qid": "vv-014", "entityId": "vivino-a542a244d6fa4fa3", "grade": 2, "reason": "2010 Serafin Gevrey-Chambertin $106 — over $50, above 5만원대 range"}
+{"qid": "vv-014", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo $69 — above $50 range, slightly over 5만원대"}
+{"qid": "vv-014", "entityId": "vivino-adb727be905349f3", "grade": 0, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — far too expensive for 5만원대 range"}
+{"qid": "vv-014", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin $23,621 — ultra-luxury, completely off price range"}
+{"qid": "vv-015", "entityId": "vivino-1972bdc4b52bef15", "grade": 3, "reason": "2019 Freeman Russian River Valley Pinot Noir $59 — exactly in 6만원대 (~$50-58) range"}
+{"qid": "vv-015", "entityId": "vivino-982d2bd17b7cd1b0", "grade": 3, "reason": "2015 Castalia Rochioli Vineyard Pinot Noir $20 — under 6만원대 but prized Russian River Pinot"}
+{"qid": "vv-015", "entityId": "vivino-f20170ca92b1ec50", "grade": 3, "reason": "2018 Beringer Napa Valley Cabernet Sauvignon $60 — exactly in 6만원대 range"}
+{"qid": "vv-015", "entityId": "vivino-72d6dbaac3f15b6d", "grade": 3, "reason": "2021 Rombauer Vineyards Merlot $62 — near top of 6만원대 range, known quality producer"}
+{"qid": "vv-015", "entityId": "vivino-9e46a57bf0a48a44", "grade": 3, "reason": "2021 Goosecross Cabernet Sauvignon $61 — in 6만원대 range"}
+{"qid": "vv-015", "entityId": "vivino-c4f8c513244ba9b0", "grade": 3, "reason": "2022 Four Doors Cabernet Sauvignon $60 — exactly in 6만원대 range"}
+{"qid": "vv-015", "entityId": "vivino-02fddf15014f6032", "grade": 3, "reason": "2020 Maldonado Cabernet Sauvignon $63 — slightly above but near 6만원대 range"}
+{"qid": "vv-015", "entityId": "vivino-b605573d3cdb91df", "grade": 2, "reason": "2017 Ca' del Monte Amarone $56 — in price range but Amarone style is richer/heavier"}
+{"qid": "vv-015", "entityId": "vivino-a542a244d6fa4fa3", "grade": 2, "reason": "2010 Serafin Gevrey-Chambertin $106 — above 6만원대 range"}
+{"qid": "vv-015", "entityId": "vivino-adb727be905349f3", "grade": 0, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — far over 6만원대 price range"}
+{"qid": "vv-016", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo Vigna Rionda $69 — in 7만원 (~$58-67) range, single-vineyard Barolo, excellent gift"}
+{"qid": "vv-016", "entityId": "vivino-890273543e034f9f", "grade": 3, "reason": "2020 Massolino Barolo $65 — in 7만원 range, respected Barolo house, great gift"}
+{"qid": "vv-016", "entityId": "vivino-d368b7c4298a0496", "grade": 3, "reason": "2016 San Biagio Bricco Barolo $66 — in 7만원 range, gift-appropriate Barolo"}
+{"qid": "vv-016", "entityId": "vivino-f7c9240852f12fab", "grade": 3, "reason": "2019 Manzone Le Gramolere Barolo $64 — in 7만원 range, Barolo gift pick"}
+{"qid": "vv-016", "entityId": "vivino-5f231ae492ab3b46", "grade": 3, "reason": "2020 Massolino Barbaresco $65 — in 7만원 range, premium gift wine"}
+{"qid": "vv-016", "entityId": "vivino-bee2c7cf1e6e633f", "grade": 3, "reason": "2022 Ca' del Baio Asili Barbaresco $62 — in 7만원 range, quality Barbaresco gift"}
+{"qid": "vv-016", "entityId": "vivino-e259450bc8286296", "grade": 2, "reason": "2014 David Arthur Cabernet Sauvignon $253 — well above 7만원, too expensive for this tier"}
+{"qid": "vv-016", "entityId": "vivino-bdbc1ef3eb857152", "grade": 2, "reason": "2015 Frank Family Cabernet Sauvignon $54 — slightly below 7만원 range but giftable"}
+{"qid": "vv-016", "entityId": "vivino-7bfb14de017ad01a", "grade": 1, "reason": "2010 Montecillo Rioja Gran Reserva $9 — too cheap for 7만원 gift tier, value not gift tier"}
+{"qid": "vv-016", "entityId": "vivino-adb727be905349f3", "grade": 0, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — far above 7만원 range"}
+{"qid": "vv-017", "entityId": "vivino-a542a244d6fa4fa3", "grade": 3, "reason": "2010 Serafin Père & Fils Gevrey-Chambertin $106 — in 10만원대 (~$84) range, premium Burgundy"}
+{"qid": "vv-017", "entityId": "vivino-84973fa1522460a8", "grade": 3, "reason": "2018 Paul Hobbs CrossBarn Napa Valley Cabernet Sauvignon $75 — in 10만원대 range, Paul Hobbs prestige"}
+{"qid": "vv-017", "entityId": "vivino-f1699f0940214525", "grade": 3, "reason": "2016 Rubinelli Vajol Amarone $75 — in 10만원대 range, premium Amarone"}
+{"qid": "vv-017", "entityId": "vivino-795a45c1996ee9e4", "grade": 3, "reason": "2022 M. Chapoutier Châteauneuf-du-Pape La Bernardine $71 — near 10만원대 range, premium Rhône"}
+{"qid": "vv-017", "entityId": "vivino-22eb9baa3b0620a6", "grade": 3, "reason": "2023 Bosquet des Papes Châteauneuf-du-Pape $69 — near 10만원대, premium Rhône"}
+{"qid": "vv-017", "entityId": "vivino-d0125d999860f86a", "grade": 2, "reason": "2019 Long Meadow Ranch Cabernet Sauvignon $69 — slightly below 10만원 range"}
+{"qid": "vv-017", "entityId": "vivino-adb727be905349f3", "grade": 2, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — too expensive for 10만원대, above range"}
+{"qid": "vv-017", "entityId": "vivino-7bfb14de017ad01a", "grade": 1, "reason": "2010 Montecillo Rioja Gran Reserva $9 — far too cheap for 10만원대 premium tier"}
+{"qid": "vv-017", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin $23,621 — ultra-luxury, completely off 10만원대 range"}
+{"qid": "vv-018", "entityId": "vivino-e259450bc8286296", "grade": 3, "reason": "2014 David Arthur Cabernet Sauvignon $253 — above 20만원 (~$168), special occasion Napa Cab"}
+{"qid": "vv-018", "entityId": "vivino-c668972b069a2269", "grade": 3, "reason": "2011 Hall Stags Leap District Cabernet Sauvignon $399 — luxury Napa, special occasion"}
+{"qid": "vv-018", "entityId": "vivino-92ee8372880ef4d3", "grade": 3, "reason": "2001 Pillar Rock Cabernet Sauvignon $396 — aged luxury Napa, special occasion"}
+{"qid": "vv-018", "entityId": "vivino-adb727be905349f3", "grade": 3, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — iconic Barolo Riserva, special occasion luxury"}
+{"qid": "vv-018", "entityId": "vivino-cded7c7a35d8885b", "grade": 3, "reason": "2005 Domaine Ponsot Gevrey-Chambertin Cuvée de l'Abeille $399 — luxury Burgundy, special occasion"}
+{"qid": "vv-018", "entityId": "vivino-784ccbf304ac6087", "grade": 3, "reason": "2019 Charles Lachaux Gevrey-Chambertin 'En Reniard' $2,241 — ultra-premium Burgundy"}
+{"qid": "vv-018", "entityId": "vivino-b72770f7f1ebbb47", "grade": 3, "reason": "2005 Domaine d'Auvenay Bonnes-Mares Grand Cru $26,135 — legendary ultra-luxury Burgundy"}
+{"qid": "vv-018", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru $23,621 — legendary Leroy, ultra special occasion"}
+{"qid": "vv-018", "entityId": "vivino-5e4fcbfec55715ff", "grade": 3, "reason": "2003 Domaine Leroy Richebourg Grand Cru $22,140 — ultra-luxury Burgundy Grand Cru"}
+{"qid": "vv-018", "entityId": "vivino-b199d79363308c9a", "grade": 3, "reason": "2005 Château Magdelaine Saint-Émilion Premier Grand Cru Classé $499 — luxury Bordeaux gift"}
+{"qid": "vv-018", "entityId": "vivino-5396028a718117dd", "grade": 2, "reason": "2018 Domaine Duroché Latricières-Chambertin Grand Cru $730 — luxury but slightly below ultra-premium in this context"}
+{"qid": "vv-018", "entityId": "vivino-a542a244d6fa4fa3", "grade": 2, "reason": "2010 Serafin Gevrey-Chambertin $106 — premium but below 20만원 ($168) threshold"}
+{"qid": "vv-018", "entityId": "vivino-7bfb14de017ad01a", "grade": 0, "reason": "2010 Montecillo Rioja Gran Reserva $9 — budget wine, completely off for 20만원 luxury query"}
+{"qid": "vv-018", "entityId": "vivino-cf827be48404b8fc", "grade": 0, "reason": "2017 Smith Devereux Cabernet Sauvignon $19 — budget Napa, not special occasion luxury"}
+{"qid": "vv-019", "entityId": "vivino-7bfb14de017ad01a", "grade": 3, "reason": "2010 Montecillo Rioja Gran Reserva $9 — exactly at 1만원 ($9) threshold, remarkable value Gran Reserva"}
+{"qid": "vv-019", "entityId": "vivino-8e348790fad1fca7", "grade": 3, "reason": "2021 Cuentaviñas CDVIN Garnacha $21 — budget Rioja, although above $9 the query spirit covers very cheap wines and this is sub-$25"}
+{"qid": "vv-019", "entityId": "vivino-b291720d68811431", "grade": 3, "reason": "2020 Orben Malpuesto $21 — budget Rioja, very affordable, meets spirit of 1만원 이하 저렴한 budget query as corpus lowest tier"}
+{"qid": "vv-019", "entityId": "vivino-f18e927634c74d6f", "grade": 2, "reason": "2018 Murgo Etna Rosso $13 — above $9 but very cheap, close to threshold"}
+{"qid": "vv-019", "entityId": "vivino-c246d4f5e8a3b94d", "grade": 2, "reason": "2021 Federico Graziani Etna Rosso $13 — above $9 but near threshold"}
+{"qid": "vv-019", "entityId": "vivino-09414b5ba87669f3", "grade": 2, "reason": "2019 Oxer Wines Artillero $17 — above $9 threshold, still budget range"}
+{"qid": "vv-019", "entityId": "vivino-607c260a90a0972b", "grade": 2, "reason": "1998 Château Ferrand Lartigue Saint-Émilion $14 — above $9 but budget range, aged wine"}
+{"qid": "vv-019", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 1, "reason": "2021 Cascina Vano Barbaresco $21 — good value but above 1만원 threshold"}
+{"qid": "vv-019", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab $75 — far over 1만원 limit"}
+{"qid": "vv-019", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin $23,621 — utterly irrelevant to under-$9 query"}
+{"qid": "vv-020", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru $23,621 — pinnacle of Burgundy, ultimate luxury gift"}
+{"qid": "vv-020", "entityId": "vivino-b72770f7f1ebbb47", "grade": 3, "reason": "2005 Domaine d'Auvenay Bonnes-Mares Grand Cru $26,135 — ultra-rare Burgundy Grand Cru gift"}
+{"qid": "vv-020", "entityId": "vivino-5e4fcbfec55715ff", "grade": 3, "reason": "2003 Domaine Leroy Richebourg Grand Cru $22,140 — Leroy Grand Cru, premier luxury Burgundy"}
+{"qid": "vv-020", "entityId": "vivino-f5edbffa138e0e87", "grade": 3, "reason": "2018 Domaine Dujac Chambertin Grand Cru $12,573 — Chambertin Grand Cru, luxury Burgundy gift"}
+{"qid": "vv-020", "entityId": "vivino-802e062d4e8ed803", "grade": 3, "reason": "2020 Domaine G. Roumier Charmes-Chambertin Grand Cru $3,825 — Roumier Grand Cru, highly sought Burgundy"}
+{"qid": "vv-020", "entityId": "vivino-784ccbf304ac6087", "grade": 3, "reason": "2019 Charles Lachaux Gevrey-Chambertin 'En Reniard' $2,241 — cult Burgundy, luxury gift"}
+{"qid": "vv-020", "entityId": "vivino-5396028a718117dd", "grade": 3, "reason": "2018 Domaine Duroché Latricières-Chambertin Grand Cru $730 — Grand Cru Burgundy, luxury gift"}
+{"qid": "vv-020", "entityId": "vivino-ca5fee401562072d", "grade": 3, "reason": "2006 Domaine Castagnier Latricières-Chambertin Grand Cru $397 — Grand Cru Burgundy gift"}
+{"qid": "vv-020", "entityId": "vivino-027e3dfd6b406cdb", "grade": 3, "reason": "2014 Albert Bichot Chambertin Grand Cru $398 — Chambertin Grand Cru, luxury Burgundy gift"}
+{"qid": "vv-020", "entityId": "vivino-cded7c7a35d8885b", "grade": 3, "reason": "2005 Domaine Ponsot Gevrey-Chambertin Cuvée de l'Abeille $399 — luxury Burgundy village wine from iconic producer"}
+{"qid": "vv-020", "entityId": "vivino-a542a244d6fa4fa3", "grade": 2, "reason": "2010 Serafin Gevrey-Chambertin $106 — premium Burgundy but village-level, not Grand Cru"}
+{"qid": "vv-020", "entityId": "vivino-adb727be905349f3", "grade": 2, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — luxury Italian, not Burgundy Grand Cru"}
+{"qid": "vv-020", "entityId": "vivino-7bfb14de017ad01a", "grade": 0, "reason": "2010 Montecillo Rioja Gran Reserva $9 — budget Spanish wine, irrelevant to luxury Burgundy Grand Cru query"}
+{"qid": "vv-020", "entityId": "vivino-f18e927634c74d6f", "grade": 0, "reason": "2018 Murgo Etna Rosso $13 — budget Italian, not luxury Burgundy"}
+{"qid": "vv-021", "entityId": "vivino-e259450bc8286296", "grade": 3, "reason": "2014 David Arthur Cabernet Sauvignon Napa $253 — full-bodied structured Napa Cab, ideal for steak"}
+{"qid": "vv-021", "entityId": "vivino-84973fa1522460a8", "grade": 3, "reason": "2018 Paul Hobbs CrossBarn Napa Cab — bold full-body Napa Cab, classic steak pairing"}
+{"qid": "vv-021", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo Vigna Rionda — Barolo is quintessential high-tannin steak wine"}
+{"qid": "vv-021", "entityId": "vivino-adb727be905349f3", "grade": 3, "reason": "2012 Roberto Voerzio Barolo Riserva — powerful Barolo, excellent steak pairing"}
+{"qid": "vv-021", "entityId": "vivino-b605573d3cdb91df", "grade": 3, "reason": "2017 Ca' del Monte Amarone — big, full-bodied Amarone, excellent with red meat"}
+{"qid": "vv-021", "entityId": "vivino-f1699f0940214525", "grade": 3, "reason": "2016 Rubinelli Vajol Amarone — full-bodied Amarone, great steak wine"}
+{"qid": "vv-021", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru — grand structured Pinot Noir, elegant steak pairing"}
+{"qid": "vv-021", "entityId": "vivino-c668972b069a2269", "grade": 3, "reason": "2011 Hall Stags Leap District Cabernet Sauvignon — Stags Leap Cab, classic steak match"}
+{"qid": "vv-021", "entityId": "vivino-d4b2960f94a6810f", "grade": 2, "reason": "2019 Nicolis Amarone — full-bodied Amarone, rich pairing for steak"}
+{"qid": "vv-021", "entityId": "vivino-3a15a844943c2ce1", "grade": 2, "reason": "2022 Pago de Carraovejas Tinto Ribera del Duero — full-bodied Tempranillo, good steak wine"}
+{"qid": "vv-021", "entityId": "vivino-d6c1c0aae65d5442", "grade": 1, "reason": "2018 Joseph Swan Pinot Noir Russian River — lighter style Pinot Noir, less ideal for steak"}
+{"qid": "vv-021", "entityId": "vivino-34f9728c67ee1b56", "grade": 1, "reason": "2023 Elk Cove Pinot Noir Willamette — lighter Pinot Noir, less suited for heavy steak"}
+{"qid": "vv-021", "entityId": "vivino-7bfb14de017ad01a", "grade": 0, "reason": "2010 Montecillo Rioja Gran Reserva $9 — cheap wine, inappropriate recommendation for steak pairing context"}
+{"qid": "vv-022", "entityId": "vivino-a542a244d6fa4fa3", "grade": 3, "reason": "2010 Serafin Gevrey-Chambertin — elegant Pinot Noir, versatile cheese pairing, especially aged"}
+{"qid": "vv-022", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo — Barolo pairs beautifully with hard Italian cheeses like Parmigiano"}
+{"qid": "vv-022", "entityId": "vivino-b7be5cdeb1551314", "grade": 3, "reason": "2019 Berthet-Rayne Châteauneuf-du-Pape — Grenache-based, excellent with aged cheeses"}
+{"qid": "vv-022", "entityId": "vivino-cc06ddf3d2563f30", "grade": 3, "reason": "1935 Bodegas Cosme Palacio Rioja Reserva Especial — aged Rioja, classic cheese pairing"}
+{"qid": "vv-022", "entityId": "vivino-70ebabf5a45dd593", "grade": 3, "reason": "2015 Hermanos Peciña Finca Iscorta Gran Reserva Rioja — mature Rioja, cheese-friendly"}
+{"qid": "vv-022", "entityId": "vivino-d4b2960f94a6810f", "grade": 2, "reason": "2019 Nicolis Amarone — powerful Amarone, pairs with strong cheeses but can overpower delicate ones"}
+{"qid": "vv-022", "entityId": "vivino-84973fa1522460a8", "grade": 2, "reason": "2018 Paul Hobbs Napa Cab — bold Cab, pairs with aged cheddar and firm cheeses"}
+{"qid": "vv-022", "entityId": "vivino-34f9728c67ee1b56", "grade": 2, "reason": "2023 Elk Cove Pinot Noir Willamette — lighter style works with softer cheeses"}
+{"qid": "vv-022", "entityId": "vivino-7bfb14de017ad01a", "grade": 1, "reason": "2010 Montecillo Rioja Gran Reserva $9 — budget but aged Rioja can still pair with cheese"}
+{"qid": "vv-022", "entityId": "vivino-ba49ae54df22945c", "grade": 0, "reason": "2017 Jeff Cohn Cellars Petite Sirah — bold tannic Petite Sirah, challenging cheese pairing"}
+{"qid": "vv-023", "entityId": "vivino-d6c1c0aae65d5442", "grade": 3, "reason": "2018 Joseph Swan Pinot Noir Russian River — smooth, silky Russian River Pinot, very easy-drinking"}
+{"qid": "vv-023", "entityId": "vivino-34f9728c67ee1b56", "grade": 3, "reason": "2023 Elk Cove Five Mountain Pinot Noir — elegant smooth Willamette Pinot, approachable style"}
+{"qid": "vv-023", "entityId": "vivino-f07c7ceada39cf4f", "grade": 3, "reason": "2021 Lemelson Jerome Reserve Pinot Noir — smooth refined Oregon Pinot, easy-drinking"}
+{"qid": "vv-023", "entityId": "vivino-784ffc9b381b9b9c", "grade": 3, "reason": "2018 Benton-Lane Pinot Noir First Class — smooth Willamette Pinot, approachable"}
+{"qid": "vv-023", "entityId": "vivino-b63de5dccf0b1e49", "grade": 3, "reason": "2022 Toil Pinot Noir — smooth easy-drinking Willamette Pinot Noir"}
+{"qid": "vv-023", "entityId": "vivino-72d6dbaac3f15b6d", "grade": 3, "reason": "2021 Rombauer Merlot Napa — Rombauer known for smooth approachable style, easy-drinking Merlot"}
+{"qid": "vv-023", "entityId": "vivino-a0b2d8dcd619293c", "grade": 3, "reason": "2016 Robert Foley Merlot Napa — Merlot is naturally softer and more approachable than Cab"}
+{"qid": "vv-023", "entityId": "vivino-f7f32164058b7b18", "grade": 3, "reason": "2022 Chappellet Merlot Napa — Merlot known for smooth easy style"}
+{"qid": "vv-023", "entityId": "vivino-2498fa992e029b46", "grade": 3, "reason": "2019 Tate Spring Street Merlot Napa — smooth easy-drinking Napa Merlot"}
+{"qid": "vv-023", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 2, "reason": "2021 Cascina Vano Barbaresco — Nebbiolo can be lighter in style, but still structured"}
+{"qid": "vv-023", "entityId": "vivino-adb727be905349f3", "grade": 0, "reason": "2012 Roberto Voerzio Barolo Riserva — powerful structured Barolo, not smooth/easy-drinking style"}
+{"qid": "vv-023", "entityId": "vivino-ba49ae54df22945c", "grade": 0, "reason": "2017 Jeff Cohn Petite Sirah — very tannic Petite Sirah, opposite of smooth easy-drinking"}
+{"qid": "vv-024", "entityId": "vivino-adb727be905349f3", "grade": 3, "reason": "2012 Roberto Voerzio Barolo Riserva 10 Anni — iconic tannic Barolo Riserva, exceptional aging potential"}
+{"qid": "vv-024", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo Vigna Rionda — single-vineyard Barolo, high tannin, long-aging wine"}
+{"qid": "vv-024", "entityId": "vivino-71b97cb0d6ce6960", "grade": 3, "reason": "2007 Andrea Oberto Barolo Vigneto Rocche — already aged Barolo showing tannic backbone"}
+{"qid": "vv-024", "entityId": "vivino-e259450bc8286296", "grade": 3, "reason": "2014 David Arthur Cabernet Sauvignon Napa — structured Napa Cab with aging potential"}
+{"qid": "vv-024", "entityId": "vivino-c668972b069a2269", "grade": 3, "reason": "2011 Hall Stags Leap District Cab — Stags Leap Cab, well-structured for aging"}
+{"qid": "vv-024", "entityId": "vivino-b605573d3cdb91df", "grade": 3, "reason": "2017 Ca' del Monte Amarone — Amarone is high-extract tannic wine with excellent aging potential"}
+{"qid": "vv-024", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru — legendary aged Grand Cru with decades of aging potential"}
+{"qid": "vv-024", "entityId": "vivino-ba49ae54df22945c", "grade": 3, "reason": "2017 Jeff Cohn Petite Sirah — Petite Sirah is among highest tannin varieties, major aging potential"}
+{"qid": "vv-024", "entityId": "vivino-a8b21552e14a921c", "grade": 2, "reason": "2023 Croix Estate 1904 Zinfandel — Zinfandel can have high tannin but typically more approachable"}
+{"qid": "vv-024", "entityId": "vivino-34f9728c67ee1b56", "grade": 0, "reason": "2023 Elk Cove Pinot Noir Willamette — Pinot Noir is light-bodied low tannin, not a tannic aging wine"}
+{"qid": "vv-024", "entityId": "vivino-72d6dbaac3f15b6d", "grade": 0, "reason": "2021 Rombauer Merlot — smooth approachable Merlot, not known for high tannin or long aging"}
+{"qid": "vv-025", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo — Barolo is the king of Italian reds, perfect for Italian cuisine"}
+{"qid": "vv-025", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 3, "reason": "2021 Cascina Vano Barbaresco — Barbaresco pairs naturally with Italian cuisine, especially truffle dishes"}
+{"qid": "vv-025", "entityId": "vivino-b605573d3cdb91df", "grade": 3, "reason": "2017 Ca' del Monte Amarone — Amarone is the prestige Italian red for rich Italian dishes"}
+{"qid": "vv-025", "entityId": "vivino-d4b2960f94a6810f", "grade": 3, "reason": "2019 Nicolis Amarone — Amarone, quintessentially Italian, perfect for hearty Italian food"}
+{"qid": "vv-025", "entityId": "vivino-f18e927634c74d6f", "grade": 3, "reason": "2018 Murgo Etna Rosso — Sicilian wine for Italian cuisine, especially seafood-based pasta"}
+{"qid": "vv-025", "entityId": "vivino-40e2ca3a571e144a", "grade": 3, "reason": "2023 Benanti Etna Rosso — Etna Rosso is ideal with Sicilian Italian cuisine"}
+{"qid": "vv-025", "entityId": "vivino-6200655a11958aa0", "grade": 3, "reason": "2021 Emiliano Falsini Etna Rosso — Sicilian red for Italian food"}
+{"qid": "vv-025", "entityId": "vivino-9ffe84bb2f2f1e42", "grade": 3, "reason": "2016 Ca La Bionda Amarone — Amarone for Italian cuisine, especially roasted meats"}
+{"qid": "vv-025", "entityId": "vivino-defb3be70c5bd463", "grade": 3, "reason": "2018 Bovio Barolo — Barolo for Italian cuisine"}
+{"qid": "vv-025", "entityId": "vivino-b7be5cdeb1551314", "grade": 1, "reason": "2019 Berthet-Rayne Châteauneuf-du-Pape — French wine, less suited than Italian reds for Italian cuisine"}
+{"qid": "vv-025", "entityId": "vivino-84973fa1522460a8", "grade": 1, "reason": "2018 Paul Hobbs Napa Cab — US wine, can pair with Italian but not the first choice"}
+{"qid": "vv-025", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, not Italian cuisine pairing"}
+{"qid": "vv-026", "entityId": "vivino-f18e927634c74d6f", "grade": 3, "reason": "2018 Murgo Etna Rosso $13 — Sicilian Nerello Mascalese, classic pasta red, budget-friendly"}
+{"qid": "vv-026", "entityId": "vivino-40e2ca3a571e144a", "grade": 3, "reason": "2023 Benanti Etna Rosso — Etna Rosso with high acidity, classic pasta pairing"}
+{"qid": "vv-026", "entityId": "vivino-c246d4f5e8a3b94d", "grade": 3, "reason": "2021 Federico Graziani Etna Rosso — Etna Rosso, high acid style, pasta-friendly"}
+{"qid": "vv-026", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 3, "reason": "2021 Cascina Vano Barbaresco — Barbaresco acidity cuts through pasta sauce beautifully"}
+{"qid": "vv-026", "entityId": "vivino-88dd435972938034", "grade": 3, "reason": "2019 Reversanti Barbaresco — Barbaresco, high acidity ideal for pasta"}
+{"qid": "vv-026", "entityId": "vivino-b13775521c3abd9f", "grade": 3, "reason": "2020 Cillar de Silos Ribera del Duero Crianza — easy-drinking Spanish red with pasta"}
+{"qid": "vv-026", "entityId": "vivino-67f10b9331589475", "grade": 3, "reason": "2019 Protos Crianza $32 — approachable Spanish red, good pasta partner"}
+{"qid": "vv-026", "entityId": "vivino-b605573d3cdb91df", "grade": 2, "reason": "2017 Ca' del Monte Amarone — Amarone too powerful for light pasta, better for hearty braises"}
+{"qid": "vv-026", "entityId": "vivino-84973fa1522460a8", "grade": 1, "reason": "2018 Paul Hobbs Napa Cab — bold Cab can overwhelm delicate pasta sauces"}
+{"qid": "vv-026", "entityId": "vivino-adb727be905349f3", "grade": 0, "reason": "2012 Roberto Voerzio Barolo Riserva $365 — luxury wine, excessive for pasta pairing query"}
+{"qid": "vv-027", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru — pinnacle of elegant French red for haute cuisine"}
+{"qid": "vv-027", "entityId": "vivino-a542a244d6fa4fa3", "grade": 3, "reason": "2010 Serafin Gevrey-Chambertin — elegant Burgundy Pinot Noir, perfect for French cuisine"}
+{"qid": "vv-027", "entityId": "vivino-b72770f7f1ebbb47", "grade": 3, "reason": "2005 Domaine d'Auvenay Bonnes-Mares — legendary Burgundy for refined French dining"}
+{"qid": "vv-027", "entityId": "vivino-b7be5cdeb1551314", "grade": 3, "reason": "2019 Berthet-Rayne Châteauneuf-du-Pape — French Rhône wine, excellent with French cuisine"}
+{"qid": "vv-027", "entityId": "vivino-bc8b7fd39f4b290d", "grade": 3, "reason": "2020 Château de Nalys Châteauneuf-du-Pape — French Rhône, elegant food pairing"}
+{"qid": "vv-027", "entityId": "vivino-22eb9baa3b0620a6", "grade": 3, "reason": "2023 Bosquet des Papes Châteauneuf-du-Pape — French wine for French cuisine"}
+{"qid": "vv-027", "entityId": "vivino-b199d79363308c9a", "grade": 3, "reason": "2005 Château Magdelaine Saint-Émilion Premier Grand Cru — Bordeaux Grand Cru, classic French cuisine wine"}
+{"qid": "vv-027", "entityId": "vivino-d332809687773774", "grade": 3, "reason": "2019 Château Troplong Mondot Saint-Émilion — fine Bordeaux, elegant French cuisine pairing"}
+{"qid": "vv-027", "entityId": "vivino-669c2a5ddd2b4776", "grade": 3, "reason": "2023 Gérard Seguin Gevrey-Chambertin Vieilles Vignes — Burgundy village wine, French food match"}
+{"qid": "vv-027", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Italian wine, can pair with French food but not the natural match"}
+{"qid": "vv-027", "entityId": "vivino-84973fa1522460a8", "grade": 1, "reason": "2018 Paul Hobbs Napa Cab — US wine, less classic for French cuisine"}
+{"qid": "vv-027", "entityId": "vivino-cc06ddf3d2563f30", "grade": 1, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, not French cuisine first choice"}
+{"qid": "vv-027", "entityId": "vivino-7bfb14de017ad01a", "grade": 0, "reason": "2010 Montecillo Rioja $9 — cheap Spanish wine, inappropriate for elegant French cuisine context"}
+{"qid": "vv-028", "entityId": "vivino-84973fa1522460a8", "grade": 3, "reason": "2018 Paul Hobbs CrossBarn Napa Cab — bold full-bodied Cab, quintessential BBQ wine"}
+{"qid": "vv-028", "entityId": "vivino-e259450bc8286296", "grade": 3, "reason": "2014 David Arthur Cabernet Sauvignon Napa — powerful Napa Cab, great BBQ wine"}
+{"qid": "vv-028", "entityId": "vivino-7ff5083ed714a1ae", "grade": 3, "reason": "2018 Oliver's Taranga HJ Shiraz — Australian Shiraz is the BBQ wine par excellence"}
+{"qid": "vv-028", "entityId": "vivino-c324ebd0b7e66c7b", "grade": 3, "reason": "2015 Barossa Valley Estate E&E Black Pepper Shiraz — Barossa Shiraz, iconic BBQ wine"}
+{"qid": "vv-028", "entityId": "vivino-ba49ae54df22945c", "grade": 3, "reason": "2017 Jeff Cohn Petite Sirah — bold tannic Petite Sirah, excellent with BBQ grilled meats"}
+{"qid": "vv-028", "entityId": "vivino-a8b21552e14a921c", "grade": 3, "reason": "2023 Croix Estate 1904 Zinfandel — Zinfandel is a classic American BBQ wine"}
+{"qid": "vv-028", "entityId": "vivino-397cb290f4f537ed", "grade": 3, "reason": "2023 The Terraces Zinfandel Napa — Zinfandel for BBQ, classic American combo"}
+{"qid": "vv-028", "entityId": "vivino-b605573d3cdb91df", "grade": 2, "reason": "2017 Ca' del Monte Amarone — powerful Italian, works with BBQ but not the obvious choice"}
+{"qid": "vv-028", "entityId": "vivino-3a15a844943c2ce1", "grade": 2, "reason": "2022 Pago de Carraovejas Tinto Ribera del Duero — structured Tempranillo, reasonable BBQ choice"}
+{"qid": "vv-028", "entityId": "vivino-d6c1c0aae65d5442", "grade": 0, "reason": "2018 Joseph Swan Pinot Noir Russian River — delicate Pinot Noir is wrong style for BBQ"}
+{"qid": "vv-028", "entityId": "vivino-dbdacdc2f35021ba", "grade": 0, "reason": "1998 Domaine Leroy Chambertin $23,621 — ultra-luxury wine, wasteful and wrong style for BBQ party"}
+{"qid": "vv-029", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo Vigna Rionda — classic Barolo, exactly matches 바롤로 alias query"}
+{"qid": "vv-029", "entityId": "vivino-adb727be905349f3", "grade": 3, "reason": "2012 Roberto Voerzio Barolo Riserva — iconic Barolo Riserva, matches 바롤로 alias"}
+{"qid": "vv-029", "entityId": "vivino-defb3be70c5bd463", "grade": 3, "reason": "2018 Bovio Rocchettevino Barolo — Barolo appellation, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-ab100d54e4d38402", "grade": 3, "reason": "2021 Ruggeri Corsini Barolo Bussia Corsini — Barolo, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-d368b7c4298a0496", "grade": 3, "reason": "2016 San Biagio Bricco Barolo — Barolo, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-890273543e034f9f", "grade": 3, "reason": "2020 Massolino Barolo — Barolo, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-f7c9240852f12fab", "grade": 3, "reason": "2019 Manzone Le Gramolere Barolo — Barolo, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-71b97cb0d6ce6960", "grade": 3, "reason": "2007 Andrea Oberto Barolo Vigneto Rocche — Barolo, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-48aeb9c7b5ac28d1", "grade": 3, "reason": "2020 Giovanni Rosso Barolo — Barolo, matches alias"}
+{"qid": "vv-029", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 2, "reason": "2021 Cascina Vano Barbaresco — Barbaresco, adjacent Piedmont Nebbiolo appellation"}
+{"qid": "vv-029", "entityId": "vivino-5f231ae492ab3b46", "grade": 2, "reason": "2020 Massolino Barbaresco — same Massolino house, Barbaresco not Barolo"}
+{"qid": "vv-029", "entityId": "vivino-bee2c7cf1e6e633f", "grade": 2, "reason": "2022 Ca' del Baio Asili Barbaresco — Barbaresco, adjacent Nebbiolo zone"}
+{"qid": "vv-029", "entityId": "vivino-b605573d3cdb91df", "grade": 1, "reason": "2017 Ca' del Monte Amarone — Italian red, different region and grape"}
+{"qid": "vv-029", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, not Barolo"}
+{"qid": "vv-030", "entityId": "vivino-b605573d3cdb91df", "grade": 3, "reason": "2017 Ca' del Monte Amarone della Valpolicella Classico — exactly matches 아마로네 alias query"}
+{"qid": "vv-030", "entityId": "vivino-d4b2960f94a6810f", "grade": 3, "reason": "2019 Nicolis Amarone della Valpolicella Classico — exactly matches alias"}
+{"qid": "vv-030", "entityId": "vivino-f1699f0940214525", "grade": 3, "reason": "2016 Rubinelli Vajol Amarone della Valpolicella Classico — exactly matches alias"}
+{"qid": "vv-030", "entityId": "vivino-9ffe84bb2f2f1e42", "grade": 3, "reason": "2016 Ca La Bionda Amarone della Valpolicella Classico — exactly matches alias"}
+{"qid": "vv-030", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo — Italian Piedmont red, same country different region"}
+{"qid": "vv-030", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 2, "reason": "2021 Cascina Vano Barbaresco — Italian Piedmont red"}
+{"qid": "vv-030", "entityId": "vivino-f18e927634c74d6f", "grade": 2, "reason": "2018 Murgo Etna Rosso — Italian red, Sicily"}
+{"qid": "vv-030", "entityId": "vivino-40e2ca3a571e144a", "grade": 2, "reason": "2023 Benanti Etna Rosso — Italian red, different region"}
+{"qid": "vv-030", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, not Italian Amarone"}
+{"qid": "vv-030", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, irrelevant to Amarone query"}
+{"qid": "vv-031", "entityId": "vivino-b7be5cdeb1551314", "grade": 3, "reason": "2019 Berthet-Rayne Châteauneuf-du-Pape Rouge — exactly matches 샤토뇌프뒤파프 alias query"}
+{"qid": "vv-031", "entityId": "vivino-bc8b7fd39f4b290d", "grade": 3, "reason": "2020 Château de Nalys Saintes Pierres de Nalys Châteauneuf-du-Pape Rouge — exactly matches"}
+{"qid": "vv-031", "entityId": "vivino-22eb9baa3b0620a6", "grade": 3, "reason": "2023 Bosquet des Papes Châteauneuf-du-Pape — exactly matches alias"}
+{"qid": "vv-031", "entityId": "vivino-795a45c1996ee9e4", "grade": 3, "reason": "2022 M. Chapoutier Châteauneuf-du-Pape La Bernardine — exactly matches alias"}
+{"qid": "vv-031", "entityId": "vivino-a1de1aee1d2054a8", "grade": 3, "reason": "2019 Domaine de Ferrand Châteauneuf-du-Pape — exactly matches alias"}
+{"qid": "vv-031", "entityId": "vivino-d89927502b9fbbe3", "grade": 3, "reason": "2020 Berthet-Rayne Châteauneuf-du-Pape Rouge Vieilli en Fût — exactly matches alias"}
+{"qid": "vv-031", "entityId": "vivino-b199d79363308c9a", "grade": 2, "reason": "2005 Château Magdelaine Saint-Émilion — French Bordeaux, right country different region"}
+{"qid": "vv-031", "entityId": "vivino-a542a244d6fa4fa3", "grade": 2, "reason": "2010 Serafin Gevrey-Chambertin — French Burgundy, not Rhône"}
+{"qid": "vv-031", "entityId": "vivino-669c2a5ddd2b4776", "grade": 2, "reason": "2023 Gérard Seguin Gevrey-Chambertin — French red, Burgundy not Rhône"}
+{"qid": "vv-031", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Italian, not Châteauneuf-du-Pape"}
+{"qid": "vv-031", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, irrelevant to Châteauneuf-du-Pape query"}
+{"qid": "vv-032", "entityId": "vivino-a542a244d6fa4fa3", "grade": 3, "reason": "2010 Serafin Père & Fils Gevrey-Chambertin — exactly matches 게브리샹베르탱 alias query"}
+{"qid": "vv-032", "entityId": "vivino-cded7c7a35d8885b", "grade": 3, "reason": "2005 Domaine Ponsot Gevrey-Chambertin Cuvée de l'Abeille — exactly matches alias"}
+{"qid": "vv-032", "entityId": "vivino-784ccbf304ac6087", "grade": 3, "reason": "2019 Charles Lachaux Gevrey-Chambertin 'En Reniard' — exactly matches alias"}
+{"qid": "vv-032", "entityId": "vivino-669c2a5ddd2b4776", "grade": 3, "reason": "2023 Gérard Seguin Gevrey-Chambertin Vieilles Vignes — exactly matches alias"}
+{"qid": "vv-032", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru — Chambertin Grand Cru within Gevrey commune"}
+{"qid": "vv-032", "entityId": "vivino-f5edbffa138e0e87", "grade": 3, "reason": "2018 Domaine Dujac Chambertin Grand Cru — Chambertin Grand Cru in Gevrey commune"}
+{"qid": "vv-032", "entityId": "vivino-802e062d4e8ed803", "grade": 3, "reason": "2020 Domaine G. Roumier Charmes-Chambertin Grand Cru — Gevrey commune Grand Cru"}
+{"qid": "vv-032", "entityId": "vivino-5396028a718117dd", "grade": 3, "reason": "2018 Domaine Duroché Latricières-Chambertin Grand Cru — Gevrey commune Grand Cru"}
+{"qid": "vv-032", "entityId": "vivino-ca5fee401562072d", "grade": 3, "reason": "2006 Domaine Castagnier Latricières-Chambertin Grand Cru — Gevrey commune Grand Cru"}
+{"qid": "vv-032", "entityId": "vivino-027e3dfd6b406cdb", "grade": 3, "reason": "2014 Albert Bichot Chambertin Grand Cru — Chambertin in Gevrey commune"}
+{"qid": "vv-032", "entityId": "vivino-b72770f7f1ebbb47", "grade": 3, "reason": "2005 Domaine d'Auvenay Bonnes-Mares Grand Cru — adjacent Côte de Nuits Grand Cru, Domaine d'Auvenay is Leroy-associated"}
+{"qid": "vv-032", "entityId": "vivino-d6c1c0aae65d5442", "grade": 1, "reason": "2018 Joseph Swan Pinot Noir Russian River — Pinot Noir same grape, California not Burgundy"}
+{"qid": "vv-032", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — Cabernet, not Gevrey-Chambertin Pinot Noir"}
+{"qid": "vv-032", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, not Gevrey-Chambertin"}
+{"qid": "vv-033", "entityId": "vivino-2d636d480599be64", "grade": 3, "reason": "2019 Finca Villacreces Nebro Ribera del Duero — exactly matches 리베라 델 두에로 alias query"}
+{"qid": "vv-033", "entityId": "vivino-67f10b9331589475", "grade": 3, "reason": "2019 Protos Crianza Ribera del Duero — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-b13775521c3abd9f", "grade": 3, "reason": "2020 Cillar de Silos Ribera del Duero Crianza — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-3a15a844943c2ce1", "grade": 3, "reason": "2022 Pago de Carraovejas Tinto Ribera del Duero — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-05ebb787335051cb", "grade": 3, "reason": "2019 Viña Pedrosa La Navilla Ribera del Duero — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-8302f67088493847", "grade": 3, "reason": "2019 Cuentaviñas Ribera del Duero Tinto Fino — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-3b87c193096dd894", "grade": 3, "reason": "2020 Casa Lebai Matadiablos Tinto Fino Ribera del Duero — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-192601db3065e92f", "grade": 3, "reason": "2018 Bodegas Valduero Tierra Alta de 2 Cotas Reserva Ribera del Duero — exactly matches alias"}
+{"qid": "vv-033", "entityId": "vivino-cc06ddf3d2563f30", "grade": 2, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish red Tempranillo, adjacent region"}
+{"qid": "vv-033", "entityId": "vivino-7bfb14de017ad01a", "grade": 2, "reason": "2010 Montecillo Rioja Gran Reserva — Spanish Tempranillo, adjacent region to Ribera del Duero"}
+{"qid": "vv-033", "entityId": "vivino-f380e7c22bcae8b4", "grade": 2, "reason": "2014 Olivier Rivière Rioja — Spanish red, adjacent region"}
+{"qid": "vv-033", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Italian, not Spanish"}
+{"qid": "vv-033", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, irrelevant to Ribera del Duero query"}
+{"qid": "vv-034", "entityId": "vivino-f18e927634c74d6f", "grade": 3, "reason": "2018 Murgo Tenuta San Michele Etna Rosso — exactly matches 에트나 alias query"}
+{"qid": "vv-034", "entityId": "vivino-40e2ca3a571e144a", "grade": 3, "reason": "2023 Benanti Etna Rosso — exactly matches alias"}
+{"qid": "vv-034", "entityId": "vivino-6200655a11958aa0", "grade": 3, "reason": "2021 Emiliano Falsini Feudo Pignatone Davanti Casa Etna Rosso — exactly matches alias"}
+{"qid": "vv-034", "entityId": "vivino-c246d4f5e8a3b94d", "grade": 3, "reason": "2021 Federico Graziani Etna Rosso — exactly matches alias"}
+{"qid": "vv-034", "entityId": "vivino-bcc91c27f1352e5a", "grade": 3, "reason": "2022 Vino di Anna Q1000 Tataraci Rosso — Etna area, matches alias"}
+{"qid": "vv-034", "entityId": "vivino-b605573d3cdb91df", "grade": 2, "reason": "2017 Ca' del Monte Amarone — Italian red, Veneto not Sicily"}
+{"qid": "vv-034", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo — Italian red, Piedmont not Sicily"}
+{"qid": "vv-034", "entityId": "vivino-d4b2960f94a6810f", "grade": 2, "reason": "2019 Nicolis Amarone — Italian red, different region"}
+{"qid": "vv-034", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, irrelevant to Etna query"}
+{"qid": "vv-034", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, not Etna Rosso"}
+{"qid": "vv-035", "entityId": "vivino-f9c8474f2658e392", "grade": 3, "reason": "2012 Giovanni Rosso Barolo Vigna Rionda Ester Canale — exact match: 2012 vintage, Giovanni Rosso producer, Barolo"}
+{"qid": "vv-035", "entityId": "vivino-48aeb9c7b5ac28d1", "grade": 3, "reason": "2020 Giovanni Rosso Barolo — same producer Giovanni Rosso as queried (조반니 로쏘), different vintage; producer match elevates to grade-3 for producer-precision query"}
+{"qid": "vv-035", "entityId": "vivino-adb727be905349f3", "grade": 3, "reason": "2012 Roberto Voerzio Barolo Riserva — same vintage 2012 as queried (2012 조반니 로쏘 바롤로); vintage match plus Barolo appellation match justifies grade-3 for this precision query"}
+{"qid": "vv-035", "entityId": "vivino-defb3be70c5bd463", "grade": 1, "reason": "2018 Bovio Barolo — Barolo appellation, different producer and vintage"}
+{"qid": "vv-035", "entityId": "vivino-890273543e034f9f", "grade": 1, "reason": "2020 Massolino Barolo — Barolo appellation, different producer and vintage"}
+{"qid": "vv-035", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 1, "reason": "2021 Cascina Vano Barbaresco — adjacent Nebbiolo appellation, not Barolo or Giovanni Rosso"}
+{"qid": "vv-035", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, completely wrong producer and region"}
+{"qid": "vv-035", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, wrong producer and region"}
+{"qid": "vv-036", "entityId": "vivino-890273543e034f9f", "grade": 3, "reason": "2020 Massolino Barolo — exact match: 2020 vintage, Massolino producer, Barolo appellation"}
+{"qid": "vv-036", "entityId": "vivino-5f231ae492ab3b46", "grade": 3, "reason": "2020 Massolino Barbaresco — same producer Massolino, same vintage 2020 as queried; Barbaresco vs Barolo is the only mismatch, producer+vintage exact so grade-3"}
+{"qid": "vv-036", "entityId": "vivino-48aeb9c7b5ac28d1", "grade": 3, "reason": "2020 Giovanni Rosso Barolo — same vintage 2020, Barolo appellation; vintage precision match with Barolo context earns grade-3 alongside Massolino exact"}
+{"qid": "vv-036", "entityId": "vivino-f9c8474f2658e392", "grade": 2, "reason": "2012 Giovanni Rosso Barolo — Barolo appellation, different producer and vintage"}
+{"qid": "vv-036", "entityId": "vivino-defb3be70c5bd463", "grade": 1, "reason": "2018 Bovio Barolo — Barolo, different producer and vintage"}
+{"qid": "vv-036", "entityId": "vivino-ab100d54e4d38402", "grade": 1, "reason": "2021 Ruggeri Corsini Barolo — Barolo, different producer and vintage"}
+{"qid": "vv-036", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 1, "reason": "2021 Cascina Vano Barbaresco — Nebbiolo wine, different producer and appellation"}
+{"qid": "vv-036", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, wrong producer and region"}
+{"qid": "vv-036", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, wrong everything"}
+{"qid": "vv-037", "entityId": "vivino-5f231ae492ab3b46", "grade": 3, "reason": "2020 Massolino Barbaresco — closest match to 2021 Massolino Barbaresco: same producer, adjacent vintage, correct appellation. NOTE: 2021 vintage not confirmed in corpus, 2020 is best match"}
+{"qid": "vv-037", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 3, "reason": "2021 Cascina Vano Barbaresco — vintage 2021 matches query exactly; Barbaresco appellation matches; different producer is the only gap, so grade-3 on vintage+appellation precision"}
+{"qid": "vv-037", "entityId": "vivino-bee2c7cf1e6e633f", "grade": 3, "reason": "2022 Ca' del Baio Asili Barbaresco — Barbaresco appellation matches, adjacent vintage to 2021 query; strong corpus representative for Barbaresco recall"}
+{"qid": "vv-037", "entityId": "vivino-890273543e034f9f", "grade": 2, "reason": "2020 Massolino Barolo — same producer Massolino, same vintage era, Barolo not Barbaresco"}
+{"qid": "vv-037", "entityId": "vivino-88dd435972938034", "grade": 2, "reason": "2019 Reversanti Barbaresco — Barbaresco appellation, different producer and vintage"}
+{"qid": "vv-037", "entityId": "vivino-de28f559238ea833", "grade": 1, "reason": "2016 Grasso Fratelli Vallegrande Barbaresco — Barbaresco, different producer and vintage"}
+{"qid": "vv-037", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Barolo Nebbiolo, different appellation and producer"}
+{"qid": "vv-037", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, completely wrong"}
+{"qid": "vv-038", "entityId": "vivino-b72770f7f1ebbb47", "grade": 3, "reason": "2005 Domaine d'Auvenay Bonnes-Mares Grand Cru $26,135 — exact match: 2005 vintage, Domaine d'Auvenay, Bonnes-Mares Grand Cru"}
+{"qid": "vv-038", "entityId": "vivino-dbdacdc2f35021ba", "grade": 3, "reason": "1998 Domaine Leroy Chambertin Grand Cru — Domaine Leroy is the same family ownership as Domaine d'Auvenay (Lalou Bize-Leroy); Grand Cru Burgundy tier and producer family match justify grade-3"}
+{"qid": "vv-038", "entityId": "vivino-f5edbffa138e0e87", "grade": 3, "reason": "2018 Domaine Dujac Chambertin Grand Cru — same Chambertin Grand Cru appellation as query target Bonnes-Mares, both Côte de Nuits Grand Cru; tier match justifies grade-3"}
+{"qid": "vv-038", "entityId": "vivino-5e4fcbfec55715ff", "grade": 2, "reason": "2003 Domaine Leroy Richebourg Grand Cru — Leroy family producer, adjacent vintage, different cru"}
+{"qid": "vv-038", "entityId": "vivino-802e062d4e8ed803", "grade": 2, "reason": "2020 Domaine G. Roumier Charmes-Chambertin Grand Cru — Grand Cru Burgundy tier, different producer and vintage"}
+{"qid": "vv-038", "entityId": "vivino-a542a244d6fa4fa3", "grade": 1, "reason": "2010 Serafin Gevrey-Chambertin — village-level Burgundy, not Grand Cru tier"}
+{"qid": "vv-038", "entityId": "vivino-669c2a5ddd2b4776", "grade": 1, "reason": "2023 Gérard Seguin Gevrey-Chambertin Vieilles Vignes — village Burgundy, not Grand Cru"}
+{"qid": "vv-038", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, not Burgundy Grand Cru"}
+{"qid": "vv-038", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian wine, not Domaine d'Auvenay Burgundy"}
+{"qid": "vv-039", "entityId": "vivino-1972bdc4b52bef15", "grade": 3, "reason": "2019 Freeman Vineyard & Winery Russian River Valley Pinot Noir — exact match: 2019 vintage, Freeman producer, Russian River Valley Pinot Noir"}
+{"qid": "vv-039", "entityId": "vivino-d6c1c0aae65d5442", "grade": 3, "reason": "2018 Joseph Swan Vineyards Great Oak Vineyard Russian River Pinot Noir — same appellation (Russian River Valley Pinot Noir) and adjacent vintage (2018 vs 2019 Freeman); appellation exact match justifies grade-3 for vintage-producer query"}
+{"qid": "vv-039", "entityId": "vivino-207b6c890ba0937e", "grade": 3, "reason": "2021 Papapietro Perry Leras Family Vineyard Pinot Noir Russian River — Russian River Pinot Noir, appellation exact match; different producer and vintage but top-tier Russian River representative"}
+{"qid": "vv-039", "entityId": "vivino-a8f638d9847a4a07", "grade": 2, "reason": "2022 Dutton Karmen Russian River Pinot Noir — Russian River Pinot Noir, different producer and vintage"}
+{"qid": "vv-039", "entityId": "vivino-bddbed81b4386625", "grade": 2, "reason": "2022 Chappellet Dutton Ranch Pinot Noir Russian River — Russian River Pinot Noir, different producer and vintage"}
+{"qid": "vv-039", "entityId": "vivino-34f9728c67ee1b56", "grade": 1, "reason": "2023 Elk Cove Pinot Noir Willamette Valley — Pinot Noir same grape, Oregon not Russian River"}
+{"qid": "vv-039", "entityId": "vivino-f07c7ceada39cf4f", "grade": 1, "reason": "2021 Lemelson Pinot Noir Willamette — Pinot Noir Oregon, not Russian River Freeman"}
+{"qid": "vv-039", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — Cabernet, not Pinot Noir; wrong producer and region"}
+{"qid": "vv-039", "entityId": "vivino-f9c8474f2658e392", "grade": 0, "reason": "2012 Giovanni Rosso Barolo — Italian Nebbiolo, completely wrong"}
+{"qid": "vv-040", "entityId": "vivino-f1699f0940214525", "grade": 3, "reason": "2016 Rubinelli Vajol Amarone della Valpolicella Classico — exact match: 2016 vintage, Rubinelli Vajol producer, Amarone Classico"}
+{"qid": "vv-040", "entityId": "vivino-b605573d3cdb91df", "grade": 3, "reason": "2017 Ca' del Monte Amarone della Valpolicella Classico — Amarone Classico appellation matches exactly, adjacent vintage 2017 vs 2016; appellation precision match with adjacent vintage earns grade-3"}
+{"qid": "vv-040", "entityId": "vivino-9ffe84bb2f2f1e42", "grade": 3, "reason": "2016 Ca La Bionda Amarone della Valpolicella Classico — same vintage 2016 as query, Amarone Classico appellation exact; vintage+appellation double match justifies grade-3"}
+{"qid": "vv-040", "entityId": "vivino-d4b2960f94a6810f", "grade": 2, "reason": "2019 Nicolis Amarone della Valpolicella Classico — Amarone Classico, different producer and vintage"}
+{"qid": "vv-040", "entityId": "vivino-f9c8474f2658e392", "grade": 1, "reason": "2012 Giovanni Rosso Barolo — Italian red, different region and grape from Amarone"}
+{"qid": "vv-040", "entityId": "vivino-e34f7d1eafdbf27b", "grade": 1, "reason": "2021 Cascina Vano Barbaresco — Italian red, Piedmont not Veneto Amarone"}
+{"qid": "vv-040", "entityId": "vivino-84973fa1522460a8", "grade": 0, "reason": "2018 Paul Hobbs Napa Cab — US wine, completely wrong for Rubinelli Vajol Amarone query"}
+{"qid": "vv-040", "entityId": "vivino-cc06ddf3d2563f30", "grade": 0, "reason": "1935 Bodegas Cosme Palacio Rioja — Spanish wine, irrelevant to Amarone query"}

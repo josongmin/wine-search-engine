@@ -54,11 +54,12 @@ describe('evaluateRerankGate', () => {
       expect(decision.reason).toBe('too_few_candidates');
     });
 
-    it('does not skip at exactly 5 candidates (pure_constraint falls through to default_skip)', () => {
-      // Use pure_constraint so the test is not affected by the semantic_preference rule.
+    it('does not skip at exactly 5 candidates (pure_constraint triggers rerank)', () => {
+      // pure_constraint always reranks — cross-encoder resolves price/style intent
+      // that BM25 cannot. Minimum candidate count guard (rule 2) fires first at < 5.
       const decision = evaluateRerankGate(makeInput({ candidateCount: 5, queryClass: 'pure_constraint' }));
-      expect(decision.shouldRerank).toBe(false);
-      expect(decision.reason).toBe('default_skip');
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('pure_constraint');
     });
   });
 
@@ -154,32 +155,83 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('candidateCount >= 20', () => {
-    it('reranks when candidateCount is exactly 20 (pure_constraint)', () => {
-      // Use pure_constraint to isolate the large_candidate_set rule from semantic_preference.
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'pure_constraint' }));
+    it('reranks when candidateCount is exactly 20 (unknown query class)', () => {
+      // Use unknown to isolate the large_candidate_set rule from class-specific rules.
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'unknown' }));
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('large_candidate_set');
     });
 
-    it('reranks when candidateCount exceeds 20 (pure_constraint)', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 50, queryClass: 'pure_constraint' }));
+    it('reranks when candidateCount exceeds 20 (unknown query class)', () => {
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 50, queryClass: 'unknown' }));
       expect(decision.shouldRerank).toBe(true);
       expect(decision.reason).toBe('large_candidate_set');
+    });
+
+    it('pure_constraint always reranks — reason is pure_constraint not large_candidate_set', () => {
+      // pure_constraint rule fires before large_candidate_set rule.
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'pure_constraint' }));
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('pure_constraint');
+    });
+  });
+
+  describe('pure_constraint — always rerank (price/style/pairing queries)', () => {
+    it('reranks pure_constraint with candidateCount 5 (minimum viable)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'pure_constraint', candidateCount: 5, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('pure_constraint');
+    });
+
+    it('reranks pure_constraint with candidateCount 10', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'pure_constraint', candidateCount: 10, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('pure_constraint');
+    });
+
+    it('pure_constraint with candidateCount < 5 still skips (too_few_candidates fires first)', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'pure_constraint', candidateCount: 3, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('too_few_candidates');
+    });
+  });
+
+  describe('ambiguous_short_form — always rerank', () => {
+    it('reranks ambiguous_short_form with sufficient candidates', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'ambiguous_short_form', candidateCount: 8, hasAnchor: false }),
+      );
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('ambiguous_short_form');
+    });
+
+    it('ambiguous_short_form with candidateCount < 5 still skips', () => {
+      const decision = evaluateRerankGate(
+        makeInput({ queryClass: 'ambiguous_short_form', candidateCount: 2 }),
+      );
+      expect(decision.shouldRerank).toBe(false);
+      expect(decision.reason).toBe('too_few_candidates');
     });
   });
 
   describe('default: skip', () => {
-    it('skips when candidateCount is between 5 and 19 with no high-value signal (pure_constraint)', () => {
-      // Use pure_constraint so semantic_preference rule does not interfere.
+    it('skips when candidateCount is between 5 and 19 with no high-value signal (unknown class)', () => {
+      // unknown class with no anchor and insufficient candidates → default_skip
       const decision = evaluateRerankGate(
-        makeInput({ candidateCount: 10, queryClass: 'pure_constraint', hasAnchor: false }),
+        makeInput({ candidateCount: 10, queryClass: 'unknown', hasAnchor: false }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
 
-    it('skips for candidateCount 19 just below threshold (pure_constraint)', () => {
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 19, queryClass: 'pure_constraint' }));
+    it('skips for candidateCount 19 just below threshold (unknown class)', () => {
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 19, queryClass: 'unknown' }));
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');
     });
@@ -187,8 +239,8 @@ describe('evaluateRerankGate', () => {
 
   describe('topKOverride', () => {
     it('does not set topKOverride in default cases', () => {
-      // Use pure_constraint to exercise the large_candidate_set path without semantic_preference.
-      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'pure_constraint' }));
+      // Use unknown class to exercise the large_candidate_set path without class-specific rules.
+      const decision = evaluateRerankGate(makeInput({ candidateCount: 20, queryClass: 'unknown' }));
       expect(decision.topKOverride).toBeUndefined();
     });
 
@@ -221,11 +273,21 @@ describe('evaluateRerankGate', () => {
   });
 
   describe('edge cases', () => {
-    it('empty string effectiveRoute does not match entity route (pure_constraint falls to default_skip)', () => {
-      // effectiveRoute='' must NOT trigger already_precise; falls through to default_skip.
-      // Use pure_constraint so semantic_preference rule does not fire.
+    it('empty string effectiveRoute does not match entity route (pure_constraint still reranks)', () => {
+      // effectiveRoute='' must NOT trigger already_precise.
+      // pure_constraint always reranks regardless of effectiveRoute.
       const decision = evaluateRerankGate(
         makeInput({ effectiveRoute: '', candidateCount: 10, queryClass: 'pure_constraint' }),
+      );
+      expect(decision.shouldRerank).toBe(true);
+      expect(decision.reason).toBe('pure_constraint');
+    });
+
+    it('empty string effectiveRoute does not match entity route (unknown falls to default_skip)', () => {
+      // effectiveRoute='' must NOT trigger already_precise; falls through to default_skip.
+      // Use unknown so no class-specific rule fires.
+      const decision = evaluateRerankGate(
+        makeInput({ effectiveRoute: '', candidateCount: 10, queryClass: 'unknown' }),
       );
       expect(decision.shouldRerank).toBe(false);
       expect(decision.reason).toBe('default_skip');

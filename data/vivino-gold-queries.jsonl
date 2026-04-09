@@ -1,0 +1,40 @@
+{"qid": "vv-001", "query": "바롤로 추천", "category": "region_ko", "difficulty": "easy", "notes": "Barolo region, any style, Korean phonetic alias", "expected_top_region": "Barolo"}
+{"qid": "vv-002", "query": "바르바레스코 와인", "category": "region_ko", "difficulty": "easy", "notes": "Barbaresco region, any style, Korean phonetic alias", "expected_top_region": "Barbaresco"}
+{"qid": "vv-003", "query": "나파 밸리 카베르네 소비뇽", "category": "region_ko", "difficulty": "easy", "notes": "Napa Valley Cabernet Sauvignon, Korean phonetic alias", "expected_top_region": "Napa Valley"}
+{"qid": "vv-004", "query": "러시안 리버 밸리 피노 누아", "category": "region_ko", "difficulty": "medium", "notes": "Russian River Valley Pinot Noir, Korean phonetic alias", "expected_top_region": "Russian River Valley"}
+{"qid": "vv-005", "query": "샤토뇌프 뒤 파프 레드", "category": "region_ko", "difficulty": "medium", "notes": "Châteauneuf-du-Pape Rouge, Korean phonetic alias", "expected_top_region": "Châteauneuf-du-Pape"}
+{"qid": "vv-006", "query": "게브레 샹베르탱 피노 누아", "category": "region_ko", "difficulty": "hard", "notes": "Gevrey-Chambertin Pinot Noir, Korean phonetic alias", "expected_top_region": "Gevrey-Chambertin"}
+{"qid": "vv-007", "query": "생테밀리옹 그랑 크뤼", "category": "region_ko", "difficulty": "medium", "notes": "Saint-Émilion Grand Cru, Korean phonetic alias", "expected_top_region": "Saint-Émilion"}
+{"qid": "vv-008", "query": "리오하 레드 와인", "category": "region_ko", "difficulty": "easy", "notes": "Rioja red wine, Korean phonetic alias", "expected_top_region": "Rioja"}
+{"qid": "vv-009", "query": "리베라 델 두에로 추천", "category": "region_ko", "difficulty": "medium", "notes": "Ribera del Duero, Korean phonetic alias", "expected_top_region": "Ribera del Duero"}
+{"qid": "vv-010", "query": "아마로네 추천", "category": "region_ko", "difficulty": "easy", "notes": "Amarone della Valpolicella, Korean phonetic alias", "expected_top_region": "Amarone della Valpolicella"}
+{"qid": "vv-011", "query": "에트나 로쏘 시칠리아", "category": "region_ko", "difficulty": "medium", "notes": "Etna Rosso Sicily, Korean phonetic alias", "expected_top_region": "Etna"}
+{"qid": "vv-012", "query": "윌라멧 밸리 피노 누아 오레곤", "category": "region_ko", "difficulty": "medium", "notes": "Willamette Valley Pinot Noir Oregon, Korean phonetic alias", "expected_top_region": "Willamette Valley"}
+{"qid": "vv-013", "query": "3만원 이하 가성비 레드 와인", "category": "price_ko", "difficulty": "easy", "notes": "Budget red under ~$25, value-focused", "expected_price_max_usd": 25}
+{"qid": "vv-014", "query": "5만원대 레드 와인 추천", "category": "price_ko", "difficulty": "easy", "notes": "Mid-range red ~$42 range", "expected_price_usd_range": [35, 50]}
+{"qid": "vv-015", "query": "6만원대 레드 와인", "category": "price_ko", "difficulty": "easy", "notes": "~$50-58 range", "expected_price_usd_range": [50, 60]}
+{"qid": "vv-016", "query": "7만원 내외 와인 선물", "category": "price_ko", "difficulty": "easy", "notes": "~$58-67 range, gift context", "expected_price_usd_range": [55, 70]}
+{"qid": "vv-017", "query": "10만원대 고급 레드 와인", "category": "price_ko", "difficulty": "medium", "notes": "Premium tier ~$84 range", "expected_price_usd_range": [75, 100]}
+{"qid": "vv-018", "query": "20만원 이상 특별한 날 와인", "category": "price_ko", "difficulty": "medium", "notes": "Luxury tier >$168, special occasion", "expected_price_min_usd": 168}
+{"qid": "vv-019", "query": "1만원 이하 저렴한 와인", "category": "price_ko", "difficulty": "easy", "notes": "Very budget under ~$9", "expected_price_max_usd": 9}
+{"qid": "vv-020", "query": "선물용 고급 부르고뉴 그랑크뤼", "category": "price_ko", "difficulty": "hard", "notes": "Luxury Burgundy Grand Cru gift", "expected_price_min_usd": 300}
+{"qid": "vv-021", "query": "스테이크와 어울리는 풀바디 레드 와인", "category": "food_pairing_ko", "difficulty": "easy", "notes": "Full-body red for steak pairing", "expected_style": "full-bodied"}
+{"qid": "vv-022", "query": "치즈와 잘 맞는 레드 와인", "category": "food_pairing_ko", "difficulty": "easy", "notes": "Red wine with cheese pairing", "expected_style": "versatile"}
+{"qid": "vv-023", "query": "부드럽고 마시기 편한 레드 와인", "category": "food_pairing_ko", "difficulty": "easy", "notes": "Smooth easy-drinking red", "expected_style": "soft"}
+{"qid": "vv-024", "query": "탄닌이 강한 장기 숙성 와인", "category": "food_pairing_ko", "difficulty": "medium", "notes": "High tannin long-aging potential", "expected_style": "tannic"}
+{"qid": "vv-025", "query": "이탈리아 요리에 어울리는 레드 와인", "category": "food_pairing_ko", "difficulty": "easy", "notes": "Italian food pairing, any Italian red", "expected_origin": "Italy"}
+{"qid": "vv-026", "query": "파스타에 어울리는 이탈리아 레드", "category": "food_pairing_ko", "difficulty": "easy", "notes": "Pasta pairing Italian red", "expected_origin": "Italy"}
+{"qid": "vv-027", "query": "프랑스 요리에 어울리는 우아한 레드", "category": "food_pairing_ko", "difficulty": "medium", "notes": "Elegant French red for French cuisine", "expected_origin": "France"}
+{"qid": "vv-028", "query": "바베큐 파티용 레드 와인", "category": "food_pairing_ko", "difficulty": "easy", "notes": "Bold red for BBQ party", "expected_style": "bold"}
+{"qid": "vv-029", "query": "바롤로", "category": "alias_ko", "difficulty": "easy", "notes": "Korean transliteration of Barolo — recall focus", "expected_top_region": "Barolo"}
+{"qid": "vv-030", "query": "아마로네", "category": "alias_ko", "difficulty": "easy", "notes": "Korean transliteration of Amarone — recall focus", "expected_top_region": "Amarone della Valpolicella"}
+{"qid": "vv-031", "query": "샤토뇌프 뒤 파프", "category": "alias_ko", "difficulty": "medium", "notes": "Korean transliteration of Châteauneuf-du-Pape — recall focus", "expected_top_region": "Châteauneuf-du-Pape"}
+{"qid": "vv-032", "query": "게브레 샹베르탱", "category": "alias_ko", "difficulty": "hard", "notes": "Korean transliteration of Gevrey-Chambertin — recall focus", "expected_top_region": "Gevrey-Chambertin"}
+{"qid": "vv-033", "query": "리베라 델 두에로", "category": "alias_ko", "difficulty": "medium", "notes": "Korean transliteration of Ribera del Duero — recall focus", "expected_top_region": "Ribera del Duero"}
+{"qid": "vv-034", "query": "에트나", "category": "alias_ko", "difficulty": "medium", "notes": "Korean transliteration of Etna — recall focus", "expected_top_region": "Etna"}
+{"qid": "vv-035", "query": "2012 조반니 로쏘 바롤로", "category": "vintage_producer", "difficulty": "hard", "notes": "Exact vintage+producer: 2012 Giovanni Rosso Barolo", "expected_entityId": "vivino-f9c8474f2658e392"}
+{"qid": "vv-036", "query": "2020 마솔리노 바롤로", "category": "vintage_producer", "difficulty": "hard", "notes": "Exact vintage+producer: 2020 Massolino Barolo", "expected_entityId": "vivino-890273543e034f9f"}
+{"qid": "vv-037", "query": "2021 Massolino Barbaresco", "category": "vintage_producer", "difficulty": "hard", "notes": "Exact vintage+producer: 2021 Massolino Barbaresco (English query)", "expected_entityId": "vivino-5f231ae492ab3b46"}
+{"qid": "vv-038", "query": "2005 도멘 드 오베네 본 마르 그랑크뤼", "category": "vintage_producer", "difficulty": "hard", "notes": "Exact vintage+producer: 2005 Domaine d'Auvenay Bonnes-Mares Grand Cru", "expected_entityId": "vivino-5d8c8a93e1a14a36"}
+{"qid": "vv-039", "query": "2019 프리먼 러시안 리버 밸리 피노 누아", "category": "vintage_producer", "difficulty": "medium", "notes": "Exact vintage+producer: 2019 Freeman Russian River Valley Pinot Noir", "expected_entityId": "vivino-1972bdc4b52bef15"}
+{"qid": "vv-040", "query": "2016 루비넬리 바졸 아마로네", "category": "vintage_producer", "difficulty": "hard", "notes": "Exact vintage+producer: 2016 Rubinelli Vajol Amarone", "expected_entityId": "vivino-f1699f0940214525"}

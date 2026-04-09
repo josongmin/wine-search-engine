@@ -76,6 +76,20 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return { shouldRerank: true, reason: 'semantic_preference' };
   }
 
+  // pure_constraint queries (price/style/food-pairing) benefit heavily from
+  // cross-encoder reranking: Cohere rerank-v3.5 understands multilingual
+  // intent ("스테이크와 어울리는") → English document cross-attention,
+  // which BM25 alone cannot provide. Always rerank when candidates exist.
+  if (queryClass === 'pure_constraint') {
+    return { shouldRerank: true, reason: 'pure_constraint' };
+  }
+
+  // ambiguous_short_form queries (e.g. "바롤로", "아마로네") have multiple
+  // plausible candidates — cross-encoder reranking improves precision.
+  if (queryClass === 'ambiguous_short_form') {
+    return { shouldRerank: true, reason: 'ambiguous_short_form' };
+  }
+
   if (candidateCount >= RERANK_GATE_LARGE_CANDIDATE_COUNT) {
     return { shouldRerank: true, reason: 'large_candidate_set' };
   }

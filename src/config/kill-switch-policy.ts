@@ -98,7 +98,8 @@ export function buildCacheReadRuntimeState(
 ): CacheReadRuntimeState {
   const learningKillSwitchEnabled = config.killSwitch.learning;
   const denseRetrievalEnabled = !config.killSwitch.denseRetrieval;
-  const rerankerConfigured = (config.reranker.url?.trim().length ?? 0) > 0;
+  const rerankerConfigured =
+    (config.reranker.url?.trim().length ?? 0) > 0 || config.cohere.apiKey !== undefined;
   const rerankerAvailable = rerankerConfigured && !rerankerRuntimeUnavailable(signal);
   const runtimeDegraded =
     learningKillSwitchEnabled

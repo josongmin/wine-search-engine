@@ -26,6 +26,10 @@ import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { estimateQueryDifficulty } from './query-difficulty-estimator.js';
 import { ConstraintFilter } from './constraint-filter.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
+import {
+  extractSearchConstraints,
+  searchConstraintsToFilterTokens,
+} from '../../query/service/search-constraint-extractor.js';
 import { annotateCandidateConstraintEvidenceBatch } from './candidate-constraint-evidence.js';
 import { CandidateAssembler, type AssemblyPolicy } from './candidate-assembly.js';
 import { applyProtectedRecallPolicy } from './protected-recall-policy.js';
@@ -209,6 +213,23 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
 
     // Vespa sparse filter tokens (aligned with browse/compare + buildSparseFilters)
     const filters = [...hardConstraintsToSparseFilterTokens(input.hardConstraints)];
+
+    // KRW price constraints from the raw query surface (e.g. "5만원대", "3만원 이하").
+    // extractSearchConstraints parses Korean price expressions that the planner's
+    // NormalizedConstraint system does not yet capture. The resulting
+    // price_usd_min / price_usd_max tokens are understood by buildSparseFilters
+    // and buildDenseFilters in mapping.ts and applied as hard YQL filters.
+    const rawQuery = input.queryPlan.rawQuery;
+    if (rawQuery.length > 0) {
+      const krwConstraints = extractSearchConstraints(rawQuery);
+      const krwTokens = searchConstraintsToFilterTokens(krwConstraints);
+      // Only add price tokens — exclusion/vintage tokens are already handled
+      // via hardConstraints. Adding them twice would produce duplicate YQL clauses.
+      const priceTokens = krwTokens.filter(
+        (t) => t.startsWith('price_usd_min:') || t.startsWith('price_usd_max:'),
+      );
+      filters.push(...priceTokens);
+    }
     const anchorDocument = await this.loadAnchorDocumentIfNeeded(input, activeChannels);
     const anchorProfile = this.resolveAnchorProfile(input, anchorDocument);
 
