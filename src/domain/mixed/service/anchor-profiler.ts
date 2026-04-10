@@ -77,8 +77,12 @@ export class AnchorProfiler {
     entityData: AnchorEntityData,
     resolutionConfidence: number,
   ): AnchorProfile {
-    const body = entityData.body ?? DEFAULT_BODY;
-    const sweetness = entityData.sweetness ?? DEFAULT_SWEETNESS;
+    // clamp01: enforces the [0,1] contract even if upstream data pipeline
+    // delivers out-of-range values (e.g. body=1.5 from a unit mismatch).
+    // Without clamping, computeBodySweetnessProximity's maxDist=2 assumption
+    // breaks and can return proximity < 0, corrupting combined similarity scores.
+    const body = clamp01(entityData.body ?? DEFAULT_BODY);
+    const sweetness = clamp01(entityData.sweetness ?? DEFAULT_SWEETNESS);
     const style = entityData.style ?? DEFAULT_STYLE;
 
     // Anchor confidence is derived from resolution confidence with

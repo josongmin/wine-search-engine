@@ -809,6 +809,13 @@ export function buildSparseFilters(filters: readonly string[]): string {
       case 'grape_primary':
         clauses.push(`grape_primary contains ${yqlString(value)}`);
         break;
+      // grapes is an array<string> field in Vespa — `contains` tests membership.
+      // Emitted alongside grape_primary: tokens for positive grape constraints so
+      // blend wines (where the variety is in grapes[] but not grape_primary) are
+      // included. Exclusion (grapes_not:) is handled in the NOT-filters section.
+      case 'grapes':
+        clauses.push(`grapes contains ${yqlString(value)}`);
+        break;
       case 'country':
         clauses.push(`country contains ${yqlString(value)}`);
         break;

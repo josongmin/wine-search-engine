@@ -197,6 +197,16 @@ export class Calibrator {
         );
         return clamp01(rawScore);
       }
+      // Isotonic regression requires non-decreasing Y values; a Y-axis violation
+      // indicates the stored model was not fitted with isotonic constraints and
+      // would produce non-monotonic calibrated probabilities.
+      if (i > 0 && y < prevY) {
+        process.emitWarning(
+          `IsotonicCalibrator: non-monotonic Y at index ${String(i)} (y=${String(y)} < prevY=${String(prevY)}); falling back to identity scaling.`,
+          { type: 'CalibrationWarning', code: 'ISOTONIC_BREAKPOINT_NON_MONOTONIC_Y' },
+        );
+        return clamp01(rawScore);
+      }
       if (rawScore <= x) {
         if (i === 0 || x === prevX) {
           return clamp01(y);

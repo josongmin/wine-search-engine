@@ -322,7 +322,6 @@ export async function createServer(
   //   - accepts   "application/json; charset=utf-8"
   //   - rejects   "text/plain"
   //   - rejects   "not-application/json"   (would pass a naive .includes() check)
-  const METHODS_WITH_BODY = new Set(['POST', 'PUT', 'PATCH']);
   app.addHook('preParsing', async (request, reply) => {
     if (METHODS_WITH_BODY.has(request.method)) {
       const rawCt = request.headers['content-type'] ?? '';

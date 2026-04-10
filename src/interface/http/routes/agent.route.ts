@@ -16,6 +16,7 @@ import {
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_INTERNAL_SERVER_ERROR,
   HTTP_STATUS_OK,
+  HTTP_STATUS_SERVICE_UNAVAILABLE,
   HTTP_STATUS_TOO_MANY_REQUESTS,
   MAX_AGENT_HTTP_QUERY_CHARS,
   MAX_AGENT_STEPS_CAP,
@@ -64,7 +65,17 @@ const AgentResponseSchema = z.object({
     request_id: z.string(),
     total_duration_ms: z.number().finite().nonnegative(),
     tool_call_count: z.number().int().nonnegative(),
-    termination_reason: z.string(),
+    termination_reason: z.enum([
+      'answer',
+      'max_steps',
+      'timeout',
+      'budget',
+      'error',
+      'loop_detected',
+      'fallback',
+      'blocked',
+      'aborted',
+    ]),
     fallback_applied: z.boolean(),
     total_tokens: z.object({
       input: z.number().int().nonnegative(),
@@ -83,6 +94,7 @@ export const AgentRouteContract = {
     [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 } as const;
 

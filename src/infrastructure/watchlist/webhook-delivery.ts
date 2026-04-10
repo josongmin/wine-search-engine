@@ -36,6 +36,12 @@ const WEBHOOK_BACKOFF_MS_AFTER_ATTEMPT = [
   WEBHOOK_BACKOFF_MS_SECOND_GAP,
   WEBHOOK_BACKOFF_MS_THIRD_GAP,
 ] as const;
+/**
+ * Fraction of backoff added as random jitter (±25%) to prevent thundering-herd
+ * retry storms when many webhook deliveries fail simultaneously (e.g. upstream
+ * receiver restart). Randomised per-attempt so batches spread over time.
+ */
+const WEBHOOK_BACKOFF_JITTER_FRACTION = 0.25;
 /** Per-attempt fetch timeout (fail fast on hung callbacks). */
 const WEBHOOK_FETCH_TIMEOUT_MS = 5000;
 const HTTP_SUCCESS_MIN = 200;
@@ -213,11 +219,13 @@ export class WebhookDelivery implements WatchlistDeliveryPort {
         );
       }
 
-      // Wait before next retry (no wait after the last attempt)
+      // Wait before next retry (no wait after the last attempt).
+      // Add ±25% jitter to spread concurrent retry storms (thundering herd).
       if (attempt < maxAttempts - 1) {
         const backoff = backoffs[attempt];
         if (backoff !== undefined) {
-          await this.sleepFn(backoff);
+          const jitter = backoff * WEBHOOK_BACKOFF_JITTER_FRACTION * Math.random();
+          await this.sleepFn(Math.round(backoff + jitter));
         }
       }
     }

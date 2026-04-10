@@ -65,15 +65,15 @@ function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSenso
   if (r.regionEnc === undefined) return false;
   if (r.countryEnc === undefined) return false;
 
-  // Sensory fields: accept either indexed value OR query-level prior.
-  // This widens predictor coverage: wines with sparse sensory data still get
-  // predictions when the compositional inference provides a fallback.
-  const hasBody = r.body !== undefined || priors?.body !== undefined;
+  // Sensory gate: tannin+acidity are REQUIRED by DrinkingWindowInput (non-optional).
+  // body/sweetness are OPTIONAL in the port — the predictor falls back to its own
+  // structural midpoints (HEURISTIC_STRUCTURE_CENTER=2, HEURISTIC_SWEETNESS_STRUCTURAL_MID=3)
+  // when absent. Requiring all four here would silently block predictions for wines
+  // that only have tannin+acidity data, which is common for older index documents.
   const hasTannin = r.tannin !== undefined || priors?.tannin !== undefined;
   const hasAcidity = r.acidity !== undefined || priors?.acidity !== undefined;
-  const hasSweetness = r.sweetness !== undefined || priors?.sweetness !== undefined;
 
-  return hasBody && hasTannin && hasAcidity && hasSweetness;
+  return hasTannin && hasAcidity;
 }
 
 /**

@@ -379,6 +379,16 @@ export default tseslint.config(
       'no-restricted-syntax': 'off',
     },
   },
+  /**
+   * clamp.ts IS the SSoT for clamp01/clamp. The rule forbidding inline
+   * Math.max(0, Math.min(1, x)) must not fire on its own implementation.
+   */
+  {
+    files: ['src/domain/shared/utils/clamp.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
+    },
+  },
   /** Infrastructure adapter boundary safety.
    *  Warn (not error) on `as` casts at JSONB/Redis boundaries so new code
    *  gets flagged in the editor while existing casts are cleaned up

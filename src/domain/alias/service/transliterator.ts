@@ -584,8 +584,7 @@ export class Transliterator {
     canonicalLabel: string,
     sourceLang: string,
   ): readonly TransliterationResult[] {
-    const VALID_LANGS: ReadonlySet<string> = new Set(['fr', 'it', 'es', 'en']);
-    if (!VALID_LANGS.has(sourceLang)) return [];
+    if (!Transliterator.VALID_LANGS.has(sourceLang)) return [];
     const lang = sourceLang as SourceLang;
     const results: TransliterationResult[] = [];
 

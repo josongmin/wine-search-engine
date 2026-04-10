@@ -9,6 +9,9 @@ import { AUTHENTICATED_SUBJECT_HEADER } from '../authenticated-subject.js';
 import { toFiniteNumber } from '../../../domain/shared/utils/safe-number.js';
 import {
   MAX_AUTHENTICATED_SUBJECT_CHARS,
+  MAX_ERROR_ENVELOPE_CODE_CHARS,
+  MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS,
+  MAX_ERROR_ENVELOPE_MESSAGE_CHARS,
   MAX_HTTPS_CALLBACK_URL_CHARS,
   MAX_HTTP_STATUS_CODE,
   MAX_PERCENT_SCALE,
@@ -411,10 +414,11 @@ export type ListDeliveriesResponse = z.infer<typeof ListDeliveriesResponseSchema
 // 4xx/5xx branch SHOULD populate both to match `ErrorResponseSchema`.
 export const WatchlistErrorResponseSchema = z.object({
   error: z.object({
-    code: z.string(),
-    message: z.string(),
+    // Bounds aligned with canonical ErrorResponseSchema (RFC-014).
+    code: z.string().max(MAX_ERROR_ENVELOPE_CODE_CHARS),
+    message: z.string().max(MAX_ERROR_ENVELOPE_MESSAGE_CHARS),
     request_id: z.string().min(1),
-    failure_reason: z.string().nullable().optional(),
+    failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable().optional(),
     retryable: z.boolean().optional(),
   }).strict(),
 }).strict();

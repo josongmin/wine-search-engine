@@ -180,10 +180,7 @@ export class SearchPipelineEvaluator implements SearchPipelinePort {
       // 'failed prediction'. Without this, regression eval would green-light
       // builds where SearchUseCase intentionally throws WRONG_RESOLVE /
       // BLOCKING_MISS / EVIDENCE_OBLIGATION as defects.
-      const defectCodes = new Set([
-        'WRONG_RESOLVE', 'BLOCKING_MISS', 'EVIDENCE_OBLIGATION',
-      ]);
-      if (error instanceof DomainError && defectCodes.has(error.code)) {
+      if (error instanceof DomainError && PIPELINE_DEFECT_CODES.has(error.code)) {
         log.error(
           { err: error, code: error.code, latencyMs, query, queryClass },
           'eval pipeline raised pipeline defect — propagating',

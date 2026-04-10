@@ -668,12 +668,23 @@ async function executeAgentToolInner(
         const priceFiltered = response.results.filter((r) => {
           const pr = r.entity.priceRange;
           if (pr === undefined) return true; // no price data → keep (benefit of doubt)
-          const usdMatch = /^\$(\d+(?:\.\d+)?)$/.exec(pr);
-          if (usdMatch === null) return true; // unrecognised format → keep
-          const priceUsd = Number(usdMatch[1]);
-          if (!Number.isFinite(priceUsd)) return true; // guard: keep on parse failure
-          const priceKrw = priceUsd * KRW_PER_USD_APPROXIMATE;
-          return priceKrw <= budgetKrw;
+          // USD: "$120" or "$1,234.56"
+          const usdMatch = /^\$(\d[\d,]*(?:\.\d+)?)$/.exec(pr);
+          if (usdMatch !== null) {
+            const priceUsd = Number(usdMatch[1]!.replace(/,/g, ''));
+            if (!Number.isFinite(priceUsd)) return true; // guard: keep on parse failure
+            return priceUsd * KRW_PER_USD_APPROXIMATE <= budgetKrw;
+          }
+          // KRW: "120,000원" or "₩120000"
+          const krwMatch = /^(?:₩|)(\d[\d,]*)(?:\s*원)?$/u.exec(pr.trim());
+          if (krwMatch !== null) {
+            const priceKrw = Number(krwMatch[1]!.replace(/,/g, ''));
+            if (!Number.isFinite(priceKrw)) return true; // guard: keep on parse failure
+            return priceKrw <= budgetKrw;
+          }
+          // Unrecognised currency format (EUR, GBP, etc.) — keep to avoid
+          // incorrectly dropping wines, but this is an acknowledged limitation.
+          return true;
         });
         if (priceFiltered.length < response.results.length) {
           response = { ...response, results: priceFiltered } as typeof response;

@@ -33,6 +33,10 @@ export const LLM_ALLOWED_ATTRIBUTES = new Set([
 /** Max values in an `in` / `exclude` operator array — wine attributes rarely exceed 20 distinct values. */
 const MAX_CONSTRAINT_IN_VALUES = 50;
 
+// CLAUDE.md Rule 10 exception: LLM-generated tool output MUST NOT use .strict().
+// LLMs routinely emit extra fields (reasoning, confidence_explanation, metadata)
+// and .strict() fails the entire item, silently dropping valid constraints.
+// The nested range object also omits .strict() for the same reason.
 export const LlmConstraintItemSchema = z.object({
   phrase: z.string().min(1),
   attribute: z.string().min(1),
@@ -40,7 +44,7 @@ export const LlmConstraintItemSchema = z.object({
   value: z.union([
     z.string(),
     z.number().finite(),
-    z.object({ min: z.number().finite(), max: z.number().finite() }),
+    z.object({ min: z.number().finite(), max: z.number().finite() }), // LLM output — no .strict()
     z.array(z.string()).max(MAX_CONSTRAINT_IN_VALUES),
   ]),
   confidence: z.number().finite().min(0).max(1),

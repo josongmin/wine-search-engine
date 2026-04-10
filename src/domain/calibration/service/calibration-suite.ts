@@ -3,6 +3,14 @@
  * split conformal prediction, and the AURC-gated threshold optimizer.
  *
  * Used by benchmark runs and admin tools to summarize calibration quality.
+ *
+ * TODO(Rule 33): This module and all its dependencies (aurc.ts, ece.ts,
+ * platt-scaling.ts, conformal-prediction.ts, threshold-optimizer.ts in THIS
+ * directory) are NOT wired into any production code path. Either:
+ *   (a) Wire via src/config/container-aux-features.ts for admin/benchmark use, OR
+ *   (b) Consolidate into src/domain/learning/ where the wired ThresholdOptimizer lives.
+ * The learning-domain threshold-optimizer (src/domain/learning/service/) IS wired;
+ * this calibration-domain variant is a duplicate with no production caller.
  */
 
 import { computeAURC, type AURCResult } from './aurc.js';

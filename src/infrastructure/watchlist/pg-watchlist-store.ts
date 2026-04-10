@@ -8,6 +8,7 @@ import type {
   WatchlistStoragePort,
   TransactionalWatchlistStore,
 } from '../../domain/watchlist/port/watchlist-repository.port.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 /** Minimal query interface shared by Pool and PoolClient. */
 interface QueryExecutor {
@@ -52,6 +53,28 @@ function rowToWatchlistEntry(row: WatchlistRow): WatchlistEntry {
     createdAt: row.created_at,
     expiresAt: row.expires_at,
   };
+}
+
+const pgWatchlistStoreLog = bootstrapLogger.child({ component: 'PgWatchlistStore' });
+
+/**
+ * Maps an array of DB rows to WatchlistEntry objects with per-record error isolation.
+ * A single row with corrupt trigger_conditions will not fail the entire query —
+ * the bad row is skipped and a warning is emitted, so callers receive all valid rows.
+ */
+function mapRowsSafe(rows: WatchlistRow[]): WatchlistEntry[] {
+  const out: WatchlistEntry[] = [];
+  for (const row of rows) {
+    try {
+      out.push(rowToWatchlistEntry(row));
+    } catch (err) {
+      pgWatchlistStoreLog.warn(
+        { err, watchlistId: row.watchlist_id },
+        'Skipping watchlist row with invalid trigger_conditions',
+      );
+    }
+  }
+  return out;
 }
 
 function rowToDeliveryLogEntry(row: WatchlistDeliveryLogRow): WatchlistDeliveryLogEntry {
@@ -119,7 +142,7 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
       `SELECT * FROM watchlists WHERE user_id = $1 ORDER BY created_at ASC LIMIT 1000`,
       [userId],
     );
-    return result.rows.map(rowToWatchlistEntry);
+    return mapRowsSafe(result.rows);
   }
 
   async findByEntityId(entityId: string): Promise<readonly WatchlistEntry[]> {
@@ -127,7 +150,7 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
       `SELECT * FROM watchlists WHERE entity_id = $1 ORDER BY created_at ASC LIMIT 1000`,
       [entityId],
     );
-    return result.rows.map(rowToWatchlistEntry);
+    return mapRowsSafe(result.rows);
   }
 
   async delete(id: string): Promise<boolean> {

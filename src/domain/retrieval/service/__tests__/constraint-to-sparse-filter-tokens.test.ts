@@ -199,3 +199,44 @@ describe('hardConstraintsToSparseFilterTokens — numeric range constraints', ()
     expect(tokens.some((t) => t.startsWith('price_usd_max:50'))).toBe(true);
   });
 });
+
+// grape_primary dual-field: positive = / in must emit BOTH grape_primary: AND grapes:
+// tokens so blend wines (variety in grapes[] but not grape_primary) are included.
+// Exclusion already covers both; this ensures positive constraints have parity.
+describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field', () => {
+  it('grape_primary = value emits grape_primary: token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', '=', 'Cabernet Sauvignon'),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_primary:'))).toBe(true);
+  });
+
+  it('grape_primary = value ALSO emits grapes: token (blend coverage)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', '=', 'Cabernet Sauvignon'),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grapes:'))).toBe(true);
+  });
+
+  it('grape_primary in [...] emits grape_primary_in: token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', 'in', ['Cabernet', 'Merlot']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_primary_in:'))).toBe(true);
+  });
+
+  it('grape_primary in [...] ALSO emits grapes_in: token (blend coverage)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', 'in', ['Cabernet', 'Merlot']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grapes_in:'))).toBe(true);
+  });
+
+  it('grape_primary exclude still covers both fields (regression)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', 'exclude', 'Chardonnay'),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_primary_not:'))).toBe(true);
+    expect(tokens.some((t) => t.startsWith('grapes_not:'))).toBe(true);
+  });
+});

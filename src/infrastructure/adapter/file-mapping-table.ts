@@ -17,7 +17,7 @@ const NLMappingSchema = z.object({
   mappingConfidence: z.number().finite(),
   mappingVersion: z.string(),
   source: z.string(),
-});
+}).strict(); // Rule 10: external file data — reject unknown keys to surface schema drift early.
 
 /** Max mappings to accept from a single file (domain bound: ~500 entities × 3 aliases). */
 const MAX_MAPPINGS_FROM_FILE = 2000;

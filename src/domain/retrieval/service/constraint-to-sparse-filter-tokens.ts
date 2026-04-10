@@ -89,7 +89,29 @@ function constraintToSparseFilterTokens(
         }
         return [`grape_primary_not_in:${joined}`, `grapes_not_in:${joined}`];
       }
-      return stringEq('grape_primary');
+      // Positive = / in: must cover BOTH grape fields so blends are included.
+      // grape_primary (string) holds the dominant variety; grapes (array<string>)
+      // holds all varieties for multi-grape blends. Filtering only grape_primary
+      // misses blend wines where the requested variety is secondary.
+      // buildSparseFilters handles `grape_primary_in:` (OR clause) and
+      // `grapes_in:` (OR clause) independently — both must be emitted.
+      if (operator === '=' && typeof value === 'string' && value.length > 0) {
+        const safe = value.replace(/\|/g, '');
+        if (safe.length === 0) return [];
+        return [`grape_primary:${safe}`, `grapes:${safe}`];
+      }
+      if (operator === 'in' && Array.isArray(value)) {
+        const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0)
+          .map((e) => e.replace(/\|/g, ''))
+          .filter((e) => e.length > 0);
+        if (normalized.length === 0) return [];
+        if (normalized.length === 1) {
+          return [`grape_primary:${normalized[0]}`, `grapes:${normalized[0]}`];
+        }
+        const joined = normalized.join('|');
+        return [`grape_primary_in:${joined}`, `grapes_in:${joined}`];
+      }
+      return [];
     // IDX-05 NOTE — SOFT_CONSTRAINT_ATTRIBUTES and hard filter cases:
     // style, price_band, flavor_profile, certification are in SOFT_CONSTRAINT_ATTRIBUTES
     // (preference signals routed to the soft bundle by constraint-compiler.ts). However

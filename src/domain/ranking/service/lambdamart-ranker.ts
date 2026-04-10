@@ -208,6 +208,19 @@ export interface RankingFeatures {
   readonly multilingualScore: number;
 }
 
+/** Canonical feature name order — must match scoreFeaturesRaw and DEFAULT_HEURISTIC_WEIGHTS.
+ *  Module-scope (Rule 16): value is deterministic, never changes per call. */
+const LAMBDAMART_FEATURE_NAMES: readonly (keyof RankingFeatures)[] = [
+  'bm25Score',
+  'semanticScore',
+  'popularityScore',
+  'recencyScore',
+  'classMatchScore',
+  'attributeMatchScore',
+  'diversityScore',
+  'multilingualScore',
+];
+
 /**
  * Training example for LambdaMART: a pair of documents and their labels.
  */
@@ -272,17 +285,7 @@ export function trainLambdaMARTModel(
       1,
       Math.floor(classExamples.length / LAMBDAMART_BATCH_SIZE_DIVISOR),
     );
-    const featureNames = [
-      'bm25Score',
-      'semanticScore',
-      'popularityScore',
-      'recencyScore',
-      'classMatchScore',
-      'attributeMatchScore',
-      'diversityScore',
-      'multilingualScore',
-    ] as const;
-
+    // LAMBDAMART_FEATURE_NAMES is module-scope (Rule 16: deterministic, never changes per call).
     // Derive a deterministic seed from the queryClass string and example count
     // so training is reproducible across process restarts (no Math.random()).
     let classSeed = classExamples.length;
@@ -312,8 +315,8 @@ export function trainLambdaMARTModel(
 
         for (let j = 0; j < LAMBDAMART_FEATURE_DIMENSION; j++) {
           // E2-T6: throwOnUndefinedFeatureName guards against out-of-bounds access.
-          // featureNames has exactly LAMBDAMART_FEATURE_DIMENSION elements; j is always in range.
-          const fname = throwOnUndefinedFeatureName(featureNames, j) as keyof RankingFeatures;
+          // LAMBDAMART_FEATURE_NAMES has exactly LAMBDAMART_FEATURE_DIMENSION elements; j is always in range.
+          const fname = throwOnUndefinedFeatureName(LAMBDAMART_FEATURE_NAMES, j) as keyof RankingFeatures;
           const featureDiff = example.features1[fname] - example.features2[fname];
           const currentGradient = gradients[j] ?? 0;
           gradients[j] = currentGradient + lambda * featureDiff;

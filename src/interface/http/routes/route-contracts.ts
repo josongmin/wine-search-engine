@@ -265,6 +265,7 @@ export const SearchRouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -287,6 +288,7 @@ export const HybridRouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -304,6 +306,7 @@ export const InterpretRouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -323,6 +326,7 @@ export const ResolveRouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -336,6 +340,7 @@ export const ReplayRouteContract = defineRouteContract({
     [HTTP_STATUS_CONFLICT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -347,6 +352,7 @@ export const BatchSearchRouteContract = defineRouteContract({
     [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
