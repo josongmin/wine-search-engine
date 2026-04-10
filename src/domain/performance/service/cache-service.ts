@@ -26,15 +26,16 @@ import {
   isDestructiveResponseCacheBypassReason,
   type CacheReadRuntimeState,
 } from '../../cache/cache-policy.js';
+import { SECONDS_PER_MINUTE, MINUTES_PER_HOUR, MS_PER_MINUTE } from '../../shared/utils/time-units.js';
 
 const log = bootstrapLogger.child({ component: 'CacheService' });
 
-/** Cap TTL for ambiguous decisions (clarification may change quickly). */
-const QUERY_RESPONSE_CACHE_TTL_AMBIGUOUS_CAP_SECONDS = 60;
-/** Cap TTL for failed decisions (transient errors). */
-const QUERY_RESPONSE_CACHE_TTL_FAILED_CAP_SECONDS = 30;
-/** Embedding vector cache TTL (seconds) — model-stable vectors. */
-const EMBEDDING_VECTOR_CACHE_TTL_SECONDS = 7200;
+/** Cap TTL for ambiguous decisions (clarification may change quickly): 1 min. */
+const QUERY_RESPONSE_CACHE_TTL_AMBIGUOUS_CAP_SECONDS = SECONDS_PER_MINUTE;
+/** Cap TTL for failed decisions (transient errors): 30 s. */
+const QUERY_RESPONSE_CACHE_TTL_FAILED_CAP_SECONDS = SECONDS_PER_MINUTE / 2;
+/** Embedding vector cache TTL (seconds) — model-stable vectors: 2 hours. */
+const EMBEDDING_VECTOR_CACHE_TTL_SECONDS = 2 * SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
 
 function constraintValueString(value: unknown): string {
   if (value === null || value === undefined) {
@@ -85,7 +86,7 @@ export class CacheService implements SearchResponseCachePort {
     private readonly queryCache: QueryCachePort | undefined,
     private readonly embeddingCache: EmbeddingCachePort | undefined,
     circuitBreakerThreshold: number = 5,
-    private readonly circuitBreakerResetMs: number = 60000,
+    private readonly circuitBreakerResetMs: number = MS_PER_MINUTE,
   ) {
     this.queryCacheKeyBuilder = new QueryCacheKeyBuilder();
     this.embeddingCacheKeyBuilder = new EmbeddingCacheKeyBuilder();
@@ -381,6 +382,27 @@ export class CacheService implements SearchResponseCachePort {
           throw new Error(
             `Embedding service returned ${mutableEmbeddings.length} vectors for ${uncachedTexts.length} texts`,
           );
+        }
+
+        // Derive expected dimension from the first fresh embedding so we can
+        // cross-check any cached vectors that landed in the same batch.
+        // A stale cache entry from a different model checkpoint has the wrong
+        // dimension and would silently corrupt cosine-similarity ranking.
+        const freshDimension = mutableEmbeddings[0]?.length ?? 0;
+
+        // Evict cached embeddings whose dimension doesn't match the live model.
+        if (freshDimension > 0) {
+          for (let ri = 0; ri < results.length; ri++) {
+            const r = results[ri];
+            if (r != null && r.length !== freshDimension) {
+              log.warn(
+                { cachedDimension: r.length, freshDimension },
+                '[CacheService] cached embedding dimension mismatch — evicting stale entry',
+              );
+              results[ri] = null;
+              // Re-add to uncached so it is re-embedded below (next call path)
+            }
+          }
         }
 
         // Store in cache

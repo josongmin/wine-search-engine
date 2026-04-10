@@ -66,6 +66,8 @@ type SearchRouteCapability =
 
 const AGENT_METRICS_ALERTS_MAX = 20;
 const RETRIEVAL_DEGRADATION_ALERTS_MAX = 20;
+/** Health/readiness checks: ~6 known checks (pg, redis, vespa, llm, embedding, reranker) + headroom. */
+const READINESS_CHECKS_MAX = 20;
 /** Upper bound for component count in degradation metrics (6 known components + headroom). */
 const RETRIEVAL_DEGRADATION_COMPONENTS_MAX = 12;
 /** Upper bound for circuit breaker registry entries. The registry currently
@@ -76,6 +78,7 @@ const CIRCUIT_BREAKER_REGISTRY_MAX = 64;
  *  short snake_case identifiers ("llm_embedding", "vespa_query"); 128 chars
  *  is comfortably above the longest known breaker id. */
 const CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS = 128;
+const MAX_TOOL_INPUT_RECORD_KEYS = 50;
 
 export interface HttpRouteContract {
   readonly operationId: string;
@@ -106,14 +109,20 @@ const ReadyResponseSchema = z.object({
   checks: z.record(z.object({
     status: z.enum(['up', 'down', 'skipped']),
     required: z.boolean(),
-  }).strict()),
+  }).strict()).refine(
+    (rec) => Object.keys(rec).length <= READINESS_CHECKS_MAX,
+    { message: `checks record must not exceed ${READINESS_CHECKS_MAX} entries` },
+  ),
 }).strict();
 
 const AgentMetricsResponseSchema = z.object({
   timestamp: z.string(),
   agent: z.object({
     runs: z.number().int().nonnegative(),
-    by_termination_reason: z.record(z.number().int().nonnegative()),
+    by_termination_reason: z.record(z.number().int().nonnegative()).refine(
+      (rec) => Object.keys(rec).length <= AGENT_METRICS_ALERTS_MAX,
+      { message: `by_termination_reason must not exceed ${AGENT_METRICS_ALERTS_MAX} keys` },
+    ),
     fallback_runs: z.number().int().nonnegative(),
     fallback_rate: z.number().finite().min(0),
     total_tool_calls: z.number().int().nonnegative(),
@@ -135,7 +144,10 @@ const ClaudeToolsExecuteRequestSchema = z.object({
     'check_drinking_window',
     'compare_wines',
   ]),
-  tool_input: z.record(z.unknown()).optional().default({}),
+  tool_input: z.record(z.unknown()).refine(
+    (rec) => Object.keys(rec).length <= MAX_TOOL_INPUT_RECORD_KEYS,
+    { message: `tool_input must have at most ${MAX_TOOL_INPUT_RECORD_KEYS} keys` },
+  ).optional().default({}),
   // request_id must be non-empty when present; regex already enforces alphanumeric+._-
   request_id: z.string().min(1).max(MAX_AUTHENTICATED_SUBJECT_CHARS).regex(/^[a-zA-Z0-9._-]+$/).optional(),
 }).strict();
@@ -196,7 +208,10 @@ const RetrievalDegradationMetricsResponseSchema = z.object({
     alerts: z.array(z.string()).max(RETRIEVAL_DEGRADATION_ALERTS_MAX),
   }).strict(),
   /** Silent skip counters from src/observability/silent-skip-counters.ts. */
-  silent_skips: z.record(z.number().int().nonnegative()).optional(),
+  silent_skips: z.record(z.number().int().nonnegative()).refine(
+    (rec) => Object.keys(rec).length <= RETRIEVAL_DEGRADATION_COMPONENTS_MAX,
+    { message: `silent_skips must not exceed ${RETRIEVAL_DEGRADATION_COMPONENTS_MAX} keys` },
+  ).optional(),
   /** Circuit breaker registry snapshot. */
   circuit_breakers: z.array(z.object({
     name: z.string().min(1).max(CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS),

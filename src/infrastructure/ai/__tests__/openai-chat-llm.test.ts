@@ -279,4 +279,61 @@ describe('OpenAiChatLlm', () => {
       await expect(resultPromise).rejects.toThrow(/abort/i);
     });
   });
+
+  // E4-T4: W2-02/W2-03 — LLM usage NaN guards
+  describe('usage NaN guards', () => {
+    function makeBodyWithUsage(usage: unknown): string {
+      return JSON.stringify({
+        model: 'gpt-4o-mini',
+        choices: [
+          { index: 0, finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } },
+        ],
+        usage,
+      });
+    }
+
+    const llm = new OpenAiChatLlm({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      defaultModel: 'gpt-4o-mini',
+      httpTimeoutMs: 5000,
+    });
+
+    it('does not throw when usage is undefined', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(makeBodyWithUsage(undefined), { status: 200 })));
+      await expect(llm.complete({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeDefined();
+    });
+
+    it('does not throw when usage fields are missing', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(makeBodyWithUsage({}), { status: 200 })));
+      await expect(llm.complete({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeDefined();
+    });
+
+    it('does not throw when usage fields contain NaN', async () => {
+      // NaN cannot be serialized as JSON literally — we use null which is parsed as
+      // typeof null !== 'number' so Number.isFinite(null) === false → treated as 0
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        makeBodyWithUsage({ prompt_tokens: null, completion_tokens: null }),
+        { status: 200 },
+      )));
+      await expect(llm.complete({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toBeDefined();
+    });
+  });
+
+  // E4-T8: AG-04 — empty choices array guard
+  describe('empty choices guard', () => {
+    it('throws when response.choices is empty', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ model: 'gpt-4o-mini', choices: [] }),
+        { status: 200 },
+      )));
+      const llm = new OpenAiChatLlm({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        defaultModel: 'gpt-4o-mini',
+        httpTimeoutMs: 5000,
+      });
+      await expect(llm.complete({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toThrow(/empty choices/i);
+    });
+  });
 });

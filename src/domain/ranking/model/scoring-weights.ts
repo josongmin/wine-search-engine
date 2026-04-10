@@ -71,7 +71,12 @@ export interface ScoringWeights {
 
 /**
  * Default scoring weights for general queries.
- * Weights for non-gate signals sum to ~1.0.
+ * Non-penalty weights (all except uncertaintyPenalty) sum to ~0.95; total
+ * including the penalty weight sums to ~1.0. Query-class overrides
+ * (e.g. anchored_similarity, semantic_preference) follow the same convention
+ * but some totals reach ~1.05 when penalty weight is included — this is
+ * intentional and handled by resolveChannelAwareWeights() proportional
+ * normalization.
  */
 const DEFAULT_WEIGHTS: ScoringWeights = {
   entityIntegrity: 0.15,

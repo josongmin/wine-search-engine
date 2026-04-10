@@ -11,6 +11,8 @@ const metaTestInclude = [
   'src/interface/http/schemas/__tests__/search-response-v2.schema.test.ts',
   'src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts',
   'src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts',
+  // E5-T12: SSoT gate — verifies SOFT_CONSTRAINT_ATTRIBUTES has exactly one definition
+  'test/meta/constraint-attributes-ssot.test.ts',
 ] as const;
 
 export default defineConfig({

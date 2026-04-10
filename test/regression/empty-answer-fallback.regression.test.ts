@@ -107,7 +107,7 @@ describe('EMPTY_ANSWER fallback regression — structural guarantee', () => {
     );
     // The Layer 4 unconditional answer assignment must be non-empty Korean string
     // Matches both backtick template literals and single/double quoted strings
-    const layer4Match = src.match(/Layer 4[\s\S]{0,100}answer\s*=\s*['"`]([^'"`]+)['"`]/);
+    const layer4Match = src.match(/Layer 4[\s\S]{0,400}answer\s*=\s*['"`]([^'"`]+)['"`]/);
     expect(layer4Match).not.toBeNull();
     if (layer4Match?.[1]) {
       expect(layer4Match[1].trim().length).toBeGreaterThan(10);

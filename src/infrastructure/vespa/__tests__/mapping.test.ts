@@ -5,6 +5,8 @@ import {
   fromVespaFields,
   readRawVespaRetrievalSummary,
   toVespaFields,
+  buildSparseFilters,
+  toRetrievalFeatureProjection,
 } from '../mapping.js';
 
 function makeDocument(overrides: Partial<RetrievalDocument> = {}): RetrievalDocument {
@@ -173,5 +175,140 @@ describe('vespa mapping retrieval summary SSOT', () => {
     expect(roundTripped.certifications).toBeUndefined();
     expect(roundTripped.soilType).toBeUndefined();
     expect(roundTripped.producerType).toBeUndefined();
+  });
+});
+
+// E1-P3-7: body/sweetness null vs 0 distinction
+describe('fromVespaFields — body/sweetness null vs 0 (E1-P3-7)', () => {
+  it('body=0 in Vespa → field is present with value 0 in returned document', () => {
+    const doc = fromVespaFields({
+      entity_id: 'test-wine',
+      entity_type: 'wine',
+      body: 0,
+    });
+    // body=0 is a legitimate "no body" value — must be preserved, not treated as absent
+    expect('body' in doc).toBe(true);
+    expect(doc.body).toBe(0);
+  });
+
+  it('sweetness=0 in Vespa → field is present with value 0 in returned document', () => {
+    const doc = fromVespaFields({
+      entity_id: 'test-wine',
+      entity_type: 'wine',
+      sweetness: 0,
+    });
+    expect('sweetness' in doc).toBe(true);
+    expect(doc.sweetness).toBe(0);
+  });
+
+  it('body absent from Vespa → field is absent (undefined) in returned document', () => {
+    const doc = fromVespaFields({
+      entity_id: 'test-wine',
+      entity_type: 'wine',
+      // body field intentionally absent
+    });
+    // "no data" → omit key entirely, not body: 0
+    expect(doc.body).toBeUndefined();
+  });
+
+  it('sweetness absent from Vespa → field is absent (undefined) in returned document', () => {
+    const doc = fromVespaFields({
+      entity_id: 'test-wine',
+      entity_type: 'wine',
+      // sweetness field intentionally absent
+    });
+    expect(doc.sweetness).toBeUndefined();
+  });
+
+  it('body=0.5 (non-zero) round-trips correctly', () => {
+    const doc = fromVespaFields({
+      entity_id: 'test-wine',
+      entity_type: 'wine',
+      body: 0.5,
+    });
+    expect(doc.body).toBeCloseTo(0.5);
+  });
+});
+
+// E1-P3-7 (regression): toRetrievalFeatureProjection body=0 / sweetness=0 must be preserved
+describe('toRetrievalFeatureProjection — body/sweetness null vs 0 (E1-P3-7)', () => {
+  it('body=0 on document → feature projection includes body:0 (was: silently dropped by !== 0)', () => {
+    const doc = makeDocument({ body: 0 });
+    const proj = toRetrievalFeatureProjection(doc);
+    // body=0 is a valid [0,1] normalised value (fully light-bodied wine)
+    expect('body' in proj).toBe(true);
+    expect(proj.body).toBe(0);
+  });
+
+  it('sweetness=0 on document → feature projection includes sweetness:0 (was: silently dropped)', () => {
+    const doc = makeDocument({ sweetness: 0 });
+    const proj = toRetrievalFeatureProjection(doc);
+    expect('sweetness' in proj).toBe(true);
+    expect(proj.sweetness).toBe(0);
+  });
+
+  it('body absent (undefined) → feature projection omits body key', () => {
+    const doc = makeDocument({ body: undefined });
+    const proj = toRetrievalFeatureProjection(doc);
+    expect(proj.body).toBeUndefined();
+  });
+
+  it('sweetness absent (undefined) → feature projection omits sweetness key', () => {
+    const doc = makeDocument({ sweetness: undefined });
+    const proj = toRetrievalFeatureProjection(doc);
+    expect(proj.sweetness).toBeUndefined();
+  });
+
+  it('body=0.7 round-trips correctly', () => {
+    const doc = makeDocument({ body: 0.7 });
+    const proj = toRetrievalFeatureProjection(doc);
+    expect(proj.body).toBeCloseTo(0.7);
+  });
+
+  it('tannin=0 is preserved (was: treated same as undefined by old !== 0 pattern)', () => {
+    const doc = makeDocument({ tannin: 0 });
+    const proj = toRetrievalFeatureProjection(doc);
+    expect('tannin' in proj).toBe(true);
+    expect(proj.tannin).toBe(0);
+  });
+
+  it('acidity=0 is preserved', () => {
+    const doc = makeDocument({ acidity: 0 });
+    const proj = toRetrievalFeatureProjection(doc);
+    expect('acidity' in proj).toBe(true);
+    expect(proj.acidity).toBe(0);
+  });
+});
+
+// IDX-05 (extended): body, tannin, critic_score, producer_prestige, finish_length are SOFT —
+// hardConstraintsToSparseFilterTokens must NOT generate hard YQL tokens for them.
+// BUG-01: region positive filter drop
+// constraint-to-sparse-filter-tokens.ts emits 'region:Burgundy' for single-value positive.
+// mapping.ts switch had case 'region_not' and multi-value 'region_in' but
+// NO case 'region' — single-value positive was silently dropped (default case no-op).
+describe('buildSparseFilters — region filter (BUG-01)', () => {
+  it('single-value positive region filter produces YQL contains clause', () => {
+    const yql = buildSparseFilters(['region:Burgundy']);
+    expect(yql).toContain('region contains "Burgundy"');
+  });
+
+  it('region negation filter still works', () => {
+    const yql = buildSparseFilters(['region_not:Burgundy']);
+    expect(yql).toContain('!(region contains "Burgundy")');
+  });
+
+  it('region multi-value IN filter works via ALLOWED_SPARSE_IN_FIELDS path', () => {
+    const yql = buildSparseFilters(['region_in:Burgundy|Barolo']);
+    expect(yql).toContain('region contains');
+  });
+
+  it('regression: country, wine_type, appellation positive filters still work', () => {
+    expect(buildSparseFilters(['country:France'])).toContain('country contains "France"');
+    expect(buildSparseFilters(['wine_type:red'])).toContain('wine_type contains "red"');
+    expect(buildSparseFilters(['appellation:Pomerol'])).toContain('appellation contains "Pomerol"');
+  });
+
+  it('empty filter array returns empty string', () => {
+    expect(buildSparseFilters([])).toBe('');
   });
 });

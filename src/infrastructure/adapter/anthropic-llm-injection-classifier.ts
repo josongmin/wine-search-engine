@@ -64,9 +64,17 @@ function isRetriableAnthropicError(err: unknown): boolean {
     || status === ANTHROPIC_RETRIABLE_HTTP_OVERLOADED;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
   });
 }
 
@@ -140,7 +148,7 @@ export class AnthropicLLMInjectionClassifier implements LLMInjectionClassifierPo
             { attempt, maxAttempts: ANTHROPIC_CLASSIFIER_MAX_ATTEMPTS, backoffMs, status: (err as { status?: number }).status },
             '[AnthropicLLMInjectionClassifier] Retrying after rate-limit / transient error',
           );
-          await sleep(backoffMs);
+          await sleep(backoffMs, options?.abortSignal);
           continue;
         }
         break;

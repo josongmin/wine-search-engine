@@ -18,7 +18,9 @@ interface EmbeddingApiResponse {
 }
 
 function isNumberArray(v: unknown): v is number[] {
-  return Array.isArray(v) && v.every((x) => typeof x === 'number');
+  // Number.isFinite required: NaN and Infinity pass `typeof x === 'number'` but
+  // cause invalid tensor values in Vespa if they reach the embedding payload.
+  return Array.isArray(v) && v.every((x) => Number.isFinite(x));
 }
 
 function isEmbeddingObject(v: unknown): v is EmbeddingObject {

@@ -85,7 +85,19 @@ export class RedisQueryCache implements QueryCachePort {
     ttlSeconds: number,
   ): Promise<void> {
     try {
-      await this.cache.set(cacheKey.redisKey, response, ttlSeconds);
+      // Write-time Zod validation (E5-T11): prevents cache-poison loops where an
+      // oversized or malformed value is written unvalidated, then rejected on read,
+      // deleted, and re-fetched in an infinite cycle.
+      const written = await this.cache.setValidated(
+        cacheKey.redisKey,
+        response,
+        SearchResponseCacheSchema,
+        'RedisQueryCache',
+        ttlSeconds,
+      );
+      if (!written) {
+        log.warn({ key: cacheKey.redisKey }, 'query cache write skipped: shape validation failed');
+      }
     } catch (error) {
       // On serialization/write error, log and continue
       log.error({ err: error }, 'write error');
@@ -187,13 +199,14 @@ export class RedisQueryCache implements QueryCachePort {
    */
   async resetStats(): Promise<void> {
     const redis = this.cache.redis;
-    try {
-      await Promise.all([
-        redis.del(STATS_KEY_HITS),
-        redis.del(STATS_KEY_MISSES),
-      ]);
-    } catch (error) {
-      log.error({ err: error }, 'reset stats error');
+    const results = await Promise.allSettled([
+      redis.del(STATS_KEY_HITS),
+      redis.del(STATS_KEY_MISSES),
+    ]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        log.error({ err: result.reason }, 'reset stats error');
+      }
     }
   }
 }

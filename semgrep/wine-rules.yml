@@ -514,3 +514,147 @@ rules:
   #      "redefined SSoT util" class
   #   3. Code review on any new file under src/domain/retrieval/service/
 
+  # =========================================================================
+  # E3 Resilience / Circuit Breaker session — 2026-04-11
+  # =========================================================================
+
+  - id: wine-zod-string-transform-number-no-min
+    languages: [typescript]
+    message: >-
+      `z.string().transform(Number)` without a prior `.min(1)` guard silently
+      maps the empty string "" to 0 (because `Number("") === 0` is finite).
+      This was a live bug in zod-coerce.ts and llm-relevance-labeler.ts.
+
+      Safe pattern:   z.string().min(1).transform(Number)
+      SSoT shortcut:  import { coerceFiniteNumber } from
+                      '@domain/shared/utils/zod-coerce.js'
+      (BUG-DS02 audit: empty-string silent zero; CLAUDE.md rules 25 + 30)
+    severity: ERROR
+    metadata:
+      category: correctness
+      bugbash: BUG-DS02-empty-string-zero
+    patterns:
+      - pattern: z.string().transform(Number)
+      - pattern-not: z.string().min(...).transform(Number)
+    paths:
+      include:
+        - src/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - src/domain/shared/utils/zod-coerce.ts
+
+  - id: wine-no-local-zod-coerce-redef
+    languages: [typescript]
+    message: >-
+      Local re-definition of a zod-coerce SSoT helper
+      (coerceFiniteNumber / coercePositiveInt / coerceNonNegativeInt).
+      Import from `src/domain/shared/utils/zod-coerce.ts` instead.
+
+      llm-relevance-labeler.ts re-defined coerceFiniteNumber without the
+      `.min(1)` fix that existed in the SSoT, producing the same
+      empty-string to 0 bug independently.
+      (CLAUDE.md rules 25 + 30)
+    severity: ERROR
+    metadata:
+      category: ssot
+      bugbash: BUG-DS02-zod-coerce-ssot
+    pattern-either:
+      - pattern: |
+          const coerceFiniteNumber = $X
+      - pattern: |
+          const coercePositiveInt = $X
+      - pattern: |
+          const coerceNonNegativeInt = $X
+    paths:
+      include:
+        - src/**
+      exclude:
+        - src/domain/shared/utils/zod-coerce.ts
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+
+  # =========================================================================
+  # E4 Agent Pipeline Integrity session — 2026-04-11
+  # =========================================================================
+
+  - id: wine-catch-domain-error-without-abort-check
+    languages: [typescript]
+    message: >-
+      catch block checks `instanceof DomainError` and/or `.code` but does NOT
+      call `isAbortError(err)` before the DomainError check.
+
+      AbortError MUST be re-thrown immediately as the first check in any catch
+      block that handles async operations. Swallowing it causes:
+        - Caller disconnects misclassified as tool failures (wrong terminationReason)
+        - Agent loop continues after client disconnect
+        - Error metrics polluted with phantom failures
+
+      Fix: add `if (isAbortError(err)) throw err;` as the VERY FIRST check.
+
+      Found in: agent-tools.ts executeAgentTool() — fixed 2026-04-11 (E4 audit).
+      (Bug class: abort signal loss in catch blocks; CLAUDE.md rule 19)
+    severity: ERROR
+    metadata:
+      category: correctness
+      bugbash: E4-catch-abort-loss
+      cwe: 'CWE-755: Improper Handling of Exceptional Conditions'
+    patterns:
+      - pattern: |
+          try { ... } catch ($E) { ... instanceof DomainError ... }
+      - pattern-not: |
+          try { ... } catch ($E) { ... isAbortError($E) ... }
+    paths:
+      include:
+        - src/application/**
+        - src/domain/**
+        - src/infrastructure/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-zod-object-paired-range-no-superrefine
+    languages: [typescript]
+    message: >-
+      z.object() has paired `*_min` / `*_max` fields but no `.superRefine()`
+      cross-field validation.
+
+      Individually-valid pairs like vintage_min=2020 / vintage_max=1990 pass
+      schema validation but create impossible Vespa YQL range filters that
+      silently return 0 results. The schema must enforce min ≤ max.
+
+      Fix:
+        z.object({ vintage_min: ..., vintage_max: ... })
+          .superRefine((data, ctx) => {
+            if (data.vintage_min != null && data.vintage_max != null
+                && data.vintage_min > data.vintage_max) {
+              ctx.addIssue({ path: ['vintage_max'], code: 'custom',
+                message: 'vintage_max must be >= vintage_min' });
+            }
+          })
+
+      Found in: agent-tools.ts SearchInputSchema — fixed 2026-04-11 (E4 audit).
+      (Bug class: Zod schema semantic invariant; CLAUDE.md schema quality bar)
+    severity: WARNING
+    metadata:
+      category: correctness
+      bugbash: E4-zod-paired-range
+    patterns:
+      - pattern: |
+          const $SCHEMA = z.object({ ..., $MIN: $T1, ..., $MAX: $T2, ... });
+      - metavariable-regex:
+          metavariable: $MIN
+          regex: '.*_min$'
+      - metavariable-regex:
+          metavariable: $MAX
+          regex: '.*_max$'
+      - pattern-not: |
+          const $SCHEMA = z.object({ ... }).superRefine(...)
+    paths:
+      include:
+        - src/interface/http/schemas/**
+        - src/application/agent/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"

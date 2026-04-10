@@ -9,6 +9,9 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { VespaQueryResponseSchema } from './vespa-response.schema.js';
+import {
+  VESPA_SEARCH_TIMEOUT_MS,
+} from './per-channel-timeouts.js';
 
 const vespaLog = bootstrapLogger.child({ component: 'VespaClient' });
 
@@ -285,9 +288,23 @@ export class VespaClient {
     url: string,
     options: RequestInit,
     timeoutMs: number,
+    externalSignal?: AbortSignal,
   ): Promise<Response> {
     const controller = new AbortController();
+
+    // If the external signal is already aborted, abort immediately so fetch
+    // never starts. Without this, addEventListener would never fire (event
+    // already dispatched) and the request would proceed unexpectedly.
+    if (externalSignal?.aborted === true) {
+      controller.abort();
+    }
+
     const id = setTimeout(() => { controller.abort(); }, timeoutMs);
+
+    // Forward future external aborts to our controller.
+    const onExternalAbort = (): void => { controller.abort(); };
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+
     try {
       return await fetch(url, { ...options, signal: controller.signal });
     } catch (err) {
@@ -303,6 +320,7 @@ export class VespaClient {
       throw new VespaNetworkError(message, cause);
     } finally {
       clearTimeout(id);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
     }
   }
 
@@ -315,6 +333,7 @@ export class VespaClient {
    *
    * @param yql - The YQL query string.
    * @param params - Additional query parameters merged into the request body.
+   * @param signal - Optional AbortSignal to cancel the request early.
    * @returns The parsed Vespa query response.
    * @throws {VespaNetworkError} On transport-level failure (timeout, connection refused, etc.).
    * @throws {Error} On non-2xx HTTP status or malformed response.
@@ -322,6 +341,7 @@ export class VespaClient {
   async query(
     yql: string,
     params?: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<VespaQueryResponse> {
     return withRetry(async () => {
       const url = `${this.baseUrl}/search/`;
@@ -338,7 +358,8 @@ export class VespaClient {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         },
-        this.timeouts.searchRequestMs,
+        VESPA_SEARCH_TIMEOUT_MS,
+        signal,
       );
 
       if (!response.ok) {

@@ -3,6 +3,7 @@ import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { JudgmentCachePort } from '../port/judgment-cache.port.js';
 import type { LLMInjectionClassifierPort } from '../port/llm-injection-classifier.port.js';
 import type { InjectionJudgeOptions, InjectionJudgePort } from '../port/injection-judge.port.js';
+import { SECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../shared/utils/time-units.js';
 
 const log = bootstrapLogger.child({ component: 'LLMInjectionJudge' });
 
@@ -30,8 +31,8 @@ export class LLMInjectionJudge implements InjectionJudgePort {
   private readonly classifier: LLMInjectionClassifierPort;
   private readonly cache: JudgmentCachePort;
 
-  /** Cache TTL: 1 hour (3600 seconds). Balances freshness vs. cost. */
-  private static readonly CACHE_TTL_SECONDS = 3600;
+  /** Cache TTL: 1 hour. Balances freshness vs. cost. Rule 30: use time-units SSoT. */
+  private static readonly CACHE_TTL_SECONDS = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
 
   /** Cache key prefix for Redis. */
   private static readonly CACHE_KEY_PREFIX = 'injection_judge:';

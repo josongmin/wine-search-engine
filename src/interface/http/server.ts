@@ -38,6 +38,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { EvalRunnerContract } from '../../config/container-eval-contracts.js';
 import { runEvaluation } from '../../infrastructure/eval/eval-initializer.js';
 import {
+  CORS_PREFLIGHT_MAX_AGE_SECONDS,
   HTTP_DEFAULT_BODY_LIMIT_BYTES,
   HTTP_DEFAULT_CONNECTION_TIMEOUT_MS,
   HTTP_DEFAULT_REQUEST_TIMEOUT_MS,
@@ -144,7 +145,7 @@ async function registerCorsSupport(
       'X-Debug-Key',
     ],
     exposedHeaders: ['X-Request-Id', 'X-Debug-Active', 'Retry-After'],
-    maxAge: 86400,
+    maxAge: CORS_PREFLIGHT_MAX_AGE_SECONDS,
     strictPreflight: true,
   });
 }

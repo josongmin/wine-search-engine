@@ -39,6 +39,7 @@ import {
   buildCacheReadRuntimeState,
   buildCacheReadRuntimeStateProvider,
 } from './kill-switch-policy.js';
+import { warnStartupMisconfigurations } from './startup-preflight.js';
 
 export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
@@ -69,6 +70,11 @@ export async function buildCoreContainerServices(
   config: Config,
   runtime: RuntimeHandles = {},
 ): Promise<CoreContainerServices> {
+  // RCA-03: Emit structured warnings for any missing retrieval infrastructure
+  // before the HTTP server starts accepting connections, so operators can
+  // diagnose degraded channels without waiting for the first failing request.
+  warnStartupMisconfigurations(config);
+
   const support = await buildRuntimeSupportServices(config, runtime);
   const adapters = buildCoreAdapterServices(config, runtime.pool);
 

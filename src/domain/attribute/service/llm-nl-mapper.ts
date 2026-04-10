@@ -38,6 +38,7 @@ import {
 } from '../model/llm-constraint-schema.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { abortError, throwIfAborted } from '../../shared/cooperative-abort.js';
+import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../shared/utils/time-units.js';
 import { resolveEntity } from './entity-resolver.js';
 import type { FuzzyMatcherPort } from '../../query/port/fuzzy-matcher.port.js';
 
@@ -215,8 +216,8 @@ export class LlmNLMapper extends NLMapper {
 
     // Step 2: LLM for missed phrases (cap to prevent token/cost explosion)
     const MAX_LLM_PHRASES = 20;
-    const PHRASE_CACHE_TTL_SECONDS = 86_400; // 24h positive TTL
-    const PHRASE_CACHE_NEGATIVE_TTL_SECONDS = 3_600; // 1h negative TTL (shorter so prompt fixes propagate)
+    const PHRASE_CACHE_TTL_SECONDS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE; // 86 400 s (24h positive TTL)
+    const PHRASE_CACHE_NEGATIVE_TTL_SECONDS = MINUTES_PER_HOUR * SECONDS_PER_MINUTE; // 3 600 s (1h negative TTL — shorter so prompt fixes propagate)
     const llmResults: NormalizedConstraint[] = [];
     let llmSkippedCount = 0;
     let llmLatencyMs: number | null = null;

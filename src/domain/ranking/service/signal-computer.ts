@@ -65,7 +65,21 @@ const UNCERTAINTY_BLEND_QUERY_WEIGHT = 0.6;
 const UNCERTAINTY_BLEND_CANDIDATE_WEIGHT = 0.4;
 /** Caps contribution from unmatched constraint ratio to uncertainty penalty. */
 const UNCERTAINTY_UNMATCHED_RATIO_SCALE = 0.5;
-/** Default preference alignment without user-specific preference context. */
+/**
+ * IDX-06: preferenceAlignment always returns this neutral value.
+ *
+ * Investigation finding: the preferenceAlignment signal IS wired into the
+ * ranking pipeline (score-aggregator.ts, ranker.ts) and IS included in
+ * ComponentScores, but signal-computer.ts always returns the neutral 0.5
+ * because there is no user history / preference profile available at
+ * query time. This is NOT dead code — it contributes 0 net ranking pressure
+ * (sigmoid midpoint), which is correct behavior until Epic-18 user history
+ * wiring is complete.
+ *
+ * TODO(IDX-06): wire to pg-feedback-repository user preference aggregations
+ * once Epic-18 click pipeline is live. The scoring formula is already in
+ * place; only the data source (UserPreferencePort) is missing.
+ */
 const PREFERENCE_ALIGNMENT_NEUTRAL = 0.5;
 /**
  * Neutral value when producer prestige data is absent (not zero, not rated).

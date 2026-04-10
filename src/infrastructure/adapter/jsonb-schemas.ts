@@ -12,6 +12,13 @@ import type { EntityAttributes } from '../../domain/entity/model/attributes.js';
 import { CORRUPTED_SNAPSHOT_ID } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
+/** Domain ceiling: a wine rarely has more than ~15 primary grapes; 50 is a safe cap. */
+const MAX_GRAPE_ARRAY_LENGTH = 50;
+/** Domain ceiling: Vivino pairing taxonomy has ~80 tags; 100 is a safe cap. */
+const MAX_PAIRING_ARRAY_LENGTH = 100;
+/** Domain ceiling: Vivino occasion taxonomy has ~30 tags; 50 is a safe cap. */
+const MAX_OCCASION_ARRAY_LENGTH = 50;
+
 /** Prefix used on warning logs emitted by JSONB validation failures. */
 const JSONB_WARN_PREFIX = 'JSONB validation failed';
 
@@ -190,7 +197,7 @@ export function parseRelationsJsonb(raw: unknown, caller: string): Relations {
  * downstream scoring math.
  */
 export const EntityAttributesJsonbSchema = z.object({
-  grapes: z.array(z.string()).optional(),
+  grapes: z.array(z.string()).max(MAX_GRAPE_ARRAY_LENGTH).optional(),
   style: z.string().optional(),
   body: z.number().finite().optional(),
   sweetness: z.number().finite().optional(),
@@ -199,8 +206,8 @@ export const EntityAttributesJsonbSchema = z.object({
   region: z.string().optional(),
   priceBand: z.string().optional(),
   vintage: z.number().int().optional(),
-  pairing: z.array(z.string()).optional(),
-  occasion: z.array(z.string()).optional(),
+  pairing: z.array(z.string()).max(MAX_PAIRING_ARRAY_LENGTH).optional(),
+  occasion: z.array(z.string()).max(MAX_OCCASION_ARRAY_LENGTH).optional(),
 }).passthrough();
 
 /** Empty EntityAttributes fallback returned on parse failure. */

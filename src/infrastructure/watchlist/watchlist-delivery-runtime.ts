@@ -92,6 +92,7 @@ export class WatchlistDeliveryRuntime implements WatchlistRuntimePort {
           onAttempt: async (log) => {
             await this.watchlistService.recordDeliveryLog({
               watchlistId: log.watchlistId,
+              userId: entry.userId,
               attempt: log.attempt,
               statusCode: log.statusCode,
               errorMessage: log.errorMessage,

@@ -12,8 +12,10 @@ import type { RedisClient } from '../infrastructure/db/redis-client.js';
 import { RedisQueryCache } from '../infrastructure/cache/redis-query-cache.js';
 import { RedisEmbeddingCache } from '../infrastructure/cache/redis-embedding-cache.js';
 import { RedisPhraseCache } from '../infrastructure/cache/redis-phrase-cache.js';
+import { RedisCircuitBreakerWrapper } from '../infrastructure/db/redis-circuit-breaker-wrapper.js';
 import type { PhraseCachePort } from '../domain/attribute/port/phrase-cache.port.js';
 import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-registry.js';
+import { getCurrentFeatureSchemaHash } from '../domain/ranking/service/feature-parity-hash.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 
@@ -96,6 +98,24 @@ export async function buildRuntimeSupportServices(
   const querySanitizer = new QuerySanitizer();
   const { pool, redisClient } = runtime;
 
+  // W2-BUG-03: Instantiate the Redis circuit breaker wrapper so the 'redis'
+  // breaker is registered in globalCircuitBreakerRegistry at startup.
+  // The wrapper gates get/set/del/ping on the hot path; the existing
+  // CacheService CB covers query/embedding cache, and RedisCache swallows
+  // errors for phrase cache — together they give full Redis resilience coverage.
+  if (redisClient) {
+    // Constructing the wrapper registers the CB; we keep a reference so it is
+    // not GC'd, and we call ping() once to verify connectivity at startup.
+    const redisCbWrapper = new RedisCircuitBreakerWrapper(redisClient);
+    void redisCbWrapper.ping().then((ok) => {
+      if (!ok) {
+        bootstrapLogger.warn('[Container] Redis ping failed at startup — circuit breaker registered but Redis may be degraded');
+      } else {
+        bootstrapLogger.info('[Container] Redis circuit breaker registered (ping OK)');
+      }
+    });
+  }
+
   let injectionJudge: InjectionJudgePort | undefined;
   if (config.anthropic.apiKey && !config.killSwitch.injectionJudge) {
     injectionJudge = new LLMInjectionJudge(
@@ -156,10 +176,23 @@ export async function buildRuntimeSupportServices(
       try {
         ltrModels = await ltrRegistry.getAllModels();
         if (ltrModels.size > 0) {
+          // E2-T5 (BUG-12): Log serve-time feature schema hash and per-model
+          // weight dimension so operators can detect train/serve skew. A full
+          // per-model hash check requires featureSchemaHash persisted in
+          // QueryClassWeights (DB migration pending); until then, weight-vector
+          // length mismatch is the earliest detectable signal of schema drift.
+          const currentHash = getCurrentFeatureSchemaHash();
           bootstrapLogger.info(
-            { ltrModelCount: ltrModels.size },
+            { ltrModelCount: ltrModels.size, featureSchemaHash: currentHash },
             '[Container] Loaded LTR models from registry',
           );
+          for (const [queryClass, model] of ltrModels.entries()) {
+            const weightDim = model.weights.length;
+            bootstrapLogger.info(
+              { queryClass, weightDim, featureSchemaHash: currentHash },
+              '[Container] LTR model weight dimension at serve time',
+            );
+          }
         } else {
           bootstrapLogger.warn('[Container] No LTR models found in registry');
         }

@@ -9,7 +9,10 @@ import {
 import {
   AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH,
   MAX_CLARIFICATION_CANDIDATES,
+  MAX_ENTITY_SUMMARY_CERTIFICATIONS,
   MAX_ENTITY_SUMMARY_GRAPES,
+  MAX_ENTITY_SUMMARY_OCCASIONS,
+  MAX_ENTITY_SUMMARY_PAIRING_TAGS,
   MAX_ERROR_ENVELOPE_CODE_CHARS,
   MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS,
   MAX_ERROR_ENVELOPE_MESSAGE_CHARS,
@@ -75,6 +78,19 @@ export const EntitySummarySchema = z.object({
   vintage: z.number().int().optional(),
   grapes: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_GRAPES).optional(),
   price_range: z.string().min(1).optional(),
+  // Extended sensory / classification fields (added in RFC-019 Phase 7).
+  style: z.string().min(1).optional(),
+  classification: z.string().min(1).optional(),
+  critic_score: z.number().finite().min(0).max(1).optional(),
+  alcohol_pct: z.number().finite().min(0).optional(),
+  certifications: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_CERTIFICATIONS).optional(),
+  pairing_tags: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_PAIRING_TAGS).optional(),
+  occasion: z.array(z.string().min(1)).max(MAX_ENTITY_SUMMARY_OCCASIONS).optional(),
+  // Sensory attributes are stored as normalized 0–1 floats in the index.
+  body: z.number().finite().min(0).max(1).optional(),
+  tannin: z.number().finite().min(0).max(1).optional(),
+  acidity: z.number().finite().min(0).max(1).optional(),
+  sweetness: z.number().finite().min(0).max(1).optional(),
 }).strict();
 
 export const MatchDetailSchema = z.object({
@@ -415,8 +431,14 @@ export const InterpretResponseSchema = z.object({
     lexical: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
     semantic: z.array(z.string()).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),
   }).strict(),
-  policy: z.record(z.unknown()),
-  uncertainty: z.record(z.unknown()),
+  policy: z.record(z.unknown()).refine(
+    (rec) => Object.keys(rec).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
+    { message: `policy must not exceed ${String(MAX_SEARCH_METADATA_OBJECT_KEYS)} keys` },
+  ),
+  uncertainty: z.record(z.unknown()).refine(
+    (rec) => Object.keys(rec).length <= MAX_SEARCH_METADATA_OBJECT_KEYS,
+    { message: `uncertainty must not exceed ${String(MAX_SEARCH_METADATA_OBJECT_KEYS)} keys` },
+  ),
   planner_version: z.string().min(1),
   policy_rule_version: z.string().min(1),
   threshold_profile_id: z.string().min(1),

@@ -177,6 +177,18 @@ export default tseslint.config(
         // Math.random() for ID generation (use crypto.randomUUID() instead).
         // This is enforced via code review, not lint.
         {
+          // Time-unit literals hardcoded instead of using time-units.ts SSoT.
+          // Catches the most common offenders: 86400 (1 day s), 3600 (1 h s),
+          // 7200 (2 h s), 1800 (30 min s) as standalone numeric literals.
+          // Rule 30: domain constants used in 2+ files must live in a shared module.
+          // Fix: import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE }
+          //       from '...shared/utils/time-units.js'
+          selector: 'Literal[value=86400], Literal[value=3600], Literal[value=7200], Literal[value=1800]',
+          message:
+            'Hard-coded time constant. Use named exports from time-units.ts SSoT ' +
+            '(HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE, MS_PER_HOUR, …). (CLAUDE.md rule 30)',
+        },
+        {
           // Bugbash fallback/heuristic audit: catch `|| 0` on numeric values.
           // `value || 0` replaces legitimate zero with 0 (tautology), losing
           // the distinction between "zero" and "absent". Use `?? 0` instead.
@@ -231,7 +243,113 @@ export default tseslint.config(
           selector: 'CatchClause[body.body.length=0]',
           message: 'Empty catch block silently swallows errors. Either log via bootstrapLogger, mark intentional with `void err; /* reason */`, or re-throw. (Bugbash silent-fallback class)',
         },
+        {
+          // z.string().transform(Number) without a prior .min(1) guard.
+          //
+          // Root cause: Number("") === 0 which is finite, so
+          // .pipe(z.number().finite()) silently accepts the empty string and maps
+          // it to 0. This was found in zod-coerce.ts (fixed) and independently
+          // in llm-relevance-labeler.ts (same bug, different file).
+          //
+          // Safe pattern: z.string().min(1).transform(Number)
+          // SSoT: import coerceFiniteNumber from
+          //   src/domain/shared/utils/zod-coerce.ts
+          selector:
+            'CallExpression[callee.property.name="transform"][arguments.0.name="Number"]:not([callee.object.type="CallExpression"][callee.object.callee.property.name="min"])',
+          message:
+            'z.string().transform(Number) without .min(1) silently maps "" to 0 (Number("") === 0 is finite). ' +
+            'Use z.string().min(1).transform(Number) or import coerceFiniteNumber from zod-coerce.ts. ' +
+            '(BUG-DS02 audit: empty-string silent zero)',
+        },
+        {
+          // Inline clamp to [0,1] — use clamp01() from shared/utils/clamp.ts SSoT.
+          // Math.max(0, Math.min(1, x)) and Math.min(1, Math.max(0, x)) are both
+          // inline duplicates that don't emit NaN warnings and hide data pipeline bugs.
+          // Import clamp01 from src/domain/shared/utils/clamp.ts instead.
+          // (CLAUDE.md rule 30: domain constants/utils in 2+ files → single SSoT)
+          // Selector: Math.max(0, Math.min(1, x)) — the second arg of Math.min must be Literal 1.
+          // This avoids false-positives on Math.max(0, Math.min(index, arr.length-1)) (array bound clamps).
+          selector:
+            'CallExpression[callee.object.name="Math"][callee.property.name="max"] > Literal[value=0] ~ CallExpression[callee.object.name="Math"][callee.property.name="min"] > Literal[value=1]:nth-child(1)',
+          message:
+            'Inline Math.max(0, Math.min(1, x)) is a clamp01 duplicate. Import clamp01 from src/domain/shared/utils/clamp.ts — it also emits NaN warnings that the inline form silently drops. (CLAUDE.md rule 30)',
+        },
+        {
+          // parseInt() without explicit radix.
+          // Omitting radix is ambiguous: "010" parses as 8 (octal) in older engines,
+          // 10 in ES5+ strict mode. Always pass 10 (or 16 for hex) explicitly.
+          // (CLAUDE.md rule 12 — external data coercion)
+          selector:
+            'CallExpression[callee.name="parseInt"][arguments.length=1],' +
+            'CallExpression[callee.type="MemberExpression"][callee.property.name="parseInt"][arguments.length=1]',
+          message:
+            'parseInt() requires an explicit radix as the 2nd argument (e.g. parseInt(s, 10)). ' +
+            'Omitting it signals intent ambiguity. (CLAUDE.md rule 12 — external data coercion)',
+        },
+        {
+          // Local re-definition of the zod-coerce.ts SSoT utilities.
+          //
+          // coerceFiniteNumber / coercePositiveInt / coerceNonNegativeInt are the
+          // canonical Zod coercion helpers in src/domain/shared/utils/zod-coerce.ts.
+          // Redefining them locally leads to diverging behaviour — llm-relevance-labeler.ts
+          // had the exact same empty-string → 0 bug because it predated the .min(1) fix.
+          //
+          // Import from the SSoT module. (CLAUDE.md rules 25 + 30)
+          selector:
+            'VariableDeclarator[id.name=/^coerce(FiniteNumber|PositiveInt|NonNegativeInt)$/],' +
+            'FunctionDeclaration[id.name=/^coerce(FiniteNumber|PositiveInt|NonNegativeInt)$/]',
+          message:
+            'Local coerce{FiniteNumber,PositiveInt,NonNegativeInt} re-implementation shadows the SSoT. ' +
+            'Import from src/domain/shared/utils/zod-coerce.ts. ' +
+            'Local copies drift silently — the empty-string → 0 bug originated here. ' +
+            '(CLAUDE.md rules 25 + 30)',
+        },
+        {
+          // Static `new Set([literal1, literal2, ...])` inside a function body.
+          // Rule 16: if the Set value is deterministic (same every call), define
+          // at module scope. Repeated allocation wastes memory and hides the invariant.
+          // Fix: `const FOO_SET = new Set(['a', 'b'])` at module scope.
+          // Exception: `new Set([...spread1, ...spread2])` is dynamic (depends on args).
+          selector:
+            ':not(:matches(Program, ExportNamedDeclaration, ExportDefaultDeclaration)) > VariableDeclaration > VariableDeclarator > NewExpression[callee.name="Set"] > ArrayExpression:not(:has(SpreadElement)):not(:has(Identifier)):not(:has(MemberExpression)):not(:has(CallExpression))',
+          message:
+            'new Set([literal, literal]) inside a function body allocates on every call. ' +
+            'Define as a named const at module scope (Rule 16). ' +
+            'Example: `const FOO_SET = new Set([\'a\', \'b\'])`',
+        },
+        {
+          // `field !== 0` / `field === 0` as an "is present?" guard on [0,1]-normalised
+          // numeric fields silently drops wines where the value is legitimately zero
+          // (e.g. body=0 for very light pétillant, sweetness=0 for bone-dry wine).
+          //
+          // Root cause (E1-P3-7): `doc.body !== 0` was used as the "body is indexed"
+          // guard. Any wine with body=0 was treated as "not indexed" and had the field
+          // omitted from the feature projection sent to Vespa — collapsing ranking for
+          // an entire class of light-bodied wines.
+          //
+          // Correct pattern: `field != null` to test presence; `field === 0` only
+          // when you explicitly mean "the value is zero".
+          //
+          // Selector fires when a strict equality/inequality to 0 is applied
+          // directly to a member expression whose property name is one of the
+          // known [0,1]-normalised sensory or score fields.
+          // (CLAUDE.md rule 26 extended; E1 bugbash audit)
+          selector:
+            'BinaryExpression[operator=/^(!==|===)$/][right.value=0]' +
+            ' > MemberExpression[property.name=/^(body|sweetness|tannin|acidity|finishLength|finish_length|criticScoreNormalized|drinkingWindowStart|drinkingWindowEnd|producerPrestige|producer_prestige)$/]',
+          message:
+            '`field !== 0` / `field === 0` is a broken "present" guard for [0,1]-normalised fields — ' +
+            'it silently drops wines where the value is legitimately 0 (e.g. light body, dry sweetness). ' +
+            'Use `field != null` to test presence; `field === 0` only when you explicitly mean zero. ' +
+            '(E1-P3-7 audit; CLAUDE.md rule 26)',
+        },
       ],
+      // NOTE (E4 audit 2026-04-11): Math.max(rawOffset + 1, otherRawOffset) is an unsafe
+      // end>start guard when both offsets can be negative. The correct pattern is
+      // Math.max(absoluteStart + 1, Math.round(base + endOffset)) — uses absolute years,
+      // not relative offsets. See drinking-window-predictor.ts ONNX path + regression test.
+      // An AST-level lint rule was explored but produces too many false positives on valid
+      // Math.max(start + 1, ...) patterns. The semgrep rule covers this instead.
       /**
        * Numeric constants in src/ must be named module-scope consts.
        * Catches function-internal timeout literals like `const X = 12_000` inside a
@@ -248,6 +366,17 @@ export default tseslint.config(
           ignoreClassFieldInitialValues: true,
         },
       ],
+    },
+  },
+  /**
+   * zod-coerce.ts IS the SSoT for coerceFiniteNumber / coercePositiveInt /
+   * coerceNonNegativeInt.  The two rules below forbid re-defining those names
+   * anywhere else, but the SSoT file itself must be exempt.
+   */
+  {
+    files: ['src/domain/shared/utils/zod-coerce.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
   /** Infrastructure adapter boundary safety.
@@ -309,6 +438,13 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-floating-promises': 'off',
       'no-magic-numbers': 'off',
+      /**
+       * Test fixtures legitimately use raw TTL literals (e.g. 3600, 86400) as
+       * explicit, readable test-data values. The time-units SSoT rule targets
+       * production src/ only — testing that "TTL is 3600" is clearer than
+       * "TTL is MINUTES_PER_HOUR * SECONDS_PER_MINUTE".
+       */
+      'no-restricted-syntax': 'off',
     },
   },
   /**

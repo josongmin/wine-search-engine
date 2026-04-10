@@ -75,10 +75,12 @@ export interface DrinkingWindowInput {
   readonly grapePrimaryEnc: number;  // 0–N, OOV → 999
   readonly regionEnc: number;
   readonly countryEnc: number;
-  readonly body: number;             // 1–5 (ordinal)
+  /** Body [1–5 ordinal]. Optional — predictor falls back to structural midpoint when absent. */
+  readonly body?: number | undefined;
   readonly tannin: number;
   readonly acidity: number;
-  readonly sweetness: number;
+  /** Sweetness [1–5 ordinal]. Optional — predictor falls back to structural midpoint when absent. */
+  readonly sweetness?: number | undefined;
   readonly avgCriticProxyScore: number; // 80–100 (or 0 if absent)
 }
 
@@ -218,7 +220,16 @@ export class DrinkingWindowPredictor {
 
   private predictHeuristic(input: DrinkingWindowInput): DrinkingWindowPrediction {
     const vintage = input.vintage;
-    const body = input.body;
+    // Rule 28: NaN vintage propagates silently through all arithmetic, producing
+    // NaN drinkingWindowStart/End that survive the start>end swap guard and reach
+    // callers. Catch it early with a loud throw so the data pipeline bug is visible.
+    if (!Number.isFinite(vintage)) {
+      throw new Error(`DrinkingWindowPredictor: vintage is not finite (got ${String(vintage)})`);
+    }
+    // Port allows body/sweetness to be absent (not all wines have sensory data).
+    // Fall back to the structural midpoint so arithmetic stays finite — port comment
+    // documents this: "Absent when not indexed — predictor falls back to midpoint."
+    const body = input.body ?? HEURISTIC_STRUCTURE_CENTER;
     const tannin = input.tannin;
     const acidity = input.acidity;
     const score = Math.max(0, input.avgCriticProxyScore);
@@ -245,9 +256,11 @@ export class DrinkingWindowPredictor {
             ? HEURISTIC_CRITIC_BONUS_GOOD
             : 0;
     // Sweetness above the structural midpoint extends aging potential (preservative effect).
+    // Fall back to midpoint when sweetness is absent (no NaN propagation — see port comment).
+    const sweetness = input.sweetness ?? HEURISTIC_SWEETNESS_STRUCTURAL_MID;
     const sweetnessBonus = Math.max(
       0,
-      (input.sweetness - HEURISTIC_SWEETNESS_STRUCTURAL_MID) * HEURISTIC_SWEETNESS_EXTENSION_WEIGHT,
+      (sweetness - HEURISTIC_SWEETNESS_STRUCTURAL_MID) * HEURISTIC_SWEETNESS_EXTENSION_WEIGHT,
     );
 
     // Floor totalWindow so end > start always holds, even when all
@@ -333,9 +346,18 @@ export class DrinkingWindowPredictor {
       runAsync(sessionEnd, tensorEnd),
     ]);
 
+    // Rule 28: NaN vintage propagates silently through all arithmetic.
+    if (!Number.isFinite(input.vintage)) {
+      throw new Error(`DrinkingWindowPredictor ONNX: vintage is not finite (got ${String(input.vintage)})`);
+    }
     const drinkingWindowStart = Math.round(input.vintage + Math.max(0, startOffset));
-    const drinkingWindowEnd = Math.round(
-      input.vintage + Math.max(startOffset + 1, endOffset),
+    // Guarantee end > start regardless of model output sign/magnitude.
+    // Math.max(startOffset + 1, endOffset) is insufficient when both offsets are
+    // negative: e.g. startOffset=-10, endOffset=-5 → start=vintage, end=vintage-5
+    // (INVARIANT VIOLATION). Mirror the heuristic path: clamp end to start+1.
+    const drinkingWindowEnd = Math.max(
+      drinkingWindowStart + 1,
+      Math.round(input.vintage + endOffset),
     );
     const peakYear = Math.round(
       drinkingWindowStart + (drinkingWindowEnd - drinkingWindowStart) / 2,
@@ -351,18 +373,22 @@ export class DrinkingWindowPredictor {
   }
 
   private toFeatureArray(input: DrinkingWindowInput): Float32Array {
+    // body/sweetness are optional in the port — fall back to structural midpoint
+    // so undefined values do not produce NaN features sent to the ONNX model.
+    const body = input.body ?? HEURISTIC_STRUCTURE_CENTER;
+    const sweetness = input.sweetness ?? HEURISTIC_SWEETNESS_STRUCTURAL_MID;
     return new Float32Array([
       input.grapePrimaryEnc,
       input.regionEnc,
       input.countryEnc,
       input.vintage,
-      input.body,
+      body,
       input.tannin,
       input.acidity,
-      input.sweetness,
+      sweetness,
       input.avgCriticProxyScore,
       input.tannin * input.acidity,
-      input.body * input.tannin,
+      body * input.tannin,
     ]);
   }
 }

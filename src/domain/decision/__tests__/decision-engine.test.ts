@@ -6,7 +6,7 @@ import type { ThresholdProfileV1 } from '../../query/model/threshold-profile.js'
 import type { DecisionInput } from '../model/decision-input.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
-import { computeConformalSetSize } from '../../resolver/service/resolver.js';
+import { computeConformalSetSize, DEFAULT_ALPHA } from '../../resolver/service/resolver.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import { createEntityId } from '../../shared/types/index.js';
 
@@ -93,7 +93,7 @@ function makeResolverResult(
       outcomeReasonCodes: [],
       ...(queryProvenance !== undefined ? { queryProvenance } : {}),
     },
-    conformalSetSize: computeConformalSetSize(C, 0.1, 1),
+    conformalSetSize: computeConformalSetSize(C, DEFAULT_ALPHA, 1),
   };
 }
 
@@ -691,7 +691,7 @@ describe('DecisionEngine', () => {
           appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
           outcomeReasonCodes: [],
         },
-        conformalSetSize: computeConformalSetSize(0.95, 0.1, 1),
+        conformalSetSize: computeConformalSetSize(0.95, DEFAULT_ALPHA, 1),
       };
 
       const input = makeInput({

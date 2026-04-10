@@ -89,13 +89,7 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
         created_at,
         expires_at
       ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-      ON CONFLICT (watchlist_id) DO UPDATE SET
-        user_id = EXCLUDED.user_id,
-        entity_id = EXCLUDED.entity_id,
-        trigger_conditions = EXCLUDED.trigger_conditions,
-        callback_url = EXCLUDED.callback_url,
-        created_at = EXCLUDED.created_at,
-        expires_at = EXCLUDED.expires_at`,
+      ON CONFLICT (user_id, entity_id, callback_url) DO NOTHING`,
       [
         entry.id,
         entry.userId,

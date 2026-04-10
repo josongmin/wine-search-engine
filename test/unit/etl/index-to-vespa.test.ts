@@ -334,3 +334,50 @@ describe('learned sparse ingest contract (T4.1a)', () => {
     expect(doc).not.toHaveProperty(LEARNED_SPARSE_ETL_KEY);
   });
 });
+
+// ── BUG-02 gate: synthetic_queries Vespa PUT payload ────────────────────────
+// These tests are a CI gate: if toVespaFields() stops emitting synthetic_queries,
+// Doc2Query BM25 silently degrades to zero contribution without any test failure.
+
+describe('Doc2Query synthetic_queries ingest gate (BUG-02)', () => {
+  it('toVespaFields emits synthetic_queries when syntheticQueries is present and non-empty', () => {
+    const record = makeEnrichedRecord({ syntheticQueries: ['full-bodied red wine', 'napa cabernet blend'] });
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    expect(fields['synthetic_queries']).toEqual(['full-bodied red wine', 'napa cabernet blend']);
+  });
+
+  it('toVespaFields omits synthetic_queries when syntheticQueries is undefined', () => {
+    const record = makeEnrichedRecord({ syntheticQueries: undefined });
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    expect(fields).not.toHaveProperty('synthetic_queries');
+  });
+
+  it('toVespaFields omits synthetic_queries when syntheticQueries is an empty array', () => {
+    const record = makeEnrichedRecord({ syntheticQueries: [] });
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    // Empty array → omit, consistent with learned_sparse_weights behaviour
+    expect(fields).not.toHaveProperty('synthetic_queries');
+  });
+
+  it('round-trip: synthetic_queries values survive serialization (no mutation)', () => {
+    const queries = ['elegant red', 'bordeaux style blend', '와인 추천'];
+    const record = makeEnrichedRecord({ syntheticQueries: queries });
+    const embedding = deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin);
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    // Values preserved exactly — no lowercasing, trimming, or deduplication
+    expect(fields['synthetic_queries']).toEqual(queries);
+    // Verify it is a copy, not the original reference (defensive spread)
+    expect(fields['synthetic_queries']).not.toBe(queries);
+  });
+});

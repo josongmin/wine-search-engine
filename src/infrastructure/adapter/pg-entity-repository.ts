@@ -16,6 +16,14 @@ const ROW_TO_ENTITY_CALLER = 'PgEntityRepository.rowToEntity';
 
 const entityRepoLog = bootstrapLogger.child({ component: 'PgEntityRepository' });
 
+/**
+ * Safety limit for SELECT * FROM entities.
+ * Prevents unbounded full-table scans in createSnapshot.
+ * Domain: entity store is expected to hold O(thousands) wines; 10K covers
+ * any realistic catalog while preventing runaway queries.
+ */
+const ENTITY_FETCH_DEFAULT_LIMIT = 10_000;
+
 interface EntityRow {
   entity_id: string;
   entity_type: string;
@@ -215,7 +223,11 @@ export class PgEntityRepository implements EntityRepository {
   async createSnapshot(label: string): Promise<string> {
     const snapshotId = nanoid();
     // Snapshot all current entities as a JSON array stored once per snapshot
-    const entitiesResult = await this.pool.query<EntityRow>('SELECT * FROM entities');
+    // ENTITY_FETCH_DEFAULT_LIMIT prevents unbounded full-table scan (W6-P1-1).
+    const entitiesResult = await this.pool.query<EntityRow>(
+      'SELECT * FROM entities LIMIT $1',
+      [ENTITY_FETCH_DEFAULT_LIMIT],
+    );
     const snapshotData = {
       label,
       createdAt: new Date().toISOString(),
@@ -322,7 +334,12 @@ export class PgEntityRepository implements EntityRepository {
         );
       }
 
-      // Delete entities that did not exist at snapshot time
+      // Delete entities that did not exist at snapshot time.
+      // SAFETY: never execute an unguarded DELETE FROM entities — an empty snapshot
+      // would wipe the entire table. If the snapshot is genuinely empty (valid edge
+      // case: rollback to a pre-seeded state), the caller must explicitly opt in by
+      // passing a flag; for now we treat an empty snapshot as a no-op to prevent
+      // accidental mass deletion.
       const idList = Array.from(snapshotEntityIds);
       if (idList.length > 0) {
         const placeholders = idList.map((_, i) => `$${i + 1}`).join(', ');
@@ -330,9 +347,8 @@ export class PgEntityRepository implements EntityRepository {
           `DELETE FROM entities WHERE entity_id NOT IN (${placeholders})`,
           idList,
         );
-      } else {
-        await client.query('DELETE FROM entities');
       }
+      // idList.length === 0: snapshot is empty — skip deletion rather than wiping the table.
 
       await client.query('COMMIT');
     } catch (err) {

@@ -20,7 +20,13 @@ import type { RequestExecutionContext } from '../../domain/shared/request-execut
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
 
 export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined {
-  const strongestAnchor = [...plan.anchors].sort((left, right) => right.confidence - left.confidence)[0];
+  // Tiebreak by surfaceForm for deterministic anchor selection when confidence is equal.
+  // Without a tiebreaker, equal-confidence anchors produce different producer_browse seeds
+  // across identical queries (JS sort is not stable across all V8 versions for equal keys).
+  const strongestAnchor = [...plan.anchors].sort((left, right) => {
+    const diff = right.confidence - left.confidence;
+    return diff !== 0 ? diff : left.surfaceForm.localeCompare(right.surfaceForm);
+  })[0];
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: empty string from trim() should fall through to normalizedForm
   const candidate = strongestAnchor?.surfaceForm.trim() || strongestAnchor?.normalizedForm.trim();
   return candidate !== undefined && candidate.length > 0 ? candidate : undefined;

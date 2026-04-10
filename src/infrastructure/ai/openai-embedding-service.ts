@@ -5,17 +5,31 @@
 
 import type { EmbeddingServicePort } from '../../domain/retrieval/port/embedding-service.port.js';
 import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { embeddingsFromOpenAiResponse } from './openai-json.js';
+import {
+  runUnderLlmBreaker,
+} from './llm-circuit-breaker-classifier.js';
 
 /** Default vector width for BGE-M3 / Vespa ANN field alignment. */
 const OPENAI_EMBEDDING_DEFAULT_DIMENSIONS = 1024;
 /** Truncate HTTP error bodies in thrown messages. */
 const OPENAI_EMBEDDING_HTTP_ERROR_PREVIEW_CHARS = 200;
+
+/** Circuit breaker thresholds for the OpenAI embedding endpoint. */
+const OPENAI_EMBEDDING_BREAKER_NAME = 'openai-embedding';
+const OPENAI_EMBEDDING_FAILURE_THRESHOLD = 3;
+const OPENAI_EMBEDDING_RECOVERY_TIMEOUT_MS = 30_000;
+const OPENAI_EMBEDDING_HALF_OPEN_MAX = 2;
 
 export interface OpenAiEmbeddingServiceOptions {
   /** API base including `/v1`, e.g. `https://api.openai.com/v1` */
@@ -37,6 +51,7 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
   private readonly model: string;
   private readonly httpTimeoutMs: number;
   private readonly dimensions: number;
+  private readonly circuitBreaker: CircuitBreaker;
 
   constructor(options: OpenAiEmbeddingServiceOptions) {
     this.endpoint = `${trimTrailingSlash(options.baseUrl)}/embeddings`;
@@ -44,22 +59,36 @@ export class OpenAiEmbeddingService implements EmbeddingServicePort {
     this.model = options.model;
     this.httpTimeoutMs = options.httpTimeoutMs;
     this.dimensions = options.dimensions ?? OPENAI_EMBEDDING_DEFAULT_DIMENSIONS;
+    this.circuitBreaker = createCircuitBreaker({
+      name: OPENAI_EMBEDDING_BREAKER_NAME,
+      failureThreshold: OPENAI_EMBEDDING_FAILURE_THRESHOLD,
+      recoveryTimeoutMs: OPENAI_EMBEDDING_RECOVERY_TIMEOUT_MS,
+      halfOpenMaxAttempts: OPENAI_EMBEDDING_HALF_OPEN_MAX,
+    });
+    globalCircuitBreakerRegistry.register(
+      OPENAI_EMBEDDING_BREAKER_NAME,
+      this.circuitBreaker,
+    );
   }
 
   async embed(text: string): Promise<readonly number[]> {
-    const results = await this.callApi(text);
-    const first = results[0];
-    if (first === undefined) {
-      throw new Error('OpenAI embeddings: empty data array for single input');
-    }
-    return first;
+    return runUnderLlmBreaker(this.circuitBreaker, OPENAI_EMBEDDING_BREAKER_NAME, async () => {
+      const results = await this.callApi(text);
+      const first = results[0];
+      if (first === undefined) {
+        throw new Error('OpenAI embeddings: empty data array for single input');
+      }
+      return first;
+    });
   }
 
   async embedBatch(
     texts: readonly string[],
   ): Promise<readonly (readonly number[])[]> {
     if (texts.length === 0) return [];
-    return this.callApi([...texts]);
+    return runUnderLlmBreaker(this.circuitBreaker, OPENAI_EMBEDDING_BREAKER_NAME, () =>
+      this.callApi([...texts]),
+    );
   }
 
   private async callApi(

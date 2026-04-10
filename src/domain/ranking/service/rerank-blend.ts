@@ -1,4 +1,5 @@
 import type { QueryClass } from '../../shared/types/index.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /**
  * Query-class-aware reranker blend weights (RFC-017 §5.3).
@@ -49,6 +50,6 @@ export function effectiveRerankBlendWeight(
   queryClass: QueryClass,
   globalScale: number,
 ): number {
-  const s = Number.isFinite(globalScale) ? Math.min(1, Math.max(0, globalScale)) : 1;
-  return Math.min(1, rerankBlendWeight(queryClass) * s);
+  const s = Number.isFinite(globalScale) ? clamp01(globalScale) : 1;
+  return clamp01(rerankBlendWeight(queryClass) * s);
 }

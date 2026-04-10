@@ -20,6 +20,8 @@ import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { evaluateRerankGate } from './rerank-gate.js';
 import { LTRRanker } from './ltr-ranker.js';
 import { extractLTRFeatures } from './ltr-feature-extractor.js';
+import { MS_PER_DAY } from '../../shared/utils/time-units.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
@@ -110,12 +112,8 @@ interface ScoredEntry {
 
 const MODEL_STALENESS_THRESHOLD_DAYS = 30;
 
-const MILLISECONDS_PER_SECOND = 1000;
-const SECONDS_PER_MINUTE = 60;
-const MINUTES_PER_HOUR = 60;
-const HOURS_PER_DAY = 24;
-const MILLISECONDS_PER_DAY =
-  MILLISECONDS_PER_SECOND * SECONDS_PER_MINUTE * MINUTES_PER_HOUR * HOURS_PER_DAY;
+// MS_PER_DAY imported from SSoT: @domain/shared/utils/time-units
+const MILLISECONDS_PER_DAY = MS_PER_DAY;
 
 /** LambdaMART weight vector length (must match {@link extractLTRFeatures} output). */
 const LTR_MODEL_FEATURE_DIMENSION = 8;
@@ -733,7 +731,7 @@ export class Ranker {
               // Clamp locally: upstream signal-computer normalizes to [0,1] via clamp01(),
               // but a mutation or NaN upstream could leak >1.0, producing scores >100.
               avgCriticProxyScore: Math.round(
-                CRITIC_PROXY_SCORE_DISPLAY_BASE + Math.min(1, Math.max(0, entry.criticScoreNormalized)) * CRITIC_PROXY_SCORE_DISPLAY_SPAN,
+                CRITIC_PROXY_SCORE_DISPLAY_BASE + clamp01(entry.criticScoreNormalized) * CRITIC_PROXY_SCORE_DISPLAY_SPAN,
               ),
               criticScoreNormalized: entry.criticScoreNormalized,
             }

@@ -67,6 +67,9 @@ export const bootstrapLogger = pino({
       '*.debug_secret',
       '*.authorization',
       '*.Authorization',
+      // Redis URL may contain credentials (redis://:password@host:port)
+      'config.redis.url',
+      '*.redis.url',
       // pg/redis error objects sometimes carry connection params
       'err.password',
       'err.options.password',

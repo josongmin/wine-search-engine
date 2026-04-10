@@ -116,7 +116,38 @@ describe('RetrainOrchestrator', () => {
     const after = await registry.list();
     expect(after).toHaveLength(1);
     expect(after[0]!.status).toBe('active');
-    expect(after[0]!.artifact.version).toBe('stub-2000000');
+    expect(after[0]!.artifact.version).toBe('ltr-2000000');
+  });
+
+  // W6-P0: stubTrain() 하드코딩 — LTR 실제 재학습 미작동
+  // 현재 retrain-orchestrator.ts는 stubTrain()을 호출해 NDCG=0.72, MRR=0.61을 하드코딩 반환.
+  // 실제 trainLambdaMARTModel()이 연결되면 NDCG는 학습 데이터에 따라 달라져야 한다.
+  // 또한 artifact version이 'stub-' prefix로 시작하면 안 된다.
+  it('W6-P0: trained model artifact version should NOT be stub-prefixed', async () => {
+    const reader = new ArrayReader(buildSufficientEvents());
+    const registry = new InMemoryModelRegistry();
+    const orch = new RetrainOrchestrator(reader, registry, defaultConfig);
+
+    const result = await orch.run(3_000_000);
+    expect(result.status).toBe('success');
+
+    const active = await registry.getActive();
+    expect(active).not.toBeNull();
+    // Real training should produce a version that doesn't say 'stub'
+    expect(active!.artifact.version, 'artifact version must not be stub-prefixed — stubTrain() must be replaced with real trainLambdaMARTModel()').not.toMatch(/^stub-/);
+  });
+
+  it('W6-P0: trained model NDCG should vary with data (not be hardcoded 0.72)', async () => {
+    // stubTrain() always returns NDCG_AT_10=0.72. Real training computes from data.
+    // With minimal data (1 query, 1 click) NDCG should NOT equal the stub constant 0.72.
+    const reader = new ArrayReader(buildSufficientEvents());
+    const registry = new InMemoryModelRegistry();
+    const orch = new RetrainOrchestrator(reader, registry, defaultConfig);
+
+    const result = await orch.run(4_000_000);
+    expect(result.status).toBe('success');
+    // Hardcoded stub value — real LTR will produce a different number
+    expect(result.newModelMetrics!.ndcg_at_10).not.toBe(0.72);
   });
 
   it('feedback collector throws → returns failed status', async () => {

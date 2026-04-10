@@ -28,6 +28,7 @@ import { LlmConstraintResponseSchema } from '../../domain/attribute/model/llm-co
 import { RedisCache } from '../adapter/redis-cache.js';
 import type { GetValidatedStatsOptions } from '../adapter/redis-cache.js';
 import type { RedisClient } from '../db/redis-client.js';
+import { HOURS_PER_DAY, SECONDS_PER_MINUTE, MINUTES_PER_HOUR } from '../../domain/shared/utils/time-units.js';
 
 const log = bootstrapLogger.child({ component: 'RedisPhraseCache' });
 
@@ -37,9 +38,7 @@ const STATS_KEY_MISSES = 'cache:stats:phrase:misses';
 
 /** Minimum TTL — Redis rejects EX <= 0; we silently clamp to keep callers safe. */
 const PHRASE_CACHE_MIN_TTL_SECONDS = 1;
-const SECONDS_PER_MINUTE = 60;
-const MINUTES_PER_HOUR = 60;
-const HOURS_PER_DAY = 24;
+// SECONDS_PER_MINUTE, MINUTES_PER_HOUR, HOURS_PER_DAY imported from SSoT: time-units.ts
 const PHRASE_CACHE_MAX_TTL_DAYS = 7;
 /** Maximum TTL — 7 days. Anything longer is almost certainly a bug. */
 const PHRASE_CACHE_MAX_TTL_SECONDS =

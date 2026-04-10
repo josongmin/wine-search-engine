@@ -112,6 +112,14 @@ export interface SearchUseCaseDeps {
  * 6. Build SearchResponseV1 via ResponseBuilder
  * 7. Track request_id, latency, route throughout
  */
+/**
+ * Pipeline defect codes that warrant an error-level log before re-throwing.
+ * Defined at module scope (Rule 16) — this Set is deterministic and never changes.
+ * Policy-blocked and snapshot errors are deliberate signals; only these three
+ * indicate upstream defects that need request_id capture.
+ */
+const PIPELINE_DEFECT_CODES = new Set(['EVIDENCE_OBLIGATION', 'WRONG_RESOLVE', 'BLOCKING_MISS']);
+
 export class SearchUseCase {
   private readonly abstainPolicy = new AbstainPolicy();
   private readonly constraintSAT = new ConstraintSAT();
@@ -155,8 +163,7 @@ export class SearchUseCase {
         // Evidence-obligation and wrong-resolve errors indicate upstream defects —
         // log at error level before propagating so request_id is captured in the trace.
         // Policy-blocked and snapshot errors are deliberate pipeline signals and need no log here.
-        const defectCodes = new Set(['EVIDENCE_OBLIGATION', 'WRONG_RESOLVE', 'BLOCKING_MISS']);
-        if (defectCodes.has(err.code)) {
+        if (PIPELINE_DEFECT_CODES.has(err.code)) {
           bootstrapLogger.error(
             { requestId, code: err.code, err: err.message },
             '[SearchUseCase] Pipeline defect DomainError — propagating to HTTP error handler',

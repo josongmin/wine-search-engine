@@ -65,7 +65,11 @@ import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
+// RCA-06: EVAL_CORPUS_PATH env var overrides the default corpus location so CI
+// can point to the current labeled set without editing source. CLI --input flag
+// takes precedence over the env var (same precedence model as llm-judge-ndcg.ts).
+const DEFAULT_INPUT =
+  process.env['EVAL_CORPUS_PATH'] ?? resolveDataPath('data/golden-queries-bronze.jsonl');
 const DEFAULT_OUTPUT = resolveDataPath('data/eval-results.json');
 
 /** Release gate thresholds (RFC-017 §3.2). */

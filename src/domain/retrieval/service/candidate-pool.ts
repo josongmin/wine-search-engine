@@ -173,7 +173,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // log so sweeps can quantify drift before a full replacement. No
     // behavior change: the cascade continues to use dispatchDecision.
     {
-      const normalizedQuery = input.queryPlan.normalizedQuery ?? '';
+      const normalizedQuery = input.queryPlan.normalizedQuery;
       const tokenCount = normalizedQuery.trim().length === 0
         ? 0
         : normalizedQuery.trim().split(/\s+/).length;
@@ -277,6 +277,13 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
 
     const sparseTask = async (): Promise<SparseResult> => {
       if (!activeChannels.has('sparse_bm25')) {
+        return { hits: [], degraded: false };
+      }
+      // RCA5-08: empty lexicalQueries → Vespa receives an empty query array
+      // which produces invalid YQL and a Vespa 500 error. Guard here in addition
+      // to the vespa-search-index.ts guard — defence-in-depth, and allows the
+      // candidate-pool to be tested without a Vespa dependency.
+      if (input.lexicalQueries.length === 0) {
         return { hits: [], degraded: false };
       }
       try {
@@ -441,8 +448,28 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         return { hits: undefined };
       }
       try {
-        const anchorEmbedding = anchorProfile.embedding
-          ?? await this.embeddingService.embed(anchorProfile.semanticSummary);
+        // BUG-04: use cacheService.getOrEmbedBatch() when available so the
+        // anchor embedding hits the embedding cache instead of always calling
+        // the embedding API directly. Falls back to embeddingService.embed()
+        // when no cacheService is wired (e.g. in unit tests or stripped envs).
+        let resolvedAnchorEmbedding: readonly number[];
+        if (anchorProfile.embedding !== undefined) {
+          resolvedAnchorEmbedding = anchorProfile.embedding;
+        } else if (this.cacheService !== undefined) {
+          const embeddings = await this.cacheService.getOrEmbedBatch(
+            [anchorProfile.semanticSummary],
+            this.embeddingModelId,
+            this.embeddingService,
+          );
+          const first = embeddings[0];
+          if (first == null || first.length === 0) {
+            throw new Error('Anchor embedding returned empty vector from cache service');
+          }
+          resolvedAnchorEmbedding = first;
+        } else {
+          resolvedAnchorEmbedding = await this.embeddingService.embed(anchorProfile.semanticSummary);
+        }
+        const anchorEmbedding = resolvedAnchorEmbedding;
 
         const hits = await this.searchIndex.denseSearch(
           anchorEmbedding,
@@ -1121,7 +1148,11 @@ function buildLearnedSparseQueryWeights(
   }
 
   return [...counts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .sort((left, right) => {
+      const diff = right[1] - left[1];
+      const primary = Number.isFinite(diff) ? diff : 0;
+      return primary !== 0 ? primary : left[0].localeCompare(right[0]);
+    })
     .slice(0, QUERY_EXPANSION_MAX_TERMS)
     .map(([token, count]) => ({
       token,

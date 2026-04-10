@@ -9,6 +9,7 @@
  * a threshold tau such that any new prediction with score > tau is
  * "guaranteed" (with probability >= coverage) to be relevant.
  */
+import { clamp } from '../../shared/utils/clamp.js';
 
 /**
  * Sentinel tau when no calibration data is available.
@@ -109,7 +110,7 @@ export function calibrateConformal(
   // We want the ceil((1 - alpha) * (n + 1)) = ceil(coverageLevel * (n + 1))
   // smallest nonconformity. If that rank exceeds n, fall back to the maximum.
   const rank = Math.ceil(clampedCoverage * (n + 1));
-  const clampedRank = Math.min(Math.max(rank, 1), n);
+  const clampedRank = clamp(rank, 1, n);
   const tau = indexed[clampedRank - 1]!.nc;
 
   return {

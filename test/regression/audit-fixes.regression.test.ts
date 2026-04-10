@@ -781,4 +781,44 @@ describe('Audit regressions — session 6 ingestion pipeline (2026-04-09)', () =
       expect(src).toMatch(/Number\.isFinite/);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // E4-ONNX-INVERSION: ONNX drinking-window predictor used
+  // Math.max(startOffset + 1, endOffset) which does NOT guarantee end > start
+  // when both offsets are negative (e.g. startOffset=-10, endOffset=-5 →
+  // start=vintage, end=vintage-5 — INVARIANT VIOLATION).
+  // Fix: clamp end to Math.max(start + 1, round(vintage + endOffset)).
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('E4-ONNX-INVERSION: ONNX predictor end > start invariant', () => {
+    it('drinking-window-predictor source uses Math.max(drinkingWindowStart + 1, ...) for ONNX end clamp', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { fileURLToPath } = await import('node:url');
+      const src = readFileSync(
+        fileURLToPath(new URL('../../src/infrastructure/ml/drinking-window-predictor.ts', import.meta.url)),
+        'utf-8',
+      );
+      // Must clamp end to at least start+1 — NOT Math.max(startOffset + 1, endOffset)
+      expect(src).toMatch(/Math\.max\(\s*drinkingWindowStart \+ 1/);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // E4-TOOL-ABORT: AbortError thrown during tool execution was falling through
+  // to the generic `observation = "Tool error: ..."` branch, misclassifying
+  // caller disconnect as a tool error. terminationReason remained 'max_steps'
+  // or 'error' instead of 'aborted', polluting metrics.
+  // Fix: check isAbortError() before the generic error branch in tool catch.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('E4-TOOL-ABORT: tool catch block handles AbortError correctly', () => {
+    it('agent-orchestrator source checks isAbortError in tool catch block', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { fileURLToPath } = await import('node:url');
+      const src = readFileSync(
+        fileURLToPath(new URL('../../src/application/agent/agent-orchestrator.ts', import.meta.url)),
+        'utf-8',
+      );
+      // Must check isAbortError in the tool catch block (identified by surrounding TIMEOUT check context)
+      expect(src).toMatch(/isAbortError\(toolErr\)/);
+    });
+  });
 });

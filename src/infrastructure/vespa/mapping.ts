@@ -393,8 +393,12 @@ export function fromVespaFields(
     searchTextKo: getString(fields, 'search_text_ko'),
     searchTextEn: summary.searchTextEn ?? '',
     semanticSummary: getString(fields, 'semantic_summary'),
-    body: summary.body ?? 0,
-    sweetness: summary.sweetness ?? 0,
+    // E1-P3-7: body/sweetness use conditional spread to distinguish "no data" (field absent)
+    // from "value is 0" (field present with value 0). The prior `?? 0` default conflated
+    // both cases, silently turning missing-data into a false "zero body/sweetness" score
+    // that corrupted similarity ranking. exactOptionalPropertyTypes: omit key when undefined.
+    ...(summary.body != null ? { body: summary.body } : {}),
+    ...(summary.sweetness != null ? { sweetness: summary.sweetness } : {}),
     style: summary.style ?? '',
     priceBand: summary.priceBand ?? '',
     pairing: summary.pairing !== undefined ? [...summary.pairing] : [],
@@ -477,17 +481,25 @@ export function toRetrievalFeatureProjection(doc: RetrievalDocument): RetrievalF
   };
   return {
     ...base,
-    ...(doc.body !== 0 ? { body: doc.body } : {}),
-    ...(doc.tannin !== undefined ? { tannin: doc.tannin } : {}),
-    ...(doc.acidity !== undefined ? { acidity: doc.acidity } : {}),
-    ...(doc.sweetness !== 0 ? { sweetness: doc.sweetness } : {}),
-    ...(doc.criticScoreNormalized !== undefined
+    // E1-P3-7: use != null (not !== 0) to distinguish "no data" from "value is 0".
+    // body/sweetness are [0,1] normalised floats — 0 is a valid value (light body,
+    // bone-dry sweetness). The prior `!== 0` guard silently dropped valid zero values,
+    // corrupting feature projections and downstream LTR signals.
+    ...(doc.body != null ? { body: doc.body } : {}),
+    ...(doc.tannin != null ? { tannin: doc.tannin } : {}),
+    ...(doc.acidity != null ? { acidity: doc.acidity } : {}),
+    ...(doc.sweetness != null ? { sweetness: doc.sweetness } : {}),
+    // Use != null consistently for all numeric projection fields (covers both null and
+    // undefined). criticScoreNormalized is also [0,1] normalised — 0 is a valid score.
+    // drinkingWindowStart/End are year integers (>1800) so 0 cannot occur, but != null
+    // keeps the pattern uniform and guards against explicit null from partial documents.
+    ...(doc.criticScoreNormalized != null
       ? { criticScoreNormalized: doc.criticScoreNormalized }
       : {}),
-    ...(doc.drinkingWindowStart !== undefined
+    ...(doc.drinkingWindowStart != null
       ? { drinkingWindowStart: doc.drinkingWindowStart }
       : {}),
-    ...(doc.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: doc.drinkingWindowEnd } : {}),
+    ...(doc.drinkingWindowEnd != null ? { drinkingWindowEnd: doc.drinkingWindowEnd } : {}),
     ...(doc.drinkingWindowModelVersion !== undefined
       ? { drinkingWindowModelVersion: doc.drinkingWindowModelVersion }
       : {}),
@@ -776,12 +788,14 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       case 'body_min': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`body >= ${clampNum(n, 0, 10).toFixed(3)}`);
+        // body is [0,1] normalised float in Vespa (ETL stores clamp(0,1)). Prior clamp(0,10)
+        // was inherited from the 1-5 sensor scale and is wrong — IDX-03 fix.
+        if (Number.isFinite(n)) clauses.push(`body >= ${clampNum(n, 0, 1).toFixed(3)}`);
         break;
       }
       case 'body_max': {
         const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`body <= ${clampNum(n, 0, 10).toFixed(3)}`);
+        if (Number.isFinite(n)) clauses.push(`body <= ${clampNum(n, 0, 1).toFixed(3)}`);
         break;
       }
       case 'availability':
@@ -797,6 +811,9 @@ export function buildSparseFilters(filters: readonly string[]): string {
         break;
       case 'country':
         clauses.push(`country contains ${yqlString(value)}`);
+        break;
+      case 'region':
+        clauses.push(`region contains ${yqlString(value)}`);
         break;
       case 'appellation':
         clauses.push(`appellation contains ${yqlString(value)}`);

@@ -79,7 +79,14 @@ export function isWatchlistEntryActive(
   entry: WatchlistEntry,
   now: Date,
 ): boolean {
-  return entry.expiresAt === null || entry.expiresAt.getTime() > now.getTime();
+  if (entry.expiresAt === null) return true;
+  const expiresAtMs = entry.expiresAt.getTime();
+  // Rule 28: new Date('invalid').getTime() → NaN; NaN > number is always false,
+  // which would incorrectly report an invalid-date entry as active.
+  // Guard: treat invalid dates as expired (safe — denies notification rather than leaking).
+  if (!Number.isFinite(expiresAtMs)) return false;
+  const nowMs = now.getTime();
+  return expiresAtMs > nowMs;
 }
 
 export function matchesWatchlistTrigger(

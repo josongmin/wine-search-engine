@@ -12,9 +12,6 @@
 
 import type { RankingFeatures } from './lambdamart-ranker.js';
 
-/** Neutral multilingual score for wines with no Korean alias data.
- *  0.5 = not rewarded, not penalised. Wines with confirmed non-Korean alias score 0. */
-const MULTILINGUAL_SCORE_NEUTRAL = 0.5;
 
 /**
  * The minimal score components needed for LTR feature extraction.
@@ -81,10 +78,10 @@ export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures 
     // recencyScore: 0.0 = "no recency data" which is intentionally neutral-to-negative
     // (a wine with unknown vintage is not rewarded for recency).
     recencyScore: scores.recency ?? 0.0,
-    // multilingualScore: 0.5 neutral when absent — a wine with no Korean alias data
-    // should not be penalised for missing indexing, only wines with confirmed
-    // non-Korean alias should score 0. Match the prestige default for consistency.
-    multilingualScore: scores.multilingualScore ?? MULTILINGUAL_SCORE_NEUTRAL,
+    // multilingualScore: 0.0 when absent — absent multilingual data is treated as
+    // no signal (not rewarded). Previously defaulted to 0.5 (MULTILINGUAL_SCORE_NEUTRAL)
+    // which caused train-serve skew by rewarding missing-data wines at inference time.
+    multilingualScore: scores.multilingualScore ?? 0.0,
 
     // bm25Score: Vespa BM25 not yet exposed per-candidate in query responses.
     // This remains 0.0 until Vespa custom rank features are wired to ranking input.

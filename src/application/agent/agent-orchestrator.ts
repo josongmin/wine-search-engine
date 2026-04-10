@@ -38,6 +38,7 @@ import {
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { containsHangul } from '../../domain/shared/utils/hangul.js';
+import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { AgentExecutionObserver } from '../../domain/agent/port/agent-execution-observer.port.js';
 
 const log = bootstrapLogger.child({ component: 'AgentOrchestrator' });
@@ -187,7 +188,8 @@ function recoverLastSearchInput(steps: readonly AgentStep[]): { query: string } 
         }
       }
     }
-    // Check legacy single action
+    // Check legacy single action (migration fallback: actionPairs is preferred; action is the deprecated path)
+    // TODO(cleanup): remove after actionPairs migration complete
     if (step.action?.tool === 'search_wines') {
       const q = step.action.input['query'];
       if (typeof q === 'string' && q.trim().length > 0) return { query: q };
@@ -550,7 +552,12 @@ export class AgentOrchestrator {
           llmResult = racedResult;
         } catch (err) {
           log.warn({ err, requestId, stepIndex: steps.length }, 'Agent LLM call failed');
-          if ((err as Error).message === 'Agent LLM step timed out') {
+          if (isAbortError(err)) {
+            // Caller disconnected (AbortError from propagateAbort or timeout abort).
+            // Classify as 'aborted' so client-disconnect events do NOT pollute error
+            // rate metrics / SLO alerts — same pattern as the parallel batch handler.
+            terminationReason = 'aborted';
+          } else if ((err as Error).message === 'Agent LLM step timed out') {
             timeoutStats.llmStep += 1;
             terminationReason = 'timeout';
           } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
@@ -731,6 +738,12 @@ export class AgentOrchestrator {
               'Parallel tool batch timed out',
             );
           } catch (batchErr) {
+            // AbortError: caller disconnected — classify as 'aborted', not 'error',
+            // so client-disconnect events don't pollute error rate metrics / SLO alerts.
+            if (isAbortError(batchErr)) {
+              terminationReason = 'aborted';
+              break;
+            }
             if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
               timeoutStats.parallelBatch += 1;
               batchAbortController.abort();
@@ -739,6 +752,9 @@ export class AgentOrchestrator {
             if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
               terminationReason = 'blocked';
+              // Cancel any in-flight parallel tools — a policy block means the
+              // entire batch is invalid; continuing would waste resources.
+              batchAbortController.abort();
               {
                 const policyMsg = `Policy blocked: ${batchErr.message}`;
                 steps.push({
@@ -763,13 +779,17 @@ export class AgentOrchestrator {
 
           const batchPairs: AgentToolCallPair[] = [];
           const observations: string[] = [];
+          // Promise.all guarantees index alignment: batchResults[bi] corresponds
+          // to batchCalls[bi] exactly. We assert non-null here (rather than
+          // skipping undefined) so that observations[] stays index-aligned with
+          // actions[]. Skipping would produce observations.length < actions.length,
+          // causing agent-prompt.ts to pair tool results with the wrong action.
           for (let bi = 0; bi < batchResults.length; bi++) {
-            const result = batchResults[bi];
-            if (result === undefined) continue;
+            const result = batchResults[bi]!;
+            const call = batchCalls[bi]!;
             const obs = truncateObservation(result.observation, this.config.maxContextChars);
             observations.push(obs);
-            const call = batchCalls[bi];
-            if (call !== undefined) batchPairs.push({ action: call, observation: obs });
+            batchPairs.push({ action: call, observation: obs });
             if (
               result.rawResult !== null &&
               typeof result.rawResult === 'object' &&
@@ -860,6 +880,34 @@ export class AgentOrchestrator {
             if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
               timeoutStats.tool += 1;
               toolAbortController.abort();
+              // MUST break here — without break the catch falls through to the
+              // generic observation assignment, losing timeout context and causing
+              // the agent to retry the same timed-out tool call. (RCA5-06)
+              observation = `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`;
+              rawResult = null;
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                action: { tool, input },
+                observation,
+                durationMs: Math.max(0, Date.now() - stepStart),
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+              break;
+            }
+            // Propagate caller abort: AbortError during tool execution means the client
+            // disconnected. Terminate immediately — do NOT classify as a tool error.
+            if (isAbortError(toolErr)) {
+              terminationReason = 'aborted';
+              steps.push({
+                index: steps.length,
+                thought: parsed.thought,
+                action: { tool, input },
+                observation: '[ABORTED] Request cancelled during tool execution.',
+                durationMs: Math.max(0, Date.now() - stepStart),
+                tokenCount: { input: inputTokens, output: outputTokens },
+              });
+              break;
             }
             // Detect policy-block errors — terminate the loop immediately.
             // The agent must NOT continue calling tools after a security block.
@@ -1020,7 +1068,7 @@ export class AgentOrchestrator {
             const candidate = parsedSynth.answer?.trim() ?? '';
             const isShell = /^[{[\s]*[}\]]*$/.test(candidate);
             return candidate.length > 10 && !isShell
-              ? parsedSynth.answer
+              ? candidate
               : undefined;
           } finally {
             abortSignal?.removeEventListener('abort', propagateSynthAbort);
@@ -1037,6 +1085,10 @@ export class AgentOrchestrator {
           // Mark the flag so downstream layers also skip LLM calls.
           if (synthErr1 instanceof DomainError && synthErr1.code === CIRCUIT_BREAKER_OPEN_CODE) {
             llmCircuitOpen = true;
+          } else if (isAbortError(synthErr1)) {
+            // Caller disconnected during synthesis — mark as aborted so the
+            // attempt-2 guard (abortSignal?.aborted) aligns with terminationReason.
+            terminationReason = 'aborted';
           }
           log.error({ err: synthErr1, requestId }, `synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         }
@@ -1057,6 +1109,8 @@ export class AgentOrchestrator {
           } catch (synthErr2) {
             if (synthErr2 instanceof DomainError && synthErr2.code === CIRCUIT_BREAKER_OPEN_CODE) {
               llmCircuitOpen = true;
+            } else if (isAbortError(synthErr2)) {
+              terminationReason = 'aborted';
             }
             log.error({ err: synthErr2, requestId }, 'synthesis attempt 2 threw — proceeding to fallback search');
           }
@@ -1148,8 +1202,13 @@ export class AgentOrchestrator {
           terminationReason = 'fallback';
         }
       } catch (err) {
-        // Log so an outage of the fallback path is observable instead of silent.
-        log.error({ err, requestId }, 'agent fallback search failed');
+        if (isAbortError(err)) {
+          // Caller disconnected during fallback search — propagate abort, do not log as failure.
+          terminationReason = 'aborted';
+        } else {
+          // Log so an outage of the fallback path is observable instead of silent.
+          log.error({ err, requestId }, 'agent fallback search failed');
+        }
       } finally {
         abortSignal?.removeEventListener('abort', propagateFallbackAbort);
         clearTimeout(fallbackTimer);
@@ -1157,8 +1216,9 @@ export class AgentOrchestrator {
       } // end else (not aborted before fallback search started)
     } // end if (answer === '' && !hasToolObservations) — Layer 2 block
 
-    if (!policyBlocked && answer === '') {
+    if (!policyBlocked && terminationReason !== 'aborted' && answer === '') {
       // Layer 3: synthesize from last available observation (deterministic, no LLM)
+      // Skip when caller disconnected (aborted) — the result will not be delivered anyway.
       // Check both sequential (observation) and parallel (observations[]) steps.
       const lastObs = steps.findLast(
         (s) =>
@@ -1188,8 +1248,10 @@ export class AgentOrchestrator {
       log.error({ requestId }, 'policy-blocked agent run ended without explicit answer; returning blocked template');
     }
 
-    if (!policyBlocked && answer === '') {
-      // Layer 4: absolute guarantee — no tool call is ALWAYS better than empty
+    if (!policyBlocked && terminationReason !== 'aborted' && answer === '') {
+      // Layer 4: absolute guarantee — no tool call is ALWAYS better than empty.
+      // Skip when caller disconnected (aborted) — preserve 'aborted' terminationReason
+      // so the caller can distinguish abort from genuine failure.
       answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
       fallbackApplied = true;
       // Same reasoning as Layer 3: if tool observations exist, the agent execution was

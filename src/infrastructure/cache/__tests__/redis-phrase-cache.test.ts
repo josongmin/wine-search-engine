@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { RedisPhraseCache } from '../redis-phrase-cache.js';
 import type { LlmConstraintItem } from '../../../domain/attribute/model/llm-constraint-schema.js';
 import type { RedisClient } from '../../db/redis-client.js';
+import { MS_PER_DAY } from '../../../domain/shared/utils/time-units.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -167,7 +168,7 @@ describe('RedisPhraseCache', () => {
     it('clamps TTL larger than 7d to 7d', async () => {
       const mock = makeMockRedis();
       const cache = new RedisPhraseCache(mock.client);
-      const sevenDays = 7 * 24 * 60 * 60;
+      const sevenDays = (7 * MS_PER_DAY) / 1000;
 
       await cache.set('test', [validItem], sevenDays * 10);
 

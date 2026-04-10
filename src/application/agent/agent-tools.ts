@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { coercePositiveInt, coerceNonNegativeInt, coerceFiniteNumber } from '../../domain/shared/utils/zod-coerce.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { SearchExecutorPort } from '../search/port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -21,6 +22,7 @@ import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
+import { isAbortError } from '../../domain/shared/cooperative-abort.js';
 import type { NormalizedConstraint } from '../../domain/shared/types/constraint-bundle.js';
 
 // ---------------------------------------------------------------------------
@@ -33,6 +35,9 @@ const SEARCH_QUERY_MAX_LEN = 500;
 const SEARCH_LIMIT_MAX = 20;
 /** Max KRW price the agent can filter on (~100M KRW, safely above any real wine). */
 const MAX_PRICE_KRW_BOUND = 100_000_000;
+/** Max USD price for legacy `max_price` field: MAX_PRICE_KRW_BOUND / KRW_PER_USD_APPROXIMATE.
+ * Prevents unbounded numeric input from LLM (e.g. 1e10) before the KRW conversion. */
+const MAX_PRICE_USD_BOUND = Math.ceil(MAX_PRICE_KRW_BOUND / KRW_PER_USD_APPROXIMATE); // ≈ 74_075
 /** Top-N results shown in the observation string (controls context window usage). */
 const SUMMARY_TOP_N = 5;
 /** Max characters in any single observation string returned to the agent loop.
@@ -67,8 +72,9 @@ const SearchInputSchema = z.object({
     .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
       message: 'query cannot be a placeholder. Use actual search terms.',
     }),
-  // .int() implies finite (no NaN/Infinity) per Zod semantics; .min/.max add domain bounds
-  limit: z.number().int().min(1).max(SEARCH_LIMIT_MAX).optional(),
+  // coercePositiveInt accepts both number and numeric string (LLMs emit "10" instead of 10).
+  // CLAUDE.md: LLM tool call inputs MUST NOT use .strict() — LLMs emit extra fields.
+  limit: coercePositiveInt.pipe(z.number().int().min(1).max(SEARCH_LIMIT_MAX)).optional(),
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
   /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]).
    *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
@@ -77,16 +83,16 @@ const SearchInputSchema = z.object({
    *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
   exclude_regions: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
   /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
-  max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
+  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(0).max(MAX_PRICE_KRW_BOUND)).optional(),
   // ── Structured Vespa filters (direct YQL, bypass NL extraction) ──
   /** Wine type filter: red, white, rosé, sparkling, etc. */
   wine_type: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
   /** Country filter (English canonical name). */
   country: z.string().trim().min(1).max(100).optional(),
   /** Minimum vintage year (inclusive). */
-  vintage_min: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
+  vintage_min: coercePositiveInt.pipe(z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX)).optional(),
   /** Maximum vintage year (inclusive). */
-  vintage_max: z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX).optional(),
+  vintage_max: coercePositiveInt.pipe(z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX)).optional(),
   /** Appellation filter (e.g. "Pauillac", "Chianti Classico"). */
   appellation: z.string().trim().min(1).max(100).optional(),
   /** Style filter (e.g. "oaked", "unoaked", "light", "full"). */
@@ -96,6 +102,17 @@ const SearchInputSchema = z.object({
   /** When true, activate diversity dedup to spread results across grapes/regions/styles.
    *  Use when user says "다양하게", "각각", "종류별로", "different styles", etc. */
   want_diversity: z.boolean().optional(),
+}).superRefine((data, ctx) => {
+  // Cross-field invariant: vintage_min must not exceed vintage_max.
+  // Each field is valid individually, but vintage_min=2020 vintage_max=1990 would
+  // produce an impossible Vespa YQL range filter that silently returns 0 results.
+  if (data.vintage_min != null && data.vintage_max != null && data.vintage_min > data.vintage_max) {
+    ctx.addIssue({
+      path: ['vintage_max'],
+      code: 'custom',
+      message: `vintage_max (${data.vintage_max}) must be >= vintage_min (${data.vintage_min})`,
+    });
+  }
 });
 
 const CompareInputSchema = z.object({
@@ -118,7 +135,7 @@ const DrinkingWindowInputSchema = z.object({
     .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
       message: 'entity_id cannot be a placeholder. Copy the actual id (e.g. "vivino-xxx") from a prior search_wines result.',
     }),
-  target_year: z.number().int().min(DRINKING_WINDOW_MIN_YEAR).max(DRINKING_WINDOW_MAX_YEAR).optional(),
+  target_year: coercePositiveInt.pipe(z.number().int().min(DRINKING_WINDOW_MIN_YEAR).max(DRINKING_WINDOW_MAX_YEAR)).optional(),
 });
 
 /** Max food description length — prevents unbounded strings in the food pairing query.
@@ -128,9 +145,9 @@ const FOOD_MAX_LEN = 200;
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1).max(FOOD_MAX_LEN),
   /** Budget in Korean Won (KRW). Use this instead of USD amounts. */
-  max_price_krw: z.number().int().min(0).max(MAX_PRICE_KRW_BOUND).optional(),
+  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(0).max(MAX_PRICE_KRW_BOUND)).optional(),
   /** Legacy USD price field — accepted for backwards compat but converted internally. */
-  max_price: z.number().finite().min(0).optional(),
+  max_price: coerceFiniteNumber.pipe(z.number().finite().min(0).max(MAX_PRICE_USD_BOUND)).optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
 });
 
@@ -229,31 +246,39 @@ const WANTS_DIVERSITY_RE = /(?:^|[^\p{L}\p{N}])(?:diverse|different|다른|다�
  * Module-scope to avoid per-call allocation (deterministic, never changes).
  * All Korean patterns use /u flag and avoid \b (ASCII-only boundary).
  */
+// BUG-14: All English word-boundary guards use (?<![\p{L}\p{N}]) / (?![\p{L}\p{N}])
+// (Unicode character-class lookbehind/lookahead) instead of (?<![a-z]) / (?![a-z]).
+// The ASCII-only form silently passes when a Korean (or accented) character immediately
+// precedes/follows an English token — e.g. "타닌tannin" would falsely match (?<![a-z])
+// because 타닌 contains no ASCII letters. Using [\p{L}\p{N}] closes this gap.
+// All patterns carry the /u flag (required for \p{} Unicode property escapes).
 const CONSTRAINT_KEYWORDS: ReadonlyArray<[RegExp, string]> = [
   // Sensory attributes — require adjacent Korean context or full English words
   // to avoid matching unrelated words (e.g. /oak/ matching "Oakville" region).
-  [/타닌|(?<![a-z])tannin(?![a-z])/iu, '타닌'],
-  [/과일향|(?<![a-z])fruity(?![a-z])|(?<![a-z])fruit(?![a-z])/iu, '과일향'],
+  [/타닌|(?<![\p{L}\p{N}])tannin(?![\p{L}\p{N}])/iu, '타닌'],
+  [/과일향|(?<![\p{L}\p{N}])fruity(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])fruit(?![\p{L}\p{N}])/iu, '과일향'],
   // '오크' is rare as a standalone Korean word outside wine context; "oak" scoped to
   // prevent matching place names like "Oakville", "Oakland" — require non-alpha boundary.
-  [/오크(?!빌|랜드|먼트)|(?<![a-zA-Z])oak(?:ed|ing|y)?(?![a-zA-Z])/iu, '오크'],
-  [/미네랄|(?<![a-z])mineral/iu, '미네랄'],
+  [/오크(?!빌|랜드|먼트)|(?<![\p{L}\p{N}])oak(?:ed|ing|y)?(?![\p{L}\p{N}])/iu, '오크'],
+  [/미네랄|(?<![\p{L}\p{N}])mineral(?![\p{L}\p{N}])/iu, '미네랄'],
   // '산도' is safe (wine-specific); "acid" scoped to word boundary equivalent
-  [/산도|(?<![a-z])acid(?:ic|ity|s)?(?![a-z])/iu, '산도'],
+  [/산도|(?<![\p{L}\p{N}])acid(?:ic|ity|s)?(?![\p{L}\p{N}])/iu, '산도'],
   // '바디' safe; "body" scoped to avoid "somebody", "everybody" etc.
-  [/바디감?|(?<![a-z])body(?![a-z])/iu, '바디'],
+  [/바디감?|(?<![\p{L}\p{N}])body(?![\p{L}\p{N}])/iu, '바디'],
   // '당도' safe; "sweet" scoped to avoid "sweetspot", "sweetheart" etc.
-  [/당도|(?<![a-z])sweet(?:ness|ish)?(?![a-zA-Z])/iu, '당도'],
+  [/당도|(?<![\p{L}\p{N}])sweet(?:ness|ish)?(?![\p{L}\p{N}])/iu, '당도'],
   // Price — numeric-anchored, safe
   [/[0-9]+\s*만?\s*원|[$€]\s*[0-9]+/u, '가격'],
-  [/비건|(?<![a-z])vegan(?![a-z])/iu, '비건'],
-  [/유기농|(?<![a-z])organic(?![a-z])/iu, '유기농'],
-  // Vintage — numeric-anchored, safe
-  [/[0-9]{4}\s*년|(?<![a-z])vintage\s+[0-9]{4}/iu, '빈티지'],
-  // Country names — safe (proper nouns, distinct)
-  [/이탈리아|프랑스|스페인|독일|한국|(?<![a-z])italy|france|spain|germany(?![a-z])/iu, '국가'],
-  // Wine type — safe (domain-specific terms)
-  [/레드|화이트|스파클링|로제|(?<![a-z])red|white|sparkling|ros[eé](?![a-z])/iu, '와인타입'],
+  [/비건|(?<![\p{L}\p{N}])vegan(?![\p{L}\p{N}])/iu, '비건'],
+  [/유기농|(?<![\p{L}\p{N}])organic(?![\p{L}\p{N}])/iu, '유기농'],
+  // Vintage — ends with 4 digits so no trailing lookahead needed; leading boundary guards
+  // against "avintage2020" false match.
+  [/[0-9]{4}\s*년|(?<![\p{L}\p{N}])vintage\s+[0-9]{4}/iu, '빈티지'],
+  // Country names — each English term needs its own Unicode word-boundary guards.
+  // A single leading (?<![\p{L}\p{N}]) in an alternation only protects the first branch.
+  [/이탈리아|프랑스|스페인|독일|한국|(?<![\p{L}\p{N}])italy(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])france(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])spain(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])germany(?![\p{L}\p{N}])/iu, '국가'],
+  // Wine type — same: each English branch needs its own boundary guards.
+  [/레드|화이트|스파클링|로제|(?<![\p{L}\p{N}])red(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])white(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])sparkling(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])ros[eé](?![\p{L}\p{N}])/iu, '와인타입'],
 ];
 
 function detectConstraintKeywords(query: string): readonly string[] {
@@ -458,6 +483,11 @@ export async function executeAgentTool(
     const result = await executeAgentToolInner(toolName, input, deps, requestId, options);
     return { ...result, observation: capObservation(result.observation) };
   } catch (err) {
+    // AbortError signals cooperative cancellation (caller disconnect, timeout abort).
+    // MUST propagate so the orchestrator classifies it as terminationReason='aborted'
+    // instead of treating it as a tool failure. Without this, abort signals are
+    // silently swallowed and the loop continues with a fake error observation.
+    if (isAbortError(err)) throw err;
     // Policy-block errors MUST propagate — they are security decisions, not
     // tool failures. Re-throw so the orchestrator can terminate the loop.
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
@@ -974,7 +1004,7 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
       parts.push(`grapes: ${r.entity.grapes.slice(0, 3).map(sanitizeObservationField).join(', ')}`);
     }
     if (r.entity.style) parts.push(`style: ${sanitizeObservationField(r.entity.style)}`);
-    if (r.entity.criticScore !== undefined) parts.push(`critic: ${(r.entity.criticScore * 100).toFixed(0)}/100`);
+    if (r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore)) parts.push(`critic: ${(r.entity.criticScore * 100).toFixed(0)}/100`);
     if (r.entity.alcoholPct !== undefined) parts.push(`alc: ${r.entity.alcoholPct}%`);
     if (r.entity.priceRange !== undefined) {
       parts.push(`price: ${sanitizeObservationField(r.entity.priceRange)}`);
@@ -1007,7 +1037,7 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
       parts.push(`grapes: ${top.entity.grapes.slice(0, 3).map(sanitizeObservationField).join(', ')}`);
     }
     if (top.entity.style) parts.push(`style: ${sanitizeObservationField(top.entity.style)}`);
-    if (top.entity.criticScore !== undefined) parts.push(`critic: ${(top.entity.criticScore * 100).toFixed(0)}/100`);
+    if (top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore)) parts.push(`critic: ${(top.entity.criticScore * 100).toFixed(0)}/100`);
     if (top.entity.alcoholPct !== undefined) parts.push(`alc: ${top.entity.alcoholPct}%`);
     if (top.entity.priceRange !== undefined) {
       parts.push(`price: ${sanitizeObservationField(top.entity.priceRange)}`);
@@ -1061,7 +1091,7 @@ function buildGroundingJsonFromSearch(
         ? { grapes: r.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
         : {}),
       ...(r.entity.style !== undefined ? { style: sanitizeObservationField(r.entity.style) } : {}),
-      ...(r.entity.criticScore !== undefined ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
+      ...(r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore) ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
       ...(r.entity.priceRange !== undefined ? { price: sanitizeObservationField(r.entity.priceRange) } : {}),
     };
     return base;
@@ -1090,7 +1120,7 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
           ? { grapes: top.entity.grapes.slice(0, 3).map((g) => sanitizeObservationField(g)) }
           : {}),
         ...(top.entity.style !== undefined ? { style: sanitizeObservationField(top.entity.style) } : {}),
-        ...(top.entity.criticScore !== undefined ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
+        ...(top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore) ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
         ...(top.entity.priceRange !== undefined ? { price: sanitizeObservationField(top.entity.priceRange) } : {}),
       };
       return [fact];

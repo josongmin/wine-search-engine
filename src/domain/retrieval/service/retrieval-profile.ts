@@ -13,6 +13,7 @@ import type { QueryClass } from '../../shared/types/index.js';
 import type { RetrievalChannel } from '../model/retrieval-channel.js';
 import { resolveChannelMix, type QueryFamily } from './channel-mix-policy.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
+import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 
 /**
  * Configuration profile that governs retrieval behaviour for a given
@@ -63,7 +64,7 @@ const HYBRID_DEFAULT: RetrievalProfile = {
   anchorWeight: 0,
   sparseTopN: 100,
   denseTopN: 100,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 200,
 } as const;
 
@@ -76,7 +77,7 @@ const MIXED_ANCHOR: RetrievalProfile = {
   anchorWeight: 0.4,
   sparseTopN: 80,
   denseTopN: 80,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 200,
 } as const;
 
@@ -89,7 +90,7 @@ const EXACT_SAFE_FALLBACK: RetrievalProfile = {
   anchorWeight: 0,
   sparseTopN: 150,
   denseTopN: 50,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 100,
 } as const;
 
@@ -105,7 +106,7 @@ const BROWSE_DEFAULT: RetrievalProfile = {
   anchorWeight: 0,
   sparseTopN: 120,
   denseTopN: 80,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 150,
 } as const;
 
@@ -121,7 +122,7 @@ const REGION_BROWSE: RetrievalProfile = {
   anchorWeight: 0,
   sparseTopN: 120,
   denseTopN: 80,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 150,
 } as const;
 
@@ -137,7 +138,7 @@ const COMPARE_DEFAULT: RetrievalProfile = {
   anchorWeight: 0.2,
   sparseTopN: 60,
   denseTopN: 100,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 80,
 } as const;
 
@@ -156,7 +157,7 @@ const LEARNED_SPARSE_HYBRID: RetrievalProfile = {
   anchorWeight: 0,
   sparseTopN: 100,
   denseTopN: 100,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 200,
 } as const;
 
@@ -175,7 +176,7 @@ const RELATIVE_FILTER: RetrievalProfile = {
   anchorWeight: 0,
   sparseTopN: 150,
   denseTopN: 0,
-  fusionK: 60,
+  fusionK: RRF_DEFAULT_K,
   finalTopK: 80,
 } as const;
 

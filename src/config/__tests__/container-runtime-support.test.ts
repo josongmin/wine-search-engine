@@ -1,8 +1,41 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeEach } from 'vitest';
 import { buildRuntimeSupportServices } from '../container-runtime-support.js';
 import { parseEnv } from '../env.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
 
 describe('buildRuntimeSupportServices', () => {
+  beforeEach(() => {
+    // Clear the global registry between tests so CB registration assertions
+    // are not polluted by registrations from prior tests in the same run.
+    globalCircuitBreakerRegistry.clear?.();
+  });
+
+  it('W2-BUG-03: registers redis circuit breaker in globalCircuitBreakerRegistry when redisClient is provided', async () => {
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    // Minimal fake Redis client — ping is called once at startup.
+    const fakeRedis = {
+      get: async () => null,
+      set: async () => 'OK',
+      del: async () => 1,
+      ping: async () => 'PONG',
+    };
+
+    await buildRuntimeSupportServices(config, { redisClient: fakeRedis as never });
+
+    const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
+    expect(names).toContain('redis');
+  });
+
+  it('W2-BUG-03: does NOT register redis circuit breaker when redisClient is absent', async () => {
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    await buildRuntimeSupportServices(config, {});
+
+    const names = globalCircuitBreakerRegistry.snapshot().map((s) => s.name);
+    expect(names).not.toContain('redis');
+  });
+
   it('initializes injection judge with in-memory cache when Redis is unavailable', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',

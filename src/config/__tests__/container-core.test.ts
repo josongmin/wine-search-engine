@@ -52,6 +52,10 @@ vi.mock('../container-adapters.js', () => ({
   buildCoreAdapterServices,
 }));
 
+vi.mock('../startup-preflight.js', () => ({
+  warnStartupMisconfigurations: vi.fn(),
+}));
+
 vi.mock('../container-runtime-support.js', () => ({
   buildRuntimeSupportServices,
 }));
@@ -88,5 +92,21 @@ describe('buildCoreContainerServices', () => {
     expect(buildMixedSolver).toHaveBeenCalledWith(adapters, rankingPipeline);
     expect(core.ranker).toBe(rankingPipeline);
     expect(core.mixedSolver).toBe(mixedSolver);
+  });
+
+  it('RCA-03: calls warnStartupMisconfigurations with config before building services', async () => {
+    const { buildCoreContainerServices } = await import('../container-core.js');
+    const { warnStartupMisconfigurations } = await import('../startup-preflight.js');
+    const config = parseEnv({ NODE_ENV: 'test' });
+
+    await buildCoreContainerServices(config);
+
+    expect(warnStartupMisconfigurations).toHaveBeenCalledOnce();
+    expect(warnStartupMisconfigurations).toHaveBeenCalledWith(config);
+    // Must run before buildRuntimeSupportServices so warnings appear even if
+    // runtime service construction throws.
+    const warnOrder = vi.mocked(warnStartupMisconfigurations).mock.invocationCallOrder[0];
+    const supportOrder = vi.mocked(buildRuntimeSupportServices).mock.invocationCallOrder[0];
+    expect(warnOrder).toBeLessThan(supportOrder!);
   });
 });

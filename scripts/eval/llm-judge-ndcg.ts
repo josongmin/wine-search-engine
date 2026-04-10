@@ -17,9 +17,8 @@
  */
 
 import { createReadStream } from 'node:fs';
-import { writeFile, readFile } from 'node:fs/promises';
+import { glob, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Config from env
@@ -42,14 +41,19 @@ function getArg(flag: string, def = ''): string {
   return i >= 0 && args[i + 1] ? (args[i + 1] ?? def) : def;
 }
 const QUERIES_FILE = getArg('--queries', 'data/vivino-gold-queries.jsonl');
-const CORPUS_FILE = getArg('--corpus', '/tmp/test300-v3.ndjson');
+// EVAL_CORPUS_PATH env var overrides the default corpus location so CI can
+// point to the current labeled set without editing source. The default
+// 'pilot200-*.ndjson' glob covers all shards of the pilot corpus; replace
+// with a versioned path (e.g. /tmp/test300-v3.ndjson) for a pinned run.
+// The pattern is expanded via Node 22 fs/promises.glob() in resolveCorpusFile().
+const CORPUS_PATTERN = getArg('--corpus', process.env['EVAL_CORPUS_PATH'] ?? '/tmp/pilot200-*.ndjson');
 const OUTPUT_FILE = getArg('--output', '/tmp/llm-judge-labels.jsonl');
 const CONCURRENCY = parseInt(getArg('--concurrency', '8'), 10);
 const DRY_RUN = args.includes('--dry-run');
 const SAMPLE_N = parseInt(getArg('--sample', '0'), 10); // 0 = all
 
 // ---------------------------------------------------------------------------
-// JSONL reader
+// JSONL reader + corpus glob resolver
 // ---------------------------------------------------------------------------
 async function readJsonl<T>(filePath: string): Promise<T[]> {
   const rows: T[] = [];
@@ -58,6 +62,30 @@ async function readJsonl<T>(filePath: string): Promise<T[]> {
     if (line.trim()) rows.push(JSON.parse(line) as T);
   }
   return rows;
+}
+
+/**
+ * Resolves a (possibly glob) pattern to a single file path.
+ * Uses Node 22 fs/promises.glob() so patterns like /tmp/pilot200-*.ndjson expand correctly.
+ * Exits the process with a clear error if no files match.
+ */
+async function resolveCorpusFile(pattern: string): Promise<string> {
+  // If no glob metacharacter, treat as a literal path (fast path).
+  if (!/[*?{[]/.test(pattern)) return pattern;
+  const matches: string[] = [];
+  for await (const f of glob(pattern)) {
+    matches.push(f);
+  }
+  if (matches.length === 0) {
+    console.error(`[llm-judge] No corpus files match pattern: ${pattern}`);
+    console.error('  Set EVAL_CORPUS_PATH or pass --corpus <exact-path>');
+    process.exit(1);
+  }
+  if (matches.length > 1) {
+    matches.sort();
+    console.warn(`[llm-judge] ${matches.length} files match corpus pattern; using first after sort: ${matches[0]}`);
+  }
+  return matches[0]!;
 }
 
 // ---------------------------------------------------------------------------
@@ -206,16 +234,18 @@ async function runConcurrent<T>(
 // Main
 // ---------------------------------------------------------------------------
 async function main(): Promise<void> {
+  const corpusFile = await resolveCorpusFile(CORPUS_PATTERN);
+
   console.log(`LLM-as-Judge NDCG labeler`);
   console.log(`  Model:       ${MODEL}`);
   console.log(`  Queries:     ${QUERIES_FILE}`);
-  console.log(`  Corpus:      ${CORPUS_FILE}`);
+  console.log(`  Corpus:      ${corpusFile}`);
   console.log(`  Output:      ${OUTPUT_FILE}`);
   console.log(`  Concurrency: ${CONCURRENCY}`);
   if (DRY_RUN) console.log(`  DRY RUN — no API calls`);
 
   const queries = await readJsonl<QueryRecord>(QUERIES_FILE);
-  const corpus = await readJsonl<WineRecord>(CORPUS_FILE);
+  const corpus = await readJsonl<WineRecord>(corpusFile);
 
   const activeQueries = SAMPLE_N > 0 ? queries.slice(0, SAMPLE_N) : queries;
   console.log(`\nQueries: ${activeQueries.length}  Corpus: ${corpus.length}`);

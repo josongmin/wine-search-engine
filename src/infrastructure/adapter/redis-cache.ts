@@ -58,27 +58,6 @@ export class RedisCache {
   }
 
   /**
-   * @deprecated Prefer {@link getValidated} which validates the parsed value
-   * against a Zod schema. The unchecked generic cast on `get<T>` returns
-   * silently-typed garbage when cache contents drift or are corrupted.
-   */
-  /** @deprecated Use {@link getValidated} with a Zod schema instead. This method
-   *  casts JSON.parse output directly to T without runtime validation. */
-  async get<T>(key: string): Promise<T | null> {
-    const raw = await this.client.get(key);
-    if (raw == null) return null;
-    try {
-      const parsed: unknown = JSON.parse(raw);
-      return parsed as T;
-    } catch {
-      // intentional: poisoned JSON entry — return null (cache miss semantics).
-      // Callers should migrate to getValidated() which also deletes the bad entry.
-      log.warn({ key }, 'deprecated get<T>: JSON.parse failed; treating as miss');
-      return null;
-    }
-  }
-
-  /**
    * Validated cache read. Returns null on miss, parse error, or shape mismatch.
    * Logs (without raising) when a cache entry has the wrong shape so operators
    * can detect schema drift / cache poisoning.
@@ -167,6 +146,13 @@ export class RedisCache {
 
   async set(key: string, value: unknown, ttlSeconds?: number): Promise<void> {
     const ttl = ttlSeconds ?? this.defaultTtlSeconds;
+    // Guard: Redis rejects EX ≤ 0 with a protocol error. A TTL of 0 often
+    // means the caller forgot to pass an explicit TTL and defaultTtlSeconds
+    // was initialized to 0 (the "always explicit" sentinel). Throw early so
+    // the data pipeline bug surfaces immediately rather than as a Redis error.
+    if (ttl <= 0) {
+      throw new Error(`RedisCache.set: TTL must be > 0, got ${String(ttl)} for key "${key}"`);
+    }
     const serialized = JSON.stringify(value);
     await this.client.set(key, serialized, { EX: ttl });
   }

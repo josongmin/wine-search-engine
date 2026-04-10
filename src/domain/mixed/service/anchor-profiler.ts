@@ -25,10 +25,10 @@ export interface AnchorEntityData {
   /** Grape varieties. */
   readonly grapes: readonly string[];
 
-  /** Body level (1-5). Defaults to 3 if missing. */
+  /** Body level [0, 1] normalised (Vespa float). Defaults to 0.5 (midpoint) if missing. */
   readonly body?: number | undefined;
 
-  /** Sweetness level (1-5). Defaults to 1 if missing. */
+  /** Sweetness level [0, 1] normalised (Vespa float). Defaults to 0.1 (dry baseline) if missing. */
   readonly sweetness?: number | undefined;
 
   /** Style descriptor (e.g. "bold red"). Defaults to "unknown" if missing. */
@@ -39,14 +39,17 @@ export interface AnchorEntityData {
 }
 
 /**
- * Default body value when entity data does not specify body.
+ * Default body when entity data does not specify body.
+ * 0.5 = midpoint of [0, 1] normalised scale — neutral assumption when absent.
  */
-const DEFAULT_BODY = 3;
+const DEFAULT_BODY = 0.5;
 
 /**
- * Default sweetness value when entity data does not specify sweetness.
+ * Default sweetness when entity data does not specify sweetness.
+ * 0.1 = near-dry baseline; most red wines are low-sweetness, so this is a
+ * conservative prior that avoids over-penalising dry-wine queries.
  */
-const DEFAULT_SWEETNESS = 1;
+const DEFAULT_SWEETNESS = 0.1;
 
 /**
  * Default style when entity data does not specify style.

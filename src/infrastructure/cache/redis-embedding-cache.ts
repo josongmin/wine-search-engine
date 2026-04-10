@@ -78,7 +78,19 @@ export class RedisEmbeddingCache implements EmbeddingCachePort {
       // return Float32Array whose JSON representation is {"0":...} (an
       // object, not array), which the read path rejects as poisoned.
       const embedding = Array.isArray(rawEmbedding) ? rawEmbedding : Array.from(rawEmbedding);
-      await this.cache.set(cacheKey.redisKey, embedding, ttlSeconds);
+      // Write-time Zod validation (E5-T11): prevents cache-poison loops where an
+      // oversized or malformed embedding is written unvalidated, then rejected on read,
+      // deleted, and re-fetched in an infinite cycle.
+      const written = await this.cache.setValidated(
+        cacheKey.redisKey,
+        embedding,
+        EmbeddingVectorSchema,
+        'RedisEmbeddingCache',
+        ttlSeconds,
+      );
+      if (!written) {
+        log.warn({ key: cacheKey.redisKey, dims: embedding.length }, 'embedding cache write skipped: shape validation failed');
+      }
     } catch (error) {
       log.error({ err: error }, 'write error');
     }

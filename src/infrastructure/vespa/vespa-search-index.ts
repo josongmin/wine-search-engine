@@ -19,7 +19,13 @@ import type {
   RetrievalHitSummary,
 } from '../../domain/retrieval/port/search-index.port.js';
 import { type VespaClient } from './vespa-client.js';
-import type { VespaHit } from './vespa-client.js';
+import {
+  createCircuitBreaker,
+  type CircuitBreaker,
+} from '../../domain/shared/circuit-breaker/circuit-breaker.js';
+import { globalCircuitBreakerRegistry } from '../../observability/circuit-breaker-registry.js';
+import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
+import type { VespaHit, VespaQueryResponse } from './vespa-client.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import {
   toVespaFields,
@@ -115,6 +121,12 @@ function sanitizeYqlIntLimit(value: number, fallback: number): number {
   if (rounded > MAX_YQL_LIMIT) return MAX_YQL_LIMIT;
   return rounded;
 }
+
+/** Circuit breaker thresholds for the Vespa search endpoint. */
+const VESPA_SEARCH_BREAKER_NAME = 'vespa-search';
+const VESPA_SEARCH_FAILURE_THRESHOLD = 3;
+const VESPA_SEARCH_RECOVERY_TIMEOUT_MS = 30_000;
+const VESPA_SEARCH_HALF_OPEN_MAX = 2;
 
 const STRUCTURED_QUERY_STRENGTH_MULTIPLIER = 0.35;
 const FILTER_STRENGTH_MULTIPLIER = 0.2;
@@ -261,7 +273,38 @@ function extractHitSummary(fields: Record<string, unknown>): RetrievalHitSummary
  * Requires a pre-configured {@link VespaClient}.
  */
 export class VespaSearchIndex implements SearchIndexPort {
-  constructor(private readonly client: VespaClient) {}
+  private readonly circuitBreaker: CircuitBreaker;
+
+  constructor(private readonly client: VespaClient) {
+    this.circuitBreaker = createCircuitBreaker({
+      name: VESPA_SEARCH_BREAKER_NAME,
+      failureThreshold: VESPA_SEARCH_FAILURE_THRESHOLD,
+      recoveryTimeoutMs: VESPA_SEARCH_RECOVERY_TIMEOUT_MS,
+      halfOpenMaxAttempts: VESPA_SEARCH_HALF_OPEN_MAX,
+    });
+    globalCircuitBreakerRegistry.register(VESPA_SEARCH_BREAKER_NAME, this.circuitBreaker);
+  }
+
+  /**
+   * Run a Vespa query under the circuit breaker.
+   *
+   * Uses `circuitBreaker.execute()` (which records every throw as a failure)
+   * rather than the LLM classifier, because Vespa errors are always transient
+   * infrastructure failures — there is no concept of a "caller fault" 4xx
+   * that should keep the breaker CLOSED.
+   *
+   * Throws CircuitBreakerOpenError when the breaker is OPEN.
+   */
+  private async queryUnderBreaker(
+    yql: string,
+    params?: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<VespaQueryResponse> {
+    if (this.circuitBreaker.state === 'OPEN') {
+      throw new CircuitBreakerOpenError(VESPA_SEARCH_BREAKER_NAME);
+    }
+    return this.circuitBreaker.execute(() => this.client.query(yql, params, signal));
+  }
 
   // -------------------------------------------------------------------------
   // sparseSearch
@@ -293,6 +336,12 @@ export class VespaSearchIndex implements SearchIndexPort {
     const hits = sanitizeYqlIntLimit(limit ?? DEFAULT_SPARSE_LIMIT, DEFAULT_SPARSE_LIMIT);
     const effectiveFilters = filters ?? [];
     const filterClause = buildSparseFilters(effectiveFilters);
+
+    // Guard: empty queries array would produce `where () AND ...` which is
+    // invalid Vespa YQL syntax and causes a 400 parse error on the Vespa side.
+    if (queries.length === 0) {
+      return [];
+    }
 
     // Per-query clause:
     //   userInput(@queryN)                             — general multi-term match via WAND
@@ -336,7 +385,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       queryParams[`query${i}`] = queries[i];
     }
 
-    const response = await this.client.query(yql, queryParams);
+    const response = await this.queryUnderBreaker(yql, queryParams);
     const children = response.root.children ?? [];
 
     return children.map((hit, index) => {
@@ -407,7 +456,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       filterClause +
       ` limit ${requestedLimit}`;
 
-    const response = await this.client.query(yql, {
+    const response = await this.queryUnderBreaker(yql, {
       'ranking.profile': rankProfile,
       'presentation.summary': 'default',
       'input.query(query_embedding)': embedding,
@@ -479,7 +528,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       filterClause +
       ` limit ${targetHits}`;
 
-    const response = await this.client.query(yql, {
+    const response = await this.queryUnderBreaker(yql, {
       'ranking.profile': 'learned_sparse',
       'presentation.summary': 'default',
       'input.query(sparse_query_embedding)': sparseQueryTensor,

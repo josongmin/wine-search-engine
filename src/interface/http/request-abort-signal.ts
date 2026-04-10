@@ -3,8 +3,8 @@ import type { FastifyRequest } from 'fastify';
 const abortSignalByRequest = new WeakMap<FastifyRequest, AbortSignal>();
 
 function rawAlreadyAborted(raw: FastifyRequest['raw']): boolean {
-  const aborted = (raw as { aborted?: boolean }).aborted;
-  return aborted === true;
+  const r = raw as { aborted?: boolean; destroyed?: boolean };
+  return r.aborted === true || r.destroyed === true;
 }
 
 /**
@@ -12,6 +12,10 @@ function rawAlreadyAborted(raw: FastifyRequest['raw']): boolean {
  * underlying socket closes or the request is aborted (client disconnect).
  * Cached per {@link FastifyRequest} instance so repeated reads in one handler
  * share the same signal.
+ *
+ * Listens on `raw.socket` 'close' (instead of `raw` 'close') to avoid firing
+ * immediately after body parsing in Fastify inject tests, where the request
+ * stream is destroyed but the socket remains open.
  */
 export function abortSignalFromFastifyRequest(request: FastifyRequest): AbortSignal {
   const cached = abortSignalByRequest.get(request);
@@ -22,17 +26,33 @@ export function abortSignalFromFastifyRequest(request: FastifyRequest): AbortSig
   const controller = new AbortController();
   const raw = request.raw;
 
-  const abort = (): void => {
+  const onAborted = (): void => {
     if (!controller.signal.aborted) {
       controller.abort();
     }
+    // Clean up cross-listeners to avoid double-firing
+    const socket = (raw as { socket?: { removeListener?: (event: string, listener: () => void) => void } }).socket;
+    if (socket != null && typeof socket.removeListener === 'function') {
+      socket.removeListener('close', onSocketClose);
+    }
+  };
+
+  const onSocketClose = (): void => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+    // Clean up cross-listeners to avoid double-firing
+    raw.removeListener('aborted', onAborted);
   };
 
   if (rawAlreadyAborted(raw)) {
-    abort();
+    controller.abort();
   } else {
-    raw.once('aborted', abort);
-    raw.once('close', abort);
+    raw.once('aborted', onAborted);
+    const socket = (raw as { socket?: { once?: (event: string, listener: () => void) => void } }).socket;
+    if (socket != null && typeof socket.once === 'function') {
+      socket.once('close', onSocketClose);
+    }
   }
 
   abortSignalByRequest.set(request, controller.signal);

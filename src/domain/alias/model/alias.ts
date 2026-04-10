@@ -1,6 +1,7 @@
 import type { EntityId } from '../../shared/types/index.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import { DomainError } from '../../shared/error/domain-error.js';
+import { MIN_ALIAS_LENGTH } from '../service/alias-filter.js';
 
 /**
  * Alias types ordered by trust/authority.
@@ -111,6 +112,14 @@ function normalizeValue(input: string): string {
 export function createAlias(params: CreateAliasParams): Alias {
   if (params.value.trim().length === 0) {
     throw new DomainError('INVARIANT_VIOLATION', 'Alias value cannot be empty');
+  }
+  // SCAN4-16: enforce MIN_ALIAS_LENGTH at the domain factory — single-char aliases
+  // produce massive false positives in matching (e.g. "A" matches any query with "A").
+  if (params.value.trim().length < MIN_ALIAS_LENGTH) {
+    throw new DomainError(
+      'INVARIANT_VIOLATION',
+      `Alias value must be ≥ ${String(MIN_ALIAS_LENGTH)} characters, got "${params.value.trim()}"`,
+    );
   }
   if (params.confidencePrior < 0 || params.confidencePrior > 1) {
     throw new DomainError(

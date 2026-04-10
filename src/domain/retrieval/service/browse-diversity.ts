@@ -1,6 +1,7 @@
 import type { SparseHit } from '../port/search-index.port.js';
 import { stripVintageYearsBounded } from '../../shared/utils/vintage.js';
 import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /** BM25 multiplier weights for critic / prestige lifts (producer browse). */
 const PRODUCER_BROWSE_CRITIC_LIFT = 0.02;
@@ -34,7 +35,7 @@ function prestige01(p: number | undefined): number {
     return 0;
   }
   const x = p <= 1 ? p : p / 100;
-  return Math.min(1, Math.max(0, x));
+  return clamp01(x);
 }
 
 /** Maps critic score to [0,1] (assumes 0–100 scale when >1). */
@@ -43,7 +44,7 @@ function critic01(c: number | undefined): number {
     return 0;
   }
   const x = c > 1 ? c / 100 : c;
-  return Math.min(1, Math.max(0, x));
+  return clamp01(x);
 }
 
 /**
@@ -157,7 +158,10 @@ export function diversifyProducerBrowseHits(
     return [];
   }
   const sorted = [...hits].sort(
-    (a, b) => producerBrowseRankScore(b) - producerBrowseRankScore(a),
+    compareScoreWithTiebreaker<SparseHit>(
+      (h) => producerBrowseRankScore(h),
+      (h) => String(h.entityId),
+    ),
   );
   const bestByKey = new Map<string, SparseHit>();
   for (const h of sorted) {
@@ -168,7 +172,10 @@ export function diversifyProducerBrowseHits(
     }
   }
   const deduped = [...bestByKey.values()].sort(
-    (a, b) => producerBrowseRankScore(b) - producerBrowseRankScore(a),
+    compareScoreWithTiebreaker<SparseHit>(
+      (h) => producerBrowseRankScore(h),
+      (h) => String(h.entityId),
+    ),
   );
   return deduped.slice(0, limit);
 }

@@ -178,9 +178,14 @@ const TRUNCATION_SUFFIX_LEN = 20;
 
 export function truncateObservation(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
-  // Guard: if maxChars < TRUNCATION_SUFFIX_LEN, slice(0, negative) produces ""
-  // and appending the suffix creates a string LONGER than maxChars. Ensure the
-  // cut point is always non-negative so the output length stays bounded.
-  const cutAt = Math.max(0, maxChars - TRUNCATION_SUFFIX_LEN);
+  // When maxChars >= TRUNCATION_SUFFIX_LEN: cutAt = maxChars - suffix → output
+  // is exactly maxChars chars (postcondition satisfied).
+  // When maxChars < TRUNCATION_SUFFIX_LEN: the suffix alone would exceed maxChars,
+  // so we return just the raw slice capped at maxChars (no suffix appended) —
+  // the truncation is still visible because the text is shorter than the original.
+  if (maxChars < TRUNCATION_SUFFIX_LEN) {
+    return text.slice(0, maxChars);
+  }
+  const cutAt = maxChars - TRUNCATION_SUFFIX_LEN;
   return text.slice(0, cutAt) + '\n... [truncated]';
 }

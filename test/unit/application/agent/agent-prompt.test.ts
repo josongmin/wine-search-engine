@@ -29,28 +29,30 @@ describe('truncateObservation', () => {
     expect(result).toContain('[truncated]');
   });
 
-  it('output length is bounded by maxChars', () => {
-    // Key invariant: output must NEVER exceed maxChars regardless of suffix length.
-    for (const maxChars of [0, 1, 5, 10, 15, 16, 17, 20, 50, 100]) {
+  it('output length is strictly bounded by maxChars (postcondition)', () => {
+    // Key invariant: output must NEVER exceed maxChars. This is now guaranteed:
+    // - maxChars >= TRUNCATION_SUFFIX_LEN(20): slice(0, cutAt) + suffix = maxChars chars
+    // - maxChars < TRUNCATION_SUFFIX_LEN: raw slice(0, maxChars) = maxChars chars
+    for (const maxChars of [0, 1, 5, 10, 15, 16, 17, 19, 20, 21, 50, 100]) {
       const result = truncateObservation('x'.repeat(200), maxChars);
-      expect(result.length).toBeLessThanOrEqual(maxChars + SUFFIX_LEN);
-      // More strictly: the truncated content + suffix must fit in maxChars
-      // when maxChars >= SUFFIX_LEN; for smaller maxChars we just get the suffix.
+      expect(result.length).toBeLessThanOrEqual(maxChars);
     }
   });
 
-  it('handles maxChars < SUFFIX_LEN (boundary bug that was fixed)', () => {
-    // Old code: slice(0, maxChars - 20) → slice(0, negative) → "" + suffix = suffix (>maxChars!)
-    // Fixed code: Math.max(0, maxChars - 20) → slice(0, 0) + suffix = suffix
+  it('handles maxChars < SUFFIX_LEN (postcondition fix: output.length <= maxChars always)', () => {
+    // When maxChars < SUFFIX_LEN the suffix alone would exceed maxChars, so
+    // the fixed code returns a raw slice capped at maxChars (no suffix appended).
+    // The output is still shorter than the original — truncation is visible.
     const result = truncateObservation('hello world', 5);
-    // Output should not be longer than suffix itself (can't meaningfully truncate)
-    expect(result.length).toBeLessThanOrEqual(SUFFIX_LEN);
+    expect(result.length).toBeLessThanOrEqual(5);
+    expect(result).toBe('hello');
   });
 
   it('handles maxChars = 0', () => {
     const result = truncateObservation('hello', 0);
-    // slice(0, Math.max(0, 0-20)) = slice(0,0) = "" → "" + suffix
-    expect(result).toBe(SUFFIX);
+    // slice(0, 0) = "" — empty string, length 0 satisfies output <= maxChars
+    expect(result).toBe('');
+    expect(result.length).toBeLessThanOrEqual(0);
   });
 
   it('handles empty string input', () => {
@@ -58,16 +60,24 @@ describe('truncateObservation', () => {
     expect(truncateObservation('', 0)).toBe('');
   });
 
-  it('handles exactly SUFFIX_LEN maxChars', () => {
+  it('handles exactly SUFFIX_LEN maxChars (< TRUNCATION_SUFFIX_LEN=20: raw slice)', () => {
+    // SUFFIX_LEN=16 < TRUNCATION_SUFFIX_LEN=20 → raw slice path, no suffix appended.
     const result = truncateObservation('x'.repeat(100), SUFFIX_LEN);
     expect(result.length).toBeLessThanOrEqual(SUFFIX_LEN);
   });
 
-  it('handles maxChars = SUFFIX_LEN + 1', () => {
-    // cutAt = max(0, (SUFFIX_LEN+1) - SUFFIX_LEN) = 1
-    // result = "x" + suffix = 1 + SUFFIX_LEN chars
-    const result = truncateObservation('x'.repeat(100), SUFFIX_LEN + 1);
-    expect(result.length).toBeLessThanOrEqual(SUFFIX_LEN + 1);
+  it('handles maxChars = TRUNCATION_SUFFIX_LEN (exactly at boundary: suffix fits)', () => {
+    // TRUNCATION_SUFFIX_LEN=20: cutAt = 20 - 20 = 0 → "" + suffix = suffix (20 chars)
+    const TRUNCATION_SUFFIX_LEN = 20;
+    const result = truncateObservation('x'.repeat(100), TRUNCATION_SUFFIX_LEN);
+    expect(result.length).toBeLessThanOrEqual(TRUNCATION_SUFFIX_LEN);
+    expect(result).toContain('[truncated]');
+  });
+
+  it('handles maxChars = TRUNCATION_SUFFIX_LEN + 1 (above boundary: 1 char + suffix)', () => {
+    const TRUNCATION_SUFFIX_LEN = 20;
+    const result = truncateObservation('x'.repeat(100), TRUNCATION_SUFFIX_LEN + 1);
+    expect(result.length).toBeLessThanOrEqual(TRUNCATION_SUFFIX_LEN + 1);
     expect(result).toContain('[truncated]');
   });
 });

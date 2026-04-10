@@ -1,6 +1,7 @@
 import type { AliasProposal } from '../model/alias-proposal.js';
 import type { ProposalStore } from '../port/proposal-store.port.js';
 import type { QueryEntityAggregation } from './feedback-processor.js';
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /** Unicode blocks for mixed-script homoglyph detection (alias safety). */
 const UNICODE_LATIN_BASIC_START = 0x0041;
@@ -259,6 +260,6 @@ export class AliasProposer {
       + ALIAS_CONFIDENCE_WEIGHT_SESSION * sessionFactor
       + ALIAS_CONFIDENCE_WEIGHT_PURCHASE * purchaseFactor;
 
-    return Math.min(1.0, Math.max(0, raw));
+    return clamp01(raw);
   }
 }

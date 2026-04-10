@@ -166,6 +166,7 @@ These patterns are caught at lint time — no need to review manually:
 - `as` casts in pg-*/redis-* → consistent-type-assertions
 - Magic numbers in src/ → no-magic-numbers
 - `console.*` in src/ → no-console
+- `field !== 0` / `field === 0` on `body`, `sweetness`, `tannin`, `acidity`, `finishLength`, `criticScoreNormalized`, `drinkingWindowStart/End`, `producerPrestige` → use `!= null` for presence check (E1-P3-7: `=== 0` drops wines with legitimately zero values)
 
 ## Private notes
 

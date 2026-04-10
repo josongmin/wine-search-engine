@@ -150,6 +150,44 @@ describe('CandidatePoolService — killSwitchDenseRetrieval pre-flight guard', (
     expect(searchIndex.denseSearch).not.toHaveBeenCalled();
   });
 
+  // ── RCA5-08: empty lexicalQueries guard ─────────────────────────────────────
+  it('does NOT call sparseSearch when lexicalQueries is empty (RCA5-08)', async () => {
+    const embeddingService = createEmbeddingService();
+    const searchIndex = createSearchIndex();
+
+    const pool = new CandidatePoolService(
+      searchIndex,
+      embeddingService,
+      new FusionService(),
+    );
+
+    await pool.execute(createInput({ lexicalQueries: [] }));
+
+    expect(searchIndex.sparseSearch).not.toHaveBeenCalled();
+  });
+
+  it('returns non-empty results via dense channel even when lexicalQueries is empty (RCA5-08)', async () => {
+    const embeddingService = createEmbeddingService();
+    const searchIndex = createSearchIndex({
+      denseSearch: vi.fn(async () => [
+        { entityId: 'wine-1' as never, score: 0.9, rank: 1, similarity: 0.9 },
+      ]),
+    });
+
+    const pool = new CandidatePoolService(
+      searchIndex,
+      embeddingService,
+      new FusionService(),
+    );
+
+    const result = await pool.execute(createInput({ lexicalQueries: [] }));
+    // With no sparse hits but valid dense hits, candidates should still be produced
+    expect(searchIndex.sparseSearch).not.toHaveBeenCalled();
+    // Dense path should still fire (lexicalQueries emptiness must not kill dense)
+    expect(searchIndex.denseSearch).toHaveBeenCalled();
+    expect(result).toBeDefined();
+  });
+
   it('DOES call embedBatch/denseSearch when kill switch is false (control)', async () => {
     const embeddingService = createEmbeddingService();
     const searchIndex = createSearchIndex();

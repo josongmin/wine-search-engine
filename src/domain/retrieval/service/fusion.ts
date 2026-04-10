@@ -1,5 +1,5 @@
 import { createEntityId } from '../../shared/types/index.js';
-import { rrfFuse } from '../../shared/utils/rrf.js';
+import { rrfFuse, RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 import type {
   SparseHit,
   DenseHit,
@@ -33,8 +33,8 @@ function buildSummaryMap(
   return map;
 }
 
-/** Standard RRF smoothing constant (rank + k in denominator). */
-const RECIPROCAL_RANK_FUSION_DEFAULT_K = 60;
+/** Standard RRF smoothing constant (rank + k in denominator). Imported from SSoT rrf.ts. */
+const RECIPROCAL_RANK_FUSION_DEFAULT_K = RRF_DEFAULT_K;
 
 /**
  * Fuses results from sparse, dense, and anchor retrieval passes using

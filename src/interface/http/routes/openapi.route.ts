@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { buildHttpRouteContractOpenApiBridge } from './http-route-contract-openapi.js';
+import { OPENAPI_CACHE_MAX_AGE_SECONDS } from '../constants.js';
 
 /**
  * Cached OpenAPI document. Built once on first request, then reused.
@@ -18,7 +19,7 @@ export function registerOpenApiRoute(app: FastifyInstance): void {
 
     await reply
       .header('content-type', 'application/json; charset=utf-8')
-      .header('cache-control', 'public, max-age=3600')
+      .header('cache-control', `public, max-age=${String(OPENAPI_CACHE_MAX_AGE_SECONDS)}`)
       .send(cachedDocument);
   });
 }

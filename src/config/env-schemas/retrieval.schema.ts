@@ -1,15 +1,20 @@
 import { z } from 'zod';
+import {
+  EMBEDDING_TIMEOUT_MS,
+  RERANKER_TIMEOUT_MS,
+} from '../../infrastructure/vespa/per-channel-timeouts.js';
 
 /**
  * Retrieval-side external services: embedding, reranker (self-hosted and Cohere),
  * and the learned matcher. Grouped here because they all plug into the hybrid
  * retrieval/ranking pipeline rather than the generic LLM chat surface.
+ *
+ * SCAN4-08: env defaults are sourced from per-channel-timeouts.ts (SSoT) so
+ * the in-process constant and the env-overridable default are always in sync.
  */
 
-const DEFAULT_EMBEDDING_HTTP_TIMEOUT_MS = 30_000;
 /** Cross-encoder blend: lower trusts external reranker less (domain default). */
 const DEFAULT_RERANK_BLEND_SCALE = 0.7;
-const DEFAULT_RERANKER_HTTP_TIMEOUT_MS = 30_000;
 const DEFAULT_LEARNED_MATCHER_HTTP_TIMEOUT_MS = 30_000;
 
 export const RetrievalEnvSchema = z.object({
@@ -27,7 +32,7 @@ export const RetrievalEnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(DEFAULT_EMBEDDING_HTTP_TIMEOUT_MS),
+    .default(EMBEDDING_TIMEOUT_MS),
 
   // Reranker Service (optional external HTTP API)
   RERANKER_SERVICE_URL: z.string().url().optional(),
@@ -38,7 +43,7 @@ export const RetrievalEnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(DEFAULT_RERANKER_HTTP_TIMEOUT_MS),
+    .default(RERANKER_TIMEOUT_MS),
 
   // Cohere reranker (preferred managed reranking)
   COHERE_API_KEY: z.string().optional(),

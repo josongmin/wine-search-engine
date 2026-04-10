@@ -55,4 +55,5 @@ export type AgentTerminationReason =
   | 'error'
   | 'loop_detected'
   | 'fallback'
-  | 'blocked';
+  | 'blocked'
+  | 'aborted';

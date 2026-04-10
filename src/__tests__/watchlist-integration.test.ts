@@ -12,6 +12,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createHmac } from 'crypto';
 import { randomUUID } from 'node:crypto';
+import { MS_PER_DAY } from '../domain/shared/utils/time-units.js';
 import { RedisWatchlistPublisher } from '../infrastructure/watchlist/redis-watchlist-publisher.js';
 import { RedisWatchlistSubscriber, type WatchlistEventHandler } from '../infrastructure/watchlist/redis-watchlist-subscriber.js';
 import { WebhookDelivery, type WebhookPayload } from '../infrastructure/watchlist/webhook-delivery.js';
@@ -397,7 +398,7 @@ describe('Watchlist Integration', () => {
     });
 
     it('should support future expiration date', () => {
-      const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      const expiryDate = new Date(Date.now() + 30 * MS_PER_DAY);
       const entry: WatchlistEntry = {
         id: randomUUID(),
         userId: randomUUID(),

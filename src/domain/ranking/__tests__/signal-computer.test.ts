@@ -86,6 +86,45 @@ describe('SignalComputer SOTA++ signals', () => {
   });
 });
 
+// ── SCAN4-01: computePopularity rank inversion fix ──────────────────────────
+describe('SignalComputer.computePopularity (SCAN4-01)', () => {
+  const computer = new SignalComputer();
+
+  it('rank=1 (best sparse hit) produces higher popularity score than rank=10', () => {
+    const rank1 = computer.computePopularity(makeCandidate({ sparseRank: 1 }));
+    const rank10 = computer.computePopularity(makeCandidate({ sparseRank: 10 }));
+    expect(rank1).toBeGreaterThan(rank10);
+  });
+
+  it('rank=1 produces score close to 1.0', () => {
+    expect(computer.computePopularity(makeCandidate({ sparseRank: 1 }))).toBeCloseTo(1.0, 5);
+  });
+
+  it('popularity is monotonically decreasing as rank increases', () => {
+    const scores = [1, 2, 3, 5, 10, 20].map(
+      (r) => computer.computePopularity(makeCandidate({ sparseRank: r })),
+    );
+    for (let i = 0; i < scores.length - 1; i++) {
+      expect(scores[i]).toBeGreaterThan(scores[i + 1] as number);
+    }
+  });
+
+  it('returns baseline when sparseRank is absent', () => {
+    const score = computer.computePopularity(makeCandidate());
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(1);
+  });
+
+  it('never produces NaN or out-of-[0,1] values', () => {
+    for (const rank of [1, 2, 5, 10, 100]) {
+      const score = computer.computePopularity(makeCandidate({ sparseRank: rank }));
+      expect(Number.isFinite(score)).toBe(true);
+      expect(score).toBeGreaterThanOrEqual(0);
+      expect(score).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe('SignalComputer specialized signals', () => {
   const computer = new SignalComputer();
 

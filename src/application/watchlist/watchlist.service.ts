@@ -18,6 +18,8 @@ export interface CreateWatchlistCommand {
 
 export interface RecordWatchlistDeliveryLogCommand {
   readonly watchlistId: string;
+  /** userId of the watchlist owner — must match the stored entry to prevent cross-user log pollution. */
+  readonly userId: string;
   readonly attempt: number;
   readonly statusCode: number | null;
   readonly errorMessage: string | null;
@@ -104,7 +106,8 @@ export class WatchlistService implements WatchlistServicePort {
 
   async recordDeliveryLog(command: RecordWatchlistDeliveryLogCommand): Promise<boolean> {
     const entry = await this.storage.findById(command.watchlistId);
-    if (entry === null) {
+    // Ownership check: prevent cross-user delivery log pollution (security audit finding)
+    if (entry === null || entry.userId !== command.userId) {
       return false;
     }
 

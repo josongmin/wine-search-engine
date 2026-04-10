@@ -57,10 +57,16 @@ export class Calibrator {
     rawScores: { readonly top1: number; readonly top2: number },
     queryClass: QueryClass,
   ): Promise<CalibratedResolutionScore> {
+    // Guard non-finite inputs before any calibration logic. A NaN/Infinity
+    // rawScore propagates silently through plattScaling (NaN arithmetic) and
+    // normalizeFallbackRawScores (NaN/NaN = NaN), corrupting decisionConfidenceC.
+    const safeTop1 = Number.isFinite(rawScores.top1) ? rawScores.top1 : 0;
+    const safeTop2 = Number.isFinite(rawScores.top2) ? rawScores.top2 : 0;
     const params = await this.loadParams(queryClass);
+    const safeRawScores = { top1: safeTop1, top2: safeTop2 };
     const normalizedRawScores = this.isDefaultFallbackParams(params)
-      ? this.normalizeFallbackRawScores(rawScores)
-      : rawScores;
+      ? this.normalizeFallbackRawScores(safeRawScores)
+      : safeRawScores;
 
     const top1Calibrated = this.applyCalibration(normalizedRawScores.top1, params);
     const top2Calibrated = this.applyCalibration(normalizedRawScores.top2, params);

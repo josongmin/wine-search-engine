@@ -150,6 +150,9 @@ describe('Negation regression — end-to-end pipeline', () => {
   });
 
   it('R-NEG-17: "카베르네 빼고 풀바디" scenario → grape exclusion covers both schema fields', () => {
+    // IDX-05: body is a SOFT_CONSTRAINT_ATTRIBUTE — hardConstraintsToSparseFilterTokens
+    // intentionally produces no token for it; the body preference goes to the soft
+    // penalty bundle, not the hard YQL filter layer.  Only grape exclusion appears in YQL.
     const tokens = hardConstraintsToSparseFilterTokens([
       { attribute: 'grape_primary', operator: 'exclude', value: 'Cabernet Sauvignon', source_phrase: '카베르네 소비뇽 빼고', confidence: 0.9 },
       { attribute: 'body', operator: '>=', value: 7, source_phrase: '풀바디', confidence: 0.85 },
@@ -157,7 +160,8 @@ describe('Negation regression — end-to-end pipeline', () => {
     const yql = buildSparseFilters(tokens);
     expect(yql).toContain('!(grape_primary contains "Cabernet Sauvignon")');
     expect(yql).toContain('!(grapes contains "Cabernet Sauvignon")');
-    expect(yql).toContain('body >= 7.000');
+    // body is soft — must NOT appear as a hard YQL clause (would over-filter and kill recall)
+    expect(yql).not.toContain('body >=');
   });
 
   it('R-NEG-18: "오크 안 쓴 샤도네이" scenario → style exclusion + wine_type positive', () => {

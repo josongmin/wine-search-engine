@@ -81,10 +81,30 @@ interface ChatCompletionsResponse {
   readonly usage?: ChatCompletionsUsage;
 }
 
+function isChatCompletionsChoice(c: unknown): c is ChatCompletionsChoice {
+  if (typeof c !== 'object' || c === null) return false;
+  const o = c as Record<string, unknown>;
+  // `message` is optional (absent for tool-call-only responses from some providers),
+  // but when present its `role` must be a string. The content field may be null
+  // (tool-call-only) or a string. We do NOT require message to exist so that
+  // tool-call responses are handled gracefully by the caller (content defaults to '').
+  if ('message' in o) {
+    const m = o['message'];
+    if (typeof m !== 'object' || m === null) return false;
+    if (typeof (m as Record<string, unknown>)['role'] !== 'string') return false;
+  }
+  return true;
+}
+
 function isChatCompletionsResponse(v: unknown): v is ChatCompletionsResponse {
   if (typeof v !== 'object' || v === null) return false;
   const o = v as Record<string, unknown>;
-  return typeof o['model'] === 'string' && Array.isArray(o['choices']);
+  if (typeof o['model'] !== 'string') return false;
+  if (!Array.isArray(o['choices'])) return false;
+  if ((o['choices'] as unknown[]).length === 0) return false;
+  // Validate the first choice shape — this is the one we always read.
+  if (!isChatCompletionsChoice((o['choices'] as unknown[])[0])) return false;
+  return true;
 }
 
 export class OpenAiChatLlm implements ChatLlmPort {
@@ -185,6 +205,15 @@ export class OpenAiChatLlm implements ChatLlmPort {
         }
 
         const data: unknown = await response.json();
+        // Guard empty choices array before the full shape check so the error message
+        // is actionable ("empty choices") rather than the generic "unexpected response".
+        if (
+          typeof data === 'object' && data !== null &&
+          Array.isArray((data as Record<string, unknown>)['choices']) &&
+          ((data as Record<string, unknown>)['choices'] as unknown[]).length === 0
+        ) {
+          throw new Error('OpenAI chat: LLM returned empty choices array');
+        }
         if (!isChatCompletionsResponse(data)) {
           throw new Error(
             `OpenAI chat: unexpected response — ${JSON.stringify(data).slice(0, OPENAI_CHAT_MALFORMED_JSON_PREVIEW_CHARS)}`,
@@ -210,10 +239,12 @@ export class OpenAiChatLlm implements ChatLlmPort {
           ...(usage !== undefined
             ? {
                 usage: {
-                  inputTokens: usage.prompt_tokens ?? 0,
-                  outputTokens: usage.completion_tokens ?? 0,
-                  ...(usage.prompt_tokens_details?.cached_tokens !== undefined
-                    ? { cachedInputTokens: usage.prompt_tokens_details.cached_tokens }
+                  // `?? 0` alone passes NaN — use Number.isFinite() to guard against
+                  // malformed API responses corrupting token tallies.
+                  inputTokens: Number.isFinite(usage.prompt_tokens) ? (usage.prompt_tokens as number) : 0,
+                  outputTokens: Number.isFinite(usage.completion_tokens) ? (usage.completion_tokens as number) : 0,
+                  ...(Number.isFinite(usage.prompt_tokens_details?.cached_tokens)
+                    ? { cachedInputTokens: usage.prompt_tokens_details?.cached_tokens as number }
                     : {}),
                 },
               }

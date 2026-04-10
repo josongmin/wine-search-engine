@@ -4,6 +4,9 @@
  * `@domain/shared/constants` when multiple layers must agree.
  */
 
+// Rule 30: time-unit constants must come from the SSoT module, not be recomputed.
+import { HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../domain/shared/utils/time-units.js';
+
 /** Subject string from X-Authenticated-Subject; matches header/log safety. */
 export const MAX_AUTHENTICATED_SUBJECT_CHARS = 128;
 
@@ -54,6 +57,16 @@ export const MAX_SEARCH_SHORT_STRING_LIST = 20;
 
 /** Entity summary: grape names per result. */
 export const MAX_ENTITY_SUMMARY_GRAPES = 20;
+
+/** Entity summary: max pairing tags per result. */
+export const MAX_ENTITY_SUMMARY_PAIRING_TAGS = 20;
+
+/** Entity summary: max occasion tags per result. */
+export const MAX_ENTITY_SUMMARY_OCCASIONS = 20;
+
+/** Entity summary: max certifications per result. */
+export const MAX_ENTITY_SUMMARY_CERTIFICATIONS = 20;
+
 
 /**
  * Bounded relevance_score magnitude: avoids NaN/Infinity and absurd floats
@@ -158,6 +171,24 @@ export const HTTP_STATUS_UNSUPPORTED_MEDIA_TYPE = 415;
 
 /** Default Fastify JSON body size limit (1 MiB) when options omit bodyLimit. */
 export const HTTP_DEFAULT_BODY_LIMIT_BYTES = 1_048_576;
+
+/**
+ * CORS preflight cache lifetime (seconds): 24 h.
+ * Browsers cache the preflight OPTIONS response for this duration,
+ * reducing round-trips on credentialed cross-origin requests.
+ * Rule 30: domain constant used in server.ts — extract here, not inline.
+ */
+export const CORS_PREFLIGHT_MAX_AGE_SECONDS =
+  HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE; // 86 400 s
+
+/**
+ * OpenAPI document cache lifetime (seconds): 1 h.
+ * The document is derived from static route contracts and never changes
+ * during a process lifetime, so a long CDN/browser cache is safe.
+ * Rule 30: domain constant used in openapi.route.ts — extract here, not inline.
+ */
+export const OPENAPI_CACHE_MAX_AGE_SECONDS =
+  MINUTES_PER_HOUR * SECONDS_PER_MINUTE; // 3 600 s
 
 /** Default TCP connection handshake timeout (ms). */
 export const HTTP_DEFAULT_CONNECTION_TIMEOUT_MS = 10_000;

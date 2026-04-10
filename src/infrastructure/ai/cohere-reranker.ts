@@ -14,9 +14,11 @@ import {
   fetchWithTimeout,
   isAbortError,
 } from '../http/fetch-with-timeout.js';
+import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;
 
@@ -201,10 +203,22 @@ export class CohereReranker implements RerankerPort {
 
     const scored: Array<{ entityId: EntityId; score: number }> = [];
     for (const item of data.results) {
+      // Guard: Cohere index must be a non-negative integer within candidates bounds.
+      // A negative or out-of-range index silently drops the result (candidates[N]
+      // is undefined). Log so operators can detect a misbehaving proxy or model.
+      if (!Number.isInteger(item.index) || item.index < 0 || item.index >= candidates.length) {
+        bootstrapLogger.warn(
+          { index: item.index, candidatesLength: candidates.length },
+          '[CohereReranker] result index out of bounds — dropping item',
+        );
+        continue;
+      }
       const candidate = candidates[item.index];
       if (candidate === undefined || !isEntityId(candidate.entityId)) continue;
       if (!Number.isFinite(item.relevance_score)) continue;
-      scored.push({ entityId: candidate.entityId, score: item.relevance_score });
+      // clamp01: Cohere's spec implies [0,1] but does not guarantee it — a score
+      // outside this range would corrupt downstream calibration and ranking.
+      scored.push({ entityId: candidate.entityId, score: clamp01(item.relevance_score) });
     }
 
     scored.sort((a, b) => b.score - a.score);

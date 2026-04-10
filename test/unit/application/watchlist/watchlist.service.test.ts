@@ -61,6 +61,7 @@ describe('WatchlistService', () => {
 
     await expect(service.recordDeliveryLog({
       watchlistId: randomUUID(),
+      userId: 'owner-1',
       attempt: 1,
       statusCode: 200,
       errorMessage: null,
@@ -76,6 +77,7 @@ describe('WatchlistService', () => {
 
     await expect(service.recordDeliveryLog({
       watchlistId: entry.id,
+      userId: 'owner-1',
       attempt: 1,
       statusCode: 200,
       errorMessage: null,
@@ -84,6 +86,31 @@ describe('WatchlistService', () => {
       watchlistId: entry.id,
       userId: 'owner-1',
     })).resolves.toHaveLength(1);
+  });
+
+  it('rejects delivery log when userId does not match watchlist owner (cross-user log pollution guard)', async () => {
+    const service = createService();
+    const entry = await service.create({
+      userId: 'owner-1',
+      entityId: 'wine-opus-one-2018',
+      triggerConditions: [],
+      callbackUrl: 'https://example.com/webhook',
+      expiresAt: null,
+    });
+
+    await expect(service.recordDeliveryLog({
+      watchlistId: entry.id,
+      userId: 'attacker-2',
+      attempt: 1,
+      statusCode: 200,
+      errorMessage: null,
+    })).resolves.toBe(false);
+
+    // Owner's log must be empty — attacker did not pollute it
+    await expect(service.listDeliveries({
+      watchlistId: entry.id,
+      userId: 'owner-1',
+    })).resolves.toHaveLength(0);
   });
 });
 

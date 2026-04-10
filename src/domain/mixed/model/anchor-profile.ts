@@ -21,10 +21,10 @@ export interface AnchorProfile {
   /** Grape varieties used in this wine. */
   readonly grapes: readonly string[];
 
-  /** Body level on a 1-5 scale (1 = light, 5 = full). */
+  /** Body level [0, 1] normalised (0 = light, 1 = full). Stored as float in Vespa. */
   readonly body: number;
 
-  /** Sweetness level on a 1-5 scale (1 = bone dry, 5 = sweet). */
+  /** Sweetness level [0, 1] normalised (0 = bone dry, 1 = sweet). Stored as float in Vespa. */
   readonly sweetness: number;
 
   /** Style descriptor (e.g. "bold red", "crisp white", "sparkling"). */

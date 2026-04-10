@@ -124,11 +124,11 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   /** Natural-language summary used for semantic embedding. */
   readonly semanticSummary: string;
 
-  /** Body score (e.g. 1-5 scale). */
-  readonly body: number;
+  /** Body score [0,1] normalised. Absent when not present in the index document. */
+  readonly body?: number | undefined;
 
-  /** Sweetness score (e.g. 1-5 scale). */
-  readonly sweetness: number;
+  /** Sweetness score [0,1] normalised. Absent when not present in the index document. */
+  readonly sweetness?: number | undefined;
 
   /** Wine style descriptor (e.g. "bold red", "crisp white"). */
   readonly style: string;

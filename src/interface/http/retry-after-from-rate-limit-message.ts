@@ -3,8 +3,7 @@
  * "Rate limit exceeded, retry in 1 minute".
  */
 
-const SECONDS_PER_MINUTE = 60;
-const MILLISECONDS_PER_SECOND = 1000;
+import { SECONDS_PER_MINUTE, MS_PER_SECOND as MILLISECONDS_PER_SECOND } from '../../domain/shared/utils/time-units.js';
 const RETRY_AFTER_FALLBACK_SECONDS = 60;
 const RETRY_AFTER_MIN_SECONDS = 1;
 

@@ -7,6 +7,12 @@
 
 import type { RetrievalMode } from '../../query/model/retrieval-mode.js';
 import { createHash } from 'crypto';
+import { MINUTES_PER_HOUR, SECONDS_PER_MINUTE } from '../../shared/utils/time-units.js';
+
+/** 1 hour in seconds — standard TTL for stable entity-level cache entries. */
+const ONE_HOUR_SECONDS = MINUTES_PER_HOUR * SECONDS_PER_MINUTE;
+/** 30 minutes in seconds — TTL for browse entries that may shift with crawl updates. */
+const HALF_HOUR_SECONDS = ONE_HOUR_SECONDS / 2;
 
 /** Truncate SHA-256 hex in Redis keys (bounded length, still low collision rate). */
 const CACHE_KEY_HASH_HEX_PREFIX_LENGTH = 16;
@@ -292,12 +298,12 @@ function hashDeterministic(input: string): string {
  * Defines cacheability rules and TTL for each mode.
  */
 export const CACHE_MODE_CONFIG = {
-  entity_lookup: { cacheable: true, ttlSeconds: 3600 },
+  entity_lookup: { cacheable: true, ttlSeconds: ONE_HOUR_SECONDS },
   entity_resolution: { cacheable: false, ttlSeconds: 0 }, // Ambiguity-dependent
-  attribute_search: { cacheable: true, ttlSeconds: 3600 },
-  constraint_filter: { cacheable: true, ttlSeconds: 3600 },
-  producer_browse: { cacheable: true, ttlSeconds: 1800 },
-  region_browse: { cacheable: true, ttlSeconds: 1800 },
+  attribute_search: { cacheable: true, ttlSeconds: ONE_HOUR_SECONDS },
+  constraint_filter: { cacheable: true, ttlSeconds: ONE_HOUR_SECONDS },
+  producer_browse: { cacheable: true, ttlSeconds: HALF_HOUR_SECONDS },
+  region_browse: { cacheable: true, ttlSeconds: HALF_HOUR_SECONDS },
   compare_candidates: { cacheable: false, ttlSeconds: 0 }, // Too specific
   recommendation: { cacheable: false, ttlSeconds: 0 }, // User-dependent
   similar_items: { cacheable: false, ttlSeconds: 0 }, // Anchor-dependent

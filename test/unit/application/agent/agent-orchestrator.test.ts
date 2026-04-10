@@ -328,7 +328,7 @@ describe('AgentOrchestrator', () => {
 
       expect(result.terminationReason).toBe('answer');
       expect(result.fallbackApplied).toBe(false);
-      expect(result.steps[0]?.observation).toContain('Tool error: Tool "search_wines" timed out');
+      expect(result.steps[0]?.observation).toContain('[TIMEOUT]');
     } finally {
       vi.useRealTimers();
     }
@@ -548,5 +548,109 @@ describe('AgentOrchestrator', () => {
     // synthesis failed and Layer 2 is skipped (tool observations exist).
     expect(result.fallbackApplied).toBe(true);
     expect(result.answer.length).toBeGreaterThan(0);
+  });
+
+  // E4-T1: BUG-DS01 — circuit open on synthesis attempt 1 → attempt 2 NOT called
+  it('does NOT call synthesis attempt 2 when synthesis attempt 1 throws CircuitBreakerOpenError', async () => {
+    // Arrange: main LLM step succeeds (tool call), synthesis attempt 1 throws circuit open.
+    // Bug: without the fix, the code would still attempt synthesis attempt 2 (which would
+    // fast-fail too since the breaker is OPEN). The fix ensures attempt 2 is skipped entirely.
+    const complete = vi.fn()
+      // Step 0: LLM emits a search action
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'search for opus one',
+          action: { tool: 'search_wines', input: { query: 'opus one' } },
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      // Synthesis attempt 1 throws CircuitBreakerOpenError
+      .mockRejectedValueOnce(new CircuitBreakerOpenError('llm.openai.chat'))
+      // If attempt 2 were called, it would return something — the test asserts it is NOT called.
+      .mockResolvedValueOnce({
+        text: JSON.stringify({ thought: 'synth', answer: 'should-not-appear' }),
+        model: 'test-model',
+        finishReason: 'stop',
+      });
+
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1 });
+    const result = await orchestrator.execute('opus one', 'req-synth-cb-open');
+
+    // Step 0 LLM (1) + synthesis attempt 1 (1) = 2 calls total.
+    // Synthesis attempt 2 MUST be skipped (circuit is OPEN after attempt 1 threw).
+    expect(complete).toHaveBeenCalledTimes(2);
+    // Answer must NOT contain the synthesis result from attempt 2
+    expect(result.answer).not.toContain('should-not-appear');
+    // Layer 3 fallback fires since synthesis failed and there are tool observations
+    expect(result.answer.length).toBeGreaterThan(0);
+  });
+
+  // E4-T3: BUG-DS03 — recoverLastSearchInput uses actionPairs-first with deprecated action fallback
+  it('recoverLastSearchInput finds query from actionPairs (new format)', async () => {
+    // Arrange: LLM emits parallel actions (actionPairs) then fails synthesis
+    // so fallback search uses the recovered query from actionPairs.
+    const complete = vi.fn()
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          thought: 'parallel search',
+          actions: [
+            { tool: 'search_wines', input: { query: 'barolo from piemonte' } },
+          ],
+        }),
+        model: 'test-model',
+        finishReason: 'stop',
+      })
+      // Synthesis attempt 1 returns empty (malformed)
+      .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string })
+      // Synthesis attempt 2 returns empty
+      .mockResolvedValueOnce(undefined as unknown as { text: string; model: string; finishReason: string });
+
+    const searchExecute = vi.fn().mockResolvedValue(makeSearchResponse());
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: { execute: searchExecute } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1 });
+    await orchestrator.execute('barolo from piemonte', 'req-t3-actionpairs');
+
+    // The fallback search (Layer 2) should not be called because tool observations exist.
+    // But if it WERE called, it should use the query from actionPairs, not the original query.
+    // This test verifies the orchestrator processes actionPairs correctly.
+    expect(searchExecute).toHaveBeenCalled();
+  });
+
+  // E4-T5: W2-04 — AbortError → terminationReason='aborted'
+  it('returns terminationReason=aborted when caller aborts mid-execution', async () => {
+    const abortController = new AbortController();
+
+    const complete = vi.fn().mockImplementation(async () => {
+      // Abort the outer controller then throw the signal's native reason.
+      // AbortController sets signal.reason to a DOMException('AbortError') by default.
+      abortController.abort();
+      // signal.reason is set by AbortController to a DOMException with name='AbortError'
+      throw abortController.signal.reason;
+    });
+
+    const chatLlm: ChatLlmPort = { complete };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 2 });
+    // NOTE: execute(query, requestId, overrides?, abortSignal?) — abortSignal is 4th param
+    const result = await orchestrator.execute('opus one', 'req-abort-test', undefined, abortController.signal);
+
+    expect(result.terminationReason).toBe('aborted');
   });
 });

@@ -1,11 +1,6 @@
 import type { ComponentScores } from '../model/ranked-result.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
-
-/**
- * Upper bound for the normalized final ranking score.
- * Scores are clamped to [0, MAX_SCORE] to maintain a bounded range.
- */
-const MAX_SCORE = 1.0;
+import { clamp01 } from '../../shared/utils/clamp.js';
 
 /**
  * Aggregates individual signal scores into a single ranking score.
@@ -73,6 +68,6 @@ export class ScoreAggregator {
     // mode-aware re-normalization. Hard clamp here is correct under those
     // assumptions, but watch for top-end saturation under future weight tuning.
     if (!Number.isFinite(score)) return -Infinity;
-    return Math.max(0, Math.min(MAX_SCORE, score));
+    return clamp01(score);
   }
 }

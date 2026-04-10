@@ -4,6 +4,7 @@ import {
   DEFAULT_WEIGHTS,
   resolveWeights,
 } from '../model/scoring-weights.js';
+import type { QueryClass } from '../../shared/types/index.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
 import { getModeWeights } from '../model/mode-weights.js';
@@ -233,6 +234,45 @@ describe('resolveChannelAwareWeights', () => {
       );
       expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(DEFAULT_WEIGHTS), 10);
     });
+  });
+});
+
+// SCAN4-12: Validate that DEFAULT_WEIGHTS and all query-class overrides have
+// non-penalty weight sums in a reasonable range [0.90, 1.05].
+// ambiguous_short_form intentionally has higher uncertaintyPenalty (0.10)
+// which leaves non-penalty sum at 0.90 — this is documented intentional
+// behaviour and is tested explicitly below so regressions are caught.
+describe('resolveWeights — non-penalty sum invariant (SCAN4-12)', () => {
+  const ALL_QUERY_CLASSES: readonly QueryClass[] = [
+    'anchored_similarity',
+    'pure_constraint',
+    'semantic_preference',
+    'short_entity',
+    'ambiguous_short_form',
+    'comparison_query',
+  ];
+
+  it('DEFAULT_WEIGHTS non-penalty sum is in [0.90, 1.05]', () => {
+    const sum = nonPenaltySum(DEFAULT_WEIGHTS);
+    expect(sum).toBeGreaterThanOrEqual(0.90);
+    expect(sum).toBeLessThanOrEqual(1.05);
+  });
+
+  for (const queryClass of ALL_QUERY_CLASSES) {
+    it(`resolveWeights('${queryClass}') non-penalty sum is in [0.90, 1.05]`, () => {
+      const weights = resolveWeights(queryClass);
+      const sum = nonPenaltySum(weights);
+      expect(sum).toBeGreaterThanOrEqual(0.90);
+      expect(sum).toBeLessThanOrEqual(1.05);
+    });
+  }
+
+  // ambiguous_short_form has uncertaintyPenalty=0.10 (vs 0.05 elsewhere),
+  // so its non-penalty sum is intentionally 0.90 — verify this explicitly.
+  it('ambiguous_short_form has non-penalty sum of exactly 0.90 (higher uncertainty penalty)', () => {
+    const weights = resolveWeights('ambiguous_short_form');
+    expect(nonPenaltySum(weights)).toBeCloseTo(0.90, 10);
+    expect(weights.uncertaintyPenalty).toBe(0.10);
   });
 });
 

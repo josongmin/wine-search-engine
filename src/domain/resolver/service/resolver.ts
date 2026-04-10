@@ -21,6 +21,7 @@ import type {
 } from '../port/learned-matcher.port.js';
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
+import { CONFORMAL_ALPHA } from '../../shared/config/conformal-config.js';
 
 /** Valid conformal alpha interval is (0, this upper bound]. */
 const CONFORMAL_ALPHA_MAX_EXCLUSIVE = 0.5;
@@ -71,6 +72,7 @@ export interface ResolverInput {
 /**
  * Default significance level (alpha) for conformal prediction.
  *
+ * Imported from SSoT: src/domain/shared/config/conformal-config.ts (W2-BUG-09).
  * At alpha = 0.3 the prediction set has at least 70 % marginal coverage.
  * This means: resolve when C ≥ 0.7, ambiguous when C ≥ 0.4.
  *
@@ -81,7 +83,7 @@ export interface ResolverInput {
  *
  * Value should be tuned via AURC on the gate eval set (RFC-009 §5.3).
  */
-export const DEFAULT_ALPHA = 0.3;
+export const DEFAULT_ALPHA = CONFORMAL_ALPHA;
 
 const LOOKUP_STRATEGY_SCORE_WEIGHTS = {
   exact: 0.06,

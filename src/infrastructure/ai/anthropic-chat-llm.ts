@@ -216,6 +216,13 @@ export class AnthropicChatLlm implements ChatLlmPort {
           throw new Error(`Anthropic chat: unexpected response — ${JSON.stringify(data).slice(0, ERROR_PREVIEW_CHARS)}`);
         }
 
+        // Guard empty content array — Anthropic may return `content: []` for
+        // tool-use-only responses or on malformed requests. An empty array is
+        // structurally valid per isAnthropicResponse() but produces no text,
+        // causing silent downstream failures instead of an actionable error.
+        if (data.content.length === 0) {
+          throw new Error('Anthropic chat: LLM returned empty content array');
+        }
         const textBlock = data.content.find((b) => b.type === 'text');
         const text = textBlock?.text ?? '';
 
@@ -223,12 +230,15 @@ export class AnthropicChatLlm implements ChatLlmPort {
         // Anthropic's usage exposes cache_read_input_tokens (cache hit) and
         // cache_creation_input_tokens (first time prompt was cached, charged at 1.25x).
         const usage = data.usage;
-        const cacheReadTokens = usage?.cache_read_input_tokens ?? 0;
-        const cacheCreationTokens = usage?.cache_creation_input_tokens ?? 0;
+        // `?? 0` alone passes NaN (NaN ?? 0 === NaN). Use Number.isFinite() to guard
+        // against malformed API responses corrupting token tallies and cost calculations.
+        const safeTokens = (n: number | undefined): number => (Number.isFinite(n) ? (n as number) : 0);
+        const cacheReadTokens = safeTokens(usage?.cache_read_input_tokens);
+        const cacheCreationTokens = safeTokens(usage?.cache_creation_input_tokens);
         // For cost accounting: cache_read = cached input (10% of normal),
         // cache_creation = uncached input (charged once at 1.25x in Anthropic but
         // approximated as 1x here for conservatism).
-        const baseInputTokens = (usage?.input_tokens ?? 0) + cacheCreationTokens;
+        const baseInputTokens = safeTokens(usage?.input_tokens) + cacheCreationTokens;
         recordResponse({
           responseModel: data.model,
           ...(data.stop_reason !== null ? { finishReason: data.stop_reason } : {}),
@@ -236,7 +246,7 @@ export class AnthropicChatLlm implements ChatLlmPort {
             ? {
                 usage: {
                   inputTokens: baseInputTokens,
-                  outputTokens: usage.output_tokens ?? 0,
+                  outputTokens: safeTokens(usage.output_tokens),
                   ...(cacheReadTokens > 0 ? { cachedInputTokens: cacheReadTokens } : {}),
                 },
               }

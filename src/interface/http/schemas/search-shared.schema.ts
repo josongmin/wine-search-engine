@@ -7,9 +7,17 @@ import {
   MAX_QUERY_BUDGET_LATENCY_MS,
   MAX_QUERY_BUDGET_RERANK_LIMIT,
   MAX_SEARCH_CONTEXT_LOCALE_CHARS,
+  MAX_SEARCH_METADATA_OBJECT_KEYS,
   MAX_SESSION_ENTITY_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
 } from '../constants.js';
+
+function boundedRecord<V extends z.ZodTypeAny>(value: V, max: number) {
+  return z.record(value).refine(
+    (rec) => Object.keys(rec).length <= max,
+    { message: `record must have at most ${max} keys` },
+  );
+}
 
 export const QueryStringSchema = z
   .string()
@@ -50,12 +58,12 @@ export const HybridOptionsSchema = z.object({
 
 export const DecisionSnapshotSchema = z.object({
   snapshot_id: z.string().min(1),
-  model_versions: z.record(z.string(), z.string()),
-  index_versions: z.record(z.string(), z.string()),
+  model_versions: boundedRecord(z.string(), MAX_SEARCH_METADATA_OBJECT_KEYS),
+  index_versions: boundedRecord(z.string(), MAX_SEARCH_METADATA_OBJECT_KEYS),
   policy_rule_version: z.string().min(1),
   threshold_profile_id: z.string().min(1),
   planner_version: z.string().min(1),
-  feature_flags: z.record(z.string(), z.boolean()),
+  feature_flags: boundedRecord(z.boolean(), MAX_SEARCH_METADATA_OBJECT_KEYS),
   response_contract_version: z.literal('search_response_v1'),
   nondeterminism_notes: z.string().optional(),
 }).strict();

@@ -90,6 +90,14 @@ function constraintToSparseFilterTokens(
         return [`grape_primary_not_in:${joined}`, `grapes_not_in:${joined}`];
       }
       return stringEq('grape_primary');
+    // IDX-05 NOTE — SOFT_CONSTRAINT_ATTRIBUTES and hard filter cases:
+    // style, price_band, flavor_profile, certification are in SOFT_CONSTRAINT_ATTRIBUTES
+    // (preference signals routed to the soft bundle by constraint-compiler.ts). However
+    // their cases are intentionally kept here because the *exclusion* operators
+    // (exclude / not_in) produce hard NOT-filters even for soft attributes — users saying
+    // "no oaky style" or "not certified biodynamic" mean a hard exclusion, not a penalty.
+    // stringEq() only emits tokens for =, in, exclude, not_in; positive '=' or 'in'
+    // constraints reach this function only via direct calls, not the production path.
     case 'style':
       return stringEq('style');
     case 'price_band':
@@ -105,40 +113,13 @@ function constraintToSparseFilterTokens(
     case 'producer_type':
       return stringEq('producer_type');
 
-    case 'body': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) {
-        return [];
-      }
-      if (operator === '>=') return [`body_min:${value}`];
-      if (operator === '<=') return [`body_max:${value}`];
-      if (operator === '=') return [`body_min:${value}`, `body_max:${value}`];
-      return [];
-    }
-
-    case 'acidity': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return [];
-      if (operator === '>=') return [`acidity_min:${value}`];
-      if (operator === '<=') return [`acidity_max:${value}`];
-      if (operator === '=') return [`acidity_min:${value}`, `acidity_max:${value}`];
-      return [];
-    }
-
-    case 'tannin': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return [];
-      if (operator === '>=') return [`tannin_min:${value}`];
-      // '<=' is the key case for "타닌 낮은" queries — was previously silently dropped
-      if (operator === '<=') return [`tannin_max:${value}`];
-      if (operator === '=') return [`tannin_min:${value}`, `tannin_max:${value}`];
-      return [];
-    }
-
-    case 'finish_length': {
-      if (typeof value !== 'number' || !Number.isFinite(value)) return [];
-      if (operator === '>=') return [`finish_length_min:${value}`];
-      if (operator === '<=') return [`finish_length_max:${value}`];
-      if (operator === '=') return [`finish_length_min:${value}`, `finish_length_max:${value}`];
-      return [];
-    }
+    // IDX-05: acidity, tannin, body, finish_length, critic_score, producer_prestige are SOFT
+    // (penalty-only numeric signals). constraint-compiler.ts routes all
+    // SOFT_CONSTRAINT_ATTRIBUTES to the soft bundle, so these never reach
+    // hardConstraintsToSparseFilterTokens in production. Cases removed to prevent the
+    // footgun where a direct call silently generates a hard filter that collapses recall.
+    // drinking_window is also SOFT — same reasoning, case removed below.
+    // Ref: SOFT_CONSTRAINT_ATTRIBUTES in src/domain/shared/constants/constraint-attributes.ts
 
     case 'price':
     case 'price_usd': {
@@ -171,28 +152,13 @@ function constraintToSparseFilterTokens(
       return [];
     }
 
-    case 'critic_score':
-    case 'critic_score_normalized': {
-      if (
-        (operator === '>=' || operator === '=') &&
-        typeof value === 'number' &&
-        Number.isFinite(value)
-      ) {
-        return [`critic_score_min:${value}`];
-      }
-      return [];
-    }
+    // IDX-05 (extended): critic_score and producer_prestige are also SOFT_CONSTRAINT_ATTRIBUTES —
+    // preference signals, not hard identity filters. Cases removed for the same reason above.
 
-    case 'producer_prestige': {
-      if (
-        (operator === '>=' || operator === '=') &&
-        typeof value === 'number' &&
-        Number.isFinite(value)
-      ) {
-        return [`producer_prestige_min:${value}`];
-      }
-      return [];
-    }
+    // IDX-05 (drinking_window): drinking_window is SOFT_CONSTRAINT_ATTRIBUTES — it is a
+    // preference signal ("ready to drink in 2026"), not a hard identity constraint. Hard-
+    // filtering on it collapses recall to near-zero for most queries. Case removed; the
+    // soft ranking path handles this via Vespa rank-profile scoring, not a WHERE clause.
 
     case 'alcohol':
     case 'alcohol_pct': {
@@ -200,13 +166,6 @@ function constraintToSparseFilterTokens(
       if (operator === '>=') return [`alcohol_min:${value}`];
       if (operator === '<=') return [`alcohol_max:${value}`];
       if (operator === '=') return [`alcohol_min:${value}`, `alcohol_max:${value}`];
-      return [];
-    }
-
-    case 'drinking_window': {
-      if (operator === '=' && typeof value === 'number' && Number.isFinite(value)) {
-        return [`drinking_window_now:${Math.floor(value)}`];
-      }
       return [];
     }
 

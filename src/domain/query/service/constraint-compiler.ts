@@ -13,6 +13,7 @@ import {
 import { buildRetrievalPlan, type RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
 import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
+import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
@@ -21,10 +22,7 @@ export interface ConstraintCompilerResult {
   readonly resolvedEntities: readonly ResolvedEntity[];
 }
 
-const SOFT_CONSTRAINT_ATTRIBUTES = new Set([
-  'body', 'sweetness', 'acidity', 'tannin', 'style',
-  'price_band', 'occasion',
-]);
+// SOFT_CONSTRAINT_ATTRIBUTES is imported from SSoT: ../../shared/constants/constraint-attributes.js
 const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 
 export class ConstraintCompiler {

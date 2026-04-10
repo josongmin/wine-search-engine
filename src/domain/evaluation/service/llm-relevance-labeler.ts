@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { coerceFiniteNumber } from '../../shared/utils/zod-coerce.js';
 import type { ChatLlmPort } from '../../ai/port/chat-llm.port.js';
 import type { RelevanceGrade } from '../model/relevance-judgment.js';
 
@@ -65,13 +66,6 @@ export interface LabelingResult {
 
 // ── Zod schema (NOT .strict() — LLM output may include extra fields) ────────
 
-/**
- * Accept both number and string for numeric fields — LLMs routinely
- * emit "0.75" instead of 0.75 (CLAUDE.md schema quality bar).
- */
-const coerceFiniteNumber = z.union([z.number(), z.string().transform(Number)]).pipe(
-  z.number().finite(),
-);
 
 const LabelingResponseSchema = z.object({
   grade: coerceFiniteNumber.pipe(z.number().int().min(0).max(3)),

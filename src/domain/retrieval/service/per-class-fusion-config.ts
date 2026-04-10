@@ -11,11 +11,8 @@
  * magic number is annotated with the heuristic it encodes.
  */
 
-/**
- * Standard RRF smoothing constant (rank + k in denominator).
- * k=60 is the canonical value from Cormack/Clarke/Buettcher (2009).
- */
-const RRF_K_DEFAULT = 60;
+// Rule 30 SSoT: k=60 is defined once in rrf.ts; import, do not redefine.
+import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 
 /**
  * Tighter k for anchored/specific lookups — rank-1 hits should dominate
@@ -75,7 +72,7 @@ export type QueryClass =
  * strings. Neutral weights, canonical RRF k.
  */
 export const DEFAULT_FUSION_CONFIG: FusionConfig = {
-  rrfK: RRF_K_DEFAULT,
+  rrfK: RRF_DEFAULT_K,
   sparseWeight: WEIGHT_NEUTRAL,
   denseWeight: WEIGHT_NEUTRAL,
   anchorWeight: WEIGHT_NEUTRAL,
@@ -102,7 +99,7 @@ const FUSION_SPECIFIC_WINE: FusionConfig = {
  * Standard k so the tail contributes to recall.
  */
 const FUSION_BROWSE: FusionConfig = {
-  rrfK: RRF_K_DEFAULT,
+  rrfK: RRF_DEFAULT_K,
   sparseWeight: WEIGHT_NEUTRAL,
   denseWeight: WEIGHT_BOOST_MILD,
   anchorWeight: WEIGHT_NEUTRAL,

@@ -21,7 +21,10 @@
 /**
  * Ranking features extracted from retrieval results.
  */
+import { z } from 'zod';
 import { clamp01 } from '../../shared/utils/clamp.js';
+import { compareScoreDescending } from '../../shared/utils/stable-comparator.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 
 /**
  * Deterministic pseudo-random number generator (xorshift32).
@@ -38,6 +41,102 @@ const XORSHIFT32_RIGHT = 17;
 const XORSHIFT32_LEFT2 = 5;
 /** 2^32 — normalizes unsigned 32-bit xorshift output to [0, 1). */
 const UINT32_TO_UNIT_INTERVAL_DIVISOR = 0x100000000;
+
+/** E2-T2: Zod schema for loaded LTR model weights — all must be finite numbers. */
+const FiniteWeightsSchema = z.array(z.number().finite()).min(1);
+
+/**
+ * E2-T2: Validates loaded model weights and falls back to uniform weights on failure.
+ * Returns { weights, usedFallback } so callers can log + report.
+ */
+export function validateAndNormalizeWeights(
+  rawWeights: readonly number[],
+): { weights: readonly number[]; usedFallback: boolean } {
+  const parsed = FiniteWeightsSchema.safeParse(rawWeights);
+  if (!parsed.success) {
+    bootstrapLogger.warn(
+      { reason: parsed.error.message, rawLength: rawWeights.length },
+      '[LambdaMART] Loaded weights failed validation — falling back to uniform weights',
+    );
+    const uniformWeight = rawWeights.length > 0 ? 1 / rawWeights.length : LAMBDAMART_UNIFORM_FEATURE_WEIGHT;
+    const fallback = Array.from({ length: Math.max(1, rawWeights.length) }, () => uniformWeight);
+    return { weights: fallback, usedFallback: true };
+  }
+  return { weights: parsed.data, usedFallback: false };
+}
+
+/**
+ * E2-T5: Check if the model's featureSchemaHash matches the current schema hash.
+ * Logs a warning when there is a mismatch — the model may produce incorrect scores.
+ * The log parameter is injectable for testability.
+ */
+export function checkFeatureParityAndWarn(
+  modelHash: string,
+  currentHash: string,
+  log: { warn: (ctx: Record<string, unknown>, msg: string) => void } = bootstrapLogger,
+): void {
+  if (modelHash !== currentHash) {
+    log.warn(
+      { modelHash, currentHash },
+      '[LambdaMART] LTR feature schema mismatch — model may produce incorrect scores',
+    );
+  }
+}
+
+/**
+ * E2-T6: Guard for featureNames index access.
+ * Throws a clear invariant error when j is out of bounds.
+ * Exported for testability.
+ */
+export function throwOnUndefinedFeatureName(
+  featureNames: readonly string[],
+  j: number,
+): string {
+  const fname = featureNames[j];
+  if (fname === undefined) {
+    throw new Error(
+      `LambdaMART invariant: featureNames[${j}] undefined (dimension=${LAMBDAMART_FEATURE_DIMENSION})`,
+    );
+  }
+  return fname;
+}
+
+/**
+ * E2-T4: Named weight constants for DEFAULT_HEURISTIC_WEIGHTS.
+ * Domain rationale per constant below. Sum = 1.00.
+ */
+/** BM25 lexical relevance — useful but less discriminative for wines than embedding. */
+const W_BM25 = 0.10;
+/** Embedding (semantic) match — primary signal for semantic queries and synonyms. */
+const W_SEMANTIC = 0.20;
+/** Producer/wine popularity — boosts well-known labels across query classes. */
+const W_POPULARITY = 0.15;
+/** Vintage recency — relevant for aged-wine and cellaring queries. */
+const W_RECENCY = 0.10;
+/** Query-class structural match — high precision for exact-entity queries. */
+const W_CLASS_MATCH = 0.15;
+/** Constraint attribute match — crucial for region/grape/style filtered search. */
+const W_ATTRIBUTE_MATCH = 0.15;
+/** Diversity penalty — suppresses near-duplicate results in candidate set. */
+const W_DIVERSITY = 0.05;
+/** Multilingual coverage — important for Korean-script and transliterated queries. */
+const W_MULTILINGUAL = 0.10;
+// Sum check: 0.10+0.20+0.15+0.10+0.15+0.15+0.05+0.10 = 1.00
+
+/**
+ * Default heuristic weights for 8 LambdaMART features, summing to exactly 1.0.
+ * Order matches featureNames in trainLambdaMARTModel and scoreFeaturesRaw.
+ */
+export const DEFAULT_HEURISTIC_WEIGHTS: readonly number[] = [
+  W_BM25,
+  W_SEMANTIC,
+  W_POPULARITY,
+  W_RECENCY,
+  W_CLASS_MATCH,
+  W_ATTRIBUTE_MATCH,
+  W_DIVERSITY,
+  W_MULTILINGUAL,
+];
 
 /** Eight ranking features → uniform prior sums to 1.0 for stable cold-start. */
 const LAMBDAMART_UNIFORM_FEATURE_WEIGHT = 0.125;
@@ -212,7 +311,9 @@ export function trainLambdaMARTModel(
         const lambda = labelDiff * stableSigmoid(-scoreDiff);
 
         for (let j = 0; j < LAMBDAMART_FEATURE_DIMENSION; j++) {
-          const fname = (featureNames[j] ?? featureNames[0]) as keyof RankingFeatures;
+          // E2-T6: throwOnUndefinedFeatureName guards against out-of-bounds access.
+          // featureNames has exactly LAMBDAMART_FEATURE_DIMENSION elements; j is always in range.
+          const fname = throwOnUndefinedFeatureName(featureNames, j) as keyof RankingFeatures;
           const featureDiff = example.features1[fname] - example.features2[fname];
           const currentGradient = gradients[j] ?? 0;
           gradients[j] = currentGradient + lambda * featureDiff;
@@ -267,6 +368,22 @@ export function trainLambdaMARTModel(
 
     const validationNdcg = computeValidationNdcg(classExamples, normalizedWeights, bias);
 
+    // Fix E: Warn when validation NDCG is pathologically low. NDCG < 0.1 almost always
+    // means all training labels are zero (degenerate pool) or the model has diverged.
+    // This is the earliest observable signal before the model pollutes production ranking.
+    const NDCG_DEGENERATE_THRESHOLD = 0.1;
+    if (validationNdcg < NDCG_DEGENERATE_THRESHOLD) {
+      bootstrapLogger.warn(
+        {
+          queryClass,
+          validationNdcg,
+          trainingExampleCount: classExamples.length,
+          ndcgThreshold: NDCG_DEGENERATE_THRESHOLD,
+        },
+        '[LambdaMART] Degenerate validation NDCG — all-zero labels or model divergence. Model will not rank meaningfully.',
+      );
+    }
+
     return {
       queryClass,
       weights: normalizedWeights,
@@ -280,12 +397,27 @@ export function trainLambdaMARTModel(
 /**
  * Scores a document's ranking using learned weights.
  * Inference path: clamp the score to [0,1] for downstream consumers.
+ *
+ * E2-T2: Validates weights via FiniteWeightsSchema — any NaN/Infinity weight
+ * triggers fallback to uniform weights before scoring.
+ * E2-T3: finalScore is clamped to [0, 1] via clamp01().
  */
 export function scoreDocument(
   features: RankingFeatures,
   weights: QueryClassWeights,
 ): number {
-  const raw = scoreFeaturesRaw(features, weights.weights, weights.bias);
+  const { weights: safeWeights } = validateAndNormalizeWeights(weights.weights);
+  // Guard bias: FiniteWeightsSchema only validates the weights array, not bias.
+  // A NaN/Infinity bias from a corrupted DB row would set score = bias before
+  // the feature loop runs, corrupting all LambdaMART scores silently.
+  const safeBias = Number.isFinite(weights.bias) ? weights.bias : LAMBDAMART_INITIAL_BIAS;
+  if (!Number.isFinite(weights.bias)) {
+    bootstrapLogger.warn(
+      { bias: weights.bias, queryClass: weights.queryClass },
+      '[LambdaMART] non-finite bias in loaded model — falling back to LAMBDAMART_INITIAL_BIAS',
+    );
+  }
+  const raw = scoreFeaturesRaw(features, safeWeights, safeBias);
   return clamp01(raw);
 }
 
@@ -315,7 +447,15 @@ function scoreFeaturesRaw(
   for (let i = 0; i < LAMBDAMART_FEATURE_DIMENSION; i++) {
     const fv = featureValues[i] ?? 0;
     const wv = weights[i] ?? 0;
-    if (!Number.isFinite(fv) || !Number.isFinite(wv)) continue;
+    if (!Number.isFinite(fv) || !Number.isFinite(wv)) {
+      // SCAN4-10: non-finite feature/weight must be loud — silent skip corrupts
+      // gradient signal during training and can mask data pipeline bugs.
+      bootstrapLogger.warn(
+        { featureIndex: i, fv, wv },
+        '[LambdaMART] non-finite value in scoreFeaturesRaw — skipping feature',
+      );
+      continue;
+    }
     score += fv * wv;
   }
   return score;
@@ -346,7 +486,7 @@ function computeValidationNdcg(
     ]);
 
     const ranked = scored
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => compareScoreDescending(a.score, b.score))
       .slice(0, LAMBDAMART_VALIDATION_NDCG_K);
 
     let dcg = 0;
@@ -364,7 +504,7 @@ function computeValidationNdcg(
     // produced a flat-but-wrong validation signal during model promotion.
     const sortedLabelsForIdcg = scored
       .map((s) => s.label)
-      .sort((a, b) => b - a)
+      .sort((a, b) => compareScoreDescending(a, b))
       .slice(0, LAMBDAMART_VALIDATION_NDCG_K);
     let idcg = 0;
     for (let i = 0; i < sortedLabelsForIdcg.length; i++) {

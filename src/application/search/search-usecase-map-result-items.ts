@@ -4,6 +4,7 @@ import {
   DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
   type DrinkingWindowUseCasePort,
 } from '../drinking-window/port/drinking-window-usecase.port.js';
+import { DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
 import {
   inferDrinkingWindowBlockingEligibility,
   inferDrinkingWindowConfidence,
@@ -57,7 +58,9 @@ export interface QueryLevelSensoryPriors {
 
 function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSensoryPriors): boolean {
   if (r.drinkingWindowStart !== undefined) return false;
-  if (r.vintageYear === undefined) return false;
+  // Rule 28: vintageYear=undefined is guarded above, but a NaN vintage from a
+  // corrupted index row would pass the undefined check and propagate into arithmetic.
+  if (r.vintageYear === undefined || !Number.isFinite(r.vintageYear)) return false;
   if (r.grapePrimaryEnc === undefined) return false;
   if (r.regionEnc === undefined) return false;
   if (r.countryEnc === undefined) return false;
@@ -113,10 +116,12 @@ export async function mapRankedResultsToResultItems(
           regionEnc: r.regionEnc!,
           countryEnc: r.countryEnc!,
           // Indexed sensory values take precedence; priors fill gaps.
-          body: r.body ?? sensoryPriors?.body ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
-          tannin: r.tannin ?? sensoryPriors?.tannin ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
-          acidity: r.acidity ?? sensoryPriors?.acidity ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
-          sweetness: r.sweetness ?? sensoryPriors?.sweetness ?? UNCERTAINTY_CONFIDENCE_NEUTRAL,
+          // All values are [0,1] normalised floats from Vespa/priors; scale to
+          // [1–5 ordinal] that the predictor expects.
+          body: ((r.body ?? sensoryPriors?.body ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+          tannin: ((r.tannin ?? sensoryPriors?.tannin ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+          acidity: ((r.acidity ?? sensoryPriors?.acidity ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+          sweetness: ((r.sweetness ?? sensoryPriors?.sweetness ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
           avgCriticProxyScore:
             r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
           targetYear,
@@ -149,7 +154,10 @@ export async function mapRankedResultsToResultItems(
     const inferredConstraints = r.inferredConstraints;
     let drinkingWindowBlock: DrinkingWindowBlock | undefined;
 
-    if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined) {
+    if (r.drinkingWindowStart !== undefined && r.drinkingWindowEnd !== undefined
+        && r.drinkingWindowStart <= r.drinkingWindowEnd) {
+      // Guard: inverted windows (start > end) from ETL bugs or Track-C backfill errors
+      // would fail the Zod response schema refine → HTTP 500. Omit the block instead.
       drinkingWindowBlock = {
         drinkingWindowStart: r.drinkingWindowStart,
         drinkingWindowEnd: r.drinkingWindowEnd,

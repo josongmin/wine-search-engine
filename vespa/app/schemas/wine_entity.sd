@@ -699,17 +699,17 @@ schema wine_entity {
   }
 
   # --- learned_sparse: SPLADE-style sparse tensor retrieval -----------------
-  # NOTE: disabled — dotProduct rank feature requires a weightedset field, not
-  # tensor<float>(token{}). Re-enable once the field is migrated or a
-  # sum(element_product(...)) expression is used instead.
-  # rank-profile learned_sparse inherits default {
-  #   inputs {
-  #     query(sparse_query_embedding) tensor<float>(token{})
-  #   }
-  #   first-phase {
-  #     expression: sum(query(sparse_query_embedding) * attribute(learned_sparse_weights))
-  #   }
-  # }
+  # Uses element-wise product + sum (tensor<float>(token{}) × tensor<float>(token{}))
+  # which is the correct expression for mapped tensor fields (not dotProduct which
+  # requires weightedset). dotProduct only works on weightedset fields.
+  rank-profile learned_sparse inherits default {
+    inputs {
+      query(sparse_query_embedding) tensor<float>(token{})
+    }
+    first-phase {
+      expression: sum(query(sparse_query_embedding) * attribute(learned_sparse_weights))
+    }
+  }
 
   # --- prestige_hybrid: for producer_browse / region_browse / compare modes --
   # BM25 is Laplace-normalised (K=25) to [0,1] before blending so it doesn't

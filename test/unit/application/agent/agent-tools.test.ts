@@ -378,4 +378,23 @@ describe('executeAgentTool', () => {
     const result = await executeAgentTool('search_wines', { query: '레드 와인 추천' }, deps, 'req-123');
     expect(result.observation).toContain('RETRIEVAL_QUALITY: unreliable');
   });
+
+  // BUG-DS02: LLMs routinely emit numeric fields as strings ("3" instead of 3).
+  // zod-coerce schemas must silently coerce these to numbers.
+  it('coerces string limit to number (BUG-DS02)', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse([]));
+    await expect(
+      executeAgentTool('search_wines', { query: '레드 와인', limit: '5' }, deps, 'req-123'),
+    ).resolves.not.toThrow();
+    const [req] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(req?.limit).toBe(5);
+  });
+
+  it('coerces string max_price_krw to number (BUG-DS02)', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse([]));
+    await executeAgentTool('search_wines', { query: '와인', max_price_krw: '50000' }, deps, 'req-123');
+    const [req] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    const parsed = (await import('../../../../src/domain/query/service/search-constraint-extractor.js')).extractSearchConstraints(req!.query);
+    expect(parsed.maxPriceKrw).toBe(50_000);
+  });
 });

@@ -22,11 +22,11 @@ export interface SimilarityCandidate {
   /** Grape varieties used. */
   readonly grapes: readonly string[];
 
-  /** Body level (1-5). */
-  readonly body: number;
+  /** Body level [0,1] normalised. Absent when not indexed. */
+  readonly body?: number | undefined;
 
-  /** Sweetness level (1-5). */
-  readonly sweetness: number;
+  /** Sweetness level [0,1] normalised. Absent when not indexed. */
+  readonly sweetness?: number | undefined;
 
   /** Style descriptor. */
   readonly style: string;
@@ -260,17 +260,26 @@ export class SimilarityScorer {
    * Computes proximity of body and sweetness attributes using L1 distance.
    *
    * Normalized to [0, 1] where 1.0 = identical attributes.
-   * Maximum possible L1 distance for two 1-5 attributes is 8.
+   * Both body and sweetness are [0, 1] floats (Vespa normalised scale),
+   * so max L1 distance per axis = 1, combined max = 2.
    */
   computeBodySweetnessProximity(
-    candidateBody: number,
-    candidateSweetness: number,
-    anchorBody: number,
-    anchorSweetness: number,
+    candidateBody: number | undefined,
+    candidateSweetness: number | undefined,
+    anchorBody: number | undefined,
+    anchorSweetness: number | undefined,
   ): number {
+    // When either value is absent, return neutral (0.5) rather than 0 or 1,
+    // consistent with how computeEmbeddingSimilarity handles missing data.
+    if (candidateBody === undefined || anchorBody === undefined
+        || candidateSweetness === undefined || anchorSweetness === undefined) {
+      // 0.5 = neutral similarity when data is absent (neither similar nor dissimilar)
+      // eslint-disable-next-line no-magic-numbers -- 0.5 is the neutral midpoint of [0,1] similarity scale
+      return 0.5;
+    }
     const bodyDist = Math.abs(candidateBody - anchorBody);
     const sweetDist = Math.abs(candidateSweetness - anchorSweetness);
-    const maxDist = 8; // (5-1) + (5-1)
+    const maxDist = 2; // [0,1] range each: max diff per axis = 1, combined = 2
     return 1 - (bodyDist + sweetDist) / maxDist;
   }
 

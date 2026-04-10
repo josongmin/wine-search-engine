@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type { DrinkingWindowUseCasePort } from '../../application/drinking-window/port/drinking-window-usecase.port.js';
+import { DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } from '../../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { DecomposedSearchUseCasePort } from '../../application/search/port/search-route-usecases.port.js';
 import type { SearchExecutorPort } from '../../application/search/port/search-executor.port.js';
 import type { SearchRequest } from '../../application/search/search-request.dto.js';
@@ -25,8 +26,6 @@ import {
 } from '../../domain/shared/constants.js';
 import { MAX_WINE_TOOL_SEARCH_RESULTS } from '../http/constants.js';
 
-/** Predictor expects body/tannin on 1–5 scale; documents store 0–1. */
-const DRINKING_WINDOW_BODY_TANNIN_SCALE = 5;
 /** criticScoreNormalized is 0–1; predictor wants 0–100 proxy points. */
 const DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE = 100;
 
@@ -338,12 +337,12 @@ export class WineToolExecutor {
       grapePrimaryEnc: doc.grapePrimaryEnc!,
       regionEnc: doc.regionEnc!,
       countryEnc: doc.countryEnc!,
-      body: doc.body,
-      // tannin/acidity in the document are stored on a [0,1] normalized scale.
-      // The predictor expects a [0,5] scale, so we expand here.
-      tannin: doc.tannin! * DRINKING_WINDOW_BODY_TANNIN_SCALE,
-      acidity: doc.acidity! * DRINKING_WINDOW_BODY_TANNIN_SCALE,
-      sweetness: doc.sweetness,
+      // body/tannin/acidity/sweetness are stored as [0,1] normalised floats.
+      // The predictor expects [1–5 ordinal] scale, so we expand here.
+      body: doc.body != null ? doc.body * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE : undefined,
+      tannin: doc.tannin! * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+      acidity: doc.acidity! * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+      sweetness: doc.sweetness != null ? doc.sweetness * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE : undefined,
       // criticScoreNormalized is [0,1]; convert to the [0,100] proxy score
       // expected by the predictor.
       avgCriticProxyScore: doc.criticScoreNormalized! * DRINKING_WINDOW_CRITIC_PROXY_PERCENT_SCALE,

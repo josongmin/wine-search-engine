@@ -136,16 +136,16 @@ export interface RankedResult {
   /** Vintage year (e.g. 2018). */
   readonly vintageYear?: number | undefined;
 
-  /** Wine body intensity (1–5 ordinal scale). */
+  /** Wine body intensity ([0,1] normalized float). */
   readonly body?: number | undefined;
 
-  /** Tannin structure (1–5 ordinal scale). */
+  /** Tannin structure ([0,1] normalized float). */
   readonly tannin?: number | undefined;
 
-  /** Acidity level (1–5 ordinal scale). */
+  /** Acidity level ([0,1] normalized float). */
   readonly acidity?: number | undefined;
 
-  /** Sweetness (1–5 ordinal scale). */
+  /** Sweetness ([0,1] normalized float). */
   readonly sweetness?: number | undefined;
 
   /** Critic proxy score (80–100 or 0 if absent). */

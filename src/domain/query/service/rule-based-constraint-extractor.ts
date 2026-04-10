@@ -78,9 +78,11 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
   }
 
   const priceUnder =
-    // (?<!\p{L})(?<!\p{N}) = two separate lookbehinds ("not preceded by letter" AND "not preceded by digit").
-    // (?<!\p{L})(?<!\p{N}) was wrong: AND-sequence checks for letter THEN digit (2-char seq), never matches anything.
-    /(?<!\p{L})(?<!\p{N})under\s+\$?(\d+)(?!\p{L})(?!\p{N})/iu.exec(q) ??
+    // BUG-14: Use single character class `(?<![\p{L}\p{N}])` / `(?![\p{L}\p{N}])` (Rule 24).
+    // Two separate lookaheads (?<!\p{L})(?<!\p{N}) are logically equivalent (both must pass)
+    // but the canonical form with brackets is unambiguous and avoids confusion with the
+    // truly broken 2-char sequence form (?<!\p{L}\p{N}).
+    /(?<![\p{L}\p{N}])under\s+\$?(\d+)(?![\p{L}\p{N}])/iu.exec(q) ??
     /(\d+)\s*(?:달러|dollar)\s*이하/iu.exec(q) ??
     /(\d+)\s*만원\s*(?:이하|미만|대)/iu.exec(q);
   if (priceUnder?.[1] !== undefined) {
