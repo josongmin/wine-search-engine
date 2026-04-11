@@ -364,3 +364,120 @@ describe('buildDeterminismFingerprint() — P0-4 E8 extended field change detect
     expect(a).not.toBe(b);
   });
 });
+
+// ─── 수학적 완결성: 각 필드 단독 변경 → 지문 변경 (per-field independence) ─────
+//
+// 지문의 암호화 속성: 필드 A 만 바꿔도 지문이 변해야 한다.
+// 번들 테스트(여러 필드 동시 변경)는 "어떤 필드가 역할을 하는지" 가릴 수 있다.
+// 여기서는 베이스라인에서 **한 필드만** 바꾸는 최소 변경을 각각 독립적으로 검증.
+
+describe('buildDeterminismFingerprint() — 필드별 독립 변경 감지 (수학적 완결성)', () => {
+  // 기준 파라미터: 모든 optional 필드 포함된 풀 베이스라인
+  const fullBaseline = {
+    plannerVersion: 'v1.0.0',
+    modelId: 'claude-sonnet-4-6',
+    fusionConfigHash: 'fusion-abc',
+    rankingConfigHash: 'ranking-def',
+    modelVersionsHash: 'models-ghi',
+    indexVersionsHash: 'index-jkl',
+    retrievalPlanVersion: 'retrieval-v1',
+    rankingPolicyVersion: 'ranking-policy-v1',
+    rerankApplied: false,
+    rerankModelId: 'ltr-v1',
+    policyRuleVersion: 'policy-v1',
+    thresholdProfileId: 'profile-standard',
+    responseContractVersion: 'contract-v1',
+  };
+
+  it('FP-INDEP-01: plannerVersion 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, plannerVersion: 'v1.0.1' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-02: modelId 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, modelId: 'claude-haiku-4-5' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-03: fusionConfigHash 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, fusionConfigHash: 'fusion-xyz' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-04: rankingConfigHash 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, rankingConfigHash: 'ranking-xyz' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-05: modelVersionsHash 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, modelVersionsHash: 'models-xyz' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-06: indexVersionsHash 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, indexVersionsHash: 'index-xyz' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-07: retrievalPlanVersion 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, retrievalPlanVersion: 'retrieval-v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-08: rankingPolicyVersion 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, rankingPolicyVersion: 'ranking-policy-v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-09: rerankApplied 단독 변경 (false→true) → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, rerankApplied: true });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-10: rerankModelId 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, rerankModelId: 'ltr-v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-11: policyRuleVersion 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, policyRuleVersion: 'policy-v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-12: thresholdProfileId 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, thresholdProfileId: 'profile-strict' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-13: responseContractVersion 단독 변경 → 지문 변경', () => {
+    const a = buildDeterminismFingerprint(fullBaseline);
+    const b = buildDeterminismFingerprint({ ...fullBaseline, responseContractVersion: 'contract-v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('FP-INDEP-14: 동일 베이스라인, 필드 하나씩 변경 — 각 변경이 서로 다른 지문 생성', () => {
+    // 서로 다른 필드를 하나씩 바꾼 지문이 서로 달라야 함
+    // (즉, 서로 다른 단독 변경이 동일한 해시를 충돌 생성하지 않는지 검증)
+    const fingerprints = new Set([
+      buildDeterminismFingerprint({ ...fullBaseline, plannerVersion: 'v2' }),
+      buildDeterminismFingerprint({ ...fullBaseline, modelId: 'model-other' }),
+      buildDeterminismFingerprint({ ...fullBaseline, fusionConfigHash: 'hash-other' }),
+      buildDeterminismFingerprint({ ...fullBaseline, rankingConfigHash: 'rank-other' }),
+      buildDeterminismFingerprint({ ...fullBaseline, rerankApplied: true }),
+    ]);
+    // 5개의 서로 다른 변경 → 5개의 서로 다른 지문
+    expect(fingerprints.size).toBe(5);
+  });
+});

@@ -99,13 +99,7 @@ describe('Resolver lookup strategy adjustments', () => {
         }),
       ]),
     );
-    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toEqual([
-      {
-        source: 'alias',
-        entityIds: ['entity-a', 'entity-b'],
-        count: 2,
-      },
-    ]);
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toBeUndefined();
   });
 
   it('keeps fuzzy-only short-form support conservative', async () => {

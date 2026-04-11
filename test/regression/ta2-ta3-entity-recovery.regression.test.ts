@@ -12,7 +12,7 @@
  * These tests are append-only (regression suite rules). Never delete.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   shouldTriggerCorrectiveRetry,
   resolveCorrectiveRetryOutcome,
@@ -67,75 +67,134 @@ function makeResolveResult(overrides: Partial<EntityResolveResult> = {}): Entity
 // ─── TA2-1: EntityCandidateGeneratorInput contract ────────────────────────────
 
 describe('EntityCandidateGeneratorInput (TA2-1)', () => {
-  it('satisfies contract: anchors + blockerOnlyIds + preloadedDocs are optional but typed', () => {
-    // Compile-time check: build a minimal valid input
+  it('satisfies contract: blockerOnlyIds absent → no blocker-seed candidates produced', async () => {
+    // 실질 검증: blockerOnlyIds 미제공 시 blocker_seed 후보가 0개여야 함
+    const { buildResolverCandidatesFromGenerator } = await import(
+      '../../src/application/search/search-usecase-resolver-candidates.js'
+    );
     const input: EntityCandidateGeneratorInput = {
       rawQuery: 'opus one',
       normalizedQuery: 'opus one',
       anchors: [],
+      // blockerOnlyIds 없음
     };
-    expect(input.rawQuery).toBe('opus one');
-    expect(input.blockerOnlyIds).toBeUndefined();
-    expect(input.preloadedDocs).toBeUndefined();
+    const result = await buildResolverCandidatesFromGenerator(input, { getDocument: async () => null });
+    const blockerSeeds = result.filter((c) => c.source === 'blocker_seed');
+    expect(blockerSeeds).toHaveLength(0);
   });
 
-  it('accepts blockerOnlyIds as a populated array', () => {
+  it('blockerOnlyIds populated → blocker_seed 후보 생성 (anchor-miss 복구)', async () => {
+    // 실질 검증: blockerOnlyIds에 ID가 있으면 blocker_seed 후보로 등장해야 함
+    const { buildResolverCandidatesFromGenerator } = await import(
+      '../../src/application/search/search-usecase-resolver-candidates.js'
+    );
     const input: EntityCandidateGeneratorInput = {
       rawQuery: 'opus one',
       normalizedQuery: 'opus one',
       anchors: [],
-      blockerOnlyIds: ['wine-1', 'wine-2'],
+      blockerOnlyIds: [createEntityId('wine-blocker-only')],
     };
-    expect(input.blockerOnlyIds).toHaveLength(2);
+    const result = await buildResolverCandidatesFromGenerator(input, {
+      getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Opus One' }),
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]?.source).toBe('blocker_seed');
+    expect(String(result[0]?.entityId)).toBe('wine-blocker-only');
   });
 
-  it('accepts preloadedDocs as a ReadonlyMap', () => {
-    const docs = new Map([
-      ['wine-1', { entityId: 'wine-1', entityType: 'wine', canonicalLabel: 'Opus One 2019' }],
-    ]);
+  it('preloadedDocs 캐시 히트 → getDocument 미호출 (N+1 방어)', async () => {
+    // 실질 검증: preloadedDocs에 이미 있는 ID는 getDocument를 호출하면 안 됨
+    const { buildResolverCandidatesFromGenerator } = await import(
+      '../../src/application/search/search-usecase-resolver-candidates.js'
+    );
+    const entityId = createEntityId('wine-preloaded');
+    const preloadedDocs = new Map([[String(entityId), { entityId, entityType: 'wine' as const, canonicalLabel: 'Preloaded Wine' }]]);
+    const getDocument = vi.fn(async () => null);
     const input: EntityCandidateGeneratorInput = {
       rawQuery: 'opus one',
       normalizedQuery: 'opus one',
-      anchors: [],
-      preloadedDocs: docs as ReadonlyMap<string, unknown> as EntityCandidateGeneratorInput['preloadedDocs'],
+      anchors: [makeAnchor({ candidateEntityIds: [entityId] })],
+      preloadedDocs,
     };
-    expect(input.preloadedDocs?.size).toBe(1);
+    await buildResolverCandidatesFromGenerator(input, { getDocument });
+    expect(getDocument).not.toHaveBeenCalled();
   });
 });
 
 // ─── TA2-2: AnchorCandidate source union ─────────────────────────────────────
 
 describe("AnchorCandidate.source union (TA2-2)", () => {
-  it("accepts 'blocker_seed' as a valid source value", () => {
-    const anchor: AnchorCandidate = makeAnchor({ source: 'blocker_seed' });
-    expect(anchor.source).toBe('blocker_seed');
+  it("source='blocker_seed' → buildResolverCandidatesFromGenerator가 source를 보존", async () => {
+    // 실질 검증: source='blocker_seed'인 anchor가 실제 파이프라인을 통과했을 때
+    // 출력 candidate의 source가 'blocker_seed'로 보존되는지
+    const { buildResolverCandidatesFromGenerator } = await import(
+      '../../src/application/search/search-usecase-resolver-candidates.js'
+    );
+    const entityId = createEntityId('wine-blocker-src-test');
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      anchors: [makeAnchor({ source: 'blocker_seed', candidateEntityIds: [entityId] })],
+    };
+    const result = await buildResolverCandidatesFromGenerator(input, {
+      getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Test' }),
+    });
+    expect(result[0]?.source).toBe('blocker_seed');
   });
 
-  it("still accepts original source values", () => {
-    const sources: AnchorCandidate['source'][] = [
-      'alias',
-      'planner_heuristic',
-      'entity_lookup',
-      'blocker_seed',
-    ];
-    for (const source of sources) {
-      const anchor: AnchorCandidate = makeAnchor({ source });
-      expect(anchor.source).toBe(source);
-    }
+  it("source별 파이프라인 출력 분리 — alias vs planner_heuristic → 각각 별개 source 보존", async () => {
+    // 실질 검증: 서로 다른 엔티티에 다른 source가 할당됐을 때 각각 유지되는지
+    const { buildResolverCandidatesFromGenerator } = await import(
+      '../../src/application/search/search-usecase-resolver-candidates.js'
+    );
+    const idA = createEntityId('wine-alias-src');
+    const idB = createEntityId('wine-heuristic-src');
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      anchors: [
+        makeAnchor({ source: 'alias', candidateEntityIds: [idA] }),
+        makeAnchor({ source: 'planner_heuristic', candidateEntityIds: [idB] }),
+      ],
+    };
+    const result = await buildResolverCandidatesFromGenerator(input, {
+      getDocument: async (id) => ({ entityId: id, entityType: 'wine', canonicalLabel: 'Wine' }),
+    });
+    const aliasCandidate = result.find((c) => String(c.entityId) === String(idA));
+    const heuristicCandidate = result.find((c) => String(c.entityId) === String(idB));
+    expect(aliasCandidate?.source).toBe('alias');
+    expect(heuristicCandidate?.source).toBe('planner_heuristic');
   });
 });
 
 // ─── TA2-3: buildResolverCandidatesFromGenerator module exports ───────────────
 
 describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
-  it('exports buildResolverCandidatesFromGenerator without error', async () => {
-    const mod = await import(
+  it('anchor entityId가 getDocument에서 null 반환 시 해당 candidate 조용히 스킵', async () => {
+    // 실질 검증: getDocument가 null을 반환하면 그 ID는 출력에서 빠져야 함
+    const { buildResolverCandidatesFromGenerator } = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
-    expect(typeof mod.buildResolverCandidatesFromGenerator).toBe('function');
+    const existingId = createEntityId('wine-exists');
+    const missingId = createEntityId('wine-missing');
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      anchors: [makeAnchor({ candidateEntityIds: [existingId, missingId] })],
+    };
+    const result = await buildResolverCandidatesFromGenerator(input, {
+      getDocument: async (id) =>
+        String(id) === String(existingId)
+          ? { entityId: id, entityType: 'wine', canonicalLabel: 'Exists' }
+          : null,
+    });
+    // missingId는 스킵, existingId만 살아남아야 함
+    expect(result).toHaveLength(1);
+    expect(String(result[0]?.entityId)).toBe(String(existingId));
   });
 
-  it('does not export buildResolverCandidatesFromPlan legacy helper anymore', async () => {
+  it('legacy buildResolverCandidatesFromPlan API 제거 확인 — 마이그레이션 퇴행 방지', async () => {
+    // 실질 검증: legacy API가 살아 돌아오면 마이그레이션이 롤백된 것
     const mod = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
@@ -202,12 +261,34 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
 // ─── TA2-4: ResolverInput.blockerSeedCandidates field ────────────────────────
 
 describe('ResolverInput.blockerSeedCandidates (TA2-4)', () => {
-  it('ResolverInput interface accepts blockerSeedCandidates field', async () => {
-    // Type-level check: import and verify the field exists in the type definition
-    const mod = await import('../../src/domain/resolver/service/resolver.js');
-    // The exported computeConformalSetSize function should be callable — this
-    // confirms the module loaded without error (which would indicate a TS error).
-    expect(typeof mod.computeConformalSetSize).toBe('function');
+  it('computeConformalSetSize: score >= 1-alpha → setSize=1 (신뢰 구간 내)', async () => {
+    // 실질 검증: 고신뢰 점수에서 혼동 집합 크기가 1이어야 함
+    const { computeConformalSetSize } = await import('../../src/domain/resolver/service/resolver.js');
+    // alpha=0.1, score=0.95 >= 1-0.1=0.9 → size=1
+    expect(computeConformalSetSize(0.95, 0.1, 10)).toBe(1);
+    // alpha=0.2, score=0.85 >= 1-0.2=0.8 → size=1
+    expect(computeConformalSetSize(0.85, 0.2, 10)).toBe(1);
+  });
+
+  it('computeConformalSetSize: score in (1-2α, 1-α) → setSize=2', async () => {
+    // 실질 검증: 중간 신뢰 구간 → 혼동 집합 크기 2
+    const { computeConformalSetSize } = await import('../../src/domain/resolver/service/resolver.js');
+    // alpha=0.1, score=0.85 → 1-2*0.1=0.8 < 0.85 < 0.9=1-0.1 → size=2
+    expect(computeConformalSetSize(0.85, 0.1, 10)).toBe(2);
+  });
+
+  it('computeConformalSetSize: score < 1-2α → setSize=k (fallback)', async () => {
+    // 실질 검증: 저신뢰 → fallback k 반환
+    const { computeConformalSetSize } = await import('../../src/domain/resolver/service/resolver.js');
+    // alpha=0.1, score=0.7 < 0.8 → size=k=5
+    expect(computeConformalSetSize(0.7, 0.1, 5)).toBe(5);
+  });
+
+  it('computeConformalSetSize: invalid alpha → RangeError', async () => {
+    // 실질 검증: alpha=0 (경계 위반) → throw
+    const { computeConformalSetSize } = await import('../../src/domain/resolver/service/resolver.js');
+    expect(() => computeConformalSetSize(0.9, 0, 5)).toThrow(RangeError);
+    expect(() => computeConformalSetSize(0.9, 0.6, 5)).toThrow(RangeError);
   });
 });
 
@@ -966,5 +1047,184 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
     const candidatesWithout = await buildResolverCandidatesFromGenerator(withoutVariants, lookup);
 
     expect(candidatesWith[0]?.sourceSignals).toEqual(candidatesWithout[0]?.sourceSignals);
+  });
+});
+
+// ─── 수학적 완결성: shouldTriggerCorrectiveRetry OR-조건 독립성 ───────────────────
+//
+// shouldTriggerCorrectiveRetry 의 반환식은 `zeroAnchors || lowConfidence`.
+// OR 논리: C1 단독으로 충분하고, C2 단독으로도 충분하다.
+// 각 조건이 독립적으로 트리거를 활성화하는지 검증한다.
+
+describe('shouldTriggerCorrectiveRetry — OR 조건 독립성 (수학적 완결성)', () => {
+  it('TA3-OR-01: C1 단독 (zeroAnchors=true, confidence >= threshold) → true', () => {
+    // C1 만 만족: anchors=[], confidence=0.9 (threshold 초과)
+    // C2 불만족이어도 C1 만으로 retry 발생해야 함
+    const plan = makePlan({ anchors: [] });
+    const result = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.9, // CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD=0.5 초과
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
+  });
+
+  it('TA3-OR-02: C2 단독 (zeroAnchors=false, confidence < threshold) → true', () => {
+    // C2 만 만족: anchors=[valid anchor], confidence=0.1 (threshold 미만)
+    // C1 불만족이어도 C2 만으로 retry 발생해야 함
+    const plan = makePlan({ anchors: [makeAnchor()] });
+    const result = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.1, // CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD=0.5 미만
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
+  });
+
+  it('TA3-OR-03: C1 && C2 모두 (zeroAnchors=true, confidence < threshold) → true', () => {
+    // 두 조건 모두 만족 — OR 로도 true
+    const plan = makePlan({ anchors: [] });
+    const result = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.1,
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
+  });
+
+  it('TA3-OR-04: C1 && C2 모두 불만족 (anchors 있음, confidence >= threshold) → false', () => {
+    // OR 에서 두 조건 모두 false → 전체 false
+    const plan = makePlan({ anchors: [makeAnchor()] });
+    const result = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.9,
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
+  });
+
+  it('TA3-OR-05: C1 단독 — threshold 경계값 (confidence = 0.5 정확히) → false (엄격한 < 비교)', () => {
+    // confidence === 0.5 는 `< 0.5` 를 만족하지 않으므로 C2 불만족
+    // anchors 있으면 → false
+    const plan = makePlan({ anchors: [makeAnchor()] });
+    const result = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.5, // exactly at threshold → NOT < threshold
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(false);
+  });
+
+  it('TA3-OR-06: C2 threshold 바로 아래 (confidence = 0.499…) → true', () => {
+    // threshold = 0.5: 0.4999 < 0.5 → C2 true → retry
+    const plan = makePlan({ anchors: [makeAnchor()] });
+    const result = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.4999,
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, result)).toBe(true);
+  });
+});
+
+// ─── 수학적 완결성: computeCorrectiveRetryCalibration 공식 단조성 및 수렴 ─────────
+//
+// 공식: BASE + RANGE * (1 - (rank-1) / max(total-1, 1))
+//   = 0.5 + 0.4 * (1 - normalizedRank)
+//
+// 단조성: rank가 증가할수록 confidence가 감소 (strong monotone decreasing)
+// 수렴: rank=1 → 0.9, rank=total → 0.5 (N에 무관하게 항상)
+// 범위: 모든 (rank, total) 에서 [0.5, 0.9]
+
+describe('computeCorrectiveRetryCalibration — 공식 단조성 및 수렴 (수학적 완결성)', () => {
+  function makeResultAtRank(
+    rank: number,
+    total: number,
+  ): EntityResolveResult {
+    const candidates = Array.from({ length: total }, (_, i) => ({
+      entityId: i === rank - 1 ? 'wine-target' : `wine-other-${i}`,
+      canonicalLabel: i === rank - 1 ? 'Target' : `Other ${i}`,
+      calibratedScore: 1 - i * 0.05,
+      rank: i + 1,
+      evidenceRefs: [],
+    }));
+    return {
+      status: 'resolved',
+      decisionConfidenceC: 0.8,
+      topEntity: {
+        entityId: 'wine-target',
+        canonicalLabel: 'Target',
+        calibratedScore: 1.0,
+      },
+      candidates,
+      decisionTrace: {} as EntityResolveResult['decisionTrace'],
+      conformalSetSize: 1,
+    };
+  }
+
+  it('TA5-CONV-01: rank=1 → 0.9 — 풀 크기에 무관하게 항상 수렴', () => {
+    for (const total of [1, 2, 3, 5, 10, 20]) {
+      const conf = computeCorrectiveRetryCalibration(makeResultAtRank(1, total), 'accept');
+      expect(conf).toBeCloseTo(0.9, 9);
+    }
+  });
+
+  it('TA5-CONV-02: rank=total → 0.5 — 풀 크기에 무관하게 항상 수렴', () => {
+    for (const total of [2, 3, 5, 10, 20]) {
+      const conf = computeCorrectiveRetryCalibration(makeResultAtRank(total, total), 'accept');
+      expect(conf).toBeCloseTo(0.5, 9);
+    }
+  });
+
+  it('TA5-MONO-01: 단조 감소 — rank 증가 시 confidence 단조 감소 (N=5)', () => {
+    const total = 5;
+    const values = [1, 2, 3, 4, 5].map((rank) =>
+      computeCorrectiveRetryCalibration(makeResultAtRank(rank, total), 'accept')!,
+    );
+    for (let i = 0; i < values.length - 1; i++) {
+      expect(values[i]!).toBeGreaterThan(values[i + 1]!);
+    }
+  });
+
+  it('TA5-MONO-02: 단조 감소 — N=10 전체 구간 검증', () => {
+    const total = 10;
+    const values = Array.from({ length: total }, (_, i) =>
+      computeCorrectiveRetryCalibration(makeResultAtRank(i + 1, total), 'accept')!,
+    );
+    for (let i = 0; i < values.length - 1; i++) {
+      expect(values[i]!).toBeGreaterThan(values[i + 1]!);
+    }
+  });
+
+  it('TA5-RANGE-01: 모든 (rank, total) 에서 값이 [0.5, 0.9] 범위 내', () => {
+    for (const total of [1, 2, 5, 10]) {
+      for (let rank = 1; rank <= total; rank++) {
+        const conf = computeCorrectiveRetryCalibration(makeResultAtRank(rank, total), 'accept')!;
+        expect(conf).toBeGreaterThanOrEqual(0.5);
+        expect(conf).toBeLessThanOrEqual(0.9);
+      }
+    }
+  });
+
+  it('TA5-FORMULA-01: rank=3, total=5 — 공식 직접 검증 (0.5 + 0.4*0.5 = 0.7)', () => {
+    // normalizedRank = (3-1)/(5-1) = 2/4 = 0.5
+    // confidence = 0.5 + 0.4 * (1 - 0.5) = 0.5 + 0.2 = 0.7
+    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(3, 5), 'accept');
+    expect(conf).toBeCloseTo(0.7, 9);
+  });
+
+  it('TA5-FORMULA-02: rank=2, total=3 — 공식 직접 검증 (0.5 + 0.4*(1/3))', () => {
+    // normalizedRank = (2-1)/(3-1) = 1/2 = 0.5
+    // confidence = 0.5 + 0.4 * (1 - 0.5) = 0.7
+    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(2, 3), 'accept');
+    expect(conf).toBeCloseTo(0.7, 9);
+  });
+
+  it('TA5-FORMULA-03: rank=1, total=1 — max(0, 1) 분모 0 방어 (단일 후보)', () => {
+    // total=1 → max(total-1, 1) = max(0, 1) = 1 (0 나누기 방지)
+    // normalizedRank = (1-1)/1 = 0 → confidence = 0.9
+    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(1, 1), 'accept');
+    expect(conf).toBeCloseTo(0.9, 9);
+  });
+
+  it('TA5-FORMULA-04: rank=2, total=2 — 분모=max(1,1)=1 → normalizedRank=1 → 0.5', () => {
+    // max(2-1, 1) = 1
+    // normalizedRank = (2-1)/1 = 1 → confidence = 0.5
+    const conf = computeCorrectiveRetryCalibration(makeResultAtRank(2, 2), 'accept');
+    expect(conf).toBeCloseTo(0.5, 9);
   });
 });

@@ -377,7 +377,7 @@ function buildDeterminismFingerprintParams(
 function buildResolverProvenanceTrace(
   resolveResult: EntityResolveResult,
 ): AuditExtension['resolver_provenance_trace'] {
-  const provenance = resolveResult.decisionTrace.queryProvenance;
+  const provenance = resolveResult.decisionTrace?.queryProvenance;
   if (provenance === undefined) {
     return undefined;
   }

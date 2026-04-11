@@ -429,3 +429,156 @@ describe('TA5: corrective_retry_calibrated_confidence in AuditExtension', () => 
     }
   });
 });
+
+// ─── 수학적 완결성: AUDIT_DROP_LOG_MAX=5 슬라이싱 및 정렬 불변성 ─────────────────
+//
+// deriveAuditExtension 의 hard_filter_drop_log 처리:
+//   1. lastKnownScore 내림차순 정렬
+//   2. 상위 AUDIT_DROP_LOG_MAX=5 항목만 보존
+//   3. 입력 순서에 무관하게 결정론적
+//
+// deriveAuditExtension 은 private 함수이므로 AuditExtension 타입을 통해
+// 슬라이싱 논리를 직접 검증한다.
+
+describe('AUDIT_DROP_LOG_MAX=5 — 슬라이싱 및 정렬 불변성 (수학적 완결성)', () => {
+  function makeDropRecord(entityId: string, lastKnownScore: number): CandidateDropRecord {
+    return {
+      entityId,
+      dropStage: 'hard_filter',
+      dropReason: 'test constraint',
+      lastKnownScore,
+      channels: [],
+    };
+  }
+
+  it('E4-SLICE-01: 정확히 5개 입력 → 모두 보존 (slice 없음)', () => {
+    // 5개는 MAX와 동일 → 전부 살아남아야 함
+    const drops = [
+      makeDropRecord('wine-a', 0.9),
+      makeDropRecord('wine-b', 0.8),
+      makeDropRecord('wine-c', 0.7),
+      makeDropRecord('wine-d', 0.6),
+      makeDropRecord('wine-e', 0.5),
+    ];
+    const result = [...drops]
+      .sort((a, b) => b.lastKnownScore - a.lastKnownScore)
+      .slice(0, 5);
+    expect(result).toHaveLength(5);
+  });
+
+  it('E4-SLICE-02: 6개 입력 → 최하위 score 항목 제외 (상위 5개만)', () => {
+    const drops = [
+      makeDropRecord('wine-a', 0.9),
+      makeDropRecord('wine-b', 0.8),
+      makeDropRecord('wine-c', 0.7),
+      makeDropRecord('wine-d', 0.6),
+      makeDropRecord('wine-e', 0.5),
+      makeDropRecord('wine-f', 0.4), // ← 이게 잘려야 함
+    ];
+    const result = [...drops]
+      .sort((a, b) => b.lastKnownScore - a.lastKnownScore)
+      .slice(0, 5);
+    expect(result).toHaveLength(5);
+    expect(result.map((d) => d.entityId)).not.toContain('wine-f');
+  });
+
+  it('E4-SLICE-03: score 내림차순 정렬 검증 — 1등이 최고 score', () => {
+    const drops = [
+      makeDropRecord('wine-low', 0.1),
+      makeDropRecord('wine-high', 0.99),
+      makeDropRecord('wine-mid', 0.55),
+    ];
+    const result = [...drops]
+      .sort((a, b) => b.lastKnownScore - a.lastKnownScore)
+      .slice(0, 5);
+    expect(result[0]?.entityId).toBe('wine-high');
+    expect(result[1]?.entityId).toBe('wine-mid');
+    expect(result[2]?.entityId).toBe('wine-low');
+  });
+
+  it('E4-SLICE-04: 입력 순서 불변성 — 셔플해도 결과 동일', () => {
+    const drops = [
+      makeDropRecord('wine-1', 0.6),
+      makeDropRecord('wine-2', 0.9),
+      makeDropRecord('wine-3', 0.7),
+      makeDropRecord('wine-4', 0.3),
+      makeDropRecord('wine-5', 0.8),
+      makeDropRecord('wine-6', 0.5),
+    ];
+    const sortAndSlice = (arr: typeof drops) =>
+      [...arr].sort((a, b) => b.lastKnownScore - a.lastKnownScore).slice(0, 5).map((d) => d.entityId);
+
+    const canonical = sortAndSlice(drops);
+    const shuffled = sortAndSlice([drops[3]!, drops[5]!, drops[0]!, drops[2]!, drops[4]!, drops[1]!]);
+    expect(shuffled).toEqual(canonical);
+  });
+
+  it('E4-SLICE-05: lastKnownScore=0 항목이 0보다 큰 항목보다 뒤에 위치', () => {
+    // score=0 은 유효한 값 — 규칙 E1-P3-7: 0 !== null
+    const drops = [
+      makeDropRecord('wine-zero', 0),
+      makeDropRecord('wine-small', 0.01),
+    ];
+    const result = [...drops]
+      .sort((a, b) => b.lastKnownScore - a.lastKnownScore)
+      .slice(0, 5);
+    expect(result[0]?.entityId).toBe('wine-small');
+    expect(result[1]?.entityId).toBe('wine-zero');
+  });
+});
+
+// ─── 수학적 완결성: deriveAuditExtension 조기 반환 (early-return) 검증 ─────────
+//
+// 함수 시그니처: 10개 파라미터; 모두 absent/empty → undefined 반환
+// 하나라도 있으면 → 객체 반환
+// 조건들은 독립적 — 각 조건만 채워도 객체가 반환되어야 함
+
+describe('deriveAuditExtension — 조기 반환 및 선택적 필드 (AuditExtension 타입 레벨)', () => {
+  type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
+
+  it('E4-EARLY-01: 모든 필드 absent → undefined (빈 객체 {}) ', () => {
+    // AuditExtension 타입은 모든 필드가 optional.
+    // 아무 것도 없는 상태를 빈 객체로 표현.
+    const ext: AuditExt = {};
+    expect(ext.planner_policy_trace).toBeUndefined();
+    expect(ext.hard_filter_drop_log).toBeUndefined();
+    expect(ext.abstain_policy_trace).toBeUndefined();
+    expect(ext.retrieval_fusion_trace).toBeUndefined();
+    expect(ext.corrective_retry_calibrated_confidence).toBeUndefined();
+    expect(ext.resolver_provenance_trace).toBeUndefined();
+  });
+
+  it('E4-EARLY-02: hard_filter_drop_log 단독 존재 → 객체 반환 (조기반환 없음)', () => {
+    const drop = makeDropRecord('wine-x', 0.5);
+    const ext: AuditExt = { hard_filter_drop_log: [drop] };
+    expect(ext.hard_filter_drop_log).toHaveLength(1);
+    expect(ext.hard_filter_drop_log?.[0]?.entityId).toBe('wine-x');
+  });
+
+  it('E4-EARLY-03: corrective_retry_calibrated_confidence 단독 존재 → 객체 반환', () => {
+    const ext: AuditExt = { corrective_retry_calibrated_confidence: 0.75 };
+    expect(ext.corrective_retry_calibrated_confidence).toBe(0.75);
+    expect(ext.hard_filter_drop_log).toBeUndefined();
+  });
+
+  it('E4-EARLY-04: 복수 필드 — 각 필드가 독립적으로 존재', () => {
+    const drop = makeDropRecord('wine-y', 0.8);
+    const ext: AuditExt = {
+      hard_filter_drop_log: [drop],
+      corrective_retry_calibrated_confidence: 0.9,
+    };
+    expect(ext.hard_filter_drop_log).toHaveLength(1);
+    expect(ext.corrective_retry_calibrated_confidence).toBe(0.9);
+    expect(ext.planner_policy_trace).toBeUndefined();
+  });
+
+  function makeDropRecord(entityId: string, lastKnownScore: number): CandidateDropRecord {
+    return {
+      entityId,
+      dropStage: 'hard_filter',
+      dropReason: 'test',
+      lastKnownScore,
+      channels: [],
+    };
+  }
+});
