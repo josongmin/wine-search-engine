@@ -309,6 +309,7 @@ export class Resolver {
 
     const trace = this.buildTrace(
       input,
+      candidates,
       input.queryClass,
       calibrated,
       ambiguityState,
@@ -593,6 +594,7 @@ export class Resolver {
    */
   private buildTrace(
     input: ResolverInput,
+    candidates: readonly ResolverCandidate[],
     queryClass: QueryClass,
     calibrated: CalibratedResolutionScore,
     ambiguity: AmbiguityState,
@@ -603,11 +605,13 @@ export class Resolver {
   ): ResolverDecisionTrace {
     const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
     const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
+    const blockerSeedEntityIds = this.collectBlockerSeedEntityIds(candidates);
     const queryProvenance =
       input.normalizedQueryViews !== undefined ||
       anchorLookupVariants.length > 0 ||
       anchorLookupStrategies.length > 0 ||
-      lookupStrategyAdjustments.length > 0
+      lookupStrategyAdjustments.length > 0 ||
+      blockerSeedEntityIds.length > 0
         ? {
             ...(input.normalizedQueryViews !== undefined
               ? { normalizedQueryViews: input.normalizedQueryViews }
@@ -620,6 +624,12 @@ export class Resolver {
               : {}),
             ...(lookupStrategyAdjustments.length > 0
               ? { lookupStrategyAdjustments }
+              : {}),
+            ...(blockerSeedEntityIds.length > 0
+              ? {
+                  blockerSeedEntityIds,
+                  blockerSeedCount: blockerSeedEntityIds.length,
+                }
               : {}),
           }
         : undefined;
@@ -679,6 +689,19 @@ export class Resolver {
     }
 
     return [...strategies].sort();
+  }
+
+  private collectBlockerSeedEntityIds(
+    candidates: readonly ResolverCandidate[],
+  ): readonly string[] {
+    const blockerSeedEntityIds = new Set<string>();
+    for (const candidate of candidates) {
+      if (candidate.source === 'blocker_seed') {
+        blockerSeedEntityIds.add(String(candidate.entityId));
+      }
+    }
+
+    return [...blockerSeedEntityIds].sort();
   }
 
   private collectLookupStrategyAdjustments(

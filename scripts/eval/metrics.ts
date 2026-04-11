@@ -653,6 +653,99 @@ export function prestigeMeanAtK(ranked: readonly RankedHit[], k: number): number
 }
 
 // ---------------------------------------------------------------------------
+// RFC-020: Slot F1 — Constraint Extraction Quality Metrics
+// ---------------------------------------------------------------------------
+
+/**
+ * A single extracted or expected constraint slot (attribute + value pair).
+ */
+export interface ConstraintSlot {
+  /** Attribute name (e.g. 'region', 'grape', 'price_max', 'wine_type'). */
+  readonly attribute: string;
+  /** Normalized value string (e.g. 'Bordeaux', 'Cabernet Sauvignon', '50'). */
+  readonly value: string;
+  /** Optional operator for numeric attributes (default: 'eq'). */
+  readonly operator?: 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'range' | undefined;
+}
+
+/**
+ * RFC-020 §P3: Slot F1 scoring for constraint extraction quality.
+ *
+ * Three modes match the SOTA NLU benchmark practice:
+ * - strict: attribute + value + operator must all match exactly
+ * - relaxed: attribute matches + value overlap ≥ 50% (numeric range) or exact (string)
+ * - type_only: attribute match only (value is ignored)
+ *
+ * Returns precision, recall, and F1 in [0, 1].
+ */
+export function scoreSlotF1(
+  extracted: readonly ConstraintSlot[],
+  expected: readonly ConstraintSlot[],
+  mode: 'strict' | 'relaxed' | 'type_only',
+): { readonly precision: number; readonly recall: number; readonly f1: number } {
+  if (extracted.length === 0 && expected.length === 0) {
+    return { precision: 1, recall: 1, f1: 1 };
+  }
+  if (extracted.length === 0) {
+    return { precision: 0, recall: 0, f1: 0 };
+  }
+  if (expected.length === 0) {
+    return { precision: 0, recall: 1, f1: 0 };
+  }
+
+  // Count matching pairs using a greedy bipartite match (linear scan sufficient for
+  // small slot sets; production constraint counts rarely exceed 10 per query).
+  const matchedExpected = new Set<number>();
+  let truePositives = 0;
+
+  for (const ext of extracted) {
+    for (let i = 0; i < expected.length; i++) {
+      if (matchedExpected.has(i)) continue;
+      const exp = expected[i];
+      if (exp === undefined) continue;
+      if (slotMatchesMode(ext, exp, mode)) {
+        truePositives += 1;
+        matchedExpected.add(i);
+        break;
+      }
+    }
+  }
+
+  const precision = truePositives / extracted.length;
+  const recall = truePositives / expected.length;
+  const f1 = precision + recall > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+  return { precision, recall, f1 };
+}
+
+function slotMatchesMode(
+  extracted: ConstraintSlot,
+  expected: ConstraintSlot,
+  mode: 'strict' | 'relaxed' | 'type_only',
+): boolean {
+  if (extracted.attribute !== expected.attribute) return false;
+  if (mode === 'type_only') return true;
+  if (mode === 'strict') {
+    return (
+      extracted.value === expected.value &&
+      (extracted.operator ?? 'eq') === (expected.operator ?? 'eq')
+    );
+  }
+  // relaxed: value overlap check
+  // For numeric attributes (price, score, year), check if values are within 50% range
+  // For string attributes, require exact value match (case-insensitive)
+  const extVal = extracted.value.toLowerCase().trim();
+  const expVal = expected.value.toLowerCase().trim();
+  if (extVal === expVal) return true;
+  // Numeric overlap: both parseable as numbers → within 50% relative distance
+  const extNum = Number(extVal);
+  const expNum = Number(expVal);
+  if (Number.isFinite(extNum) && Number.isFinite(expNum) && expNum !== 0) {
+    return Math.abs(extNum - expNum) / Math.abs(expNum) <= 0.5;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Aggregate result type
 // ---------------------------------------------------------------------------
 

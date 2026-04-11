@@ -12,6 +12,15 @@ export interface ResolverQueryProvenance extends QueryLookupProvenance {
     readonly strategies: readonly string[];
     readonly rawScoreDelta: number;
   }[] | undefined;
+
+  /**
+   * Candidate entity IDs that entered resolver scoring via blocker-seed
+   * hydration rather than anchor lookup.
+   */
+  readonly blockerSeedEntityIds?: readonly string[] | undefined;
+
+  /** Number of blocker-seeded candidates that survived into scoring. */
+  readonly blockerSeedCount?: number | undefined;
 }
 
 /**

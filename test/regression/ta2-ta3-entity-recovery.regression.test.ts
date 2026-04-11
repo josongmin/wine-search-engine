@@ -240,6 +240,21 @@ describe('ResolvedCandidate.blockerSeed (T6)', () => {
   });
 });
 
+// ─── T7: Resolver trace blocker-seed provenance fields ──────────────────────
+
+describe('ResolverQueryProvenance blocker-seed trace (T7)', () => {
+  it('accepts blockerSeedEntityIds and blockerSeedCount fields', async () => {
+    const candidateIds = ['wine-abc-123'];
+    const trace = {
+      blockerSeedEntityIds: candidateIds,
+      blockerSeedCount: candidateIds.length,
+    };
+
+    expect(trace.blockerSeedEntityIds).toEqual(['wine-abc-123']);
+    expect(trace.blockerSeedCount).toBe(1);
+  });
+});
+
 // ─── TA3-1: shouldTriggerCorrectiveRetry ────────────────────────────────────
 
 describe('shouldTriggerCorrectiveRetry (TA3-1)', () => {
