@@ -143,6 +143,10 @@ describe('DefaultRankingPolicy (T5.5a)', () => {
       expect(out[0]?.producer).toBe('Opus One');
       expect(out[1]?.producer).toBe('Opus One');
       expect(out[2]?.producer).toBe('Opus One');
+      // 4번째는 반드시 Other — Opus One이 4번째에 있으면 정책 위반
+      expect(out[3]?.producer).toBe('Other');
+      // 전체 Opus One 개수가 3개로 고정 (4개로 늘어나는 퇴행 방지)
+      expect(out.filter((r) => r.producer === 'Opus One')).toHaveLength(3);
     });
 
     it('demotes 4th+ occurrences of same producer to after position 10', () => {

@@ -64,6 +64,7 @@ describe('search replay fixtures — executable HTTP subset', () => {
         'authority_trace_ref',
         'runtime_correlation_ref',
         'decision_snapshot.snapshot_id',
+        'determinism_fingerprint',
       ]);
       expect(assertionSummary.executionMode).toBe(fixture.expected.execution_mode);
       expect(assertionSummary.degradationReasons).toEqual(fixture.expected.degradation_reasons);

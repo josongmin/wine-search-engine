@@ -17,6 +17,7 @@ import {
 export function buildPlanCacheKey(
   plan: QueryPlanV1,
   request: { sessionContext?: { sessionId: string }; context?: { locale: string } },
+  snapshotId?: string,
 ): QueryCacheKey {
   const b = new QueryCacheKeyBuilder();
   return b.build(
@@ -33,6 +34,7 @@ export function buildPlanCacheKey(
     [...plan.expansions.lexical, ...plan.expansions.semantic],
     request.sessionContext?.sessionId,
     request.context?.locale,
+    snapshotId,
   );
 }
 

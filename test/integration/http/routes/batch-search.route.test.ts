@@ -122,18 +122,20 @@ async function sendBatchSearch(app: FastifyInstance, payload: Record<string, unk
 function expectUseCaseCalledWith(
   execute: BatchSearchUseCase['execute'],
   options: {
-    batchId?: string;
+    /** Literal batch id or Vitest asymmetric matcher (e.g. `expect.any(String)`). */
+    batchId?: unknown;
     routeOptions?: Record<string, unknown>;
   } = {},
 ) {
   expect(execute).toHaveBeenCalledWith(
-    expect.arrayContaining([
-      expect.objectContaining({ id: '1', query: 'Test' }),
-    ]),
+    expect.arrayContaining([expect.objectContaining({ id: '1', query: 'Test' })]),
     options.routeOptions !== undefined
       ? expect.objectContaining(options.routeOptions)
       : undefined,
     options.batchId,
+    expect.objectContaining({
+      abortSignal: expect.any(AbortSignal),
+    }),
   );
 }
 
@@ -475,7 +477,7 @@ describe('POST /v1/batch-search', () => {
       });
     });
 
-    it('should pass undefined batch_id when not provided', async () => {
+    it('should pass request-scoped batch_id when not provided', async () => {
       const batchResponse = makeBatchResponse({
         batch_id: 'batch_12345_abc123',
         processing_time_ms: 50,
@@ -489,7 +491,9 @@ describe('POST /v1/batch-search', () => {
         requests: [makeBatchRequestItem()],
       });
 
-      expectUseCaseCalledWith(mockBatchSearchUseCase.execute);
+      expectUseCaseCalledWith(mockBatchSearchUseCase.execute, {
+        batchId: expect.any(String),
+      });
     });
   });
 
@@ -516,6 +520,7 @@ describe('POST /v1/batch-search', () => {
           fail_fast: true,
           timeout_ms: 10000,
         },
+        batchId: expect.any(String),
       });
     });
   });

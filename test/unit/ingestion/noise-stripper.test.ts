@@ -34,10 +34,14 @@ describe('stripNoiseTokens', () => {
 
   it('"Premium Margaux Gift Set" → "Premium", "Gift Set", and "Set" tokens stripped', () => {
     const result = stripNoiseTokens('Premium Margaux Gift Set');
-    expect(result.noiseFlags.length).toBeGreaterThan(0);
-    // "premium" and "gift set" should be detected
     const lowercaseFlags = result.noiseFlags.map((f) => f.toLowerCase());
+    // 테스트 이름에 명시된 모든 토큰을 실제로 검증
     expect(lowercaseFlags).toContain('premium');
+    expect(lowercaseFlags).toContain('gift set');
+    // cleaned에서 노이즈 토큰이 제거되고 "Margaux"는 남아야 함
+    expect(result.cleaned).toContain('Margaux');
+    expect(result.cleaned.toLowerCase()).not.toContain('premium');
+    expect(result.cleaned.toLowerCase()).not.toContain('gift set');
   });
 
   it('"Château Margaux Import" → "Import" stripped', () => {

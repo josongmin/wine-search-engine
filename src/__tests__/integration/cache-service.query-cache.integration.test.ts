@@ -65,9 +65,10 @@ describe('CacheService query cache integration', () => {
   async function seedDirectCachedResponse(
     response: SearchResponseV1,
     request: { sessionContext?: { sessionId: string }; context?: { locale: string } } = {},
+    currentSnapshot: DecisionSnapshot = createMockSnapshot(),
   ) {
     const plan = createMockPlan();
-    await queryCache.set(buildPlanCacheKey(plan, request), response, 3600);
+    await queryCache.set(buildPlanCacheKey(plan, request, currentSnapshot.snapshot_id), response, 3600);
     return { plan, request };
   }
 
@@ -80,11 +81,16 @@ describe('CacheService query cache integration', () => {
       request?: { sessionContext?: { sessionId: string }; context?: { locale: string } };
     } = {},
   ) {
-    const { plan, request } = await seedDirectCachedResponse(response, options.request);
+    const currentSnapshot = options.snapshot ?? createMockSnapshot();
+    const { plan, request } = await seedDirectCachedResponse(
+      response,
+      options.request,
+      currentSnapshot,
+    );
     const result = await cacheService.getSearchResponse(
       plan,
       request,
-      options.snapshot ?? createMockSnapshot(),
+      currentSnapshot,
       options.runtimeState,
     );
     expect(result.hit).toBe(false);
@@ -225,7 +231,13 @@ describe('CacheService query cache integration', () => {
 
     expect(result.hit).toBe(false);
     expect(result.reason).toBe(reason);
-    expect((await queryCache.get(buildPlanCacheKey(plan, request)))?.meta.requestId).toBe('test-request-123');
+    expect(
+      (
+        await queryCache.get(
+          buildPlanCacheKey(plan, request, createMockSnapshot().snapshot_id),
+        )
+      )?.meta.requestId,
+    ).toBe('test-request-123');
   });
 
   it('fails closed when cached model versions are missing', async () => {
@@ -254,7 +266,15 @@ describe('CacheService query cache integration', () => {
     const stored = await cacheService.setSearchResponse(mockPlan, mockRequest, nonBlockingResponse);
 
     expect(stored).toBe(false);
-    expect(await queryCache.get(buildPlanCacheKey(mockPlan, mockRequest))).toBeUndefined();
+    expect(
+      await queryCache.get(
+        buildPlanCacheKey(
+          mockPlan,
+          mockRequest,
+          nonBlockingResponse.meta.decisionSnapshot?.snapshot_id,
+        ),
+      ),
+    ).toBeUndefined();
   });
 
   it.each([

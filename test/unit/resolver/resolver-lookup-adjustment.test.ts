@@ -90,7 +90,9 @@ describe('Resolver lookup strategy adjustments', () => {
     const result = await resolver.resolve(input);
 
     expect(result.topEntity?.entityId).toBe('entity-a');
-    expect(result.decisionTrace.queryProvenance?.lookupStrategyAdjustments).toEqual(
+    const adjustments = result.decisionTrace.queryProvenance?.lookupStrategyAdjustments ?? [];
+    // entity-a: transliterated_exact 전략으로 +0.05 보너스 받음
+    expect(adjustments).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           entityId: 'entity-a',
@@ -99,6 +101,12 @@ describe('Resolver lookup strategy adjustments', () => {
         }),
       ]),
     );
+    // entity-b: lookup strategy 없음 → adjustments에 등장하지 않거나 delta=0
+    // arrayContaining만 쓰면 entity-b가 의도치 않게 보너스를 받아도 테스트 통과됨
+    const entityBAdj = adjustments.find((a: { entityId: string }) => a.entityId === 'entity-b');
+    expect(entityBAdj?.rawScoreDelta ?? 0).toBe(0);
+    // entity-a가 실제로 1위 — 조정 없이도 entity-b보다 높아야 함
+    expect(result.candidates[0]?.entityId).toBe('entity-a');
     expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toBeUndefined();
   });
 

@@ -70,7 +70,8 @@ describe('ScoreAggregator', () => {
     });
 
     it('final score is bounded to [0, 1]', () => {
-      // Even with large signals, score should be clamped to 1.0
+      // DEFAULT_WEIGHTS 합계 = 0.95 (anchorSimilarity=0, uncertaintyPenalty=0.05 제외)
+      // 모든 non-penalty 신호 = 1.0 → weighted sum = 0.95 → clamp 불필요
       const scores = makeScores({
         entityIntegrity: 1.0,
         semantic: 1.0,
@@ -83,8 +84,28 @@ describe('ScoreAggregator', () => {
         uncertaintyPenalty: 0,
       });
       const result = aggregator.aggregate(scores, DEFAULT_WEIGHTS);
-      expect(result).toBeGreaterThanOrEqual(0);
+      // 실제 가중치 합 = 0.15+0.25+0.20+0.15+0.10+0.03+0.07 = 0.95
+      expect(result).toBeCloseTo(0.95, 10);
       expect(result).toBeLessThanOrEqual(1);
+    });
+
+    it('final score upper-clamp: 가중치 합이 1을 초과하면 정확히 1.0으로 clamp', () => {
+      // semantic=2.0 과도 가중치 → weighted sum > 1 → clamp01이 1.0을 반환해야 함
+      const customWeights = {
+        ...DEFAULT_WEIGHTS,
+        semantic: 2.0,
+      };
+      const scores = makeScores({ entityIntegrity: 1.0, semantic: 1.0, hardConstraintPass: true });
+      const result = aggregator.aggregate(scores, customWeights);
+      // clamp01이 > 1.0을 그대로 통과시키면 이 테스트가 잡아냄
+      expect(result).toBe(1);
+    });
+
+    it('NaN 신호는 NaN을 반환하지 않음 (non-finite guard)', () => {
+      // entityIntegrity=NaN → aggregate는 절대 NaN을 반환하면 안 됨
+      const scores = makeScores({ entityIntegrity: NaN, hardConstraintPass: true });
+      const result = aggregator.aggregate(scores, DEFAULT_WEIGHTS);
+      expect(Number.isNaN(result)).toBe(false);
     });
 
     it('score is clamped to 0 for heavy uncertainty penalty', () => {
