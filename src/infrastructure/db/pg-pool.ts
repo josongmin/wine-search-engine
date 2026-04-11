@@ -8,11 +8,16 @@ let pool: Pool | null = null;
 
 export function createPgPool(pgConfig: PgPoolConfig): Pool {
   const nextPool = new Pool({
-    host: pgConfig.host,
-    port: pgConfig.port,
-    database: pgConfig.database,
-    user: pgConfig.user,
-    password: pgConfig.password,
+    ...(pgConfig.connectionString !== undefined
+      ? { connectionString: pgConfig.connectionString }
+      : {
+          host: pgConfig.host,
+          port: pgConfig.port,
+          database: pgConfig.database,
+          user: pgConfig.user,
+          password: pgConfig.password,
+        }),
+    ...(pgConfig.ssl ? { ssl: { rejectUnauthorized: false } } : {}),
     max: pgConfig.poolMax,
     idleTimeoutMillis: pgConfig.idleTimeoutMillis,
     connectionTimeoutMillis: pgConfig.connectionTimeoutMillis,
@@ -48,7 +53,7 @@ export function getPgPool(pgConfig: PgPoolConfig = config.pg): Pool {
 }
 
 export function shouldUsePgPool(pgConfig: PgPoolConfig = config.pg): boolean {
-  return pgConfig.password.length > 0;
+  return (pgConfig.connectionString?.length ?? 0) > 0 || pgConfig.password.length > 0;
 }
 
 export function getOptionalPgPool(pgConfig: PgPoolConfig = config.pg): Pool | undefined {

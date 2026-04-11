@@ -86,4 +86,18 @@ describe('parseEnv invariants', () => {
     expect(config.agent.perStepTimeoutMs).toBe(10000);
     expect(config.agent.agentTimeoutMs).toBe(30000);
   });
+
+  it('uses DATABASE_URL as pg connection source when provided', () => {
+    const config = parseEnv({
+      DATABASE_URL: 'postgresql://postgres:secret@example.com:5432/postgres',
+    });
+    expect(config.pg.connectionString).toBe('postgresql://postgres:secret@example.com:5432/postgres');
+  });
+
+  it('parses PG_SSL explicitly', () => {
+    const config = parseEnv({
+      PG_SSL: 'true',
+    });
+    expect(config.pg.ssl).toBe(true);
+  });
 });

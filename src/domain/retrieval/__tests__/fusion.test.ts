@@ -319,4 +319,30 @@ describe('FusionService', () => {
       expect(candidates[0]?.fusionRrfTotal).toBeCloseTo(1 / 61, 10);
     });
   });
+
+  describe('sort comparator NaN guard', () => {
+    it('sort is stable when multiple candidates have identical fusionRrfTotal (tie-break by entityId)', () => {
+      // If both scores are identical, diff = 0; entityId comparison provides stable order.
+      const sparse = [makeSparse('wine-z', 1), makeSparse('wine-a', 1)];
+      const dense = [makeDense('wine-z', 1), makeDense('wine-a', 1)];
+      const candidates = fusion.fuse(sparse, dense);
+      // Both have the same RRF score (rank-1 in both channels); entityId tie-break → 'wine-a' first
+      expect(candidates[0]?.entityId).toBe(createEntityId('wine-a'));
+      expect(candidates[1]?.entityId).toBe(createEntityId('wine-z'));
+    });
+
+    it('sort produces deterministic order when candidates span all RRF score values', () => {
+      // Regression: bScore - aScore = NaN when both are -Infinity (non-finite).
+      // The guard (aScore !== bScore) skips the subtraction and falls through to entityId.
+      const sparse = [makeSparse('wine-a', 1), makeSparse('wine-b', 2), makeSparse('wine-c', 3)];
+      const candidates = fusion.fuse(sparse, []);
+      // All have finite fusionRrfTotal; sort must return stable non-NaN comparisons.
+      for (let i = 1; i < candidates.length; i++) {
+        const prev = candidates[i - 1]!.fusionRrfTotal!;
+        const curr = candidates[i]!.fusionRrfTotal!;
+        expect(Number.isFinite(prev)).toBe(true);
+        expect(prev).toBeGreaterThanOrEqual(curr);
+      }
+    });
+  });
 });

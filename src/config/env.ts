@@ -107,11 +107,13 @@ function buildConfig(parsed: EnvVars) {
 
     /** PostgreSQL connection settings. */
     pg: {
+      connectionString: parsed.DATABASE_URL,
       host: parsed.PG_HOST,
       port: parsed.PG_PORT,
       database: parsed.PG_DATABASE,
       user: parsed.PG_USER,
       password: parsed.PG_PASSWORD,
+      ssl: parsed.PG_SSL,
       poolMax: parsed.PG_POOL_MAX,
       idleTimeoutMillis: parsed.PG_POOL_IDLE_TIMEOUT_MS,
       connectionTimeoutMillis: parsed.PG_POOL_CONNECTION_TIMEOUT_MS,

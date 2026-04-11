@@ -227,8 +227,10 @@ export class FusionService {
       // in sync (Rule 30: SSoT for cross-module sort behaviour).
       const aScore = Number.isFinite(a.fusionRrfTotal) ? a.fusionRrfTotal! : -Infinity;
       const bScore = Number.isFinite(b.fusionRrfTotal) ? b.fusionRrfTotal! : -Infinity;
-      const diff = bScore - aScore;
-      if (diff !== 0) return diff;
+      // Guard: if BOTH scores are non-finite (-Infinity - (-Infinity) = NaN), the
+      // subtraction produces NaN, which violates the sort comparator contract (must
+      // return a consistent number). Fall through to entityId tie-break in that case.
+      if (aScore !== bScore) return bScore - aScore;
       return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
     });
 

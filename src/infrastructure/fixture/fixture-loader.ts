@@ -51,6 +51,14 @@ const MIN_QUERY_LENGTH = 1;
 /** Maximum query string length (domain: no realistic wine search exceeds 500 chars). */
 const MAX_QUERY_LENGTH = 500;
 
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB;
+/** 20 MB — maximum NDJSON corpus size for full in-memory load.
+ *  Based on: largest expected gold corpus ~2K entries × ~500 bytes/entry = ~1 MB.
+ *  20 MB is a 20× safety margin; files beyond this must use streaming readline. */
+const MAX_CORPUS_LOAD_MB = 20;
+const MAX_CORPUS_LOAD_BYTES = MAX_CORPUS_LOAD_MB * BYTES_PER_MB;
+
 // ---------------------------------------------------------------------------
 // Zod schemas — strict() to catch schema drift at the source boundary
 // ---------------------------------------------------------------------------
@@ -474,13 +482,34 @@ export class FixtureLoader {
     const path = join(this.repoRoot, corpusRelPath);
     this.assertSafePath(path);
     const content = await readFile(path, 'utf8');
+    // Guard: reject corpus files larger than 20 MB to prevent heap exhaustion.
+    // Larger corpora must be streamed via corpusPath() + a readline reader.
+    if (Buffer.byteLength(content, 'utf8') > MAX_CORPUS_LOAD_BYTES) {
+      throw new Error(
+        `loadCorpusNdjson: corpus file exceeds 20 MB limit — use corpusPath() for streaming. Path: ${path}`,
+      );
+    }
     const lines = content
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
     const results: unknown[] = [];
-    for (const line of lines) {
-      results.push(JSON.parse(line) as unknown);
+    let malformedLines = 0;
+    for (let i = 0; i < lines.length; i++) {
+      try {
+        results.push(JSON.parse(lines[i]!) as unknown);
+      } catch {
+        malformedLines++;
+        // Skip malformed lines and continue — a single bad line should not
+        // corrupt the entire corpus. Callers can detect truncation via length.
+        // eslint-disable-next-line no-console
+        console.warn(`loadCorpusNdjson: malformed JSON at line ${i + 1} in ${path} — line skipped`);
+      }
+    }
+    if (malformedLines > 0) {
+      throw new Error(
+        `loadCorpusNdjson: ${malformedLines} malformed line(s) in ${path}. Corpus integrity compromised — fix the source file.`,
+      );
     }
     return results;
   }

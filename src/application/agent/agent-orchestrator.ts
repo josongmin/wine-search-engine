@@ -1045,7 +1045,7 @@ export class AgentOrchestrator {
           for (let bi = 0; bi < batchResults.length; bi++) {
             const result = batchResults[bi]!;
             const call = batchCalls[bi]!;
-            const obs = truncateObservation(result.observation, this.config.maxContextChars);
+            const obs = truncateObservation(result.observation, effectiveConfig.maxContextChars);
             observations.push(obs);
             batchPairs.push({ action: call, observation: obs });
             if (
@@ -1172,7 +1172,7 @@ export class AgentOrchestrator {
               effectiveConfig.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
               `Tool "${tool}" timed out`,
             );
-            observation = truncateObservation(timedToolResult.observation, this.config.maxContextChars);
+            observation = truncateObservation(timedToolResult.observation, effectiveConfig.maxContextChars);
             rawResult = timedToolResult.rawResult;
           } catch (toolErr) {
             if ((toolErr as TimeoutErrorLike).code === 'TIMEOUT') {
