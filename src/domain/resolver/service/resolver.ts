@@ -32,6 +32,15 @@ const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
 const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
 /** Decimal places when serializing gap for traces. */
 const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
+/**
+ * Minimum calibrated confidence C below which a non-ambiguous, non-resolved
+ * result triggers a corrective_retry recommendation (TA3-1).
+ *
+ * Mirrors CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD in search-usecase-corrective-retry.ts.
+ * Both must stay in sync — Rule 30: cross-module constants require a single SSoT.
+ * TODO(cleanup): extract to a shared domain config once the TA3 spec stabilises.
+ */
+const RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD = 0.5;
 
 function classifyLearnedMatcherFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -67,6 +76,19 @@ export interface ResolverInput {
 
   /** Pre-loaded candidate entities (may come from external retrieval). */
   readonly candidateEntities: readonly ResolverCandidate[];
+
+  /**
+   * TA2-4: Blocker-seeded candidates — entities returned by `Blocker.block()`
+   * that were NOT already covered by any anchor's `candidateEntityIds`.
+   *
+   * These carry zero-filled signal sets (`ZERO_SIGNALS`) and `source:
+   * 'blocker_seed'`. They enter the scorer's attribute-hint pathway.
+   *
+   * Produced upstream by `buildResolverCandidatesFromGenerator()` when
+   * the caller supplies `blockerOnlyIds`.  If undefined (not yet wired),
+   * the pipeline falls back to the current anchors-only behaviour.
+   */
+  readonly blockerSeedCandidates?: readonly ResolverCandidate[] | undefined;
 }
 
 /**
@@ -185,16 +207,34 @@ export class Resolver {
       input.normalizedQuery,
     );
 
-    // Merge blocked IDs with pre-loaded candidate entities.
-    // Pre-loaded candidates that survived blocking are used; others from
-    // blocking that are not in candidateEntities are excluded (they lack signals).
+    // TA2-4: Merge pre-loaded candidates with blocker-seeded candidates.
+    // Both pools are filtered to IDs that survived blocking (recall gate).
+    //
+    // Blocker-seeded candidates (source: 'blocker_seed') carry zero-filled
+    // signal sets. They enter the scorer's attribute-hint pathway and
+    // receive proportional calibrated scores in buildResolvedCandidates().
+    // This promotes the blocker's high-recall recall output from a filter
+    // to a hydrate-able seed — fixing the "invisible entity" failure mode
+    // where the blocker found the correct wine but alias lookup missed it.
     const blockedIdSet = new Set(blockedIds.map(String));
-    const candidates = input.candidateEntities.filter(
+    const allInputCandidates = [
+      ...input.candidateEntities,
+      ...(input.blockerSeedCandidates ?? []),
+    ];
+    // Deduplicate: if a candidate ID appears in both pools, prefer the one
+    // from candidateEntities (full signals) over the blocker seed (zero signals).
+    const seenInMerge = new Set<string>();
+    const mergedCandidates: typeof allInputCandidates = [];
+    for (const c of allInputCandidates) {
+      const key = String(c.entityId);
+      if (!seenInMerge.has(key)) {
+        seenInMerge.add(key);
+        mergedCandidates.push(c);
+      }
+    }
+    const candidates = mergedCandidates.filter(
       (c) => blockedIdSet.has(String(c.entityId)),
     );
-
-    // If blocking returned IDs not present in candidateEntities, we still
-    // proceed with what we have — the scorer needs full signal sets.
 
     // Step 2: Score each candidate
     const scored = candidates.map((candidate) => ({
@@ -370,7 +410,22 @@ export class Resolver {
       return { status: 'ambiguous', nextAction: 'clarify', reasonCodes };
     }
 
-    // Low confidence, no ambiguity detected — fail or hybrid search
+    // Low confidence, no ambiguity detected — check whether corrective retry
+    // is warranted (TA3-1): zero anchors OR confidence below retry threshold.
+    //
+    // corrective_retry takes precedence over hybrid_search: it is a targeted
+    // exact-recovery retry, not a broad fallback. The application layer
+    // (executeEntityRoute) honours this recommendation to run Pass 2.
+    const zeroAnchors = input.anchorCandidates.length === 0;
+    const rawConfidence = calibrated.decisionConfidenceC;
+    const confidenceFinite = Number.isFinite(rawConfidence) ? rawConfidence : 0;
+    const belowRetryThreshold = confidenceFinite < RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD;
+
+    if (zeroAnchors || belowRetryThreshold) {
+      reasonCodes.push('CORRECTIVE_RETRY_WARRANTED');
+      return { status: 'failed', nextAction: 'corrective_retry', reasonCodes };
+    }
+
     if (calibrated.decisionConfidenceC > 0) {
       reasonCodes.push('LOW_CONFIDENCE_HYBRID_FALLBACK');
       return { status: 'ambiguous', nextAction: 'hybrid_search', reasonCodes };
@@ -384,7 +439,11 @@ export class Resolver {
     input: ResolverInput,
     ambiguity: AmbiguityState,
   ): boolean {
-    if (input.queryClass !== 'short_entity' && input.queryClass !== 'ambiguous_short_form') {
+    if (
+      input.queryClass !== 'exact_entity' &&
+      input.queryClass !== 'short_entity' &&
+      input.queryClass !== 'ambiguous_short_form'
+    ) {
       return false;
     }
 
@@ -438,6 +497,8 @@ export class Resolver {
         calibratedScore,
         rank: index + 1,
         evidenceRefs: entry.candidate.aliasMatches.map((m) => m.aliasValue),
+        // TA2-4: Propagate blocker seed provenance so callers can tag traces.
+        ...(entry.candidate.source === 'blocker_seed' ? { blockerSeed: true as const } : {}),
       };
     });
   }
@@ -693,7 +754,9 @@ export class Resolver {
     }
 
     const isShortForm =
-      queryClass === 'short_entity' || queryClass === 'ambiguous_short_form';
+      queryClass === 'exact_entity' ||
+      queryClass === 'short_entity' ||
+      queryClass === 'ambiguous_short_form';
     const hasOnlyNoisySupport = strategies.every(
       (strategy) =>
         strategy !== 'exact' &&

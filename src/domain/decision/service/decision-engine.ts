@@ -398,9 +398,11 @@ export class DecisionEngine {
     }
 
     const cMeetsThreshold = C >= thresholds.resolveTau;
-    // Use dynamic gap threshold based on query class (RFC-009 §5.3)
-    const dynamicGapThreshold = computeDynamicGapThreshold(input.queryPlan.queryClass, C);
-    const gapMeetsThreshold = delta >= dynamicGapThreshold;
+    // thresholds.gapTau is already the dynamic gap threshold computed by
+    // loadThresholds() via computeDynamicGapThreshold(). Using it directly
+    // avoids a redundant computation with identical arguments (Rule 30: SSoT).
+    const effectiveGapTau = thresholds.gapTau;
+    const gapMeetsThreshold = delta >= effectiveGapTau;
 
     // Gate 1: Full resolution (conformal set size blocks resolution per §6.2)
     if (cMeetsThreshold && gapMeetsThreshold && !A && conformalSetSize < 2) {
@@ -409,7 +411,7 @@ export class DecisionEngine {
         status: 'resolved',
         nextAction: 'return_result',
         rulesApplied: [...rulesApplied],
-        finalReason: `Calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_gap=${dynamicGapThreshold.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, no ambiguity.`,
+        finalReason: `Calibrated C=${C.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_resolve=${thresholds.resolveTau}, gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} >= T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}, no ambiguity.`,
       };
     }
 
@@ -429,7 +431,7 @@ export class DecisionEngine {
         rulesApplied.push('AMBIGUITY_DETECTED');
       }
       if (!gapMeetsThreshold) {
-        reasons.push(`gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_gap=${dynamicGapThreshold.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}`);
+        reasons.push(`gap=${delta.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)} < T_gap=${effectiveGapTau.toFixed(DECISION_TRACE_FLOAT_DECIMAL_PLACES)}`);
         rulesApplied.push('GAP_BELOW_THRESHOLD');
       }
       return {
@@ -592,7 +594,11 @@ export class DecisionEngine {
     }
 
     const queryClass = input.queryPlan.queryClass;
-    if (queryClass !== 'short_entity' && queryClass !== 'ambiguous_short_form') {
+    if (
+      queryClass !== 'exact_entity' &&
+      queryClass !== 'short_entity' &&
+      queryClass !== 'ambiguous_short_form'
+    ) {
       return state;
     }
 

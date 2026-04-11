@@ -161,6 +161,22 @@ const QUERY_CLASS_OVERRIDES: Readonly<Partial<Record<QueryClass, Partial<Scoring
     criticScore: 0.0,
     multilingualScore: 0.0,
   },
+  // exact_entity: fully specified lookup — same weight profile as short_entity;
+  // entity integrity and attribute alignment dominate.
+  exact_entity: {
+    entityIntegrity: 0.30,
+    attributeAlignment: 0.25,
+    semantic: 0.15,
+    softConstraint: 0.10,
+    preferenceAlignment: 0.05,
+    popularity: 0.03,
+    availability: 0.07,
+    uncertaintyPenalty: 0.05,
+    producerPrestige: 0.0,
+    recency: 0.0,
+    criticScore: 0.0,
+    multilingualScore: 0.0,
+  },
   ambiguous_short_form: {
     entityIntegrity: 0.25,
     semantic: 0.20,

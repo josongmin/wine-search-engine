@@ -176,7 +176,11 @@ export class AmbiguityClassifier {
     candidates: readonly ResolverCandidate[],
     queryClass: QueryClass,
   ): boolean {
-    if (queryClass !== 'short_entity' && queryClass !== 'ambiguous_short_form') {
+    if (
+      queryClass !== 'exact_entity' &&
+      queryClass !== 'short_entity' &&
+      queryClass !== 'ambiguous_short_form'
+    ) {
       return false;
     }
 

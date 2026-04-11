@@ -30,6 +30,7 @@ import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EngineDecision } from '../model/engine-decision.js';
 import type { ResultItem } from '../model/result-item.js';
 import type { ClarificationPayload } from '../model/clarification.js';
+import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type { CounterfactualReject, ResponseMeta } from '../model/counterfactual.js';
 import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-response.js';
 import type { GroupedResult } from './result-grouper.js';
@@ -98,6 +99,13 @@ export interface ResponseBuildParams {
 
   /** Optional specialized retrieval provenance surfaced by route execution. */
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+
+  /**
+   * Optional audit payload to include in the response meta.
+   * Populated when `options.explain = true` and the planner trace is non-empty.
+   * Use conditional spread at call sites: `...(auditExtension !== undefined ? { auditExtension } : {})`.
+   */
+  readonly auditExtension?: AuditExtension | undefined;
 }
 
 /** Fixed-point precision for confidence in deterministic response hash. */
@@ -176,6 +184,7 @@ export class ResponseBuilder {
         ? { retrievalProvenanceSlices: params.retrievalProvenanceSlices }
         : {}),
       ...toSpecializedRouteMeta(params.specializedRouteObservability),
+      ...(params.auditExtension !== undefined ? { auditExtension: params.auditExtension } : {}),
     };
 
     // Extract LLM envelope fields (Epic 9)

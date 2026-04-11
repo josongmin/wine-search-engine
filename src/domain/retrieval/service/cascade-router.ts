@@ -92,7 +92,10 @@ export class CascadeRouter {
     aliasMatchStrength: number,
     constraintCount: number,
   ): 'easy' | 'medium' | 'hard' {
-    if (queryClass === 'short_entity' && aliasMatchStrength >= CASCADE_EASY_ALIAS_MATCH_STRENGTH) {
+    if (
+      (queryClass === 'exact_entity' || queryClass === 'short_entity') &&
+      aliasMatchStrength >= CASCADE_EASY_ALIAS_MATCH_STRENGTH
+    ) {
       return 'easy';
     }
 

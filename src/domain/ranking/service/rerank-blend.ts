@@ -27,6 +27,9 @@ const RERANK_BLEND_BY_CLASS: Readonly<Record<QueryClass, number>> = {
   ambiguous_short_form: 0.12,
   anchored_similarity: 0.12,
   short_entity: 0.05,
+  // exact_entity: fully specified lookup — BM25 + entity_integrity already rank correctly;
+  // reranker adds noise (same rationale as short_entity).
+  exact_entity: 0.05,
   unknown: 0.1,
 };
 

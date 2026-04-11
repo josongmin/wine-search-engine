@@ -61,7 +61,7 @@ export function evaluateRerankGate(input: RerankGateInput): RerankGateDecision {
     return { shouldRerank: false, reason: 'too_few_candidates' };
   }
 
-  if (queryClass === 'short_entity' || effectiveRoute === 'entity') {
+  if (queryClass === 'exact_entity' || queryClass === 'short_entity' || effectiveRoute === 'entity') {
     return { shouldRerank: false, reason: 'already_precise' };
   }
 

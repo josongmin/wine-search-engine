@@ -69,6 +69,7 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
  */
 function mapToFusionQueryClass(qc: DomainQueryClass): FusionQueryClass {
   switch (qc) {
+    case 'exact_entity':
     case 'short_entity':
     case 'ambiguous_short_form':
     case 'anchored_similarity':
@@ -252,6 +253,9 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // without races on shared mutable state.
 
     const filtersOrUndefined = filters.length > 0 ? filters : undefined;
+    // W2-BUG-05: propagate request ID to downstream Vespa queries so
+    // distributed traces can be correlated across service boundaries.
+    const requestId = input.requestContext?.requestId;
 
     type DegradationReport = {
       readonly component: 'sparse_bm25' | 'learned_sparse' | 'dense_semantic' | 'embedding_combiner' | 'anchor_similarity';
@@ -292,6 +296,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           filtersOrUndefined,
           profile.sparseTopN,
           vespaRankProfile,
+          requestId,
         );
         return { hits, degraded: false };
       } catch (sparseErr) {
@@ -327,6 +332,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           buildLearnedSparseQueryWeights(input),
           filtersOrUndefined,
           profile.sparseTopN,
+          requestId,
         );
         return { hits, degraded: false };
       } catch (learnedErr) {
@@ -414,6 +420,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           filtersOrUndefined,
           profile.denseTopN,
           vespaRankProfile,
+          requestId,
         );
         return { hits, degraded: false };
       } catch (denseErr) {
@@ -476,6 +483,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
           filtersOrUndefined,
           profile.denseTopN,
           vespaRankProfile,
+          requestId,
         );
         return { hits };
       } catch (anchorErr) {
@@ -861,7 +869,11 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
  *   without a second post-retrieval rerank pass.
  * - compare_candidates / relative → `prestige_hybrid`: head-to-head comparisons
  *   benefit from the same quality-first signal set.
- * - everything else → `hybrid`: standard 50/50 BM25+ANN.
+ * - discovery / recommendation / occasion → `wine_aware`: full domain signals with
+ *   2-phase reranking; adds availability boost, critic score, vintage freshness,
+ *   and drinking-window proximity on top of hybrid phase-1. Best for "find me a wine"
+ *   queries where domain quality signals matter most.
+ * - everything else → `hybrid`: normalized BM25+ANN+popularity for standard search.
  */
 function resolveVespaRankProfile(retrievalMode: string | undefined): string {
   switch (retrievalMode) {
@@ -870,6 +882,10 @@ function resolveVespaRankProfile(retrievalMode: string | undefined): string {
     case 'compare_candidates':
     case 'relative':
       return 'prestige_hybrid';
+    case 'discovery':
+    case 'recommendation':
+    case 'occasion':
+      return 'wine_aware';
     default:
       return 'hybrid';
   }
@@ -964,7 +980,16 @@ function normalizeCandidateProvenance(
 function toCandidateProvenance(
   provenance: CandidateEnvelope['provenance'],
 ): CandidateEnvelope['provenance'] {
-  const parsed = CandidateProvenanceV2Schema.parse(normalizeCandidateProvenance(provenance));
+  const normalized = normalizeCandidateProvenance(provenance);
+  const result = CandidateProvenanceV2Schema.safeParse(normalized);
+  if (!result.success) {
+    bootstrapLogger.warn(
+      { issues: result.error.issues },
+      '[CandidatePool] toCandidateProvenance: schema validation failed — using raw normalized provenance',
+    );
+    return normalized;
+  }
+  const parsed = result.data;
   return {
     channels: parsed.channels,
     channelScores: parsed.channelScores,
@@ -1143,7 +1168,11 @@ function buildLearnedSparseQueryWeights(
   ]) {
     const boostTokens = retrievalValueToTokens(boost.value);
     for (const token of boostTokens) {
-      counts.set(token, (counts.get(token) ?? 0) + Math.max(1, boost.weight));
+      // Math.max(0, ...) prevents negative weights from corrupting counts.
+      // Previously Math.max(1, ...) was used but that clamps all [0,1]-range weights to 1,
+      // discarding calibrated confidence signal entirely — high-confidence (0.95) and
+      // low-confidence (0.07) boosts received identical increments of 1.
+      counts.set(token, (counts.get(token) ?? 0) + Math.max(0, Number.isFinite(boost.weight) ? boost.weight : 0));
     }
   }
 
@@ -1151,7 +1180,10 @@ function buildLearnedSparseQueryWeights(
     .sort((left, right) => {
       const diff = right[1] - left[1];
       const primary = Number.isFinite(diff) ? diff : 0;
-      return primary !== 0 ? primary : left[0].localeCompare(right[0]);
+      // Deterministic tiebreaker: avoid localeCompare() which is locale-dependent
+      // and produces different token orderings across systems (CLAUDE.md rule 21).
+      // Tokens are ASCII-safe query terms so simple lexicographic comparison is correct.
+      return primary !== 0 ? primary : (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0);
     })
     .slice(0, QUERY_EXPANSION_MAX_TERMS)
     .map(([token, count]) => ({

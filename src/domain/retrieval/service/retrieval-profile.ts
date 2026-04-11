@@ -318,7 +318,7 @@ export class RetrievalProfileService {
     }
 
     // Exact entity lookups use the conservative fallback
-    if (queryClass === 'short_entity' || queryClass === 'ambiguous_short_form') {
+    if (queryClass === 'exact_entity' || queryClass === 'short_entity' || queryClass === 'ambiguous_short_form') {
       return EXACT_SAFE_FALLBACK;
     }
 

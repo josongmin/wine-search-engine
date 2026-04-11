@@ -85,7 +85,15 @@ export class PlannerV1Adapter implements QueryPlannerPort {
       ...(v2.decompositionHint !== undefined && { decompositionHint: v2.decompositionHint }),
     };
 
-    const compiled = this.executionCompiler.compile({ plan: v2 });
+    const compiledBase = this.executionCompiler.compile({ plan: v2 });
+
+    // Forward plannerTrace from V2 into CompiledWineQuery so the post-route
+    // phase can attach it to the response without needing a separate V2 reference.
+    // Only populated when enablePlannerTrace = true (options.explain=true).
+    const compiled: CompiledWineQuery =
+      v2.plannerTrace != null && v2.plannerTrace.length > 0
+        ? { ...compiledBase, plannerTrace: v2.plannerTrace }
+        : compiledBase;
 
     return { v1, compiled };
   }

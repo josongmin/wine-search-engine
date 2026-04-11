@@ -28,5 +28,6 @@ export function buildPlannerContextFromSearchRequest(
         }
       : undefined,
     ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+    ...(request.options?.explain === true ? { enablePlannerTrace: true } : {}),
   };
 }

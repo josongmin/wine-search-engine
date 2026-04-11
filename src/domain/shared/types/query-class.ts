@@ -2,6 +2,7 @@
  * All query classification labels as defined in RFC-005.
  */
 export const QUERY_CLASSES = [
+  'exact_entity',
   'short_entity',
   'ambiguous_short_form',
   'anchored_similarity',
@@ -14,6 +15,7 @@ export const QUERY_CLASSES = [
 /**
  * The classification of an incoming search query, per RFC-005.
  *
+ * - `exact_entity` — Unambiguous single-entity lookup — fully specified query expected to resolve to exactly one entity.
  * - `short_entity` — direct entity lookup (e.g. "Opus One 2018").
  * - `ambiguous_short_form` — short or abbreviated name that maps to multiple entities.
  * - `anchored_similarity` — "wines like X" with an anchor entity.

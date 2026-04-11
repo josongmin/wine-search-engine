@@ -1,9 +1,11 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type { AuditExtension } from '../../domain/audit/model/audit-extension.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
+import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
@@ -14,8 +16,10 @@ import { buildEntropyAbstainResponseParams } from './search-usecase-execute-buil
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
+import { ConstraintReasoner } from '../../domain/query/service/constraint-reasoner.js';
+import type { ChannelDegradationSummary } from '../../domain/query/model/abstain-decision.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
-import { EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
+import { DomainError, EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
 import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
 import { deriveQueryFamily } from '../../domain/query/model/query-observability-vocab.js';
@@ -37,6 +41,49 @@ import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
 } from './specialized-route-observability.js';
+
+/** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
+const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
+
+/**
+ * Derives AuditExtension from planner/ranking runtime state.
+ * Returns undefined when no gated trace payload is available.
+ */
+function deriveAuditExtension(
+  compiled: CompiledWineQuery | undefined,
+  rankingMetadata: RankingMetadata | undefined,
+  rankedResults: readonly RankedResult[],
+): AuditExtension | undefined {
+  const plannerTrace = compiled?.plannerTrace;
+  const scoreDriftRecord = rankingMetadata?.scoreDriftRecord;
+
+  if (
+    (plannerTrace == null || plannerTrace.length === 0)
+    && scoreDriftRecord === undefined
+  ) {
+    return undefined;
+  }
+
+  return {
+    ...(plannerTrace != null && plannerTrace.length > 0
+      ? { planner_policy_trace: plannerTrace }
+      : {}),
+    ...(scoreDriftRecord !== undefined
+      ? {
+          ranking_delta_trace: {
+            preRerankTop5: rankingMetadata?.preRerankTop5 ?? [],
+            postRerankTop5: rankedResults.slice(0, AUDIT_RERANK_SNAPSHOT_COUNT).map((result) => String(result.entityId)),
+            safetyEnvelopeBlocks: scoreDriftRecord.safetyEnvelopeBlocks,
+            drift: scoreDriftRecord,
+          },
+          rerank_decision_trace: {
+            gateDecision: 'applied' as const,
+            scoreContract: 'bounded_normalized_0_1',
+          },
+        }
+      : {}),
+  };
+}
 
 function mergeRouteDegradation(
   snapshot: DecisionSnapshot,
@@ -90,6 +137,7 @@ export interface SearchPostRouteExecutionContext {
   readonly responseBuilder: ResponseBuilderPort;
   readonly cacheService?: SearchResponseCachePort | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
+  readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
   /** When true (options.explain=true), counterfactuals are always included. */
   readonly includeCounterfactuals?: boolean | undefined;
@@ -136,6 +184,7 @@ export interface RankedRouteDecisionPhaseContext {
   readonly plannerSuggestedMode?: string | undefined;
   readonly includeCounterfactuals?: boolean | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
+  readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
 }
 
@@ -283,6 +332,11 @@ export async function runRankedRouteDecisionPhase(
    * Do NOT pass raw scores or internal ranker state to the quality gate.
    * compiled.execution.effectiveRoute/effectiveRetrievalMode are forwarded via ResponseBuildParams.
    */
+  const auditExtension = deriveAuditExtension(
+    ctx.compiled,
+    ctx.rankingMetadata,
+    ctx.fullRankedResults,
+  );
   let built: SearchResponseV1;
   try {
     built = ctx.responseBuilder.build({
@@ -305,51 +359,26 @@ export async function runRankedRouteDecisionPhase(
       ...(ctx.specializedRouteObservability !== undefined
         ? { specializedRouteObservability: ctx.specializedRouteObservability }
         : {}),
+      ...(auditExtension !== undefined ? { auditExtension } : {}),
     });
   } catch (buildErr) {
     if (buildErr instanceof EvidenceObligationError) {
       throw buildErr;
     }
+    // MUST NOT fabricate a 200 OK response for unexpected infrastructure failures
+    // (Redis down, OOM, nil dereference, etc.). Per CLAUDE.md schema quality bar:
+    // "Catch blocks in use-case code MUST NOT fabricate success-shaped (200 OK)
+    // responses from unexpected errors."  Re-throw as DomainError so the HTTP
+    // error handler maps it to 500 + RFC-014 envelope (mirrors hybrid.usecase.ts).
+    const errorMessage = buildErr instanceof Error ? buildErr.message : String(buildErr);
     bootstrapLogger.error(
       { requestId: ctx.requestId, err: buildErr },
-      '[runRankedRouteDecisionPhase] responseBuilder.build() threw; returning bare safe response',
+      '[runRankedRouteDecisionPhase] responseBuilder.build() threw unexpectedly — propagating as 500',
     );
-    const safeTraceRef = buildAuthorityTraceRef({
-      queryPlan: ctx.plan,
-      snapshot,
-      route: ctx.effectiveRoute,
-      ...(ctx.compiled !== undefined
-        ? { retrievalMode: ctx.compiled.execution.effectiveRetrievalMode }
-        : {}),
-      decisionStatus: 'failed',
-      nextAction: 'fail',
-      failureReason: 'INTERNAL_INCONSISTENCY',
-    });
-    return {
-      queryType: 'search',
-      engineDecision: {
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        route: ctx.effectiveRoute,
-        decisionConfidence: 0,
-        confidenceSemantics: 'calibrated_decision_confidence',
-        decisionTraceRef: safeTraceRef,
-        authorityTraceRef: safeTraceRef,
-        decisionSnapshot: snapshot,
-      },
-      results: [],
-      meta: {
-        requestId: ctx.requestId,
-        queryTimeMs,
-        route: ctx.effectiveRoute,
-        version: '1',
-        engine_schema_version: 'search_response_v1',
-        authorityTraceRef: safeTraceRef,
-        runtimeCorrelationRef: ctx.requestId,
-        executionMode: 'degraded',
-        blockingEligible: false,
-      },
-    };
+    throw new DomainError(
+      'INTERNAL_INCONSISTENCY',
+      `Response building failed unexpectedly: ${errorMessage}`,
+    );
   }
   /* Unit tests may stub partial SearchResponseV1; skip structured log when snapshot missing. */
   const engineDecision = built.engineDecision as SearchResponseV1['engineDecision'] | undefined;
@@ -401,7 +430,37 @@ export async function runSearchPostRoutePhase(
   );
 
   const topScores = topKFinalScores(ctx.rankedResults);
-  const abstainDecision = ctx.abstainPolicy.shouldAbstain(topScores);
+  const auditExtension = deriveAuditExtension(
+    ctx.compiled,
+    ctx.rankingMetadata,
+    ctx.rankedResults,
+  );
+
+  // E6: Run ConstraintReasoner inline to detect soft_tension / contradiction for
+  // the typed evaluate() gate. Pure CPU operation — no I/O, negligible overhead.
+  const reasoner = new ConstraintReasoner();
+  const reasonerOutput = reasoner.reason(ctx.plan.constraints);
+
+  // Derive channel degradation from routeDegradation signals populated upstream
+  // by the candidate-pool retrieval phase. The routeDegradation.degradationReasons
+  // array is the authoritative signal set for channel health in this request.
+  const degradationReasons = mergedRouteDegradation?.degradationReasons ?? [];
+  const channelDegradation: ChannelDegradationSummary = {
+    denseDegraded: degradationReasons.includes('dense_retrieval_disabled'),
+    anchorDegraded: false,
+    sparseDegraded: false,
+  };
+
+  // ltrAvailable is false in heuristic-only mode (no LTR model loaded). If
+  // the snapshot's killSwitchLearning flag is set, treat as ltr unavailable.
+  const ltrAvailable = snapshot.feature_flags['killSwitchLearning'] !== true;
+
+  const abstainDecision = ctx.abstainPolicy.evaluate(
+    topScores,
+    reasonerOutput.relations,
+    channelDegradation,
+    { ltrAvailable },
+  );
 
   // Apply caller-specified result limit after ranking + abstain check (both need the full set).
   // Defensive bounds: clamp to [1, 1000] and reject NaN/negative/non-integer
@@ -416,12 +475,14 @@ export async function runSearchPostRoutePhase(
 
   let response: SearchResponseV1;
 
-  if (abstainDecision.abstain) {
+  if (abstainDecision !== false) {
+    const abstainEntropy = abstainDecision.entropy;
     pipelineDebug(
       {
         step: 'post_route.entropy_abstain',
         effective_route: ctx.effectiveRoute,
-        entropy: abstainDecision.entropy,
+        abstain_reason: abstainDecision.reason,
+        ...(abstainEntropy !== undefined ? { entropy: abstainEntropy } : {}),
         score_count: topScores.length,
       },
       'pipeline entropy abstain',
@@ -461,7 +522,10 @@ export async function runSearchPostRoutePhase(
             effectiveRoute: ctx.effectiveRoute,
             retrievalModeSource: ctx.retrievalModeSource,
             plannerSuggestedMode: ctx.plannerSuggestedMode,
-            entropy: abstainDecision.entropy,
+            // entropy is only present for low_confidence abstains; use NaN as
+            // sentinel for other reasons (no_match, semantic_conflict, etc.) —
+            // buildEntropyAbstainResponseParams guards with Number.isFinite().
+            entropy: abstainDecision.entropy ?? Number.NaN,
             results,
             rankedResults: limitedRankedResults,
             ...(retrievalProvenanceSlices.length > 0 ? { retrievalProvenanceSlices } : {}),
@@ -471,6 +535,7 @@ export async function runSearchPostRoutePhase(
           ...(ctx.specializedRouteObservability !== undefined
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
             : {}),
+          ...(auditExtension !== undefined ? { auditExtension } : {}),
         },
       );
     } catch (buildErr) {
@@ -538,6 +603,7 @@ export async function runSearchPostRoutePhase(
       retrievalModeSource: ctx.retrievalModeSource,
       plannerSuggestedMode: ctx.plannerSuggestedMode,
       routeDegradation: mergedRouteDegradation,
+      ...(ctx.rankingMetadata !== undefined ? { rankingMetadata: ctx.rankingMetadata } : {}),
       specializedRouteObservability: ctx.specializedRouteObservability,
     });
   }
@@ -576,7 +642,7 @@ export async function runSearchPostRoutePhase(
       );
       if (!stored) {
         pipelineDebug(
-          { step: 'cache.set_skipped', reason: abstainDecision.abstain ? 'entropy_abstain' : 'ineligible_or_breaker' },
+          { step: 'cache.set_skipped', reason: abstainDecision !== false ? 'entropy_abstain' : 'ineligible_or_breaker' },
           '[Search] setSearchResponse skipped',
         );
       }

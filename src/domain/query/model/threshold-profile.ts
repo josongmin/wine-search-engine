@@ -66,7 +66,7 @@ export function computeDynamicGapThreshold(
     return DYNAMIC_GAP_SEMANTIC_PREF_STANDARD;
   }
 
-  if (queryClass === 'short_entity') {
+  if (queryClass === 'exact_entity' || queryClass === 'short_entity') {
     return DYNAMIC_GAP_SHORT_ENTITY;
   }
 
@@ -142,6 +142,8 @@ export const DEFAULT_THRESHOLD_PROFILE: ThresholdProfileV1 = {
   version: '2.1.0',
   perQueryClass: {
     // gapTau static values are fallback; dynamic values are preferred
+    // exact_entity: tighter than short_entity — fully-specified lookup expects one clear winner.
+    exact_entity: { resolveTau: 0.55, gapTau: 0.03 },
     short_entity: { resolveTau: 0.60, gapTau: 0.03 },
     ambiguous_short_form: { resolveTau: 0.75, gapTau: 0.08 },
     anchored_similarity: { resolveTau: 0.55, gapTau: 0.03 },

@@ -1,5 +1,6 @@
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EntityId, DecisionSnapshot } from '../../shared/types/index.js';
+import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type {
   SpecializedFallbackReason,
   SpecializedRouteName,
@@ -102,4 +103,11 @@ export interface ResponseMeta {
   readonly fallbackApplied?: boolean | undefined;
 
   readonly fallbackReason?: SpecializedFallbackReason | null | undefined;
+
+  /**
+   * Optional audit payload populated when `options.explain = true` on the request.
+   * Contains planner policy traces and other per-request debug data.
+   * Omitted on normal requests to keep response payloads lean.
+   */
+  readonly auditExtension?: AuditExtension | undefined;
 }
