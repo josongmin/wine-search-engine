@@ -67,7 +67,7 @@ export interface ToolOutcome {
   readonly stepId: string;
 
   /** The tool that was invoked. */
-  readonly tool: AgentToolName | string; // string fallback for unknown/future tools
+  readonly tool: string; // AgentToolName or unknown/future tools
 
   /** Structured outcome classification. */
   readonly kind: ToolOutcomeKind;
@@ -140,7 +140,7 @@ export interface PlanStep {
   readonly requiredInputs: readonly string[];
 
   /** Tool to invoke. */
-  readonly tool: AgentToolName | string;
+  readonly tool: string; // AgentToolName or unknown/future tools
 
   /** Tool input parameters. */
   readonly toolInput: Readonly<Record<string, unknown>>;

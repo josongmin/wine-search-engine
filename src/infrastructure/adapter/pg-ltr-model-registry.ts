@@ -68,6 +68,7 @@ export interface LtrModelRegistryPort {
  * so that downstream dot-product scoring never silently produces NaN.
  */
 function parseLtrWeights(raw: number[], registryId: string): number[] {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- pg returns float[] as string[] at runtime
   const weights = (raw as unknown as string[]).map(Number);
   if (weights.some((w) => !Number.isFinite(w))) {
     throw new Error(`LTR model ${registryId} has non-finite weights`);
@@ -80,7 +81,8 @@ function parseLtrWeights(raw: number[], registryId: string): number[] {
  * Guard and throw rather than let NaN silently corrupt every LTR score.
  */
 function parseLtrBias(raw: number, registryId: string): number {
-  const bias = Number(raw);
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- pg returns float8 as string at runtime
+  const bias = Number(raw as unknown as string);
   if (!Number.isFinite(bias)) {
     throw new Error(`LTR model ${registryId} has non-finite bias`);
   }

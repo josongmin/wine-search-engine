@@ -147,7 +147,7 @@ export class RankingStagePipeline {
     // The heuristic is unreliable: blended scores can remain in descending order
     // even after reranking if the blend weight is low.
     const precisionRerankExecuted = rankingMetadata.rerankExecuted;
-    const rerankGateReason = rankingMetadata.rerankGateReason;
+    const rerankGateReason = rankingMetadata.rerankDecision?.reason;
     // T5.6: Retrieve the pre-rerank top-5 snapshot for rerankChangedTopK metric.
     const preRerankTop5 = rankingMetadata.preRerankTop5;
     stageTraces.push({

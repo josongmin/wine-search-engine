@@ -140,7 +140,7 @@ function encodeQueryTargetType(
 
 export function extractExtendedLTRFeatures(
   scores: LTRScoreComponents,
-  targetType?: QueryTargetType | undefined,
+  targetType?: QueryTargetType,
 ): ExtendedLTRFeatures {
   return {
     ...extractLTRFeatures(scores),

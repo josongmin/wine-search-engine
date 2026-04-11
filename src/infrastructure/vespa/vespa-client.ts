@@ -266,7 +266,8 @@ async function withRetry<T>(
           const id = setTimeout(resolve, delay);
           signal?.addEventListener('abort', () => {
             clearTimeout(id);
-            reject(signal.reason);
+            const reason = signal.reason instanceof Error ? signal.reason : new Error('Aborted');
+            reject(reason);
           }, { once: true });
         });
       }

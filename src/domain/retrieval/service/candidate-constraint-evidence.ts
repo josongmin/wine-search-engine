@@ -192,7 +192,7 @@ function evaluateOperator(
       ) {
         return false;
       }
-      return (attrValue as number) >= (constraintValue.min as number) && (attrValue as number) <= (constraintValue.max as number);
+      return (attrValue as number) >= constraintValue.min && (attrValue as number) <= constraintValue.max;
     }
 
     case 'in': {

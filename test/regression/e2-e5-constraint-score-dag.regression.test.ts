@@ -28,7 +28,6 @@ import {
   liftBundleToAtoms,
   CONSTRAINT_AUTHORITY_BY_SOURCE_KIND,
 } from '../../src/domain/shared/types/constraint-atom.js';
-import type { ConstraintAtom } from '../../src/domain/shared/types/constraint-atom.js';
 import type { NormalizedConstraint, ConstraintBundle } from '../../src/domain/shared/types/constraint-bundle.js';
 import { ConstraintReasoner } from '../../src/domain/query/service/constraint-reasoner.js';
 import {
@@ -320,7 +319,7 @@ describe('ScoreDecomposition type contract (E5-T1)', () => {
     expect(decomp.rerankDeltaNormalized).toBeCloseTo(0.05);
     // rerankDelta = ltr - heuristic (floating point, use closeTo)
     expect(decomp.rerankDeltaNormalized).toBeCloseTo(
-      decomp.ltrScoreNormalized! - decomp.heuristicScoreNormalized,
+      (decomp.ltrScoreNormalized ?? 0) - decomp.heuristicScoreNormalized,
     );
   });
 });

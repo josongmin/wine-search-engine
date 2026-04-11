@@ -77,6 +77,7 @@ export function buildOntologySnapshot(
 
   for (const [alias, canonical] of collectAliasGroups(GRAPE_ALIASES)) {
     nodes.push({
+      // eslint-disable-next-line no-restricted-syntax -- ontology node ID, not a Vespa filter token
       id: `grape_primary:${canonical}`,
       entityType: 'grape_primary',
       canonicalLabel: wineTitleCase(canonical),

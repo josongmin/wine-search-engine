@@ -22,7 +22,7 @@ import { BenchmarkCaseSchema, BenchmarkSuiteSchema, FixtureLoader } from '../fix
 import { SUITE_REGISTRY } from '../suite-registry.js';
 
 const FIXTURE_ROOT = process.env['FIXTURE_REPO_PATH']
-  ?? resolve(__dirname, '../../../../../../wine-engine-fixture');
+  ?? resolve(process.cwd(), '../wine-engine-fixture');
 
 // ---------------------------------------------------------------------------
 // JSON Schema loader — validate via Zod round-trip (no ajv dependency needed)
@@ -127,7 +127,7 @@ describe('Schema parity — BenchmarkCase (JSON Schema ↔ Zod)', () => {
     const failures: string[] = [];
     for (const { suiteDir, caseFile, path } of caseFiles) {
       const raw = readJson(path) as Record<string, unknown>;
-      const caseId = String(raw['id'] ?? '');
+      const caseId = typeof raw['id'] === 'string' ? raw['id'] : '';
       const prefix = caseId.split('-')[0];
       const entry = SUITE_REGISTRY.find((r) => r.dir === suiteDir);
       if (entry && prefix !== entry.prefix) {
@@ -276,9 +276,9 @@ describe('Schema parity — target-entity-map completeness', () => {
       if (!existsSync(casesDir)) continue;
       for (const f of readdirSync(casesDir).filter((n) => n.endsWith('.json'))) {
         const raw = readJson(join(casesDir, f)) as Record<string, unknown>;
-        const id = String(raw['id'] ?? '');
+        const id = typeof raw['id'] === 'string' ? raw['id'] : '';
         const evaluation = raw['evaluation'] as Record<string, unknown> | undefined;
-        const mode = String(evaluation?.['mode'] ?? '');
+        const mode = typeof evaluation?.['mode'] === 'string' ? evaluation['mode'] : '';
         if (ENTITY_MODES.has(mode)) {
           if (!(id in map) || map[id] == null) {
             failures.push(
