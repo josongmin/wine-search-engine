@@ -80,7 +80,9 @@ describe('EMPTY_ANSWER fallback regression — layer 3 and 4 guards present', ()
     // There are now 2 separate catch blocks (attempt 1 + attempt 2), both must use log.error.
     // Verify no log.warn for synthesis failures.
     expect(src).toMatch(/synthesis attempt.*threw.*\n.*log\.error/s);
-    expect(src).not.toMatch(/synthesis.*threw.*\n.*log\.warn/s);
+    // Negative assertion: "synthesis attempt N threw" must not be followed immediately by log.warn.
+    // Uses a non-greedy match (.*?) to prevent DOTALL from spanning thousands of lines.
+    expect(src).not.toMatch(/synthesis attempt \d+ threw.*?\n.*?log\.warn/s);
   });
 
   it('R-EMPTY-06: fallback search failure logs at error level (not warn)', async () => {

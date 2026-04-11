@@ -341,8 +341,12 @@ describe('HTTP server route registration', () => {
           by_termination_reason: expect.any(Object),
           fallback_runs: expect.any(Number),
           fallback_rate: expect.any(Number),
+          fallback_by_layer: expect.any(Object),
+          reasoning_failure_runs: expect.any(Number),
           total_tool_calls: expect.any(Number),
           avg_duration_ms: expect.any(Number),
+          tool_outcome_kinds: expect.any(Object),
+          failed_outcome_kinds: expect.any(Object),
           timeouts: {
             llm_step: expect.any(Number),
             tool: expect.any(Number),

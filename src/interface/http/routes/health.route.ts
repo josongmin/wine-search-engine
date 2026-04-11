@@ -149,10 +149,9 @@ export function registerHealthRoutes(
   app: FastifyInstance,
   options?: HealthRouteOptions,
 ): void {
-  if (!isValidMetricsSecret(options?.metricsDebugSecret) && process.env['NODE_ENV'] === 'production') {
+  if (!isValidMetricsSecret(options?.metricsDebugSecret)) {
     bootstrapLogger.warn(
-      'METRICS_DEBUG_SECRET is unset or empty in production — /metrics/* endpoints are OPEN without authentication. '
-      + 'Set METRICS_DEBUG_SECRET to gate metrics behind the X-Debug-Key header.',
+      'METRICS_DEBUG_SECRET is unset or empty — /metrics/* endpoints are disabled until a debug secret is configured.',
     );
   }
 
@@ -255,21 +254,16 @@ export function registerHealthRoutes(
     url: '/metrics/agent',
     contract: AgentMetricsRouteContract,
     handler: async (request, reply) => {
-      // When METRICS_DEBUG_SECRET is unset or empty, the metrics endpoint is
-      // OPEN (intended for local dev / read-only deploys). Set the secret to
-      // gate metrics behind the X-Debug-Key header.
       const expectedSecret = options?.metricsDebugSecret;
-      if (isValidMetricsSecret(expectedSecret)) {
-        if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
-          sendRouteContractResponse(
-            request,
-            reply,
-            AgentMetricsRouteContract,
-            HTTP_STATUS_FORBIDDEN,
-            denyMetricsAccess(request),
-          );
-          return;
-        }
+      if (!isValidMetricsSecret(expectedSecret) || !isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          AgentMetricsRouteContract,
+          HTTP_STATUS_FORBIDDEN,
+          denyMetricsAccess(request),
+        );
+        return;
       }
       const metrics = getAgentExecutionMetricsCollector().getMetrics();
       sendRouteContractResponse(
@@ -284,8 +278,12 @@ export function registerHealthRoutes(
             by_termination_reason: metrics.byTerminationReason,
             fallback_runs: metrics.fallbackRuns,
             fallback_rate: metrics.fallbackRate,
+            fallback_by_layer: metrics.fallbackByLayer,
+            reasoning_failure_runs: metrics.reasoningFailureRuns,
             total_tool_calls: metrics.totalToolCalls,
             avg_duration_ms: metrics.avgDurationMs,
+            tool_outcome_kinds: metrics.toolOutcomeKinds,
+            failed_outcome_kinds: metrics.failedOutcomeKinds,
             timeouts: {
               llm_step: metrics.timeouts.llmStep,
               tool: metrics.timeouts.tool,
@@ -304,21 +302,16 @@ export function registerHealthRoutes(
     url: '/metrics/retrieval-degradation',
     contract: RetrievalDegradationMetricsRouteContract,
     handler: async (request, reply) => {
-      // When METRICS_DEBUG_SECRET is unset or empty, the metrics endpoint is
-      // OPEN (intended for local dev / read-only deploys). Set the secret to
-      // gate metrics behind the X-Debug-Key header.
       const expectedSecret = options?.metricsDebugSecret;
-      if (isValidMetricsSecret(expectedSecret)) {
-        if (!isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
-          sendRouteContractResponse(
-            request,
-            reply,
-            RetrievalDegradationMetricsRouteContract,
-            HTTP_STATUS_FORBIDDEN,
-            denyMetricsAccess(request),
-          );
-          return;
-        }
+      if (!isValidMetricsSecret(expectedSecret) || !isMetricsHeaderAuthorized(request.headers['x-debug-key'], expectedSecret)) {
+        sendRouteContractResponse(
+          request,
+          reply,
+          RetrievalDegradationMetricsRouteContract,
+          HTTP_STATUS_FORBIDDEN,
+          denyMetricsAccess(request),
+        );
+        return;
       }
       const metrics = getRetrievalDegradationCollector().getMetrics();
       const silentSkips = globalSilentSkipCounter.snapshot();

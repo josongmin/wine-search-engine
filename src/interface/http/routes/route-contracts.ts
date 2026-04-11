@@ -127,8 +127,21 @@ const AgentMetricsResponseSchema = z.object({
     ),
     fallback_runs: z.number().int().nonnegative(),
     fallback_rate: z.number().finite().min(0),
+    fallback_by_layer: z.record(z.number().int().nonnegative()).refine(
+      (rec) => Object.keys(rec).length <= AGENT_METRICS_ALERTS_MAX,
+      { message: `fallback_by_layer must not exceed ${AGENT_METRICS_ALERTS_MAX} keys` },
+    ),
+    reasoning_failure_runs: z.number().int().nonnegative(),
     total_tool_calls: z.number().int().nonnegative(),
     avg_duration_ms: z.number().finite().nonnegative(),
+    tool_outcome_kinds: z.record(z.number().int().nonnegative()).refine(
+      (rec) => Object.keys(rec).length <= AGENT_METRICS_ALERTS_MAX,
+      { message: `tool_outcome_kinds must not exceed ${AGENT_METRICS_ALERTS_MAX} keys` },
+    ),
+    failed_outcome_kinds: z.record(z.number().int().nonnegative()).refine(
+      (rec) => Object.keys(rec).length <= AGENT_METRICS_ALERTS_MAX,
+      { message: `failed_outcome_kinds must not exceed ${AGENT_METRICS_ALERTS_MAX} keys` },
+    ),
     timeouts: z.object({
       llm_step: z.number().int().nonnegative(),
       tool: z.number().int().nonnegative(),

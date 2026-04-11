@@ -37,8 +37,10 @@ import {
 } from './agent-tools.js';
 import { evaluateBatchPolicy } from './tool-batch-policy.js';
 import {
+  buildSynthesisContext,
   type ExpectedOutputSchema,
   isAgentToolName,
+  type SynthesisContext,
   type ToolOutcome,
   type ToolOutcomeKind,
 } from './tool-outcome.js';
@@ -137,7 +139,7 @@ function getComparableResultItems(tool: string, rawResult: unknown): readonly un
     record['queryType'] === 'search' &&
     Array.isArray(record['results'])
   ) {
-    return record['results'];
+    return record['results'] as unknown[];
   }
   if (tool === 'compare_wines' && record['queryType'] === 'comparison' && Array.isArray(record['entities'])) {
     return record['entities']
@@ -196,7 +198,7 @@ function buildToolOutcome(
   const baseKind = classifyToolOutcomeKind(
     observation,
     rawResult,
-    threwError,
+    execError,
     timedOut,
     policyViolation,
   );
@@ -1292,7 +1294,7 @@ export class AgentOrchestrator {
 
           // E7-T2: Generate typed ToolOutcome alongside AgentStep.
           // At this point: TIMEOUT/abort/policy paths already called break, so
-          // if we reach here the tool either succeeded or threw a generic error
+          // if we reach here the tool succeeded or produced a generic error
           // (rawResult === null, observation starts with "Tool error:").
           toolOutcomes.push(
             buildToolOutcome(

@@ -173,7 +173,7 @@ export const ClarificationPayloadSchema = z.object({
       'budget_gap',
     ]),
     question: z.string().min(1),
-    options: z.array(z.string().min(1)).optional(),
+    options: z.array(z.string().min(1)).max(MAX_CLARIFICATION_CANDIDATES).optional(),
     conflicting_atoms: z.tuple([z.string().min(1), z.string().min(1)]).optional(),
     gap_description: z.string().min(1).optional(),
   }).strict().optional(),
