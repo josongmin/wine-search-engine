@@ -15,6 +15,7 @@ import type { SpecializedFallbackReason } from './specialized-fallback-reason.js
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
+import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
@@ -25,7 +26,9 @@ export function extractProducerBrowseSeed(plan: QueryPlanV1): string | undefined
   // across identical queries (JS sort is not stable across all V8 versions for equal keys).
   const strongestAnchor = [...plan.anchors].sort((left, right) => {
     const diff = right.confidence - left.confidence;
-    return diff !== 0 ? diff : left.surfaceForm.localeCompare(right.surfaceForm);
+    // Locale-independent byte comparison for deterministic cross-system ordering.
+    // localeCompare() produces different results across Node versions / OS locales.
+    return diff !== 0 ? diff : left.surfaceForm < right.surfaceForm ? -1 : left.surfaceForm > right.surfaceForm ? 1 : 0;
   })[0];
   // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: empty string from trim() should fall through to normalizedForm
   const candidate = strongestAnchor?.surfaceForm.trim() || strongestAnchor?.normalizedForm.trim();
@@ -208,29 +211,42 @@ export async function retrieveHybridCandidatesForPlan(
         break;
       }
       if (producerName !== undefined) {
-        const candidates = await ports.browseRetriever.browseProducer(
-          producerName,
-          plan.constraints,
-          limit,
-        );
-        if (candidates.length > 0) {
-          pipelineDebug(
-            {
-              step: 'retrieval.producer_browse',
-              candidate_count: candidates.length,
-            },
-            'pipeline specialized retrieval',
+        try {
+          const candidates = await ports.browseRetriever.browseProducer(
+            producerName,
+            plan.constraints,
+            limit,
           );
-          return {
-            candidates,
-            specializedRouteObservability: {
-              specializedRouteRequested: 'producer_browse',
-              specializedRouteExecuted: 'producer_browse',
-              fallbackApplied: false,
-            },
-          };
+          if (candidates.length > 0) {
+            pipelineDebug(
+              {
+                step: 'retrieval.producer_browse',
+                candidate_count: candidates.length,
+              },
+              'pipeline specialized retrieval',
+            );
+            return {
+              candidates,
+              specializedRouteObservability: {
+                specializedRouteRequested: 'producer_browse',
+                specializedRouteExecuted: 'producer_browse',
+                fallbackApplied: false,
+              },
+            };
+          }
+          degradationReasons.add('producer_browse_fallback');
+        } catch (err) {
+          // Circuit breaker open or transient infra failure — degrade gracefully
+          // rather than propagating an unhandled rejection to the caller.
+          const reason = err instanceof CircuitBreakerOpenError
+            ? 'producer_browse_unavailable'
+            : 'producer_browse_fallback';
+          degradationReasons.add(reason);
+          pipelineDebug(
+            { step: 'retrieval.producer_browse.error', reason, err_name: err instanceof Error ? err.name : 'unknown' },
+            'pipeline producer_browse degraded',
+          );
         }
-        degradationReasons.add('producer_browse_fallback');
       } else {
         degradationReasons.add('producer_browse_fallback');
       }
@@ -243,29 +259,40 @@ export async function retrieveHybridCandidatesForPlan(
         break;
       }
       if (regionName !== undefined) {
-        const candidates = await ports.browseRetriever.browseRegion(
-          regionName,
-          plan.constraints,
-          limit,
-        );
-        if (candidates.length > 0) {
-          pipelineDebug(
-            {
-              step: 'retrieval.region_browse',
-              candidate_count: candidates.length,
-            },
-            'pipeline specialized retrieval',
+        try {
+          const candidates = await ports.browseRetriever.browseRegion(
+            regionName,
+            plan.constraints,
+            limit,
           );
-          return {
-            candidates,
-            specializedRouteObservability: {
-              specializedRouteRequested: 'region_browse',
-              specializedRouteExecuted: 'region_browse',
-              fallbackApplied: false,
-            },
-          };
+          if (candidates.length > 0) {
+            pipelineDebug(
+              {
+                step: 'retrieval.region_browse',
+                candidate_count: candidates.length,
+              },
+              'pipeline specialized retrieval',
+            );
+            return {
+              candidates,
+              specializedRouteObservability: {
+                specializedRouteRequested: 'region_browse',
+                specializedRouteExecuted: 'region_browse',
+                fallbackApplied: false,
+              },
+            };
+          }
+          degradationReasons.add('region_browse_fallback');
+        } catch (err) {
+          const reason = err instanceof CircuitBreakerOpenError
+            ? 'region_browse_unavailable'
+            : 'region_browse_fallback';
+          degradationReasons.add(reason);
+          pipelineDebug(
+            { step: 'retrieval.region_browse.error', reason, err_name: err instanceof Error ? err.name : 'unknown' },
+            'pipeline region_browse degraded',
+          );
         }
-        degradationReasons.add('region_browse_fallback');
       } else {
         degradationReasons.add('region_browse_fallback');
       }
@@ -281,29 +308,40 @@ export async function retrieveHybridCandidatesForPlan(
         const anchorEntityId = anchorResolution.topEntity?.entityId;
         fallbackAnchorEntityId = anchorEntityId;
         if (anchorEntityId !== undefined) {
-          const candidates = await ports.compareRetriever.compareAgainstAnchor(
-            anchorEntityId,
-            plan.constraints,
-            limit,
-          );
-          if (candidates.length > 0) {
-            pipelineDebug(
-              {
-                step: 'retrieval.compare_candidates',
-                candidate_count: candidates.length,
-              },
-              'pipeline specialized retrieval',
+          try {
+            const candidates = await ports.compareRetriever.compareAgainstAnchor(
+              anchorEntityId,
+              plan.constraints,
+              limit,
             );
-            return {
-              candidates,
-              specializedRouteObservability: {
-                specializedRouteRequested: 'compare_candidates',
-                specializedRouteExecuted: 'compare_candidates',
-                fallbackApplied: false,
-              },
-            };
+            if (candidates.length > 0) {
+              pipelineDebug(
+                {
+                  step: 'retrieval.compare_candidates',
+                  candidate_count: candidates.length,
+                },
+                'pipeline specialized retrieval',
+              );
+              return {
+                candidates,
+                specializedRouteObservability: {
+                  specializedRouteRequested: 'compare_candidates',
+                  specializedRouteExecuted: 'compare_candidates',
+                  fallbackApplied: false,
+                },
+              };
+            }
+            degradationReasons.add('compare_candidates_fallback');
+          } catch (err) {
+            const reason = err instanceof CircuitBreakerOpenError
+              ? 'compare_retriever_unavailable'
+              : 'compare_candidates_fallback';
+            degradationReasons.add(reason);
+            pipelineDebug(
+              { step: 'retrieval.compare_candidates.error', reason, err_name: err instanceof Error ? err.name : 'unknown' },
+              'pipeline compare_candidates degraded',
+            );
           }
-          degradationReasons.add('compare_candidates_fallback');
         } else {
           // Resolver returned no validated entity — label correctly and fall through.
           degradationReasons.add('compare_anchor_resolution_failed');

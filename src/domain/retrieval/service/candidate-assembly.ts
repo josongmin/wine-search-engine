@@ -96,8 +96,20 @@ export class CandidateAssembler {
     const inputCount = candidates.length;
 
     // --- Step 1: Remove candidates with failed hard constraints ---
+    //
+    // Exception: candidates with a protectedInclusionReason (sparse rank 1 /
+    // anchor_conditioned / exact_alias_match) survive even if they have failed
+    // hard constraints. The ranker's coarse prune (hardConstraintPass →
+    // -Infinity) is the authoritative precision gate for these — they will be
+    // demoted by score rather than silently dropped before the ranker sees them.
+    //
+    // Without this exception, applyProtectedRecallPolicy() (Step 6b in
+    // candidate-pool) correctly marks known_item and anchor candidates, but
+    // assembly Step 1 immediately removes them because failedHardConstraints
+    // is non-empty — the protection is rendered meaningless.
     const hardFiltered = candidates.filter(
       (c) =>
+        c.provenance.protectedInclusionReason !== undefined ||
         c.provenance.failedHardConstraints === undefined ||
         c.provenance.failedHardConstraints.length === 0,
     );
@@ -184,6 +196,17 @@ export class CandidateAssembler {
     // Full producer diversity logic would require knowledge of entity relationships;
     // here we use a simple first-producer-wins approach.
     const producerCounts = new Map<string, number>();
+    // Seed producerCounts with protected candidates so they count against
+    // maxProducerSlots for non-protected candidates — prevents a single producer
+    // from dominating via both protected and non-protected slots.
+    if (policy.maxProducerSlots !== undefined) {
+      for (const c of protected_) {
+        const producerKey = c.legacyCandidate.producer;
+        if (producerKey !== undefined && producerKey.length > 0) {
+          producerCounts.set(producerKey, (producerCounts.get(producerKey) ?? 0) + 1);
+        }
+      }
+    }
 
     const maxTotal = policy.maxTotal;
     // Pre-index channel quotas as a Map so the per-candidate check is a
@@ -209,7 +232,10 @@ export class CandidateAssembler {
           const count = channelCounts.get(ch) ?? 0;
           if (count >= maxSlots) {
             blockedByQuota = true;
-            cappedBy = 'channelQuota';
+            // Only record the first cap reason — later skips may overwrite with a
+            // stale reason even when the set has room for more candidates, corrupting
+            // trace diagnostics. (Bug: last-write-wins produced wrong cap reason.)
+            cappedBy ??= 'channelQuota';
             break;
           }
         }
@@ -226,7 +252,9 @@ export class CandidateAssembler {
         if (producerKey !== undefined && producerKey.length > 0) {
           const count = producerCounts.get(producerKey) ?? 0;
           if (count >= policy.maxProducerSlots) {
-            cappedBy = 'producerSlot';
+            // Same first-wins semantics as channelQuota above — don't overwrite
+            // an already-set cap reason with a later producerSlot skip.
+            cappedBy ??= 'producerSlot';
             continue;
           }
           producerCounts.set(producerKey, count + 1);

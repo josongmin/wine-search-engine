@@ -14,7 +14,6 @@ import { OpenAiDoc2QueryGenerator } from '../infrastructure/ai/openai-doc2query-
 import { StubDoc2QueryGenerator } from '../infrastructure/adapter/stub-doc2query-generator.js';
 import { CohereReranker } from '../infrastructure/ai/cohere-reranker.js';
 import { HttpEmbeddingService } from '../infrastructure/vespa/embedding-service.js';
-import { HttpCrossEncoderReranker } from '../infrastructure/vespa/reranker.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
 import { VespaSimilarRetrieval } from '../infrastructure/vespa/vespa-similar-retrieval.js';
 import { VespaCandidateAttributes } from '../infrastructure/vespa/vespa-candidate-attributes.js';
@@ -191,8 +190,6 @@ export function buildCoreAdapterServices(
             httpTimeoutMs: config.reranker.httpTimeoutMs,
           }),
         }
-      : config.reranker.url !== undefined
-      ? { reranker: new HttpCrossEncoderReranker() }
       : {}),
     blockingPort: pool ? new PgBlockingAdapter(pool) : new StubBlockingPort(),
     calibrationStore: pool ? new PgCalibrationStore(pool) : new StubCalibrationStore(),

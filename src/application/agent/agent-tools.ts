@@ -18,7 +18,7 @@ import type { ComparisonSearchResponse } from '../../domain/response/model/compa
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
-import { KRW_PER_USD_APPROXIMATE } from '../../domain/shared/constants.js';
+import { KRW_PER_USD_APPROXIMATE, MAX_QUERY_LENGTH, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
@@ -29,8 +29,8 @@ import type { NormalizedConstraint } from '../../domain/shared/types/constraint-
 // Schema bounds — named constants so lint catches accidental magic numbers
 // ---------------------------------------------------------------------------
 
-/** Max characters for a search query string passed to the tool. */
-const SEARCH_QUERY_MAX_LEN = 500;
+/** Max characters for a search query string passed to the tool. SSoT: MAX_QUERY_LENGTH from constants.ts. */
+const SEARCH_QUERY_MAX_LEN = MAX_QUERY_LENGTH;
 /** Max results the agent can request in a single search call. */
 const SEARCH_LIMIT_MAX = 20;
 /** Max KRW price the agent can filter on (~100M KRW, safely above any real wine). */
@@ -55,6 +55,12 @@ const VINTAGE_FILTER_MIN = 1600;
 const VINTAGE_FILTER_MAX = 2100;
 /** Maximum length for style/certification filter strings (e.g. "oaked", "biodynamic"). */
 const STYLE_FILTER_MAX_LEN = 50;
+/** Max length for individual exclude_grapes / exclude_regions / country / appellation strings.
+ *  Longest known appellation: "Vino Nobile di Montepulciano" (28 chars); 100 gives ample headroom. */
+const FILTER_STRING_MAX_LEN = 100;
+/** Max count of exclude_grapes / exclude_regions array items.
+ *  Practical limit: a search with >10 exclusions is degenerate and likely a data error. */
+const EXCLUDE_FILTER_MAX_COUNT = 10;
 
 /**
  * Placeholder patterns that LLMs sometimes emit instead of real values.
@@ -78,23 +84,25 @@ const SearchInputSchema = z.object({
   retrieval_mode: z.enum(['auto', 'entity', 'hybrid', 'mixed']).optional(),
   /** Grape varieties to exclude from results (e.g. ["Cabernet Sauvignon", "Merlot"]).
    *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
-  exclude_grapes: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
+  exclude_grapes: z.array(z.string().trim().min(1).max(FILTER_STRING_MAX_LEN)).max(EXCLUDE_FILTER_MAX_COUNT).optional(),
   /** Countries/regions to exclude (e.g. ["France", "프랑스"]).
    *  Applied as Vespa YQL NOT clauses — index-level, not post-filter. */
-  exclude_regions: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
+  exclude_regions: z.array(z.string().trim().min(1).max(FILTER_STRING_MAX_LEN)).max(EXCLUDE_FILTER_MAX_COUNT).optional(),
   /** Maximum price in KRW. Agent can pass "$50" style — normalized below. */
-  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(0).max(MAX_PRICE_KRW_BOUND)).optional(),
+  // min(1): 0원은 유효한 예산이 아님. LLM이 0을 emit하면 price post-filter가 lenient
+  // fallback을 트리거해 가격 미입력 와인 전체를 반환하는 silent no-op이 된다.
+  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(MAX_PRICE_KRW_BOUND)).optional(),
   // ── Structured Vespa filters (direct YQL, bypass NL extraction) ──
   /** Wine type filter: red, white, rosé, sparkling, etc. */
   wine_type: z.enum(['red', 'white', 'rosé', 'sparkling', 'fortified', 'dessert', 'orange', 'natural']).optional(),
   /** Country filter (English canonical name). */
-  country: z.string().trim().min(1).max(100).optional(),
+  country: z.string().trim().min(1).max(FILTER_STRING_MAX_LEN).optional(),
   /** Minimum vintage year (inclusive). */
   vintage_min: coercePositiveInt.pipe(z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX)).optional(),
   /** Maximum vintage year (inclusive). */
   vintage_max: coercePositiveInt.pipe(z.number().int().min(VINTAGE_FILTER_MIN).max(VINTAGE_FILTER_MAX)).optional(),
   /** Appellation filter (e.g. "Pauillac", "Chianti Classico"). */
-  appellation: z.string().trim().min(1).max(100).optional(),
+  appellation: z.string().trim().min(1).max(FILTER_STRING_MAX_LEN).optional(),
   /** Style filter (e.g. "oaked", "unoaked", "light", "full"). */
   style: z.string().trim().min(1).max(STYLE_FILTER_MAX_LEN).optional(),
   /** Certification filter (e.g. "organic", "biodynamic"). */
@@ -123,10 +131,10 @@ const CompareInputSchema = z.object({
 /** Max length for entity_id to prevent unbounded strings reaching Vespa GET / NL parser.
  * Vespa document IDs are typically ≤200 chars; 500 is a conservative upper bound. */
 const ENTITY_ID_MAX_LEN = 500;
-/** Conservative lower bound for valid wine drinking-window years. */
-const DRINKING_WINDOW_MIN_YEAR = 1700;
-/** Conservative upper bound for valid wine drinking-window years. */
-const DRINKING_WINDOW_MAX_YEAR = 2200;
+// Drinking-window year bounds: imported from SSoT (src/domain/shared/constants.ts).
+// Do NOT redefine locally — see CLAUDE.md rule 30.
+const DRINKING_WINDOW_MIN_YEAR = MIN_PRODUCED_VINTAGE_YEAR;
+const DRINKING_WINDOW_MAX_YEAR = MAX_PRODUCED_VINTAGE_YEAR;
 
 const DrinkingWindowInputSchema = z.object({
   entity_id: z.string()
@@ -145,7 +153,8 @@ const FOOD_MAX_LEN = 200;
 const FoodPairingInputSchema = z.object({
   food: z.string().min(1).max(FOOD_MAX_LEN),
   /** Budget in Korean Won (KRW). Use this instead of USD amounts. */
-  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(0).max(MAX_PRICE_KRW_BOUND)).optional(),
+  // min(1): SearchInputSchema와 동일 이유 — 0원은 price filter를 무력화함.
+  max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(MAX_PRICE_KRW_BOUND)).optional(),
   /** Legacy USD price field — accepted for backwards compat but converted internally. */
   max_price: coerceFiniteNumber.pipe(z.number().finite().min(0).max(MAX_PRICE_USD_BOUND)).optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
@@ -230,11 +239,15 @@ const MIN_RESULTS_FOR_RELIABLE_QUALITY = 3;
 
 /**
  * Maximum length of the enriched query string (original query + appended exclusion/price params).
- * The base query is max 500 chars; exclusion/price params can add ~200 chars.
+ * Must not exceed MAX_QUERY_LENGTH (500) — the security gate in query-sanitizer.ts rejects
+ * queries longer than MAX_QUERY_LENGTH, so an enriched query built to 700 chars would always
+ * be rejected. Capping here at MAX_QUERY_LENGTH ensures the enriched query passes the gate.
+ *
  * Domain rationale: Vespa YQL parser has a 4 KB query limit; downstream NL parser
- * has its own 700-char soft limit for reliable constraint extraction.
+ * operates well within 500 chars. The previously used value of 700 was inconsistent
+ * with the security gate constant.
  */
-const MAX_ENRICHED_QUERY_LEN = 700;
+const MAX_ENRICHED_QUERY_LEN = MAX_QUERY_LENGTH; // 500 — must match security gate
 
 /** Regex for diversity-intent detection. Korean included → /u flag required (rule 8).
  *  Word boundaries use (?:^|[^\p{L}\p{N}])…(?=$|[^\p{L}\p{N}]) instead of \b so
@@ -371,6 +384,8 @@ function buildStructuredSearchClauses(input: {
   readonly exclude_grapes?: readonly string[] | undefined;
   readonly exclude_regions?: readonly string[] | undefined;
   readonly max_price_krw?: number | undefined;
+  readonly style?: string | undefined;
+  readonly certification?: string | undefined;
 }): readonly string[] {
   const clauses: string[] = [];
   for (const grape of input.exclude_grapes ?? []) {
@@ -381,6 +396,16 @@ function buildStructuredSearchClauses(input: {
   }
   if (input.max_price_krw !== undefined) {
     clauses.push(`${input.max_price_krw}원 이하`);
+  }
+  // style and certification are soft text hints — they are NOT Vespa hard filters.
+  // style values in the index are compound ("medium red", "bold red") so exact-match
+  // filtering on agent-emitted values like "light" or "oaked" always returns 0 hits.
+  // certification maps to boolean fields (organic, biodynamic) not a string field.
+  if (input.style !== undefined) {
+    clauses.push(input.style);
+  }
+  if (input.certification !== undefined) {
+    clauses.push(input.certification);
   }
   return clauses;
 }
@@ -431,15 +456,14 @@ function buildStructuredFilters(input: z.infer<typeof SearchInputSchema>): reado
     filters.push({ attribute: 'appellation', operator: '=', value: input.appellation, source_phrase: input.appellation, confidence: 1.0, mapping_version: v });
   }
 
-  // Style
-  if (input.style !== undefined) {
-    filters.push({ attribute: 'style', operator: '=', value: input.style, source_phrase: input.style, confidence: 1.0, mapping_version: v });
-  }
+  // Style: NOT a hard Vespa filter — Vespa style values are compound strings like
+  // "medium red", "bold red", "light red", "medium white", "full white". An exact-match
+  // filter for agent-emitted values like "light" or "oaked" always returns 0 hits.
+  // Style is passed as a soft text hint via appendStructuredQueryClauses() instead.
 
-  // Certification
-  if (input.certification !== undefined) {
-    filters.push({ attribute: 'certification', operator: '=', value: input.certification, source_phrase: input.certification, confidence: 1.0, mapping_version: v });
-  }
+  // Certification: NOT a hard filter — the index has separate boolean fields `organic`
+  // and `biodynamic`, not a `certification` string field. A YQL filter on a nonexistent
+  // field returns 0 hits. Certification is appended as a text hint to the query.
 
   return filters;
 }
@@ -610,6 +634,14 @@ async function executeAgentToolInner(
       // Checks canonicalLabel, grapes array, and all NEGATION_ENTITY_STRING_FIELDS.
       const negTerms = collectExcludedTerms(parsed);
       if (negTerms.length > 0) {
+        // Pre-compile all negation regexes once — not inside the filter callback —
+        // to avoid O(results × terms) RegExp compilations per search call.
+        // Previously new RegExp() was called inside the filter, creating up to
+        // SEARCH_LIMIT_MAX × EXCLUDE_FILTER_MAX_COUNT (20 × 10 = 200) objects per call.
+        const negRegs = negTerms.map((term) => {
+          const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+        });
         const filtered = response.results.filter((r) => {
           const entity = r.entity;
           // Build a single lowercased string from all identity-bearing fields.
@@ -628,11 +660,7 @@ async function executeAgentToolInner(
           const check = parts.join(' ');
           // Use Unicode-aware word boundary so "cabernet" doesn't match "cabernet franc"
           // as a full-word exclusion. \b is ASCII-only and silently fails on non-ASCII.
-          return !negTerms.some((term) => {
-            const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const re = new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
-            return re.test(check);
-          });
+          return !negRegs.some((re) => re.test(check));
         });
         if (filtered.length < response.results.length) {
           const filteredResponse = { ...response, results: filtered } as typeof response;
@@ -665,28 +693,48 @@ async function executeAgentToolInner(
       // slip through. This post-filter gives the agent accurate budget-aware results.
       if (parsed.max_price_krw !== undefined) {
         const budgetKrw = parsed.max_price_krw;
-        const priceFiltered = response.results.filter((r) => {
-          const pr = r.entity.priceRange;
-          if (pr === undefined) return true; // no price data → keep (benefit of doubt)
+        // Parse a priceRange string into KRW. Returns null when the format is
+        // unrecognised (e.g. EUR, GBP) — those are kept to avoid false drops.
+        // Returns undefined when price data is absent.
+        const parsePriceAsKrw = (pr: string | undefined): number | null | undefined => {
+          if (pr === undefined) return undefined; // no price data
           // USD: "$120" or "$1,234.56"
           const usdMatch = /^\$(\d[\d,]*(?:\.\d+)?)$/.exec(pr);
           if (usdMatch !== null) {
             const priceUsd = Number(usdMatch[1]!.replace(/,/g, ''));
-            if (!Number.isFinite(priceUsd)) return true; // guard: keep on parse failure
-            return priceUsd * KRW_PER_USD_APPROXIMATE <= budgetKrw;
+            if (!Number.isFinite(priceUsd)) return null; // parse failure → keep
+            return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
           }
           // KRW: "120,000원" or "₩120000"
           const krwMatch = /^(?:₩|)(\d[\d,]*)(?:\s*원)?$/u.exec(pr.trim());
           if (krwMatch !== null) {
             const priceKrw = Number(krwMatch[1]!.replace(/,/g, ''));
-            if (!Number.isFinite(priceKrw)) return true; // guard: keep on parse failure
-            return priceKrw <= budgetKrw;
+            if (!Number.isFinite(priceKrw)) return null; // parse failure → keep
+            return priceKrw;
           }
-          // Unrecognised currency format (EUR, GBP, etc.) — keep to avoid
-          // incorrectly dropping wines, but this is an acknowledged limitation.
-          return true;
+          return null; // unrecognised currency (EUR, GBP, etc.) → keep
+        };
+        const priceFiltered = response.results.filter((r) => {
+          const priceKrw = parsePriceAsKrw(r.entity.priceRange);
+          if (priceKrw === undefined) return false; // no price data → drop (strict budget)
+          if (priceKrw === null) return true; // unrecognisable format → keep (benefit of doubt)
+          return priceKrw <= budgetKrw;
         });
-        if (priceFiltered.length < response.results.length) {
+        // If strict filtering removed ALL results (sparse price_usd in index),
+        // fall back to keeping wines with no price data so the agent can still
+        // return something and the user gets guidance rather than an empty list.
+        const strictEmpty = priceFiltered.length === 0 && response.results.length > 0;
+        if (strictEmpty) {
+          const lenient = response.results.filter((r) => {
+            const priceKrw = parsePriceAsKrw(r.entity.priceRange);
+            if (priceKrw === undefined || priceKrw === null) return true; // no data / unknown currency
+            return priceKrw <= budgetKrw;
+          });
+          response = {
+            ...response,
+            results: lenient,
+          } as typeof response;
+        } else if (priceFiltered.length < response.results.length) {
           response = { ...response, results: priceFiltered } as typeof response;
         }
       }

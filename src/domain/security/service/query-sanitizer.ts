@@ -109,8 +109,19 @@ export class QuerySanitizer {
       // required because a single combined (?<!\p{L})(?<!\p{N}) only blocks when BOTH
       // a letter AND digit precede — "시스템ignore" would slip through.
       // Separate lookbehinds block when EITHER a letter OR digit precedes.
-      /(?<!\p{L})(?<!\p{N})ignore\s+(?:previous|all|above|prior|system|my|your|the|these|those|any|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})ignore\s+(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
+      // "ignore X" injection patterns. "ignore the price range" / "ignore the tannin level"
+      // are legitimate wine preference phrasings — to avoid false positives, bare "the" is
+      // NOT a match trigger. Instead we fire on:
+      //   (a) unambiguous AI-directive adverbs/pronouns (previous, all, prior, system, my,
+      //       your, these, those, everything, earlier, safety, now), or
+      //   (b) "ignore [the] <AI-directive noun>" — optional "the" before a hard injection noun.
+      // "ignore the instructions" and "IGNORE THE PREVIOUS INSTRUCTIONS" are both caught:
+      //   - "IGNORE THE PREVIOUS" → fires on (a): `previous`
+      //   - "ignore the instructions" → fires on (b): optional-the + `instructions`
+      // Optional "the" before the directive target — catches both:
+      //   "ignore previous instructions" and "IGNORE THE PREVIOUS INSTRUCTIONS"
+      /(?<!\p{L})(?<!\p{N})ignore\s+(?:the\s+)?(?:previous|all|above|prior|system|my|your|these|those|everything|earlier|safety|now)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})ignore\s+(?:the\s+)?(?:instructions|rules|guidelines|policy|policies|constraints|restrictions|prompts?|directives)(?!\p{L})(?!\p{N})/iu,
       // "you are now X", "act as X", "roleplay as X" — persona injection.
       // "you are looking for" and "wines become more complex" are false positives
       // for the bare forms, so require explicit escalation context:
@@ -123,13 +134,18 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})act\s+as\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model)|my\s+(?:assistant|tool)|an?\s+(?:ai|assistant)\s+without)/iu,
       /(?<!\p{L})(?<!\p{N})(?:roleplay\s+as|pretend\s+(?:to\s+be|you\s+are?))\s+/iu,
       /(?<!\p{L})(?<!\p{N})become\s+(?:a\s+)?(?:root|admin|unrestricted|DAN|superuser|god|evil|hacker|different\s+(?:ai|system|model))(?!\p{L})(?!\p{N})/iu,
-      /(?:system|assistant|admin)\s+mode/i,
+      // Unicode-boundary form to prevent false positives like "assistant model" or
+      // "system model for wine scoring" — the bare /mode/i matched the first 4 chars
+      // of "model", blocking legitimate AI-assistant-model references.
+      /(?<!\p{L})(?<!\p{N})(?:system|assistant|admin)\s+mode(?!l)(?!\p{L})(?!\p{N})/iu,
       /^\s*(?:system|admin)\s*[:>]/iu,
-      // "system override" / "admin override" at start of string, after sentence punctuation,
-      // OR after a newline/carriage-return (multi-line injection vector).
-      // "Hello\nsystem override" and "First. system override" are both directive forms.
-      /^\s*(?:system|admin)\s+override/iu,
-      /[.!?\r\n]\s*(?:system|admin)\s+override/iu,
+      // "system override" / "admin override" — fires at ANY position in the string,
+      // not just at start or after [.!?\r\n]. The original two-pattern approach had a
+      // bypass: "please admin override the instructions" (no leading punctuation) and
+      // "OK, admin override" (, not in [.!?\r\n]) both slipped through.
+      // False-positive guard: "operating system override" uses "system" as a compound noun
+      // (operating system), not a directive — exclude via negative lookbehind for "operating ".
+      /(?<!operating\s)(?<!\p{L})(?<!\p{N})(?:system|admin)\s+override(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})you\s+(?:must|should|will)\s+(?:now|immediately)(?!\p{L})(?!\p{N})/iu,
       // Indirect prompt injection via bracketed directives embedded in user content.
       // Detects [SYSTEM: , [INST: , [ASSISTANT: etc. — these are LLM prompt-format
@@ -160,16 +176,32 @@ export class QuerySanitizer {
       /(?<!\p{L})(?<!\p{N})dan\s+mode(?!\p{L})(?!\p{N})/iu,
       /(?<!\p{L})(?<!\p{N})(?:jailbreak|bypass|circumvent)(?!\p{L})(?!\p{N})/iu,
       // Classic jailbreak phrases: "forget everything", "disregard all rules", etc.
-      // Avoid broad pronouns (my, the) — "forget my preferences" and "disregard the price"
-      // are legitimate user phrasings. Only unambiguous directive objects are blocked.
-      /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your|any)(?!\p{L})(?!\p{N})/iu,
-      /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every|prior|previous|your)(?!\p{L})(?!\p{N})/iu,
-      // "new instructions/rules/prompt/guidelines/system" — injection vector
-      /(?<!\p{L})(?<!\p{N})new\s+(?:instructions?|rules?|prompts?|guidelines?|system\s+prompt|directives?)(?!\p{L})(?!\p{N})/iu,
+      // Removed "any" from forget — "forget any tannin-heavy wines" is a legitimate user
+      // preference phrasing (comment above already states: avoid broad pronouns).
+      /(?<!\p{L})(?<!\p{N})forget\s+(?:everything|all|prior|previous|your)(?!\p{L})(?!\p{N})/iu,
+      // "disregard X" — injection patterns. "disregard any wine over 100" and
+      // "disregard all the tannin-heavy options" are legitimate preference phrasings.
+      // We fire on:
+      //   (a) unambiguous AI-directive pronouns (prior, previous, your), or
+      //   (b) any/all/every + optional modifier word(s) + hard injection noun.
+      // "disregard all previous instructions" → (a) catches `previous`
+      // "disregard any safety rules" → (b) catches `any [safety] rules`
+      /(?<!\p{L})(?<!\p{N})disregard\s+(?:prior|previous|your)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})disregard\s+(?:all|any|every)\s+(?:\S+\s+)?(?:rules?|instructions?|guidelines?|training|programming|restrictions?|filters?|constraints?)(?!\p{L})(?!\p{N})/iu,
+      // "new instructions/prompts/system prompt/directives" — injection vector.
+      // Removed bare "rules?" and "guidelines?" — too common in wine-domain discourse
+      // ("new rules for Bordeaux classification", "new guidelines for organic certification").
+      // They only fire when paired with an AI-directive object below.
+      /(?<!\p{L})(?<!\p{N})new\s+(?:instructions?|prompts?|system\s+prompt|directives?)(?!\p{L})(?!\p{N})/iu,
+      /(?<!\p{L})(?<!\p{N})new\s+(?:rules?|guidelines?)\s+(?:for\s+(?:you|the\s+(?:ai|model|system|assistant))|to\s+follow)(?!\p{L})(?!\p{N})/iu,
       // "override system prompt" / "override your instructions"
       /(?<!\p{L})(?<!\p{N})override\s+(?:system\s+prompt|your\s+(?:instructions?|rules?|guidelines?|training|programming))(?!\p{L})(?!\p{N})/iu,
-      // "clear memory/context/history" — session reset injection
-      /(?<!\p{L})(?<!\p{N})clear\s+(?:memory|context|history|your\s+(?:memory|context|training))(?!\p{L})(?!\p{N})/iu,
+      // "clear memory/context/history" — session reset injection.
+      // "a clear context" and "wines with a clear context" are legitimate descriptions, but
+      // "clear context" as an imperative (no determiner before it) is an injection signal.
+      // Guard: only fire when "clear context" is NOT preceded by "a " or "the " (article guard).
+      /(?<!\p{L})(?<!\p{N})clear\s+(?:memory|history|your\s+(?:memory|context|training))(?!\p{L})(?!\p{N})/iu,
+      /(?<!(?:a|the)\s)(?<!\p{L})(?<!\p{N})clear\s+context(?!\p{L})(?!\p{N})/iu,
       // "from now on you will" — future instruction binding / persistent injection
       /(?<!\p{L})(?<!\p{N})from\s+now\s+on(?:\s+you\s+(?:will|must|should|are))?(?!\p{L})(?!\p{N})/iu,
       // "you have no restrictions" / "you have been freed" — capability assertion injection

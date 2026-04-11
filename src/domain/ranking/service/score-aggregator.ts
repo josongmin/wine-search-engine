@@ -31,7 +31,9 @@ export class ScoreAggregator {
     }
 
     // Gate 2: Entity integrity below threshold → remove
-    if (signals.entityIntegrity < weights.entityIntegrityThreshold) {
+    // NaN guard: `NaN < threshold` is false, which would silently pass a candidate
+    // with corrupt/missing integrity data. Treat NaN as 0 (below any threshold).
+    if (!Number.isFinite(signals.entityIntegrity) || signals.entityIntegrity < weights.entityIntegrityThreshold) {
       return -Infinity;
     }
 

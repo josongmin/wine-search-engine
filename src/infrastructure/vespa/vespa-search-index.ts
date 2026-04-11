@@ -7,6 +7,7 @@
 
 import type { EntityId } from '../../domain/shared/types/index.js';
 import { isEntityId } from '../../domain/shared/types/index.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type {
   RetrievalDocument,
   RetrievalHitProjection,
@@ -194,6 +195,10 @@ function buildStructuredQueryFeatureParams(
     'ranking.features.query(structured_country_boost)': countryBoost,
     'ranking.features.query(structured_grape_boost)': grapeBoost,
     'ranking.features.query(filter_strength)': filterStrength,
+    // wine_aware second-phase uses current_year for vintage freshness and
+    // drinking-window proximity scoring. Always send the real calendar year
+    // so the deployed profile doesn't fall back to its hardcoded default (2024).
+    'ranking.features.query(current_year)': new Date().getFullYear(),
   };
 }
 
@@ -221,6 +226,8 @@ function extractMatchedFields(fields: Record<string, unknown>): readonly string[
       'producer',
       'appellation',
       'grape_primary',
+      'grape_family',
+      'region_hierarchy',
       'flavor_profiles',
       'classification',
     ];
@@ -299,11 +306,12 @@ export class VespaSearchIndex implements SearchIndexPort {
     yql: string,
     params?: Record<string, unknown>,
     signal?: AbortSignal,
+    requestId?: string,
   ): Promise<VespaQueryResponse> {
     if (this.circuitBreaker.state === 'OPEN') {
       throw new CircuitBreakerOpenError(VESPA_SEARCH_BREAKER_NAME);
     }
-    return this.circuitBreaker.execute(() => this.client.query(yql, params, signal));
+    return this.circuitBreaker.execute(() => this.client.query(yql, params, signal, requestId));
   }
 
   // -------------------------------------------------------------------------
@@ -329,6 +337,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     filters?: readonly string[],
     limit?: number,
     rankProfile: string = 'hybrid',
+    requestId?: string,
   ): Promise<readonly SparseHit[]> {
     // Sanitize limit BEFORE interpolating into YQL: the port type is `number`
     // but at runtime a buggy caller can pass NaN / Infinity / negatives, and
@@ -366,7 +375,7 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     const queryUnion =
       queryClauses.length === 1
-        ? queryClauses[0]
+        ? queryClauses[0]!
         : `(${queryClauses.join(' OR ')})`;
 
     const yql =
@@ -385,7 +394,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       queryParams[`query${i}`] = queries[i];
     }
 
-    const response = await this.queryUnderBreaker(yql, queryParams);
+    const response = await this.queryUnderBreaker(yql, queryParams, undefined, requestId);
     const children = response.root.children ?? [];
 
     return children.map((hit, index) => {
@@ -420,7 +429,12 @@ export class VespaSearchIndex implements SearchIndexPort {
     filters?: readonly string[],
     limit?: number,
     rankProfile: string = 'hybrid',
+    requestId?: string,
   ): Promise<readonly DenseHit[]> {
+    // Guard: empty embedding would send a zero-dimension vector to Vespa's nearestNeighbor
+    // operator, causing a dimension-mismatch error. CLAUDE.md rule 32: empty array [] is
+    // truthy — cannot use bare truthiness check here.
+    if (embedding.length === 0) return [];
     // Sanitize limit BEFORE interpolating into YQL (see sparseSearch).
     const requestedLimit = sanitizeYqlIntLimit(limit ?? DEFAULT_DENSE_LIMIT, DEFAULT_DENSE_LIMIT);
     const effectiveFilters = filters ?? [];
@@ -461,7 +475,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       'presentation.summary': 'default',
       'input.query(query_embedding)': embedding,
       ...buildStructuredQueryFeatureParams([], effectiveFilters),
-    });
+    }, undefined, requestId);
 
     const children = response.root.children ?? [];
 
@@ -501,6 +515,7 @@ export class VespaSearchIndex implements SearchIndexPort {
     queryWeights: readonly { token: string; weight: number }[],
     filters?: readonly string[],
     limit?: number,
+    requestId?: string,
   ): Promise<readonly DenseHit[]> {
     if (queryWeights.length === 0) {
       return [];
@@ -532,7 +547,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       'ranking.profile': 'learned_sparse',
       'presentation.summary': 'default',
       'input.query(sparse_query_embedding)': sparseQueryTensor,
-    });
+    }, undefined, requestId);
 
     const children = response.root.children ?? [];
 
@@ -736,7 +751,7 @@ export class VespaSearchIndex implements SearchIndexPort {
         `select ${selectFields}` +
         ` from ${SCHEMA} where entity_id in (${idList})` +
         ` limit ${batch.length}`;
-      const response = await this.client.query(yql, {
+      const response = await this.queryUnderBreaker(yql, {
         'presentation.summary': summaryName,
       });
       const children = response.root.children ?? [];
@@ -744,14 +759,21 @@ export class VespaSearchIndex implements SearchIndexPort {
     }));
 
     // Build Map<entityId, projection> from successful batches.
+    // Log failed batches — previously they were silently swallowed, making partial
+    // failures invisible in production and causing silent ranking feature data loss.
     const projectionMap = new Map<string, T>();
     for (const result of settled) {
-      if (result.status === 'fulfilled') {
-        for (const proj of result.value) {
-          const eid = entityIdOf(proj);
-          if (eid !== undefined) {
-            projectionMap.set(eid, proj);
-          }
+      if (result.status === 'rejected') {
+        bootstrapLogger.warn(
+          { err: result.reason instanceof Error ? result.reason.message : String(result.reason), callerName },
+          `[VespaSearchIndex] ${callerName}: batch query failed — results will be partial`,
+        );
+        continue;
+      }
+      for (const proj of result.value) {
+        const eid = entityIdOf(proj);
+        if (eid !== undefined) {
+          projectionMap.set(eid, proj);
         }
       }
     }

@@ -45,3 +45,17 @@ export const KRW_PER_CHEON_WON = 1_000;
  * price queries (e.g. "1억원 이상 그랑크뤼"). 1억 = 10^8 = 100 million.
  */
 export const KRW_PER_EOK_WON = 100_000_000;
+
+/**
+ * Approximate KRW per EUR for NL price extraction (soft filters only; no FX API).
+ * Mid-2025 reference rate (EUR/KRW ≈ 1:1470). Used for mixed-currency queries
+ * like "€50 이하 와인". Source: ECB/KRX mid-market rate 2025-Q1 average.
+ */
+export const KRW_PER_EUR_APPROXIMATE = 1_470;
+
+/**
+ * Approximate KRW per GBP for NL price extraction (soft filters only; no FX API).
+ * Mid-2025 reference rate (GBP/KRW ≈ 1:1720). Used for "£30 이하" price queries.
+ * Source: BOE/KRX mid-market rate 2025-Q1 average.
+ */
+export const KRW_PER_GBP_APPROXIMATE = 1_720;

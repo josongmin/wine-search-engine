@@ -114,6 +114,19 @@ export interface VivinoPayload {
 
   /** Bottle volume in ml, e.g. 750, 1500. */
   readonly bottle_ml?: number;
+
+  /**
+   * Official wine classification label from Vivino, e.g. "Barolo DOCG",
+   * "Grand Cru Classé", "Premier Cru". Populated in some regional Vivino
+   * vintages where the classification system is well-known.
+   */
+  readonly classification?: string;
+
+  /**
+   * Oak ageing descriptor from Vivino, e.g. "French oak", "New oak 18 months".
+   * Populated for premium wines that list barrel ageing details.
+   */
+  readonly oak_ageing?: string;
 }
 
 /** Row from wine_pdp_snapshot table (Bronze tier). */
@@ -226,6 +239,19 @@ export interface SilverWineRecord {
 
   /** Finish length in [0, 1] normalized ordinal. Added by LLM enrichment step. */
   readonly finishLength?: number | undefined;
+
+  /**
+   * Official classification tier (e.g. "Premier Grand Cru Classé", "Barolo DOCG",
+   * "Grand Cru", "DOCa Rioja Gran Reserva"). Extracted from Vivino payload or
+   * rule-based from region/style. Null when not determinable.
+   */
+  readonly classification?: string | null;
+
+  /**
+   * Oak treatment descriptor (e.g. "French oak 18 months", "New oak", "Unoaked").
+   * Extracted from Vivino payload oak_ageing field or inferred from tasting notes.
+   */
+  readonly oakTreatment?: string | null;
 }
 
 // ---------------------------------------------------------------------------

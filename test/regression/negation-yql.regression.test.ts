@@ -58,11 +58,21 @@ describe('Negation regression — constraint-to-sparse-filter-tokens', () => {
     expect(tokens.filter((t) => t.includes('_not'))).toHaveLength(0);
   });
 
-  it('R-NEG-06: exclude on style emits style_not token', () => {
-    const tokens = hardConstraintsToSparseFilterTokens([
+  it('R-NEG-06: exclude on style with a canonical value emits style_not token', () => {
+    // 'oaked' is not a Vespa style field value (stored values are e.g. "medium red", "full red").
+    // STYLE_NORMALISATION_MAP maps 'oaked' → '' so the token is dropped — emitting
+    // style_not:oaked would produce a no-op !(style contains "oaked") YQL clause.
+    // Use a canonical style value ('bold') to verify the pipeline still works end-to-end.
+    const tokensOaked = hardConstraintsToSparseFilterTokens([
       { attribute: 'style', operator: 'exclude', value: 'oaked', source_phrase: '오크 안 쓴', confidence: 0.9 },
     ]);
-    expect(tokens).toContain('style_not:oaked');
+    // oaked is skipped (non-indexable) — no token emitted
+    expect(tokensOaked).toHaveLength(0);
+
+    const tokensBold = hardConstraintsToSparseFilterTokens([
+      { attribute: 'style', operator: 'exclude', value: 'bold', source_phrase: '진하지 않은', confidence: 0.9 },
+    ]);
+    expect(tokensBold).toContain('style_not:bold');
   });
 });
 
@@ -119,9 +129,11 @@ describe('Negation regression — buildSparseFilters YQL output', () => {
 
   it('R-NEG-14: style_not for unoaked Chardonnay query does not block "oak" in producer names', () => {
     // False-positive guard: filtering style=oaked must not block wines with "oak" in label
-    // This is enforced at Vespa query time on the `style` field specifically, not full-text
+    // style field is attribute-only — must use `matches` (regex substring), not `contains`.
+    // `!(style matches "oaked")` correctly excludes wines where style field contains "oaked";
+    // `!(style contains "oaked")` silently no-ops on multi-token stored values like "full red".
     const yql = buildSparseFilters(['style_not:oaked', 'wine_type:White']);
-    expect(yql).toContain('!(style contains "oaked")');
+    expect(yql).toContain('!(style matches "oaked")');
     expect(yql).toContain('wine_type contains "White"');
     // The NOT clause is scoped to the `style` field — full-text "oak" matches are unaffected
     expect(yql).not.toContain('!(canonical_label');
@@ -164,13 +176,18 @@ describe('Negation regression — end-to-end pipeline', () => {
     expect(yql).not.toContain('body >=');
   });
 
-  it('R-NEG-18: "오크 안 쓴 샤도네이" scenario → style exclusion + wine_type positive', () => {
+  it('R-NEG-18: "오크 안 쓴 샤도네이" scenario → oaked style excluded (no-op token), grape positive retained', () => {
+    // 'oaked' maps to '' in STYLE_NORMALISATION_MAP — it is not a stored Vespa style value
+    // so emitting !(style contains "oaked") would be a no-op filter that silently passes all
+    // wines (the stored values are "medium red", "full red", etc., never "oaked").
+    // The pipeline correctly drops the oaked token; only the grape_primary token is emitted.
     const tokens = hardConstraintsToSparseFilterTokens([
       { attribute: 'style', operator: 'exclude', value: 'oaked', source_phrase: '오크 안 쓴', confidence: 0.88 },
       { attribute: 'grape_primary', operator: '=', value: 'Chardonnay', source_phrase: '샤도네이', confidence: 0.95 },
     ]);
     const yql = buildSparseFilters(tokens);
-    expect(yql).toContain('!(style contains "oaked")');
+    // oaked token dropped — no style YQL clause emitted
+    expect(yql).not.toContain('style');
     expect(yql).toContain('grape_primary contains "Chardonnay"');
   });
 

@@ -20,7 +20,6 @@ export interface StartupPreflightConfig {
   readonly vespa?: { readonly url?: string | undefined } | undefined;
   readonly embedding?: { readonly url?: string | undefined } | undefined;
   readonly openai?: { readonly apiKey?: string | undefined } | undefined;
-  readonly reranker?: { readonly url?: string | undefined } | undefined;
   readonly cohere?: { readonly apiKey?: string | undefined } | undefined;
 }
 
@@ -51,12 +50,11 @@ export function warnStartupMisconfigurations(config: StartupPreflightConfig): vo
     );
   }
 
-  const hasRerankerUrl = config.reranker?.url != null && config.reranker.url !== '';
   const hasCohereKey = config.cohere?.apiKey != null && config.cohere.apiKey !== '';
-  if (!hasRerankerUrl && !hasCohereKey) {
+  if (!hasCohereKey) {
     bootstrapLogger.warn(
       'No reranker configured — results will use heuristic ranking only' +
-      ' (set RERANKER_SERVICE_URL or COHERE_API_KEY)',
+      ' (set COHERE_API_KEY)',
     );
   }
 }

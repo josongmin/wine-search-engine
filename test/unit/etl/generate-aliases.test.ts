@@ -134,4 +134,73 @@ describe('generateAliases', () => {
     expect(shortAlias).toBeDefined();
     expect(shortAlias!.value).toBe('Opus One');
   });
+
+  // SCAN4-15: \b → Unicode-safe boundary regression
+  // Vintage year should be removed from no-vintage alias without corrupting
+  // adjacent Korean characters or multi-digit substrings like "20150".
+  describe('no-vintage alias — Unicode-safe year boundary (SCAN4-15)', () => {
+    it('removes 4-digit vintage year from label', () => {
+      const result = generateAliases(makeSilverRecord({
+        canonicalLabel: 'Château Margaux Grand Vin 2015',
+        vintageYear: 2015,
+      }));
+      const noVintage = result.proposed.find((a) => a.source === 'rule:no_vintage_v1');
+      expect(noVintage?.value).toBe('Château Margaux Grand Vin');
+    });
+
+    it('does not remove year substring embedded in longer number (e.g. 20150)', () => {
+      // "도멘 2015 셀러" → vintage should be stripped correctly,
+      // but a label with "20150" should not have "2015" stripped mid-number.
+      const result = generateAliases(makeSilverRecord({
+        canonicalLabel: 'Opus One 20150 Special',
+        vintageYear: 2015,
+        producer: 'Opus One',
+      }));
+      const noVintage = result.proposed.find((a) => a.source === 'rule:no_vintage_v1');
+      // "2015" embedded in "20150" must NOT be removed
+      expect(noVintage?.value).toContain('20150');
+    });
+
+    it('handles Korean label with vintage year adjacent to Hangul', () => {
+      // Korean wine label: "보르도 레드 2015" — year should be removed cleanly
+      const result = generateAliases(makeSilverRecord({
+        canonicalLabel: '보르도 레드 2015',
+        producer: '보르도 와이너리',
+        vintageYear: 2015,
+      }));
+      const noVintage = result.proposed.find((a) => a.source === 'rule:no_vintage_v1');
+      expect(noVintage?.value).toBe('보르도 레드');
+    });
+  });
+});
+
+describe('extractShortName NFC normalization', () => {
+  // R-NFC-GA-SHORT-01: extractShortName must NFC-normalize input before prefix matching.
+  // CHATEAU_PREFIXES entries are NFC (e.g. 'château'). If the producer name arrives as
+  // NFD (U+0065 + combining caron), the startsWith() comparison silently returns false,
+  // and no short-name alias is generated. After the fix, NFC normalization in
+  // extractShortName ensures NFD inputs match NFC prefixes.
+  it('R-NFC-GA-SHORT-01: NFD-decomposed "Château" producer still generates short-name alias', () => {
+    const nfdProducer = 'Château'.normalize('NFD') + ' Margaux'; // e.g. "Cha\u0302teau Margaux"
+    const result = generateAliases(makeSilverRecord({
+      producer: nfdProducer,
+      canonicalLabel: nfdProducer + ' 2015',
+      vintageYear: 2015,
+    }));
+    const shortAlias = result.proposed.find((a) => a.source === 'rule:short_name_v1');
+    // Without NFC in extractShortName, shortAlias would be undefined
+    expect(shortAlias).toBeDefined();
+    expect(shortAlias?.value).toBe('Margaux');
+  });
+
+  it('R-NFC-GA-SHORT-02: NFC "Château" producer generates short-name alias (regression check)', () => {
+    const result = generateAliases(makeSilverRecord({
+      producer: 'Château Margaux',
+      canonicalLabel: 'Château Margaux 2015',
+      vintageYear: 2015,
+    }));
+    const shortAlias = result.proposed.find((a) => a.source === 'rule:short_name_v1');
+    expect(shortAlias).toBeDefined();
+    expect(shortAlias?.value).toBe('Margaux');
+  });
 });

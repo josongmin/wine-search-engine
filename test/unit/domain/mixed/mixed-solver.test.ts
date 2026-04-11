@@ -46,8 +46,8 @@ function buildSolver(runtimeSignal?: RankerRuntimeSignal): MixedSolver {
       canonicalLabel: 'Opus One',
       region: 'Napa Valley',
       grapes: ['Cabernet Sauvignon'],
-      body: 4,
-      sweetness: 1,
+      body: 0.8,
+      sweetness: 0.1,
       style: 'bold',
     }),
   };

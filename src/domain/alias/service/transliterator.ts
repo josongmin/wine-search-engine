@@ -433,6 +433,9 @@ export class Transliterator {
     ['chave', '샤브'],
   ]);
 
+  /** Supported source languages for alias generation (module-scope, Rule 16). */
+  private static readonly VALID_LANGS: Set<string> = new Set(['fr', 'it', 'es', 'en']);
+
   private static readonly FR_SORTED_KEYS: readonly string[] =
     [...Transliterator.FR_KO_RULES.keys()].sort((a, b) => b.length - a.length);
   private static readonly ES_SORTED_KEYS: readonly string[] =
@@ -478,8 +481,10 @@ export class Transliterator {
     // Delegates to the vintage SSoT (`@domain/shared/utils/vintage`).
     const vintageStripped = stripVintageYears(s.toLowerCase().normalize('NFKC'));
     return vintageStripped
-      // Strip whitespace, punctuation, and Latin letters (vintage abbreviations may leak in).
-      .replace(/[\s\-_.,()'"·]+/gu, '')
+      // Strip whitespace, punctuation, and Latin letters (vintage abbreviations may leak in,
+      // e.g. "돔 페리뇽 NV" must strip "nv" so the key matches the EXCEPTIONS entry "돔페리뇽").
+      // The .toLowerCase().normalize('NFKC') above ensures uppercase Latin is already lowercased.
+      .replace(/[\s\-_.,()'"·a-z]+/gu, '')
       // Apply the common "오퍼스" → "오푸스" typo normalization inline. This is the single
       // Korean→Korean misspelling that appears in real benchmark scenarios for Opus One.
       // Keeping it inline avoids a dependency on korean-wine-aliases.ts.
@@ -545,7 +550,10 @@ export class Transliterator {
    * @returns Korean transliteration.
    */
   transliterate(input: string, sourceLang: SourceLang): string {
-    const lower = input.toLowerCase().trim();
+    // NFC-normalize before lowercasing: macOS produces NFD-encoded strings (decomposed
+    // accented chars, e.g. 'e' + combining acute = '\u0301'), but EXCEPTIONS keys are NFC.
+    // Map.get() uses strict codepoint equality so NFD input silently misses NFC keys.
+    const lower = input.normalize('NFC').toLowerCase().trim();
 
     // 1. Full-string exception lookup
     const fullException = Transliterator.EXCEPTIONS.get(lower);
@@ -585,10 +593,14 @@ export class Transliterator {
     sourceLang: string,
   ): readonly TransliterationResult[] {
     if (!Transliterator.VALID_LANGS.has(sourceLang)) return [];
+    // Guard empty input: transliterate('') produces [''] from split, then
+    // applyRules('', …) returns '', which would create an empty alias and
+    // throw INVARIANT_VIOLATION in createAlias. Fail early and cleanly.
+    if (canonicalLabel.trim().length === 0) return [];
     const lang = sourceLang as SourceLang;
     const results: TransliterationResult[] = [];
 
-    const lower = canonicalLabel.toLowerCase().trim();
+    const lower = canonicalLabel.normalize('NFC').toLowerCase().trim();
     const isException = Transliterator.EXCEPTIONS.has(lower);
 
     // Primary transliteration

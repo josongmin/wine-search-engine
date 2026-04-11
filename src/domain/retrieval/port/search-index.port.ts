@@ -44,6 +44,7 @@ export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entit
   readonly drinkingWindowModelVersion?: string | undefined;
   readonly priceUsd?: number | undefined;
   readonly certifications?: readonly string[] | undefined;
+  readonly flavorProfiles?: readonly string[] | undefined;
   readonly soilType?: string | undefined;
   readonly producerType?: string | undefined;
   readonly grapeFamily?: string | undefined;
@@ -80,6 +81,7 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
   'drinkingWindowModelVersion',
   'priceUsd',
   'certifications',
+  'flavorProfiles',
   'soilType',
   'producerType',
   'grapeFamily',
@@ -148,6 +150,7 @@ export interface SearchIndexPort {
    * @param filters - Optional filter expressions to narrow the candidate set.
    * @param limit - Maximum number of hits to return (default: implementation-defined).
    * @param rankProfile - Optional backend-native rank profile for mode-specific retrieval tuning.
+   * @param requestId - Optional request identifier forwarded as `X-Request-Id` to downstream services.
    * @returns Sparse hits sorted by descending score.
    */
   sparseSearch(
@@ -155,6 +158,7 @@ export interface SearchIndexPort {
     filters?: readonly string[],
     limit?: number,
     rankProfile?: string,
+    requestId?: string,
   ): Promise<readonly SparseHit[]>;
 
   /**
@@ -164,6 +168,7 @@ export interface SearchIndexPort {
    * @param filters - Optional filter expressions to narrow the candidate set.
    * @param limit - Maximum number of hits to return.
    * @param rankProfile - Optional backend-native rank profile for mode-specific retrieval tuning.
+   * @param requestId - Optional request identifier forwarded as `X-Request-Id` to downstream services.
    * @returns Dense hits sorted by descending similarity.
    */
   denseSearch(
@@ -171,6 +176,7 @@ export interface SearchIndexPort {
     filters?: readonly string[],
     limit?: number,
     rankProfile?: string,
+    requestId?: string,
   ): Promise<readonly DenseHit[]>;
 
   /**
@@ -184,12 +190,14 @@ export interface SearchIndexPort {
    *   When empty, the implementation must return `[]` immediately (no I/O).
    * @param filters - Optional filter expressions to narrow the candidate set.
    * @param limit - Maximum number of hits to return.
+   * @param requestId - Optional request identifier forwarded as `X-Request-Id` to downstream services for distributed tracing.
    * @returns Hits sorted by descending learned-sparse score, shaped as DenseHit.
    */
   searchLearnedSparse(
     queryWeights: readonly { token: string; weight: number }[],
     filters?: readonly string[],
     limit?: number,
+    requestId?: string,
   ): Promise<readonly DenseHit[]>;
 
   /**

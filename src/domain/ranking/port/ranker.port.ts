@@ -11,6 +11,7 @@ import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RankerRuntimeSignal } from '../model/ranking-runtime-signal.js';
 import type { FunnelMetrics } from '../model/ranking-stage.js';
+import type { ScoreDriftRecord } from '../model/score-decomposition.js';
 
 /**
  * Metadata produced alongside ranked results during a single rank() call.
@@ -34,6 +35,17 @@ export interface RankingMetadata {
    * cannot corrupt each other's funnel data.
    */
   readonly funnelMetrics?: FunnelMetrics | undefined;
+
+  /**
+   * E5-T6: Score drift record — LTR vs heuristic ordering drift for this query.
+   *
+   * Present when LTR reranking was executed (rerankExecuted=true and LTR model
+   * was applied). Absent for cross-encoder-only reranks or when no reranking ran.
+   *
+   * Used by the drift monitor as a deployment-unit acceptance gate when LTR
+   * models are promoted.
+   */
+  readonly scoreDriftRecord?: ScoreDriftRecord | undefined;
 }
 
 /**

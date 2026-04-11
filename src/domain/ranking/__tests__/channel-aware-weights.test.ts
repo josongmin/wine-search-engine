@@ -304,7 +304,8 @@ function applyModeOverlayWithNorm(
   };
   const baseSum = NON_PENALTY_KEYS.reduce((s, k) => s + (baseWeights[k] ?? 0), 0);
   const overlaidSum = NON_PENALTY_KEYS.reduce((s, k) => s + (overlaid[k] ?? 0), 0);
-  const normFactor = overlaidSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
+  const normFactor =
+    overlaidSum > 0 && baseSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
   if (normFactor === 1) return overlaid;
   return {
     ...overlaid,
@@ -351,5 +352,68 @@ describe('mode-overlay normalization invariant', () => {
     expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
     expect(result.semantic).toBeCloseTo(base.semantic, 10);
     expect(result.popularity).toBeCloseTo(base.popularity, 10);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bug 3 regression: modeNormFactor division-by-zero guard (ranker.ts)
+// When baseSum === 0 (all base weights zero), the previous code produced
+// modeNormFactor = 0 / overlaidSum = 0, zeroing out all ranking weights.
+// After the fix, modeNormFactor falls back to 1 (no normalisation applied).
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('modeNormFactor baseSum=0 guard (Bug 3 regression)', () => {
+  const ALL_ZERO_WEIGHTS: ScoringWeights = {
+    entityIntegrity: 0,
+    anchorSimilarity: 0,
+    semantic: 0,
+    softConstraint: 0,
+    attributeAlignment: 0,
+    preferenceAlignment: 0,
+    popularity: 0,
+    availability: 0,
+    uncertaintyPenalty: 0,
+    entityIntegrityThreshold: 0.3,
+    producerPrestige: 0,
+    recency: 0,
+    criticScore: 0,
+    multilingualScore: 0,
+  };
+
+  it('returns finite weights (not 0 or Infinity) when baseSum is 0', () => {
+    // Applying any mode to an all-zero base must not produce NaN/Infinity/0 weights.
+    const result = applyModeOverlayWithNorm(ALL_ZERO_WEIGHTS, 'producer_browse');
+    const resultSum = nonPenaltySum(result);
+    expect(Number.isFinite(resultSum)).toBe(true);
+    expect(resultSum).not.toBe(0);
+  });
+
+  it('returns normFactor of 1 (no adjustment) when baseSum is 0', () => {
+    // With baseSum=0 the guard must skip normalisation entirely (factor stays 1),
+    // so the overlaid values are returned as-is — not zeroed.
+    const result = applyModeOverlayWithNorm(ALL_ZERO_WEIGHTS, 'recommendation');
+    // If the guard fires correctly, result weights equal the mode profile overlaid
+    // values (all still 0 since base was all-zero and Math.max(0, modeBoost)=modeBoost).
+    // The key invariant: no weight becomes NaN or Infinity.
+    for (const key of NON_PENALTY_KEYS) {
+      expect(Number.isFinite(result[key])).toBe(true);
+    }
+  });
+
+  it('produces modeNormFactor=1 when overlaidSum equals baseSum (no-op mode)', () => {
+    // When overlaidSum === baseSum the factor is 1 regardless (fast-path).
+    // Using the DEFAULT mode (all-zero overlay) on DEFAULT_WEIGHTS satisfies this.
+    const base = resolveWeights('comparison_query');
+    const result = applyModeOverlayWithNorm(base, undefined);
+    // Non-penalty sum must be unchanged.
+    expect(nonPenaltySum(result)).toBeCloseTo(nonPenaltySum(base), 10);
+  });
+
+  it('resolveChannelAwareWeights does not produce Infinity when weights are all zero', () => {
+    // Defensive check: resolveChannelAwareWeights already has an adjustedNonPenaltySum > 0
+    // guard.  Verify it produces finite output even for pathological zero input.
+    const result = resolveChannelAwareWeights([], ALL_ZERO_WEIGHTS);
+    const resultSum = nonPenaltySum(result);
+    expect(Number.isFinite(resultSum)).toBe(true);
   });
 });

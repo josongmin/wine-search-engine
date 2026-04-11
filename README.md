@@ -406,7 +406,6 @@ flowchart TD
 | `scripts/` | ETL, eval, Vespa 레인 셸 래퍼, HTTP 계약 내보내기 |
 | `scripts/etl/` | NDJSON / Silver 파이프라인, 음역, index-to-Vespa, 검증 |
 | `vespa/app/` | Vespa 스키마(`schemas/`), `services.xml`, `hosts.xml`, 쿼리 프로파일 |
-| 외부 리랭커 API | `RERANKER_SERVICE_URL`로 연결되는 HTTP cross-encoder |
 | `data/` | eval 쿼리, 베이스라인, 스모크 예측(대용량 — 커밋 전 검토) |
 | `docs/` | RFC, 계획, 런북; **`docs/archive/`**(날짜별 메모); **`docs/sessions/`**(예: 버그배시) |
 | `models/` | 선택 ONNX / 모델 번들(음주 가능 기간 문서 참고) |
@@ -476,7 +475,7 @@ cp .env.example .env
 | Postgres | `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER`, `PG_PASSWORD` — 비밀번호 비우면 여러 경로에서 PG 풀 생략 |
 | Redis | `REDIS_URL` |
 | Vespa | `VESPA_URL`, `VESPA_CONTENT_CLUSTER` |
-| ML HTTP | `EMBEDDING_SERVICE_URL`, 선택 `COHERE_API_KEY`/`COHERE_RERANK_MODEL`, 선택 `RERANKER_SERVICE_URL`, `RERANK_BLEND_SCALE`, 선택 `LEARNED_MATCHER_SERVICE_URL` |
+| ML HTTP | `EMBEDDING_SERVICE_URL`, 선택 `COHERE_API_KEY`/`COHERE_RERANK_MODEL`, `RERANK_BLEND_SCALE`, 선택 `LEARNED_MATCHER_SERVICE_URL` |
 | Anthropic | `ANTHROPIC_API_KEY`(선택 기능) |
 | 음주 가능 기간 | `ALLOW_HEURISTIC_DRINKING_WINDOW`, `DRINKING_WINDOW_MODEL_DIR` |
 | 워치리스트 | `WATCHLIST_ENABLED`, `WEBHOOK_SECRET` |
@@ -493,7 +492,7 @@ bash scripts/build/link-external-artifacts.sh
 
 루트 `node_modules`는 외부 디렉터리로 빼도 되지만, `web/node_modules`는 Next/Turbopack 제약 때문에 저장소 내부 경로를 유지해야 합니다.
 
-**Docker Compose (`docker-compose.yml`)**는 **`app`** 서비스 환경을 설정해 **`postgres`**, **`redis`**, **`vespa`**를 DNS으로 해석; 임베딩은 **`host.docker.internal`**로 호스트 서비스를 쓸 수 있음. 리랭커는 자체호스팅하지 않고 외부 HTTP API를 `RERANKER_SERVICE_URL`로 연결합니다.
+**Docker Compose (`docker-compose.yml`)**는 **`app`** 서비스 환경을 설정해 **`postgres`**, **`redis`**, **`vespa`**를 DNS으로 해석; 임베딩은 **`host.docker.internal`**로 호스트 서비스를 쓸 수 있음. 리랭커는 Cohere API(`COHERE_API_KEY`)를 사용합니다.
 
 ---
 

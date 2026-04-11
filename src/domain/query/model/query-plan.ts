@@ -1,4 +1,4 @@
-import type { QueryClass, ConstraintBundle } from '../../shared/types/index.js';
+import type { QueryClass, ConstraintBundle, ConstraintAtom } from '../../shared/types/index.js';
 import type { QueryIntent } from './query-intent.js';
 import type { QueryRoute } from './query-route.js';
 import type { RetrievalMode } from './retrieval-mode.js';
@@ -14,6 +14,7 @@ import type { QueryUnderstandingSnapshot } from './query-understanding-snapshot.
 import type { QueryDecompositionHint } from './query-decomposition.js';
 import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
+import type { PolicyDecisionRecord } from './policy-decision-record.js';
 
 /**
  * Version 1 of the Query Plan -- the single source of truth (SSOT) output
@@ -145,6 +146,28 @@ export interface QueryPlanV2 {
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   /** Structured retrieval plan built from compiled constraints. */
   readonly retrievalPlan?: RetrievalPlan | undefined;
+  /**
+   * E2-T3: ConstraintAtom IR — flat list of atoms produced by ConstraintReasoner.
+   *
+   * Present when the planner ran ConstraintReasoner after Tier 6 extraction.
+   * Absent for legacy/V1 plan paths that have not been upgraded yet.
+   *
+   * Consumers (Ranker, Safety Envelope) that need conflict-resolved constraints
+   * MUST prefer this list when present. Fall back to `constraints` (raw bundle)
+   * when absent.
+   */
+  readonly constraintAtoms?: readonly ConstraintAtom[] | undefined;
+
+  /**
+   * E3: Planner policy trace — machine-readable record of each decision stage.
+   *
+   * Present when the planner ran with tracing enabled (debug header or explain=true).
+   * Absent in production hot-path (tracing is opt-in to avoid allocation overhead).
+   *
+   * Consumers MUST treat this as optional. Core plan fields are the source of truth;
+   * plannerTrace is additive observability only.
+   */
+  readonly plannerTrace?: readonly PolicyDecisionRecord[] | undefined;
 
   // --- Admission context (planner still populates this) ---
   readonly admission_context?: {
@@ -160,7 +183,15 @@ export interface QueryPlanV2 {
   readonly suggestedRetrievalMode: RetrievalMode;
 }
 
-/** Convert QueryPlanV2 to QueryUnderstandingSnapshot (drops route/mode suggestions and admission_context). */
+/**
+ * Convert QueryPlanV2 to QueryUnderstandingSnapshot.
+ *
+ * Intentionally drops: route/mode suggestions, admission_context, and plannerTrace.
+ * - Route/mode are execution decisions, not understanding.
+ * - plannerTrace is diagnostic only — QueryUnderstandingSnapshot is the
+ *   understanding SSOT and must not carry execution-phase observability data.
+ *   Consumers that need the trace must retain the full QueryPlanV2.
+ */
 export function planV2ToUnderstandingSnapshot(plan: QueryPlanV2): QueryUnderstandingSnapshot {
   return {
     rawQuery: plan.rawQuery,

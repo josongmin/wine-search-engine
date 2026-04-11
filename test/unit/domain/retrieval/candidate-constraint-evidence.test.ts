@@ -120,3 +120,88 @@ describe('candidate constraint evidence', () => {
     expect(annotated.unmetHardConstraints).toEqual(['wine_type']);
   });
 });
+
+describe('evaluateOperator NaN safety (CLAUDE.md schema quality bar)', () => {
+  // NaN is typeof 'number' but any comparison with NaN returns false.
+  // The type guard `typeof attrValue === 'number'` passes NaN, which would
+  // silently fail every constraint check — wine is dropped even if it satisfies.
+  it('R-NAN-OP-01: NaN attribute value correctly fails <= constraint (not silently wrong)', () => {
+    const constraints: ConstraintBundle = {
+      hard: [
+        {
+          attribute: 'price_usd',
+          operator: '<=',
+          value: 100,
+          source_phrase: 'under 100',
+          confidence: 1,
+        },
+      ],
+      soft: [],
+      inferred: [],
+    };
+    const candidate = makeCandidate({ priceUsd: NaN });
+    const annotated = annotateCandidateConstraintEvidence(candidate, constraints);
+    // NaN priceUsd must fail the constraint — not match it
+    expect(annotated.matchedConstraints).not.toContain('price_usd');
+    expect(annotated.unmetHardConstraints).toContain('price_usd');
+  });
+
+  it('R-NAN-OP-02: NaN attribute value correctly fails >= constraint', () => {
+    const constraints: ConstraintBundle = {
+      hard: [
+        {
+          attribute: 'critic_score_normalized',
+          operator: '>=',
+          value: 0.9,
+          source_phrase: '90 points',
+          confidence: 1,
+        },
+      ],
+      soft: [],
+      inferred: [],
+    };
+    const candidate = makeCandidate({ criticScoreNormalized: NaN });
+    const annotated = annotateCandidateConstraintEvidence(candidate, constraints);
+    expect(annotated.matchedConstraints).not.toContain('critic_score_normalized');
+    expect(annotated.unmetHardConstraints).toContain('critic_score_normalized');
+  });
+
+  it('R-NAN-OP-03: NaN attribute value correctly fails range constraint', () => {
+    const constraints: ConstraintBundle = {
+      hard: [
+        {
+          attribute: 'alcohol_pct',
+          operator: 'range',
+          value: { min: 12, max: 15 },
+          source_phrase: '12-15%',
+          confidence: 1,
+        },
+      ],
+      soft: [],
+      inferred: [],
+    };
+    const candidate = makeCandidate({ alcoholPct: NaN });
+    const annotated = annotateCandidateConstraintEvidence(candidate, constraints);
+    expect(annotated.matchedConstraints).not.toContain('alcohol_pct');
+    expect(annotated.unmetHardConstraints).toContain('alcohol_pct');
+  });
+
+  it('R-NAN-OP-04: valid finite value still satisfies range constraint (regression)', () => {
+    const constraints: ConstraintBundle = {
+      hard: [
+        {
+          attribute: 'alcohol_pct',
+          operator: 'range',
+          value: { min: 12, max: 15 },
+          source_phrase: '12-15%',
+          confidence: 1,
+        },
+      ],
+      soft: [],
+      inferred: [],
+    };
+    const candidate = makeCandidate({ alcoholPct: 13.5 });
+    const annotated = annotateCandidateConstraintEvidence(candidate, constraints);
+    expect(annotated.matchedConstraints).toContain('alcohol_pct');
+  });
+});

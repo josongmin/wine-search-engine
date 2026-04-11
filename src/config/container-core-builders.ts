@@ -121,7 +121,11 @@ export function buildEntityResolver(adapters: CoreAdapterServices, config: Confi
     new Calibrator(adapters.calibrationStore, {
       requireTrainedParams: config.nodeEnv === 'production',
     }),
-    adapters.learnedMatcher,
+    // Mirror the CandidatePoolService kill-switch guard: when KILL_SWITCH_LEARNING is true,
+    // suppress the learned-matcher blend in the Resolver as well. Without this guard,
+    // KILL_SWITCH_LEARNING=true disables SPLADE retrieval but the learned-matcher service
+    // is still called on every entity resolution — defeating the kill switch's intent.
+    config.killSwitch.learning ? undefined : adapters.learnedMatcher,
   );
 }
 

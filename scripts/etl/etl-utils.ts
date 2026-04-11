@@ -83,9 +83,28 @@ export async function acquireLock(
   try {
     const existing = await fsp.readFile(lockPath, 'utf8').catch(() => null);
     if (existing) {
-      const parsed = JSON.parse(existing) as { pid: number; ts: number };
+      const rawParsed: unknown = JSON.parse(existing);
+      const rec = (typeof rawParsed === 'object' && rawParsed !== null)
+        ? rawParsed as Record<string, unknown>
+        : null;
+      const rawPid = rec?.['pid'];
+      const rawTs = rec?.['ts'];
+      // typeof NaN === 'number' is true — must use Number.isFinite() to reject NaN/Infinity.
+      // A lock file with NaN pid would call isProcessAlive(NaN) → process.kill(NaN, 0),
+      // which has undefined behaviour and could mask stale locks indefinitely.
+      if (
+        rec === null
+        || !Number.isFinite(rawPid)
+        || !Number.isFinite(rawTs)
+      ) {
+        throw new Error(`Invalid lock file format at ${lockPath}`);
+      }
+      const parsed = { pid: rawPid as number, ts: rawTs as number };
+      // Negative age (clock skew / future timestamp) must be treated as stale —
+      // a negative value satisfies `age < LOCK_STALE_MS` and would call
+      // isProcessAlive() with potentially garbage pid from a corrupted lock.
       const age = Date.now() - parsed.ts;
-      if (age < LOCK_STALE_MS && isProcessAlive(parsed.pid)) {
+      if (age >= 0 && age < LOCK_STALE_MS && isProcessAlive(parsed.pid)) {
         throw new Error(
           `ETL lock held by PID ${parsed.pid} (age ${Math.round(age / 1000)}s). ` +
           `If stale, delete ${lockPath}`,
@@ -306,6 +325,52 @@ export async function appendDeadLetter(
   await fsp.mkdir(dir, { recursive: true });
   const line = JSON.stringify({ ...entry, timestamp: new Date().toISOString() }) + '\n';
   await fsp.appendFile(deadLetterPath, line, 'utf8');
+}
+
+// ---------------------------------------------------------------------------
+// Locale-safe numeric string parsing (SCAN4-14)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a numeric string that may use European decimal notation ("87,5") or
+ * standard notation ("87.5").
+ *
+ * SCAN4-14: Vivino and some wine databases use comma as the decimal separator
+ * (common in France, Germany, Italy, Spain). Passing such strings directly to
+ * `parseFloat()` produces a truncated integer (e.g. parseFloat("87,5") → 87).
+ *
+ * Algorithm:
+ *   1. If the string contains a comma AND no period → treat comma as decimal separator.
+ *      e.g. "87,5" → 87.5, "14,4" → 14.4
+ *   2. If the string contains both comma and period → comma is a thousands separator.
+ *      e.g. "1,234.56" → 1234.56
+ *   3. Otherwise → pass through to parseFloat as-is.
+ *
+ * Always returns NaN for unparseable input. Callers MUST check Number.isFinite()
+ * before use (CLAUDE.md schema quality bar).
+ *
+ * @example
+ *   parseLocaleFloat("87,5")    → 87.5
+ *   parseLocaleFloat("87.5")    → 87.5
+ *   parseLocaleFloat("1,234.5") → 1234.5
+ *   parseLocaleFloat("abc")     → NaN
+ *   parseLocaleFloat(87)        → 87
+ */
+export function parseLocaleFloat(value: string | number | null | undefined): number {
+  if (value == null) return NaN;
+  if (typeof value === 'number') return value;
+  const s = value.trim();
+  if (s.length === 0) return NaN;
+
+  // European decimal: comma present, no period → replace comma with period
+  if (s.includes(',') && !s.includes('.')) {
+    return parseFloat(s.replace(',', '.'));
+  }
+  // Mixed: comma as thousands separator (e.g. "1,234.56") → strip commas
+  if (s.includes(',') && s.includes('.')) {
+    return parseFloat(s.replace(/,/g, ''));
+  }
+  return parseFloat(s);
 }
 
 // ---------------------------------------------------------------------------

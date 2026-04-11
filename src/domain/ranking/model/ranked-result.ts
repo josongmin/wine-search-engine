@@ -1,5 +1,6 @@
 import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
+import type { ScoreDecomposition } from './score-decomposition.js';
 
 /**
  * E3-U5: Calibrator feature source contract.
@@ -218,6 +219,27 @@ export interface RankedResult {
    * on every result returned by the ranking pipeline.
    */
   readonly coarsePruneMeta?: CoarsePruneMeta | undefined;
+
+  /**
+   * E5-T1: Score decomposition — rerank-aware normalized score breakdown.
+   *
+   * Present when the ranker computed a full score decomposition for this result.
+   * Absent for legacy ranking paths or when decomposition was skipped (e.g. no LTR).
+   *
+   * Consumers MUST treat this as optional — the core ranking contract is
+   * `finalScore` + `componentScores`. `scoreDecomposition` is additive observability.
+   */
+  readonly scoreDecomposition?: ScoreDecomposition | undefined;
+
+  /**
+   * E5-T3: BM25 sparse rank from retrieval — propagated from ScoredEntry for
+   * rerank-safety protected-candidate evaluation (Rule 3: sparseRank === 1 protected).
+   *
+   * Present only for candidates retrieved via the sparse_bm25 channel.
+   * Absent (undefined) for dense-only or anchor-lookup candidates.
+   */
+  readonly sparseRank?: number | undefined;
+
 }
 
 /**

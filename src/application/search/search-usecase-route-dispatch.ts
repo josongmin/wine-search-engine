@@ -4,6 +4,7 @@ import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { FunnelMetrics } from '../../domain/ranking/model/ranking-stage.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
+import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
@@ -23,6 +24,7 @@ export interface SearchRouteExecutionResult {
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly fallbackReason?: string | undefined;
   readonly funnelMetrics?: FunnelMetrics | undefined;
+  readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
 }
 

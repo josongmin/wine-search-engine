@@ -13,9 +13,13 @@ import type { RetrievalMode } from '../../query/model/retrieval-mode.js';
  * Ranking weight profile for a retrieval mode.
  * Weights are relative (sum to 1.0 in typical cases) and influence
  * BM25, embedding, popularity, and domain-specific signals.
+ *
+ * All 12 non-penalty ScoringWeights fields have a corresponding entry here
+ * so the mode overlay in ranker.ts can apply Math.max() across all fields
+ * without silently leaving 6 fields unadjusted (RCA5-04).
  */
 export interface ModeWeightProfile {
-  /** How much to weight BM25 lexical match. */
+  /** How much to weight BM25 lexical match (maps to no direct ScoringWeights field; used by anchorSimilarity overlay). */
   readonly lexicalWeight: number;
 
   /** How much to weight semantic embedding similarity. */
@@ -44,6 +48,23 @@ export interface ModeWeightProfile {
 
   /** For recommendations: emphasize preference alignment (pairing, occasion). */
   readonly preferenceAlignmentWeight: number;
+
+  // ── Previously missing fields (RCA5-04: only 6/12 fields were overlaid) ──
+
+  /** Maps to ScoringWeights.anchorSimilarity. */
+  readonly anchorSimilarityWeight: number;
+
+  /** Maps to ScoringWeights.softConstraint. */
+  readonly softConstraintWeight: number;
+
+  /** Maps to ScoringWeights.availability. */
+  readonly availabilityWeight: number;
+
+  /** Maps to ScoringWeights.criticScore. */
+  readonly criticScoreWeight: number;
+
+  /** Maps to ScoringWeights.multilingualScore. */
+  readonly multilingualScoreWeight: number;
 }
 
 /**
@@ -62,6 +83,11 @@ export const DEFAULT_WEIGHTS: ModeWeightProfile = {
   producerPrestigeWeight: 0.0,
   geographicAlignmentWeight: 0.0,
   preferenceAlignmentWeight: 0.0,
+  anchorSimilarityWeight: 0.0,
+  softConstraintWeight: 0.0,
+  availabilityWeight: 0.0,
+  criticScoreWeight: 0.0,
+  multilingualScoreWeight: 0.0,
 };
 
 /**
@@ -81,6 +107,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 
   // === Ambiguous entity: boost confidence thresholds ===
@@ -95,6 +126,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 
   // === Attribute search: balance text + semantic ===
@@ -109,6 +145,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 
   // === Constraint filtering: favor constraint adherence ===
@@ -123,6 +164,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.20,      // Soft constraints matter in filter mode
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 
   // === Producer browse: high diversity, prestige-aware ===
@@ -137,6 +183,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.10,       // Producer reputation matters
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.05,            // Critic score secondary for browse
+    multilingualScoreWeight: 0.0,
   },
 
   // === Region browse: geographic alignment ===
@@ -151,6 +202,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.05,
     geographicAlignmentWeight: 0.20,   // Region/appellation critical
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 
   // === Comparison: entity integrity paramount ===
@@ -165,6 +221,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.05,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.20,       // Anchor similarity key for comparison
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.10,            // Critic score key for comparison
+    multilingualScoreWeight: 0.0,
   },
 
   // === Recommendation/pairing: preference & occasion focus ===
@@ -179,6 +240,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.25,   // Occasion/pairing preference
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.15,        // Soft constraints (pairing tags) important
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.10,           // Quality signals for recommendations
+    multilingualScoreWeight: 0.0,
   },
 
   // === Similar items: anchor-based similarity (mixed route) ===
@@ -193,6 +259,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.30,      // Anchor similarity is the main signal
+    softConstraintWeight: 0.10,        // Constraint satisfaction secondary
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 
   // === No match: fallback (should rarely be reached in ranking) ===
@@ -207,6 +278,11 @@ const MODE_WEIGHT_PROFILES: Record<RetrievalMode, ModeWeightProfile> = {
     producerPrestigeWeight: 0.0,
     geographicAlignmentWeight: 0.0,
     preferenceAlignmentWeight: 0.0,
+    anchorSimilarityWeight: 0.0,
+    softConstraintWeight: 0.0,
+    availabilityWeight: 0.0,
+    criticScoreWeight: 0.0,
+    multilingualScoreWeight: 0.0,
   },
 };
 

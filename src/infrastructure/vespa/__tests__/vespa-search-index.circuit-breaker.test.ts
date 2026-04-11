@@ -47,6 +47,60 @@ describe('VespaSearchIndex circuit breaker (E3-T2)', () => {
   });
 });
 
+// ── Bug 2 regression: batchFetchBySummary circuit-breaker passthrough ─────────
+// Before the fix, batchFetchBySummary called this.client.query() directly,
+// bypassing the circuit breaker.  After the fix, failures from individual
+// batch Vespa calls are routed through queryUnderBreaker → circuitBreaker.execute(),
+// so the breaker failure counter is incremented even though batchFetchBySummary
+// itself uses Promise.allSettled and does NOT re-throw (it returns [] after logging).
+
+describe('batchFetchBySummary routes through circuit breaker (Bug 2 regression)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    globalCircuitBreakerRegistry.clear();
+  });
+
+  it('increments circuit breaker failure count when fetchWithHitSummary batch fails', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Vespa unavailable'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const index = newIndex();
+
+    // Confirm breaker starts at 0 failures.
+    const snapshot0 = globalCircuitBreakerRegistry.snapshot();
+    const breakerBefore = snapshot0.find((s) => s.name === 'vespa-search');
+    expect(breakerBefore?.metrics.failureCount).toBe(0);
+
+    const { createEntityId } = await import('../../../domain/shared/types/index.js');
+    // batchFetchBySummary uses Promise.allSettled — it returns [] on batch failure
+    // rather than throwing, so the call resolves (but with an empty result).
+    const result = await index.fetchWithHitSummary([createEntityId('wine-entity-001')]);
+    expect(result).toEqual([]);
+
+    const snapshot1 = globalCircuitBreakerRegistry.snapshot();
+    const breakerAfter = snapshot1.find((s) => s.name === 'vespa-search');
+    // The circuit-breaker failure counter MUST have been incremented — this
+    // proves the HTTP call went through queryUnderBreaker, not client.query directly.
+    expect(breakerAfter?.metrics.failureCount).toBeGreaterThan(0);
+  });
+
+  it('increments circuit breaker failure count when fetchWithFeatureSummary batch fails', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('Vespa timeout'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const index = newIndex();
+    const { createEntityId } = await import('../../../domain/shared/types/index.js');
+
+    const result = await index.fetchWithFeatureSummary([createEntityId('wine-entity-002')]);
+    expect(result).toEqual([]);
+
+    const snapshot = globalCircuitBreakerRegistry.snapshot();
+    const breaker = snapshot.find((s) => s.name === 'vespa-search');
+    expect(breaker?.metrics.failureCount).toBeGreaterThan(0);
+  });
+});
+
 describe('VespaClient.query() AbortSignal (E3-T3)', () => {
   afterEach(() => {
     vi.unstubAllGlobals();

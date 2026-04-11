@@ -1,4 +1,5 @@
 import type { EntityId, QueryClass } from '../../shared/types/index.js';
+import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import type { RankingInput } from '../model/ranking-input.js';
@@ -22,11 +23,23 @@ import { LTRRanker } from './ltr-ranker.js';
 import { extractLTRFeatures } from './ltr-feature-extractor.js';
 import { MS_PER_DAY } from '../../shared/utils/time-units.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
+import {
+  evaluateRerankSafety,
+  buildRerankSafetyListContext,
+} from './rerank-safety.js';
+import type { SafetyCandidateDescriptor } from './rerank-safety.js';
+import type { ScoreDecomposition, ScoreDriftRecord } from '../model/score-decomposition.js';
 
 /**
  * Default number of top candidates to submit for cross-encoder reranking.
  */
 const DEFAULT_RERANK_TOP_K = 20;
+
+/**
+ * E5-T6: Top-K window for ScoreDriftRecord heuristic/LTR top-N comparison.
+ * Must match ScoreDriftRecord.heuristicTop3EntityIds field semantics (top-3).
+ */
+const DRIFT_MONITOR_TOP_K = 3;
 
 /** Max characters sent to the cross-encoder (latency + model context). */
 const RERANK_PASSAGE_MAX_CHARS = 1200;
@@ -82,6 +95,12 @@ interface ScoredEntry {
   readonly unmetConstraints: readonly string[];
   readonly inferredConstraints: readonly string[];
   readonly retrievalProvenance?: CandidateProvenance | undefined;
+  /**
+   * E1-T3: sparse (BM25) rank from retrieval — used as 3rd tie-break stage after
+   * finalScore and before entityId. Lower rank = better lexical match.
+   * Present only for candidates retrieved via sparse_bm25 channel.
+   */
+  readonly sparseRank?: number | undefined;
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
   readonly drinkingWindowModelVersion?: string | undefined;
@@ -131,8 +150,14 @@ const CRITIC_PROXY_SCORE_DISPLAY_SPAN = 20;
  * overly tight and collapsed distinct candidates to the neutral blend.
  */
 const RERANK_SCORE_MIN_MAX_RANGE_EPSILON = 1e-6;
-/** Neutral normalized rerank score when range is unusable. */
+/** Neutral normalized rerank score when range is unusable (midpoint of [0,1]). */
 const RERANK_SCORE_NORMALIZED_NEUTRAL = 0.5;
+/**
+ * Fallback rerank blend weight when effectiveRerankBlendWeight returns NaN/Infinity
+ * (e.g. misconfigured rerankBlendScale env var). Midpoint = equal weight between
+ * cross-encoder and heuristic score, preventing either from dominating.
+ */
+const RERANK_BLEND_WEIGHT_FALLBACK = 0.5;
 
 /**
  * Final-score comparisons treat values within this epsilon as tied so ordering
@@ -161,11 +186,26 @@ function sumNonPenaltyWeights(weights: ScoringWeights): number {
   return total;
 }
 
-/** Descending sort by finalScore; NaN-safe; deterministic tie-break on entityId. */
+/**
+ * Descending sort by finalScore; NaN-safe; 3-stage deterministic tie-break.
+ *
+ * Stage 1: finalScore descending (NaN → last)
+ * Stage 2: sparseRank ascending (lower BM25 rank = better lexical match; absent → last)
+ * Stage 3: entityId ascending (stable lexicographic tie-break, RFC-009/015)
+ *
+ * E1-T3: adding sparseRank as stage-2 tie-break eliminates insertion-order
+ * non-determinism for candidates with identical heuristic scores. Candidates
+ * that appear higher in the BM25 ranking have a stronger lexical signal and
+ * should win ties over candidates absent from BM25 results.
+ */
 function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
   const aFinite = Number.isFinite(a.finalScore);
   const bFinite = Number.isFinite(b.finalScore);
   if (!aFinite && !bFinite) {
+    // Stage 2 + 3 for NaN-NaN ties
+    const aSparse = a.sparseRank ?? Infinity;
+    const bSparse = b.sparseRank ?? Infinity;
+    if (aSparse !== bSparse) return aSparse - bSparse;
     return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
   }
   if (!aFinite) return 1;
@@ -174,17 +214,40 @@ function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): n
   if (Math.abs(scoreDiff) > FINAL_SCORE_SORT_TIE_EPSILON) {
     return scoreDiff > 0 ? 1 : -1;
   }
+  // Stage 2: sparseRank ascending (absent = Infinity → loses)
+  const aSparse = a.sparseRank ?? Infinity;
+  const bSparse = b.sparseRank ?? Infinity;
+  if (aSparse !== bSparse) return aSparse - bSparse;
+  // Stage 3: entityId ascending
   return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
 }
+
+/**
+ * E1-T4: Typed reason why learned LTR rerank was skipped.
+ *
+ * - `not_skipped`: rerank was applied normally
+ * - `no_model_for_query_class`: no LTR model registered for this query class
+ * - `empty_candidates`: result list was empty before rerank
+ * - `feature_dimension_mismatch`: model weight vector length ≠ LTR_MODEL_FEATURE_DIMENSION
+ * - `model_stale`: model age exceeded MODEL_STALENESS_THRESHOLD_DAYS (warning only, does not skip)
+ */
+export type LtrRerankSkipReason =
+  | 'not_skipped'
+  | 'no_model_for_query_class'
+  | 'empty_candidates'
+  | 'feature_dimension_mismatch';
 
 function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
   ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
-): { results: RankedResult[]; skippedDueToDimensionMismatch: boolean } {
+): { results: RankedResult[]; skipReason: LtrRerankSkipReason } {
   const ltrModel = ltrModels?.get(queryClass);
-  if (!ltrModel || rankedResults.length === 0) {
-    return { results: [...rankedResults], skippedDueToDimensionMismatch: false };
+  if (!ltrModel) {
+    return { results: [...rankedResults], skipReason: 'no_model_for_query_class' };
+  }
+  if (rankedResults.length === 0) {
+    return { results: [], skipReason: 'empty_candidates' };
   }
 
   // Guard against an Invalid Date `trainedAt` (e.g. JSONB corruption or a
@@ -213,13 +276,19 @@ function applyLearnedLtrRerank(
 
   if (ltrModel.weights.length !== LTR_MODEL_FEATURE_DIMENSION) {
     bootstrapLogger.warn({ queryClass, modelWeightDim: ltrModel.weights.length, expectedDim: LTR_MODEL_FEATURE_DIMENSION }, '[Ranker] LTR model dimension mismatch — skipping LTR rerank');
-    return { results: [...rankedResults], skippedDueToDimensionMismatch: true };
+    return { results: [...rankedResults], skipReason: 'feature_dimension_mismatch' };
   }
 
-  const rankableDocuments = rankedResults.map((doc, idx) => ({
-    entityId: doc.entityId,
-    retrievalScore: doc.finalScore,
-    features: extractLTRFeatures({
+  // E5-T3: Build safety evaluation descriptors — one per candidate,
+  // using heuristic scores and ranks from the pre-LTR ordering.
+  // We first run LTR to get proposed ranks, then apply safety checks.
+  //
+  // ltrFeatureVectorMap: entity → ordered feature vector (8 values, same order
+  // as scoreFeaturesRaw in lambdamart-ranker.ts) so ScoreDecomposition can
+  // carry the raw input for debugging / drift analysis.
+  const ltrFeatureVectorMap = new Map<string, readonly number[]>();
+  const rankableDocuments = rankedResults.map((doc, idx) => {
+    const features = extractLTRFeatures({
       semantic: doc.componentScores.semantic,
       popularity: doc.componentScores.popularity,
       attributeAlignment: doc.componentScores.attributeAlignment,
@@ -237,29 +306,129 @@ function applyLearnedLtrRerank(
       ...(doc.componentScores.multilingualScore !== undefined
         ? { multilingualScore: doc.componentScores.multilingualScore }
         : {}),
-    }),
-    originalRank: idx + 1,
-  }));
+    });
+    // Store as ordered vector matching lambdamart-ranker scoreFeaturesRaw order
+    ltrFeatureVectorMap.set(String(doc.entityId), [
+      features.bm25Score,
+      features.semanticScore,
+      features.popularityScore,
+      features.recencyScore,
+      features.classMatchScore,
+      features.attributeMatchScore,
+      features.diversityScore,
+      features.multilingualScore,
+    ]);
+    return {
+      entityId: doc.entityId,
+      retrievalScore: doc.finalScore,
+      features,
+      originalRank: idx + 1,
+    };
+  });
 
   const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
+
+  // Build proposed LTR rank map for safety evaluation
+  const proposedLtrRankMap = new Map<string, number>(
+    rerankedDocs.map((r) => [r.entityId, r.finalRank]),
+  );
+
+  // E5-T3: Build safety candidate descriptors + list context.
+  // Safety is evaluated HERE (single pass) with the actual proposed LTR ranks.
+  // H2 fix: hardConstraintViolations carries only the violations that caused
+  // hardConstraintPass=false. When the candidate passes all hard constraints,
+  // unmetConstraints may still have soft mismatches — exclude those here so the
+  // safety envelope does not conflate soft-constraint mismatches with hard ones.
+  const safetyDescriptors: SafetyCandidateDescriptor[] = rankedResults.map((doc, idx) => ({
+    entityId: String(doc.entityId),
+    heuristicRank: idx + 1,
+    hardConstraintPass: doc.componentScores.hardConstraintPass,
+    // When hardConstraintPass is true, there are no hard violations to report.
+    hardConstraintViolations: doc.componentScores.hardConstraintPass ? [] : [...doc.unmetConstraints],
+    anchorSimilarity: doc.componentScores.anchorSimilarity ?? 0,
+    // E5-T3: sparseRank is now propagated from ScoredEntry to RankedResult (Wave 2 fix).
+    // sparseRank === 1 enables protected-candidate Rule 3 for exact-known-item BM25 hits.
+    sparseRank: doc.sparseRank ?? Infinity,
+    heuristicScoreNormalized: Number.isFinite(doc.finalScore) ? doc.finalScore : 0,
+    proposedLtrRank: proposedLtrRankMap.get(doc.entityId) ?? Infinity,
+  }));
+  const safetyListCtx = buildRerankSafetyListContext(safetyDescriptors);
+
+  // Single-pass safety evaluation with actual proposed LTR ranks (H1 fix:
+  // applyLearnedLtrRerank no longer runs a separate safety pass internally).
+  const blockedByEnvelopeIds = new Set<string>();
+  for (const desc of safetyDescriptors) {
+    const safetyResult = evaluateRerankSafety(desc, safetyListCtx, []);
+    if (!safetyResult.allowed) {
+      blockedByEnvelopeIds.add(desc.entityId);
+    }
+  }
+
   const originalByEntity = new Map<string, RankedResult>(
-    rankedResults.map((result) => [result.entityId, result]),
+    rankedResults.map((result) => [String(result.entityId), result]),
   );
 
   const results = rerankedDocs
     .map((reranked) => {
-      const original = originalByEntity.get(reranked.entityId);
+      const entityKey = reranked.entityId;
+      const original = originalByEntity.get(entityKey);
       if (original === undefined) {
         return undefined;
       }
+
+      // E5-T3: Safety envelope — blocked candidates keep heuristic score
+      if (blockedByEnvelopeIds.has(entityKey)) {
+        // Keep heuristic score + rank; only attach decomposition with no delta
+        const decomp: ScoreDecomposition = {
+          lexicalContribution: 0,
+          semanticContribution: original.componentScores.semantic,
+          anchorContribution: original.componentScores.anchorSimilarity ?? 0,
+          attributeSatisfaction: original.componentScores.attributeAlignment,
+          popularityContribution: original.componentScores.popularity,
+          preferenceAlignmentContribution: original.componentScores.preferenceAlignment,
+          heuristicScoreRaw: original.finalScore,
+          heuristicScoreNormalized: Number.isFinite(original.finalScore) ? original.finalScore : 0,
+          finalScore: original.finalScore,
+        };
+        return {
+          ...original,
+          scoreDecomposition: decomp,
+        };
+      }
+
+      // Allowed — apply LTR score + build full decomposition
+      const heuristicNorm = Number.isFinite(original.finalScore) ? original.finalScore : 0;
+      const ltrNorm = Number.isFinite(reranked.ltrScore) ? reranked.ltrScore : heuristicNorm;
+      const rerankDelta = ltrNorm - heuristicNorm;
+
+      const decomp: ScoreDecomposition = {
+        lexicalContribution: 0,
+        semanticContribution: original.componentScores.semantic,
+        anchorContribution: original.componentScores.anchorSimilarity ?? 0,
+        attributeSatisfaction: original.componentScores.attributeAlignment,
+        popularityContribution: original.componentScores.popularity,
+        preferenceAlignmentContribution: original.componentScores.preferenceAlignment,
+        heuristicScoreRaw: heuristicNorm,
+        heuristicScoreNormalized: heuristicNorm,
+        ltrScoreNormalized: ltrNorm,
+        rerankDeltaNormalized: rerankDelta,
+        // C4: attach the feature vector used for LTR inference so ScoreDecomposition
+        // is self-contained for drift analysis and debugging.
+        ...(ltrFeatureVectorMap.has(entityKey)
+          ? { ltrFeatureVector: ltrFeatureVectorMap.get(entityKey) }
+          : {}),
+        finalScore: reranked.ltrScore,
+      };
+
       return {
         ...original,
         finalScore: reranked.ltrScore,
         rank: reranked.finalRank,
+        scoreDecomposition: decomp,
       };
     })
-    .filter((result): result is RankedResult => result !== undefined);
-  return { results, skippedDueToDimensionMismatch: false };
+    .filter((result) => result !== undefined) as RankedResult[];
+  return { results, skipReason: 'not_skipped' };
 }
 
 /**
@@ -433,6 +602,7 @@ export class Ranker {
     let localRerankGateReason: string | undefined;
     let localRuntimeSignal: RankerRuntimeSignal | undefined;
     let localPreRerankTop5: readonly string[] = [];
+    let localScoreDriftRecord: ScoreDriftRecord | undefined;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -448,18 +618,38 @@ export class Ranker {
     // Explicit modes (producer_browse etc.) can only raise a signal, never suppress.
     // After overlay, re-normalise so the non-penalty sum is preserved — otherwise
     // Math.max can inflate the total (e.g. popularity 0.02→0.15 adds +0.13).
+    // RCA5-04 fix: apply Math.max overlay across ALL 12 non-penalty ScoringWeights
+    // fields, not just the 6 that were previously wired. Previously entityIntegrity,
+    // anchorSimilarity, softConstraint, availability, criticScore, multilingualScore
+    // were silently left at their query-class base values even when a mode profile
+    // defined a higher floor (e.g. compare_candidates sets anchorSimilarityWeight=0.20
+    // but the base anchored_similarity class already has 0.30, so max is a no-op there;
+    // but for short_entity base=0.0 the overlay correctly raises it).
     const overlaid: ScoringWeights = {
       ...baseWeights,
+      entityIntegrity: Math.max(baseWeights.entityIntegrity, modeProfile.entityIntegrityWeight),
+      anchorSimilarity: Math.max(baseWeights.anchorSimilarity, modeProfile.anchorSimilarityWeight),
       semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
-      popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
+      softConstraint: Math.max(baseWeights.softConstraint, modeProfile.softConstraintWeight),
       attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
       preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
+      popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
+      availability: Math.max(baseWeights.availability, modeProfile.availabilityWeight),
       producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
       recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
+      criticScore: Math.max(baseWeights.criticScore, modeProfile.criticScoreWeight),
+      multilingualScore: Math.max(baseWeights.multilingualScore, modeProfile.multilingualScoreWeight),
     };
     const baseSum = sumNonPenaltyWeights(baseWeights);
     const overlaidSum = sumNonPenaltyWeights(overlaid);
-    const modeNormFactor = overlaidSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
+    // Guard: avoid division by zero when overlaidSum === 0 (all weights zero).
+    // Also guard baseSum === 0 — if base weights are all zero, no normalisation is
+    // possible; leave the overlaid weights unchanged (factor = 1) so downstream
+    // scoring is not zeroed out or inflated to Infinity.
+    const modeNormFactor =
+      overlaidSum > 0 && baseSum > 0 && overlaidSum !== baseSum
+        ? baseSum / overlaidSum
+        : 1;
     const weights: ScoringWeights = modeNormFactor === 1 ? overlaid : {
       ...overlaid,
       entityIntegrity: overlaid.entityIntegrity * modeNormFactor,
@@ -562,6 +752,8 @@ export class Ranker {
         ...(candidate.occasion !== undefined ? { occasion: candidate.occasion } : {}),
         ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
         ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
+        // E1-T3: propagate sparseRank for 3rd-stage tie-break determinism
+        ...(candidate.sparseRank !== undefined ? { sparseRank: candidate.sparseRank } : {}),
         matchedConstraints: constraintState.matchedConstraints,
         unmetConstraints: constraintState.unmetConstraints,
         inferredConstraints: constraintState.inferredConstraints,
@@ -747,23 +939,129 @@ export class Ranker {
         ...(entry.occasion !== undefined ? { occasion: entry.occasion } : {}),
         ...(entry.priceBand !== undefined ? { priceBand: entry.priceBand } : {}),
         ...(entry.priceUsd !== undefined ? { priceUsd: entry.priceUsd } : {}),
+        // E5-T3: propagate sparse BM25 rank for rerank-safety protected-candidate Rule 3
+        ...(entry.sparseRank !== undefined ? { sparseRank: entry.sparseRank } : {}),
       };
     });
 
     if (shouldApplyLearnedRerank) {
-      const ltrOutcome = applyLearnedLtrRerank(
-        results,
-        queryPlan.queryClass,
-        this.ltrModels,
+      // E5-T3: Build safety envelope descriptors BEFORE LTR runs.
+      // Heuristic ranks are the pre-rerank baseline for invariant checks.
+      // Lift hard constraints from RankingInput.constraints to ConstraintAtom[]
+      // for the safety envelope. liftBundleToAtoms is side-effect free.
+      const hardConstraintAtoms = liftBundleToAtoms(input.constraints).filter(
+        (a) => a.source_tier === 'hard',
       );
-      results = ltrOutcome.results;
-      if (ltrOutcome.skippedDueToDimensionMismatch) {
+
+      const safetyDescriptors: SafetyCandidateDescriptor[] = results.map((r, idx) => ({
+        entityId: String(r.entityId),
+        heuristicRank: idx + 1,
+        hardConstraintPass: r.componentScores.hardConstraintPass,
+        // H2 fix (second path): only include unmetConstraints as hard violations when
+        // hardConstraintPass is false — same guard as the first safety descriptor path
+        // at line 337. Soft/inferred unmet constraints must not be conflated with hard ones.
+        hardConstraintViolations: r.componentScores.hardConstraintPass ? [] : [...r.unmetConstraints],
+        anchorSimilarity: r.componentScores.anchorSimilarity ?? 0,
+        // E5-T3: sparseRank is now propagated from ScoredEntry to RankedResult (Wave 2 fix).
+        sparseRank: r.sparseRank ?? Infinity,
+        heuristicScoreNormalized: Number.isFinite(r.finalScore) ? r.finalScore : 0,
+        proposedLtrRank: idx + 1, // overwritten after LTR runs
+      }));
+
+      const listCtx = buildRerankSafetyListContext(safetyDescriptors);
+
+      // Run LTR rerank to get proposed ordering
+      const ltrOutcome = applyLearnedLtrRerank(results, queryPlan.queryClass, this.ltrModels);
+
+      // Map entityId → proposed LTR rank
+      const ltrRankMap = new Map<string, number>(
+        ltrOutcome.results.map((r, idx) => [String(r.entityId), idx + 1]),
+      );
+
+      // Evaluate safety with actual proposed LTR ranks; collect blocked IDs
+      let safetyEnvelopeBlocks = 0;
+      const blockedIds = new Set<string>();
+      for (const desc of safetyDescriptors) {
+        const proposedRank = ltrRankMap.get(desc.entityId) ?? desc.heuristicRank;
+        const updatedDesc: SafetyCandidateDescriptor = { ...desc, proposedLtrRank: proposedRank };
+        const safety = evaluateRerankSafety(updatedDesc, listCtx, hardConstraintAtoms);
+        if (!safety.allowed) {
+          blockedIds.add(desc.entityId);
+          safetyEnvelopeBlocks++;
+        }
+      }
+
+      if (blockedIds.size === 0) {
+        // Fast path: no blocks — use LTR results directly
+        results = ltrOutcome.results;
+      } else {
+        // Restore heuristic finalScore for blocked candidates so they sort
+        // to their original positions in the re-merged list.
+        const heuristicScoreMap = new Map<string, number>(
+          results.map((r) => [String(r.entityId), r.finalScore]),
+        );
+        results = ltrOutcome.results.map((r) => {
+          const id = String(r.entityId);
+          if (blockedIds.has(id)) {
+            return { ...r, finalScore: heuristicScoreMap.get(id) ?? r.finalScore };
+          }
+          return r;
+        });
+        // Re-sort to interleave blocked (heuristic score) and non-blocked (LTR score)
+        results.sort((a, b) => {
+          const diff = b.finalScore - a.finalScore;
+          if (Math.abs(diff) > FINAL_SCORE_SORT_TIE_EPSILON) return diff > 0 ? 1 : -1;
+          return String(a.entityId) < String(b.entityId) ? -1 : 1;
+        });
+        // Re-assign ranks after sort
+        results = results.map((r, idx) => ({ ...r, rank: idx + 1 }));
+      }
+
+      if (safetyEnvelopeBlocks > 0) {
+        bootstrapLogger.warn(
+          {
+            queryClass: queryPlan.queryClass,
+            safetyEnvelopeBlocks,
+            blockedIds: [...blockedIds],
+          },
+          '[Ranker] E5 safety envelope blocked LTR promotion(s)',
+        );
+      }
+
+      // E1-T4: typed skip reason — only feature_dimension_mismatch degrades
+      if (ltrOutcome.skipReason === 'feature_dimension_mismatch') {
         localRuntimeSignal = {
           rerankerStatus: 'skipped',
           degradation: {
             executionMode: 'degraded',
             degradationReasons: ['ltr_dimension_mismatch'],
           },
+        };
+      }
+
+      // E5-T6: Compute ScoreDriftRecord — LTR vs heuristic ordering drift.
+      // Only produced when LTR actually ran (skipReason === 'not_skipped').
+      if (ltrOutcome.skipReason === 'not_skipped') {
+        // heuristicTop3 = first 3 entity IDs before LTR reorder (pre-rerank order)
+        const heuristicTop3EntityIds = safetyDescriptors
+          .slice(0, DRIFT_MONITOR_TOP_K)
+          .map((d) => d.entityId);
+
+        // ltrTop3 = first 3 entity IDs in proposed LTR order
+        const ltrTop3EntityIds = ltrOutcome.results
+          .slice(0, DRIFT_MONITOR_TOP_K)
+          .map((r) => String(r.entityId));
+
+        // Kendall tau distance over top-K candidates (normalized to [0, 1]).
+        // We compare the relative orderings of the candidates that appear in BOTH
+        // top-K lists. Discordant pairs / total pairs = tau distance.
+        localScoreDriftRecord = {
+          queryClass: queryPlan.queryClass,
+          heuristicTop3EntityIds,
+          ltrTop3EntityIds,
+          rankOrderChanges: computeKendallTauDistance(heuristicTop3EntityIds, ltrTop3EntityIds),
+          averageRerankDeltaNormalized: computeAverageRerankDelta(safetyDescriptors, ltrOutcome.results),
+          safetyEnvelopeBlocks,
         };
       }
     }
@@ -774,6 +1072,7 @@ export class Ranker {
       rerankGateReason: localRerankGateReason,
       runtimeSignal: localRuntimeSignal,
       preRerankTop5: localPreRerankTop5,
+      ...(localScoreDriftRecord !== undefined ? { scoreDriftRecord: localScoreDriftRecord } : {}),
     };
 
     return { results, metadata };
@@ -860,7 +1159,10 @@ export class Ranker {
         continue;
       }
       // Blend: query-class weight × optional global scale (RFC-017 §5.3)
-      const w = effectiveRerankBlendWeight(queryClass, this.rerankBlendScale);
+      const rawW = effectiveRerankBlendWeight(queryClass, this.rerankBlendScale);
+      // Guard against NaN/Infinity from a misconfigured rerankBlendScale (e.g. NaN env var).
+      // NaN * normScore = NaN which would propagate into finalScore and leak into API responses.
+      const w = Number.isFinite(rawW) ? rawW : RERANK_BLEND_WEIGHT_FALLBACK;
       const normScore = normalizeRerankScore(r.score);
       const blendedScore = w * normScore + (1 - w) * original.finalScore;
       rerankedTopK.push({
@@ -888,4 +1190,76 @@ export class Ranker {
     combined.sort(compareScoredEntriesByFinalScoreDesc);
     return combined;
   }
+}
+
+// ─── E5-T6: ScoreDriftRecord helpers ─────────────────────────────────────────
+
+/**
+ * Compute normalized Kendall tau distance between two entity-ID orderings.
+ *
+ * Returns a value in [0, 1]:
+ *   0 = identical order
+ *   1 = completely reversed
+ *
+ * Only entities present in BOTH lists are compared; entities unique to one
+ * list are ignored (avoids penalizing safety-evicted candidates).
+ *
+ * Time: O(n²) where n = common list length (typically ≤ 3).
+ */
+function computeKendallTauDistance(
+  listA: readonly string[],
+  listB: readonly string[],
+): number {
+  // Build intersection in listA order
+  const setB = new Set(listB);
+  const common = listA.filter((id) => setB.has(id));
+  const n = common.length;
+  if (n < 2) return 0;
+
+  // For each id in common, record its position in listB
+  const posB = new Map<string, number>(listB.map((id, i) => [id, i]));
+
+  let discordant = 0;
+  const totalPairs = (n * (n - 1)) / 2;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const rankBi = posB.get(common[i]!) ?? Infinity;
+      const rankBj = posB.get(common[j]!) ?? Infinity;
+      // In listA: i < j (i ranks higher). In listB: discordant if j ranks higher than i.
+      if (rankBj < rankBi) {
+        discordant++;
+      }
+    }
+  }
+
+  return totalPairs > 0 ? discordant / totalPairs : 0;
+}
+
+/**
+ * Compute mean absolute normalized score delta across reranked candidates.
+ *
+ * Compares each candidate's heuristic score (from safetyDescriptors) to
+ * the LTR finalScore (from ltrResults). Candidates missing from either
+ * side are skipped.
+ */
+function computeAverageRerankDelta(
+  safetyDescriptors: readonly SafetyCandidateDescriptor[],
+  ltrResults: readonly RankedResult[],
+): number {
+  const heuristicScoreMap = new Map<string, number>(
+    safetyDescriptors.map((d) => [d.entityId, d.heuristicScoreNormalized]),
+  );
+
+  let totalDelta = 0;
+  let count = 0;
+  for (const r of ltrResults) {
+    const id = String(r.entityId);
+    const heuristicScore = heuristicScoreMap.get(id);
+    if (heuristicScore === undefined) continue;
+    const ltrScore = Number.isFinite(r.finalScore) ? r.finalScore : 0;
+    totalDelta += Math.abs(ltrScore - heuristicScore);
+    count++;
+  }
+
+  return count > 0 ? totalDelta / count : 0;
 }

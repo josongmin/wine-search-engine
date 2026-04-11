@@ -397,4 +397,140 @@ describe('executeAgentTool', () => {
     const parsed = (await import('../../../../src/domain/query/service/search-constraint-extractor.js')).extractSearchConstraints(req!.query);
     expect(parsed.maxPriceKrw).toBe(50_000);
   });
+
+  it('price post-filter: drops wines with USD price above max_price_krw budget', async () => {
+    // 100000 KRW ≈ $74.07 USD. Wine at $80 should be dropped; wine at $60 should be kept.
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-cheap', canonicalLabel: 'Budget Blanc', type: 'wine', priceRange: '$60' },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-pricey', canonicalLabel: 'Pricey Rouge', type: 'wine', priceRange: '$80' },
+          relevanceScore: 0.85,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.85, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '10만원 이하', max_price_krw: 100_000 }, deps, 'req-123');
+    const filtered = result.rawResult as SearchResponseV1;
+    expect(filtered.results).toHaveLength(1);
+    expect(filtered.results[0]?.entity.entityId).toBe('wine-cheap');
+  });
+
+  it('price post-filter: drops wines with no price data (strict budget enforcement)', async () => {
+    // Regression: previously wines with priceRange=undefined passed the filter,
+    // letting budget-violating unpriced wines through. Now they are dropped.
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-priced', canonicalLabel: 'Priced Wine', type: 'wine', priceRange: '$30' },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-nodata', canonicalLabel: 'Unknown Price Wine', type: 'wine' },
+          relevanceScore: 0.85,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.85, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '5만원 이하', max_price_krw: 50_000 }, deps, 'req-123');
+    const filtered = result.rawResult as SearchResponseV1;
+    // wine-nodata has no price → dropped under strict budget enforcement
+    expect(filtered.results).toHaveLength(1);
+    expect(filtered.results[0]?.entity.entityId).toBe('wine-priced');
+  });
+
+  it('price post-filter: falls back to lenient mode when strict filter removes all results', async () => {
+    // When ALL results have no price data, strict filtering would leave 0 results.
+    // Fallback allows unpriced wines through so agent can still respond.
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: { entityId: 'wine-a', canonicalLabel: 'Wine A', type: 'wine' },
+          relevanceScore: 0.9,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.8, semantic: 0.8, attribute: 0.8, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+        {
+          entity: { entityId: 'wine-b', canonicalLabel: 'Wine B', type: 'wine' },
+          relevanceScore: 0.8,
+          match: { matchType: 'hybrid', scoreComponents: { lexical: 0.7, semantic: 0.7, attribute: 0.7, popularity: 0.5, preferenceAlignment: 0.5 } },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.8, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: '편의점 와인', max_price_krw: 15_000 }, deps, 'req-123');
+    const filtered = result.rawResult as SearchResponseV1;
+    // Strict filter drops both (no price data), lenient fallback keeps both
+    expect(filtered.results).toHaveLength(2);
+    expect(result.observation).not.toContain('검색 결과가 없습니다');
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Regression: Bug 1 — enriched query must not exceed security gate (MAX_QUERY_LENGTH=500)
+  // Previously MAX_ENRICHED_QUERY_LEN=700 caused enriched queries to be blocked by
+  // the 500-char security gate in query-sanitizer.ts.
+  // ──────────────────────────────────────────────────────────────────────────
+  it('enriched query never exceeds MAX_QUERY_LENGTH (500) even with long base query and clauses', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse([]));
+
+    // Base query at exactly 490 chars — just under the limit but with clauses would exceed
+    const longBase = '레드 와인 '.repeat(60).slice(0, 490);
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: longBase,
+        exclude_grapes: ['Merlot', 'Cabernet Sauvignon', 'Pinot Noir'],
+        exclude_regions: ['France', 'Italy'],
+        max_price_krw: 50_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query.length).toBeLessThanOrEqual(500);
+  });
+
+  it('enriched query with short base and many clauses stays within 500 chars', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(makeSearchResponse([]));
+
+    await executeAgentTool(
+      'search_wines',
+      {
+        query: '레드 와인',
+        exclude_grapes: ['Merlot', 'Cabernet Sauvignon'],
+        exclude_regions: ['France'],
+        max_price_krw: 50_000,
+      },
+      deps,
+      'req-123',
+    );
+
+    const [request] = vi.mocked(mockSearchUseCase.execute).mock.calls[0] ?? [];
+    expect(request?.query.length).toBeLessThanOrEqual(500);
+  });
 });

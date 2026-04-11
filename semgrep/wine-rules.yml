@@ -658,3 +658,206 @@ rules:
       exclude:
         - "**/*.test.ts"
         - "**/__tests__/**"
+
+  - id: wine-abort-controller-not-aborted-on-isaborterror
+    languages: [typescript]
+    message: >-
+      `isAbortError` branch inside a catch block does NOT call `.abort()` on an
+      in-scope AbortController before breaking.
+
+      When one sibling in a parallel batch throws AbortError, the AbortController
+      shared with siblings must be aborted immediately so in-flight HTTP/LLM calls
+      stop consuming resources. Omitting `.abort()` leaves sibling tool executions
+      running as orphaned microtasks until their own timeouts fire.
+
+      Real bug caught: agent-orchestrator.ts batch catch — `isAbortError(batchErr)`
+      broke out of the loop but did NOT call `batchAbortController.abort()`, leaving
+      sibling Vespa/LLM calls running after the batch was already dead. Fixed in
+      E4 audit 2026-04-11.
+
+      Fix: add `<controller>.abort()` immediately before/after
+      `terminationReason = 'aborted'` in every `isAbortError` branch that has a
+      sibling AbortController in scope.
+
+      (Bug class: orphaned parallel tasks; CLAUDE.md rule 19 + rule 20)
+    severity: WARNING
+    metadata:
+      category: correctness
+      bugbash: E4-abort-controller-not-aborted
+      cwe: 'CWE-755: Improper Handling of Exceptional Conditions'
+    patterns:
+      - pattern: |
+          const $CONTROLLER = new AbortController();
+          ...
+          } catch ($ERR) {
+            ...
+            if (isAbortError($ERR)) {
+              ...
+              break;
+            }
+            ...
+          }
+      - pattern-not: |
+          const $CONTROLLER = new AbortController();
+          ...
+          } catch ($ERR) {
+            ...
+            if (isAbortError($ERR)) {
+              ...
+              $CONTROLLER.abort();
+              ...
+            }
+            ...
+          }
+    paths:
+      include:
+        - src/application/**
+        - src/infrastructure/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-zod-enum-field-as-string
+    languages: [typescript]
+    message: >-
+      Zod schema property with a semantic-enum name uses `z.string()` instead of
+      `z.enum([...])`.
+
+      Fields like `termination_reason`, `decision_status`, `match_type`, `query_type`
+      carry a fixed set of domain values. Using `z.string()` means:
+        - Any value (including LLM hallucinations) passes schema validation
+        - TypeScript callers infer `string` instead of a proper union type
+        - OpenAPI clients cannot introspect the allowed values
+
+      Real bug caught: agent.route.ts `termination_reason: z.string()` accepted
+      any string, silently diverging from `AgentTerminationReason` union.
+      Fixed in E4 audit 2026-04-11 to `z.enum(['answer','max_steps',...])`.
+
+      Fix: replace `z.string()` with `z.enum(['val1', 'val2', ...])` listing
+      every allowed value from the domain type definition.
+
+      (CLAUDE.md schema quality bar; E4 audit 2026-04-11)
+    severity: WARNING
+    metadata:
+      category: correctness
+      bugbash: E4-zod-enum-field-as-string
+    pattern-either:
+      - pattern: termination_reason: z.string()
+      - pattern: decision_status: z.string()
+      - pattern: match_type: z.string()
+      - pattern: query_type: z.string()
+      - pattern: result_type: z.string()
+      - pattern: retrieval_mode: z.string()
+      - pattern: execution_mode: z.string()
+    paths:
+      include:
+        - src/interface/http/schemas/**
+        - src/interface/http/routes/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  - id: wine-zod-response-string-no-max
+    languages: [typescript]
+    message: >-
+      z.string() in an HTTP response schema without .max() — unbounded strings
+      allow adversarial LLM outputs or runaway synthesis to produce response
+      payloads of arbitrary size, bypassing HTTP body-size limits.
+
+      Add .max(N) with a domain-justified named constant from constants.ts.
+
+      Examples of correct usage:
+        answer: z.string().max(AGENT_ANSWER_MAX_CHARS)
+        thought: z.string().max(AGENT_ANSWER_MAX_CHARS)
+        code: z.string().max(MAX_ERROR_ENVELOPE_CODE_CHARS)
+
+      Real bugs caught: agent.route.ts AgentResponseSchema + AgentStepSchema had
+      unbounded `answer`, `thought`, `observation` fields — fixed E4 audit 2026-04-11.
+
+      (CLAUDE.md schema quality bar)
+    severity: WARNING
+    metadata:
+      category: correctness
+      bugbash: E4-zod-response-string-unbound
+    pattern: z.string()
+    pattern-not-either:
+      - pattern: z.string().max(...)
+      - pattern: z.string().min(...).max(...)
+      - pattern: z.string().uuid()
+      - pattern: z.string().url()
+      - pattern: z.string().email()
+      - pattern: z.string().regex(...)
+      - pattern: z.string().datetime()
+      - pattern: z.string().nullable()
+      - pattern: z.literal(...)
+    paths:
+      include:
+        - src/interface/http/schemas/**
+        - src/interface/http/routes/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+
+  # =========================================================================
+  # E1 Retrieval Correctness session — 2026-04-11
+  # =========================================================================
+
+  - id: wine-sensory-scale-magic-5
+    languages: [typescript]
+    message: >-
+      Magic number `5` multiplied with a sensory field (body, tannin, acidity,
+      sweetness). The [0,1] → [1–5 ordinal] scale conversion MUST use the SSoT
+      constant `DRINKING_WINDOW_SENSORY_ORDINAL_SCALE` from
+      `src/domain/drinking-window/port/drinking-window-predictor.port.ts`.
+
+      A bare `* 5` is unauditable — reviewers cannot distinguish the ordinal
+      scale conversion from an accidental 5× amplification.
+
+      Fix: import DRINKING_WINDOW_SENSORY_ORDINAL_SCALE and replace `* 5`.
+
+      (E1 session; CLAUDE.md rules 15 + 30)
+    severity: ERROR
+    metadata:
+      category: correctness
+      bugbash: E1-sensory-scale-ssot
+    pattern-either:
+      - pattern: $X.body * 5
+      - pattern: $X.tannin * 5
+      - pattern: $X.acidity * 5
+      - pattern: $X.sweetness * 5
+    paths:
+      include:
+        - src/**
+      exclude:
+        - "**/*.test.ts"
+        - "**/__tests__/**"
+        - src/domain/drinking-window/port/drinking-window-predictor.port.ts
+
+  - id: wine-grape-positive-token-without-or
+    languages: [typescript]
+    message: >-
+      Emitting `grape_primary:X` as a standalone positive filter token (without
+      also emitting a corresponding `grapes:X` or replacing both with `grape_or:X`)
+      misses blend wines where the variety only appears in grapes[] but not
+      grape_primary.
+
+      Correct approach: emit a single `grape_or:X` compound token. buildSparseFilters
+      in mapping.ts expands this to `(grape_primary contains "X" OR grapes contains "X")`.
+
+      See src/domain/retrieval/service/constraint-to-sparse-filter-tokens.ts for the
+      canonical implementation.
+
+      (E1-IDX-07 blend recall; fixed 2026-04-11)
+    severity: WARNING
+    metadata:
+      category: correctness
+      bugbash: E1-grape-or-blend-coverage
+    pattern-regex: '`grape_primary:\$\{'
+    paths:
+      include:
+        - src/domain/retrieval/**
+        - src/infrastructure/vespa/**
+      exclude:
+        - src/domain/retrieval/service/constraint-to-sparse-filter-tokens.ts
+        - "**/*.test.ts"
+        - "**/__tests__/**"

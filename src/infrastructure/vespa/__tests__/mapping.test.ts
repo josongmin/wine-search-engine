@@ -312,3 +312,49 @@ describe('buildSparseFilters — region filter (BUG-01)', () => {
     expect(buildSparseFilters([])).toBe('');
   });
 });
+
+// Bug-1: flavorProfiles double-write in toVespaFields / misread in fromVespaFields
+//
+// After adding flavorProfiles to VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS, the old explicit
+// `fields['flavor_profiles'] = ...` line in toVespaFields was still present, causing a
+// double-write. In fromVespaFields, the value was read from fields['flavor_profiles']
+// directly instead of via summary.flavorProfiles, diverging from the spec registry SSoT.
+describe('flavorProfiles Vespa mapping (Bug-1 regression)', () => {
+  it('toVespaFields writes flavor_profiles exactly once via VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS', () => {
+    const doc = makeDocument({ flavorProfiles: ['cherry', 'leather'] });
+    const fields = toVespaFields(doc);
+
+    // Confirm the field is written correctly.
+    expect(fields['flavor_profiles']).toEqual(['cherry', 'leather']);
+
+    // Enumerate all keys to confirm 'flavor_profiles' appears only once.
+    const keys = Object.keys(fields);
+    const flavorProfileKeys = keys.filter((k) => k === 'flavor_profiles');
+    expect(flavorProfileKeys).toHaveLength(1);
+  });
+
+  it('fromVespaFields reads flavorProfiles via summary (VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS SSoT)', () => {
+    const doc = makeDocument({ flavorProfiles: ['plum', 'tobacco'] });
+    const fields = toVespaFields(doc);
+
+    const roundTripped = fromVespaFields(fields);
+    expect(roundTripped.flavorProfiles).toEqual(['plum', 'tobacco']);
+  });
+
+  it('fromVespaFields returns undefined flavorProfiles when field is absent from Vespa response', () => {
+    const doc = makeDocument({ flavorProfiles: undefined });
+    const fields = toVespaFields(doc);
+
+    // Confirm the field is absent (no double-write side-effect).
+    expect(fields['flavor_profiles']).toBeUndefined();
+
+    const roundTripped = fromVespaFields(fields);
+    expect(roundTripped.flavorProfiles).toBeUndefined();
+  });
+
+  it('readRawVespaRetrievalSummary returns flavorProfiles via spec (not a manual read path)', () => {
+    const fields = toVespaFields(makeDocument({ flavorProfiles: ['rose', 'violet'] }));
+    const summary = readRawVespaRetrievalSummary(fields);
+    expect(summary.flavorProfiles).toEqual(['rose', 'violet']);
+  });
+});

@@ -235,3 +235,41 @@ describe('hybrid candidate summary helpers', () => {
     expect(normalizeSummarySearchText('   ')).toBeUndefined();
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Round 5: grapeFamily and flavorProfiles must flow through retrievalDocumentToHitSummary
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('retrievalDocumentToHitSummary — grapeFamily and flavorProfiles (Round 5 fix)', () => {
+  it('grapeFamily from RetrievalDocument propagates to hit summary', () => {
+    const doc = makeDocument({ grapeFamily: 'Cabernet' });
+    const summary = retrievalDocumentToHitSummary(doc);
+    expect(summary.grapeFamily).toBe('Cabernet');
+  });
+
+  it('grapeFamily whitespace-only is trimmed to undefined', () => {
+    const doc = makeDocument({ grapeFamily: '   ' });
+    const summary = retrievalDocumentToHitSummary(doc);
+    expect(summary.grapeFamily).toBeUndefined();
+  });
+
+  it('flavorProfiles from RetrievalDocument propagates to hit summary', () => {
+    const doc = makeDocument({ flavorProfiles: ['fruity', 'spicy'] });
+    const summary = retrievalDocumentToHitSummary(doc);
+    expect(summary.flavorProfiles).toEqual(['fruity', 'spicy']);
+  });
+
+  it('flavorProfiles empty strings are filtered out', () => {
+    const doc = makeDocument({ flavorProfiles: ['fruity', '', '  '] });
+    const summary = retrievalDocumentToHitSummary(doc);
+    // normalizeSummaryStringList with allowEmpty:false strips blank entries
+    expect(summary.flavorProfiles?.every((v) => v.length > 0)).toBe(true);
+    expect(summary.flavorProfiles).toContain('fruity');
+  });
+
+  it('summaryToHybridCandidateFields propagates grapeFamily', () => {
+    const summary: RetrievalHitSummary = { grapeFamily: 'Merlot' } as RetrievalHitSummary;
+    const fields = summaryToHybridCandidateFields(summary);
+    expect((fields as Record<string, unknown>)['grapeFamily']).toBe('Merlot');
+  });
+});

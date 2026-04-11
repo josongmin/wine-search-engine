@@ -24,7 +24,7 @@
  * Policy-blocked (POLICY_BLOCKED) and snapshot errors are deliberate signals
  * and are intentionally absent from this set.
  */
-export const PIPELINE_DEFECT_CODES: ReadonlySet<string> = new Set([
+export const PIPELINE_DEFECT_CODES: Set<string> = new Set([
   'WRONG_RESOLVE',
   'BLOCKING_MISS',
   'EVIDENCE_OBLIGATION',

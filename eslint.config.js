@@ -343,6 +343,64 @@ export default tseslint.config(
             'Use `field != null` to test presence; `field === 0` only when you explicitly mean zero. ' +
             '(E1-P3-7 audit; CLAUDE.md rule 26)',
         },
+        {
+          // grape_primary: positive token emitted outside the SSoT file.
+          // Emitting `grape_primary:X` as a standalone positive filter token misses
+          // blend wines where the variety is only in grapes[] (not grape_primary).
+          // The correct pattern is the `grape_or:X` compound token, handled by
+          // buildSparseFilters as (grape_primary contains X OR grapes contains X).
+          //
+          // This selector fires on template literals like `grape_primary:${val}` that
+          // appear in return statements or array expressions in production src/ code
+          // outside the canonical constraint-to-sparse-filter-tokens.ts file.
+          // It only catches the positive form — `grape_primary_not:` (exclusion) is fine.
+          //
+          // (E1-IDX-07 blend recall; grape_primary AND/OR inversion)
+          selector:
+            'TemplateLiteral > TemplateElement[value.raw=/^grape_primary:(?!_)/]',
+          message:
+            '`grape_primary:${val}` emits a standalone positive filter token that misses blend wines. ' +
+            'Use `grape_or:${val}` instead — buildSparseFilters expands it to ' +
+            '(grape_primary contains "val" OR grapes contains "val"). ' +
+            '(E1-IDX-07: grape_primary AND/OR inversion; blend recall)',
+        },
+        {
+          // Semantic-enum fields that use z.string() instead of z.enum([...]).
+          //
+          // Fields like `termination_reason`, `decision_status`, `match_type`,
+          // `query_type` carry a fixed set of domain values. Using z.string() means:
+          //   - Any garbage value (including LLM hallucinations) passes validation
+          //   - TypeScript callers get `string` instead of a union type
+          //   - OpenAPI clients cannot introspect the allowed values
+          //
+          // Real bug caught: agent.route.ts `termination_reason: z.string()` accepted
+          // any string, bypassing the `AgentTerminationReason` union type. Fixed in
+          // E4 audit 2026-04-11 to `z.enum(['answer','max_steps',...])`.
+          //
+          // Selector: a Property node whose key is one of the known semantic-enum
+          // field names, whose value is a CallExpression where the last callee is
+          // `.string()` with no further chaining (i.e., literally `z.string()` at
+          // the property value, not `z.string().max(...)` or `z.string().email()`).
+          // We match the raw `z.string()` call by checking callee.property.name='string'
+          // and that the parent is NOT another CallExpression (no further chain).
+          //
+          // NOTE: This cannot be expressed as a no-method-chain check in ESLint AST
+          // without writing a custom rule. The practical guard here is documentation +
+          // the semgrep rule wine-zod-enum-field-as-string (which covers this more
+          // precisely by path + field name). The ESLint selector below catches the
+          // most literal form: `fieldName: z.string()` where the CallExpression is
+          // not the callee.object of another CallExpression (i.e., not chained).
+          //
+          // (E4 audit 2026-04-11; CLAUDE.md schema quality bar)
+          selector:
+            'Property[key.name=/^(termination_reason|decision_status|match_type|query_type|result_type|retrieval_mode|execution_mode|query_class|route_type)$/]' +
+            ' > CallExpression[callee.property.name="string"]:not(CallExpression > CallExpression[callee.property.name="string"])',
+          message:
+            'Semantic-enum field uses z.string() — use z.enum([...]) to enforce allowed values at parse time. ' +
+            '`z.string()` accepts any garbage including LLM hallucinations. ' +
+            'Real bug: agent.route.ts termination_reason accepted invalid values (E4 audit). ' +
+            '(CLAUDE.md schema quality bar)',
+        },
       ],
       // NOTE (E4 audit 2026-04-11): Math.max(rawOffset + 1, otherRawOffset) is an unsafe
       // end>start guard when both offsets can be negative. The correct pattern is

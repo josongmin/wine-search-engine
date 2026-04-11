@@ -17,6 +17,8 @@ import {
   KRW_PER_EOK_WON,
   KRW_PER_MAN_WON,
   KRW_PER_USD_APPROXIMATE,
+  KRW_PER_EUR_APPROXIMATE,
+  KRW_PER_GBP_APPROXIMATE,
 } from '../../shared/constants.js';
 import { WINE_TYPE_ALL_TOKENS } from '../model/wine-type-patterns.js';
 import {
@@ -184,9 +186,10 @@ const KOREAN_COUNTRY_ALIASES: ReadonlyArray<readonly [RegExp, string]> = [
   [/스페인|spain|spanish/iu, 'Spain'],
   [/호주|australia|australian/iu, 'Australia'],
   [/칠레|chile|chilean/iu, 'Chile'],
-  // (?![\p{L}\p{N}]) = lookahead character class: not followed by letter OR digit. (rule 24)
-  // (?!\p{L})(?!\p{N}) was wrong: AND-sequence, never blocks anything useful.
-  [/미국|미(?![\p{L}\p{N}])|usa|united\s+states|american/iu, 'United States'],
+  // Lookbehind required for bare '미': without it, '아미' or '카미' would match via '미'
+  // at the end of the syllable sequence, incorrectly classifying producer/winery
+  // names containing '미' as 'United States'. (Rule 8: non-ASCII boundary guard)
+  [/미국|(?<![\p{L}\p{N}])미(?![\p{L}\p{N}])|usa|united\s+states|american/iu, 'United States'],
   [/아르헨티나|argentina|argentinian/iu, 'Argentina'],
   [/독일|germany|german/iu, 'Germany'],
   [/포르투갈|portugal|portuguese/iu, 'Portugal'],
@@ -237,7 +240,7 @@ const NEGATION_SUBJECT_BEFORE: RegExp =
   /(?:^|[^\p{L}\p{N}])(?:not|without|exclude|no|except)\s+(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)/giu;
 
 const NEGATION_SUBJECT_AFTER: RegExp =
-  /(?:^|[^\p{L}\p{N}])(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)\s+(?:빼고|제외|말고|없이|빼(?=[^\p{L}\p{N}]|$))/giu;
+  /(?:^|[^\p{L}\p{N}])(?<subject>[^\s,;]+(?:\s+[^\s,;]+)?)\s+(?:빼고|빼주세요|빼줘|제외|말고|없이|빼(?=[^\p{L}\p{N}]|$))/giu;
 
 // ---------------------------------------------------------------------------
 // Price extraction
@@ -327,6 +330,162 @@ function koreanNumberWordToDigit(s: string): string {
   );
 }
 
+/**
+ * Converts a foreign-currency amount to KRW using a fixed approximate rate.
+ *
+ * Supported currency symbols:
+ *   ₩ / W  — KRW (no conversion needed, returns as-is)
+ *   $      — USD → KRW via KRW_PER_USD_APPROXIMATE
+ *   €      — EUR → KRW via KRW_PER_EUR_APPROXIMATE
+ *   £      — GBP → KRW via KRW_PER_GBP_APPROXIMATE
+ *
+ * Returns null if the symbol is unrecognised or the amount is not finite.
+ * CLAUDE.md Rule 21: never uses toLocaleString(); amounts are converted with
+ * integer arithmetic so locale-specific formatting cannot corrupt output.
+ */
+function foreignCurrencyToKrw(symbol: string, amount: number): number | null {
+  if (!Number.isFinite(amount)) return null;
+  const sym = symbol.trim();
+  if (sym === '₩' || sym.toLowerCase() === 'w') return Math.round(amount);
+  if (sym === '$') return Math.round(amount * KRW_PER_USD_APPROXIMATE);
+  if (sym === '€') return Math.round(amount * KRW_PER_EUR_APPROXIMATE);
+  if (sym === '£') return Math.round(amount * KRW_PER_GBP_APPROXIMATE);
+  return null;
+}
+
+/**
+ * Extracts price constraints from queries that contain foreign-currency symbols
+ * (RCA5-07: mixed-currency price parsing).
+ *
+ * Supported patterns (evaluated before KRW-native patterns):
+ *   "₩70000 이하"       → maxPriceKrw=70000
+ *   "$100 이하"          → maxPriceKrw=100*1350
+ *   "€50~€80"            → min/max range in EUR→KRW
+ *   "$50 이상"           → minPriceKrw=50*1350
+ *   "70,000원" / "₩70,000" — commas are thousands-separators, stripped upstream
+ *
+ * Returns {} when no foreign-currency pattern is found (caller falls through to
+ * KRW-native patterns).
+ *
+ * Rule 21: No toLocaleString(). All numeric ops use integer math.
+ */
+function extractForeignCurrencyPrice(
+  q: string,
+): Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> {
+  // Strip thousands-separator commas before matching
+  const qn = q.replace(/,/g, '');
+
+  // Priority A — foreign-currency range: "$50~$80" or "€30-€50" or "$50~80"
+  // Symbol before both bounds, or only before the first (second bound uses same currency).
+  const fxRangeMatch =
+    /([$€£₩])(\d+(?:\.\d+)?)\s*[~\-–]\s*(?:[$€£₩])?(\d+(?:\.\d+)?)/u.exec(qn);
+  if (
+    fxRangeMatch !== null &&
+    fxRangeMatch[1] !== undefined &&
+    fxRangeMatch[2] !== undefined &&
+    fxRangeMatch[3] !== undefined
+  ) {
+    const sym = fxRangeMatch[1];
+    const loRaw = parseFloat(fxRangeMatch[2]);
+    const hiRaw = parseFloat(fxRangeMatch[3]);
+    if (!Number.isFinite(loRaw) || !Number.isFinite(hiRaw)) return {};
+    const lo = foreignCurrencyToKrw(sym, loRaw);
+    const hi = foreignCurrencyToKrw(sym, hiRaw);
+    if (lo !== null && hi !== null) {
+      const [safeMin, safeMax] = lo <= hi ? [lo, hi] : [hi, lo];
+      return { minPriceKrw: safeMin, maxPriceKrw: safeMax };
+    }
+  }
+
+  // Priority B — foreign-currency upper bound: "$100 이하/이내/미만" or "$100 under/below"
+  const fxUnderMatch =
+    /([$€£₩])(\d+(?:\.\d+)?)\s*(?:이하|이내|미만|under|below|or less)/iu.exec(qn);
+  if (
+    fxUnderMatch !== null &&
+    fxUnderMatch[1] !== undefined &&
+    fxUnderMatch[2] !== undefined
+  ) {
+    const underAmt = parseFloat(fxUnderMatch[2]);
+    if (!Number.isFinite(underAmt)) return {};
+    const krw = foreignCurrencyToKrw(fxUnderMatch[1], underAmt);
+    if (krw !== null) return { maxPriceKrw: krw };
+  }
+
+  // Priority C — foreign-currency lower bound: "$50 이상/이상" or "$50 above/over"
+  const fxOverMatch =
+    /([$€£₩])(\d+(?:\.\d+)?)\s*(?:이상|초과|above|over|or more)/iu.exec(qn);
+  if (
+    fxOverMatch !== null &&
+    fxOverMatch[1] !== undefined &&
+    fxOverMatch[2] !== undefined
+  ) {
+    const overAmt = parseFloat(fxOverMatch[2]);
+    if (!Number.isFinite(overAmt)) return {};
+    const krw = foreignCurrencyToKrw(fxOverMatch[1], overAmt);
+    if (krw !== null) return { minPriceKrw: krw };
+  }
+
+  // Priority D — bare foreign-currency amount with no direction keyword:
+  // treat as "approximately" = upper bound only (matches user intent for "€50 와인").
+  const fxBareMatch = /([$€£])(\d+(?:\.\d+)?)/u.exec(qn);
+  if (
+    fxBareMatch !== null &&
+    fxBareMatch[1] !== undefined &&
+    fxBareMatch[2] !== undefined
+  ) {
+    const bareAmt = parseFloat(fxBareMatch[2]);
+    if (!Number.isFinite(bareAmt)) return {};
+    const krw = foreignCurrencyToKrw(fxBareMatch[1], bareAmt);
+    if (krw !== null) return { maxPriceKrw: krw };
+  }
+
+  return {};
+}
+
+/**
+ * Korean retail-channel price caps (KRW).
+ *
+ * Derived from Korean retail market data (2025):
+ *   편의점 (convenience store): GS25/CU/7-Eleven wine lines top out at 12-15K KRW
+ *   마트/대형마트 (hypermarket): E-Mart/Homeplus everyday shelf; premium floor ~30K KRW
+ *   백화점 (department store): Lotte/Shinsegae mid-range floor ~100K KRW (prestige is uncapped)
+ *
+ * Only upper bounds are recorded because "편의점 와인" implies affordability, not a floor.
+ * These are maxPriceKrw constraints (soft upper bound), not hard Vespa YQL filters.
+ */
+/** Max KRW for convenience-store (편의점) wine tier. Source: GS25/CU/7-Eleven 2025 wine price survey. */
+const RETAIL_CHANNEL_MAX_KRW_CONVENIENCE = 15_000;
+/** Max KRW for hypermarket (마트/슈퍼) wine tier. Source: E-Mart/Homeplus everyday shelf 2025. */
+const RETAIL_CHANNEL_MAX_KRW_MART = 30_000;
+/** Max KRW for department store (백화점) wine tier. Source: Lotte/Shinsegae mid-range floor 2025. */
+const RETAIL_CHANNEL_MAX_KRW_DEPARTMENT = 100_000;
+
+const RETAIL_CHANNEL_MAX_KRW: ReadonlyArray<readonly [RegExp, number]> = [
+  // 편의점: GS25, CU, 7-Eleven, 이마트24 — wine prices 5K-15K KRW
+  [/편의점(?:\s*(?:와인|수준|에서|용))?/u, RETAIL_CHANNEL_MAX_KRW_CONVENIENCE],
+  // 마트/대형마트/슈퍼: E-Mart, Homeplus, Lotte Mart everyday shelf
+  // Boundary: 마트 must be followed by space, end, or Korean postposition (조사: 에/에서/의/용/와인/수준)
+  // but NOT by an arbitrary Hangul letter — prevents "마트료시카" false positive.
+  [/(?:대형\s*)?마트(?:\s*(?:와인|수준|용)|(?:에서?|의)(?:\s|$)|\s|$)|슈퍼(?:마켓)?(?:\s*(?:와인|수준))?/u, RETAIL_CHANNEL_MAX_KRW_MART],
+  // 백화점: Lotte, Shinsegae, Hyundai mid-range floor
+  [/백화점(?:\s*(?:와인|수준|용))?/u, RETAIL_CHANNEL_MAX_KRW_DEPARTMENT],
+];
+
+/**
+ * Extracts a price cap from Korean retail channel keywords BEFORE numeric parsing.
+ * Returns {} if no channel keyword is found so numeric price extraction continues normally.
+ * When a numeric price constraint is ALSO present in the query, numeric wins (caller merges
+ * with later extractors; the numeric patterns are more specific).
+ */
+function extractRetailChannelPrice(q: string): Pick<SearchConstraints, 'maxPriceKrw'> {
+  for (const [pattern, maxKrw] of RETAIL_CHANNEL_MAX_KRW) {
+    if (pattern.test(q)) {
+      return { maxPriceKrw: maxKrw };
+    }
+  }
+  return {};
+}
+
 function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> {
   // Normalize: strip ALL commas — in Korean price context commas are always thousands
   // separators ("50,000원") and never decimal separators. Global removal is safe and
@@ -389,10 +548,12 @@ function extractKrwPrice(q: string): Pick<SearchConstraints, 'minPriceKrw' | 'ma
     if (Number.isFinite(v)) return { minPriceKrw: Math.round(v * KRW_PER_EOK_WON) };
   }
 
-  // Priority 4 — man_under: "X만원 이하/이내/미만/정도/쯤/약"
-  // 정도/쯤/약 are "approximate around" markers — treated as soft upper bound
+  // Priority 4 — man_under: "X만원 이하/이내/미만/정도/쯤/약/언저리/근처/정도/내외"
+  // 정도/쯤/약/언저리/근처/내외 are "approximate around" markers — treated as soft upper bound
   // (the band logic at priority 3 handles the explicit "대" form with ±10%).
-  const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만|정도|쯤|약)/u.exec(qn);
+  // "언저리" (around, in the vicinity of) is commonly used in Korean price queries
+  // e.g. "10만원 언저리로" = "around 100,000 KRW".
+  const underMatch = /(\d+(?:\.\d+)?)\s*만원\s*(?:이하|이내|미만|정도|쯤|약|언저리|근처|내외)/u.exec(qn);
   if (underMatch !== null && underMatch[1] !== undefined) {
     const v = parseFloat(underMatch[1]);
     if (Number.isFinite(v)) return { maxPriceKrw: Math.round(v * KRW_PER_MAN_WON) };
@@ -528,13 +689,44 @@ export function extractSearchConstraints(query: string): SearchConstraints {
       continue;
     }
 
+    // Korean sweetness synonyms → map to canonical English Vespa style value.
+    // '달콤한', '달콤', '스위트', '단맛' must resolve to 'sweet' (the English value
+    // stored in the Vespa style field). Without this, excludeStyleSet would contain
+    // the Korean token and the resulting style_not:달콤한 filter would never match.
+    if (/^(?:달콤한|달콤|스위트|단맛)$/u.test(token)) {
+      excludeStyleSet.add('sweet');
+      continue;
+    }
+
     // Style exclusion: wine type terms (from canonical WINE_TYPE_ALL_TOKENS SSOT)
     // plus style/flavor descriptors that are not wine types themselves.
+    //
+    // Notes on the inline pattern:
+    // - `oak(?:ed)?` matches 'oak' and 'oaked'; previously `oaked?` matched 'oake' (optional d
+    //   on 'oake', not optional 'ed' on 'oak') — a regex quantifier precedence bug (rule 8).
+    // - `full(?:-bodied)?`, `light(?:-bodied)?`, `medium(?:-bodied)?`, `bold`, `heavy`, `rich`
+    //   are style body descriptors absent from WINE_TYPE_ALL_TOKENS. Without them, "not full-bodied"
+    //   fell through to excludeRegionSet, emitting a no-op `region_not:full-bodied` YQL clause.
+    // - Multi-word token handling: "내추럴 와인" is 2 words; WINE_TYPE_ALL_TOKENS has '내추럴' (1 word).
+    //   Check both the full token and its first word so "내추럴 와인 빼고" routes to excludeStyleSet.
+    const tokenLower = token.toLowerCase();
+    const firstWord = tokenLower.split(/\s+/u)[0] ?? tokenLower;
     if (
-      WINE_TYPE_ALL_TOKENS.has(token.toLowerCase()) ||
-      /^(?:oaked?|sweet|sweeter|탄닌|오크)$/iu.test(token)
+      WINE_TYPE_ALL_TOKENS.has(tokenLower) ||
+      WINE_TYPE_ALL_TOKENS.has(firstWord) ||
+      /^(?:oak(?:ed)?|sweet|sweeter|탄닌|오크|full(?:-bodied)?|light(?:-bodied)?|medium(?:-bodied)?|bold|heavy|rich)$/iu.test(tokenLower)
     ) {
-      excludeStyleSet.add(token.toLowerCase());
+      // Use firstWord ONLY when the full token is a multi-word wine type (e.g. "내추럴 와인" → '내추럴')
+      // and the full token is NOT in WINE_TYPE_ALL_TOKENS but firstWord IS.
+      // For inline-regex matches (e.g. "full-bodied", "light-bodied"), use tokenLower — firstWord
+      // would be "full" or "light" which is wrong (excludes too broadly).
+      const canonicalToken =
+        WINE_TYPE_ALL_TOKENS.has(tokenLower)
+          ? tokenLower
+          : WINE_TYPE_ALL_TOKENS.has(firstWord)
+            ? firstWord
+            : tokenLower;
+      excludeStyleSet.add(canonicalToken);
       continue;
     }
 
@@ -542,7 +734,22 @@ export function extractSearchConstraints(query: string): SearchConstraints {
     excludeRegionSet.add(token);
   }
 
-  const price = extractKrwPrice(q);
+  // RCA5-07: try foreign-currency (USD/EUR/GBP/₩ symbol) patterns first; if
+  // none match, fall through to the KRW-native (만원/천원/원) extractor.
+  // Ordering matters: "₩70,000 이하" contains no Korean unit suffix, so the
+  // KRW-native extractor silently misses it without this pre-pass.
+  const fxPrice = extractForeignCurrencyPrice(q);
+  const numericPrice =
+    fxPrice.minPriceKrw !== undefined || fxPrice.maxPriceKrw !== undefined
+      ? fxPrice
+      : extractKrwPrice(q);
+  // Retail-channel keywords (편의점/마트/백화점) set a soft maxPriceKrw cap.
+  // Numeric price wins when present — it is always more specific than a channel label.
+  const channelPrice = extractRetailChannelPrice(q);
+  const price: Pick<SearchConstraints, 'minPriceKrw' | 'maxPriceKrw'> = {
+    ...channelPrice,
+    ...numericPrice, // numeric overrides channel when both present
+  };
   const vintage = extractVintage(q);
 
   const excludeGrapes = [...excludeGrapeSet];

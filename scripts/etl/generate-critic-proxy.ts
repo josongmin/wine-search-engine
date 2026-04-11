@@ -29,6 +29,10 @@ export interface CriticProxyResult {
   readonly isSynthetic: true;
 }
 
+/** Module-scope (Rule 16): deterministic sets, allocate once not per-call. */
+const VALID_SCORE_TIERS: ReadonlySet<string> = new Set(['exceptional', 'outstanding', 'very_good', 'good']);
+const VALID_CONFIDENCES: ReadonlySet<string> = new Set(['high', 'medium', 'low']);
+
 const CRITIC_PROXY_PROMPT = `
 You are scoring a wine based on its tasting notes using the 100-point scale
 used by professional wine critics (Robert Parker, Wine Spectator style).
@@ -117,13 +121,53 @@ export async function generateCriticProxy(
     throw new Error(`Unbalanced JSON braces in response: ${responseText.slice(0, 200)}`);
   }
 
-  const parsed = JSON.parse(responseText.slice(startIdx, endIdx + 1));
+  // CLAUDE.md Rule 12: cast JSON.parse result to unknown, then validate.
+  const rawParsed: unknown = JSON.parse(responseText.slice(startIdx, endIdx + 1));
+  if (typeof rawParsed !== 'object' || rawParsed === null) {
+    throw new Error(`Expected JSON object from Claude, got: ${typeof rawParsed}`);
+  }
+  const parsed = rawParsed as Record<string, unknown>;
+
+  // SCAN4-09 fix: LLMs sometimes emit proxy_score as a string (e.g. "87" instead of 87).
+  // CLAUDE.md Rule 26: use != null, not truthiness, to handle score=0 edge case.
+  // CLAUDE.md schema quality bar: parseFloat result must be guarded with Number.isFinite().
+  const rawScore = parsed['proxy_score'];
+  const numericScore =
+    typeof rawScore === 'number'
+      ? rawScore
+      : typeof rawScore === 'string'
+        ? parseFloat(rawScore)
+        : NaN;
+  if (!Number.isFinite(numericScore)) {
+    throw new Error(`Invalid proxy_score from Claude: ${String(rawScore)}`);
+  }
+  // Guard against LLM emitting an out-of-range value (e.g. already-normalized 0.85
+  // instead of integer 80-100, or a hallucinated 110/200). The downstream indexer
+  // divides by 100 expecting a [80,100] integer — an out-of-range value silently
+  // produces a score far outside [0,1] (e.g. 0.0085 for 0.85, or 1.1 for 110).
+  if (numericScore < 0 || numericScore > 100) {
+    throw new Error(`proxy_score out of expected range [0,100]: ${numericScore}`);
+  }
+
+  // Validate enum fields against module-scope sets — LLMs can emit values
+  // outside the declared union; `as` cast is unsafe without a runtime check.
+  const rawTier = parsed['score_tier'];
+  const rawConfidence = parsed['confidence'];
+
+  if (typeof rawTier !== 'string' || !VALID_SCORE_TIERS.has(rawTier)) {
+    throw new Error(`Invalid score_tier from Claude: ${String(rawTier)}`);
+  }
+  if (typeof rawConfidence !== 'string' || !VALID_CONFIDENCES.has(rawConfidence)) {
+    throw new Error(`Invalid confidence from Claude: ${String(rawConfidence)}`);
+  }
 
   return {
-    proxyScore: parsed.proxy_score,
-    scoreTier: parsed.score_tier,
-    confidence: parsed.confidence,
-    reasoningSignals: parsed.reasoning_signals ?? [],
+    proxyScore: numericScore,
+    scoreTier: rawTier as CriticProxyResult['scoreTier'],
+    confidence: rawConfidence as CriticProxyResult['confidence'],
+    reasoningSignals: Array.isArray(parsed['reasoning_signals'])
+      ? (parsed['reasoning_signals'] as unknown[]).filter((s): s is string => typeof s === 'string')
+      : [],
     isSynthetic: true,
   };
 }

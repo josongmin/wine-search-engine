@@ -10,6 +10,7 @@ function makeCandidate(
   entityId: string,
   fusionScore: number,
   overrides: Partial<CandidateEnvelope['provenance']> = {},
+  legacyOverrides: Partial<CandidateEnvelope['legacyCandidate']> = {},
 ): CandidateEnvelope {
   return {
     entityId,
@@ -25,10 +26,10 @@ function makeCandidate(
     },
     legacyCandidate: {
       entityId,
-      bm25Score: fusionScore,
-      semanticScore: 0,
-      fusedScore: fusionScore,
+      retrievalFusionScore: fusionScore,
+      matchedConstraints: [],
       retrievalTrace: { channels: ['sparse'], queryViews: [] },
+      ...legacyOverrides,
     },
   };
 }
@@ -183,6 +184,72 @@ describe('accumulateEvidence', () => {
     const result = accumulateEvidence(candidates);
     const scores = result.map((r) => r.bestFusionScore);
     expect(scores).toEqual([0.9, 0.6, 0.3]);
+  });
+
+  // -------------------------------------------------------------------------
+  // Regression: sparse-field best-value merge (grapeFamily / flavorProfiles /
+  // regionHierarchy / priceBandNumeric lost when canonical lacks them)
+  // -------------------------------------------------------------------------
+
+  it('merges grapeFamily from non-canonical envelope when canonical lacks it', () => {
+    // c2 has higher fusionScore → canonical; c1 has grapeFamily, c2 does not
+    const c1 = makeCandidate(
+      'e1',
+      0.6,
+      { channels: ['sparse_bm25'] },
+      { grapeFamily: 'Pinot' },
+    );
+    const c2 = makeCandidate('e1', 0.9, {
+      channels: ['dense_semantic'],
+      channelScores: [{ channel: 'dense_semantic', rawScore: 0.9, rank: 1, rrfContribution: 0.9 }],
+    });
+    const [result] = accumulateEvidence([c1, c2]);
+    expect(result?.canonicalEnvelope).toBe(c2);
+    expect(result?.mergedEnvelope.legacyCandidate.grapeFamily).toBe('Pinot');
+  });
+
+  it('does not overwrite grapeFamily already on canonical with non-canonical value', () => {
+    // Both have grapeFamily; canonical's value must win
+    const c1 = makeCandidate(
+      'e1',
+      0.6,
+      { channels: ['sparse_bm25'] },
+      { grapeFamily: 'Merlot' },
+    );
+    const c2 = makeCandidate(
+      'e1',
+      0.9,
+      {
+        channels: ['dense_semantic'],
+        channelScores: [{ channel: 'dense_semantic', rawScore: 0.9, rank: 1, rrfContribution: 0.9 }],
+      },
+      { grapeFamily: 'Cabernet' },
+    );
+    const [result] = accumulateEvidence([c1, c2]);
+    expect(result?.canonicalEnvelope).toBe(c2);
+    expect(result?.mergedEnvelope.legacyCandidate.grapeFamily).toBe('Cabernet');
+  });
+
+  it('merges flavorProfiles, regionHierarchy, and priceBandNumeric from non-canonical envelope', () => {
+    const c1 = makeCandidate(
+      'e1',
+      0.5,
+      { channels: ['sparse_bm25'] },
+      {
+        flavorProfiles: ['fruity', 'oaky'],
+        regionHierarchy: ['France', 'Burgundy'],
+        priceBandNumeric: 3,
+      },
+    );
+    const c2 = makeCandidate('e1', 0.95, {
+      channels: ['dense_semantic'],
+      channelScores: [{ channel: 'dense_semantic', rawScore: 0.95, rank: 1, rrfContribution: 0.95 }],
+    });
+    const [result] = accumulateEvidence([c1, c2]);
+    expect(result?.canonicalEnvelope).toBe(c2);
+    expect(result?.mergedEnvelope.legacyCandidate.flavorProfiles).toEqual(['fruity', 'oaky']);
+    expect(result?.mergedEnvelope.legacyCandidate.regionHierarchy).toEqual(['France', 'Burgundy']);
+    expect(result?.mergedEnvelope.legacyCandidate.priceBandNumeric).toBe(3);
   });
 
   it('handles multiple distinct entities', () => {

@@ -34,6 +34,17 @@ const DOMAIN_ERROR_STATUS_MAP: Readonly<Record<string, number>> = {
   SNAPSHOT_MISMATCH: HTTP_STATUS_CONFLICT,
   MISSING_SNAPSHOT: HTTP_STATUS_BAD_REQUEST,
   DETERMINISM_VIOLATION: HTTP_STATUS_CONFLICT,
+  // Domain model invariant violations — thrown by entity factories and alias
+  // constructors when input fails structural validation. Surface as 500 because
+  // these represent internal logic failures, not malformed client requests.
+  ENTITY_INVARIANT: HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  INVARIANT_VIOLATION: HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  // Search use-case internal consistency failure — thrown when resolved results
+  // disagree with retrieval evidence in ways that should be impossible. 500.
+  INTERNAL_INCONSISTENCY: HTTP_STATUS_INTERNAL_SERVER_ERROR,
+  // Client sent a request that violates the endpoint's semantic contract
+  // (e.g. comparison query sent to the lookup endpoint). 400.
+  INVALID_REQUEST: HTTP_STATUS_BAD_REQUEST,
   [POLICY_BLOCKED_CODE]: HTTP_STATUS_FORBIDDEN,
   // Bugbash inventory #10: LLM circuit breaker OPEN fast-fails with a
   // DomainError — surface as 503 Service Unavailable (retryable) instead
@@ -60,6 +71,10 @@ const SAFE_DOMAIN_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   SNAPSHOT_MISMATCH: 'Replay snapshot does not match the current engine version.',
   MISSING_SNAPSHOT: 'Replay snapshot was not found.',
   DETERMINISM_VIOLATION: 'Replay produced a non-deterministic result.',
+  ENTITY_INVARIANT: 'An internal data consistency error occurred.',
+  INVARIANT_VIOLATION: 'An internal data consistency error occurred.',
+  INTERNAL_INCONSISTENCY: 'An internal consistency check failed.',
+  INVALID_REQUEST: 'The request is not valid for this endpoint.',
   [CIRCUIT_BREAKER_OPEN_CODE]: 'A downstream dependency is temporarily degraded. Please retry shortly.',
 };
 

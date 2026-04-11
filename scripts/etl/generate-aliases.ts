@@ -84,7 +84,10 @@ const CHATEAU_PREFIXES = [
  * "Opus One Winery" → "Opus One"
  */
 function extractShortName(producer: string): string | null {
-  const lower = producer.toLowerCase();
+  // NFC-normalize before lowercasing so NFD-decomposed inputs (e.g. "Château".normalize('NFD'))
+  // match the NFC-encoded CHATEAU_PREFIXES entries (e.g. 'château'). Without NFC the
+  // startsWith() comparison fails for any producer name with precomposed accented characters.
+  const lower = producer.normalize('NFC').toLowerCase();
 
   // Remove common prefixes
   for (const prefix of CHATEAU_PREFIXES) {
@@ -168,10 +171,14 @@ export function generateAliases(record: SilverWineRecord): AliasBundle {
   }
 
   // 6. Label without vintage (for vintage-agnostic search).
-  //    Use word-boundary regex to avoid matching the year as a substring
-  //    (e.g. "2015" in "20150" or similar edge cases).
+  //    Use Unicode-safe boundary assertions (CLAUDE.md Rule 8, Rule 24):
+  //    \b is ASCII-only and silently fails on non-ASCII boundaries.
+  //    (?<![\\p{L}\\p{N}]) / (?![\\p{L}\\p{N}]) match any Unicode letter-or-digit boundary.
+  //    Vintage years are always 4 ASCII digits, but Korean wine names often appear
+  //    adjacent to the year (e.g. "보르도 2015"), so Unicode-safe boundaries prevent
+  //    false removal of "2015" in "20150" or similar edge cases across locales.
   if (record.vintageYear !== null) {
-    const yearPattern = new RegExp(`\\b${record.vintageYear}\\b`, 'g');
+    const yearPattern = new RegExp(`(?<![\\p{L}\\p{N}])${record.vintageYear}(?![\\p{L}\\p{N}])`, 'gu');
     const noVintage = record.canonicalLabel
       .replace(yearPattern, '')
       .replace(/\s{2,}/g, ' ')

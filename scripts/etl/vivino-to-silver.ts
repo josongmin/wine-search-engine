@@ -75,7 +75,11 @@ const VIVINO_STYLE_KEYWORD_MAP: Array<[string, WineType]> = [
   ['cava', 'sparkling'],
   ['prosecco', 'sparkling'],
   ['rosé', 'rosé'],
-  ['rose', 'rosé'],
+  // 'rose' substring must be matched with word boundaries to avoid false positives
+  // on producer/vineyard names like "Rosemary Vineyard" or "Primrose Hill" (CLAUDE.md rule 23).
+  // Use regex instead of plain substring match. This entry is replaced by the regex check
+  // in detectWineType below — the plain 'rose' entry is intentionally omitted here.
+  // ['rose', 'rosé'],  // ← DO NOT restore: causes "rosemary" → 'rosé' false positive
   ['port', 'fortified'],
   ['sherry', 'fortified'],
   ['madeira', 'fortified'],
@@ -219,7 +223,7 @@ export function normalizeLabel(
  * "no data" from a measured mid-range value.
  */
 function normalizeScale(score: number | undefined | null, max = 5): number | null {
-  if (score === undefined || score === null || !isFinite(score)) return null;
+  if (score === undefined || score === null || !Number.isFinite(score)) return null;
   return Math.max(0, Math.min(1, score / max));
 }
 
@@ -268,6 +272,10 @@ function inferTypeFromGrape(grapePrimary: string | null): WineType | null {
  *  for any wine whose Vivino style was missing or used an unrecognized vocabulary.
  *  Whites, rosés, sparkling, dessert, and fortified wines were all silently
  *  indexed as 'red', breaking type-filtered search and corrupting facets. */
+// Unicode-aware word boundary for ETL wine-style keyword matching.
+// CLAUDE.md rule 8: \b is ASCII-only and fails on accented chars like 'é'. Use [\p{L}\p{N}] instead.
+const ROSE_WORD_BOUNDARY_RE = /(?:^|[^\p{L}\p{N}])ros[eé](?=$|[^\p{L}\p{N}])/iu;
+
 function detectWineType(wineStyle: string | null): WineType | null {
   if (!wineStyle) return null;
   const lower = wineStyle.toLowerCase();
@@ -275,6 +283,10 @@ function detectWineType(wineStyle: string | null): WineType | null {
   for (const [key, value] of Object.entries(VIVINO_STYLE_MAP)) {
     if (lower.includes(key)) return value;
   }
+  // 'rose' / 'rosé' must use word-boundary regex to avoid false positives on
+  // producer/vineyard names like "Rosemary Vineyard" or "Primrose". Plain
+  // includes('rose') matches 'rosemary' and would silently misclassify white wines.
+  if (ROSE_WORD_BOUNDARY_RE.test(lower)) return 'rosé';
   // Keyword fallback for region-style labels (e.g. "Napa Valley Cabernet Sauvignon")
   for (const [keyword, type] of VIVINO_STYLE_KEYWORD_MAP) {
     if (lower.includes(keyword)) return type;
@@ -287,28 +299,49 @@ function detectWineType(wineStyle: string | null): WineType | null {
 // ---------------------------------------------------------------------------
 
 /**
- * Parses an alcohol string like "14%", "13.5%", "14.4% alc" → float or null.
+ * Parses an alcohol string like "14%", "13.5%", "14,4% alc" → float or null.
  * Returns null when the string is absent or unparseable.
+ *
+ * SCAN4-14: Supports European decimal notation ("14,5%") — comma used as the
+ * decimal separator in French, German, Italian, and Spanish wine databases.
+ * The regex captures both "14.5" and "14,5" forms.
  */
 export function parseAlcohol(raw: string | undefined): number | null {
   if (!raw) return null;
-  const match = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+  // Match digits optionally followed by a decimal separator (period or comma) and more digits
+  const match = raw.match(/(\d+(?:[.,]\d+)?)\s*%/);
   if (!match || !match[1]) return null;
-  const val = parseFloat(match[1]);
+  // Normalize European comma-decimal to period before parsing
+  const normalized = match[1].replace(',', '.');
+  const val = parseFloat(normalized);
   // Sanity range: 0–25% ABV (covers fortified wines like Port ~20%, some Amarone ~17%)
-  return isFinite(val) && val > 0 && val <= 25 ? val : null;
+  return Number.isFinite(val) && val > 0 && val <= 25 ? val : null;
 }
 
 /**
  * Parses Vivino's varietal string ("Grenache, Shiraz/Syrah") into an array of
- * grape names. Splits on commas and slashes, trims each token.
+ * canonical grape names.
+ *
+ * Vivino uses two separators with different semantics:
+ *   - Comma (",") separates DISTINCT grapes: "Grenache, Syrah" → ['Grenache', 'Syrah']
+ *   - Slash ("/") separates SYNONYMS for the same grape: "Garnacha/Grenache" → ['Garnacha']
+ *     (first name is canonical; alternatives are discarded to avoid duplicate grapes)
+ *
+ * Treating slashes as commas (previous behavior) destroyed the synonym relationship,
+ * producing ["Garnacha", "Grenache"] as two separate grapes for one variety.
+ *
  * Returns empty array when absent.
  */
 export function parseVarietal(raw: string | undefined): readonly string[] {
   if (!raw || raw.trim().length === 0) return [];
   return raw
-    .split(/[,/]/)
-    .map((s) => s.trim())
+    .split(',')
+    .map((segment) => {
+      // For each comma-separated segment, take only the first slash-delimited token
+      // (the canonical name). "Garnacha/Grenache" → "Garnacha".
+      const canonical = segment.split('/')[0] ?? segment;
+      return canonical.trim();
+    })
     .filter((s) => s.length > 0);
 }
 
@@ -494,6 +527,106 @@ function extractPairings(payload: VivinoPayload | null): readonly string[] {
   return payload?.food_pairings?.filter((p) => p.length > 0) ?? [];
 }
 
+/**
+ * Classification tier keywords by prestige level (highest first).
+ * Rule 16: module-scope — allocate once, not per-call.
+ */
+const CLASSIFICATION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  // Bordeaux / Saint-Émilion
+  [/premier\s+grand\s+cru\s+class[eé]/iu, 'Premier Grand Cru Classé'],
+  [/grand\s+cru\s+class[eé]\s+[ab]/iu, 'Grand Cru Classé'],
+  [/grand\s+cru\s+class[eé]/iu, 'Grand Cru Classé'],
+  [/premier\s+cru\s+class[eé]/iu, 'Premier Cru Classé'],
+  [/cru\s+bourgeois\s+exceptionnel/iu, 'Cru Bourgeois Exceptionnel'],
+  [/cru\s+bourgeois/iu, 'Cru Bourgeois'],
+  // Burgundy
+  [/grand\s+cru/iu, 'Grand Cru'],
+  [/premier\s+cru/iu, 'Premier Cru'],
+  // Champagne
+  [/blanc\s+de\s+blancs/iu, 'Blanc de Blancs'],
+  [/blanc\s+de\s+noirs/iu, 'Blanc de Noirs'],
+  // Italian DOC/DOCG
+  [/barolo\s+docg/iu, 'Barolo DOCG'],
+  [/brunello\s+di\s+montalcino\s+docg/iu, 'Brunello di Montalcino DOCG'],
+  [/amarone\s+della\s+valpolicella\s+docg/iu, 'Amarone della Valpolicella DOCG'],
+  [/chianti\s+classico\s+gran\s+selezione/iu, 'Chianti Classico Gran Selezione'],
+  [/chianti\s+classico\s+riserva/iu, 'Chianti Classico Riserva'],
+  [/barossa\s+valley/iu, 'Barossa Valley'],
+  // Spanish
+  [/gran\s+reserva/iu, 'Gran Reserva'],
+  [/reserva/iu, 'Reserva'],
+  [/crianza/iu, 'Crianza'],
+  // German
+  [/trockenbeerenauslese/iu, 'Trockenbeerenauslese'],
+  [/beerenauslese/iu, 'Beerenauslese'],
+  [/spätlese/iu, 'Spätlese'],
+  [/auslese/iu, 'Auslese'],
+];
+
+/**
+ * Extracts the wine's official classification tier from the Vivino payload
+ * or falls back to keyword scan of the style description.
+ *
+ * Returns null when no classification is detectable.
+ */
+function extractClassification(payload: VivinoPayload | null, row: BronzeRow): string | null {
+  // Prefer explicit classification field from payload
+  if (payload?.classification && payload.classification.trim().length > 0) {
+    return payload.classification.trim();
+  }
+
+  // Scan style description and wine_style for known classification keywords
+  const searchText = [
+    payload?.style?.description ?? '',
+    row.wine_style ?? '',
+    payload?.tasting_notes ?? '',
+  ].join(' ');
+
+  for (const [pattern, label] of CLASSIFICATION_PATTERNS) {
+    if (pattern.test(searchText)) return label;
+  }
+
+  return null;
+}
+
+/**
+ * Oak treatment keywords (ordered from most specific to least).
+ * Rule 16: module-scope — allocate once.
+ */
+const OAK_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(?:new|100%\s+new)\s+(?:french|american|hungarian|slavonian)?\s*oak/iu, 'New oak'],
+  [/no\s+(?:new\s+)?oak|unoaked|stainless\s+steel/iu, 'Unoaked'],
+  [/french\s+oak/iu, 'French oak'],
+  [/american\s+oak/iu, 'American oak'],
+  [/hungarian\s+oak/iu, 'Hungarian oak'],
+  [/slavonian\s+oak/iu, 'Slavonian oak'],
+  [/\d+\s*months?\s+(?:in\s+)?(?:new\s+)?oak/iu, 'Oak aged'],
+  [/oak[\s-]aged|aged\s+in\s+oak/iu, 'Oak aged'],
+  [/barrique/iu, 'Barrique'],
+  [/amphora|clay\s+pot/iu, 'Amphora'],
+];
+
+/**
+ * Extracts oak treatment descriptor from Vivino payload or tasting note text.
+ * Returns null when no oak signal is detectable.
+ */
+function extractOakTreatment(payload: VivinoPayload | null): string | null {
+  if (payload?.oak_ageing && payload.oak_ageing.trim().length > 0) {
+    return payload.oak_ageing.trim();
+  }
+
+  const searchText = [
+    payload?.style?.description ?? '',
+    payload?.tasting_notes ?? '',
+  ].join(' ');
+
+  for (const [pattern, label] of OAK_PATTERNS) {
+    if (pattern.test(searchText)) return label;
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Transform: BronzeRow → SilverWineRecord (pre-popularity)
 // ---------------------------------------------------------------------------
@@ -535,6 +668,15 @@ export function transformRow(row: BronzeRow): PreSilver | null {
   // v4 fix: detectWineType now returns null on no match. Cascade through grape-based
   // inference (most reliable secondary signal) before falling back to 'red' as a last
   // resort, with explicit logging when the fallback fires.
+  //
+  // Scale note: Vivino taste.structure fields (acidity, tannin, sweetness, fizziness)
+  // are returned on a 0–5 integer scale by the API.  The normalized (0–1) threshold
+  // for "at least slightly sparkling" is 0.3, which equals 1.5 on the raw 0–5 scale.
+  // Bug fix: previous code compared the raw 0–5 value against 1.5 (correct), but the
+  // condition only applied when base === 'red', silently skipping sparkling whites and
+  // rosés.  Expand to fire for any non-sparkling base type so Blanc-de-Blancs, Cava
+  // Rosé, etc. are correctly classified.
+  const FIZZINESS_SPARKLING_THRESHOLD_RAW = 1.5; // 0.3 × 5 (raw 0–5 Vivino scale)
   const detectedWineType = (() => {
     let base = detectWineType(row.wine_style);
     if (base === null) {
@@ -546,7 +688,11 @@ export function transformRow(row: BronzeRow): PreSilver | null {
       // ETL validators should track this fallback rate as a data quality metric.
       base = 'red';
     }
-    if (base === 'red' && taste?.fizziness !== undefined && taste.fizziness > 1.5) {
+    if (
+      base !== 'sparkling' &&
+      taste?.fizziness !== undefined &&
+      taste.fizziness > FIZZINESS_SPARKLING_THRESHOLD_RAW
+    ) {
       return 'sparkling' as WineType;
     }
     return base;
@@ -580,12 +726,20 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     ? normalizeScale(taste.sweetness, 5)
     : null;
 
+  // SCAN: pg driver returns NUMERIC columns as strings; coerce before passing to extractPriceUsd.
+  const rowPrice = (() => {
+    const raw = row.price;
+    if (raw === null) return null;
+    const n = typeof raw === 'string' ? parseFloat(raw) : raw;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  })();
+
   // SOTA++: best price from merchant_prices (with FX conversion)
-  const priceUsd = extractPriceUsd(row.price, row.currency, payload?.merchant_prices, payload?.bottle_ml);
+  const priceUsd = extractPriceUsd(rowPrice, row.currency, payload?.merchant_prices, payload?.bottle_ml);
 
   // SOTA++: producer_prestige from winery_rating (1–5 → 0–1)
   const producerPrestige =
-    payload?.winery_rating !== undefined && isFinite(payload.winery_rating)
+    payload?.winery_rating !== undefined && Number.isFinite(payload.winery_rating)
       ? Math.max(0, Math.min(1, payload.winery_rating / 5))
       : null;
 
@@ -624,7 +778,14 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     pairingTags: extractPairings(payload),
     flavorProfiles: extractFlavorProfiles(payload),
     searchTextEn: buildSearchText(row, payload),
-    ratingAvg: row.rating ?? payload?.statistics?.ratings_average ?? null,
+    // SCAN: pg driver returns NUMERIC columns as strings; guard with parseFloat + isFinite.
+    // BronzeRow types rating as `number | null` but the real runtime value may be a string.
+    ratingAvg: (() => {
+      const raw = row.rating ?? payload?.statistics?.ratings_average ?? null;
+      if (raw === null) return null;
+      const n = typeof raw === 'string' ? parseFloat(raw) : raw;
+      return Number.isFinite(n) ? n : null;
+    })(),
     ratingsCount,
     priceUsd,
     priceBand: priceBand(priceUsd),
@@ -633,6 +794,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     alcoholPct: parseAlcohol(payload?.alcohol),
     producerPrestige,
     isTopRated,
+    classification: extractClassification(payload, row),
+    oakTreatment: extractOakTreatment(payload),
   };
 }
 
@@ -650,6 +813,8 @@ function mergeSOTAPlusFields(winner: PreSilver, fallback: PreSilver): PreSilver 
     alcoholPct: winner.alcoholPct ?? fallback.alcoholPct,
     producerPrestige: winner.producerPrestige ?? fallback.producerPrestige,
     isTopRated: winner.isTopRated || fallback.isTopRated,
+    classification: winner.classification ?? fallback.classification,
+    oakTreatment: winner.oakTreatment ?? fallback.oakTreatment,
     // Prefer longer searchTextEn if winner's is empty (different scrape depth)
     searchTextEn: winner.searchTextEn.length >= fallback.searchTextEn.length
       ? winner.searchTextEn

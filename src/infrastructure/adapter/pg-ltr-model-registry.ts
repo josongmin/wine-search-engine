@@ -62,6 +62,32 @@ export interface LtrModelRegistryPort {
 }
 
 /**
+ * node-postgres returns float[] columns as string[] at runtime — the type
+ * parameter on the query result is a compile-time annotation only.
+ * Parse each element with Number() and reject non-finite values immediately
+ * so that downstream dot-product scoring never silently produces NaN.
+ */
+function parseLtrWeights(raw: number[], registryId: string): number[] {
+  const weights = (raw as unknown as string[]).map(Number);
+  if (weights.some((w) => !Number.isFinite(w))) {
+    throw new Error(`LTR model ${registryId} has non-finite weights`);
+  }
+  return weights;
+}
+
+/**
+ * node-postgres also returns scalar float8 columns (bias) as strings.
+ * Guard and throw rather than let NaN silently corrupt every LTR score.
+ */
+function parseLtrBias(raw: number, registryId: string): number {
+  const bias = Number(raw);
+  if (!Number.isFinite(bias)) {
+    throw new Error(`LTR model ${registryId} has non-finite bias`);
+  }
+  return bias;
+}
+
+/**
  * PostgreSQL-backed LTR model registry with versioning.
  *
  * Stores trained LambdaMART models for each query class with:
@@ -134,8 +160,8 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
 
     return {
       queryClass: row.query_class,
-      weights: row.weights,
-      bias: row.bias,
+      weights: parseLtrWeights(row.weights, row.registry_id),
+      bias: parseLtrBias(row.bias, row.registry_id),
       trainingExampleCount: row.training_example_count,
       ndcg5ValidationScore: row.ndcg5_validation_score,
       trainedAt: row.trained_at,
@@ -151,8 +177,8 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     for (const row of result.rows) {
       models.set(row.query_class, {
         queryClass: row.query_class,
-        weights: row.weights,
-        bias: row.bias,
+        weights: parseLtrWeights(row.weights, row.registry_id),
+        bias: parseLtrBias(row.bias, row.registry_id),
         trainingExampleCount: row.training_example_count,
         ndcg5ValidationScore: row.ndcg5_validation_score,
         trainedAt: row.trained_at,

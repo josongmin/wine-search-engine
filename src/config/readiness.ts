@@ -44,25 +44,47 @@ async function probeRedis(
     return 'down';
   }
 
+  // Apply a timeout: a half-open TCP socket (network partition, routing blackhole)
+  // could cause `ping()` to hang indefinitely, blocking the entire /ready response
+  // for the LB health check. Mirror the pattern used by probePostgres.
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await redisClient.ping();
+    await Promise.race([
+      redisClient.ping(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('redis probe timeout')); }, PROBE_TIMEOUT_MS);
+      }),
+    ]);
     return 'up';
   } catch (err) {
     log.warn({ err, probe: 'redis' }, 'readiness probe failed');
     return 'down';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
 async function probeCalibrationStore(
   calibrationStore: CalibrationStore,
 ): Promise<ReadinessStatus> {
+  // Apply a timeout: calibrationStore.getCalibrationParams issues a PG query.
+  // A live connection with a slow/locked query will hang indefinitely, blocking
+  // the /ready endpoint (this probe is required:true in production).
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    // Use a representative query class to verify the store is reachable.
-    await calibrationStore.getCalibrationParams('short_entity');
+    await Promise.race([
+      // Use a representative query class to verify the store is reachable.
+      calibrationStore.getCalibrationParams('short_entity'),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error('calibration store probe timeout')); }, PROBE_TIMEOUT_MS);
+      }),
+    ]);
     return 'up';
   } catch (err) {
     log.warn({ err, probe: 'calibration_store' }, 'readiness probe failed');
     return 'down';
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
   }
 }
 
@@ -131,8 +153,12 @@ export function buildHealthRouteOptions(
                 }
                 // Fall back to self-hosted embedding service URL.
                 if (config.embedding.url === undefined) {
-                  log.warn('embedding readiness: no OPENAI_API_KEY and no EMBEDDING_SERVICE_URL — no embedding configured, reporting down');
-                  return 'down';
+                  // No embedding backend is configured at all. 'skipped' is more
+                  // accurate than 'down': the probe cannot run, not that a running
+                  // service is unreachable. This prevents a misconfiguration (missing
+                  // env var) from reporting as a live service outage (W6-P1-2).
+                  log.warn('embedding readiness: no OPENAI_API_KEY and no EMBEDDING_SERVICE_URL — embedding probe skipped');
+                  return 'skipped';
                 }
                 return probeJsonPostEndpoint(`${config.embedding.url}/embeddings`, {
                   model: config.embedding.model,
@@ -162,18 +188,6 @@ export function buildHealthRouteOptions(
                 Promise.resolve(
                   drinkingWindowPredictor.modelVersion.startsWith('heuristic') ? 'down' : 'up',
                 ),
-            },
-          }
-        : {}),
-      ...(config.reranker.url !== undefined
-        ? {
-            reranker: {
-              required: false,
-              check: async (): Promise<ReadinessStatus> =>
-                probeJsonPostEndpoint(`${config.reranker.url}/rerank`, {
-                  query: '__healthcheck__',
-                  texts: ['__healthcheck__'],
-                }),
             },
           }
         : {}),

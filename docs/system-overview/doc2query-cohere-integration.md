@@ -4,7 +4,7 @@
 
 **한 줄:** 1차 retrieval recall은 **Doc2Query (index-time, OpenAI gpt-5.x)** 가 합성 쿼리를 BM25 인덱스에 깔아서 책임지고, ranking precision은 **Cohere Rerank API (CircuitBreaker 보호)** 가 top-K 재정렬로 책임진다. SPLADE / ColBERT 스캐폴딩은 트리에 남아 있지만 composition root에서 import 0 — dormant.
 
-**Last updated:** 2026-04-10
+**Last updated:** 2026-04-11
 
 ---
 
@@ -97,19 +97,20 @@ SearchUseCase.execute()
     │
     └─ Hybrid 경로
          │
-         ├─ CandidatePoolService.generate()
+         ├─ CandidatePoolService.execute()  (legacy generate() alias still delegates here)
          │     └─ sparse_bm25 channel → SearchIndexPort.sparseSearch()
          │           └─ Vespa rank profile = bm25_wine
          │              └─ + bm25(synthetic_queries) * 0.6  ← AUTOMATIC
          │
          └─ Ranker.rank()
-               └─ RerankerPort.rerank(query, top-K, limit)
-                     └─ CohereReranker
-                           └─ runUnderLlmBreaker(circuitBreaker, ...)
-                                 └─ POST api.cohere.ai/v2/rerank
+               ├─ (선택) RerankerPort.rerank(query, top-K, limit)
+               │     └─ CohereReranker
+               │           └─ runUnderLlmBreaker(circuitBreaker, ...)
+               │                 └─ POST api.cohere.ai/v2/rerank
+               └─ (선택) learned LTR rerank
 ```
 
-핵심: **두 통합 모두 런타임 코드 변경 0**. Doc2Query는 인덱스에만 영향, Cohere는 DI 한 줄.
+핵심: **Doc2Query는 인덱스에만 영향**이고, **Cohere는 `Ranker.rank()` 내부 precision stage의 cross-encoder adapter만 교체**한다. learned LTR이 로드되어 있으면 같은 `Ranker.rank()` 호출 안에서 추가 rerank가 이어질 수 있다.
 
 ---
 
@@ -164,6 +165,12 @@ elif config.reranker.url != null:
 else:
   reranker = undefined  → Ranker가 cross-encoder rerank를 skip
 ```
+
+주의:
+
+- 이 DI는 **cross-encoder adapter 선택**만 담당한다.
+- learned LTR 모델 주입은 `container-runtime-support.ts`에서 registry 로드 후 `buildRanker(..., support?.ltrModels)`로 별도 처리된다.
+- 따라서 `COHERE_API_KEY`가 없어도, LTR model이 있으면 `Ranker.rank()` 내부 learned rerank는 계속 동작할 수 있다.
 
 ---
 

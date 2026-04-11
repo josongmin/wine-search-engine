@@ -114,10 +114,19 @@ export class VespaNetworkError extends Error {
   /** The original error from `fetch` (always an `Error` in practice). */
   override readonly cause: Error;
 
-  constructor(message: string, cause: Error) {
+  /**
+   * True when the request was aborted by the caller (external AbortSignal or
+   * internal timeout). Aborted requests must NOT be retried — the caller
+   * already cancelled and retrying triple-counts the failure in the circuit
+   * breaker (one per retry attempt vs. one for the original failure).
+   */
+  readonly isAborted: boolean;
+
+  constructor(message: string, cause: Error, isAborted = false) {
     super(message);
     this.name = 'VespaNetworkError';
     this.cause = cause;
+    this.isAborted = isAborted;
   }
 }
 
@@ -219,6 +228,7 @@ const VESPA_RETRY_CONFIG = {
 async function withRetry<T>(
   fn: () => Promise<T>,
   config = VESPA_RETRY_CONFIG,
+  signal?: AbortSignal,
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
@@ -230,7 +240,18 @@ async function withRetry<T>(
       if (err instanceof VespaHttpError && err.isClientError && !err.isRateLimited) {
         throw err;
       }
+      // Don't retry aborted requests — the caller cancelled (timeout or external
+      // AbortSignal). Retrying would: (a) waste resources since the caller no
+      // longer cares, and (b) triple-count the failure in the circuit breaker
+      // (threshold = 3), which would open the breaker on a single caller abort.
+      if (err instanceof VespaNetworkError && err.isAborted) {
+        throw err;
+      }
       if (attempt < config.maxRetries) {
+        // Bail immediately if the caller already aborted before we start sleeping.
+        if (signal?.aborted === true) {
+          throw lastErr;
+        }
         // Full jitter (AWS architecture blog): random in [0, expDelay].
         // Without jitter, every concurrent failed request retries at the
         // same instant, creating a thundering herd against an already
@@ -240,7 +261,14 @@ async function withRetry<T>(
           config.maxDelayMs,
         );
         const delay = Math.floor(Math.random() * expDelay);
-        await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
+        // Also abort mid-sleep if the signal fires during the wait.
+        await new Promise<void>((resolve, reject) => {
+          const id = setTimeout(resolve, delay);
+          signal?.addEventListener('abort', () => {
+            clearTimeout(id);
+            reject(signal.reason);
+          }, { once: true });
+        });
       }
     }
   }
@@ -317,7 +345,7 @@ export class VespaClient {
       const message = aborted
         ? `Vespa request timed out after ${timeoutMs}ms (${url})`
         : `Vespa network error (${url}): ${cause.message}`;
-      throw new VespaNetworkError(message, cause);
+      throw new VespaNetworkError(message, cause, aborted);
     } finally {
       clearTimeout(id);
       externalSignal?.removeEventListener('abort', onExternalAbort);
@@ -342,6 +370,7 @@ export class VespaClient {
     yql: string,
     params?: Record<string, unknown>,
     signal?: AbortSignal,
+    requestId?: string,
   ): Promise<VespaQueryResponse> {
     return withRetry(async () => {
       const url = `${this.baseUrl}/search/`;
@@ -355,7 +384,10 @@ export class VespaClient {
         url,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(requestId !== undefined ? { 'X-Request-Id': requestId } : {}),
+          },
           body: JSON.stringify(body),
         },
         VESPA_SEARCH_TIMEOUT_MS,
@@ -450,7 +482,7 @@ export class VespaClient {
       );
 
       return parsed;
-    });
+    }, VESPA_RETRY_CONFIG, signal);
   }
 
   // -------------------------------------------------------------------------

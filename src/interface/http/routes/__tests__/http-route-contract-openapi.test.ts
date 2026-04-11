@@ -22,7 +22,7 @@ describe('HTTP contract OpenAPI bridge', () => {
       'x-contract-has-body': true,
       'x-contract-has-params': false,
       'x-contract-success-status-codes': [200],
-      'x-contract-error-status-codes': [400, 403, 408, 429, 500],
+      'x-contract-error-status-codes': [400, 403, 408, 429, 500, 503],
     }));
     expect(document.paths['/v1/search']?.post?.requestBody?.content['application/json'].schema).toEqual(
       expect.objectContaining({

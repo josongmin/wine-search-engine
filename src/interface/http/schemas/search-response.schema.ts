@@ -2,10 +2,13 @@ import { z } from 'zod';
 import {
   DecisionSnapshotSchema,
 } from './search-shared.schema.js';
+import { DETERMINISM_FINGERPRINT_HEX_LENGTH } from '../../../domain/shared/utils/determinism-fingerprint.js';
 import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
 } from '../../../domain/shared/constants.js';
+import { RETRIEVAL_MODES } from '../../../domain/query/model/retrieval-mode.js';
+import { QUERY_CLASSES } from '../../../domain/shared/types/query-class.js';
 import {
   AUTHORITY_TRACE_REF_SHA256_HEX_LENGTH,
   MAX_CLARIFICATION_CANDIDATES,
@@ -46,7 +49,7 @@ export const CANONICAL_AUTHORITY_TRACE_REF_PATTERN = new RegExp(
 export const ErrorResponseSchema = z.object({
   error: z.object({
     request_id: z.string().min(1).max(MAX_ERROR_ENVELOPE_REQUEST_ID_CHARS),
-    code: z.string().max(MAX_ERROR_ENVELOPE_CODE_CHARS),
+    code: z.string().min(1).max(MAX_ERROR_ENVELOPE_CODE_CHARS),
     message: z.string().max(MAX_ERROR_ENVELOPE_MESSAGE_CHARS),
     failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable(),
     retryable: z.boolean(),
@@ -192,7 +195,7 @@ export const EngineDecisionSchema = z.object({
   decision_snapshot: DecisionSnapshotSchema,
   failure_reason: z.string().min(1).optional(),
   admission_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
-  abstain_reason: z.string().min(1).optional(),
+  abstain_reason: z.enum(['no_match', 'low_confidence', 'semantic_conflict', 'insufficient_evidence']).optional(),
   retrieval_mode_source: z.enum(['planner', 'api_override']).optional(),
   planner_suggested_mode: z.string().min(1).optional(),
 }).strict();
@@ -220,6 +223,14 @@ export const SearchResponseMetaSchema = z.object({
   decision_snapshot: DecisionSnapshotSchema.optional(),
   debug_refs: z.array(z.string()).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
   response_hash: z.string().min(1).optional(),
+  /**
+   * E1-T5: Determinism fingerprint — 16-char hex digest of engine configuration
+   * (planner version, model ID, fusion config, ranking config). Two responses
+   * with identical fingerprints were produced by the same engine configuration.
+   * Populated on every response. Distinct from response_hash (which hashes
+   * result content) — the fingerprint hashes configuration, not output.
+   */
+  determinism_fingerprint: z.string().length(DETERMINISM_FINGERPRINT_HEX_LENGTH).optional(),
   authority_trace_ref: z.string().regex(CANONICAL_AUTHORITY_TRACE_REF_PATTERN).optional(),
   runtime_correlation_ref: z.string().min(1).optional(),
   execution_mode: z
@@ -259,6 +270,17 @@ export const SearchResponseMetaSchema = z.object({
     fusion_score: z.number().finite(),
     rank: z.number().int().positive(),
   }).strict()).max(MAX_SEARCH_RETRIEVAL_PROVENANCE_SLICES).optional(),
+  /**
+   * E8: Audit extension — structured trace payloads from EPIC-3 through EPIC-7.
+   *
+   * Not validated at the Zod boundary — AuditExtension is a typed domain object
+   * that is serialized as-is. Consumers should treat it as `unknown` and narrow
+   * via the AuditExtension TypeScript type from the domain layer.
+   *
+   * Gating: fields within the envelope are populated per the field gating policy
+   * in AuditExtension (explain=true / debug header / always-on for abstain+fallback).
+   */
+  audit_extension: z.unknown().optional(),
 }).strict();
 
 export const SearchResponseSchema = z.object({
@@ -419,8 +441,8 @@ export const InterpretResponseSchema = z.object({
   intent: z.string().min(1),
   secondary_intents: z.array(z.string().min(1)).max(MAX_INTERPRET_SECONDARY_INTENTS).optional(),
   route: z.enum(['entity', 'hybrid', 'mixed']),
-  retrieval_mode: z.string().min(1),
-  query_class: z.string().min(1),
+  retrieval_mode: z.enum(RETRIEVAL_MODES),
+  query_class: z.enum(QUERY_CLASSES),
   anchors: z.array(z.record(z.unknown())).max(MAX_NORMALIZED_QUERY_VIEW_STRINGS),
   constraints: z.object({
     hard: z.array(z.record(z.unknown())).max(MAX_SEARCH_CONSTRAINT_STRING_LIST),

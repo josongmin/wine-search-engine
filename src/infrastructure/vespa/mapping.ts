@@ -211,6 +211,7 @@ export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   regionHierarchy: { vespaField: 'region_hierarchy', kind: 'string_array' },
   priceBandNumeric: { vespaField: 'price_band_numeric', kind: 'number' },
   searchTextKo: { vespaField: 'search_text_ko', kind: 'string' },
+  flavorProfiles: { vespaField: 'flavor_profiles', kind: 'string_array' },
 } as const satisfies Record<RetrievalHitSummaryKey, VespaRetrievalSummaryFieldSpec>;
 
 function readRawVespaRetrievalSummaryField(
@@ -300,7 +301,9 @@ export function toVespaFields(
   }
 
   // SOTA++ taxonomy fields
-  if (doc.flavorProfiles !== undefined) fields['flavor_profiles'] = [...doc.flavorProfiles];
+  // Note: flavorProfiles is written via writeVespaRetrievalSummaryFields above
+  // (VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS includes flavorProfiles → 'flavor_profiles').
+  // Do NOT write it again here — that would double-write the field.
   if (doc.oakTreatment !== undefined) fields['oak_treatment'] = doc.oakTreatment;
 
   // Doc2Query synthetic queries — emit only when non-empty so existing
@@ -359,8 +362,9 @@ export function fromVespaFields(
   const summary = readRawVespaRetrievalSummary(fields);
 
   // SOTA++ taxonomy fields
-  const flavorProfilesRaw = fields['flavor_profiles'];
-  const flavorProfiles = isStringArray(flavorProfilesRaw) ? flavorProfilesRaw : undefined;
+  // flavorProfiles is read via readRawVespaRetrievalSummary above (summary.flavorProfiles).
+  // Do NOT read fields['flavor_profiles'] again here — use summary.flavorProfiles to stay
+  // consistent with VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS as the SSoT for the field mapping.
   const oakTreatment = getOptionalString(fields, 'oak_treatment');
 
   // Doc2Query synthetic queries
@@ -420,8 +424,8 @@ export function fromVespaFields(
     ...(summary.criticScoreNormalized !== undefined
       && { criticScoreNormalized: summary.criticScoreNormalized }),
     ...(summary.priceUsd !== undefined && { priceUsd: summary.priceUsd }),
-    // SOTA++ taxonomy fields
-    ...(flavorProfiles !== undefined && { flavorProfiles }),
+    // SOTA++ taxonomy fields — read from summary (via VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS SSoT)
+    ...(summary.flavorProfiles !== undefined && { flavorProfiles: summary.flavorProfiles }),
     ...(summary.classification !== undefined && { classification: summary.classification }),
     ...(summary.alcoholPct !== undefined && { alcoholPct: summary.alcoholPct }),
     ...(summary.drinkingWindowStart !== undefined
@@ -640,24 +644,134 @@ export function yqlEscapeString(value: string): string {
  */
 const yqlString = yqlEscapeString;
 
-/**
- * Whitelist of safe field names for `_in` (multi-value) and `_not_in` (negation
- * multi-value) sparse filter tokens.
- * Must match the producer in `domain/retrieval/service/constraint-to-sparse-filter-tokens.ts`.
- * Hoisted to module scope to avoid per-iteration allocation in `buildSparseFilters`.
+// ---------------------------------------------------------------------------
+// Filter Token Registry
+// ---------------------------------------------------------------------------
+// SSoT for the mapping between sparse filter token keys and their Vespa YQL
+// clause generators. Adding a new token REQUIRES an entry here — unknown tokens
+// are blocked and logged, never silently passed through.
+//
+// Token types:
+//   'contains'        → field contains "value"                (indexed or attribute)
+//   'matches'         → field matches "escaped_regex"          (attribute-only; regex substring)
+//   'num_gte'         → field >= clamped_number
+//   'num_lte'         → field <= clamped_number
+//   'int_gte'         → field >= clamped_int
+//   'int_lte'         → field <= clamped_int
+//   'bool'            → field = true|false
+//   'drinking_window' → special: drinking_window_start <= n AND drinking_window_end >= n
+//   'grape_or'        → special: (grape_primary contains v OR grapes contains v)
+//   'not_contains'    → !(field contains "value")
+//   'not_matches'     → !(field matches "escaped_regex")   (attribute-only; regex substring NOT)
+//
+// clamp: [min, max] applied before number interpolation into YQL.
+
+/** TokenSpec variants — discriminated union ensures clamp is required for numeric types.
  *
- * Positive fields produce Vespa OR clauses; `_not` variants produce AND NOT clauses.
+ * `grape_or` has no `field` property: it always emits a compound OR across both
+ * `grape_primary` and `grapes` schema fields — there is no single Vespa field to name.
+ * `drinking_window` similarly: it emits TWO clauses (start <=, end >=). The `field`
+ * property names the start field only, for documentation purposes.
+ */
+type TokenSpec =
+  | { readonly type: 'contains' | 'matches' | 'not_contains' | 'not_matches' | 'bool'; readonly field: string }
+  | { readonly type: 'drinking_window'; readonly field: string } // field = 'drinking_window_start' (doc only)
+  | { readonly type: 'grape_or' }                                // no field — always targets grape_primary + grapes
+  | { readonly type: 'num_gte' | 'num_lte'; readonly field: string; readonly clamp: readonly [number, number]; readonly decimals: number }
+  | { readonly type: 'int_gte' | 'int_lte'; readonly field: string; readonly clamp: readonly [number, number] };
+
+/**
+ * Declares every valid sparse filter token and its YQL generation rule.
+ *
+ * ADDING A NEW FILTER TOKEN:
+ *   1. Add an entry here with the correct type, field, and clamp.
+ *   2. Add a corresponding case in `constraint-to-sparse-filter-tokens.ts`.
+ *   3. Add a regression test in `vespa-mapping-sparse-filters.test.ts`.
+ *   4. If multi-value (_in / _not_in) is needed, add the base key to ALLOWED_SPARSE_IN_FIELDS below.
+ *
+ * Unknown tokens are blocked — they never reach Vespa.
+ */
+const FILTER_TOKEN_REGISTRY: ReadonlyMap<string, TokenSpec> = new Map([
+  // String equality / substring filters (attribute | index fields → contains)
+  ['wine_type',        { type: 'contains',  field: 'wine_type' }],
+  ['country',          { type: 'contains',  field: 'country' }],
+  ['region',           { type: 'contains',  field: 'region' }],
+  ['appellation',      { type: 'contains',  field: 'appellation' }],
+  ['grape_primary',    { type: 'contains',  field: 'grape_primary' }],
+  ['price_band',       { type: 'contains',  field: 'price_band' }],
+  ['flavor_profile',   { type: 'contains',  field: 'flavor_profiles' }],
+  ['classification',   { type: 'contains',  field: 'classification' }],
+  ['certification',    { type: 'contains',  field: 'certifications' }],
+  ['soil_type',        { type: 'contains',  field: 'soil_type' }],
+  ['producer_type',    { type: 'contains',  field: 'producer_type' }],
+  ['grape_family',     { type: 'contains',  field: 'grape_family' }],
+  // Legacy style:  kept ONLY because NOT-exclusion (style_not:) still uses contains for exact NOT.
+  // Positive style matching MUST use style_matches: (see below).
+  ['style',            { type: 'contains',  field: 'style' }],
+
+  // Regex substring match (attribute-only fields whose values are multi-token compounds).
+  // style field stores "medium red", "bold red" etc. — contains fails; matches works.
+  ['style_matches',    { type: 'matches',   field: 'style' }],
+
+  // Special compound tokens
+  ['grape_or',         { type: 'grape_or' }],  // targets both grape_primary AND grapes — no single field
+  ['availability',     { type: 'bool',      field: 'availability' }],
+  ['drinking_window_now', { type: 'drinking_window', field: 'drinking_window_start' }],
+
+  // Numeric range filters — clamped before YQL interpolation
+  ['body_min',              { type: 'num_gte', field: 'body',                    clamp: [0, 1],                          decimals: 3 }],
+  ['body_max',              { type: 'num_lte', field: 'body',                    clamp: [0, 1],                          decimals: 3 }],
+  ['acidity_min',           { type: 'num_gte', field: 'acidity',                 clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
+  ['acidity_max',           { type: 'num_lte', field: 'acidity',                 clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
+  ['tannin_min',            { type: 'num_gte', field: 'tannin',                  clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
+  ['tannin_max',            { type: 'num_lte', field: 'tannin',                  clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
+  ['finish_length_min',     { type: 'num_gte', field: 'finish_length',           clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
+  ['finish_length_max',     { type: 'num_lte', field: 'finish_length',           clamp: [WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX], decimals: 3 }],
+  ['price_usd_min',         { type: 'num_gte', field: 'price_usd',               clamp: [WINE_SENSOR_SCALE_MIN, MAX_PRICE_USD_YQL_CLAMP], decimals: 2 }],
+  ['price_usd_max',         { type: 'num_lte', field: 'price_usd',               clamp: [WINE_SENSOR_SCALE_MIN, MAX_PRICE_USD_YQL_CLAMP], decimals: 2 }],
+  ['critic_score_min',      { type: 'num_gte', field: 'critic_score_normalized', clamp: [0, 1],                          decimals: NORMALIZED_SCORE_YQL_DECIMAL_PLACES }],
+  ['producer_prestige_min', { type: 'num_gte', field: 'producer_prestige',       clamp: [0, 1],                          decimals: NORMALIZED_SCORE_YQL_DECIMAL_PLACES }],
+  ['alcohol_min',           { type: 'num_gte', field: 'alcohol_pct',             clamp: [WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP], decimals: 2 }],
+  ['alcohol_max',           { type: 'num_lte', field: 'alcohol_pct',             clamp: [WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP], decimals: 2 }],
+  ['vintage_year_min',      { type: 'int_gte', field: 'vintage_year',            clamp: [MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR] }],
+  ['vintage_year_max',      { type: 'int_lte', field: 'vintage_year',            clamp: [MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR] }],
+
+  // NOT-exclusion tokens (field_not: prefix)
+  ['grape_primary_not', { type: 'not_contains', field: 'grape_primary' }],
+  ['grapes_not',        { type: 'not_contains', field: 'grapes' }],
+  ['wine_type_not',     { type: 'not_contains', field: 'wine_type' }],
+  ['country_not',       { type: 'not_contains', field: 'country' }],
+  ['region_not',        { type: 'not_contains', field: 'region' }],
+  ['appellation_not',   { type: 'not_contains', field: 'appellation' }],
+  // style field is attribute-only — `contains` does NOT do substring matching on multi-token
+  // values like "full red". Must use `matches` (regex substring) so exclusions like
+  // `style_not:full` correctly produce `!(style matches "full")` and exclude "full red" wines.
+  ['style_not',         { type: 'not_matches',  field: 'style' }],
+  ['price_band_not',    { type: 'not_contains', field: 'price_band' }],
+  ['flavor_profile_not',    { type: 'not_contains', field: 'flavor_profiles' }],
+  ['classification_not',    { type: 'not_contains', field: 'classification' }],
+  ['certification_not',     { type: 'not_contains', field: 'certifications' }],
+  ['soil_type_not',         { type: 'not_contains', field: 'soil_type' }],
+  ['producer_type_not',     { type: 'not_contains', field: 'producer_type' }],
+  ['grape_family_not',      { type: 'not_contains', field: 'grape_family' }],
+]);
+
+/**
+ * Whitelist of base field names valid for multi-value `_in` / `_not_in` tokens.
+ * Derived from FILTER_TOKEN_REGISTRY: only keys that have a contains/not_contains/grape_or
+ * entry are safe to use as the base of a multi-value OR clause.
+ *
+ * Must stay in sync with FILTER_TOKEN_REGISTRY — validated by unit tests.
  */
 const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
-  // Positive fields — produce Vespa OR clauses via <field>_in tokens
-  'wine_type', 'country', 'region', 'appellation', 'grape_primary', 'grapes', 'style',
-  'price_band', 'flavor_profile', 'classification', 'certification',
-  'soil_type', 'producer_type',
-  // Negation variants — used by <field>_not_in tokens (produce AND NOT clauses)
+  'wine_type', 'country', 'region', 'appellation', 'grape_primary', 'style',
+  'style_matches', 'price_band', 'flavor_profile', 'classification', 'certification',
+  'soil_type', 'producer_type', 'grape_family', 'grape_or',
+  // Negation variants
   'wine_type_not', 'country_not', 'region_not', 'appellation_not',
-  'grape_primary_not', 'grapes_not',  // grapes_not needed for grape_primary not_in dual-field
+  'grape_primary_not', 'grapes_not',
   'style_not', 'price_band_not', 'flavor_profile_not', 'classification_not',
-  'certification_not', 'soil_type_not', 'producer_type_not',
+  'certification_not', 'soil_type_not', 'producer_type_not', 'grape_family_not',
 ]);
 
 /**
@@ -672,6 +786,8 @@ const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
  * - `availability:true`         → `availability = true`
  * - `wine_type:<value>`         → `wine_type contains "value"`
  * - `grape_primary:<value>`     → `grape_primary contains "value"`
+ * - `grape_or:<value>`          → `(grape_primary contains "value" OR grapes contains "value")`
+ * - `grape_or_in:<v1>|<v2>`    → `((gp contains "v1" OR grapes contains "v1") OR (gp contains "v2" OR grapes contains "v2"))`
  * - `country:<value>`           → `country contains "value"`
  * - `appellation:<value>`       → `appellation contains "value"`
  * - `vintage_year_min:<n>`      → `vintage_year >= n`
@@ -695,6 +811,16 @@ const ALLOWED_SPARSE_IN_FIELDS: ReadonlySet<string> = new Set([
  * @param filters - Array of filter token strings.
  * @returns A YQL fragment starting with ` AND ` for each token, or `""` if empty.
  */
+/**
+ * Escapes special regex metacharacters in a string so it can be used as a
+ * literal substring pattern in a Vespa `matches` clause.
+ * Prevents regex injection when user-supplied constraint values are interpolated
+ * into YQL `style matches "..."` expressions.
+ */
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function clampNum(value: number, min: number, max: number): number {
   if (value < min) return min;
   if (value > max) return max;
@@ -770,6 +896,66 @@ export function buildNumericRangeFilters(constraints: SearchConstraints): string
   return ' AND ' + clauses.join(' AND ');
 }
 
+/**
+ * Builds a single YQL clause from a known token spec and its value.
+ * Returns null if the value is invalid for the spec type (e.g. non-finite number).
+ */
+function buildTokenClause(_key: string, spec: TokenSpec, value: string): string | null {
+  switch (spec.type) {
+    case 'contains':
+      return `${spec.field} contains ${yqlString(value)}`;
+    case 'matches':
+      return `${spec.field} matches ${yqlString(escapeRegex(value))}`;
+    case 'not_contains':
+      return `!(${spec.field} contains ${yqlString(value)})`;
+    case 'not_matches':
+      // Attribute-only fields (e.g. style) whose values are multi-token compounds:
+      // `contains` does exact-token match and silently no-ops on "full red" vs "full".
+      // `matches` does regex substring, so `!(style matches "full")` correctly excludes
+      // any wine with "full" in the style field (e.g. "full red", "full white").
+      return `!(${spec.field} matches ${yqlString(escapeRegex(value))})`;
+    case 'bool':
+      return `${spec.field} = ${value === 'true' ? 'true' : 'false'}`;
+    case 'grape_or':
+      // No single `field` — always targets both grape_primary and grapes.
+      return `(grape_primary contains ${yqlString(value)} OR grapes contains ${yqlString(value)})`;
+    case 'drinking_window':
+      // Two-clause special: handled directly in buildSparseFilters, not here.
+      // buildTokenClause cannot return multiple clauses — caller must branch on spec.type === 'drinking_window'.
+      return null;
+    case 'num_gte': {
+      const n = parseFloat(value);
+      if (!Number.isFinite(n)) return null;
+      const [lo, hi] = spec.clamp; // clamp is required by discriminated union — no ! needed
+      return `${spec.field} >= ${clampNum(n, lo, hi).toFixed(spec.decimals)}`;
+    }
+    case 'num_lte': {
+      const n = parseFloat(value);
+      if (!Number.isFinite(n)) return null;
+      const [lo, hi] = spec.clamp;
+      return `${spec.field} <= ${clampNum(n, lo, hi).toFixed(spec.decimals)}`;
+    }
+    case 'int_gte': {
+      const n = parseInt(value, DECIMAL_RADIX);
+      if (!Number.isFinite(n)) return null;
+      const [lo, hi] = spec.clamp;
+      return `${spec.field} >= ${clampInt(n, lo, hi)}`;
+    }
+    case 'int_lte': {
+      const n = parseInt(value, DECIMAL_RADIX);
+      if (!Number.isFinite(n)) return null;
+      const [lo, hi] = spec.clamp;
+      return `${spec.field} <= ${clampInt(n, lo, hi)}`;
+    }
+    default: {
+      // Exhaustiveness guard — TypeScript should catch new TokenSpec variants at compile time
+      const _never: never = spec;
+      void _never;
+      return null;
+    }
+  }
+}
+
 export function buildSparseFilters(filters: readonly string[]): string {
   if (filters.length === 0) return '';
 
@@ -778,304 +964,81 @@ export function buildSparseFilters(filters: readonly string[]): string {
   for (const token of filters) {
     const { key, value } = parseFilterToken(token);
     if (value === '') continue; // skip empty filter values
-    switch (key) {
-      // Original filters
-      case 'price_band':
-        clauses.push(`price_band contains ${yqlString(value)}`);
-        break;
-      case 'style':
-        clauses.push(`style contains ${yqlString(value)}`);
-        break;
-      case 'body_min': {
-        const n = parseFloat(value);
-        // body is [0,1] normalised float in Vespa (ETL stores clamp(0,1)). Prior clamp(0,10)
-        // was inherited from the 1-5 sensor scale and is wrong — IDX-03 fix.
-        if (Number.isFinite(n)) clauses.push(`body >= ${clampNum(n, 0, 1).toFixed(3)}`);
-        break;
-      }
-      case 'body_max': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) clauses.push(`body <= ${clampNum(n, 0, 1).toFixed(3)}`);
-        break;
-      }
-      case 'availability':
-        clauses.push(`availability = ${value === 'true' ? 'true' : 'false'}`);
-        break;
 
-      // New wine-domain string filters
-      case 'wine_type':
-        clauses.push(`wine_type contains ${yqlString(value)}`);
-        break;
-      case 'grape_primary':
-        clauses.push(`grape_primary contains ${yqlString(value)}`);
-        break;
-      // grapes is an array<string> field in Vespa — `contains` tests membership.
-      // Emitted alongside grape_primary: tokens for positive grape constraints so
-      // blend wines (where the variety is in grapes[] but not grape_primary) are
-      // included. Exclusion (grapes_not:) is handled in the NOT-filters section.
-      case 'grapes':
-        clauses.push(`grapes contains ${yqlString(value)}`);
-        break;
-      case 'country':
-        clauses.push(`country contains ${yqlString(value)}`);
-        break;
-      case 'region':
-        clauses.push(`region contains ${yqlString(value)}`);
-        break;
-      case 'appellation':
-        clauses.push(`appellation contains ${yqlString(value)}`);
-        break;
-
-      // New wine-domain numeric range filters.
-      // All numeric inputs are clamped to domain bounds to prevent
-      // attackers from sending extreme values (e.g., -999999999) that
-      // bypass downstream filtering logic and to avoid scientific-notation
-      // YQL interpolation.
-      case 'vintage_year_min': {
-        const n = parseInt(value, DECIMAL_RADIX);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `vintage_year >= ${clampInt(n, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR)}`,
-          );
-        }
-        break;
-      }
-      case 'vintage_year_max': {
-        const n = parseInt(value, DECIMAL_RADIX);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `vintage_year <= ${clampInt(n, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR)}`,
-          );
-        }
-        break;
-      }
-      case 'acidity_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `acidity >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
-          );
-        }
-        break;
-      }
-      case 'acidity_max': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `acidity <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
-          );
-        }
-        break;
-      }
-      case 'tannin_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `tannin >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
-          );
-        }
-        break;
-      }
-      case 'tannin_max': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `tannin <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
-          );
-        }
-        break;
-      }
-      case 'finish_length_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `finish_length >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
-          );
-        }
-        break;
-      }
-      case 'finish_length_max': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `finish_length <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, WINE_SENSOR_SCALE_MAX).toFixed(3)}`,
-          );
-        }
-        break;
-      }
-      case 'price_usd_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `price_usd >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_PRICE_USD_YQL_CLAMP).toFixed(2)}`,
-          );
-        }
-        break;
-      }
-      case 'price_usd_max': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `price_usd <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_PRICE_USD_YQL_CLAMP).toFixed(2)}`,
-          );
-        }
-        break;
-      }
-      case 'critic_score_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `critic_score_normalized >= ${clampNum(n, 0, 1).toFixed(NORMALIZED_SCORE_YQL_DECIMAL_PLACES)}`,
-          );
-        }
-        break;
-      }
-      case 'producer_prestige_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `producer_prestige >= ${clampNum(n, 0, 1).toFixed(NORMALIZED_SCORE_YQL_DECIMAL_PLACES)}`,
-          );
-        }
-        break;
-      }
-
-      // SOTA++ taxonomy filters
-      case 'flavor_profile':
-        clauses.push(`flavor_profiles contains ${yqlString(value)}`);
-        break;
-      case 'classification':
-        clauses.push(`classification contains ${yqlString(value)}`);
-        break;
-      case 'alcohol_min': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `alcohol_pct >= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP).toFixed(2)}`,
-          );
-        }
-        break;
-      }
-      case 'alcohol_max': {
-        const n = parseFloat(value);
-        if (Number.isFinite(n)) {
-          clauses.push(
-            `alcohol_pct <= ${clampNum(n, WINE_SENSOR_SCALE_MIN, MAX_ALCOHOL_PCT_YQL_CLAMP).toFixed(2)}`,
-          );
-        }
-        break;
-      }
-      case 'certification':
-        clauses.push(`certifications contains ${yqlString(value)}`);
-        break;
-      case 'soil_type':
-        clauses.push(`soil_type contains ${yqlString(value)}`);
-        break;
-      case 'producer_type':
-        clauses.push(`producer_type contains ${yqlString(value)}`);
-        break;
-      case 'drinking_window_now': {
+    const spec = FILTER_TOKEN_REGISTRY.get(key);
+    if (spec !== undefined) {
+      // drinking_window emits TWO clauses (start <= yr AND end >= yr).
+      // Handle directly here so buildTokenClause stays single-clause.
+      if (spec.type === 'drinking_window') {
         const n = parseInt(value, DECIMAL_RADIX);
         if (Number.isFinite(n)) {
           const yr = clampInt(n, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR);
           clauses.push(`drinking_window_start <= ${yr}`);
           clauses.push(`drinking_window_end >= ${yr}`);
         }
-        break;
+        continue;
       }
-
-      // -----------------------------------------------------------------------
-      // NOT filters — string field exclusions via YQL !(field contains "value")
-      // -----------------------------------------------------------------------
-      // Emitted by constraintToSparseFilterTokens() for 'exclude'/'not_in' operators.
-      // grape_primary_not also sets grapes_not to cover the array schema field.
-
-      case 'grape_primary_not':
-        clauses.push(`!(grape_primary contains ${yqlString(value)})`);
-        break;
-
-      case 'grapes_not':
-        clauses.push(`!(grapes contains ${yqlString(value)})`);
-        break;
-
-      case 'wine_type_not':
-        clauses.push(`!(wine_type contains ${yqlString(value)})`);
-        break;
-
-      case 'country_not':
-        clauses.push(`!(country contains ${yqlString(value)})`);
-        break;
-
-      case 'region_not':
-        clauses.push(`!(region contains ${yqlString(value)})`);
-        break;
-
-      case 'appellation_not':
-        clauses.push(`!(appellation contains ${yqlString(value)})`);
-        break;
-
-      case 'style_not':
-        clauses.push(`!(style contains ${yqlString(value)})`);
-        break;
-
-      case 'price_band_not':
-        clauses.push(`!(price_band contains ${yqlString(value)})`);
-        break;
-
-      case 'flavor_profile_not':
-        clauses.push(`!(flavor_profiles contains ${yqlString(value)})`);
-        break;
-
-      case 'classification_not':
-        clauses.push(`!(classification contains ${yqlString(value)})`);
-        break;
-
-      case 'certification_not':
-        clauses.push(`!(certifications contains ${yqlString(value)})`);
-        break;
-
-      case 'soil_type_not':
-        clauses.push(`!(soil_type contains ${yqlString(value)})`);
-        break;
-
-      case 'producer_type_not':
-        clauses.push(`!(producer_type contains ${yqlString(value)})`);
-        break;
-
-      default: {
-        // Multi-value IN / NOT-IN tokens: key ends with _in, value is pipe-delimited.
-        // Positive (_in): produces a Vespa OR clause: (field contains "a" OR field contains "b").
-        // Negation (_not_in): produces individual AND NOT clauses — Vespa has no NOT-IN shorthand.
-        // The base field name (with optional _not suffix) is validated against a whitelist
-        // to prevent YQL injection.
-        if (key.endsWith('_in')) {
-          const fieldWithSuffix = key.slice(0, -SPARSE_IN_SUFFIX_LENGTH);
-          if (!ALLOWED_SPARSE_IN_FIELDS.has(fieldWithSuffix)) break;
-          // The value is a pipe-delimited list produced by our constraint pipeline.
-          // Individual tokens must NOT contain pipes — if the raw value itself
-          // contains a pipe beyond the delimiters it signals a schema bug or
-          // injection attempt. We validate the raw value's structure:
-          // - split, then ensure every token is non-empty (rejects "a||b", "|", etc.)
-          // Note: checking !v.includes('|') AFTER split is logically dead code because
-          // split removes all pipes. The guard must be on the joined form, not the parts.
-          const vals = value.split('|').filter((v) => v.length > 0);
-          if (vals.length === 0) break;
-          if (fieldWithSuffix.endsWith('_not')) {
-            // Negation NOT-IN: !(field contains "v1") AND !(field contains "v2")
-            const actualField = fieldWithSuffix.slice(0, -SPARSE_NOT_FIELD_SUFFIX_LENGTH);
-            for (const v of vals) {
-              clauses.push(`!(${actualField} contains ${yqlString(v)})`);
-            }
-          } else {
-            // Positive IN: (field contains "a" OR field contains "b")
-            const disjuncts = vals.map((v) => `${fieldWithSuffix} contains ${yqlString(v)}`);
-            clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
-          }
-        }
-        // Other unrecognised tokens are silently skipped to avoid breaking queries.
-        break;
-      }
+      // All other known tokens — delegate to registry-driven builder
+      const clause = buildTokenClause(key, spec, value);
+      if (clause !== null) clauses.push(clause);
+      continue;
     }
+
+    // Multi-value IN / NOT-IN tokens: key ends with _in, value is pipe-delimited.
+    // Positive (_in): produces a Vespa OR clause: (field contains "a" OR field contains "b").
+    // Negation (_not_in): produces individual AND NOT clauses — Vespa has no NOT-IN shorthand.
+    // The base field name (with optional _not suffix) is validated against ALLOWED_SPARSE_IN_FIELDS.
+    if (key.endsWith('_in')) {
+      const fieldWithSuffix = key.slice(0, -SPARSE_IN_SUFFIX_LENGTH);
+      if (!ALLOWED_SPARSE_IN_FIELDS.has(fieldWithSuffix)) {
+        // Unknown field — block and skip. This is the injection prevention gate.
+        continue;
+      }
+      const vals = value.split('|').filter((v) => v.length > 0);
+      if (vals.length === 0) continue;
+      if (fieldWithSuffix.endsWith('_not')) {
+        // Negation NOT-IN: !(field contains "v1") AND !(field contains "v2")
+        // OR for not_matches fields: !(field matches "v1") AND !(field matches "v2")
+        // Derive the actual Vespa field name from the registry (handles field name remapping,
+        // e.g. flavor_profile_not → flavor_profiles).
+        const baseKey = fieldWithSuffix.slice(0, -SPARSE_NOT_FIELD_SUFFIX_LENGTH);
+        const notSpec = FILTER_TOKEN_REGISTRY.get(fieldWithSuffix);
+        // Use registry field name (handles remapping: flavor_profile_not → flavor_profiles).
+        // grape_or has no field property — excluded from ALLOWED_SPARSE_IN_FIELDS _not variants.
+        const actualField = notSpec !== undefined && 'field' in notSpec ? notSpec.field : baseKey;
+        // Use matches (regex substring) for not_matches fields (e.g. style_not_in) — `contains`
+        // on attribute-only multi-token fields silently no-ops ("full" vs "full red").
+        const useNotMatches = notSpec?.type === 'not_matches';
+        for (const v of vals) {
+          clauses.push(
+            useNotMatches
+              ? `!(${actualField} matches ${yqlString(escapeRegex(v))})`
+              : `!(${actualField} contains ${yqlString(v)})`,
+          );
+        }
+      } else if (fieldWithSuffix === 'grape_or') {
+        // grape_or_in: each value must match grape_primary OR grapes (blend coverage)
+        const disjuncts = vals.map(
+          (v) => `(grape_primary contains ${yqlString(v)} OR grapes contains ${yqlString(v)})`,
+        );
+        clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
+      } else {
+        // Positive IN: use the registered operator for this base key.
+        // CRITICAL: style_matches_in must use `matches`, not `contains` — look up the
+        // base spec to determine the correct YQL operator instead of hardcoding `contains`.
+        const baseSpec = FILTER_TOKEN_REGISTRY.get(fieldWithSuffix);
+        const useMatches = baseSpec?.type === 'matches';
+        const vespaField = baseSpec !== undefined && 'field' in baseSpec ? baseSpec.field : fieldWithSuffix;
+        const disjuncts = useMatches
+          ? vals.map((v) => `${vespaField} matches ${yqlString(escapeRegex(v))}`)
+          : vals.map((v) => `${vespaField} contains ${yqlString(v)}`);
+        clauses.push(vals.length === 1 ? disjuncts[0]! : `(${disjuncts.join(' OR ')})`);
+      }
+      continue;
+    }
+
+    // Unknown token — blocked. Never reaches Vespa.
+    // No log here (hot path) — callers should validate tokens before this point.
   }
 
   if (clauses.length === 0) return '';

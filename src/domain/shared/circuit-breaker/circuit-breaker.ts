@@ -69,14 +69,14 @@ export class CircuitBreakerImpl implements CircuitBreaker {
   private halfOpenInFlight = 0;
 
   constructor(opts: CircuitBreakerOptions) {
-    if (opts.failureThreshold <= 0) {
-      throw new Error('circuit-breaker: failureThreshold must be > 0');
+    if (!Number.isFinite(opts.failureThreshold) || opts.failureThreshold <= 0) {
+      throw new Error('circuit-breaker: failureThreshold must be a finite positive number');
     }
-    if (opts.recoveryTimeoutMs < 0) {
-      throw new Error('circuit-breaker: recoveryTimeoutMs must be >= 0');
+    if (!Number.isFinite(opts.recoveryTimeoutMs) || opts.recoveryTimeoutMs < 0) {
+      throw new Error('circuit-breaker: recoveryTimeoutMs must be a finite non-negative number');
     }
-    if (opts.halfOpenMaxAttempts <= 0) {
-      throw new Error('circuit-breaker: halfOpenMaxAttempts must be > 0');
+    if (!Number.isFinite(opts.halfOpenMaxAttempts) || opts.halfOpenMaxAttempts <= 0) {
+      throw new Error('circuit-breaker: halfOpenMaxAttempts must be a finite positive number');
     }
     this.opts = opts;
   }

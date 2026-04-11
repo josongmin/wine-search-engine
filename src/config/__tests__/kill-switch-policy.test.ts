@@ -9,23 +9,7 @@ describe('buildCacheReadRuntimeState — rerankerAvailable', () => {
     expect(state.rerankerAvailable).toBe(true);
   });
 
-  it('is true when self-hosted reranker URL is configured', () => {
-    const config = parseEnv({ NODE_ENV: 'test', RERANKER_SERVICE_URL: 'https://reranker.example.com' });
-    const state = buildCacheReadRuntimeState(config);
-    expect(state.rerankerAvailable).toBe(true);
-  });
-
-  it('is true when both Cohere key and reranker URL are configured', () => {
-    const config = parseEnv({
-      NODE_ENV: 'test',
-      COHERE_API_KEY: 'co-test-key',
-      RERANKER_SERVICE_URL: 'https://reranker.example.com',
-    });
-    const state = buildCacheReadRuntimeState(config);
-    expect(state.rerankerAvailable).toBe(true);
-  });
-
-  it('is false when neither Cohere key nor reranker URL are configured', () => {
+  it('is false when COHERE_API_KEY is not set', () => {
     const config = parseEnv({ NODE_ENV: 'test' });
     const state = buildCacheReadRuntimeState(config);
     expect(state.rerankerAvailable).toBe(false);
@@ -34,15 +18,56 @@ describe('buildCacheReadRuntimeState — rerankerAvailable', () => {
   it('is false when reranker is configured but runtime signal reports timeout', () => {
     const config = parseEnv({ NODE_ENV: 'test', COHERE_API_KEY: 'co-test-key' });
     const state = buildCacheReadRuntimeState(config, {
-      degradation: { degradationReasons: ['reranker_timeout'] },
+      rerankerStatus: 'failed',
+      degradation: { executionMode: 'degraded', degradationReasons: ['reranker_timeout'] },
     });
     expect(state.rerankerAvailable).toBe(false);
   });
 
-  it('is false when reranker is configured but runtime signal reports unavailable', () => {
+  // 'reranker_unavailable' is NOT a value produced by classifyRerankerFailureReason().
+  // The actual values are: reranker_timeout, reranker_http_error, reranker_parse_error,
+  // reranker_unknown. This test ensures we don't accidentally rely on the old ghost string.
+  it('is true when degradationReasons contains unknown ghost string reranker_unavailable (not produced by ranker)', () => {
     const config = parseEnv({ NODE_ENV: 'test', COHERE_API_KEY: 'co-test-key' });
     const state = buildCacheReadRuntimeState(config, {
-      degradation: { degradationReasons: ['reranker_unavailable'] },
+      rerankerStatus: 'executed',
+      degradation: { executionMode: 'degraded', degradationReasons: ['reranker_unavailable'] },
+    });
+    // 'reranker_unavailable' is not in the whitelist so this alone doesn't mark it unavailable
+    expect(state.rerankerAvailable).toBe(true);
+  });
+
+  it('is false when rerankerStatus is "failed" (primary SSoT)', () => {
+    const config = parseEnv({ NODE_ENV: 'test', COHERE_API_KEY: 'co-test-key' });
+    const state = buildCacheReadRuntimeState(config, {
+      rerankerStatus: 'failed',
+    });
+    expect(state.rerankerAvailable).toBe(false);
+  });
+
+  it('is false when degradationReasons includes reranker_http_error', () => {
+    const config = parseEnv({ NODE_ENV: 'test', COHERE_API_KEY: 'co-test-key' });
+    const state = buildCacheReadRuntimeState(config, {
+      rerankerStatus: 'failed',
+      degradation: { executionMode: 'degraded', degradationReasons: ['reranker_http_error'] },
+    });
+    expect(state.rerankerAvailable).toBe(false);
+  });
+
+  it('is false when degradationReasons includes reranker_parse_error', () => {
+    const config = parseEnv({ NODE_ENV: 'test', COHERE_API_KEY: 'co-test-key' });
+    const state = buildCacheReadRuntimeState(config, {
+      rerankerStatus: 'failed',
+      degradation: { executionMode: 'degraded', degradationReasons: ['reranker_parse_error'] },
+    });
+    expect(state.rerankerAvailable).toBe(false);
+  });
+
+  it('is false when degradationReasons includes reranker_unknown', () => {
+    const config = parseEnv({ NODE_ENV: 'test', COHERE_API_KEY: 'co-test-key' });
+    const state = buildCacheReadRuntimeState(config, {
+      rerankerStatus: 'failed',
+      degradation: { executionMode: 'degraded', degradationReasons: ['reranker_unknown'] },
     });
     expect(state.rerankerAvailable).toBe(false);
   });
@@ -98,29 +123,5 @@ describe('buildCacheReadRuntimeState — currentExecutionModeHint', () => {
     });
     const state = buildCacheReadRuntimeState(config);
     expect(state.denseRetrievalEnabled).toBe(false);
-  });
-
-  it('reranker URL with trailing whitespace is still treated as configured (trim-safe)', () => {
-    // kill-switch-policy uses url?.trim().length to guard against whitespace-only strings.
-    // A valid URL with surrounding whitespace parsed through env is a different path —
-    // here we verify the policy itself trims before checking length.
-    const config = parseEnv({ NODE_ENV: 'test', RERANKER_SERVICE_URL: 'https://reranker.example.com' });
-    // Manually simulate what would happen if URL had leading/trailing spaces post-parse
-    const configWithSpaceUrl = {
-      ...config,
-      reranker: { ...config.reranker, url: '   ' },
-    };
-    const state = buildCacheReadRuntimeState(configWithSpaceUrl as typeof config);
-    expect(state.rerankerAvailable).toBe(false);
-  });
-
-  it('whitespace-only reranker url → mode degraded', () => {
-    const config = parseEnv({ NODE_ENV: 'test' });
-    const configWithSpaceUrl = {
-      ...config,
-      reranker: { ...config.reranker, url: '   ' },
-    };
-    const state = buildCacheReadRuntimeState(configWithSpaceUrl as typeof config);
-    expect(state.currentExecutionModeHint).toBe('degraded');
   });
 });

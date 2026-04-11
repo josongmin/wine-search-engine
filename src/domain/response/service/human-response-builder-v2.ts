@@ -50,9 +50,10 @@ export interface HumanResponseBuildParamsV2 {
 function synthesiseEvidenceSummary(result: RankedResult): string {
   const items = [...result.evidenceItems]
     .sort((a, b) => {
-      const wa = parseFloat(a.contribution);
-      const wb = parseFloat(b.contribution);
-      // Guard: parseFloat("abc") → NaN; Math.abs(NaN) → NaN; NaN - NaN → NaN
+      const wa = Number(a.contribution);
+      const wb = Number(b.contribution);
+      // Guard: Number("0.5abc") → NaN (unlike parseFloat which returns 0.5 for "0.5abc");
+      // Math.abs(NaN) → NaN; NaN - NaN → NaN
       // which produces non-deterministic sort. Treat non-finite as 0 (weakest signal).
       const absA = Number.isFinite(wa) ? Math.abs(wa) : 0;
       const absB = Number.isFinite(wb) ? Math.abs(wb) : 0;

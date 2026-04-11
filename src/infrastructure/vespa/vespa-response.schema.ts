@@ -30,9 +30,15 @@ const MAX_VESPA_HITS = 10_000;
 export const VespaHitSchema = z
   .object({
     id: z.string().optional(),
-    relevance: z.number().finite().optional(),
+    // Vespa always emits `relevance` for ranked hits; default(0) guards against
+    // pathological empty-ranking-profile responses and prevents the downstream
+    // cast to VespaHit (relevance: number) from silently converting undefined → NaN.
+    relevance: z.number().finite().default(0),
     source: z.string(),
-    fields: z.record(z.unknown()).optional(),
+    // `fields` can be absent on metadata-only hits (e.g. grouping result nodes).
+    // Default to empty record so extractMatchedFields / extractHitSummary callers
+    // never receive undefined — they iterate over the object, which is always safe.
+    fields: z.record(z.unknown()).default({}),
   })
   .passthrough();
 

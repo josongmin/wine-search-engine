@@ -51,6 +51,11 @@ export class InMemoryWatchlistStore implements WatchlistStoragePort, Transaction
 
   append(log: WatchlistDeliveryLogEntry): Promise<void> {
     const logs = this.deliveryLogs.get(log.watchlistId) ?? [];
+    // Mirror PgWatchlistStore's hard cap of 1000 delivery log entries per watchlist
+    // to prevent unbounded memory growth in long-running tests or CI fixtures.
+    if (logs.length >= 1000) {
+      logs.shift();
+    }
     logs.push(log);
     this.deliveryLogs.set(log.watchlistId, logs);
     return Promise.resolve();

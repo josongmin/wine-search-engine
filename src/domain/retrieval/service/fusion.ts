@@ -33,8 +33,7 @@ function buildSummaryMap(
   return map;
 }
 
-/** Standard RRF smoothing constant (rank + k in denominator). Imported from SSoT rrf.ts. */
-const RECIPROCAL_RANK_FUSION_DEFAULT_K = RRF_DEFAULT_K;
+// Rule 30 SSoT: RRF_DEFAULT_K is defined once in rrf.ts. Use it directly — no local alias.
 
 /**
  * Fuses results from sparse, dense, and anchor retrieval passes using
@@ -72,36 +71,52 @@ export class FusionService {
     if (k !== undefined && k < 1) {
       throw new Error(`FusionService.fuse: k must be ≥ 1, got ${k}`);
     }
-    const effectiveK = k ?? RECIPROCAL_RANK_FUSION_DEFAULT_K;
+    const effectiveK = k ?? RRF_DEFAULT_K;
 
-    // Build rank maps for RRF
+    // Build rank maps for RRF.
+    // Dedup by entityId using best (lowest) rank — if the same entity appears at
+    // two positions in the same hit list (e.g. Vespa dedup misconfigured), take
+    // the better rank so the RRF contribution is correct. Last-write-wins semantics
+    // would otherwise produce an arbitrary, non-best rank for the entity.
     const sparseRankMap = new Map<string, number>();
     const sparseScoreMap = new Map<string, number>();
     for (const hit of sparseHits) {
-      sparseRankMap.set(hit.entityId, hit.rank);
-      sparseScoreMap.set(hit.entityId, hit.score);
+      const existing = sparseRankMap.get(hit.entityId);
+      if (existing === undefined || hit.rank < existing) {
+        sparseRankMap.set(hit.entityId, hit.rank);
+        sparseScoreMap.set(hit.entityId, hit.score);
+      }
     }
 
     const denseRankMap = new Map<string, number>();
     const denseScoreMap = new Map<string, number>();
     for (const hit of denseHits) {
-      denseRankMap.set(hit.entityId, hit.rank);
-      denseScoreMap.set(hit.entityId, hit.score);
+      const existing = denseRankMap.get(hit.entityId);
+      if (existing === undefined || hit.rank < existing) {
+        denseRankMap.set(hit.entityId, hit.rank);
+        denseScoreMap.set(hit.entityId, hit.score);
+      }
     }
 
     const learnedSparseRankMap = new Map<string, number>();
     const learnedSparseScoreMap = new Map<string, number>();
     for (const hit of learnedSparseHits) {
-      learnedSparseRankMap.set(hit.entityId, hit.rank);
-      learnedSparseScoreMap.set(hit.entityId, hit.score);
+      const existing = learnedSparseRankMap.get(hit.entityId);
+      if (existing === undefined || hit.rank < existing) {
+        learnedSparseRankMap.set(hit.entityId, hit.rank);
+        learnedSparseScoreMap.set(hit.entityId, hit.score);
+      }
     }
 
     const anchorRankMap = new Map<string, number>();
     const anchorScoreMap = new Map<string, number>();
     if (anchorHits) {
       for (const hit of anchorHits) {
-        anchorRankMap.set(hit.entityId, hit.rank);
-        anchorScoreMap.set(hit.entityId, hit.score);
+        const existing = anchorRankMap.get(hit.entityId);
+        if (existing === undefined || hit.rank < existing) {
+          anchorRankMap.set(hit.entityId, hit.rank);
+          anchorScoreMap.set(hit.entityId, hit.score);
+        }
       }
     }
 
@@ -207,8 +222,12 @@ export class FusionService {
     // localeCompare for ASCII IDs without the allocation of `String(...)`
     // wrappers or the heavy Intl collator path.
     candidates.sort((a, b) => {
-      const aScore = Number.isFinite(a.fusionRrfTotal) ? a.fusionRrfTotal! : 0;
-      const bScore = Number.isFinite(b.fusionRrfTotal) ? b.fusionRrfTotal! : 0;
+      // NaN/Infinity guard: use -Infinity (not 0) so non-finite scores always
+      // sort LAST rather than interleaving with valid 0-score candidates.
+      // evidence-accumulator.ts uses the same -Infinity sentinel — keep them
+      // in sync (Rule 30: SSoT for cross-module sort behaviour).
+      const aScore = Number.isFinite(a.fusionRrfTotal) ? a.fusionRrfTotal! : -Infinity;
+      const bScore = Number.isFinite(b.fusionRrfTotal) ? b.fusionRrfTotal! : -Infinity;
       const diff = bScore - aScore;
       if (diff !== 0) return diff;
       return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;

@@ -21,7 +21,6 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
       vespa: { url: undefined },
       embedding: { url: undefined },
       openai: { apiKey: undefined },
-      reranker: { url: undefined },
       cohere: { apiKey: undefined },
     });
 
@@ -37,7 +36,6 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
       vespa: { url: 'http://vespa:8080' },
       embedding: { url: undefined },
       openai: { apiKey: undefined },
-      reranker: { url: undefined },
       cohere: { apiKey: undefined },
     });
 
@@ -46,14 +44,13 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
     );
   });
 
-  it('logs reranker warning when neither reranker.url nor cohere.apiKey is set', () => {
+  it('logs reranker warning when cohere.apiKey is not set', () => {
     const warnSpy = vi.spyOn(bootstrapLogger, 'warn');
 
     warnStartupMisconfigurations({
       vespa: { url: 'http://vespa:8080' },
       embedding: { url: 'http://embedding:8080' },
       openai: { apiKey: undefined },
-      reranker: { url: undefined },
       cohere: { apiKey: undefined },
     });
 
@@ -69,7 +66,6 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
       vespa: { url: 'http://vespa:8080' },
       embedding: { url: undefined },
       openai: { apiKey: 'sk-test' },
-      reranker: { url: undefined },
       cohere: { apiKey: 'co-test' },
     });
 
@@ -83,8 +79,7 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
       vespa: { url: 'http://vespa:8080' },
       embedding: { url: undefined },
       openai: { apiKey: 'sk-test' },
-      reranker: { url: 'http://reranker:8080' },
-      cohere: { apiKey: undefined },
+      cohere: { apiKey: 'co-test' },
     });
 
     // embedding warning should NOT be logged because openai.apiKey is provided

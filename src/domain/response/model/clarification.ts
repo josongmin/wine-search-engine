@@ -1,4 +1,5 @@
 import type { EntityId } from '../../shared/types/index.js';
+import type { StructuredClarifyPayload } from '../../query/model/abstain-decision.js';
 
 /**
  * A single candidate presented to the user during disambiguation.
@@ -27,4 +28,11 @@ export interface ClarificationPayload {
 
   /** The kind of suggestion being offered. */
   readonly suggestionType: 'disambiguation' | 'missing_info';
+
+  /**
+   * E6: Structured clarification payload — kind-specific data for UI rendering.
+   * Present when the clarification was produced via TypedAbstainDecision / E6 path.
+   * Absent for legacy clarifications produced before E6.
+   */
+  readonly structuredPayload?: StructuredClarifyPayload | undefined;
 }

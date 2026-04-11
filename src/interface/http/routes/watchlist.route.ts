@@ -5,11 +5,13 @@
  * accept caller-provided `user_id` and hide cross-user resources behind 404s.
  */
 
+import { promises as dnsPromises } from 'node:dns';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type {
   WatchlistDeliveryLogEntry,
   WatchlistEntry,
 } from '../../../domain/watchlist/model/watchlist-entry.js';
+import { isPrivateOrReservedIp } from '../../../infrastructure/watchlist/ssrf-guard.js';
 import { toWatchlistTriggerResponse } from '../../../domain/watchlist/service/watchlist-policy.js';
 import { getAuthenticatedSubject } from '../authenticated-subject.js';
 import {
@@ -66,7 +68,10 @@ function requireSubject(
     | typeof WatchlistDeliveriesRouteContract,
 ): string | null {
   const subject = getAuthenticatedSubject(request);
-  if (subject !== null) {
+  // Guard empty-string subject: a misconfigured upstream proxy may send
+  // X-Authenticated-Subject: "" which would pass the null check but route
+  // all watchlist operations to the same empty-string user bucket.
+  if (subject !== null && subject.length > 0) {
     return subject;
   }
 
@@ -164,6 +169,54 @@ export function registerWatchlistRoute(
       }
 
       const body = parseContractBody(request, WatchlistCreateRouteContract);
+
+      // Defense-in-depth SSRF check at creation time (DNS rebinding mitigation).
+      // webhook-delivery.ts re-checks at each delivery attempt; checking here prevents
+      // storing a URL that will always fail and surfaces the error to the caller early.
+      try {
+        const parsedUrl = new URL(body.callback_url);
+        if (parsedUrl.protocol !== 'https:') {
+          sendRouteContractResponse(
+            request,
+            reply,
+            WatchlistCreateRouteContract,
+            HTTP_STATUS_BAD_REQUEST,
+            createErrorResponse(getRequestId(request), 'INVALID_CALLBACK_URL', 'Callback URL must use https'),
+          );
+          return;
+        }
+        const lookups = await dnsPromises.lookup(parsedUrl.hostname, { all: true });
+        for (const { address } of lookups) {
+          if (isPrivateOrReservedIp(address)) {
+            sendRouteContractResponse(
+              request,
+              reply,
+              WatchlistCreateRouteContract,
+              HTTP_STATUS_BAD_REQUEST,
+              createErrorResponse(getRequestId(request), 'INVALID_CALLBACK_URL', 'Callback host resolves to private/reserved IP'),
+            );
+            return;
+          }
+        }
+      } catch (dnsErr: unknown) {
+        if (dnsErr instanceof Error && dnsErr.message.startsWith('INVALID_CALLBACK_URL')) {
+          // Already sent response above — do not fall through to the generic error handler.
+          return;
+        }
+        const msg = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
+        if (msg.includes('ENOTFOUND') || msg.includes('ENODATA') || msg.includes('EAI_')) {
+          sendRouteContractResponse(
+            request,
+            reply,
+            WatchlistCreateRouteContract,
+            HTTP_STATUS_BAD_REQUEST,
+            createErrorResponse(getRequestId(request), 'INVALID_CALLBACK_URL', 'Callback hostname could not be resolved'),
+          );
+          return;
+        }
+        // Unexpected DNS error — fall through to creation attempt
+        request.log.warn({ err: dnsErr }, 'watchlist create: DNS preflight failed unexpectedly');
+      }
 
       try {
         const entry = await deps.watchlistService.create({

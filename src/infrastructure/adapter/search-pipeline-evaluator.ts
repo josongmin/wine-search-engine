@@ -35,6 +35,7 @@ import {
   preferCanonicalRetrievalChannelLabels,
 } from '../../domain/retrieval/model/retrieval-channel.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from '../../application/search/search-usecase-decision-snapshot.js';
+import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
 
 const log = bootstrapLogger.child({ component: 'SearchPipelineEvaluator' });
 

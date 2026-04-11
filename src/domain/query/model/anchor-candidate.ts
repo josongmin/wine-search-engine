@@ -39,6 +39,15 @@ export interface AnchorCandidate {
    */
   readonly confidence: number;
 
-  /** How this anchor candidate was discovered. */
-  readonly source: 'alias' | 'planner_heuristic' | 'entity_lookup';
+  /**
+   * How this anchor candidate was discovered.
+   *
+   * - `alias`            — AnchorExtractor matched a known alias/canonical form
+   * - `planner_heuristic`— Planner emitted via heuristic (e.g. fuzzy expansion)
+   * - `entity_lookup`    — Explicit entity-id lookup from query context
+   * - `blocker_seed`     — TA2-4: high-recall blocker returned this ID but it
+   *                        was absent from alias anchors; signal set is zero-filled
+   *                        and populated downstream by the scorer's attribute path
+   */
+  readonly source: 'alias' | 'planner_heuristic' | 'entity_lookup' | 'blocker_seed';
 }

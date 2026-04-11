@@ -1,6 +1,7 @@
 import type { EntityId } from '../../shared/types/index.js';
 import type { AliasType } from '../../alias/model/alias.js';
 import type { MatchSignalSet } from './match-signal-set.js';
+import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
 
 /**
  * A candidate that has been scored, calibrated, and ranked by the resolver.
@@ -20,6 +21,16 @@ export interface ResolvedCandidate {
 
   /** References to evidence items that support this candidate. */
   readonly evidenceRefs: readonly string[];
+
+  /**
+   * TA2-4: Whether this candidate originated from a blocker seed rather than
+   * an alias anchor lookup. Present and `true` for candidates that entered the
+   * pipeline via `blockerOnlyIds` — i.e. the blocker found the entity but the
+   * alias extractor did not. Absent (undefined) for anchor-sourced candidates.
+   *
+   * Used downstream for provenance tagging and corrective retry logging.
+   */
+  readonly blockerSeed?: true | undefined;
 }
 
 /**
@@ -44,6 +55,16 @@ export interface ResolverCandidate {
 
   /** The full set of match signals for scoring. */
   readonly sourceSignals: MatchSignalSet;
+
+  /**
+   * TA2-4: Origin of this candidate.
+   *
+   * - `'alias'` / `'planner_heuristic'` / `'entity_lookup'` — classic alias-anchor path.
+   * - `'blocker_seed'` — entity returned by Blocker.block() that was NOT present in
+   *   any anchor's candidateEntityIds. Carries ZERO_SIGNALS; relies on attribute-hint
+   *   scoring. Absent on candidates built before TA2-4 was wired.
+   */
+  readonly source?: EntityCandidateSource | undefined;
 }
 
 /**

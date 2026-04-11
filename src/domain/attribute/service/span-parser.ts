@@ -98,13 +98,19 @@ export function parseSpans(normalizedQuery: string): readonly Span[] {
 export function resolveOverlaps<T>(
   annotated: readonly { span: Span; resolved: T | null }[],
 ): readonly { span: Span; resolved: T | null }[] {
-  // Sort by: resolved first (longer first, earlier first), then unresolved.
+  // Sort by: resolved first (longer first, earlier first, then span text), then unresolved.
+  // The text tie-breaker is required for determinism when two spans share the same resolved
+  // status, tokenCount, and startChar (e.g. different endChar after punctuation stripping).
   const sorted = [...annotated].sort((a, b) => {
     const aResolved = a.resolved !== null;
     const bResolved = b.resolved !== null;
     if (aResolved !== bResolved) return aResolved ? -1 : 1;
     if (a.span.tokenCount !== b.span.tokenCount) return b.span.tokenCount - a.span.tokenCount;
-    return a.span.startChar - b.span.startChar;
+    if (a.span.startChar !== b.span.startChar) return a.span.startChar - b.span.startChar;
+    // Prefer longer span (larger endChar) when start and tokenCount are equal
+    if (a.span.endChar !== b.span.endChar) return b.span.endChar - a.span.endChar;
+    // Final deterministic tie-breaker: lexicographic on span text
+    return a.span.text < b.span.text ? -1 : a.span.text > b.span.text ? 1 : 0;
   });
 
   const claimed: { start: number; end: number }[] = [];

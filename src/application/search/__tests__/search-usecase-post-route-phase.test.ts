@@ -66,6 +66,7 @@ describe('runSearchPostRoutePhase', () => {
       retrievalModeSource: 'planner',
       abstainPolicy: {
         shouldAbstain: vi.fn().mockReturnValue({ abstain: true, entropy: 0.99 }),
+        evaluate: vi.fn().mockReturnValue({ shouldAbstain: true, reason: 'low_confidence', detail: 'entropy=0.99', recoverableBy: 'clarify', entropy: 0.99 }),
       } as never,
       snapshotVersions: {
         modelVersions: {},

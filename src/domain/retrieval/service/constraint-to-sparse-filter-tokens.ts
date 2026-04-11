@@ -1,6 +1,82 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 
 /**
+ * Vespa `style` field stores compound strings: "medium red", "bold red", "light red",
+ * "medium white", "full white". The field uses `attribute` indexing only (no full-text
+ * index), so `contains` does NOT do substring matching on multi-token strings.
+ * We must use `matches` (regex substring) in YQL, which requires a `style_matches:`
+ * token prefix so `buildSparseFilters` emits the right clause.
+ *
+ * This map normalises agent/planner emitted style values to the canonical Vespa
+ * style prefix that will match via `matches`. Values not in this map are escaped
+ * as regex literals (see escapeVespaRegex) before being passed to buildSparseFilters,
+ * preventing LLM-emitted metacharacters from acting as Vespa (Java) regex patterns.
+ *
+ * SSoT for style value normalisation. Do not duplicate in agent-tools or elsewhere.
+ */
+const STYLE_NORMALISATION_MAP: ReadonlyMap<string, string> = new Map([
+  // Body/weight synonyms → match the compound "X red"/"X white" values
+  ['light', 'light'],
+  ['light-bodied', 'light'],
+  ['light bodied', 'light'],
+  ['medium', 'medium'],
+  ['medium-bodied', 'medium'],
+  ['medium bodied', 'medium'],
+  ['full', 'full'],
+  ['full-bodied', 'full'],
+  ['full bodied', 'full'],
+  ['bold', 'bold'],
+  ['heavy', 'bold'],
+  ['rich', 'bold'],
+  // Oaked — not a Vespa style value, no match possible; skip (return empty)
+  ['oaked', ''],
+  ['unoaked', ''],
+  ['oak', ''],
+]);
+
+/**
+ * Vespa `price_band` field stores single-token enum values: "value", "mid",
+ * "premium", "luxury". Maps common agent/planner values to these canonical tokens.
+ *
+ * SSoT for price_band normalisation.
+ */
+const PRICE_BAND_NORMALISATION_MAP: ReadonlyMap<string, string> = new Map([
+  ['budget', 'value'],
+  ['value', 'value'],
+  ['affordable', 'value'],
+  ['cheap', 'value'],
+  ['inexpensive', 'value'],
+  ['mid', 'mid'],
+  ['mid-range', 'mid'],
+  ['mid range', 'mid'],
+  ['moderate', 'mid'],
+  ['premium', 'premium'],
+  ['high-end', 'premium'],
+  ['high end', 'premium'],
+  ['expensive', 'premium'],
+  ['luxury', 'luxury'],
+  ['ultra-premium', 'luxury'],
+  ['ultra premium', 'luxury'],
+  ['fine', 'luxury'],
+]);
+
+/**
+ * Escapes a string so it is treated as a literal (non-special) pattern by
+ * Vespa's `matches` operator, which uses Java regex syntax. Without escaping,
+ * LLM-emitted style values containing `.`, `*`, `+`, `?`, `(`, `)`, etc. act
+ * as regex wildcards, matching unintended wines or causing Vespa to throw a
+ * PatternSyntaxException.
+ *
+ * The canonical `STYLE_NORMALISATION_MAP` values (light, medium, full, bold)
+ * are already safe literals — this function guards the fallthrough path for
+ * unrecognised values that pass through unchanged.
+ */
+function escapeVespaRegex(value: string): string {
+  // Java regex special characters: \.[]{}()*+?^$|
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Maps planner hard constraints to Vespa sparse filter tokens understood by
  * {@link buildSparseFilters} (`src/infrastructure/vespa/mapping.ts`).
  *
@@ -24,7 +100,11 @@ function constraintToSparseFilterTokens(
 
   const stringEq = (key: string): readonly string[] => {
     if (operator === '=' && typeof value === 'string' && value.length > 0) {
-      return [`${key}:${value}`];
+      // Strip pipe to prevent token-delimiter injection: a pipe in a single value
+      // would be misinterpreted by buildSparseFilters as a multi-value delimiter.
+      const safe = value.replace(/\|/g, '');
+      if (safe.length === 0) return [];
+      return [`${key}:${safe}`];
     }
     if (operator === 'in' && Array.isArray(value)) {
       // Strip pipe chars from individual values: pipe is the token delimiter used by
@@ -41,8 +121,22 @@ function constraintToSparseFilterTokens(
       return [];
     }
     // Negation operators: emit <key>_not tokens for downstream YQL NOT clauses.
-    if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
-      return [`${key}_not:${value.replace(/\|/g, '')}`];
+    if (operator === 'exclude') {
+      if (typeof value === 'string' && value.length > 0) {
+        const safe = value.replace(/\|/g, '');
+        if (safe.length === 0) return [];
+        return [`${key}_not:${safe}`];
+      }
+      if (Array.isArray(value)) {
+        // Same pipe-stripping as 'not_in' array branch above.
+        const normalized = value
+          .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+          .map((entry) => entry.replace(/\|/g, ''))
+          .filter((entry) => entry.length > 0);
+        if (normalized.length === 0) return [];
+        if (normalized.length === 1) return [`${key}_not:${normalized[0]}`];
+        return [`${key}_not_in:${normalized.join('|')}`];
+      }
     }
     if (operator === 'not_in' && Array.isArray(value)) {
       // Same pipe-stripping: see 'in' branch above.
@@ -75,6 +169,20 @@ function constraintToSparseFilterTokens(
         if (safe.length === 0) return [];
         return [`grape_primary_not:${safe}`, `grapes_not:${safe}`];
       }
+      if (operator === 'exclude' && Array.isArray(value)) {
+        // Array exclude: must cover both grape_primary (string) and grapes (array<string>).
+        // Strip pipes to prevent token-delimiter injection.
+        const normalized = value
+          .filter((e): e is string => typeof e === 'string' && e.length > 0)
+          .map((e) => e.replace(/\|/g, ''))
+          .filter((e) => e.length > 0);
+        if (normalized.length === 0) return [];
+        if (normalized.length === 1) {
+          return [`grape_primary_not:${normalized[0]}`, `grapes_not:${normalized[0]}`];
+        }
+        const joined = normalized.join('|');
+        return [`grape_primary_not_in:${joined}`, `grapes_not_in:${joined}`];
+      }
       if (operator === 'not_in' && Array.isArray(value)) {
         // Strip pipes to prevent token-delimiter injection (same as stringEq branch).
         const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0)
@@ -89,16 +197,15 @@ function constraintToSparseFilterTokens(
         }
         return [`grape_primary_not_in:${joined}`, `grapes_not_in:${joined}`];
       }
-      // Positive = / in: must cover BOTH grape fields so blends are included.
-      // grape_primary (string) holds the dominant variety; grapes (array<string>)
-      // holds all varieties for multi-grape blends. Filtering only grape_primary
-      // misses blend wines where the requested variety is secondary.
-      // buildSparseFilters handles `grape_primary_in:` (OR clause) and
-      // `grapes_in:` (OR clause) independently — both must be emitted.
+      // Positive = / in: use `grape_or:` compound token so buildSparseFilters
+      // emits (grape_primary contains "X" OR grapes contains "X").
+      // Previously emitted two separate tokens (grape_primary:X + grapes:X) which
+      // buildSparseFilters combined as AND — meaning blend wines where the requested
+      // variety is only in grapes[] but NOT grape_primary were EXCLUDED. OR is correct.
       if (operator === '=' && typeof value === 'string' && value.length > 0) {
         const safe = value.replace(/\|/g, '');
         if (safe.length === 0) return [];
-        return [`grape_primary:${safe}`, `grapes:${safe}`];
+        return [`grape_or:${safe}`];
       }
       if (operator === 'in' && Array.isArray(value)) {
         const normalized = value.filter((e): e is string => typeof e === 'string' && e.length > 0)
@@ -106,10 +213,10 @@ function constraintToSparseFilterTokens(
           .filter((e) => e.length > 0);
         if (normalized.length === 0) return [];
         if (normalized.length === 1) {
-          return [`grape_primary:${normalized[0]}`, `grapes:${normalized[0]}`];
+          return [`grape_or:${normalized[0]}`];
         }
         const joined = normalized.join('|');
-        return [`grape_primary_in:${joined}`, `grapes_in:${joined}`];
+        return [`grape_or_in:${joined}`];
       }
       return [];
     // IDX-05 NOTE — SOFT_CONSTRAINT_ATTRIBUTES and hard filter cases:
@@ -120,10 +227,108 @@ function constraintToSparseFilterTokens(
     // "no oaky style" or "not certified biodynamic" mean a hard exclusion, not a penalty.
     // stringEq() only emits tokens for =, in, exclude, not_in; positive '=' or 'in'
     // constraints reach this function only via direct calls, not the production path.
-    case 'style':
-      return stringEq('style');
-    case 'price_band':
-      return stringEq('price_band');
+    case 'style': {
+      // style field uses attribute-only indexing — `contains` fails on multi-token values
+      // like "light red". Use `style_matches:` token so buildSparseFilters emits `matches`
+      // (regex substring).
+      //
+      // Exclusion operators must normalise synonyms before emitting the NOT token.
+      // Without normalisation, `style exclude "full-bodied"` emits `style_not:full-bodied`
+      // → Vespa `!(style contains "full-bodied")` which never matches `"full red"` (the
+      // canonical stored value), causing the exclusion to silently no-op.
+      // With normalisation, it emits `style_not:full` → `!(style contains "full")` which
+      // correctly excludes any wine whose style field contains "full" (e.g. "full red").
+      if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
+        const normalised = STYLE_NORMALISATION_MAP.get(value.toLowerCase()) ?? value.toLowerCase();
+        if (normalised.length === 0) return []; // known non-indexable (oaked/unoaked)
+        const safe = normalised.replace(/\|/g, '');
+        if (safe.length === 0) return [];
+        return [`style_not:${safe}`];
+      }
+      if (operator === 'not_in' && Array.isArray(value)) {
+        const normalised = value
+          .filter((v): v is string => typeof v === 'string' && v.length > 0)
+          .map((v) => STYLE_NORMALISATION_MAP.get(v.toLowerCase()) ?? v.toLowerCase())
+          .filter((v) => v.length > 0) // drop oaked/unoaked (maps to "")
+          .map((v) => v.replace(/\|/g, ''))
+          .filter((v) => v.length > 0);
+        if (normalised.length === 0) return [];
+        if (normalised.length === 1) return [`style_not:${normalised[0]}`];
+        return [`style_not_in:${normalised.join('|')}`];
+      }
+      if (operator === '=' && typeof value === 'string' && value.length > 0) {
+        const lower = value.toLowerCase();
+        // Canonical values (light, medium, full, bold) are safe regex literals.
+        // Unknown fallthrough values must be escaped before Vespa `matches` (Java regex).
+        const normalised = STYLE_NORMALISATION_MAP.has(lower)
+          ? (STYLE_NORMALISATION_MAP.get(lower) as string)
+          : escapeVespaRegex(lower);
+        if (normalised.length === 0) return []; // known non-indexable value (e.g. "oaked")
+        return [`style_matches:${normalised}`];
+      }
+      if (operator === 'in' && Array.isArray(value)) {
+        // Multi-value style: normalise each value and emit pipe-delimited style_matches_in token.
+        // buildSparseFilters handles style_matches_in with `matches` operator (not `contains`).
+        const normalised = value
+          .filter((v): v is string => typeof v === 'string' && v.length > 0)
+          .map((v) => {
+            const lower = v.toLowerCase();
+            return STYLE_NORMALISATION_MAP.has(lower)
+              ? (STYLE_NORMALISATION_MAP.get(lower) as string)
+              : escapeVespaRegex(lower);
+          })
+          .filter((v) => v.length > 0); // drop oaked/unoaked (normalised to "")
+        if (normalised.length === 0) return [];
+        if (normalised.length === 1) return [`style_matches:${normalised[0]}`];
+        return [`style_matches_in:${normalised.join('|')}`];
+      }
+      return [];
+    }
+    case 'price_band': {
+      // price_band stores single-token enums ("value", "mid", "premium", "luxury").
+      // Normalise synonyms before emitting the filter token.
+      //
+      // Exclusion operators must normalise synonyms before emitting the NOT token.
+      // Without normalisation, `price_band exclude "expensive"` emits `price_band_not:expensive`
+      // → Vespa `!(price_band contains "expensive")` which never matches `"premium"` (the
+      // canonical stored value), causing the exclusion to silently no-op.
+      if (operator === 'exclude' && typeof value === 'string' && value.length > 0) {
+        const normalised = PRICE_BAND_NORMALISATION_MAP.get(value.toLowerCase()) ?? value.toLowerCase();
+        if (normalised.length === 0) return [];
+        const safe = normalised.replace(/\|/g, '');
+        if (safe.length === 0) return [];
+        return [`price_band_not:${safe}`];
+      }
+      if (operator === 'not_in' && Array.isArray(value)) {
+        const normalised = value
+          .filter((v): v is string => typeof v === 'string' && v.length > 0)
+          .map((v) => PRICE_BAND_NORMALISATION_MAP.get(v.toLowerCase()) ?? v.toLowerCase())
+          .map((v) => v.replace(/\|/g, ''))
+          .filter((v) => v.length > 0);
+        if (normalised.length === 0) return [];
+        if (normalised.length === 1) return [`price_band_not:${normalised[0]}`];
+        return [`price_band_not_in:${normalised.join('|')}`];
+      }
+      if (operator === '=' && typeof value === 'string' && value.length > 0) {
+        const normalised = PRICE_BAND_NORMALISATION_MAP.get(value.toLowerCase()) ?? value.toLowerCase();
+        if (normalised.length === 0) return [];
+        return [`price_band:${normalised}`];
+      }
+      if (operator === 'in' && Array.isArray(value)) {
+        // Multi-value price_band: normalise each synonym and emit pipe-delimited _in token.
+        const normalised = value
+          .filter((v): v is string => typeof v === 'string' && v.length > 0)
+          .map((v) => PRICE_BAND_NORMALISATION_MAP.get(v.toLowerCase()) ?? v.toLowerCase())
+          .map((v) => v.replace(/\|/g, '')) // strip pipe to prevent token-delimiter injection
+          .filter((v) => v.length > 0);
+        if (normalised.length === 0) return [];
+        if (normalised.length === 1) return [`price_band:${normalised[0]}`];
+        return [`price_band_in:${normalised.join('|')}`];
+      }
+      return [];
+    }
+    case 'grape_family':
+      return stringEq('grape_family');
     case 'flavor_profile':
       return stringEq('flavor_profile');
     case 'classification':
@@ -146,7 +351,11 @@ function constraintToSparseFilterTokens(
     case 'price':
     case 'price_usd': {
       if (operator === 'range' && isNumericRange(value)) {
-        return [`price_usd_min:${value.min}`, `price_usd_max:${value.max}`];
+        // Normalise reversed ranges: a caller emitting { min: 200, max: 50 } would otherwise
+        // produce `price_usd >= 200 AND price_usd <= 50` — always false, 0 results.
+        const lo = Math.min(value.min, value.max);
+        const hi = Math.max(value.min, value.max);
+        return [`price_usd_min:${lo}`, `price_usd_max:${hi}`];
       }
       if (operator === '<=' && typeof value === 'number' && Number.isFinite(value)) {
         return [`price_usd_max:${value}`];
@@ -160,10 +369,10 @@ function constraintToSparseFilterTokens(
     case 'vintage':
     case 'vintage_year': {
       if (operator === 'range' && isNumericRange(value)) {
-        return [
-          `vintage_year_min:${Math.floor(value.min)}`,
-          `vintage_year_max:${Math.floor(value.max)}`,
-        ];
+        // Normalise reversed ranges for the same reason as price_usd above.
+        const lo = Math.floor(Math.min(value.min, value.max));
+        const hi = Math.floor(Math.max(value.min, value.max));
+        return [`vintage_year_min:${lo}`, `vintage_year_max:${hi}`];
       }
       if (operator === '>=' && typeof value === 'number' && Number.isFinite(value)) {
         return [`vintage_year_min:${Math.floor(value)}`];
@@ -184,6 +393,18 @@ function constraintToSparseFilterTokens(
 
     case 'alcohol':
     case 'alcohol_pct': {
+      // Range operator: { min, max } → both floor and ceiling tokens.
+      // Normalise reversed ranges (min > max) the same way price_usd and vintage_year do —
+      // a reversed range would produce `alcohol_pct >= 20 AND alcohol_pct <= 10` which is
+      // always false and returns 0 results.
+      if (operator === 'range' && isNumericRange(value)) {
+        const lo = Math.min(value.min, value.max);
+        const hi = Math.max(value.min, value.max);
+        const tokens: string[] = [];
+        if (Number.isFinite(lo)) tokens.push(`alcohol_min:${lo}`);
+        if (Number.isFinite(hi)) tokens.push(`alcohol_max:${hi}`);
+        return tokens;
+      }
       if (typeof value !== 'number' || !Number.isFinite(value)) return [];
       if (operator === '>=') return [`alcohol_min:${value}`];
       if (operator === '<=') return [`alcohol_max:${value}`];

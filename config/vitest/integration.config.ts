@@ -8,7 +8,11 @@ export default defineConfig({
   test: {
     ...vitestMemorySchedulerOptions(),
     globals: true,
-    include: ['test/integration/**/*.test.ts', 'src/__tests__/integration/**/*.integration.test.ts'],
+    include: [
+      'test/integration/**/*.test.ts',
+      'src/__tests__/integration/**/*.integration.test.ts',
+      'src/infrastructure/fixture/__tests__/schema-parity.test.ts',
+    ],
     exclude: ['test/integration/search-pipeline.test.ts'],
     pool: 'threads',
     poolOptions: {

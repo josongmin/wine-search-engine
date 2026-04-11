@@ -821,4 +821,52 @@ describe('Audit regressions — session 6 ingestion pipeline (2026-04-09)', () =
       expect(src).toMatch(/isAbortError\(toolErr\)/);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // W6-P1-3: soft/hard constraint classification split-brain.
+  // rule-based-constraint-extractor.ts used to place `style exclude` constraints
+  // into bundle.hard without consulting SOFT_CONSTRAINT_ATTRIBUTES.
+  // constraint-compiler.ts then merged that bundle as-is, landing `style` in
+  // the hard list — contradicting the SSoT which classifies `style` as soft.
+  // Fix: mergeConstraintBundleIntoLists re-classifies using SOFT_CONSTRAINT_ATTRIBUTES,
+  //      with a special carve-out for `operator: 'exclude'` (always hard).
+  // ─────────────────────────────────────────────────────────────────────────
+  describe('W6-P1-3: constraint-compiler mergeConstraintBundleIntoLists re-classifies via SSoT', () => {
+    it('constraint-compiler source imports SOFT_CONSTRAINT_ATTRIBUTES from SSoT', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { fileURLToPath } = await import('node:url');
+      const src = readFileSync(
+        fileURLToPath(new URL('../../src/domain/query/service/constraint-compiler.ts', import.meta.url)),
+        'utf-8',
+      );
+      expect(src).toMatch(/SOFT_CONSTRAINT_ATTRIBUTES.*from.*constraint-attributes/);
+    });
+
+    it('constraint-compiler source re-classifies non-exclude hard constraints via SSoT in merge', async () => {
+      const { readFileSync } = await import('node:fs');
+      const { fileURLToPath } = await import('node:url');
+      const src = readFileSync(
+        fileURLToPath(new URL('../../src/domain/query/service/constraint-compiler.ts', import.meta.url)),
+        'utf-8',
+      );
+      // mergeConstraintBundleIntoLists must gate the SOFT_CONSTRAINT_ATTRIBUTES re-classification
+      // on a negation-operator check (exclude / not_in are always hard regardless of attribute).
+      // The check may be expressed as `operator !== 'exclude'` OR `isNegationOperator` — both are valid.
+      expect(src).toMatch(
+        /operator.*!==.*'exclude'.*SOFT_CONSTRAINT_ATTRIBUTES|SOFT_CONSTRAINT_ATTRIBUTES.*operator.*!==.*'exclude'|isNegationOperator.*SOFT_CONSTRAINT_ATTRIBUTES|SOFT_CONSTRAINT_ATTRIBUTES.*isNegationOperator/,
+      );
+    });
+
+    it('rule-based extractor emits style as hard for exclude operator with English wine type', () => {
+      // "without sweet" — exclude sweet style: should be in bundle.hard (NOT-clause)
+      // WINE_TYPE_ALL_TOKENS contains canonical English values; "sweet" matches.
+      // Note: the regex in rule-based extractor also checks /^(?:oaked?|sweet|...)$/
+      const bundle = extractRuleBasedConstraints('without sweet');
+      const styleExclude = bundle.hard.find(
+        (c) => c.attribute === 'style' && c.operator === 'exclude',
+      );
+      // style exclude must be in bundle.hard (it's a NOT-filter, even though style is soft for includes)
+      expect(styleExclude).toBeDefined();
+    });
+  });
 });

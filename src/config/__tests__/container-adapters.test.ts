@@ -23,17 +23,27 @@ describe('buildCoreAdapterServices', () => {
     expect(() => buildCoreAdapterServices(config, {})).not.toThrow();
   });
 
-  it('prefers Cohere reranker when both Cohere and generic reranker are configured', () => {
+  it('wires CohereReranker when COHERE_API_KEY is set', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
       COHERE_API_KEY: 'co-test',
       COHERE_RERANK_MODEL: 'rerank-v4.0-pro',
-      RERANKER_SERVICE_URL: 'https://fallback-reranker.example.com',
     });
 
     const adapters = buildCoreAdapterServices(config, {});
 
     expect(adapters.reranker).toBeInstanceOf(CohereReranker);
+  });
+
+  it('leaves reranker undefined when COHERE_API_KEY is not set', () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      WEBHOOK_SECRET: 'watchlist-secret-1234',
+    });
+
+    const adapters = buildCoreAdapterServices(config, {});
+
+    expect(adapters.reranker).toBeUndefined();
   });
 });

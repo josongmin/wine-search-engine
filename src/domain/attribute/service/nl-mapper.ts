@@ -552,14 +552,15 @@ export class NLMapper {
   async mapPhrase(phrase: string): Promise<NLMapping | null> {
     const trimmed = phrase.trim();
 
-    // 1. Check the repository
-    const repoMapping = await this.mappingTable.findMapping(trimmed);
+    // 1. Check the repository (with lowercase normalisation so "Bordeaux" and
+    // "bordeaux" always hit the same mapping row).
+    const repoMapping = await this.mappingTable.findMapping(trimmed.toLowerCase());
     if (repoMapping !== null) {
       return repoMapping;
     }
 
-    // 2. Fall back to built-in defaults
-    const builtIn = DEFAULT_MAPPINGS.get(trimmed);
+    // 2. Fall back to built-in defaults (all DEFAULT_MAPPINGS keys are lowercase).
+    const builtIn = DEFAULT_MAPPINGS.get(trimmed.toLowerCase());
     return builtIn ?? null;
   }
 
@@ -584,10 +585,13 @@ export class NLMapper {
     for (const phrase of phrases) {
       throwIfAborted(options?.abortSignal, 'Constraint mapping aborted');
       const normalizedPhrase = phrase.trim();
-      if (normalizedPhrase.length === 0 || seenPhrases.has(normalizedPhrase)) {
+      // Dedup by lowercase key so "Bordeaux" and "bordeaux" don't produce
+      // duplicate constraints. mapPhrase also normalises to lowercase internally.
+      const dedupKey = normalizedPhrase.toLowerCase();
+      if (normalizedPhrase.length === 0 || seenPhrases.has(dedupKey)) {
         continue;
       }
-      seenPhrases.add(normalizedPhrase);
+      seenPhrases.add(dedupKey);
       const mapping = await this.mapPhrase(normalizedPhrase);
       if (mapping !== null) {
         results.push(toNormalizedConstraint(mapping));

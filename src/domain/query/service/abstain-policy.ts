@@ -4,6 +4,16 @@
  * If entropy exceeds threshold, the engine abstains and requests clarification.
  */
 
+import type {
+  TypedAbstainDecision,
+  AbstainReason,
+  ChannelDegradationSummary,
+} from '../model/abstain-decision.js';
+
+/** Decimal places for entropy values in trace strings and detail messages. */
+const ENTROPY_TRACE_DECIMAL_PLACES = 4;
+import type { ConstraintRelation } from './constraint-reasoner.js';
+
 export type AbstainDecision =
   | { readonly abstain: false; readonly entropy?: number; readonly reason?: string }
   | { readonly abstain: true; readonly entropy: number };
@@ -57,19 +67,97 @@ export class AbstainPolicy {
     return { abstain: false, entropy };
   }
 
+  /**
+   * E6: Typed evaluate() — returns a structured TypedAbstainDecision when the
+   * engine should abstain, or `false` when results can be returned.
+   *
+   * Decision priority (evaluated in order):
+   *  1. `no_match`             — candidateCount === 0
+   *  2. `semantic_conflict`    — soft_tension or contradiction in constraintRelations
+   *  3. `insufficient_evidence`— dense + anchor both degraded
+   *  4. `low_confidence`       — entropy gate fires (requires ltrAvailable)
+   */
+  evaluate(
+    topKScores: readonly number[],
+    constraintRelations: readonly ConstraintRelation[],
+    channelDegradation: ChannelDegradationSummary,
+    context?: AbstainContext,
+  ): TypedAbstainDecision | false {
+    // Priority 1: no candidates at all
+    if (topKScores.length === 0) {
+      return {
+        shouldAbstain: true,
+        reason: 'no_match',
+        detail: 'Hard constraint filter produced zero candidates.',
+        recoverableBy: 'relax_constraints',
+      };
+    }
+
+    // Priority 2: semantic conflict from EPIC-2 ConstraintReasoner
+    const conflictRelations = constraintRelations.filter(
+      (r) => r.type === 'soft_tension' || r.type === 'contradiction',
+    );
+    if (conflictRelations.length > 0) {
+      return {
+        shouldAbstain: true,
+        reason: 'semantic_conflict',
+        detail: `${conflictRelations.length} constraint relation(s) detected: ${conflictRelations.map((r) => r.type).join(', ')}.`,
+        recoverableBy: 'clarify',
+        conflictingRelations: conflictRelations,
+      };
+    }
+
+    // Priority 3: both dense and anchor channels degraded — sparse-only result
+    if (channelDegradation.denseDegraded && channelDegradation.anchorDegraded) {
+      return {
+        shouldAbstain: true,
+        reason: 'insufficient_evidence',
+        detail: 'Dense and anchor retrieval channels are both degraded; sparse-only results are insufficient for confident ranking.',
+        recoverableBy: 'retry_with_dense',
+      };
+    }
+
+    // Priority 4: entropy gate (low_confidence)
+    const entropyDecision = this.shouldAbstain(topKScores, context);
+    if (entropyDecision.abstain) {
+      const entropyVal = entropyDecision.entropy;
+      return {
+        shouldAbstain: true,
+        reason: 'low_confidence' as AbstainReason,
+        detail: `Top-K score distribution is near-uniform (entropy=${entropyVal.toFixed(ENTROPY_TRACE_DECIMAL_PLACES)}). Cannot confidently rank results.`,
+        recoverableBy: 'clarify',
+        entropy: entropyVal,
+      };
+    }
+
+    return false;
+  }
+
   private normalizedEntropy(scores: readonly number[]): number {
     // Early guard: empty or single-element distributions have entropy 0 by
     // definition. Without this, intermediate steps below produce NaN
     // (e/sumExp where sumExp=0) that propagates silently. (Bugbash R17)
     if (scores.length < 2) return 0;
+    // Filter out non-finite inputs before computing softmax. NaN or ±Infinity
+    // scores come from upstream pipeline defects (failed LTR inference, RRF
+    // overflow). Including them produces NaN entropy that silently bypasses the
+    // gate — filtering is the correct defensive response.
+    const finiteScores = scores.filter((s) => Number.isFinite(s));
+    if (finiteScores.length < 2) return 0;
     let maxScore = -Infinity;
-    for (const s of scores) { if (s > maxScore) maxScore = s; }
-    const expScores = scores.map((s) => Math.exp(s - maxScore));
+    for (const s of finiteScores) { if (s > maxScore) maxScore = s; }
+    const expScores = finiteScores.map((s) => {
+      const e = Math.exp(s - maxScore);
+      // Guard: underflow (e === 0) is fine for softmax; NaN is not. NaN can
+      // appear if maxScore is Infinity (all scores equal +Inf) — return 0 so
+      // the contribution is simply excluded from the sum.
+      return Number.isFinite(e) ? e : 0;
+    });
     const sumExp = expScores.reduce((a, b) => a + b, 0);
     if (sumExp === 0) return 0;
     const probs = expScores.map((e) => e / sumExp);
     const rawEntropy = probs.reduce((h, p) => (p <= 0 ? h : h - p * Math.log2(p)), 0);
-    const maxEntropy = Math.log2(scores.length);
+    const maxEntropy = Math.log2(finiteScores.length);
     return maxEntropy > 0 ? rawEntropy / maxEntropy : 0;
   }
 }

@@ -98,7 +98,7 @@ flowchart LR
 
 ### 배경.5 런타임 검색 파이프라인 (요약)
 
-**한 줄:** 보안·플래너·(캐시/SAT) 이후 **effective route**에 따라 `entity` / `hybrid` / `mixed` 중 하나로 실행되며, `hybrid`는 후보 생성 → 랭킹 → (선택 LTR) → 합성 리졸브까지 이어진다.
+**한 줄:** 보안·플래너·(캐시/SAT) 이후 **effective route**에 따라 `entity` / `hybrid` / `mixed` 중 하나로 실행되며, `hybrid`는 후보 생성 → `Ranker.rank()` precision rerank/LTR → 합성 리졸브(+ 필요 시 constraint relaxation)까지 이어진다.
 
 상세 다이어그램·코드 인용은 `docs/system-overview/retriever-pipeline.md`에 있다. 논리 순서만 적으면:
 
@@ -108,14 +108,13 @@ HTTP Search
   → route resolution (entity | hybrid | mixed)
   → [hybrid] retrieveHybridCandidatesForPlan
         → (선택) browseProducer / browseRegion / compareAgainstAnchor
-        → (폴백) CandidatePoolService.generate
+        → (폴백) CandidatePoolService.execute
               → sparse (BM25/lexical) + dense (embedding ANN) + hard filters
               → RRF fusion → HybridCandidate[]
-  → runHybridRankingPipeline
-        → Ranker.rank (다중 시그널 스코어)
-        → (조건) cross-encoder rerank top-K
-        → applyLtrRerankIfAvailable (query-class별 LambdaMART 가중치가 있을 때)
+  → executeHybridRouteRankingPipeline / runHybridRankingPipeline
+        → Ranker.rank (다중 시그널 스코어 + cross-encoder rerank + learned LTR SSOT)
         → buildHybridRouteResolveResult
+        → (0건 + hard constraints) constraint relaxation retry
   → post-route (결정·응답·캐시 등)
 ```
 
@@ -158,7 +157,7 @@ PG wine_pdp_snapshot (Bronze)
 | Retrieval | Specialized browse/compare | `browse-retriever.ts`, `compare-retriever.ts` |
 | Ranking | 다중 컴포넌트 스코어 집계 (semantic, popularity, attribute …) | `signal-computer.ts`, `RFC-013` |
 | Rerank | Cross-encoder HTTP, wine-aware passage | `ranker.ts`, `reranker.ts` |
-| LTR | Per-query-class LambdaMART 재정렬 (모델 있을 때) | `search-usecase-ltr-rerank.ts` |
+| LTR | Per-query-class LambdaMART 재정렬 (모델 있을 때, serve-time owner는 `Ranker.rank()`) | `ranker.ts`, `ltr-ranker.ts`, `ltr-training-service.ts` |
 | Decision | Admission, gap threshold, query-class별 프로파일 | `decision-engine.ts`, `RFC-016` |
 | Decision / authority | 결정론적 authority trace·스냅샷·배치 id, canonical 직렬화 SSOT | `authority-trace.ts`, `canonical-json.ts`, `hash.ts`, `id-schema-version.ts`, `pg-snapshot-store.ts`, `batch-search.usecase.ts`; 상세는 `docs/bugbash/apr-6-hardening-wave3.md` |
 | Policy | 응답 캐시 적격 판단, kill-switch 정책 표 | `cache-policy.ts`, `kill-switch-policy.ts` |
@@ -295,7 +294,7 @@ PG wine_pdp_snapshot (Bronze)
 | Hard filter at retrieval | hard constraint sparse token filter + hard filter pass | `src/domain/retrieval/service/candidate-pool.ts` | `Implemented` |
 | Candidate fusion | RRF | `src/domain/retrieval/service/fusion.ts` | `Implemented` |
 | Cross-encoder rerank | remote HTTP reranker + score blend | `src/domain/ranking/service/ranker.ts`, `src/infrastructure/vespa/reranker.ts` | `Implemented` |
-| LTR scaffold | per-query-class LambdaMART training / inference | `src/application/search/search-usecase-ltr-rerank.ts`, `src/domain/ranking/service/ltr-training-service.ts` | `Implemented` |
+| LTR scaffold | per-query-class LambdaMART training / inference (`Ranker.rank()` 내부 serve-time rerank) | `src/domain/ranking/service/ranker.ts`, `src/domain/ranking/service/ltr-ranker.ts`, `src/domain/ranking/service/ltr-training-service.ts` | `Implemented` |
 | Eval pipeline | golden queries, hard negatives, splits, offline eval | `scripts/eval/*`, `scripts/ltr/*` | `Implemented` |
 | Feedback ingestion | click / purchase / dismiss ingest + TTL | `src/interface/http/routes/feedback.route.ts`, `src/domain/learning/service/feedback-ttl-enforcer.ts` | `Implemented` |
 | KO alias / transliteration assets | alias generation, transliteration backfill | `scripts/etl/generate-korean-aliases.ts`, `scripts/etl/generate-transliteration-aliases.ts` | `Implemented` |

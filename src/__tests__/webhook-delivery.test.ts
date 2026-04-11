@@ -110,11 +110,17 @@ describe('WebhookDelivery', () => {
       expect(result).toBe(false);
       expect(fetchSpy).toHaveBeenCalledTimes(4);
 
-      // Verify exact backoff durations: 1 s after attempt 1, 5 s after 2, 30 s after 3.
+      // Verify backoff durations are within expected jitter range (±25%).
+      // The base schedule is 1 s → 5 s → 30 s; jitter adds 0–25% so the
+      // actual sleep values fall in [base, base * 1.25] after Math.round().
       expect(sleepSpy).toHaveBeenCalledTimes(3);
-      expect(sleepSpy).toHaveBeenNthCalledWith(1, 1000);
-      expect(sleepSpy).toHaveBeenNthCalledWith(2, 5000);
-      expect(sleepSpy).toHaveBeenNthCalledWith(3, 30000);
+      const [s1, s2, s3] = sleepSpy.mock.calls.map((c) => c[0]);
+      expect(s1).toBeGreaterThanOrEqual(1000);
+      expect(s1).toBeLessThanOrEqual(1250);
+      expect(s2).toBeGreaterThanOrEqual(5000);
+      expect(s2).toBeLessThanOrEqual(6250);
+      expect(s3).toBeGreaterThanOrEqual(30000);
+      expect(s3).toBeLessThanOrEqual(37500);
     });
 
     it('should succeed on retry if eventual response is 2xx', async () => {

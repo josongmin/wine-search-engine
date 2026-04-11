@@ -14,16 +14,26 @@ import { buildRetrievalPlan, type RetrievalPlan } from '../../retrieval/service/
 import { canonicalJsonStringify } from '../../shared/utils/canonical-json.js';
 import { extractRuleBasedConstraints } from './rule-based-constraint-extractor.js';
 import { SOFT_CONSTRAINT_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
+import { ConstraintReasoner, type ConstraintReasonerOutput } from './constraint-reasoner.js';
 
 export interface ConstraintCompilerResult {
   readonly bundle: ConstraintBundle;
   readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
   readonly retrievalPlan: RetrievalPlan;
   readonly resolvedEntities: readonly ResolvedEntity[];
+  /**
+   * E2-T2: ConstraintReasoner output — conflict-resolved atoms + pairwise relations.
+   *
+   * `resolvedBundle` is the conflict-resolved version of `bundle`; retrieval plan
+   * and ranker MUST prefer this over the raw bundle when present.
+   */
+  readonly reasonerOutput: ConstraintReasonerOutput;
 }
 
 // SOFT_CONSTRAINT_ATTRIBUTES is imported from SSoT: ../../shared/constants/constraint-attributes.js
 const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
+
+const CONSTRAINT_REASONER = new ConstraintReasoner();
 
 export class ConstraintCompiler {
   constructor(
@@ -77,7 +87,10 @@ export class ConstraintCompiler {
       const isLlmSourced =
         (constraint.mapping_version?.startsWith('llm-') ?? false)
         || constraint.source_phrase.startsWith('llm_linker(');
-      if (isLlmSourced || SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)) {
+      // Negation operators (exclude, not_in) are always hard regardless of attribute
+      // because they produce Vespa NOT-clauses. Must be checked before SOFT_CONSTRAINT_ATTRIBUTES.
+      const isNegationOperator = constraint.operator === 'exclude' || constraint.operator === 'not_in';
+      if (!isNegationOperator && (isLlmSourced || SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute))) {
         soft.push(constraint);
       } else {
         hard.push(constraint);
@@ -178,13 +191,19 @@ export class ConstraintCompiler {
       );
     }
 
-    const retrievalPlan = buildRetrievalPlan(finalBundle);
+    // E2-T2: Run ConstraintReasoner after Tier 6 (Wave 2 design: Tier 6 → Reasoner →
+    // buildRetrievalPlan). The resolvedBundle is conflict-resolved and deduplicated;
+    // retrieval plan, ranker, and query plan consumers MUST use it over the raw finalBundle.
+    const reasonerOutput = CONSTRAINT_REASONER.reason(finalBundle);
+    const effectiveBundle = reasonerOutput.resolvedBundle;
+
+    const retrievalPlan = buildRetrievalPlan(effectiveBundle);
     const constraintExtraction = buildConstraintExtractionTrace({
       baseTrace: mapperTrace,
       spans,
       matched,
       resolvedEntityCount: resolvedEntities.length,
-      finalBundle,
+      finalBundle: effectiveBundle,
       ontologyAddedCount: countBundleConstraints(expanded) - countBundleConstraints(baseBundle),
       compositionalAddedCount: countBundleConstraints(finalBundle) - countBundleConstraints(expanded),
       tier6ConstraintCount,
@@ -193,10 +212,11 @@ export class ConstraintCompiler {
     });
 
     return {
-      bundle: finalBundle,
+      bundle: effectiveBundle,
       ...(constraintExtraction !== undefined ? { constraintExtraction } : {}),
       retrievalPlan,
       resolvedEntities,
+      reasonerOutput,
     };
   }
 }
@@ -211,6 +231,20 @@ function constraintKey(constraint: NormalizedConstraint): string {
   return `${constraint.attribute}|${constraint.operator}|${canonicalJsonStringify(constraint.value)}`;
 }
 
+/**
+ * Merges a ConstraintBundle into the running hard/soft lists, deduplicating by
+ * constraint key.
+ *
+ * W6-P1-3 (split-brain fix): incoming bundle.hard constraints are re-classified
+ * using the SOFT_CONSTRAINT_ATTRIBUTES SSoT before insertion. The only exception
+ * are `operator: 'exclude'` or `operator: 'not_in'` — negation operators are always
+ * hard constraints regardless of attribute, because they produce Vespa NOT-clauses.
+ *
+ * Without this re-classification, rule-based-constraint-extractor.ts (which does
+ * not import SOFT_CONSTRAINT_ATTRIBUTES) could place a `style` constraint in
+ * bundle.hard, and it would land in the hard list — contradicting the SSoT that
+ * classifies `style` as soft.
+ */
 function mergeConstraintBundleIntoLists(
   bundle: ConstraintBundle,
   hard: ConstraintBundle['hard'][number][],
@@ -225,7 +259,14 @@ function mergeConstraintBundleIntoLists(
     const key = constraintKey(constraint);
     if (existing.has(key)) continue;
     existing.add(key);
-    hard.push(constraint);
+    // Re-classify: exclude and not_in operators are always hard (they produce NOT-clauses).
+    // All other hard constraints are re-checked against SOFT_CONSTRAINT_ATTRIBUTES SSoT.
+    const isNegationOperator = constraint.operator === 'exclude' || constraint.operator === 'not_in';
+    if (!isNegationOperator && SOFT_CONSTRAINT_ATTRIBUTES.has(constraint.attribute)) {
+      soft.push(constraint);
+    } else {
+      hard.push(constraint);
+    }
     added++;
   }
   for (const constraint of bundle.soft) {

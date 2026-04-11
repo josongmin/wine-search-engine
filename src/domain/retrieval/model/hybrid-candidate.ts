@@ -58,6 +58,11 @@ export interface HybridCandidate {
   /** Primary grape from index summary (cross-encoder passage). */
   readonly grapePrimary?: string | undefined;
 
+  /** Full grape variety list (array field in Vespa schema). Used for blend coverage:
+   * grape_or filter at retrieval targets both this field and grapePrimary.
+   * Annotation mirrors retrieval by checking both. */
+  readonly grapes?: readonly string[] | undefined;
+
   /** Style descriptor propagated from retrieval summaries. */
   readonly style?: string | undefined;
 
@@ -131,6 +136,13 @@ export interface HybridCandidate {
 
   /** Vineyard soil type. */
   readonly soilType?: string | undefined;
+
+  /**
+   * Flavor profile tags from the Vespa `flavor_profiles` field
+   * (e.g. ["fruity", "oaky", "mineral"]).
+   * Used by the annotation layer to match `flavor_profile` soft constraints.
+   */
+  readonly flavorProfiles?: readonly string[] | undefined;
 
   /** Producer archetype. */
   readonly producerType?: string | undefined;

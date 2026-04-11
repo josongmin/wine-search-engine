@@ -32,3 +32,11 @@ export type { RankableDocument, RankedDocument } from './service/ltr-ranker.js';
 
 export { extractLTRFeatures } from './service/ltr-feature-extractor.js';
 export type { LTRScoreComponents } from './service/ltr-feature-extractor.js';
+
+// ── Wave 2 / E5 score decomposition & safety types ───────────────────────────
+export type {
+  ScoreDecomposition,
+  RerankSafetyResult,
+  RerankSafetyMetrics,
+  ScoreDriftRecord,
+} from './model/score-decomposition.js';

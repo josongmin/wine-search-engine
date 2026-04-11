@@ -13,8 +13,6 @@ export { VespaSearchIndex } from './vespa-search-index.js';
 
 export { HttpEmbeddingService } from './embedding-service.js';
 
-export { HttpCrossEncoderReranker } from './reranker.js';
-
 export {
   toVespaFields,
   fromVespaFields,

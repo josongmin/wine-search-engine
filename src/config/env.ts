@@ -53,6 +53,15 @@ function buildConfig(parsed: EnvVars) {
     );
   }
 
+  // CLAUDE.md Rule 22: mutually consistent limits.
+  // A per-step timeout larger than the total budget means every step would be
+  // aborted before it could complete — the agent can never make progress.
+  if (parsed.AGENT_PER_STEP_TIMEOUT_MS > parsed.AGENT_TIMEOUT_MS) {
+    throw new Error(
+      `AGENT_PER_STEP_TIMEOUT_MS (${parsed.AGENT_PER_STEP_TIMEOUT_MS}) must not exceed AGENT_TIMEOUT_MS (${parsed.AGENT_TIMEOUT_MS})`,
+    );
+  }
+
   // Production security invariant: Layer 2 prompt-injection defense (LLMInjectionJudge)
   // requires ANTHROPIC_API_KEY. Without the key the judge is silently undefined and
   // every query bypasses Layer 2 — INJECTION_JUDGE_FAIL_OPEN=false has NO effect on
@@ -132,9 +141,8 @@ function buildConfig(parsed: EnvVars) {
       httpTimeoutMs: parsed.EMBEDDING_HTTP_TIMEOUT_MS,
     },
 
-    /** Reranker service settings. */
+    /** Reranker settings (Cohere-backed). */
     reranker: {
-      url: parsed.RERANKER_SERVICE_URL,
       blendScale: parsed.RERANK_BLEND_SCALE,
       httpTimeoutMs: parsed.RERANKER_HTTP_TIMEOUT_MS,
     },

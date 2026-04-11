@@ -17,6 +17,7 @@ import type { ResolveRequest } from '../../../application/search/resolve-request
 import {
   type HybridRequestSchema,
   type InterpretRequestSchema,
+  type LookupRequestSchema,
   type ReplayRequestSchema,
   type ResolveRequestSchema,
   type SearchRequestSchema,
@@ -63,6 +64,31 @@ function normalizeHybridOptions(
   return {
     explain: options.explain,
     clarification: options.clarification,
+  };
+}
+
+/**
+ * Maps a lookup request body to a SearchRequest with retrieval_mode forced to
+ * 'entity'. The caller cannot override routing — lookup is always entity-only.
+ *
+ * `options.mode` is intentionally omitted: routing is non-negotiable.
+ * `clarification` is always false: lookup callers want a direct answer,
+ *   not a "did you mean?" deflection.
+ */
+export function toLookupRequest(body: z.output<typeof LookupRequestSchema>): SearchRequest {
+  const aliases = extractNormalizedAliases(body);
+  // Always inject options so clarification:false is honoured even when the
+  // caller omits the options object entirely.
+  const options: SearchOptions = {
+    mode: 'auto',
+    explain: body.options?.explain ?? false,
+    clarification: false,
+  };
+  return {
+    query: body.query,
+    ...aliases,
+    options,
+    retrieval_mode: 'entity',
   };
 }
 

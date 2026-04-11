@@ -92,6 +92,75 @@ describe('extractRegionBrowseSeed', () => {
     });
     expect(extractRegionBrowseSeed(plan)).toBe('france / bordeaux / medoc');
   });
+
+  // Bug-2 regression: extractRegionBrowseSeed must include inferred constraints.
+  // Region constraints can appear as inferred (from context / implicit mention),
+  // so limiting the search to hard constraints only misses these cases.
+  it('reads region from inferred constraints (Bug-2 regression)', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [],
+        soft: [],
+        inferred: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Tuscany',
+            source_phrase: 'Tuscany',
+            confidence: 0.7,
+          },
+        ],
+      },
+    });
+    expect(extractRegionBrowseSeed(plan)).toBe('Tuscany');
+  });
+
+  it('reads appellation from inferred constraints (Bug-2 regression)', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [],
+        soft: [],
+        inferred: [
+          {
+            attribute: 'appellation',
+            operator: '=',
+            value: 'Pomerol',
+            source_phrase: 'Pomerol',
+            confidence: 0.75,
+          },
+        ],
+      },
+    });
+    expect(extractRegionBrowseSeed(plan)).toBe('Pomerol');
+  });
+
+  it('prefers hard region constraint over inferred when both present', () => {
+    const plan = minimalPlan({
+      constraints: {
+        hard: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Burgundy',
+            source_phrase: 'Burgundy',
+            confidence: 0.95,
+          },
+        ],
+        soft: [],
+        inferred: [
+          {
+            attribute: 'region',
+            operator: '=',
+            value: 'Bordeaux',
+            source_phrase: 'Bordeaux',
+            confidence: 0.6,
+          },
+        ],
+      },
+    });
+    // hard constraints come first in the spread, so Burgundy wins
+    expect(extractRegionBrowseSeed(plan)).toBe('Burgundy');
+  });
 });
 
 describe('buildDecisionSnapshotFromPlan', () => {

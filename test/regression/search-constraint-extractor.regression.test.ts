@@ -288,9 +288,12 @@ describe('buildSparseFilters — NOT filter YQL generation', () => {
     expect(yql).toContain('!(region contains "Bordeaux")');
   });
 
-  it('generates !(style contains "oaked") from style_not token', () => {
+  it('generates !(style matches "oaked") from style_not token', () => {
+    // style field is attribute-only — must use `matches` (regex substring), not `contains`.
+    // `!(style matches "oaked")` correctly excludes wines whose style contains "oaked";
+    // `!(style contains "oaked")` silently no-ops on multi-token values like "full red".
     const yql = buildSparseFilters(['style_not:oaked']);
-    expect(yql).toContain('!(style contains "oaked")');
+    expect(yql).toContain('!(style matches "oaked")');
   });
 
   it('escapes double-quote characters in NOT filter values (YQL injection guard)', () => {
@@ -639,5 +642,140 @@ describe('search-constraint-extractor price parsing edge cases', () => {
     const c = extractSearchConstraints('오만한 사람을 위한 와인');
     expect(c.maxPriceKrw).toBeUndefined();
     expect(c.minPriceKrw).toBeUndefined();
+  });
+
+  // R-PRICE-EONEORI: "언저리" (approximate around) marker must be treated as maxPriceKrw
+  it('R-PRICE-EONEORI-01: "10만원 언저리로" → maxPriceKrw=100000', () => {
+    const c = extractSearchConstraints('10만원 언저리로');
+    expect(c.maxPriceKrw).toBe(100_000);
+  });
+
+  it('R-PRICE-EONEORI-02: "5만원 근처" → maxPriceKrw=50000', () => {
+    const c = extractSearchConstraints('5만원 근처 레드 와인');
+    expect(c.maxPriceKrw).toBe(50_000);
+  });
+
+  it('R-PRICE-EONEORI-03: "3만원 내외" → maxPriceKrw=30000', () => {
+    const c = extractSearchConstraints('3만원 내외 화이트');
+    expect(c.maxPriceKrw).toBe(30_000);
+  });
+});
+
+describe('retail channel price mapping', () => {
+  it('R-CHANNEL-01: "편의점 와인" → maxPriceKrw=15000', () => {
+    const c = extractSearchConstraints('편의점 와인 추천해줘');
+    expect(c.maxPriceKrw).toBe(15_000);
+  });
+
+  it('R-CHANNEL-02: "편의점 수준으로" → maxPriceKrw=15000', () => {
+    const c = extractSearchConstraints('편의점 수준으로 레드 와인');
+    expect(c.maxPriceKrw).toBe(15_000);
+  });
+
+  it('R-CHANNEL-03: "마트 와인" → maxPriceKrw=30000', () => {
+    const c = extractSearchConstraints('마트 와인 추천');
+    expect(c.maxPriceKrw).toBe(30_000);
+  });
+
+  it('R-CHANNEL-04: "대형마트" → maxPriceKrw=30000', () => {
+    const c = extractSearchConstraints('대형마트에서 살 수 있는 와인');
+    expect(c.maxPriceKrw).toBe(30_000);
+  });
+
+  it('R-CHANNEL-05: "백화점 와인" → maxPriceKrw=100000', () => {
+    const c = extractSearchConstraints('백화점 와인 수준');
+    expect(c.maxPriceKrw).toBe(100_000);
+  });
+
+  it('R-CHANNEL-06: numeric price overrides channel cap when both present', () => {
+    // "편의점에서 파는 8천원짜리" → numeric 8000 wins over channel cap 15000
+    const c = extractSearchConstraints('편의점에서 8천원 이하 와인');
+    expect(c.maxPriceKrw).toBe(8_000);
+  });
+
+  it('R-CHANNEL-07: "마트" does NOT match embedded in other words (false positive guard)', () => {
+    // "슈퍼마켓" contains 마트 but is handled by the 슈퍼마켓 pattern, not a false positive
+    // "마트" in "마트료시카" (matryoshka) should not match — it is preceded by no space
+    // but our pattern requires word-level context. This is a false-positive guard test.
+    const c = extractSearchConstraints('마트료시카 인형처럼 겹겹이 복잡한 와인');
+    // Pattern /(?:대형\s*)?마트(?:\s*(?:와인|수준|용))?/ requires 마트 to be followed by
+    // optional whitespace then 와인/수준/용 OR end-of-word. "마트료시카" has 료 after 마트
+    // which is neither 와인 nor 수준 nor 용, so the greedy match should NOT fire.
+    // If this fails it means the pattern is too loose and needs tightening.
+    expect(c.maxPriceKrw).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUG regressions — negation routing and pattern fixes (Round 7)
+// ---------------------------------------------------------------------------
+
+describe('search-constraint-extractor — negation routing fixes (BUG regression)', () => {
+  // BUG: oaked? regex matched 'oake' (oake + optional d), not 'oak' + optional 'ed'
+  // Fix: oak(?:ed)? — now matches 'oak' and 'oaked' as standalone subjects correctly.
+  // Note: NEGATION_SUBJECT_BEFORE greedy-captures 2 words ("oak white" from "without oak white wine"),
+  // so the single-word form "without oak" (no trailing words) is the reliable test.
+  it('R-NEG-BUG-01: "without oak" (single subject) routes to excludeStyleSet', () => {
+    const c = extractSearchConstraints('without oak');
+    expect(c.excludeStyles).toContain('oak');
+    expect(c.excludeRegions ?? []).not.toContain('oak');
+  });
+
+  it('R-NEG-BUG-02: "exclude oaked" (single subject) routes to excludeStyleSet', () => {
+    // Single subject — no 2nd word to greedily capture
+    const c = extractSearchConstraints('exclude oaked');
+    expect(c.excludeStyles).toContain('oaked');
+  });
+
+  // BUG: "full-bodied", "light-bodied", "medium-bodied" were absent from style classifier
+  // "not full-bodied" has a 2-word greedy issue: subject = "full-bodied" (hyphenated = 1 token)
+  it('R-NEG-BUG-03: "not full-bodied" (single hyphenated token) routes to excludeStyleSet', () => {
+    const c = extractSearchConstraints('not full-bodied');
+    expect(c.excludeStyles).toContain('full-bodied');
+    expect(c.excludeRegions ?? []).not.toContain('full-bodied');
+  });
+
+  it('R-NEG-BUG-04: "not light-bodied" routes to excludeStyleSet', () => {
+    const c = extractSearchConstraints('not light-bodied');
+    expect(c.excludeStyles).toContain('light-bodied');
+  });
+
+  // R-NEG-BUG-04b: firstWord fallback must NOT trigger for inline-regex-only tokens.
+  // "full-bodied" matches the inline regex but is NOT in WINE_TYPE_ALL_TOKENS.
+  // firstWord = "full" is also NOT in WINE_TYPE_ALL_TOKENS.
+  // The correct canonical is "full-bodied" (tokenLower), not "full" (firstWord).
+  // Regression for the canonicalToken ternary that previously used firstWord unconditionally
+  // when tokenLower was not in WINE_TYPE_ALL_TOKENS.
+  it('R-NEG-BUG-04b: "not full-bodied" canonical is "full-bodied" not "full" (firstWord guard)', () => {
+    const c = extractSearchConstraints('not full-bodied');
+    expect(c.excludeStyles).toContain('full-bodied');
+    expect(c.excludeStyles ?? []).not.toContain('full');
+  });
+
+  it('R-NEG-BUG-04c: "not medium-bodied" canonical is "medium-bodied" not "medium"', () => {
+    const c = extractSearchConstraints('not medium-bodied');
+    expect(c.excludeStyles).toContain('medium-bodied');
+    expect(c.excludeStyles ?? []).not.toContain('medium');
+  });
+
+  // BUG: multi-word Korean wine type "내추럴 와인 빼고" — NEGATION_SUBJECT_AFTER captures
+  // "내추럴 와인" as subject. WINE_TYPE_ALL_TOKENS has '내추럴' (first word).
+  // Fix: firstWord fallback → routes to excludeStyleSet with canonical '내추럴'
+  it('R-NEG-BUG-05: "내추럴 와인 빼고" routes to excludeStyleSet via first-word matching', () => {
+    const c = extractSearchConstraints('내추럴 와인 빼고 레드 추천');
+    expect(c.excludeStyles).toContain('내추럴');
+    expect(c.excludeRegions ?? []).not.toContain('내추럴 와인');
+  });
+
+  // BUG: "빼주세요" and "빼줘" were absent from NEGATION_SUBJECT_AFTER pattern
+  // Users using polite forms got no negation extraction at all
+  it('R-NEG-BUG-06: "스파클링 빼주세요" extracts sparkling exclusion', () => {
+    const c = extractSearchConstraints('스파클링 빼주세요');
+    expect(c.excludeStyles).toContain('스파클링');
+  });
+
+  it('R-NEG-BUG-07: "스파클링 빼줘" extracts sparkling exclusion', () => {
+    const c = extractSearchConstraints('스파클링 빼줘');
+    expect(c.excludeStyles).toContain('스파클링');
   });
 });

@@ -11,10 +11,15 @@ const DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS = 5_000;
 
 export const AiEnvSchema = z.object({
   // OpenAI API (optional — hexagonal ChatLlmPort + optional OpenAiEmbeddingService)
-  OPENAI_API_KEY: z.string().optional(),
+  // z.preprocess: coerce empty string "" → undefined so `apiKey !== undefined` checks
+  // in container-adapters.ts and readiness.ts correctly skip the OpenAI path when the
+  // env var is set to an empty string. Without this, OPENAI_API_KEY="" passes as ""
+  // and produces `Authorization: Bearer ` (empty token) → 401 from OpenAI, masking
+  // the misconfiguration as a service failure instead of a config error.
+  OPENAI_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
   /** Must include `/v1` for official API, e.g. `https://api.openai.com/v1` */
   OPENAI_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
-  OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-5.4-mini'),
+  OPENAI_CHAT_MODEL: z.string().min(1).default('gpt-4o-mini'),
   /**
    * Model used for index-time Doc2Query synthetic-query generation
    * (`scripts/etl/generate-doc-queries.ts`). Decoupled from
@@ -22,7 +27,7 @@ export const AiEnvSchema = z.object({
    * model than the runtime chat path without affecting query interpreter,
    * agent, or any other in-request LLM call.
    */
-  OPENAI_DOC2QUERY_MODEL: z.string().min(1).default('gpt-5.3-mini'),
+  OPENAI_DOC2QUERY_MODEL: z.string().min(1).default('gpt-4o-mini'),
   /**
    * Embedding model for dense retrieval via OpenAI-compatible API.
    * Defaults to text-embedding-3-small — the most cost-effective option.
@@ -48,7 +53,8 @@ export const AiEnvSchema = z.object({
     .default(DEFAULT_LLM_QUERY_INTERPRETER_TIMEOUT_MS),
 
   // Anthropic API (for LLM-based security features like Epic 16.1 injection judge)
-  ANTHROPIC_API_KEY: z.string().optional(),
+  // z.preprocess: coerce "" → undefined (same rationale as OPENAI_API_KEY above).
+  ANTHROPIC_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().optional()),
   /** Model id for injection classifier (Messages API). Override for newer Sonnet/Haiku. */
   ANTHROPIC_INJECTION_MODEL: z.string().min(1).optional(),
   /**

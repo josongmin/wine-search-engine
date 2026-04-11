@@ -14,6 +14,7 @@ import type { QueryEntrySecurityObserver } from '../../domain/security/port/secu
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
+import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
@@ -26,6 +27,7 @@ import type { DecomposedSearchUseCasePort } from './port/search-route-usecases.p
 import type { SearchRequest } from './search-request.dto.js';
 import type { CacheLookupRuntimeState } from './search-usecase-cache-lookup.js';
 import type {
+  BlockingUseCasePort,
   BrowseRetrieverPort,
   CandidatePoolPort,
   CompareRetrieverPort,
@@ -37,14 +39,21 @@ import type {
   RankingPort,
   ResponseBuilderPort,
 } from './port/search-pipeline-deps.port.js';
-import { executeHybridRouteRankingPipeline } from './search-usecase-hybrid-ranking-pipeline.js';
+import {
+  executeHybridRouteRankingPipeline,
+  resolveEntityRouteForPlan,
+} from './search-usecase-hybrid-ranking-pipeline.js';
 import {
   buildFailedMixedRouteExecution,
   mixedQueryResultToSearchRouteExecution,
 } from './search-usecase-mixed-route.js';
 import { buildSearchRouteResolutionContext } from './search-usecase-route-resolution.js';
 import { runSearchPostRoutePhase } from './search-usecase-post-route-phase.js';
-import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
+import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
+import {
+  shouldTriggerCorrectiveRetry,
+  resolveCorrectiveRetryOutcome,
+} from './search-usecase-corrective-retry.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import {
   rankedResultsToEvalProvenanceSlices,
@@ -73,6 +82,12 @@ export interface SearchUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
+  /**
+   * TA2-4: Application-layer blocker for seeding candidates not covered by
+   * anchor alias lookup. Optional — when absent, the entity route falls back
+   * to anchors-only behaviour (pre-TA2 behaviour preserved).
+   */
+  readonly blocker?: BlockingUseCasePort | undefined;
   readonly candidatePool: CandidatePoolPort;
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
@@ -112,13 +127,9 @@ export interface SearchUseCaseDeps {
  * 6. Build SearchResponseV1 via ResponseBuilder
  * 7. Track request_id, latency, route throughout
  */
-/**
- * Pipeline defect codes that warrant an error-level log before re-throwing.
- * Defined at module scope (Rule 16) — this Set is deterministic and never changes.
- * Policy-blocked and snapshot errors are deliberate signals; only these three
- * indicate upstream defects that need request_id capture.
- */
-const PIPELINE_DEFECT_CODES = new Set(['EVIDENCE_OBLIGATION', 'WRONG_RESOLVE', 'BLOCKING_MISS']);
+// PIPELINE_DEFECT_CODES imported from domain SSoT (Rule 30) — shared with
+// SearchPipelineEvaluator which cannot import from this application layer.
+// Do NOT redefine locally; changes here would drift from pipeline-defect-codes.ts.
 
 export class SearchUseCase {
   private readonly abstainPolicy = new AbstainPolicy();
@@ -294,6 +305,7 @@ export class SearchUseCase {
       decisionContext,
       routeDegradation,
       funnelMetrics,
+      rankingMetadata,
       specializedRouteObservability,
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
@@ -336,6 +348,7 @@ export class SearchUseCase {
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
       routeDegradation,
+      ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
       // Wire HTTP options.explain → includeCounterfactuals symmetrically:
       //   explain=true  → includeCounterfactuals=true (force on)
@@ -369,25 +382,49 @@ export class SearchUseCase {
   }
 
   /**
-   * Entity-only route: run EntityResolver directly.
+   * Entity-only route: run EntityResolver with TA3 corrective retry loop.
+   *
+   * Implements a maximum-1 corrective exact-recovery retry (TA3-1/TA3-2):
+   *
+   *   Pass 1: Build candidates from plan anchors, resolve.
+   *   If shouldTriggerCorrectiveRetry() → Pass 2: broader blocker recall +
+   *     re-hydrate candidates → re-resolve with expanded candidate set.
+   *   After Pass 2: apply resolveCorrectiveRetryOutcome() exit conditions.
+   *
+   * The retry is NOT a broad search fallback — it is an exact-recovery retry.
+   * Ambiguous misses and 'clarify'/'fail' recommendations skip the retry.
    */
   // NOTE: compiled (CompiledWineQuery) is intentionally not passed to the entity route.
   // Entity resolution uses QueryPlanV1 policy fields directly (requireExact, allowApproximate).
   // compiled.execution.budget and provenancePolicy are NOT applied to entity queries.
   // To extend compiled-first semantics to entity route, thread compiled through EntityResolver.
   private async executeEntityRoute(plan: QueryPlanV1): Promise<EntityResolveResult> {
-    const candidateEntities = await buildResolverCandidatesFromPlan(plan, this.deps.entityLookup);
+    // TA2-4: Run blocker to surface entity IDs not covered by alias anchors.
+    // blockerOnlyIds = blocker output minus IDs already in anchor candidateEntityIds.
+    const blockerOnlyIds = await this.runBlockerForPlan(plan, false);
+
+    const candidateEntities = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        anchors: plan.anchors,
+        ...(blockerOnlyIds.length > 0 ? { blockerOnlyIds } : {}),
+      },
+      this.deps.entityLookup,
+    );
 
     pipelineDebug(
       {
         step: 'route.entity.only.start',
         query_class: plan.queryClass,
         resolver_candidate_count: candidateEntities.length,
+        blocker_seed_count: blockerOnlyIds.length,
       },
       'pipeline entity-only route',
     );
 
-    const resolved = await this.deps.entityResolver.resolve({
+    // Pass 1 resolve
+    const firstResult = await this.deps.entityResolver.resolve({
       rawQuery: plan.rawQuery,
       normalizedQuery: plan.normalizedQuery,
       ...(plan.normalizedQueryViews !== undefined
@@ -400,11 +437,101 @@ export class SearchUseCase {
       candidateEntities,
     });
 
+    // TA3-1: Evaluate corrective retry trigger conditions
+    const triggerRetry = shouldTriggerCorrectiveRetry(plan, firstResult);
+
+    if (!triggerRetry) {
+      pipelineDebug(
+        {
+          step: 'route.entity.only.done',
+          resolve_status: firstResult.status,
+          candidate_count: firstResult.candidates.length,
+          corrective_retry: false,
+          has_degradation: firstResult.degradation !== undefined,
+        },
+        'pipeline entity-only route',
+      );
+      return firstResult;
+    }
+
+    // TA3-2: Corrective retry — broader blocker recall + candidate re-hydration.
+    //
+    // Pass 2 uses broader=true to relax the blocker's limit/threshold and surface
+    // additional high-recall candidates that Pass 1 missed. New IDs are merged with
+    // the Pass 1 candidate set so the resolver sees a strictly larger pool.
+    pipelineDebug(
+      {
+        step: 'route.entity.corrective_retry.start',
+        query_class: plan.queryClass,
+        first_pass_confidence: firstResult.decisionConfidenceC,
+        first_pass_status: firstResult.status,
+        anchor_count: plan.anchors.length,
+        pass1_blocker_seed_count: blockerOnlyIds.length,
+      },
+      'pipeline entity corrective retry',
+    );
+
+    const broaderBlockerIds = await this.runBlockerForPlan(plan, true);
+    // Merge broader IDs with Pass 1 anchor coverage so dedup works correctly.
+    const anchorCoveredIds = new Set(
+      plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
+    );
+    const pass1BlockerSet = new Set(blockerOnlyIds.map(String));
+    const additionalIds = broaderBlockerIds.filter(
+      (id) => !anchorCoveredIds.has(String(id)) && !pass1BlockerSet.has(String(id)),
+    );
+
+    // Rebuild candidates only when broader recall surfaced new IDs.
+    const retryCandidateEntities =
+      additionalIds.length > 0
+        ? await buildResolverCandidatesFromGenerator(
+            {
+              rawQuery: plan.rawQuery,
+              normalizedQuery: plan.normalizedQuery,
+              anchors: plan.anchors,
+              blockerOnlyIds: [...blockerOnlyIds, ...additionalIds],
+            },
+            this.deps.entityLookup,
+          )
+        : candidateEntities;
+
+    pipelineDebug(
+      {
+        step: 'route.entity.corrective_retry.candidates',
+        pass2_blocker_seed_count: broaderBlockerIds.length,
+        additional_ids_count: additionalIds.length,
+        retry_candidate_count: retryCandidateEntities.length,
+      },
+      'pipeline entity corrective retry candidates',
+    );
+
+    const retryResult = await this.deps.entityResolver.resolve({
+      rawQuery: plan.rawQuery,
+      normalizedQuery: plan.normalizedQuery,
+      ...(plan.normalizedQueryViews !== undefined
+        ? { normalizedQueryViews: plan.normalizedQueryViews }
+        : {}),
+      queryClass: plan.queryClass,
+      policy: plan.policy,
+      anchorCandidates: plan.anchors,
+      uncertainty: plan.uncertainty,
+      candidateEntities: retryCandidateEntities,
+    });
+
+    // TA3-2: Apply exit conditions after corrective retry
+    const outcome = resolveCorrectiveRetryOutcome(retryResult);
+
+    // Use retry result regardless of outcome — the outcome tag is for future
+    // clarify/fail routing in the decision layer (post-route phase).
+    const resolved = retryResult;
+
     pipelineDebug(
       {
         step: 'route.entity.only.done',
         resolve_status: resolved.status,
         candidate_count: resolved.candidates.length,
+        corrective_retry: true,
+        corrective_retry_outcome: outcome,
         has_degradation: resolved.degradation !== undefined,
       },
       'pipeline entity-only route',
@@ -414,12 +541,49 @@ export class SearchUseCase {
   }
 
   /**
+   * TA2-4 / TA3: Run the blocker to produce entity IDs not covered by anchors.
+   *
+   * Returns the diff: blocker output IDs that are NOT already in any anchor's
+   * `candidateEntityIds`. These are the true "blocker-only" seeds.
+   *
+   * @param broader  When true, use a higher-recall invocation for corrective retry (TA3).
+   */
+  private async runBlockerForPlan(
+    plan: QueryPlanV1,
+    broader: boolean,
+  ): Promise<readonly import('../../domain/shared/types/index.js').EntityId[]> {
+    if (this.deps.blocker === undefined) {
+      return [];
+    }
+    const allBlockerIds = await this.deps.blocker.block(
+      plan.rawQuery,
+      plan.normalizedQuery,
+      broader ? { broader: true } : undefined,
+    );
+    // Diff: remove IDs already covered by anchor candidateEntityIds
+    const anchorCoveredIds = new Set(
+      plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
+    );
+    return allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id)));
+  }
+
+  /**
    * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
+   *
+   * The resolveEntity callback uses resolveEntityRouteForPlan (single-pass, no
+   * TA3 retry loop) — anchor resolution in the hybrid route only needs to find
+   * the pivot entity for compare_candidates, not perform full exact recovery.
+   * TA3 corrective retry is intentionally limited to the entity-only route.
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
     compiled?: CompiledWineQuery,
   ): Promise<SearchRouteExecutionResult> {
+    const entityResolutionDeps = {
+      entityResolver: this.deps.entityResolver,
+      entityLookup: this.deps.entityLookup,
+      blocker: this.deps.blocker,
+    };
     return executeHybridRouteRankingPipeline(
       plan,
       {
@@ -428,7 +592,7 @@ export class SearchUseCase {
         compareRetriever: this.deps.compareRetriever,
         ranker: this.deps.ranker,
       },
-      (p) => this.executeEntityRoute(p),
+      (p) => resolveEntityRouteForPlan(p, entityResolutionDeps),
       compiled,
     );
   }

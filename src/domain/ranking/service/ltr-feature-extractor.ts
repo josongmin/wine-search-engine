@@ -11,6 +11,7 @@
  */
 
 import type { RankingFeatures } from './lambdamart-ranker.js';
+import type { QueryTargetType } from '../../query/model/query-target-type.js';
 
 
 /**
@@ -95,9 +96,9 @@ export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures 
 
 /**
  * Extended LTR feature extraction for offline training that includes
- * additional prestige and critic signals not yet in the 8-feature
- * LambdaMART model. Used by ltr-training-service.ts for next-generation
- * model training without affecting the live inference path.
+ * additional prestige, critic, and query-target-type signals not yet in the
+ * 8-feature LambdaMART model. Used by ltr-training-service.ts for
+ * next-generation model training without affecting the live inference path.
  *
  * When the next LambdaMART model version adds these features, promote
  * them to extractLTRFeatures() and update RankingFeatures accordingly.
@@ -105,15 +106,46 @@ export function extractLTRFeatures(scores: LTRScoreComponents): RankingFeatures 
 export interface ExtendedLTRFeatures extends RankingFeatures {
   readonly criticScoreFeature: number;
   readonly producerPrestigeFeature: number;
+  /**
+   * RFC-017 §9: query_target_type as 1-hot encoding (4 binary features).
+   * Encoding: isTargetWine | isTargetProducer | isTargetRegion | isTargetStyle
+   * 'unknown' → all zeros (no signal).
+   *
+   * LambdaMART can learn that producer-targeted queries should weight
+   * producerPrestige higher, region queries should weight regionMatch higher, etc.
+   */
+  readonly isTargetWine: 0 | 1;
+  readonly isTargetProducer: 0 | 1;
+  readonly isTargetRegion: 0 | 1;
+  readonly isTargetStyle: 0 | 1;
 }
 
 /** Neutral producer prestige feature when component missing. */
 const LTR_PRODUCER_PRESTIGE_FEATURE_DEFAULT = 0.5;
 
-export function extractExtendedLTRFeatures(scores: LTRScoreComponents): ExtendedLTRFeatures {
+/**
+ * Encodes QueryTargetType as 4 binary 1-hot features.
+ * 'unknown' maps to all-zeros (neutral — no target type signal).
+ */
+function encodeQueryTargetType(
+  targetType: QueryTargetType | undefined,
+): Pick<ExtendedLTRFeatures, 'isTargetWine' | 'isTargetProducer' | 'isTargetRegion' | 'isTargetStyle'> {
+  return {
+    isTargetWine: targetType === 'wine' ? 1 : 0,
+    isTargetProducer: targetType === 'producer' ? 1 : 0,
+    isTargetRegion: targetType === 'region' ? 1 : 0,
+    isTargetStyle: targetType === 'style' ? 1 : 0,
+  };
+}
+
+export function extractExtendedLTRFeatures(
+  scores: LTRScoreComponents,
+  targetType?: QueryTargetType | undefined,
+): ExtendedLTRFeatures {
   return {
     ...extractLTRFeatures(scores),
     criticScoreFeature: scores.criticScore ?? 0.0,
     producerPrestigeFeature: scores.producerPrestige ?? LTR_PRODUCER_PRESTIGE_FEATURE_DEFAULT,
+    ...encodeQueryTargetType(targetType),
   };
 }

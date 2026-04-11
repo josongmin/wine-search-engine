@@ -1,6 +1,8 @@
 /**
- * E5-T1: W6-P1-2 — embedding readiness returns 'degraded' when URL missing.
- * Test first (TDD).
+ * E5-T1: W6-P1-2 — embedding readiness returns 'skipped' when URL missing.
+ *
+ * Fix: URL 없음 = probe 불가 상태이므로 'down'(서비스 장애) 대신 'skipped'(probe 불가)가 정확.
+ * 'down' + required:true 조합이 URL 미설정 환경에서 허위 not-ready를 보고했던 버그 수정.
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { Config } from '../../../src/config/env.js';
@@ -52,15 +54,16 @@ function makeRuntime(): RuntimeHandles {
 }
 
 describe('E5-T1: embedding readiness when URL missing', () => {
-  it('returns degraded when no openai.apiKey and no embedding.url', async () => {
+  it('returns skipped when no openai.apiKey and no embedding.url', async () => {
     const config = makeMinimalConfig({ url: undefined });
     const options = buildHealthRouteOptions(config, makeRuntime());
     const embeddingCheck = options.readiness['embedding'];
     expect(embeddingCheck).toBeDefined();
     const status = await embeddingCheck!.check();
-    // 'down' signals the required embedding capability is unavailable (not just unconfigured).
-    // With required: true, this causes overall readiness to report not-ready.
-    expect(status).toBe('down');
+    // W6-P1-2 fix: URL 없음 = probe 불가 → 'skipped'. 'down'은 서비스가 실제로 응답 실패할 때
+    // 사용하며, URL 자체가 없는 경우 (미설정 환경)에서는 'skipped'가 정확한 상태입니다.
+    // required:true + 'down' 조합이 URL 미설정 환경에서 서버를 허위 not-ready로 표시했던 버그 수정.
+    expect(status).toBe('skipped');
   });
 
   it('returns up when openai.apiKey is set (falls through to openai check, mocked as up)', async () => {

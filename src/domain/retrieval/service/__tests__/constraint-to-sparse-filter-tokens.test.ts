@@ -200,36 +200,45 @@ describe('hardConstraintsToSparseFilterTokens — numeric range constraints', ()
   });
 });
 
-// grape_primary dual-field: positive = / in must emit BOTH grape_primary: AND grapes:
-// tokens so blend wines (variety in grapes[] but not grape_primary) are included.
-// Exclusion already covers both; this ensures positive constraints have parity.
-describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field', () => {
-  it('grape_primary = value emits grape_primary: token', () => {
+// grape_primary dual-field: positive = / in must emit grape_or: compound token so
+// buildSparseFilters produces (grape_primary contains "X" OR grapes contains "X").
+// Previously emitted two separate tokens (grape_primary:X + grapes:X) which produced
+// AND semantics — blend wines were incorrectly excluded.
+describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field (grape_or compound token)', () => {
+  it('grape_primary = value emits grape_or: compound token (OR semantics for blend coverage)', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       makeConstraint('grape_primary', '=', 'Cabernet Sauvignon'),
     ]);
-    expect(tokens.some((t) => t.startsWith('grape_primary:'))).toBe(true);
+    expect(tokens.some((t) => t.startsWith('grape_or:'))).toBe(true);
   });
 
-  it('grape_primary = value ALSO emits grapes: token (blend coverage)', () => {
+  it('grape_primary = value does NOT emit separate grape_primary: token (no AND leakage)', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       makeConstraint('grape_primary', '=', 'Cabernet Sauvignon'),
     ]);
-    expect(tokens.some((t) => t.startsWith('grapes:'))).toBe(true);
+    expect(tokens.filter((t) => t.startsWith('grape_primary:'))).toHaveLength(0);
   });
 
-  it('grape_primary in [...] emits grape_primary_in: token', () => {
+  it('grape_primary = value does NOT emit separate grapes: token (no AND leakage)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', '=', 'Cabernet Sauvignon'),
+    ]);
+    expect(tokens.filter((t) => t.startsWith('grapes:'))).toHaveLength(0);
+  });
+
+  it('grape_primary in [...] emits grape_or_in: token', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       makeConstraint('grape_primary', 'in', ['Cabernet', 'Merlot']),
     ]);
-    expect(tokens.some((t) => t.startsWith('grape_primary_in:'))).toBe(true);
+    expect(tokens.some((t) => t.startsWith('grape_or_in:'))).toBe(true);
   });
 
-  it('grape_primary in [...] ALSO emits grapes_in: token (blend coverage)', () => {
+  it('grape_primary in [...] does NOT emit separate grape_primary_in: or grapes_in: tokens', () => {
     const tokens = hardConstraintsToSparseFilterTokens([
       makeConstraint('grape_primary', 'in', ['Cabernet', 'Merlot']),
     ]);
-    expect(tokens.some((t) => t.startsWith('grapes_in:'))).toBe(true);
+    expect(tokens.filter((t) => t.startsWith('grape_primary_in:'))).toHaveLength(0);
+    expect(tokens.filter((t) => t.startsWith('grapes_in:'))).toHaveLength(0);
   });
 
   it('grape_primary exclude still covers both fields (regression)', () => {
@@ -238,5 +247,270 @@ describe('hardConstraintsToSparseFilterTokens — grape_primary dual-field', () 
     ]);
     expect(tokens.some((t) => t.startsWith('grape_primary_not:'))).toBe(true);
     expect(tokens.some((t) => t.startsWith('grapes_not:'))).toBe(true);
+  });
+
+  it('grape_primary exclude array → grape_primary_not_in + grapes_not_in (dual-field coverage)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', 'exclude', ['Merlot', 'Cab']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_primary_not_in:'))).toBe(true);
+    expect(tokens.some((t) => t.startsWith('grapes_not_in:'))).toBe(true);
+    const pn = tokens.find((t) => t.startsWith('grape_primary_not_in:'));
+    const gn = tokens.find((t) => t.startsWith('grapes_not_in:'));
+    expect(pn).toMatch(/Merlot/);
+    expect(pn).toMatch(/Cab/);
+    expect(gn).toMatch(/Merlot/);
+    expect(gn).toMatch(/Cab/);
+  });
+
+  it('grape_primary exclude single-element array → grape_primary_not + grapes_not (scalar form)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', 'exclude', ['Pinot Noir']),
+    ]);
+    expect(tokens.some((t) => t === 'grape_primary_not:Pinot Noir')).toBe(true);
+    expect(tokens.some((t) => t === 'grapes_not:Pinot Noir')).toBe(true);
+  });
+
+  it('grape_primary not_in array → grape_primary_not_in + grapes_not_in (dual-field coverage)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_primary', 'not_in', ['Merlot', 'Syrah']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_primary_not_in:'))).toBe(true);
+    expect(tokens.some((t) => t.startsWith('grapes_not_in:'))).toBe(true);
+  });
+});
+
+describe('hardConstraintsToSparseFilterTokens — grape_family (Round 4: was silently dropped)', () => {
+  it('grape_family = value emits grape_family: token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_family', '=', 'Cabernet'),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_family:'))).toBe(true);
+  });
+
+  it('grape_family exclude value emits grape_family_not: token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_family', 'exclude', 'Chardonnay'),
+    ]);
+    expect(tokens.some((t) => t.startsWith('grape_family_not:'))).toBe(true);
+  });
+});
+
+describe('hardConstraintsToSparseFilterTokens — exclude array for standard attributes', () => {
+  it('country exclude array → country_not_in with pipe-delimited values', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('country', 'exclude', ['France', 'Italy']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('country_not_in:'))).toBe(true);
+    const tok = tokens.find((t) => t.startsWith('country_not_in:'));
+    expect(tok).toMatch(/France/);
+    expect(tok).toMatch(/Italy/);
+  });
+
+  it('country exclude single-element array → country_not scalar form', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('country', 'exclude', ['Spain']),
+    ]);
+    expect(tokens.some((t) => t === 'country_not:Spain')).toBe(true);
+  });
+
+  it('region not_in array → region_not_in with pipe-delimited values', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('region', 'not_in', ['Burgundy', 'Champagne']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('region_not_in:'))).toBe(true);
+    const tok = tokens.find((t) => t.startsWith('region_not_in:'));
+    expect(tok).toMatch(/Burgundy/);
+    expect(tok).toMatch(/Champagne/);
+  });
+
+  it('style not_in array → normalised style_not_in (oaked/unoaked map to "" and are dropped; oaky is not in map so stays)', () => {
+    // 'oaky' → NOT in STYLE_NORMALISATION_MAP → fallback lowercase 'oaky' (kept, length > 0)
+    // 'bold' → STYLE_NORMALISATION_MAP.get('bold') = 'bold' → kept
+    // Both kept → style_not_in:oaky|bold (or bold|oaky depending on order)
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'not_in', ['oaky', 'bold']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('style_not_in:') && t.includes('bold'))).toBe(true);
+  });
+
+  it('style not_in with oaked (in map → "") and full-bodied → only full remains', () => {
+    // 'oaked' → STYLE_NORMALISATION_MAP maps to '' → filtered out
+    // 'full-bodied' → maps to 'full' → kept
+    // Single value remaining → style_not:full
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'not_in', ['oaked', 'full-bodied']),
+    ]);
+    expect(tokens.some((t) => t === 'style_not:full')).toBe(true);
+  });
+
+  it('style not_in two normalised values → style_not_in with pipe-delimited canonical tokens', () => {
+    // Both 'full-bodied' and 'light-bodied' normalise to canonical values
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'not_in', ['full-bodied', 'light-bodied']),
+    ]);
+    expect(tokens.some((t) => t.startsWith('style_not_in:'))).toBe(true);
+    const tok = tokens.find((t) => t.startsWith('style_not_in:'))!;
+    expect(tok).toContain('full');
+    expect(tok).toContain('light');
+  });
+
+  it('pipe character in exclude value is stripped to prevent token-delimiter injection', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('country', 'exclude', ['France|Italy']),
+    ]);
+    // pipe stripped → treated as single value, no pipe remains in output
+    const tok = tokens.find((t) => t.startsWith('country_not:'));
+    expect(tok).toBeDefined();
+    expect(tok).not.toContain('|');
+  });
+});
+
+describe('hardConstraintsToSparseFilterTokens — grape_family (BUG regression: was no-op)', () => {
+  // Previously grape_family tokens were generated but not in FILTER_TOKEN_REGISTRY
+  // so buildSparseFilters silently blocked them — grape family constraints were no-ops.
+  it('grape_family = value produces grape_family: token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_family', '=', 'Cabernet'),
+    ]);
+    expect(tokens).toContain('grape_family:Cabernet');
+  });
+
+  it('grape_family exclude value produces grape_family_not: token', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('grape_family', 'exclude', 'Muscat'),
+    ]);
+    expect(tokens).toContain('grape_family_not:Muscat');
+  });
+});
+
+describe('hardConstraintsToSparseFilterTokens — style/price_band exclude normalisation (BUG regression)', () => {
+  // Previously exclude operators emitted raw un-normalised values.
+  // style field stores canonical compound values ("full red", "light white") — not synonyms.
+  // Exclusion of "full-bodied" must emit "full" (canonical) not "full-bodied" (synonym).
+  it('style exclude "full-bodied" emits style_not:full (normalised)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'exclude', 'full-bodied'),
+    ]);
+    expect(tokens).toContain('style_not:full');
+    expect(tokens).not.toContain('style_not:full-bodied');
+  });
+
+  it('style exclude "light-bodied" emits style_not:light (normalised)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'exclude', 'light-bodied'),
+    ]);
+    expect(tokens).toContain('style_not:light');
+  });
+
+  it('style exclude "oaked" emits no token (non-indexable style value)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'exclude', 'oaked'),
+    ]);
+    expect(tokens.filter((t) => t.startsWith('style_not'))).toHaveLength(0);
+  });
+
+  it('price_band exclude "expensive" emits price_band_not:premium (normalised)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('price_band', 'exclude', 'expensive'),
+    ]);
+    expect(tokens).toContain('price_band_not:premium');
+    expect(tokens).not.toContain('price_band_not:expensive');
+  });
+
+  it('price_band exclude "high-end" emits price_band_not:premium (normalised)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('price_band', 'exclude', 'high-end'),
+    ]);
+    expect(tokens).toContain('price_band_not:premium');
+  });
+
+  it('price_band not_in ["budget", "luxury"] emits price_band_not_in with canonical values', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('price_band', 'not_in', ['budget', 'luxury']),
+    ]);
+    const tok = tokens.find((t) => t.startsWith('price_band_not_in:'));
+    expect(tok).toBeDefined();
+    expect(tok).toContain('value');   // 'budget' → 'value'
+    expect(tok).toContain('luxury');
+  });
+});
+
+describe('hardConstraintsToSparseFilterTokens — alcohol reversed range (BUG regression)', () => {
+  // Previously alcohol range did not normalise reversed ranges like price_usd/vintage_year do.
+  // { min: 20, max: 10 } would produce alcohol_pct >= 20 AND <= 10 → always false → 0 results.
+  it('alcohol range with lo > hi normalises to correct min/max', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('alcohol', 'range', { min: 20, max: 10 }),
+    ]);
+    const minTok = tokens.find((t) => t.startsWith('alcohol_min:'));
+    const maxTok = tokens.find((t) => t.startsWith('alcohol_max:'));
+    expect(minTok).toBeDefined();
+    expect(maxTok).toBeDefined();
+    // After normalisation: lo=10, hi=20
+    expect(minTok).toBe('alcohol_min:10');
+    expect(maxTok).toBe('alcohol_max:20');
+  });
+
+  it('alcohol range with lo < hi passes through unchanged', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('alcohol', 'range', { min: 12, max: 15 }),
+    ]);
+    expect(tokens).toContain('alcohol_min:12');
+    expect(tokens).toContain('alcohol_max:15');
+  });
+});
+
+describe('hardConstraintsToSparseFilterTokens — style regex escape (R-REGEX-01)', () => {
+  // Vespa `matches` uses Java regex. Raw LLM-emitted style values containing
+  // metacharacters (., *, +, ?, (, )) must be escaped to prevent unintended
+  // broad matching or PatternSyntaxException errors.
+
+  it('R-REGEX-01: known canonical values pass through without escaping', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', '=', 'full'),
+    ]);
+    // Canonical value — no escaping needed, no backslashes
+    expect(tokens).toContain('style_matches:full');
+  });
+
+  it('R-REGEX-02: style value with dot is escaped (dot is regex wildcard)', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', '=', 'full.bodied'),
+    ]);
+    // Dot must be escaped to \. to avoid matching any character
+    const tok = tokens.find((t) => t.startsWith('style_matches:'));
+    expect(tok).toBeDefined();
+    expect(tok).toContain('\\.');
+    expect(tok).not.toBe('style_matches:full.bodied');
+  });
+
+  it('R-REGEX-03: style value with .* does not produce a style_matches:.* wildcard', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', '=', '.*'),
+    ]);
+    const tok = tokens.find((t) => t.startsWith('style_matches:'));
+    // Must be escaped — raw .* would match every wine
+    if (tok !== undefined) {
+      expect(tok).not.toBe('style_matches:.*');
+      expect(tok).toContain('\\');
+    }
+  });
+
+  it('R-REGEX-04: unknown style value in "in" array is escaped', () => {
+    const tokens = hardConstraintsToSparseFilterTokens([
+      makeConstraint('style', 'in', ['full', 'tannic+spicy']),
+    ]);
+    // 'full' → canonical, 'tannic+spicy' → + must be escaped
+    const tok = tokens.find((t) => t.startsWith('style_matches') || t.startsWith('style_matches_in'));
+    expect(tok).toBeDefined();
+    // The + character must not appear unescaped in the token
+    const valueAfterColon = tok?.split(':').slice(1).join(':') ?? '';
+    // Split on | to check individual values
+    const parts = valueAfterColon.split('|');
+    const tannicPart = parts.find((p) => p.includes('tannic'));
+    if (tannicPart !== undefined) {
+      expect(tannicPart).toContain('\\+');
+    }
   });
 });

@@ -738,6 +738,12 @@ export interface BenchmarkReport {
   readonly judgeRequiredExcludedCount: number;
   readonly judgeFailCount: number;
   readonly judgeAttemptCount: number;
+  /**
+   * Number of scenarios that hit step-0 fallback: LLM was unavailable (rate-limit/timeout)
+   * BEFORE the agent ran even one step. These are infra failures, not agent logic bugs,
+   * but they drag down terminationCorrectness (25% partial credit) and the overall score.
+   */
+  readonly infraFallbackCount: number;
   /** Wall-clock breakdown for the whole CLI run (profiling). */
   readonly wallClock: BenchmarkWallClock;
   readonly results: readonly ScenarioResult[];
@@ -920,6 +926,9 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
   let scenarioWallMsSum = 0;
   let scenarioWallSampleCount = 0;
   let completedCount = 0;
+  // Infra failure tracking: step-0 fallback = LLM rate-limit / timeout before agent ran.
+  // These pollute the overall score but are NOT agent logic failures.
+  let infraFallbackCount = 0;
   const totalToRun = scenarios.filter((s) => s.skip === undefined).length;
 
   const results = await runWithConcurrency(
@@ -1107,6 +1116,10 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           `term=${(sc.terminationCorrectness * 100).toFixed(0)}%`,
         ].join(' ');
         completedCount++;
+        // Detect infra failure: step-0 fallback = LLM unavailable (rate-limit/timeout).
+        const isInfraFallback = execution.terminationReason === 'fallback' && execution.stepCount === 0;
+        if (isInfraFallback) infraFallbackCount++;
+        const infraTag = isInfraFallback ? ' ⚡INFRA-FALLBACK(LLM rate-limit/timeout — not agent bug)' : '';
         console.error(
           `  [DONE] #${String(scenario.id).padEnd(3)} `
           + `[${scenario.tier.slice(0, 16).padEnd(16)}] `
@@ -1114,7 +1127,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
           + `tools=${execution.toolCallCount} steps=${scored.stepCount} `
           + `${dimParts}${judgePart}${faithPart}${scrPart}${elaPart}${claimPart} `
           + `${(elapsed / 1000).toFixed(1)}s `
-          + `[${completedCount}/${totalToRun}]`,
+          + `[${completedCount}/${totalToRun}]${infraTag}`,
         );
         return scored;
       } catch (err) {
@@ -1191,7 +1204,7 @@ async function runBenchmark(args: CliArgs): Promise<BenchmarkReport> {
     );
   }
 
-  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock);
+  return buildReport(results, scenarios, modelId, judgeModelId, embeddingModel, apiBaseDomain, args, judgeFailCount, judgeAttemptCount, wallClock, infraFallbackCount);
 }
 
 function filterScenarios(
@@ -1218,6 +1231,7 @@ function buildReport(
   judgeFailCount: number,
   judgeAttemptCount: number,
   wallClock: BenchmarkWallClock,
+  infraFallbackCount: number = 0,
 ): BenchmarkReport {
   const executed = results.filter((r) => !r.skipped && r.error === undefined);
 
@@ -1365,6 +1379,7 @@ function buildReport(
     judgeRequiredExcludedCount,
     judgeFailCount,
     judgeAttemptCount,
+    infraFallbackCount,
     wallClock,
     results,
     summary: {
@@ -1530,6 +1545,14 @@ async function main(): Promise<void> {
   if (report.criticalFailureCount > 0) {
     console.error(`  ⚠ Critical:   ${report.criticalFailureCount} scenario(s) had a critical failure (overall=0)`);
   }
+  if (report.infraFallbackCount > 0) {
+    const pct = report.executedCount > 0 ? (report.infraFallbackCount / report.executedCount * 100).toFixed(0) : '0';
+    console.error(
+      `  ⚡ Infra fail: ${report.infraFallbackCount} scenario(s) (${pct}%) hit step-0 fallback`
+      + ` — LLM rate-limit/timeout BEFORE agent ran. Score penalized by term=25% but NOT an agent bug.`
+      + ` Lower concurrency (--concurrency ${Math.max(1, (report.wallClock.concurrency ?? 7) - 2)}) or retry to get clean signal.`,
+    );
+  }
   if (report.judgeFailCount > 0) {
     // Warn loudly when >10% of actual judge attempts failed.
     const judgeCallsTotal = report.judgeAttemptCount;
@@ -1603,22 +1626,103 @@ async function main(): Promise<void> {
   for (const [tier, data] of sortedTiers) {
     console.error(`  ${tier.padEnd(22)} ${(data.avgScore * 100).toFixed(1)}% (${data.count})`);
   }
-  // ────── worst 5 scenarios ──────
+  // ────── worst N scenarios (triage-ready) ──────
   const executedResults = report.results.filter((r) => !r.skipped && r.error === undefined);
-  const worst5 = [...executedResults]
+  const WORST_N = 10;
+  const worstN = [...executedResults]
     .sort((a, b) => a.scores.overall - b.scores.overall)
-    .slice(0, 5);
-  if (worst5.length > 0) {
-    console.error('  ────── worst 5 ─────────');
-    for (const w of worst5) {
-      const dims: string[] = [];
-      if (w.scores.toolAccuracy < 1) dims.push(`tool=${(w.scores.toolAccuracy * 100).toFixed(0)}%`);
-      if (w.scores.answerQuality < 1) dims.push(`ans=${(w.scores.answerQuality * 100).toFixed(0)}%`);
-      if (w.scores.terminationCorrectness < 1) dims.push(`term=${(w.scores.terminationCorrectness * 100).toFixed(0)}%`);
-      if (w.scores.costEfficiency < 1) dims.push(`cost=${(w.scores.costEfficiency * 100).toFixed(0)}%`);
-      const dimStr = dims.length > 0 ? ` [${dims.join(', ')}]` : '';
-      console.error(`  #${String(w.id).padEnd(4)} ${(w.scores.overall * 100).toFixed(1)}%  ${w.tier.padEnd(20)}${dimStr}`);
+    .slice(0, WORST_N);
+  if (worstN.length > 0) {
+    console.error(`  ────── worst ${WORST_N} (triage) ──────`);
+    for (const w of worstN) {
+      // ── root-cause classification ──────────────────────────────────────────
+      const isInfraFallback = w.terminationReason === 'fallback' && (w.stepCount ?? 1) === 0;
+      const criticals = (w.diagnostics ?? []).filter((d) => d.severity === 'critical');
+      const warns = (w.diagnostics ?? []).filter((d) => d.severity === 'warn');
+
+      // Primary root-cause label — pick the most informative one
+      let rootCause: string;
+      if (isInfraFallback) {
+        rootCause = '⚡ INFRA-FALLBACK — LLM rate-limit/timeout, agent never ran';
+      } else if (criticals.length > 0) {
+        rootCause = `🔴 CRITICAL: ${criticals.map((d) => d.code).join(', ')}`;
+      } else if (w.scores.judge !== null && w.scores.judge < 0.25) {
+        rootCause = '🟠 JUDGE-FAIL — answer structurally wrong per rubric';
+      } else if ((w.scores.toolAccuracy ?? 1) < 0.5) {
+        rootCause = '🟡 WRONG-TOOL — tool selection or tool call missing';
+      } else if ((w.scores.answerQuality ?? 1) < 0.5) {
+        rootCause = '🟡 ANSWER-INCOMPLETE — partial constraint coverage';
+      } else if (warns.length > 0) {
+        rootCause = `⚠ ${warns[0].code}`;
+      } else {
+        rootCause = '— (no critical diag)';
+      }
+
+      // ── score breakdown ────────────────────────────────────────────────────
+      const sc = w.scores;
+      const scoreParts = [
+        `tool=${(sc.toolAccuracy * 100).toFixed(0)}%`,
+        `ans=${(sc.answerQuality * 100).toFixed(0)}%`,
+        `term=${(sc.terminationCorrectness * 100).toFixed(0)}%`,
+        sc.faithfulness !== null ? `faith=${(sc.faithfulness * 100).toFixed(0)}%` : null,
+        sc.judge !== null ? `judge=${sc.judge.toFixed(2)}` : null,
+      ].filter(Boolean).join(' ');
+
+      // ── execution context ──────────────────────────────────────────────────
+      const steps = w.stepCount ?? 0;
+      const tools = (w.toolsUsed ?? []).join(',') || 'none';
+      const termReason = w.terminationReason ?? '?';
+      const durationS = w.totalDurationMs !== undefined ? `${(w.totalDurationMs / 1000).toFixed(1)}s` : '';
+
+      // ── query (truncated) ──────────────────────────────────────────────────
+      const querySnippet = (w.query ?? '').slice(0, 70);
+
+      // ── answer snippet (only when judge failed or answer incomplete) ───────
+      const showAnswer = (sc.judge !== null && sc.judge < 0.5) || sc.answerQuality < 0.7;
+      const answerSnippet = showAnswer && w.answer
+        ? `\n      answer: "${w.answer.slice(0, 120).replace(/\n/g, ' ')}…"`
+        : '';
+
+      // ── judge rationale ────────────────────────────────────────────────────
+      const judgeRationale = w.judgeReasoning
+        ? `\n      judge:  "${w.judgeReasoning.slice(0, 150).replace(/\n/g, ' ')}…"`
+        : '';
+
+      // ── critical diagnostic details ────────────────────────────────────────
+      const diagDetails = criticals.slice(0, 3).map((d) => {
+        const obs = d.observed !== undefined ? ` observed=${d.observed}` : '';
+        const exp = d.expected !== undefined ? ` expected=${d.expected}` : '';
+        return `\n      diag:   [${d.dim}] ${d.message}${obs}${exp}`;
+      }).join('');
+
+      // ── step trace (first tool call input when tool is wrong) ──────────────
+      const stepTrace = !isInfraFallback && (w.steps ?? []).length > 0
+        ? (() => {
+            const firstToolStep = (w.steps ?? []).find((s) => s.action !== undefined || (s.actions !== undefined && s.actions.length > 0));
+            if (firstToolStep?.action !== undefined) {
+              const inp = JSON.stringify(firstToolStep.action.input).slice(0, 100);
+              return `\n      step1:  ${firstToolStep.action.tool}(${inp})`;
+            }
+            if (firstToolStep?.actions !== undefined && firstToolStep.actions.length > 0) {
+              const acts = firstToolStep.actions.map((a) => a.tool).join('+');
+              return `\n      step1:  [batch] ${acts}`;
+            }
+            return '';
+          })()
+        : '';
+
+      console.error(
+        `\n  #${String(w.id).padEnd(4)} ${(sc.overall * 100).toFixed(1)}%  [${w.tier}]`
+        + `\n      query:  "${querySnippet}"`
+        + `\n      cause:  ${rootCause}`
+        + `\n      scores: ${scoreParts}  steps=${steps} tools=${tools} term=${termReason} ${durationS}`
+        + answerSnippet
+        + judgeRationale
+        + diagDetails
+        + stepTrace,
+      );
     }
+    console.error('');
   }
 
   // ────── critical failures ──────

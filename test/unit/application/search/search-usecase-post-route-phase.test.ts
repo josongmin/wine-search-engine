@@ -3,9 +3,11 @@ import {
   runRankedRouteDecisionPhase,
   runSearchPostRoutePhase,
 } from '../../../../src/application/search/search-usecase-post-route-phase.js';
+import { DomainError } from '../../../../src/domain/shared/error/domain-error.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker.port.js';
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -155,8 +157,12 @@ function makeDecisionEngine(output = makeDecisionOutput()) {
 }
 
 function makeAbstainPolicy(abstain = false, entropy = 0.1) {
+  const typedDecision = abstain
+    ? { shouldAbstain: true as const, reason: 'low_confidence' as const, detail: `entropy=${entropy}`, recoverableBy: 'clarify' as const, entropy }
+    : false;
   return {
     shouldAbstain: vi.fn(() => ({ abstain, entropy })),
+    evaluate: vi.fn(() => typedDecision),
   };
 }
 
@@ -746,6 +752,60 @@ describe('runSearchPostRoutePhase', () => {
     expect(decisionEngine.decide).toHaveBeenCalledTimes(2);
   });
 
+  it('wires scoreDriftRecord into auditExtension ranking traces', async () => {
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+    const rankingMetadata: RankingMetadata = {
+      coarsePruneSummary: undefined,
+      rerankExecuted: true,
+      rerankGateReason: 'semantic_preference',
+      runtimeSignal: undefined,
+      preRerankTop5: ['wine:1', 'wine:2', 'wine:3'],
+      scoreDriftRecord: {
+        queryClass: 'semantic_preference',
+        heuristicTop3EntityIds: ['wine:1', 'wine:2', 'wine:3'],
+        ltrTop3EntityIds: ['wine:2', 'wine:1', 'wine:3'],
+        rankOrderChanges: 0.33,
+        averageRerankDeltaNormalized: 0.12,
+        safetyEnvelopeBlocks: 1,
+      },
+    };
+
+    await runRankedRouteDecisionPhase({
+      plan: minimalPlan(),
+      requestId: 'req-audit',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [
+        makeRankedResult({ entityId: createEntityId('wine:2') }),
+        makeRankedResult({ entityId: createEntityId('wine:1'), rank: 2, finalScore: 0.82 }),
+        makeRankedResult({ entityId: createEntityId('wine:3'), rank: 3, finalScore: 0.7 }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [
+        makeRankedResult({ entityId: createEntityId('wine:2') }),
+        makeRankedResult({ entityId: createEntityId('wine:1'), rank: 2, finalScore: 0.82 }),
+        makeRankedResult({ entityId: createEntityId('wine:3'), rank: 3, finalScore: 0.7 }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      rankingMetadata,
+      decisionEngine: makeDecisionEngine() as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    const buildParams = responseBuilder.build.mock.calls[0]?.[0] as { auditExtension?: Record<string, unknown> };
+    const auditExtension = buildParams.auditExtension as {
+      ranking_delta_trace?: { preRerankTop5: string[]; postRerankTop5: string[]; safetyEnvelopeBlocks: number };
+      rerank_decision_trace?: { gateDecision: string; scoreContract: string };
+    } | undefined;
+
+    expect(auditExtension?.ranking_delta_trace?.preRerankTop5).toEqual(['wine:1', 'wine:2', 'wine:3']);
+    expect(auditExtension?.ranking_delta_trace?.postRerankTop5).toEqual(['wine:2', 'wine:1', 'wine:3']);
+    expect(auditExtension?.ranking_delta_trace?.safetyEnvelopeBlocks).toBe(1);
+    expect(auditExtension?.rerank_decision_trace).toEqual({
+      gateDecision: 'applied',
+      scoreContract: 'bounded_normalized_0_1',
+    });
+  });
+
   it.each([
     [
       'passes route degradation into the response contract for ranked routes',
@@ -784,7 +844,11 @@ describe('runSearchPostRoutePhase', () => {
     );
   });
 
-  it('returns a canonical degraded authority trace when ranked-route response building throws', async () => {
+  it('throws DomainError(INTERNAL_INCONSISTENCY) when ranked-route response building throws unexpectedly', async () => {
+    // Previously this test expected a fabricated degraded-200 response. After the
+    // fix in search-usecase-post-route-phase.ts, unexpected builder errors are
+    // propagated as DomainError('INTERNAL_INCONSISTENCY') so the HTTP error handler
+    // can return a proper 500 instead of silently swallowing the failure.
     const plan = minimalPlan();
     const request: SearchRequest = { query: 'x' };
     const rankedResults = [makeRankedResult()] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
@@ -795,72 +859,57 @@ describe('runSearchPostRoutePhase', () => {
       }),
     };
 
-    const response = await runSearchPostRoutePhase({
-      plan,
-      compiled: {
-        query: {
-          rawQuery: plan.rawQuery,
-          normalizedQuery: plan.normalizedQuery,
-          intent: plan.intent,
-          queryClass: plan.queryClass,
-          anchors: plan.anchors,
-          constraints: plan.constraints,
-          expansions: plan.expansions,
-          uncertainty: plan.uncertainty,
-          plannerVersion: plan.plannerVersion,
-          policyRuleVersion: plan.policyRuleVersion,
-          thresholdProfileId: plan.thresholdProfileId,
-        },
-        execution: {
-          effectiveRoute: 'hybrid',
-          effectiveRetrievalMode: 'recommendation',
-          routeSource: 'planner',
-          budget: { maxCandidates: 20, enablePrecisionRerank: true },
-          provenancePolicy: {
-            requireIdentitySeal: true,
-            requireConstraintEvidence: false,
-            requireAnchorEvidence: false,
+    await expect(
+      runSearchPostRoutePhase({
+        plan,
+        compiled: {
+          query: {
+            rawQuery: plan.rawQuery,
+            normalizedQuery: plan.normalizedQuery,
+            intent: plan.intent,
+            queryClass: plan.queryClass,
+            anchors: plan.anchors,
+            constraints: plan.constraints,
+            expansions: plan.expansions,
+            uncertainty: plan.uncertainty,
+            plannerVersion: plan.plannerVersion,
+            policyRuleVersion: plan.policyRuleVersion,
+            thresholdProfileId: plan.thresholdProfileId,
+          },
+          execution: {
+            effectiveRoute: 'hybrid',
+            effectiveRetrievalMode: 'recommendation',
+            routeSource: 'planner',
+            budget: { maxCandidates: 20, enablePrecisionRerank: true },
+            provenancePolicy: {
+              requireIdentitySeal: true,
+              requireConstraintEvidence: false,
+              requireAnchorEvidence: false,
+            },
           },
         },
-      },
-      request,
-      requestId: 'req-post-route-builder-error',
-      startTime: Date.now() - 10,
-      resolveResult: makeResolveResult(),
-      rankedResults,
-      effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
-      retrievalModeSource: 'planner',
-      abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
-      snapshotVersions: undefined,
-      drinkingWindow: undefined,
-      decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
-      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
-      cacheService: undefined,
-    });
-
-    expect(response).toMatchObject({
-      queryType: 'search',
-      engineDecision: {
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        route: 'hybrid',
-      },
-      meta: {
+        request,
         requestId: 'req-post-route-builder-error',
-        route: 'hybrid',
-        executionMode: 'degraded',
-        blockingEligible: false,
-        runtimeCorrelationRef: 'req-post-route-builder-error',
-      },
+        startTime: Date.now() - 10,
+        resolveResult: makeResolveResult(),
+        rankedResults,
+        effectiveRoute: 'hybrid',
+        plannerSuggestedMode: 'hybrid',
+        retrievalModeSource: 'planner',
+        abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+        snapshotVersions: undefined,
+        drinkingWindow: undefined,
+        decisionEngine: decisionEngine as import('../../../../src/application/search/port/search-pipeline-deps.port.js').DecisionEnginePort,
+        responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+        cacheService: undefined,
+      }),
+    ).rejects.toSatisfy((err: unknown) => {
+      return (
+        err instanceof DomainError &&
+        err.code === 'INTERNAL_INCONSISTENCY' &&
+        err.message.includes('builder exploded')
+      );
     });
-    expect(response.engineDecision.decisionTraceRef).toMatch(
-      /^decision:v1:unknown:[a-f0-9]{64}$/,
-    );
-    expect(response.engineDecision.authorityTraceRef).toBe(
-      response.engineDecision.decisionTraceRef,
-    );
-    expect(response.meta.authorityTraceRef).toBe(response.engineDecision.decisionTraceRef);
   });
 
   it('carries top-ranked evidence into degraded failed decision output when the decision engine throws', async () => {

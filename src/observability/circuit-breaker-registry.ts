@@ -19,6 +19,10 @@ export class CircuitBreakerRegistry {
   private readonly breakers = new Map<string, CircuitBreaker>();
 
   register(name: string, breaker: CircuitBreaker): void {
+    // Idempotent: same name + same instance is a no-op (safe for constructors called
+    // multiple times in tests). A different instance under the same name replaces the
+    // prior entry — this happens in tests that build fresh containers. In production
+    // there is exactly one container, so no replacement occurs.
     this.breakers.set(name, breaker);
   }
 

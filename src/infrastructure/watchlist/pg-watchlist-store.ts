@@ -131,7 +131,13 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
       [id],
     );
     const row = result.rows[0];
-    return row !== undefined ? rowToWatchlistEntry(row) : null;
+    if (row === undefined) return null;
+    try {
+      return rowToWatchlistEntry(row);
+    } catch (err) {
+      pgWatchlistStoreLog.warn({ err, id }, 'watchlist.findById: corrupt row skipped');
+      return null;
+    }
   }
 
   async findByUserId(userId: string): Promise<readonly WatchlistEntry[]> {
@@ -208,7 +214,13 @@ export class PgWatchlistStore implements WatchlistStoragePort, TransactionalWatc
       [id],
     );
     const row = result.rows[0];
-    return row !== undefined ? rowToWatchlistEntry(row) : null;
+    if (row === undefined) return null;
+    try {
+      return rowToWatchlistEntry(row);
+    } catch (err) {
+      pgWatchlistStoreLog.warn({ err, id }, 'watchlist.findByIdForUpdate: corrupt row skipped');
+      return null;
+    }
   }
 
   async withTransaction<T>(fn: (tx: TransactionalWatchlistStore) => Promise<T>): Promise<T> {

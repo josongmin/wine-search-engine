@@ -169,6 +169,14 @@ function makeSignalComputer(scores: ComponentScores): SignalComputer {
   } as unknown as SignalComputer;
 }
 
+function makeSignalComputerByEntity(scoresByEntityId: Readonly<Record<string, ComponentScores>>): SignalComputer {
+  return {
+    computeAll: vi.fn((candidate: HybridCandidate) => {
+      return scoresByEntityId[String(candidate.entityId)] ?? makeComponentScores();
+    }),
+  } as unknown as SignalComputer;
+}
+
 /**
  * Creates a stub ScoreAggregator whose aggregate() always returns the
  * given finalScore (or -Infinity when scores.hardConstraintPass is false).
@@ -736,6 +744,98 @@ describe('Ranker', () => {
           degradationReasons: ['reranker_timeout'],
         },
       });
+    });
+  });
+
+  describe('wave 2 ranking observability', () => {
+    it('emits scoreDriftRecord when learned LTR rerank executes', async () => {
+      const candidates = makeCandidates(3, 'wine-drift');
+      const scoresByEntityId: Record<string, ComponentScores> = {
+        [String(candidates[0]!.entityId)]: makeComponentScores({
+          semantic: 0.1,
+          popularity: 0.1,
+          attributeAlignment: 0.1,
+          preferenceAlignment: 0.1,
+        }),
+        [String(candidates[1]!.entityId)]: makeComponentScores({
+          semantic: 0.9,
+          popularity: 0.9,
+          attributeAlignment: 0.9,
+          preferenceAlignment: 0.9,
+        }),
+        [String(candidates[2]!.entityId)]: makeComponentScores({
+          semantic: 0.6,
+          popularity: 0.6,
+          attributeAlignment: 0.6,
+          preferenceAlignment: 0.6,
+        }),
+      };
+      const ranker = new Ranker(
+        makeSignalComputerByEntity(scoresByEntityId),
+        makeScoreAggregatorSequence([0.9, 0.6, 0.4]),
+        makeEvidenceMapper(),
+        { ltrModels: new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]) },
+      );
+
+      const { metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(metadata.scoreDriftRecord).toBeDefined();
+      expect(metadata.scoreDriftRecord?.queryClass).toBe('semantic_preference');
+      expect(metadata.scoreDriftRecord?.heuristicTop3EntityIds).toEqual(
+        candidates.map((candidate) => String(candidate.entityId)),
+      );
+      expect(metadata.scoreDriftRecord?.ltrTop3EntityIds[0]).toBe(String(candidates[1]!.entityId));
+      expect(metadata.scoreDriftRecord?.rankOrderChanges).toBeGreaterThan(0);
+      expect(metadata.scoreDriftRecord?.averageRerankDeltaNormalized).toBeGreaterThan(0);
+    });
+
+    it('propagates sparseRank and blocks deep eviction of sparse-rank-1 candidate', async () => {
+      const protectedCandidate = { ...makeCandidate('wine-protected'), sparseRank: 1 };
+      const candidates = [
+        protectedCandidate,
+        makeCandidate('wine-strong-a'),
+        makeCandidate('wine-strong-b'),
+        makeCandidate('wine-strong-c'),
+      ];
+      const scoresByEntityId: Record<string, ComponentScores> = {
+        [String(protectedCandidate.entityId)]: makeComponentScores({
+          semantic: 0.0,
+          popularity: 0.0,
+          attributeAlignment: 0.0,
+          preferenceAlignment: 0.0,
+        }),
+        [String(candidates[1]!.entityId)]: makeComponentScores({
+          semantic: 1.0,
+          popularity: 1.0,
+          attributeAlignment: 1.0,
+          preferenceAlignment: 1.0,
+        }),
+        [String(candidates[2]!.entityId)]: makeComponentScores({
+          semantic: 0.9,
+          popularity: 0.9,
+          attributeAlignment: 0.9,
+          preferenceAlignment: 0.9,
+        }),
+        [String(candidates[3]!.entityId)]: makeComponentScores({
+          semantic: 0.8,
+          popularity: 0.8,
+          attributeAlignment: 0.8,
+          preferenceAlignment: 0.8,
+        }),
+      };
+      const ranker = new Ranker(
+        makeSignalComputerByEntity(scoresByEntityId),
+        makeScoreAggregatorSequence([0.95, 0.8, 0.7, 0.6]),
+        makeEvidenceMapper(),
+        { ltrModels: new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]) },
+      );
+
+      const { results, metadata } = await ranker.rank(makeInput(candidates, true));
+      const protectedResult = results.find((result) => result.entityId === protectedCandidate.entityId);
+
+      expect(protectedResult?.sparseRank).toBe(1);
+      expect(protectedResult?.rank).toBeLessThanOrEqual(3);
+      expect(metadata.scoreDriftRecord?.safetyEnvelopeBlocks).toBe(1);
     });
   });
 });

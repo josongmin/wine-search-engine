@@ -71,14 +71,6 @@ services:
       retries: 10
       start_period: 60s
 
-  # Noop placeholder: some Docker Desktop “Compose applications” still reference a
-  # `reranker` service by name after it was removed from the stack. This satisfies
-  # `docker compose start reranker` without running a cross-encoder server here.
-  # Configure real reranking via `RERANKER_SERVICE_URL` / Cohere in `.env` (optional).
-  reranker:
-    image: alpine:3.20
-    command: ["sleep", "infinity"]
-
 volumes:
   pg_data:
   redis_data:

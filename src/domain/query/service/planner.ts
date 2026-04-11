@@ -14,15 +14,14 @@ import type { QueryBudget } from '../model/query-budget.js';
 import type { QueryTargetType } from '../model/query-target-type.js';
 import { DEFAULT_QUERY_BUDGET } from '../model/query-budget.js';
 import { MAX_QUERY_LENGTH } from '../../shared/constants.js';
+import { STYLE_SENSORY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../model/threshold-profile.js';
 import type { AmbiguityDictionary } from '../port/ambiguity-dictionary.port.js';
 import type { FuzzyMatcherPort } from '../port/fuzzy-matcher.port.js';
 import { type AnchorExtractor } from './anchor-extractor.js';
 import { type ExpansionBuilder } from './expansion-builder.js';
 import { type NLMapper } from '../../attribute/service/nl-mapper.js';
-import type { ConstraintExtractionTrace } from '../../attribute/model/constraint-extraction-trace.js';
-import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
-import { ConstraintCompiler } from './constraint-compiler.js';
+import { ConstraintCompiler, type ConstraintCompilerResult } from './constraint-compiler.js';
 import { hasVintageYear as hasBoundedVintageYear } from '../../shared/utils/vintage.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
 import { QueryNormalizer } from './query-normalizer.js';
@@ -34,6 +33,7 @@ import {
 import { analyzeQueryDecomposition } from './decomposition-detector.js';
 import { extractAllPairingConstraints } from './pairing-extractor.js';
 import { correctKoreanWineTypos } from './korean-wine-aliases.js';
+import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decision-record.js';
 
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
@@ -90,6 +90,14 @@ export interface PlannerContext extends RequestExecutionContext {
   readonly session?: SessionContext | undefined;
   /** Resource budget override. */
   readonly budget?: QueryBudget | undefined;
+  /**
+   * E3: Enable planner policy trace (QueryPlanV2.plannerTrace).
+   *
+   * Opt-in only — trace allocation is non-trivial for high-QPS hot paths.
+   * Set to true when the request carries an explain=true flag or a debug
+   * header. Absent / false → plannerTrace is omitted from the plan.
+   */
+  readonly enablePlannerTrace?: boolean | undefined;
 }
 
 /**
@@ -159,6 +167,12 @@ export class Planner {
     const queryViews = this.queryNormalizer.normalize(typoFixed);
     const normalizedQuery = queryViews.accentless;
 
+    // E3: planner policy trace — opt-in only (context.enablePlannerTrace === true).
+    // Absent on the hot path to avoid allocation overhead on high-QPS requests.
+    // Enable via explain=true request flag or X-Debug-Key header.
+    const tracingEnabled = context?.enablePlannerTrace === true;
+    const plannerTrace: PolicyDecisionRecord[] = [];
+
     // 2. Extract anchors.
     const anchors = await this.anchorExtractor.extract(normalizedQuery, queryViews);
 
@@ -176,9 +190,29 @@ export class Planner {
       anchors,
       this.anchorExtractor,
     );
+    if (tracingEnabled) {
+      plannerTrace.push(buildDecisionRecord(
+        'intent_classification',
+        { normalizedQuery, anchorCount: anchors.length },
+        [{ ruleId: 'intent.detected', description: 'Intent detected via detectQueryIntent', inputsMatched: { normalizedQuery }, outcome: intent }],
+        [],
+        intent,
+        1.0,
+      ));
+    }
 
     // 4. Determine route.
     const route = this.determineRoute(intent, anchors);
+    if (tracingEnabled) {
+      plannerTrace.push(buildDecisionRecord(
+        'route_resolution',
+        { intent, anchorCount: anchors.length },
+        [{ ruleId: 'route.resolved', description: 'Route resolved via determineRoute', inputsMatched: { intent, anchorCount: anchors.length }, outcome: route }],
+        [],
+        route,
+        1.0,
+      ));
+    }
 
     // 5. Determine retrieval mode.
     const retrievalMode = this.determineRetrievalMode(
@@ -186,6 +220,16 @@ export class Planner {
       anchors,
       normalizedQuery,
     );
+    if (tracingEnabled) {
+      plannerTrace.push(buildDecisionRecord(
+        'retrieval_mode_selection',
+        { intent, anchorCount: anchors.length, normalizedQuery },
+        [{ ruleId: 'retrieval_mode.resolved', description: 'Mode resolved via determineRetrievalMode', inputsMatched: { intent }, outcome: retrievalMode }],
+        [],
+        retrievalMode,
+        1.0,
+      ));
+    }
 
     // 6. Determine query class.
     const queryClass = await this.determineQueryClass(
@@ -193,6 +237,16 @@ export class Planner {
       intent,
       anchors,
     );
+    if (tracingEnabled) {
+      plannerTrace.push(buildDecisionRecord(
+        'query_class_classification',
+        { normalizedQuery, intent, anchorCount: anchors.length },
+        [{ ruleId: 'query_class.classified', description: 'Query class classified via determineQueryClass', inputsMatched: { intent }, outcome: queryClass }],
+        [],
+        queryClass,
+        1.0,
+      ));
+    }
 
     // 6. Parse constraints (NL + rule-based) and attach food-pairing tags (Epic 12).
     const parsed = await this.parseConstraints(normalizedQuery, intent, context?.abortSignal);
@@ -223,6 +277,16 @@ export class Planner {
       anchors,
       constraints,
     );
+    if (tracingEnabled) {
+      plannerTrace.push(buildDecisionRecord(
+        'uncertainty_estimation',
+        { normalizedQuery, anchorCount: anchors.length, constraintCount: constraints.hard.length + constraints.soft.length + constraints.inferred.length },
+        [{ ruleId: 'uncertainty.computed', description: 'Uncertainty computed via computeUncertainty', inputsMatched: { anchorCount: anchors.length }, outcome: String(uncertainty.overall) }],
+        [],
+        String(uncertainty.overall),
+        1.0 - uncertainty.overall,
+      ));
+    }
 
     const budget = context?.budget ?? DEFAULT_QUERY_BUDGET;
 
@@ -233,6 +297,20 @@ export class Planner {
       constraints,
       intent,
     );
+    if (tracingEnabled) {
+      plannerTrace.push(buildDecisionRecord(
+        'target_entity_inference',
+        { normalizedQuery, intent, anchorCount: anchors.length },
+        targetEntityType != null
+          ? [{ ruleId: 'target_entity.inferred', description: 'Target entity type inferred', inputsMatched: { intent }, outcome: targetEntityType }]
+          : [],
+        targetEntityType == null
+          ? [{ ruleId: 'target_entity.none', description: 'No target entity type could be inferred', failedCondition: 'No matching entity type signals' }]
+          : [],
+        targetEntityType ?? 'none',
+        targetEntityType != null ? 1.0 : 0.0,
+      ));
+    }
 
     // Derive secondary intents from the 2nd+ anchor candidates.
     const secondaryIntents =
@@ -281,14 +359,24 @@ export class Planner {
       ...(parsed.constraintExtraction !== undefined
         ? { constraintExtraction: parsed.constraintExtraction }
         : {}),
-      ...(parsed.retrievalPlan !== undefined
-        ? { retrievalPlan: parsed.retrievalPlan }
-        : {}),
+      retrievalPlan: parsed.retrievalPlan,
+      // E2-T3: Expose conflict-resolved ConstraintAtoms from reasoner for ranker + safety consumers.
+      constraintAtoms: parsed.reasonerOutput.atoms,
+      ...(plannerTrace.length > 0 ? { plannerTrace } : {}),
     };
   }
 
   /**
    * Determines the query route based on intent and anchors.
+   *
+   * RCA5-02 fix: `mixed_query` without any anchor must route to `'hybrid'`,
+   * not `'mixed'`. The `'mixed'` route requires an anchor to perform the
+   * anchor-similarity pass; without one, the execution layer falls through to
+   * a plain hybrid search anyway, but the plan advertises 'mixed' — causing
+   * route/mode mismatch where mode='attribute_search' but route='mixed'.
+   * Aligning route to 'hybrid' when no anchor is present makes the plan
+   * internally consistent: `determineRetrievalMode` already maps
+   * `mixed_query + !hasAnyAnchor → 'attribute_search'` (hybrid strategy).
    */
   private determineRoute(
     intent: QueryIntent,
@@ -302,7 +390,11 @@ export class Planner {
       case 'comparison_search':
         return 'entity';
       case 'mixed_query':
-        return 'mixed';
+        // Only route to 'mixed' when an anchor exists — 'mixed' requires anchor
+        // evidence for the similarity pass (RFC-005 §3.3, RCA5-02).
+        return anchors.some((a) => a.confidence >= ANCHOR_PRESENT_CONFIDENCE)
+          ? 'mixed'
+          : 'hybrid';
       case 'facet_search':
       case 'semantic_discovery':
       case 'pairing_search':
@@ -428,7 +520,10 @@ export class Planner {
     }
 
     // Short queries (1-2 tokens) with an anchor -> short_entity.
-    const tokenCount = normalizedQuery.split(/\s+/).length;
+    // Guard: "".split(/\s+/) returns [''] (length 1, not 0); trim+filter removes empty tokens.
+    const tokenCount = normalizedQuery.trim().length === 0
+      ? 0
+      : normalizedQuery.trim().split(/\s+/).length;
     if (tokenCount <= 2 && anchors.length > 0) {
       // Multiple candidate entities for a short query -> ambiguous.
       const totalCandidates = anchors.reduce(
@@ -501,11 +596,7 @@ export class Planner {
     normalizedQuery: string,
     _intent: QueryIntent,
     abortSignal?: AbortSignal,
-  ): Promise<{
-    readonly bundle: ConstraintBundle;
-    readonly retrievalPlan?: RetrievalPlan | undefined;
-    readonly constraintExtraction?: ConstraintExtractionTrace | undefined;
-  }> {
+  ): Promise<ConstraintCompilerResult> {
     return this.constraintCompiler.compile(normalizedQuery, abortSignal);
   }
 
@@ -518,7 +609,11 @@ export class Planner {
     constraints: ConstraintBundle,
   ): Promise<QueryUncertainty> {
     // Parser confidence: higher for shorter, cleaner queries.
-    const tokenCount = normalizedQuery.split(/\s+/).length;
+    // Guard: "".split(/\s+/) → [''] (length 1); use trimmed token count to avoid
+    // inflating confidence for empty/whitespace-only queries.
+    const tokenCount = normalizedQuery.trim().length === 0
+      ? 0
+      : normalizedQuery.trim().split(/\s+/).length;
     const parserConfidence = Math.max(
       UNCERTAINTY_PARSER_CONFIDENCE_FLOOR,
       Math.min(
@@ -534,15 +629,22 @@ export class Planner {
       if (a.confidence > anchorConfidence) anchorConfidence = a.confidence;
     }
 
-    // Constraint confidence: based on number of extracted constraints.
-    const totalConstraints =
-      constraints.hard.length + constraints.soft.length + constraints.inferred.length;
+    // Constraint confidence: average confidence across ALL extracted constraints.
+    // BUG-P2 fix: was `totalConstraints > 0` but then only averaged hard constraints.
+    // If 0 hard constraints but N soft constraints exist, hard.length=0 caused division
+    // by Max(1,0)=1 → 0/1=0 confidence, or neutral for total=0. Both wrong.
+    // Correct: average across hard+soft+inferred so queries with only soft constraints
+    // (e.g. "떫은 와인" — style only) get meaningful confidence, not neutral.
+    const allConstraints = [
+      ...constraints.hard,
+      ...constraints.soft,
+      ...constraints.inferred,
+    ];
     const constraintConfidence =
-      totalConstraints > 0
+      allConstraints.length > 0
         ? Math.min(
             1.0,
-            constraints.hard.reduce((s, c) => s + c.confidence, 0) /
-              Math.max(1, constraints.hard.length),
+            allConstraints.reduce((s, c) => s + c.confidence, 0) / allConstraints.length,
           )
         : UNCERTAINTY_CONSTRAINT_CONFIDENCE_NEUTRAL;
 
@@ -654,9 +756,7 @@ export class Planner {
     // Check for style-only constraints (no hard constraints about wine type or vintage).
     const hasOnlyStyleConstraints =
       constraints.hard.length === 0 &&
-      constraints.soft.every((c) =>
-        ['body', 'sweetness', 'acidity', 'tannin', 'style'].includes(c.attribute),
-      );
+      constraints.soft.every((c) => STYLE_SENSORY_ATTRIBUTES.has(c.attribute));
 
     // If semantic discovery or facet search with only style constraints → 'style'
     if (
@@ -700,3 +800,23 @@ export class Planner {
   }
 }
 
+/** Build a PolicyDecisionRecord for a planner decision stage. */
+function buildDecisionRecord(
+  stage: PlannerStage,
+  inputFacts: Record<string, unknown>,
+  rulesEvaluated: PolicyDecisionRecord['rulesEvaluated'],
+  rejectedBranches: PolicyDecisionRecord['rejectedBranches'],
+  decision: string,
+  confidence: number,
+  durationMs?: number,
+): PolicyDecisionRecord {
+  return {
+    stage,
+    inputFacts,
+    rulesEvaluated,
+    rejectedBranches,
+    decision,
+    confidence,
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  };
+}

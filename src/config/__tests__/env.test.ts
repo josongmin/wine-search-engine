@@ -67,4 +67,23 @@ describe('parseEnv invariants', () => {
     expect(() => parseEnv({ NODE_ENV: 'test' })).not.toThrow();
     expect(() => parseEnv({ NODE_ENV: 'development' })).not.toThrow();
   });
+
+  // CLAUDE.md Rule 22: AGENT_PER_STEP_TIMEOUT_MS must not exceed AGENT_TIMEOUT_MS
+  it('AGENT_PER_STEP_TIMEOUT_MS > AGENT_TIMEOUT_MS throws (Rule 22 mutual consistency)', () => {
+    expect(() =>
+      parseEnv({ AGENT_TIMEOUT_MS: '5000', AGENT_PER_STEP_TIMEOUT_MS: '10000' }),
+    ).toThrowError(/AGENT_PER_STEP_TIMEOUT_MS.*must not exceed AGENT_TIMEOUT_MS/);
+  });
+
+  it('AGENT_PER_STEP_TIMEOUT_MS === AGENT_TIMEOUT_MS is allowed (boundary)', () => {
+    const config = parseEnv({ AGENT_TIMEOUT_MS: '10000', AGENT_PER_STEP_TIMEOUT_MS: '10000' });
+    expect(config.agent.perStepTimeoutMs).toBe(10000);
+    expect(config.agent.agentTimeoutMs).toBe(10000);
+  });
+
+  it('AGENT_PER_STEP_TIMEOUT_MS < AGENT_TIMEOUT_MS is allowed (normal case)', () => {
+    const config = parseEnv({ AGENT_TIMEOUT_MS: '30000', AGENT_PER_STEP_TIMEOUT_MS: '10000' });
+    expect(config.agent.perStepTimeoutMs).toBe(10000);
+    expect(config.agent.agentTimeoutMs).toBe(30000);
+  });
 });

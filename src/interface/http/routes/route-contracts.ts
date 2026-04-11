@@ -6,6 +6,7 @@ import {
 import {
   HybridRequestSchema,
   InterpretRequestSchema,
+  LookupRequestSchema,
   ReplayRequestSchema,
   ResolveRequestSchema,
   SearchRequestSchema,
@@ -66,6 +67,8 @@ type SearchRouteCapability =
 
 const AGENT_METRICS_ALERTS_MAX = 20;
 const RETRIEVAL_DEGRADATION_ALERTS_MAX = 20;
+/** Upper bound for Claude tools list. Currently 4 tools; 100 prevents unbounded growth from misconfigured servers. */
+const CLAUDE_TOOLS_LIST_MAX = 100;
 /** Health/readiness checks: ~6 known checks (pg, redis, vespa, llm, embedding, reranker) + headroom. */
 const READINESS_CHECKS_MAX = 20;
 /** Upper bound for component count in degradation metrics (6 known components + headroom). */
@@ -79,7 +82,6 @@ const CIRCUIT_BREAKER_REGISTRY_MAX = 64;
  *  is comfortably above the longest known breaker id. */
 const CIRCUIT_BREAKER_IDENTIFIER_MAX_CHARS = 128;
 const MAX_TOOL_INPUT_RECORD_KEYS = 50;
-
 export interface HttpRouteContract {
   readonly operationId: string;
   readonly body?: z.ZodTypeAny;
@@ -166,9 +168,9 @@ const ClaudeToolsExecuteResponseSchema = z.object({
 // retryable } }`. Keeping this comment as a grep target for future migrations.
 
 const ClaudeToolsListResponseSchema = z.object({
-  // Bounded to 100 — there are currently 4 tools; this cap prevents unbounded growth
-  // from misconfigured or malicious server responses.
-  tools: z.array(z.unknown()).max(100),
+  // Bounded to CLAUDE_TOOLS_LIST_MAX — there are currently 4 tools; this cap
+  // prevents unbounded growth from misconfigured or malicious server responses.
+  tools: z.array(z.unknown()).max(CLAUDE_TOOLS_LIST_MAX),
   request_id: z.string().min(1),
 }).strict();
 
@@ -243,6 +245,29 @@ export const ClaudeToolsListRouteContract = defineRouteContract({
   operationId: 'tools.list',
   responses: {
     [HTTP_STATUS_OK]: ClaudeToolsListResponseSchema,
+    // Global error handler emits RFC-014 envelope on unexpected failures.
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+  },
+});
+
+export const LookupRouteContract = defineRouteContract({
+  operationId: 'search.lookup',
+  body: LookupRequestSchema,
+  capabilities: [
+    'security',
+    'planner',
+    'SAT',
+    'cache',
+    'resolver_only',
+  ],
+  responses: {
+    [HTTP_STATUS_OK]: SearchResponseSchema,
+    [HTTP_STATUS_BAD_REQUEST]: ErrorResponseSchema,
+    [HTTP_STATUS_FORBIDDEN]: ErrorResponseSchema,
+    [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
+    [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
+    [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -490,6 +515,8 @@ export const SearchV2RouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    // Circuit breaker OPEN and BLOCKING_MISS throw DomainErrors that map to 503.
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -514,6 +541,8 @@ export const HybridV2RouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    // Circuit breaker OPEN and BLOCKING_MISS throw DomainErrors that map to 503.
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });
 
@@ -533,5 +562,7 @@ export const InterpretV2RouteContract = defineRouteContract({
     [HTTP_STATUS_REQUEST_TIMEOUT]: ErrorResponseSchema,
     [HTTP_STATUS_TOO_MANY_REQUESTS]: ErrorResponseSchema,
     [HTTP_STATUS_INTERNAL_SERVER_ERROR]: ErrorResponseSchema,
+    // Circuit breaker OPEN throws a DomainError that maps to 503.
+    [HTTP_STATUS_SERVICE_UNAVAILABLE]: ErrorResponseSchema,
   },
 });

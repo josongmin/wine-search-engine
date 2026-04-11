@@ -100,3 +100,28 @@ export interface ResponseBuilderPort {
 export interface MixedSolverPort {
   solve(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): Promise<MixedQueryResult>;
 }
+
+/**
+ * TA2-4: Application-layer blocker port — exposes the Blocker's high-recall
+ * candidate retrieval to callers outside the resolver domain (entity route,
+ * hybrid anchor resolver).
+ *
+ * Separate from the domain-level BlockingPort so the application layer does
+ * not depend on the domain resolver internals. The broader recall option is
+ * used by the corrective retry path (TA3) to expand the candidate set.
+ */
+export interface BlockingUseCasePort {
+  /**
+   * Returns candidate entity IDs that pass the blocking filter.
+   *
+   * @param query            Original user query string.
+   * @param normalizedQuery  Lowercased, accent-stripped, whitespace-collapsed form.
+   * @param options.broader  When true, use a higher limit / relaxed threshold for
+   *                         corrective retry recall expansion (TA3).
+   */
+  block(
+    query: string,
+    normalizedQuery: string,
+    options?: { readonly broader?: boolean },
+  ): Promise<readonly import('../../../domain/shared/types/index.js').EntityId[]>;
+}

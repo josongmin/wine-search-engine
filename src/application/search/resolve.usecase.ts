@@ -10,7 +10,7 @@ import type {
 } from './port/search-pipeline-deps.port.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
 import type { ResolveResponse } from './resolve-response.dto.js';
-import { buildResolverCandidatesFromPlan } from './search-usecase-resolver-candidates.js';
+import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
 import { buildPlannerContextFromSearchRequest } from './search-usecase-planner-context.js';
 import { createSearchQuerySecurityGate } from './search-usecase-security-gate.js';
 import { pipelineDebug, sanitizeQueryForDebug } from '../../observability/request-pipeline-debug.js';
@@ -122,8 +122,12 @@ export class ResolveUseCase {
     throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
     // Build resolver input
-    const candidateEntities = await buildResolverCandidatesFromPlan(
-      plan,
+    const candidateEntities = await buildResolverCandidatesFromGenerator(
+      {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        anchors: plan.anchors,
+      },
       this.deps.entityLookup,
     );
 

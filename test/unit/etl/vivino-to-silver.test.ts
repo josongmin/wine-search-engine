@@ -51,13 +51,39 @@ describe('vivino-to-silver helpers', () => {
       expect(parseAlcohol('30%')).toBeNull();
       expect(parseAlcohol('0%')).toBeNull();
     });
+
+    // SCAN4-14: European decimal notation (comma as decimal separator)
+    it('parses European decimal notation (comma as separator)', () => {
+      expect(parseAlcohol('14,5%')).toBe(14.5);
+      expect(parseAlcohol('13,8%')).toBe(13.8);
+      expect(parseAlcohol('14,4% alc')).toBe(14.4);
+    });
   });
 
   describe('parseVarietal', () => {
-    it('splits comma-separated grapes', () => {
-      expect(parseVarietal('Grenache, Shiraz/Syrah')).toEqual([
-        'Grenache', 'Shiraz', 'Syrah',
+    it('splits comma-separated grapes and keeps only canonical (first) synonym per grape', () => {
+      // Slash separates synonyms for the SAME grape — keep only the canonical (first) name.
+      // "Shiraz/Syrah" → "Shiraz" (not two separate grapes).
+      expect(parseVarietal('Grenache, Shiraz/Syrah')).toEqual(['Grenache', 'Shiraz']);
+    });
+
+    it('R-PARSE-VAR-01: single grape with synonym uses canonical name only', () => {
+      // "Garnacha/Grenache" is one grape; "Garnacha" is canonical (first).
+      expect(parseVarietal('Garnacha/Grenache')).toEqual(['Garnacha']);
+    });
+
+    it('R-PARSE-VAR-02: multiple grapes with synonyms produce distinct canonical names', () => {
+      expect(parseVarietal('Garnacha/Grenache, Monastrell/Mourvedre')).toEqual([
+        'Garnacha', 'Monastrell',
       ]);
+    });
+
+    it('R-PARSE-VAR-03: grape without synonym is unchanged', () => {
+      expect(parseVarietal('Chardonnay')).toEqual(['Chardonnay']);
+    });
+
+    it('R-PARSE-VAR-04: multi-word grape name preserved when no slash', () => {
+      expect(parseVarietal('Pinot Noir, Pinot Blanc')).toEqual(['Pinot Noir', 'Pinot Blanc']);
     });
 
     it('returns empty array for missing', () => {
@@ -243,6 +269,102 @@ describe('vivino-to-silver helpers', () => {
       // Without payload.taste.structure, falls back to taste_profile or 0.5
       expect(result!.body).toBeGreaterThanOrEqual(0);
       expect(result!.body).toBeLessThanOrEqual(1);
+    });
+
+    // ── Bug fix regression: fizziness threshold scale (Bug 1) ─────────────────
+    // Vivino taste.structure values are on a 0–5 integer scale.
+    // The threshold for "at least slightly sparkling" is 1.5 (= 0.3 × 5).
+    // Previously the condition only fired for base==='red'; sparkling whites/rosés
+    // were silently misclassified. After the fix the condition fires for any
+    // non-sparkling base type.
+
+    it('classifies red wine with fizziness just above threshold (>1.5 on 0-5 scale) as sparkling', () => {
+      const row: BronzeRow = {
+        ...baseRow,
+        wine_style: 'Red Wine', // detectWineType → 'red'
+        payload: {
+          taste: {
+            structure: {
+              // fizziness=2 is above 1.5 threshold → sparkling override must fire
+              fizziness: 2,
+              acidity: 3,
+              tannin: 1,
+              sweetness: 1,
+              intensity: 3,
+            },
+          },
+        },
+      };
+      const result = transformRow(row);
+      expect(result).not.toBeNull();
+      expect(result!.wineType).toBe('sparkling');
+    });
+
+    it('does NOT classify red wine with fizziness at or below threshold (≤1.5) as sparkling', () => {
+      const row: BronzeRow = {
+        ...baseRow,
+        wine_style: 'Red Wine',
+        payload: {
+          taste: {
+            structure: {
+              fizziness: 1, // ≤1.5 → still red
+              acidity: 3,
+              tannin: 4,
+              sweetness: 1,
+              intensity: 4,
+            },
+          },
+        },
+      };
+      const result = transformRow(row);
+      expect(result).not.toBeNull();
+      expect(result!.wineType).toBe('red');
+    });
+
+    it('classifies white wine with high fizziness as sparkling (regression: was silently skipped)', () => {
+      // Before fix: condition was `base === 'red'` only — white wines with high
+      // fizziness (e.g. Blanc-de-Blancs Champagne detected as white) were missed.
+      const row: BronzeRow = {
+        ...baseRow,
+        wine_style: 'White Wine', // detectWineType → 'white'
+        payload: {
+          taste: {
+            structure: {
+              fizziness: 4, // very fizzy — clearly sparkling
+              acidity: 4,
+              tannin: 0,
+              sweetness: 1,
+              intensity: 3,
+            },
+          },
+        },
+      };
+      const result = transformRow(row);
+      expect(result).not.toBeNull();
+      expect(result!.wineType).toBe('sparkling');
+    });
+
+    it('preserves sparkling classification even when fizziness is high (no double-override)', () => {
+      // If detectWineType already returns 'sparkling', fizziness guard must NOT
+      // re-apply (it checks base !== 'sparkling').
+      const row: BronzeRow = {
+        ...baseRow,
+        wine_style: 'Sparkling Wine',
+        payload: {
+          taste: {
+            structure: {
+              fizziness: 5,
+              acidity: 3,
+              tannin: 0,
+              sweetness: 2,
+              intensity: 4,
+            },
+          },
+        },
+      };
+      const result = transformRow(row);
+      expect(result).not.toBeNull();
+      expect(result!.wineType).toBe('sparkling');
     });
   });
 

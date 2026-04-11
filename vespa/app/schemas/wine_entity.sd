@@ -657,7 +657,7 @@ schema wine_entity {
         + 0.05 * if(isNan(attribute(critic_score_normalized)), 0, attribute(critic_score_normalized))
         + 0.03 * if(
             attribute(vintage_year) > 0,
-            max(0.0, 1.0 - (2024.0 - attribute(vintage_year)) / 30.0),
+            max(0.0, 1.0 - (query(current_year) - attribute(vintage_year)) / 30.0),
             0.0
           )
         + 0.02 * if(

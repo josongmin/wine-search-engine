@@ -112,6 +112,18 @@ function normalizeRetrievalHitSummaryValue(
         Array.isArray(value) ? value : undefined,
         { allowEmpty: true },
       ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
+    case 'grapeFamily':
+      // String field like other name strings — trim whitespace, reject empty.
+      return trimNonEmptySummaryValue(
+        typeof value === 'string' ? value : undefined,
+      ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
+    case 'flavorProfiles':
+    case 'regionHierarchy':
+      // String array fields — normalize like pairing/occasion (reject empty entries).
+      return normalizeSummaryStringList(
+        Array.isArray(value) ? value : undefined,
+        { allowEmpty: false },
+      ) as RetrievalHitSummary[RetrievalHitSummaryKey] | undefined;
     default:
       return value;
   }
@@ -220,7 +232,9 @@ export function retrievalDocumentToHitSummary(doc: RetrievalDocument): Retrieval
     drinkingWindowModelVersion: doc.drinkingWindowModelVersion,
     priceUsd: doc.priceUsd,
     certifications: doc.certifications,
+    flavorProfiles: doc.flavorProfiles,
     soilType: doc.soilType,
     producerType: doc.producerType,
+    grapeFamily: doc.grapeFamily,
   }) ?? { canonicalLabel: doc.canonicalLabel };
 }

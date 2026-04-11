@@ -52,8 +52,14 @@ function trimTrailingSlash(url: string): string {
 function isCohereRerankItem(value: unknown): value is CohereRerankItem {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record['index'] === 'number'
-    && typeof record['relevance_score'] === 'number';
+  // Require finite values: typeof NaN === 'number' and typeof Infinity === 'number'
+  // both pass a bare typeof check but would corrupt downstream score arithmetic.
+  const idx = record['index'];
+  const score = record['relevance_score'];
+  return typeof idx === 'number'
+    && Number.isFinite(idx)
+    && typeof score === 'number'
+    && Number.isFinite(score);
 }
 
 function isCohereRerankResponse(value: unknown): value is CohereRerankResponse {

@@ -63,6 +63,9 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     [/(?:^|[^\p{L}\p{N}])(?:south african?|south africa|남아공)(?=$|[^\p{L}\p{N}])/iu, 'South Africa'],
     [/(?:^|[^\p{L}\p{N}])(?:austrian|austria|오스트리아)(?=$|[^\p{L}\p{N}])/iu, 'Austria'],
   ];
+  // No break — accumulate ALL matching countries. A query like "France or Italy"
+  // should extract both; breaking at the first match silently drops subsequent ones
+  // (CLAUDE.md Rule 17: for...of with break in accumulator loop is almost certainly wrong).
   for (const [pattern, value] of countryRules) {
     if (pattern.test(q)) {
       hard.push({
@@ -73,7 +76,6 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
         confidence: 0.85,
         mapping_version: mv,
       });
-      break;
     }
   }
 
@@ -89,8 +91,25 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     const priceValue = parseInt(priceUnder[1], DECIMAL_RADIX);
     // Guard: parseInt can return NaN on malformed capture group (edge case with regex backtracking).
     // NaN would propagate into band comparison (always false) and corrupt soft constraints. (CLAUDE.md rule 28)
-    if (!Number.isFinite(priceValue)) return { hard, soft, inferred: [] };
-    const usd = /만원/u.test(q) ? priceValue * KRW_PER_MAN_WON / KRW_PER_USD_APPROXIMATE : priceValue;
+    // BUG-P1 fix: was `return { hard, soft, inferred: [] }` — that discarded all previously
+    // accumulated hard constraints (wine_type, country, etc.) when price parsing failed.
+    // Correct fix: skip only the price_band push; let the rest of the function continue.
+    if (!Number.isFinite(priceValue)) {
+      // skip price_band extraction — do not return early
+    } else {
+    // Determine the matched currency context from which regex fired.
+    // The third regex (`만원 이하`) means the value is already in 만원 units (×10000 KRW).
+    // The second regex (`달러 이하`) means USD. The first regex (`under $N`) means USD.
+    // We must detect currency from the MATCHED regex, not from a global 만원 presence scan
+    // (global scan would misfire on queries like "50달러 under wine 10만원" — the 만원
+    // appears in the query but the matched price was in dollars).
+    const matchedText = priceUnder[0];
+    const isKrwManWon = /만원/u.test(matchedText);
+    // If the matched text contains 만원, convert from 만원 units to USD.
+    // Otherwise (달러, dollar, $, or bare number) treat directly as USD.
+    const usd = isKrwManWon
+      ? priceValue * KRW_PER_MAN_WON / KRW_PER_USD_APPROXIMATE
+      : priceValue;
     const band =
       usd <= PRICE_BAND_BUDGET_MAX_USD
         ? 'budget'
@@ -107,6 +126,7 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
       confidence: 0.8,
       mapping_version: mv,
     });
+    } // end else (isFinite branch)
   }
 
   // Standalone price-level keywords (no numeric amount)
@@ -202,7 +222,17 @@ export function extractRuleBasedConstraints(normalizedQuery: string): Constraint
     });
   }
 
-  if (/(?:^|[^\p{L}\p{N}])(?:dry wine|드라이|brut|extra[\s-]?brut)(?=$|[^\p{L}\p{N}])/iu.test(q)) {
+  // SCAN4-05: standalone "dry" should match as sweetness=dry, but NOT when "dry"
+  // modifies a wine type (e.g. "dry white wine", "dry red wine", "dry rosé").
+  // Using negative lookahead (?!\s+(?:white|red|ros[eé]|wine|fruit)) prevents
+  // the false-positive where "dry white wine" would emit sweetness='dry' even
+  // though the user only means the wine type adjective, not a sweetness preference.
+  // Rule 8: \b is ASCII-only — use Unicode-safe boundary assertions.
+  // Rule 24: use [\p{L}\p{N}] character class (OR), not \p{L}\p{N} sequence.
+  if (
+    /(?:^|[^\p{L}\p{N}])(?:dry)(?!\s+(?:white|red|ros[eé]|wine|fruit))(?=$|[^\p{L}\p{N}])/iu.test(q)
+    || /(?:^|[^\p{L}\p{N}])(?:드라이|brut|extra[\s-]?brut)(?=$|[^\p{L}\p{N}])/iu.test(q)
+  ) {
     soft.push({
       attribute: 'sweetness',
       operator: '=',

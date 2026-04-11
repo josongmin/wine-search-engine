@@ -6,6 +6,9 @@ import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-se
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from './port/search-pipeline-deps.port.js';
+import type {
+  EntityCandidateGeneratorInput,
+} from '../../domain/resolver/model/entity-candidate-generator-input.js';
 
 const ZERO_SIGNALS: MatchSignalSet = {
   canonicalExactMatch: 0,
@@ -46,7 +49,7 @@ function inferAliasType(anchor: AnchorCandidate): AliasType {
   return 'canonical';
 }
 
-function buildSignals(plan: QueryPlanV1, anchor: AnchorCandidate): MatchSignalSet {
+function buildSignals(normalizedQuery: string, anchor: AnchorCandidate): MatchSignalSet {
   const strategies = new Set(anchor.lookupStrategies ?? []);
   const exactLike =
     strategies.has('exact') ||
@@ -63,7 +66,7 @@ function buildSignals(plan: QueryPlanV1, anchor: AnchorCandidate): MatchSignalSe
 
   return {
     ...ZERO_SIGNALS,
-    canonicalExactMatch: exactLike && plan.normalizedQuery === anchor.normalizedForm ? 1 : 0,
+    canonicalExactMatch: exactLike && normalizedQuery === anchor.normalizedForm ? 1 : 0,
     canonicalNormalizedMatch: anchor.confidence,
     aliasExactMatch: exactLike ? anchor.confidence : 0,
     aliasFuzzyMatch: fuzzyLike ? anchor.confidence : 0,
@@ -76,58 +79,101 @@ function buildSignals(plan: QueryPlanV1, anchor: AnchorCandidate): MatchSignalSe
   };
 }
 
-export async function buildResolverCandidatesFromPlan(
-  plan: QueryPlanV1,
+/**
+ * TA2-3: Build resolver candidates from the shared entity candidate generator
+ * input contract (EntityCandidateGeneratorInput).
+ *
+ * Extends the prior anchors-only contract to include:
+ *   - blockerOnlyIds: IDs from Blocker.block() not covered by any anchor
+ *   - preloadedDocs: upstream prefetch cache to avoid N+1 fetches
+ *
+ * Blocker-seeded candidates are emitted with ZERO_SIGNALS and
+ * `source: 'blocker_seed'` — they carry no alias surface form.
+ * The scorer's attribute-hint pathway populates their effective score.
+ *
+ * @param input  Shared generator contract
+ * @param entityLookup  Port for fetching entity documents by ID
+ */
+export async function buildResolverCandidatesFromGenerator(
+  input: EntityCandidateGeneratorInput,
   entityLookup: EntityDocumentLookupPort | undefined,
 ): Promise<readonly ResolverCandidate[]> {
-  if (entityLookup === undefined || plan.anchors.length === 0) {
+  if (entityLookup === undefined) {
+    return [];
+  }
+  if (input.anchors.length === 0 && (input.blockerOnlyIds == null || input.blockerOnlyIds.length === 0)) {
     return [];
   }
 
-  // Collect all unique entity IDs across anchors
+  // Collect all unique entity IDs: from anchors + blocker-only additions
   const allEntityIds = new Set<EntityId>();
-  for (const anchor of plan.anchors) {
+  for (const anchor of input.anchors) {
     for (const id of anchor.candidateEntityIds) {
       allEntityIds.add(id);
     }
   }
+  const blockerOnlyIds = input.blockerOnlyIds ?? [];
+  for (const id of blockerOnlyIds) {
+    allEntityIds.add(id);
+  }
 
-  // Fetch all documents in parallel (eliminates N+1 sequential latency).
-  // Use allSettled so a single Vespa/network error doesn't abort the entire
-  // resolve step — remaining candidates are still useful for ranking.
-  const settled = await Promise.allSettled(
-    [...allEntityIds].map(async (id) => {
-      const doc = await entityLookup.getDocument(id);
-      return [id, doc] as const;
-    }),
-  );
+  // Build set of IDs covered by anchors (used to tag blocker-only seeds)
+  const anchorCoveredIds = new Set<string>();
+  for (const anchor of input.anchors) {
+    for (const id of anchor.candidateEntityIds) {
+      anchorCoveredIds.add(String(id));
+    }
+  }
+
+  // Resolve documents: use preloaded cache first, then fetch missing IDs.
   const docMap = new Map<EntityId, RetrievalDocument>();
-  for (const result of settled) {
-    if (result.status === 'fulfilled') {
-      const [id, doc] = result.value;
-      if (doc != null) {
-        docMap.set(id, doc);
+
+  // Populate from upstream prefetch cache
+  if (input.preloadedDocs != null) {
+    for (const [key, doc] of input.preloadedDocs) {
+      // preloadedDocs keys are string-coerced EntityIds; match by stringified form
+      for (const id of allEntityIds) {
+        if (String(id) === key) {
+          docMap.set(id, doc);
+        }
       }
     }
-    // rejected results are silently skipped — the candidate simply won't
-    // appear, which is the correct degradation behaviour.
+  }
+
+  // Fetch IDs not covered by the prefetch cache
+  const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
+  if (missingIds.length > 0) {
+    const settled = await Promise.allSettled(
+      missingIds.map(async (id) => {
+        const doc = await entityLookup.getDocument(id);
+        return [id, doc] as const;
+      }),
+    );
+    for (const result of settled) {
+      if (result.status === 'fulfilled') {
+        const [id, doc] = result.value;
+        if (doc != null) {
+          docMap.set(id, doc);
+        }
+      }
+      // rejected results are silently skipped — correct degradation behaviour.
+    }
   }
 
   // Build candidates from the pre-fetched map (synchronous)
   const seen = new Set<EntityId>();
   const candidates: ResolverCandidate[] = [];
 
-  for (const anchor of plan.anchors) {
+  // 1. Anchor-sourced candidates (carry full signal sets)
+  for (const anchor of input.anchors) {
     for (const entityId of anchor.candidateEntityIds) {
       if (seen.has(entityId)) {
         continue;
       }
-
       const doc = docMap.get(entityId);
       if (doc == null) {
         continue;
       }
-
       seen.add(entityId);
       candidates.push({
         entityId,
@@ -140,10 +186,51 @@ export async function buildResolverCandidatesFromPlan(
             matchScore: anchor.confidence,
           },
         ],
-        sourceSignals: buildSignals(plan, anchor),
+        sourceSignals: buildSignals(input.normalizedQuery, anchor),
       });
     }
   }
 
+  // 2. Blocker-seeded candidates (zero signal sets; not covered by any anchor)
+  for (const entityId of blockerOnlyIds) {
+    if (seen.has(entityId)) {
+      continue;
+    }
+    const doc = docMap.get(entityId);
+    if (doc == null) {
+      continue;
+    }
+    seen.add(entityId);
+    candidates.push({
+      entityId,
+      entityType: doc.entityType,
+      canonicalLabel: doc.canonicalLabel,
+      aliasMatches: [],
+      sourceSignals: ZERO_SIGNALS,
+      source: 'blocker_seed',
+    });
+  }
+
   return candidates;
+}
+
+/**
+ * Legacy entry point — builds generator input from a QueryPlanV1 and delegates
+ * to `buildResolverCandidatesFromGenerator`.
+ *
+ * Retained for backwards compatibility with callers that still pass a raw
+ * QueryPlanV1. Prefer `buildResolverCandidatesFromGenerator` for new code.
+ */
+export async function buildResolverCandidatesFromPlan(
+  plan: QueryPlanV1,
+  entityLookup: EntityDocumentLookupPort | undefined,
+): Promise<readonly ResolverCandidate[]> {
+  const generatorInput: EntityCandidateGeneratorInput = {
+    rawQuery: plan.rawQuery,
+    normalizedQuery: plan.normalizedQuery,
+    anchors: plan.anchors,
+    // blockerOnlyIds and preloadedDocs are not yet available at this call site.
+    // TA2-4 will thread blocker output here after the blocker runs in the resolver.
+  };
+  return buildResolverCandidatesFromGenerator(generatorInput, entityLookup);
 }

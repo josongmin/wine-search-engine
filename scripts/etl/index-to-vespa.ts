@@ -225,6 +225,8 @@ type GoldRecord = EnrichedSilverRecord & {
   readonly alcoholPct?: number | null;
   readonly producerPrestige?: number | null;
   readonly isTopRated?: boolean;
+  // Classification tier — may be extracted by Silver rule-based or LLM enrichment step
+  readonly classification?: string | null;
   // Track C Step 1
   readonly criticProxy?: CriticProxy | null;
   // Track C Step 2
@@ -426,6 +428,14 @@ export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecor
     ...(rec.finishLength !== undefined && rec.finishLength > 0 ? { finishLength: rec.finishLength } : {}),
     ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
     ...(gold.alcoholPct != null ? { alcoholPct: gold.alcoholPct } : {}),
+    // Classification and oak from Silver (rule-based extraction or LLM enrichment)
+    // GoldRecord overrides take priority; Silver values are the fallback.
+    ...(gold.classification != null
+      ? { classification: gold.classification }
+      : rec.classification != null
+        ? { classification: rec.classification }
+        : {}),
+    ...(rec.oakTreatment != null ? { oakTreatment: rec.oakTreatment } : {}),
     ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
     ...(rec.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: rec.learnedSparseWeights }

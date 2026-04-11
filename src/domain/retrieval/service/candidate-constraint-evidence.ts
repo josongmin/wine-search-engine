@@ -4,6 +4,7 @@ import type {
   NormalizedConstraint,
 } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import { GEOGRAPHY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
@@ -31,8 +32,30 @@ function deriveColor(candidate: HybridCandidate): string | undefined {
   return wineType;
 }
 
+/**
+ * Normalizes a string for comparison: trim → lowercase → NFD decompose →
+ * strip combining diacritical marks (U+0300–U+036F).
+ *
+ * This mirrors Vespa's `accent-removal: true` index setting so that
+ * annotation-layer comparisons are consistent with retrieval-layer filtering.
+ * Without this, "Côtes du Rhône" ≠ "Cotes du Rhone" at annotation time even
+ * though Vespa treats them as equivalent — causing false unmetHardConstraints.
+ */
 function normalizeString(value: string): string {
-  return value.trim().toLowerCase();
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function geographyContains(attrValue: string, constraintValue: string): boolean {
+  return normalizeString(attrValue).includes(normalizeString(constraintValue));
+}
+
+function geographyExcludesAll(attrValue: string, constraintValues: readonly string[]): boolean {
+  const norm = normalizeString(attrValue);
+  return constraintValues.every((cv) => !norm.includes(normalizeString(cv)));
 }
 
 function resolveCandidateValue(
@@ -92,8 +115,34 @@ function resolveCandidateValue(
       return candidate.soilType;
     case 'producer_type':
       return candidate.producerType;
-    default:
+    case 'grape_family':
+      return candidate.grapeFamily;
+    case 'flavor_profile':
+      // flavor_profiles is a string array fetched from Vespa (flavor_profiles field).
+      // Constraint matching uses 'in' semantics: the candidate satisfies the constraint
+      // if ANY of its flavor profiles matches the constraint value.
+      return candidate.flavorProfiles;
+    case 'fruit_intensity':
+      // fruit_intensity has no backing field in HybridCandidate or Vespa schema.
+      // Return undefined so the caller (annotateCandidateConstraintEvidence) can detect
+      // "no backing field" and treat this soft constraint as not-evaluable rather than
+      // unmet — preventing the ranker from penalising every result via totalWeight growth
+      // without a matching weightedSum contribution.
       return undefined;
+    default: {
+      // Unknown attribute: return undefined so satisfiesConstraint() returns
+      // false and the attribute is added to unmetHardConstraints.
+      //
+      // IMPORTANT: if a new constraint attribute is added to the domain model,
+      // add a corresponding case here. Unknown attributes cause silent no-results
+      // when that attribute is used as a hard constraint — every candidate is
+      // marked as unmet, and applyHardFilters() / ranker coarse prune removes
+      // them all.
+      //
+      // Rule (CLAUDE.md §4): new attribute → add case → add test in
+      // candidate-constraint-evidence.test.ts asserting the value resolves.
+      return undefined;
+    }
   }
 }
 
@@ -107,30 +156,43 @@ function evaluateOperator(
       if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
         return normalizeString(attrValue) === normalizeString(constraintValue);
       }
+      // Array attribute (e.g. flavorProfiles, certifications, pairing, occasion):
+      // '=' means "the array contains this value" — mirrors 'in' single-value semantics.
+      if (Array.isArray(attrValue) && typeof constraintValue === 'string') {
+        const norm = normalizeString(constraintValue);
+        return attrValue
+          .filter((v): v is string => typeof v === 'string')
+          .some((v) => normalizeString(v) === norm);
+      }
       return attrValue === constraintValue;
     }
 
     case '<=':
-      return typeof attrValue === 'number' &&
-        typeof constraintValue === 'number' &&
-        attrValue <= constraintValue;
+      // CLAUDE.md schema quality: Number.isFinite() rejects NaN and Infinity.
+      // typeof NaN === 'number' passes the type guard but NaN <= x is always false,
+      // silently treating NaN attribute values as failing the constraint.
+      return Number.isFinite(attrValue) &&
+        Number.isFinite(constraintValue) &&
+        (attrValue as number) <= (constraintValue as number);
 
     case '>=':
-      return typeof attrValue === 'number' &&
-        typeof constraintValue === 'number' &&
-        attrValue >= constraintValue;
+      return Number.isFinite(attrValue) &&
+        Number.isFinite(constraintValue) &&
+        (attrValue as number) >= (constraintValue as number);
 
     case 'range': {
       if (
-        typeof attrValue !== 'number' ||
+        !Number.isFinite(attrValue) ||
         typeof constraintValue !== 'object' ||
         Array.isArray(constraintValue) ||
         !('min' in constraintValue) ||
-        !('max' in constraintValue)
+        !('max' in constraintValue) ||
+        !Number.isFinite(constraintValue.min) ||
+        !Number.isFinite(constraintValue.max)
       ) {
         return false;
       }
-      return attrValue >= constraintValue.min && attrValue <= constraintValue.max;
+      return (attrValue as number) >= (constraintValue.min as number) && (attrValue as number) <= (constraintValue.max as number);
     }
 
     case 'in': {
@@ -166,23 +228,24 @@ function evaluateOperator(
     }
 
     case 'exclude': {
+      // Build the set of values to exclude — handles both scalar and array constraintValue.
+      const excludeVals = Array.isArray(constraintValue)
+        ? constraintValue.filter((v): v is string => typeof v === 'string').map(normalizeString)
+        : typeof constraintValue === 'string'
+          ? [normalizeString(constraintValue)]
+          : [];
+      const excludeSet = new Set(excludeVals);
+
       if (Array.isArray(attrValue)) {
-        const attrValueSet = new Set(
-          attrValue
-            .filter((value): value is string => typeof value === 'string')
-            .map(normalizeString),
-        );
-        if (Array.isArray(constraintValue)) {
-          return constraintValue
-            .filter((value): value is string => typeof value === 'string')
-            .every((value) => !attrValueSet.has(normalizeString(value)));
-        }
-        return typeof constraintValue !== 'string' ||
-          !attrValueSet.has(normalizeString(constraintValue));
+        // attrValue is a list (e.g. certifications) — all elements must not be excluded.
+        return attrValue
+          .filter((v): v is string => typeof v === 'string')
+          .every((v) => !excludeSet.has(normalizeString(v)));
       }
-      if (typeof attrValue === 'string' && typeof constraintValue === 'string') {
-        return normalizeString(attrValue) !== normalizeString(constraintValue);
+      if (typeof attrValue === 'string') {
+        return !excludeSet.has(normalizeString(attrValue));
       }
+      // Non-string, non-array — equality check (number case).
       return attrValue !== constraintValue;
     }
 
@@ -219,6 +282,24 @@ function satisfiesConstraint(
   candidate: HybridCandidate,
   constraint: NormalizedConstraint,
 ): boolean {
+  // grape_primary uses OR semantics at retrieval time (grape_or filter covers both
+  // grape_primary AND grapes fields). Annotation must mirror Vespa's retrieval logic:
+  // a candidate satisfies grape_primary = X if X appears in EITHER grapePrimary OR grapes[].
+  // Without this, blend wines where the requested variety appears only in grapes[]
+  // are false-negatives: retrieval finds them but annotation marks them unmet.
+  if (constraint.attribute === 'grape_primary') {
+    const { operator, value } = constraint;
+    const primaryGrape = candidate.grapePrimary;
+    const grapesArray = candidate.grapes ?? [];
+    const allGrapes = [
+      ...(primaryGrape !== undefined ? [primaryGrape] : []),
+      ...grapesArray,
+    ];
+    if (allGrapes.length === 0) return false;
+    // Delegate to evaluateOperator with the full grape list so array 'in' / exclude semantics work.
+    return evaluateOperator(operator, allGrapes, value);
+  }
+
   if (constraint.attribute === 'drinking_window') {
     if (
       constraint.operator !== '=' ||
@@ -236,6 +317,38 @@ function satisfiesConstraint(
   if (attrValue === undefined) {
     return false;
   }
+
+  // Geography attributes (country, region, appellation) use Vespa `contains`
+  // (substring) at retrieval time. Annotation must mirror this: "Bordeaux AOC"
+  // satisfies constraint value "Bordeaux" for positive operators.
+  // Negative operators (exclude, not_in) retain exact semantics — broad
+  // exclusions must never pass a superset string.
+  if (GEOGRAPHY_ATTRIBUTES.has(constraint.attribute) && typeof attrValue === 'string') {
+    const { operator, value } = constraint;
+    if (operator === '=') {
+      return typeof value === 'string' && geographyContains(attrValue, value);
+    }
+    if (operator === 'in') {
+      const vals = Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string')
+        : typeof value === 'string'
+          ? [value]
+          : [];
+      return vals.some((v) => geographyContains(attrValue, v));
+    }
+    if (operator === 'exclude' || operator === 'not_in') {
+      // Both exclude and not_in mean "attrValue must NOT match any listed value".
+      // Use geographyExcludesAll for both to keep negative semantics consistent:
+      // excludes means "not a substring of attrValue" for geography.
+      const vals = Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === 'string')
+        : typeof value === 'string'
+          ? [value]
+          : [];
+      return geographyExcludesAll(attrValue, vals);
+    }
+  }
+
   return evaluateOperator(constraint.operator, attrValue, constraint.value);
 }
 
@@ -244,18 +357,27 @@ export function annotateCandidateConstraintEvidence(
   constraints: ConstraintBundle,
 ): HybridCandidate {
   const matched = new Set(candidate.matchedConstraints);
-  const unmetHard: string[] = [];
+  const unmetHardSet = new Set<string>();
 
   for (const constraint of constraints.hard) {
     if (satisfiesConstraint(candidate, constraint)) {
       matched.add(constraint.attribute);
     } else {
-      unmetHard.push(constraint.attribute);
+      unmetHardSet.add(constraint.attribute);
     }
   }
 
   for (const constraint of constraints.soft) {
     if (satisfiesConstraint(candidate, constraint)) {
+      matched.add(constraint.attribute);
+    } else if (resolveCandidateValue(candidate, constraint.attribute) === undefined) {
+      // Soft constraint has no backing field on this candidate (e.g. fruit_intensity
+      // is not projected from Vespa). Treat as "not evaluable" rather than "unmet" so
+      // the ranker's computeSoftConstraint does not penalise every result by counting
+      // this attribute in totalWeight but never in weightedSum.
+      // Hard constraints intentionally do NOT get this exemption — unknown hard attrs
+      // are already caught by the default case in resolveCandidateValue and surfaced as
+      // unmetHardConstraints so engineers see the misconfiguration immediately.
       matched.add(constraint.attribute);
     }
   }
@@ -275,8 +397,8 @@ export function annotateCandidateConstraintEvidence(
     candidate,
     { matchedConstraints: [...matched] },
   );
-  if (unmetHard.length > 0) {
-    (result as { unmetHardConstraints: readonly string[] }).unmetHardConstraints = unmetHard;
+  if (unmetHardSet.size > 0) {
+    (result as { unmetHardConstraints: readonly string[] }).unmetHardConstraints = [...unmetHardSet];
   } else {
     delete (result as { unmetHardConstraints?: readonly string[] }).unmetHardConstraints;
   }

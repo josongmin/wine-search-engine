@@ -154,6 +154,7 @@ export class HybridUseCase {
         {
           stageTimer,
           ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+          requestId,
         },
       );
       stageTimer.end('hybrid.retrieval_and_ranking');
@@ -178,6 +179,7 @@ export class HybridUseCase {
       rankedResults,
       decisionContext,
       routeDegradation,
+      rankingMetadata,
       specializedRouteObservability,
     } = hybridPipelineResult;
 
@@ -222,6 +224,7 @@ export class HybridUseCase {
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
       routeDegradation,
+      ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
     });
   }

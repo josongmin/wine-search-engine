@@ -1,7 +1,7 @@
 # Wine Search Engine — Agentic Request Processing
 
 > 이 문서는 HTTP 요청이 들어온 시점부터 최종 응답이 반환될 때까지의 전 과정을 코드 수준으로 설명합니다.
-> 참조 파일의 라인 번호는 2026-04-11 기준 `main` 브랜치 기준입니다.
+> 참조 파일의 라인 번호는 2026-04-11 기준 `main` 브랜치 커밋 `f8a2932` 근처입니다(리팩터 시 어긋날 수 있음).
 
 ---
 
@@ -30,19 +30,24 @@
 
 ### 요청 라우트 종류
 
+HTTP 계약은 `src/interface/http/routes/http-route-contract-catalog.ts`에 등록됩니다.  
+**V1**은 URL에 `/v1` 접두사가 붙습니다(별칭 `POST /search` 없음).
+
 | 라우트 | Operation ID | 특징 |
 |--------|-------------|------|
-| `POST /search` | `search.execute` | 기본 검색. 캐시, 보안, 플래너, SAT 게이트 전부 활성 |
-| `POST /search/hybrid` | `search.hybrid` | `forced_hybrid_retrieval` 캐퍼빌리티 추가 |
-| `POST /search/interpret` | `search.interpret` | 제약 파싱만, 실제 검색 없음 |
-| `POST /v2/search` | `v2.search.execute` | V1 동일 로직 + 사람이 읽기 좋은 응답 형식 |
+| `POST /v1/search` | `search.execute` | 기본 검색. 캐시, 보안, 플래너, SAT 게이트 전부 활성 |
+| `POST /v1/search/hybrid` | `search.hybrid` | `forced_hybrid_retrieval` 캐퍼빌리티 추가 |
+| `POST /v1/search/interpret` | `search.interpret` | 제약 파싱만, 실제 검색 없음 |
+| `POST /v2/search` | `search.v2.execute` | 동일 `SearchUseCase` 파이프라인; 응답은 `SearchResponseV2Human` 계약(사람이 읽기 쉬운 V2 봉투) |
+| `POST /v2/search/hybrid` | `search.v2.hybrid` | V2 응답 계약 + `forced_hybrid_retrieval` |
+| `POST /v2/search/interpret` | `search.v2.interpret` | V2 interpret 응답 계약, 플래너 전용 |
 
 ### 검증 흐름
 
 ```
 HTTP 요청
   → Fastify preHandler (security hooks)
-  → Zod 스키마 검증 (SearchRequestSchema — search-request.schema.ts)
+  → Zod 스키마 검증 (`SearchRequestSchema` — `search-request.schema.ts` + `search-shared.schema.ts`의 `QueryStringSchema` 등)
       ├─ query: string (1–MAX_QUERY_LENGTH=500자)    ← QueryStringSchema
       ├─ context?: { locale: string, currency: string }   ← SearchContextSchema
       ├─ options?: { mode: 'auto'|'entity'|'hybrid'|'mixed', explain: boolean, clarification: boolean }
@@ -81,11 +86,14 @@ HTTP 요청
    NL 추출 제약 중 에이전트 필터와 (attribute, operator) 충돌하는 것 제거
    → 에이전트 명시적 필터가 NL 추출을 덮어씀 (AUTHORITATIVE)
 
-5. Constraint SAT 검사 — constraintSAT.check(plan.constraints)
+5. 구조화 로그 기록 — logSearchEvent(query_observability, decomposition_strategy)
+   planToObservabilitySlice()로 plan + compiled → 관찰성 슬라이스 변환 후 즉시 기록
+
+6. Constraint SAT 검사 — constraintSAT.check(plan.constraints)
    모순(예: wine_type='red' AND wine_type='white') 감지 시
    → 모순 응답 즉시 반환
 
-6. 캐시 조회 — tryGetCachedSearchResponse()
+7. 캐시 조회 — tryGetCachedSearchResponse()
    HIT 시 캐시된 응답 즉시 반환
 ```
 
@@ -96,7 +104,7 @@ HTTP 요청
 ```
 effectiveRoute 기준으로 세 경로 중 하나 실행:
   'entity' → executeEntityRoute()   (EntityResolver 직접 조회)
-  'hybrid' → executeHybridRoute()   (CandidatePool + Ranker; LambdaMART는 Ranker 내 선택적 Step 6)
+  'hybrid' → executeHybridRoute()   (CandidatePool + Ranker; 학습 LTR은 게이트 통과 시 RankedResult 구성 이후 Step 6b)
   'mixed'  → executeMixedRoute()    (비교 쿼리 → 서브쿼리 분해 후 각각 실행)
 ```
 
@@ -116,6 +124,7 @@ effectiveRoute 기준으로 세 경로 중 하나 실행:
    │    mapRankedResultsToResultItems(limitedResults, drinkingWindow, targetYear, sensoryPriors)
    │    rankedResultsToEvalProvenanceSlices(fullResults)
    │    buildSearchCounterfactuals (includeCounterfactuals===true 일 때만)
+   │       ← abstain 경로: `includeCounterfactuals === true` 만 포함
    │    responseBuilder.build(buildEntropyAbstainResponseParams(...))
    │
    └─ abstain=false → runRankedRouteDecisionPhase()
@@ -123,19 +132,25 @@ effectiveRoute 기준으로 세 경로 중 하나 실행:
         decisionEngine.decide()
         mapRankedResultsToResultItems(limitedResults, drinkingWindow, ...)
         rankedResultsToEvalProvenanceSlices(fullResults)   ← fullRankedResults 사용
-        buildSearchCounterfactuals(resolveResult, fullResults)
+        buildSearchCounterfactuals — `getExplanationObligation(deriveQueryFamily(...)).requiresCounterfactual
+           || includeCounterfactuals !== false` 이면 포함 (`explanation-obligation.ts` + `runRankedRouteDecisionPhase`)
         responseBuilder.build()
+        logSearchEvent(...)   ← non-abstain만: runRankedRouteDecisionPhase 내부에서 먼저 기록
 
 5. 구조화 로그 기록 (두 경로 합류 후)
+   responseSnapshot !== undefined 일 때 logSearchEvent() 재호출
+   → abstain 경로: 여기서 1회 기록
+   → non-abstain 경로: 내부 1회 + 여기 1회 (총 2회)
 
 6. cacheService.setSearchResponse()
    → 캐시 내부에서 abstain 여부 등 자격 검사 후 skip 가능
    → 두 경로 모두 시도함 (abstain이어도 캐시 write 시도)
 ```
 
-> **주의:** 캐시는 abstain 경로도 write를 시도합니다. 단 캐시 서비스 내부(`setSearchResponse`)에서 abstain 응답이 캐싱 자격 미달이면 skip됩니다.
+> **주의:** 캐시는 abstain 경로도 write를 시도합니다. 단 캐시 서비스 내부(`setSearchResponse`)에서 abstain 응답이 캐싱 자격 미달이면 skip됩니다.  
+> **주의:** `logSearchEvent`는 non-abstain 경로에서 `runRankedRouteDecisionPhase()` 내부와 공유 블록에서 총 2회 호출됩니다.
 
-**Agentic 경로** (`/agent` 엔드포인트)는 별도로 `AgentOrchestrator.execute()`를 통해 처리됩니다 (§9 참조).
+**Agentic 경로** (`POST /v1/agent`)는 별도로 `AgentOrchestrator.execute()`를 통해 처리됩니다 (§9 참조).
 
 ---
 
@@ -175,13 +190,13 @@ anchors = await anchorExtractor.extract(normalizedQuery, queryViews)
 - `ANCHOR_PRESENT_CONFIDENCE = 0.5` → "앵커 존재" (`hasAnyAnchor`)
 - 두 기준 사이 (≥0.5, <0.85) → "약한 앵커" (`hasWeakAnchor`)
 
-우선순위 순 결정 로직 (`detectQueryIntent()` lines 91–134):
+우선순위 순 결정 로직 (`detectQueryIntent()` — `planner-intent-detection.ts` 분기 본문 약 91–134행):
 
 | 우선순위 | 인텐트 | 조건 |
 |---------|--------|------|
 | 1 | `comparison_search` | `hasComparisonMarker && hasAnyAnchor` |
 | 2 | `comparison_search` | `anchors.length >= 2 && hasComparisonMarker` |
-| 3 | `mixed_query` | `hasKoreanMixedQueryMarker && hasAnyAnchor` |
+| 3 | `mixed_query` | `hasKoreanMixed(=hasKoreanMixedQueryMarkers()) && hasAnyAnchor` |
 | 4 | `mixed_query` | `hasStrongAnchor && hasConstraintKeyword` |
 | 5 | `entity_exact` | `hasStrongAnchor && !hasConstraintKeyword && !hasPriceKeyword` |
 | 6 | `entity_fuzzy` | `hasWeakAnchor && !hasConstraintKeyword && !hasPriceKeyword` |
@@ -277,7 +292,7 @@ overall_uncertainty = clamp(
 
 ### Stage 10: 대상 엔티티 타입 추론
 
-**우선순위 순서** (`inferTargetEntityType()`, lines 648–700):
+**우선순위 순서** (`inferTargetEntityType()`, `planner.ts` 약 662–712행):
 
 | 우선순위 | 타입 | 조건 |
 |---------|------|------|
@@ -556,43 +571,45 @@ constraintToSparseFilterTokens(hardConstraints)
 
 **핵심 파일:** `src/domain/ranking/service/ranker.ts` (서빙 랭킹), `src/domain/ranking/service/lambdamart-ranker.ts` (LTR 훈련)
 
-### Ranker.rank() 실제 파이프라인 (ranker.ts:427)
+### Ranker.rank() 실제 파이프라인 (`src/domain/ranking/service/ranker.ts` — `rank()`)
+
+실행 순서는 **가중치를 후보 루프보다 먼저** 고정한다는 점이 중요합니다(요청당 1회).
 
 ```
-Step 1: 모든 candidate의 신호 계산
-  signalComputer.computeAll(candidate, queryPlan, constraints, anchorProfile, ...)
-  → componentScores (per-candidate 다차원 신호 벡터)
+[루프 전 — 코드 주석 Step 2] 가중치 결정
+  a. resolveWeights(queryClass)              → 쿼리 클래스별 기본 가중치
+  b. getModeWeights(effectiveRetrievalMode)  → compiled.execution.effectiveRetrievalMode 우선, 없으면 plan
+  c. max 오버레이 + modeNormFactor로 정규화   → 오버레이 총합 팽창 보정
+  (요청 공통) referenceYear, queryContainsHangul, queryConstraintCtx 선계산
 
-Step 2: 가중치 결정 (3단계)
-  a. resolveWeights(queryClass)       → 쿼리 클래스별 기본 가중치
-  b. getModeWeights(retrievalMode)    → 리트리벌 모드 오버레이 (max 연산)
-  c. 정규화 (modeNormFactor)          → 오버레이로 인한 총합 팽창 보정
-
-Step 3: 채널별 가중치 조정
-  resolveChannelAwareWeights(candidate.retrievalTrace.candidateSources, weights)
-  → 채널 기여도에 따라 채널별 신호 가중치 추가 조정
-
-Step 3b: 최종 스코어 집계
-  scoreAggregator.aggregate(componentScores, candidateWeights)
-  → finalScore
+[후보별 for 루프]
+  signalComputer.computeAll(...)     → componentScores
+  buildConstraintState(...)          → matched / unmet / inferred
+  resolveChannelAwareWeights(...)    → candidateWeights
+  scoreAggregator.aggregate(...)     → finalScore → scored[]
 
 Step 4: Coarse Prune (T5.2)
-  -Infinity 스코어 제거 (하드 제약 위반, 엔티티 무결성 실패)
+  비유한 finalScore(-Infinity 등) 제거 → viable[]
 
-Step 5: 내림차순 정렬 (NaN 안전, entityId 타이브레이크)
-  compareScoredEntriesByFinalScoreDesc()
+Step 5: 정렬
+  viable.sort(compareScoredEntriesByFinalScoreDesc)  (NaN 안전, entityId 타이브레이크)
+  preRerankTop5 엔티티 스냅샷
 
-Step 6: 재랭킹 게이트 평가 (evaluateRerankGate)
+Step 6: 재랭킹 게이트 (evaluateRerankGate)
   gateDecision = { shouldRerank, topKOverride, reason }
-  ├─ shouldRerank=true + reranker 있음 → 크로스 인코더 재랭킹
-  │    applyReranking(query, viable, queryClass, topK)
-  │    실패 시 → 원래 순위로 폴백
-  └─ shouldRerank=true + ltrModels 있음 → LambdaMART LTR 재랭킹
-       applyLearnedLtrRerank(results, queryClass, ltrModels)
-       차원 불일치 시 → 스킵
+  ├─ shouldRerank=true + reranker 있음 → applyReranking (크로스 인코더 top-K)
+  │    실패 시 viable 순위로 폴백
+  └─ shouldRerank=true + ltrModels에 해당 queryClass 키 존재
+       → shouldApplyLearnedRerank=true (실제 호출은 아래 Step 6b)
 
-Step 7-8: RankedResult 배열 구성 + 증거 항목 매핑
-  evidenceMapper.mapToEvidence(componentScores) → evidenceItems
+Step 7–8: RankedResult[] 구성 + 증거
+  finalOrder → 각 entry에 evidenceMapper.mapToEvidence(componentScores)
+
+Step 6b (코드상 Step 7–8 직후): shouldApplyLearnedRerank이면
+  applyLearnedLtrRerank(results, queryClass, ltrModels) — RankedResult 배열을 재정렬
+  차원 불일치 등 시 스킵·degradation 신호 기록
+
+반환: RankingOutput { results, metadata }
 ```
 
 ### 가중치 구조 (ScoringWeights — ranker.ts)
@@ -667,42 +684,63 @@ Step 7-8: RankedResult 배열 구성 + 증거 항목 매핑
 **파일:** `src/application/agent/agent-orchestrator.ts`  
 **진입:** `AgentOrchestrator.execute(query, requestId, overrides?, abortSignal?)`
 
-사용자가 `/agent` 엔드포인트를 통해 복잡한 다단계 쿼리를 보낼 때 실행됩니다.
+사용자가 `POST /v1/agent`를 통해 복잡한 다단계 쿼리를 보낼 때 실행됩니다.
 
 ### 전체 루프 구조
 
 ```
 execute()
   │
-  ├─ 적응형 스텝 예산 결정
-  │    classifyQueryBudget(query) → { maxSteps, maxTotalTokens, perStepTimeoutMs }
-  │    (단순 쿼리 → 작은 예산, 복잡 비교 → 큰 예산)
+  ├─ 빈 쿼리 즉시 반환 (terminationReason='answer')
   │
-  └─ 루프 (종료 조건: answer | max_steps | timeout | budget | error | aborted)
+  ├─ 보안 pre-check (querySanitizer 있을 때)
+  │    sanitize(query) → !safe → terminationReason='blocked' 즉시 반환
+  │
+  ├─ 적응형 스텝 예산 결정
+  │    overrides.maxSteps 없으면 classifyQueryBudget(query) → adaptive maxSteps
+  │    effectiveConfig = { ...DEFAULT_AGENT_CONFIG, ...adaptive, ...overrides }
+  │
+  └─ 루프 (종료 조건: answer | max_steps | timeout | budget | error | aborted | loop_detected | blocked)
        │
-       ├─ [사전 검사] StepBudget.canProceed()
-       │    → 스텝 수 초과 OR 타임아웃 → 루프 종료
+       ├─ [사전 검사 1] StepBudget.canProceed()
+       │    → 스텝 수 초과 OR agentTimeoutMs 초과 → 루프 종료
        │
-       ├─ BUDGET_WARNING 주입
-       │    (잔여 스텝 = 1이고 도구 이력 있을 때)
+       ├─ [사전 검사 2] 토큰 예산 pre-flight
+       │    totalInputTokens + totalOutputTokens >= maxTotalTokens → 'budget' 종료
+       │    (LLM 호출 전 소비 방지)
+       │
+       ├─ isLastStep 판정 및 메시지 주입
+       │    remainingSteps=1 → [LAST_STEP] 강제 answer 요구
+       │    remainingSteps=2 && steps.length>0 → [BUDGET_WARNING] now 합성 요구
+       │
+       ├─ abortSignal?.aborted 체크(LLM 호출 직전) → `terminationReason='error'`로 종료
+       │    (§9 하단 “AbortSignal 전파” — `AbortError` 경로와 구분)
        │
        ├─ LLM 호출 (Promise.race — 스텝 타임아웃 경쟁)
        │    chatLlm.complete({ messages, temperature: 0, maxOutputTokens: 2048 })
        │    에러 분류: AbortError → 'aborted', Timeout → 'timeout',
-       │              CircuitBreakerOpen → 'error', 기타 → 'error'
+       │              CircuitBreakerOpen → llmCircuitOpen=true + 'error', 기타 → 'error'
+       │
+       ├─ [post-hoc] 토큰 예산 초과 검사
+       │    이번 스텝 토큰 누적 후 >= maxTotalTokens → 'budget' 종료
        │
        ├─ 응답 파싱 (parseLlmOutput)
-       │    ├─ {"thought":"…","answer":"…"} → answer 경로, 루프 종료
+       │    ├─ {"thought":"…","answer":"…"} (비어있지 않은 answer) → 루프 종료
        │    ├─ {"thought":"…","action":{tool,input}} → 단일 도구 실행
        │    └─ {"thought":"…","actions":[…]} → 병렬 도구 배치 실행
        │
-       ├─ 토큰 예산 초과 검사 (post-hoc)
-       │    totalInputTokens + totalOutputTokens >= maxTotalTokens → 'budget' 종료
+       ├─ [배치 도구] 정책 검사 후 executeAgentToolsBatch(calls)
+       │    batchCalls.length > MAX_TOOLS_PER_BATCH=4 → 'error' 종료
+       │    unknown tool → 관찰 기록, MAX_UNKNOWN_TOOL_ATTEMPTS=2 초과 시 'error'
+       │    validateParallelBatchPolicy() 위반 → 관찰 기록, continue
+       │    budget.recordParallelBatch(..., {skipNearDuplicate:true}) → 루프 감지
        │
-       ├─ [단일 도구] executeAgentTool(tool, input)
+       ├─ [단일 도구] 정책 검사 후 executeAgentTool(tool, input)
+       │    unknown tool → 관찰 기록, MAX_UNKNOWN_TOOL_ATTEMPTS=2 초과 시 'error'
+       │    budget.recordStep(tool, input) → 루프 감지
        │
-       └─ [배치 도구] executeAgentToolsBatch(calls)
-            (MAX_TOOLS_PER_BATCH 초과 시 거부)
+       └─ zero-results 감지 시 constraint-relaxation hint 주입 (1회)
+            remainingSteps >= 3 + !hasInjectedRefinementHint → pendingRefinementHint 세팅
 ```
 
 ### 사용 가능한 도구 목록
@@ -738,17 +776,42 @@ execute()
 | `error` | LLM 에러, CB OPEN, 말형된 응답, 알 수 없는 도구 초과 |
 | `aborted` | 클라이언트 연결 종료 (AbortError) — SLO 오류율에서 제외 |
 | `loop_detected` | 동일 도구 호출 반복 패턴 감지 |
-| `fallback` | 도구 실행 정책 차단 후 합성으로 전환 |
+| `fallback` | Layer 2 fallback search 또는 Layer 3/4 observation 합성으로 answer 생성 (도구 실행은 없었거나 synthesis LLM 실패) |
 | `blocked` | 보안 정책 또는 도메인 정책에 의해 강제 종료 |
 
-### 루프 종료 후 합성 (4개 레이어)
+### 루프 종료 후 합성 (실제 순서)
 
 ```
-Layer 1: 정상 answer 문자열 → 그대로 반환
-Layer 2: max_steps / budget → 마지막 search 결과로 합성
-Layer 3: timeout / error → 부분 결과 합성 시도
-Layer 4: 합성 실패 → 비어 있는 폴백 응답
+[전제 조건] !policyBlocked && !llmCircuitOpen && answer==='' && terminationReason!=='answer'
+            && !(abortSignal?.aborted) && 토큰 예산 미소진
+
+[관찰 기반 합성] obsSteps.length > 0 일 때 LLM 2회 시도
+  Attempt 1: chatLlm.complete({maxOutputTokens: SYNTHESIS_TOKENS_ATTEMPT_1=512})
+  Attempt 2: chatLlm.complete({maxOutputTokens: SYNTHESIS_TOKENS_ATTEMPT_2=256})
+             (attempt 1 실패/빈 결과 + !aborted + !llmCircuitOpen + 예산 남은 경우)
+  성공 시 → answer 세팅, terminationReason='answer'
+
+[Layer 2] !policyBlocked && answer==='' && !hasToolObservations && !aborted
+  단일 fallback search (FALLBACK_SEARCH_TIMEOUT_MS=5_000ms)
+  recoverLastSearchInput(steps)로 이전 search_wines query 복원
+  결과 있으면 → 언어 감지(Hangul 여부) 후 ko/en 템플릿 answer
+  결과 없으면 → "결과 없음" 템플릿, terminationReason='fallback'
+
+[Layer 3] !policyBlocked && terminationReason!=='aborted' && answer===''
+  마지막 observation slice (LAYER3_OBSERVATION_SLICE_CHARS=300자)
+  hasToolObservations → terminationReason='answer' (올바른 실행, 합성만 실패)
+  그 외 → terminationReason='fallback'
+
+[policyBlocked 처리] policyBlocked && answer===''
+  → 차단 메시지 템플릿
+
+[Layer 4] !policyBlocked && terminationReason!=='aborted' && answer===''
+  → 빈 폴백 템플릿
+  hasToolObservations → terminationReason='answer'
+  그 외 → terminationReason='fallback'
 ```
+
+> **주의:** 문서에서 "Layer 1: 정상 answer → 그대로 반환"이라고 설명했으나, 정상 answer는 루프 안에서 즉시 종료되므로 루프 종료 후 합성 단계 자체에 도달하지 않습니다.
 
 ### AbortSignal 전파 경로
 
@@ -758,8 +821,12 @@ HTTP 클라이언트 연결 종료
   → AgentOrchestrator.execute()의 abortSignal 파라미터
   → propagateAbort() → stepAbortController.abort()
   → chatLlm.complete()의 HTTP fetch 취소
-  → terminationReason = 'aborted' (오류 메트릭에서 제외)
 ```
+
+**종료 이유 분기 (주의):**
+
+- `chatLlm.complete()`가 `AbortError`로 실패하면 → `terminationReason = 'aborted'` (SLO 오류율에서 제외하려는 경로).
+- 루프 반복 중 **LLM 호출 직전**에 `abortSignal.aborted`이면 코드는 `terminationReason = 'error'`로 빠지는 분기가 있다(`agent-orchestrator.ts`). 운영 대시보드에서는 `aborted`와 구분될 수 있음.
 
 ---
 
@@ -767,33 +834,54 @@ HTTP 클라이언트 연결 종료
 
 **파일:** `src/application/search/search-usecase-post-route-phase.ts`
 
-§2의 Post-Route Phase 상세 설명과 동일. 핵심 분기:
+§2의 Post-Route Phase 상세 설명과 동일. `runSearchPostRoutePhase()` 전체 흐름:
 
 ```
 rankedResults[]
   │
-  ├─ abstainPolicy.shouldAbstain(topScores)
+  ▼
+[1] cacheRequestContext 빌드 (abstain 여부와 무관하게 미리 준비)
   │
-  ├─ [abstain=true] ──────────────────────────────────────────────────
-  │    DrinkingWindow 추가
-  │    ResponseBuilder.build() (abstain 플래그 포함)
-  │    캐시 기록 SKIP
-  │    반환
+  ▼
+[2] snapshot + degradation 계산 (두 경로 공유)
   │
-  └─ [abstain=false] ─────────────────────────────────────────────────
-       result limit 클램프 (1–1000)
-       │
-       ├─ DecisionEngine.decide()
-       │    → resolved / ambiguous / failed / clarify
-       │
-       ├─ DrinkingWindowPredictor (선택적)
-       │
-       ├─ ResponseBuilder.build() → SearchResponseV1
-       │
-       ├─ 구조화 로그 기록
-       │
-       └─ cacheService.setSearchResponse() (캐시 기록)
+  ▼
+[3] topKFinalScores() → abstainPolicy.shouldAbstain() 판단
+  │
+  ▼
+[4] result limit 적용 — clamp: safeLimit = min(1000, floor(raw)); NaN/음수이면 전체
+  │
+  ├─ [abstain=true] ──────────────────────────────────────────────────────────
+  │    mapRankedResultsToResultItems(limitedResults, drinkingWindow, ...)
+  │    rankedResultsToEvalProvenanceSlices(fullResults)
+  │    buildSearchCounterfactuals (includeCounterfactuals === true 일 때만)
+  │        ← abstain 경로는 strict === true 체크
+  │    responseBuilder.build(buildEntropyAbstainResponseParams(...))
+  │
+  └─ [abstain=false] → runRankedRouteDecisionPhase() ────────────────────────
+       buildSearchDecisionInput()
+       decisionEngine.decide()        → resolved / ambiguous / failed / clarify
+       mapRankedResultsToResultItems(limitedResults, drinkingWindow, ...)
+       rankedResultsToEvalProvenanceSlices(fullResults)   ← fullRankedResults 사용
+       buildSearchCounterfactuals — `getExplanationObligation(deriveQueryFamily(...)).requiresCounterfactual
+           || includeCounterfactuals !== false` 이면 포함 (`explanation-obligation.ts`)
+       responseBuilder.build() → SearchResponseV1
+       logSearchEvent(...)   ← non-abstain: 이 내부에서 먼저 1회 기록
+  │
+  ▼
+[5] 구조화 로그 기록 (두 경로 합류 후 공유)
+    responseSnapshot !== undefined 일 때 logSearchEvent() 재호출
+    → abstain 경로: 여기서 1회만 기록
+    → non-abstain 경로: 내부 1회 + 여기 1회 (총 2회)
+  │
+  ▼
+[6] cacheService.setSearchResponse()
+    → 두 경로 모두 캐시 write 시도 (abstain이어도 시도)
+    → 캐시 내부에서 abstain 응답이 자격 미달이면 skip
 ```
+
+> **주의:** abstain 경로도 `cacheService.setSearchResponse()`를 호출합니다. 단 캐시 서비스 내부에서 자격 검사 후 skip될 수 있습니다.  
+> **주의:** `logSearchEvent`는 non-abstain 경로에서 `runRankedRouteDecisionPhase()` 내부와 공유 블록에서 총 2회 호출됩니다.
 
 ---
 
@@ -883,6 +971,7 @@ SearchResponseSchema {
   ├─ 비교 쿼리 분해 시도 → 단일 쿼리, 스킵
   ├─ Planner.planWithCompiled() → QueryPlanV1 + CompiledWineQuery 생성
   ├─ 에이전트 필터 없음 → 스킵
+  ├─ logSearchEvent(query_observability) → 구조화 로그 기록
   ├─ Constraint SAT 검사 → 모순 없음
   └─ 캐시 조회 → MISS, 계속 진행
   │
@@ -925,18 +1014,27 @@ SearchResponseSchema {
   └─ 하드 제약 필터 (wine_type, region 재검사)
   │
   ▼
-[7] LambdaMART.rank()
-  ├─ 8개 피처 추출 per candidate
-  ├─ 가중치 적용 (또는 학습된 QueryClassWeights)
-  └─ finalScore = clamp(bias + Σ feature×weight, 0, 1)
+[7] Ranker.rank() → RankingOutput { results, metadata }
+  ├─ [루프 전] 가중치 결정: resolveWeights + getModeWeights + 정규화
+  ├─ [루프 내 per candidate] 신호 계산 → 채널별 가중치 → aggregate → finalScore
+  ├─ Coarse Prune (-Infinity 제거) → 정렬 → 재랭킹 게이트
+  ├─ RankedResult[] 구성 (Steps 7-8)
+  └─ [선택적] applyLearnedLtrRerank() → LTR 모델 + 게이트 통과 시
   │
   ▼
-[8] Post-Route Phase
+[8] Post-Route Phase (runSearchPostRoutePhase)
+  ├─ cacheRequestContext 빌드
+  ├─ snapshot + degradation 계산
   ├─ abstainPolicy → abstain=false (점수 분포 뚜렷)
-  ├─ DecisionEngine → resolved
-  ├─ DrinkingWindow 예측 추가
-  ├─ ResponseBuilder.build() → SearchResponseV1
-  └─ cacheService.setSearchResponse() 기록
+  ├─ result limit 클램프 (min(1000, floor(raw)))
+  ├─ runRankedRouteDecisionPhase()
+  │    decisionEngine.decide() → resolved
+  │    mapRankedResultsToResultItems (drinkingWindow 포함)
+  │    buildSearchCounterfactuals — `getExplanationObligation(...).requiresCounterfactual || includeCounterfactuals !== false`
+  │    responseBuilder.build() → SearchResponseV1
+  │    logSearchEvent() (내부 1회)
+  ├─ logSearchEvent() (공유 블록 1회)
+  └─ cacheService.setSearchResponse() 기록 시도
   │
   ▼
 HTTP 200 SearchResponseV1
@@ -973,28 +1071,36 @@ HTTP 200 SearchResponseV1
 
 | 상수 | 값 | 위치 | 의미 |
 |------|----|------|------|
-| `LAMBDAMART_FEATURE_DIMENSION` | 8 | lambdamart-ranker.ts:149 | 피처 벡터 차원 |
-| `LAMBDAMART_UNIFORM_FEATURE_WEIGHT` | 0.125 | lambdamart-ranker.ts:142 | 초기 균일 가중치 |
-| `LAMBDAMART_WEIGHT_SUM_EPSILON` | 1e-8 | lambdamart-ranker.ts:154 | 가중치 붕괴 감지 임계값 |
-| `LAMBDAMART_VALIDATION_NDCG_K` | 5 | lambdamart-ranker.ts:156 | 검증 지표 truncation |
-| `RRF_DEFAULT_K` | 60 | rrf.ts:9 | RRF k 기본값 (browse·fallback 클래스); specific_wine=30, compare=40, pairing(browse)=60 |
-| `CONFORMAL_ALPHA` | 0.3 | conformal-config.ts | 보정 알파 (70% coverage) |
-| `UNCERTAINTY_PARSER_CONFIDENCE_FLOOR` | 0.5 | planner.ts:522 | 파서 신뢰도 하한 |
-| `EXACT_ANCHOR_CONFIDENCE` | 0.85 | planner-intent-detection.ts:10 | strong anchor 판정 임계값 (producer_browse·entity_resolution 진입 등) |
-| `IPS_POSITION_PROPENSITY` | [1.0, 0.6, 0.4, 0.3, 0.2] | position-debias.ts | 위치 편향 IPS 가중치 |
-| `MAX_TOOLS_PER_BATCH` | (에이전트 설정) | agent-orchestrator.ts:404 | 배치당 최대 도구 수 |
-| `maxOutputTokens` | 2048 | agent-orchestrator.ts:530 | LLM 스텝당 최대 출력 토큰 |
-| `PRODUCER_BROWSE_CRITIC_LIFT` | 0.02 | browse-diversity.ts:6 | Producer Browse BM25 critic 가중치 |
-| `PRODUCER_BROWSE_PRESTIGE_LIFT` | 0.025 | browse-diversity.ts:7 | Producer Browse BM25 prestige 가중치 |
-| `REGION_BROWSE_CRITIC_LIFT` | 0.02 | browse-diversity.ts:9 | Region Browse BM25 critic 가중치 |
-| `REGION_BROWSE_PRESTIGE_LIFT` | 0.03 | browse-diversity.ts:10 | Region Browse BM25 prestige 가중치 (탐색 강화) |
-| `PRODUCER_BROWSE_MAX_LEXICAL_VARIANTS` | 4 | browse-diversity.ts:12 | Producer OR-쿼리 변형 최대 수 |
-| `REGION_BROWSE_MAX_LEXICAL_VARIANTS` | 6 | browse-diversity.ts:14 | Region OR-쿼리 변형 최대 수 |
-| `REGION_DIVERSITY_PER_PRODUCER_MIN` | 2 | browse-diversity.ts:16 | 지역 다양성 생산자당 최솟값 |
-| `REGION_DIVERSITY_PER_PRODUCER_MAX` | 4 | browse-diversity.ts:17 | 지역 다양성 생산자당 최댓값 |
-| `REGION_DIVERSITY_LIMIT_DIVISOR` | 5 | browse-diversity.ts:18 | 지역 다양성: 생산자당 = ceil(limit ÷ 5) |
-| `BROWSE_SPARSE_FETCH_CEILING` | 240 | browse-diversity.ts:20 | Sparse over-fetch 하드 상한 |
-| `BROWSE_SPARSE_OVERFETCH_FACTOR` | 8 | browse-diversity.ts:252 | Over-fetch 배수 (limit × 8, 상한 240) |
+| `LAMBDAMART_FEATURE_DIMENSION` | 8 | `src/domain/ranking/service/lambdamart-ranker.ts` | 피처 벡터 차원 |
+| `LAMBDAMART_UNIFORM_FEATURE_WEIGHT` | 0.125 | 위와 동일 | 초기 균일 가중치 |
+| `LAMBDAMART_WEIGHT_SUM_EPSILON` | 1e-8 | 위와 동일 | 가중치 붕괴 감지 임계값 |
+| `LAMBDAMART_VALIDATION_NDCG_K` | 5 | 위와 동일 | 검증 지표 truncation |
+| `RRF_DEFAULT_K` | 60 | `src/domain/shared/utils/rrf.ts` | RRF k 기본값 (browse·fallback 클래스); specific_wine=30, compare=40, pairing(browse)=60 |
+| `CONFORMAL_ALPHA` | 0.3 | `src/domain/shared/config/conformal-config.ts` | 보정 알파 (70% coverage) |
+| `UNCERTAINTY_PARSER_CONFIDENCE_FLOOR` | 0.5 | `src/domain/query/service/planner.ts` (모듈 상단 상수 + `computeUncertainty()` 사용부) | 파서 신뢰도 하한 |
+| `EXACT_ANCHOR_CONFIDENCE` | 0.85 | `src/domain/query/service/planner-intent-detection.ts` | strong anchor 판정 임계값 (producer_browse·entity_resolution 진입 등) |
+| `IPS_POSITION_PROPENSITY` | [1.0, 0.6, 0.4, 0.3, 0.2] | `src/domain/feedback/service/position-debias.ts` | 위치 편향 IPS 가중치 |
+| `MAX_TOOLS_PER_BATCH` | 4 | `src/application/agent/agent-orchestrator.ts` | 배치당 최대 도구 수 |
+| `MAX_UNKNOWN_TOOL_ATTEMPTS` | 2 | 위와 동일 | 알 수 없는 도구 연속 호출 허용 횟수 |
+| `maxOutputTokens` | 2048 | 위와 동일 | ReAct 스텝 `chatLlm.complete` 기본 상한 |
+| `SYNTHESIS_TOKENS_ATTEMPT_1` | 512 | 위와 동일 | 합성 LLM 1차 시도 최대 출력 토큰 |
+| `SYNTHESIS_TOKENS_ATTEMPT_2` | 256 | 위와 동일 | 합성 LLM 2차 시도 최대 출력 토큰 |
+| `SYNTHESIS_TIMEOUT_MS` | 60_000 | 위와 동일 | 합성 단계 전체 타임아웃 (ms) |
+| `FALLBACK_SEARCH_TIMEOUT_MS` | 5_000 | 위와 동일 | Layer 2 fallback search 타임아웃 (ms) |
+| `LAYER3_OBSERVATION_SLICE_CHARS` | 300 | 위와 동일 | Layer 3 마지막 observation 슬라이스 길이 (자) |
+| `DEFAULT_TOOL_TIMEOUT_MS` | 8_000 | 위와 동일 | 단일 도구 실행 기본 타임아웃 (ms) |
+| `DEFAULT_PARALLEL_BATCH_TIMEOUT_MS` | 10_000 | 위와 동일 | 병렬 도구 배치 기본 타임아웃 (ms) |
+| `PRODUCER_BROWSE_CRITIC_LIFT` | 0.02 | `src/domain/retrieval/service/browse-diversity.ts` | Producer Browse BM25 critic 가중치 |
+| `PRODUCER_BROWSE_PRESTIGE_LIFT` | 0.025 | 위와 동일 | Producer Browse BM25 prestige 가중치 |
+| `REGION_BROWSE_CRITIC_LIFT` | 0.02 | 위와 동일 | Region Browse BM25 critic 가중치 |
+| `REGION_BROWSE_PRESTIGE_LIFT` | 0.03 | 위와 동일 | Region Browse BM25 prestige 가중치 (탐색 강화) |
+| `PRODUCER_BROWSE_MAX_LEXICAL_VARIANTS` | 4 | 위와 동일 | Producer OR-쿼리 변형 최대 수 |
+| `REGION_BROWSE_MAX_LEXICAL_VARIANTS` | 6 | 위와 동일 | Region OR-쿼리 변형 최대 수 |
+| `REGION_DIVERSITY_PER_PRODUCER_MIN` | 2 | 위와 동일 | 지역 다양성 생산자당 최솟값 |
+| `REGION_DIVERSITY_PER_PRODUCER_MAX` | 4 | 위와 동일 | 지역 다양성 생산자당 최댓값 |
+| `REGION_DIVERSITY_LIMIT_DIVISOR` | 5 | 위와 동일 | 지역 다양성: 생산자당 = ceil(limit ÷ 5) |
+| `BROWSE_SPARSE_FETCH_CEILING` | 240 | 위와 동일 | Sparse over-fetch 하드 상한 |
+| `BROWSE_SPARSE_OVERFETCH_FACTOR` | 8 | 위와 동일 (`export` 블록) | Over-fetch 배수 (limit × 8, 상한 240) |
 
 ---
 
@@ -1012,22 +1118,30 @@ HTTP 200 SearchResponseV1
 | R6 (5차 검증) | 2026-04-11 | a24b348 | §8 Diversity 전체, §9 tool 목록 재검증, §14 상수표 Diversity 섹션, 목차 §7 제목 | **E12**: §9 tool 목록 `get_wine_details`/`get_drinking_window` → `check_drinking_window`/`get_food_pairings` + 배치 정책 상세 추가 / **E13**: §8 Region Browse prestige lift 누락(0.03, Producer는 0.025와 다름) + product line key 로직 + over-fetch 상수 추가 / **E14**: 목차 §7 "LambdaMART 8-feature" → "Ranker 8-step" |
 | R7 (6차 검증) | 2026-04-11 | a24b348 | §1 SearchRequestSchema 필드, §4 Tier 6 조건 + ConstraintExtractionTrace, §7 LambdaMART 훈련 수식 | **E15**: §1 요청 스키마 완전히 틀림 — `locale?`/`session_id?`/`explain?`/`budget_override?` 최상위 필드 없음, 실제는 `context.locale`/`options.explain`/`sessionContext.sessionId`/`queryBudget` / **E16**: §4 Tier 6 "Tier 1–2 아무것도 못 찾을 때만" 텍스트 잔존 → 항상 실행+병합으로 수정, `ConstraintExtractionTrace` 필드 전면 수정(optional 필드 다수 누락, `fallbackReason` 누락) / **E17**: §7 훈련 반복 `max(100, n×10)` → `min(100, n×10)` |
 | R8 (7차 검증) | 2026-04-11 | a24b348 | §2 Route Dispatch + Post-Route 전체 흐름, §6 RRF 표 + pairing 클래스 | **E18**: `'hybrid' → CandidatePool + LambdaMART` → `CandidatePool + Ranker` / **E19**: Post-Route abstain 경로 흐름 전면 재작성 — 실제는 (1)cacheContext 빌드 (2)snapshot/degradation (3)abstain 판단 (4)limit 적용 후 양쪽 경로 분기, 캐시 write는 abstain 포함 두 경로 모두 시도 / **E20**: §6 `pairing` 융합 클래스(k=80)는 `per-class-fusion-config.ts`에 존재하지만 `mapToFusionQueryClass()`에서 미매핑 — `pairing_search` → `semantic_preference` → `browse`(k=60)가 실제 경로 |
+| R9 (8차 검증) | 2026-04-11 | a24b348 | §3 Stage 번호·QueryPlanV2 출력 구조, §7 Ranker 루프 경계·LTR 순서·반환타입, §10 Post-Route 다이어그램, §12 다이어그램 [7] | **E21**: §3 Stage 번호 — 코드에서 Stage 8=불확실성, Stage 10=타입 추론(9 없음); 확장 구성 Stage 8→7; "6(중복): 제약 파싱" 명시 / **E22**: §3 QueryPlanV2 출력 구조에 `secondaryIntents?`, `thresholdProfileId`, `queryBudget`, `sessionContext?` 누락 / **E23**: §7 Ranker 루프 경계 완전히 틀림 — Step 2(가중치)는 루프 전, Steps 1·3은 루프 안; LambdaMART는 Steps 7-8 RankedResult 구성 이후 실행; `rank()` 반환타입 `RankingOutput {results, metadata}` 명시 / **E24**: §10 다이어그램 "캐시 기록 SKIP" 잔존 — §2와 모순, 전면 재작성 / **E25**: §12 다이어그램 [7] `LambdaMART.rank()` → `Ranker.rank()` |
+| R10 (9차 검증) | 2026-04-11 | a24b348 | §2 Pre-Route `runSearchPreRoutePhase()` 전체 파일, `planner-intent-detection.ts` 전체 파일 직접 확인 | **E26**: §2 Pre-Route 5번 단계 누락 — 에이전트 필터 머지 후 SAT 검사 전에 `logSearchEvent(query_observability, decomposition_strategy)` 호출; 단계 5→6→7 재번호 / **E27**: §3 Priority 3 변수명 — `hasKoreanMixedQueryMarker`(단수 오기) → `hasKoreanMixed`(지역변수명, `hasKoreanMixedQueryMarkers()` 반환값) 명시 |
+| R11 (10차 검증) | 2026-04-11 | a24b348 | `agent-orchestrator.ts` 전체, `search-usecase-post-route-phase.ts` 전체 | **E28**: §9 루프 구조 전면 재작성 — (1) 빈 쿼리 즉시 반환 누락 (2) 보안 pre-check(querySanitizer) 누락 (3) 토큰 예산 pre-flight 체크(LLM 호출 전)와 post-hoc 체크 모두 있음, 문서에는 post-hoc만 (4) isLastStep: remainingSteps=1 OR (=2 && hasToolHistory) 두 조건 (5) MAX_TOOLS_PER_BATCH=4, MAX_UNKNOWN_TOOL_ATTEMPTS=2 값 추가 (6) zero-results 후 constraint-relaxation hint 주입 누락 / **E29**: §9 합성 레이어 완전히 잘못됨 — "Layer 1-4" 설명이 코드와 불일치; 실제는 관찰 기반 LLM 합성(2회 시도, 512/256토큰) → Layer 2(fallback search, 도구 관찰 없을 때만) → Layer 3(observation slice 300자) → policyBlocked 템플릿 → Layer 4(빈 폴백) / **E30**: §9 `fallback` 종료 이유 설명 오기 / **E31**: §2 Post-Route abstain counterfactuals 조건 비대칭 누락 — abstain은 `=== true` strict, non-abstain은 `!== false`(기본 포함) / **E32**: §2 Post-Route `logSearchEvent` 호출 구조 — non-abstain은 `runRankedRouteDecisionPhase()` 내부 + 공유 블록 총 2회, abstain은 공유 블록 1회 |
+| R12 (11차 검증) | 2026-04-11 | f8a2932 | §2·§7·§9·§10·§14, 동기화 이력 정리 | **E33**: R11 **E31** 보완 — non-abstain counterfactual에 `EXPLANATION_OBLIGATION_MAP.requiresCounterfactual` OR 조건 반영 / **E34**: §7 `Ranker.rank()` 서술 순서를 코드와 일치(가중치 선계산 → 후보루프 → Step 6b LTR) / **E35**: §9 Abort — LLM 직전 `abortSignal.aborted` short-circuit은 `error` 가능, `AbortError`는 `aborted` / **E36**: §10 non-abstain counterfactual 한 줄을 §2와 동일하게 수정 / **E37**: 상수표 `MAX_TOOLS_PER_BATCH` 라인·`maxOutputTokens` 설명 정리 |
+| R13 (12차 검증) | 2026-04-11 | f8a2932 | §1 라우트 URL·V2 operationId, §2 hybrid 설명, §3 라인 주석, §9 agent URL, §14 상수 위치 | **E38**: `POST /search` 등 구 URL → `/v1/search`…; V2 `v2.search.*` → `search.v2.*`; V2 하이브리드·interpret 행 추가 / **E39**: `inferTargetEntityType` 라인 범위 648–700 → 662–712 / **E40**: `UNCERTAINTY_PARSER_CONFIDENCE_FLOOR` 잘못된 `planner.ts:522` 참조 제거 / **E41**: 상수표 경로를 `src/...` 기준으로 정리, Conformal·RRF·IPS 파일 위치 정정 |
 
 ### 검증 현황
 
-- [x] §1 HTTP 라우팅 & 스키마 — `SearchRequestSchema` 실제 필드 전체 (R7)
+- [x] §1 HTTP 라우팅 & 스키마 — 계약 URL·operationId·`SearchRequestSchema` (R7, R13)
+- [x] §2 Pre-Route 실행 순서 — `runSearchPreRoutePhase()` 전체 파일 직접 확인 (R3, R10)
+- [x] §2 Post-Route 실행 순서 — `runSearchPostRoutePhase()` + `runRankedRouteDecisionPhase()` 전체 직접 확인 (R3, R8, R11, R12)
 - [x] §2 Route Dispatch — `entity`/`hybrid`/`mixed` 3개 경로, `dispatchSearchRouteExecution()` (R6)
-- [x] §3 Intent Detection 12개 분기 (R2)
+- [x] §3 Intent Detection 12개 분기 — `planner-intent-detection.ts` 전체 파일 직접 확인 (R2, R10)
+- [x] §3 Stage 번호 + `QueryPlanV2` 출력 구조 (R9)
 - [x] §4 Constraint Compiler — Tier 6 항상 실행, `ConstraintExtractionTrace` 전체 필드 (R7)
-- [x] §5 Pre-Route 실행 순서 (R3)
 - [x] §6 Retrieval 채널 & RRF k값 (R2–R3)
-- [x] §7 Ranking — `Ranker.rank()` 8-step, LambdaMART 훈련 `min(100,n×10)` (R4, R7)
+- [x] §7 Ranking — `Ranker.rank()` 가중치→루프→LTR Step 6b·`RankingOutput` (R4, R7, R9, R12)
 - [x] §8 Diversity — Producer/Region 점수식, product line key, over-fetch 상수 전체 (R6)
-- [x] §9 Agentic Loop — tool 목록 4개 + 배치 정책 전체, 예산 구성, 종료 이유 (R5–R6)
-- [x] §10 Post-Route abstain 경로 (R3)
+- [x] §9 Agentic Loop — `POST /v1/agent`, `agent-orchestrator.ts` (합성·Abort 분기 포함) (R5, R6, R11, R12, R13)
+- [x] §10 Post-Route — abstain/비-abstain 분기 + 공유 log/cache (R3, R9, R12)
 - [x] §11 Response Schema 필드명 전체 (R5)
-- [x] §14 상수표 전체 — Diversity 섹션 확장 포함 (R5–R6)
+- [x] §12 데이터 흐름 다이어그램 [7] (R9)
+- [x] §14 상수표 전체 — 에이전트·Diversity 상수·소스 경로 (R5–R6, R12, R13)
 
 ---
 
-*최종 업데이트: 2026-04-11 | 코드 기준: `main` 브랜치 a24b348 이후 | 동기화 라운드: R8 | 발견된 오류 누계: 20개*
+*최종 업데이트: 2026-04-11 | 코드 기준: `main` @ f8a2932 | 동기화 라운드: R13 | 이력 태그: E41까지*

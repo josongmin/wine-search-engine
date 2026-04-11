@@ -67,7 +67,7 @@ export function rrfFuse(
       // Skip such entries defensively rather than propagating bad values.
       if (rank <= 0) continue;
       const current = fused.get(entityId) ?? 0;
-      fused.set(entityId, current + 1 / (k + rank));
+      fused.set(entityId, current + rrfContribution(rank, k));
     }
   }
 

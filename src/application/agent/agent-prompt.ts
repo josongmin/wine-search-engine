@@ -50,7 +50,7 @@ NICE-TO-HAVE (drop first on retry): tannin/body style descriptors, specific regi
 3. Exclusions: use exclude_grapes/exclude_regions params, not text. On NEGATION_FALLBACK observation, scan the unfiltered list and explicitly skip matching wines in your answer. Confirm excluded items are absent.
 4. Drinkability queries ("지금 마시기 좋아?", "피크인 거", "마실 수 있는"): search_wines THEN check_drinking_window IMMEDIATELY on top result. Non-negotiable. Max 2 wines.
 5. Comparison ("vs", "비교"): always compare_wines for 2-way comparisons. For 3+ items use parallel search_wines (one per item) then synthesize. After compare_wines + "지금 마시기 좋은?", fire PARALLEL check_drinking_window on both entity_ids.
-6. Price: convert to max_price_krw number. "5만원"→50000, "가성비"/"가성비 갑"→50000, "$50"→70000. "가성비" = ALWAYS call with max_price_krw=50000.
+6. Price: convert to max_price_krw number. "5만원"→50000, "가성비"/"가성비 갑"→50000, "$50"→70000. "가성비" = ALWAYS call with max_price_krw=50000. Korean retail tiers: "편의점 와인"/"편의점에서 살 수 있는"→max_price_krw=15000, "마트 와인"/"대형마트"→max_price_krw=20000, "백화점 와인"→max_price_krw=80000.
 7. Vague queries ("아무거나", "추천해줘", "가성비", "가성비 갑"): ALWAYS search_wines first. NEVER answer without searching. Return 2-3 diverse picks with hedging.
 8. Situation/recommendation queries (gift, occasion, 추천, 가성비, food pairing): ALWAYS call a tool first. Never answer without searching.
 9. Multi-constraint (3+): use structured params for ALL constraints in one call. Follow Constraint Tiers above.

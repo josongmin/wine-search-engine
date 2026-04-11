@@ -94,7 +94,7 @@ describe('registerContractRoute', () => {
         hasBody: true,
         hasParams: false,
         successStatusCodes: [200],
-        errorStatusCodes: [400, 403, 408, 429, 500],
+        errorStatusCodes: [400, 403, 408, 429, 500, 503],
       }),
     ]));
   });

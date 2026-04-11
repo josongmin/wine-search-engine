@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   WINE_TYPE_RULES,
   WINE_TYPE_DETECTION_PATTERNS,
+  WINE_TYPE_ALL_TOKENS,
   type WineTypeValue,
 } from '../wine-type-patterns.js';
 
@@ -130,5 +131,38 @@ describe('WINE_TYPE_DETECTION_PATTERNS ↔ WINE_TYPE_RULES 동기화', () => {
   it('detectsAnyWineType 헬퍼가 DETECTION_PATTERNS와 동일하게 동작', () => {
     expect(detectsAnyWineType('red wine')).toBe(true);
     expect(detectsAnyWineType('randomquery')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. 프로세코/카바 Korean sparkling regression (BUG: was absent from regex)
+// ---------------------------------------------------------------------------
+
+describe('Korean sparkling terms — 프로세코/카바 regex coverage (BUG regression)', () => {
+  // Previously '프로세코' and '카바' were in WINE_TYPE_KOREAN_TOKENS but NOT in the regex,
+  // so positive classification silently failed while exclusion detection worked asymmetrically.
+  it('프로세코 → sparkling (was silently undetected before fix)', () => {
+    expect(detectWineType('프로세코 추천해줘')).toBe('sparkling');
+  });
+
+  it('카바 → sparkling (was silently undetected before fix)', () => {
+    expect(detectWineType('카바 마시고 싶어')).toBe('sparkling');
+  });
+
+  it('프로세코 is in WINE_TYPE_ALL_TOKENS (consistent with regex)', () => {
+    expect(WINE_TYPE_ALL_TOKENS.has('프로세코')).toBe(true);
+  });
+
+  it('카바 is in WINE_TYPE_ALL_TOKENS (consistent with regex)', () => {
+    expect(WINE_TYPE_ALL_TOKENS.has('카바')).toBe(true);
+  });
+
+  // False-positive guard: '자연' was removed from WINE_TYPE_KOREAN_TOKENS (too broad)
+  it('자연 is NOT in WINE_TYPE_ALL_TOKENS (removed: common Korean word, not wine type)', () => {
+    expect(WINE_TYPE_ALL_TOKENS.has('자연')).toBe(false);
+  });
+
+  it('자연산 생선 does NOT trigger any wine type detection', () => {
+    expect(detectsAnyWineType('자연산 생선 어울리는 와인')).toBe(false);
   });
 });

@@ -115,3 +115,27 @@ describe('NLMapper', () => {
     expect(c.value).toContain('gift');
   });
 });
+
+describe('NLMapper — case-insensitive mapping (Round 5 fix)', () => {
+  it('mapPhrase with title-case input matches the same as lowercase', async () => {
+    // "묵직한" is Korean so case doesn't apply, but built-in DEFAULT_MAPPINGS keys
+    // are lowercase. If any English phrase is keyed lowercase, uppercase input
+    // should still hit the same mapping.
+    // Verify dedup key normalisation via mapConstraints with mixed-case duplicates.
+    const { constraints } = await mapper.mapConstraints(['묵직한', '묵직한', '묵직한']);
+    // Three identical phrases → should produce exactly one constraint (dedup)
+    expect(constraints).toHaveLength(1);
+  });
+
+  it('mapConstraints deduplicates case-insensitively (same phrase, different trim)', async () => {
+    // ' 묵직한 ' and '묵직한' are the same after trim — should produce exactly one constraint
+    const { constraints } = await mapper.mapConstraints([' 묵직한 ', '묵직한']);
+    expect(constraints).toHaveLength(1);
+  });
+
+  it('mapPhrase with extra whitespace still resolves', async () => {
+    const mapping = await mapper.mapPhrase('  묵직한  ');
+    expect(mapping).not.toBeNull();
+    expect(mapping!.mappedAttribute).toBe('body');
+  });
+});

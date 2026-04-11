@@ -52,8 +52,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITEST_MAX_THREADS: 4
+      FIXTURE_REPO_PATH: ${{ github.workspace }}/wine-engine-fixture
     steps:
       - uses: ./.github/actions/setup-node-ci
+      - name: Checkout fixture repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/wine-engine-fixture
+          path: wine-engine-fixture
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Validate fixture integrity
+        working-directory: ${{ github.workspace }}/wine-engine-fixture
+        run: npx tsx scripts/validate-integrity.ts
+      - name: Verify target-entity-map is up to date
+        working-directory: ${{ github.workspace }}/wine-engine-fixture
+        run: npx tsx scripts/generate-target-entity-map.ts --verify
       - run: npm run test:integration
 
   test-watchlist:

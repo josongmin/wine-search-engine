@@ -1,0 +1,359 @@
+/**
+ * Regression: EPIC-3 Planner Policy Trace + EPIC-4 Retrieval Evidence Layer
+ *
+ * Guards:
+ *  E3:
+ *   1. PolicyDecisionRecord shape — all required fields present with correct types
+ *   2. PlannerStage union — all 6 stages are valid literals
+ *   3. RuleMatch shape — ruleId, description, inputsMatched, outcome
+ *   4. RuleMiss shape — ruleId, description, failedCondition
+ *   5. QueryPlanV2.plannerTrace optional field type-checks
+ *   6. plannerTrace is readonly array of PolicyDecisionRecord
+ *   7. PolicyDecisionRecord.durationMs is optional
+ *
+ *  E4:
+ *   8.  FilterTrace shape — applied (readonly string[]) + optional rejected
+ *   9.  CandidateProvenanceDetail shape — all required + optional fields
+ *  10.  CandidateDropRecord shape — dropStage union + lastKnownScore + channels
+ *  11.  RrfFusionTrace shape — rrfK, channelWeights, candidateCount
+ *  12.  CandidateProvenance.detail optional field type-checks
+ *  13.  CandidateEnvelope.dropLog optional field type-checks
+ *  14.  CandidateEnvelope.fusionTrace optional field type-checks
+ *  15.  CandidateDropRecord.dropStage: 'hard_filter' | 'coarse_prune' | 'assembly_dedup'
+ *  16.  RrfFusionTrace.candidateCount has beforeFusion + afterFusion + afterHardFilter + afterAssembly
+ *  17.  CandidateProvenanceDetail.degraded is required boolean
+ *  18.  CandidateProvenanceDetail.matchedTerms is optional string[]
+ *
+ * These tests are append-only (regression suite rules). Never delete.
+ */
+
+import { describe, expect, it } from 'vitest';
+import type {
+  PolicyDecisionRecord,
+  PlannerStage,
+  RuleMatch,
+  RuleMiss,
+} from '../../src/domain/query/model/policy-decision-record.js';
+import type {
+  FilterTrace,
+  CandidateProvenanceDetail,
+  CandidateDropRecord,
+  RrfFusionTrace,
+  CandidateProvenance,
+  CandidateEnvelope,
+} from '../../src/domain/retrieval/model/candidate-envelope.js';
+
+// ─── E3: PolicyDecisionRecord ─────────────────────────────────────────────────
+
+describe('E3: PolicyDecisionRecord', () => {
+  it('E3-1: PolicyDecisionRecord has all required fields with correct types', () => {
+    const record: PolicyDecisionRecord = {
+      stage: 'intent_classification',
+      inputFacts: { normalizedQuery: 'bordeaux', anchorCount: 0 },
+      rulesEvaluated: [],
+      rejectedBranches: [],
+      decision: 'recommendation',
+      confidence: 0.9,
+    };
+    expect(record.stage).toBe('intent_classification');
+    expect(record.decision).toBe('recommendation');
+    expect(typeof record.confidence).toBe('number');
+    expect(record.confidence).toBeGreaterThanOrEqual(0);
+    expect(record.confidence).toBeLessThanOrEqual(1);
+    expect(Array.isArray(record.rulesEvaluated)).toBe(true);
+    expect(Array.isArray(record.rejectedBranches)).toBe(true);
+  });
+
+  it('E3-2: PlannerStage accepts all 6 valid literals', () => {
+    const stages: PlannerStage[] = [
+      'intent_classification',
+      'route_resolution',
+      'retrieval_mode_selection',
+      'query_class_classification',
+      'uncertainty_estimation',
+      'target_entity_inference',
+    ];
+    expect(stages).toHaveLength(6);
+    // Each must be a non-empty string
+    for (const s of stages) {
+      expect(typeof s).toBe('string');
+      expect(s.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('E3-3: RuleMatch has ruleId, description, inputsMatched, outcome', () => {
+    const match: RuleMatch = {
+      ruleId: 'route.entity_exact.strong_anchor',
+      description: 'Strong anchor → entity_exact route',
+      inputsMatched: { anchorCount: 1, anchorConfidence: 0.95 },
+      outcome: 'entity_exact',
+    };
+    expect(match.ruleId).toBe('route.entity_exact.strong_anchor');
+    expect(typeof match.inputsMatched).toBe('object');
+    expect(match.outcome).toBe('entity_exact');
+  });
+
+  it('E3-4: RuleMiss has ruleId, description, failedCondition', () => {
+    const miss: RuleMiss = {
+      ruleId: 'route.entity_fuzzy.moderate_anchor',
+      description: 'Moderate anchor → entity_fuzzy route',
+      failedCondition: 'anchorConfidence < 0.6 not met',
+    };
+    expect(miss.ruleId).toBeDefined();
+    expect(miss.failedCondition).toBeDefined();
+    expect(typeof miss.failedCondition).toBe('string');
+  });
+
+  it('E3-5: PolicyDecisionRecord.durationMs is optional', () => {
+    const withDuration: PolicyDecisionRecord = {
+      stage: 'route_resolution',
+      inputFacts: {},
+      rulesEvaluated: [],
+      rejectedBranches: [],
+      decision: 'entity_exact',
+      confidence: 1.0,
+      durationMs: 2.4,
+    };
+    const withoutDuration: PolicyDecisionRecord = {
+      stage: 'route_resolution',
+      inputFacts: {},
+      rulesEvaluated: [],
+      rejectedBranches: [],
+      decision: 'entity_exact',
+      confidence: 1.0,
+    };
+    expect(withDuration.durationMs).toBe(2.4);
+    expect(withoutDuration.durationMs).toBeUndefined();
+  });
+
+  it('E3-6: plannerTrace on a QueryPlanV2-shaped object is a readonly PolicyDecisionRecord[]', () => {
+    const records: readonly PolicyDecisionRecord[] = [
+      {
+        stage: 'query_class_classification',
+        inputFacts: { queryClass: 'specific_wine' },
+        rulesEvaluated: [],
+        rejectedBranches: [],
+        decision: 'specific_wine',
+        confidence: 0.85,
+      },
+    ];
+    // Simulate a partial QueryPlanV2 shape to confirm type compatibility
+    const planFragment: { plannerTrace?: readonly PolicyDecisionRecord[] } = {
+      plannerTrace: records,
+    };
+    expect(planFragment.plannerTrace).toHaveLength(1);
+    expect(planFragment.plannerTrace![0]!.stage).toBe('query_class_classification');
+  });
+
+  it('E3-7: plannerTrace may be absent (undefined)', () => {
+    const planFragment: { plannerTrace?: readonly PolicyDecisionRecord[] } = {};
+    expect(planFragment.plannerTrace).toBeUndefined();
+  });
+});
+
+// ─── E4: FilterTrace ──────────────────────────────────────────────────────────
+
+describe('E4: FilterTrace', () => {
+  it('E4-8: FilterTrace has applied (readonly string[]) and optional rejected', () => {
+    const passing: FilterTrace = {
+      applied: ['region=Bordeaux', 'type=red'],
+    };
+    expect(Array.isArray(passing.applied)).toBe(true);
+    expect(passing.rejected).toBeUndefined();
+
+    const failing: FilterTrace = {
+      applied: ['type=red'],
+      rejected: 'region constraint: candidate region=Burgundy != Bordeaux',
+    };
+    expect(failing.rejected).toContain('region');
+  });
+});
+
+// ─── E4: CandidateProvenanceDetail ───────────────────────────────────────────
+
+describe('E4: CandidateProvenanceDetail', () => {
+  it('E4-9: CandidateProvenanceDetail has all required fields', () => {
+    const detail: CandidateProvenanceDetail = {
+      channel: 'sparse_bm25',
+      rawScore: 12.4,
+      normalizedScore: 0.78,
+      rrfContribution: 0.016,
+      rank: 3,
+      retrievalProfile: 'bm25_strict_v2',
+      degraded: false,
+    };
+    expect(detail.channel).toBe('sparse_bm25');
+    expect(typeof detail.rawScore).toBe('number');
+    expect(typeof detail.normalizedScore).toBe('number');
+    expect(typeof detail.rrfContribution).toBe('number');
+    expect(typeof detail.rank).toBe('number');
+    expect(typeof detail.retrievalProfile).toBe('string');
+    expect(typeof detail.degraded).toBe('boolean');
+  });
+
+  it('E4-17: CandidateProvenanceDetail.degraded is required boolean', () => {
+    const degraded: CandidateProvenanceDetail = {
+      channel: 'dense_semantic',
+      rawScore: 0.0,
+      normalizedScore: 0.0,
+      rrfContribution: 0.0,
+      rank: 999,
+      retrievalProfile: 'dense_v1',
+      degraded: true,
+      degradationReason: 'embedding service timeout',
+    };
+    expect(degraded.degraded).toBe(true);
+    expect(degraded.degradationReason).toBeDefined();
+  });
+
+  it('E4-18: CandidateProvenanceDetail.matchedTerms is optional', () => {
+    const withTerms: CandidateProvenanceDetail = {
+      channel: 'sparse_bm25',
+      rawScore: 8.0,
+      normalizedScore: 0.5,
+      rrfContribution: 0.012,
+      rank: 5,
+      retrievalProfile: 'bm25_v1',
+      degraded: false,
+      matchedTerms: ['bordeaux', 'cabernet'],
+    };
+    const withoutTerms: CandidateProvenanceDetail = {
+      channel: 'dense_semantic',
+      rawScore: 0.9,
+      normalizedScore: 0.9,
+      rrfContribution: 0.02,
+      rank: 1,
+      retrievalProfile: 'dense_v1',
+      degraded: false,
+    };
+    expect(withTerms.matchedTerms).toEqual(['bordeaux', 'cabernet']);
+    expect(withoutTerms.matchedTerms).toBeUndefined();
+  });
+});
+
+// ─── E4: CandidateDropRecord ──────────────────────────────────────────────────
+
+describe('E4: CandidateDropRecord', () => {
+  it('E4-10: CandidateDropRecord shape — dropStage union + required fields', () => {
+    const hardDrop: CandidateDropRecord = {
+      entityId: 'wine:123',
+      dropStage: 'hard_filter',
+      dropReason: 'region constraint failed: candidate=Burgundy, required=Bordeaux',
+      lastKnownScore: 0.34,
+      channels: [{ channel: 'sparse_bm25', rawScore: 6.2, rank: 12 }],
+    };
+    expect(hardDrop.dropStage).toBe('hard_filter');
+    expect(hardDrop.channels).toHaveLength(1);
+    expect(typeof hardDrop.lastKnownScore).toBe('number');
+  });
+
+  it('E4-15: CandidateDropRecord.dropStage: hard_filter | coarse_prune | assembly_dedup', () => {
+    const stages: CandidateDropRecord['dropStage'][] = [
+      'hard_filter',
+      'coarse_prune',
+      'assembly_dedup',
+    ];
+    expect(stages).toHaveLength(3);
+    for (const s of stages) {
+      const record: CandidateDropRecord = {
+        entityId: `wine:${s}`,
+        dropStage: s,
+        dropReason: `dropped at ${s}`,
+        lastKnownScore: 0.1,
+        channels: [],
+      };
+      expect(record.dropStage).toBe(s);
+    }
+  });
+});
+
+// ─── E4: RrfFusionTrace ───────────────────────────────────────────────────────
+
+describe('E4: RrfFusionTrace', () => {
+  it('E4-11: RrfFusionTrace has rrfK, channelWeights, candidateCount', () => {
+    const trace: RrfFusionTrace = {
+      queryClass: 'specific_wine',
+      fusionClass: 'specific_wine',
+      rrfK: 60,
+      channelWeights: { sparse: 0.5, dense: 0.4, anchor: 0.1, learnedSparse: 0.0 },
+      candidateCount: {
+        beforeFusion: { sparse: 100, dense: 100, anchor: 20 },
+        afterFusion: 150,
+        afterHardFilter: 140,
+        afterAssembly: 50,
+      },
+    };
+    expect(trace.rrfK).toBe(60);
+    expect(trace.channelWeights.sparse + trace.channelWeights.dense + trace.channelWeights.anchor)
+      .toBeCloseTo(1.0, 5);
+  });
+
+  it('E4-16: RrfFusionTrace.candidateCount has all 4 required sub-fields', () => {
+    const trace: RrfFusionTrace = {
+      queryClass: 'browse',
+      fusionClass: 'browse',
+      rrfK: 60,
+      channelWeights: { sparse: 0.5, dense: 0.5, anchor: 0.0, learnedSparse: 0.0 },
+      candidateCount: {
+        beforeFusion: { sparse: 50, dense: 80, anchor: 0 },
+        afterFusion: 100,
+        afterHardFilter: 95,
+        afterAssembly: 30,
+      },
+    };
+    expect(trace.candidateCount.beforeFusion).toBeDefined();
+    expect(trace.candidateCount.afterFusion).toBeDefined();
+    expect(trace.candidateCount.afterHardFilter).toBeDefined();
+    expect(trace.candidateCount.afterAssembly).toBeDefined();
+    expect(trace.candidateCount.afterAssembly).toBeLessThanOrEqual(trace.candidateCount.afterHardFilter);
+  });
+});
+
+// ─── E4: CandidateProvenance + CandidateEnvelope extensions ──────────────────
+
+describe('E4: CandidateProvenance + CandidateEnvelope extensions', () => {
+  it('E4-12: CandidateProvenance.detail is optional', () => {
+    const withDetail: CandidateProvenance = {
+      channels: ['sparse_bm25'],
+      channelScores: [],
+      queryViewMatches: [],
+      anchorConditioned: false,
+      matchedFilterConstraints: [],
+      fusionProfile: 'default',
+      fusionScore: 0.45,
+      detail: [
+        {
+          channel: 'sparse_bm25',
+          rawScore: 5.0,
+          normalizedScore: 0.5,
+          rrfContribution: 0.01,
+          rank: 8,
+          retrievalProfile: 'bm25_v1',
+          degraded: false,
+        },
+      ],
+    };
+    expect(withDetail.detail).toHaveLength(1);
+
+    const withoutDetail: CandidateProvenance = {
+      channels: ['dense_semantic'],
+      channelScores: [],
+      queryViewMatches: [],
+      anchorConditioned: false,
+      matchedFilterConstraints: [],
+      fusionProfile: 'default',
+      fusionScore: 0.6,
+    };
+    expect(withoutDetail.detail).toBeUndefined();
+  });
+
+  it('E4-13: CandidateEnvelope.dropLog is optional', () => {
+    const envelope: Pick<CandidateEnvelope, 'dropLog'> = {};
+    expect(envelope.dropLog).toBeUndefined();
+  });
+
+  it('E4-14: CandidateEnvelope.fusionTrace is optional', () => {
+    const envelope: Pick<CandidateEnvelope, 'fusionTrace'> = {};
+    expect(envelope.fusionTrace).toBeUndefined();
+  });
+});

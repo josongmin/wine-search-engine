@@ -70,6 +70,93 @@ export interface CandidateProvenance {
 
   /** Final RRF score (sum of channel contributions). */
   readonly fusionScore: number;
+
+  /**
+   * E4: Per-channel detailed evidence. Present when detail tracing is enabled.
+   * Absent in production hot-path (opt-in to avoid allocation overhead).
+   */
+  readonly detail?: readonly CandidateProvenanceDetail[] | undefined;
+}
+
+/**
+ * E4: Hard filter pass/reject trace for a single candidate in a channel.
+ */
+export interface FilterTrace {
+  /** Filter attributes that this candidate passed (e.g. 'region=Bordeaux'). */
+  readonly applied: readonly string[];
+  /** Reason this candidate was rejected by a filter, if any. */
+  readonly rejected?: string | undefined;
+}
+
+/**
+ * E4: Per-channel detailed evidence for a single candidate.
+ *
+ * Extends the lighter ChannelScoreEvidence with matching detail
+ * for audit and calibration use.
+ */
+export interface CandidateProvenanceDetail {
+  readonly channel: CandidateChannel;
+  readonly rawScore: number;
+  readonly normalizedScore: number;
+  readonly rrfContribution: number;
+  readonly rank: number;
+
+  /** Sparse channel: BM25 matched tokens. */
+  readonly matchedTerms?: readonly string[] | undefined;
+  /** Constraint attributes satisfied by this candidate in this channel. */
+  readonly matchedConstraints?: readonly string[] | undefined;
+  /** Constraint attributes not satisfied. */
+  readonly missingConstraints?: readonly string[] | undefined;
+
+  /** Vespa rank profile used. */
+  readonly retrievalProfile: string;
+  /** Hard filter trace. */
+  readonly filterTrace?: FilterTrace | undefined;
+
+  /** Whether this channel's retrieval was degraded. */
+  readonly degraded: boolean;
+  readonly degradationReason?: string | undefined;
+}
+
+/**
+ * E4: Record of a candidate that was dropped from the pipeline.
+ * Retained for audit; production systems sample top-5 drops.
+ */
+export interface CandidateDropRecord {
+  readonly entityId: string;
+  /** Stage at which this candidate was dropped. */
+  readonly dropStage: 'hard_filter' | 'coarse_prune' | 'assembly_dedup';
+  readonly dropReason: string;
+  readonly lastKnownScore: number;
+  // NOTE: Pick<> does not preserve readonly on individual fields, so we use an
+  // explicit inline type to maintain the codebase's readonly-first invariant.
+  readonly channels: ReadonlyArray<{
+    readonly channel: CandidateChannel;
+    readonly rawScore: number;
+    readonly rank: number;
+  }>;
+}
+
+/**
+ * E4: Request-level RRF fusion trace — one per query execution.
+ * Attached to CandidateEnvelope at the list level.
+ */
+export interface RrfFusionTrace {
+  readonly queryClass: string;
+  readonly fusionClass: string;
+  readonly rrfK: number;
+  readonly channelWeights: {
+    readonly sparse: number;
+    readonly dense: number;
+    readonly anchor: number;
+    readonly learnedSparse: number;
+  };
+  readonly candidateCount: {
+    readonly beforeFusion: { readonly sparse: number; readonly dense: number; readonly anchor: number };
+    readonly afterFusion: number;
+    readonly afterHardFilter: number;
+    readonly afterAssembly: number;
+  };
 }
 
 /**
@@ -92,4 +179,16 @@ export interface CandidateEnvelope {
    * during Epic 3 migration. Will be removed in Epic 4.
    */
   readonly legacyCandidate: HybridCandidate;
+
+  /**
+   * E4: Sampled drop log — candidates dropped from the pipeline during assembly.
+   * Top-5 in production; full list in debug mode.
+   */
+  readonly dropLog?: readonly CandidateDropRecord[] | undefined;
+
+  /**
+   * E4: RRF fusion trace for this request. Attached once per list, not per candidate.
+   * Only the first CandidateEnvelope in a result list carries this; others omit it.
+   */
+  readonly fusionTrace?: RrfFusionTrace | undefined;
 }

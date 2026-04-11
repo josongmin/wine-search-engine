@@ -86,10 +86,27 @@ export function logKillSwitchPolicyAtStartup(config: Config, log: { info: (o: ob
   }
 }
 
+/**
+ * Returns true when the ranker's runtime signal indicates the reranker failed.
+ *
+ * classifyRerankerFailureReason() in ranker.ts returns one of:
+ *   'timeout' | 'http_error' | 'parse_error' | 'unknown'
+ *
+ * ranker.ts then builds degradationReasons as `reranker_${reason}`, producing:
+ *   'reranker_timeout' | 'reranker_http_error' | 'reranker_parse_error' | 'reranker_unknown'
+ *
+ * Checking rerankerStatus === 'failed' is the SSoT; degradationReasons is a
+ * secondary signal that may be absent if the signal was constructed without
+ * degradation context.
+ */
 function rerankerRuntimeUnavailable(signal?: RankerRuntimeSignal): boolean {
+  if (signal?.rerankerStatus === 'failed') return true;
   const reasons = signal?.degradation?.degradationReasons ?? [];
   return reasons.some((reason) =>
-    reason === 'reranker_timeout' || reason === 'reranker_unavailable');
+    reason === 'reranker_timeout' ||
+    reason === 'reranker_http_error' ||
+    reason === 'reranker_parse_error' ||
+    reason === 'reranker_unknown');
 }
 
 export function buildCacheReadRuntimeState(
@@ -98,8 +115,7 @@ export function buildCacheReadRuntimeState(
 ): CacheReadRuntimeState {
   const learningKillSwitchEnabled = config.killSwitch.learning;
   const denseRetrievalEnabled = !config.killSwitch.denseRetrieval;
-  const rerankerConfigured =
-    (config.reranker.url?.trim().length ?? 0) > 0 || config.cohere.apiKey !== undefined;
+  const rerankerConfigured = config.cohere.apiKey !== undefined;
   const rerankerAvailable = rerankerConfigured && !rerankerRuntimeUnavailable(signal);
   const runtimeDegraded =
     learningKillSwitchEnabled

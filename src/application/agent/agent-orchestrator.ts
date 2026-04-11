@@ -115,8 +115,11 @@ function validateParallelBatchPolicy(
   const hasPairing = toolSet.has('get_food_pairings');
 
   // compare_wines already returns a full comparison payload and should not run
-  // in the same parallel turn with unrelated tools.
-  if (hasCompare && toolSet.size > 1) {
+  // in the same parallel turn with unrelated tools — OR with another compare_wines call.
+  // Bug fix: check calls.length (raw count), not toolSet.size (deduplicated by tool name).
+  // toolSet.size === 1 even when the LLM emits two compare_wines with different inputs,
+  // allowing two concurrent compare_wines calls to slip through the guard silently.
+  if (hasCompare && calls.length > 1) {
     return { allowed: false, reason: 'compare_wines must run alone in a step' };
   }
   // Drinking-window checks are safe to parallelize with each other, but mixing
@@ -634,16 +637,22 @@ export class AgentOrchestrator {
         // and land directly in Layer 4 with a stale terminationReason='answer' from a step
         // that produced nothing. Treating empty-answer as "no answer yet" lets the loop
         // continue (or expire gracefully via budget exhaustion → synthesis sentinel).
-        if (typeof parsed.answer === 'string' && parsed.answer.length > 0) {
-          steps.push({
-            index: steps.length,
-            thought: parsed.thought,
-            answer: parsed.answer,
-            durationMs: Math.max(0, Date.now() - stepStart),
-            tokenCount: { input: inputTokens, output: outputTokens },
-          });
-          terminationReason = 'answer';
-          break;
+        // AG-02: trim BEFORE the length check so whitespace-only answers are rejected
+        // consistently. The trimmed value is also what gets stored/returned — synthesis
+        // paths (lines ~1068) already trim; the main-loop path must match.
+        if (typeof parsed.answer === 'string') {
+          const trimmedAnswer = parsed.answer.trim();
+          if (trimmedAnswer.length > 0) {
+            steps.push({
+              index: steps.length,
+              thought: parsed.thought,
+              answer: trimmedAnswer,
+              durationMs: Math.max(0, Date.now() - stepStart),
+              tokenCount: { input: inputTokens, output: outputTokens },
+            });
+            terminationReason = 'answer';
+            break;
+          }
         }
 
         // ── Parallel batch ──────────────────────────────────────────────────
@@ -741,6 +750,11 @@ export class AgentOrchestrator {
             // AbortError: caller disconnected — classify as 'aborted', not 'error',
             // so client-disconnect events don't pollute error rate metrics / SLO alerts.
             if (isAbortError(batchErr)) {
+              // Propagate abort to sibling tools — AbortError may originate from the
+              // outer caller signal (via propagateBatchAbort), but if it came from
+              // a single tool's internal timeout, sibling tools are still running.
+              // Abort explicitly to release resources (Vespa connections, LLM calls).
+              batchAbortController.abort();
               terminationReason = 'aborted';
               break;
             }
@@ -748,6 +762,7 @@ export class AgentOrchestrator {
               timeoutStats.parallelBatch += 1;
               batchAbortController.abort();
               terminationReason = 'timeout';
+              break;
             }
             if (batchErr instanceof DomainError && batchErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
@@ -768,9 +783,7 @@ export class AgentOrchestrator {
                 });
               }
             } else {
-              if (terminationReason !== 'timeout') {
-                terminationReason = 'error';
-              }
+              terminationReason = 'error';
             }
             break;
           } finally {
@@ -927,6 +940,13 @@ export class AgentOrchestrator {
             observation = `Tool error: ${toolErr instanceof Error ? toolErr.message : String(toolErr)}`;
             rawResult = null;
           } finally {
+            // Always abort the per-tool controller so any in-flight Vespa/HTTP request
+            // initiated by the tool is cancelled immediately, not at its natural timeout.
+            // The three explicit catch branches (TIMEOUT, AbortError, PolicyBlocked) all
+            // break out of the loop — this finally also fires for the generic error path
+            // which falls through, so toolAbortController was previously never aborted
+            // in that case, leaking connection-pool slots until timeout expiry.
+            toolAbortController.abort();
             abortSignal?.removeEventListener('abort', propagateToolAbort);
           }
 
@@ -982,7 +1002,9 @@ export class AgentOrchestrator {
     // the raw query through the search use case would just hit the same
     // security gate (or worse, slip through if the gate state changed).
     let fallbackApplied = false;
-    let answer = steps.find((s) => s.answer !== undefined)?.answer ?? '';
+    // Require non-empty answer string: a step with answer='' is not a valid answer.
+    // Without the length check, synthesis layers below all skip and empty string propagates.
+    let answer = steps.find((s) => s.answer !== undefined && s.answer.length > 0)?.answer ?? '';
 
     // Observation-based synthesis: if we have tool results but no answer,
     // try to synthesize from what we already gathered before doing a fresh search.
@@ -1046,11 +1068,14 @@ export class AgentOrchestrator {
               log.warn({ requestId }, 'synthesis LLM returned malformed result');
               return undefined;
             }
-            // Accumulate synthesis tokens into the overall run totals so the
-            // final response reports accurate token usage (char-based estimate,
-            // same method as the main loop at lines 413-416).
-            const synthInputChars = synthMessages.reduce((sum, m) => sum + m.content.length, 0);
-            totalInputTokens += Math.ceil(synthInputChars / CHARS_PER_TOKEN_ESTIMATE);
+            // Accumulate synthesis tokens into the overall run totals.
+            // IMPORTANT: count ONLY the synthSentinel (the new message unique to
+            // this synthesis call). buildSystemMessage(), buildUserMessage(), and
+            // buildStepMessages() tokens were already counted on each main-loop
+            // iteration — re-counting synthMessages in full would inflate
+            // totalInputTokens and could cause the attempt-2 budget guard
+            // (line ~1128) to block a legal retry.
+            totalInputTokens += Math.ceil(synthSentinel.length / CHARS_PER_TOKEN_ESTIMATE);
             totalOutputTokens += Math.ceil(synthResult.text.length / CHARS_PER_TOKEN_ESTIMATE);
             const parsedSynth = parseLlmOutput(synthResult.text);
             // If the synthesis LLM still returns a tool call despite the sentinel
@@ -1101,6 +1126,8 @@ export class AgentOrchestrator {
           synthAnswer === undefined
           && !(abortSignal?.aborted)
           && !llmCircuitOpen
+          // Use >= (not >) to match pre-flight check at line ~1001 — at exact boundary
+          // the budget is consumed, any synthesis would silently overrun (CLAUDE.md rule 20).
           && totalInputTokens + totalOutputTokens < effectiveConfig.maxTotalTokens
         ) {
           try {
@@ -1286,8 +1313,12 @@ export class AgentOrchestrator {
       timeoutStats,
     });
 
+    // AG-02: normalise answer whitespace at the exit point so all code paths
+    // (main-loop answer, synthesis, fallback templates) produce a consistent
+    // trimmed string. Fallback templates are already clean but applying .trim()
+    // is idempotent — this is the single canonical normalisation point.
     return {
-      answer,
+      answer: answer.trim(),
       steps,
       totalDurationMs: budget.getElapsedMs(),
       totalTokens: { input: totalInputTokens, output: totalOutputTokens },

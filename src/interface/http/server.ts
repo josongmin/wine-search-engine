@@ -15,6 +15,7 @@ import { registerRequestContext } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { deepKeysToSnake } from './middleware/snake-case-hook.js';
 import { registerSearchRoute } from './routes/search.route.js';
+import { registerLookupRoute } from './routes/lookup.route.js';
 import { registerBatchSearchRoute } from './routes/batch-search.route.js';
 import { registerReplayRoute } from './routes/replay.route.js';
 import { registerInterpretRoute } from './routes/interpret.route.js';
@@ -47,6 +48,9 @@ import {
 } from './constants.js';
 
 const serverLog = bootstrapLogger.child({ component: 'HttpServer' });
+
+/** HTTP methods that carry a request body and require Content-Type: application/json (module-scope, Rule 16). */
+const METHODS_WITH_BODY: Set<string> = new Set(['POST', 'PUT', 'PATCH']);
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -373,6 +377,7 @@ export async function createServer(
   });
   registerClaudeToolsRoute(app, deps);
   registerSearchRoute(app, deps);
+  registerLookupRoute(app, deps);
   registerBatchSearchRoute(app, deps);
   registerReplayRoute(app, deps);
   registerInterpretRoute(app, deps);

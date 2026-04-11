@@ -1,5 +1,6 @@
 import type { ResultItem } from '../model/result-item.js';
 import type { QueryTargetType } from '../../query/model/query-target-type.js';
+import { STYLE_SENSORY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
 
 /**
  * Summary statistics for a grouped set of results.
@@ -92,8 +93,13 @@ export class ResultGrouper {
    * returns a producer_set with summary. Otherwise returns wine_set.
    */
   private groupByProducer(results: readonly ResultItem[]): GroupedResult {
-    // Extract producer from each result.
-    const producers = results.map((r) => r.entity.producer).filter(Boolean);
+    // Extract producer from each result. Use an explicit non-empty string guard
+    // rather than filter(Boolean) — an empty string '' is falsy but is a valid
+    // (if degenerate) producer value that would otherwise incorrectly fail the
+    // "all results share the same producer" check.
+    const producers = results
+      .map((r) => r.entity.producer)
+      .filter((p): p is string => p != null && p.length > 0);
 
     // If all results have the same producer, return as producer_set.
     if (producers.length === results.length && new Set(producers).size === 1) {
@@ -121,8 +127,11 @@ export class ResultGrouper {
    * returns a region_set with summary. Otherwise returns wine_set.
    */
   private groupByRegion(results: readonly ResultItem[]): GroupedResult {
-    // Extract region from each result.
-    const regions = results.map((r) => r.entity.region).filter(Boolean);
+    // Extract region from each result. Same non-empty guard as groupByProducer —
+    // filter(Boolean) would discard empty strings, causing false 'wine_set' fallback.
+    const regions = results
+      .map((r) => r.entity.region)
+      .filter((r): r is string => r != null && r.length > 0);
 
     // If all results have the same region, return as region_set.
     if (regions.length === results.length && new Set(regions).size === 1) {
@@ -156,9 +165,10 @@ export class ResultGrouper {
     let styleHint: string | undefined;
 
     if (firstResult) {
-      // Look for body, sweetness, acidity, tannin in matched constraints.
+      // Look for style sensory attributes (body, sweetness, acidity, tannin, style)
+      // in matched constraints — SSoT: STYLE_SENSORY_ATTRIBUTES from constraint-attributes.ts.
       const styleMatches = firstResult.constraints.matched.filter((attr) =>
-        ['body', 'sweetness', 'acidity', 'tannin'].includes(attr),
+        STYLE_SENSORY_ATTRIBUTES.has(attr),
       );
       if (styleMatches.length > 0) {
         styleHint = styleMatches.join(' + ');

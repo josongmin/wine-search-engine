@@ -415,7 +415,7 @@ export type ListDeliveriesResponse = z.infer<typeof ListDeliveriesResponseSchema
 export const WatchlistErrorResponseSchema = z.object({
   error: z.object({
     // Bounds aligned with canonical ErrorResponseSchema (RFC-014).
-    code: z.string().max(MAX_ERROR_ENVELOPE_CODE_CHARS),
+    code: z.string().min(1).max(MAX_ERROR_ENVELOPE_CODE_CHARS),
     message: z.string().max(MAX_ERROR_ENVELOPE_MESSAGE_CHARS),
     request_id: z.string().min(1),
     failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable().optional(),

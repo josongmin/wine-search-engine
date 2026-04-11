@@ -24,7 +24,7 @@ export const WINE_TYPE_RULES: readonly (readonly [RegExp, WineTypeValue])[] = [
   [/(?:^|[^\p{L}\p{N}])(?:red|rouge|레드|적포도주)(?=$|[^\p{L}\p{N}])/iu, 'red'],
   [/(?:^|[^\p{L}\p{N}])(?:white|blanc|화이트|백포도주)(?=$|[^\p{L}\p{N}])/iu, 'white'],
   // Sparkling before rosé: "sparkling rosé" should resolve to sparkling (primary characteristic).
-  [/(?:^|[^\p{L}\p{N}])(?:sparkling|스파클링|champagne|샴페인|prosecco|cava|크레망)(?=$|[^\p{L}\p{N}])/iu, 'sparkling'],
+  [/(?:^|[^\p{L}\p{N}])(?:sparkling|스파클링|champagne|샴페인|prosecco|프로세코|cava|카바|크레망)(?=$|[^\p{L}\p{N}])/iu, 'sparkling'],
   // Use lookarounds (not \b) because \b is ASCII-aware and 'é' is not a word char,
   // which would break the trailing word boundary on "rosé".
   [/(?:^|[^\p{L}\p{N}])(?:ros[eé]|로제)(?=$|[^\p{L}\p{N}])/iu, 'rosé'],
@@ -62,13 +62,49 @@ const WINE_TYPE_ALIASES: Partial<Record<WineTypeValue, readonly string[]>> = {
 };
 
 /**
- * All recognized wine type tokens — canonical values + aliases.
- * Used by search-constraint-extractor for membership checks (e.g. "is 'rose' a wine type?").
- * Includes accent-less aliases so "not rose" is correctly identified as a wine type exclusion.
+ * Korean-language wine type tokens — canonical Korean names used in negation/exclusion
+ * detection by search-constraint-extractor (e.g. "스파클링 빼고" → exclude sparkling).
+ *
+ * These must be kept in sync with the Korean alternatives in WINE_TYPE_RULES patterns.
+ * Values are lowercase for Set membership check consistency with `token.toLowerCase()`.
+ *
+ * Source: WINE_TYPE_RULES regex alternatives (lines matching /스파클링|샴페인|.../).
+ */
+const WINE_TYPE_KOREAN_TOKENS: readonly string[] = [
+  // sparkling
+  '스파클링', '샴페인', '프로세코', '카바', '크레망',
+  // red
+  '레드', '적포도주',
+  // white
+  '화이트', '백포도주',
+  // rosé
+  '로제',
+  // natural / natural wine — '자연' (nature) intentionally excluded: it is too broad
+  // ('자연산' = wild-caught seafood, '자연인' = naturalist) and has no regex in WINE_TYPE_RULES.
+  '내추럴',
+  // dessert
+  // NOTE: '달콤한' (sweet/sweetness) is intentionally NOT listed here. It is a
+  // style/taste descriptor, not a wine type. Including it caused excludeStyleSet to
+  // emit `style_not:달콤한` — a Korean token that never matches Vespa's English-valued
+  // style field ("sweet", "dry", etc.). Handle Korean sweetness negation in
+  // search-constraint-extractor.ts via the STYLE_CANONICAL_MAP instead.
+  '디저트',
+  // fortified
+  '주정강화',
+  // orange
+  '오렌지',
+];
+
+/**
+ * All recognized wine type tokens — canonical values + aliases + Korean tokens.
+ * Used by search-constraint-extractor for membership checks (e.g. "is '스파클링' a wine type?").
+ * Includes accent-less aliases so "not rose" and Korean tokens like "스파클링 빼고"
+ * are correctly identified as wine type exclusions.
  */
 export const WINE_TYPE_ALL_TOKENS: ReadonlySet<string> = new Set<string>([
   ...WINE_TYPE_VALUES,
   ...Object.values(WINE_TYPE_ALIASES).flat(),
+  ...WINE_TYPE_KOREAN_TOKENS,
 ]);
 
 /**

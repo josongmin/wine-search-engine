@@ -9,6 +9,16 @@ export {
 } from './constraint-bundle.js';
 export { type EvidenceStrength, type EvidenceItem } from './evidence-item.js';
 export {
+  type ConstraintAtom,
+  type ConstraintTier,
+  type ConstraintSourceKind,
+  type ConstraintSemanticScope,
+  type ConstraintConflictPolicy,
+  CONSTRAINT_AUTHORITY_BY_SOURCE_KIND,
+  liftToAtom,
+  liftBundleToAtoms,
+} from './constraint-atom.js';
+export {
   type DecisionSnapshot,
   CORRUPTED_SNAPSHOT_ID,
   isCorruptedSnapshot,

@@ -83,4 +83,42 @@ describe('FusionService', () => {
       expect(ids).toEqual(sorted);
     });
   });
+
+  describe('duplicate entityId handling (best rank wins)', () => {
+    it('same entityId at two sparse ranks → best (lowest) rank is used for RRF contribution', () => {
+      // wine-42 appears at rank 1 (score 10) and rank 5 (score 2) in the same list.
+      // The rank-1 appearance should win so its RRF contribution is 1/(60+1), not 1/(60+5).
+      const sparse = [
+        sparseHit('wine-42', 1, 10),
+        sparseHit('wine-42', 5, 2),  // duplicate — should be ignored
+      ];
+      const result = service.fuse(sparse, []);
+      expect(result).toHaveLength(1);
+      const candidate = result[0]!;
+      // sparseRank should reflect the best rank (1), not the last-seen (5)
+      expect(candidate.sparseRank).toBe(1);
+      // RRF score using rank=1 is higher than rank=5 — verify it is non-trivially positive
+      expect(candidate.retrievalFusionScore).toBeGreaterThan(0);
+    });
+
+    it('same entityId in both sparse and dense → both channels contribute (correct dedup)', () => {
+      // This is the normal multi-channel case (not a bug) — verify it still works after fix.
+      const sparse = [sparseHit('wine-1', 1)];
+      const dense = [denseHit('wine-1', 1)];
+      const result = service.fuse(sparse, dense);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.sparseRank).toBe(1);
+      expect(result[0]?.denseRank).toBe(1);
+    });
+
+    it('same entityId at two dense ranks → best (lowest) rank used', () => {
+      const dense = [
+        denseHit('wine-99', 1, 0.9),
+        denseHit('wine-99', 3, 0.5),  // duplicate
+      ];
+      const result = service.fuse([], dense);
+      expect(result).toHaveLength(1);
+      expect(result[0]?.denseRank).toBe(1);
+    });
+  });
 });

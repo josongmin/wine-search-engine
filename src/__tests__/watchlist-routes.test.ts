@@ -4,7 +4,10 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { WatchlistService } from '../application/watchlist/watchlist.service.js';
 import { deepKeysToSnake } from '../interface/http/middleware/snake-case-hook.js';
 import { registerWatchlistRoute } from '../interface/http/routes/watchlist.route.js';
-import { AUTHENTICATED_SUBJECT_HEADER } from '../interface/http/authenticated-subject.js';
+import {
+  AUTHENTICATED_SUBJECT_HEADER,
+  configureAuthenticatedSubjectTrust,
+} from '../interface/http/authenticated-subject.js';
 import { InMemoryWatchlistStore } from '../infrastructure/watchlist/in-memory-watchlist-store.js';
 
 function authHeaders(subject = 'user-1'): Record<string, string> {
@@ -41,6 +44,10 @@ describe('Watchlist Routes', () => {
       return deepKeysToSnake(payload);
     });
 
+    // Trust the X-Authenticated-Subject header in tests — the route handler
+    // requires this flag to be set (prevents impersonation in prod when a
+    // verifying proxy is absent). In tests we control the header directly.
+    configureAuthenticatedSubjectTrust(app, true);
     registerWatchlistRoute(app, { watchlistService });
   });
 
