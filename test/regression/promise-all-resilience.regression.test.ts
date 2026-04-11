@@ -11,14 +11,14 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { buildResolverCandidatesFromPlan } from '../../src/application/search/search-usecase-resolver-candidates.js';
+import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import { VespaCandidateAttributes } from '../../src/infrastructure/vespa/vespa-candidate-attributes.js';
 import { WatchlistAwareSearchIndex } from '../../src/infrastructure/watchlist/watchlist-aware-search-index.js';
-import type { QueryPlanV1 } from '../../src/domain/query/model/query-plan.js';
 import type { EntityId } from '../../src/domain/shared/types/index.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../src/domain/retrieval/port/search-index.port.js';
+import type { EntityCandidateGeneratorInput } from '../../src/domain/resolver/model/entity-candidate-generator-input.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -32,21 +32,18 @@ function makeDoc(entityId: string): RetrievalDocument {
   } as RetrievalDocument;
 }
 
-function makePlanWithAnchors(entityIds: string[]): QueryPlanV1 {
+function makeGeneratorInputWithAnchors(entityIds: string[]): EntityCandidateGeneratorInput {
   return {
-    route: 'hybrid',
-    queryClass: 'entity_lookup',
+    rawQuery: 'test',
     normalizedQuery: 'test',
-    retrievalMode: 'hybrid',
-    constraints: { hard: [], soft: [] },
-    expansions: { lexical: [], semantic: [] },
     anchors: entityIds.map((id) => ({
       surfaceForm: `wine-${id}`,
       normalizedForm: `wine-${id}`,
       candidateEntityIds: [createEntityId(id)],
       confidence: 0.9,
+      source: 'alias' as const,
     })),
-  } as QueryPlanV1;
+  };
 }
 
 function makeSearchIndexStub(
@@ -71,12 +68,12 @@ function makeSearchIndexStub(
 // ── tests ────────────────────────────────────────────────────────────────
 
 describe('Promise.all → allSettled resilience (regression)', () => {
-  describe('buildResolverCandidatesFromPlan', () => {
+  describe('buildResolverCandidatesFromGenerator', () => {
     it('returns surviving candidates when one getDocument rejects', async () => {
       const goodId = 'entity-good';
       const failId = 'entity-fail';
       const doc = makeDoc(goodId);
-      const plan = makePlanWithAnchors([goodId, failId]);
+      const input = makeGeneratorInputWithAnchors([goodId, failId]);
 
       const entityLookup = {
         getDocument: vi.fn(async (id: EntityId) => {
@@ -87,20 +84,20 @@ describe('Promise.all → allSettled resilience (regression)', () => {
         }),
       };
 
-      const result = await buildResolverCandidatesFromPlan(plan, entityLookup);
+      const result = await buildResolverCandidatesFromGenerator(input, entityLookup);
       expect(result.length).toBe(1);
       expect(result[0]!.entityId).toBe(createEntityId(goodId));
     });
 
     it('returns empty array when all getDocument calls reject', async () => {
-      const plan = makePlanWithAnchors(['a', 'b']);
+      const input = makeGeneratorInputWithAnchors(['a', 'b']);
       const entityLookup = {
         getDocument: vi.fn(async () => {
           throw new Error('total Vespa outage');
         }),
       };
 
-      const result = await buildResolverCandidatesFromPlan(plan, entityLookup);
+      const result = await buildResolverCandidatesFromGenerator(input, entityLookup);
       expect(result).toEqual([]);
     });
   });

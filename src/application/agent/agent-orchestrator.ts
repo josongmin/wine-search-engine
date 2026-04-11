@@ -516,6 +516,7 @@ export class AgentOrchestrator {
     let terminationReason: AgentTerminationReason = 'max_steps';
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let reasoningFailureDetected = false;
     /**
      * Set when a tool execution surfaced a policy block. Prevents the
      * single-shot fallback from re-running the raw query through the
@@ -683,6 +684,7 @@ export class AgentOrchestrator {
               { requestId, stepIndex: steps.length, rawType: typeof racedResult },
               'Agent LLM returned malformed step result',
             );
+            reasoningFailureDetected = true;
             terminationReason = 'error';
             break;
           }
@@ -695,15 +697,18 @@ export class AgentOrchestrator {
             // rate metrics / SLO alerts — same pattern as the parallel batch handler.
             terminationReason = 'aborted';
           } else if ((err as Error).message === 'Agent LLM step timed out') {
+            reasoningFailureDetected = true;
             timeoutStats.llmStep += 1;
             terminationReason = 'timeout';
           } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
             // LLM circuit breaker is OPEN — every subsequent complete() call
             // will fast-fail synchronously. Mark the flag so the synthesis
             // layer does not waste round-trips, and terminate cleanly.
+            reasoningFailureDetected = true;
             llmCircuitOpen = true;
             terminationReason = 'error';
           } else {
+            reasoningFailureDetected = true;
             terminationReason = 'error';
           }
           break;
@@ -799,6 +804,7 @@ export class AgentOrchestrator {
           // Per-batch tool count limit: reject oversized batches to prevent
           // resource exhaustion via Promise.all with 100+ concurrent tool calls.
           if (batchCalls.length > MAX_TOOLS_PER_BATCH) {
+            reasoningFailureDetected = true;
             terminationReason = 'error';
             const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
             const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
@@ -834,6 +840,7 @@ export class AgentOrchestrator {
           // Unknown tool guard: reject the whole batch on first unknown name.
           const unknownTool = batchCalls.find((c) => !isKnownTool(c.tool));
           if (unknownTool !== undefined) {
+            reasoningFailureDetected = true;
             unknownToolAttempts++;
             if (unknownToolAttempts > MAX_UNKNOWN_TOOL_ATTEMPTS) {
               terminationReason = 'error';
@@ -961,6 +968,7 @@ export class AgentOrchestrator {
               break;
             }
             if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
+              reasoningFailureDetected = true;
               timeoutStats.parallelBatch += 1;
               batchAbortController.abort();
               const batchDurationMs = Math.max(0, Date.now() - stepStart);
@@ -1019,6 +1027,7 @@ export class AgentOrchestrator {
                 });
               }
             } else {
+              reasoningFailureDetected = true;
               terminationReason = 'error';
             }
             break;
@@ -1105,6 +1114,7 @@ export class AgentOrchestrator {
           // adversarial or confused LLM that keeps emitting the same
           // invalid tool name.
           if (!isKnownTool(tool)) {
+            reasoningFailureDetected = true;
             unknownToolAttempts++;
             if (unknownToolAttempts > MAX_UNKNOWN_TOOL_ATTEMPTS) {
               terminationReason = 'error';
@@ -1332,9 +1342,11 @@ export class AgentOrchestrator {
         policyBlocked = true;
         terminationReason = 'blocked';
       } else if (err instanceof DomainError && err.code === CIRCUIT_BREAKER_OPEN_CODE) {
+        reasoningFailureDetected = true;
         llmCircuitOpen = true;
         terminationReason = 'error';
       } else {
+        reasoningFailureDetected = true;
         terminationReason = 'error';
       }
     }
@@ -1345,6 +1357,8 @@ export class AgentOrchestrator {
     // security gate (or worse, slip through if the gate state changed).
     let fallbackApplied = false;
     let fallbackLayer: SynthesisContext['fallbackApplied'] = null;
+    let failedSynthesisAttempts = 0;
+    let fallbackSearchUsed = false;
     // Require non-empty answer string: a step with answer='' is not a valid answer.
     // Without the length check, synthesis layers below all skip and empty string propagates.
     let answer = steps.find((s) => s.answer !== undefined && s.answer.length > 0)?.answer ?? '';
@@ -1460,6 +1474,9 @@ export class AgentOrchestrator {
           }
           log.error({ err: synthErr1, requestId }, `synthesis attempt 1 threw (timeout/error) — retrying with maxOutputTokens=${SYNTHESIS_TOKENS_ATTEMPT_2}`);
         }
+        if (synthAnswer === undefined) {
+          failedSynthesisAttempts += 1;
+        }
         // Attempt 2: retry with shorter output if attempt 1 failed (empty or threw).
         // Skip when (a) caller disconnected, (b) LLM circuit breaker is OPEN
         // (attempt 1 noted this), or (c) the token budget is now exhausted —
@@ -1483,6 +1500,9 @@ export class AgentOrchestrator {
               terminationReason = 'aborted';
             }
             log.error({ err: synthErr2, requestId }, 'synthesis attempt 2 threw — proceeding to fallback search');
+          }
+          if (synthAnswer === undefined) {
+            failedSynthesisAttempts += 1;
           }
         }
         if (synthAnswer !== undefined) {
@@ -1545,6 +1565,7 @@ export class AgentOrchestrator {
           `${requestId}-fallback`,
           { abortSignal: fallbackController.signal },
         );
+        fallbackSearchUsed = true;
         const topResult = fallbackResult.queryType === 'search' ? fallbackResult.results.at(0) : undefined;
         if (topResult !== undefined) {
           const producer = topResult.entity.producer ?? '';
@@ -1658,12 +1679,29 @@ export class AgentOrchestrator {
       toolCallCount: steps.reduce((n, s) => n + (s.action !== undefined ? 1 : 0) + (s.actionPairs?.length ?? 0), 0),
       totalDurationMs: budget.getElapsedMs(),
       timeoutStats,
+      synthesis: {
+        reasoningFailure:
+          reasoningFailureDetected
+          || timeoutStats.llmStep > 0
+          || timeoutStats.parallelBatch > 0
+          || llmCircuitOpen
+          || failedSynthesisAttempts > 0
+          || (hasToolObservations && fallbackLayer !== null),
+        fallbackApplied: fallbackLayer,
+      },
     });
 
+    const reasoningFailure =
+      reasoningFailureDetected
+      || timeoutStats.llmStep > 0
+      || timeoutStats.parallelBatch > 0
+      || llmCircuitOpen
+      || failedSynthesisAttempts > 0
+      || (hasToolObservations && fallbackLayer !== null);
     const synthesisContext = buildSynthesisContext(
       query,
       toolOutcomes,
-      fallbackLayer !== null,
+      reasoningFailure,
       fallbackLayer,
     );
 
@@ -1683,6 +1721,16 @@ export class AgentOrchestrator {
       // E7-T2: Include typed tool outcomes when at least one tool was invoked.
       ...(toolOutcomes.length > 0 ? { toolOutcomes } : {}),
       synthesisContext,
+      ...(fallbackApplied
+        ? {
+            fallbackTrace: {
+              fallbackApplied: fallbackLayer,
+              reasoningFailure,
+              failedSynthesisAttempts,
+              fallbackSearchUsed,
+            },
+          }
+        : {}),
     };
   }
 }

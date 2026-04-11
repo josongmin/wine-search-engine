@@ -246,6 +246,9 @@ async function buildLiveSnapshotReplayPayload(
     decision_snapshot: {
       ...preflightResponse.meta.decision_snapshot,
     },
+    ...(preflightResponse.meta.determinism_fingerprint !== undefined
+      ? { expected_determinism_fingerprint: preflightResponse.meta.determinism_fingerprint }
+      : {}),
     preflight_honesty_contract: {
       execution_mode:
         preflightResponse.engine_decision.execution_mode
@@ -360,6 +363,9 @@ export async function runSearchFixture(
   if (!snapshotDecode.ok) {
     throw new Error(JSON.stringify(snapshotDecode.error));
   }
+  if (response.meta.determinism_fingerprint === undefined) {
+    throw new Error('missing determinism_fingerprint on replay fixture response');
+  }
   return {
     response,
     assertionSummary: {
@@ -373,6 +379,7 @@ export async function runSearchFixture(
         'authority_trace_ref',
         'runtime_correlation_ref',
         'decision_snapshot.snapshot_id',
+        'determinism_fingerprint',
       ],
       executionMode: fixture.expected.execution_mode,
       degradationReasons: fixture.expected.degradation_reasons,
@@ -409,5 +416,9 @@ export function assertSearchFixtureExpectation(
     throw new Error(
       `Expected degradation_reasons=${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
     );
+  }
+
+  if (body.meta.determinism_fingerprint === undefined) {
+    throw new Error('Expected meta.determinism_fingerprint to be present');
   }
 }

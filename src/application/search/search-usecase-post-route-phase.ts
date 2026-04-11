@@ -1,6 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
-import type { AuditExtension } from '../../domain/audit/model/audit-extension.js';
+import type { AuditExtension, PolicyOutcome } from '../../domain/audit/model/audit-extension.js';
 import type { CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -20,6 +20,7 @@ import { buildSearchCacheRequestContext } from './search-usecase-cache-context.j
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { ConstraintReasoner } from '../../domain/query/service/constraint-reasoner.js';
+import type { ConstraintReasonerOutput } from '../../domain/query/service/constraint-reasoner.js';
 import type { ChannelDegradationSummary } from '../../domain/query/model/abstain-decision.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import { DomainError, EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
@@ -39,6 +40,14 @@ import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js'
 import type { DeterminismFingerprintParams } from '../../domain/shared/utils/determinism-fingerprint.js';
 import { deterministicHash } from '../../domain/shared/utils/hash.js';
 import { RRF_DEFAULT_K } from '../../domain/shared/utils/rrf.js';
+import {
+  getFusionConfig,
+  mapDomainQueryClassToFusionQueryClass,
+} from '../../domain/retrieval/service/per-class-fusion-config.js';
+import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
+import { retrievalPlanVersion } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import { getModeWeights } from '../../domain/ranking/model/mode-weights.js';
+import { RANKING_POLICY_VERSION } from '../../domain/ranking/service/ranker.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
@@ -49,6 +58,7 @@ import {
 } from './specialized-route-observability.js';
 /** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
 const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
+const retrievalProfileService = new RetrievalProfileService();
 
 /**
  * Derives AuditExtension from planner/ranking runtime state and optional
@@ -69,21 +79,27 @@ function deriveAuditExtension(
   rankingMetadata: RankingMetadata | undefined,
   rankedResults: readonly RankedResult[],
   retrievalFusionTrace?: RrfFusionTrace,
+  constraintResolutionTrace?: AuditExtension['constraint_resolution_trace'],
   abstainDecision?: TypedAbstainDecision | false,
   channelDegradation?: ChannelDegradationSummary,
   hardFilterDropLog?: readonly CandidateDropRecord[],
   correctiveRetryCalibration?: number,
+  resolverProvenanceTrace?: AuditExtension['resolver_provenance_trace'],
 ): AuditExtension | undefined {
   const plannerTrace = compiled?.plannerTrace;
   // E1-T4: Read scoreDriftRecord from rerankDecision (structured contract).
   // The top-level RankingMetadata.scoreDriftRecord field is @deprecated —
   // all new reads must go through rerankDecision.scoreDriftRecord.
-  const scoreDriftRecord = rankingMetadata?.rerankDecision?.scoreDriftRecord;
+  const rerankDecision = rankingMetadata?.rerankDecision;
+  const scoreDriftRecord = rerankDecision?.scoreDriftRecord;
 
   // Abstain policy trace is emitted whenever abstain evaluation ran (abstainDecision !== undefined).
   const hasAbstainTrace = abstainDecision !== undefined;
   // Retrieval fusion trace present when hybrid RRF path was used.
   const hasFusionTrace = retrievalFusionTrace !== undefined;
+  const hasRerankDecisionTrace =
+    rerankDecision !== undefined
+    && (scoreDriftRecord !== undefined || (plannerTrace?.length ?? 0) > 0);
   // E4: Drop log present when at least one candidate was hard-filtered out.
   const hasDropLog = hardFilterDropLog !== undefined && hardFilterDropLog.length > 0;
   // TA5: Corrective retry calibration present when retry was accepted.
@@ -93,9 +109,11 @@ function deriveAuditExtension(
     (plannerTrace == null || plannerTrace.length === 0)
     && scoreDriftRecord === undefined
     && !hasFusionTrace
+    && constraintResolutionTrace === undefined
     && !hasAbstainTrace
     && !hasDropLog
     && !hasRetryCalibration
+    && resolverProvenanceTrace === undefined
   ) {
     return undefined;
   }
@@ -115,6 +133,9 @@ function deriveAuditExtension(
     ...(plannerTrace != null && plannerTrace.length > 0
       ? { planner_policy_trace: plannerTrace }
       : {}),
+    ...(constraintResolutionTrace !== undefined
+      ? { constraint_resolution_trace: constraintResolutionTrace }
+      : {}),
     ...(hasFusionTrace
       ? { retrieval_fusion_trace: retrievalFusionTrace }
       : {}),
@@ -126,9 +147,14 @@ function deriveAuditExtension(
             safetyEnvelopeBlocks: scoreDriftRecord.safetyEnvelopeBlocks,
             drift: scoreDriftRecord,
           },
+        }
+      : {}),
+    ...(hasRerankDecisionTrace
+      ? {
           rerank_decision_trace: {
-            gateDecision: 'applied' as const,
-            scoreContract: 'bounded_normalized_0_1',
+            gateDecision: rerankDecision.decision,
+            ...(rerankDecision.modelId !== undefined ? { appliedModel: rerankDecision.modelId } : {}),
+            ...(rerankDecision.applied ? { scoreContract: 'bounded_normalized_0_1' as const } : {}),
           },
         }
       : {}),
@@ -156,6 +182,76 @@ function deriveAuditExtension(
     ...(hasRetryCalibration
       ? { corrective_retry_calibrated_confidence: correctiveRetryCalibration }
       : {}),
+    ...(resolverProvenanceTrace !== undefined
+      ? { resolver_provenance_trace: resolverProvenanceTrace }
+      : {}),
+  };
+}
+
+function shouldEmitConstraintResolutionTrace(
+  compiled: CompiledWineQuery | undefined,
+  requestExplain?: boolean,
+): boolean {
+  return requestExplain === true || (compiled?.plannerTrace?.length ?? 0) > 0;
+}
+
+function buildConstraintPolicyOutcomes(
+  reasonerOutput: ConstraintReasonerOutput,
+): readonly PolicyOutcome[] {
+  const relationsByAtom = new Map<number, typeof reasonerOutput.relations>();
+  for (let index = 0; index < reasonerOutput.atoms.length; index++) {
+    relationsByAtom.set(index, []);
+  }
+  for (const relation of reasonerOutput.relations) {
+    relationsByAtom.set(relation.atomIndexA, [...(relationsByAtom.get(relation.atomIndexA) ?? []), relation]);
+    relationsByAtom.set(relation.atomIndexB, [...(relationsByAtom.get(relation.atomIndexB) ?? []), relation]);
+  }
+
+  return reasonerOutput.atoms.map((_atom, atomIndex) => {
+    const relations = relationsByAtom.get(atomIndex) ?? [];
+    const losingRelation = relations.find((relation) => {
+      if (
+        relation.type !== 'contradiction'
+        && relation.type !== 'redundancy'
+        && relation.type !== 'overshadow'
+      ) {
+        return false;
+      }
+      const loserIndex =
+        relation.winner === 'a'
+          ? relation.atomIndexB
+          : relation.atomIndexA;
+      return loserIndex === atomIndex;
+    });
+    if (losingRelation !== undefined) {
+      return {
+        atomIndex,
+        outcome: losingRelation.type === 'overshadow' ? 'shadowed' : 'dropped',
+        reason: losingRelation.explanation,
+      } satisfies PolicyOutcome;
+    }
+
+    const winningOrInformative = relations
+      .map((relation) => relation.explanation)
+      .filter((explanation, index, all) => all.indexOf(explanation) === index);
+
+    return {
+      atomIndex,
+      outcome: 'kept',
+      reason: winningOrInformative.length > 0
+        ? winningOrInformative.join('; ')
+        : 'No conflict detected',
+    } satisfies PolicyOutcome;
+  });
+}
+
+function buildConstraintResolutionTrace(
+  reasonerOutput: ConstraintReasonerOutput,
+): NonNullable<AuditExtension['constraint_resolution_trace']> {
+  return {
+    atoms: reasonerOutput.atoms,
+    relations: reasonerOutput.relations,
+    policy_outcomes: buildConstraintPolicyOutcomes(reasonerOutput),
   };
 }
 
@@ -166,8 +262,9 @@ function deriveAuditExtension(
  * fusion k constant, ranking config hash) so that two executions with the same
  * configuration always produce the same fingerprint regardless of query content.
  *
- * fusionConfigHash and rankingConfigHash are derived from the snapshot's
- * model_versions / index_versions — a stable proxy for configuration state.
+ * modelVersionsHash and indexVersionsHash are canonical hashes over the full
+ * snapshot version maps, avoiding insertion-order dependence and capturing
+ * full execution-snapshot drift rather than a single "primary" model.
  *
  * E1-T5 extended fields:
  *   - responseContractVersion: from snapshot.response_contract_version
@@ -177,27 +274,79 @@ function deriveAuditExtension(
 function buildDeterminismFingerprintParams(
   snapshot: DecisionSnapshot,
   snapshotVersions: SnapshotVersionInjection,
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery | undefined,
   rankingMetadata?: RankingMetadata,
 ): DeterminismFingerprintParams {
-  // Pick the primary LLM model id from the model_versions map.
-  // Prefer 'query_understanding' > 'rerank' > first key > fallback literal.
   const modelVersions = snapshotVersions?.modelVersions ?? {};
   const primaryModelId =
     modelVersions['query_understanding'] ??
     modelVersions['rerank'] ??
-    Object.values(modelVersions)[0] ??
     'unknown';
 
-  // Stable hash of fusion configuration — RRF_DEFAULT_K is the only global
-  // fusion config constant (Rule 30 SSoT). Include in hash for forward-compat
-  // when additional fusion params are introduced.
-  const fusionConfigHash = deterministicHash(String(RRF_DEFAULT_K));
+  const modelVersionsHash = deterministicHash(
+    ...Object.keys(modelVersions).sort().map((key) => `${key}:${modelVersions[key] ?? ''}`),
+  );
+
+  const featureFlagsHash = deterministicHash(
+    ...Object.keys(snapshot.feature_flags).sort().map((key) => `${key}:${JSON.stringify(snapshot.feature_flags[key])}`),
+  );
 
   // Stable hash of ranking config — index versions act as a proxy for the
   // feature schema version that drives LTR scoring.
   const indexVersions = snapshotVersions?.indexVersions ?? {};
+  const indexVersionsHash = deterministicHash(
+    ...Object.keys(indexVersions).sort().map((key) => `${key}:${indexVersions[key] ?? ''}`),
+  );
+  const queryFamily = deriveQueryFamily(plan, compiled);
+  const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
+  const effectiveRoute = compiled?.execution.effectiveRoute ?? 'hybrid';
+  const fusionQueryClass = mapDomainQueryClassToFusionQueryClass(plan.queryClass, effectiveRetrievalMode);
+  const fusionConfig = getFusionConfig(fusionQueryClass);
+  const retrievalProfile = retrievalProfileService.getProfile(
+    plan.queryClass,
+    effectiveRoute,
+    effectiveRetrievalMode,
+    queryFamily,
+  );
+  const modeWeights = getModeWeights(effectiveRetrievalMode);
+  const fusionConfigHash = deterministicHash(
+    String(RRF_DEFAULT_K),
+    fusionQueryClass,
+    String(fusionConfig.rrfK),
+    String(fusionConfig.sparseWeight),
+    String(fusionConfig.denseWeight),
+    String(fusionConfig.anchorWeight),
+    String(fusionConfig.learnedSparseWeight),
+    retrievalProfile.name,
+    retrievalProfile.channelMix.join(','),
+    String(retrievalProfile.sparseWeight),
+    String(retrievalProfile.denseWeight),
+    String(retrievalProfile.anchorWeight),
+    String(retrievalProfile.sparseTopN),
+    String(retrievalProfile.denseTopN),
+    String(retrievalProfile.fusionK),
+    String(retrievalProfile.finalTopK),
+  );
   const rankingConfigHash = deterministicHash(
-    ...Object.keys(indexVersions).sort().map((k) => `${k}:${indexVersions[k] ?? ''}`),
+    indexVersionsHash,
+    RANKING_POLICY_VERSION,
+    effectiveRetrievalMode,
+    String(modeWeights.lexicalWeight),
+    String(modeWeights.semanticWeight),
+    String(modeWeights.popularityWeight),
+    String(modeWeights.entityIntegrityWeight),
+    String(modeWeights.attributeAlignmentWeight),
+    String(modeWeights.diversityWeight),
+    String(modeWeights.recencyWeight),
+    String(modeWeights.producerPrestigeWeight),
+    String(modeWeights.geographicAlignmentWeight),
+    String(modeWeights.preferenceAlignmentWeight),
+    String(modeWeights.anchorSimilarityWeight),
+    String(modeWeights.softConstraintWeight),
+    String(modeWeights.availabilityWeight),
+    String(modeWeights.criticScoreWeight),
+    String(modeWeights.multilingualScoreWeight),
   );
 
   // E1-T5: extended fields — reranker model ID prefers the explicit rerankDecision
@@ -210,13 +359,50 @@ function buildDeterminismFingerprintParams(
   return {
     plannerVersion: snapshot.planner_version,
     modelId: primaryModelId,
+    modelVersionsHash,
+    featureFlagsHash,
     fusionConfigHash,
+    indexVersionsHash,
     rankingConfigHash,
+    retrievalPlanVersion: retrievalPlanVersion(),
+    rankingPolicyVersion: RANKING_POLICY_VERSION,
     policyRuleVersion: snapshot.policy_rule_version,
     thresholdProfileId: snapshot.threshold_profile_id,
     responseContractVersion: snapshot.response_contract_version,
     ...(rerankApplied !== undefined ? { rerankApplied } : {}),
     ...(rerankModelId !== undefined ? { rerankModelId } : {}),
+  };
+}
+
+function buildResolverProvenanceTrace(
+  resolveResult: EntityResolveResult,
+): AuditExtension['resolver_provenance_trace'] {
+  const provenance = resolveResult.decisionTrace.queryProvenance;
+  if (provenance === undefined) {
+    return undefined;
+  }
+  const candidateSourceBreakdown = provenance.candidateSourceBreakdown?.map((entry) => ({
+    source: entry.source,
+    entity_ids: entry.entityIds,
+    count: entry.count,
+  }));
+  if (
+    (candidateSourceBreakdown?.length ?? 0) === 0
+    && provenance.blockerSeedEntityIds === undefined
+    && provenance.blockerSeedCount === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(candidateSourceBreakdown !== undefined && candidateSourceBreakdown.length > 0
+      ? { candidate_source_breakdown: candidateSourceBreakdown }
+      : {}),
+    ...(provenance.blockerSeedEntityIds !== undefined
+      ? { blocker_seed_entity_ids: provenance.blockerSeedEntityIds }
+      : {}),
+    ...(provenance.blockerSeedCount !== undefined
+      ? { blocker_seed_count: provenance.blockerSeedCount }
+      : {}),
   };
 }
 
@@ -329,6 +515,10 @@ export interface RankedRouteDecisionPhaseContext {
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
   /** E4: RRF fusion trace from the candidate pool, forwarded from the calling context. */
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
+  /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
+  readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
+  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
+  readonly correctiveRetryCalibration?: number | undefined;
 }
 
 /**
@@ -387,6 +577,7 @@ export async function runRankedRouteDecisionPhase(
   );
 
   const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
+  const constraintReasonerOutput = new ConstraintReasoner().reason(ctx.plan.constraints);
   const mergedRouteDegradation = mergeRouteDegradation(
     snapshot,
     ctx.effectiveRoute,
@@ -471,17 +662,27 @@ export async function runRankedRouteDecisionPhase(
    * E6-U2: Quality Gate Wiring — compiled fields forwarded to quality gate
    * Fields from SearchPostRouteExecutionContext forwarded to EvidenceGate:
    *   - evidenceQuality (from decision input)
-   *   - rerank suppression flag (from RerankGateDecision)
+   *   - rerank suppression flag (from typed rerank decision code)
    * Do NOT pass raw scores or internal ranker state to the quality gate.
    * compiled.execution.effectiveRoute/effectiveRetrievalMode are forwarded via ResponseBuildParams.
    */
   // In the non-abstain ranked path, fusion trace is forwarded from ctx; abstain
   // decision is false (not abstaining), so abstain_policy_trace is omitted here.
+  // E4/TA5: hard_filter_drop_log and corrective_retry_calibrated_confidence are
+  // forwarded from ctx when available (entity-only route with corrective retry).
   const auditExtension = deriveAuditExtension(
     ctx.compiled,
     ctx.rankingMetadata,
     ctx.fullRankedResults,
     ctx.retrievalFusionTrace,
+    shouldEmitConstraintResolutionTrace(ctx.compiled)
+      ? buildConstraintResolutionTrace(constraintReasonerOutput)
+      : undefined,
+    undefined,          // abstainDecision — no abstain in ranked path
+    undefined,          // channelDegradation — not available in ranked phase context
+    ctx.hardFilterDropLog,
+    ctx.correctiveRetryCalibration,
+    buildResolverProvenanceTrace(ctx.resolveResult),
   );
   let built: SearchResponseV1;
   try {
@@ -506,7 +707,13 @@ export async function runRankedRouteDecisionPhase(
         ? { specializedRouteObservability: ctx.specializedRouteObservability }
         : {}),
       ...(auditExtension !== undefined ? { auditExtension } : {}),
-      determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions, ctx.rankingMetadata),
+      determinismFingerprintParams: buildDeterminismFingerprintParams(
+        snapshot,
+        ctx.snapshotVersions,
+        ctx.plan,
+        ctx.compiled,
+        ctx.rankingMetadata,
+      ),
     });
   } catch (buildErr) {
     if (buildErr instanceof EvidenceObligationError) {
@@ -615,10 +822,14 @@ export async function runSearchPostRoutePhase(
     ctx.rankingMetadata,
     ctx.rankedResults,
     ctx.retrievalFusionTrace,
+    shouldEmitConstraintResolutionTrace(ctx.compiled, ctx.request.options?.explain)
+      ? buildConstraintResolutionTrace(reasonerOutput)
+      : undefined,
     abstainDecision,
     channelDegradation,
     ctx.hardFilterDropLog,
     ctx.correctiveRetryCalibration,
+    buildResolverProvenanceTrace(ctx.resolveResult),
   );
 
   // Apply caller-specified result limit after ranking + abstain check (both need the full set).
@@ -696,7 +907,13 @@ export async function runSearchPostRoutePhase(
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
             : {}),
           ...(auditExtension !== undefined ? { auditExtension } : {}),
-          determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions, ctx.rankingMetadata),
+          determinismFingerprintParams: buildDeterminismFingerprintParams(
+            snapshot,
+            ctx.snapshotVersions,
+            ctx.plan,
+            ctx.compiled,
+            ctx.rankingMetadata,
+          ),
         },
       );
     } catch (buildErr) {
@@ -767,6 +984,10 @@ export async function runSearchPostRoutePhase(
       ...(ctx.rankingMetadata !== undefined ? { rankingMetadata: ctx.rankingMetadata } : {}),
       specializedRouteObservability: ctx.specializedRouteObservability,
       ...(ctx.retrievalFusionTrace !== undefined ? { retrievalFusionTrace: ctx.retrievalFusionTrace } : {}),
+      ...(ctx.hardFilterDropLog !== undefined && ctx.hardFilterDropLog.length > 0
+        ? { hardFilterDropLog: ctx.hardFilterDropLog }
+        : {}),
+      ...(ctx.correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration: ctx.correctiveRetryCalibration } : {}),
     });
   }
 

@@ -41,6 +41,7 @@ export function registerSearchRoute(
 
       const response = await deps.searchUseCase.execute(searchRequest, requestId, {
         abortSignal: abortSignalFromFastifyRequest(request),
+        debugRequest: request.debugRequest,
       });
 
       // RFC 7234 §4.1: Vary must list headers that influence representation selection.

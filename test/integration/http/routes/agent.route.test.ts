@@ -151,4 +151,41 @@ describe('POST /v1/agent', () => {
     expect(capturedSignal).toBeDefined();
     expect(capturedSignal?.aborted).toBe(true);
   });
+
+  it('serializes fallback_trace when the orchestrator reports agent fallback', async () => {
+    deps.agentOrchestrator.execute = vi.fn().mockResolvedValue({
+      answer: 'fallback answer',
+      steps: [],
+      totalDurationMs: 4,
+      totalTokens: { input: 2, output: 1 },
+      toolCallCount: 1,
+      fallbackApplied: true,
+      fallbackTrace: {
+        fallbackApplied: 'layer2',
+        reasoningFailure: false,
+        failedSynthesisAttempts: 0,
+        fallbackSearchUsed: true,
+      },
+      terminationReason: 'fallback',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/agent',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: 'fallback trace check',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.meta.fallback_applied).toBe(true);
+    expect(body.meta.fallback_trace).toEqual({
+      fallbackApplied: 'layer2',
+      reasoningFailure: false,
+      failedSynthesisAttempts: 0,
+      fallbackSearchUsed: true,
+    });
+  });
 });

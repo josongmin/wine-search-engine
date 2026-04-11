@@ -403,7 +403,7 @@ describe('BenchmarkCaseSchema — prefix-suite cross-validation', () => {
 // ---------------------------------------------------------------------------
 
 describe('FixtureLoader — path traversal prevention', () => {
-  const FIXTURE_ROOT = resolve(__dirname, '../../../../../../wine-engine-fixture');
+  const FIXTURE_ROOT = resolve(process.cwd(), '../wine-engine-fixture');
   const loader = new FixtureLoader(FIXTURE_ROOT);
 
   it('isAvailable() returns true when repo exists', () => {
@@ -492,7 +492,7 @@ describe('FixtureLoader — loadCase with unknown prefix', () => {
 
 describe('FixtureLoader — filtering helpers with actual fixture repo', () => {
   const FIXTURE_ROOT = process.env['FIXTURE_REPO_PATH']
-    ?? resolve(__dirname, '../../../../../../wine-engine-fixture');
+    ?? resolve(process.cwd(), '../wine-engine-fixture');
   const loader = new FixtureLoader(FIXTURE_ROOT);
 
   beforeAll(() => {
@@ -566,7 +566,7 @@ describe('FixtureLoader — filtering helpers with actual fixture repo', () => {
 
 describe('FixtureLoader — suite loading with actual fixture repo', () => {
   const FIXTURE_ROOT = process.env['FIXTURE_REPO_PATH']
-    ?? resolve(__dirname, '../../../../../../wine-engine-fixture');
+    ?? resolve(process.cwd(), '../wine-engine-fixture');
   const loader = new FixtureLoader(FIXTURE_ROOT);
 
   beforeAll(() => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  DeterminismViolationError,
   MissingSnapshotError,
   ReplayUseCase,
   SnapshotMismatchError,
@@ -34,6 +35,7 @@ const STUB_RESPONSE: SearchResponseV1 = {
     route: 'entity',
     version: '1',
     engine_schema_version: 'search_response_v1',
+    determinism_fingerprint: 'abc123def4567890',
   },
 };
 
@@ -151,6 +153,28 @@ describe('ReplayUseCase', () => {
         'reranker_timeout',
         'heuristic_drinking_window',
       ]);
+    });
+
+    it('validates expected_determinism_fingerprint when provided', async () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCase(inner);
+
+      const result = await useCase.execute({
+        ...makeRequest(),
+        expected_determinism_fingerprint: 'abc123def4567890',
+      }, 'req-fp-ok');
+
+      expect(result.meta.determinism_fingerprint).toBe('abc123def4567890');
+    });
+
+    it('throws DETERMINISM_VIOLATION when expected_determinism_fingerprint differs', async () => {
+      const inner = makeSearchUseCase();
+      const useCase = makeReplayUseCase(inner);
+
+      await expect(useCase.execute({
+        ...makeRequest(),
+        expected_determinism_fingerprint: 'ffffffffffffffff',
+      }, 'req-fp-bad')).rejects.toBeInstanceOf(DeterminismViolationError);
     });
   });
 

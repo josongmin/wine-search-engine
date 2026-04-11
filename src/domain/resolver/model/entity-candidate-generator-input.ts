@@ -21,7 +21,7 @@ import type { RetrievalDocument } from '../../retrieval/model/retrieval-document
  *
  * Design invariants:
  *   - No parallel truth structures. This type is the single entry point that
- *     `buildResolverCandidatesFromPlan()` consumes. It does NOT replace
+ *     `buildResolverCandidatesFromGenerator()` consumes. It does NOT replace
  *     QueryPlanV2/CandidateProvenance/componentScores.
  *   - `preloadedDocs` is an optional hot-cache from an upstream prefetch so
  *     generators don't each trigger their own N+1 document fetches.

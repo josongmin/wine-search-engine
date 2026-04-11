@@ -9,6 +9,7 @@ import type { SearchRequest } from '../../../../src/application/search/search-re
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker.port.js';
 import { AbstainPolicy } from '../../../../src/domain/query/service/abstain-policy.js';
+import { buildDeterminismFingerprint } from '../../../../src/domain/shared/utils/determinism-fingerprint.js';
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -753,6 +754,55 @@ describe('runSearchPostRoutePhase', () => {
     expect(decisionEngine.decide).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps determinism fingerprint stable when only query text changes', async () => {
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+    const decisionEngine = makeDecisionEngine();
+    const snapshotVersions = {
+      modelVersions: { query_understanding: 'model-a' },
+      indexVersions: { retrieval: 'index-a' },
+      featureFlags: {},
+    };
+
+    await runRankedRouteDecisionPhase({
+      plan: { ...minimalPlan(), rawQuery: '오퍼스원', normalizedQuery: 'opus one' },
+      requestId: 'req-fingerprint-a',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      snapshotVersions,
+      decisionEngine: decisionEngine as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    await runRankedRouteDecisionPhase({
+      plan: { ...minimalPlan(), rawQuery: '샤또 마고', normalizedQuery: 'chateau margaux' },
+      requestId: 'req-fingerprint-b',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      snapshotVersions,
+      decisionEngine: decisionEngine as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    const firstParams = responseBuilder.build.mock.calls[0]?.[0] as {
+      determinismFingerprintParams?: Parameters<typeof buildDeterminismFingerprint>[0];
+    };
+    const secondParams = responseBuilder.build.mock.calls[1]?.[0] as {
+      determinismFingerprintParams?: Parameters<typeof buildDeterminismFingerprint>[0];
+    };
+
+    expect(firstParams.determinismFingerprintParams).toBeDefined();
+    expect(secondParams.determinismFingerprintParams).toBeDefined();
+    expect(buildDeterminismFingerprint(firstParams.determinismFingerprintParams!)).toBe(
+      buildDeterminismFingerprint(secondParams.determinismFingerprintParams!),
+    );
+  });
+
   it('wires scoreDriftRecord into auditExtension ranking traces', async () => {
     const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
     const scoreDriftRecord = {
@@ -812,6 +862,141 @@ describe('runSearchPostRoutePhase', () => {
       gateDecision: 'applied',
       scoreContract: 'bounded_normalized_0_1',
     });
+  });
+
+  it('derives rerank_decision_trace gateDecision from the shared typed rerank decision', async () => {
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+    const rankingMetadata: RankingMetadata = {
+      coarsePruneSummary: undefined,
+      rerankExecuted: false,
+      rerankGateReason: 'forced',
+      runtimeSignal: undefined,
+      preRerankTop5: [],
+      rerankDecision: {
+        applied: false,
+        decision: 'no_model_for_query_class',
+      },
+    };
+
+    await runRankedRouteDecisionPhase({
+      plan: minimalPlan(),
+      compiled: {
+        execution: {
+          effectiveRetrievalMode: 'semantic_hybrid',
+        },
+        query: {
+          retrievalPlan: {
+            mode: 'semantic_hybrid',
+            sensoryPriors: [],
+          },
+        },
+        plannerTrace: [
+          {
+            stage: 'route_resolution',
+            inputFacts: { explain: true },
+            rulesEvaluated: [],
+            rejectedBranches: [],
+            decision: 'emit_trace',
+            confidence: 1,
+          },
+        ],
+      } as never,
+      requestId: 'req-rerank-trace',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      rankingMetadata,
+      decisionEngine: makeDecisionEngine() as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    const buildParams = responseBuilder.build.mock.calls[0]?.[0] as { auditExtension?: Record<string, unknown> };
+    const auditExtension = buildParams.auditExtension as {
+      rerank_decision_trace?: { gateDecision: string; scoreContract?: string };
+    } | undefined;
+
+    expect(auditExtension?.rerank_decision_trace).toEqual({
+      gateDecision: 'no_model_for_query_class',
+    });
+  });
+
+  it('wires constraint_resolution_trace when explain/planner trace is enabled', async () => {
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+
+    await runRankedRouteDecisionPhase({
+      plan: {
+        ...minimalPlan(),
+        constraints: {
+          hard: [
+            {
+              attribute: 'region',
+              operator: '=',
+              value: 'Bordeaux',
+              confidence: 1,
+              sourceText: '보르도',
+              source_tier: 'hard',
+              authority_level: 100,
+            },
+            {
+              attribute: 'region',
+              operator: '=',
+              value: 'Burgundy',
+              confidence: 1,
+              sourceText: '부르고뉴',
+              source_tier: 'hard',
+              authority_level: 50,
+            },
+          ],
+          soft: [],
+          inferred: [],
+        },
+      },
+      compiled: {
+        execution: {
+          effectiveRetrievalMode: 'semantic_hybrid',
+        },
+        query: {
+          retrievalPlan: {
+            mode: 'semantic_hybrid',
+            sensoryPriors: [],
+          },
+        },
+        plannerTrace: [
+          {
+            stage: 'constraint_resolution',
+            inputFacts: { rawConstraintCount: 2 },
+            rulesEvaluated: [],
+            rejectedBranches: [],
+            decision: 'emit_trace',
+            confidence: 1,
+          },
+        ],
+      } as never,
+      requestId: 'req-constraint-trace',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      decisionEngine: makeDecisionEngine() as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    const buildParams = responseBuilder.build.mock.calls[0]?.[0] as { auditExtension?: Record<string, unknown> };
+    const auditExtension = buildParams.auditExtension as {
+      constraint_resolution_trace?: {
+        atoms: Array<{ attribute: string }>;
+        relations: Array<{ type: string }>;
+        policy_outcomes: Array<{ outcome: string }>;
+      };
+    } | undefined;
+
+    expect(auditExtension?.constraint_resolution_trace?.atoms).toHaveLength(2);
+    expect(auditExtension?.constraint_resolution_trace?.relations[0]?.type).toBe('contradiction');
+    expect(auditExtension?.constraint_resolution_trace?.policy_outcomes.map((outcome) => outcome.outcome)).toContain('dropped');
+    expect(auditExtension?.constraint_resolution_trace?.policy_outcomes.map((outcome) => outcome.outcome)).toContain('kept');
   });
 
   it('wires structured clarify payload and runtime degradation into the entropy-abstain path', async () => {

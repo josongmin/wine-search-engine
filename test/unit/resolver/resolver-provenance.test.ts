@@ -79,7 +79,27 @@ describe('Resolver provenance', () => {
         anchorConfidence: 0.95,
         constraintConfidence: 0.95,
       },
-      candidateEntities: [],
+      candidateEntities: [
+        {
+          entityId: createEntityId('entity-opus-one-2018'),
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasMatches: [
+            {
+              aliasValue: 'Opus One 18',
+              aliasType: 'translation',
+              matchScore: 0.92,
+            },
+          ],
+          sourceSignals: {
+            ...ZERO_SIGNALS,
+            canonicalNormalizedMatch: 0.92,
+            aliasExactMatch: 0.92,
+            aliasTypePrior: 0.92,
+          },
+          source: 'alias',
+        },
+      ],
     };
 
     const result = await resolver.resolve(input);
@@ -103,6 +123,129 @@ describe('Resolver provenance', () => {
         }),
       ]),
     );
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toEqual([
+      {
+        source: 'alias',
+        entityIds: ['entity-opus-one-2018'],
+        count: 1,
+      },
+    ]);
+    expect(result.candidates[0]?.source).toBe('alias');
+  });
+
+  it('surfaces Korean transliteration provenance and source breakdown in the same trace', async () => {
+    const koreanBlockingPort: BlockingPort = {
+      async block() {
+        return [
+          createEntityId('entity-chateau-margaux'),
+          createEntityId('entity-chateau-margaux-2'),
+        ];
+      },
+    };
+    const resolver = new Resolver(
+      new Blocker(koreanBlockingPort),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator(calibrationStore),
+    );
+
+    const queryViews = new QueryNormalizer().normalize('샤또마고');
+    const input: ResolverInput = {
+      rawQuery: '샤또마고',
+      normalizedQuery: queryViews.accentless,
+      normalizedQueryViews: queryViews,
+      queryClass: 'short_entity',
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'fail',
+        policyReasonCodes: [],
+      },
+      anchorCandidates: [
+        {
+          surfaceForm: '샤또마고',
+          normalizedForm: queryViews.accentless,
+          candidateEntityIds: [createEntityId('entity-chateau-margaux')],
+          lookupStrategies: ['transliterated_exact'],
+          confidence: 0.96,
+          source: 'alias',
+        },
+      ],
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.95,
+        anchorConfidence: 0.96,
+        constraintConfidence: 0.95,
+      },
+      candidateEntities: [
+        {
+          entityId: createEntityId('entity-chateau-margaux'),
+          entityType: 'wine',
+          canonicalLabel: 'Chateau Margaux',
+          aliasMatches: [
+            {
+              aliasValue: '샤또마고',
+              aliasType: 'translation',
+              matchScore: 0.96,
+            },
+          ],
+          sourceSignals: {
+            ...ZERO_SIGNALS,
+            canonicalNormalizedMatch: 0.96,
+            aliasExactMatch: 0.96,
+            aliasTypePrior: 0.96,
+          },
+          source: 'alias',
+        },
+        {
+          entityId: createEntityId('entity-chateau-margaux-2'),
+          entityType: 'wine',
+          canonicalLabel: 'Chateau Margaux',
+          aliasMatches: [
+            {
+              aliasValue: '샤또마고',
+              aliasType: 'translation',
+              matchScore: 0.9,
+            },
+          ],
+          sourceSignals: {
+            ...ZERO_SIGNALS,
+            canonicalNormalizedMatch: 0.9,
+            aliasExactMatch: 0.9,
+            aliasTypePrior: 0.9,
+          },
+          source: 'alias',
+        },
+      ],
+    };
+
+    const result = await resolver.resolve(input);
+
+    expect(result.decisionTrace.queryProvenance?.normalizedQueryViews?.transliterated).toBe(
+      'chateau margaux',
+    );
+    expect(result.decisionTrace.queryProvenance?.lookupStrategyAdjustments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityId: 'entity-chateau-margaux',
+          strategies: ['transliterated_exact'],
+          rawScoreDelta: 0.05,
+        }),
+      ]),
+    );
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toEqual([
+      {
+        source: 'alias',
+        entityIds: ['entity-chateau-margaux', 'entity-chateau-margaux-2'],
+        count: 2,
+      },
+    ]);
+    expect(result.candidates[0]?.source).toBe('alias');
   });
 
   it('surfaces blocker-seed provenance for candidates that entered scoring via blocker hydration', async () => {
@@ -152,9 +295,194 @@ describe('Resolver provenance', () => {
     const result = await resolver.resolve(input);
 
     expect(result.candidates[0]?.blockerSeed).toBe(true);
+    expect(result.candidates[0]?.source).toBe('blocker_seed');
+    expect(result.candidates[0]?.sources).toEqual(['blocker_seed']);
     expect(result.decisionTrace.queryProvenance?.blockerSeedEntityIds).toEqual([
       'entity-opus-one-2018',
     ]);
     expect(result.decisionTrace.queryProvenance?.blockerSeedCount).toBe(1);
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toEqual([
+      {
+        source: 'blocker_seed',
+        entityIds: ['entity-opus-one-2018'],
+        count: 1,
+      },
+    ]);
+  });
+
+  it('surfaces planner_heuristic provenance for fuzzy entity candidates', async () => {
+    const resolver = new Resolver(
+      new Blocker(blockingPort),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator(calibrationStore),
+    );
+
+    const input: ResolverInput = {
+      rawQuery: '오퍼스 원 18',
+      normalizedQuery: 'opus one 18',
+      queryClass: 'short_entity',
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'fail',
+        policyReasonCodes: [],
+      },
+      anchorCandidates: [],
+      uncertainty: {
+        overall: 0.2,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.8,
+        anchorConfidence: 0.2,
+        constraintConfidence: 0.9,
+      },
+      candidateEntities: [
+        {
+          entityId: createEntityId('entity-opus-one-2018'),
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasMatches: [
+            {
+              aliasValue: 'opus one',
+              aliasType: 'misspelling',
+              matchScore: 0.71,
+            },
+          ],
+          sourceSignals: {
+            ...ZERO_SIGNALS,
+            canonicalNormalizedMatch: 0.71,
+            aliasFuzzyMatch: 0.71,
+            aliasTypePrior: 0.71,
+            editDistanceScore: 0.568,
+          },
+          source: 'planner_heuristic',
+        },
+      ],
+    };
+
+    const result = await resolver.resolve(input);
+
+    expect(result.candidates[0]?.source).toBe('planner_heuristic');
+    expect(result.candidates[0]?.sources).toEqual(['planner_heuristic']);
+    expect(result.candidates[0]?.blockerSeed).toBeUndefined();
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toEqual([
+      {
+        source: 'planner_heuristic',
+        entityIds: ['entity-opus-one-2018'],
+        count: 1,
+      },
+    ]);
+  });
+
+  it('preserves mixed-source candidates without collapsing them to alias', async () => {
+    const resolver = new Resolver(
+      new Blocker(blockingPort),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator(calibrationStore),
+    );
+
+    const input: ResolverInput = {
+      rawQuery: '오퍼스원 2018',
+      normalizedQuery: 'opus one 2018',
+      queryClass: 'short_entity',
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'fail',
+        policyReasonCodes: [],
+      },
+      anchorCandidates: [],
+      uncertainty: {
+        overall: 0.2,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.8,
+        anchorConfidence: 0.2,
+        constraintConfidence: 0.9,
+      },
+      candidateEntities: [
+        {
+          entityId: createEntityId('entity-opus-one-2018'),
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasMatches: [],
+          sourceSignals: ZERO_SIGNALS,
+          sources: ['alias', 'planner_heuristic'],
+        },
+      ],
+    };
+
+    const result = await resolver.resolve(input);
+
+    expect(result.candidates[0]?.source).toBeUndefined();
+    expect(result.candidates[0]?.sources).toEqual(['alias', 'planner_heuristic']);
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toEqual([
+      {
+        source: 'alias',
+        entityIds: ['entity-opus-one-2018'],
+        count: 1,
+      },
+      {
+        source: 'planner_heuristic',
+        entityIds: ['entity-opus-one-2018'],
+        count: 1,
+      },
+    ]);
+  });
+
+  it('does not coerce missing provenance into alias in source breakdown', async () => {
+    const resolver = new Resolver(
+      new Blocker(blockingPort),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator(calibrationStore),
+    );
+
+    const input: ResolverInput = {
+      rawQuery: '오퍼스원 2018',
+      normalizedQuery: 'opus one 2018',
+      queryClass: 'short_entity',
+      policy: {
+        requireExact: false,
+        allowApproximate: true,
+        requireClarification: false,
+        fallbackMode: 'fail',
+        policyReasonCodes: [],
+      },
+      anchorCandidates: [],
+      uncertainty: {
+        overall: 0.2,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.8,
+        anchorConfidence: 0.2,
+        constraintConfidence: 0.9,
+      },
+      candidateEntities: [
+        {
+          entityId: createEntityId('entity-opus-one-2018'),
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+          aliasMatches: [],
+          sourceSignals: ZERO_SIGNALS,
+        },
+      ],
+    };
+
+    const result = await resolver.resolve(input);
+
+    expect(result.candidates[0]?.source).toBeUndefined();
+    expect(result.candidates[0]?.sources).toBeUndefined();
+    expect(result.decisionTrace.queryProvenance?.candidateSourceBreakdown).toBeUndefined();
   });
 });

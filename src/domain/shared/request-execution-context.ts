@@ -7,6 +7,11 @@ import type { StageTimer } from '../../observability/stage-timer.js';
 export interface RequestExecutionContext {
   readonly abortSignal?: AbortSignal | undefined;
   /**
+   * True when the HTTP request passed X-Debug-Key validation.
+   * Planner/audit trace gates may use this to enable debug-only observability.
+   */
+  readonly debugRequest?: boolean | undefined;
+  /**
    * Per-request stage latency tracker. Domain code may call
    * `stageTimer?.start(name)` / `stageTimer?.end(name)` around hot stages
    * (retrieval channels, fusion, ranking, second-phase) so the route

@@ -205,10 +205,38 @@ describe('AgentOrchestrator', () => {
       expect(result.fallbackApplied).toBe(true);
       expect(result.terminationReason).toBe('fallback');
       expect(result.answer).toContain('Opus One 2018');
+      expect(result.fallbackTrace).toEqual({
+        fallbackApplied: 'layer2',
+        reasoningFailure: true,
+        failedSynthesisAttempts: 0,
+        fallbackSearchUsed: true,
+      });
       expect(vi.mocked(toolDeps.searchUseCase.execute)).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('marks malformed step-result fallback as reasoningFailure in fallbackTrace', async () => {
+    const chatLlm: ChatLlmPort = {
+      complete: vi.fn().mockResolvedValue(undefined as unknown as { text: string; model: string; finishReason: string }),
+    };
+    const toolDeps: AgentToolDeps = {
+      searchUseCase: {
+        execute: vi.fn().mockResolvedValue(makeSearchResponse()),
+      } as never,
+    };
+
+    const orchestrator = new AgentOrchestrator({ chatLlm, toolDeps }, { maxSteps: 1, perStepTimeoutMs: 100 });
+    const result = await orchestrator.execute('opus one', 'req-malformed-step-trace');
+
+    expect(result.fallbackApplied).toBe(true);
+    expect(result.fallbackTrace).toEqual({
+      fallbackApplied: 'layer2',
+      reasoningFailure: true,
+      failedSynthesisAttempts: 0,
+      fallbackSearchUsed: true,
+    });
   });
 
   it('caps oversized parallel batch and records bounded error observations', async () => {

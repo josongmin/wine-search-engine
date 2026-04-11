@@ -8,6 +8,7 @@ import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.j
 import type { EntityResolveResult } from '../model/resolve-result.js';
 import type { ResolvedCandidate, ResolverCandidate } from '../model/resolved-candidate.js';
 import type { ResolverDecisionTrace } from '../model/decision-trace.js';
+import type { EntityCandidateSource } from '../model/entity-candidate-generator-input.js';
 import type { CalibratedResolutionScore } from '../model/calibrated-score.js';
 import type { AmbiguityState } from '../model/ambiguity-state.js';
 import type { Blocker } from './blocker.js';
@@ -492,14 +493,19 @@ export class Resolver {
         calibratedScore = Math.max(0, calibrated.top1CalibratedScore * ratio);
       }
 
+      const candidateSources = this.collectCandidateSources(entry.candidate);
       return {
         entityId: entry.candidate.entityId,
         canonicalLabel: entry.candidate.canonicalLabel,
         calibratedScore,
         rank: index + 1,
         evidenceRefs: entry.candidate.aliasMatches.map((m) => m.aliasValue),
+        ...(candidateSources.length === 1 ? { source: candidateSources[0] } : {}),
+        ...(candidateSources.length > 0 ? { sources: candidateSources } : {}),
         // TA2-4: Propagate blocker seed provenance so callers can tag traces.
-        ...(entry.candidate.source === 'blocker_seed' ? { blockerSeed: true as const } : {}),
+        ...(candidateSources.includes('blocker_seed')
+          ? { blockerSeed: true as const }
+          : {}),
       };
     });
   }
@@ -606,12 +612,14 @@ export class Resolver {
     const anchorLookupVariants = this.collectAnchorLookupVariants(input.anchorCandidates);
     const anchorLookupStrategies = this.collectAnchorLookupStrategies(input.anchorCandidates);
     const blockerSeedEntityIds = this.collectBlockerSeedEntityIds(candidates);
+    const candidateSourceBreakdown = this.collectCandidateSourceBreakdown(candidates);
     const queryProvenance =
       input.normalizedQueryViews !== undefined ||
       anchorLookupVariants.length > 0 ||
       anchorLookupStrategies.length > 0 ||
       lookupStrategyAdjustments.length > 0 ||
-      blockerSeedEntityIds.length > 0
+      blockerSeedEntityIds.length > 0 ||
+      candidateSourceBreakdown.length > 0
         ? {
             ...(input.normalizedQueryViews !== undefined
               ? { normalizedQueryViews: input.normalizedQueryViews }
@@ -630,6 +638,9 @@ export class Resolver {
                   blockerSeedEntityIds,
                   blockerSeedCount: blockerSeedEntityIds.length,
                 }
+              : {}),
+            ...(candidateSourceBreakdown.length > 0
+              ? { candidateSourceBreakdown }
               : {}),
           }
         : undefined;
@@ -696,12 +707,60 @@ export class Resolver {
   ): readonly string[] {
     const blockerSeedEntityIds = new Set<string>();
     for (const candidate of candidates) {
-      if (candidate.source === 'blocker_seed') {
+      if (this.collectCandidateSources(candidate).includes('blocker_seed')) {
         blockerSeedEntityIds.add(String(candidate.entityId));
       }
     }
 
     return [...blockerSeedEntityIds].sort();
+  }
+
+  private collectCandidateSourceBreakdown(
+    candidates: readonly ResolverCandidate[],
+  ): readonly {
+    readonly source: EntityCandidateSource;
+    readonly entityIds: readonly string[];
+    readonly count: number;
+  }[] {
+    const bySource = new Map<EntityCandidateSource, Set<string>>();
+    for (const candidate of candidates) {
+      for (const source of this.collectCandidateSources(candidate)) {
+        const entityIds = bySource.get(source) ?? new Set<string>();
+        entityIds.add(String(candidate.entityId));
+        bySource.set(source, entityIds);
+      }
+    }
+
+    const sourceOrder: readonly EntityCandidateSource[] = [
+      'alias',
+      'planner_heuristic',
+      'entity_lookup',
+      'blocker_seed',
+    ];
+
+    return sourceOrder
+      .filter((source) => bySource.has(source))
+      .map((source) => {
+        const entityIds = [...(bySource.get(source) ?? new Set<string>())].sort();
+        return {
+          source,
+          entityIds,
+          count: entityIds.length,
+        };
+      });
+  }
+
+  private collectCandidateSources(
+    candidate: Pick<ResolverCandidate, 'source' | 'sources'>,
+  ): readonly EntityCandidateSource[] {
+    const combined = new Set<EntityCandidateSource>();
+    for (const source of candidate.sources ?? []) {
+      combined.add(source);
+    }
+    if (candidate.source !== undefined) {
+      combined.add(candidate.source);
+    }
+    return [...combined].sort();
   }
 
   private collectLookupStrategyAdjustments(

@@ -84,6 +84,20 @@ export class AbstainPolicy {
    *  2. `semantic_conflict`    — soft_tension or contradiction in constraintRelations
    *  3. `insufficient_evidence`— dense + anchor both degraded
    *  4. `low_confidence`       — entropy gate fires (requires ltrAvailable)
+   *
+   * ClarifyPayload split responsibility (intentional design):
+   *  - `budget_gap`            — built HERE (no_match + price + quality constraints)
+   *  - `preference_gap`        — built HERE (low_confidence + any constraints)
+   *  - `constraint_conflict`   — built in search-usecase-execute-builders.ts
+   *                              (semantic_conflict path; requires top-K labels from ranked results)
+   *  - `anchor_disambiguation` — built in search-usecase-execute-builders.ts
+   *                              (low_confidence path; requires anchor surface forms from resolver)
+   *
+   * The constraint_conflict and anchor_disambiguation kinds require application-layer
+   * data (ranked result labels, resolver anchor info) not available at domain-policy
+   * evaluation time. They are therefore delegated to the execute-builders layer which
+   * has access to the full pipeline context. AbstainPolicy only builds payloads from
+   * data it directly receives (atoms, relations, scores).
    */
   evaluate(
     topKScores: readonly number[],

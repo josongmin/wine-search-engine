@@ -50,6 +50,16 @@ function makeCandidate(id: string): HybridCandidate {
   } as unknown as HybridCandidate;
 }
 
+function makeCandidateWithOverrides(
+  id: string,
+  overrides: Partial<HybridCandidate> = {},
+): HybridCandidate {
+  return {
+    ...makeCandidate(id),
+    ...overrides,
+  } as HybridCandidate;
+}
+
 function makeCandidates(count: number, prefix = 'wine'): HybridCandidate[] {
   return Array.from({ length: count }, (_, i) => makeCandidate(`${prefix}-${i}`));
 }
@@ -337,6 +347,112 @@ describe('Ranker', () => {
         Array.from({ length: expectedScores.length }, (_, index) => index + 1),
       );
     });
+
+    it('tie results are stable across insertion order when all tie-break inputs match', async () => {
+      const ranker = makeRanker(makeScoreAggregator(0.5));
+      const candidatesA = [makeCandidate('wine-c'), makeCandidate('wine-a'), makeCandidate('wine-b')];
+      const candidatesB = [makeCandidate('wine-b'), makeCandidate('wine-c'), makeCandidate('wine-a')];
+
+      const { results: resultsA } = await ranker.rank(makeInput(candidatesA));
+      const { results: resultsB } = await ranker.rank(makeInput(candidatesB));
+
+      const expectedOrder = ['wine-a', 'wine-b', 'wine-c'];
+      expect(resultsA.map((result) => String(result.entityId))).toEqual(expectedOrder);
+      expect(resultsB.map((result) => String(result.entityId))).toEqual(expectedOrder);
+    });
+
+    it('prefers exact-known-item evidence over generic candidates when finalScore ties', async () => {
+      const exact = makeCandidateWithOverrides('wine-exact', {
+        retrievalProvenance: {
+          channels: ['anchor_similarity'],
+          channelScores: [],
+          queryViewMatches: [{ viewName: 'strict', matchedText: 'opus one', channel: 'anchor_similarity' }],
+          anchorConditioned: true,
+          matchedFilterConstraints: [],
+          protectedInclusionReason: 'exact_alias_match',
+          fusionProfile: 'test',
+          fusionScore: 0.1,
+        },
+        anchorRank: 2,
+      });
+      const generic = makeCandidateWithOverrides('wine-generic', {
+        retrievalProvenance: {
+          channels: ['dense_semantic'],
+          channelScores: [],
+          queryViewMatches: [],
+          anchorConditioned: false,
+          matchedFilterConstraints: [],
+          fusionProfile: 'test',
+          fusionScore: 0.1,
+        },
+        denseRank: 1,
+      });
+      const ranker = makeRanker(makeScoreAggregator(0.5));
+
+      const { results } = await ranker.rank(makeInput([generic, exact]));
+
+      expect(results.map((result) => String(result.entityId))).toEqual([
+        'wine-exact',
+        'wine-generic',
+      ]);
+    });
+
+    it('orders lexical tiers as strict/compact > transliterated/phonetic_compact > vintage > none', async () => {
+      const strict = makeCandidateWithOverrides('wine-strict', {
+        retrievalProvenance: {
+          channels: ['sparse_bm25'],
+          channelScores: [],
+          queryViewMatches: [{ viewName: 'compact', matchedText: 'opusone18', channel: 'sparse_bm25' }],
+          anchorConditioned: false,
+          matchedFilterConstraints: [],
+          fusionProfile: 'test',
+          fusionScore: 0.1,
+        },
+      });
+      const transliterated = makeCandidateWithOverrides('wine-translit', {
+        retrievalProvenance: {
+          channels: ['sparse_bm25'],
+          channelScores: [],
+          queryViewMatches: [{ viewName: 'transliterated', matchedText: 'opus one', channel: 'sparse_bm25' }],
+          anchorConditioned: false,
+          matchedFilterConstraints: [],
+          fusionProfile: 'test',
+          fusionScore: 0.1,
+        },
+      });
+      const vintage = makeCandidateWithOverrides('wine-vintage', {
+        retrievalProvenance: {
+          channels: ['sparse_bm25'],
+          channelScores: [],
+          queryViewMatches: [{ viewName: 'vintage_stripped', matchedText: 'opus one', channel: 'sparse_bm25' }],
+          anchorConditioned: false,
+          matchedFilterConstraints: [],
+          fusionProfile: 'test',
+          fusionScore: 0.1,
+        },
+      });
+      const none = makeCandidateWithOverrides('wine-none', {
+        retrievalProvenance: {
+          channels: ['dense_semantic'],
+          channelScores: [],
+          queryViewMatches: [],
+          anchorConditioned: false,
+          matchedFilterConstraints: [],
+          fusionProfile: 'test',
+          fusionScore: 0.1,
+        },
+      });
+      const ranker = makeRanker(makeScoreAggregator(0.5));
+
+      const { results } = await ranker.rank(makeInput([none, vintage, transliterated, strict]));
+
+      expect(results.map((result) => String(result.entityId))).toEqual([
+        'wine-strict',
+        'wine-translit',
+        'wine-vintage',
+        'wine-none',
+      ]);
+    });
   });
 
   describe('constraint evidence propagation', () => {
@@ -623,6 +739,71 @@ describe('Ranker', () => {
       // LTR rerank must have executed.
       expect(metadata.rerankExecuted).toBe(true);
       expect(results).toHaveLength(3);
+    });
+
+    it('no_model_for_query_class is reported when no LTR model is registered', async () => {
+      const candidates = makeCandidates(1, 'wine-no-model');
+      const ltrModels = new Map([
+        ['comparison_query', makeUniformSemanticPreferenceLtrModel()],
+      ]);
+      const ranker = makeRanker(makeScoreAggregator(0.5), { ltrModels });
+
+      const { metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(metadata.rerankExecuted).toBe(false);
+      expect(metadata.rerankGateReason).toBe('forced');
+      expect(metadata.rerankDecision).toMatchObject({
+        applied: false,
+        decision: 'no_model_for_query_class',
+      });
+    });
+
+    it('empty_candidates path is exercised when forced LTR receives no viable candidates', async () => {
+      const ltrModels = new Map([['semantic_preference', makeUniformSemanticPreferenceLtrModel()]]);
+      const ranker = makeRanker(makeScoreAggregator(0.5), { ltrModels });
+
+      const { results, metadata } = await ranker.rank(makeInput([], true));
+
+      // applyLearnedLtrRerank returns empty_candidates here; the public metadata
+      // surface records the empty-candidate skip directly with zero counts.
+      expect(results).toEqual([]);
+      expect(metadata.rerankExecuted).toBe(false);
+      expect(metadata.rerankGateReason).toBe('forced');
+      expect(metadata.rerankDecision).toMatchObject({
+        applied: false,
+        decision: 'empty_candidates',
+        inputCount: 0,
+        outputCount: 0,
+      });
+      expect(metadata.scoreDriftRecord).toBeUndefined();
+    });
+
+    it('feature_dimension_mismatch degrades runtime signal when LTR weights are malformed', async () => {
+      const candidates = makeCandidates(6, 'wine-dim');
+      const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
+      const ltrModels = new Map([
+        [
+          'semantic_preference',
+          makeLtrModel([1, 1, 1, 1, 1, 1, 1]),
+        ],
+      ]);
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { ltrModels });
+
+      const { metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(metadata.rerankExecuted).toBe(false);
+      expect(metadata.rerankGateReason).toBe('forced');
+      expect(metadata.rerankDecision).toMatchObject({
+        applied: false,
+        decision: 'feature_dimension_mismatch',
+      });
+      expect(metadata.runtimeSignal).toEqual({
+        rerankerStatus: 'skipped',
+        degradation: {
+          executionMode: 'degraded',
+          degradationReasons: ['ltr_dimension_mismatch'],
+        },
+      });
     });
   });
 

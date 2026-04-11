@@ -252,6 +252,7 @@ export function buildEntropyAbstainResponseParams(options: {
     queryPlan: plan,
     ...(compiled !== undefined ? { compiled } : {}),
     decisionOutput,
+    abstainReason: abstainDecision.reason,
     results,
     clarification: {
       reason: `Query is ambiguous (entropy=${

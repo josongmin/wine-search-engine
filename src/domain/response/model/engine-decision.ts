@@ -1,5 +1,6 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import type { FailureReason } from '../../decision/model/failure-reason.js';
+import type { AbstainReason } from '../../query/model/abstain-decision.js';
 
 /**
  * The external-facing decision record included in every {@link SearchResponseV1}.
@@ -63,10 +64,12 @@ export interface EngineDecision {
 
   /**
    * Reason for abstention when decisionStatus is 'ambiguous' but not due to
-   * hard constraint violation (Epic 9). Omitted if decision was not ambiguous
-   * or if ambiguity was hard-constraint-related.
+   * hard constraint violation (Epic 9).
+   *
+   * MUST be sourced from TypedAbstainDecision.reason. Never populate this from
+   * free-text trace strings such as decisionTrace.finalReason.
    */
-  readonly abstainReason?: string | undefined;
+  readonly abstainReason?: AbstainReason | undefined;
 
   /**
    * Indicates whether the retrieval mode was determined by the planner or

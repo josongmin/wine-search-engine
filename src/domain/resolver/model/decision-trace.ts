@@ -1,4 +1,5 @@
 import type { QueryLookupProvenance } from '../../query/model/query-lookup-provenance.js';
+import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
 
 /**
  * Query-side provenance attached to resolver traces for noisy lookup debugging.
@@ -21,6 +22,18 @@ export interface ResolverQueryProvenance extends QueryLookupProvenance {
 
   /** Number of blocker-seeded candidates that survived into scoring. */
   readonly blockerSeedCount?: number | undefined;
+
+  /**
+   * Generalized source breakdown for all candidates that survived into scoring.
+   *
+   * Preferred audit surface for exact-recovery provenance. The blocker-specific
+   * fields above are retained as derived compatibility fields.
+   */
+  readonly candidateSourceBreakdown?: readonly {
+    readonly source: EntityCandidateSource;
+    readonly entityIds: readonly string[];
+    readonly count: number;
+  }[] | undefined;
 }
 
 /**

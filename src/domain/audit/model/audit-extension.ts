@@ -22,6 +22,7 @@ import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
 import type { ConstraintRelation } from '../../query/service/constraint-reasoner.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../retrieval/model/candidate-envelope.js';
 import type { ScoreDriftRecord } from '../../ranking/model/score-decomposition.js';
+import type { RerankDecisionCode } from '../../ranking/port/ranker.port.js';
 import type { TypedAbstainDecision, ChannelDegradationSummary } from '../../query/model/abstain-decision.js';
 
 // ─── Supporting sub-types ─────────────────────────────────────────────────────
@@ -39,9 +40,9 @@ export interface PolicyOutcome {
 }
 
 /**
- * Rerank gate decision outcome — was LTR reranking applied?
+ * Audit-surface alias for the single rerank decision code owned by the ranking port.
  */
-export type RerankGateDecision = 'applied' | 'skipped_ltr_unavailable' | 'skipped_kill_switch' | 'skipped_safety_blocked';
+export type RerankGateDecision = RerankDecisionCode;
 
 // ─── AuditExtension ──────────────────────────────────────────────────────────
 
@@ -128,6 +129,20 @@ export interface AuditExtension {
    * Gated: populated whenever hard-filter drops occur, regardless of explain flag.
    */
   readonly hard_filter_drop_log?: readonly CandidateDropRecord[] | undefined;
+
+  /**
+   * Exact-recovery resolver provenance surfaced for noisy entity lookup audit.
+   * Present when resolver query provenance carries candidate source breakdown.
+   */
+  readonly resolver_provenance_trace?: {
+    readonly candidate_source_breakdown?: readonly {
+      readonly source: 'alias' | 'planner_heuristic' | 'entity_lookup' | 'blocker_seed';
+      readonly entity_ids: readonly string[];
+      readonly count: number;
+    }[] | undefined;
+    readonly blocker_seed_entity_ids?: readonly string[] | undefined;
+    readonly blocker_seed_count?: number | undefined;
+  } | undefined;
 
   /**
    * TA5: Calibrated posterior confidence from corrective retry (TA5).

@@ -13,6 +13,7 @@
 
 // Rule 30 SSoT: k=60 is defined once in rrf.ts; import, do not redefine.
 import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
+import type { QueryClass as DomainQueryClass } from '../../shared/types/query-class.js';
 
 /**
  * Tighter k for anchored/specific lookups — rank-1 hits should dominate
@@ -187,4 +188,34 @@ export const PER_CLASS_FUSION: ReadonlyMap<QueryClass, FusionConfig> = new Map<
 export function getFusionConfig(queryClass: QueryClass): FusionConfig {
   const found = PER_CLASS_FUSION.get(queryClass);
   return found ?? DEFAULT_FUSION_CONFIG;
+}
+
+/**
+ * Canonical mapping from domain query classes to fusion query classes.
+ *
+ * TRACK-A A4: runtimeMode 'entity_anchor_first' overrides to 'entity_exact'
+ * so anchor-dominant fusion config is used instead of specific_wine.
+ */
+export function mapDomainQueryClassToFusionQueryClass(
+  qc: DomainQueryClass,
+  runtimeMode?: string,
+): QueryClass {
+  if (runtimeMode === 'entity_anchor_first') {
+    return 'entity_exact';
+  }
+  switch (qc) {
+    case 'exact_entity':
+    case 'short_entity':
+    case 'ambiguous_short_form':
+    case 'anchored_similarity':
+      return 'specific_wine';
+    case 'pure_constraint':
+    case 'semantic_preference':
+      return 'browse';
+    case 'comparison_query':
+      return 'compare';
+    case 'unknown':
+    default:
+      return 'fallback';
+  }
 }

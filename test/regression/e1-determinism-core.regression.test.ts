@@ -4,12 +4,12 @@
  * Guards the determinism guarantees added in EPIC-1:
  *
  *  1. FusionService.fuse() tie-break — same fusionRrfTotal → entityId ascending
- *  2. Ranker 4-stage tie-break — score → channelMatchType → sparseRank → entityId
- *     (upgraded from 3-stage in E1-T3: channelMatchType inserted as stage 2)
+ *  2. Ranker 5-stage tie-break — score → evidenceQuality → lexicalExactness
+ *     → sparseRank → entityId
  *  3. LtrRerankSkipReason typed union — all skip paths produce a named reason
  *  4. buildDeterminismFingerprint() — same config → same fingerprint; different
  *     config → different fingerprint; key order does not affect output
- *  5. FusionService denseRank/anchorRank propagation — channelMatchType relies on
+ *  5. FusionService denseRank/anchorRank propagation — tie-break inputs rely on
  *     these fields being populated by FusionService.fuse()
  *
  * These tests are append-only (regression suite rules). Never delete.
@@ -87,6 +87,20 @@ describe('buildDeterminismFingerprint()', () => {
     expect(a).toBe(b);
   });
 
+  it('same config, different query → same fingerprint', () => {
+    const requestA = {
+      query: '오퍼스원',
+      ...fingerprintParams,
+    };
+    const requestB = {
+      query: '샤또 마고',
+      ...fingerprintParams,
+    };
+    const { query: _queryA, ...paramsA } = requestA;
+    const { query: _queryB, ...paramsB } = requestB;
+    expect(buildDeterminismFingerprint(paramsA)).toBe(buildDeterminismFingerprint(paramsB));
+  });
+
   it('different plannerVersion → different fingerprint', () => {
     const a = buildDeterminismFingerprint(fingerprintParams);
     const b = buildDeterminismFingerprint({ ...fingerprintParams, plannerVersion: 'v2.3.2' });
@@ -102,6 +116,30 @@ describe('buildDeterminismFingerprint()', () => {
   it('different fusionConfigHash → different fingerprint', () => {
     const a = buildDeterminismFingerprint(fingerprintParams);
     const b = buildDeterminismFingerprint({ ...fingerprintParams, fusionConfigHash: 'xyz789' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different modelVersionsHash → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, modelVersionsHash: 'models:v1' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, modelVersionsHash: 'models:v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different indexVersionsHash → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, indexVersionsHash: 'index:v1' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, indexVersionsHash: 'index:v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different retrievalPlanVersion → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, retrievalPlanVersion: 'retrieval-plan-v1.0' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, retrievalPlanVersion: 'retrieval-plan-v2.0' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different rankingPolicyVersion → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, rankingPolicyVersion: 'ranker-policy-v1.0' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, rankingPolicyVersion: 'ranker-policy-v2.0' });
     expect(a).not.toBe(b);
   });
 
@@ -183,6 +221,99 @@ describe('FusionService — denseRank/anchorRank propagation for channelMatchTyp
   });
 });
 
+// ─── FusionService input-order invariance (E1-T1/T2) ─────────────────────────
+//
+// RRF fusion MUST produce the same ranked output regardless of the order in
+// which sparse/dense hit lists are fed in. Each hit list is deduplicated by
+// entityId (best rank wins), so shuffling input order must not change the
+// final fused ranking.
+//
+// This is the strongest determinism claim: not just "same input → same output"
+// but "any permutation of the same hit set → same output".
+
+describe('FusionService.fuse() — input-order invariance (shuffle regression)', () => {
+  const fusion = new FusionService();
+
+  it('E1-SHUFFLE-01: sparse list reversal produces identical ranking', () => {
+    const sparse = [
+      makeSparseHit('wine-a', 1),
+      makeSparseHit('wine-b', 2),
+      makeSparseHit('wine-c', 3),
+    ];
+    const dense = [
+      makeDenseHit('wine-a', 2),
+      makeDenseHit('wine-c', 1),
+      makeDenseHit('wine-b', 3),
+    ];
+    const fwd = fusion.fuse(sparse, dense).map((c) => c.entityId);
+    const rev = fusion.fuse([...sparse].reverse(), dense).map((c) => c.entityId);
+    expect(rev).toEqual(fwd);
+  });
+
+  it('E1-SHUFFLE-02: dense list reversal produces identical ranking', () => {
+    const sparse = [makeSparseHit('wine-x', 1), makeSparseHit('wine-y', 2)];
+    const dense = [makeDenseHit('wine-y', 1), makeDenseHit('wine-x', 2)];
+    const fwd = fusion.fuse(sparse, dense).map((c) => c.entityId);
+    const rev = fusion.fuse(sparse, [...dense].reverse()).map((c) => c.entityId);
+    expect(rev).toEqual(fwd);
+  });
+
+  it('E1-SHUFFLE-03: both lists shuffled produce identical ranking', () => {
+    const sparse = [
+      makeSparseHit('wine-p', 1),
+      makeSparseHit('wine-q', 2),
+      makeSparseHit('wine-r', 3),
+      makeSparseHit('wine-s', 4),
+    ];
+    const dense = [
+      makeDenseHit('wine-r', 1),
+      makeDenseHit('wine-p', 2),
+      makeDenseHit('wine-s', 3),
+      makeDenseHit('wine-q', 4),
+    ];
+    const canonical = fusion.fuse(sparse, dense).map((c) => c.entityId);
+    // Shuffle both lists: reverse sparse, interleave dense
+    const shuffleSparse = [sparse[2]!, sparse[0]!, sparse[3]!, sparse[1]!];
+    const shuffleDense = [dense[1]!, dense[3]!, dense[0]!, dense[2]!];
+    const shuffled = fusion.fuse(shuffleSparse, shuffleDense).map((c) => c.entityId);
+    expect(shuffled).toEqual(canonical);
+  });
+
+  it('E1-SHUFFLE-04: duplicate entityId in same list uses best (lowest) rank regardless of input order', () => {
+    // wine-a appears at rank 1 AND rank 5 in sparse — best rank wins
+    const sparseWithDup = [
+      makeSparseHit('wine-a', 5), // worse rank first
+      makeSparseHit('wine-b', 2),
+      makeSparseHit('wine-a', 1), // better rank second
+    ];
+    const dense = [makeDenseHit('wine-b', 1), makeDenseHit('wine-a', 2)];
+
+    // Reversed order: better rank first
+    const sparseRevDup = [
+      makeSparseHit('wine-a', 1),
+      makeSparseHit('wine-b', 2),
+      makeSparseHit('wine-a', 5),
+    ];
+
+    const r1 = fusion.fuse(sparseWithDup, dense).map((c) => c.entityId);
+    const r2 = fusion.fuse(sparseRevDup, dense).map((c) => c.entityId);
+    expect(r1).toEqual(r2);
+  });
+
+  it('E1-SHUFFLE-05: anchor channel shuffle produces identical ranking', () => {
+    const sparse = [makeSparseHit('wine-a', 1)];
+    const dense = [makeDenseHit('wine-b', 1)];
+    const anchor = [
+      makeDenseHit('wine-c', 1),
+      makeDenseHit('wine-a', 2),
+      makeDenseHit('wine-b', 3),
+    ];
+    const fwd = fusion.fuse(sparse, dense, anchor).map((c) => c.entityId);
+    const rev = fusion.fuse(sparse, dense, [...anchor].reverse()).map((c) => c.entityId);
+    expect(rev).toEqual(fwd);
+  });
+});
+
 // ─── LtrRerankSkipReason (E1-T4) ─────────────────────────────────────────────
 
 describe('LtrRerankSkipReason typed union', () => {
@@ -192,5 +323,44 @@ describe('LtrRerankSkipReason typed union', () => {
     // If LtrRerankSkipReason type changes, TypeScript will catch it at compile time.
     await import('../../src/domain/ranking/service/ranker.js');
     expect(true).toBe(true);
+  });
+});
+
+// ─── P0-4: E8 extended fingerprint fields — change detection ─────────────────
+//
+// Guards that each E8 extended field (rerankApplied, rerankModelId,
+// policyRuleVersion, thresholdProfileId, responseContractVersion) is
+// actually incorporated into the fingerprint hash. A field omitted from the
+// hash would silently allow config drift to go undetected.
+
+describe('buildDeterminismFingerprint() — P0-4 E8 extended field change detection', () => {
+  it('different rerankApplied → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, rerankApplied: false });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, rerankApplied: true });
+    expect(a).not.toBe(b);
+  });
+
+  it('different rerankModelId → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, rerankModelId: 'ltr-model-v1' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, rerankModelId: 'ltr-model-v2' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different policyRuleVersion → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, policyRuleVersion: 'policy-v1.0' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, policyRuleVersion: 'policy-v2.0' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different thresholdProfileId → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, thresholdProfileId: 'profile-A' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, thresholdProfileId: 'profile-B' });
+    expect(a).not.toBe(b);
+  });
+
+  it('different responseContractVersion → different fingerprint', () => {
+    const a = buildDeterminismFingerprint({ ...fingerprintParams, responseContractVersion: 'contract-v1' });
+    const b = buildDeterminismFingerprint({ ...fingerprintParams, responseContractVersion: 'contract-v2' });
+    expect(a).not.toBe(b);
   });
 });

@@ -36,7 +36,10 @@ export function registerInterpretRoute(
 
       void reply.header('Vary', 'Accept');
 
-      const interpretOptions = { abortSignal: abortSignalFromFastifyRequest(request) };
+      const interpretOptions = {
+        abortSignal: abortSignalFromFastifyRequest(request),
+        debugRequest: request.debugRequest,
+      };
 
       if (wantsHumanResponse(request.headers.accept)) {
         const result = await deps.interpretUseCase.execute(

@@ -20,6 +20,12 @@ export interface ReplayRequest {
    */
   readonly expected_response_hash?: string | undefined;
   /**
+   * Optional expected determinism fingerprint for configuration-drift validation.
+   *
+   * Omit to perform snapshot/hash-only replay without fingerprint validation.
+   */
+  readonly expected_determinism_fingerprint?: string | undefined;
+  /**
    * Optional honesty floor observed during live-snapshot preflight.
    *
    * When present, replay must not surface a more optimistic execution contract

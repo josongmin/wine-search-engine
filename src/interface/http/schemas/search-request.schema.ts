@@ -147,6 +147,7 @@ export const ReplayRequestSchema = withRequestAliases({
   context: SearchContextSchema.optional(),
   options: SearchOptionsSchema.optional(),
   expected_response_hash: z.string().min(1).optional(),
+  expected_determinism_fingerprint: z.string().min(1).optional(),
   preflight_honesty_contract: z.object({
     execution_mode: z.enum(['authoritative', 'degraded', 'heuristic', 'advisory']),
     degradation_reasons: z.array(z.string().min(1)).max(MAX_SEARCH_SHORT_STRING_LIST),

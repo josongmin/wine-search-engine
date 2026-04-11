@@ -35,10 +35,20 @@ export interface DeterminismFingerprintParams {
   readonly plannerVersion: string;
   /** LLM model ID used for query understanding / rerank. */
   readonly modelId: string;
+  /** Canonical hash of the full model_versions snapshot. */
+  readonly modelVersionsHash?: string | undefined;
+  /** Canonical hash of the full feature_flags snapshot. */
+  readonly featureFlagsHash?: string | undefined;
   /** Stable hash of fusion configuration (RRF k, channel weights). */
   readonly fusionConfigHash: string;
+  /** Canonical hash of the full index_versions snapshot. */
+  readonly indexVersionsHash?: string | undefined;
   /** Stable hash of ranking configuration (weight vector, mode weights). */
   readonly rankingConfigHash: string;
+  /** Retrieval plan builder version used for this execution. */
+  readonly retrievalPlanVersion?: string | undefined;
+  /** Ranking / rerank safety policy version used for this execution. */
+  readonly rankingPolicyVersion?: string | undefined;
 
   // E8: Extended fields — sourced from DecisionSnapshot when available.
   // All optional to preserve backward compatibility with existing callers.
@@ -60,8 +70,8 @@ export interface DeterminismFingerprintParams {
  *
  * The fingerprint does NOT include query text, session ID, or request ID —
  * only the engine configuration. Two requests with the same configuration
- * (same planner version, model, fusion config, ranking config) will produce
- * the same fingerprint, allowing drift detection across identical setups.
+ * (same planner version, model/index snapshots, fusion config, ranking config)
+ * will produce the same fingerprint, allowing drift detection across identical setups.
  *
  * @returns 16-character lowercase hex string (64-bit prefix of SHA-256).
  */

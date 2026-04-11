@@ -1,13 +1,14 @@
 import type { AliasType } from '../../domain/alias/model/alias.js';
-import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { AnchorCandidate } from '../../domain/query/model/anchor-candidate.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-set.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from './port/search-pipeline-deps.port.js';
+import { DomainError } from '../../domain/shared/error/domain-error.js';
 import type {
   EntityCandidateGeneratorInput,
+  EntityCandidateSource,
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
 
 const ZERO_SIGNALS: MatchSignalSet = {
@@ -79,6 +80,38 @@ function buildSignals(normalizedQuery: string, anchor: AnchorCandidate): MatchSi
   };
 }
 
+function mergeSignals(
+  left: MatchSignalSet,
+  right: MatchSignalSet,
+): MatchSignalSet {
+  return {
+    canonicalExactMatch: Math.max(left.canonicalExactMatch, right.canonicalExactMatch),
+    canonicalNormalizedMatch: Math.max(left.canonicalNormalizedMatch, right.canonicalNormalizedMatch),
+    aliasExactMatch: Math.max(left.aliasExactMatch, right.aliasExactMatch),
+    aliasFuzzyMatch: Math.max(left.aliasFuzzyMatch, right.aliasFuzzyMatch),
+    aliasTypePrior: Math.max(left.aliasTypePrior, right.aliasTypePrior),
+    producerMatch: Math.max(left.producerMatch, right.producerMatch),
+    vintageMatch: Math.max(left.vintageMatch, right.vintageMatch),
+    regionMatch: Math.max(left.regionMatch, right.regionMatch),
+    grapeHintMatch: Math.max(left.grapeHintMatch, right.grapeHintMatch),
+    phoneticMatch: Math.max(left.phoneticMatch, right.phoneticMatch),
+    editDistanceScore: Math.max(left.editDistanceScore, right.editDistanceScore),
+    ambiguityPenalty: Math.max(left.ambiguityPenalty, right.ambiguityPenalty),
+  };
+}
+
+function mergeSources(
+  existing: readonly EntityCandidateSource[] | undefined,
+  incoming: EntityCandidateSource | undefined,
+): readonly EntityCandidateSource[] | undefined {
+  if (incoming === undefined) {
+    return existing;
+  }
+  const merged = new Set(existing ?? []);
+  merged.add(incoming);
+  return [...merged].sort();
+}
+
 /**
  * TA2-3: Build resolver candidates from the shared entity candidate generator
  * input contract (EntityCandidateGeneratorInput).
@@ -98,11 +131,14 @@ export async function buildResolverCandidatesFromGenerator(
   input: EntityCandidateGeneratorInput,
   entityLookup: EntityDocumentLookupPort | undefined,
 ): Promise<readonly ResolverCandidate[]> {
-  if (entityLookup === undefined) {
-    return [];
-  }
   if (input.anchors.length === 0 && (input.blockerOnlyIds == null || input.blockerOnlyIds.length === 0)) {
     return [];
+  }
+  if (entityLookup === undefined) {
+    throw new DomainError(
+      'INTERNAL_INCONSISTENCY',
+      'Entity candidate generation requires entityLookup when anchors or blocker seeds are present.',
+    );
   }
 
   // Collect all unique entity IDs: from anchors + blocker-only additions
@@ -161,76 +197,79 @@ export async function buildResolverCandidatesFromGenerator(
   }
 
   // Build candidates from the pre-fetched map (synchronous)
-  const seen = new Set<EntityId>();
-  const candidates: ResolverCandidate[] = [];
+  const candidatesById = new Map<string, ResolverCandidate>();
 
   // 1. Anchor-sourced candidates (carry full signal sets)
   for (const anchor of input.anchors) {
     for (const entityId of anchor.candidateEntityIds) {
-      if (seen.has(entityId)) {
-        continue;
-      }
       const doc = docMap.get(entityId);
       if (doc == null) {
         continue;
       }
-      seen.add(entityId);
-      candidates.push({
-        entityId,
-        entityType: doc.entityType,
-        canonicalLabel: doc.canonicalLabel,
-        aliasMatches: [
-          {
-            aliasValue: anchor.surfaceForm,
-            aliasType: inferAliasType(anchor),
-            matchScore: anchor.confidence,
-          },
-        ],
-        sourceSignals: buildSignals(input.normalizedQuery, anchor),
+      const key = String(entityId);
+      const incomingAliasMatch = {
+        aliasValue: anchor.surfaceForm,
+        aliasType: inferAliasType(anchor),
+        matchScore: anchor.confidence,
+      } as const;
+      const incomingSignals = buildSignals(input.normalizedQuery, anchor);
+      const existing = candidatesById.get(key);
+      if (existing === undefined) {
+        candidatesById.set(key, {
+          entityId,
+          entityType: doc.entityType,
+          canonicalLabel: doc.canonicalLabel,
+          aliasMatches: [incomingAliasMatch],
+          sourceSignals: incomingSignals,
+          source: anchor.source,
+          ...(mergeSources(undefined, anchor.source) !== undefined
+            ? { sources: mergeSources(undefined, anchor.source) }
+            : {}),
+        });
+        continue;
+      }
+
+      const aliasMatches = [
+        ...existing.aliasMatches,
+        incomingAliasMatch,
+      ].filter((match, index, all) => all.findIndex((candidate) => (
+        candidate.aliasValue === match.aliasValue
+        && candidate.aliasType === match.aliasType
+        && candidate.matchScore === match.matchScore
+      )) === index);
+      const mergedSources = mergeSources(existing.sources, anchor.source);
+      candidatesById.set(key, {
+        ...existing,
+        aliasMatches,
+        sourceSignals: mergeSignals(existing.sourceSignals, incomingSignals),
+        ...(mergedSources !== undefined ? { sources: mergedSources } : {}),
+        ...(mergedSources !== undefined && mergedSources.length === 1
+          ? { source: mergedSources[0] }
+          : { source: undefined }),
       });
     }
   }
 
   // 2. Blocker-seeded candidates (zero signal sets; not covered by any anchor)
   for (const entityId of blockerOnlyIds) {
-    if (seen.has(entityId)) {
+    const key = String(entityId);
+    if (candidatesById.has(key)) {
       continue;
     }
     const doc = docMap.get(entityId);
     if (doc == null) {
       continue;
     }
-    seen.add(entityId);
-    candidates.push({
+    candidatesById.set(key, {
       entityId,
       entityType: doc.entityType,
       canonicalLabel: doc.canonicalLabel,
       aliasMatches: [],
       sourceSignals: ZERO_SIGNALS,
       source: 'blocker_seed',
+      sources: ['blocker_seed'],
     });
   }
 
-  return candidates;
-}
-
-/**
- * Legacy entry point — builds generator input from a QueryPlanV1 and delegates
- * to `buildResolverCandidatesFromGenerator`.
- *
- * Retained for backwards compatibility with callers that still pass a raw
- * QueryPlanV1. Prefer `buildResolverCandidatesFromGenerator` for new code.
- */
-export async function buildResolverCandidatesFromPlan(
-  plan: QueryPlanV1,
-  entityLookup: EntityDocumentLookupPort | undefined,
-): Promise<readonly ResolverCandidate[]> {
-  const generatorInput: EntityCandidateGeneratorInput = {
-    rawQuery: plan.rawQuery,
-    normalizedQuery: plan.normalizedQuery,
-    anchors: plan.anchors,
-    // blockerOnlyIds and preloadedDocs are not yet available at this call site.
-    // TA2-4 will thread blocker output here after the blocker runs in the resolver.
-  };
-  return buildResolverCandidatesFromGenerator(generatorInput, entityLookup);
+  return [...candidatesById.values()];
 }

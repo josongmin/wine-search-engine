@@ -7,11 +7,11 @@
  *  E8-3:  constraint_resolution_trace has atoms + relations + policy_outcomes
  *  E8-4:  retrieval_fusion_trace accepts RrfFusionTrace
  *  E8-5:  ranking_delta_trace has preRerankTop5, postRerankTop5, safetyEnvelopeBlocks
- *  E8-6:  rerank_decision_trace has gateDecision union (4 values)
+ *  E8-6:  rerank_decision_trace has gateDecision union (5 values)
  *  E8-7:  abstain_policy_trace has evaluated, decision, optional topKEntropy
  *  E8-8:  fallback_trace has fallbackApplied | null, reasoningFailure, counts
  *  E8-9:  PolicyOutcome has atomIndex, outcome union, reason
- *  E8-10: RerankGateDecision union — 4 literals
+ *  E8-10: RerankGateDecision alias matches ranking-port decision union
  *  E8-11: SearchResponseMetaSchema accepts audit_extension field (Zod z.unknown())
  *  E8-12: DeterminismFingerprintParams — extended optional fields accepted
  *  E8-13: buildDeterminismFingerprint() returns 16-char hex with extended params
@@ -130,11 +130,12 @@ describe('E8: AuditExtension type', () => {
   it('E8-6: rerank_decision_trace gateDecision union', () => {
     const decisions: RerankGateDecision[] = [
       'applied',
-      'skipped_ltr_unavailable',
-      'skipped_kill_switch',
-      'skipped_safety_blocked',
+      'no_model_for_query_class',
+      'empty_candidates',
+      'feature_dimension_mismatch',
+      'gate_blocked',
     ];
-    expect(decisions).toHaveLength(4);
+    expect(decisions).toHaveLength(5);
     const ext: AuditExtension = {
       rerank_decision_trace: {
         gateDecision: 'applied',
@@ -230,12 +231,13 @@ describe('E8: PolicyOutcome', () => {
     expect(o.outcome).toBe('dropped');
   });
 
-  it('E8-10: RerankGateDecision 4 literals', () => {
+  it('E8-10: RerankGateDecision matches ranking-port literals', () => {
     const gates: RerankGateDecision[] = [
       'applied',
-      'skipped_ltr_unavailable',
-      'skipped_kill_switch',
-      'skipped_safety_blocked',
+      'no_model_for_query_class',
+      'empty_candidates',
+      'feature_dimension_mismatch',
+      'gate_blocked',
     ];
     for (const g of gates) expect(typeof g).toBe('string');
   });

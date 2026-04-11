@@ -2,10 +2,16 @@ import type { EntityId, QueryClass } from '../../shared/types/index.js';
 import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
+import { PROVENANCE_QUERY_VIEWS, type ProvenanceQueryView } from '../../retrieval/model/provenance.js';
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RankerRuntimeSignal, RerankerFailureReason } from '../model/ranking-runtime-signal.js';
-import type { RankingMetadata, RankingOutput, RerankDecision } from '../port/ranker.port.js';
+import type {
+  RankingMetadata,
+  RankingOutput,
+  RerankDecision,
+  RerankDecisionCode,
+} from '../port/ranker.port.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import type { QueryClassWeights } from '../index.js';
@@ -79,8 +85,9 @@ function buildWineText(entry: ScoredEntry): string {
 
 /**
  * Internal intermediate representation during ranking.
+ * Exported for regression tests (E1-P03 tie-break suite).
  */
-interface ScoredEntry {
+export interface ScoredEntry {
   readonly entityId: EntityId;
   readonly canonicalLabel: string;
   readonly producer?: string;
@@ -112,17 +119,27 @@ interface ScoredEntry {
    */
   readonly anchorRank?: number | undefined;
   /**
-   * E1-T3: Lexical exactness tier for stage-2 tie-break.
+   * E1-T3: evidence quality tier for deterministic stage-2 tie-break.
+   *
+   * Values (lower = stronger exact/known-item evidence):
+   *   0 — exact_alias_match / known_item_lookup protected candidate
+   *   1 — anchor-conditioned candidate
+   *   2 — ordinary lexical/dense candidate with some provenance
+   *   3 — weak candidate with no lexical/protected evidence
+   */
+  readonly evidenceQualityTier?: number | undefined;
+  /**
+   * E1-T3: Lexical exactness tier for stage-3 tie-break.
    *
    * Captures how closely the candidate's surface form matched the query
    * text via BM25 / alias lookup strategies, independently of which
    * retrieval channels the candidate appeared in.
    *
    * Values (lower = better lexical match, consistent with sparseRank):
-   *   0 — exact canonical/alias match (strategies: exact, lexical_exact, compact_exact)
-   *   1 — transliterated or phonetic match
-   *   2 — fuzzy / substring / smart-document match
-   *   3 — no alias match available (dense-only or blocker-seeded candidate)
+   *   0 — strict / accentless / compact query views
+   *   1 — transliterated / phonetic_compact query views
+   *   2 — vintage_canonicalized / vintage_stripped query views
+   *   3 — no recognized query-view evidence
    */
   readonly lexicalExactnessTier?: number | undefined;
   readonly drinkingWindowStart?: number | undefined;
@@ -188,6 +205,15 @@ const RERANK_BLEND_WEIGHT_FALLBACK = 0.5;
  * falls through to entityId (deterministic tie-break, RFC-009/015).
  */
 const FINAL_SCORE_SORT_TIE_EPSILON = 1e-12;
+/** Replay-grade ranking policy version for determinism fingerprinting. */
+export const RANKING_POLICY_VERSION = 'ranker-policy-v2.0';
+const EVIDENCE_QUALITY_TIER_UNKNOWN = 3;
+const LEXICAL_EXACTNESS_TIER_EXACT = 0;
+const LEXICAL_EXACTNESS_TIER_TRANSLITERATED = 1;
+const LEXICAL_EXACTNESS_TIER_VINTAGE = 2;
+const EXACT_QUERY_VIEWS = new Set<ProvenanceQueryView>(['strict', 'accentless', 'compact']);
+const TRANSLITERATED_QUERY_VIEWS = new Set<ProvenanceQueryView>(['transliterated', 'phonetic_compact']);
+const VINTAGE_QUERY_VIEWS = new Set<ProvenanceQueryView>(['vintage_canonicalized', 'vintage_stripped']);
 
 /**
  * Non-penalty scoring weight fields — used to compute the mode-overlay
@@ -211,24 +237,21 @@ function sumNonPenaltyWeights(weights: ScoringWeights): number {
 }
 
 /**
- * E1-T3: Compute lexical exactness tier for a scored entry.
+ * E1-T3: Compute evidence/lexical tiers for a scored entry.
  *
- * This is the stage-2 tie-break axis: it measures how well the candidate
+ * Evidence quality is the stage-2 axis: it measures how strong the
+ * exact-known-item evidence is before we look at lexical fidelity.
+ *
+ * Lexical exactness is the stage-3 axis: it measures how well the candidate
  * matched the query as a surface-form text string, independent of which
- * retrieval channels it appeared in (that would be channelMatchPriority,
- * which was the old, incorrect stage-2 heuristic).
+ * retrieval channels it appeared in.
  *
- * Tier values (lower = better):
- *   0 — exact canonical / alias match (strategies: exact, lexical_exact, compact_exact)
- *   1 — transliterated or phonetic match
- *   2 — fuzzy, substring, or smart-document match
- *   3 — no alias surface-form match available (dense-only or blocker-seeded)
- *
- * The tier is pre-computed at scoring time from retrieval provenance metadata
- * (see buildLexicalExactnessTier). When not pre-computed (legacy entry),
- * fall back to tier 3 (worst) so old entries lose ties against new ones that
- * carry explicit provenance.
+ * Tiers are pre-computed at scoring time from retrieval provenance metadata.
  */
+function getEvidenceQualityTier(entry: ScoredEntry): number {
+  return entry.evidenceQualityTier ?? EVIDENCE_QUALITY_TIER_UNKNOWN;
+}
+
 function getLexicalExactnessTier(entry: ScoredEntry): number {
   return entry.lexicalExactnessTier ?? LEXICAL_EXACTNESS_TIER_UNKNOWN;
 }
@@ -239,60 +262,66 @@ const LEXICAL_EXACTNESS_TIER_UNKNOWN = 3;
 /**
  * E1-T3: Build the lexical exactness tier from retrieval provenance metadata.
  *
- * Reads the query view names recorded on the HybridCandidate's provenance
- * (CandidateProvenance.queryViewMatches) and the sparse rank to determine
- * how closely the candidate's surface form matched the query.
- *
- * Tier assignment priority (first match wins):
- *   0 — sparseRank=1 OR query view name contains 'strict'
- *   1 — query view name contains 'transliterated' or 'phonetic'
- *   2 — sparseRank present (any BM25 channel hit) OR view contains 'accentless'/'fuzzy'
- *   3 — no sparse signal and no recognized query view name (dense-only / blocker-seeded)
+ * Reads canonical provenance query-view vocabulary only.
  */
 function buildLexicalExactnessTier(candidate: HybridCandidate): number {
-  const sparseRank = candidate.sparseRank;
-  const viewNames = candidate.retrievalProvenance?.queryViewMatches.map((m) => m.viewName) ?? [];
+  const matchedViews = candidate.retrievalProvenance?.queryViewMatches
+    .map((match) => match.viewName)
+    .filter((view): view is ProvenanceQueryView => (
+      PROVENANCE_QUERY_VIEWS as readonly string[]
+    ).includes(view)) ?? [];
 
-  // Tier 0: exact surface-form match — BM25 rank-1 or strict query view matched
-  if (sparseRank === 1 || viewNames.some((v) => v === 'strict' || v.includes('exact'))) {
-    return 0;
+  if (matchedViews.some((view) => EXACT_QUERY_VIEWS.has(view))) {
+    return LEXICAL_EXACTNESS_TIER_EXACT;
+  }
+  if (matchedViews.some((view) => TRANSLITERATED_QUERY_VIEWS.has(view))) {
+    return LEXICAL_EXACTNESS_TIER_TRANSLITERATED;
+  }
+  if (matchedViews.some((view) => VINTAGE_QUERY_VIEWS.has(view))) {
+    return LEXICAL_EXACTNESS_TIER_VINTAGE;
   }
 
-  // Tier 1: transliterated or phonetic surface form
-  if (viewNames.some((v) => v.includes('transliterated') || v.includes('phonetic'))) {
-    return 1;
-  }
-
-  // Tier 2: any BM25 sparse rank present, or accentless / fuzzy view matched
-  if (
-    sparseRank !== undefined
-    || viewNames.some((v) => v.includes('accentless') || v.includes('fuzzy') || v.includes('compact'))
-  ) {
-    return 2;
-  }
-
-  // Tier 3: no lexical evidence — dense-only or blocker-seeded
   return LEXICAL_EXACTNESS_TIER_UNKNOWN;
 }
 
+function buildEvidenceQualityTier(candidate: HybridCandidate): number {
+  const protectedReason = candidate.retrievalProvenance?.protectedInclusionReason;
+  if (protectedReason === 'exact_alias_match' || protectedReason === 'known_item_lookup') {
+    return 0;
+  }
+  if (candidate.anchorRank !== undefined) {
+    return 1;
+  }
+  if (
+    candidate.retrievalProvenance !== undefined
+    || candidate.sparseRank !== undefined
+    || candidate.denseRank !== undefined
+  ) {
+    return 2;
+  }
+  return EVIDENCE_QUALITY_TIER_UNKNOWN;
+}
+
 /**
- * Descending sort by finalScore; NaN-safe; 4-stage deterministic tie-break.
+ * Descending sort by finalScore; NaN-safe; 5-stage deterministic tie-break.
  *
  * Stage 1: finalScore descending (NaN → last)
- * Stage 2: lexicalExactnessTier ascending (lower = better surface-form match)
- * Stage 3: sparseRank ascending (lower BM25 rank = better lexical match; absent → last)
- * Stage 4: entityId ascending (stable lexicographic tie-break, RFC-009/015)
+ * Stage 2: evidenceQualityTier ascending (lower = stronger exact/known-item evidence)
+ * Stage 3: lexicalExactnessTier ascending (lower = better surface-form match)
+ * Stage 4: sparseRank ascending (lower BM25 rank = better lexical match; absent → last)
+ * Stage 5: entityId ascending (stable lexicographic tie-break, RFC-009/015)
  *
- * E1-T3: lexicalExactnessTier as stage-2 tie-break is the RFC-intended signal:
- * it ranks candidates by how closely they matched the query surface form,
- * independently of channel multiplicity. The prior stage-2 was channelMatchPriority
- * (channel richness), which is a retrieval-layer property orthogonal to lexical exactness.
+ * E1-T3: exact-known-item evidence beats generic lexical evidence; lexical
+ * fidelity then breaks remaining ties before sparse rank and entityId.
  */
-function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
+export function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
   const aFinite = Number.isFinite(a.finalScore);
   const bFinite = Number.isFinite(b.finalScore);
   if (!aFinite && !bFinite) {
-    // Stages 2-4 for NaN-NaN ties
+    // Stages 2-5 for NaN-NaN ties
+    const aEvidence = getEvidenceQualityTier(a);
+    const bEvidence = getEvidenceQualityTier(b);
+    if (aEvidence !== bEvidence) return aEvidence - bEvidence;
     const aTier = getLexicalExactnessTier(a);
     const bTier = getLexicalExactnessTier(b);
     if (aTier !== bTier) return aTier - bTier;
@@ -307,15 +336,19 @@ function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): n
   if (Math.abs(scoreDiff) > FINAL_SCORE_SORT_TIE_EPSILON) {
     return scoreDiff > 0 ? 1 : -1;
   }
-  // Stage 2: lexical exactness tier ascending (lower = better surface-form match)
+  // Stage 2: evidence quality tier ascending (lower = stronger exact/known-item evidence)
+  const aEvidence = getEvidenceQualityTier(a);
+  const bEvidence = getEvidenceQualityTier(b);
+  if (aEvidence !== bEvidence) return aEvidence - bEvidence;
+  // Stage 3: lexical exactness tier ascending (lower = better surface-form match)
   const aTier = getLexicalExactnessTier(a);
   const bTier = getLexicalExactnessTier(b);
   if (aTier !== bTier) return aTier - bTier;
-  // Stage 3: sparseRank ascending (absent = Infinity → loses)
+  // Stage 4: sparseRank ascending (absent = Infinity → loses)
   const aSparse = a.sparseRank ?? Infinity;
   const bSparse = b.sparseRank ?? Infinity;
   if (aSparse !== bSparse) return aSparse - bSparse;
-  // Stage 4: entityId ascending
+  // Stage 5: entityId ascending
   return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
 }
 
@@ -338,7 +371,7 @@ function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
   ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
-): { results: RankedResult[]; skipReason: LtrRerankSkipReason } {
+): { results: RankedResult[]; skipReason: LtrRerankSkipReason; modelId?: string } {
   const ltrModel = ltrModels?.get(queryClass);
   if (!ltrModel) {
     return { results: [...rankedResults], skipReason: 'no_model_for_query_class' };
@@ -525,7 +558,9 @@ function applyLearnedLtrRerank(
       };
     })
     .filter((result) => result !== undefined) as RankedResult[];
-  return { results, skipReason: 'not_skipped' };
+  // P0-5: queryClass is the model identifier (key into ltrModels Map).
+  // Returned so rank() can populate rerankDecision.modelId.
+  return { results, skipReason: 'not_skipped', modelId: ltrModel.queryClass };
 }
 
 /**
@@ -704,6 +739,8 @@ export class Ranker {
     let localRuntimeSignal: RankerRuntimeSignal | undefined;
     let localPreRerankTop5: readonly string[] = [];
     let localScoreDriftRecord: ScoreDriftRecord | undefined;
+    let localLtrSkipReason: Exclude<LtrRerankSkipReason, 'not_skipped'> | undefined;
+    let localRerankDecisionCode: RerankDecisionCode | undefined;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -853,10 +890,11 @@ export class Ranker {
         ...(candidate.occasion !== undefined ? { occasion: candidate.occasion } : {}),
         ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
         ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
-        // E1-T3: propagate channel ranks + lexical exactness tier for tie-break determinism
+        // E1-T3: propagate deterministic tie-break tiers alongside channel ranks.
         ...(candidate.sparseRank !== undefined ? { sparseRank: candidate.sparseRank } : {}),
         ...(candidate.denseRank !== undefined ? { denseRank: candidate.denseRank } : {}),
         ...(candidate.anchorRank !== undefined ? { anchorRank: candidate.anchorRank } : {}),
+        evidenceQualityTier: buildEvidenceQualityTier(candidate),
         lexicalExactnessTier: buildLexicalExactnessTier(candidate),
         matchedConstraints: constraintState.matchedConstraints,
         unmetConstraints: constraintState.unmetConstraints,
@@ -918,13 +956,19 @@ export class Ranker {
 
     // Step 6: Optionally rerank top-K via cross-encoder (T5.4: gate-controlled)
     let finalOrder: readonly ScoredEntry[] = viable;
-    const hasLearnedRerank = this.ltrModels?.has(queryPlan.queryClass) ?? false;
+    const hasConfiguredLearnedRerank = this.ltrModels !== undefined;
     // Tracks whether the gate cleared the learned LTR rerank for this request.
     // Must only be set inside the `gateDecision.shouldRerank` block so the gate
     // is honoured — setting it outside would bypass short_entity / too_few_candidates
     // rules and run LTR on every query regardless of quality signals.
     let shouldApplyLearnedRerank = false;
-    if (this.reranker !== undefined || hasLearnedRerank) {
+    if (viable.length === 0 && hasConfiguredLearnedRerank) {
+      localLtrSkipReason = 'empty_candidates';
+      localRerankDecisionCode = 'empty_candidates';
+      localRerankInputCount = 0;
+      localRerankOutputCount = 0;
+    }
+    if (this.reranker !== undefined || hasConfiguredLearnedRerank) {
       // E3-U5: compiled-first route for gate — falls back to V1 plan.route
       const gateEffectiveRoute = input.compiled?.execution.effectiveRoute ?? queryPlan.route;
       const gateDecision = evaluateRerankGate({
@@ -949,6 +993,7 @@ export class Ranker {
               effectiveTopK,
             );
             localRerankExecuted = true;
+            localRerankDecisionCode = 'applied';
             localRerankInputCount = preRerankCount;
             localRerankOutputCount = finalOrder.length;
             localRuntimeSignal = { rerankerStatus: 'executed' };
@@ -976,10 +1021,11 @@ export class Ranker {
             };
           }
         }
-        if (hasLearnedRerank) {
-          localRerankExecuted = true;
+        if (hasConfiguredLearnedRerank) {
           shouldApplyLearnedRerank = true;
         }
+      } else if (localLtrSkipReason === undefined) {
+        localRerankDecisionCode = 'gate_blocked';
       }
     }
 
@@ -1079,6 +1125,19 @@ export class Ranker {
 
       // Run LTR rerank to get proposed ordering
       const ltrOutcome = applyLearnedLtrRerank(results, queryPlan.queryClass, this.ltrModels);
+      localRerankInputCount = localRerankInputCount ?? safetyDescriptors.length;
+      localRerankOutputCount = localRerankOutputCount ?? ltrOutcome.results.length;
+      if (ltrOutcome.skipReason === 'not_skipped') {
+        localRerankExecuted = true;
+        localRerankDecisionCode = 'applied';
+        // P0-5: capture model ID from LTR outcome so rerankDecision.modelId is populated.
+        localRerankModelId = ltrOutcome.modelId;
+      } else {
+        localLtrSkipReason = ltrOutcome.skipReason;
+        if (!localRerankExecuted) {
+          localRerankDecisionCode = ltrOutcome.skipReason;
+        }
+      }
 
       // Map entityId → proposed LTR rank
       const ltrRankMap = new Map<string, number>(
@@ -1137,11 +1196,6 @@ export class Ranker {
 
       // E1-T4: record LTR safety blocks for RerankDecision audit trail
       localRerankBlockedCount = safetyEnvelopeBlocks;
-      if (localRerankExecuted) {
-        // LTR counts are set here — cross-encoder counts were set at applyReranking callsite
-        localRerankInputCount = localRerankInputCount ?? safetyDescriptors.length;
-        localRerankOutputCount = localRerankOutputCount ?? results.length;
-      }
 
       // E1-T4: typed skip reason — only feature_dimension_mismatch degrades
       if (ltrOutcome.skipReason === 'feature_dimension_mismatch') {
@@ -1183,10 +1237,25 @@ export class Ranker {
 
     // E1-T4: Build typed RerankDecision for structured audit trail.
     // Maps local rerank tracking variables to the RerankDecision contract.
+    const rerankDecisionCode = (() => {
+      if (localRerankDecisionCode !== undefined) {
+        return localRerankDecisionCode;
+      }
+      if (localRerankExecuted) {
+        return 'applied';
+      }
+      if (localLtrSkipReason !== undefined) {
+        return localLtrSkipReason;
+      }
+      if (localRerankGateReason !== undefined) {
+        return 'gate_blocked';
+      }
+      return 'no_model_for_query_class';
+    })();
     const rerankDecision: RerankDecision = localRerankExecuted
       ? {
           applied: true,
-          decision: 'applied',
+          decision: rerankDecisionCode,
           ...(localRerankGateReason !== undefined ? { reason: localRerankGateReason } : {}),
           ...(localRerankModelId !== undefined ? { modelId: localRerankModelId } : {}),
           ...(localRerankInputCount !== undefined ? { inputCount: localRerankInputCount } : {}),
@@ -1196,8 +1265,10 @@ export class Ranker {
         }
       : {
           applied: false,
-          decision: localRerankGateReason !== undefined ? 'gate_blocked' : 'no_model_for_query_class',
+          decision: rerankDecisionCode,
           ...(localRerankGateReason !== undefined ? { reason: localRerankGateReason } : {}),
+          ...(localRerankInputCount !== undefined ? { inputCount: localRerankInputCount } : {}),
+          ...(localRerankOutputCount !== undefined ? { outputCount: localRerankOutputCount } : {}),
         };
 
     const metadata: RankingMetadata = {

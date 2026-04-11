@@ -24,29 +24,28 @@ import type { ScoreDriftRecord } from '../model/score-decomposition.js';
  *   - how many candidates entered and exited the reranker
  *   - how many were blocked by the safety envelope
  *
- * `decision` mirrors LtrRerankSkipReason values plus 'applied' for the
- * positive (rerank ran) case so consumers can exhaustively switch on outcome.
+ * `decision` is the single typed outcome surface for rerank audit consumers.
  */
+export type RerankDecisionCode =
+  | 'applied'
+  | 'no_model_for_query_class'
+  | 'empty_candidates'
+  | 'feature_dimension_mismatch'
+  | 'gate_blocked';
+
 export interface RerankDecision {
   /** Whether the reranker was actually applied. */
   readonly applied: boolean;
   /**
    * Outcome code:
    *   - `applied`                    — rerank executed normally
-   *   - `not_skipped`                — legacy alias for `applied` (backward compat)
    *   - `no_model_for_query_class`   — no LTR model registered for this query class
    *   - `empty_candidates`           — result list was empty before rerank
    *   - `feature_dimension_mismatch` — weight vector length ≠ LTR_MODEL_FEATURE_DIMENSION
    *   - `gate_blocked`               — rerank gate policy suppressed reranking
    *                                    (e.g. has_anchor, too_few_candidates)
    */
-  readonly decision:
-    | 'applied'
-    | 'not_skipped'
-    | 'no_model_for_query_class'
-    | 'empty_candidates'
-    | 'feature_dimension_mismatch'
-    | 'gate_blocked';
+  readonly decision: RerankDecisionCode;
   /**
    * Human-readable gate reason string from the rerank gate evaluator.
    * Present for `gate_blocked`; may be present for other outcomes when the

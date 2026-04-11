@@ -386,6 +386,49 @@ describe('ResponseBuilder', () => {
 
       expect(response.engineDecision.route).toBe('semantic');
     });
+
+    it('surfaces typed abstainReason when provided explicitly for ambiguous responses', () => {
+      const decisionOutput = makeDecisionOutput({
+        decisionStatus: 'ambiguous',
+        nextAction: 'clarify',
+        decisionTrace: {
+          ...makeDecisionOutput().decisionTrace,
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+          finalReason: 'Normalized entropy 0.9231 exceeds threshold; query is ambiguous',
+        },
+      });
+
+      const response = builder.build(
+        makeBaseParams({
+          decisionOutput,
+          abstainReason: 'low_confidence',
+        }),
+      );
+
+      expect(response.engineDecision.abstainReason).toBe('low_confidence');
+    });
+
+    it('does not derive abstainReason from free-text finalReason when typed reason is absent', () => {
+      const decisionOutput = makeDecisionOutput({
+        decisionStatus: 'ambiguous',
+        nextAction: 'clarify',
+        decisionTrace: {
+          ...makeDecisionOutput().decisionTrace,
+          decisionStatus: 'ambiguous',
+          nextAction: 'clarify',
+          finalReason: 'Normalized entropy 0.9231 exceeds threshold; query is ambiguous',
+        },
+      });
+
+      const response = builder.build(
+        makeBaseParams({
+          decisionOutput,
+        }),
+      );
+
+      expect(response.engineDecision.abstainReason).toBeUndefined();
+    });
   });
 
   describe('results array', () => {

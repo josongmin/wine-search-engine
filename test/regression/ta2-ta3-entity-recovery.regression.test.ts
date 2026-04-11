@@ -18,10 +18,13 @@ import {
   resolveCorrectiveRetryOutcome,
   computeCorrectiveRetryCalibration,
 } from '../../src/application/search/search-usecase-corrective-retry.js';
+import { buildResolverCandidatesFromGenerator } from '../../src/application/search/search-usecase-resolver-candidates.js';
 import type { EntityCandidateGeneratorInput } from '../../src/domain/resolver/model/entity-candidate-generator-input.js';
 import type { AnchorCandidate } from '../../src/domain/query/model/anchor-candidate.js';
 import type { EntityResolveResult } from '../../src/domain/resolver/model/resolve-result.js';
 import type { QueryPlanV1 } from '../../src/domain/query/model/query-plan.js';
+import type { EntityDocumentLookupPort } from '../../src/application/search/port/search-pipeline-deps.port.js';
+import { createEntityId } from '../../src/domain/shared/types/index.js';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -132,14 +135,14 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
     expect(typeof mod.buildResolverCandidatesFromGenerator).toBe('function');
   });
 
-  it('exports buildResolverCandidatesFromPlan (legacy, deprecated but still exported)', async () => {
+  it('does not export buildResolverCandidatesFromPlan legacy helper anymore', async () => {
     const mod = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
-    expect(typeof mod.buildResolverCandidatesFromPlan).toBe('function');
+    expect('buildResolverCandidatesFromPlan' in mod).toBe(false);
   });
 
-  it('returns empty array when entityLookup is undefined', async () => {
+  it('fails closed when entityLookup is undefined but candidate IDs are present', async () => {
     const { buildResolverCandidatesFromGenerator } = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
@@ -148,8 +151,9 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor()],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, undefined);
-    expect(result).toHaveLength(0);
+    await expect(buildResolverCandidatesFromGenerator(input, undefined)).rejects.toMatchObject({
+      code: 'INTERNAL_INCONSISTENCY',
+    });
   });
 
   it('returns empty array when anchors are empty and no blockerOnlyIds', async () => {
@@ -223,9 +227,11 @@ describe('ResolvedCandidate.blockerSeed (T6)', () => {
       calibratedScore: 0.42,
       rank: 1,
       evidenceRefs: [],
+      source: 'blocker_seed' as const,
       blockerSeed: true as const,
     };
     expect(candidate.blockerSeed).toBe(true);
+    expect(candidate.source).toBe('blocker_seed');
   });
 
   it('ResolvedCandidate type allows blockerSeed to be absent (undefined)', () => {
@@ -235,9 +241,11 @@ describe('ResolvedCandidate.blockerSeed (T6)', () => {
       calibratedScore: 0.9,
       rank: 1,
       evidenceRefs: [],
+      source: 'alias' as const,
     };
     // No blockerSeed field — must be valid (optional)
     expect((candidate as Record<string, unknown>)['blockerSeed']).toBeUndefined();
+    expect(candidate.source).toBe('alias');
   });
 });
 
@@ -249,10 +257,18 @@ describe('ResolverQueryProvenance blocker-seed trace (T7)', () => {
     const trace = {
       blockerSeedEntityIds: candidateIds,
       blockerSeedCount: candidateIds.length,
+      candidateSourceBreakdown: [
+        {
+          source: 'blocker_seed' as const,
+          entityIds: candidateIds,
+          count: candidateIds.length,
+        },
+      ],
     };
 
     expect(trace.blockerSeedEntityIds).toEqual(['wine-abc-123']);
     expect(trace.blockerSeedCount).toBe(1);
+    expect(trace.candidateSourceBreakdown[0]?.source).toBe('blocker_seed');
   });
 });
 
@@ -484,5 +500,471 @@ describe('computeCorrectiveRetryCalibration (TA5)', () => {
       expect(worst!).toBeGreaterThanOrEqual(0.5);
       expect(worst!).toBeLessThanOrEqual(0.9);
     }
+  });
+});
+
+// ─── TA3: 1-retry-max structural guarantee ───────────────────────────────────
+//
+// The corrective retry is implemented as a sequential if-block (no loop).
+// These tests guard that the control-flow contract — at most ONE retry per
+// request — is structurally preserved and cannot silently become a loop.
+
+describe('TA3: 1-retry-max structural guarantee', () => {
+  it('TA3-MAX-01: shouldTriggerCorrectiveRetry returns false for resolved results — no retry after success', () => {
+    // Even if we call shouldTriggerCorrectiveRetry on the retry result, it must
+    // return false when status=resolved. This is the gate that prevents a 3rd pass.
+    const plan = makePlan({ anchors: [] });
+    const resolvedResult = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
+    expect(shouldTriggerCorrectiveRetry(plan, resolvedResult)).toBe(false);
+  });
+
+  it('TA3-MAX-02: shouldTriggerCorrectiveRetry returns false for clarify recommendation — retry never escalates clarify', () => {
+    const plan = makePlan({ anchors: [] });
+    const clarifyResult = makeResolveResult({
+      status: 'ambiguous',
+      decisionConfidenceC: 0.2,
+      recommendedNextAction: 'clarify',
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, clarifyResult)).toBe(false);
+  });
+
+  it('TA3-MAX-03: shouldTriggerCorrectiveRetry returns false for fail recommendation — hard failure is not retried', () => {
+    const plan = makePlan({ anchors: [] });
+    const failResult = makeResolveResult({
+      status: 'failed',
+      decisionConfidenceC: 0.1,
+      recommendedNextAction: 'fail',
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, failResult)).toBe(false);
+  });
+
+  it('TA3-MAX-04: shouldTriggerCorrectiveRetry returns false for ambiguous result even with low confidence — ambiguity → clarify not retry', () => {
+    const plan = makePlan({ anchors: [] });
+    const ambiguousResult = makeResolveResult({
+      status: 'ambiguous',
+      decisionConfidenceC: 0.1,
+      ambiguity: { type: 'entity_ambiguity', candidates: [] } as EntityResolveResult['ambiguity'],
+    });
+    expect(shouldTriggerCorrectiveRetry(plan, ambiguousResult)).toBe(false);
+  });
+
+  it('TA3-MAX-05: after corrective_retry recommendation, resolveCorrectiveRetryOutcome(resolved)=accept — loop terminates', () => {
+    // Simulates the retry pass returning resolved: outcome=accept means the
+    // caller must return, not re-enter the retry path.
+    const retryResult = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.85 });
+    expect(resolveCorrectiveRetryOutcome(retryResult)).toBe('accept');
+  });
+
+  it('TA3-MAX-06: resolveCorrectiveRetryOutcome(failed) — low confidence after retry → clarify, not another retry', () => {
+    // After exactly 1 retry, continued low confidence routes to clarify.
+    // There is no 'retry_again' outcome — the loop cannot continue.
+    const retryResult = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.2 });
+    const outcome = resolveCorrectiveRetryOutcome(retryResult);
+    expect(outcome).toBe('clarify');
+    // Crucially: outcome is never 'retry' — the only outcomes are accept/clarify/fail
+    expect(['accept', 'clarify', 'fail']).toContain(outcome);
+  });
+
+  it('TA3-MAX-07: resolveCorrectiveRetryOutcome union is closed — no retry outcome exists', () => {
+    // Type-level guard: the return type of resolveCorrectiveRetryOutcome is
+    // 'accept' | 'clarify' | 'fail'. There is no 'retry' value.
+    // This test exhausts all three branches to confirm no fourth branch exists.
+    const resolved = makeResolveResult({ status: 'resolved', decisionConfidenceC: 0.9 });
+    const ambiguous = makeResolveResult({
+      status: 'ambiguous',
+      ambiguity: { type: 'entity_ambiguity', candidates: [] } as EntityResolveResult['ambiguity'],
+    });
+    const hardFail = makeResolveResult({ status: 'failed', decisionConfidenceC: 0.6, recommendedNextAction: 'fail' });
+
+    expect(resolveCorrectiveRetryOutcome(resolved)).toBe('accept');
+    expect(resolveCorrectiveRetryOutcome(ambiguous)).toBe('clarify');
+    expect(resolveCorrectiveRetryOutcome(hardFail)).toBe('fail');
+  });
+});
+
+// ─── P0-2 (TA2-T2): Noisy evidence formalization ─────────────────────────────
+//
+// Guards that AnchorCandidate provenance (source, lookupStrategies, lookupVariants)
+// is preserved end-to-end through buildResolverCandidatesFromGenerator, and that
+// downstream consumers can distinguish alias / planner_heuristic / entity_lookup /
+// blocker_seed sources.
+//
+// These tests are append-only (regression suite rules). Never delete.
+
+describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-to-end', () => {
+  // ── helper: minimal entity lookup ──────────────────────────────────────────
+  function makeEntityLookup(entries: Array<[string, string]>): EntityDocumentLookupPort {
+    const map = new Map(entries);
+    return {
+      getDocument: async (id) => {
+        const label = map.get(String(id));
+        if (label == null) return null;
+        return { entityId: id, entityType: 'wine', canonicalLabel: label };
+      },
+    };
+  }
+
+  // ── helper: anchor builder ──────────────────────────────────────────────────
+  function makeAnchorFor(
+    entityId: string,
+    overrides: Partial<AnchorCandidate> = {},
+  ): AnchorCandidate {
+    return {
+      surfaceForm: entityId,
+      normalizedForm: entityId,
+      candidateEntityIds: [createEntityId(entityId)],
+      confidence: 0.85,
+      source: 'alias',
+      ...overrides,
+    };
+  }
+
+  it('P0-2-A: alias anchor — source=alias propagates to ResolverCandidate', async () => {
+    const id = createEntityId('opus-one-2019');
+    const lookup = makeEntityLookup([['opus-one-2019', 'Opus One 2019']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'opus one 2019',
+      normalizedQuery: 'opus one 2019',
+      anchors: [makeAnchorFor('opus-one-2019', { source: 'alias', lookupStrategies: ['exact'] })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.source).toBe('alias');
+    expect(candidates[0]?.sources).toContain('alias');
+    expect(candidates[0]?.entityId).toEqual(id);
+  });
+
+  it('P0-2-B: Korean transliteration — source=alias, strategy=transliterated_exact preserved', async () => {
+    // 샤또마고 → Chateau Margaux: transliterated anchor
+    const lookup = makeEntityLookup([['chateau-margaux', 'Chateau Margaux']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: '샤또마고',
+      normalizedQuery: '샤또마고',
+      anchors: [makeAnchorFor('chateau-margaux', {
+        surfaceForm: '샤또마고',
+        normalizedForm: '샤또마고',
+        source: 'alias',
+        lookupStrategies: ['transliterated_exact'],
+        lookupVariants: ['chateau margaux', 'chateaumargaux'],
+        confidence: 0.96,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('alias');
+    // lookupStrategies must not be lost — signals derived from it
+    // (aliasExactMatch > 0 because transliterated_exact is in exactLike set)
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.aliasTypePrior).toBeGreaterThan(0);
+  });
+
+  it('P0-2-C: Korean misspelling/otyeo — source=planner_heuristic, strategy=fuzzy_char_ngram preserved', async () => {
+    // 옼퍼스원 (typo) → Opus One: fuzzy_char_ngram anchor from planner heuristic
+    const lookup = makeEntityLookup([['opus-one-2019', 'Opus One 2019']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: '옼퍼스원 2019',
+      normalizedQuery: '옼퍼스원 2019',
+      anchors: [makeAnchorFor('opus-one-2019', {
+        surfaceForm: '옼퍼스원',
+        normalizedForm: '옼퍼스원',
+        source: 'planner_heuristic',
+        lookupStrategies: ['fuzzy_char_ngram'],
+        confidence: 0.71,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('planner_heuristic');
+    expect(candidates[0]?.sources).toContain('planner_heuristic');
+    // fuzzy_char_ngram is in fuzzyLike set → aliasFuzzyMatch and editDistanceScore populated
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.editDistanceScore).toBeGreaterThan(0);
+    // aliasExactMatch must be 0 for a fuzzy-only anchor
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
+  });
+
+  it('P0-2-D: substring strategy — source=planner_heuristic, fuzzyLike signals populated', async () => {
+    const lookup = makeEntityLookup([['barolo-2020', 'Barolo 2020']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'barolo',
+      normalizedQuery: 'barolo',
+      anchors: [makeAnchorFor('barolo-2020', {
+        surfaceForm: 'barolo',
+        normalizedForm: 'barolo',
+        source: 'planner_heuristic',
+        lookupStrategies: ['substring'],
+        confidence: 0.65,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('planner_heuristic');
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.editDistanceScore).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
+  });
+
+  it('P0-2-E: smart_document strategy — source=planner_heuristic, fuzzyLike signals populated', async () => {
+    const lookup = makeEntityLookup([['romanee-conti-2015', 'Romanée-Conti 2015']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: '로마네 꽁티 15',
+      normalizedQuery: '로마네 꽁티 15',
+      anchors: [makeAnchorFor('romanee-conti-2015', {
+        surfaceForm: '로마네 꽁티 15',
+        normalizedForm: '로마네 꽁티 15',
+        source: 'planner_heuristic',
+        lookupStrategies: ['smart_document'],
+        confidence: 0.78,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('planner_heuristic');
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
+  });
+
+  it('P0-2-F: blocker_seed — source=blocker_seed, ZERO_SIGNALS, no aliasMatches', async () => {
+    const lookup = makeEntityLookup([['opus-one-2019', 'Opus One 2019']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: '오퍼스원 2019',
+      normalizedQuery: '오퍼스원 2019',
+      anchors: [],
+      blockerOnlyIds: [createEntityId('opus-one-2019')],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('blocker_seed');
+    expect(candidates[0]?.sources).toEqual(['blocker_seed']);
+    expect(candidates[0]?.aliasMatches).toHaveLength(0);
+    // ZERO_SIGNALS: all numeric fields are 0
+    const signals = candidates[0]?.sourceSignals;
+    expect(signals?.canonicalExactMatch).toBe(0);
+    expect(signals?.aliasExactMatch).toBe(0);
+    expect(signals?.aliasFuzzyMatch).toBe(0);
+    expect(signals?.editDistanceScore).toBe(0);
+  });
+
+  it('P0-2-G: entity_lookup source — literal source tag preserved in ResolverCandidate', async () => {
+    const lookup = makeEntityLookup([['margaux-2016', 'Margaux 2016']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'margaux 2016',
+      normalizedQuery: 'margaux 2016',
+      anchors: [makeAnchorFor('margaux-2016', {
+        source: 'entity_lookup',
+        lookupStrategies: ['exact'],
+        confidence: 0.99,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('entity_lookup');
+    expect(candidates[0]?.sources).toContain('entity_lookup');
+  });
+
+  it('P0-2-H: mixed alias+planner_heuristic same entity — sources union preserved, source cleared', async () => {
+    // Same entity arrived via both alias lookup AND planner heuristic.
+    // ResolverCandidate.sources must contain both; source (singular) must be undefined.
+    const id = createEntityId('opus-one-2019');
+    const lookup = makeEntityLookup([['opus-one-2019', 'Opus One 2019']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'opus one',
+      normalizedQuery: 'opus one',
+      anchors: [
+        makeAnchorFor('opus-one-2019', { source: 'alias', lookupStrategies: ['exact'], confidence: 0.92 }),
+        makeAnchorFor('opus-one-2019', { source: 'planner_heuristic', lookupStrategies: ['fuzzy_char_ngram'], confidence: 0.71 }),
+      ],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates).toHaveLength(1); // merged, not duplicated
+    expect(candidates[0]?.entityId).toEqual(id);
+    // When multiple sources exist, source (singular) is undefined
+    expect(candidates[0]?.source).toBeUndefined();
+    // sources union must include both
+    expect(candidates[0]?.sources).toContain('alias');
+    expect(candidates[0]?.sources).toContain('planner_heuristic');
+    // Merged signals: aliasExactMatch from alias, aliasFuzzyMatch from fuzzy
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.aliasFuzzyMatch).toBeGreaterThan(0);
+  });
+
+  it('P0-2-I: alias+blocker_seed overlap — anchor wins, blocker deduped, sources contain both', async () => {
+    // Entity is in both anchor (alias) and blockerOnlyIds.
+    // buildResolverCandidatesFromGenerator should deduplicate: anchor-built
+    // candidate wins the full signals; blocker does NOT overwrite.
+    const id = createEntityId('petrus-2018');
+    const lookup = makeEntityLookup([['petrus-2018', 'Petrus 2018']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'petrus 2018',
+      normalizedQuery: 'petrus 2018',
+      anchors: [makeAnchorFor('petrus-2018', {
+        source: 'alias',
+        lookupStrategies: ['exact'],
+        confidence: 0.97,
+      })],
+      blockerOnlyIds: [id], // same entity in blockerOnlyIds
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    // Only one candidate (not two)
+    expect(candidates).toHaveLength(1);
+    // Anchor-built signals preserved (not overwritten by ZERO)
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeGreaterThan(0);
+    // source tag from anchor
+    expect(candidates[0]?.source).toBe('alias');
+  });
+
+  it('P0-2-J: phonetic strategy — source=alias, phoneticMatch signal populated', async () => {
+    // 로마네꽁티 via phonetic lookup (phonetic_exact strategy)
+    const lookup = makeEntityLookup([['romanee-conti', 'Romanée-Conti']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: '로마네꽁티',
+      normalizedQuery: '로마네꽁티',
+      anchors: [makeAnchorFor('romanee-conti', {
+        surfaceForm: '로마네꽁티',
+        normalizedForm: '로마네꽁티',
+        source: 'alias',
+        lookupStrategies: ['phonetic_exact'],
+        confidence: 0.88,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.source).toBe('alias');
+    expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBeGreaterThan(0);
+  });
+
+  it('P0-2-K: phonetic_fuzzy strategy — phoneticMatch AND editDistanceScore both populated', async () => {
+    const lookup = makeEntityLookup([['petrus-2020', 'Petrus 2020']]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: '페트루스 20',
+      normalizedQuery: '페트루스 20',
+      anchors: [makeAnchorFor('petrus-2020', {
+        surfaceForm: '페트루스 20',
+        source: 'alias',
+        lookupStrategies: ['phonetic_fuzzy'],
+        confidence: 0.75,
+      })],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates[0]?.sourceSignals.phoneticMatch).toBeGreaterThan(0);
+    expect(candidates[0]?.sourceSignals.editDistanceScore).toBeGreaterThan(0);
+    // aliasExactMatch must be 0 for phonetic_fuzzy
+    expect(candidates[0]?.sourceSignals.aliasExactMatch).toBe(0);
+  });
+
+  it('P0-2-L: multiple blocker seeds — all tagged blocker_seed, each distinct entity returned', async () => {
+    const id1 = createEntityId('wine-a');
+    const id2 = createEntityId('wine-b');
+    const id3 = createEntityId('wine-c');
+    const lookup = makeEntityLookup([
+      ['wine-a', 'Wine A'],
+      ['wine-b', 'Wine B'],
+      ['wine-c', 'Wine C'],
+    ]);
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      anchors: [],
+      blockerOnlyIds: [id1, id2, id3],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates).toHaveLength(3);
+    for (const candidate of candidates) {
+      expect(candidate.source).toBe('blocker_seed');
+      expect(candidate.sources).toEqual(['blocker_seed']);
+      expect(candidate.aliasMatches).toHaveLength(0);
+    }
+  });
+
+  it('P0-2-M: missing entity from lookup is silently skipped (no throw, no ghost candidate)', async () => {
+    // Some IDs from anchors may not exist in the index (deleted wine, ETL gap).
+    // buildResolverCandidatesFromGenerator must skip them silently.
+    const lookup = makeEntityLookup([['real-wine', 'Real Wine']]); // ghost-wine not in lookup
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      anchors: [
+        makeAnchorFor('real-wine', { source: 'alias', confidence: 0.9 }),
+        makeAnchorFor('ghost-wine', { source: 'alias', confidence: 0.8 }),
+      ],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    expect(candidates).toHaveLength(1);
+    expect(String(candidates[0]?.entityId)).toBe('real-wine');
+  });
+
+  it('P0-2-N: preloadedDocs cache — entity lookup not called for cached IDs', async () => {
+    const id = createEntityId('cached-wine');
+    const getDocumentSpy = vi.fn().mockResolvedValue(null); // spy returns null for all
+    const lookup: EntityDocumentLookupPort = { getDocument: getDocumentSpy };
+
+    const preloadedDocs: ReadonlyMap<string, { entityId: unknown; entityType: string; canonicalLabel: string }> =
+      new Map([['cached-wine', { entityId: id, entityType: 'wine', canonicalLabel: 'Cached Wine' }]]);
+
+    const input: EntityCandidateGeneratorInput = {
+      rawQuery: 'cached wine',
+      normalizedQuery: 'cached wine',
+      anchors: [makeAnchorFor('cached-wine', { source: 'alias', confidence: 0.9 })],
+      preloadedDocs: preloadedDocs as EntityCandidateGeneratorInput['preloadedDocs'],
+    };
+
+    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
+
+    // Candidate built from cache — getDocument was not called
+    expect(getDocumentSpy).not.toHaveBeenCalled();
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.canonicalLabel).toBe('Cached Wine');
+  });
+
+  it('P0-2-O: lookupVariants on anchor do NOT affect signal computation (provenance-only field)', async () => {
+    // lookupVariants is provenance metadata — it must not change scoring signals.
+    // Two otherwise-identical anchors with/without lookupVariants should produce
+    // the same sourceSignals.
+    const id = createEntityId('test-wine');
+    const lookup = makeEntityLookup([['test-wine', 'Test Wine']]);
+
+    const withVariants: EntityCandidateGeneratorInput = {
+      rawQuery: 'test wine',
+      normalizedQuery: 'test wine',
+      anchors: [makeAnchorFor('test-wine', {
+        source: 'alias',
+        lookupStrategies: ['exact'],
+        lookupVariants: ['testwine', 'test-wine'],
+        confidence: 0.9,
+      })],
+    };
+    const withoutVariants: EntityCandidateGeneratorInput = {
+      rawQuery: 'test wine',
+      normalizedQuery: 'test wine',
+      anchors: [makeAnchorFor('test-wine', {
+        source: 'alias',
+        lookupStrategies: ['exact'],
+        confidence: 0.9,
+      })],
+    };
+
+    const candidatesWith = await buildResolverCandidatesFromGenerator(withVariants, lookup);
+    const candidatesWithout = await buildResolverCandidatesFromGenerator(withoutVariants, lookup);
+
+    expect(candidatesWith[0]?.sourceSignals).toEqual(candidatesWithout[0]?.sourceSignals);
   });
 });

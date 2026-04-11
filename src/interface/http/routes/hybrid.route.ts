@@ -37,6 +37,7 @@ export function registerHybridRoute(
 
       const response = await deps.hybridUseCase.execute(hybridRequest, requestId, {
         abortSignal: abortSignalFromFastifyRequest(request),
+        debugRequest: request.debugRequest,
       });
 
       void reply.header('Vary', 'Accept');

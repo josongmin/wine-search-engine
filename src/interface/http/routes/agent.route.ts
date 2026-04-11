@@ -77,6 +77,12 @@ const AgentResponseSchema = z.object({
       'aborted',
     ]),
     fallback_applied: z.boolean(),
+    fallback_trace: z.object({
+      fallbackApplied: z.enum(['layer2', 'layer3', 'layer4']).nullable(),
+      reasoningFailure: z.boolean(),
+      failedSynthesisAttempts: z.number().int().nonnegative(),
+      fallbackSearchUsed: z.boolean(),
+    }).strict().optional(),
     total_tokens: z.object({
       input: z.number().int().nonnegative(),
       output: z.number().int().nonnegative(),
@@ -174,6 +180,7 @@ export function registerAgentRoute(
           tool_call_count: result.toolCallCount,
           termination_reason: result.terminationReason,
           fallback_applied: result.fallbackApplied,
+          ...(result.fallbackTrace !== undefined ? { fallback_trace: result.fallbackTrace } : {}),
           total_tokens: result.totalTokens,
         },
       };

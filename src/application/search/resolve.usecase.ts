@@ -92,7 +92,10 @@ export class ResolveUseCase {
           sessionContext: request.sessionContext,
           queryBudget: request.queryBudget,
         },
-        { ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}) },
+        {
+          ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
+          ...(options?.debugRequest === true ? { debugRequest: true } : {}),
+        },
       ),
     );
 

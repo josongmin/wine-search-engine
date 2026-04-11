@@ -148,6 +148,39 @@ describe('POST /v1/search/replay', () => {
         expected_response_hash: 'actual-hash',
       }),
       expect.any(String),
+      expect.any(Object),
+    );
+  });
+
+  it('passes expected_determinism_fingerprint through to the replay use case', async () => {
+    const execute = vi.fn(async (request) => {
+      expect(request).toMatchObject({
+        query: 'Opus One 2018',
+        expected_determinism_fingerprint: 'abc123def4567890',
+      });
+      throw new DeterminismViolationError('expected-fingerprint', 'actual-fingerprint', 'determinism_fingerprint');
+    });
+    mockDeps.replayUseCase.execute = execute;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/search/replay',
+      headers: { 'content-type': 'application/json' },
+      payload: {
+        query: 'Opus One 2018',
+        decision_snapshot: buildReplaySnapshot(),
+        expected_determinism_fingerprint: 'abc123def4567890',
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: 'Opus One 2018',
+        expected_determinism_fingerprint: 'abc123def4567890',
+      }),
+      expect.any(String),
+      expect.any(Object),
     );
   });
 
@@ -208,6 +241,7 @@ describe('POST /v1/search/replay', () => {
         },
       }),
       expect.any(String),
+      expect.any(Object),
     );
   });
 

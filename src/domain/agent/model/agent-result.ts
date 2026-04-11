@@ -5,6 +5,7 @@
 import type { AgentStep, AgentTerminationReason } from './agent-step.js';
 import type { SearchResponseV1 } from '../../response/model/search-response.js';
 import type { SynthesisContext, ToolOutcome } from '../../../application/agent/tool-outcome.js';
+import type { AuditExtension } from '../../audit/model/audit-extension.js';
 
 export interface AgentResult {
   readonly answer: string;
@@ -29,4 +30,10 @@ export interface AgentResult {
    * Captures failed steps and which fallback layer, if any, was applied.
    */
   readonly synthesisContext?: SynthesisContext | undefined;
+
+  /**
+   * E8: Structured fallback trace for agent responses.
+   * Uses the canonical AuditExtension fallback_trace shape as SSOT.
+   */
+  readonly fallbackTrace?: AuditExtension['fallback_trace'] | undefined;
 }

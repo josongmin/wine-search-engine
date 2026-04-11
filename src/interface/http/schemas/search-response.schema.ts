@@ -493,6 +493,9 @@ export const ResolveCandidateSchema = z.object({
   canonical_label: z.string().min(1),
   rank: z.number().int().positive(),
   calibrated_score: z.number().finite().min(0).max(1),
+  source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']).optional(),
+  sources: z.array(z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed'])).max(4).optional(),
+  blocker_seed: z.literal(true).optional(),
   evidence_refs: z.array(z.string().min(1)).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
   match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),
   metadata: z.record(z.string(), z.unknown()).refine(

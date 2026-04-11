@@ -72,6 +72,7 @@ describe('POST /v1/entity/resolve', () => {
         query: 'Opus One 2018',
         requestId: expect.any(String),
       }),
+      expect.any(Object),
     );
   });
 
@@ -100,6 +101,47 @@ describe('POST /v1/entity/resolve', () => {
           rerankLimit: 8,
         },
       }),
+      expect.any(Object),
     );
+  });
+
+  it('accepts resolver provenance fields on candidate responses', async () => {
+    mockDeps.resolveUseCase.execute = vi.fn().mockResolvedValue({
+      status: 'ambiguous',
+      candidates: [
+        {
+          entityId: 'wine-opus-one-2018',
+          canonicalLabel: 'Opus One 2018',
+          rank: 1,
+          calibratedScore: 0.77,
+          evidenceRefs: ['opus one'],
+          source: 'blocker_seed',
+          sources: ['alias', 'blocker_seed'],
+          blockerSeed: true,
+        },
+      ],
+      topEntity: undefined,
+      decision_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      authority_trace_ref: 'decision:v1:known_item:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+      request_id: 'test-request',
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/entity/resolve',
+      headers: { 'content-type': 'application/json' },
+      payload: { query: 'Opus One 2018' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      candidates: [
+        {
+          source: 'blocker_seed',
+          sources: ['alias', 'blocker_seed'],
+          blocker_seed: true,
+        },
+      ],
+    });
   });
 });

@@ -28,6 +28,8 @@ export function buildPlannerContextFromSearchRequest(
         }
       : undefined,
     ...(options?.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
-    ...(request.options?.explain === true ? { enablePlannerTrace: true } : {}),
+    ...((request.options?.explain === true || options?.debugRequest === true)
+      ? { enablePlannerTrace: true }
+      : {}),
   };
 }

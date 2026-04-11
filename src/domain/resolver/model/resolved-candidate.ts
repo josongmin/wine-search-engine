@@ -23,6 +23,22 @@ export interface ResolvedCandidate {
   readonly evidenceRefs: readonly string[];
 
   /**
+   * Generalized candidate source provenance.
+   *
+   * Runtime-produced candidates should always populate this. It remains
+   * optional for backward compatibility with older fixtures and tests.
+   */
+  readonly source?: EntityCandidateSource | undefined;
+
+  /**
+   * Full source provenance set for this candidate.
+   *
+   * Unlike {@link source}, this preserves mixed-source candidates that were
+   * supported by several upstream generators (alias + planner heuristic, etc.).
+   */
+  readonly sources?: readonly EntityCandidateSource[] | undefined;
+
+  /**
    * TA2-4: Whether this candidate originated from a blocker seed rather than
    * an alias anchor lookup. Present and `true` for candidates that entered the
    * pipeline via `blockerOnlyIds` — i.e. the blocker found the entity but the
@@ -65,6 +81,15 @@ export interface ResolverCandidate {
    *   scoring. Absent on candidates built before TA2-4 was wired.
    */
   readonly source?: EntityCandidateSource | undefined;
+
+  /**
+   * Full source provenance set for this raw candidate.
+   *
+   * Preferred internal truth when the same entity is supported by multiple
+   * upstream generators. `source` remains as the single-source compatibility
+   * surface and may be undefined for mixed/legacy candidates.
+   */
+  readonly sources?: readonly EntityCandidateSource[] | undefined;
 }
 
 /**

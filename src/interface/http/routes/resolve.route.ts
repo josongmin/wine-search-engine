@@ -28,6 +28,7 @@ export function registerResolveRoute(
 
       const result = await deps.resolveUseCase.execute(resolveRequest, {
         abortSignal: abortSignalFromFastifyRequest(request),
+        debugRequest: request.debugRequest,
       });
 
       sendRouteContractResponse(request, reply, ResolveRouteContract, HTTP_STATUS_OK, result);

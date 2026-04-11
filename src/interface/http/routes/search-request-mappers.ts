@@ -160,6 +160,9 @@ export function toReplayRequest(body: z.output<typeof ReplayRequestSchema>): Rep
     ...(body.expected_response_hash !== undefined
       ? { expected_response_hash: body.expected_response_hash }
       : {}),
+    ...(body.expected_determinism_fingerprint !== undefined
+      ? { expected_determinism_fingerprint: body.expected_determinism_fingerprint }
+      : {}),
     ...(body.preflight_honesty_contract !== undefined
       ? {
           preflight_honesty_contract: {

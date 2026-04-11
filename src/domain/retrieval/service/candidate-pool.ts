@@ -21,9 +21,8 @@ import { type FusionService } from './fusion.js';
 import { RetrievalProfileService } from './retrieval-profile.js';
 import {
   getFusionConfig,
-  type QueryClass as FusionQueryClass,
+  mapDomainQueryClassToFusionQueryClass,
 } from './per-class-fusion-config.js';
-import type { QueryClass as DomainQueryClass } from '../../shared/types/index.js';
 import { CascadeRouter, type RetrievalPhase } from './cascade-router.js';
 import { estimateQueryDifficulty } from './query-difficulty-estimator.js';
 import { ConstraintFilter } from './constraint-filter.js';
@@ -72,30 +71,6 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
  * TRACK-A A4: runtimeMode 'entity_anchor_first' overrides to 'entity_exact'
  * so the anchor-dominant fusion config is used instead of specific_wine.
  */
-function mapToFusionQueryClass(
-  qc: DomainQueryClass,
-  runtimeMode?: string,
-): FusionQueryClass {
-  // TRACK-A A4: anchor-first mode uses a tighter, anchor-dominant fusion config.
-  if (runtimeMode === 'entity_anchor_first') {
-    return 'entity_exact';
-  }
-  switch (qc) {
-    case 'exact_entity':
-    case 'short_entity':
-    case 'ambiguous_short_form':
-    case 'anchored_similarity':
-      return 'specific_wine';
-    case 'pure_constraint':
-    case 'semantic_preference':
-      return 'browse';
-    case 'comparison_query':
-      return 'compare';
-    case 'unknown':
-    default:
-      return 'fallback';
-  }
-}
 /** Max expansion terms fed into retrieval query views. */
 const QUERY_EXPANSION_MAX_TERMS = 32;
 /** Weight increment per repeated token occurrence in expansion stats. */
@@ -668,7 +643,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // behavior-preserving for queries outside the 5 mapped classes. The
     // profile.fusionK still acts as the ultimate fallback when the mapped
     // class resolves to 'fallback' AND profile opts to a non-default k.
-    const fusionQueryClass = mapToFusionQueryClass(input.queryPlan.queryClass, retrievalMode);
+    const fusionQueryClass = mapDomainQueryClassToFusionQueryClass(input.queryPlan.queryClass, retrievalMode);
     const fusionConfig = getFusionConfig(fusionQueryClass);
     const effectiveFusionK = fusionConfig.rrfK;
     let candidates = this.fusionService.fuse(
@@ -1349,4 +1324,3 @@ function tokenizeRetrievalValue(value: string): readonly string[] {
     .map((part) => part.trim())
     .filter((part) => part.length >= 2);
 }
-

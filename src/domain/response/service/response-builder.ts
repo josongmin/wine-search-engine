@@ -26,6 +26,7 @@
 import type { DecisionOutput } from '../../decision/model/decision-output.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
+import type { AbstainReason } from '../../query/model/abstain-decision.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EngineDecision } from '../model/engine-decision.js';
 import type { ResultItem } from '../model/result-item.js';
@@ -69,6 +70,12 @@ export interface ResponseBuildParams {
 
   /** Optional canonical provenance slices to preserve runtime/eval SSOT. */
   readonly retrievalProvenanceSlices?: readonly EvalProvenanceSlice[] | undefined;
+
+  /**
+   * Typed abstain reason for ambiguous clarification responses.
+   * MUST come from TypedAbstainDecision.reason, never from free-text traces.
+   */
+  readonly abstainReason?: AbstainReason | undefined;
 
   /** Caller-supplied request ID for correlation. */
   readonly requestId?: string | undefined;
@@ -215,7 +222,10 @@ export class ResponseBuilder {
       params.queryPlan,
     );
     const parsedConstraints = params.queryPlan ? this.buildParsedConstraints(params.queryPlan) : undefined;
-    const abstainReason = this.extractAbstainReason(params.decisionOutput);
+    const abstainReason = this.extractAbstainReason(
+      params.decisionOutput,
+      params.abstainReason,
+    );
 
     // Enrich engineDecision with abstain reason if present
     const enrichedEngineDecision: EngineDecision = abstainReason !== undefined
@@ -473,15 +483,14 @@ export class ResponseBuilder {
   }
 
   /**
-   * Extract abstain reason from DecisionOutput (Epic 9).
-   * Returns a reason when:
-   * - decisionStatus is 'ambiguous'
-   * - AND it's not due to hard constraint violation
-   * - AND there's a finalReason in the decision trace
+   * Extract abstain reason from the explicit typed seam (Epic 9 / E6).
+   * Free-text decisionTrace.finalReason must never flow into the public enum
+   * contract because it breaks HTTP schema validation.
    */
   private extractAbstainReason(
     output: DecisionOutput,
-  ): string | undefined {
+    abstainReason?: AbstainReason,
+  ): AbstainReason | undefined {
     if (output.decisionStatus !== 'ambiguous') {
       return undefined;
     }
@@ -491,8 +500,7 @@ export class ResponseBuilder {
       return undefined;
     }
 
-    const finalReason = output.decisionTrace.finalReason;
-    return finalReason.length > 0 ? finalReason : undefined;
+    return abstainReason;
   }
 
   /**

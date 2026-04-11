@@ -49,18 +49,24 @@ export class MissingSnapshotError extends DomainError {
  * query + snapshot — a determinism violation per RFC-009 §8 / RFC-015.
  */
 export class DeterminismViolationError extends DomainError {
-  public readonly expectedHash: string;
-  public readonly actualHash: string;
+  public readonly expectedValue: string;
+  public readonly actualValue: string;
+  public readonly artifact: 'response_hash' | 'determinism_fingerprint';
 
-  constructor(expectedHash: string, actualHash: string) {
+  constructor(
+    expectedValue: string,
+    actualValue: string,
+    artifact: 'response_hash' | 'determinism_fingerprint' = 'response_hash',
+  ) {
     super(
       'DETERMINISM_VIOLATION',
-      `Replay response hash mismatch: expected=${expectedHash}, actual=${actualHash}. ` +
+      `Replay ${artifact} mismatch: expected=${expectedValue}, actual=${actualValue}. ` +
         'The engine produced a different decision for the same query and snapshot (RFC-009 §8).',
     );
     this.name = 'DeterminismViolationError';
-    this.expectedHash = expectedHash;
-    this.actualHash = actualHash;
+    this.expectedValue = expectedValue;
+    this.actualValue = actualValue;
+    this.artifact = artifact;
   }
 }
 
@@ -158,6 +164,21 @@ export class ReplayUseCase {
         throw new DeterminismViolationError(
           request.expected_response_hash,
           actualHash ?? '(missing)',
+          'response_hash',
+        );
+      }
+    }
+
+    if (request.expected_determinism_fingerprint !== undefined) {
+      const actualFingerprint = response.meta.determinism_fingerprint;
+      if (
+        actualFingerprint === undefined
+        || actualFingerprint !== request.expected_determinism_fingerprint
+      ) {
+        throw new DeterminismViolationError(
+          request.expected_determinism_fingerprint,
+          actualFingerprint ?? '(missing)',
+          'determinism_fingerprint',
         );
       }
     }
