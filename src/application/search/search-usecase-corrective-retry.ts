@@ -128,3 +128,77 @@ export function resolveCorrectiveRetryOutcome(
   // Marginal improvement — accept the best available result.
   return 'accept';
 }
+
+/**
+ * TA5: Calibration base score assigned to a resolved retry result.
+ *
+ * At rank 1 (best possible), confidence converges to 0.9.
+ * At rank = totalCandidates (worst), confidence converges to 0.5.
+ * Formula: 0.5 + 0.4 * (1 - (rank - 1) / max(totalCandidates - 1, 1))
+ *
+ * The 0.5 floor reflects that corrective retry always carries more
+ * uncertainty than a first-pass resolved result.
+ */
+const TA5_CALIBRATION_BASE = 0.5;
+/** Upward range above base: rank-1 hit receives base + range = 0.9 confidence. */
+const TA5_CALIBRATION_RANGE = 0.4;
+
+/**
+ * TA5: Calibrated posterior confidence for a corrective retry outcome.
+ *
+ * Computes a confidence value from the rank of the top entity in the retry
+ * result and the total candidate count:
+ *
+ *   calibratedConfidence = 0.5 + 0.4 * (1 - normalizedRank)
+ *
+ * where normalizedRank = (rank - 1) / max(totalCandidates - 1, 1), so:
+ *   - rank 1 of N  → normalizedRank 0.0 → confidence 0.9
+ *   - rank N of N  → normalizedRank 1.0 → confidence 0.5
+ *
+ * Returns `undefined` when:
+ *   - the retry outcome is not 'accept' (no meaningful posterior to report)
+ *   - the retry result has no candidates (cannot derive rank)
+ *   - the top entity is absent (resolver produced no confident top-1)
+ *
+ * @param retryResult  The entity resolve result from the corrective retry pass.
+ * @param outcome      The exit decision produced by resolveCorrectiveRetryOutcome.
+ * @returns Calibrated confidence in [0.5, 0.9], or undefined if not applicable.
+ */
+export function computeCorrectiveRetryCalibration(
+  retryResult: EntityResolveResult,
+  outcome: 'accept' | 'clarify' | 'fail',
+): number | undefined {
+  // Only calibrate accepted outcomes — clarify/fail have no useful posterior.
+  if (outcome !== 'accept') {
+    return undefined;
+  }
+
+  const totalCandidates = retryResult.candidates.length;
+  if (totalCandidates === 0) {
+    return undefined;
+  }
+
+  // Find the top entity's rank in the candidate list.
+  const topEntityId = retryResult.topEntity?.entityId;
+  if (topEntityId === undefined) {
+    return undefined;
+  }
+
+  const topCandidate = retryResult.candidates.find(
+    (c) => String(c.entityId) === String(topEntityId),
+  );
+  if (topCandidate === undefined) {
+    return undefined;
+  }
+
+  // Rule 26: rank is 1-based; normalizedRank collapses single-candidate results to 0.0.
+  const zeroBasedRank = topCandidate.rank - 1;
+  // Avoid division by zero when totalCandidates === 1 (single-candidate result → rank 1 → 0).
+  const denominator = totalCandidates > 1 ? totalCandidates - 1 : 1;
+  const normalizedRank = zeroBasedRank / denominator;
+  const calibrated = TA5_CALIBRATION_BASE + TA5_CALIBRATION_RANGE * (1 - normalizedRank);
+
+  // Guard: NaN/Infinity from malformed rank values produce undefined, not a corrupt score.
+  // Rule 28: always guard Number.isFinite() before returning a numeric score.
+  return Number.isFinite(calibrated) ? calibrated : undefined;
+}

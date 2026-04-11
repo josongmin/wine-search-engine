@@ -1,13 +1,16 @@
 /**
- * Regression: E1 Deterministic Core (Wave 0)
+ * Regression: E1 Deterministic Core (Wave 0 + E1-T3 Wave 1)
  *
- * Guards the three determinism guarantees added in EPIC-1:
+ * Guards the determinism guarantees added in EPIC-1:
  *
  *  1. FusionService.fuse() tie-break — same fusionRrfTotal → entityId ascending
- *  2. Ranker 3-stage tie-break — score → sparseRank → entityId
+ *  2. Ranker 4-stage tie-break — score → channelMatchType → sparseRank → entityId
+ *     (upgraded from 3-stage in E1-T3: channelMatchType inserted as stage 2)
  *  3. LtrRerankSkipReason typed union — all skip paths produce a named reason
  *  4. buildDeterminismFingerprint() — same config → same fingerprint; different
  *     config → different fingerprint; key order does not affect output
+ *  5. FusionService denseRank/anchorRank propagation — channelMatchType relies on
+ *     these fields being populated by FusionService.fuse()
  *
  * These tests are append-only (regression suite rules). Never delete.
  */
@@ -124,6 +127,59 @@ describe('buildDeterminismFingerprint()', () => {
     expect(buildDeterminismFingerprint(paramsOrderA)).toBe(
       buildDeterminismFingerprint(paramsOrderB),
     );
+  });
+});
+
+// ─── E1-T3: FusionService channel rank propagation (stage 2 input) ───────────
+
+describe('FusionService — denseRank/anchorRank propagation for channelMatchType', () => {
+  const fusion = new FusionService();
+
+  it('sparse-only candidate has sparseRank set, denseRank undefined', () => {
+    const sparse = [makeSparseHit('wine-a', 1)];
+    const dense: typeof sparse = [];
+    const result = fusion.fuse(sparse, dense);
+    expect(result[0]?.entityId).toBe('wine-a');
+    expect(result[0]?.sparseRank).toBe(1);
+    expect(result[0]?.denseRank).toBeUndefined();
+    expect(result[0]?.anchorRank).toBeUndefined();
+  });
+
+  it('dense-only candidate has denseRank set, sparseRank undefined', () => {
+    const dense = [makeDenseHit('wine-b', 2)];
+    const result = fusion.fuse([], dense);
+    expect(result[0]?.entityId).toBe('wine-b');
+    expect(result[0]?.denseRank).toBe(2);
+    expect(result[0]?.sparseRank).toBeUndefined();
+    expect(result[0]?.anchorRank).toBeUndefined();
+  });
+
+  it('both-channel candidate has sparseRank and denseRank set', () => {
+    const sparse = [makeSparseHit('wine-c', 1)];
+    const dense = [makeDenseHit('wine-c', 3)];
+    const result = fusion.fuse(sparse, dense);
+    expect(result[0]?.entityId).toBe('wine-c');
+    expect(result[0]?.sparseRank).toBe(1);
+    expect(result[0]?.denseRank).toBe(3);
+  });
+
+  it('anchor-channel candidate has anchorRank set', () => {
+    const anchor = [makeDenseHit('wine-d', 2)];
+    const result = fusion.fuse([], [], anchor);
+    expect(result[0]?.entityId).toBe('wine-d');
+    expect(result[0]?.anchorRank).toBe(2);
+    expect(result[0]?.sparseRank).toBeUndefined();
+    expect(result[0]?.denseRank).toBeUndefined();
+  });
+
+  it('both sparse+anchor candidate has sparseRank and anchorRank set', () => {
+    const sparse = [makeSparseHit('wine-e', 1)];
+    const anchor = [makeDenseHit('wine-e', 4)];
+    const result = fusion.fuse(sparse, [], anchor);
+    expect(result[0]?.entityId).toBe('wine-e');
+    expect(result[0]?.sparseRank).toBe(1);
+    expect(result[0]?.anchorRank).toBe(4);
+    expect(result[0]?.denseRank).toBeUndefined();
   });
 });
 

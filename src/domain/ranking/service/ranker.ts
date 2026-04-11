@@ -5,7 +5,7 @@ import type { CandidateProvenance } from '../../retrieval/model/candidate-envelo
 import type { RankingInput } from '../model/ranking-input.js';
 import type { RankedResult, ComponentScores, CoarsePruneStageSummary } from '../model/ranked-result.js';
 import type { RankerRuntimeSignal, RerankerFailureReason } from '../model/ranking-runtime-signal.js';
-import type { RankingMetadata, RankingOutput } from '../port/ranker.port.js';
+import type { RankingMetadata, RankingOutput, RerankDecision } from '../port/ranker.port.js';
 import type { RerankerPort, RerankCandidate } from '../port/reranker.port.js';
 import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.port.js';
 import type { QueryClassWeights } from '../index.js';
@@ -96,11 +96,35 @@ interface ScoredEntry {
   readonly inferredConstraints: readonly string[];
   readonly retrievalProvenance?: CandidateProvenance | undefined;
   /**
-   * E1-T3: sparse (BM25) rank from retrieval — used as 3rd tie-break stage after
-   * finalScore and before entityId. Lower rank = better lexical match.
+   * E1-T3: sparse (BM25) rank from retrieval — used as tie-break stage after
+   * finalScore and channelMatchType, before entityId. Lower rank = better lexical match.
    * Present only for candidates retrieved via sparse_bm25 channel.
    */
   readonly sparseRank?: number | undefined;
+  /**
+   * E1-T3: dense (ANN embedding) rank from retrieval.
+   * Present only for candidates retrieved via dense_semantic channel.
+   */
+  readonly denseRank?: number | undefined;
+  /**
+   * E1-T3: anchor-neighbourhood rank from retrieval.
+   * Present only for candidates retrieved via anchor_similarity channel.
+   */
+  readonly anchorRank?: number | undefined;
+  /**
+   * E1-T3: Lexical exactness tier for stage-2 tie-break.
+   *
+   * Captures how closely the candidate's surface form matched the query
+   * text via BM25 / alias lookup strategies, independently of which
+   * retrieval channels the candidate appeared in.
+   *
+   * Values (lower = better lexical match, consistent with sparseRank):
+   *   0 — exact canonical/alias match (strategies: exact, lexical_exact, compact_exact)
+   *   1 — transliterated or phonetic match
+   *   2 — fuzzy / substring / smart-document match
+   *   3 — no alias match available (dense-only or blocker-seeded candidate)
+   */
+  readonly lexicalExactnessTier?: number | undefined;
   readonly drinkingWindowStart?: number | undefined;
   readonly drinkingWindowEnd?: number | undefined;
   readonly drinkingWindowModelVersion?: string | undefined;
@@ -187,22 +211,91 @@ function sumNonPenaltyWeights(weights: ScoringWeights): number {
 }
 
 /**
- * Descending sort by finalScore; NaN-safe; 3-stage deterministic tie-break.
+ * E1-T3: Compute lexical exactness tier for a scored entry.
+ *
+ * This is the stage-2 tie-break axis: it measures how well the candidate
+ * matched the query as a surface-form text string, independent of which
+ * retrieval channels it appeared in (that would be channelMatchPriority,
+ * which was the old, incorrect stage-2 heuristic).
+ *
+ * Tier values (lower = better):
+ *   0 — exact canonical / alias match (strategies: exact, lexical_exact, compact_exact)
+ *   1 — transliterated or phonetic match
+ *   2 — fuzzy, substring, or smart-document match
+ *   3 — no alias surface-form match available (dense-only or blocker-seeded)
+ *
+ * The tier is pre-computed at scoring time from retrieval provenance metadata
+ * (see buildLexicalExactnessTier). When not pre-computed (legacy entry),
+ * fall back to tier 3 (worst) so old entries lose ties against new ones that
+ * carry explicit provenance.
+ */
+function getLexicalExactnessTier(entry: ScoredEntry): number {
+  return entry.lexicalExactnessTier ?? LEXICAL_EXACTNESS_TIER_UNKNOWN;
+}
+
+/** Sentinel tier value for entries whose lexical exactness could not be determined. */
+const LEXICAL_EXACTNESS_TIER_UNKNOWN = 3;
+
+/**
+ * E1-T3: Build the lexical exactness tier from retrieval provenance metadata.
+ *
+ * Reads the query view names recorded on the HybridCandidate's provenance
+ * (CandidateProvenance.queryViewMatches) and the sparse rank to determine
+ * how closely the candidate's surface form matched the query.
+ *
+ * Tier assignment priority (first match wins):
+ *   0 — sparseRank=1 OR query view name contains 'strict'
+ *   1 — query view name contains 'transliterated' or 'phonetic'
+ *   2 — sparseRank present (any BM25 channel hit) OR view contains 'accentless'/'fuzzy'
+ *   3 — no sparse signal and no recognized query view name (dense-only / blocker-seeded)
+ */
+function buildLexicalExactnessTier(candidate: HybridCandidate): number {
+  const sparseRank = candidate.sparseRank;
+  const viewNames = candidate.retrievalProvenance?.queryViewMatches.map((m) => m.viewName) ?? [];
+
+  // Tier 0: exact surface-form match — BM25 rank-1 or strict query view matched
+  if (sparseRank === 1 || viewNames.some((v) => v === 'strict' || v.includes('exact'))) {
+    return 0;
+  }
+
+  // Tier 1: transliterated or phonetic surface form
+  if (viewNames.some((v) => v.includes('transliterated') || v.includes('phonetic'))) {
+    return 1;
+  }
+
+  // Tier 2: any BM25 sparse rank present, or accentless / fuzzy view matched
+  if (
+    sparseRank !== undefined
+    || viewNames.some((v) => v.includes('accentless') || v.includes('fuzzy') || v.includes('compact'))
+  ) {
+    return 2;
+  }
+
+  // Tier 3: no lexical evidence — dense-only or blocker-seeded
+  return LEXICAL_EXACTNESS_TIER_UNKNOWN;
+}
+
+/**
+ * Descending sort by finalScore; NaN-safe; 4-stage deterministic tie-break.
  *
  * Stage 1: finalScore descending (NaN → last)
- * Stage 2: sparseRank ascending (lower BM25 rank = better lexical match; absent → last)
- * Stage 3: entityId ascending (stable lexicographic tie-break, RFC-009/015)
+ * Stage 2: lexicalExactnessTier ascending (lower = better surface-form match)
+ * Stage 3: sparseRank ascending (lower BM25 rank = better lexical match; absent → last)
+ * Stage 4: entityId ascending (stable lexicographic tie-break, RFC-009/015)
  *
- * E1-T3: adding sparseRank as stage-2 tie-break eliminates insertion-order
- * non-determinism for candidates with identical heuristic scores. Candidates
- * that appear higher in the BM25 ranking have a stronger lexical signal and
- * should win ties over candidates absent from BM25 results.
+ * E1-T3: lexicalExactnessTier as stage-2 tie-break is the RFC-intended signal:
+ * it ranks candidates by how closely they matched the query surface form,
+ * independently of channel multiplicity. The prior stage-2 was channelMatchPriority
+ * (channel richness), which is a retrieval-layer property orthogonal to lexical exactness.
  */
 function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): number {
   const aFinite = Number.isFinite(a.finalScore);
   const bFinite = Number.isFinite(b.finalScore);
   if (!aFinite && !bFinite) {
-    // Stage 2 + 3 for NaN-NaN ties
+    // Stages 2-4 for NaN-NaN ties
+    const aTier = getLexicalExactnessTier(a);
+    const bTier = getLexicalExactnessTier(b);
+    if (aTier !== bTier) return aTier - bTier;
     const aSparse = a.sparseRank ?? Infinity;
     const bSparse = b.sparseRank ?? Infinity;
     if (aSparse !== bSparse) return aSparse - bSparse;
@@ -214,11 +307,15 @@ function compareScoredEntriesByFinalScoreDesc(a: ScoredEntry, b: ScoredEntry): n
   if (Math.abs(scoreDiff) > FINAL_SCORE_SORT_TIE_EPSILON) {
     return scoreDiff > 0 ? 1 : -1;
   }
-  // Stage 2: sparseRank ascending (absent = Infinity → loses)
+  // Stage 2: lexical exactness tier ascending (lower = better surface-form match)
+  const aTier = getLexicalExactnessTier(a);
+  const bTier = getLexicalExactnessTier(b);
+  if (aTier !== bTier) return aTier - bTier;
+  // Stage 3: sparseRank ascending (absent = Infinity → loses)
   const aSparse = a.sparseRank ?? Infinity;
   const bSparse = b.sparseRank ?? Infinity;
   if (aSparse !== bSparse) return aSparse - bSparse;
-  // Stage 3: entityId ascending
+  // Stage 4: entityId ascending
   return a.entityId < b.entityId ? -1 : a.entityId > b.entityId ? 1 : 0;
 }
 
@@ -600,6 +697,10 @@ export class Ranker {
     // in RankingOutput (no mutable instance fields).
     let localRerankExecuted = false;
     let localRerankGateReason: string | undefined;
+    let localRerankModelId: string | undefined;
+    let localRerankInputCount: number | undefined;
+    let localRerankOutputCount: number | undefined;
+    let localRerankBlockedCount = 0;
     let localRuntimeSignal: RankerRuntimeSignal | undefined;
     let localPreRerankTop5: readonly string[] = [];
     let localScoreDriftRecord: ScoreDriftRecord | undefined;
@@ -752,8 +853,11 @@ export class Ranker {
         ...(candidate.occasion !== undefined ? { occasion: candidate.occasion } : {}),
         ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
         ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
-        // E1-T3: propagate sparseRank for 3rd-stage tie-break determinism
+        // E1-T3: propagate channel ranks + lexical exactness tier for tie-break determinism
         ...(candidate.sparseRank !== undefined ? { sparseRank: candidate.sparseRank } : {}),
+        ...(candidate.denseRank !== undefined ? { denseRank: candidate.denseRank } : {}),
+        ...(candidate.anchorRank !== undefined ? { anchorRank: candidate.anchorRank } : {}),
+        lexicalExactnessTier: buildLexicalExactnessTier(candidate),
         matchedConstraints: constraintState.matchedConstraints,
         unmetConstraints: constraintState.unmetConstraints,
         inferredConstraints: constraintState.inferredConstraints,
@@ -837,6 +941,7 @@ export class Ranker {
         const effectiveTopK = gateDecision.topKOverride ?? this.rerankTopK;
         if (this.reranker !== undefined) {
           try {
+            const preRerankCount = viable.length;
             finalOrder = await this.applyReranking(
               queryPlan.normalizedQuery,
               viable,
@@ -844,6 +949,8 @@ export class Ranker {
               effectiveTopK,
             );
             localRerankExecuted = true;
+            localRerankInputCount = preRerankCount;
+            localRerankOutputCount = finalOrder.length;
             localRuntimeSignal = { rerankerStatus: 'executed' };
           } catch (err) {
             const rerankerFailureReason = classifyRerankerFailureReason(err);
@@ -1028,6 +1135,14 @@ export class Ranker {
         );
       }
 
+      // E1-T4: record LTR safety blocks for RerankDecision audit trail
+      localRerankBlockedCount = safetyEnvelopeBlocks;
+      if (localRerankExecuted) {
+        // LTR counts are set here — cross-encoder counts were set at applyReranking callsite
+        localRerankInputCount = localRerankInputCount ?? safetyDescriptors.length;
+        localRerankOutputCount = localRerankOutputCount ?? results.length;
+      }
+
       // E1-T4: typed skip reason — only feature_dimension_mismatch degrades
       if (ltrOutcome.skipReason === 'feature_dimension_mismatch') {
         localRuntimeSignal = {
@@ -1066,10 +1181,30 @@ export class Ranker {
       }
     }
 
+    // E1-T4: Build typed RerankDecision for structured audit trail.
+    // Maps local rerank tracking variables to the RerankDecision contract.
+    const rerankDecision: RerankDecision = localRerankExecuted
+      ? {
+          applied: true,
+          decision: 'applied',
+          ...(localRerankGateReason !== undefined ? { reason: localRerankGateReason } : {}),
+          ...(localRerankModelId !== undefined ? { modelId: localRerankModelId } : {}),
+          ...(localRerankInputCount !== undefined ? { inputCount: localRerankInputCount } : {}),
+          ...(localRerankOutputCount !== undefined ? { outputCount: localRerankOutputCount } : {}),
+          ...(localRerankBlockedCount > 0 ? { blockedCandidateCount: localRerankBlockedCount } : {}),
+          ...(localScoreDriftRecord !== undefined ? { scoreDriftRecord: localScoreDriftRecord } : {}),
+        }
+      : {
+          applied: false,
+          decision: localRerankGateReason !== undefined ? 'gate_blocked' : 'no_model_for_query_class',
+          ...(localRerankGateReason !== undefined ? { reason: localRerankGateReason } : {}),
+        };
+
     const metadata: RankingMetadata = {
       coarsePruneSummary: localCoarsePruneSummary,
       rerankExecuted: localRerankExecuted,
       rerankGateReason: localRerankGateReason,
+      rerankDecision,
       runtimeSignal: localRuntimeSignal,
       preRerankTop5: localPreRerankTop5,
       ...(localScoreDriftRecord !== undefined ? { scoreDriftRecord: localScoreDriftRecord } : {}),

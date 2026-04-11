@@ -4,10 +4,12 @@ import type { InjectionJudgePort } from '../../domain/security/port/injection-ju
 import type { QueryEntrySecurityObserver } from '../../domain/security/port/security-observer.port.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type {
+  BlockingUseCasePort,
   EntityDocumentLookupPort,
   EntityResolverPort,
   QueryPlannerPort,
 } from './port/search-pipeline-deps.port.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
 import type { ResolveResponse } from './resolve-response.dto.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
@@ -38,6 +40,12 @@ export interface ResolveUseCaseDeps {
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
+  /**
+   * TA2-T5: High-recall blocker for seeding candidates not covered by alias anchors.
+   * Mirrors the blocker injection pattern used in search/hybrid/entity routes.
+   * When absent, resolve falls back to anchor-only candidate generation.
+   */
+  readonly blocker?: BlockingUseCasePort | undefined;
 }
 
 /**
@@ -121,12 +129,24 @@ export class ResolveUseCase {
 
     throwIfAborted(options?.abortSignal, 'Resolve use case aborted');
 
+    // TA2-T5: Invoke blocker to surface entity IDs not covered by alias anchors.
+    // Mirrors the pattern in resolveEntityRouteForPlan / executeEntityRoute.
+    let blockerOnlyIds: readonly EntityId[] = [];
+    if (this.deps.blocker !== undefined) {
+      const allBlockerIds = await this.deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
+      const anchorCoveredIds = new Set(
+        plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
+      );
+      blockerOnlyIds = allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id)));
+    }
+
     // Build resolver input
     const candidateEntities = await buildResolverCandidatesFromGenerator(
       {
         rawQuery: plan.rawQuery,
         normalizedQuery: plan.normalizedQuery,
         anchors: plan.anchors,
+        ...(blockerOnlyIds.length > 0 ? { blockerOnlyIds } : {}),
       },
       this.deps.entityLookup,
     );

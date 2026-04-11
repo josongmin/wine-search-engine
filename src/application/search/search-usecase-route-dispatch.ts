@@ -7,7 +7,7 @@ import type { RankingDegradationSignal } from '../../domain/ranking/model/rankin
 import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
-import type { RrfFusionTrace } from '../../domain/retrieval/model/candidate-envelope.js';
+import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 
 export interface SearchRouteDecisionContext {
@@ -29,6 +29,19 @@ export interface SearchRouteExecutionResult {
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
   /** E4: RRF fusion trace from the candidate pool, when hybrid RRF path was used. */
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
+  /** E4: Hard-filter drop log from the candidate pool, when hybrid RRF path was used. */
+  readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
+  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
+  readonly correctiveRetryCalibration?: number | undefined;
+}
+
+/**
+ * Minimal entity route result — wraps EntityResolveResult with optional TA5 calibration.
+ */
+export interface EntityRouteResult {
+  readonly resolveResult: EntityResolveResult;
+  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
+  readonly correctiveRetryCalibration?: number | undefined;
 }
 
 /**
@@ -37,7 +50,7 @@ export interface SearchRouteExecutionResult {
 export async function dispatchSearchRouteExecution(
   effectiveRoute: QueryRoute,
   actions: {
-    readonly executeEntity: () => Promise<EntityResolveResult>;
+    readonly executeEntity: () => Promise<EntityRouteResult>;
     readonly executeHybrid: () => Promise<SearchRouteExecutionResult>;
     readonly executeMixed: () => Promise<SearchRouteExecutionResult>;
   },
@@ -48,7 +61,7 @@ export async function dispatchSearchRouteExecution(
   );
   switch (effectiveRoute) {
     case 'entity': {
-      const resolveResult = await actions.executeEntity();
+      const { resolveResult, correctiveRetryCalibration } = await actions.executeEntity();
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_ENTITY_COMPLETE,
@@ -68,6 +81,7 @@ export async function dispatchSearchRouteExecution(
               },
             }
           : {}),
+        ...(correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration } : {}),
       };
     }
     case 'hybrid': {

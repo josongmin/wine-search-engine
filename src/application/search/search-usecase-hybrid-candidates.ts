@@ -4,7 +4,7 @@ import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candid
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
-import type { RrfFusionTrace } from '../../domain/retrieval/model/candidate-envelope.js';
+import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import type {
   BrowseRetrieverPort,
@@ -87,6 +87,8 @@ export interface HybridCandidateRetrievalResult {
    *  when the generic hybrid path (candidatePool.execute) was used — absent for
    *  specialized browse/compare paths that bypass RRF fusion. */
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
+  /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
+  readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
 }
 
 export function buildHybridRetrievalInputForPlan(
@@ -98,6 +100,10 @@ export function buildHybridRetrievalInputForPlan(
 ): HybridRetrievalInput {
   const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
+  // TA4: Propagate fuzzy entity hypothesis terms from the planner into the retrieval
+  // input. When the planner's fuzzy matcher fires on an anchor-miss query, these terms
+  // are entity hypothesis seeds that enable the entity-first dual retrieval path.
+  const fuzzyEntityHypotheses = plan.expansions.fuzzyEntityHypotheses;
   return {
     queryPlan: plan,
     route,
@@ -109,6 +115,9 @@ export function buildHybridRetrievalInputForPlan(
     retrievalPlan,
     ...(anchorEntityId !== undefined ? { anchorEntityId } : {}),
     ...(requestContext !== undefined ? { requestContext } : {}),
+    ...(fuzzyEntityHypotheses != null && fuzzyEntityHypotheses.length > 0
+      ? { entityHypothesisTerms: fuzzyEntityHypotheses }
+      : {}),
   };
 }
 
@@ -372,14 +381,18 @@ export async function retrieveHybridCandidatesForPlan(
   const candidates = ports.candidatePool.execute !== undefined
     ? await ports.candidatePool.execute(retrievalInput)
     : await ports.candidatePool.generate(retrievalInput);
-  // E4: Retrieve the RRF fusion trace produced during execute()/generate().
-  // Only available when candidatePool implements getLastFusionTrace() (CandidatePoolService).
-  // Specialized browse/compare paths that return early above do NOT have a fusion trace
-  // (they bypass the RRF fusion step entirely), so this is intentionally absent there.
+  // E4: Retrieve the RRF fusion trace and hard-filter drop log produced during execute()/generate().
+  // Only available when candidatePool implements these methods (CandidatePoolService).
+  // Specialized browse/compare paths that return early above do NOT have these traces
+  // (they bypass the RRF fusion step entirely), so these are intentionally absent there.
   const retrievalFusionTrace = ports.candidatePool.getLastFusionTrace?.();
+  const hardFilterDropLog = ports.candidatePool.getLastDropLog?.();
   return {
     candidates,
     ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
+    ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
+      ? { hardFilterDropLog }
+      : {}),
     ...(degradationReasons.size > 0
       ? {
           routeDegradation: {

@@ -335,6 +335,12 @@ export async function executeHybridRouteRankingPipeline(
             : retrieval.retrievalFusionTrace !== undefined
               ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
               : {}),
+          // E4: Prefer the relaxed-retrieval drop log; fall back to original.
+          ...(relaxedRetrieval.hardFilterDropLog !== undefined && relaxedRetrieval.hardFilterDropLog.length > 0
+            ? { hardFilterDropLog: relaxedRetrieval.hardFilterDropLog }
+            : retrieval.hardFilterDropLog !== undefined && retrieval.hardFilterDropLog.length > 0
+              ? { hardFilterDropLog: retrieval.hardFilterDropLog }
+              : {}),
         };
       }
       // Still no results — try next relaxation step.
@@ -364,6 +370,9 @@ export async function executeHybridRouteRankingPipeline(
         ...(retrieval.retrievalFusionTrace !== undefined
           ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
           : {}),
+        ...(retrieval.hardFilterDropLog !== undefined && retrieval.hardFilterDropLog.length > 0
+          ? { hardFilterDropLog: retrieval.hardFilterDropLog }
+          : {}),
       };
     }
   }
@@ -378,6 +387,9 @@ export async function executeHybridRouteRankingPipeline(
       ...(retrieval.retrievalFusionTrace !== undefined
         ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
         : {}),
+      ...(retrieval.hardFilterDropLog !== undefined && retrieval.hardFilterDropLog.length > 0
+        ? { hardFilterDropLog: retrieval.hardFilterDropLog }
+        : {}),
     };
   }
 
@@ -389,6 +401,9 @@ export async function executeHybridRouteRankingPipeline(
       : {}),
     ...(retrieval.retrievalFusionTrace !== undefined
       ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
+      : {}),
+    ...(retrieval.hardFilterDropLog !== undefined && retrieval.hardFilterDropLog.length > 0
+      ? { hardFilterDropLog: retrieval.hardFilterDropLog }
       : {}),
   };
 }

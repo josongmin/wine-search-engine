@@ -4,7 +4,6 @@ import type { EntityId } from '../../domain/shared/types/index.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
-import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { QuerySanitizer } from '../../domain/security/service/query-sanitizer.js';
 import type { InjectionJudgePort } from '../../domain/security/port/injection-judge.port.js';
@@ -18,7 +17,7 @@ import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { PIPELINE_DEFECT_CODES } from '../../domain/shared/error/pipeline-defect-codes.js';
 import { isAbortError, throwIfAborted } from '../../domain/shared/cooperative-abort.js';
 import { dispatchSearchRouteExecution } from './search-usecase-route-dispatch.js';
-import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
+import type { SearchRouteExecutionResult, EntityRouteResult } from './search-usecase-route-dispatch.js';
 import { runSearchPreRoutePhase } from './search-usecase-pre-route-phase.js';
 import type {
   SearchExecutionOptions,
@@ -54,6 +53,7 @@ import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-
 import {
   shouldTriggerCorrectiveRetry,
   resolveCorrectiveRetryOutcome,
+  computeCorrectiveRetryCalibration,
 } from './search-usecase-corrective-retry.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import {
@@ -309,6 +309,8 @@ export class SearchUseCase {
       rankingMetadata,
       specializedRouteObservability,
       retrievalFusionTrace,
+      hardFilterDropLog,
+      correctiveRetryCalibration,
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
@@ -353,6 +355,10 @@ export class SearchUseCase {
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
       ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
+      ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
+        ? { hardFilterDropLog }
+        : {}),
+      ...(correctiveRetryCalibration !== undefined ? { correctiveRetryCalibration } : {}),
       // Wire HTTP options.explain → includeCounterfactuals symmetrically:
       //   explain=true  → includeCounterfactuals=true (force on)
       //   explain=false → includeCounterfactuals=false (force off)
@@ -401,7 +407,7 @@ export class SearchUseCase {
   // Entity resolution uses QueryPlanV1 policy fields directly (requireExact, allowApproximate).
   // compiled.execution.budget and provenancePolicy are NOT applied to entity queries.
   // To extend compiled-first semantics to entity route, thread compiled through EntityResolver.
-  private async executeEntityRoute(plan: QueryPlanV1): Promise<EntityResolveResult> {
+  private async executeEntityRoute(plan: QueryPlanV1): Promise<EntityRouteResult> {
     // TA2-4: Run blocker to surface entity IDs not covered by alias anchors.
     // blockerOnlyIds = blocker output minus IDs already in anchor candidateEntityIds.
     const blockerOnlyIds = await this.runBlockerForPlan(plan, false);
@@ -454,7 +460,7 @@ export class SearchUseCase {
         },
         'pipeline entity-only route',
       );
-      return firstResult;
+      return { resolveResult: firstResult };
     }
 
     // TA3-2: Corrective retry — broader blocker recall + candidate re-hydration.
@@ -524,6 +530,10 @@ export class SearchUseCase {
     // TA3-2: Apply exit conditions after corrective retry
     const outcome = resolveCorrectiveRetryOutcome(retryResult);
 
+    // TA5: Compute calibrated posterior confidence for the retry outcome.
+    // Only populated for 'accept' outcomes; undefined for clarify/fail.
+    const retryCalibratedConfidence = computeCorrectiveRetryCalibration(retryResult, outcome);
+
     // Use retry result regardless of outcome — the outcome tag is for future
     // clarify/fail routing in the decision layer (post-route phase).
     const resolved = retryResult;
@@ -535,12 +545,18 @@ export class SearchUseCase {
         candidate_count: resolved.candidates.length,
         corrective_retry: true,
         corrective_retry_outcome: outcome,
+        ...(retryCalibratedConfidence !== undefined
+          ? { corrective_retry_calibrated_confidence: retryCalibratedConfidence }
+          : {}),
         has_degradation: resolved.degradation !== undefined,
       },
       'pipeline entity-only route',
     );
 
-    return resolved;
+    return {
+      resolveResult: resolved,
+      ...(retryCalibratedConfidence !== undefined ? { correctiveRetryCalibration: retryCalibratedConfidence } : {}),
+    };
   }
 
   /**

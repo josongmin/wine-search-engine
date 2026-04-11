@@ -58,7 +58,7 @@ describe('dispatchSearchRouteExecution', () => {
   });
 
   it('entity route returns empty ranked results', async () => {
-    const entity = vi.fn(async () => minimalResolve());
+    const entity = vi.fn(async () => ({ resolveResult: minimalResolve() }));
     const out = await dispatchSearchRouteExecution('entity', {
       executeEntity: entity,
       executeHybrid: async () => {

@@ -37,9 +37,15 @@ import type { RuntimeSupportServices } from './container-runtime-support.js';
 import { bootstrapLogger } from './bootstrap-logger.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
 import type {
+  BlockingUseCasePort,
   BrowseRetrieverPort,
   CompareRetrieverPort,
 } from '../application/search/port/search-pipeline-deps.port.js';
+
+/** Default blocking limit for standard queries. */
+const BLOCKER_DEFAULT_LIMIT = 100;
+/** Broader blocking limit for corrective retry recall expansion (TA3). */
+const BLOCKER_BROADER_LIMIT = 200;
 
 export function buildSnapshotVersions(config: Config): SnapshotVersions {
   return {
@@ -114,6 +120,28 @@ export async function buildQueryPlanner(
     nlMapper,
     fuzzyMatcher,
   );
+}
+
+/**
+ * TA2-T5: Adapts the domain-layer Blocker to the application-layer
+ * BlockingUseCasePort so that SearchUseCase, HybridUseCase, and
+ * ResolveUseCase can all consume the blocker without depending on
+ * the domain resolver internals.
+ *
+ * Maps `options.broader = true` to a higher blocking limit (BLOCKER_BROADER_LIMIT)
+ * for corrective retry recall expansion (TA3).
+ */
+export function buildBlockingUseCaseAdapter(adapters: CoreAdapterServices): BlockingUseCasePort {
+  const blocker = new Blocker(adapters.blockingPort);
+  return {
+    block: (
+      query: string,
+      normalizedQuery: string,
+      options?: { readonly broader?: boolean },
+    ) => blocker.block(query, normalizedQuery, {
+      limit: options?.broader === true ? BLOCKER_BROADER_LIMIT : BLOCKER_DEFAULT_LIMIT,
+    }),
+  };
 }
 
 export function buildEntityResolver(adapters: CoreAdapterServices, config: Config): Resolver {

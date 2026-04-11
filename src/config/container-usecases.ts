@@ -54,6 +54,7 @@ export function buildUseCaseContainerServices(
 
   const searchUseCase = new SearchUseCase({
     queryPlanner: core.queryPlanner,
+    blocker: core.blocker,
     entityResolver: core.entityResolver,
     entityLookup: core.entityLookup,
     candidatePool: core.candidatePool,
@@ -94,8 +95,10 @@ export function buildUseCaseContainerServices(
     }),
     resolveUseCase: new ResolveUseCase({
       queryPlanner: core.queryPlanner,
+      blocker: core.blocker,
       entityResolver: core.entityResolver,
       entityLookup: core.entityLookup,
+      snapshotVersions: core.snapshotVersions,
       querySanitizer: core.querySanitizer,
       injectionJudge: core.injectionJudge,
       judgeFailureMode: config.queryEntrySecurity.judgeFailureMode,

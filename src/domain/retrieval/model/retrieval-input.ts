@@ -75,4 +75,16 @@ export interface HybridRetrievalInput {
    * Optional so non-HTTP callers (background jobs, unit tests) can omit it.
    */
   readonly requestContext?: RequestExecutionContext | undefined;
+
+  /**
+   * TA4: Entity hypothesis sources from fuzzy planner hits.
+   *
+   * When the planner's fuzzy matcher fires (anchor-miss case), the matched
+   * terms are surfaced here as entity hypothesis candidates. Retrieval layers
+   * that support entity-first dual retrieval use these to seed the entity path
+   * before falling back to the discovery path.
+   *
+   * Absent when anchor extraction succeeded (no fuzzy fallback needed).
+   */
+  readonly entityHypothesisTerms?: readonly string[] | undefined;
 }

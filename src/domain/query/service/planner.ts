@@ -38,6 +38,20 @@ import type { PolicyDecisionRecord, PlannerStage } from '../model/policy-decisio
 /** Current planner version. */
 const PLANNER_VERSION = '1.0.0';
 
+/**
+ * TA2-T2: Minimum confidence floor for planner_heuristic anchors.
+ * Fuzzy matches at maximum edit distance would otherwise get confidence 0;
+ * clamp to this floor so they still contribute signal to the resolver.
+ */
+const FUZZY_ANCHOR_CONFIDENCE_FLOOR = 0.5;
+
+/**
+ * TA2-T2: Confidence penalty per unit of edit distance for planner_heuristic anchors.
+ * A fuzzy hit with editDistance=1 → confidence × 0.9 (10% discount).
+ * A fuzzy hit with editDistance=5 → confidence × 0.5 (clamped at floor).
+ */
+const FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY = 0.1;
+
 /** Current policy rule version. */
 const POLICY_RULE_VERSION = '1.0.0';
 
@@ -178,11 +192,56 @@ export class Planner {
 
     // 2b. Fuzzy-match fallback: when anchor extraction finds nothing, try
     //     approximate matching against the known-term index.
+    //
+    //     TA2-T2: fuzzy hits are promoted to AnchorCandidates with
+    //     source: 'planner_heuristic' so the resolver can score them on the
+    //     entity-similarity path instead of treating the query as purely semantic.
+    //     Each fuzzy term is re-looked up via the aliasMatcher to get entity IDs.
     let fuzzyExpansions: readonly string[] = [];
+    let fuzzyAnchors: readonly AnchorCandidate[] = [];
     if (anchors.length === 0 && this.fuzzyMatcher !== undefined) {
       const fuzzyHits = this.fuzzyMatcher.match(normalizedQuery);
       fuzzyExpansions = fuzzyHits.map((h) => h.term);
+
+      // Resolve entity IDs for each fuzzy term via the anchor extractor.
+      // Use allSettled to avoid a single lookup failure blocking all others.
+      const anchorResults = await Promise.allSettled(
+        fuzzyHits.map(async (hit) => {
+          const matches = await this.anchorExtractor.lookupForFuzzyTerm(hit.term);
+          return { hit, matches };
+        }),
+      );
+
+      const heuristicCandidates: AnchorCandidate[] = [];
+      for (const result of anchorResults) {
+        if (result.status !== 'fulfilled') continue;
+        const { hit, matches } = result.value;
+        for (const match of matches) {
+          if (match.entityIds.length === 0) continue;
+          heuristicCandidates.push({
+            surfaceForm: match.surfaceForm,
+            normalizedForm: match.normalizedForm,
+            candidateEntityIds: match.entityIds,
+            lookupVariants: [hit.term],
+            lookupStrategies: ['fuzzy_char_ngram'],
+            // Confidence discounted by edit distance: further edit distance → lower confidence.
+            // Floor at FUZZY_ANCHOR_CONFIDENCE_FLOOR so deep edits still contribute signal.
+            confidence: match.matchConfidence * Math.max(
+              FUZZY_ANCHOR_CONFIDENCE_FLOOR,
+              1 - hit.editDistance * FUZZY_ANCHOR_EDIT_DISTANCE_PENALTY,
+            ),
+            source: 'planner_heuristic' as const,
+          });
+        }
+      }
+      fuzzyAnchors = heuristicCandidates;
     }
+
+    // Merge planner_heuristic anchors into the anchor list.
+    // These carry lower confidence than exact alias anchors but provide entity
+    // ID resolution that pure lexical expansions cannot supply.
+    const allAnchors: readonly AnchorCandidate[] =
+      fuzzyAnchors.length > 0 ? [...anchors, ...fuzzyAnchors] : anchors;
 
     // 3. Detect intent.
     const intent = detectQueryIntent(
@@ -263,11 +322,15 @@ export class Planner {
     );
 
     // Merge fuzzy-match results into lexical expansions.
+    // TA4: also surface fuzzy hits as entity hypothesis sources in
+    // fuzzyEntityHypotheses, enabling the entity-first dual retrieval path
+    // even when exact anchor extraction fails (anchor count === 0).
     const expansions =
       fuzzyExpansions.length > 0
         ? {
             ...baseExpansions,
             lexical: [...baseExpansions.lexical, ...fuzzyExpansions],
+            fuzzyEntityHypotheses: fuzzyExpansions,
           }
         : baseExpansions;
 
@@ -344,7 +407,9 @@ export class Planner {
       suggestedRoute: route,
       suggestedRetrievalMode: retrievalMode,
       queryClass,
-      anchors,
+      // TA2-T2: Include planner_heuristic anchors from fuzzy-match fallback.
+      // allAnchors = exact alias anchors + fuzzy heuristic anchors (when present).
+      anchors: allAnchors,
       constraints,
       expansions,
       uncertainty,

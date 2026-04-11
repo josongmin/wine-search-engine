@@ -48,6 +48,7 @@ TRACK-A는 exact recovery의 실제 병목(`anchor miss → resolver 후보 0개
 | [EPIC-8-audit-record.md](./EPIC-8-audit-record.md) | Response를 판정 기록물로 확장 | 계획 |
 | [TRACK-A-exact-entity-recovery-roadmap.md](./TRACK-A-exact-entity-recovery-roadmap.md) | 난입력 exact wine recovery 보강 트랙 | 계획 |
 | [TASK-DAG.md](./TASK-DAG.md) | 구현 태스크 DAG / 선행관계 / work pack | 계획 |
+| [FINAL-IMPLEMENTATION-GAPS.md](./FINAL-IMPLEMENTATION-GAPS.md) | 현재 코드 기준 남은 빵구 / 중복 금지 / 최종 실행 순서 | 실행 지시서 |
 
 `TASK-DAG.md`에는 wave별 구현 묶음, exit criteria, 병렬 가능 범위까지 정리되어 있다.
 

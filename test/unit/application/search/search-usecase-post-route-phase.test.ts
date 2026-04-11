@@ -755,19 +755,26 @@ describe('runSearchPostRoutePhase', () => {
 
   it('wires scoreDriftRecord into auditExtension ranking traces', async () => {
     const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+    const scoreDriftRecord = {
+      queryClass: 'semantic_preference',
+      heuristicTop3EntityIds: ['wine:1', 'wine:2', 'wine:3'],
+      ltrTop3EntityIds: ['wine:2', 'wine:1', 'wine:3'],
+      rankOrderChanges: 0.33,
+      averageRerankDeltaNormalized: 0.12,
+      safetyEnvelopeBlocks: 1,
+    };
     const rankingMetadata: RankingMetadata = {
       coarsePruneSummary: undefined,
       rerankExecuted: true,
       rerankGateReason: 'semantic_preference',
       runtimeSignal: undefined,
       preRerankTop5: ['wine:1', 'wine:2', 'wine:3'],
-      scoreDriftRecord: {
-        queryClass: 'semantic_preference',
-        heuristicTop3EntityIds: ['wine:1', 'wine:2', 'wine:3'],
-        ltrTop3EntityIds: ['wine:2', 'wine:1', 'wine:3'],
-        rankOrderChanges: 0.33,
-        averageRerankDeltaNormalized: 0.12,
-        safetyEnvelopeBlocks: 1,
+      // E1-T4: scoreDriftRecord now lives in rerankDecision (typed contract)
+      rerankDecision: {
+        applied: true,
+        decision: 'applied',
+        reason: 'semantic_preference',
+        scoreDriftRecord,
       },
     };
 

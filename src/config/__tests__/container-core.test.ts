@@ -47,6 +47,7 @@ const buildSnapshotVersions = vi.fn(() => ({
 const buildDecisionEngine = vi.fn(() => decisionEngine);
 const buildMixedSolver = vi.fn(() => mixedSolver);
 const buildResponseBuilder = vi.fn(() => responseBuilder);
+const buildBlockingUseCaseAdapter = vi.fn(() => ({ block: vi.fn() }));
 
 vi.mock('../container-adapters.js', () => ({
   buildCoreAdapterServices,
@@ -61,6 +62,7 @@ vi.mock('../container-runtime-support.js', () => ({
 }));
 
 vi.mock('../container-core-builders.js', () => ({
+  buildBlockingUseCaseAdapter,
   buildCandidatePool,
   buildBrowseRetriever,
   buildCompareRetriever,

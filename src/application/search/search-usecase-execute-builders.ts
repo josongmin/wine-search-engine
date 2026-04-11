@@ -22,6 +22,13 @@ function buildStructuredClarifyPayload(
   abstainDecision: TypedAbstainDecision,
   rankedResults: readonly RankedResult[],
 ): StructuredClarifyPayload {
+  // E6: Use the pre-computed clarifyPayload from AbstainPolicy when available.
+  // AbstainPolicy derives budget_gap / preference_gap from ConstraintAtom analysis;
+  // that signal is more precise than the fallback heuristics below.
+  if (abstainDecision.clarifyPayload !== undefined) {
+    return abstainDecision.clarifyPayload;
+  }
+
   const topLabels = rankedResults
     .slice(0, 3)
     .map((result) => result.canonicalLabel)

@@ -182,6 +182,7 @@ export class HybridUseCase {
       rankingMetadata,
       specializedRouteObservability,
       retrievalFusionTrace,
+      hardFilterDropLog,
     } = hybridPipelineResult;
 
     throwIfAborted(options?.abortSignal, 'Hybrid search execution aborted');
@@ -228,6 +229,9 @@ export class HybridUseCase {
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
       ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
+      ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
+        ? { hardFilterDropLog }
+        : {}),
     });
   }
 }

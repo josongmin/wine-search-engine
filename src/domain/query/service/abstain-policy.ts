@@ -8,11 +8,19 @@ import type {
   TypedAbstainDecision,
   AbstainReason,
   ChannelDegradationSummary,
+  StructuredClarifyPayload,
 } from '../model/abstain-decision.js';
 
 /** Decimal places for entropy values in trace strings and detail messages. */
 const ENTROPY_TRACE_DECIMAL_PLACES = 4;
 import type { ConstraintRelation } from './constraint-reasoner.js';
+import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
+
+/** Attribute names that represent price constraints (extrinsic/budget). */
+const PRICE_ATTRIBUTES = new Set(['price', 'priceMin', 'priceMax', 'price_min', 'price_max']);
+
+/** Attribute names that represent quality/critic-score constraints. */
+const QUALITY_ATTRIBUTES = new Set(['criticScore', 'critic_score', 'rating', 'score', 'points']);
 
 export type AbstainDecision =
   | { readonly abstain: false; readonly entropy?: number; readonly reason?: string }
@@ -82,14 +90,17 @@ export class AbstainPolicy {
     constraintRelations: readonly ConstraintRelation[],
     channelDegradation: ChannelDegradationSummary,
     context?: AbstainContext,
+    constraintAtoms?: readonly ConstraintAtom[],
   ): TypedAbstainDecision | false {
     // Priority 1: no candidates at all
     if (topKScores.length === 0) {
+      const noMatchClarify = buildNoMatchClarifyPayload(constraintAtoms ?? []);
       return {
         shouldAbstain: true,
         reason: 'no_match',
         detail: 'Hard constraint filter produced zero candidates.',
         recoverableBy: 'relax_constraints',
+        ...(noMatchClarify !== undefined && { clarifyPayload: noMatchClarify }),
       };
     }
 
@@ -121,18 +132,21 @@ export class AbstainPolicy {
     const entropyDecision = this.shouldAbstain(topKScores, context);
     if (entropyDecision.abstain) {
       const entropyVal = entropyDecision.entropy;
+      const lowConfClarify = buildLowConfidenceClarifyPayload(constraintAtoms ?? []);
       return {
         shouldAbstain: true,
         reason: 'low_confidence' as AbstainReason,
         detail: `Top-K score distribution is near-uniform (entropy=${entropyVal.toFixed(ENTROPY_TRACE_DECIMAL_PLACES)}). Cannot confidently rank results.`,
         recoverableBy: 'clarify',
         entropy: entropyVal,
+        ...(lowConfClarify !== undefined && { clarifyPayload: lowConfClarify }),
       };
     }
 
     return false;
   }
 
+  // ─── Private helpers ────────────────────────────────────────────────────────
   private normalizedEntropy(scores: readonly number[]): number {
     // Early guard: empty or single-element distributions have entropy 0 by
     // definition. Without this, intermediate steps below produce NaN
@@ -160,4 +174,69 @@ export class AbstainPolicy {
     const maxEntropy = Math.log2(finiteScores.length);
     return maxEntropy > 0 ? rawEntropy / maxEntropy : 0;
   }
+}
+
+// ─── Module-scope helpers for ClarifyPayload construction ────────────────────
+
+/**
+ * Returns true if any atom in the list represents a price constraint.
+ */
+function hasPriceConstraint(atoms: readonly ConstraintAtom[]): boolean {
+  for (const atom of atoms) {
+    if (PRICE_ATTRIBUTES.has(atom.attribute)) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns true if any atom in the list represents a quality/critic-score constraint.
+ */
+function hasQualityConstraint(atoms: readonly ConstraintAtom[]): boolean {
+  for (const atom of atoms) {
+    if (QUALITY_ATTRIBUTES.has(atom.attribute)) return true;
+  }
+  return false;
+}
+
+/**
+ * Returns true if the atom list contains any constraint at all (hard, soft, or inferred).
+ */
+function hasAnyConstraint(atoms: readonly ConstraintAtom[]): boolean {
+  return atoms.length > 0;
+}
+
+/**
+ * Build a `budget_gap` StructuredClarifyPayload for `no_match` abstains where
+ * the query has both price AND quality constraints that cannot be jointly satisfied.
+ * Returns undefined if the condition does not apply.
+ */
+function buildNoMatchClarifyPayload(
+  atoms: readonly ConstraintAtom[],
+): StructuredClarifyPayload | undefined {
+  if (!hasPriceConstraint(atoms) || !hasQualityConstraint(atoms)) return undefined;
+  return {
+    kind: 'budget_gap',
+    question:
+      'No wines match your combined price and quality requirements. Would you like to adjust your budget or lower the minimum score?',
+    options: ['Relax price range', 'Lower minimum score', 'Try both'],
+    gapDescription:
+      'The price constraint and quality/score constraint cannot be jointly satisfied by available wines.',
+  };
+}
+
+/**
+ * Build a `preference_gap` StructuredClarifyPayload for `low_confidence` abstains
+ * where constraints are present but result quality is too low to rank confidently.
+ * Returns undefined if no constraints are present (unconstrained query should not
+ * request preference clarification).
+ */
+function buildLowConfidenceClarifyPayload(
+  atoms: readonly ConstraintAtom[],
+): StructuredClarifyPayload | undefined {
+  if (!hasAnyConstraint(atoms)) return undefined;
+  return {
+    kind: 'preference_gap',
+    question:
+      'I found wines matching your criteria but cannot confidently rank them. Could you share more about your taste preferences to help narrow it down?',
+  };
 }

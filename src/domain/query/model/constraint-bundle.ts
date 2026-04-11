@@ -10,6 +10,10 @@ export type {
  *
  * - `lexical` -- additional keywords derived from the query (synonyms, stems).
  * - `semantic` -- phrases suitable for dense/vector retrieval.
+ * - `fuzzyEntityHypotheses` -- fuzzy-matched terms promoted as entity hypothesis
+ *   sources (TA4: exact-first dual retrieval). Present only when the planner's
+ *   fuzzy matcher fires on anchor-miss queries. Downstream retrieval uses these
+ *   as entity hypothesis candidates in addition to lexical expansion terms.
  */
 export interface ExpansionBundle {
   /** Lexical expansion terms for sparse (BM25-style) retrieval. */
@@ -17,4 +21,17 @@ export interface ExpansionBundle {
 
   /** Semantic expansion phrases for dense (embedding-based) retrieval. */
   readonly semantic: readonly string[];
+
+  /**
+   * TA4: Fuzzy-matched terms promoted as entity hypothesis sources.
+   *
+   * When the planner's fuzzy matcher fires (anchor count === 0), the matched
+   * terms are surfaced here in addition to `lexical`. Downstream retrieval
+   * layers use these as candidate entity hypothesis seeds, enabling the
+   * entity-first path even when exact anchor extraction fails.
+   *
+   * Absent when no fuzzy hits were produced (anchor extraction succeeded or
+   * fuzzy matcher is not configured).
+   */
+  readonly fuzzyEntityHypotheses?: readonly string[] | undefined;
 }

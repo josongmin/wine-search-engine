@@ -20,7 +20,7 @@
 import type { PolicyDecisionRecord } from '../../query/model/policy-decision-record.js';
 import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
 import type { ConstraintRelation } from '../../query/service/constraint-reasoner.js';
-import type { RrfFusionTrace } from '../../retrieval/model/candidate-envelope.js';
+import type { RrfFusionTrace, CandidateDropRecord } from '../../retrieval/model/candidate-envelope.js';
 import type { ScoreDriftRecord } from '../../ranking/model/score-decomposition.js';
 import type { TypedAbstainDecision, ChannelDegradationSummary } from '../../query/model/abstain-decision.js';
 
@@ -120,6 +120,21 @@ export interface AuditExtension {
     /** Channel degradation state at time of evaluation. */
     readonly channelDegradation?: ChannelDegradationSummary | undefined;
   } | undefined;
+
+  /**
+   * E4: Hard-filter dropout log — top-5 candidates dropped by hard constraint filter.
+   * Always emitted when at least one candidate was dropped; sampled to top-5 drops
+   * (ordered by lastKnownScore desc) to keep the payload lean.
+   * Gated: populated whenever hard-filter drops occur, regardless of explain flag.
+   */
+  readonly hard_filter_drop_log?: readonly CandidateDropRecord[] | undefined;
+
+  /**
+   * TA5: Calibrated posterior confidence from corrective retry (TA5).
+   * Present when a corrective retry was accepted; undefined otherwise.
+   * Range: [0.5, 0.9] — 0.9 at rank 1, 0.5 at rank N.
+   */
+  readonly corrective_retry_calibrated_confidence?: number | undefined;
 
   /**
    * Agent fallback trace — always emitted when agent fallback occurs.

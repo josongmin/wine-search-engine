@@ -383,3 +383,139 @@ describe('CandidatePoolService — TRACK-A A4 anchor-first path', () => {
     expect(profile.channelMix).not.toContain('anchor_similarity');
   });
 });
+
+// ---------------------------------------------------------------------------
+// TA4: fuzzyEntityHypotheses propagation (ExpansionBundle → HybridRetrievalInput)
+// ---------------------------------------------------------------------------
+
+describe('TA4: fuzzyEntityHypotheses in ExpansionBundle and HybridRetrievalInput', () => {
+  it('ExpansionBundle accepts fuzzyEntityHypotheses field (type contract)', () => {
+    // Compile-time contract check: ExpansionBundle with fuzzyEntityHypotheses
+    // must be assignable to ExpansionBundle.
+    const expansion = {
+      lexical: ['opus one', 'opus one 2018'],
+      semantic: ['opus one 2018'],
+      fuzzyEntityHypotheses: ['opus one'],
+    };
+    expect(expansion.fuzzyEntityHypotheses).toHaveLength(1);
+    expect(expansion.fuzzyEntityHypotheses[0]).toBe('opus one');
+  });
+
+  it('ExpansionBundle without fuzzyEntityHypotheses is still valid (field is optional)', () => {
+    const expansion = {
+      lexical: ['opus one'],
+      semantic: ['opus one'],
+    };
+    expect((expansion as Record<string, unknown>)['fuzzyEntityHypotheses']).toBeUndefined();
+  });
+
+  it('buildHybridRetrievalInputForPlan propagates fuzzyEntityHypotheses as entityHypothesisTerms', async () => {
+    const { buildHybridRetrievalInputForPlan } = await import(
+      '../../src/application/search/search-usecase-hybrid-candidates.js'
+    );
+
+    const planWithFuzzy = makePlan('exact_entity', []);
+    // Inject fuzzyEntityHypotheses into the plan's expansions
+    const planFuzzy = {
+      ...planWithFuzzy,
+      expansions: {
+        ...planWithFuzzy.expansions,
+        fuzzyEntityHypotheses: ['오퍼스원', 'opus one'],
+      },
+    } as typeof planWithFuzzy;
+
+    const input = buildHybridRetrievalInputForPlan(planFuzzy);
+
+    // entityHypothesisTerms must be set from fuzzyEntityHypotheses
+    expect(input.entityHypothesisTerms).toBeDefined();
+    expect(input.entityHypothesisTerms).toContain('오퍼스원');
+    expect(input.entityHypothesisTerms).toContain('opus one');
+  });
+
+  it('buildHybridRetrievalInputForPlan omits entityHypothesisTerms when no fuzzyEntityHypotheses', async () => {
+    const { buildHybridRetrievalInputForPlan } = await import(
+      '../../src/application/search/search-usecase-hybrid-candidates.js'
+    );
+    const plan = makePlan('exact_entity', []);
+    const input = buildHybridRetrievalInputForPlan(plan);
+    // No fuzzy hits → entityHypothesisTerms absent
+    expect(input.entityHypothesisTerms).toBeUndefined();
+  });
+
+  it('buildHybridRetrievalInputForPlan omits entityHypothesisTerms when fuzzyEntityHypotheses is empty array', async () => {
+    const { buildHybridRetrievalInputForPlan } = await import(
+      '../../src/application/search/search-usecase-hybrid-candidates.js'
+    );
+    const plan = makePlan('exact_entity', []);
+    const planEmpty = {
+      ...plan,
+      expansions: { ...plan.expansions, fuzzyEntityHypotheses: [] as readonly string[] },
+    } as typeof plan;
+    const input = buildHybridRetrievalInputForPlan(planEmpty);
+    // Empty array → field still omitted (length guard prevents spurious field)
+    expect(input.entityHypothesisTerms).toBeUndefined();
+  });
+
+  // TA4-CONSUME: entityHypothesisTerms merged into sparseSearch queries
+  it('CandidatePoolService.execute() merges entityHypothesisTerms into sparseSearch queries', async () => {
+    // Verify that entity hypothesis terms from the planner's fuzzy-match path
+    // are forwarded to Vespa BM25 sparse search — i.e., they are NOT a dead field.
+    const sparseSearch = vi.fn(async () => []);
+    const searchIndex = createSearchIndex({ sparseSearch });
+    const embeddingService = createEmbeddingService();
+    const pool = new CandidatePoolService(
+      searchIndex,
+      embeddingService,
+      new FusionService(),
+    );
+
+    const base = makeInput('hybrid', []);
+    const input: HybridRetrievalInput = {
+      ...base,
+      lexicalQueries: ['opus one'],
+      entityHypothesisTerms: ['오퍼스원', '오퍼스 원'],
+    };
+
+    await pool.execute(input);
+
+    // sparseSearch must have been called with the merged query array
+    expect(sparseSearch).toHaveBeenCalledOnce();
+    const [calledQueries] = sparseSearch.mock.calls[0] as [readonly string[], ...unknown[]];
+    // All base queries present
+    expect(calledQueries).toContain('opus one');
+    // Hypothesis terms appended
+    expect(calledQueries).toContain('오퍼스원');
+    expect(calledQueries).toContain('오퍼스 원');
+    // No duplicates: dedup guard prevents double-searching the same term
+    expect(calledQueries.length).toBe(new Set(calledQueries).size);
+  });
+
+  it('CandidatePoolService.execute() deduplicates when entityHypothesisTerms overlaps lexicalQueries', async () => {
+    // If a hypothesis term is already in lexicalQueries (e.g. English form already present),
+    // the dedup guard prevents it being sent to Vespa twice.
+    const sparseSearch = vi.fn(async () => []);
+    const searchIndex = createSearchIndex({ sparseSearch });
+    const embeddingService = createEmbeddingService();
+    const pool = new CandidatePoolService(
+      searchIndex,
+      embeddingService,
+      new FusionService(),
+    );
+
+    const base = makeInput('hybrid', []);
+    const input: HybridRetrievalInput = {
+      ...base,
+      lexicalQueries: ['opus one', 'opus one 2018'],
+      entityHypothesisTerms: ['opus one', 'chateau margaux'],  // 'opus one' duplicates lexicalQueries
+    };
+
+    await pool.execute(input);
+
+    const [calledQueries] = sparseSearch.mock.calls[0] as [readonly string[], ...unknown[]];
+    // 'opus one' appears exactly once despite being in both arrays
+    const opusOneCount = calledQueries.filter((q) => q === 'opus one').length;
+    expect(opusOneCount).toBe(1);
+    // 'chateau margaux' (new term) is present
+    expect(calledQueries).toContain('chateau margaux');
+  });
+});

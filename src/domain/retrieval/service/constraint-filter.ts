@@ -1,5 +1,6 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
+import type { CandidateDropRecord } from '../model/candidate-envelope.js';
 
 /**
  * Post-retrieval constraint gate.
@@ -82,5 +83,88 @@ export class ConstraintFilter {
     // authoritative gate. Preserving them here costs nothing: they score
     // -Infinity and are removed before final ranking.
     return candidates;
+  }
+
+  /**
+   * E4: Variant of applyHardFilters() that also returns a drop log.
+   *
+   * Returns:
+   *   filtered — same result as applyHardFilters() (compliant or full list).
+   *   drops    — CandidateDropRecord[] for every non-compliant, non-protected
+   *              candidate that was actually removed.
+   *
+   * When the compliant pool is below minRecallFloor, NO candidates are
+   * removed, so drops is always empty in that case.
+   */
+  applyHardFiltersWithDropLog(
+    candidates: readonly HybridCandidate[],
+    constraints: readonly NormalizedConstraint[],
+    minRecallFloor = 10,
+  ): { filtered: readonly HybridCandidate[]; drops: readonly CandidateDropRecord[] } {
+    if (constraints.length === 0) {
+      return { filtered: candidates, drops: [] };
+    }
+
+    const compliant: HybridCandidate[] = [];
+    const dropped: HybridCandidate[] = [];
+
+    for (const candidate of candidates) {
+      const unmet = candidate.unmetHardConstraints ?? [];
+      const isProtected =
+        candidate.sparseRank === 1 ||
+        candidate.anchorRank !== undefined;
+      if (unmet.length === 0 || isProtected) {
+        compliant.push(candidate);
+      } else {
+        dropped.push(candidate);
+      }
+    }
+
+    // Only materialise the drop log when candidates are actually removed.
+    if (compliant.length >= minRecallFloor) {
+      const drops: CandidateDropRecord[] = dropped.map((candidate) => {
+        const channels: CandidateDropRecord['channels'][number][] = [];
+        if (candidate.sparseRank !== undefined) {
+          channels.push({
+            channel: 'sparse_bm25',
+            rawScore: candidate.sparseRawScore ?? 0,
+            rank: candidate.sparseRank,
+          });
+        }
+        if (candidate.denseRank !== undefined) {
+          channels.push({
+            channel: 'dense_semantic',
+            rawScore: candidate.denseRawScore ?? 0,
+            rank: candidate.denseRank,
+          });
+        }
+        if (candidate.learnedSparseRank !== undefined) {
+          channels.push({
+            channel: 'learned_sparse',
+            rawScore: candidate.learnedSparseRawScore ?? 0,
+            rank: candidate.learnedSparseRank,
+          });
+        }
+        if (candidate.anchorRank !== undefined) {
+          channels.push({
+            channel: 'anchor_similarity',
+            rawScore: candidate.anchorRawScore ?? 0,
+            rank: candidate.anchorRank,
+          });
+        }
+        return {
+          entityId: candidate.entityId,
+          dropStage: 'hard_filter',
+          dropReason: (candidate.unmetHardConstraints ?? []).join(', '),
+          // TODO(cleanup): remove retrievalFusionScore fallback after migration
+          lastKnownScore: candidate.fusionRrfTotal ?? candidate.sparseRawScore ?? 0,
+          channels,
+        };
+      });
+      return { filtered: compliant, drops };
+    }
+
+    // Below recall floor — nothing removed, no drops.
+    return { filtered: candidates, drops: [] };
   }
 }

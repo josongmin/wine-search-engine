@@ -73,6 +73,14 @@ export interface TypedAbstainDecision {
    * the entropy figure in trace logs and the entropy-abstain response path.
    */
   readonly entropy?: number | undefined;
+
+  /**
+   * E6: Structured clarification payload.
+   * Present when the abstain decision is actionable via a specific clarification
+   * kind (preference_gap, budget_gap). Absent for semantic_conflict (which
+   * uses conflictingRelations instead) and insufficient_evidence.
+   */
+  readonly clarifyPayload?: StructuredClarifyPayload | undefined;
 }
 
 // ─── ClarifyKind ─────────────────────────────────────────────────────────────

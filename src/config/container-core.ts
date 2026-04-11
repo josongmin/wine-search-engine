@@ -11,6 +11,7 @@ import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port
 import type { SnapshotVersions } from '../application/search/search.usecase.js';
 import type { CacheLookupRuntimeState } from '../application/search/search-usecase-cache-lookup.js';
 import type {
+  BlockingUseCasePort,
   BrowseRetrieverPort,
   CompareRetrieverPort,
   EntityDocumentLookupPort,
@@ -23,6 +24,7 @@ import {
   type RuntimeSupportServices,
 } from './container-runtime-support.js';
 import {
+  buildBlockingUseCaseAdapter,
   buildCandidatePool,
   buildBrowseRetriever,
   buildCompareRetriever,
@@ -45,6 +47,7 @@ export interface CoreContainerServices {
   // T1.2: typed as QueryPlannerPort for backward compat while Planner returns QueryPlanV2.
   // T1.5 will update the port to QueryPlanV2.
   readonly queryPlanner: QueryPlannerPort;
+  readonly blocker: BlockingUseCasePort;
   readonly chatLlm?: ChatLlmPort;
   readonly entityResolver: Resolver;
   readonly candidatePool: CandidatePoolService;
@@ -100,6 +103,7 @@ export async function buildCoreContainerServices(
 
   return {
     queryPlanner,
+    blocker: buildBlockingUseCaseAdapter(adapters),
     entityResolver,
     candidatePool,
     browseRetriever,

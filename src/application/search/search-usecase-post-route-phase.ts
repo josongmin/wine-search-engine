@@ -1,6 +1,7 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { AuditExtension } from '../../domain/audit/model/audit-extension.js';
+import type { CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -60,27 +61,41 @@ const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
  *  - ranking_delta_trace       LTR applied + explain=true (sourced from scoreDriftRecord)
  *  - abstain_policy_trace      always when abstain occurs (sourced from TypedAbstainDecision)
  */
+/** Maximum drop records included in hard_filter_drop_log to keep payload lean. */
+const AUDIT_DROP_LOG_MAX = 5;
+
 function deriveAuditExtension(
   compiled: CompiledWineQuery | undefined,
   rankingMetadata: RankingMetadata | undefined,
   rankedResults: readonly RankedResult[],
-  retrievalFusionTrace?: RrfFusionTrace | undefined,
-  abstainDecision?: TypedAbstainDecision | false | undefined,
-  channelDegradation?: ChannelDegradationSummary | undefined,
+  retrievalFusionTrace?: RrfFusionTrace,
+  abstainDecision?: TypedAbstainDecision | false,
+  channelDegradation?: ChannelDegradationSummary,
+  hardFilterDropLog?: readonly CandidateDropRecord[],
+  correctiveRetryCalibration?: number,
 ): AuditExtension | undefined {
   const plannerTrace = compiled?.plannerTrace;
-  const scoreDriftRecord = rankingMetadata?.scoreDriftRecord;
+  // E1-T4: Read scoreDriftRecord from rerankDecision (structured contract).
+  // The top-level RankingMetadata.scoreDriftRecord field is @deprecated —
+  // all new reads must go through rerankDecision.scoreDriftRecord.
+  const scoreDriftRecord = rankingMetadata?.rerankDecision?.scoreDriftRecord;
 
   // Abstain policy trace is emitted whenever abstain evaluation ran (abstainDecision !== undefined).
   const hasAbstainTrace = abstainDecision !== undefined;
   // Retrieval fusion trace present when hybrid RRF path was used.
   const hasFusionTrace = retrievalFusionTrace !== undefined;
+  // E4: Drop log present when at least one candidate was hard-filtered out.
+  const hasDropLog = hardFilterDropLog !== undefined && hardFilterDropLog.length > 0;
+  // TA5: Corrective retry calibration present when retry was accepted.
+  const hasRetryCalibration = correctiveRetryCalibration !== undefined && Number.isFinite(correctiveRetryCalibration);
 
   if (
     (plannerTrace == null || plannerTrace.length === 0)
     && scoreDriftRecord === undefined
     && !hasFusionTrace
     && !hasAbstainTrace
+    && !hasDropLog
+    && !hasRetryCalibration
   ) {
     return undefined;
   }
@@ -130,6 +145,17 @@ function deriveAuditExtension(
           },
         }
       : {}),
+    ...(hasDropLog
+      ? {
+          // E4: Sample top-AUDIT_DROP_LOG_MAX drops by lastKnownScore desc to keep payload lean.
+          hard_filter_drop_log: [...hardFilterDropLog]
+            .sort((a, b) => b.lastKnownScore - a.lastKnownScore)
+            .slice(0, AUDIT_DROP_LOG_MAX),
+        }
+      : {}),
+    ...(hasRetryCalibration
+      ? { corrective_retry_calibrated_confidence: correctiveRetryCalibration }
+      : {}),
   };
 }
 
@@ -142,10 +168,16 @@ function deriveAuditExtension(
  *
  * fusionConfigHash and rankingConfigHash are derived from the snapshot's
  * model_versions / index_versions — a stable proxy for configuration state.
+ *
+ * E1-T5 extended fields:
+ *   - responseContractVersion: from snapshot.response_contract_version
+ *   - rerankApplied: from rankingMetadata.rerankExecuted
+ *   - rerankModelId: from model_versions['reranker_model'] or rerankDecision.modelId
  */
 function buildDeterminismFingerprintParams(
   snapshot: DecisionSnapshot,
   snapshotVersions: SnapshotVersionInjection,
+  rankingMetadata?: RankingMetadata,
 ): DeterminismFingerprintParams {
   // Pick the primary LLM model id from the model_versions map.
   // Prefer 'query_understanding' > 'rerank' > first key > fallback literal.
@@ -168,6 +200,13 @@ function buildDeterminismFingerprintParams(
     ...Object.keys(indexVersions).sort().map((k) => `${k}:${indexVersions[k] ?? ''}`),
   );
 
+  // E1-T5: extended fields — reranker model ID prefers the explicit rerankDecision
+  // record (E1-T4 typed contract), falling back to model_versions['reranker_model'].
+  const rerankApplied = rankingMetadata?.rerankExecuted;
+  const rerankModelId =
+    rankingMetadata?.rerankDecision?.modelId
+    ?? (rerankApplied === true ? (modelVersions['reranker_model'] ?? modelVersions['dense_model']) : undefined);
+
   return {
     plannerVersion: snapshot.planner_version,
     modelId: primaryModelId,
@@ -175,6 +214,9 @@ function buildDeterminismFingerprintParams(
     rankingConfigHash,
     policyRuleVersion: snapshot.policy_rule_version,
     thresholdProfileId: snapshot.threshold_profile_id,
+    responseContractVersion: snapshot.response_contract_version,
+    ...(rerankApplied !== undefined ? { rerankApplied } : {}),
+    ...(rerankModelId !== undefined ? { rerankModelId } : {}),
   };
 }
 
@@ -234,6 +276,10 @@ export interface SearchPostRouteExecutionContext {
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
   /** E4: RRF fusion trace from CandidatePoolService, when hybrid path was used. */
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
+  /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
+  readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
+  /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
+  readonly correctiveRetryCalibration?: number | undefined;
   /** When true (options.explain=true), counterfactuals are always included. */
   readonly includeCounterfactuals?: boolean | undefined;
 }
@@ -460,7 +506,7 @@ export async function runRankedRouteDecisionPhase(
         ? { specializedRouteObservability: ctx.specializedRouteObservability }
         : {}),
       ...(auditExtension !== undefined ? { auditExtension } : {}),
-      determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions),
+      determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions, ctx.rankingMetadata),
     });
   } catch (buildErr) {
     if (buildErr instanceof EvidenceObligationError) {
@@ -558,10 +604,12 @@ export async function runSearchPostRoutePhase(
     reasonerOutput.relations,
     channelDegradation,
     { ltrAvailable },
+    reasonerOutput.atoms,
   );
 
-  // E4/E6: Derive AuditExtension after abstain evaluation so both retrieval_fusion_trace
-  // and abstain_policy_trace can be populated in a single pass.
+  // E4/E6/TA5: Derive AuditExtension after abstain evaluation so all traces
+  // (retrieval_fusion_trace, abstain_policy_trace, hard_filter_drop_log,
+  // corrective_retry_calibrated_confidence) can be populated in a single pass.
   const auditExtension = deriveAuditExtension(
     ctx.compiled,
     ctx.rankingMetadata,
@@ -569,6 +617,8 @@ export async function runSearchPostRoutePhase(
     ctx.retrievalFusionTrace,
     abstainDecision,
     channelDegradation,
+    ctx.hardFilterDropLog,
+    ctx.correctiveRetryCalibration,
   );
 
   // Apply caller-specified result limit after ranking + abstain check (both need the full set).
@@ -646,7 +696,7 @@ export async function runSearchPostRoutePhase(
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
             : {}),
           ...(auditExtension !== undefined ? { auditExtension } : {}),
-          determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions),
+          determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions, ctx.rankingMetadata),
         },
       );
     } catch (buildErr) {

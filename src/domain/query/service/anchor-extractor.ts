@@ -197,6 +197,23 @@ export class AnchorExtractor {
   }
 
   /**
+   * TA2-T2: Look up alias matches for a fuzzy-corrected term.
+   *
+   * Used by the Planner's fuzzy-match fallback path to resolve entity IDs
+   * for terms that the FuzzyMatcher corrected but that did not match during
+   * the original anchor extraction pass.
+   *
+   * Returns the raw AliasMatchResult array — callers are responsible for
+   * converting results to AnchorCandidates with `source: 'planner_heuristic'`.
+   *
+   * @param term - The fuzzy-corrected surface form to look up.
+   * @returns Zero or more alias match results, ordered by confidence descending.
+   */
+  async lookupForFuzzyTerm(term: string): Promise<readonly AliasMatchResult[]> {
+    return this.aliasMatcher.findMatches(term);
+  }
+
+  /**
    * Checks whether the query contains Korean mixed-query markers.
    *
    * These markers (같은, 비슷한, 말고, 대신, 보다) indicate that the user

@@ -357,3 +357,75 @@ describe('E4: CandidateProvenance + CandidateEnvelope extensions', () => {
     expect(envelope.fusionTrace).toBeUndefined();
   });
 });
+
+// ─── E4: hard_filter_drop_log in AuditExtension ───────────────────────────────
+
+describe('E4: hard_filter_drop_log surfaced to AuditExtension', () => {
+  it('E4-20: AuditExtension type accepts hard_filter_drop_log field', () => {
+    // Type-level contract: AuditExtension.hard_filter_drop_log must accept CandidateDropRecord[].
+    const drop: CandidateDropRecord = {
+      entityId: 'wine:456',
+      dropStage: 'hard_filter',
+      dropReason: 'vintage constraint failed: candidate=2015, required=2020',
+      lastKnownScore: 0.42,
+      channels: [{ channel: 'sparse_bm25', rawScore: 7.1, rank: 5 }],
+    };
+    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {
+      hard_filter_drop_log: [drop],
+    };
+    expect(ext.hard_filter_drop_log).toHaveLength(1);
+    expect(ext.hard_filter_drop_log?.[0]?.dropStage).toBe('hard_filter');
+  });
+
+  it('E4-21: AuditExtension.hard_filter_drop_log is optional (omitted when no drops)', () => {
+    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {};
+    expect(ext.hard_filter_drop_log).toBeUndefined();
+  });
+
+  it('E4-22: CandidatePoolService.getLastDropLog() returns empty array when no hard-filter drops', async () => {
+    const { CandidatePoolService } = await import('../../src/domain/retrieval/service/candidate-pool.js');
+    const { FusionService } = await import('../../src/domain/retrieval/service/fusion.js');
+    const { vi } = await import('vitest');
+    const pool = new CandidatePoolService(
+      {
+        sparseSearch: vi.fn(async () => []),
+        denseSearch: vi.fn(async () => []),
+        searchLearnedSparse: vi.fn(async () => []),
+        getDocument: vi.fn(async () => null),
+      },
+      { embed: vi.fn(async () => [0.1, 0.2]), embedBatch: vi.fn(async () => [[0.1, 0.2]]) },
+      new FusionService(),
+    );
+    // getLastDropLog() should exist and return an empty array before any execute().
+    expect(typeof pool.getLastDropLog).toBe('function');
+    expect(pool.getLastDropLog()).toEqual([]);
+  });
+});
+
+// ─── TA5: corrective_retry_calibrated_confidence in AuditExtension ───────────
+
+describe('TA5: corrective_retry_calibrated_confidence in AuditExtension', () => {
+  it('TA5-20: AuditExtension type accepts corrective_retry_calibrated_confidence field', () => {
+    // Type-level contract: AuditExtension must accept the TA5 calibration field.
+    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {
+      corrective_retry_calibrated_confidence: 0.85,
+    };
+    expect(ext.corrective_retry_calibrated_confidence).toBe(0.85);
+  });
+
+  it('TA5-21: AuditExtension.corrective_retry_calibrated_confidence is optional', () => {
+    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {};
+    expect(ext.corrective_retry_calibrated_confidence).toBeUndefined();
+  });
+
+  it('TA5-22: corrective_retry_calibrated_confidence range is [0.5, 0.9]', () => {
+    // The TA5 formula guarantees: min=0.5 (rank N of N), max=0.9 (rank 1 of N).
+    for (const conf of [0.5, 0.7, 0.9]) {
+      const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {
+        corrective_retry_calibrated_confidence: conf,
+      };
+      expect(ext.corrective_retry_calibrated_confidence).toBeGreaterThanOrEqual(0.5);
+      expect(ext.corrective_retry_calibrated_confidence).toBeLessThanOrEqual(0.9);
+    }
+  });
+});

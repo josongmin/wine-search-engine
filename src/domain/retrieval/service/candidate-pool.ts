@@ -5,6 +5,7 @@ import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type {
   CandidateEnvelope,
   CandidateChannel,
+  CandidateDropRecord,
   QueryViewMatch,
   RrfFusionTrace,
 } from '../model/candidate-envelope.js';
@@ -136,6 +137,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   private readonly candidateAssembler: CandidateAssembler;
   /** E4: Last RRF fusion trace, populated after each execute() call. */
   private _lastFusionTrace: RrfFusionTrace | undefined = undefined;
+  /** E4: Drop log from the most recent execute() call's hard-filter step. */
+  private _lastDropLog: readonly CandidateDropRecord[] = [];
 
   constructor(
     private readonly searchIndex: SearchIndexPort,
@@ -308,16 +311,26 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       if (!activeChannels.has('sparse_bm25')) {
         return { hits: [], degraded: false };
       }
+      // TA4: Merge entity hypothesis terms from fuzzy match into lexical queries.
+      // These are fuzzy-entity surface forms forwarded from the planner's anchor-miss
+      // path — they provide an entity-first BM25 seed separate from query expansion.
+      // Deduplicate to avoid double-scoring the same term already in lexicalQueries.
+      const baseQueries = input.lexicalQueries;
+      const hypothesisTerms = input.entityHypothesisTerms ?? [];
+      const effectiveLexicalQueries =
+        hypothesisTerms.length > 0
+          ? [...new Set([...baseQueries, ...hypothesisTerms])]
+          : baseQueries;
       // RCA5-08: empty lexicalQueries → Vespa receives an empty query array
       // which produces invalid YQL and a Vespa 500 error. Guard here in addition
       // to the vespa-search-index.ts guard — defence-in-depth, and allows the
       // candidate-pool to be tested without a Vespa dependency.
-      if (input.lexicalQueries.length === 0) {
+      if (effectiveLexicalQueries.length === 0) {
         return { hits: [], degraded: false };
       }
       try {
         const hits = await this.searchIndex.sparseSearch(
-          input.lexicalQueries,
+          effectiveLexicalQueries,
           filtersOrUndefined,
           profile.sparseTopN,
           vespaRankProfile,
@@ -725,10 +738,11 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       inferred: input.queryPlan.constraints.inferred,
     });
 
-    // Step 5: Apply hard constraint filter
-    candidates = [
-      ...this.constraintFilter.applyHardFilters(candidates, input.hardConstraints),
-    ];
+    // Step 5: Apply hard constraint filter (with drop log for E4 audit).
+    const { filtered: hardFiltered, drops: hardFilterDrops } =
+      this.constraintFilter.applyHardFiltersWithDropLog(candidates, input.hardConstraints);
+    candidates = [...hardFiltered];
+    this._lastDropLog = hardFilterDrops;
     const countAfterHardFilter = candidates.length;
 
     // Step 6: Structured assembly + protected recall.
@@ -799,6 +813,14 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
    */
   getLastFusionTrace(): RrfFusionTrace | undefined {
     return this._lastFusionTrace;
+  }
+
+  /**
+   * E4: Returns the hard-filter drop log from the most recent execute() call.
+   * Empty array before the first execute() call or when no candidates were dropped.
+   */
+  getLastDropLog(): readonly CandidateDropRecord[] {
+    return this._lastDropLog;
   }
 
   /**
