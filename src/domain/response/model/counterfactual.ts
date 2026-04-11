@@ -80,6 +80,14 @@ export interface ResponseMeta {
    */
   readonly response_hash?: string | undefined;
 
+  /**
+   * E1-T5: 16-char hex determinism fingerprint identifying the exact engine configuration
+   * (planner version, model, fusion config, ranking config). Two responses with the same
+   * fingerprint MUST produce identical rankings given the same index state.
+   * Omitted when fingerprint params are not supplied at call sites.
+   */
+  readonly determinism_fingerprint?: string | undefined;
+
   /** Deterministic authority id (mirrors `engineDecision.authorityTraceRef`). */
   readonly authorityTraceRef?: string | undefined;
 

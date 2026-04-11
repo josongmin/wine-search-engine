@@ -6,6 +6,7 @@ import type {
   CandidateEnvelope,
   CandidateChannel,
   QueryViewMatch,
+  RrfFusionTrace,
 } from '../model/candidate-envelope.js';
 import type { RetrievalTrace } from '../model/retrieval-trace.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
@@ -66,8 +67,18 @@ const HYBRID_ANCHOR_CONFIDENCE_DEFAULT = 0.5;
  * RFC-005 class — pairing intent is not surfaced as its own QueryClass
  * today, so that config remains unused until an upstream pairing class
  * lands.
+ *
+ * TRACK-A A4: runtimeMode 'entity_anchor_first' overrides to 'entity_exact'
+ * so the anchor-dominant fusion config is used instead of specific_wine.
  */
-function mapToFusionQueryClass(qc: DomainQueryClass): FusionQueryClass {
+function mapToFusionQueryClass(
+  qc: DomainQueryClass,
+  runtimeMode?: string,
+): FusionQueryClass {
+  // TRACK-A A4: anchor-first mode uses a tighter, anchor-dominant fusion config.
+  if (runtimeMode === 'entity_anchor_first') {
+    return 'entity_exact';
+  }
   switch (qc) {
     case 'exact_entity':
     case 'short_entity':
@@ -106,11 +117,25 @@ const QUERY_EXPANSION_TERM_WEIGHT_STEP = 0.25;
  *
  * Dependencies injected for testability and loose coupling (SOLID - D principle).
  */
+
+/**
+ * Retrieval modes that handle their own routing and must not be overridden by
+ * the TRACK-A A4 entity_anchor_first path. Only undefined / entity_lookup /
+ * entity_resolution / legacy mode strings are safe to override.
+ */
+const ANCHOR_FIRST_BLOCKED_MODES: ReadonlySet<string> = new Set([
+  'producer_browse', 'region_browse', 'compare_candidates',
+  'recommendation', 'similar_items', 'attribute_search',
+  'constraint_filter', 'no_match_detection',
+]);
+
 export class CandidatePoolService implements RetrievalExecutorV2Port {
   private readonly profileService: RetrievalProfileService;
   private readonly cascadeRouter: CascadeRouter;
   private readonly constraintFilter: ConstraintFilter;
   private readonly candidateAssembler: CandidateAssembler;
+  /** E4: Last RRF fusion trace, populated after each execute() call. */
+  private _lastFusionTrace: RrfFusionTrace | undefined = undefined;
 
   constructor(
     private readonly searchIndex: SearchIndexPort,
@@ -202,7 +227,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         'cascade vs estimator difficulty',
       );
     }
-    const activeChannels = this.resolveActiveChannels(profile.channelMix, dispatchDecision, input);
+    const activeChannels = this.resolveActiveChannels(profile.channelMix, dispatchDecision, input, retrievalMode);
     const allPhases: RetrievalPhase[] = [
       'sparse',
       'learned_sparse',
@@ -231,7 +256,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       );
       filters.push(...priceTokens);
     }
-    const anchorDocument = await this.loadAnchorDocumentIfNeeded(input, activeChannels);
+    const anchorDocument = await this.loadAnchorDocumentIfNeeded(input, activeChannels, retrievalMode);
     const anchorProfile = this.resolveAnchorProfile(input, anchorDocument);
 
     // Select Vespa rank profile based on retrieval mode.
@@ -630,7 +655,8 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     // behavior-preserving for queries outside the 5 mapped classes. The
     // profile.fusionK still acts as the ultimate fallback when the mapped
     // class resolves to 'fallback' AND profile opts to a non-default k.
-    const fusionConfig = getFusionConfig(mapToFusionQueryClass(input.queryPlan.queryClass));
+    const fusionQueryClass = mapToFusionQueryClass(input.queryPlan.queryClass, retrievalMode);
+    const fusionConfig = getFusionConfig(fusionQueryClass);
     const effectiveFusionK = fusionConfig.rrfK;
     let candidates = this.fusionService.fuse(
       sparseHits,
@@ -639,6 +665,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       effectiveFusionK,
       learnedSparseHits,
     );
+    const countAfterFusion = candidates.length;
 
     // Enrich traces with pipeline context.
     // Perf: the query-level trace fields (lexical/semantic queries, filters,
@@ -702,6 +729,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     candidates = [
       ...this.constraintFilter.applyHardFilters(candidates, input.hardConstraints),
     ];
+    const countAfterHardFilter = candidates.length;
 
     // Step 6: Structured assembly + protected recall.
     const envelopes = candidates.map((candidate) =>
@@ -712,6 +740,28 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       accumulated.map((entry) => entry.mergedEnvelope),
       buildAssemblyPolicy(profile.finalTopK),
     );
+
+    this._lastFusionTrace = {
+      queryClass: input.queryPlan.queryClass,
+      fusionClass: fusionQueryClass,
+      rrfK: effectiveFusionK,
+      channelWeights: {
+        sparse: fusionConfig.sparseWeight,
+        dense: fusionConfig.denseWeight,
+        anchor: fusionConfig.anchorWeight,
+        learnedSparse: fusionConfig.learnedSparseWeight,
+      },
+      candidateCount: {
+        beforeFusion: {
+          sparse: sparseHits.length,
+          dense: denseHits.length,
+          anchor: anchorHits?.length ?? 0,
+        },
+        afterFusion: countAfterFusion,
+        afterHardFilter: countAfterHardFilter,
+        afterAssembly: assembled.candidates.length,
+      },
+    };
 
     pipelineDebug(
       {
@@ -743,6 +793,15 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   }
 
   /**
+   * E4: Returns the RRF fusion trace from the most recent execute() call.
+   * Returns undefined before the first execute() call.
+   * Mirrors the getLastFunnelMetrics() pattern on RankingPort.
+   */
+  getLastFusionTrace(): RrfFusionTrace | undefined {
+    return this._lastFusionTrace;
+  }
+
+  /**
    * Heuristic estimate of alias match strength for cascade routing.
    * CandidatePool intentionally stays downstream of planning/anchor extraction,
    * so it uses anchor confidence propagated by the planner rather than reaching
@@ -769,6 +828,23 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     if (baseMode === 'compare_candidates' && input.anchorEntityId !== undefined) {
       return 'relative';
     }
+    // TRACK-A A4: exact_entity / short_entity WITH non-empty anchors → anchor-first dual path.
+    // The planner has resolved at least one entity with a confidence score — prioritise the
+    // entity-anchor channel in fusion so the exact target surfaces at rank 1.
+    // Condition: queryClass is exact_entity or short_entity AND anchors array is non-empty.
+    // No override when baseMode is already a specialised mode (producer_browse, etc.) —
+    // those paths handle their own routing.
+    const isEntityQueryClass =
+      input.queryPlan.queryClass === 'exact_entity' ||
+      input.queryPlan.queryClass === 'short_entity';
+    const hasAnchors = input.queryPlan.anchors.length > 0;
+    // Allow entity_anchor_first override only when the base mode is absent or a
+    // generic entity lookup mode. Specialised modes (producer_browse, region_browse,
+    // compare_candidates, etc.) handle their own routing and must not be overridden.
+    const noSpecialMode = !ANCHOR_FIRST_BLOCKED_MODES.has(baseMode);
+    if (isEntityQueryClass && hasAnchors && noSpecialMode) {
+      return 'entity_anchor_first';
+    }
     return baseMode;
   }
 
@@ -776,6 +852,7 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     profileChannels: readonly CandidateChannel[],
     dispatchDecision: ReturnType<CascadeRouter['getDispatchDecision']>,
     input: HybridRetrievalInput,
+    runtimeMode?: string,
   ): ReadonlySet<CandidateChannel> {
     const dispatchChannels = new Set(dispatchDecision.channelsToActivate);
     const active = new Set<CandidateChannel>();
@@ -793,6 +870,24 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
 
       if (channel === 'relative_filter' && input.anchorEntityId !== undefined) {
         active.add(channel);
+        continue;
+      }
+
+      // TRACK-A A4: entity_anchor_first mode activates all three of its channels
+      // regardless of cascade difficulty.  The cascade router routes exact_entity /
+      // short_entity to 'easy' (sparse only) when aliasMatchStrength ≥ 0.9, which
+      // would otherwise suppress both anchor_similarity and dense_semantic.  We
+      // intentionally override that suppression — the profile includes all three
+      // channels and the whole purpose of entity_anchor_first is to run the anchor
+      // ANN pass.  dense_semantic is kept (damped in future weighted fusion) because
+      // it fills the pool with nearby wines that may not have exact-match BM25 hits.
+      if (runtimeMode === 'entity_anchor_first' && (
+        channel === 'anchor_similarity' ||
+        channel === 'dense_semantic' ||
+        channel === 'sparse_bm25'
+      )) {
+        active.add(channel);
+        continue;
       }
     }
 
@@ -824,18 +919,32 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
   private async loadAnchorDocumentIfNeeded(
     input: HybridRetrievalInput,
     activeChannels: ReadonlySet<CandidateChannel>,
+    runtimeMode?: string,
   ): Promise<RetrievalDocument | undefined> {
-    if (
-      input.anchorEntityId === undefined
-      || (
-        !activeChannels.has('anchor_similarity')
-        && !activeChannels.has('relative_filter')
-      )
-    ) {
+    const needsAnchorChannel =
+      activeChannels.has('anchor_similarity') || activeChannels.has('relative_filter');
+    if (!needsAnchorChannel) {
       return undefined;
     }
 
-    const anchorDocument = await this.searchIndex.getDocument(input.anchorEntityId);
+    // Prefer the explicit anchorEntityId from the input (set by compare_candidates
+    // path).  TRACK-A A4: for entity_anchor_first mode the input may not carry an
+    // explicit anchorEntityId — derive it from the first planner anchor instead.
+    let resolvedAnchorEntityId = input.anchorEntityId;
+    if (resolvedAnchorEntityId === undefined && runtimeMode === 'entity_anchor_first') {
+      // Anchors are sorted by confidence at planning time; take the first candidate
+      // entity ID of the highest-confidence anchor.  candidateEntityIds is always
+      // non-empty when an anchor is emitted (empty arrays are pruned by the planner).
+      const firstAnchor = input.queryPlan.anchors[0];
+      const firstEntityId = firstAnchor?.candidateEntityIds[0];
+      resolvedAnchorEntityId = firstEntityId;
+    }
+
+    if (resolvedAnchorEntityId === undefined) {
+      return undefined;
+    }
+
+    const anchorDocument = await this.searchIndex.getDocument(resolvedAnchorEntityId);
     return anchorDocument ?? undefined;
   }
 

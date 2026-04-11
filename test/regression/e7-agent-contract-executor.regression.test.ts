@@ -367,10 +367,13 @@ describe('E7: Additional batch policy coverage (critical audit findings)', () =>
     expect(result.allowed).toBe(false);
   });
 
-  it('E7-27: 2x search_wines → blocked (maxPerBatch=1)', () => {
+  it('E7-27: 2x search_wines → allowed (parallel multi-query is valid; maxPerBatch=4)', () => {
+    // Multiple search_wines calls in one parallel batch are intentional — the agent
+    // may resolve "compare A vs B" by firing two independent searches concurrently.
+    // The original validateParallelBatchPolicy() permitted this; evaluateBatchPolicy()
+    // was corrected to match (maxPerBatch=4 for search_wines).
     const result = evaluateBatchPolicy([makeCall('search_wines'), makeCall('search_wines')]);
-    expect(result.allowed).toBe(false);
-    if (!result.allowed) expect(result.reason).toContain('maxPerBatch');
+    expect(result.allowed).toBe(true);
   });
 
   it('E7-28: 2x get_food_pairings → blocked (maxPerBatch=1)', () => {

@@ -9,6 +9,7 @@ import {
   computeExecutionModeBlockingEligibleMatrix,
   computeExecutionModeSlices,
   computeSpecializedFallbackMetrics,
+  computeSlotF1Aggregates,
   type OfflineEvalCaseResult,
 } from '../../../scripts/eval/run-offline-eval.js';
 
@@ -354,6 +355,113 @@ describe('offline eval reporting helpers', () => {
       share: 0.5,
     });
     expect(report.specialized_fallback_summary?.fallback_rate.producer_browse?.fallback_rate).toBe(1);
+  });
+
+  describe('computeSlotF1Aggregates (RFC-020)', () => {
+    it('returns undefined when no result has expected_constraints', () => {
+      const result = computeSlotF1Aggregates([makeCaseResult(), makeCaseResult()]);
+      expect(result).toBeUndefined();
+    });
+
+    it('returns undefined when expected_constraints present but extracted_constraints absent', () => {
+      const result = computeSlotF1Aggregates([
+        makeCaseResult({
+          query: makeGoldenQuery({
+            expected_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+          }),
+          // extracted_constraints omitted — engine did not emit them
+        }),
+      ]);
+      expect(result).toBeUndefined();
+    });
+
+    it('returns undefined when extracted_constraints present but expected_constraints absent', () => {
+      const result = computeSlotF1Aggregates([
+        makeCaseResult({
+          extracted_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+          // query has no expected_constraints
+        }),
+      ]);
+      expect(result).toBeUndefined();
+    });
+
+    it('computes perfect F1=1.0 when extracted matches expected exactly', () => {
+      const result = computeSlotF1Aggregates([
+        makeCaseResult({
+          query: makeGoldenQuery({
+            expected_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+          }),
+          extracted_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+        }),
+      ]);
+
+      expect(result).not.toBeUndefined();
+      expect(result!.slot_f1_query_count).toBe(1);
+      expect(result!.mean_slot_f1_strict).toBeCloseTo(1.0, 5);
+      expect(result!.mean_slot_f1_relaxed).toBeCloseTo(1.0, 5);
+    });
+
+    it('computes F1=0 when extracted and expected have no attribute overlap', () => {
+      const result = computeSlotF1Aggregates([
+        makeCaseResult({
+          query: makeGoldenQuery({
+            expected_constraints: [{ attribute: 'grape', value: 'Cabernet Sauvignon' }],
+          }),
+          extracted_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+        }),
+      ]);
+
+      expect(result).not.toBeUndefined();
+      expect(result!.mean_slot_f1_strict).toBeCloseTo(0.0, 5);
+      expect(result!.mean_slot_f1_relaxed).toBeCloseTo(0.0, 5);
+    });
+
+    it('averages F1 across multiple queries — only counts annotated queries', () => {
+      // Q1: annotated + extracted → perfect match (F1=1.0)
+      // Q2: annotated + extracted → no match (F1=0.0)
+      // Q3: not annotated — skipped
+      const results = computeSlotF1Aggregates([
+        makeCaseResult({
+          query: makeGoldenQuery({
+            qid: 'q-1',
+            expected_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+          }),
+          extracted_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+        }),
+        makeCaseResult({
+          query: makeGoldenQuery({
+            qid: 'q-2',
+            expected_constraints: [{ attribute: 'region', value: 'Bordeaux' }],
+          }),
+          extracted_constraints: [{ attribute: 'grape', value: 'Pinot Noir' }],
+        }),
+        makeCaseResult({
+          query: makeGoldenQuery({ qid: 'q-3' }),
+          // no expected_constraints, no extracted_constraints
+        }),
+      ]);
+
+      expect(results).not.toBeUndefined();
+      expect(results!.slot_f1_query_count).toBe(2);
+      expect(results!.mean_slot_f1_strict).toBeCloseTo(0.5, 5);
+      expect(results!.mean_slot_f1_relaxed).toBeCloseTo(0.5, 5);
+    });
+
+    it('relaxed mode gives higher F1 for numerically close values than strict', () => {
+      // strict: value '40' vs expected '50' → no match (different string)
+      // relaxed: |40-50|/50 = 0.2 → within 50% → match (F1=1.0)
+      const strictResult = computeSlotF1Aggregates([
+        makeCaseResult({
+          query: makeGoldenQuery({
+            expected_constraints: [{ attribute: 'price_max', value: '50', operator: 'lte' }],
+          }),
+          extracted_constraints: [{ attribute: 'price_max', value: '40', operator: 'lte' }],
+        }),
+      ]);
+
+      expect(strictResult!.mean_slot_f1_strict).toBeCloseTo(0.0, 5);
+      expect(strictResult!.mean_slot_f1_relaxed).toBeCloseTo(1.0, 5);
+    });
   });
 
   it('highlights stable accuracy with higher degraded share in baseline comparison', () => {

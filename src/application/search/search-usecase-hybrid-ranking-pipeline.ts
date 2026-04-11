@@ -1,5 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -78,7 +79,7 @@ export async function resolveEntityRouteForPlan(
   }
 
   // TA2-4: Invoke blocker to surface entity IDs not covered by alias anchors.
-  let blockerOnlyIds: readonly import('../../domain/shared/types/index.js').EntityId[] = [];
+  let blockerOnlyIds: readonly EntityId[] = [];
   if (deps.blocker !== undefined) {
     const allBlockerIds = await deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
     const anchorCoveredIds = new Set(
@@ -326,6 +327,14 @@ export async function executeHybridRouteRankingPipeline(
           ...(relaxedRetrieval.specializedRouteObservability !== undefined
             ? { specializedRouteObservability: relaxedRetrieval.specializedRouteObservability }
             : {}),
+          // Prefer the relaxed-retrieval fusion trace (it reflects the actual
+          // candidates returned), falling back to the original retrieval trace
+          // if the relaxed path produced none.
+          ...(relaxedRetrieval.retrievalFusionTrace !== undefined
+            ? { retrievalFusionTrace: relaxedRetrieval.retrievalFusionTrace }
+            : retrieval.retrievalFusionTrace !== undefined
+              ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
+              : {}),
         };
       }
       // Still no results — try next relaxation step.
@@ -352,6 +361,9 @@ export async function executeHybridRouteRankingPipeline(
         ...(retrieval.specializedRouteObservability !== undefined
           ? { specializedRouteObservability: retrieval.specializedRouteObservability }
           : {}),
+        ...(retrieval.retrievalFusionTrace !== undefined
+          ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
+          : {}),
       };
     }
   }
@@ -363,6 +375,9 @@ export async function executeHybridRouteRankingPipeline(
       ...(retrieval.specializedRouteObservability !== undefined
         ? { specializedRouteObservability: retrieval.specializedRouteObservability }
         : {}),
+      ...(retrieval.retrievalFusionTrace !== undefined
+        ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
+        : {}),
     };
   }
 
@@ -371,6 +386,9 @@ export async function executeHybridRouteRankingPipeline(
     routeDegradation: mergeRouteDegradation(ranked.routeDegradation, retrieval.routeDegradation),
     ...(retrieval.specializedRouteObservability !== undefined
       ? { specializedRouteObservability: retrieval.specializedRouteObservability }
+      : {}),
+    ...(retrieval.retrievalFusionTrace !== undefined
+      ? { retrievalFusionTrace: retrieval.retrievalFusionTrace }
       : {}),
   };
 }

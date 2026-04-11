@@ -35,6 +35,13 @@ import {
   type AgentToolDeps,
   type AgentToolResult,
 } from './agent-tools.js';
+import { evaluateBatchPolicy } from './tool-batch-policy.js';
+import {
+  type ExpectedOutputSchema,
+  isAgentToolName,
+  type ToolOutcome,
+  type ToolOutcomeKind,
+} from './tool-outcome.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { containsHangul } from '../../domain/shared/utils/hangul.js';
@@ -60,6 +67,159 @@ const DEFAULT_TOOL_TIMEOUT_MS = 8_000;
 const DEFAULT_PARALLEL_BATCH_TIMEOUT_MS = 10_000;
 /** Log-preview chars for non-parseable LLM text — enough to diagnose without bloating the log line. */
 const LOG_PREVIEW_CHARS = 200;
+
+/**
+ * E7-T2: Classify a tool call's ToolOutcomeKind from its observation string and error state.
+ *
+ * Classification priority:
+ *  1. Timed-out (TIMEOUT prefix)
+ *  2. Policy blocked (Policy blocked: prefix)
+ *  3. Tool error (Tool error: prefix or rawResult null from error path)
+ *  4. Empty result (0개 / NO_MATCH / 검색 결과가 없습니다)
+ *  5. Success (rawResult is a SearchResponseV1 with results)
+ *  6. Default: success (non-null rawResult)
+ */
+function classifyToolOutcomeKind(
+  observation: string,
+  rawResult: unknown,
+  execError: boolean,
+  timedOut: boolean,
+  policyBlocked: boolean,
+): ToolOutcomeKind {
+  if (timedOut) return 'timeout';
+  if (policyBlocked) return 'policy_violation';
+  if (execError) return 'tool_error';
+  if (
+    observation.startsWith('NO_MATCH:') ||
+    observation.includes('0개') ||
+    observation.includes('검색 결과가 없습니다')
+  ) return 'empty_result';
+  if (rawResult != null) return 'success';
+  return 'tool_error';
+}
+
+function buildToolOutcomeStepId(
+  requestId: string,
+  stepIndex: number,
+  toolPosition: number,
+): string {
+  return `${requestId}:${stepIndex}:${toolPosition}`;
+}
+
+function getExpectedOutputSchema(tool: string): ExpectedOutputSchema | undefined {
+  if (tool === 'search_wines' || tool === 'get_food_pairings') {
+    return {
+      minResults: 1,
+      requiredFields: ['entity.entityId', 'entity.canonicalLabel'],
+    };
+  }
+  if (tool === 'compare_wines') {
+    return {
+      minResults: 2,
+      requiredFields: ['topResult.entity.entityId', 'topResult.entity.canonicalLabel'],
+    };
+  }
+  if (tool === 'check_drinking_window') {
+    return {
+      requiredFields: ['drinkingWindowStart', 'drinkingWindowEnd', 'currentlyDrinkable'],
+    };
+  }
+  return undefined;
+}
+
+function getComparableResultItems(tool: string, rawResult: unknown): readonly unknown[] | undefined {
+  if (typeof rawResult !== 'object' || rawResult === null) {
+    return undefined;
+  }
+  const record = rawResult as Record<string, unknown>;
+  if (
+    (tool === 'search_wines' || tool === 'get_food_pairings') &&
+    record['queryType'] === 'search' &&
+    Array.isArray(record['results'])
+  ) {
+    return record['results'];
+  }
+  if (tool === 'compare_wines' && record['queryType'] === 'comparison' && Array.isArray(record['entities'])) {
+    return record['entities']
+      .filter((entity): entity is Record<string, unknown> => typeof entity === 'object' && entity !== null)
+      .filter((entity) => entity['topResult'] !== null);
+  }
+  if (tool === 'check_drinking_window') {
+    return [record];
+  }
+  return undefined;
+}
+
+function getValueAtPath(input: unknown, path: string): unknown {
+  const segments = path.split('.');
+  let current: unknown = input;
+  for (const segment of segments) {
+    if (typeof current !== 'object' || current === null) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return current;
+}
+
+function validateToolPostconditions(tool: string, rawResult: unknown): readonly string[] {
+  const expected = getExpectedOutputSchema(tool);
+  const items = getComparableResultItems(tool, rawResult);
+  if (expected === undefined || items === undefined) {
+    return [];
+  }
+
+  const violations: string[] = [];
+  if (expected.minResults !== undefined && items.length < expected.minResults) {
+    violations.push(`minResults: expected >=${expected.minResults}, got ${items.length}`);
+  }
+  for (const field of expected.requiredFields ?? []) {
+    if (items.some((item) => getValueAtPath(item, field) == null)) {
+      violations.push(`requiredFields: missing ${field}`);
+    }
+  }
+  return violations;
+}
+
+function buildToolOutcome(
+  requestId: string,
+  stepIndex: number,
+  toolPosition: number,
+  tool: string,
+  observation: string,
+  rawResult: unknown,
+  durationMs: number,
+  execError: boolean,
+  timedOut: boolean,
+  policyViolation: boolean,
+): ToolOutcome {
+  const baseKind = classifyToolOutcomeKind(
+    observation,
+    rawResult,
+    threwError,
+    timedOut,
+    policyViolation,
+  );
+  const postconditionViolations =
+    baseKind === 'success' && isAgentToolName(tool)
+      ? validateToolPostconditions(tool, rawResult)
+      : [];
+  const kind =
+    baseKind === 'success' && postconditionViolations.length > 0
+      ? 'partial_result'
+      : baseKind;
+  return {
+    stepId: buildToolOutcomeStepId(requestId, stepIndex, toolPosition),
+    tool: isAgentToolName(tool) ? tool : tool,
+    kind,
+    ...(rawResult != null ? { result: rawResult } : {}),
+    ...((kind === 'tool_error' || kind === 'timeout' || kind === 'policy_violation')
+      ? { errorMessage: observation }
+      : {}),
+    ...(postconditionViolations.length > 0 ? { postconditionViolations } : {}),
+    durationMs,
+  };
+}
 /** Longer log-preview chars for step-level debug output (more context than error previews). */
 const STEP_LOG_PREVIEW_CHARS = 500;
 /** Rough estimate: 4 characters ≈ 1 LLM token (for budget tracking only, not billing). */
@@ -103,36 +263,6 @@ async function withTimeout<T>(work: Promise<T>, timeoutMs: number, message: stri
   } finally {
     if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
   }
-}
-
-function validateParallelBatchPolicy(
-  calls: readonly { readonly tool: string; readonly input: Record<string, unknown> }[],
-): { readonly allowed: true } | { readonly allowed: false; readonly reason: string } {
-  const toolSet = new Set(calls.map((c) => c.tool));
-  const hasCompare = toolSet.has('compare_wines');
-  const hasSearch = toolSet.has('search_wines');
-  const hasWindow = toolSet.has('check_drinking_window');
-  const hasPairing = toolSet.has('get_food_pairings');
-
-  // compare_wines already returns a full comparison payload and should not run
-  // in the same parallel turn with unrelated tools — OR with another compare_wines call.
-  // Bug fix: check calls.length (raw count), not toolSet.size (deduplicated by tool name).
-  // toolSet.size === 1 even when the LLM emits two compare_wines with different inputs,
-  // allowing two concurrent compare_wines calls to slip through the guard silently.
-  if (hasCompare && calls.length > 1) {
-    return { allowed: false, reason: 'compare_wines must run alone in a step' };
-  }
-  // Drinking-window checks are safe to parallelize with each other, but mixing
-  // with search/pairing in the same batch creates ambiguous synthesis context.
-  if (hasWindow && (hasSearch || hasPairing || hasCompare)) {
-    return { allowed: false, reason: 'check_drinking_window batch must include only check_drinking_window calls' };
-  }
-  // get_food_pairings may run with search_wines (independent retrieval), but
-  // not with compare_wines or check_drinking_window.
-  if (hasPairing && (hasCompare || hasWindow)) {
-    return { allowed: false, reason: 'get_food_pairings can only batch with search_wines' };
-  }
-  return { allowed: true };
 }
 
 /**
@@ -378,6 +508,8 @@ export class AgentOrchestrator {
     }
     const budget = new StepBudget(effectiveConfig);
     const steps: AgentStep[] = [];
+    // E7-T2: Typed tool outcomes, generated alongside AgentStep for each tool invocation.
+    const toolOutcomes: ToolOutcome[] = [];
     let lastSearchResult: SearchResponseV1 | undefined;
     let terminationReason: AgentTerminationReason = 'max_steps';
     let totalInputTokens = 0;
@@ -668,13 +800,30 @@ export class AgentOrchestrator {
             terminationReason = 'error';
             const truncatedActions = batchCalls.slice(0, MAX_TOOLS_PER_BATCH);
             const batchErrorMsg = `Batch too large: ${batchCalls.length} tools requested (max ${MAX_TOOLS_PER_BATCH}). Retry with fewer parallel calls.`;
+            const batchDurationMs = Math.max(0, Date.now() - stepStart);
+            for (let bi = 0; bi < truncatedActions.length; bi++) {
+              toolOutcomes.push(
+                buildToolOutcome(
+                  requestId,
+                  steps.length,
+                  bi,
+                  truncatedActions[bi]!.tool,
+                  batchErrorMsg,
+                  null,
+                  batchDurationMs,
+                  false,
+                  false,
+                  true,
+                ),
+              );
+            }
             steps.push({
               index: steps.length,
               thought: parsed.thought,
               actionPairs: truncatedActions.map((a) => ({ action: a, observation: batchErrorMsg })),
               actions: truncatedActions,
               observations: truncatedActions.map(() => batchErrorMsg),
-              durationMs: Math.max(0, Date.now() - stepStart),
+              durationMs: batchDurationMs,
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             break;
@@ -690,29 +839,63 @@ export class AgentOrchestrator {
             }
             {
               const unknownToolMsg = `Unknown tool: ${unknownTool.tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+              const batchDurationMs = Math.max(0, Date.now() - stepStart);
+              for (let bi = 0; bi < batchCalls.length; bi++) {
+                toolOutcomes.push(
+                  buildToolOutcome(
+                    requestId,
+                    steps.length,
+                    bi,
+                    batchCalls[bi]!.tool,
+                    unknownToolMsg,
+                    null,
+                    batchDurationMs,
+                    false,
+                    false,
+                    true,
+                  ),
+                );
+              }
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
                 actionPairs: batchCalls.map((a) => ({ action: a, observation: unknownToolMsg })),
                 actions: batchCalls,
                 observations: batchCalls.map(() => unknownToolMsg),
-                durationMs: Math.max(0, Date.now() - stepStart),
+                durationMs: batchDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
               });
             }
             continue;
           }
 
-          const batchPolicy = validateParallelBatchPolicy(batchCalls);
+          const batchPolicy = evaluateBatchPolicy(batchCalls);
           if (!batchPolicy.allowed) {
             const policyMsg = `Invalid parallel batch: ${batchPolicy.reason}. Allowed: search_wines+search_wines/get_food_pairings, or check_drinking_window-only batches, or compare_wines alone.`;
+            const batchDurationMs = Math.max(0, Date.now() - stepStart);
+            for (let bi = 0; bi < batchCalls.length; bi++) {
+              toolOutcomes.push(
+                buildToolOutcome(
+                  requestId,
+                  steps.length,
+                  bi,
+                  batchCalls[bi]!.tool,
+                  policyMsg,
+                  null,
+                  batchDurationMs,
+                  false,
+                  false,
+                  true,
+                ),
+              );
+            }
             steps.push({
               index: steps.length,
               thought: parsed.thought,
               actionPairs: batchCalls.map((a) => ({ action: a, observation: policyMsg })),
               actions: batchCalls,
               observations: batchCalls.map(() => policyMsg),
-              durationMs: Math.max(0, Date.now() - stepStart),
+              durationMs: batchDurationMs,
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             continue;
@@ -755,12 +938,46 @@ export class AgentOrchestrator {
               // a single tool's internal timeout, sibling tools are still running.
               // Abort explicitly to release resources (Vespa connections, LLM calls).
               batchAbortController.abort();
+              const batchDurationMs = Math.max(0, Date.now() - stepStart);
+              for (let bi = 0; bi < batchCalls.length; bi++) {
+                toolOutcomes.push(
+                  buildToolOutcome(
+                    requestId,
+                    steps.length,
+                    bi,
+                    batchCalls[bi]!.tool,
+                    '[ABORTED] Request cancelled during parallel tool execution.',
+                    null,
+                    batchDurationMs,
+                    true,
+                    false,
+                    false,
+                  ),
+                );
+              }
               terminationReason = 'aborted';
               break;
             }
             if ((batchErr as TimeoutErrorLike).code === 'TIMEOUT') {
               timeoutStats.parallelBatch += 1;
               batchAbortController.abort();
+              const batchDurationMs = Math.max(0, Date.now() - stepStart);
+              for (let bi = 0; bi < batchCalls.length; bi++) {
+                toolOutcomes.push(
+                  buildToolOutcome(
+                    requestId,
+                    steps.length,
+                    bi,
+                    batchCalls[bi]!.tool,
+                    '[TIMEOUT] Parallel tool batch timed out.',
+                    null,
+                    batchDurationMs,
+                    false,
+                    true,
+                    false,
+                  ),
+                );
+              }
               terminationReason = 'timeout';
               break;
             }
@@ -772,13 +989,30 @@ export class AgentOrchestrator {
               batchAbortController.abort();
               {
                 const policyMsg = `Policy blocked: ${batchErr.message}`;
+                const batchDurationMs = Math.max(0, Date.now() - stepStart);
+                for (let bi = 0; bi < batchCalls.length; bi++) {
+                  toolOutcomes.push(
+                    buildToolOutcome(
+                      requestId,
+                      steps.length,
+                      bi,
+                      batchCalls[bi]!.tool,
+                      policyMsg,
+                      null,
+                      batchDurationMs,
+                      false,
+                      false,
+                      true,
+                    ),
+                  );
+                }
                 steps.push({
                   index: steps.length,
                   thought: parsed.thought,
                   actionPairs: batchCalls.map((a) => ({ action: a, observation: policyMsg })),
                   actions: batchCalls,
                   observations: batchCalls.map(() => policyMsg),
-                  durationMs: Math.max(0, Date.now() - stepStart),
+                  durationMs: batchDurationMs,
                   tokenCount: { input: inputTokens, output: outputTokens },
                 });
               }
@@ -813,15 +1047,38 @@ export class AgentOrchestrator {
             }
           }
 
+          const batchDurationMs = Math.max(0, Date.now() - stepStart);
+          const batchStepIndex = steps.length;
           steps.push({
-            index: steps.length,
+            index: batchStepIndex,
             thought: parsed.thought,
             actionPairs: batchPairs,
             actions: batchCalls,
             observations,
-            durationMs: Math.max(0, Date.now() - stepStart),
+            durationMs: batchDurationMs,
             tokenCount: { input: inputTokens, output: outputTokens },
           });
+
+          // E7-T2: Generate typed ToolOutcome for each tool in the batch.
+          for (let bi = 0; bi < batchResults.length; bi++) {
+            const result = batchResults[bi]!;
+            const call = batchCalls[bi]!;
+            const obs = observations[bi] ?? '';
+            toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                batchStepIndex,
+                bi,
+                call.tool,
+                obs,
+                result.rawResult,
+                batchDurationMs,
+                false,
+                false,
+                false,
+              ),
+            );
+          }
 
           const remainingAfterBatch = effectiveConfig.maxSteps - budget.getStepCount();
           if (
@@ -851,12 +1108,28 @@ export class AgentOrchestrator {
               terminationReason = 'error';
               break;
             }
+            const stepDurationMs = Math.max(0, Date.now() - stepStart);
+            const unknownToolMsg = `Unknown tool: ${tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`;
+            toolOutcomes.push(
+              buildToolOutcome(
+                requestId,
+                steps.length,
+                0,
+                tool,
+                unknownToolMsg,
+                null,
+                stepDurationMs,
+                false,
+                false,
+                true,
+              ),
+            );
             steps.push({
               index: steps.length,
               thought: parsed.thought,
               action: { tool, input },
-              observation: `Unknown tool: ${tool}. Available: search_wines, compare_wines, check_drinking_window, get_food_pairings`,
-              durationMs: Math.max(0, Date.now() - stepStart),
+              observation: unknownToolMsg,
+              durationMs: stepDurationMs,
               tokenCount: { input: inputTokens, output: outputTokens },
             });
             continue;
@@ -898,12 +1171,27 @@ export class AgentOrchestrator {
               // the agent to retry the same timed-out tool call. (RCA5-06)
               observation = `[TIMEOUT] Tool "${tool}" timed out. Try a different approach or a narrower query.`;
               rawResult = null;
+              const stepDurationMs = Math.max(0, Date.now() - stepStart);
+              toolOutcomes.push(
+                buildToolOutcome(
+                  requestId,
+                  steps.length,
+                  0,
+                  tool,
+                  observation,
+                  rawResult,
+                  stepDurationMs,
+                  false,
+                  true,
+                  false,
+                ),
+              );
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
                 action: { tool, input },
                 observation,
-                durationMs: Math.max(0, Date.now() - stepStart),
+                durationMs: stepDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
               });
               break;
@@ -912,12 +1200,28 @@ export class AgentOrchestrator {
             // disconnected. Terminate immediately — do NOT classify as a tool error.
             if (isAbortError(toolErr)) {
               terminationReason = 'aborted';
+              const stepDurationMs = Math.max(0, Date.now() - stepStart);
+              const abortedObservation = '[ABORTED] Request cancelled during tool execution.';
+              toolOutcomes.push(
+                buildToolOutcome(
+                  requestId,
+                  steps.length,
+                  0,
+                  tool,
+                  abortedObservation,
+                  null,
+                  stepDurationMs,
+                  true,
+                  false,
+                  false,
+                ),
+              );
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
                 action: { tool, input },
-                observation: '[ABORTED] Request cancelled during tool execution.',
-                durationMs: Math.max(0, Date.now() - stepStart),
+                observation: abortedObservation,
+                durationMs: stepDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
               });
               break;
@@ -927,12 +1231,28 @@ export class AgentOrchestrator {
             if (toolErr instanceof DomainError && toolErr.code === POLICY_BLOCKED_CODE) {
               policyBlocked = true;
               terminationReason = 'blocked';
+              const stepDurationMs = Math.max(0, Date.now() - stepStart);
+              const blockedObservation = `Policy blocked: ${toolErr.message}`;
+              toolOutcomes.push(
+                buildToolOutcome(
+                  requestId,
+                  steps.length,
+                  0,
+                  tool,
+                  blockedObservation,
+                  null,
+                  stepDurationMs,
+                  false,
+                  false,
+                  true,
+                ),
+              );
               steps.push({
                 index: steps.length,
                 thought: parsed.thought,
                 action: { tool, input },
-                observation: `Policy blocked: ${toolErr.message}`,
-                durationMs: Math.max(0, Date.now() - stepStart),
+                observation: blockedObservation,
+                durationMs: stepDurationMs,
                 tokenCount: { input: inputTokens, output: outputTokens },
               });
               break;
@@ -960,14 +1280,34 @@ export class AgentOrchestrator {
             lastSearchResult = rawResult as SearchResponseV1;
           }
 
+          const stepDurationMs = Math.max(0, Date.now() - stepStart);
           steps.push({
             index: steps.length,
             thought: parsed.thought,
             action: { tool, input },
             observation,
-            durationMs: Math.max(0, Date.now() - stepStart),
+            durationMs: stepDurationMs,
             tokenCount: { input: inputTokens, output: outputTokens },
           });
+
+          // E7-T2: Generate typed ToolOutcome alongside AgentStep.
+          // At this point: TIMEOUT/abort/policy paths already called break, so
+          // if we reach here the tool either succeeded or threw a generic error
+          // (rawResult === null, observation starts with "Tool error:").
+          toolOutcomes.push(
+            buildToolOutcome(
+              requestId,
+              steps.length - 1,
+              0,
+              tool,
+              observation,
+              rawResult,
+              stepDurationMs,
+              rawResult === null,
+              false,
+              false,
+            ),
+          );
 
           // Constraint-relaxation hint: if the observation indicates zero results
           // and we have enough remaining steps, inject a hint once into the next
@@ -1002,6 +1342,7 @@ export class AgentOrchestrator {
     // the raw query through the search use case would just hit the same
     // security gate (or worse, slip through if the gate state changed).
     let fallbackApplied = false;
+    let fallbackLayer: SynthesisContext['fallbackApplied'] = null;
     // Require non-empty answer string: a step with answer='' is not a valid answer.
     // Without the length check, synthesis layers below all skip and empty string propagates.
     let answer = steps.find((s) => s.answer !== undefined && s.answer.length > 0)?.answer ?? '';
@@ -1217,6 +1558,7 @@ export class AgentOrchestrator {
             : `Based on your query, I found: ${topResult.entity.canonicalLabel}${detail ? ` (${detail})` : ''}. (Note: simplified result due to processing constraints.)`;
           lastSearchResult = fallbackResult.queryType === 'search' ? fallbackResult : undefined;
           fallbackApplied = true;
+          fallbackLayer = 'layer2';
           terminationReason = 'fallback';
         } else {
           // Fallback search returned no results — construct a graceful template answer.
@@ -1226,6 +1568,7 @@ export class AgentOrchestrator {
             ? `"${query}"에 대한 검색 결과를 찾지 못했습니다. 검색어를 더 간단하게 바꾸거나 다른 와인명이나 품종으로 다시 시도해보세요.`
             : `No results found for "${query}". Try simplifying the query or using a different wine name or grape variety.`;
           fallbackApplied = true;
+          fallbackLayer = 'layer2';
           terminationReason = 'fallback';
         }
       } catch (err) {
@@ -1262,6 +1605,7 @@ export class AgentOrchestrator {
           ? `검색 결과 요약: ${preview}`
           : `Search result summary: ${preview}`;
         fallbackApplied = true;
+        fallbackLayer = 'layer3';
         // When tool observations exist, the agent successfully called the right tools —
         // only the synthesis LLM call failed (infrastructure). Use terminationReason='answer'
         // so the scorer credits correct tool execution rather than penalising as full failure.
@@ -1281,6 +1625,7 @@ export class AgentOrchestrator {
       // so the caller can distinguish abort from genuine failure.
       answer = '요청하신 와인 정보를 현재 처리하지 못했습니다. 검색어를 바꿔서 다시 시도해주세요.';
       fallbackApplied = true;
+      fallbackLayer = 'layer4';
       // Same reasoning as Layer 3: if tool observations exist, the agent execution was
       // correct; only synthesis failed. Use 'answer' to avoid penalising correct execution.
       terminationReason = hasToolObservations ? 'answer' : 'fallback';
@@ -1313,6 +1658,13 @@ export class AgentOrchestrator {
       timeoutStats,
     });
 
+    const synthesisContext = buildSynthesisContext(
+      query,
+      toolOutcomes,
+      fallbackLayer !== null,
+      fallbackLayer,
+    );
+
     // AG-02: normalise answer whitespace at the exit point so all code paths
     // (main-loop answer, synthesis, fallback templates) produce a consistent
     // trimmed string. Fallback templates are already clean but applying .trim()
@@ -1326,6 +1678,9 @@ export class AgentOrchestrator {
       fallbackApplied,
       terminationReason,
       ...(lastSearchResult !== undefined ? { searchResults: lastSearchResult } : {}),
+      // E7-T2: Include typed tool outcomes when at least one tool was invoked.
+      ...(toolOutcomes.length > 0 ? { toolOutcomes } : {}),
+      synthesisContext,
     };
   }
 }

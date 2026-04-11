@@ -8,6 +8,7 @@ import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker.port.js';
+import { AbstainPolicy } from '../../../../src/domain/query/service/abstain-policy.js';
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -804,6 +805,76 @@ describe('runSearchPostRoutePhase', () => {
       gateDecision: 'applied',
       scoreContract: 'bounded_normalized_0_1',
     });
+  });
+
+  it('wires structured clarify payload and runtime degradation into the entropy-abstain path', async () => {
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+    const plan = minimalPlan();
+    const request: SearchRequest = { query: 'x' };
+    const rankedResults = [
+      makeRankedResult({
+        entityId: createEntityId('wine:structured-clarify'),
+        canonicalLabel: 'Structured Clarify Wine',
+        finalScore: 0.51,
+      }),
+    ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+    const decisionEngine = makeDecisionEngine();
+
+    await runSearchPostRoutePhase({
+      plan,
+      request,
+      requestId: 'req-clarify',
+      startTime: Date.now() - 10,
+      resolveResult: {
+        ...makeResolveResult({
+          candidates: rankedResults.map((result) => ({
+            entityId: result.entityId,
+            canonicalLabel: result.canonicalLabel,
+            calibratedScore: 0.51,
+            rank: 1,
+            evidenceRefs: ['alias:structured'],
+          })),
+          degradation: { reasons: ['entity_resolver_unavailable'] },
+        }),
+        status: 'failed',
+      },
+      rankedResults,
+      effectiveRoute: 'hybrid',
+      routeDegradation: {
+        executionMode: 'degraded',
+        degradationReasons: ['dense_retrieval_disabled'],
+      },
+      plannerSuggestedMode: 'hybrid',
+      retrievalModeSource: 'planner',
+      abstainPolicy: new AbstainPolicy(0.95, 3),
+      snapshotVersions: {
+        modelVersions: {},
+        indexVersions: {},
+        featureFlags: {},
+      },
+      decisionEngine: decisionEngine as never,
+      responseBuilder: responseBuilder as never,
+      drinkingWindow: undefined,
+      cacheService: undefined,
+    });
+
+    const buildParams = responseBuilder.build.mock.calls[0]?.[0] as {
+      clarification?: {
+        structuredPayload?: {
+          kind: string;
+          question: string;
+          options?: string[];
+        };
+      };
+      decisionOutput?: { nextAction?: string };
+    };
+
+    expect(buildParams.decisionOutput?.nextAction).toBe('clarify');
+    expect(buildParams.clarification?.structuredPayload?.kind).toBe('preference_gap');
+    expect(buildParams.clarification?.structuredPayload?.question).toContain('검색 신호가 부족합니다');
+    expect(buildParams.clarification?.structuredPayload?.options).toEqual([
+      'Structured Clarify Wine',
+    ]);
   });
 
   it.each([

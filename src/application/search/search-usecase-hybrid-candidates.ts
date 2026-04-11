@@ -4,6 +4,7 @@ import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candid
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
+import type { RrfFusionTrace } from '../../domain/retrieval/model/candidate-envelope.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import type {
   BrowseRetrieverPort,
@@ -82,6 +83,10 @@ export interface HybridCandidateRetrievalResult {
   readonly candidates: readonly HybridCandidate[];
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  /** E4: RRF fusion trace from CandidatePoolService.getLastFusionTrace(). Present only
+   *  when the generic hybrid path (candidatePool.execute) was used — absent for
+   *  specialized browse/compare paths that bypass RRF fusion. */
+  readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
 }
 
 export function buildHybridRetrievalInputForPlan(
@@ -367,8 +372,14 @@ export async function retrieveHybridCandidatesForPlan(
   const candidates = ports.candidatePool.execute !== undefined
     ? await ports.candidatePool.execute(retrievalInput)
     : await ports.candidatePool.generate(retrievalInput);
+  // E4: Retrieve the RRF fusion trace produced during execute()/generate().
+  // Only available when candidatePool implements getLastFusionTrace() (CandidatePoolService).
+  // Specialized browse/compare paths that return early above do NOT have a fusion trace
+  // (they bypass the RRF fusion step entirely), so this is intentionally absent there.
+  const retrievalFusionTrace = ports.candidatePool.getLastFusionTrace?.();
   return {
     candidates,
+    ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
     ...(degradationReasons.size > 0
       ? {
           routeDegradation: {

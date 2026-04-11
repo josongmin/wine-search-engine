@@ -30,6 +30,7 @@ describe('per-class-fusion-config', () => {
   it('every declared QueryClass has a config registered', () => {
     const classes: readonly QueryClass[] = [
       'specific_wine',
+      'entity_exact',
       'browse',
       'compare',
       'pairing',

@@ -202,15 +202,23 @@ const scenarioC: QueryGen = (rec, _all, idx) => {
   // Semantic preference query (no wine name, style-based)
   const lang = assignLanguage(idx);
   let query: string;
+  // Extract just the top-level region label (before any "/" separator)
+  const regionLabel = rec.region ? rec.region.split('/')[0]!.trim() : '';
   if (lang === 'ko' || lang === 'mixed') {
     const bodyDesc = rec.body >= 0.7 ? '묵직한' : rec.body >= 0.4 ? '미디엄' : '가벼운';
     const typeDesc = rec.wineType === 'red' ? '레드' : rec.wineType === 'white' ? '화이트' : rec.wineType;
-    const regionPart = rec.region ? ` ${rec.region}` : '';
-    query = `${bodyDesc}${regionPart} ${typeDesc}`;
+    const regionPart = regionLabel ? ` ${regionLabel}` : '';
+    query = `${bodyDesc}${regionPart} ${typeDesc} 추천`;
   } else {
-    const bodyDesc = rec.body >= 0.7 ? 'full bodied' : rec.body >= 0.4 ? 'medium body' : 'light';
-    const regionPart = rec.region ? ` ${rec.region}` : '';
-    query = `${bodyDesc}${regionPart} ${rec.wineType}`;
+    const bodyDesc = rec.body >= 0.7 ? 'full-bodied' : rec.body >= 0.4 ? 'medium-bodied' : 'light-bodied';
+    if (regionLabel) {
+      // Vary phrasing: "recommend a full-bodied Barolo red" or "Tuscany red with medium body"
+      query = idx % 2 === 0
+        ? `recommend a ${bodyDesc} ${regionLabel} ${rec.wineType}`
+        : `${regionLabel} ${rec.wineType} with ${bodyDesc.replace('-', ' ')} body`;
+    } else {
+      query = `recommend a ${bodyDesc} ${rec.wineType}`;
+    }
   }
   return {
     qid: makeQid('C', idx),
@@ -244,14 +252,25 @@ const scenarioD: QueryGen = (rec, _all, idx) => {
   if (rec.priceUsd === null) return null;
   const lang = assignLanguage(idx);
   let query: string;
+  // Extract just the top-level region label (before any "/" separator)
+  const regionLabel = rec.region ? rec.region.split('/')[0]!.trim() : '';
   if (lang === 'ko' || lang === 'mixed') {
     const priceLabel =
       rec.priceUsd < 50 ? '5만원 이하' : rec.priceUsd < 150 ? '15만원 이하' : '50만원 이하';
-    query = `${rec.region} ${rec.wineType === 'red' ? '레드' : rec.wineType} ${priceLabel}`;
+    const typeDesc = rec.wineType === 'red' ? '레드' : rec.wineType === 'white' ? '화이트' : rec.wineType;
+    const regionPart = regionLabel ? `${regionLabel} ` : '';
+    query = `${regionPart}${typeDesc} ${priceLabel}`;
   } else {
     const priceLabel =
       rec.priceUsd < 50 ? 'under $50' : rec.priceUsd < 150 ? 'under $150' : 'under $500';
-    query = `${rec.region} ${rec.wineType} ${priceLabel}`;
+    if (regionLabel) {
+      // Vary phrasing: "red wine from Barolo under $150" or "good Rioja red for under $50"
+      query = idx % 2 === 0
+        ? `${rec.wineType} from ${regionLabel} ${priceLabel}`
+        : `good ${regionLabel} ${rec.wineType} for ${priceLabel}`;
+    } else {
+      query = `${rec.wineType} ${priceLabel}`;
+    }
   }
   return {
     qid: makeQid('D', idx),

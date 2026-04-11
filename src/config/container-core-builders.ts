@@ -43,7 +43,10 @@ import type {
 
 export function buildSnapshotVersions(config: Config): SnapshotVersions {
   return {
-    modelVersions: { embedding: config.embedding.model },
+    modelVersions: {
+      dense_model: config.embedding.model,
+      reranker_model: process.env['COHERE_RERANK_MODEL'] ?? 'rerank-v4.0-pro',
+    },
     indexVersions: { wine_content: config.vespa.contentCluster },
     featureFlags: {
       killSwitchAliasOverlay: config.killSwitch.aliasOverlay,

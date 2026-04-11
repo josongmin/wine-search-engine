@@ -33,6 +33,7 @@ import {
   browseLineDiversityAtK,
   grapeVarietyAtK,
   prestigeMeanAtK,
+  scoreSlotF1,
   type RankedHit,
   type DecisionOutcome,
   type GroundTruth,
@@ -47,6 +48,7 @@ import {
   type EvalBlockingEligibleBucket,
   type EvalCountShareBucket,
   type EvalReleaseReport,
+  type ConstraintSlot,
 } from './metrics.js';
 import { multipleComparison, type MultiComparisonResult } from './significance.js';
 import {
@@ -297,6 +299,8 @@ async function forEachPool<T>(
 interface SearchResult {
   readonly ranked: RankedHit[];
   readonly decision: DecisionOutcome;
+  /** RFC-020: Constraint slots extracted by the engine, if present in meta. */
+  readonly extracted_constraints?: readonly ConstraintSlot[];
 }
 
 export interface OfflineEvalCaseResult {
@@ -304,6 +308,12 @@ export interface OfflineEvalCaseResult {
   readonly ranked: RankedHit[];
   readonly decision: DecisionOutcome;
   readonly truth: GroundTruth;
+  /**
+   * RFC-020: Constraint slots extracted by the engine for this query.
+   * Populated from the search response `meta.extracted_constraints` field when present.
+   * Undefined when the engine did not return constraint extraction data.
+   */
+  readonly extracted_constraints?: readonly ConstraintSlot[];
 }
 
 export interface OfflinePerQueryMetrics {
@@ -419,6 +429,32 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
     const fallbackApplied = meta['fallback_applied'] ?? meta['fallbackApplied'];
     const fallbackReason = meta['fallback_reason'] ?? meta['fallbackReason'];
 
+    // RFC-020: parse extracted_constraints from meta if the engine provides them.
+    // Accepts both snake_case and camelCase field names for forward-compatibility.
+    const rawExtractedConstraints =
+      meta['extracted_constraints'] ?? meta['extractedConstraints'];
+    const extractedConstraints: ConstraintSlot[] | undefined = Array.isArray(rawExtractedConstraints)
+      ? (rawExtractedConstraints as unknown[]).reduce<ConstraintSlot[]>((acc, item) => {
+          if (item !== null && typeof item === 'object') {
+            const slot = item as Record<string, unknown>;
+            const attribute = slot['attribute'];
+            const value = slot['value'];
+            if (typeof attribute === 'string' && attribute.length > 0 && typeof value === 'string') {
+              const operator = slot['operator'];
+              const validOperators = new Set(['eq', 'lt', 'lte', 'gt', 'gte', 'range']);
+              acc.push({
+                attribute,
+                value,
+                ...(typeof operator === 'string' && validOperators.has(operator)
+                  ? { operator: operator as ConstraintSlot['operator'] }
+                  : {}),
+              });
+            }
+          }
+          return acc;
+        }, [])
+      : undefined;
+
     const decision: DecisionOutcome = {
       decision_status: decisionStatus as 'resolved' | 'ambiguous' | 'failed',
       top_entity_id: ranked[0]?.entity_id ?? null,
@@ -474,7 +510,11 @@ async function executeSearch(goldenQuery: GoldenQuery, timeoutMs: number): Promi
         : {}),
     };
 
-    return { ranked, decision };
+    return {
+      ranked,
+      decision,
+      ...(extractedConstraints !== undefined ? { extracted_constraints: extractedConstraints } : {}),
+    };
   } catch {
     return {
       ranked: [],
@@ -1524,6 +1564,52 @@ function finalizeEntityTypeAccumulator(
   };
 }
 
+// ---------------------------------------------------------------------------
+// RFC-020: Slot F1 aggregate helper (exported for unit testing)
+// ---------------------------------------------------------------------------
+
+export interface SlotF1Aggregates {
+  readonly mean_slot_f1_strict: number;
+  readonly mean_slot_f1_relaxed: number;
+  readonly slot_f1_query_count: number;
+}
+
+/**
+ * Compute aggregate Slot F1 metrics across a result set.
+ *
+ * A query contributes to the aggregate only when:
+ *   - `result.query.expected_constraints` is a non-null array (annotated)
+ *   - `result.extracted_constraints` is a non-null array (engine emitted them)
+ *
+ * Returns `undefined` when no query satisfies both conditions (graceful no-op).
+ */
+export function computeSlotF1Aggregates(
+  results: readonly OfflineEvalCaseResult[],
+): SlotF1Aggregates | undefined {
+  let strictTotal = 0;
+  let relaxedTotal = 0;
+  let count = 0;
+
+  for (const result of results) {
+    if (result.query.expected_constraints == null || result.extracted_constraints == null) {
+      continue;
+    }
+    strictTotal += scoreSlotF1(result.extracted_constraints, result.query.expected_constraints, 'strict').f1;
+    relaxedTotal += scoreSlotF1(result.extracted_constraints, result.query.expected_constraints, 'relaxed').f1;
+    count += 1;
+  }
+
+  if (count === 0) {
+    return undefined;
+  }
+
+  return {
+    mean_slot_f1_strict: strictTotal / count,
+    mean_slot_f1_relaxed: relaxedTotal / count,
+    slot_f1_query_count: count,
+  };
+}
+
 interface CountBucket {
   query_count: number;
 }
@@ -1808,6 +1894,11 @@ async function run(): Promise<void> {
   };
   const specializedFallbackHistogram = new Map<string, number>();
 
+  // RFC-020: Slot F1 accumulators — only count queries where expected_constraints is present.
+  let slotF1StrictTotal = 0;
+  let slotF1RelaxedTotal = 0;
+  let slotF1QueryCount = 0;
+
   await Promise.race([
     forEachPool(
       evalQueries,
@@ -1815,8 +1906,12 @@ async function run(): Promise<void> {
       async (q) => {
         let ranked: RankedHit[];
         let decision: DecisionOutcome;
+        let searchExtractedConstraints: readonly ConstraintSlot[] | undefined;
         try {
-          ({ ranked, decision } = await executeSearch(q, timeoutMs));
+          const searchResult = await executeSearch(q, timeoutMs);
+          ranked = searchResult.ranked;
+          decision = searchResult.decision;
+          searchExtractedConstraints = searchResult.extracted_constraints;
         } catch (err) {
           console.error(`[eval] query "${q.query}" (qid=${q.qid}) threw — recording as error:`, err);
           ranked = [];
@@ -1828,7 +1923,15 @@ async function run(): Promise<void> {
         }
 
         const truth = queryToGroundTruth(q);
-        const result = { query: q, ranked, decision, truth } satisfies OfflineEvalCaseResult;
+        const result: OfflineEvalCaseResult = {
+          query: q,
+          ranked,
+          decision,
+          truth,
+          ...(searchExtractedConstraints !== undefined
+            ? { extracted_constraints: searchExtractedConstraints }
+            : {}),
+        };
 
         const ndcgAt10 = ndcg(ranked, truth.relevant, 10);
         const mrrAt10 = reciprocalRank(ranked, truth.relevant, 10);
@@ -1857,6 +1960,25 @@ async function run(): Promise<void> {
           perQueryMetrics.recall_at_100.push(recallAt100);
           perQueryMetrics.decision_utility.push(decisionUtilityValue);
           perQueryMetrics.non_wrong_top1_rate.push(nonWrongTop1RateValue);
+        }
+
+        // RFC-020: Slot F1 — compute when query has expected_constraints annotated.
+        // Graceful no-op when either expected_constraints is absent (annotation not yet done)
+        // or extracted_constraints is absent (engine does not yet emit them).
+        if (q.expected_constraints != null && result.extracted_constraints != null) {
+          const strictResult = scoreSlotF1(
+            result.extracted_constraints,
+            q.expected_constraints,
+            'strict',
+          );
+          const relaxedResult = scoreSlotF1(
+            result.extracted_constraints,
+            q.expected_constraints,
+            'relaxed',
+          );
+          slotF1StrictTotal += strictResult.f1;
+          slotF1RelaxedTotal += relaxedResult.f1;
+          slotF1QueryCount += 1;
         }
 
         const scenarioAccumulator =
@@ -2072,6 +2194,14 @@ async function run(): Promise<void> {
     by_blocking_eligible: byBlockingEligible,
     degradation_reason_histogram: degradationReasonHistogram,
     execution_mode_x_blocking_eligible: executionModeBlockingEligible,
+    // RFC-020: Slot F1 — include aggregate metrics when at least one query was scored.
+    ...(slotF1QueryCount > 0
+      ? {
+          mean_slot_f1_strict: slotF1StrictTotal / slotF1QueryCount,
+          mean_slot_f1_relaxed: slotF1RelaxedTotal / slotF1QueryCount,
+          slot_f1_query_count: slotF1QueryCount,
+        }
+      : {}),
   };
 
   // Add optional Epic 11 fields if present
@@ -2130,6 +2260,13 @@ async function run(): Promise<void> {
   console.log(`  WrongTop1 rate:   ${evalResult.wrong_top1_rate.toFixed(4)}`);
   console.log(`  AURC:             ${evalResult.aurc.toFixed(4)}`);
   console.log(`  ECE:              ${evalResult.ece.toFixed(4)}`);
+  if (evalResult.mean_slot_f1_strict !== undefined) {
+    console.log(
+      `  SlotF1 (strict):  ${evalResult.mean_slot_f1_strict.toFixed(4)}` +
+      `  (n=${evalResult.slot_f1_query_count ?? 0})`,
+    );
+    console.log(`  SlotF1 (relaxed): ${(evalResult.mean_slot_f1_relaxed ?? 0).toFixed(4)}`);
+  }
   if (evalResult.baseline_comparison) {
     console.log('\n  vs baseline:');
     console.log(`    ndcg@10 Δ:       ${evalResult.baseline_comparison.deltas.ndcg_at_10.toFixed(4)}`);

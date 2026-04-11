@@ -181,6 +181,7 @@ export class HybridUseCase {
       routeDegradation,
       rankingMetadata,
       specializedRouteObservability,
+      retrievalFusionTrace,
     } = hybridPipelineResult;
 
     throwIfAborted(options?.abortSignal, 'Hybrid search execution aborted');
@@ -226,6 +227,7 @@ export class HybridUseCase {
       routeDegradation,
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
+      ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
     });
   }
 }

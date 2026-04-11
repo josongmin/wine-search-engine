@@ -7,6 +7,7 @@ import type { RankingDegradationSignal } from '../../domain/ranking/model/rankin
 import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { EntityId } from '../../domain/shared/types/index.js';
+import type { RrfFusionTrace } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 
 export interface SearchRouteDecisionContext {
@@ -26,6 +27,8 @@ export interface SearchRouteExecutionResult {
   readonly funnelMetrics?: FunnelMetrics | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  /** E4: RRF fusion trace from the candidate pool, when hybrid RRF path was used. */
+  readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
 }
 
 /**

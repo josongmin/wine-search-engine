@@ -40,6 +40,10 @@ import type { SpecializedRouteObservability } from '../model/specialized-route.j
 import { toSpecializedRouteMeta } from '../model/specialized-route.js';
 import { EvidenceObligationError } from '../../shared/error/domain-error.js';
 import { isCorruptedSnapshot } from '../../shared/types/index.js';
+import {
+  buildDeterminismFingerprint,
+  type DeterminismFingerprintParams,
+} from '../../shared/utils/determinism-fingerprint.js';
 
 /**
  * Parameters required by {@link ResponseBuilder.build}.
@@ -106,6 +110,14 @@ export interface ResponseBuildParams {
    * Use conditional spread at call sites: `...(auditExtension !== undefined ? { auditExtension } : {})`.
    */
   readonly auditExtension?: AuditExtension | undefined;
+
+  /**
+   * E1-T5: Optional determinism fingerprint params.
+   * When provided, meta.determinism_fingerprint is populated with a stable 16-char hex digest
+   * that identifies the exact engine configuration (planner version, model, fusion config, etc.).
+   * Two responses with the same fingerprint MUST produce identical rankings for the same index state.
+   */
+  readonly determinismFingerprintParams?: DeterminismFingerprintParams | undefined;
 }
 
 /** Fixed-point precision for confidence in deterministic response hash. */
@@ -164,6 +176,13 @@ export class ResponseBuilder {
       snapshotCorrupted ? '' : snapshot.planner_version,
     );
 
+    // E1-T5: Build determinism fingerprint when params are supplied.
+    // The fingerprint covers only engine configuration — not query text or request ID —
+    // so that identical configurations always produce the same fingerprint regardless of query.
+    const determinismFingerprint = params.determinismFingerprintParams != null
+      ? buildDeterminismFingerprint(params.determinismFingerprintParams)
+      : undefined;
+
     const meta: ResponseMeta = {
       requestId: params.requestId,
       queryTimeMs: params.queryTimeMs,
@@ -173,6 +192,7 @@ export class ResponseBuilder {
       decisionSnapshot: snapshot,
       ...(debugRefs !== undefined ? { debugRefs } : {}),
       response_hash: responseHash,
+      ...(determinismFingerprint !== undefined ? { determinism_fingerprint: determinismFingerprint } : {}),
       authorityTraceRef: params.decisionOutput.decisionTraceRef,
       ...(params.requestId !== undefined ? { runtimeCorrelationRef: params.requestId } : {}),
       executionMode: contract.executionMode,

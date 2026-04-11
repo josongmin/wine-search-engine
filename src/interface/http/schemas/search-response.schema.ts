@@ -165,6 +165,18 @@ export const ClarificationPayloadSchema = z.object({
   reason: z.string().min(1),
   candidates: z.array(ClarificationCandidateSchema).max(MAX_CLARIFICATION_CANDIDATES),
   suggestion_type: z.enum(['disambiguation', 'missing_info']),
+  structured_payload: z.object({
+    kind: z.enum([
+      'anchor_disambiguation',
+      'constraint_conflict',
+      'preference_gap',
+      'budget_gap',
+    ]),
+    question: z.string().min(1),
+    options: z.array(z.string().min(1)).optional(),
+    conflicting_atoms: z.tuple([z.string().min(1), z.string().min(1)]).optional(),
+    gap_description: z.string().min(1).optional(),
+  }).strict().optional(),
 }).strict();
 
 export const CounterfactualRejectSchema = z.object({

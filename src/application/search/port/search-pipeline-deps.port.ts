@@ -5,6 +5,7 @@ import type { EntityResolveResult } from '../../../domain/resolver/model/resolve
 import type { HybridRetrievalInput } from '../../../domain/retrieval/model/retrieval-input.js';
 import type { HybridCandidate } from '../../../domain/retrieval/model/hybrid-candidate.js';
 import type { RetrievalDocument } from '../../../domain/retrieval/model/retrieval-document.js';
+import type { RrfFusionTrace } from '../../../domain/retrieval/model/candidate-envelope.js';
 import type { RankingInput } from '../../../domain/ranking/model/ranking-input.js';
 import type { FunnelMetrics } from '../../../domain/ranking/model/ranking-stage.js';
 import type { RankerRuntimeSignal } from '../../../domain/ranking/model/ranking-runtime-signal.js';
@@ -50,6 +51,13 @@ export interface EntityResolverPort {
 export interface CandidatePoolPort {
   execute?(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
   generate(input: HybridRetrievalInput): Promise<readonly HybridCandidate[]>;
+  /**
+   * Returns the RRF fusion trace from the most recent execute() call.
+   * Pattern mirrors getLastFunnelMetrics() on RankingPort.
+   * Only implemented by CandidatePoolService — optional so existing stubs/adapters
+   * do not need to be updated.
+   */
+  getLastFusionTrace?(): RrfFusionTrace | undefined;
 }
 
 export interface EntityDocumentLookupPort {
@@ -123,5 +131,5 @@ export interface BlockingUseCasePort {
     query: string,
     normalizedQuery: string,
     options?: { readonly broader?: boolean },
-  ): Promise<readonly import('../../../domain/shared/types/index.js').EntityId[]>;
+  ): Promise<readonly EntityId[]>;
 }

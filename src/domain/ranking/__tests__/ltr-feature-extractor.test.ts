@@ -109,7 +109,7 @@ describe('extractLTRFeatures', () => {
 // criticScore와 producerPrestige의 default 처리가 비대칭 (0.0 vs 0.5).
 // 잘못된 default는 train-serve skew를 유발한다.
 describe('extractExtendedLTRFeatures (BUG-13)', () => {
-  it('includes all 8 base features plus criticScoreFeature and producerPrestigeFeature', () => {
+  it('includes all 8 base features plus criticScoreFeature, producerPrestigeFeature, and 4 target-type 1-hot fields', () => {
     const scores: LTRScoreComponents = {
       semantic: 0.8,
       popularity: 0.5,
@@ -119,9 +119,15 @@ describe('extractExtendedLTRFeatures (BUG-13)', () => {
       producerPrestige: 0.7,
     };
     const features = extractExtendedLTRFeatures(scores);
-    expect(Object.keys(features)).toHaveLength(10);
+    // 8 base + criticScoreFeature + producerPrestigeFeature + 4 target-type 1-hot = 14
+    expect(Object.keys(features)).toHaveLength(14);
     expect(features.criticScoreFeature).toBe(0.9);
     expect(features.producerPrestigeFeature).toBe(0.7);
+    // No targetType supplied → all 1-hot zeros
+    expect(features.isTargetWine).toBe(0);
+    expect(features.isTargetProducer).toBe(0);
+    expect(features.isTargetRegion).toBe(0);
+    expect(features.isTargetStyle).toBe(0);
   });
 
   it('criticScore undefined → 0.0 default (not 0.5 — 0 means no critic data)', () => {

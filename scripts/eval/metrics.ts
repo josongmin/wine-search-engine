@@ -805,6 +805,23 @@ export interface EvalResult {
 
   non_blocking_metrics?: readonly string[];
 
+  // RFC-020: Slot F1 aggregate metrics — only present when ≥1 query has expected_constraints.
+  /**
+   * Mean Slot F1 (strict mode) across all queries that have `expected_constraints` annotated.
+   * Undefined when no query in the eval set carries expected_constraints.
+   */
+  readonly mean_slot_f1_strict?: number;
+  /**
+   * Mean Slot F1 (relaxed mode) across all queries that have `expected_constraints` annotated.
+   * Undefined when no query in the eval set carries expected_constraints.
+   */
+  readonly mean_slot_f1_relaxed?: number;
+  /**
+   * Number of queries that contributed to the Slot F1 averages.
+   * Undefined when Slot F1 is not computed.
+   */
+  readonly slot_f1_query_count?: number;
+
   // T5.7: Optional statistical diagnostics for offline eval comparisons.
   diagnostics?: {
     readonly per_query_metrics?: {

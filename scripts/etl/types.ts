@@ -546,4 +546,17 @@ export interface GoldenQuery {
 
   /** Optional retrieval mode (inferred from query class). Epic 11. */
   readonly retrieval_mode?: RetrievalMode;
+
+  /**
+   * RFC-020: Expected constraint slots for Slot F1 evaluation.
+   * Each slot is an attribute + value pair representing a query constraint
+   * (e.g. region=Bordeaux, price_max<=50). When present, the eval pipeline
+   * computes Slot F1 against the engine-extracted constraints.
+   * When absent, Slot F1 is silently skipped for this query.
+   */
+  readonly expected_constraints?: readonly {
+    readonly attribute: string;
+    readonly value: string;
+    readonly operator?: 'eq' | 'lt' | 'lte' | 'gt' | 'gte' | 'range';
+  }[];
 }

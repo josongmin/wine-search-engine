@@ -95,6 +95,41 @@ const EXACT_SAFE_FALLBACK: RetrievalProfile = {
 } as const;
 
 /**
+ * TRACK-A A4: Entity-anchor-first profile for exact_entity / short_entity
+ * queries WHERE a resolved anchor is present.
+ *
+ * Channel mix: anchor_similarity fires FIRST (highest RRF weight), BM25
+ * provides a precision backstop, dense_semantic is kept but damped so the
+ * anchor entity is never buried by semantic neighbours.
+ *
+ * Profile constants (no magic numbers — mirrors FUSION_ENTITY_EXACT rationale):
+ *   anchorWeight dominant: the planner resolved the entity, anchor channel
+ *     must win the fusion to surface the exact entity at rank 1.
+ *   sparseTopN / denseTopN conservative: this is a precision-first path —
+ *     we do not need wide recall; 50/30 caps avoid unnecessary Vespa cost.
+ *   finalTopK 50: entity lookups expect a tight, ranked short-list.
+ */
+
+/** Top-N sparse hits for anchor-first entity paths: precision-first, not recall. */
+const ENTITY_ANCHOR_FIRST_SPARSE_TOP_N = 50;
+/** Top-N dense hits for anchor-first entity paths. */
+const ENTITY_ANCHOR_FIRST_DENSE_TOP_N = 30;
+/** Final candidate ceiling after fusion for anchor-first entity paths. */
+const ENTITY_ANCHOR_FIRST_FINAL_TOP_K = 50;
+
+const ENTITY_ANCHOR_FIRST: RetrievalProfile = {
+  name: 'entity_anchor_first',
+  channelMix: ['anchor_similarity', 'sparse_bm25', 'dense_semantic'],
+  sparseWeight: 0.3,
+  denseWeight: 0.1,
+  anchorWeight: 0.6,
+  sparseTopN: ENTITY_ANCHOR_FIRST_SPARSE_TOP_N,
+  denseTopN: ENTITY_ANCHOR_FIRST_DENSE_TOP_N,
+  fusionK: RRF_DEFAULT_K,
+  finalTopK: ENTITY_ANCHOR_FIRST_FINAL_TOP_K,
+} as const;
+
+/**
  * T4.1: Profile for producer browse queries.
  * Lean on sparse to match producer names; no anchor neighborhood.
  */
@@ -249,13 +284,14 @@ export class RetrievalProfileService {
     if (queryFamily !== undefined && retrievalMode === undefined) {
       const decision = resolveChannelMix(queryFamily);
       switch (decision.profileName) {
-        case 'compare_default':    return COMPARE_DEFAULT;
-        case 'mixed_anchor':       return MIXED_ANCHOR;
-        case 'browse_default':     return BROWSE_DEFAULT;
-        case 'region_browse':      return REGION_BROWSE;
-        case 'exact_safe_fallback': return EXACT_SAFE_FALLBACK;
-        case 'relative_filter':    return RELATIVE_FILTER;
-        case 'hybrid_default':     return HYBRID_DEFAULT;
+        case 'compare_default':       return COMPARE_DEFAULT;
+        case 'mixed_anchor':          return MIXED_ANCHOR;
+        case 'browse_default':        return BROWSE_DEFAULT;
+        case 'region_browse':         return REGION_BROWSE;
+        case 'exact_safe_fallback':   return EXACT_SAFE_FALLBACK;
+        case 'entity_anchor_first':   return ENTITY_ANCHOR_FIRST;
+        case 'relative_filter':       return RELATIVE_FILTER;
+        case 'hybrid_default':        return HYBRID_DEFAULT;
         // No default: fall through to legacy heuristics for unrecognised profiles
       }
     }
@@ -275,7 +311,10 @@ export class RetrievalProfileService {
         // Legacy V1 aliases like semantic_hybrid/hybrid_search intentionally
         // fall through to the queryClass/route heuristics below.
       } else
-      if (normalizedRetrievalMode === 'entity_lookup' || normalizedRetrievalMode === 'entity_resolution') {
+      if (normalizedRetrievalMode === 'entity_anchor_first') {
+        // TRACK-A A4: exact_entity / short_entity with resolved anchor — anchor leads.
+        return ENTITY_ANCHOR_FIRST;
+      } else if (normalizedRetrievalMode === 'entity_lookup' || normalizedRetrievalMode === 'entity_resolution') {
         return EXACT_SAFE_FALLBACK;
       } else if (normalizedRetrievalMode === 'attribute_search' || normalizedRetrievalMode === 'constraint_filter') {
         return HYBRID_DEFAULT;

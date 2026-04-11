@@ -54,6 +54,8 @@ const PROFILE_CHANNEL_MIXES = {
   // region_browse activates browse_region — distinct from producer browse.
   region_browse: ['sparse_bm25', 'dense_semantic', 'browse_region'] as const,
   exact_safe_fallback: ['sparse_bm25', 'dense_semantic'] as const,
+  // TRACK-A A4: anchor_similarity listed first to signal dispatch priority.
+  entity_anchor_first: ['anchor_similarity', 'sparse_bm25', 'dense_semantic'] as const,
   relative_filter: ['sparse_bm25', 'relative_filter'] as const,
 } as const satisfies Record<string, readonly RetrievalChannel[]>;
 

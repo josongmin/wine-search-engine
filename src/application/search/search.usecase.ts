@@ -1,5 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type { EntityId } from '../../domain/shared/types/index.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -307,6 +308,7 @@ export class SearchUseCase {
       funnelMetrics,
       rankingMetadata,
       specializedRouteObservability,
+      retrievalFusionTrace,
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
@@ -350,6 +352,7 @@ export class SearchUseCase {
       routeDegradation,
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
+      ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
       // Wire HTTP options.explain → includeCounterfactuals symmetrically:
       //   explain=true  → includeCounterfactuals=true (force on)
       //   explain=false → includeCounterfactuals=false (force off)
@@ -551,7 +554,7 @@ export class SearchUseCase {
   private async runBlockerForPlan(
     plan: QueryPlanV1,
     broader: boolean,
-  ): Promise<readonly import('../../domain/shared/types/index.js').EntityId[]> {
+  ): Promise<readonly EntityId[]> {
     if (this.deps.blocker === undefined) {
       return [];
     }

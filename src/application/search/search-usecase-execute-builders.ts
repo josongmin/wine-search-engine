@@ -1,6 +1,7 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
+import type { StructuredClarifyPayload, TypedAbstainDecision } from '../../domain/query/model/abstain-decision.js';
 import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../domain/response/service/response-builder.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
@@ -15,6 +16,44 @@ function deriveDecisionEvidenceItems(
   rankedResults?: readonly RankedResult[],
 ): readonly EvidenceItem[] {
   return rankedResults?.[0]?.evidenceItems ?? [];
+}
+
+function buildStructuredClarifyPayload(
+  abstainDecision: TypedAbstainDecision,
+  rankedResults: readonly RankedResult[],
+): StructuredClarifyPayload {
+  const topLabels = rankedResults
+    .slice(0, 3)
+    .map((result) => result.canonicalLabel)
+    .filter((label) => label.trim().length > 0);
+
+  switch (abstainDecision.reason) {
+    case 'semantic_conflict':
+      return {
+        kind: 'constraint_conflict',
+        question: '입력한 조건들이 서로 충돌합니다. 어떤 조건을 우선할까요?',
+      };
+    case 'insufficient_evidence':
+      return {
+        kind: 'preference_gap',
+        question: '검색 신호가 부족합니다. 조건을 조금 더 구체화하거나 범위를 넓혀주세요.',
+        ...(topLabels.length > 0 ? { options: topLabels } : {}),
+      };
+    case 'no_match':
+      return {
+        kind: 'preference_gap',
+        question: '조건에 맞는 결과를 찾지 못했습니다. 조건을 완화해 보시겠어요?',
+      };
+    case 'low_confidence':
+    default:
+      return {
+        kind: topLabels.length > 0 ? 'anchor_disambiguation' : 'preference_gap',
+        question: topLabels.length > 0
+          ? '결과가 모호합니다. 어떤 후보를 찾으시나요?'
+          : '결과가 모호합니다. 조건을 더 구체적으로 알려주세요.',
+        ...(topLabels.length > 0 ? { options: topLabels } : {}),
+      };
+  }
 }
 /**
  * Builds the {@link ResponseBuildParams} for a constraint-SAT contradiction (failed decision).
@@ -123,6 +162,7 @@ export function buildEntropyAbstainResponseParams(options: {
   readonly effectiveRoute: string;
   readonly retrievalModeSource: 'planner' | 'api_override';
   readonly plannerSuggestedMode: string;
+  readonly abstainDecision: TypedAbstainDecision;
   readonly entropy: number;
   readonly results: readonly ResultItem[];
   readonly rankedResults: readonly RankedResult[];
@@ -137,6 +177,7 @@ export function buildEntropyAbstainResponseParams(options: {
     effectiveRoute,
     retrievalModeSource,
     plannerSuggestedMode,
+    abstainDecision,
     entropy,
     results,
     rankedResults,
@@ -211,6 +252,7 @@ export function buildEntropyAbstainResponseParams(options: {
           ? entropy.toFixed(ENTROPY_CLARIFICATION_REASON_FRACTION_DIGITS)
           : 'unknown'
       }). Please refine your search.`,
+      structuredPayload: buildStructuredClarifyPayload(abstainDecision, rankedResults),
       candidates: rankedResults.slice(0, 3).map((r) => ({
         entityId: r.entityId,
         label: r.canonicalLabel,

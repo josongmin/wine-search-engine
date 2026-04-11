@@ -7,6 +7,8 @@ import type { EntityResolveResult } from '../../domain/resolver/model/resolve-re
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
+import type { RrfFusionTrace } from '../../domain/retrieval/model/candidate-envelope.js';
+import type { TypedAbstainDecision } from '../../domain/query/model/abstain-decision.js';
 import type { DrinkingWindowUseCasePort } from '../drinking-window/port/drinking-window-usecase.port.js';
 import type { SearchResponseCachePort } from '../../domain/performance/port/search-response-cache.port.js';
 import type { DecisionEnginePort, ResponseBuilderPort } from './port/search-pipeline-deps.port.js';
@@ -33,6 +35,9 @@ import {
 } from './extract-sensory-priors.js';
 import { topKFinalScores } from './search-usecase-ranking-scores.js';
 import type { SnapshotVersionInjection } from './search-usecase-cache-lookup.js';
+import type { DeterminismFingerprintParams } from '../../domain/shared/utils/determinism-fingerprint.js';
+import { deterministicHash } from '../../domain/shared/utils/hash.js';
+import { RRF_DEFAULT_K } from '../../domain/shared/utils/rrf.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
@@ -41,32 +46,62 @@ import {
   toSpecializedRouteMeta,
   type SpecializedRouteObservability,
 } from './specialized-route-observability.js';
-
 /** Number of top-ranked entity IDs captured in pre/post-rerank audit snapshots. */
 const AUDIT_RERANK_SNAPSHOT_COUNT = 5;
 
 /**
- * Derives AuditExtension from planner/ranking runtime state.
+ * Derives AuditExtension from planner/ranking runtime state and optional
+ * retrieval/abstain traces.
  * Returns undefined when no gated trace payload is available.
+ *
+ * Gating policy (from AuditExtension field documentation):
+ *  - planner_policy_trace      explain=true OR debug header (sourced from compiled.plannerTrace)
+ *  - retrieval_fusion_trace    explain=true OR debug header (sourced from RRF fusion)
+ *  - ranking_delta_trace       LTR applied + explain=true (sourced from scoreDriftRecord)
+ *  - abstain_policy_trace      always when abstain occurs (sourced from TypedAbstainDecision)
  */
 function deriveAuditExtension(
   compiled: CompiledWineQuery | undefined,
   rankingMetadata: RankingMetadata | undefined,
   rankedResults: readonly RankedResult[],
+  retrievalFusionTrace?: RrfFusionTrace | undefined,
+  abstainDecision?: TypedAbstainDecision | false | undefined,
+  channelDegradation?: ChannelDegradationSummary | undefined,
 ): AuditExtension | undefined {
   const plannerTrace = compiled?.plannerTrace;
   const scoreDriftRecord = rankingMetadata?.scoreDriftRecord;
 
+  // Abstain policy trace is emitted whenever abstain evaluation ran (abstainDecision !== undefined).
+  const hasAbstainTrace = abstainDecision !== undefined;
+  // Retrieval fusion trace present when hybrid RRF path was used.
+  const hasFusionTrace = retrievalFusionTrace !== undefined;
+
   if (
     (plannerTrace == null || plannerTrace.length === 0)
     && scoreDriftRecord === undefined
+    && !hasFusionTrace
+    && !hasAbstainTrace
   ) {
     return undefined;
   }
 
+  // Normalize topKEntropy: only emit when it's a finite number.
+  const topKEntropy = (() => {
+    if (abstainDecision !== false && abstainDecision?.reason === 'low_confidence' && abstainDecision.entropy !== undefined) {
+      return abstainDecision.entropy;
+    }
+    // Compute from topKScores when abstain decision doesn't carry entropy directly.
+    // This is the case for no_match / semantic_conflict / insufficient_evidence.
+    // We don't recompute entropy here — rely on what AbstainPolicy returned.
+    return undefined;
+  })();
+
   return {
     ...(plannerTrace != null && plannerTrace.length > 0
       ? { planner_policy_trace: plannerTrace }
+      : {}),
+    ...(hasFusionTrace
+      ? { retrieval_fusion_trace: retrievalFusionTrace }
       : {}),
     ...(scoreDriftRecord !== undefined
       ? {
@@ -82,6 +117,64 @@ function deriveAuditExtension(
           },
         }
       : {}),
+    ...(hasAbstainTrace
+      ? {
+          abstain_policy_trace: {
+            evaluated: true,
+            decision: abstainDecision,
+            ...(topKEntropy !== undefined ? { topKEntropy } : {}),
+            ...(abstainDecision !== false && abstainDecision.conflictingRelations !== undefined
+              ? { constraintConflicts: abstainDecision.conflictingRelations }
+              : {}),
+            ...(channelDegradation !== undefined ? { channelDegradation } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * E1-T5: Build DeterminismFingerprintParams from the execution context snapshot.
+ *
+ * The fingerprint covers engine configuration (planner version, primary model ID,
+ * fusion k constant, ranking config hash) so that two executions with the same
+ * configuration always produce the same fingerprint regardless of query content.
+ *
+ * fusionConfigHash and rankingConfigHash are derived from the snapshot's
+ * model_versions / index_versions — a stable proxy for configuration state.
+ */
+function buildDeterminismFingerprintParams(
+  snapshot: DecisionSnapshot,
+  snapshotVersions: SnapshotVersionInjection,
+): DeterminismFingerprintParams {
+  // Pick the primary LLM model id from the model_versions map.
+  // Prefer 'query_understanding' > 'rerank' > first key > fallback literal.
+  const modelVersions = snapshotVersions?.modelVersions ?? {};
+  const primaryModelId =
+    modelVersions['query_understanding'] ??
+    modelVersions['rerank'] ??
+    Object.values(modelVersions)[0] ??
+    'unknown';
+
+  // Stable hash of fusion configuration — RRF_DEFAULT_K is the only global
+  // fusion config constant (Rule 30 SSoT). Include in hash for forward-compat
+  // when additional fusion params are introduced.
+  const fusionConfigHash = deterministicHash(String(RRF_DEFAULT_K));
+
+  // Stable hash of ranking config — index versions act as a proxy for the
+  // feature schema version that drives LTR scoring.
+  const indexVersions = snapshotVersions?.indexVersions ?? {};
+  const rankingConfigHash = deterministicHash(
+    ...Object.keys(indexVersions).sort().map((k) => `${k}:${indexVersions[k] ?? ''}`),
+  );
+
+  return {
+    plannerVersion: snapshot.planner_version,
+    modelId: primaryModelId,
+    fusionConfigHash,
+    rankingConfigHash,
+    policyRuleVersion: snapshot.policy_rule_version,
+    thresholdProfileId: snapshot.threshold_profile_id,
   };
 }
 
@@ -139,6 +232,8 @@ export interface SearchPostRouteExecutionContext {
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  /** E4: RRF fusion trace from CandidatePoolService, when hybrid path was used. */
+  readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** When true (options.explain=true), counterfactuals are always included. */
   readonly includeCounterfactuals?: boolean | undefined;
 }
@@ -186,6 +281,8 @@ export interface RankedRouteDecisionPhaseContext {
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  /** E4: RRF fusion trace from the candidate pool, forwarded from the calling context. */
+  readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
 }
 
 /**
@@ -332,10 +429,13 @@ export async function runRankedRouteDecisionPhase(
    * Do NOT pass raw scores or internal ranker state to the quality gate.
    * compiled.execution.effectiveRoute/effectiveRetrievalMode are forwarded via ResponseBuildParams.
    */
+  // In the non-abstain ranked path, fusion trace is forwarded from ctx; abstain
+  // decision is false (not abstaining), so abstain_policy_trace is omitted here.
   const auditExtension = deriveAuditExtension(
     ctx.compiled,
     ctx.rankingMetadata,
     ctx.fullRankedResults,
+    ctx.retrievalFusionTrace,
   );
   let built: SearchResponseV1;
   try {
@@ -360,6 +460,7 @@ export async function runRankedRouteDecisionPhase(
         ? { specializedRouteObservability: ctx.specializedRouteObservability }
         : {}),
       ...(auditExtension !== undefined ? { auditExtension } : {}),
+      determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions),
     });
   } catch (buildErr) {
     if (buildErr instanceof EvidenceObligationError) {
@@ -430,11 +531,6 @@ export async function runSearchPostRoutePhase(
   );
 
   const topScores = topKFinalScores(ctx.rankedResults);
-  const auditExtension = deriveAuditExtension(
-    ctx.compiled,
-    ctx.rankingMetadata,
-    ctx.rankedResults,
-  );
 
   // E6: Run ConstraintReasoner inline to detect soft_tension / contradiction for
   // the typed evaluate() gate. Pure CPU operation — no I/O, negligible overhead.
@@ -447,8 +543,10 @@ export async function runSearchPostRoutePhase(
   const degradationReasons = mergedRouteDegradation?.degradationReasons ?? [];
   const channelDegradation: ChannelDegradationSummary = {
     denseDegraded: degradationReasons.includes('dense_retrieval_disabled'),
-    anchorDegraded: false,
-    sparseDegraded: false,
+    anchorDegraded:
+      degradationReasons.includes('entity_resolver_unavailable')
+      || degradationReasons.some((reason) => reason.startsWith('anchor_')),
+    sparseDegraded: degradationReasons.some((reason) => reason.startsWith('sparse_')),
   };
 
   // ltrAvailable is false in heuristic-only mode (no LTR model loaded). If
@@ -460,6 +558,17 @@ export async function runSearchPostRoutePhase(
     reasonerOutput.relations,
     channelDegradation,
     { ltrAvailable },
+  );
+
+  // E4/E6: Derive AuditExtension after abstain evaluation so both retrieval_fusion_trace
+  // and abstain_policy_trace can be populated in a single pass.
+  const auditExtension = deriveAuditExtension(
+    ctx.compiled,
+    ctx.rankingMetadata,
+    ctx.rankedResults,
+    ctx.retrievalFusionTrace,
+    abstainDecision,
+    channelDegradation,
   );
 
   // Apply caller-specified result limit after ranking + abstain check (both need the full set).
@@ -522,6 +631,7 @@ export async function runSearchPostRoutePhase(
             effectiveRoute: ctx.effectiveRoute,
             retrievalModeSource: ctx.retrievalModeSource,
             plannerSuggestedMode: ctx.plannerSuggestedMode,
+            abstainDecision,
             // entropy is only present for low_confidence abstains; use NaN as
             // sentinel for other reasons (no_match, semantic_conflict, etc.) —
             // buildEntropyAbstainResponseParams guards with Number.isFinite().
@@ -536,6 +646,7 @@ export async function runSearchPostRoutePhase(
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
             : {}),
           ...(auditExtension !== undefined ? { auditExtension } : {}),
+          determinismFingerprintParams: buildDeterminismFingerprintParams(snapshot, ctx.snapshotVersions),
         },
       );
     } catch (buildErr) {
@@ -605,6 +716,7 @@ export async function runSearchPostRoutePhase(
       routeDegradation: mergedRouteDegradation,
       ...(ctx.rankingMetadata !== undefined ? { rankingMetadata: ctx.rankingMetadata } : {}),
       specializedRouteObservability: ctx.specializedRouteObservability,
+      ...(ctx.retrievalFusionTrace !== undefined ? { retrievalFusionTrace: ctx.retrievalFusionTrace } : {}),
     });
   }
 

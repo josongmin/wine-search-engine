@@ -21,6 +21,15 @@ import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 const RRF_K_TIGHT = 30;
 
 /**
+ * Tightest k for exact-entity anchor-first lookups — the resolved anchor
+ * entity should appear at rank 1; any displacement costs proportionally more.
+ * Arithmetic: at k=10, rank-1 score is 1/11 ≈ 0.091; rank-10 score is 1/20 = 0.05
+ * — a rank-1 entity carries 82% more weight than a rank-10 entity in the same
+ * channel, ensuring the anchor hit dominates the fusion output.
+ */
+const RRF_K_ENTITY_EXACT = 10;
+
+/**
  * Slightly tighter k for compare flows where anchor rank is load-bearing.
  */
 const RRF_K_COMPARE = 40;
@@ -62,6 +71,7 @@ export interface FusionConfig {
 
 export type QueryClass =
   | 'specific_wine'
+  | 'entity_exact'
   | 'browse'
   | 'compare'
   | 'pairing'
@@ -90,6 +100,27 @@ const FUSION_SPECIFIC_WINE: FusionConfig = {
   sparseWeight: WEIGHT_BOOST_STRONG,
   denseWeight: WEIGHT_HALF,
   anchorWeight: WEIGHT_BOOST_MILD,
+  learnedSparseWeight: LEARNED_SPARSE_DISABLED,
+};
+
+/**
+ * entity_exact: unambiguous single-entity lookup with a resolved anchor
+ * (TRACK-A A4). The anchor channel is the strongest signal — the planner
+ * resolved the entity with high confidence, so anchor hits should dominate.
+ * BM25 provides a precision backstop; dense is damped to avoid drowning the
+ * anchor signal with semantic neighbours. Very tight k so rank-1 anchor hits
+ * are maximally separated from tail candidates.
+ *
+ * Weight rationale:
+ *   anchor WEIGHT_BOOST_STRONG (2.0) — resolved entity is the primary target
+ *   sparse WEIGHT_BOOST_MILD (1.5) — exact-token BM25 match is load-bearing
+ *   dense  WEIGHT_HALF (0.5)       — ANN neighbourhood useful but must not swamp anchor
+ */
+const FUSION_ENTITY_EXACT: FusionConfig = {
+  rrfK: RRF_K_ENTITY_EXACT,
+  sparseWeight: WEIGHT_BOOST_MILD,
+  denseWeight: WEIGHT_HALF,
+  anchorWeight: WEIGHT_BOOST_STRONG,
   learnedSparseWeight: LEARNED_SPARSE_DISABLED,
 };
 
@@ -141,6 +172,7 @@ export const PER_CLASS_FUSION: ReadonlyMap<QueryClass, FusionConfig> = new Map<
   FusionConfig
 >([
   ['specific_wine', FUSION_SPECIFIC_WINE],
+  ['entity_exact', FUSION_ENTITY_EXACT],
   ['browse', FUSION_BROWSE],
   ['compare', FUSION_COMPARE],
   ['pairing', FUSION_PAIRING],

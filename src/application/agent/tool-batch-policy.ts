@@ -53,13 +53,15 @@ export interface BatchPolicyEntry {
  *  - check_drinking_window: can batch with itself (up to 4 parallel checks),
  *                           but not with search, pairing, or compare
  *  - get_food_pairings:    can batch with search_wines only
- *  - search_wines:         can batch with get_food_pairings only
+ *  - search_wines:         can batch with itself (multiple parallel queries) or get_food_pairings
  */
 export const TOOL_BATCH_POLICY: Readonly<Record<AgentToolName, BatchPolicyEntry>> = {
   search_wines: {
-    canRunWith: ['get_food_pairings'],
+    // Multiple search_wines calls may run in parallel (e.g. "compare two wines
+    // by running two searches"). get_food_pairings is also a safe co-tool.
+    canRunWith: ['get_food_pairings', 'search_wines'],
     mustRunAlone: false,
-    maxPerBatch: 1,
+    maxPerBatch: 4,
   },
   compare_wines: {
     canRunWith: [],
@@ -103,10 +105,14 @@ export function evaluateBatchPolicy(
 
   const toolNames = calls.map((c) => c.tool);
 
+  // Helper: safe lookup that treats unknown tool names as undefined (cast via unknown).
+  const getPolicy = (name: string): BatchPolicyEntry | undefined =>
+    (TOOL_BATCH_POLICY as Record<string, BatchPolicyEntry | undefined>)[name];
+
   // Check mustRunAlone — if any tool requires solo execution and batch has >1 call
   for (const name of toolNames) {
-    const policy = TOOL_BATCH_POLICY[name as AgentToolName];
-    if (policy?.mustRunAlone === true) {
+    const policy = getPolicy(name);
+    if (policy?.mustRunAlone) {
       return {
         allowed: false,
         reason: `'${name}' must run alone in a step`,
@@ -121,7 +127,7 @@ export function evaluateBatchPolicy(
     toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1);
   }
   for (const [name, count] of toolCounts) {
-    const policy = TOOL_BATCH_POLICY[name as AgentToolName];
+    const policy = getPolicy(name);
     if (policy !== undefined && count > policy.maxPerBatch) {
       return {
         allowed: false,
@@ -135,7 +141,7 @@ export function evaluateBatchPolicy(
   // An unknown tool (not in TOOL_BATCH_POLICY) has no declared compatibility —
   // allowing it to silently bypass checks would violate the contract graph.
   for (const name of toolCounts.keys()) {
-    if (TOOL_BATCH_POLICY[name as AgentToolName] === undefined) {
+    if (getPolicy(name) === undefined) {
       return {
         allowed: false,
         reason: `Unknown tool '${name}' has no batch policy entry`,
@@ -147,8 +153,8 @@ export function evaluateBatchPolicy(
   // Check canRunWith — for each tool, verify all co-batched tools are permitted
   const uniqueTools = [...toolCounts.keys()];
   for (const name of uniqueTools) {
-    const policy = TOOL_BATCH_POLICY[name as AgentToolName];
-    if (policy === undefined) continue; // unknown tool — skip policy check
+    const policy = getPolicy(name);
+    if (policy === undefined) continue; // unknown tool — already rejected above
     const coTools = uniqueTools.filter((t) => t !== name);
     for (const coTool of coTools) {
       if (!(policy.canRunWith as readonly string[]).includes(coTool)) {

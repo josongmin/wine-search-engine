@@ -113,4 +113,28 @@ describe('SearchResponseSchema', () => {
 
     expect(parsed.success).toBe(false);
   });
+
+  it('accepts structured clarification payloads on the V1 search contract', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      clarification: {
+        reason: 'Query is ambiguous (entropy=0.998). Please refine your search.',
+        candidates: [
+          {
+            entity_id: 'wine:opus-one-2018',
+            label: 'Opus One 2018',
+            distinguishing_features: ['Napa Valley', 'Cabernet Sauvignon'],
+          },
+        ],
+        suggestion_type: 'disambiguation',
+        structured_payload: {
+          kind: 'anchor_disambiguation',
+          question: '어떤 후보를 찾으시나요?',
+          options: ['Opus One 2018', 'Château Margaux 2015'],
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
 });

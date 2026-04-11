@@ -18,6 +18,11 @@ import { clamp01 } from '../../shared/utils/clamp.js';
  * Conservative blend weights for an un-fine-tuned cross-encoder: the generic
  * BGE reranker should only nudge rankings until LTR learns `f24_rerank_score`.
  */
+// FIXME(Epic-5): restore to RFC-017 §6.3 values (0.75 / 0.70) after LTR calibration.
+// Current values are intentionally conservative (detuned post-retrieval refactor).
+// RFC-017 §6.3 targets: semantic_preference → 0.75, pure_constraint → 0.70.
+// Will be restored after Epic 5 LTR/reranker fine-tuning completes and calibration
+// validates that the higher blend weights do not introduce regression.
 const RERANK_BLEND_BY_CLASS: Readonly<Record<QueryClass, number>> = {
   // Generic BGE reranker + wine passages: keep weights low so lexical+dense scores
   // dominate unless LTR (Epic 4) learns a stronger rerank feature weight.
