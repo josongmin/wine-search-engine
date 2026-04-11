@@ -3,7 +3,6 @@ import type { AnchorProfile } from '../../domain/mixed/model/anchor-profile.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
 import { summaryToHybridCandidateFields } from '../../domain/retrieval/service/hybrid-candidate-summary.js';
-import { rrfContribution } from '../../domain/shared/utils/rrf.js';
 
 /**
  * Vespa-backed implementation of {@link SimilarRetrievalPort}.
@@ -40,7 +39,9 @@ export class VespaSimilarRetrieval implements SimilarRetrievalPort {
         entityId: hit.entityId,
         denseRank: hit.rank,
         denseRawScore: hit.score,
-        retrievalFusionScore: rrfContribution(hit.rank),
+        // retrievalFusionScore intentionally omitted — field is deprecated/optional.
+        // Downstream consumers use fusionRrfTotal (absent here — no fusion pass)
+        // or fall back to sparseRawScore/denseRawScore via candidate-pool mapping.
         matchedConstraints: [],
         retrievalTrace: {
           retrievalProfile: 'similar_anchor',

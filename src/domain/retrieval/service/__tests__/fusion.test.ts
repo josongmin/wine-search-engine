@@ -98,7 +98,7 @@ describe('FusionService', () => {
       // sparseRank should reflect the best rank (1), not the last-seen (5)
       expect(candidate.sparseRank).toBe(1);
       // RRF score using rank=1 is higher than rank=5 — verify it is non-trivially positive
-      expect(candidate.retrievalFusionScore).toBeGreaterThan(0);
+      expect(candidate.fusionRrfTotal).toBeGreaterThan(0);
     });
 
     it('same entityId in both sparse and dense → both channels contribute (correct dedup)', () => {

@@ -54,9 +54,9 @@ describe('FusionService', () => {
 
       const candidates = fusion.fuse(sparse, dense);
 
-      const topScore = candidates.find((c) => c.entityId === createEntityId('wine-top'))?.retrievalFusionScore ?? 0;
-      const sparseOnlyScore = candidates.find((c) => c.entityId === createEntityId('wine-sparse-only'))?.retrievalFusionScore ?? 0;
-      const denseOnlyScore = candidates.find((c) => c.entityId === createEntityId('wine-dense-only'))?.retrievalFusionScore ?? 0;
+      const topScore = candidates.find((c) => c.entityId === createEntityId('wine-top'))?.fusionRrfTotal ?? 0;
+      const sparseOnlyScore = candidates.find((c) => c.entityId === createEntityId('wine-sparse-only'))?.fusionRrfTotal ?? 0;
+      const denseOnlyScore = candidates.find((c) => c.entityId === createEntityId('wine-dense-only'))?.fusionRrfTotal ?? 0;
 
       expect(topScore).toBeGreaterThan(sparseOnlyScore);
       expect(topScore).toBeGreaterThan(denseOnlyScore);
@@ -72,8 +72,8 @@ describe('FusionService', () => {
       const dense = [makeDense('wine-both', 1)];
 
       const candidates = fusion.fuse(sparse, dense);
-      const bothScore = candidates.find((c) => c.entityId === createEntityId('wine-both'))?.retrievalFusionScore ?? 0;
-      const sparseOnlyScore = candidates.find((c) => c.entityId === createEntityId('wine-sparse-only'))?.retrievalFusionScore ?? 0;
+      const bothScore = candidates.find((c) => c.entityId === createEntityId('wine-both'))?.fusionRrfTotal ?? 0;
+      const sparseOnlyScore = candidates.find((c) => c.entityId === createEntityId('wine-sparse-only'))?.fusionRrfTotal ?? 0;
 
       expect(bothScore).toBeGreaterThan(sparseOnlyScore);
     });
@@ -101,7 +101,7 @@ describe('FusionService', () => {
   });
 
   describe('sorted by fusion score descending', () => {
-    it('result list is sorted descending by retrievalFusionScore', () => {
+    it('result list is sorted descending by fusionRrfTotal', () => {
       const sparse = [
         makeSparse('wine-a', 1),
         makeSparse('wine-b', 2),
@@ -115,8 +115,8 @@ describe('FusionService', () => {
 
       const candidates = fusion.fuse(sparse, dense);
       for (let i = 1; i < candidates.length; i++) {
-        expect(candidates[i - 1]!.retrievalFusionScore).toBeGreaterThanOrEqual(
-          candidates[i]!.retrievalFusionScore,
+        expect(candidates[i - 1]!.fusionRrfTotal).toBeGreaterThanOrEqual(
+          candidates[i]!.fusionRrfTotal,
         );
       }
     });
@@ -308,7 +308,7 @@ describe('FusionService', () => {
       const dense = [makeDense('wine-a', 1)];
 
       const candidates = fusion.fuse(sparse, dense);
-      expect(candidates[0]?.retrievalFusionScore).toBeCloseTo(2 / 61, 10);
+      expect(candidates[0]?.fusionRrfTotal).toBeCloseTo(2 / 61, 10);
     });
 
     it('fusion score for rank 1 in sparse only = 1/(60+1)', () => {
@@ -316,7 +316,7 @@ describe('FusionService', () => {
       const dense: DenseHit[] = [];
 
       const candidates = fusion.fuse(sparse, dense);
-      expect(candidates[0]?.retrievalFusionScore).toBeCloseTo(1 / 61, 10);
+      expect(candidates[0]?.fusionRrfTotal).toBeCloseTo(1 / 61, 10);
     });
   });
 });

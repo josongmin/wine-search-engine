@@ -4,13 +4,17 @@
  *
  * Used by benchmark runs and admin tools to summarize calibration quality.
  *
- * TODO(Rule 33): This module and all its dependencies (aurc.ts, ece.ts,
- * platt-scaling.ts, conformal-prediction.ts, threshold-optimizer.ts in THIS
- * directory) are NOT wired into any production code path. Either:
- *   (a) Wire via src/config/container-aux-features.ts for admin/benchmark use, OR
- *   (b) Consolidate into src/domain/learning/ where the wired ThresholdOptimizer lives.
- * The learning-domain threshold-optimizer (src/domain/learning/service/) IS wired;
- * this calibration-domain variant is a duplicate with no production caller.
+ * Rule 33 status (2026-04-12): This module is intentionally eval-only, not
+ * wired into the production request path. It is imported by:
+ *   - scripts/eval/calibration-report.ts (calibration benchmark runner)
+ *
+ * The production decision-confidence path uses src/domain/learning/service/
+ * threshold-optimizer.ts (wired via container-learning.ts). This calibration-
+ * domain variant provides richer offline metrics (AURC, ECE, Platt, conformal)
+ * that are too expensive for the request path but valuable for eval dashboards.
+ *
+ * If this module grows into a production concern, wire via
+ * src/config/container-aux-features.ts and remove this comment.
  */
 
 import { computeAURC, type AURCResult } from './aurc.js';

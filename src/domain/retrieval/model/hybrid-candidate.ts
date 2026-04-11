@@ -186,10 +186,11 @@ export interface HybridCandidate {
    * which semantic applies.
    *
    * For RRF total, prefer {@link fusionRrfTotal}. For BM25 raw score,
-   * prefer {@link sparseRawScore}. This field will be removed once all
-   * consumers are migrated.
+   * prefer {@link sparseRawScore}. Migration step 3 (2026-04-12): field made
+   * optional — new producers omit it. Remove entirely once all read sites
+   * are cleaned up (candidate-pool.ts, mixed-solver.ts).
    */
-  readonly retrievalFusionScore: number;
+  readonly retrievalFusionScore?: number | undefined;
 
   /**
    * RRF total score (sum of weighted reciprocal rank contributions across

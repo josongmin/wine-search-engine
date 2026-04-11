@@ -259,8 +259,9 @@ export class MixedSolver {
     // could survive while top-scoring ones from the same producer were
     // dropped.
     const sorted = [...excluded].sort(
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback
-      (a, b) => (b.fusionRrfTotal ?? b.retrievalFusionScore) - (a.fusionRrfTotal ?? a.retrievalFusionScore),
+      // fusionRrfTotal: set by FusionService. Non-fusion candidates (Browse/Compare/similar)
+      // fall back to denseRawScore (anchor_similarity uses dense-only retrieval).
+      (a, b) => (b.fusionRrfTotal ?? b.denseRawScore ?? 0) - (a.fusionRrfTotal ?? a.denseRawScore ?? 0),
     );
 
     // Step 3: Apply producer diversity (max 2 per producer).

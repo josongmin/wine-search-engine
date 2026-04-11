@@ -45,13 +45,13 @@ export function sparseHitToCandidate(
     ...summaryToHybridCandidateFields(hit.summary),
     sparseRank: rank,
     // Browse/Compare bypass fusion — the BM25 raw score goes into
-    // sparseRawScore (canonical per-channel field) and the legacy
-    // retrievalFusionScore (for backward-compat fallback consumers).
-    // fusionRrfTotal is intentionally absent: these candidates were
-    // never fused, so fabricating a value would violate the semantic
-    // split contract (fusionRrfTotal ≡ RRF total, not BM25 raw).
+    // sparseRawScore (canonical per-channel field). fusionRrfTotal is
+    // intentionally absent: these candidates were never fused, so
+    // fabricating a value would violate the semantic split contract
+    // (fusionRrfTotal ≡ RRF total, not BM25 raw).
+    // retrievalFusionScore omitted — field is optional and deprecated;
+    // consumers fall back to sparseRawScore via candidate-pool mapping.
     sparseRawScore: hit.score,
-    retrievalFusionScore: hit.score,
     matchedConstraints: [],
     retrievalTrace: trace,
   };

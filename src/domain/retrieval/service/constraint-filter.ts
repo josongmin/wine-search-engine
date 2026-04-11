@@ -156,7 +156,6 @@ export class ConstraintFilter {
           entityId: candidate.entityId,
           dropStage: 'hard_filter',
           dropReason: (candidate.unmetHardConstraints ?? []).join(', '),
-          // TODO(cleanup): remove retrievalFusionScore fallback after migration
           lastKnownScore: candidate.fusionRrfTotal ?? candidate.sparseRawScore ?? 0,
           channels,
         };

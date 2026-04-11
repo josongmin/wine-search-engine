@@ -29,7 +29,7 @@ const AgentRequestSchema = z.object({
   session_context: z.object({
     session_id: z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS),
     previous_entities: z.array(z.string().min(1).max(MAX_SESSION_ENTITY_ID_CHARS)).max(MAX_SESSION_PREVIOUS_ENTITIES).optional(),
-  }).optional(),
+  }).strict().optional(),
   options: z.object({
     max_steps: z.number().int().min(1).max(MAX_AGENT_STEPS_CAP).optional(),
   }).strict().optional(),

@@ -39,7 +39,7 @@ function buildSummaryMap(
  * Fuses results from sparse, dense, and anchor retrieval passes using
  * Reciprocal Rank Fusion (RRF).
  *
- * The resulting {@link HybridCandidate.retrievalFusionScore} is a
+ * The resulting {@link HybridCandidate.fusionRrfTotal} is a
  * retrieval-stage ranking signal — it is **never** a calibrated
  * decision confidence.
  */
@@ -205,7 +205,6 @@ export class FusionService {
         ...(learnedSparseRawScore !== undefined ? { learnedSparseRawScore } : {}),
         anchorRank,
         ...(anchorRawScore !== undefined ? { anchorRawScore } : {}),
-        retrievalFusionScore: fusionScore,
         fusionRrfTotal: fusionScore,
         matchedConstraints: [],
         retrievalTrace: trace,

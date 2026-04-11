@@ -1231,8 +1231,10 @@ function hybridCandidateToEnvelope(
       ? { failedHardConstraints: candidate.unmetHardConstraints }
       : {}),
     fusionProfile: candidate.retrievalTrace.retrievalProfile,
-    // eslint-disable-next-line @typescript-eslint/no-deprecated -- migration fallback
-    fusionScore: candidate.fusionRrfTotal ?? candidate.retrievalFusionScore,
+    // fusionRrfTotal: set by FusionService only. Non-fusion candidates (Browse/Compare/similar)
+    // fall back to sparseRawScore (their canonical per-channel score). Default 0 is safe —
+    // these candidates are ranked by signal-computer, not by this fallback fusionScore.
+    fusionScore: candidate.fusionRrfTotal ?? candidate.sparseRawScore ?? 0,
   } satisfies CandidateEnvelope['provenance'];
   const normalizedProvenance = toCandidateProvenance(provenance);
 

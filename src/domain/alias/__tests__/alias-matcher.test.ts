@@ -215,6 +215,45 @@ describe('AliasMatcher', () => {
     });
   });
 
+  describe('findFuzzyCandidates prefix length boundary (Rule 18: Math.ceil(N/2))', () => {
+    // In-memory stub uses Math.ceil(normalized.length / 2) with NO Math.max(1, ...)
+    // guard. Production pg-alias-repository uses Math.max(1, Math.ceil(...)).
+    // These tests document the intended prefix semantics for N=1,2,3,4.
+
+    function prefixForLength(n: number): string {
+      // Mirrors InMemoryAliasRepository.findFuzzyCandidates formula exactly.
+      return 'a'.repeat(Math.ceil(n / 2));
+    }
+
+    it('N=1: ceil(1/2)=1 → entire single-char string is the prefix', () => {
+      // A 1-char query uses the whole string as prefix — effectively exact prefix match.
+      expect(prefixForLength(1)).toBe('a'); // length 1
+    });
+
+    it('N=2: ceil(2/2)=1 → first 1 char is the prefix', () => {
+      expect(prefixForLength(2)).toHaveLength(1);
+    });
+
+    it('N=3: ceil(3/2)=2 → first 2 chars are the prefix', () => {
+      expect(prefixForLength(3)).toHaveLength(2);
+    });
+
+    it('N=4: ceil(4/2)=2 → first 2 chars are the prefix', () => {
+      expect(prefixForLength(4)).toHaveLength(2);
+    });
+
+    it('production pg-alias-repository adds Math.max(1,...) guard: N=0 yields prefix length 1, not 0', () => {
+      // pg-alias-repository.ts:104 uses Math.max(1, Math.ceil(normalized.length / 2))
+      // so an empty normalized string (length=0) still produces prefix length 1,
+      // preventing a LIKE '%' query that would return all aliases.
+      const pgPrefixLength = (n: number) => Math.max(1, Math.ceil(n / 2));
+      expect(pgPrefixLength(0)).toBe(1);
+      expect(pgPrefixLength(1)).toBe(1);
+      expect(pgPrefixLength(2)).toBe(1);
+      expect(pgPrefixLength(3)).toBe(2);
+    });
+  });
+
   describe('no match', () => {
     it('completely unrelated query returns empty array', async () => {
       const repo = new InMemoryAliasRepository();

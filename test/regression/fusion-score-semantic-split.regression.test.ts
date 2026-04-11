@@ -25,7 +25,9 @@ function denseHit(entityId: string, rank: number, score: number): DenseHit {
 describe('Regression: fusion score semantic split', () => {
   const fusion = new FusionService();
 
-  it('FusionService candidates have fusionRrfTotal ≡ retrievalFusionScore (dual-write)', () => {
+  it('FusionService candidates have fusionRrfTotal set; retrievalFusionScore is undefined (migration step 3 complete)', () => {
+    // Migration step 3 (2026-04-12): FusionService no longer dual-writes
+    // retrievalFusionScore. fusionRrfTotal is the sole canonical RRF score.
     const candidates = fusion.fuse(
       [sparseHit('w-1', 1, 10)],
       [denseHit('w-1', 1, 0.9)],
@@ -33,7 +35,8 @@ describe('Regression: fusion score semantic split', () => {
     const c = candidates[0]!;
     expect(c.fusionRrfTotal).toBeTypeOf('number');
     expect(Number.isFinite(c.fusionRrfTotal)).toBe(true);
-    expect(c.fusionRrfTotal).toBe(c.retrievalFusionScore);
+    // retrievalFusionScore is deprecated/optional — FusionService no longer writes it
+    expect(c.retrievalFusionScore).toBeUndefined();
   });
 
   it('FusionService candidates carry per-channel sparseRawScore distinct from fusionRrfTotal', () => {
@@ -46,7 +49,8 @@ describe('Regression: fusion score semantic split', () => {
     expect(c.fusionRrfTotal).not.toBe(c.sparseRawScore);
   });
 
-  it('Browse/Compare candidates have sparseRawScore but NOT fusionRrfTotal', () => {
+  it('Browse/Compare candidates have sparseRawScore but NOT fusionRrfTotal or retrievalFusionScore', () => {
+    // Migration step 3: sparseHitToCandidate no longer writes retrievalFusionScore
     const candidate = sparseHitToCandidate(
       sparseHit('w-browse', 1, 14.7),
       1,
@@ -59,6 +63,7 @@ describe('Regression: fusion score semantic split', () => {
     );
     expect(candidate.sparseRawScore).toBe(14.7);
     expect(candidate).not.toHaveProperty('fusionRrfTotal');
+    expect(candidate.retrievalFusionScore).toBeUndefined();
   });
 
   it('Sort order of fused candidates is by fusionRrfTotal descending', () => {

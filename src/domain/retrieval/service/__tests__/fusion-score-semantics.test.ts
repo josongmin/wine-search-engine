@@ -31,7 +31,6 @@ const noDegradation = { dense: false, sparse: false, anchor: false } as const;
 function minimalCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
   return {
     entityId: createEntityId('w-test'),
-    retrievalFusionScore: 0,
     matchedConstraints: [],
     retrievalTrace: {
       candidateSources: [],
@@ -58,8 +57,8 @@ describe('Score semantic split — fusionRrfTotal', () => {
     for (const c of candidates) {
       expect(c.fusionRrfTotal).toBeTypeOf('number');
       expect(Number.isFinite(c.fusionRrfTotal)).toBe(true);
-      // fusionRrfTotal must equal retrievalFusionScore in FusionService output
-      expect(c.fusionRrfTotal).toBe(c.retrievalFusionScore);
+      // retrievalFusionScore is now optional/deprecated — FusionService no longer writes it
+      expect(c.retrievalFusionScore).toBeUndefined();
     }
   });
 
@@ -76,8 +75,8 @@ describe('Score semantic split — fusionRrfTotal', () => {
     expect(candidate).not.toHaveProperty('fusionRrfTotal');
     // sparseRawScore carries the BM25 raw score (canonical per-channel field)
     expect(candidate.sparseRawScore).toBe(12.5);
-    // retrievalFusionScore is still set (legacy — backward compat)
-    expect(candidate.retrievalFusionScore).toBe(12.5);
+    // retrievalFusionScore is deprecated/optional — sparseHitToCandidate no longer writes it
+    expect(candidate.retrievalFusionScore).toBeUndefined();
   });
 
   it('FusionService always populates sparseRawScore when sparse hits are present — no missing-rawScore edge case in practice', () => {
@@ -135,7 +134,8 @@ describe('Score semantic split — fusionRrfTotal', () => {
     // The value should be very small but still a valid number
     expect(Number.isFinite(c!.fusionRrfTotal)).toBe(true);
     expect(c!.fusionRrfTotal).toBeGreaterThan(0);
-    expect(c!.fusionRrfTotal).toBe(c!.retrievalFusionScore);
+    // retrievalFusionScore is deprecated/optional — FusionService no longer writes it
+    expect(c!.retrievalFusionScore).toBeUndefined();
   });
 
   it('signal-computer: candidate with fusionRrfTotal=0 uses 0, not retrievalFusionScore via ??', () => {
