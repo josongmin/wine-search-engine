@@ -30,7 +30,6 @@ import {
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/entity-retrieval-fixture-eval-results.json');
-const DEFAULT_PREDICTIONS = resolveDataPath('data/entity-retrieval-fixture-predictions-smoke.jsonl');
 const DEFAULT_SUITES = [
   'exact_entity_recovery',
   'ambiguous_shortform',
@@ -41,6 +40,7 @@ interface CliArgs {
   readonly output: string;
   readonly apiUrl: string;
   readonly predictions: string | null;
+  readonly smokePredictions: boolean;
   readonly mode: 'auto' | 'hybrid' | 'entity';
   readonly timeoutMs: number;
   readonly concurrency: number;
@@ -86,6 +86,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   let predictions: string | null = null;
+  let smokePredictions = false;
   let suites: readonly EntityRetrievalSuiteId[] = DEFAULT_SUITES;
   let mode: CliArgs['mode'] = 'hybrid';
   let timeoutMs = 60_000;
@@ -100,6 +101,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
       apiUrl = argv[++i] ?? apiUrl;
     } else if (arg === '--predictions') {
       predictions = argv[++i] ?? null;
+    } else if (arg === '--smoke-predictions') {
+      smokePredictions = true;
     } else if (arg === '--suite' || arg === '--suites') {
       suites = parseSuiteIdList(argv[++i], DEFAULT_SUITES) ?? DEFAULT_SUITES;
     } else if (arg === '--mode') {
@@ -115,12 +118,10 @@ function parseArgs(argv: readonly string[]): CliArgs {
       if (Number.isFinite(value) && value >= 1) concurrency = Math.min(16, value);
     } else if (arg === '--no-thresholds') {
       useThresholds = false;
-    } else if (arg === '--smoke-predictions') {
-      predictions = DEFAULT_PREDICTIONS;
     }
   }
 
-  return { output, apiUrl, predictions, suites, mode, timeoutMs, concurrency, useThresholds };
+  return { output, apiUrl, predictions, smokePredictions, suites, mode, timeoutMs, concurrency, useThresholds };
 }
 
 function hitAtK(entityIds: readonly string[], expectedEntityId: string, k: number): boolean {
@@ -239,6 +240,18 @@ export function scoreEntityRetrievalFixtureCases(
   };
 }
 
+export function buildPerfectEntityRetrievalPredictions(
+  cases: readonly FixtureEntityBenchmarkCase[],
+): Map<string, RankedPrediction> {
+  return new Map(cases.map((benchmarkCase) => [
+    benchmarkCase.benchmark_id,
+    {
+      rankedEntities: [{ entity_id: benchmarkCase.expected_entity_id }],
+      decisionStatus: benchmarkCase.expected_resolution ?? 'resolved',
+    },
+  ]));
+}
+
 export async function assertEntityRetrievalFixtureThresholds(
   report: EntityRetrievalFixtureReport,
 ): Promise<void> {
@@ -299,14 +312,16 @@ export async function assertEntityRetrievalFixtureThresholds(
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cases = await loadEntityRetrievalFixtureCases(args.suites);
-  const predictions = args.predictions !== null
+  const predictions = args.smokePredictions
+    ? buildPerfectEntityRetrievalPredictions(cases)
+    : args.predictions !== null
     ? await loadNoisyEntityPredictions(args.predictions, new Set(cases.map((item) => item.benchmark_id)))
     : await fetchLiveRankings(cases, args.apiUrl, args.mode, args.timeoutMs, args.concurrency);
 
   const report = scoreEntityRetrievalFixtureCases(cases, predictions);
   const finalReport: EntityRetrievalFixtureReport = {
     ...report,
-    source: args.predictions !== null ? 'predictions' : 'live-api',
+    source: args.predictions !== null || args.smokePredictions ? 'predictions' : 'live-api',
     evaluated_at: new Date().toISOString(),
   };
 

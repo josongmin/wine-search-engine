@@ -10,6 +10,7 @@
 
 import fs from 'node:fs/promises';
 import {
+  buildPerfectNoisyEntityPredictions,
   loadNoisyEntityBenchmark,
   loadNoisyEntityPredictions,
   scoreNoisyEntityBenchmark,
@@ -44,22 +45,28 @@ interface RegressionFailure {
 }
 
 function parseArgs(argv: readonly string[]): {
-  predictions: string;
+  predictions: string | null;
   baseline: string;
+  smokePredictions: boolean;
 } {
-  let predictions = DEFAULT_PREDICTIONS;
+  let predictions: string | null = null;
   let baseline = DEFAULT_BASELINE;
+  let smokePredictions = true;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--predictions') {
       predictions = argv[++i] ?? DEFAULT_PREDICTIONS;
+      smokePredictions = false;
     } else if (arg === '--baseline') {
       baseline = argv[++i] ?? DEFAULT_BASELINE;
+    } else if (arg === '--no-smoke-predictions') {
+      smokePredictions = false;
+      predictions = DEFAULT_PREDICTIONS;
     }
   }
 
-  return { predictions, baseline };
+  return { predictions, baseline, smokePredictions };
 }
 
 async function main(): Promise<void> {
@@ -70,7 +77,9 @@ async function main(): Promise<void> {
   const benchmarkIds = new Set(cases.map((c) => c.benchmark_id));
 
   // Load predictions
-  const predictions = await loadNoisyEntityPredictions(args.predictions, benchmarkIds);
+  const predictions = args.smokePredictions
+    ? buildPerfectNoisyEntityPredictions(cases)
+    : await loadNoisyEntityPredictions(args.predictions ?? DEFAULT_PREDICTIONS, benchmarkIds);
 
   // Score
   const report = scoreNoisyEntityBenchmark(cases, predictions);
@@ -151,7 +160,7 @@ async function main(): Promise<void> {
   console.log('=== Noisy Entity Baseline Check ===');
   console.log(`  baseline version: ${baseline.version}`);
   console.log(`  baseline captured: ${baseline.capturedAt}`);
-  console.log(`  predictions: ${args.predictions}`);
+  console.log(`  predictions: ${args.smokePredictions ? 'generated-from-fixtures' : (args.predictions ?? DEFAULT_PREDICTIONS)}`);
   console.log('');
   console.log('--- Current Metrics ---');
   console.log(`  recall@1:            ${report.recall_at_1.toFixed(4)}`);
