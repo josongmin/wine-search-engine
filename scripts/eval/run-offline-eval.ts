@@ -62,20 +62,79 @@ import {
 } from './entity-type.js';
 import { verifyDefaultGoldenSplits } from './split-integrity.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import { FixtureLoader } from '../../src/infrastructure/fixture/fixture-loader.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-// RCA-06: EVAL_CORPUS_PATH env var overrides the default corpus location so CI
-// can point to the current labeled set without editing source. CLI --input flag
-// takes precedence over the env var (same precedence model as llm-judge-ndcg.ts).
-const DEFAULT_INPUT =
-  process.env['EVAL_CORPUS_PATH'] ?? resolveDataPath('data/golden-queries-bronze.jsonl');
+/** ADR-005 Workstream D: fixture repo corpus path for golden-queries-gate. */
+const FIXTURE_CORPUS_GATE = 'corpora/offline-eval/golden-queries-gate.jsonl';
+
+/**
+ * Resolve the default eval corpus path.
+ * Priority order (ADR-005 Workstream D):
+ *   1. CLI --input flag (handled later in parseArgs)
+ *   2. EVAL_CORPUS_PATH env var (backward compat / CI override)
+ *   3. External fixture repo corpora/offline-eval/golden-queries-gate.jsonl
+ *   4. Engine-local data/golden-queries-bronze.jsonl (derived artifact fallback)
+ *
+ * RCA-06: EVAL_CORPUS_PATH env var preserves CI compatibility while fixture
+ * repo becomes the primary SSOT.
+ */
+function resolveDefaultCorpusPath(): string {
+  if (process.env['EVAL_CORPUS_PATH'] != null) {
+    return process.env['EVAL_CORPUS_PATH'];
+  }
+  const loader = new FixtureLoader();
+  if (loader.isAvailable()) {
+    return loader.corpusPath(FIXTURE_CORPUS_GATE);
+  }
+  return resolveDataPath('data/golden-queries-bronze.jsonl');
+}
+
+const DEFAULT_INPUT = resolveDefaultCorpusPath();
 const DEFAULT_OUTPUT = resolveDataPath('data/eval-results.json');
 
-/** Release gate thresholds (RFC-017 §3.2). */
-const RELEASE_GATES = {
+/**
+ * Release gate thresholds.
+ * ADR-005 Workstream D: loaded from external fixture thresholds.json (offline_eval suite).
+ * Falls back to hard-coded values when fixture repo is unavailable (CI compatibility).
+ */
+async function loadOfflineEvalGates(): Promise<typeof RELEASE_GATES_FALLBACK> {
+  const loader = new FixtureLoader();
+  if (!loader.isAvailable()) return RELEASE_GATES_FALLBACK;
+  const allThresholds = await loader.loadThresholds();
+  const suite = allThresholds['offline_eval'];
+  if (typeof suite !== 'object' || suite === null) return RELEASE_GATES_FALLBACK;
+  const s = suite as Record<string, unknown>;
+  function val(key: string, fallback: number): number {
+    const entry = s[key];
+    if (typeof entry === 'object' && entry !== null) {
+      const v = (entry as Record<string, unknown>)['value'];
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+    }
+    return fallback;
+  }
+  return {
+    wrong_top1_rate_max: val('wrong_top1_rate_max', RELEASE_GATES_FALLBACK.wrong_top1_rate_max),
+    decision_utility_min_delta: val('decision_utility_min_delta', RELEASE_GATES_FALLBACK.decision_utility_min_delta),
+    ndcg_at_10_min_delta: val('ndcg_at_10_min_delta', RELEASE_GATES_FALLBACK.ndcg_at_10_min_delta),
+    recall_at_100_min: val('recall_at_100_min', RELEASE_GATES_FALLBACK.recall_at_100_min),
+    aurc_max_delta: val('aurc_max_delta', RELEASE_GATES_FALLBACK.aurc_max_delta),
+    entity_resolve_wrong_top1_max: val('entity_resolve_wrong_top1_max', RELEASE_GATES_FALLBACK.entity_resolve_wrong_top1_max),
+    set_retrieval_recall_at_10_min: val('set_retrieval_recall_at_10_min', RELEASE_GATES_FALLBACK.set_retrieval_recall_at_10_min),
+    no_match_false_resolve_max: val('no_match_false_resolve_max', RELEASE_GATES_FALLBACK.no_match_false_resolve_max),
+  } as const;
+}
+
+/**
+ * Fallback values (ADR-005: engine repo MUST NOT define competing minimums).
+ * These are used only when fixture repo is unavailable — they mirror what is
+ * now canonical in eval/thresholds.json. Do NOT lower these without also
+ * lowering the fixture repo values.
+ */
+const RELEASE_GATES_FALLBACK = {
   wrong_top1_rate_max: 0.02,
   decision_utility_min_delta: -0.05,
   ndcg_at_10_min_delta: -0.03,
@@ -85,6 +144,10 @@ const RELEASE_GATES = {
   set_retrieval_recall_at_10_min: 0.60,
   no_match_false_resolve_max: 0.05,
 } as const;
+
+// Synchronous alias for places that reference RELEASE_GATES before run() loads
+// the async version. Replaced at run time via loadOfflineEvalGates().
+let RELEASE_GATES: typeof RELEASE_GATES_FALLBACK = RELEASE_GATES_FALLBACK;
 
 /**
  * Release gates for retrieval modes (Epic 11, advisory in phase 1).
@@ -1763,6 +1826,9 @@ function finalizeGlobalDecisionAccumulator(accumulator: GlobalDecisionAccumulato
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+
+  // ADR-005 Workstream D: load release gate thresholds from fixture repo.
+  RELEASE_GATES = await loadOfflineEvalGates();
 
   if (args.verifySplits) {
     console.log('Running split integrity check (RFC-017 §2.5) …');

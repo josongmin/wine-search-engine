@@ -1,5 +1,14 @@
 /**
- * Agent benchmark scenarios — complete coverage of user intent patterns.
+ * Agent benchmark scenarios — exploratory / nightly coverage corpus.
+ *
+ * ADR-005 Workstream F: AGENT_SCENARIOS is NOT the release-gate source for
+ * agent correctness. Release gates use fixture-native runners:
+ *   - npm run bench:agent:fixtures:tool-use
+ *   - npm run bench:agent:fixtures:answer-quality
+ *
+ * AGENT_SCENARIOS is retained for broad regression exploration and nightly
+ * runs only. Do NOT add new release-gate logic that depends solely on this
+ * corpus.
  *
  * Adversarial security scenarios (#106-116) live in scenarios.adversarial.ts.
  * Coverage-expansion scenarios (200+) live in scenarios.coverage.ts.

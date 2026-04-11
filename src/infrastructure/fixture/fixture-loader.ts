@@ -461,6 +461,40 @@ export class FixtureLoader {
     }
   }
 
+  /**
+   * ADR-005 Workstream D/E: loads a corpus NDJSON/JSONL file from the
+   * external fixture repository.
+   *
+   * @param corpusRelPath - path relative to fixture repo root, e.g.
+   *   `corpora/offline-eval/golden-queries-gate.jsonl`
+   * @returns parsed lines as unknown[] (callers validate with Zod or type guards)
+   * @throws if the file is missing or cannot be parsed as NDJSON
+   */
+  async loadCorpusNdjson(corpusRelPath: string): Promise<readonly unknown[]> {
+    const path = join(this.repoRoot, corpusRelPath);
+    this.assertSafePath(path);
+    const content = await readFile(path, 'utf8');
+    const lines = content
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    const results: unknown[] = [];
+    for (const line of lines) {
+      results.push(JSON.parse(line) as unknown);
+    }
+    return results;
+  }
+
+  /**
+   * Returns the absolute path for a corpus file in the fixture repo.
+   * Use when callers need to pass the path to a streaming reader.
+   */
+  corpusPath(corpusRelPath: string): string {
+    const path = join(this.repoRoot, corpusRelPath);
+    this.assertSafePath(path);
+    return path;
+  }
+
   // ---------------------------------------------------------------------------
   // Availability check
   // ---------------------------------------------------------------------------
