@@ -195,8 +195,10 @@ describe('AmbiguityClassifier', () => {
         },
       ];
       const state = classifier.classify(candidates, 'short_entity');
-      expect(state.types.length).toBeGreaterThanOrEqual(1);
-      // At least one type should be detected (alias_collision and/or multi_vintage)
+      // Both multi_vintage (2018 vs 2019) and alias_collision (shared "opus-one") are triggered
+      expect(state.types).toContain('multi_vintage');
+      expect(state.types).toContain('alias_collision');
+      expect(state.types.length).toBeGreaterThanOrEqual(2);
       expect(state.detected).toBe(true);
     });
 

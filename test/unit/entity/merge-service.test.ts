@@ -194,6 +194,25 @@ describe('merge', () => {
     const cab = merged.attributes.grapes!.filter((g) => g === 'Cabernet Sauvignon');
     expect(cab).toHaveLength(1);
   });
+
+  it('merge() deduplicates 3+ grapes when both arrays share common elements', () => {
+    // a has 2 grapes, b has 3 — with 2 overlapping; merged should have exactly 3 unique grapes
+    const a = makeWineEntity('Blend', 'prod-1', 'region-1', {
+      grapes: ['Cabernet Sauvignon', 'Merlot'],
+    });
+    const b = makeWineEntity('Blend', 'prod-1', 'region-1', {
+      grapes: ['Cabernet Sauvignon', 'Merlot', 'Cabernet Franc'],
+    });
+
+    const merged = merge(a, b, 'merge test');
+    expect(merged.attributes.grapes).toBeDefined();
+    // All three varieties present
+    expect(merged.attributes.grapes!).toContain('Cabernet Sauvignon');
+    expect(merged.attributes.grapes!).toContain('Merlot');
+    expect(merged.attributes.grapes!).toContain('Cabernet Franc');
+    // Exactly 3 unique grapes — no duplicates from either array
+    expect(merged.attributes.grapes!).toHaveLength(3);
+  });
 });
 
 describe('canSplit', () => {

@@ -45,6 +45,13 @@ describe('ConstraintEvaluator', () => {
       expect(result.hardPass).toBe(false);
       expect(result.unmet).toContain('sweetness');
     });
+
+    it('sweetness <= 0.5, candidate sweetness = 0.3 → hardPass=true', () => {
+      const bundle = makeBundle([makeConstraint('sweetness', '<=', 0.5)]);
+      const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.3 });
+      expect(result.hardPass).toBe(true);
+      expect(result.matched).toContain('sweetness');
+    });
   });
 
   describe('soft constraints', () => {
@@ -117,6 +124,20 @@ describe('ConstraintEvaluator', () => {
       expect(result.hardPass).toBe(false);
       expect(result.unmet).toContain('sweetness');
     });
+
+    it('sweetness range [0.3, 0.6], candidate = 0.3 (at min boundary) → matched', () => {
+      const bundle = makeBundle([makeConstraint('sweetness', 'range', { min: 0.3, max: 0.6 })]);
+      const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.3 });
+      expect(result.hardPass).toBe(true);
+      expect(result.matched).toContain('sweetness');
+    });
+
+    it('sweetness range [0.3, 0.6], candidate = 0.8 (above max) → does not match', () => {
+      const bundle = makeBundle([makeConstraint('sweetness', 'range', { min: 0.3, max: 0.6 })]);
+      const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.8 });
+      expect(result.hardPass).toBe(false);
+      expect(result.unmet).toContain('sweetness');
+    });
   });
 
   describe('empty constraints', () => {
@@ -125,6 +146,22 @@ describe('ConstraintEvaluator', () => {
       const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.3 });
       expect(result.hardPass).toBe(true);
       expect(result.softScore).toBe(1.0);
+    });
+  });
+
+  describe('= operator', () => {
+    it('style = "red", candidate style = "red" → hardPass=true', () => {
+      const bundle = makeBundle([makeConstraint('style', '=', 'red')]);
+      const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.1, style: 'red' });
+      expect(result.hardPass).toBe(true);
+      expect(result.matched).toContain('style');
+    });
+
+    it('style = "red", candidate style = "white" → hardPass=false', () => {
+      const bundle = makeBundle([makeConstraint('style', '=', 'red')]);
+      const result = evaluator.evaluate(bundle, { body: 0.5, sweetness: 0.1, style: 'white' });
+      expect(result.hardPass).toBe(false);
+      expect(result.unmet).toContain('style');
     });
   });
 

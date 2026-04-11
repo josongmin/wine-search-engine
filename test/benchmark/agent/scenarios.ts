@@ -177,7 +177,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // ─────────────────────────────────────────────────────────────────────
   // Tier 3: Complex Reasoning (도구 3-5회)
   // ─────────────────────────────────────────────────────────────────────
-  // #11 moved to scenarios.phase2.ts (session_history dependency)
+  // #11 removed (session_history — multi-turn not implemented)
   { id: 12, tier: 'complex_reasoning', query: '결혼기념일인데, 2015년산 중에 지금 피크인 거로 추천해줘', description: 'Vintage + drinking window peak',
     expectation: { maxSteps: 5, maxDurationMs: 60_000, maxTotalTokens: 12_000,
       tools: [{ tool: 'search_wines' }],
@@ -211,7 +211,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       judgeRequired: true,
       rubric: 'Must compare 2015 vs 2016 Bordeaux vintages AND address drinking window for both.' } },
 
-  // Tier 4 (Conversational) entirely moved to scenarios.phase2.ts
+  // Tier 4 (Conversational) removed — session_history / multi-turn not implemented
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 5: Edge Cases
@@ -391,7 +391,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
       answerMustMatch: ['(opus\\s*one|오푸스\\s*원)'],
       rubric: 'Must reference Opus One as the style anchor and recommend wines at roughly half the price.' },
     goldenKeywords: ['opus one'] },
-  // #36-38 moved to scenarios.phase2.ts (session_history dependency)
+  // #36-38 removed (session_history — multi-turn not implemented)
   { id: 39, tier: 'relative_reference', query: '친구가 추천해준 건데 이탈리아 바로 뭐시기...', description: 'Fuzzy entity resolution',
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       answerMustMatch: ['(이탈리아|italy|italian|바롤로|barolo|barbaresco|피에몬테|piedmont)'],
@@ -511,7 +511,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       rubric: 'Must recommend sparkling wine between brut and demi-sec sweetness (Extra Dry / Sec range). Should address the sweetness nuance.' } },
-  // #49 moved to scenarios.phase2.ts (session_history dependency)
+  // #49 removed (session_history — multi-turn not implemented)
 
   // ─────────────────────────────────────────────────────────────────────
   // Tier 11: Knowledge + Search Hybrid
@@ -540,7 +540,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
   // ─────────────────────────────────────────────────────────────────────
   // Tier 12: Extreme Nesting (한계 테스트)
   // ─────────────────────────────────────────────────────────────────────
-  // #55 moved to scenarios.phase2.ts (session_history dependency)
+  // #55 removed (session_history — multi-turn not implemented)
   { id: 56, tier: 'extreme', query: '보르도 2015, 2016, 2018 빈티지 3개 비교해주고, 지금 마실 수 있는 것만 골라서 가격순으로 정렬해줘', description: '3-vintage compare + drinking window',
     expectation: { maxSteps: 5, maxDurationMs: 90_000, maxTotalTokens: 12_000,
       drinkingWindowStatus: 'now',
@@ -847,7 +847,7 @@ const MAIN_SCENARIOS: readonly AgentBenchmarkScenario[] = [
     expectation: { maxSteps: 2, maxDurationMs: 40_000, maxTotalTokens: 6_000,
       tools: [{ tool: 'search_wines' }],
       rubric: 'Must provide a sensible default recommendation for the vague query. Should not refuse.' } },
-  // #101 moved to scenarios.phase2.ts (multi-turn dependency)
+  // #101 removed (multi-turn — session_history not implemented)
   { id: 102, tier: 'adversarial', query: '그냥 아무거나 빨리', description: 'Impatient vague query',
     expectation: { maxSteps: 2, terminationReason: 'answer', maxDurationMs: 25_000, maxTotalTokens: 3_000,
       tools: [{ tool: 'search_wines' }],

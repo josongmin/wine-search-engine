@@ -11,7 +11,7 @@
  *   - bilingual_mixed     (English + Korean mixed queries)
  *   - cellar_aging        (aging potential, drinking window, cellaring)
  *
- * IDs start at 200 to avoid collision with existing 1-116 + phase2.
+ * IDs start at 200 to avoid collision with existing 1-116 (adversarial).
  */
 
 import type { AgentBenchmarkScenario } from './scenario.js';

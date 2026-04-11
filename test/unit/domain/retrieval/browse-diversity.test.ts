@@ -91,7 +91,29 @@ describe('browse diversity helpers', () => {
     }
     const out = diversifyRegionBrowseHits(rows, 6);
     const producers = new Set(out.map((h) => h.summary?.producer));
-    expect(producers.size).toBeGreaterThan(1);
+    // Setup has exactly 2 producers (P1 and P2), both should appear in the output
+    expect(producers.size).toBe(2);
     expect(out.length).toBe(6);
+  });
+
+  it('diversifyRegionBrowseHits with single producer returns up to limit', () => {
+    // All 10 candidates from the same producer — result is limited but not diverse
+    const rows: SparseHit[] = [];
+    for (let i = 0; i < 10; i++) {
+      rows.push(
+        hit(`w${i}`, 10 - i * 0.1, {
+          canonicalLabel: `Wine ${i}`,
+          producer: 'OnlyProducer',
+          criticScoreNormalized: 80,
+        }),
+      );
+    }
+    const out = diversifyRegionBrowseHits(rows, 6);
+    // Output is capped at limit
+    expect(out.length).toBe(6);
+    // All are from the single producer — diversity is impossible
+    const producers = new Set(out.map((h) => h.summary?.producer));
+    expect(producers.size).toBe(1);
+    expect([...producers][0]).toBe('OnlyProducer');
   });
 });

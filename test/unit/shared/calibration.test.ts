@@ -80,6 +80,19 @@ describe('temperatureScaling', () => {
     expect(sum).toBeCloseTo(1.0, 10);
   });
 
+  it('monotonicity: if logit_i < logit_j then p_i < p_j (tested at T=0.5, 1.0, 2.0)', () => {
+    // Use four logits in strict ascending order.
+    const logits = [-2, 0, 1, 3];
+
+    for (const temperature of [0.5, 1.0, 2.0]) {
+      const probs = temperatureScaling(logits, temperature);
+      // Every adjacent pair must be strictly increasing in the same order as logits.
+      for (let i = 0; i < probs.length - 1; i++) {
+        expect(probs[i]).toBeLessThan(probs[i + 1]!);
+      }
+    }
+  });
+
   it('throws for non-positive temperature', () => {
     expect(() => temperatureScaling([1, 2, 3], 0)).toThrow('Temperature must be positive');
     expect(() => temperatureScaling([1, 2, 3], -1)).toThrow('Temperature must be positive');

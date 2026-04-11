@@ -254,7 +254,11 @@ describe('Calibrator', () => {
       const calibrator = new Calibrator(makeStubStore(params));
       const result = await calibrator.calibrate({ top1: 0.5, top2: 0.0 }, 'short_entity');
 
-      // t = (0.5 - 0.3) / (0.7 - 0.3) = 0.5; interpolated = 0.4 + 0.5*(0.9-0.4) = 0.65
+      // Verify via explicit interpolation formula: t = (rawScore - x0)/(x1 - x0); expected = y0 + t*(y1-y0)
+      const x0 = 0.3, y0 = 0.4, x1 = 0.7, y1 = 0.9, rawScore = 0.5;
+      const t = (rawScore - x0) / (x1 - x0); // 0.5
+      const formulaExpected = y0 + t * (y1 - y0); // 0.65
+      expect(result.top1CalibratedScore).toBeCloseTo(formulaExpected, 10);
       expect(result.top1CalibratedScore).toBeCloseTo(0.65, 10);
     });
 

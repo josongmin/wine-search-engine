@@ -139,4 +139,18 @@ describe('field-normalizer full-width digits', () => {
     // Test that "2018년" is parsed correctly
     expect(normalizeYear('2018년')).toBe(2018);
   });
+
+  it('normalizeYear on full-width digits "２０１８" → null (NFC not NFKC; ASCII digit class only)', () => {
+    // normalizeUnicode applies NFC, not NFKC, so full-width digits are NOT converted
+    // to ASCII. normalizeYear regex uses \d which matches ASCII digits only in JS.
+    // Full-width digits remain unreduced and no 4-digit ASCII year is found → null.
+    expect(normalizeYear('２０１８')).toBeNull();
+  });
+
+  it('normalizeField converts NFD "Cha\\u0302teau" to NFC "Château"', () => {
+    // U+0302 is combining circumflex accent (NFD form).
+    // normalizeField → normalizeUnicode → .normalize('NFC') composes it to â (U+00E2).
+    const nfd = 'Cha\u0302teau'; // NFD: 'a' + combining circumflex
+    expect(normalizeField(nfd)).toBe('Château');
+  });
 });

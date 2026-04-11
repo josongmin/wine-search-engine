@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rrfFuse } from '../../../src/domain/shared/utils/rrf.js';
+import { rrfFuse, rrfContribution, RRF_DEFAULT_K } from '../../../src/domain/shared/utils/rrf.js';
 
 describe('rrfFuse', () => {
   it('single ranked list: top rank gets highest score', () => {
@@ -34,12 +34,12 @@ describe('rrfFuse', () => {
   it('k=60 is the default and scores match formula', () => {
     const ranking = new Map([['entity-A', 1]]);
     const result = rrfFuse([ranking]);
-    expect(result.get('entity-A')).toBeCloseTo(1 / (60 + 1), 10);
+    expect(result.get('entity-A')).toBeCloseTo(1 / (RRF_DEFAULT_K + 1), 10);
   });
 
   it('k can be overridden and scores use overridden k', () => {
     const ranking = new Map([['entity-A', 1]]);
-    const resultDefault = rrfFuse([ranking]); // k=60
+    const resultDefault = rrfFuse([ranking]); // k=RRF_DEFAULT_K
     const resultCustom = rrfFuse([ranking], 10); // k=10
 
     // 1/(10+1) > 1/(60+1) so custom k produces higher score for rank 1
@@ -65,9 +65,20 @@ describe('rrfFuse', () => {
     const result = rrfFuse([list1, list2]);
     // Should only have one entry for shared-entity, but with combined scores
     expect(result.size).toBe(1);
-    // Score = 1/(60+1) + 1/(60+3)
-    const expected = 1 / 61 + 1 / 63;
+    // Score = 1/(RRF_DEFAULT_K+1) + 1/(RRF_DEFAULT_K+3)
+    const expected = 1 / (RRF_DEFAULT_K + 1) + 1 / (RRF_DEFAULT_K + 3);
     expect(result.get('shared-entity')!).toBeCloseTo(expected, 10);
+  });
+
+  it('score is monotone decreasing in rank (higher rank → lower score)', () => {
+    // For ranks 1, 2, 3, 5, 10: scores should be strictly decreasing.
+    // rrfContribution(rank) = 1 / (RRF_DEFAULT_K + rank): smaller rank → larger score.
+    const ranks = [1, 2, 3, 5, 10];
+    const scores = ranks.map((r) => rrfContribution(r));
+
+    for (let i = 0; i < scores.length - 1; i++) {
+      expect(scores[i]).toBeGreaterThan(scores[i + 1]!);
+    }
   });
 
   it('multiple lists with distinct entities collect all entries', () => {
@@ -88,7 +99,7 @@ describe('rrfFuse', () => {
     const list3 = new Map([['X', 10]]);
 
     const result = rrfFuse([list1, list2, list3]);
-    const expected = 1 / (60 + 2) + 1 / (60 + 5) + 1 / (60 + 10);
+    const expected = 1 / (RRF_DEFAULT_K + 2) + 1 / (RRF_DEFAULT_K + 5) + 1 / (RRF_DEFAULT_K + 10);
     expect(result.get('X')!).toBeCloseTo(expected, 10);
   });
 });

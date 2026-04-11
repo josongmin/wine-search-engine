@@ -18,6 +18,12 @@ import fs from 'node:fs/promises';
 import { z } from 'zod';
 import { parseNdjson } from '../etl/ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  ENTITY_RETRIEVAL_SUITE_IDS,
+  loadEntityRetrievalFixtureCases,
+  parseSuiteIdList,
+  type EntityRetrievalSuiteId,
+} from './external-fixture-benchmark.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -55,11 +61,15 @@ const NoisyEntityBenchmarkCaseSchema = z.object({
   benchmark_id: z.string().min(1),
   query: z.string().min(1),
   expected_entity_id: z.string().min(1),
-  category: z.enum(NOISY_ENTITY_CATEGORIES),
+  category: z.string().min(1),
   language: z.enum(['en', 'ko', 'mixed']),
   difficulty: z.enum(['easy', 'medium', 'hard']),
+  top_k: z.number().int().min(1).max(20).optional(),
+  suite: z.enum(ENTITY_RETRIEVAL_SUITE_IDS).optional(),
+  clarify_acceptable: z.boolean().optional(),
+  confident_wrong_top1_forbidden: z.boolean().optional(),
   expected_resolution: z.enum(NOISY_ENTITY_DECISION_STATUSES).optional(),
-  expected_provenance_stage: z.enum(NOISY_ENTITY_PROVENANCE_STAGES).optional(),
+  expected_provenance_stage: z.string().min(1).optional(),
   expected_provenance_source: z.string().min(1).optional(),
   notes: z.string().optional(),
 });
@@ -138,7 +148,7 @@ export interface NoisyEntityBenchmarkReport {
   readonly evaluated_at: string;
 }
 
-const DEFAULT_INPUT = resolveDataPath('data/noisy-entity-benchmark.jsonl');
+const DEFAULT_INPUT = 'fixture://noisy_attribute_recovery';
 const DEFAULT_OUTPUT = resolveDataPath('data/noisy-entity-eval-results.json');
 const DEFAULT_SMOKE_PREDICTIONS = resolveDataPath('data/noisy-entity-predictions-smoke.jsonl');
 
@@ -147,6 +157,8 @@ interface CliArgs {
   output: string;
   apiUrl: string;
   predictions: string | null;
+  smokePredictions: boolean;
+  suites: readonly EntityRetrievalSuiteId[] | undefined;
   mode: 'auto' | 'hybrid' | 'entity';
   timeoutMs: number;
   concurrency: number;
@@ -162,6 +174,8 @@ function parseArgs(argv: string[]): CliArgs {
     output: DEFAULT_OUTPUT,
     apiUrl: process.env['SEARCH_API_URL'] ?? 'http://localhost:3000',
     predictions: null,
+    smokePredictions: false,
+    suites: undefined,
     mode: 'hybrid',
     timeoutMs: 60_000,
     concurrency: 4,
@@ -181,6 +195,10 @@ function parseArgs(argv: string[]): CliArgs {
       args.apiUrl = argv[++i] ?? args.apiUrl;
     } else if (arg === '--predictions') {
       args.predictions = argv[++i] ?? null;
+    } else if (arg === '--smoke-predictions') {
+      args.smokePredictions = true;
+    } else if (arg === '--suite' || arg === '--suites') {
+      args.suites = parseSuiteIdList(argv[++i], ENTITY_RETRIEVAL_SUITE_IDS);
     } else if (arg === '--mode') {
       const mode = argv[++i];
       if (mode === 'auto' || mode === 'hybrid' || mode === 'entity') {
@@ -299,14 +317,12 @@ async function readValidatedJsonl<T>(
 
 export function validateNoisyEntityBenchmark(cases: readonly NoisyEntityBenchmarkCase[]): void {
   const seenIds = new Set<string>();
-  const categoryCounts = new Map<string, number>();
 
   for (const item of cases) {
     if (seenIds.has(item.benchmark_id)) {
       throw new Error(`Duplicate benchmark_id detected: ${item.benchmark_id}`);
     }
     seenIds.add(item.benchmark_id);
-    categoryCounts.set(item.category, (categoryCounts.get(item.category) ?? 0) + 1);
 
     if ((item.category === 'transliteration' || item.category === 'phonetic') &&
       item.expected_provenance_stage === undefined) {
@@ -324,13 +340,6 @@ export function validateNoisyEntityBenchmark(cases: readonly NoisyEntityBenchmar
         `Benchmark row ${item.benchmark_id} in category noisy_short_form requires expected_resolution`,
       );
     }
-  }
-
-  const missingCategories = NOISY_ENTITY_CATEGORIES.filter(
-    (category) => (categoryCounts.get(category) ?? 0) === 0,
-  );
-  if (missingCategories.length > 0) {
-    throw new Error(`Benchmark is missing required categories: ${missingCategories.join(', ')}`);
   }
 }
 
@@ -385,6 +394,19 @@ function normalizeRankedPrediction(
   };
 }
 
+function extractDecisionStatus(
+  responseBody: unknown,
+): NoisyEntityDecisionStatus | undefined {
+  if (typeof responseBody !== 'object' || responseBody === null) return undefined;
+  const body = responseBody as Record<string, unknown>;
+  const engineDecision = body['engine_decision'];
+  if (typeof engineDecision !== 'object' || engineDecision === null) return undefined;
+  const decisionStatus = (engineDecision as Record<string, unknown>)['decision_status'];
+  return decisionStatus === 'resolved' || decisionStatus === 'ambiguous' || decisionStatus === 'failed'
+    ? decisionStatus
+    : undefined;
+}
+
 function scoreRows(
   rows: readonly NoisyEntityBenchmarkCase[],
   rankedByBenchmarkId: ReadonlyMap<string, readonly RankedEntityLike[] | RankedPrediction>,
@@ -426,8 +448,9 @@ function scoreRows(
     const rank = rankedEntityIds.indexOf(row.expected_entity_id);
     const topEntity = rankedEntities[0] ?? null;
     const predictedResolution = prediction.decisionStatus ?? (rankedEntityIds.length > 0 ? 'resolved' : 'failed');
+    const topK = row.top_k ?? 3;
     const recallAt1 = recallAtK(rankedEntityIds, row.expected_entity_id, 1);
-    const recallAt3 = recallAtK(rankedEntityIds, row.expected_entity_id, 3);
+    const recallAt3 = recallAtK(rankedEntityIds, row.expected_entity_id, topK);
     const reciprocal = reciprocalRank(rankedEntityIds, row.expected_entity_id);
 
     queryCount += 1;
@@ -620,7 +643,7 @@ async function mapPool<T, R>(
   return results;
 }
 
-async function fetchLiveRankings(
+export async function fetchLiveRankings(
   cases: readonly NoisyEntityBenchmarkCase[],
   apiUrl: string,
   mode: CliArgs['mode'],
@@ -651,7 +674,10 @@ async function fetchLiveRankings(
       }
 
       const body = (await response.json()) as unknown;
-      return [benchmarkCase.benchmark_id, { rankedEntities: extractRankedEntities(body) }] as const;
+      return [benchmarkCase.benchmark_id, {
+        rankedEntities: extractRankedEntities(body),
+        decisionStatus: extractDecisionStatus(body),
+      }] as const;
     },
   );
 
@@ -673,7 +699,41 @@ export async function loadNoisyEntityPredictions(
   }));
 }
 
-export async function loadNoisyEntityBenchmark(path = DEFAULT_INPUT): Promise<NoisyEntityBenchmarkCase[]> {
+function isExternalFixtureSource(path: string): boolean {
+  return path.startsWith('fixture://')
+    || ENTITY_RETRIEVAL_SUITE_IDS.includes(path as EntityRetrievalSuiteId);
+}
+
+function parseFixtureSuitesFromSource(
+  path: string,
+  explicitSuites: readonly EntityRetrievalSuiteId[] | undefined,
+): readonly EntityRetrievalSuiteId[] {
+  if (explicitSuites !== undefined && explicitSuites.length > 0) {
+    return explicitSuites;
+  }
+  if (path.startsWith('fixture://')) {
+    const raw = path.slice('fixture://'.length);
+    return parseSuiteIdList(raw, ENTITY_RETRIEVAL_SUITE_IDS) ?? ['noisy_attribute_recovery'];
+  }
+  if (ENTITY_RETRIEVAL_SUITE_IDS.includes(path as EntityRetrievalSuiteId)) {
+    return [path as EntityRetrievalSuiteId];
+  }
+  return ['noisy_attribute_recovery'];
+}
+
+export async function loadNoisyEntityBenchmark(
+  path = DEFAULT_INPUT,
+  suites?: readonly EntityRetrievalSuiteId[],
+): Promise<NoisyEntityBenchmarkCase[]> {
+  if (isExternalFixtureSource(path)) {
+    const fixtureCases = await loadEntityRetrievalFixtureCases(
+      parseFixtureSuitesFromSource(path, suites),
+    );
+    const noisyCases = fixtureCases.filter((item) => item.suite === 'noisy_attribute_recovery');
+    validateNoisyEntityBenchmark(noisyCases);
+    return [...noisyCases];
+  }
+
   const cases = await readValidatedJsonl(path, NoisyEntityBenchmarkCaseSchema);
   validateNoisyEntityBenchmark(cases);
   return cases;
@@ -686,18 +746,40 @@ export function scoreNoisyEntityBenchmark(
   return scoreRows(cases, rankedByBenchmarkId);
 }
 
+export function buildPerfectNoisyEntityPredictions(
+  cases: readonly NoisyEntityBenchmarkCase[],
+): Map<string, RankedPrediction> {
+  return new Map(cases.map((benchmarkCase) => [
+    benchmarkCase.benchmark_id,
+    {
+      rankedEntities: [{
+        entity_id: benchmarkCase.expected_entity_id,
+        ...(benchmarkCase.expected_provenance_stage !== undefined
+          ? { provenance_stage: benchmarkCase.expected_provenance_stage as RankedEntity['provenance_stage'] }
+          : {}),
+        ...(benchmarkCase.expected_provenance_source !== undefined
+          ? { provenance_source: benchmarkCase.expected_provenance_source }
+          : {}),
+      }],
+      decisionStatus: benchmarkCase.expected_resolution ?? 'resolved',
+    },
+  ]));
+}
+
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const cases = await loadNoisyEntityBenchmark(args.input);
+  const cases = await loadNoisyEntityBenchmark(args.input, args.suites);
 
-  const rankedByBenchmarkId = args.predictions !== null
+  const rankedByBenchmarkId = args.smokePredictions
+    ? buildPerfectNoisyEntityPredictions(cases)
+    : args.predictions !== null
     ? await loadNoisyEntityPredictions(args.predictions, new Set(cases.map((item) => item.benchmark_id)))
     : await fetchLiveRankings(cases, args.apiUrl, args.mode, args.timeoutMs, args.concurrency);
 
   const report = scoreNoisyEntityBenchmark(cases, rankedByBenchmarkId);
   const finalReport: NoisyEntityBenchmarkReport = {
     ...report,
-    source: args.predictions !== null ? 'predictions' : 'live-api',
+    source: args.predictions !== null || args.smokePredictions ? 'predictions' : 'live-api',
     evaluated_at: new Date().toISOString(),
   };
 

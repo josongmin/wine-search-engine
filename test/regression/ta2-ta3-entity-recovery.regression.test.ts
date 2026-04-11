@@ -290,6 +290,22 @@ describe('ResolverInput.blockerSeedCandidates (TA2-4)', () => {
     expect(() => computeConformalSetSize(0.9, 0, 5)).toThrow(RangeError);
     expect(() => computeConformalSetSize(0.9, 0.6, 5)).toThrow(RangeError);
   });
+
+  it('TA2-4-BOUND-01: alpha > 0.5 → RangeError (above upper boundary)', async () => {
+    // 실질 검증: alpha > 0.5 (유효 범위 (0, 0.5] 초과) → throw
+    const { computeConformalSetSize } = await import('../../src/domain/resolver/service/resolver.js');
+    expect(() => computeConformalSetSize(0.9, 0.501, 5)).toThrow(RangeError);
+    expect(() => computeConformalSetSize(0.9, 0.75, 5)).toThrow(RangeError);
+    expect(() => computeConformalSetSize(0.9, 1.0, 5)).toThrow(RangeError);
+  });
+
+  it('TA2-4-BOUND-02: alpha = 0.5 → does NOT throw (exactly at upper boundary)', async () => {
+    // 실질 검증: alpha=0.5 는 유효 범위 (0, 0.5] 경계값 → throw 없이 정상 반환
+    const { computeConformalSetSize } = await import('../../src/domain/resolver/service/resolver.js');
+    expect(() => computeConformalSetSize(0.9, 0.5, 5)).not.toThrow();
+    // alpha=0.499 도 유효 범위 내
+    expect(() => computeConformalSetSize(0.9, 0.499, 5)).not.toThrow();
+  });
 });
 
 // ─── T6: ResolvedCandidate.blockerSeed provenance field ──────────────────────
@@ -1072,7 +1088,6 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
     // lookupVariants is provenance metadata — it must not change scoring signals.
     // Two otherwise-identical anchors with/without lookupVariants should produce
     // the same sourceSignals.
-    const id = createEntityId('test-wine');
     const lookup = makeEntityLookup([['test-wine', 'Test Wine']]);
 
     const withVariants: EntityCandidateGeneratorInput = {
