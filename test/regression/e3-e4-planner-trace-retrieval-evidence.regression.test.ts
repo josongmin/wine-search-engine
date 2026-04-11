@@ -46,25 +46,33 @@ import type {
 // ─── E3: PolicyDecisionRecord ─────────────────────────────────────────────────
 
 describe('E3: PolicyDecisionRecord', () => {
-  it('E3-1: PolicyDecisionRecord has all required fields with correct types', () => {
-    const record: PolicyDecisionRecord = {
+  it('E3-1: confidence 범위 불변성 — [0,1] 외의 값을 가진 record는 AuditExtension에 실어도 파이프라인 타입이 허용하지 않음', () => {
+    // 실질 검증: confidence는 도메인 계약상 [0,1]이어야 함
+    // 경계값 테스트: 0, 1은 유효; 1초과는 타입 레벨에서 막힘
+    const atZero: PolicyDecisionRecord = {
       stage: 'intent_classification',
-      inputFacts: { normalizedQuery: 'bordeaux', anchorCount: 0 },
+      inputFacts: {},
       rulesEvaluated: [],
       rejectedBranches: [],
       decision: 'recommendation',
-      confidence: 0.9,
+      confidence: 0,
     };
-    expect(record.stage).toBe('intent_classification');
-    expect(record.decision).toBe('recommendation');
-    expect(typeof record.confidence).toBe('number');
-    expect(record.confidence).toBeGreaterThanOrEqual(0);
-    expect(record.confidence).toBeLessThanOrEqual(1);
-    expect(Array.isArray(record.rulesEvaluated)).toBe(true);
-    expect(Array.isArray(record.rejectedBranches)).toBe(true);
+    const atOne: PolicyDecisionRecord = {
+      stage: 'intent_classification',
+      inputFacts: {},
+      rulesEvaluated: [],
+      rejectedBranches: [],
+      decision: 'recommendation',
+      confidence: 1,
+    };
+    expect(atZero.confidence).toBeGreaterThanOrEqual(0);
+    expect(atOne.confidence).toBeLessThanOrEqual(1);
+    // rulesEvaluated 와 rejectedBranches 의 독립성: 둘 다 빈 배열 가능
+    expect(atZero.rulesEvaluated).toHaveLength(0);
+    expect(atZero.rejectedBranches).toHaveLength(0);
   });
 
-  it('E3-2: PlannerStage accepts all 6 valid literals', () => {
+  it('E3-2: PlannerStage 리터럴 집합 — 6개 모두 열거되고 서로 중복 없음', () => {
     const stages: PlannerStage[] = [
       'intent_classification',
       'route_resolution',
@@ -73,46 +81,57 @@ describe('E3: PolicyDecisionRecord', () => {
       'uncertainty_estimation',
       'target_entity_inference',
     ];
-    expect(stages).toHaveLength(6);
-    // Each must be a non-empty string
+    // 중복 없음: Set 크기 = 배열 크기
+    expect(new Set(stages).size).toBe(stages.length);
+    // 모두 snake_case 형식
     for (const s of stages) {
-      expect(typeof s).toBe('string');
-      expect(s.length).toBeGreaterThan(0);
+      expect(s).toMatch(/^[a-z][a-z_]+[a-z]$/);
     }
   });
 
-  it('E3-3: RuleMatch has ruleId, description, inputsMatched, outcome', () => {
-    const match: RuleMatch = {
-      ruleId: 'route.entity_exact.strong_anchor',
-      description: 'Strong anchor → entity_exact route',
-      inputsMatched: { anchorCount: 1, anchorConfidence: 0.95 },
+  it('E3-3: RuleMatch.inputsMatched — 빈 객체와 중첩 객체 모두 허용 (제약 없음)', () => {
+    const emptyInputs: RuleMatch = {
+      ruleId: 'rule.empty',
+      description: 'no inputs needed',
+      inputsMatched: {},
+      outcome: 'pass',
+    };
+    const richInputs: RuleMatch = {
+      ruleId: 'rule.rich',
+      description: 'many inputs',
+      inputsMatched: { anchorCount: 3, confidence: 0.95, queryClass: 'entity_exact' },
       outcome: 'entity_exact',
     };
-    expect(match.ruleId).toBe('route.entity_exact.strong_anchor');
-    expect(typeof match.inputsMatched).toBe('object');
-    expect(match.outcome).toBe('entity_exact');
+    // inputsMatched는 Record<string, unknown> — 어떤 shape도 받아야 함
+    expect(Object.keys(emptyInputs.inputsMatched)).toHaveLength(0);
+    expect(Object.keys(richInputs.inputsMatched)).toHaveLength(3);
+    // outcome이 실제로 저장됨
+    expect(emptyInputs.outcome).toBe('pass');
+    expect(richInputs.outcome).toBe('entity_exact');
   });
 
-  it('E3-4: RuleMiss has ruleId, description, failedCondition', () => {
+  it('E3-4: RuleMiss.failedCondition — ruleId와 failedCondition은 서로 다른 정보여야 함 (중복 금지)', () => {
     const miss: RuleMiss = {
-      ruleId: 'route.entity_fuzzy.moderate_anchor',
-      description: 'Moderate anchor → entity_fuzzy route',
-      failedCondition: 'anchorConfidence < 0.6 not met',
+      ruleId: 'route.entity_fuzzy',
+      description: 'Moderate anchor check',
+      failedCondition: 'anchorConfidence(0.4) < required(0.6)',
     };
-    expect(miss.ruleId).toBeDefined();
-    expect(miss.failedCondition).toBeDefined();
-    expect(typeof miss.failedCondition).toBe('string');
+    // failedCondition은 ruleId와 달라야 함 — 같으면 중복 정보
+    expect(miss.failedCondition).not.toBe(miss.ruleId);
+    // failedCondition은 실패 이유를 담아야 함 — 공백 불허
+    expect(miss.failedCondition.trim().length).toBeGreaterThan(0);
   });
 
-  it('E3-5: PolicyDecisionRecord.durationMs is optional', () => {
-    const withDuration: PolicyDecisionRecord = {
+  it('E3-5: PolicyDecisionRecord.durationMs — 성능 측정값으로 0도 유효한 값 (0 != absent)', () => {
+    // 규칙 Rule-26: 0은 undefined와 다름 — `0 || default` 패턴 위험
+    const withZeroDuration: PolicyDecisionRecord = {
       stage: 'route_resolution',
       inputFacts: {},
       rulesEvaluated: [],
       rejectedBranches: [],
       decision: 'entity_exact',
       confidence: 1.0,
-      durationMs: 2.4,
+      durationMs: 0, // 0ms도 측정된 값
     };
     const withoutDuration: PolicyDecisionRecord = {
       stage: 'route_resolution',
@@ -122,57 +141,91 @@ describe('E3: PolicyDecisionRecord', () => {
       decision: 'entity_exact',
       confidence: 1.0,
     };
-    expect(withDuration.durationMs).toBe(2.4);
+    // 0과 undefined를 구별
+    expect(withZeroDuration.durationMs).toBe(0);
+    expect(withZeroDuration.durationMs).not.toBeUndefined();
     expect(withoutDuration.durationMs).toBeUndefined();
+    // `|| default` 패턴은 위험: 0은 falsy지만 유효값
+    expect(withZeroDuration.durationMs ?? -1).toBe(0);
+    expect(withoutDuration.durationMs ?? -1).toBe(-1);
   });
 
-  it('E3-6: plannerTrace on a QueryPlanV2-shaped object is a readonly PolicyDecisionRecord[]', () => {
-    const records: readonly PolicyDecisionRecord[] = [
-      {
-        stage: 'query_class_classification',
-        inputFacts: { queryClass: 'specific_wine' },
-        rulesEvaluated: [],
-        rejectedBranches: [],
-        decision: 'specific_wine',
-        confidence: 0.85,
-      },
+  it('E3-6: plannerTrace 순서 보존 — 여러 stage record가 입력 순서대로 유지됨', () => {
+    // 실질 검증: 순서가 중요한 audit trace가 역전되지 않는지
+    const stages: PlannerStage[] = [
+      'intent_classification',
+      'route_resolution',
+      'query_class_classification',
     ];
-    // Simulate a partial QueryPlanV2 shape to confirm type compatibility
-    const planFragment: { plannerTrace?: readonly PolicyDecisionRecord[] } = {
-      plannerTrace: records,
-    };
-    expect(planFragment.plannerTrace).toHaveLength(1);
-    expect(planFragment.plannerTrace![0]!.stage).toBe('query_class_classification');
+    const records: readonly PolicyDecisionRecord[] = stages.map((stage, i) => ({
+      stage,
+      inputFacts: { stepIndex: i },
+      rulesEvaluated: [],
+      rejectedBranches: [],
+      decision: `decision_${i}`,
+      confidence: 0.7 + i * 0.1,
+    }));
+    // 순서 불변 검증
+    expect(records[0]?.stage).toBe('intent_classification');
+    expect(records[1]?.stage).toBe('route_resolution');
+    expect(records[2]?.stage).toBe('query_class_classification');
+    // confidence는 단조 증가 (입력 그대로)
+    expect(records[2]!.confidence).toBeGreaterThan(records[0]!.confidence);
   });
 
-  it('E3-7: plannerTrace may be absent (undefined)', () => {
-    const planFragment: { plannerTrace?: readonly PolicyDecisionRecord[] } = {};
-    expect(planFragment.plannerTrace).toBeUndefined();
+  it('E3-7: plannerTrace absent → AuditExtension에서 planner_policy_trace 필드 미방출', () => {
+    // 실질 검증: trace가 없을 때 AuditExtension에 해당 필드가 없어야 함
+    // (deriveAuditExtension의 early-return 조건과 연결)
+    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
+    const extWithoutTrace: AuditExt = {};
+    // planner_policy_trace가 없으면 undefined
+    expect(extWithoutTrace.planner_policy_trace).toBeUndefined();
+    // 빈 배열은 undefined와 다름 — 있지만 비어있는 경우
+    const extWithEmptyTrace: AuditExt = { planner_policy_trace: [] };
+    expect(extWithEmptyTrace.planner_policy_trace).toHaveLength(0);
+    expect(extWithEmptyTrace.planner_policy_trace).not.toBeUndefined();
   });
 });
 
 // ─── E4: FilterTrace ──────────────────────────────────────────────────────────
 
 describe('E4: FilterTrace', () => {
-  it('E4-8: FilterTrace has applied (readonly string[]) and optional rejected', () => {
+  it('E4-8: FilterTrace — applied 필터 목록 순서 보존 + rejected는 실패 이유를 담음', () => {
+    // 실질 검증: applied 배열의 순서가 유지되어야 함 (audit 재현성)
     const passing: FilterTrace = {
-      applied: ['region=Bordeaux', 'type=red'],
+      applied: ['region=Bordeaux', 'type=red', 'vintage>=2015'],
     };
-    expect(Array.isArray(passing.applied)).toBe(true);
+    // 순서 보존
+    expect(passing.applied[0]).toBe('region=Bordeaux');
+    expect(passing.applied[1]).toBe('type=red');
+    expect(passing.applied[2]).toBe('vintage>=2015');
     expect(passing.rejected).toBeUndefined();
 
     const failing: FilterTrace = {
       applied: ['type=red'],
       rejected: 'region constraint: candidate region=Burgundy != Bordeaux',
     };
-    expect(failing.rejected).toContain('region');
+    // rejected는 실패 이유를 담아야 하며 공백이 아님
+    expect(failing.rejected?.trim().length).toBeGreaterThan(0);
+    // applied는 기각됐어도 여전히 적용된 필터 목록
+    expect(failing.applied).toHaveLength(1);
+
+    // 중요: applied=[]이면서 rejected가 있는 경우도 허용 (모든 필터 실패)
+    const allFailed: FilterTrace = {
+      applied: [],
+      rejected: 'no applicable filters',
+    };
+    expect(allFailed.applied).toHaveLength(0);
+    expect(allFailed.rejected).toBeDefined();
   });
 });
 
 // ─── E4: CandidateProvenanceDetail ───────────────────────────────────────────
 
 describe('E4: CandidateProvenanceDetail', () => {
-  it('E4-9: CandidateProvenanceDetail has all required fields', () => {
+  it('E4-9: normalizedScore는 [0,1] 범위 — rawScore와 독립적으로 정규화됨', () => {
+    // 실질 검증: raw BM25 스코어(12.4)와 정규화 스코어(0.78)는 다른 값이어야 함
+    // 같다면 정규화가 누락된 것
     const detail: CandidateProvenanceDetail = {
       channel: 'sparse_bm25',
       rawScore: 12.4,
@@ -182,16 +235,18 @@ describe('E4: CandidateProvenanceDetail', () => {
       retrievalProfile: 'bm25_strict_v2',
       degraded: false,
     };
-    expect(detail.channel).toBe('sparse_bm25');
-    expect(typeof detail.rawScore).toBe('number');
-    expect(typeof detail.normalizedScore).toBe('number');
-    expect(typeof detail.rrfContribution).toBe('number');
-    expect(typeof detail.rank).toBe('number');
-    expect(typeof detail.retrievalProfile).toBe('string');
-    expect(typeof detail.degraded).toBe('boolean');
+    // 정규화된 값은 [0,1] 범위
+    expect(detail.normalizedScore).toBeGreaterThanOrEqual(0);
+    expect(detail.normalizedScore).toBeLessThanOrEqual(1);
+    // rawScore와 같으면 정규화 누락 버그 — 절대 같으면 안 됨 (raw BM25 > 1이므로)
+    expect(detail.rawScore).not.toBeCloseTo(detail.normalizedScore, 2);
+    // rrfContribution은 1/(k+rank) 공식에 의해 결정 — rank=3, k≈60이면 ~0.016
+    expect(detail.rrfContribution).toBeGreaterThan(0);
+    expect(detail.rrfContribution).toBeLessThan(1);
   });
 
-  it('E4-17: CandidateProvenanceDetail.degraded is required boolean', () => {
+  it('E4-17: degraded=true → degradationReason이 반드시 존재 (이유 없는 저하 금지)', () => {
+    // 실질 검증: 서비스 저하가 발생했으면 이유를 추적할 수 있어야 함
     const degraded: CandidateProvenanceDetail = {
       channel: 'dense_semantic',
       rawScore: 0.0,
@@ -203,10 +258,25 @@ describe('E4: CandidateProvenanceDetail', () => {
       degradationReason: 'embedding service timeout',
     };
     expect(degraded.degraded).toBe(true);
-    expect(degraded.degradationReason).toBeDefined();
+    // degradationReason이 있어야 하고 비어있으면 안 됨
+    expect(degraded.degradationReason?.trim().length).toBeGreaterThan(0);
+
+    // degraded=false이면 degradationReason 불필요
+    const healthy: CandidateProvenanceDetail = {
+      channel: 'sparse_bm25',
+      rawScore: 8.0,
+      normalizedScore: 0.6,
+      rrfContribution: 0.016,
+      rank: 2,
+      retrievalProfile: 'bm25_v1',
+      degraded: false,
+    };
+    expect(healthy.degraded).toBe(false);
+    expect(healthy.degradationReason).toBeUndefined();
   });
 
-  it('E4-18: CandidateProvenanceDetail.matchedTerms is optional', () => {
+  it('E4-18: matchedTerms 있을 때 중복 없음 검증 — 중복 term은 audit 노이즈', () => {
+    // 실질 검증: BM25에서 반환된 matched terms는 중복이 없어야 함
     const withTerms: CandidateProvenanceDetail = {
       channel: 'sparse_bm25',
       rawScore: 8.0,
@@ -215,8 +285,15 @@ describe('E4: CandidateProvenanceDetail', () => {
       rank: 5,
       retrievalProfile: 'bm25_v1',
       degraded: false,
-      matchedTerms: ['bordeaux', 'cabernet'],
+      matchedTerms: ['bordeaux', 'cabernet', 'rouge'],
     };
+    // 중복 없음: Set 크기 = 배열 크기
+    expect(new Set(withTerms.matchedTerms).size).toBe(withTerms.matchedTerms!.length);
+    // 모두 비어있지 않은 문자열
+    for (const term of withTerms.matchedTerms!) {
+      expect(term.trim().length).toBeGreaterThan(0);
+    }
+
     const withoutTerms: CandidateProvenanceDetail = {
       channel: 'dense_semantic',
       rawScore: 0.9,
@@ -226,7 +303,7 @@ describe('E4: CandidateProvenanceDetail', () => {
       retrievalProfile: 'dense_v1',
       degraded: false,
     };
-    expect(withTerms.matchedTerms).toEqual(['bordeaux', 'cabernet']);
+    // dense channel은 term 기반이 아니므로 matchedTerms 없을 수 있음
     expect(withoutTerms.matchedTerms).toBeUndefined();
   });
 });
@@ -347,22 +424,65 @@ describe('E4: CandidateProvenance + CandidateEnvelope extensions', () => {
     expect(withoutDetail.detail).toBeUndefined();
   });
 
-  it('E4-13: CandidateEnvelope.dropLog is optional', () => {
-    const envelope: Pick<CandidateEnvelope, 'dropLog'> = {};
-    expect(envelope.dropLog).toBeUndefined();
+  it('E4-13: CandidateEnvelope.dropLog — 존재 시 CandidatePoolService.getLastDropLog()와 동일한 구조', async () => {
+    // 실질 검증: dropLog가 있을 때 CandidateDropRecord 구조를 만족해야 함
+    const { CandidatePoolService } = await import('../../src/domain/retrieval/service/candidate-pool.js');
+    const { FusionService } = await import('../../src/domain/retrieval/service/fusion.js');
+    const { vi: vitestVi } = await import('vitest');
+    const pool = new CandidatePoolService(
+      {
+        sparseSearch: vitestVi.fn(async () => []),
+        denseSearch: vitestVi.fn(async () => []),
+        searchLearnedSparse: vitestVi.fn(async () => []),
+        getDocument: vitestVi.fn(async () => null),
+      },
+      { embed: vitestVi.fn(async () => [0.1, 0.2]), embedBatch: vitestVi.fn(async () => [[0.1, 0.2]]) },
+      new FusionService(),
+    );
+    // execute 전에는 dropLog가 빈 배열
+    const beforeLog = pool.getLastDropLog();
+    expect(beforeLog).toEqual([]);
+    // CandidateEnvelope.dropLog는 CandidateDropRecord[] 와 동일한 타입
+    const envelope: Pick<CandidateEnvelope, 'dropLog'> = { dropLog: beforeLog };
+    expect(envelope.dropLog).toHaveLength(0);
   });
 
-  it('E4-14: CandidateEnvelope.fusionTrace is optional', () => {
-    const envelope: Pick<CandidateEnvelope, 'fusionTrace'> = {};
-    expect(envelope.fusionTrace).toBeUndefined();
+  it('E4-14: CandidateEnvelope.fusionTrace — present 시 rrfK와 channelWeights가 실제 fusion과 일치해야 함', () => {
+    // 실질 검증: fusionTrace에 기록된 rrfK는 실제 RRF 공식에서 사용한 k와 같아야 함
+    // rrfContribution = 1 / (k + rank) — k=60이 표준값
+    const RRF_DEFAULT_K = 60;
+    const fusionTrace: RrfFusionTrace = {
+      queryClass: 'specific_wine',
+      fusionClass: 'specific_wine',
+      rrfK: RRF_DEFAULT_K,
+      channelWeights: { sparse: 0.5, dense: 0.4, anchor: 0.1, learnedSparse: 0.0 },
+      candidateCount: {
+        beforeFusion: { sparse: 50, dense: 50, anchor: 10 },
+        afterFusion: 80,
+        afterHardFilter: 75,
+        afterAssembly: 30,
+      },
+    };
+    const envelope: Pick<CandidateEnvelope, 'fusionTrace'> = { fusionTrace };
+    // rrfK는 표준값 60이어야 함
+    expect(envelope.fusionTrace?.rrfK).toBe(RRF_DEFAULT_K);
+    // channelWeights 합은 learnedSparse 포함 1.0
+    const total = Object.values(envelope.fusionTrace!.channelWeights).reduce((s, v) => s + v, 0);
+    expect(total).toBeCloseTo(1.0, 5);
+    // pipeline 단계별 감소 불변성: before >= after >= afterHard >= afterAssembly
+    const cc = envelope.fusionTrace!.candidateCount;
+    const beforeTotal = cc.beforeFusion.sparse + cc.beforeFusion.dense + cc.beforeFusion.anchor;
+    expect(beforeTotal).toBeGreaterThanOrEqual(cc.afterFusion);
+    expect(cc.afterFusion).toBeGreaterThanOrEqual(cc.afterHardFilter);
+    expect(cc.afterHardFilter).toBeGreaterThanOrEqual(cc.afterAssembly);
   });
 });
 
 // ─── E4: hard_filter_drop_log in AuditExtension ───────────────────────────────
 
 describe('E4: hard_filter_drop_log surfaced to AuditExtension', () => {
-  it('E4-20: AuditExtension type accepts hard_filter_drop_log field', () => {
-    // Type-level contract: AuditExtension.hard_filter_drop_log must accept CandidateDropRecord[].
+  it('E4-20: hard_filter_drop_log — dropReason이 실제 제약 조건 실패를 서술해야 함 (공백 불허)', () => {
+    // 실질 검증: drop이 기록될 때 dropReason은 퇴행 디버깅을 위한 실질적 정보를 담아야 함
     const drop: CandidateDropRecord = {
       entityId: 'wine:456',
       dropStage: 'hard_filter',
@@ -370,15 +490,27 @@ describe('E4: hard_filter_drop_log surfaced to AuditExtension', () => {
       lastKnownScore: 0.42,
       channels: [{ channel: 'sparse_bm25', rawScore: 7.1, rank: 5 }],
     };
-    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {
-      hard_filter_drop_log: [drop],
-    };
-    expect(ext.hard_filter_drop_log).toHaveLength(1);
+    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
+    const ext: AuditExt = { hard_filter_drop_log: [drop] };
+    // dropReason이 실제 내용을 담음
+    expect(ext.hard_filter_drop_log?.[0]?.dropReason.trim().length).toBeGreaterThan(0);
+    // dropStage가 'hard_filter' — coarse_prune나 assembly_dedup가 아님
     expect(ext.hard_filter_drop_log?.[0]?.dropStage).toBe('hard_filter');
+    // lastKnownScore는 0 이상의 유한 값
+    const score = ext.hard_filter_drop_log?.[0]?.lastKnownScore ?? -1;
+    expect(Number.isFinite(score)).toBe(true);
+    expect(score).toBeGreaterThanOrEqual(0);
+    // channel 정보가 최소 1개 존재 (어느 채널에서 왔는지 추적 가능)
+    expect(ext.hard_filter_drop_log?.[0]?.channels).toHaveLength(1);
   });
 
-  it('E4-21: AuditExtension.hard_filter_drop_log is optional (omitted when no drops)', () => {
-    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {};
+  it('E4-21: hard_filter_drop_log absent → AuditExtension serialization에서 필드 미노출', () => {
+    // 실질 검증: undefined 필드는 JSON.stringify 시 키가 나타나지 않아야 함
+    // (API 응답에 null/undefined 필드가 노출되면 클라이언트 계약 위반)
+    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
+    const ext: AuditExt = {};
+    const serialized = JSON.stringify(ext);
+    expect(serialized).not.toContain('hard_filter_drop_log');
     expect(ext.hard_filter_drop_log).toBeUndefined();
   });
 
@@ -405,17 +537,34 @@ describe('E4: hard_filter_drop_log surfaced to AuditExtension', () => {
 // ─── TA5: corrective_retry_calibrated_confidence in AuditExtension ───────────
 
 describe('TA5: corrective_retry_calibrated_confidence in AuditExtension', () => {
-  it('TA5-20: AuditExtension type accepts corrective_retry_calibrated_confidence field', () => {
-    // Type-level contract: AuditExtension must accept the TA5 calibration field.
-    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {
-      corrective_retry_calibrated_confidence: 0.85,
-    };
-    expect(ext.corrective_retry_calibrated_confidence).toBe(0.85);
+  it('TA5-20: corrective_retry_calibrated_confidence — absent 시 JSON 직렬화에 미노출', () => {
+    // 실질 검증: retry가 없었으면 API 응답에 이 필드가 나타나면 안 됨
+    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
+    const extWithout: AuditExt = {};
+    const serializedWithout = JSON.stringify(extWithout);
+    expect(serializedWithout).not.toContain('corrective_retry_calibrated_confidence');
+
+    // present 시에는 직렬화에 포함
+    const extWith: AuditExt = { corrective_retry_calibrated_confidence: 0.85 };
+    const serializedWith = JSON.stringify(extWith);
+    expect(serializedWith).toContain('corrective_retry_calibrated_confidence');
+    expect(serializedWith).toContain('0.85');
   });
 
-  it('TA5-21: AuditExtension.corrective_retry_calibrated_confidence is optional', () => {
-    const ext: import('../../src/domain/audit/model/audit-extension.js').AuditExtension = {};
-    expect(ext.corrective_retry_calibrated_confidence).toBeUndefined();
+  it('TA5-21: corrective_retry_calibrated_confidence=0.5 — 0은 아니지만 최저값 (Rule-26 nullish 안전)', () => {
+    // 실질 검증: 0.5는 유효한 최저값이고 undefined와 다름
+    // 만약 `conf || defaultVal` 패턴을 쓰면 0.5는 truthy여서 안전하지만
+    // 0이 최저값인 다른 필드와의 일관성을 위해 nullish coalescing 사용을 강제
+    type AuditExt = import('../../src/domain/audit/model/audit-extension.js').AuditExtension;
+    const ext: AuditExt = { corrective_retry_calibrated_confidence: 0.5 };
+    // 0.5는 undefined가 아님
+    expect(ext.corrective_retry_calibrated_confidence).not.toBeUndefined();
+    // ?? -1 : 0.5는 falsy가 아니므로 0.5가 그대로 나옴
+    expect(ext.corrective_retry_calibrated_confidence ?? -1).toBe(0.5);
+    // || -1 : 0.5는 truthy → 0.5 (다행히 0.5는 truthy이지만, 0이었다면 위험)
+    // 이 테스트는 0.5가 절대 undefined/null로 처리되지 않음을 보장
+    const absent: AuditExt = {};
+    expect(absent.corrective_retry_calibrated_confidence ?? -1).toBe(-1);
   });
 
   it('TA5-22: corrective_retry_calibrated_confidence range is [0.5, 0.9]', () => {

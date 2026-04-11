@@ -295,61 +295,113 @@ describe('ResolverInput.blockerSeedCandidates (TA2-4)', () => {
 // ─── T6: ResolvedCandidate.blockerSeed provenance field ──────────────────────
 
 describe('ResolvedCandidate.blockerSeed (T6)', () => {
-  it('ResolvedCandidate type accepts blockerSeed: true', async () => {
-    // Type-level compile check: import ResolvedCandidate shape
-    // A value with blockerSeed: true must be assignable to ResolvedCandidate.
-    const { type: _unused } = await import('../../src/domain/resolver/model/resolved-candidate.js').then(
-      (m) => ({ type: m }),
+  it('blockerSeed=true → Resolver.resolve() 출력에서 candidates[].blockerSeed 보존', async () => {
+    // 실질 검증: Resolver를 실제로 실행해서 blockerSeedCandidates가 출력의
+    // candidates[].blockerSeed=true 로 이어지는지 확인
+    const { Resolver, Blocker, CandidateScorer, AmbiguityClassifier, Calibrator } = await import(
+      '../../src/domain/resolver/index.js'
     );
-    // Runtime check: construct a minimal ResolvedCandidate-shaped object with blockerSeed
-    const candidate = {
-      entityId: 'wine-abc-123',
-      canonicalLabel: 'Test Wine 2019',
-      calibratedScore: 0.42,
-      rank: 1,
-      evidenceRefs: [],
-      source: 'blocker_seed' as const,
-      blockerSeed: true as const,
-    };
-    expect(candidate.blockerSeed).toBe(true);
-    expect(candidate.source).toBe('blocker_seed');
+    const resolver = new Resolver(
+      new Blocker({ async block() { return [createEntityId('wine-seed-provenance')]; } }),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator({ async getCalibrationParams() { return null; }, async save() {} }),
+    );
+    const result = await resolver.resolve({
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      queryClass: 'short_entity',
+      policy: { requireExact: false, allowApproximate: true, requireClarification: false, fallbackMode: 'fail', policyReasonCodes: [] },
+      anchorCandidates: [],
+      uncertainty: { overall: 0.5, ambiguityDetected: false, ambiguityTypes: [], ambiguitySeverity: 'low', decisionEffect: 'trace_only', parserConfidence: 0.5, anchorConfidence: 0.5, constraintConfidence: 0.5 },
+      candidateEntities: [],
+      blockerSeedCandidates: [
+        {
+          entityId: createEntityId('wine-seed-provenance'),
+          entityType: 'wine',
+          canonicalLabel: 'Blocker Seed Wine',
+          aliasMatches: [],
+          sourceSignals: { canonicalExactMatch: 0, canonicalNormalizedMatch: 0, aliasExactMatch: 0, aliasFuzzyMatch: 0, aliasTypePrior: 0, producerMatch: 0, vintageMatch: 0, regionMatch: 0, grapeHintMatch: 0, phoneticMatch: 0, editDistanceScore: 0, ambiguityPenalty: 0 },
+          source: 'blocker_seed',
+        },
+      ],
+    });
+    const seedCandidate = result.candidates.find((c) => String(c.entityId) === 'wine-seed-provenance');
+    expect(seedCandidate?.blockerSeed).toBe(true);
+    expect(seedCandidate?.source).toBe('blocker_seed');
   });
 
-  it('ResolvedCandidate type allows blockerSeed to be absent (undefined)', () => {
-    const candidate = {
-      entityId: 'wine-abc-456',
-      canonicalLabel: 'Test Wine 2020',
-      calibratedScore: 0.9,
-      rank: 1,
-      evidenceRefs: [],
-      source: 'alias' as const,
-    };
-    // No blockerSeed field — must be valid (optional)
-    expect((candidate as Record<string, unknown>)['blockerSeed']).toBeUndefined();
-    expect(candidate.source).toBe('alias');
+  it('blockerSeed 필드 absent → alias source candidate에는 blockerSeed 없음', async () => {
+    // 실질 검증: alias source 후보는 blockerSeed=undefined이어야 함 (오염 방지)
+    const { Resolver, Blocker, CandidateScorer, AmbiguityClassifier, Calibrator } = await import(
+      '../../src/domain/resolver/index.js'
+    );
+    const resolver = new Resolver(
+      new Blocker({ async block() { return []; } }),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator({ async getCalibrationParams() { return null; }, async save() {} }),
+    );
+    const result = await resolver.resolve({
+      rawQuery: 'test',
+      normalizedQuery: 'test',
+      queryClass: 'short_entity',
+      policy: { requireExact: false, allowApproximate: true, requireClarification: false, fallbackMode: 'fail', policyReasonCodes: [] },
+      anchorCandidates: [],
+      uncertainty: { overall: 0.1, ambiguityDetected: false, ambiguityTypes: [], ambiguitySeverity: 'low', decisionEffect: 'trace_only', parserConfidence: 0.9, anchorConfidence: 0.9, constraintConfidence: 0.9 },
+      candidateEntities: [
+        {
+          entityId: createEntityId('wine-alias-candidate'),
+          entityType: 'wine',
+          canonicalLabel: 'Alias Wine',
+          aliasMatches: [{ aliasValue: 'test', aliasType: 'translation', matchScore: 0.9 }],
+          sourceSignals: { canonicalExactMatch: 0, canonicalNormalizedMatch: 0.9, aliasExactMatch: 0.9, aliasFuzzyMatch: 0, aliasTypePrior: 0.9, producerMatch: 0, vintageMatch: 0, regionMatch: 0, grapeHintMatch: 0, phoneticMatch: 0, editDistanceScore: 0, ambiguityPenalty: 0 },
+          source: 'alias',
+        },
+      ],
+    });
+    const aliasCandidate = result.candidates.find((c) => String(c.entityId) === 'wine-alias-candidate');
+    expect(aliasCandidate?.blockerSeed).toBeUndefined();
   });
 });
 
 // ─── T7: Resolver trace blocker-seed provenance fields ──────────────────────
 
 describe('ResolverQueryProvenance blocker-seed trace (T7)', () => {
-  it('accepts blockerSeedEntityIds and blockerSeedCount fields', async () => {
-    const candidateIds = ['wine-abc-123'];
-    const trace = {
-      blockerSeedEntityIds: candidateIds,
-      blockerSeedCount: candidateIds.length,
-      candidateSourceBreakdown: [
-        {
-          source: 'blocker_seed' as const,
-          entityIds: candidateIds,
-          count: candidateIds.length,
-        },
+  it('blockerSeedEntityIds + blockerSeedCount → Resolver.resolve() decisionTrace에 실제 반영', async () => {
+    // 실질 검증: Resolver를 실행하면 decisionTrace.queryProvenance.blockerSeedEntityIds가
+    // 실제 입력한 blockerSeedCandidates의 entityId를 담아야 함
+    const { Resolver, Blocker, CandidateScorer, AmbiguityClassifier, Calibrator } = await import(
+      '../../src/domain/resolver/index.js'
+    );
+    const resolver = new Resolver(
+      new Blocker({ async block() { return [createEntityId('wine-trace-01'), createEntityId('wine-trace-02')]; } }),
+      new CandidateScorer(),
+      new AmbiguityClassifier(),
+      new Calibrator({ async getCalibrationParams() { return null; }, async save() {} }),
+    );
+    const ZERO = { canonicalExactMatch: 0, canonicalNormalizedMatch: 0, aliasExactMatch: 0, aliasFuzzyMatch: 0, aliasTypePrior: 0, producerMatch: 0, vintageMatch: 0, regionMatch: 0, grapeHintMatch: 0, phoneticMatch: 0, editDistanceScore: 0, ambiguityPenalty: 0 };
+    const result = await resolver.resolve({
+      rawQuery: 'trace test',
+      normalizedQuery: 'trace test',
+      queryClass: 'short_entity',
+      policy: { requireExact: false, allowApproximate: true, requireClarification: false, fallbackMode: 'fail', policyReasonCodes: [] },
+      anchorCandidates: [],
+      uncertainty: { overall: 0.5, ambiguityDetected: false, ambiguityTypes: [], ambiguitySeverity: 'low', decisionEffect: 'trace_only', parserConfidence: 0.5, anchorConfidence: 0.5, constraintConfidence: 0.5 },
+      candidateEntities: [],
+      blockerSeedCandidates: [
+        { entityId: createEntityId('wine-trace-01'), entityType: 'wine', canonicalLabel: 'Wine 1', aliasMatches: [], sourceSignals: ZERO, source: 'blocker_seed' },
+        { entityId: createEntityId('wine-trace-02'), entityType: 'wine', canonicalLabel: 'Wine 2', aliasMatches: [], sourceSignals: ZERO, source: 'blocker_seed' },
       ],
-    };
-
-    expect(trace.blockerSeedEntityIds).toEqual(['wine-abc-123']);
-    expect(trace.blockerSeedCount).toBe(1);
-    expect(trace.candidateSourceBreakdown[0]?.source).toBe('blocker_seed');
+    });
+    const provenance = result.decisionTrace.queryProvenance;
+    expect(provenance?.blockerSeedCount).toBe(2);
+    expect(provenance?.blockerSeedEntityIds).toEqual(
+      expect.arrayContaining(['wine-trace-01', 'wine-trace-02']),
+    );
+    // candidateSourceBreakdown에 blocker_seed가 count=2로 등장해야 함
+    const seedBreakdown = provenance?.candidateSourceBreakdown?.find((b) => b.source === 'blocker_seed');
+    expect(seedBreakdown?.count).toBe(2);
   });
 });
 
