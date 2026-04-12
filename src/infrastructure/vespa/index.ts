@@ -11,8 +11,6 @@ export type {
 
 export { VespaSearchIndex } from './vespa-search-index.js';
 
-export { HttpEmbeddingService } from './embedding-service.js';
-
 export {
   toVespaFields,
   fromVespaFields,

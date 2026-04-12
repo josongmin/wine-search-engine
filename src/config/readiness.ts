@@ -172,19 +172,9 @@ export function buildHealthRouteOptions(
                     input: '__healthcheck__',
                   }, { Authorization: `Bearer ${config.openai.apiKey}` });
                 }
-                // Fall back to self-hosted embedding service URL.
-                if (config.embedding.url === undefined) {
-                  // No embedding backend is configured at all. 'skipped' is more
-                  // accurate than 'down': the probe cannot run, not that a running
-                  // service is unreachable. This prevents a misconfiguration (missing
-                  // env var) from reporting as a live service outage (W6-P1-2).
-                  log.warn('embedding readiness: no OPENAI_API_KEY and no EMBEDDING_SERVICE_URL — embedding probe skipped');
-                  return 'skipped';
-                }
-                return probeJsonPostEndpoint(`${config.embedding.url}/embeddings`, {
-                  model: config.embedding.model,
-                  input: '__healthcheck__',
-                });
+                // No OpenAI key → embedding unavailable.
+                log.warn('embedding readiness: no OPENAI_API_KEY — embedding probe skipped');
+                return 'skipped';
               },
             },
           }

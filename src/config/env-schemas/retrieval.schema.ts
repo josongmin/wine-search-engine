@@ -21,13 +21,8 @@ const DEFAULT_LEARNED_MATCHER_HTTP_TIMEOUT_MS = 30_000;
 const MAX_EMBEDDING_DIMENSION = 8192;
 
 export const RetrievalEnvSchema = z.object({
-  // Embedding Service
-  // External embedding HTTP service (fallback when OpenAI embedding is not configured).
-  // No default — if neither OPENAI_EMBEDDING_MODEL nor EMBEDDING_SERVICE_URL is set
-  // and OPENAI_API_KEY is present, the system uses OpenAI embeddings. If neither key
-  // nor URL is set, dense retrieval is disabled via the kill switch guard below.
-  EMBEDDING_SERVICE_URL: z.string().url().optional(),
-  EMBEDDING_MODEL: z.string().min(1).default('bge-m3'),
+  // Embedding model label (telemetry / debug). Actual model is set by OPENAI_EMBEDDING_MODEL.
+  EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
   /** Expected embedding vector dimension. When set, vectors with mismatched dimensions are rejected. */
   EMBEDDING_DIMENSION: z.coerce.number().int().positive().max(MAX_EMBEDDING_DIMENSION).optional(),
   /** Per-request HTTP timeout for embedding API calls (AbortSignal). */

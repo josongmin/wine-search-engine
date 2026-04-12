@@ -135,9 +135,8 @@ function buildConfig(parsed: EnvVars) {
       },
     },
 
-    /** Embedding service settings. */
+    /** Embedding settings (OpenAI API — no separate embedding service). */
     embedding: {
-      url: parsed.EMBEDDING_SERVICE_URL,
       model: parsed.EMBEDDING_MODEL,
       dimension: parsed.EMBEDDING_DIMENSION,
       httpTimeoutMs: parsed.EMBEDDING_HTTP_TIMEOUT_MS,

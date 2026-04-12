@@ -9,14 +9,14 @@
  * 4. Preserve all existing fields; only update embedding vectors
  *
  * Inputs:
- * - EMBEDDING_SERVICE_URL env var (points to new embedding model)
+ * - OPENAI_API_KEY env var (points to new embedding model)
  * - All documents currently in Vespa index
  *
  * Outputs:
  * - Updated Vespa index with new embedding vectors
  *
  * Usage:
- *   EMBEDDING_SERVICE_URL=http://localhost:8000 npx tsx scripts/ltr/reindex-embeddings.ts
+ *   OPENAI_API_KEY=http://localhost:8000 npx tsx scripts/ltr/reindex-embeddings.ts
  *
  * Note: Instruction prefix "Represent this wine for retrieval: [doc text]"
  *       must be preserved for consistency with original BGE-M3 training.
@@ -287,10 +287,10 @@ async function reindexEmbeddings(): Promise<void> {
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
 
-if (!process.env['EMBEDDING_SERVICE_URL']) {
+if (!process.env['OPENAI_API_KEY']) {
   console.error(
-    '❌ EMBEDDING_SERVICE_URL environment variable not set.\n' +
-    'Usage: EMBEDDING_SERVICE_URL=http://localhost:8000 npx tsx scripts/ltr/reindex-embeddings.ts',
+    '❌ OPENAI_API_KEY environment variable not set.\n' +
+    'Usage: OPENAI_API_KEY=http://localhost:8000 npx tsx scripts/ltr/reindex-embeddings.ts',
   );
   process.exit(1);
 }

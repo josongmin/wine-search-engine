@@ -28,15 +28,15 @@ const DOC_TYPE = 'wine_entity';
 // local embedding service URL from .env.
 const realEmbeddingsOverride = process.env['USE_REAL_EMBEDDINGS'];
 
-// Use real embeddings when EMBEDDING_SERVICE_URL is set; fall back to
-// the deterministic formula when running without a live embedding service.
+// Use real embeddings when OPENAI_API_KEY is set; fall back to
+// the deterministic formula when running without an API key.
 const USE_REAL_EMBEDDINGS =
   realEmbeddingsOverride === 'true'
     ? true
     : realEmbeddingsOverride === 'false'
       ? false
-      : process.env['EMBEDDING_SERVICE_URL'] !== undefined &&
-        process.env['EMBEDDING_SERVICE_URL'] !== '';
+      : process.env['OPENAI_API_KEY'] !== undefined &&
+        process.env['OPENAI_API_KEY'] !== '';
 const DEFAULT_LEARNED_DRINKING_WINDOW_MODEL_VERSION =
   process.env['SEED_DRINKING_WINDOW_MODEL_VERSION'] ?? 'learned-v1.0-seeded';
 

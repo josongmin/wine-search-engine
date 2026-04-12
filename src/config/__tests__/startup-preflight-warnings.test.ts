@@ -29,12 +29,11 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
     );
   });
 
-  it('logs embedding warning when neither embedding.url nor openai.apiKey is set', () => {
+  it('logs embedding warning when openai.apiKey is not set', () => {
     const warnSpy = vi.spyOn(bootstrapLogger, 'warn');
 
     warnStartupMisconfigurations({
       vespa: { url: 'http://vespa:8080' },
-      embedding: { url: undefined },
       openai: { apiKey: undefined },
       cohere: { apiKey: undefined },
     });
@@ -49,8 +48,7 @@ describe('warnStartupMisconfigurations (E3-T7)', () => {
 
     warnStartupMisconfigurations({
       vespa: { url: 'http://vespa:8080' },
-      embedding: { url: 'http://embedding:8080' },
-      openai: { apiKey: undefined },
+      openai: { apiKey: 'sk-test' },
       cohere: { apiKey: undefined },
     });
 

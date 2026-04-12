@@ -22,8 +22,6 @@ services:
       PG_PASSWORD: wine_dev
       REDIS_URL: redis://redis:6379
       VESPA_URL: http://vespa:8080
-      # No embedding container in this compose; point at a service on the host if you run one.
-      EMBEDDING_SERVICE_URL: http://host.docker.internal:8081
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -57,6 +55,10 @@ services:
 
   vespa:
     image: vespaengine/vespa:8
+    mem_limit: 4g
+    environment:
+      VESPA_CONFIGSERVER_JVMARGS: "-Xms128m -Xmx256m"
+      VESPA_CONFIGPROXY_JVMARGS: "-Xms32m -Xmx64m"
     ports:
       - "8080:8080"  # query/feed API (VESPA_URL from host: http://localhost:8080)
       # Host 19072 avoids clashing with docker-compose.test.yml (Vespa config on 19071 there).

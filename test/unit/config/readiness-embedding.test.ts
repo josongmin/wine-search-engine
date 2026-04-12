@@ -1,8 +1,8 @@
 /**
- * E5-T1: W6-P1-2 — embedding readiness returns 'skipped' when URL missing.
+ * E5-T1: W6-P1-2 — embedding readiness returns 'skipped' when no OpenAI key.
  *
- * Fix: URL 없음 = probe 불가 상태이므로 'down'(서비스 장애) 대신 'skipped'(probe 불가)가 정확.
- * 'down' + required:true 조합이 URL 미설정 환경에서 허위 not-ready를 보고했던 버그 수정.
+ * Fix: API key 없음 = probe 불가 상태이므로 'down'(서비스 장애) 대신 'skipped'(probe 불가)가 정확.
+ * 'down' + required:true 조합이 key 미설정 환경에서 허위 not-ready를 보고했던 버그 수정.
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { Config } from '../../../src/config/env.js';
@@ -53,32 +53,19 @@ function makeRuntime(): RuntimeHandles {
   return {} as unknown as RuntimeHandles;
 }
 
-describe('E5-T1: embedding readiness when URL missing', () => {
-  it('returns skipped when no openai.apiKey and no embedding.url', async () => {
-    const config = makeMinimalConfig({ url: undefined });
+describe('E5-T1: embedding readiness when no OpenAI key', () => {
+  it('returns skipped when no openai.apiKey', async () => {
+    const config = makeMinimalConfig();
     const options = buildHealthRouteOptions(config, makeRuntime());
     const embeddingCheck = options.readiness['embedding'];
     expect(embeddingCheck).toBeDefined();
     const status = await embeddingCheck!.check();
-    // W6-P1-2 fix: URL 없음 = probe 불가 → 'skipped'. 'down'은 서비스가 실제로 응답 실패할 때
-    // 사용하며, URL 자체가 없는 경우 (미설정 환경)에서는 'skipped'가 정확한 상태입니다.
-    // required:true + 'down' 조합이 URL 미설정 환경에서 서버를 허위 not-ready로 표시했던 버그 수정.
     expect(status).toBe('skipped');
   });
 
-  it('returns up when openai.apiKey is set (falls through to openai check, mocked as up)', async () => {
-    const config = makeMinimalConfig({ url: undefined });
+  it('returns up when openai.apiKey is set (probe called, mocked as up)', async () => {
+    const config = makeMinimalConfig();
     (config.openai as Record<string, unknown>)['apiKey'] = 'sk-test';
-    const options = buildHealthRouteOptions(config, makeRuntime());
-    const embeddingCheck = options.readiness['embedding'];
-    expect(embeddingCheck).toBeDefined();
-    const status = await embeddingCheck!.check();
-    // Mocked probeJsonPostEndpoint returns 'up'
-    expect(status).toBe('up');
-  });
-
-  it('returns up when embedding.url is set (probe called, mocked as up)', async () => {
-    const config = makeMinimalConfig({ url: 'http://embedding:5000' });
     const options = buildHealthRouteOptions(config, makeRuntime());
     const embeddingCheck = options.readiness['embedding'];
     expect(embeddingCheck).toBeDefined();

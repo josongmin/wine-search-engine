@@ -13,7 +13,6 @@ import { OpenAiEmbeddingService } from '../infrastructure/ai/openai-embedding-se
 import { OpenAiDoc2QueryGenerator } from '../infrastructure/ai/openai-doc2query-generator.js';
 import { StubDoc2QueryGenerator } from '../infrastructure/adapter/stub-doc2query-generator.js';
 import { CohereReranker } from '../infrastructure/ai/cohere-reranker.js';
-import { HttpEmbeddingService } from '../infrastructure/vespa/embedding-service.js';
 import { VespaAnchorResolver } from '../infrastructure/vespa/vespa-anchor-resolver.js';
 import { VespaSimilarRetrieval } from '../infrastructure/vespa/vespa-similar-retrieval.js';
 import { VespaCandidateAttributes } from '../infrastructure/vespa/vespa-candidate-attributes.js';
@@ -143,14 +142,11 @@ export function buildCoreAdapterServices(
         ...(config.embedding.dimension !== undefined ? { dimensions: config.embedding.dimension } : {}),
       });
     }
-    if (config.embedding.url !== undefined) {
-      return new HttpEmbeddingService();
-    }
     // No embedding source configured — dense retrieval won't work.
     // Return stub so the process boots; the kill switch guard downstream
     // will degrade gracefully.
     bootstrapLogger.warn(
-      'No embedding source configured (set OPENAI_API_KEY or EMBEDDING_SERVICE_URL). Dense retrieval disabled.',
+      'No embedding source configured (set OPENAI_API_KEY). Dense retrieval disabled.',
     );
     return new StubEmbeddingService(config.embedding.dimension);
   })();

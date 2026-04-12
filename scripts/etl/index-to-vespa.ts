@@ -39,9 +39,13 @@ const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
 const BATCH_SIZE = 50;
 
-function embeddingServiceUrl(): string | undefined {
-  const u = process.env['EMBEDDING_SERVICE_URL']?.trim();
-  return u && u.length > 0 ? u : undefined;
+function openAiBaseUrl(): string {
+  return (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+}
+
+function openAiApiKey(): string | undefined {
+  const k = process.env['OPENAI_API_KEY']?.trim();
+  return k && k.length > 0 ? k : undefined;
 }
 
 function isNumberArray(v: unknown): v is number[] {
@@ -49,20 +53,23 @@ function isNumberArray(v: unknown): v is number[] {
 }
 
 /**
- * OpenAI-compatible embeddings API — inlined so this script never imports
- * {@link ../../src/infrastructure/vespa/embedding-service.js} (which pulls full `config` / Zod).
+ * OpenAI embeddings API — inlined so this script never imports
+ * src/ modules (which pull full `config` / Zod).
  */
 async function embedBatchHttp(
   texts: readonly string[],
 ): Promise<readonly (readonly number[])[]> {
-  const base = embeddingServiceUrl();
-  if (!base) {
-    throw new Error('embedBatchHttp: no EMBEDDING_SERVICE_URL');
+  const apiKey = openAiApiKey();
+  if (!apiKey) {
+    throw new Error('embedBatchHttp: OPENAI_API_KEY is required');
   }
-  const model = process.env['EMBEDDING_MODEL'] ?? 'bge-m3';
-  const response = await fetch(`${base.replace(/\/$/, '')}/embeddings`, {
+  const model = process.env['OPENAI_EMBEDDING_MODEL'] ?? 'text-embedding-3-small';
+  const response = await fetch(`${openAiBaseUrl()}/embeddings`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({ model, input: [...texts] }),
   });
   if (!response.ok) {
@@ -671,11 +678,11 @@ export async function run(): Promise<void> {
   // Vespa client
   const vespa = new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE);
 
-  const embedUrl = embeddingServiceUrl();
-  if (embedUrl) {
-    console.log('  Will try HTTP embeddings at EMBEDDING_SERVICE_URL; on failure → deterministic');
+  const hasApiKey = openAiApiKey() !== undefined;
+  if (hasApiKey) {
+    console.log('  Will use OpenAI embeddings; on failure → deterministic');
   } else {
-    console.log('  Using deterministic fallback embeddings (EMBEDDING_SERVICE_URL unset)');
+    console.log('  Using deterministic fallback embeddings (OPENAI_API_KEY unset)');
   }
 
   const chunks = chunkArray(records, BATCH_SIZE);
@@ -689,7 +696,7 @@ export async function run(): Promise<void> {
 
     // Generate embeddings — retry per-batch rather than giving up globally
     let embeddings: readonly (readonly number[])[];
-    if (embedUrl && httpEmbedFailures < MAX_HTTP_FAILURES) {
+    if (hasApiKey && httpEmbedFailures < MAX_HTTP_FAILURES) {
       try {
         const texts = chunk.map(buildEmbedText);
         embeddings = await embedBatchHttp(texts);
