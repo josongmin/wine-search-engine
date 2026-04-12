@@ -17,6 +17,7 @@ import { buildStepMessages } from '../../src/application/agent/agent-prompt.js';
 import { executeAgentToolsBatch } from '../../src/application/agent/agent-tools.js';
 import type { AgentStep } from '../../src/domain/agent/model/agent-step.js';
 import type { AgentToolDeps } from '../../src/application/agent/agent-tools.js';
+import { DomainError } from '../../src/domain/shared/error/domain-error.js';
 
 // ─── parseLlmOutput is not exported, test via orchestrator indirectly ───────
 // Instead, test the JSON shapes that the orchestrator's parser handles,
@@ -161,13 +162,43 @@ describe('executeAgentToolsBatch', () => {
     expect(typeof results[1]?.observation).toBe('string');
   });
 
-  it('one tool error returns error observation, other result preserved', async () => {
+  it('unknown infrastructure errors propagate (no fabricated success observation)', async () => {
+    // CLAUDE.md: catch blocks in use-case code MUST NOT fabricate
+    // success-shaped responses from unexpected errors. A raw `new Error(...)`
+    // (not a DomainError, not AbortError) is an infrastructure failure and
+    // MUST propagate to the orchestrator's outer error handler so the
+    // request fails loud rather than the agent loop continuing on a
+    // poisoned partial result.
     const deps = makeDeps();
-    // Override execute to throw on second call
     let callCount = 0;
     (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mockImplementation(() => {
       callCount++;
       if (callCount === 2) throw new Error('Vespa timeout');
+      return Promise.resolve({ queryType: 'search', results: [], engineDecision: {}, meta: {} });
+    });
+
+    await expect(
+      executeAgentToolsBatch(
+        [
+          { tool: 'search_wines', input: { query: 'Barolo' } },
+          { tool: 'search_wines', input: { query: 'Bad query' } },
+        ],
+        deps,
+        'test-req',
+      ),
+    ).rejects.toThrow(/Vespa timeout/);
+  });
+
+  it('DomainError tool failures DO convert to enumerated error observation', async () => {
+    // Enumerated domain failures (validation, missing entity, etc.) are
+    // tool-level errors the agent loop can recover from by trying a
+    // different approach — these are explicitly NOT fabrication, they are
+    // structured tool observations carrying the DomainError code.
+    const deps = makeDeps();
+    let callCount = 0;
+    (deps.searchUseCase.execute as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      callCount++;
+      if (callCount === 2) throw new DomainError('NO_RESULTS', 'no candidates after retrieval');
       return Promise.resolve({
         queryType: 'search',
         results: [],
@@ -207,10 +238,8 @@ describe('executeAgentToolsBatch', () => {
     );
 
     expect(results).toHaveLength(2);
-    // First succeeded
-    expect(results[0]?.observation).not.toContain('unexpected error');
-    // Second failed gracefully
-    expect(results[1]?.observation).toContain('unexpected error');
+    expect(results[0]?.observation).not.toContain('NO_RESULTS');
+    expect(results[1]?.observation).toContain('NO_RESULTS');
   });
 
   it('2 parallel tools called with unique requestIds (p0, p1 suffix)', async () => {

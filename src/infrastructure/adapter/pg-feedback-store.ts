@@ -21,12 +21,12 @@ function toFeedbackType(value: string): FeedbackType {
     value === 'clarification_resolution' ||
     value === 'session_success'
   ) return value;
-  return 'click';
+  throw new Error(`PgFeedbackStore: unknown feedback signal_type "${value}" — schema drift or corrupted row`);
 }
 
 function toQueryClass(value: string): QueryClass {
   if (isQueryClass(value)) return value;
-  return 'unknown';
+  throw new Error(`PgFeedbackStore: unknown query_class "${value}" — schema drift or corrupted row`);
 }
 
 interface FeedbackRow {

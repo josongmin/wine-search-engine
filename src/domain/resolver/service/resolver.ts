@@ -23,6 +23,7 @@ import type {
 import { computeMatcherFeatures } from './learned-matcher-features.js';
 import type { MatcherFeatureVector } from './learned-matcher-features.js';
 import { CONFORMAL_ALPHA } from '../../shared/config/conformal-config.js';
+import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD as RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../model/corrective-retry-thresholds.js';
 
 /** Valid conformal alpha interval is (0, this upper bound]. */
 const CONFORMAL_ALPHA_MAX_EXCLUSIVE = 0.5;
@@ -33,15 +34,6 @@ const LEARNED_MATCH_PROBABILITY_BLEND = 0.4;
 const SHORT_FORM_NOISY_SUPPORT_GAP_CAP = 0.01;
 /** Decimal places when serializing gap for traces. */
 const RESOLVER_GAP_TRACE_DECIMAL_PLACES = 4;
-/**
- * Minimum calibrated confidence C below which a non-ambiguous, non-resolved
- * result triggers a corrective_retry recommendation (TA3-1).
- *
- * Mirrors CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD in search-usecase-corrective-retry.ts.
- * Both must stay in sync — Rule 30: cross-module constants require a single SSoT.
- * TODO(cleanup): extract to a shared domain config once the TA3 spec stabilises.
- */
-const RESOLVER_CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD = 0.5;
 
 function classifyLearnedMatcherFailureReason(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();

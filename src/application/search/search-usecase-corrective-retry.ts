@@ -32,15 +32,7 @@ import type { EntityResolveResult } from '../../domain/resolver/model/resolve-re
  * not speculative broadening. See TRACK-A RFC §A3 termination rules.
  */
 
-/**
- * Minimum calibrated confidence C below which a retry is triggered when
- * the query lacks anchors or the resolver returned a non-resolved status.
- *
- * At 0.5 we allow retry when the resolver is effectively uncertain —
- * better than the resolution threshold itself (usually 0.7) to avoid
- * triggering retry for near-miss cases that may still resolve correctly.
- */
-const CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD = 0.5;
+import { CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD } from '../../domain/resolver/model/corrective-retry-thresholds.js';
 
 /**
  * Evaluate whether a corrective exact-recovery retry should be attempted.

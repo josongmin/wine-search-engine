@@ -12,7 +12,7 @@ function toAliasType(value: string): AliasType {
     value === 'observed_query_alias' ||
     value === 'catalog_noise_alias'
   ) return value;
-  return 'canonical';
+  throw new Error(`PgAliasRepository: unknown alias_type "${value}" — schema drift or corrupted row`);
 }
 
 function toAliasScope(value: string): AliasScope {
@@ -25,7 +25,7 @@ function toAliasScope(value: string): AliasScope {
     value === 'retailer_specific' ||
     value === 'temporal'
   ) return value;
-  return 'global';
+  throw new Error(`PgAliasRepository: unknown alias_scope "${value}" — schema drift or corrupted row`);
 }
 
 interface AliasRow {

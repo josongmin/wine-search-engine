@@ -8,17 +8,17 @@ import { isQueryClass } from '../../domain/shared/types/query-class.js';
 
 function toProposedAliasType(value: string): ProposedAliasType {
   if (value === 'observed_query_alias') return value;
-  return 'observed_query_alias';
+  throw new Error(`PgProposalStore: unknown proposed_type "${value}" — schema drift or corrupted row`);
 }
 
 function toAliasProposalStatus(value: string): AliasProposalStatus {
   if (value === 'pending' || value === 'approved' || value === 'rejected' || value === 'promoted') return value;
-  return 'pending';
+  throw new Error(`PgProposalStore: unknown alias proposal status "${value}" — schema drift or corrupted row`);
 }
 
 function toThresholdProposalStatus(value: string): ThresholdProposalStatus {
   if (value === 'pending' || value === 'shadow_testing' || value === 'approved' || value === 'rejected') return value;
-  return 'pending';
+  throw new Error(`PgProposalStore: unknown threshold proposal status "${value}" — schema drift or corrupted row`);
 }
 
 interface AliasProposalRow {

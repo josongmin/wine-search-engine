@@ -8,7 +8,7 @@ import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { parseDecisionSnapshotJsonb, parseEvidenceItemsJsonb } from './jsonb-schemas.js';
 function toDecisionStatus(value: string): DecisionStatus {
   if (value === 'resolved' || value === 'ambiguous' || value === 'failed') return value;
-  return 'failed';
+  throw new Error(`PgEvalResultStore: unknown predicted_status "${value}" — schema drift or corrupted row`);
 }
 
 interface EvalResultRow {

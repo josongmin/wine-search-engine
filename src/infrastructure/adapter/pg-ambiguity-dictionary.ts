@@ -33,13 +33,14 @@ export class PgAmbiguityDictionary implements AmbiguityDictionary {
     if (!Array.isArray(typesRaw) || !typesRaw.every((t): t is string => typeof t === 'string')) {
       return null;
     }
-    const severity =
-      severityRaw === 'low' || severityRaw === 'medium' || severityRaw === 'high'
-        ? severityRaw
-        : 'low';
+    if (severityRaw !== 'low' && severityRaw !== 'medium' && severityRaw !== 'high') {
+      throw new Error(
+        `PgAmbiguityDictionary: unknown severity "${String(severityRaw)}" — schema drift or corrupted row`,
+      );
+    }
     return {
       types: typesRaw,
-      severity,
+      severity: severityRaw,
     };
   }
 

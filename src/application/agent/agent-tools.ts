@@ -523,11 +523,25 @@ export async function executeAgentTool(
     if (err instanceof DomainError && err.code === POLICY_BLOCKED_CODE) {
       throw err;
     }
-    bootstrapLogger.warn({ err, tool: toolName, requestId }, '[agent-tools] tool execution failed');
-    return {
-      observation: `Tool "${toolName}" encountered an unexpected error. Try a different approach or query.`,
-      rawResult: null,
-    };
+    // Other DomainErrors are enumerated tool-level failures (validation,
+    // missing entity, ambiguity, etc.) — convert them to a structured
+    // observation so the agent loop can try a different approach.
+    if (err instanceof DomainError) {
+      bootstrapLogger.warn(
+        { err, tool: toolName, requestId, code: err.code },
+        '[agent-tools] domain error returned as observation',
+      );
+      return {
+        observation: `Tool "${toolName}" failed with ${err.code}: ${err.message}`,
+        rawResult: null,
+      };
+    }
+    // Unknown errors are NOT enumerated tool-level failures — they are
+    // infrastructure or programmer errors (DB outage, OOM, type confusion).
+    // CLAUDE.md: catch blocks in use-case code MUST NOT fabricate
+    // success-shaped responses from unexpected errors. Propagate to the
+    // orchestrator's outer error handler so the request fails loud.
+    throw err;
   }
 }
 

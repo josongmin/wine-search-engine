@@ -19,9 +19,6 @@ import { logSearchEvent } from '../../observability/log-search-event.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import { buildDecisionSnapshotFromPlan } from './search-usecase-decision-snapshot.js';
-import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 
 export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
@@ -222,62 +219,22 @@ export async function runSearchPreRoutePhase(
       },
       'pipeline pre_route constraint exit',
     );
-    let response: SearchResponseV1;
-    try {
-      response = ctx.responseBuilder.build(
-        buildConstraintContradictionExitParams(
-          plan,
-          ctx.request,
-          ctx.requestId,
-          ctx.startTime,
-          ctx.snapshotVersions,
-          satResult.conflictPairs,
-          compiled,
-        ),
-      );
-    } catch (buildErr) {
-      bootstrapLogger.warn(
-        { requestId: ctx.requestId, err: buildErr },
-        '[runSearchPreRoutePhase] responseBuilder.build() threw in constraint-contradiction exit; returning bare safe response',
-      );
-      const queryTimeMs = Date.now() - ctx.startTime;
-      const safeSnapshot = buildDecisionSnapshotFromPlan(plan, ctx.snapshotVersions);
-      const effectiveRoute = compiled.execution.effectiveRoute;
-      const safeTraceRef = buildAuthorityTraceRef({
-        queryPlan: plan,
-        snapshot: safeSnapshot,
-        route: effectiveRoute,
-        retrievalMode: compiled.execution.effectiveRetrievalMode,
-        decisionStatus: 'failed',
-        nextAction: 'fail',
-        failureReason: 'HARD_CONSTRAINT_VIOLATION',
-      });
-      response = {
-        queryType: 'search',
-        engineDecision: {
-          decisionStatus: 'failed',
-          nextAction: 'fail',
-          route: effectiveRoute,
-          decisionConfidence: 0,
-          confidenceSemantics: 'calibrated_decision_confidence',
-          decisionTraceRef: safeTraceRef,
-          authorityTraceRef: safeTraceRef,
-          decisionSnapshot: safeSnapshot,
-        },
-        results: [],
-        meta: {
-          requestId: ctx.requestId,
-          queryTimeMs,
-          route: effectiveRoute,
-          version: '1.0.0',
-          engine_schema_version: 'search_response_v1',
-          authorityTraceRef: safeTraceRef,
-          runtimeCorrelationRef: ctx.requestId,
-          executionMode: 'degraded',
-          blockingEligible: false,
-        },
-      };
-    }
+    // CLAUDE.md: catch blocks in use-case code MUST NOT fabricate
+    // success-shaped responses from unexpected errors. If responseBuilder
+    // throws here it is a programmer/infrastructure bug, not an enumerated
+    // degradation — propagate to the HTTP error handler so the failure is
+    // visible and the RFC-014 envelope is emitted by the central handler.
+    const response = ctx.responseBuilder.build(
+      buildConstraintContradictionExitParams(
+        plan,
+        ctx.request,
+        ctx.requestId,
+        ctx.startTime,
+        ctx.snapshotVersions,
+        satResult.conflictPairs,
+        compiled,
+      ),
+    );
     return { outcome: 'return', response };
   }
 
