@@ -7,6 +7,11 @@ import {
   MIN_PRODUCED_VINTAGE_YEAR,
   MAX_PRODUCED_VINTAGE_YEAR,
 } from '../../../domain/shared/constants.js';
+import {
+  MAX_SOURCE_RECORD_REFS_PER_ENTITY,
+  MAX_SOURCE_RECORD_RECORD_ID_CHARS,
+  MAX_SOURCE_RECORD_SOURCE_SYSTEM_CHARS,
+} from '../../../domain/entity/model/source-record-ref.js';
 import { RETRIEVAL_MODES } from '../../../domain/query/model/retrieval-mode.js';
 import { QUERY_CLASSES } from '../../../domain/shared/types/query-class.js';
 import {
@@ -39,6 +44,7 @@ import {
   MAX_SEARCH_UNCERTAINTY_STRING_LIST,
   MAX_SESSION_ENTITY_ID_CHARS,
   MAX_SESSION_PREVIOUS_ENTITIES,
+  MAX_RESOLVE_CANDIDATE_SOURCES_LIST,
   SEARCH_RELEVANCE_SCORE_ABS_MAX,
 } from '../constants.js';
 
@@ -70,6 +76,13 @@ export const EvidenceItemSchema = z.object({
   ).optional(),
 }).strict();
 
+const SourceRecordRefWireSchema = z
+  .object({
+    source_system: z.string().min(1).max(MAX_SOURCE_RECORD_SOURCE_SYSTEM_CHARS),
+    source_record_id: z.string().min(1).max(MAX_SOURCE_RECORD_RECORD_ID_CHARS),
+  })
+  .strict();
+
 export const EntitySummarySchema = z.object({
   entity_id: z.string().min(1),
   canonical_label: z.string().min(1),
@@ -94,6 +107,10 @@ export const EntitySummarySchema = z.object({
   tannin: z.number().finite().min(0).max(1).optional(),
   acidity: z.number().finite().min(0).max(1).optional(),
   sweetness: z.number().finite().min(0).max(1).optional(),
+  source_record_refs: z
+    .array(SourceRecordRefWireSchema)
+    .max(MAX_SOURCE_RECORD_REFS_PER_ENTITY)
+    .optional(),
 }).strict();
 
 export const MatchDetailSchema = z.object({
@@ -494,7 +511,10 @@ export const ResolveCandidateSchema = z.object({
   rank: z.number().int().positive(),
   calibrated_score: z.number().finite().min(0).max(1),
   source: z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']).optional(),
-  sources: z.array(z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed'])).max(4).optional(),
+  sources: z
+    .array(z.enum(['alias', 'planner_heuristic', 'entity_lookup', 'blocker_seed']))
+    .max(MAX_RESOLVE_CANDIDATE_SOURCES_LIST)
+    .optional(),
   blocker_seed: z.literal(true).optional(),
   evidence_refs: z.array(z.string().min(1)).max(MAX_SEARCH_META_DEBUG_REFS).optional(),
   match_reasons: z.array(z.string()).max(MAX_SEARCH_UNCERTAINTY_STRING_LIST).optional(),

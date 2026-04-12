@@ -9,9 +9,10 @@
  */
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 
-const INPUT_PATH = resolve(process.cwd(), 'data/entity-ontology.json');
-const OUTPUT_PATH = resolve(process.cwd(), 'data/nl-mappings.json');
+const DEFAULT_INPUT_PATH = resolve(process.cwd(), 'data/entity-ontology.json');
+const DEFAULT_OUTPUT_PATH = resolveDataPath('data/nl-mappings.json');
 
 interface NLMapping {
   readonly surface: string;
@@ -32,14 +33,38 @@ interface OntologyFile {
   readonly entities: Readonly<Record<string, OntologyEntity>>;
 }
 
+interface Args {
+  readonly inputPath: string;
+  readonly outputPath: string;
+}
+
+function parseArgs(argv: readonly string[]): Args {
+  let inputPath = DEFAULT_INPUT_PATH;
+  let outputPath = DEFAULT_OUTPUT_PATH;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--input' || arg === '-i') {
+      inputPath = argv[index + 1] ?? inputPath;
+      index += 1;
+    } else if (arg === '--output' || arg === '-o') {
+      outputPath = argv[index + 1] ?? outputPath;
+      index += 1;
+    }
+  }
+
+  return { inputPath, outputPath };
+}
+
 async function main(): Promise<void> {
-  process.stdout.write(`Reading ontology from ${INPUT_PATH}\n`);
+  const args = parseArgs(process.argv.slice(2));
+  process.stdout.write(`Reading ontology from ${args.inputPath}\n`);
 
   let raw: string;
   try {
-    raw = await readFile(INPUT_PATH, 'utf8');
+    raw = await readFile(args.inputPath, 'utf8');
   } catch {
-    process.stderr.write(`Error: Could not read ${INPUT_PATH}. Run generate-entity-ontology.ts first.\n`);
+    process.stderr.write(`Error: Could not read ${args.inputPath}. Run generate-entity-ontology.ts first.\n`);
     process.exitCode = 1;
     return;
   }
@@ -84,9 +109,9 @@ async function main(): Promise<void> {
     mappings,
   };
 
-  await mkdir(dirname(OUTPUT_PATH), { recursive: true });
-  await writeFile(OUTPUT_PATH, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
-  process.stdout.write(`Wrote ${mappings.length} NL mappings to ${OUTPUT_PATH}\n`);
+  await mkdir(dirname(args.outputPath), { recursive: true });
+  await writeFile(args.outputPath, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
+  process.stdout.write(`Wrote ${mappings.length} NL mappings to ${args.outputPath}\n`);
 }
 
 main().catch((error: unknown) => {

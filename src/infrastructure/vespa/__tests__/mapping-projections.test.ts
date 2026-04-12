@@ -16,6 +16,7 @@ import {
   parseFeatureSummary,
   toVespaFields,
 } from '../mapping.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../shared/constants/source-systems.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,6 +62,7 @@ function makeFullDocument(overrides: Partial<RetrievalDocument> = {}): Retrieval
     certifications: ['biodynamic'],
     soilType: 'limestone',
     producerType: 'domaine',
+    sourceRecordRefs: [{ sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: 'proj-silver-1' }],
     ...overrides,
   };
 }
@@ -86,6 +88,9 @@ describe('parseHitSummary', () => {
     expect(hit.vintageYear).toBe(2015);
     expect(hit.searchTextEn).toBe('Leroy Chambertin elegant red Burgundy');
     expect(hit.producerPrestige).toBeCloseTo(0.97);
+    expect(hit.sourceRecordRefs).toEqual([
+      { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: 'proj-silver-1' },
+    ]);
   });
 
   it('does NOT include feature fields (body, tannin, acidity, sweetness, criticScoreNormalized)', () => {
@@ -314,7 +319,7 @@ describe('Projection family separation', () => {
 
     // Hit-only display keys must NOT appear in feature
     const hitOnlyKeys = ['canonicalLabel', 'producer', 'region', 'appellation',
-      'grapePrimary', 'vintageYear', 'searchTextEn', 'producerPrestige'];
+      'grapePrimary', 'vintageYear', 'searchTextEn', 'producerPrestige', 'sourceRecordRefs'];
     for (const key of hitOnlyKeys) {
       expect(feature[key]).toBeUndefined();
     }

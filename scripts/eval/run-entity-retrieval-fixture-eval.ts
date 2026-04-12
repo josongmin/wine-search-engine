@@ -28,6 +28,10 @@ import {
   type RankedEntity,
 } from './run-noisy-entity-eval.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  runLiveBenchmarkPreflight,
+  type BenchmarkExecutionLane,
+} from './live-benchmark-preflight.js';
 
 const DEFAULT_OUTPUT = resolveDataPath('data/entity-retrieval-fixture-eval-results.json');
 const DEFAULT_SUITES = [
@@ -44,6 +48,8 @@ interface CliArgs {
   readonly mode: 'auto' | 'hybrid' | 'entity';
   readonly timeoutMs: number;
   readonly concurrency: number;
+  readonly executionLane: BenchmarkExecutionLane;
+  readonly debugKey?: string;
   readonly suites: readonly EntityRetrievalSuiteId[];
   readonly useThresholds: boolean;
 }
@@ -91,6 +97,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let mode: CliArgs['mode'] = 'hybrid';
   let timeoutMs = 60_000;
   let concurrency = 4;
+  let executionLane: BenchmarkExecutionLane = 'public';
+  let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
 
   for (let i = 0; i < argv.length; i++) {
@@ -116,12 +124,31 @@ function parseArgs(argv: readonly string[]): CliArgs {
     } else if (arg === '--concurrency') {
       const value = Number.parseInt(argv[++i] ?? '', 10);
       if (Number.isFinite(value) && value >= 1) concurrency = Math.min(16, value);
+    } else if (arg === '--execution-lane') {
+      const value = argv[++i];
+      if (value === 'public' || value === 'trusted_benchmark') {
+        executionLane = value;
+      }
+    } else if (arg === '--debug-key') {
+      debugKey = argv[++i] ?? debugKey;
     } else if (arg === '--no-thresholds') {
       useThresholds = false;
     }
   }
 
-  return { output, apiUrl, predictions, smokePredictions, suites, mode, timeoutMs, concurrency, useThresholds };
+  return {
+    output,
+    apiUrl,
+    predictions,
+    smokePredictions,
+    suites,
+    mode,
+    timeoutMs,
+    concurrency,
+    executionLane,
+    debugKey,
+    useThresholds,
+  };
 }
 
 function hitAtK(entityIds: readonly string[], expectedEntityId: string, k: number): boolean {
@@ -312,11 +339,27 @@ export async function assertEntityRetrievalFixtureThresholds(
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cases = await loadEntityRetrievalFixtureCases(args.suites);
+  if (!args.smokePredictions && args.predictions === null) {
+    await runLiveBenchmarkPreflight({
+      apiUrl: args.apiUrl,
+      executionLane: args.executionLane,
+      debugKey: args.debugKey,
+      requiredEntityIds: cases.map((item) => item.expected_entity_id),
+    });
+  }
   const predictions = args.smokePredictions
     ? buildPerfectEntityRetrievalPredictions(cases)
     : args.predictions !== null
     ? await loadNoisyEntityPredictions(args.predictions, new Set(cases.map((item) => item.benchmark_id)))
-    : await fetchLiveRankings(cases, args.apiUrl, args.mode, args.timeoutMs, args.concurrency);
+    : await fetchLiveRankings(
+        cases,
+        args.apiUrl,
+        args.mode,
+        args.timeoutMs,
+        args.concurrency,
+        args.executionLane,
+        args.debugKey,
+      );
 
   const report = scoreEntityRetrievalFixtureCases(cases, predictions);
   const finalReport: EntityRetrievalFixtureReport = {

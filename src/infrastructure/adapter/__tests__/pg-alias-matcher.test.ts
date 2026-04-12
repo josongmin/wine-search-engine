@@ -137,4 +137,17 @@ describe('PgAliasMatcher', () => {
     expect(results).toEqual([]);
     expect(pool.queries).toHaveLength(1);
   });
+
+  it('fails closed to empty matches when aliases table is absent', async () => {
+    const pool = {
+      async query(): Promise<never> {
+        const err = new Error('relation "aliases" does not exist') as Error & { code?: string };
+        err.code = '42P01';
+        throw err;
+      },
+    };
+    const matcher = new PgAliasMatcher(pool as never);
+
+    await expect(matcher.findMatches('opusone')).resolves.toEqual([]);
+  });
 });

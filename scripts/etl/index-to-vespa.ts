@@ -17,12 +17,17 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, IndexableWineRecord } from './types.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../src/shared/constants/source-systems.js';
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createEntityId } from '../../src/domain/shared/types/entity-id.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  loadGoldCanonicalLookupForBuild,
+  resolveWineSnapshotEntity,
+} from './snapshot-entity-identity.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -103,6 +108,8 @@ interface Args {
   input: string;
   dryRun: boolean;
   limit: number;
+  snapshotId?: string;
+  fixtureRepoRoot?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -112,8 +119,17 @@ function parseArgs(argv: string[]): Args {
     if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--limit') out.limit = Math.max(1, Number(argv[++i] ?? '0'));
+    else if (a === '--snapshot-id') {
+      const v = argv[++i];
+      if (v !== undefined) out.snapshotId = v;
+    } else if (a === '--fixture-repo') {
+      const v = argv[++i];
+      if (v !== undefined) out.fixtureRepoRoot = v;
+    }
     else if (a === '--help' || a === '-h') {
-      console.log('Usage: index-to-vespa.ts [--input PATH] [--dry-run] [--limit N]');
+      console.log(
+        'Usage: index-to-vespa.ts [--input PATH] [--dry-run] [--limit N] [--snapshot-id ID] [--fixture-repo PATH]',
+      );
       process.exit(0);
     }
   }
@@ -181,7 +197,7 @@ const HANGUL_RE = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F]/;
  */
 export function buildSearchTextKo(rec: EnrichedSilverRecord): string {
   // Prefer pre-built Korean text from Phase-1 enrichment (stored in the NDJSON)
-  const prebuilt = (rec as Record<string, unknown>)['searchTextKo'];
+  const prebuilt = (rec as unknown as Record<string, unknown>)['searchTextKo'];
   if (typeof prebuilt === 'string' && prebuilt.length > 0) return prebuilt;
 
   const koAliases = rec.aliases.noisyRecallProjection.filter((a) =>
@@ -363,8 +379,12 @@ function priceBandToNumeric(band: string): number {
  * grabbing.
  */
 // Projection family: hit + feature + payload (see docs/migration/projection-reindex-strategy.md)
-export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecord {
+export function silverToIndexable(
+  rec: EnrichedSilverRecord,
+  goldCanonicalLookup: ReadonlyMap<string, string> = new Map(),
+): IndexableWineRecord {
   const gold = rec as GoldRecord;
+  const resolvedEntity = resolveWineSnapshotEntity(rec, goldCanonicalLookup);
 
   // criticScoreNormalized: Track C proxy (÷100) takes priority over raw Vivino rating (÷5)
   const criticScoreNormalized: number | undefined = (() => {
@@ -380,7 +400,10 @@ export function silverToIndexable(rec: EnrichedSilverRecord): IndexableWineRecor
 
   return {
     // RetrievalHitProjection fields
-    entityId: String(createEntityId(rec.sourceId)),
+    entityId: resolvedEntity.entityId,
+    sourceRecordRefs: [
+      { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: rec.sourceId },
+    ],
     canonicalLabel: rec.canonicalLabel,
     producer: rec.producer || undefined,
     region: rec.region || undefined,
@@ -528,12 +551,16 @@ export function validateIndexableRecord(rec: IndexableWineRecord): IndexableVali
 export function silverToRetrievalDoc(
   rec: EnrichedSilverRecord,
   embedding: readonly number[],
+  searchSnapshotId?: string,
+  goldCanonicalLookup?: ReadonlyMap<string, string>,
 ): RetrievalDocument {
-  const indexable = silverToIndexable(rec);
+  const lookup = goldCanonicalLookup ?? new Map();
+  const indexable = silverToIndexable(rec, lookup);
 
   const doc: RetrievalDocument = {
-    entityId: createEntityId(rec.sourceId),
+    entityId: createEntityId(indexable.entityId),
     entityType: indexable.entityType,
+    ...(searchSnapshotId !== undefined ? { searchSnapshotId } : {}),
     canonicalLabel: indexable.canonicalLabel,
     aliasesIdentitySafe: indexable.aliasesIdentitySafe,
     aliasesNoisyRecall: indexable.aliasesNoisyRecall,
@@ -593,6 +620,9 @@ export function silverToRetrievalDoc(
     ...(indexable.grapeFamily !== undefined ? { grapeFamily: indexable.grapeFamily } : {}),
     ...(indexable.regionHierarchy !== undefined ? { regionHierarchy: [...indexable.regionHierarchy] } : {}),
     ...(indexable.priceBandNumeric !== undefined ? { priceBandNumeric: indexable.priceBandNumeric } : {}),
+    ...(indexable.sourceRecordRefs !== undefined && indexable.sourceRecordRefs.length > 0
+      ? { sourceRecordRefs: [...indexable.sourceRecordRefs] }
+      : {}),
   };
   return doc;
 }
@@ -615,6 +645,7 @@ function chunkArray<T>(arr: readonly T[], size: number): T[][] {
 
 export async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
 
   console.log(`Reading enriched Silver from ${args.input} …`);
   const content = await fs.readFile(args.input, 'utf8');
@@ -630,7 +661,7 @@ export async function run(): Promise<void> {
     const sample = records[0];
     if (sample) {
       const emb = deterministicEmbedding(sample.body, sample.sweetness, sample.acidity, sample.tannin);
-      const doc = silverToRetrievalDoc(sample, emb);
+      const doc = silverToRetrievalDoc(sample, emb, args.snapshotId, goldLookup);
       console.log('  Sample RetrievalDocument:');
       console.log(JSON.stringify(doc, null, 2).slice(0, 2000));
     }
@@ -685,7 +716,7 @@ export async function run(): Promise<void> {
     const docs: { id: string; fields: Record<string, unknown> }[] = [];
     for (let i = 0; i < chunk.length; i++) {
       const rec = chunk[i]!;
-      const indexable = silverToIndexable(rec);
+      const indexable = silverToIndexable(rec, goldLookup);
       const validation = validateIndexableRecord(indexable);
       if (!validation.valid) {
         failures += 1;
@@ -695,7 +726,7 @@ export async function run(): Promise<void> {
         continue;
       }
       const embedding = embeddings[i] ?? deterministicEmbedding(rec.body, rec.sweetness, rec.acidity, rec.tannin);
-      const retrievalDoc = silverToRetrievalDoc(rec, embedding);
+      const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, goldLookup);
       docs.push({
         id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),

@@ -11,12 +11,17 @@
  *
  * Usage:
  *   npx tsx scripts/eval/mine-hard-negatives.ts
+ *   npx tsx scripts/eval/mine-hard-negatives.ts --fixture-repo ../wine-engine-fixture
  */
 
 import fs from 'node:fs/promises';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { EnrichedSilverRecord } from '../etl/types.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  buildEntityIdBySourceId,
+  loadGoldCanonicalLookupForBuild,
+} from '../etl/snapshot-entity-identity.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,6 +33,8 @@ const DEFAULT_OUTPUT = resolveDataPath('data/hard-negatives.jsonl');
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+type CanonicalEntityIdOf = (record: EnrichedSilverRecord) => string;
 
 interface HardNegativePair {
   readonly strategy: 'same_producer' | 'same_vintage_region' | 'alias_collision';
@@ -41,15 +48,24 @@ interface HardNegativePair {
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv: string[]): { input: string; output: string } {
+function parseArgs(argv: string[]): {
+  input: string;
+  output: string;
+  fixtureRepo?: string | undefined;
+} {
   let input = DEFAULT_INPUT;
   let output = DEFAULT_OUTPUT;
+  let fixtureRepo: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--input' || a === '-i') input = argv[++i] ?? DEFAULT_INPUT;
     else if (a === '--output' || a === '-o') output = argv[++i] ?? DEFAULT_OUTPUT;
+    else if (a === '--fixture-repo') {
+      const next = argv[++i];
+      if (next != null && next.length > 0) fixtureRepo = next;
+    }
   }
-  return { input, output };
+  return { input, output, fixtureRepo };
 }
 
 // ---------------------------------------------------------------------------
@@ -58,6 +74,7 @@ function parseArgs(argv: string[]): { input: string; output: string } {
 
 function mineSameProducer(
   records: readonly EnrichedSilverRecord[],
+  canonicalEntityId: CanonicalEntityIdOf,
 ): HardNegativePair[] {
   const byProducer = new Map<string, EnrichedSilverRecord[]>();
   for (const rec of records) {
@@ -82,8 +99,8 @@ function mineSameProducer(
     pairs.push({
       strategy: 'same_producer',
       query: positive.producer,
-      positive_entity_id: positive.sourceId,
-      negative_entity_ids: negatives.map((n) => n.sourceId),
+      positive_entity_id: canonicalEntityId(positive),
+      negative_entity_ids: negatives.map((n) => canonicalEntityId(n)),
       explanation: `Producer "${producer}" has ${wines.length} wines — query by producer name alone is ambiguous`,
     });
   }
@@ -97,6 +114,7 @@ function mineSameProducer(
 
 function mineSameVintageRegion(
   records: readonly EnrichedSilverRecord[],
+  canonicalEntityId: CanonicalEntityIdOf,
 ): HardNegativePair[] {
   const byVintageRegion = new Map<string, EnrichedSilverRecord[]>();
   for (const rec of records) {
@@ -125,8 +143,8 @@ function mineSameVintageRegion(
     pairs.push({
       strategy: 'same_vintage_region',
       query: `${region} ${vintage}`,
-      positive_entity_id: positive.sourceId,
-      negative_entity_ids: negatives.map((n) => n.sourceId),
+      positive_entity_id: canonicalEntityId(positive),
+      negative_entity_ids: negatives.map((n) => canonicalEntityId(n)),
       explanation: `"${region} ${vintage}" matches ${wines.length} different wines — requires disambiguation`,
     });
   }
@@ -144,6 +162,7 @@ function removeAccents(text: string): string {
 
 function mineAliasCollision(
   records: readonly EnrichedSilverRecord[],
+  canonicalEntityId: CanonicalEntityIdOf,
 ): HardNegativePair[] {
   // Build alias → entity mapping
   const aliasToEntities = new Map<string, EnrichedSilverRecord[]>();
@@ -180,8 +199,8 @@ function mineAliasCollision(
     pairs.push({
       strategy: 'alias_collision',
       query: alias,
-      positive_entity_id: positive.sourceId,
-      negative_entity_ids: negatives.map((n) => n.sourceId),
+      positive_entity_id: canonicalEntityId(positive),
+      negative_entity_ids: negatives.map((n) => canonicalEntityId(n)),
       explanation: `Alias "${alias}" collides across ${entities.length} entities: ${entities.map((e) => e.canonicalLabel).join(', ')}`,
     });
   }
@@ -201,15 +220,25 @@ async function run(): Promise<void> {
   const { records } = parseNdjson<EnrichedSilverRecord>(content, args.input);
   console.log(`  Loaded ${records.length} records`);
 
+  const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepo });
+  const sourceToCanonical = buildEntityIdBySourceId(records, goldLookup);
+  const canonicalEntityId: CanonicalEntityIdOf = (r) => {
+    const id = sourceToCanonical.get(r.sourceId);
+    if (id === undefined) {
+      throw new Error(`Missing canonical entity id mapping for sourceId=${r.sourceId}`);
+    }
+    return id;
+  };
+
   console.log('\nMining hard negatives …');
 
-  const sameProducer = mineSameProducer(records);
+  const sameProducer = mineSameProducer(records, canonicalEntityId);
   console.log(`  Same-producer:          ${sameProducer.length} pairs`);
 
-  const sameVintageRegion = mineSameVintageRegion(records);
+  const sameVintageRegion = mineSameVintageRegion(records, canonicalEntityId);
   console.log(`  Same-vintage-region:    ${sameVintageRegion.length} pairs`);
 
-  const aliasCollision = mineAliasCollision(records);
+  const aliasCollision = mineAliasCollision(records, canonicalEntityId);
   console.log(`  Alias collision:        ${aliasCollision.length} pairs`);
 
   const allPairs = [...sameProducer, ...sameVintageRegion, ...aliasCollision];

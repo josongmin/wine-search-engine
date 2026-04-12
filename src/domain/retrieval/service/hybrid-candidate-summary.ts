@@ -1,6 +1,10 @@
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
 import {
+  SourceRecordRefListSchema,
+  type SourceRecordRef,
+} from '../../entity/model/source-record-ref.js';
+import {
   RETRIEVAL_HIT_SUMMARY_KEYS,
   type RetrievalHitSummary,
   type RetrievalHitSummaryKey,
@@ -8,14 +12,20 @@ import {
 } from '../port/search-index.port.js';
 import type { EntityId } from '../../shared/types/index.js';
 
-export type HybridCandidateSummaryFields = Pick<HybridCandidate, RetrievalHitSummaryKey>;
+export type HybridCandidateSummaryFields = Pick<
+  HybridCandidate,
+  RetrievalHitSummaryKey | 'sourceRecordRefs'
+>;
 
 /**
  * Runtime-safe set of keys allowed in HybridCandidateSummaryFields.
  * Used by {@link toSafeHybridCandidateSummaryFields} to strip unknown keys
  * and validate value types, replacing the previous unsafe `as` cast.
  */
-const SUMMARY_KEY_SET: ReadonlySet<string> = new Set(RETRIEVAL_HIT_SUMMARY_KEYS);
+const SUMMARY_KEY_SET: ReadonlySet<string> = new Set([
+  ...RETRIEVAL_HIT_SUMMARY_KEYS,
+  'sourceRecordRefs',
+]);
 
 /**
  * Safely project a normalized summary into HybridCandidateSummaryFields
@@ -33,6 +43,13 @@ function toSafeHybridCandidateSummaryFields(
     if (!SUMMARY_KEY_SET.has(key)) continue;
     const value = (normalized as Record<string, unknown>)[key];
     if (value === undefined) continue;
+    if (key === 'sourceRecordRefs') {
+      const parsed = SourceRecordRefListSchema.safeParse(value);
+      if (parsed.success && parsed.data.length > 0) {
+        result[key] = parsed.data;
+      }
+      continue;
+    }
     // Accept string, number, and string[] — the three value families in RetrievalHitSummaryKey
     if (
       typeof value === 'string' ||
@@ -46,6 +63,8 @@ function toSafeHybridCandidateSummaryFields(
 }
 type NormalizableRetrievalHitSummary = {
   [Key in RetrievalHitSummaryKey]?: RetrievalHitSummary[Key] | undefined;
+} & {
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 };
 
 const RERANK_SUMMARY_SEARCH_TEXT_MAX = 800;
@@ -144,6 +163,13 @@ export function normalizeRetrievalHitSummary(
     }
   }
 
+  if (summary.sourceRecordRefs !== undefined) {
+    const parsed = SourceRecordRefListSchema.safeParse(summary.sourceRecordRefs);
+    if (parsed.success && parsed.data.length > 0) {
+      (normalized as Record<string, unknown>).sourceRecordRefs = parsed.data;
+    }
+  }
+
   return Object.keys(normalized).length > 0
     ? (normalized as RetrievalHitSummary)
     : undefined;
@@ -162,6 +188,14 @@ export function mergeRetrievalHitSummaries(
         mergedRecord[key] = value;
         break;
       }
+    }
+  }
+
+  for (const summary of summaries) {
+    const refs = summary?.sourceRecordRefs;
+    if (refs !== undefined && refs.length > 0) {
+      (merged as Record<string, unknown>).sourceRecordRefs = refs;
+      break;
     }
   }
 
@@ -236,5 +270,8 @@ export function retrievalDocumentToHitSummary(doc: RetrievalDocument): Retrieval
     soilType: doc.soilType,
     producerType: doc.producerType,
     grapeFamily: doc.grapeFamily,
+    ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
+      ? { sourceRecordRefs: [...doc.sourceRecordRefs] }
+      : {}),
   }) ?? { canonicalLabel: doc.canonicalLabel };
 }

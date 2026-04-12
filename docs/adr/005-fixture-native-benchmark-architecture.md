@@ -733,11 +733,20 @@ exploratory/nightly coverage corpus.
   - distinguish:
     - fixture-native release-gate commands
     - exploratory/nightly scenario commands
+  - canonical exploratory entrypoints MUST use explicit names:
+    - `bench:agent:exploratory`
+    - `bench:agent:exploratory:tier`
+    - `benchmark:exploratory:quick`
+    - `benchmark:exploratory:standard`
+    - `benchmark:exploratory:nightly`
+    - `benchmark:exploratory:retrieval`
+  - legacy short names may remain only as compatibility aliases and MUST NOT be documented as canonical
 
 #### Acceptance
 
 - agent release correctness is no longer blocked on `AGENT_SCENARIOS` semantics
 - `AGENT_SCENARIOS` remains available for broad regression exploration
+- exploratory benchmark entrypoints are explicitly named and non-gating
 
 ### Workstream G: CI / release-gate rewiring
 

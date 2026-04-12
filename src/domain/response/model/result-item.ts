@@ -1,4 +1,5 @@
 import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
+import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 
 /**
  * Drinking window prediction block (Epic 15).
@@ -81,6 +82,12 @@ export interface EntitySummary {
 
   /** Human-readable price band (e.g. "$20-$30"). */
   readonly priceRange?: string | undefined;
+
+  /**
+   * Upstream source record identifiers for lineage (ADR-007). Never use these
+   * as public `entity_id`; they are for audit, support, and cross-system joins only.
+   */
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 }
 
 /**

@@ -22,6 +22,12 @@ function npmRun(script, extraArgs = []) {
   run('npm', ['run', script, '--', ...extraArgs]);
 }
 
+/** Full TS graph: `src/` (app) + `scripts/etl/` (ETL) — see `tsconfig.etl.json`. */
+function runTypecheckStack() {
+  npmRun('typecheck');
+  npmRun('typecheck:etl');
+}
+
 function runVitestLane(mode, config, extraArgs = [], emptyExitCode = null) {
   const args = ['./scripts/test/run-vitest-lane.mjs'];
   if (emptyExitCode !== null) {
@@ -126,6 +132,7 @@ const metaPatterns = [
   /^src\/interface\/http\/schemas\/__tests__\/search-response-v2\.schema\.test\.ts$/,
   /^src\/interface\/http\/routes\/__tests__\/http-contract-manifest-script\.test\.ts$/,
   /^src\/interface\/http\/routes\/__tests__\/http-contract-openapi-bridge\.test\.ts$/,
+  /^test\/meta\/vespa-hit-summary-readraw-parity\.test\.ts$/,
 ];
 
 const metaSourcePatterns = [
@@ -134,6 +141,10 @@ const metaSourcePatterns = [
   /^src\/interface\/http\/routes\/(?!__tests__)/,
   /^scripts\/export-http-contract-manifest\.ts$/,
   /^scripts\/export-http-openapi-bridge\.ts$/,
+  /^vespa\/app\/schemas\//,
+  /^src\/infrastructure\/vespa\/vespa-schema\.sd$/,
+  /^src\/infrastructure\/vespa\/mapping\.ts$/,
+  /^test\/meta\/vespa-hit-summary-readraw-parity\.test\.ts$/,
 ];
 
 const evalPatterns = [
@@ -204,10 +215,6 @@ if (explicitFiles.length === 0 && changedFiles.length > 15) {
   console.log(
     `[${label}] ${changedFiles.length} changed files detected; falling back to check:quick instead of running many narrow lanes.`,
   );
-  if (shouldRunTypecheck) {
-    console.log(`[${label}] Source/config changes detected; running typecheck first.`);
-    npmRun('typecheck');
-  }
   if (lintableFiles.length > 0) {
     console.log(`[${label}] Lintable changes detected; running changed-file lint first.`);
     npmRun('lint:file', lintableFiles);
@@ -258,10 +265,6 @@ const relatedInputs = changedFiles.filter((file) => !claimed.has(file) && !isDoc
 
 if (broadFallback) {
   console.log(`[${label}] Config/test-lane files changed; running safer broad fallback.`);
-  if (shouldRunTypecheck) {
-    console.log(`[${label}] Source/config changes detected; running typecheck first.`);
-    npmRun('typecheck');
-  }
   if (lintableFiles.length > 0) {
     console.log(`[${label}] Lintable changes detected; running changed-file lint first.`);
     npmRun('lint:file', lintableFiles);
@@ -277,7 +280,7 @@ if (broadFallback) {
 
 if (shouldRunTypecheck) {
   console.log(`[${label}] Source/config changes detected; running typecheck.`);
-  npmRun('typecheck');
+  runTypecheckStack();
 }
 
 if (lintableFiles.length > 0) {

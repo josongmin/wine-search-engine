@@ -251,6 +251,8 @@ schema wine_entity {
     summary grape_family {}
     summary region_hierarchy {}
     summary price_band_numeric {}
+    summary flavor_profiles {}
+    summary source_record_refs_json {}
   }
 
   document-summary feature_summary {

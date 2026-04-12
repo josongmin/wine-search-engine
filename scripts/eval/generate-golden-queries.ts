@@ -12,6 +12,11 @@
  * Usage:
  *   npx tsx scripts/eval/generate-golden-queries.ts
  *   npx tsx scripts/eval/generate-golden-queries.ts --input data/silver-docquery.ndjson
+ *   npx tsx scripts/eval/generate-golden-queries.ts --fixture-repo ../wine-engine-fixture
+ *
+ * This script produces an engine-local derived artifact only. It does NOT
+ * define release-gate benchmark truth; fixture-native corpora in the external
+ * fixture repository remain the SSOT.
  */
 
 import fs from 'node:fs/promises';
@@ -25,13 +30,17 @@ import type {
   RelevanceJudgment,
 } from '../etl/types.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  buildEntityIdBySourceId,
+  loadGoldCanonicalLookupForBuild,
+} from '../etl/snapshot-entity-identity.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
-const DEFAULT_OUTPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
+const DEFAULT_OUTPUT = resolveDataPath('data/golden-queries-bronze.snapshot.jsonl');
 const RUN_ID = `run-${new Date().toISOString().slice(0, 10)}-001`;
 
 // Scenario targets (total = 500)
@@ -70,6 +79,8 @@ function assignLanguage(idx: number): 'en' | 'ko' | 'mixed' {
 interface Args {
   input: string;
   output: string;
+  /** Optional path to wine-engine-fixture (ADR-007 gold canonical overlay). */
+  fixtureRepo?: string | undefined;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -78,6 +89,10 @@ function parseArgs(argv: string[]): Args {
     const a = argv[i];
     if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
     else if (a === '--output' || a === '-o') out.output = argv[++i] ?? DEFAULT_OUTPUT;
+    else if (a === '--fixture-repo') {
+      const next = argv[++i];
+      if (next != null && next.length > 0) out.fixtureRepo = next;
+    }
   }
   return out;
 }
@@ -100,13 +115,14 @@ function removeAccents(text: string): string {
   return text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').normalize('NFC');
 }
 
-/** Build a same-producer relevance set. */
+/** Build a same-producer relevance set (ADR-007: `entity_id` is canonical public identity). */
 function buildProducerRelevanceSet(
   target: EnrichedSilverRecord,
   all: readonly EnrichedSilverRecord[],
+  canonicalEntityId: (r: EnrichedSilverRecord) => string,
 ): RelevanceJudgment[] {
   const judgments: RelevanceJudgment[] = [
-    { entity_id: target.sourceId, grade: 3 },
+    { entity_id: canonicalEntityId(target), grade: 3 },
   ];
 
   // Same producer, different wine = grade 1-2
@@ -114,7 +130,7 @@ function buildProducerRelevanceSet(
     if (rec.sourceId === target.sourceId) continue;
     if (rec.producer.toLowerCase() === target.producer.toLowerCase()) {
       const grade = rec.vintageYear === target.vintageYear ? 2 : 1;
-      judgments.push({ entity_id: rec.sourceId, grade: grade as 1 | 2 });
+      judgments.push({ entity_id: canonicalEntityId(rec), grade: grade as 1 | 2 });
       if (judgments.length >= 5) break;
     }
   }
@@ -126,13 +142,16 @@ function buildProducerRelevanceSet(
 // Query generators per scenario
 // ---------------------------------------------------------------------------
 
+type CanonicalEntityIdOf = (record: EnrichedSilverRecord) => string;
+
 type QueryGen = (
   record: EnrichedSilverRecord,
   all: readonly EnrichedSilverRecord[],
   idx: number,
+  canonicalEntityId: CanonicalEntityIdOf,
 ) => GoldenQuery | null;
 
-const scenarioA: QueryGen = (rec, all, idx) => {
+const scenarioA: QueryGen = (rec, all, idx, cid) => {
   // Exact entity with full name + vintage
   const lang = assignLanguage(idx);
   const query = lang === 'ko' && rec.aliases.noisyRecallProjection.length > 0
@@ -145,16 +164,16 @@ const scenarioA: QueryGen = (rec, all, idx) => {
     scenario: 'A',
     language: lang,
     retrieval_labels: {
-      relevant: buildProducerRelevanceSet(rec, all),
+      relevant: buildProducerRelevanceSet(rec, all, cid),
     },
     decision_labels: {
       expected_decision_status: 'resolved',
-      expected_entity_id: rec.sourceId,
+      expected_entity_id: cid(rec),
       ambiguity_expected: false,
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'exact_entity_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -166,7 +185,7 @@ const scenarioA: QueryGen = (rec, all, idx) => {
   };
 };
 
-const scenarioB: QueryGen = (rec, _all, idx) => {
+const scenarioB: QueryGen = (rec, _all, idx, cid) => {
   // Short / ambiguous alias (producer only, no vintage)
   const lang = assignLanguage(idx);
   const query = rec.producer;
@@ -178,7 +197,7 @@ const scenarioB: QueryGen = (rec, _all, idx) => {
     scenario: 'B',
     language: lang,
     retrieval_labels: {
-      relevant: [{ entity_id: rec.sourceId, grade: 2 }],
+      relevant: [{ entity_id: cid(rec), grade: 2 }],
     },
     decision_labels: {
       expected_decision_status: 'ambiguous',
@@ -186,7 +205,7 @@ const scenarioB: QueryGen = (rec, _all, idx) => {
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'short_alias_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -198,7 +217,7 @@ const scenarioB: QueryGen = (rec, _all, idx) => {
   };
 };
 
-const scenarioC: QueryGen = (rec, _all, idx) => {
+const scenarioC: QueryGen = (rec, _all, idx, cid) => {
   // Semantic preference query (no wine name, style-based)
   const lang = assignLanguage(idx);
   let query: string;
@@ -227,7 +246,7 @@ const scenarioC: QueryGen = (rec, _all, idx) => {
     scenario: 'C',
     language: lang,
     retrieval_labels: {
-      relevant: [{ entity_id: rec.sourceId, grade: 2 }],
+      relevant: [{ entity_id: cid(rec), grade: 2 }],
     },
     decision_labels: {
       expected_decision_status: 'resolved',
@@ -235,7 +254,7 @@ const scenarioC: QueryGen = (rec, _all, idx) => {
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'semantic_pref_ko_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -247,7 +266,7 @@ const scenarioC: QueryGen = (rec, _all, idx) => {
   };
 };
 
-const scenarioD: QueryGen = (rec, _all, idx) => {
+const scenarioD: QueryGen = (rec, _all, idx, cid) => {
   // Constraint query (price + region + type)
   if (rec.priceUsd === null) return null;
   const lang = assignLanguage(idx);
@@ -279,7 +298,7 @@ const scenarioD: QueryGen = (rec, _all, idx) => {
     scenario: 'D',
     language: lang,
     retrieval_labels: {
-      relevant: [{ entity_id: rec.sourceId, grade: 2 }],
+      relevant: [{ entity_id: cid(rec), grade: 2 }],
     },
     decision_labels: {
       expected_decision_status: 'resolved',
@@ -287,7 +306,7 @@ const scenarioD: QueryGen = (rec, _all, idx) => {
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'constraint_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -299,7 +318,7 @@ const scenarioD: QueryGen = (rec, _all, idx) => {
   };
 };
 
-const scenarioE: QueryGen = (rec, _all, idx) => {
+const scenarioE: QueryGen = (rec, _all, idx, cid) => {
   // Exploration / recommendation
   const pairing = rec.pairingTags[0];
   if (!pairing) return null;
@@ -314,7 +333,7 @@ const scenarioE: QueryGen = (rec, _all, idx) => {
     scenario: 'E',
     language: lang,
     retrieval_labels: {
-      relevant: [{ entity_id: rec.sourceId, grade: 1 }],
+      relevant: [{ entity_id: cid(rec), grade: 1 }],
     },
     decision_labels: {
       expected_decision_status: 'resolved',
@@ -322,7 +341,7 @@ const scenarioE: QueryGen = (rec, _all, idx) => {
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'exploration_pairing_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -338,6 +357,7 @@ const scenarioE: QueryGen = (rec, _all, idx) => {
 function findSimilarWines(
   seed: EnrichedSilverRecord,
   all: readonly EnrichedSilverRecord[],
+  canonicalEntityId: CanonicalEntityIdOf,
 ): RelevanceJudgment[] {
   const judgments: RelevanceJudgment[] = [];
   for (const rec of all) {
@@ -349,7 +369,7 @@ function findSimilarWines(
     const sameRegion =
       rec.region.toLowerCase() === seed.region.toLowerCase();
     judgments.push({
-      entity_id: rec.sourceId,
+      entity_id: canonicalEntityId(rec),
       grade: sameRegion ? 3 : 2,
     });
     if (judgments.length >= 5) break;
@@ -357,13 +377,13 @@ function findSimilarWines(
   return judgments;
 }
 
-const scenarioF: QueryGen = (rec, all, idx) => {
+const scenarioF: QueryGen = (rec, all, idx, cid) => {
   // Similar / compare ("비슷한 와인")
   const lang = assignLanguage(idx);
   const query = lang === 'en'
     ? `wines similar to ${rec.canonicalLabel}`
     : `${rec.canonicalLabel} 비슷한 와인`;
-  const similarWines = findSimilarWines(rec, all);
+  const similarWines = findSimilarWines(rec, all, cid);
   if (similarWines.length === 0) return null; // need at least 1 similar wine
   return {
     qid: makeQid('F', idx),
@@ -375,7 +395,7 @@ const scenarioF: QueryGen = (rec, all, idx) => {
       // Seed entity = grade 0 (it's not a "similar wine" to itself).
       // Actual similar wines get grade 2-3.
       relevant: [
-        { entity_id: rec.sourceId, grade: 0 },
+        { entity_id: cid(rec), grade: 0 },
         ...similarWines,
       ],
     },
@@ -385,7 +405,7 @@ const scenarioF: QueryGen = (rec, all, idx) => {
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'similar_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -397,7 +417,7 @@ const scenarioF: QueryGen = (rec, all, idx) => {
   };
 };
 
-const scenarioG: QueryGen = (rec, all, idx) => {
+const scenarioG: QueryGen = (rec, all, idx, cid) => {
   // Catalog browse (producer wines)
   const lang = assignLanguage(idx);
   const query = lang === 'en'
@@ -407,7 +427,7 @@ const scenarioG: QueryGen = (rec, all, idx) => {
     .filter((r) => r.producer.toLowerCase() === rec.producer.toLowerCase())
     .slice(0, 5)
     .map((r): RelevanceJudgment => ({
-      entity_id: r.sourceId,
+      entity_id: cid(r),
       grade: r.popularityScore > 0.5 ? 3 : 2,
     }));
 
@@ -426,7 +446,7 @@ const scenarioG: QueryGen = (rec, all, idx) => {
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'catalog_browse_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -438,7 +458,7 @@ const scenarioG: QueryGen = (rec, all, idx) => {
   };
 };
 
-const scenarioH: QueryGen = (rec, _all, idx) => {
+const scenarioH: QueryGen = (rec, _all, idx, cid) => {
   // Noisy / typo query
   const lang = assignLanguage(idx);
   const folded = removeAccents(rec.canonicalLabel).toLowerCase();
@@ -453,16 +473,16 @@ const scenarioH: QueryGen = (rec, _all, idx) => {
     scenario: 'H',
     language: lang,
     retrieval_labels: {
-      relevant: [{ entity_id: rec.sourceId, grade: 3 }],
+      relevant: [{ entity_id: cid(rec), grade: 3 }],
     },
     decision_labels: {
       expected_decision_status: 'resolved',
-      expected_entity_id: rec.sourceId,
+      expected_entity_id: cid(rec),
       ambiguity_expected: false,
       requires_abstain: false,
     },
     leakage_keys: {
-      entity_id: rec.sourceId,
+      entity_id: cid(rec),
       query_template_id: 'noisy_recall_v1',
       generation_run_id: RUN_ID,
       alias_cluster_id: aliasCluster(rec),
@@ -483,7 +503,7 @@ const GENERATORS: Record<Scenario, QueryGen> = {
   F: scenarioF,
   G: scenarioG,
   H: scenarioH,
-  no_match: () => null, // handled separately below
+  no_match: (_rec, _all, _idx, _cid) => null, // handled separately below
 };
 
 // ---------------------------------------------------------------------------
@@ -578,6 +598,16 @@ async function run(): Promise<void> {
   const { records } = parseNdjson<EnrichedSilverRecord>(content, args.input);
   console.log(`  Loaded ${records.length} records`);
 
+  const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepo });
+  const sourceToCanonical = buildEntityIdBySourceId(records, goldLookup);
+  const canonicalEntityId: CanonicalEntityIdOf = (r) => {
+    const id = sourceToCanonical.get(r.sourceId);
+    if (id === undefined) {
+      throw new Error(`Missing canonical entity id mapping for sourceId=${r.sourceId}`);
+    }
+    return id;
+  };
+
   // Shuffle records for random sampling
   const shuffled = [...records].sort(
     () => crypto.randomBytes(4).readUInt32LE(0) / 0xffffffff - 0.5,
@@ -598,7 +628,7 @@ async function run(): Promise<void> {
     for (const rec of shuffled) {
       if (generated >= target.count) break;
       attempted++;
-      const q = gen(rec, records, generated);
+      const q = gen(rec, records, generated, canonicalEntityId);
       if (q) {
         allQueries.push(q);
         generated++;

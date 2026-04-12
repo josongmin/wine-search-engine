@@ -1832,7 +1832,7 @@ function scoreContextRelevance(
  * appear verbatim in the `(id: ...) producer: ...` lines of summarizeSearchResults().
  *
  * v3 note: this replaces the v2 goldenEntityIds approach which used slug-style
- * IDs that never appeared in observations (real corpus uses vivino-hash IDs).
+ * IDs that never appeared in observations (ADR-007: prefer canonical ids in traces).
  * Weight is 0 in DEFAULT_WEIGHTS — this is a DIAGNOSTIC metric only.
  *
  * Returns null when:

@@ -6,6 +6,7 @@
  */
 
 import type { LearnedSparseVector } from './learned-sparse-spec.js';
+import type { SourceRecordRef } from '../../src/domain/entity/model/source-record-ref.js';
 
 // ---------------------------------------------------------------------------
 // Vivino Bronze payload shape (from wine_pdp_snapshot.payload JSONB)
@@ -316,6 +317,8 @@ export interface EnrichedSilverRecord extends SilverWineRecord {
    */
   readonly syntheticQueries?: readonly string[];
   readonly doc2queryFingerprint?: Doc2QueryFingerprint;
+  /** SPLADE-style sparse weights when the learned-sparse ETL step has run. */
+  readonly learnedSparseWeights?: LearnedSparseVector | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +355,8 @@ export interface IndexableWineRecord {
   readonly grapePrimary?: string | undefined;
   /** Vintage year (e.g. 2018). */
   readonly vintageYear?: number | undefined;
+  /** ADR-007 lineage for upstream source records (indexed to Vespa + HTTP). */
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
   /** English full-text search field. */
   readonly searchTextEn?: string | undefined;
   /** Producer prestige score in [0, 1]. */

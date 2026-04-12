@@ -1263,7 +1263,7 @@ describe('RAGAS Context Relevance', () => {
 // RAGAS Context Recall (canonical-label keyword overlap — v3)
 // ─────────────────────────────────────────────────────────────────────
 // v3 breaking change: goldenEntityIds (slug-based) replaced by goldenKeywords
-// (canonical-label fragments). Observations contain "1. Opus One 2018 (id: vivino-xxx)"
+// (canonical-label fragments). Observations may include "(id: opus-one-2018)" style ids.
 // so keyword "opus one" matches; slug "opus-one-2018" never matched.
 
 describe('RAGAS Context Recall', () => {
@@ -1276,8 +1276,8 @@ describe('RAGAS Context Recall', () => {
       scenario,
       makeExecution({
         observations: [
-          '1. Opus One 2018 Robert Mondavi (id: vivino-abc123)',
-          '2. Ridge Monte Bello 2019 (id: vivino-def456)',
+          '1. Opus One 2018 Robert Mondavi (id: opus-one-2018)',
+          '2. Ridge Monte Bello 2019 (id: ridge-monte-bello-2019)',
         ],
       }),
       undefined,
@@ -1293,7 +1293,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['1. Some Other Wine (id: vivino-other999)'],
+        observations: ['1. Some Other Wine (id: other-wine-999)'],
       }),
       undefined,
     );
@@ -1305,7 +1305,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       makeScenario({ maxSteps: 5 }),
       makeExecution({
-        observations: ['1. Opus One 2018 (id: vivino-abc)'],
+        observations: ['1. Opus One 2018 (id: opus-one-2018)'],
       }),
       undefined,
     );
@@ -1320,7 +1320,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['1. Opus One 2019 (id: vivino-1) · 2. Almaviva 2019 (id: vivino-2)'],
+        observations: ['1. Opus One 2019 (id: opus-one-2019) · 2. Almaviva 2019 (id: almaviva-2019)'],
       }),
       undefined,
     );
@@ -1350,7 +1350,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['1. Château Margaux 2018 (id: vivino-xyz)'],
+        observations: ['1. Château Margaux 2018 (id: chateau-margaux-2018)'],
       }),
       undefined,
     );
@@ -1367,7 +1367,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['1. Cha\u0302teau Margaux 2018 (id: vivino-xyz)'],  // â decomposed
+        observations: ['1. Cha\u0302teau Margaux 2018 (id: chateau-margaux-2018)'],  // â decomposed
       }),
       undefined,
     );
@@ -1384,7 +1384,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['1. Opus One Overture 2019 (id: vivino-xyz)'],  // wrong vintage
+        observations: ['1. Opus One Overture 2019 (id: opus-one-overture-2019)'],  // wrong vintage
       }),
       undefined,
     );
@@ -1400,7 +1400,7 @@ describe('RAGAS Context Recall', () => {
     const r = scoreScenario(
       scenario,
       makeExecution({
-        observations: ['1. Château Brane-Cantenac Margaux de Brane (id: vivino-aoc)'],
+        observations: ['1. Château Brane-Cantenac Margaux de Brane (id: brane-cantenac-margaux-de-brane)'],
       }),
       undefined,
     );
@@ -1413,7 +1413,7 @@ describe('RAGAS Context Recall', () => {
     // Both should produce the same overall score because weight=0.
     const base = makeScenario({ maxSteps: 5 });
     const withKeywords = makeScenario({ maxSteps: 5 }, { goldenKeywords: ['petrus'] });
-    const exec = makeExecution({ observations: ['1. Opus One (id: vivino-abc)'] });
+    const exec = makeExecution({ observations: ['1. Opus One (id: opus-one-nv)'] });
     const rBase = scoreScenario(base, exec, undefined);
     const rWithKeywords = scoreScenario(withKeywords, exec, undefined);
     // contextRecall=null (base) vs 0 (withKeywords) — overall must be equal

@@ -813,8 +813,8 @@ function mergeSOTAPlusFields(winner: PreSilver, fallback: PreSilver): PreSilver 
     alcoholPct: winner.alcoholPct ?? fallback.alcoholPct,
     producerPrestige: winner.producerPrestige ?? fallback.producerPrestige,
     isTopRated: winner.isTopRated || fallback.isTopRated,
-    classification: winner.classification ?? fallback.classification,
-    oakTreatment: winner.oakTreatment ?? fallback.oakTreatment,
+    classification: (winner.classification ?? fallback.classification) ?? null,
+    oakTreatment: (winner.oakTreatment ?? fallback.oakTreatment) ?? null,
     // Prefer longer searchTextEn if winner's is empty (different scrape depth)
     searchTextEn: winner.searchTextEn.length >= fallback.searchTextEn.length
       ? winner.searchTextEn

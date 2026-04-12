@@ -1,4 +1,5 @@
 import type { EntityId } from '../../shared/types/index.js';
+import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 
 /**
  * SPLADE-style learned sparse weights for one document.
@@ -31,6 +32,8 @@ export interface DocumentSparseVector {
  */
 export interface RetrievalHitProjection {
   readonly entityId: EntityId;
+  /** Lineage: upstream source keys (indexed for HTTP / agent exposure). */
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
   readonly canonicalLabel?: string | undefined;
   readonly producer?: string | undefined;
   readonly region?: string | undefined;
@@ -84,6 +87,15 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
 
   /** Entity type discriminator (e.g. "wine", "producer"). */
   readonly entityType: string;
+
+  /**
+   * Search snapshot identity that produced this document feed.
+   *
+   * This is optional for backward compatibility with legacy Vespa documents,
+   * but snapshot-native publish paths MUST populate it so readiness can verify
+   * the active Vespa document plane against the runtime substrate snapshot.
+   */
+  readonly searchSnapshotId?: string | undefined;
 
   /** Canonical display label (e.g. "Opus One 2018"). */
   readonly canonicalLabel: string;

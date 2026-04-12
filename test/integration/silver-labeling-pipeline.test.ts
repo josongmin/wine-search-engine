@@ -40,14 +40,16 @@ describe('silver labeling pipeline (stub)', () => {
     const labelingInputPath = path.join(tmpDir, 'labeling-input.jsonl');
     const silverPath = path.join(tmpDir, 'silver.ndjson');
 
-    // 1) Bridge: 3 scenarios from the real AGENT_SCENARIOS list, against the
-    //    real ontology snapshot. The bridge is deterministic — same ontology,
-    //    same scenarios → same output bytes.
+    // 1) Bridge: explicit exploratory source mode from AGENT_SCENARIOS against
+    //    the real ontology snapshot. Fixture-native corpora are the default
+    //    release-gate truth; this test keeps the deterministic exploratory
+    //    bridge alive as a non-gating pipeline check.
     const bridgeResult = await runBridge({
       output: labelingInputPath,
       limit: INPUT_CANDIDATE_COUNT,
       topK: DEFAULT_TOP_K_CANDIDATES,
       ontology: 'data/entity-ontology.json',
+      sourceMode: 'agent_scenarios',
       help: false,
     });
     expect(bridgeResult.linesWritten).toBeGreaterThan(0);

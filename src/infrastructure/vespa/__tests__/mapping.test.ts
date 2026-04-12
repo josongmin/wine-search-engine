@@ -7,7 +7,11 @@ import {
   toVespaFields,
   buildSparseFilters,
   toRetrievalFeatureProjection,
+  parseHitSummary,
+  toRetrievalHitProjection,
 } from '../mapping.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../shared/constants/source-systems.js';
+import { stableJsonStringify } from '../../../shared/utils/stable-json.js';
 
 function makeDocument(overrides: Partial<RetrievalDocument> = {}): RetrievalDocument {
   return {
@@ -97,10 +101,11 @@ describe('fromVespaFields entity_id validation', () => {
 
 describe('vespa mapping retrieval summary SSOT', () => {
   it('writes and reads retrieval summary fields through the shared Vespa mapping contract', () => {
-    const doc = makeDocument();
+    const doc = makeDocument({ searchSnapshotId: 'search-snapshot:v1:mapping-test' });
 
     const fields = toVespaFields(doc);
     expect(fields).toMatchObject({
+      search_snapshot_id: 'search-snapshot:v1:mapping-test',
       canonical_label: 'Mapping Wine',
       producer: 'Mapping Producer',
       region: 'Barolo',
@@ -135,6 +140,7 @@ describe('vespa mapping retrieval summary SSOT', () => {
     const roundTripped = fromVespaFields(fields);
     expect(roundTripped).toMatchObject({
       entityId: doc.entityId,
+      searchSnapshotId: doc.searchSnapshotId,
       canonicalLabel: doc.canonicalLabel,
       producer: doc.producer,
       region: doc.region,
@@ -356,5 +362,38 @@ describe('flavorProfiles Vespa mapping (Bug-1 regression)', () => {
     const fields = toVespaFields(makeDocument({ flavorProfiles: ['rose', 'violet'] }));
     const summary = readRawVespaRetrievalSummary(fields);
     expect(summary.flavorProfiles).toEqual(['rose', 'violet']);
+  });
+});
+
+describe('source_record_refs_json (entity lineage)', () => {
+  const lineage = [{ sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: 'silver-lineage-1' }] as const;
+
+  it('toVespaFields writes stable JSON on source_record_refs_json', () => {
+    const doc = makeDocument({ sourceRecordRefs: [...lineage] });
+    const fields = toVespaFields(doc);
+    expect(fields['source_record_refs_json']).toBe(stableJsonStringify([...lineage]));
+  });
+
+  it('fromVespaFields and readRawVespaRetrievalSummary roundtrip lineage', () => {
+    const doc = makeDocument({ sourceRecordRefs: [...lineage] });
+    const fields = toVespaFields(doc);
+    const roundTripped = fromVespaFields(fields);
+    expect(roundTripped.sourceRecordRefs).toEqual([...lineage]);
+
+    const summary = readRawVespaRetrievalSummary(fields);
+    expect(summary.sourceRecordRefs).toEqual([...lineage]);
+  });
+
+  it('parseHitSummary parses source_record_refs_json into sourceRecordRefs', () => {
+    const doc = makeDocument({ sourceRecordRefs: [...lineage] });
+    const fields = toVespaFields(doc);
+    const hit = parseHitSummary(fields);
+    expect(hit.sourceRecordRefs).toEqual([...lineage]);
+  });
+
+  it('toRetrievalHitProjection propagates sourceRecordRefs', () => {
+    const doc = makeDocument({ sourceRecordRefs: [...lineage] });
+    const proj = toRetrievalHitProjection(doc);
+    expect(proj.sourceRecordRefs).toEqual([...lineage]);
   });
 });

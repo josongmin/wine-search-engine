@@ -20,6 +20,7 @@ import type { EntityId } from '../../domain/shared/types/index.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
 import { KRW_PER_USD_APPROXIMATE, MAX_QUERY_LENGTH, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
+import { MAX_SOURCE_RECORD_REFS_PER_ENTITY } from '../../domain/entity/model/source-record-ref.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
 import { POLICY_BLOCKED_CODE } from '../../domain/shared/error/policy-blocked.js';
 import { isAbortError } from '../../domain/shared/cooperative-abort.js';
@@ -40,6 +41,11 @@ const MAX_PRICE_KRW_BOUND = 100_000_000;
 const MAX_PRICE_USD_BOUND = Math.ceil(MAX_PRICE_KRW_BOUND / KRW_PER_USD_APPROXIMATE); // ≈ 74_075
 /** Top-N results shown in the observation string (controls context window usage). */
 const SUMMARY_TOP_N = 5;
+/**
+ * Max lineage `(source_system:source_record_id)` pairs per wine in the pipe-delimited
+ * observation text — keeps agent context bounded; full list is in GROUNDING_JSON.
+ */
+const AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX = 3;
 /** Max characters in any single observation string returned to the agent loop.
  * Truncation prevents a single tool result from exhausting the agent's token budget.
  * ~2000 chars ≈ 500 tokens (at 4 chars/token) — enough for 5 wine summaries. */
@@ -141,7 +147,7 @@ const DrinkingWindowInputSchema = z.object({
     .min(1)
     .max(ENTITY_ID_MAX_LEN)
     .refine((v) => !PLACEHOLDER_PATTERN.test(v), {
-      message: 'entity_id cannot be a placeholder. Copy the actual id (e.g. "vivino-xxx") from a prior search_wines result.',
+      message: 'entity_id cannot be a placeholder. Copy the canonical entity_id from a prior search_wines result (e.g. "opus-one-2018").',
     }),
   target_year: coercePositiveInt.pipe(z.number().int().min(DRINKING_WINDOW_MIN_YEAR).max(DRINKING_WINDOW_MAX_YEAR)).optional(),
 });
@@ -994,6 +1000,18 @@ function sanitizeObservationField(value: string): string {
     .replace(/[\r\n]+/g, ' ');
 }
 
+function sanitizeSourceRecordRefsForGrounding(
+  refs: readonly { readonly sourceSystem: string; readonly sourceRecordId: string }[],
+): readonly { readonly source_system: string; readonly source_record_id: string }[] {
+  const capped = refs.length > MAX_SOURCE_RECORD_REFS_PER_ENTITY
+    ? refs.slice(0, MAX_SOURCE_RECORD_REFS_PER_ENTITY)
+    : refs;
+  return capped.map((r) => ({
+    source_system: sanitizeObservationField(r.sourceSystem),
+    source_record_id: sanitizeObservationField(r.sourceRecordId),
+  }));
+}
+
 function summarizeSearchResults(response: SearchResponseV1, diversify = false): string {
   const { results, engineDecision } = response;
   if (results.length === 0) {
@@ -1071,6 +1089,16 @@ function summarizeSearchResults(response: SearchResponseV1, diversify = false): 
     if (r.drinkingWindow) {
       parts.push(`drink: ${r.drinkingWindow.drinkingWindowStart}-${r.drinkingWindow.drinkingWindowEnd}`);
     }
+    if (r.entity.sourceRecordRefs !== undefined && r.entity.sourceRecordRefs.length > 0) {
+      const shown = r.entity.sourceRecordRefs.slice(0, AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX);
+      const refText = shown
+        .map((ref) =>
+          `${sanitizeObservationField(ref.sourceSystem)}:${sanitizeObservationField(ref.sourceRecordId)}`,
+        )
+        .join(', ');
+      const suffix = r.entity.sourceRecordRefs.length > AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX ? ',…' : '';
+      parts.push(`lineage: ${refText}${suffix}`);
+    }
     return parts.join(' | ');
   });
 
@@ -1104,6 +1132,16 @@ function summarizeComparison(response: ComparisonSearchResponse): string {
     if (top.drinkingWindow) {
       parts.push(`drink: ${top.drinkingWindow.drinkingWindowStart}-${top.drinkingWindow.drinkingWindowEnd}`);
     }
+    if (top.entity.sourceRecordRefs !== undefined && top.entity.sourceRecordRefs.length > 0) {
+      const shown = top.entity.sourceRecordRefs.slice(0, AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX);
+      const refText = shown
+        .map((ref) =>
+          `${sanitizeObservationField(ref.sourceSystem)}:${sanitizeObservationField(ref.sourceRecordId)}`,
+        )
+        .join(', ');
+      const suffix = top.entity.sourceRecordRefs.length > AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX ? ',…' : '';
+      parts.push(`lineage: ${refText}${suffix}`);
+    }
     parts.push(`match: ${top.match.matchType}`);
     return parts.join(' | ');
   });
@@ -1133,6 +1171,11 @@ interface GroundingWineFact {
   readonly style?: string;
   readonly critic_score_100?: number;
   readonly price?: string;
+  /** Upstream lineage keys (sanitized); not public entity identifiers. */
+  readonly source_record_refs?: readonly {
+    readonly source_system: string;
+    readonly source_record_id: string;
+  }[];
 }
 
 function buildGroundingJsonFromSearch(
@@ -1152,6 +1195,9 @@ function buildGroundingJsonFromSearch(
       ...(r.entity.style !== undefined ? { style: sanitizeObservationField(r.entity.style) } : {}),
       ...(r.entity.criticScore !== undefined && Number.isFinite(r.entity.criticScore) ? { critic_score_100: Math.round(r.entity.criticScore * 100) } : {}),
       ...(r.entity.priceRange !== undefined ? { price: sanitizeObservationField(r.entity.priceRange) } : {}),
+      ...(r.entity.sourceRecordRefs !== undefined && r.entity.sourceRecordRefs.length > 0
+        ? { source_record_refs: sanitizeSourceRecordRefsForGrounding(r.entity.sourceRecordRefs) }
+        : {}),
     };
     return base;
   });
@@ -1181,6 +1227,9 @@ function buildGroundingJsonFromComparison(response: ComparisonSearchResponse): s
         ...(top.entity.style !== undefined ? { style: sanitizeObservationField(top.entity.style) } : {}),
         ...(top.entity.criticScore !== undefined && Number.isFinite(top.entity.criticScore) ? { critic_score_100: Math.round(top.entity.criticScore * 100) } : {}),
         ...(top.entity.priceRange !== undefined ? { price: sanitizeObservationField(top.entity.priceRange) } : {}),
+        ...(top.entity.sourceRecordRefs !== undefined && top.entity.sourceRecordRefs.length > 0
+          ? { source_record_refs: sanitizeSourceRecordRefsForGrounding(top.entity.sourceRecordRefs) }
+          : {}),
       };
       return [fact];
     });

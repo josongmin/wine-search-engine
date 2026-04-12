@@ -27,6 +27,12 @@ import {
   readNumericThreshold,
 } from './external-fixture-benchmark.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  buildBenchmarkRequestHeaders,
+  resolveBenchmarkSearchEndpoint,
+  runLiveBenchmarkPreflight,
+  type BenchmarkExecutionLane,
+} from './live-benchmark-preflight.js';
 
 const SUITE_ID = 'search_feature_behavior' as const;
 const DEFAULT_OUTPUT = resolveDataPath('data/search-feature-behavior-fixture-eval-results.json');
@@ -42,6 +48,8 @@ interface CliArgs {
   readonly apiUrl: string;
   readonly timeoutMs: number;
   readonly concurrency: number;
+  readonly executionLane: BenchmarkExecutionLane;
+  readonly debugKey?: string;
   readonly useThresholds: boolean;
   readonly smokePredictions: boolean;
 }
@@ -136,6 +144,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   let timeoutMs = 60_000;
   let concurrency = DEFAULT_CONCURRENCY;
+  let executionLane: BenchmarkExecutionLane = 'public';
+  let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
   let smokePredictions = false;
 
@@ -151,6 +161,13 @@ function parseArgs(argv: readonly string[]): CliArgs {
     } else if (arg === '--concurrency') {
       const v = Number.parseInt(argv[++i] ?? '', 10);
       if (Number.isFinite(v) && v >= 1) concurrency = Math.min(16, v);
+    } else if (arg === '--execution-lane') {
+      const value = argv[++i];
+      if (value === 'public' || value === 'trusted_benchmark') {
+        executionLane = value;
+      }
+    } else if (arg === '--debug-key') {
+      debugKey = argv[++i] ?? debugKey;
     } else if (arg === '--no-thresholds') {
       useThresholds = false;
     } else if (arg === '--smoke-predictions') {
@@ -158,7 +175,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
     }
   }
 
-  return { output, apiUrl, timeoutMs, concurrency, useThresholds, smokePredictions };
+  return { output, apiUrl, timeoutMs, concurrency, executionLane, debugKey, useThresholds, smokePredictions };
 }
 
 // ─── Fixture case adapter ────────────────────────────────────────────────────
@@ -206,10 +223,12 @@ async function callSearchApi(
   apiUrl: string,
   query: string,
   timeoutMs: number,
+  executionLane: BenchmarkExecutionLane,
+  debugKey?: string,
 ): Promise<LiveSearchResponse> {
-  const response = await fetch(`${apiUrl}/v1/search`, {
+  const response = await fetch(resolveBenchmarkSearchEndpoint(apiUrl, executionLane), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: buildBenchmarkRequestHeaders(executionLane, debugKey),
     body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -433,6 +452,16 @@ async function run(): Promise<void> {
 
   const rawCases = await loadFixtureCases([SUITE_ID]);
   const cases = rawCases.map(adaptCase);
+  if (!args.smokePredictions) {
+    await runLiveBenchmarkPreflight({
+      apiUrl: args.apiUrl,
+      executionLane: args.executionLane,
+      debugKey: args.debugKey,
+      requiredEntityIds: cases
+        .map((benchmarkCase) => benchmarkCase.target_entity_id)
+        .filter((entityId): entityId is string => entityId !== undefined),
+    });
+  }
 
   process.stderr.write(
     `[sfb-fixture-eval] ${args.smokePredictions ? 'smoke' : 'live'} — ${cases.length} cases\n`,
@@ -441,7 +470,13 @@ async function run(): Promise<void> {
   const results = await mapPool(cases, args.concurrency, async (benchmarkCase) => {
     const response = args.smokePredictions
       ? synthesizeSmokeResponse(benchmarkCase)
-      : await callSearchApi(args.apiUrl, benchmarkCase.query, args.timeoutMs);
+      : await callSearchApi(
+          args.apiUrl,
+          benchmarkCase.query,
+          args.timeoutMs,
+          args.executionLane,
+          args.debugKey,
+        );
     return evaluateCase(benchmarkCase, response);
   });
 

@@ -40,15 +40,19 @@ import {
 } from '../../test/benchmark/agent/retrieval-analysis.js';
 import { AGENT_SCENARIOS } from '../../test/benchmark/agent/scenarios.js';
 import type { AgentBenchmarkScenario } from '../../test/benchmark/agent/scenario.js';
+import {
+  RELEVANCE_GOLD_CORPUS,
+  resolveFixtureCorpusPath,
+} from './fixture-corpus-paths.js';
 
 /** Synthetic gold IDs per scenario when no real ground truth exists. */
 const SYNTHETIC_GOLD_COUNT = 3;
 /** Synthetic filler (non-relevant) IDs per scenario. */
 const FILLER_COUNT = 5;
-/** Output path for the dry-run baseline report. */
-const OUTPUT_REL_PATH = 'data/retrieval-ceiling/dry-run-baseline.json';
-/** Optional hand-crafted gold judgments (see data/gold-relevance-judgments.jsonl). */
-const GOLD_JUDGMENTS_REL_PATH = 'data/gold-relevance-judgments.jsonl';
+/** Output path for the exploratory dry-run baseline report. */
+const OUTPUT_REL_PATH = 'data/retrieval-ceiling/exploratory-dry-run-baseline.json';
+/** Optional hand-crafted gold judgments for exploratory ceiling analysis. */
+const LEGACY_GOLD_JUDGMENTS_REL_PATH = 'data/gold-relevance-judgments.jsonl';
 /** Minimum grade considered "relevant" for gold-derived ground truth. */
 const GOLD_RELEVANCE_THRESHOLD = 2;
 
@@ -174,7 +178,8 @@ async function main(): Promise<void> {
   let goldCount = 0;
   let syntheticCount = 0;
 
-  const goldMapAbs = path.resolve(process.cwd(), GOLD_JUDGMENTS_REL_PATH);
+  const goldMapAbs = resolveFixtureCorpusPath(RELEVANCE_GOLD_CORPUS)
+    ?? path.resolve(process.cwd(), LEGACY_GOLD_JUDGMENTS_REL_PATH);
   const goldRelevanceMap = await loadGoldRelevanceMap(goldMapAbs);
   const goldSourceUsed = goldRelevanceMap.size > 0;
 
@@ -206,10 +211,10 @@ async function main(): Promise<void> {
   const report: DryRunReport = {
     generatedAt: new Date().toISOString(),
     note:
-      'SYNTHETIC dry-run — no live retrieval pipeline. Validates the ' +
+      'EXPLORATORY synthetic dry-run — no live retrieval pipeline. Validates the ' +
       'measurement harness plumbing only. Real ceiling requires a live ' +
       'benchmark run with actual retrieved/ranked IDs from the search ' +
-      'pipeline. Use as the "before" snapshot for future diff comparison.',
+      'pipeline. This report is non-gating and must not be treated as release truth.',
     config: {
       syntheticGoldCount: SYNTHETIC_GOLD_COUNT,
       fillerCount: FILLER_COUNT,
@@ -230,7 +235,7 @@ async function main(): Promise<void> {
 
   // Summary to stderr so `| tee` / piping remains clean.
   const lines: string[] = [];
-  lines.push('─── Retrieval Ceiling Dry-Run Summary (SYNTHETIC) ───');
+  lines.push('─── Retrieval Ceiling Dry-Run Summary (EXPLORATORY SYNTHETIC) ───');
   lines.push(`Scenarios analyzed:       ${summary.scenarioCount}`);
   lines.push(
     `Ground truth sources:     real=${realCount}, gold=${goldCount}, synthetic=${syntheticCount}`,

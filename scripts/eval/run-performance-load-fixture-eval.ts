@@ -27,6 +27,12 @@ import {
   readNumericThreshold,
 } from './external-fixture-benchmark.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  buildBenchmarkRequestHeaders,
+  resolveBenchmarkSearchEndpoint,
+  runLiveBenchmarkPreflight,
+  type BenchmarkExecutionLane,
+} from './live-benchmark-preflight.js';
 
 const SUITE_ID = 'performance_load' as const;
 const DEFAULT_OUTPUT = resolveDataPath('data/performance-load-fixture-eval-results.json');
@@ -38,6 +44,8 @@ interface CliArgs {
   readonly output: string;
   readonly apiUrl: string;
   readonly timeoutMs: number;
+  readonly executionLane: BenchmarkExecutionLane;
+  readonly debugKey?: string;
   readonly useThresholds: boolean;
 }
 
@@ -94,6 +102,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let output = DEFAULT_OUTPUT;
   let apiUrl = process.env['SEARCH_API_URL'] ?? 'http://localhost:3000';
   let timeoutMs = 30_000;
+  let executionLane: BenchmarkExecutionLane = 'public';
+  let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
 
   for (let i = 0; i < argv.length; i++) {
@@ -105,12 +115,19 @@ function parseArgs(argv: readonly string[]): CliArgs {
     } else if (arg === '--timeout-ms') {
       const v = Number.parseInt(argv[++i] ?? '', 10);
       if (Number.isFinite(v) && v >= 100) timeoutMs = v;
+    } else if (arg === '--execution-lane') {
+      const value = argv[++i];
+      if (value === 'public' || value === 'trusted_benchmark') {
+        executionLane = value;
+      }
+    } else if (arg === '--debug-key') {
+      debugKey = argv[++i] ?? debugKey;
     } else if (arg === '--no-thresholds') {
       useThresholds = false;
     }
   }
 
-  return { output, apiUrl, timeoutMs, useThresholds };
+  return { output, apiUrl, timeoutMs, executionLane, debugKey, useThresholds };
 }
 
 // ─── Fixture case adapter ────────────────────────────────────────────────────
@@ -172,11 +189,15 @@ async function executeSustainedLoad(
   concurrency: number,
   durationMs: number,
   timeoutMs: number,
+  executionLane: BenchmarkExecutionLane,
+  debugKey?: string,
 ): Promise<readonly RequestOutcome[]> {
   const outcomes: RequestOutcome[] = [];
   const startTime = performance.now();
   let activeWorkers = 0;
   let done = false;
+  const endpoint = resolveBenchmarkSearchEndpoint(apiUrl, executionLane);
+  const headers = buildBenchmarkRequestHeaders(executionLane, debugKey);
 
   await new Promise<void>((resolve) => {
     function trySpawn(): void {
@@ -188,9 +209,9 @@ async function executeSustainedLoad(
         }
         activeWorkers++;
         const reqStart = performance.now();
-        fetch(`${apiUrl}/v1/search`, {
+        fetch(endpoint, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers,
           body: JSON.stringify({ query }),
           signal: AbortSignal.timeout(timeoutMs),
         })
@@ -369,6 +390,11 @@ async function assertThresholds(report: PerformanceLoadFixtureReport): Promise<v
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  await runLiveBenchmarkPreflight({
+    apiUrl: args.apiUrl,
+    executionLane: args.executionLane,
+    debugKey: args.debugKey,
+  });
 
   const rawCases = await loadFixtureCases([SUITE_ID]);
   const cases = rawCases.map(adaptCase);
@@ -386,6 +412,8 @@ async function run(): Promise<void> {
       benchmarkCase.concurrency,
       benchmarkCase.duration_ms,
       args.timeoutMs,
+      args.executionLane,
+      args.debugKey,
     );
     caseResults.push(evaluateCase(benchmarkCase, outcomes));
   }
@@ -403,8 +431,10 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`[perf-load-fixture-eval] fatal: ${message}\n`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void run().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[perf-load-fixture-eval] fatal: ${message}\n`);
+    process.exit(1);
+  });
+}

@@ -3,6 +3,7 @@ import { executeAgentTool, type AgentToolDeps } from '../../../../src/applicatio
 import { extractSearchConstraints } from '../../../../src/domain/query/service/search-constraint-extractor.js';
 import type { SearchExecutorPort } from '../../../../src/application/search/port/search-executor.port.js';
 import type { SearchResponseV1 } from '../../../../src/domain/response/model/search-response.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../../src/shared/constants/source-systems.js';
 
 function makeSearchResponse(
   results: SearchResponseV1['results'],
@@ -371,6 +372,43 @@ describe('executeAgentTool', () => {
     expect(result.observation).toContain('GROUNDING_JSON:');
     expect(result.observation).toContain('"canonical_label":"Wine A"');
     expect(result.observation).toContain('"region":"Bordeaux"');
+  });
+
+  it('includes source_record_refs in GROUNDING_JSON and lineage in observation when present', async () => {
+    vi.mocked(mockSearchUseCase.execute).mockResolvedValue(
+      makeSearchResponse([
+        {
+          entity: {
+            entityId: 'wine-1',
+            canonicalLabel: 'Wine A',
+            type: 'wine',
+            sourceRecordRefs: [
+              { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: 'ref-abc' },
+            ],
+          },
+          relevanceScore: 0.9,
+          match: {
+            matchType: 'hybrid',
+            scoreComponents: {
+              lexical: 0.8,
+              semantic: 0.8,
+              attribute: 0.8,
+              popularity: 0.5,
+              preferenceAlignment: 0.5,
+            },
+          },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: { uncertaintyConfidence: 0.9, missingInfo: [], approximationUsed: false },
+          evidenceItems: [],
+        },
+      ]),
+    );
+
+    const result = await executeAgentTool('search_wines', { query: 'test lineage' }, deps, 'req-123');
+    expect(result.observation).toContain(`lineage: ${SOURCE_SYSTEM_VIVINO_SILVER}:ref-abc`);
+    expect(result.observation).toContain('"source_record_refs"');
+    expect(result.observation).toContain(`"source_system":"${SOURCE_SYSTEM_VIVINO_SILVER}"`);
+    expect(result.observation).toContain('"source_record_id":"ref-abc"');
   });
 
   it('tags observation with RETRIEVAL_QUALITY: unreliable when 0 results', async () => {

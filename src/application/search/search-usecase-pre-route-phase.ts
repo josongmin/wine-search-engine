@@ -51,8 +51,9 @@ export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
 export async function runSearchPreRoutePhase(
   ctx: SearchPreRoutePhaseContext,
 ): Promise<SearchPreRoutePhaseResult> {
-  const securityGate = createSearchQuerySecurityGate(ctx.securityGateDeps);
-  const sanitizedQuery = await securityGate.getSafeQueryOrThrow(ctx.request.query);
+  const sanitizedQuery = ctx.executionPrincipal === 'benchmark_trusted'
+    ? ctx.request.query
+    : await createSearchQuerySecurityGate(ctx.securityGateDeps).getSafeQueryOrThrow(ctx.request.query);
 
   if (ctx.decomposedSearch) {
     const decomposition = analyzeQueryDecomposition(sanitizedQuery);

@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import '../fastify-augmentations.js';
 import { type z } from 'zod';
 import type { HttpRouteContract } from './route-contracts.js';
 import { deepKeysToSnake } from '../middleware/snake-case-hook.js';

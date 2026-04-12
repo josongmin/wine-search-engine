@@ -17,6 +17,11 @@ interface LtrModelRow {
   query_class: string;
   model_version: number;
   is_active: boolean;
+  search_snapshot_id: string;
+  eval_dataset_version: string;
+  feature_schema_hash: string;
+  copied_from_registry_id: string | null;
+  copied_from_snapshot_id: string | null;
   weights: number[];
   bias: number;
   training_example_count: number;
@@ -37,17 +42,21 @@ export interface LtrModelRegistryPort {
    * Saves a trained model for a query class.
    * Inserts a new version and marks it as active (deactivating prior versions).
    */
-  saveModel(queryClass: string, weights: QueryClassWeights): Promise<void>;
+  saveModel(
+    queryClass: string,
+    weights: QueryClassWeights,
+    metadata: LtrModelSaveMetadata,
+  ): Promise<void>;
 
   /**
    * Retrieves the active trained model for a query class.
    */
-  getModel(queryClass: string): Promise<QueryClassWeights | null>;
+  getModel(queryClass: string, searchSnapshotId?: string): Promise<QueryClassWeights | null>;
 
   /**
    * Retrieves all active trained models.
    */
-  getAllModels(): Promise<ReadonlyMap<string, QueryClassWeights>>;
+  getAllModels(searchSnapshotId?: string): Promise<ReadonlyMap<string, QueryClassWeights>>;
 
   /**
    * Rolls back to the previous model version for a query class.
@@ -56,9 +65,41 @@ export interface LtrModelRegistryPort {
   rollbackModel(queryClass: string): Promise<boolean>;
 
   /**
+   * Atomically activates the latest model version per query class for a snapshot.
+   */
+  activateSnapshot(searchSnapshotId: string): Promise<number>;
+
+  /**
+   * Strictly clone active snapshot-bound models into a new snapshot when the
+   * document plane and feature schema are proven compatible.
+   */
+  cloneActiveModelsToSnapshot(
+    sourceSnapshotId: string,
+    targetSnapshotId: string,
+    metadata: LtrModelCloneMetadata,
+  ): Promise<number>;
+
+  /**
+   * Lists snapshots that currently own active LTR models under a compatible
+   * feature schema.
+   */
+  listActiveSnapshotIds(featureSchemaHash?: string): Promise<readonly string[]>;
+
+  /**
    * Deletes all models (for testing/retraining).
    */
   clearAllModels(): Promise<void>;
+}
+
+export interface LtrModelSaveMetadata {
+  readonly searchSnapshotId: string;
+  readonly evalDatasetVersion: string;
+  readonly featureSchemaHash: string;
+  readonly activate?: boolean;
+}
+
+export interface LtrModelCloneMetadata {
+  readonly featureSchemaHash: string;
 }
 
 /**
@@ -101,17 +142,22 @@ function parseLtrBias(raw: number, registryId: string): number {
 export class PgLtrModelRegistry implements LtrModelRegistryPort {
   constructor(private readonly pool: Pool) {}
 
-  async saveModel(queryClass: string, weights: QueryClassWeights): Promise<void> {
+  async saveModel(
+    queryClass: string,
+    weights: QueryClassWeights,
+    metadata: LtrModelSaveMetadata,
+  ): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
 
-      // Deactivate current active model for this query class
-      await client.query(
-        `UPDATE ltr_model_registry SET is_active = FALSE
-         WHERE query_class = $1 AND is_active = TRUE`,
-        [queryClass],
-      );
+      if (metadata.activate === true) {
+        await client.query(
+          `UPDATE ltr_model_registry SET is_active = FALSE
+           WHERE query_class = $1 AND is_active = TRUE`,
+          [queryClass],
+        );
+      }
 
       // Determine next version number
       const versionResult = await client.query<{ next_version: number }>(
@@ -126,12 +172,18 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
       await client.query(
         `INSERT INTO ltr_model_registry (
           registry_id, query_class, model_version, is_active,
+          search_snapshot_id, eval_dataset_version,
+          feature_schema_hash,
           weights, bias, training_example_count, ndcg5_validation_score, trained_at
-        ) VALUES ($1, $2, $3, TRUE, $4, $5, $6, $7, $8)`,
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
         [
           registryId,
           queryClass,
           nextVersion,
+          metadata.activate === true,
+          metadata.searchSnapshotId,
+          metadata.evalDatasetVersion,
+          metadata.featureSchemaHash,
           Array.from(weights.weights),
           weights.bias,
           weights.trainingExampleCount,
@@ -149,12 +201,15 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     }
   }
 
-  async getModel(queryClass: string): Promise<QueryClassWeights | null> {
+  async getModel(queryClass: string, searchSnapshotId?: string): Promise<QueryClassWeights | null> {
     const result = await this.pool.query<LtrModelRow>(
       `SELECT * FROM ltr_model_registry
-       WHERE query_class = $1 AND is_active = TRUE
+       WHERE query_class = $1
+         AND is_active = TRUE
+         AND ($2::text IS NULL OR search_snapshot_id = $2)
+       ORDER BY model_version DESC
        LIMIT 1`,
-      [queryClass],
+      [queryClass, searchSnapshotId ?? null],
     );
 
     const row = result.rows[0];
@@ -170,9 +225,13 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
     };
   }
 
-  async getAllModels(): Promise<ReadonlyMap<string, QueryClassWeights>> {
+  async getAllModels(searchSnapshotId?: string): Promise<ReadonlyMap<string, QueryClassWeights>> {
     const result = await this.pool.query<LtrModelRow>(
-      `SELECT * FROM ltr_model_registry WHERE is_active = TRUE`,
+      `SELECT * FROM ltr_model_registry
+       WHERE is_active = TRUE
+         AND ($1::text IS NULL OR search_snapshot_id = $1)
+       ORDER BY query_class ASC, model_version DESC`,
+      [searchSnapshotId ?? null],
     );
 
     const models = new Map<string, QueryClassWeights>();
@@ -255,5 +314,158 @@ export class PgLtrModelRegistry implements LtrModelRegistryPort {
 
   async clearAllModels(): Promise<void> {
     await this.pool.query(`DELETE FROM ltr_model_registry`);
+  }
+
+  async activateSnapshot(searchSnapshotId: string): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const snapshotClassResult = await client.query<{ query_class: string }>(
+        `SELECT DISTINCT query_class
+         FROM ltr_model_registry
+         WHERE search_snapshot_id = $1`,
+        [searchSnapshotId],
+      );
+
+      const queryClasses = snapshotClassResult.rows.map((row) => row.query_class);
+      if (queryClasses.length === 0) {
+        await client.query('ROLLBACK');
+        return 0;
+      }
+
+      await client.query(
+        `UPDATE ltr_model_registry
+         SET is_active = FALSE
+         WHERE query_class = ANY($1::text[]) AND is_active = TRUE`,
+        [queryClasses],
+      );
+
+      const activateResult = await client.query(
+        `WITH latest_per_class AS (
+           SELECT query_class, MAX(model_version) AS model_version
+           FROM ltr_model_registry
+           WHERE search_snapshot_id = $1
+           GROUP BY query_class
+         )
+         UPDATE ltr_model_registry AS target
+         SET is_active = TRUE
+         FROM latest_per_class
+         WHERE target.search_snapshot_id = $1
+           AND target.query_class = latest_per_class.query_class
+           AND target.model_version = latest_per_class.model_version`,
+        [searchSnapshotId],
+      );
+
+      await client.query('COMMIT');
+      return activateResult.rowCount ?? 0;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async cloneActiveModelsToSnapshot(
+    sourceSnapshotId: string,
+    targetSnapshotId: string,
+    metadata: LtrModelCloneMetadata,
+  ): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const existingTargetResult = await client.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count
+         FROM ltr_model_registry
+         WHERE search_snapshot_id = $1`,
+        [targetSnapshotId],
+      );
+      const existingTargetCountRaw = existingTargetResult.rows[0]?.count ?? '0';
+      const existingTargetCount = Number(existingTargetCountRaw);
+      if (!Number.isFinite(existingTargetCount)) {
+        throw new Error(
+          `cloneActiveModelsToSnapshot: non-finite COUNT from ltr_model_registry: ${existingTargetCountRaw}`,
+        );
+      }
+      if (existingTargetCount > 0) {
+        await client.query('ROLLBACK');
+        return 0;
+      }
+
+      const sourceResult = await client.query<LtrModelRow>(
+        `SELECT *
+         FROM ltr_model_registry
+         WHERE is_active = TRUE
+           AND search_snapshot_id = $1
+           AND feature_schema_hash = $2
+         ORDER BY query_class ASC, model_version ASC`,
+        [sourceSnapshotId, metadata.featureSchemaHash],
+      );
+
+      if (sourceResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return 0;
+      }
+
+      for (const row of sourceResult.rows) {
+        const versionResult = await client.query<{ next_version: number }>(
+          `SELECT COALESCE(MAX(model_version), 0) + 1 AS next_version
+           FROM ltr_model_registry
+           WHERE query_class = $1`,
+          [row.query_class],
+        );
+        const nextVersion = versionResult.rows[0]?.next_version ?? 1;
+        await client.query(
+          `INSERT INTO ltr_model_registry (
+             registry_id, query_class, model_version, is_active,
+             search_snapshot_id, eval_dataset_version, feature_schema_hash,
+             copied_from_registry_id, copied_from_snapshot_id,
+             weights, bias, training_example_count, ndcg5_validation_score, trained_at
+           ) VALUES (
+             $1, $2, $3, FALSE,
+             $4, $5, $6,
+             $7, $8,
+             $9, $10, $11, $12, $13
+           )`,
+          [
+            nanoid(),
+            row.query_class,
+            nextVersion,
+            targetSnapshotId,
+            row.eval_dataset_version,
+            row.feature_schema_hash,
+            row.registry_id,
+            sourceSnapshotId,
+            row.weights,
+            row.bias,
+            row.training_example_count,
+            row.ndcg5_validation_score,
+            row.trained_at,
+          ],
+        );
+      }
+
+      await client.query('COMMIT');
+      return sourceResult.rows.length;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listActiveSnapshotIds(featureSchemaHash?: string): Promise<readonly string[]> {
+    const result = await this.pool.query<{ search_snapshot_id: string }>(
+      `SELECT DISTINCT search_snapshot_id
+       FROM ltr_model_registry
+       WHERE is_active = TRUE
+         AND ($1::text IS NULL OR feature_schema_hash = $1)
+       ORDER BY search_snapshot_id ASC`,
+      [featureSchemaHash ?? null],
+    );
+    return result.rows.map((row) => row.search_snapshot_id);
   }
 }

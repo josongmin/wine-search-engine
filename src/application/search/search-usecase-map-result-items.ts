@@ -198,6 +198,9 @@ export async function mapRankedResultsToResultItems(
         ...(r.certifications !== undefined ? { certifications: r.certifications } : {}),
         ...(r.pairingTags !== undefined ? { pairingTags: r.pairingTags } : {}),
         ...(r.occasion !== undefined ? { occasion: r.occasion } : {}),
+        ...(r.sourceRecordRefs !== undefined && r.sourceRecordRefs.length > 0
+          ? { sourceRecordRefs: r.sourceRecordRefs }
+          : {}),
         ...(r.body !== undefined ? { body: r.body } : {}),
         ...(r.tannin !== undefined ? { tannin: r.tannin } : {}),
         ...(r.acidity !== undefined ? { acidity: r.acidity } : {}),

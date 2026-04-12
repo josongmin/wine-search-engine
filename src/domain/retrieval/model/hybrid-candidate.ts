@@ -1,4 +1,5 @@
 import type { EntityId } from '../../shared/types/index.js';
+import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from './candidate-envelope.js';
 import type { RetrievalTrace } from './retrieval-trace.js';
 
@@ -199,6 +200,9 @@ export interface HybridCandidate {
    * similar) leave this undefined.
    */
   readonly fusionRrfTotal?: number | undefined;
+
+  /** ADR-007 upstream source lineage (propagated to HTTP when present). */
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 
   /** Constraint attribute names matched by this candidate. */
   readonly matchedConstraints: readonly string[];

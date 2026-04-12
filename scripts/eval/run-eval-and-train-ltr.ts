@@ -20,6 +20,33 @@ import { SearchPipelineEvaluator } from '../../src/infrastructure/adapter/search
 import { buildTrainingExamples, trainAllModels } from '../../src/domain/ranking/training.js';
 import { PgLtrModelRegistry } from '../../src/infrastructure/adapter/pg-ltr-model-registry.js';
 import type { SearchUseCase } from '../../src/application/search/search.usecase.js';
+import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
+import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/feature-parity-hash.js';
+
+const DEFAULT_EVAL_DATASET_VERSION = 'pg_gold_set_store.v1';
+
+interface CliArgs {
+  readonly snapshotId?: string;
+  readonly evalDatasetVersion: string;
+}
+
+function parseArgs(argv: readonly string[]): CliArgs {
+  let snapshotId: string | undefined;
+  let evalDatasetVersion = DEFAULT_EVAL_DATASET_VERSION;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--snapshot-id') {
+      snapshotId = argv[index + 1] ?? undefined;
+      index += 1;
+    } else if (arg === '--eval-dataset-version') {
+      evalDatasetVersion = argv[index + 1] ?? DEFAULT_EVAL_DATASET_VERSION;
+      index += 1;
+    }
+  }
+
+  return { snapshotId, evalDatasetVersion };
+}
 
 /**
  * Main evaluation pipeline.
@@ -30,10 +57,15 @@ import type { SearchUseCase } from '../../src/application/search/search.usecase.
 async function runEvaluationAndTraining(
   searchUseCase: SearchUseCase,
   pool: Pool,
+  args: CliArgs,
 ): Promise<void> {
+  const searchSnapshotId = args.snapshotId ?? (await loadSearchSnapshotRuntimeState()).snapshotId;
   {
     console.log('🚀 Starting Evaluation + LTR Training Pipeline\n');
     console.log('='.repeat(60));
+    console.log(`🔒 Binding trained models to search snapshot: ${searchSnapshotId}`);
+    console.log(`🧪 Eval dataset version: ${args.evalDatasetVersion}`);
+    console.log(`🧬 Feature schema hash: ${getCurrentFeatureSchemaHash()}`);
 
     // Step 1: Load evaluation cases
     console.log('\n📖 Step 1: Loading evaluation cases from database...');
@@ -115,12 +147,20 @@ async function runEvaluationAndTraining(
 
         let storedCount = 0;
         for (const [queryClass, weights] of models.entries()) {
-          await modelRegistry.saveModel(queryClass, weights);
+          await modelRegistry.saveModel(queryClass, weights, {
+            searchSnapshotId,
+            evalDatasetVersion: args.evalDatasetVersion,
+            featureSchemaHash: getCurrentFeatureSchemaHash(),
+            activate: false,
+          });
           storedCount++;
           console.log(
             `   ✓ Stored model for ${queryClass} (NDCG@5: ${weights.ndcg5ValidationScore.toFixed(3)})`,
           );
         }
+
+        const activatedCount = await modelRegistry.activateSnapshot(searchSnapshotId);
+        console.log(`   ✓ Activated ${activatedCount} LTR models for snapshot ${searchSnapshotId}`);
 
         console.log(`   ✓ Persisted ${storedCount} models to ltr_model_registry`);
       } else {
@@ -146,6 +186,7 @@ async function runEvaluationAndTraining(
 // Requires: PG_HOST, PG_PORT, PG_DATABASE, PG_USER, PG_PASSWORD env vars
 if (import.meta.url === `file://${process.argv[1]}`) {
   (async () => {
+    const args = parseArgs(process.argv.slice(2));
     // Bootstrap the DI container to get a wired SearchUseCase
     const { config } = await import('../../src/config/env.js');
     const { createContainer } = await import('../../src/config/container.js');
@@ -154,7 +195,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const pool = getPgPool();
     const container = await createContainer(config, pool);
 
-    await runEvaluationAndTraining(container.searchUseCase, pool);
+    await runEvaluationAndTraining(container.searchUseCase, pool, args);
     await pool.end();
   })().catch((err: unknown) => {
     console.error('❌ Pipeline failed:', err);

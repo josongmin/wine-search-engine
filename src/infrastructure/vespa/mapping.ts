@@ -25,6 +25,8 @@ import {
   type SearchConstraints,
   krwToUsd,
 } from '../../domain/query/service/search-constraint-extractor.js';
+import { parseSourceRecordRefsFromVespa } from '../../domain/entity/model/source-record-ref.js';
+import { stableJsonStringify } from '../../shared/utils/stable-json.js';
 
 /** Decimal radix for parseInt on external filter tokens. */
 const DECIMAL_RADIX = 10;
@@ -173,10 +175,6 @@ type VespaRetrievalSummaryFieldSpec = {
   readonly kind: RetrievalSummaryFieldKind;
 };
 type RetrievalDocumentSummaryKey = Extract<RetrievalHitSummaryKey, keyof RetrievalDocument>;
-type RawRetrievalHitSummary = {
-  [Key in RetrievalHitSummaryKey]?: RetrievalHitSummary[Key] | undefined;
-};
-
 export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   canonicalLabel: { vespaField: 'canonical_label', kind: 'string' },
   producer: { vespaField: 'producer', kind: 'string' },
@@ -214,6 +212,20 @@ export const VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS = {
   flavorProfiles: { vespaField: 'flavor_profiles', kind: 'string_array' },
 } as const satisfies Record<RetrievalHitSummaryKey, VespaRetrievalSummaryFieldSpec>;
 
+/**
+ * Vespa field names consumed by {@link readRawVespaRetrievalSummary} (summary specs
+ * plus lineage JSON). Used by meta tests to keep `wine_entity.sd` `hit_summary`
+ * aligned with {@link VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS}.
+ */
+export const VESPA_READ_RAW_RETRIEVAL_SUMMARY_FIELD_NAMES: readonly string[] = (() => {
+  const names: string[] = [];
+  for (const key of RETRIEVAL_HIT_SUMMARY_KEYS) {
+    names.push(VESPA_RETRIEVAL_SUMMARY_FIELD_SPECS[key].vespaField);
+  }
+  names.push('source_record_refs_json');
+  return names;
+})();
+
 function readRawVespaRetrievalSummaryField(
   fields: Record<string, unknown>,
   spec: VespaRetrievalSummaryFieldSpec,
@@ -232,8 +244,8 @@ function readRawVespaRetrievalSummaryField(
 
 export function readRawVespaRetrievalSummary(
   fields: Record<string, unknown>,
-): RawRetrievalHitSummary {
-  const summary: RawRetrievalHitSummary = {};
+): Partial<RetrievalHitSummary> {
+  const summary: Partial<RetrievalHitSummary> = {};
   const summaryRecord = summary as Record<RetrievalHitSummaryKey, unknown>;
 
   for (const key of RETRIEVAL_HIT_SUMMARY_KEYS) {
@@ -244,6 +256,11 @@ export function readRawVespaRetrievalSummary(
     if (value !== undefined) {
       summaryRecord[key] = value;
     }
+  }
+
+  const lineageRefs = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);
+  if (lineageRefs !== undefined && lineageRefs.length > 0) {
+    (summary as Record<string, unknown>).sourceRecordRefs = lineageRefs;
   }
 
   return summary;
@@ -293,7 +310,15 @@ export function toVespaFields(
     popularity_score: doc.popularityScore,
   };
 
+  if (doc.searchSnapshotId !== undefined) {
+    fields['search_snapshot_id'] = doc.searchSnapshotId;
+  }
+
   writeVespaRetrievalSummaryFields(fields, doc);
+
+  if (doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0) {
+    fields['source_record_refs_json'] = stableJsonStringify([...doc.sourceRecordRefs]);
+  }
 
   if (doc.embedding !== undefined) {
     // Vespa dense tensor format: { values: number[] }
@@ -385,9 +410,14 @@ export function fromVespaFields(
     throw new Error('fromVespaFields: malformed Vespa document — missing entity_id');
   }
 
+  const lineageRefsFromFields = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);
+
   return {
     entityId: createEntityId(rawEntityId),
     entityType: getString(fields, 'entity_type'),
+    ...(getOptionalString(fields, 'search_snapshot_id') !== undefined
+      ? { searchSnapshotId: getOptionalString(fields, 'search_snapshot_id') }
+      : {}),
     canonicalLabel: summary.canonicalLabel ?? '',
     aliasesIdentitySafe: getStringArray(fields, 'aliases_identity_safe'),
     aliasesNoisyRecall: getStringArray(fields, 'aliases_noisy_recall'),
@@ -442,6 +472,9 @@ export function fromVespaFields(
     ...(summary.priceBandNumeric !== undefined && { priceBandNumeric: summary.priceBandNumeric }),
     ...(learnedSparseWeights !== undefined && { learnedSparseWeights }),
     ...(syntheticQueries !== undefined && { syntheticQueries }),
+    ...(lineageRefsFromFields !== undefined && lineageRefsFromFields.length > 0
+      ? { sourceRecordRefs: lineageRefsFromFields }
+      : {}),
   };
 }
 
@@ -471,6 +504,9 @@ export function toRetrievalHitProjection(doc: RetrievalDocument): RetrievalHitPr
       ? { searchTextEn: doc.searchTextEn }
       : {}),
     ...(doc.producerPrestige !== undefined ? { producerPrestige: doc.producerPrestige } : {}),
+    ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
+      ? { sourceRecordRefs: doc.sourceRecordRefs }
+      : {}),
   };
 }
 
@@ -536,6 +572,7 @@ export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProje
   const vintageYear = getOptionalNumber(raw, 'vintage_year');
   const searchTextEn = getOptionalString(raw, 'search_text_en');
   const producerPrestige = getOptionalNumber(raw, 'producer_prestige');
+  const lineageRefs = parseSourceRecordRefsFromVespa(raw['source_record_refs_json']);
 
   return {
     entityId: createEntityId(entityIdRaw),
@@ -547,6 +584,7 @@ export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProje
     ...(vintageYear !== undefined ? { vintageYear } : {}),
     ...(searchTextEn !== undefined ? { searchTextEn } : {}),
     ...(producerPrestige !== undefined ? { producerPrestige } : {}),
+    ...(lineageRefs !== undefined && lineageRefs.length > 0 ? { sourceRecordRefs: lineageRefs } : {}),
   };
 }
 

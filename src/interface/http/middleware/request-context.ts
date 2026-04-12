@@ -1,18 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-
-/**
- * Augment Fastify request with a typed request_id property.
- */
-declare module 'fastify' {
-  interface FastifyRequest {
-    requestId: string;
-    startTime: number;
-    /**
-     * True when `HTTP_DEBUG_SECRET` is set and `X-Debug-Key` matched (see `registerHttpDebugMode`).
-     */
-    debugRequest: boolean;
-  }
-}
+import '../fastify-augmentations.js';
 
 /**
  * Registers a Fastify hook that:

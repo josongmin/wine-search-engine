@@ -24,6 +24,12 @@ import {
   parseSuiteIdList,
   type EntityRetrievalSuiteId,
 } from './external-fixture-benchmark.js';
+import {
+  buildBenchmarkRequestHeaders,
+  resolveBenchmarkSearchEndpoint,
+  runLiveBenchmarkPreflight,
+  type BenchmarkExecutionLane,
+} from './live-benchmark-preflight.js';
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -162,6 +168,8 @@ interface CliArgs {
   mode: 'auto' | 'hybrid' | 'entity';
   timeoutMs: number;
   concurrency: number;
+  executionLane: BenchmarkExecutionLane;
+  debugKey?: string;
   minRecallAt3?: number;
   minResolutionMatchRate?: number;
   minProvenanceMatchRate?: number;
@@ -179,6 +187,8 @@ function parseArgs(argv: string[]): CliArgs {
     mode: 'hybrid',
     timeoutMs: 60_000,
     concurrency: 4,
+    executionLane: 'public',
+    debugKey: process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'],
     minRecallAt3: undefined,
     minResolutionMatchRate: undefined,
     minProvenanceMatchRate: undefined,
@@ -214,6 +224,13 @@ function parseArgs(argv: string[]): CliArgs {
       if (Number.isFinite(value) && value >= 1) {
         args.concurrency = Math.min(16, value);
       }
+    } else if (arg === '--execution-lane') {
+      const value = argv[++i];
+      if (value === 'public' || value === 'trusted_benchmark') {
+        args.executionLane = value;
+      }
+    } else if (arg === '--debug-key') {
+      args.debugKey = argv[++i] ?? args.debugKey;
     } else if (arg === '--min-recall-at-3') {
       const value = Number.parseFloat(argv[++i] ?? '');
       if (Number.isFinite(value)) {
@@ -649,7 +666,11 @@ export async function fetchLiveRankings(
   mode: CliArgs['mode'],
   timeoutMs: number,
   concurrency: number,
+  executionLane: BenchmarkExecutionLane,
+  debugKey?: string,
 ): Promise<Map<string, RankedPrediction>> {
+  const endpoint = resolveBenchmarkSearchEndpoint(apiUrl, executionLane);
+  const headers = buildBenchmarkRequestHeaders(executionLane, debugKey);
   const mappings = await mapPool(
     cases,
     concurrency,
@@ -662,9 +683,9 @@ export async function fetchLiveRankings(
         payload.options = { mode };
       }
 
-      const response = await fetch(`${apiUrl}/v1/search`, {
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(timeoutMs),
       });
@@ -770,11 +791,28 @@ async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cases = await loadNoisyEntityBenchmark(args.input, args.suites);
 
+  if (!args.smokePredictions && args.predictions === null) {
+    await runLiveBenchmarkPreflight({
+      apiUrl: args.apiUrl,
+      executionLane: args.executionLane,
+      debugKey: args.debugKey,
+      requiredEntityIds: cases.map((item) => item.expected_entity_id),
+    });
+  }
+
   const rankedByBenchmarkId = args.smokePredictions
     ? buildPerfectNoisyEntityPredictions(cases)
     : args.predictions !== null
     ? await loadNoisyEntityPredictions(args.predictions, new Set(cases.map((item) => item.benchmark_id)))
-    : await fetchLiveRankings(cases, args.apiUrl, args.mode, args.timeoutMs, args.concurrency);
+    : await fetchLiveRankings(
+        cases,
+        args.apiUrl,
+        args.mode,
+        args.timeoutMs,
+        args.concurrency,
+        args.executionLane,
+        args.debugKey,
+      );
 
   const report = scoreNoisyEntityBenchmark(cases, rankedByBenchmarkId);
   const finalReport: NoisyEntityBenchmarkReport = {

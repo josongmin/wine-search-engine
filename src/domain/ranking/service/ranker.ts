@@ -1,6 +1,7 @@
 import type { EntityId, QueryClass } from '../../shared/types/index.js';
 import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
+import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import { PROVENANCE_QUERY_VIEWS, type ProvenanceQueryView } from '../../retrieval/model/provenance.js';
 import type { RankingInput } from '../model/ranking-input.js';
@@ -168,6 +169,8 @@ export interface ScoredEntry {
   // Price data for agent/response surface
   readonly priceBand?: string | undefined;
   readonly priceUsd?: number | undefined;
+
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 }
 
 const MODEL_STALENESS_THRESHOLD_DAYS = 30;
@@ -890,6 +893,9 @@ export class Ranker {
         ...(candidate.occasion !== undefined ? { occasion: candidate.occasion } : {}),
         ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
         ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
+        ...(candidate.sourceRecordRefs !== undefined && candidate.sourceRecordRefs.length > 0
+          ? { sourceRecordRefs: candidate.sourceRecordRefs }
+          : {}),
         // E1-T3: propagate deterministic tie-break tiers alongside channel ranks.
         ...(candidate.sparseRank !== undefined ? { sparseRank: candidate.sparseRank } : {}),
         ...(candidate.denseRank !== undefined ? { denseRank: candidate.denseRank } : {}),
@@ -1092,6 +1098,9 @@ export class Ranker {
         ...(entry.occasion !== undefined ? { occasion: entry.occasion } : {}),
         ...(entry.priceBand !== undefined ? { priceBand: entry.priceBand } : {}),
         ...(entry.priceUsd !== undefined ? { priceUsd: entry.priceUsd } : {}),
+        ...(entry.sourceRecordRefs !== undefined && entry.sourceRecordRefs.length > 0
+          ? { sourceRecordRefs: entry.sourceRecordRefs }
+          : {}),
         // E5-T3: propagate sparse BM25 rank for rerank-safety protected-candidate Rule 3
         ...(entry.sparseRank !== undefined ? { sparseRank: entry.sparseRank } : {}),
       };

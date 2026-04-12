@@ -16,6 +16,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { getWineDataDir } from '../../src/shared/utils/data-paths.js';
+import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  requireFixtureCorpusPath,
+} from '../eval/fixture-corpus-paths.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -348,13 +352,15 @@ async function main(): Promise<void> {
 
   const dataDir = getWineDataDir();
   const outputDir = path.resolve(dataDir, 'fine-tune-dataset');
+  const fixtureGoldenQueries = requireFixtureCorpusPath(
+    OFFLINE_EVAL_SILVER_CORPUS,
+    'prepare-finetuning-data default golden corpus resolution',
+  );
 
   try {
     // Load data
     console.warn('📥 Loading golden queries...');
-    const queries = await loadGoldenQueries(
-      path.join(dataDir, 'golden-queries-bronze.jsonl'),
-    );
+    const queries = await loadGoldenQueries(fixtureGoldenQueries);
     console.warn(`   Loaded ${queries.size} golden queries`);
 
     console.warn('📥 Loading wine documents...');

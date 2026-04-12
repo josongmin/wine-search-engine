@@ -15,9 +15,20 @@
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolve } from 'node:path';
+import fs from 'node:fs/promises';
 
 import { FixtureLoader, type BenchmarkCase } from '../../src/infrastructure/fixture/fixture-loader.js';
 import { ALL_SUITE_IDS, type SuiteId } from '../../src/infrastructure/fixture/suite-registry.js';
+import {
+  OFFLINE_EVAL_GATE_CORPUS,
+  OFFLINE_EVAL_SILVER_CORPUS,
+  OFFLINE_EVAL_VAL_CORPUS,
+  RELEVANCE_AUDIT_CORPUS,
+  RELEVANCE_GOLD_CORPUS,
+  RELEVANCE_LABELING_INPUT_CORPUS,
+  RELEVANCE_REJECTED_CORPUS,
+  RELEVANCE_SILVER_STUB_CORPUS,
+} from './fixture-corpus-paths.js';
 
 const execFile = promisify(execFileCb);
 
@@ -103,6 +114,34 @@ function assertExactEntityTargetCoverage(
   }
 }
 
+async function assertRequiredCorporaPresent(
+  loader: FixtureLoader,
+): Promise<void> {
+  const requiredCorpora = [
+    OFFLINE_EVAL_GATE_CORPUS,
+    OFFLINE_EVAL_SILVER_CORPUS,
+    OFFLINE_EVAL_VAL_CORPUS,
+    RELEVANCE_LABELING_INPUT_CORPUS,
+    RELEVANCE_SILVER_STUB_CORPUS,
+    RELEVANCE_GOLD_CORPUS,
+    RELEVANCE_AUDIT_CORPUS,
+    RELEVANCE_REJECTED_CORPUS,
+  ] as const;
+
+  const missing: string[] = [];
+  for (const corpusPath of requiredCorpora) {
+    try {
+      await fs.access(loader.corpusPath(corpusPath));
+    } catch {
+      missing.push(corpusPath);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(`Required fixture corpora missing: ${missing.join(', ')}`);
+  }
+}
+
 function printSummary(
   fixtureRoot: string,
   suiteCount: number,
@@ -148,6 +187,7 @@ async function main(): Promise<void> {
   assertThresholdCoverage(thresholds);
   assertCaseCoverage(caseCounts);
   assertExactEntityTargetCoverage(cases, targetEntityMap);
+  await assertRequiredCorporaPresent(loader);
 
   if (aliasCatalog.length === 0) {
     throw new Error('Korean alias catalog is empty; fixture repo is not benchmark-ready.');

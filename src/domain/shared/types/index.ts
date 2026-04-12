@@ -1,4 +1,15 @@
-export { type EntityId, createEntityId, isEntityId } from './entity-id.js';
+export {
+  type CanonicalEntityId,
+  type DocumentId,
+  type EntityId,
+  type SourceRecordId,
+  createCanonicalEntityId,
+  createDocumentId,
+  createEntityId,
+  createSourceRecordId,
+  isCanonicalPublicEntityId,
+  isEntityId,
+} from './entity-id.js';
 export { DECISION_STATUSES, type DecisionStatus } from './decision-status.js';
 export { NEXT_ACTIONS, type NextAction } from './next-action.js';
 export { QUERY_CLASSES, type QueryClass } from './query-class.js';

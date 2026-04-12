@@ -128,6 +128,12 @@ export const MAX_INTERPRET_SECONDARY_INTENTS = 10;
 /** Resolve response candidate list cap. */
 export const MAX_RESOLVE_CANDIDATES = 200;
 
+/**
+ * Max tags on `ResolveCandidate.sources` — one slot per resolver channel enum
+ * member (`alias`, `planner_heuristic`, `entity_lookup`, `blocker_seed`).
+ */
+export const MAX_RESOLVE_CANDIDATE_SOURCES_LIST = 4;
+
 /** Debug refs on search meta. */
 export const MAX_SEARCH_META_DEBUG_REFS = 50;
 

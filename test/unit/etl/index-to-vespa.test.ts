@@ -6,6 +6,8 @@ import {
   silverToRetrievalDoc,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { toVespaFields } from '../../../src/infrastructure/vespa/mapping.js';
+import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../../src/shared/constants/source-systems.js';
+import { stableJsonStringify } from '../../../src/shared/utils/stable-json.js';
 import {
   LEARNED_SPARSE_EVAL_KEY,
   LEARNED_SPARSE_FIELD_KEY,
@@ -76,6 +78,26 @@ describe('index-to-vespa bridge', () => {
     expect(buildSearchTextKo(record)).toBe('Opus One 2018 오푸스원');
   });
 
+  it('maps Silver sourceId into Vespa source_record_refs_json via retrieval document', () => {
+    const record = makeEnrichedRecord();
+    const embedding = deterministicEmbedding(
+      record.body,
+      record.sweetness,
+      record.acidity,
+      record.tannin,
+    );
+    const doc = silverToRetrievalDoc(record, embedding);
+    const fields = toVespaFields(doc);
+
+    const expected = stableJsonStringify([
+      { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: record.sourceId },
+    ]);
+    expect(fields['source_record_refs_json']).toBe(expected);
+    expect(doc.sourceRecordRefs).toEqual([
+      { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: record.sourceId },
+    ]);
+  });
+
   it('maps enriched records into retrieval documents and omits absent optionals', () => {
     const record = makeEnrichedRecord({
       acidity: 0,
@@ -111,6 +133,21 @@ describe('index-to-vespa bridge', () => {
     expect(fields).not.toHaveProperty('price_usd');
     expect(fields).not.toHaveProperty('flavor_profiles');
     expect(fields).not.toHaveProperty('critic_score_normalized');
+  });
+
+  it('propagates an explicit search snapshot id into the retrieval document and Vespa payload', () => {
+    const record = makeEnrichedRecord();
+    const embedding = deterministicEmbedding(
+      record.body,
+      record.sweetness,
+      record.acidity,
+      record.tannin,
+    );
+    const doc = silverToRetrievalDoc(record, embedding, 'search-snapshot:v1:test-1234');
+    const fields = toVespaFields(doc);
+
+    expect(doc.searchSnapshotId).toBe('search-snapshot:v1:test-1234');
+    expect(fields['search_snapshot_id']).toBe('search-snapshot:v1:test-1234');
   });
 
   it('deterministicEmbedding produces 1024-dim vectors matching Vespa schema', () => {

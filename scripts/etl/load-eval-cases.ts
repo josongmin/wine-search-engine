@@ -10,7 +10,10 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
 import { Pool } from 'pg';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  requireFixtureCorpusPath,
+} from '../eval/fixture-corpus-paths.js';
 
 interface GoldenQuery {
   qid: string;
@@ -126,7 +129,7 @@ function goldenQueryToEvalCase(gq: GoldenQuery): {
     expected_status: gq.decision_labels.expected_decision_status,
     label_tier: labelTier,
     annotator_agreement: agreementByTier[labelTier],
-    slice_tags: createSliceTags(gq),
+    slice_tags: [...createSliceTags(gq)],
     created_at: new Date(gq.created_at),
   };
 }
@@ -243,7 +246,10 @@ async function loadEvalCases(
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const inputPath = resolveDataPath('data/golden-queries-bronze.jsonl');
+  const inputPath = requireFixtureCorpusPath(
+    OFFLINE_EVAL_SILVER_CORPUS,
+    'load-eval-cases default input resolution',
+  );
   const connectionString = process.env.DATABASE_URL || 'postgresql://localhost/wine-search';
 
   console.log(`Loading eval cases from: ${inputPath}`);

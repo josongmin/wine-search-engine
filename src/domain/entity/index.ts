@@ -13,6 +13,13 @@ export {
   computeIdentitySignature,
   type SignatureParams,
 } from './model/identity-signature.js';
+export {
+  MAX_SOURCE_RECORD_REFS_PER_ENTITY,
+  SourceRecordRefListSchema,
+  SourceRecordRefSchema,
+  parseSourceRecordRefsFromVespa,
+  type SourceRecordRef,
+} from './model/source-record-ref.js';
 
 // ── Ports ───────────────────────────────────────────────────────────────────
 export type { EntityRepository } from './port/entity-repository.port.js';

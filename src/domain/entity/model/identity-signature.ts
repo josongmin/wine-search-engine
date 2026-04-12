@@ -23,8 +23,11 @@ export interface SignatureParams {
 /**
  * Normalizes a label for deterministic hashing:
  * trims, lowercases, and collapses whitespace.
+ *
+ * Exported so ETL gold-overlay matching (ADR-007) stays aligned with wine
+ * identity signatures — drift between the two would break canonical resolution.
  */
-function normalizeLabel(label: string): string {
+export function normalizeCanonicalLabelForIdentity(label: string): string {
   return label.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
@@ -57,7 +60,7 @@ export function computeIdentitySignature(type: EntityType, params: SignaturePara
       }
       return identityHash(
         'wine',
-        normalizeLabel(params.canonicalLabel),
+        normalizeCanonicalLabelForIdentity(params.canonicalLabel),
         params.producerId,
         params.regionId,
       );
@@ -81,7 +84,7 @@ export function computeIdentitySignature(type: EntityType, params: SignaturePara
       }
       return identityHash(
         'producer',
-        normalizeLabel(params.canonicalLabel),
+        normalizeCanonicalLabelForIdentity(params.canonicalLabel),
         params.parentRegionId ?? '',
       );
     }
@@ -91,7 +94,7 @@ export function computeIdentitySignature(type: EntityType, params: SignaturePara
       }
       return identityHash(
         'region',
-        normalizeLabel(params.canonicalLabel),
+        normalizeCanonicalLabelForIdentity(params.canonicalLabel),
         params.parentRegionId ?? '',
       );
     }
@@ -101,7 +104,7 @@ export function computeIdentitySignature(type: EntityType, params: SignaturePara
       }
       return identityHash(
         'grape',
-        normalizeLabel(params.canonicalLabel),
+        normalizeCanonicalLabelForIdentity(params.canonicalLabel),
       );
     }
   }

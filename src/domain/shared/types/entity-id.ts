@@ -1,39 +1,90 @@
 import { nanoid } from 'nanoid';
+import { isSourceRecordStylePublicEntityId } from '../../../shared/constants/public-entity-id-namespace.js';
 
-declare const EntityIdBrand: unique symbol;
+declare const CanonicalEntityIdBrand: unique symbol;
 
 /**
- * A branded string type representing a unique entity identifier.
- * Branding prevents accidental use of arbitrary strings as entity IDs.
+ * ADR-007: Public runtime / HTTP / snapshot / Vespa projection identity.
+ * Must not use the source-record namespace ({@link isSourceRecordStylePublicEntityId}).
  */
-export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
+export type CanonicalEntityId = string & { readonly [CanonicalEntityIdBrand]: typeof CanonicalEntityIdBrand };
+
+declare const SourceRecordIdBrand: unique symbol;
 
 /**
- * Creates a new {@link EntityId}, optionally from an existing string value.
- * When no value is provided, a cryptographically random nanoid is generated.
+ * ADR-007: Source-system row identity (e.g. Vivino ingestion ids). Never interchangeable
+ * with {@link CanonicalEntityId}.
+ */
+export type SourceRecordId = string & { readonly [SourceRecordIdBrand]: typeof SourceRecordIdBrand };
+
+declare const DocumentIdBrand: unique symbol;
+
+/**
+ * ADR-007: Storage / index document identifier when distinct from public entity identity.
+ */
+export type DocumentId = string & { readonly [DocumentIdBrand]: typeof DocumentIdBrand };
+
+/** Same as {@link CanonicalEntityId}; kept for existing imports and call sites (ADR-007 convergence). */
+export type EntityId = CanonicalEntityId;
+
+/**
+ * Validates and brands a string as {@link CanonicalEntityId}.
  *
- * @param value - An optional string to use as the entity ID. Must be non-empty if provided.
- * @returns A branded {@link EntityId}.
- * @throws {Error} If an empty string is provided.
+ * @throws If empty or if the value uses the forbidden source-record public namespace.
  */
-export function createEntityId(value?: string): EntityId {
-  if (value !== undefined) {
-    if (value.length === 0) {
-      throw new Error('EntityId cannot be an empty string');
-    }
-    return value as EntityId;
+export function createCanonicalEntityId(value: string): CanonicalEntityId {
+  if (value.length === 0) {
+    throw new Error('CanonicalEntityId cannot be an empty string');
   }
-  return nanoid();
+  if (isSourceRecordStylePublicEntityId(value)) {
+    throw new Error(
+      'ADR-007: canonical public entity_id must not use the source-record namespace — use SourceRecordId / source_record_refs instead',
+    );
+  }
+  return value as CanonicalEntityId;
 }
 
 /**
- * Type guard that checks whether an unknown value is a valid {@link EntityId}.
- * An EntityId is any non-empty string. This is a runtime check; the brand is
- * erased at runtime and serves only as a compile-time guard.
- *
- * @param value - The value to test.
- * @returns `true` if `value` is a non-empty string suitable for use as an EntityId.
+ * Validates and brands a non-empty source-system record id.
  */
-export function isEntityId(value: unknown): value is EntityId {
+export function createSourceRecordId(value: string): SourceRecordId {
+  if (value.length === 0) {
+    throw new Error('SourceRecordId cannot be an empty string');
+  }
+  return value as SourceRecordId;
+}
+
+export function createDocumentId(value: string): DocumentId {
+  if (value.length === 0) {
+    throw new Error('DocumentId cannot be an empty string');
+  }
+  return value as DocumentId;
+}
+
+/**
+ * Creates a new {@link CanonicalEntityId}, optionally from an existing string.
+ * When no value is provided, generates an opaque id with prefix `nx-` (never the source-record namespace).
+ *
+ * @param value - Optional string; if provided, must satisfy canonical public namespace rules.
+ * @throws {Error} If empty or source-record namespace (when `value` is provided).
+ */
+export function createEntityId(value?: string): CanonicalEntityId {
+  if (value !== undefined) {
+    return createCanonicalEntityId(value);
+  }
+  // nanoid() is URL-safe and does not use the forbidden `vivino-` public namespace; prefix keeps audits obvious.
+  return createCanonicalEntityId(`nx-${nanoid()}`);
+}
+
+/**
+ * Non-empty string guard (legacy). Does **not** assert ADR-007 namespace rules;
+ * use {@link isCanonicalPublicEntityId} when rejecting source-style ids is required.
+ */
+export function isEntityId(value: unknown): value is CanonicalEntityId {
   return typeof value === 'string' && value.length > 0;
+}
+
+/** ADR-007: true when `value` is a non-empty string and not a forbidden public `vivino-` namespace id. */
+export function isCanonicalPublicEntityId(value: unknown): value is CanonicalEntityId {
+  return typeof value === 'string' && value.length > 0 && !isSourceRecordStylePublicEntityId(value);
 }

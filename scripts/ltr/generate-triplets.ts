@@ -20,6 +20,10 @@ import * as fs from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  requireFixtureCorpusPath,
+} from '../eval/fixture-corpus-paths.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -50,7 +54,6 @@ interface Triplet {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const INPUT_FILE = resolveDataPath('data/golden-queries-bronze.jsonl');
 const OUTPUT_FILE = resolveDataPath('data/triplets-train.jsonl');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -238,8 +241,12 @@ async function generateTriplets(
 
 async function main(): Promise<void> {
   try {
-    console.log(`📖 Loading queries from ${INPUT_FILE}...`);
-    const queries = await loadNdjson<GoldenQuery>(INPUT_FILE);
+    const inputFile = requireFixtureCorpusPath(
+      OFFLINE_EVAL_SILVER_CORPUS,
+      'generate-triplets default input resolution',
+    );
+    console.log(`📖 Loading queries from ${inputFile}...`);
+    const queries = await loadNdjson<GoldenQuery>(inputFile);
     console.log(`✅ Loaded ${queries.length} queries`);
 
     const triplets = await generateTriplets(queries);

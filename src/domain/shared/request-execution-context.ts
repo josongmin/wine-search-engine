@@ -5,6 +5,13 @@ import type { StageTimer } from '../../observability/stage-timer.js';
  * application use cases. Extend deliberately — avoid diverging inline option bags.
  */
 export interface RequestExecutionContext {
+  /**
+   * Explicit trust-domain for the execution path.
+   * `benchmark_trusted` is reserved for internally authenticated benchmark lanes
+   * and skips public-edge query-entry security so retrieval quality can be
+   * measured independently from prompt-injection defenses.
+   */
+  readonly executionPrincipal?: 'public' | 'benchmark_trusted' | undefined;
   readonly abortSignal?: AbortSignal | undefined;
   /**
    * True when the HTTP request passed X-Debug-Key validation.

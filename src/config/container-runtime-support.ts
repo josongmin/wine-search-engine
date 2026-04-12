@@ -18,6 +18,7 @@ import { PgLtrModelRegistry } from '../infrastructure/adapter/pg-ltr-model-regis
 import { getCurrentFeatureSchemaHash } from '../domain/ranking/service/feature-parity-hash.js';
 import { DrinkingWindowPredictor } from '../infrastructure/ml/drinking-window-predictor.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
+import { loadSearchSnapshotRuntimeState } from '../infrastructure/health/search-snapshot-readiness.js';
 
 /** Consecutive cache failures before opening circuit (matches CacheService default). */
 const CACHE_CIRCUIT_BREAKER_THRESHOLD_DEFAULT = 5;
@@ -172,9 +173,18 @@ export async function buildRuntimeSupportServices(
   let ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined;
   if (pool) {
     const ltrRegistry = new PgLtrModelRegistry(pool);
+    let runtimeSearchSnapshotId: string | undefined;
+    try {
+      runtimeSearchSnapshotId = (await loadSearchSnapshotRuntimeState()).snapshotId;
+    } catch (err) {
+      bootstrapLogger.warn(
+        { err },
+        '[Container] Search snapshot runtime state unavailable; snapshot-bound LTR load skipped',
+      );
+    }
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        ltrModels = await ltrRegistry.getAllModels();
+        ltrModels = await ltrRegistry.getAllModels(runtimeSearchSnapshotId);
         if (ltrModels.size > 0) {
           // E2-T5 (BUG-12): Log serve-time feature schema hash and per-model
           // weight dimension so operators can detect train/serve skew. A full
@@ -183,7 +193,7 @@ export async function buildRuntimeSupportServices(
           // length mismatch is the earliest detectable signal of schema drift.
           const currentHash = getCurrentFeatureSchemaHash();
           bootstrapLogger.info(
-            { ltrModelCount: ltrModels.size, featureSchemaHash: currentHash },
+            { ltrModelCount: ltrModels.size, featureSchemaHash: currentHash, searchSnapshotId: runtimeSearchSnapshotId },
             '[Container] Loaded LTR models from registry',
           );
           for (const [queryClass, model] of ltrModels.entries()) {
@@ -194,7 +204,10 @@ export async function buildRuntimeSupportServices(
             );
           }
         } else {
-          bootstrapLogger.warn('[Container] No LTR models found in registry');
+          bootstrapLogger.warn(
+            { searchSnapshotId: runtimeSearchSnapshotId },
+            '[Container] No snapshot-bound LTR models found in registry',
+          );
         }
         break; // success
       } catch (err) {

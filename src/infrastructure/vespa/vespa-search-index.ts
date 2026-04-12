@@ -678,7 +678,8 @@ export class VespaSearchIndex implements SearchIndexPort {
       callerName: 'fetchWithHitSummary',
       selectFields:
         'entity_id, canonical_label, producer, region, appellation,' +
-        ' grape_primary, vintage_year, search_text_en, producer_prestige',
+        ' grape_primary, vintage_year, search_text_en, producer_prestige,' +
+        ' source_record_refs_json',
       summaryName: 'hit_summary',
       parseHit: (fields) => parseHitSummary(fields),
       entityIdOf: (proj) => String(proj.entityId),

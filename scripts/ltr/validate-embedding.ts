@@ -31,6 +31,10 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  requireFixtureCorpusPath,
+} from '../eval/fixture-corpus-paths.js';
+import {
   ndcg,
   recall,
   type RankedHit,
@@ -75,7 +79,6 @@ interface ComparisonResult {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const DEFAULT_INPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
 const DEFAULT_BASELINE = resolveDataPath('data/eval-baseline-bronze.json');
 const DEFAULT_SAMPLE_SIZE = 100;
 
@@ -91,8 +94,12 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
+  const defaultInput = requireFixtureCorpusPath(
+    OFFLINE_EVAL_SILVER_CORPUS,
+    'validate-embedding default input resolution',
+  );
   const out: Args = {
-    input: DEFAULT_INPUT,
+    input: defaultInput,
     baseline: DEFAULT_BASELINE,
     sample: DEFAULT_SAMPLE_SIZE,
     tier: 'bronze',
@@ -100,7 +107,7 @@ function parseArgs(argv: string[]): Args {
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
+    if (a === '--input' || a === '-i') out.input = argv[++i] ?? defaultInput;
     else if (a === '--baseline' || a === '-b') out.baseline = argv[++i] ?? DEFAULT_BASELINE;
     else if (a === '--sample' || a === '-s') {
       const s = argv[++i];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { SearchResponseSchema } from '../search-response.schema.js';
+import { deepKeysToSnake } from '../../middleware/snake-case-hook.js';
+import { EntitySummarySchema, SearchResponseSchema } from '../search-response.schema.js';
 
 function makeValidV1SearchResponse() {
   return {
@@ -136,5 +137,67 @@ describe('SearchResponseSchema', () => {
     });
 
     expect(parsed.success).toBe(true);
+  });
+
+  it('accepts source_record_refs on entity summaries (ADR-007 lineage)', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      results: [
+        {
+          entity: {
+            entity_id: 'wine:test-lineage',
+            canonical_label: 'Test Wine',
+            type: 'wine',
+            source_record_refs: [
+              { source_system: 'vivino-silver', source_record_id: 'vivino:fixture-1' },
+            ],
+          },
+          relevance_score: 0.9,
+          match: {
+            match_type: 'hybrid',
+            score_components: {
+              lexical: 0.5,
+              semantic: 0.5,
+              attribute: 0.5,
+              popularity: 0.5,
+              preference_alignment: 0.5,
+            },
+          },
+          constraints: { matched: [], unmet: [], inferred: [] },
+          uncertainty: {
+            uncertainty_confidence: 0.9,
+            missing_info: [],
+            approximation_used: false,
+          },
+          evidence_items: [
+            {
+              type: 'retrieval',
+              source: 'hybrid',
+              contribution: 'ranked candidate',
+              strength: 'high',
+              provenance: 'unit-test',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it('EntitySummarySchema accepts lineage keys after deepKeysToSnake from domain camelCase', () => {
+    const entity = deepKeysToSnake({
+      entityId: 'wine:test',
+      canonicalLabel: 'Test',
+      type: 'wine',
+      sourceRecordRefs: [{ sourceSystem: 'vivino-silver', sourceRecordId: 'silver-99' }],
+    });
+    const parsed = EntitySummarySchema.safeParse(entity);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.source_record_refs).toEqual([
+        { source_system: 'vivino-silver', source_record_id: 'silver-99' },
+      ]);
+    }
   });
 });

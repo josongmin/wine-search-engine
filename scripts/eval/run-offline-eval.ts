@@ -63,13 +63,16 @@ import {
 import { verifyDefaultGoldenSplits } from './split-integrity.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { FixtureLoader } from '../../src/infrastructure/fixture/fixture-loader.js';
+import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  OFFLINE_EVAL_VAL_CORPUS,
+  OFFLINE_EVAL_GATE_CORPUS,
+  requireFixtureCorpusPath,
+} from './fixture-corpus-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** ADR-005 Workstream D: fixture repo corpus path for golden-queries-gate. */
-const FIXTURE_CORPUS_GATE = 'corpora/offline-eval/golden-queries-gate.jsonl';
 
 /**
  * Resolve the default eval corpus path.
@@ -77,23 +80,21 @@ const FIXTURE_CORPUS_GATE = 'corpora/offline-eval/golden-queries-gate.jsonl';
  *   1. CLI --input flag (handled later in parseArgs)
  *   2. EVAL_CORPUS_PATH env var (backward compat / CI override)
  *   3. External fixture repo corpora/offline-eval/golden-queries-gate.jsonl
- *   4. Engine-local data/golden-queries-bronze.jsonl (derived artifact fallback)
  *
- * RCA-06: EVAL_CORPUS_PATH env var preserves CI compatibility while fixture
- * repo becomes the primary SSOT.
+ * Engine-local golden query files are no longer the release-gate default.
+ * Callers that need a non-SSOT corpus must pass --input or EVAL_CORPUS_PATH
+ * explicitly.
  */
 function resolveDefaultCorpusPath(): string {
   if (process.env['EVAL_CORPUS_PATH'] != null) {
     return process.env['EVAL_CORPUS_PATH'];
   }
-  const loader = new FixtureLoader();
-  if (loader.isAvailable()) {
-    return loader.corpusPath(FIXTURE_CORPUS_GATE);
-  }
-  return resolveDataPath('data/golden-queries-bronze.jsonl');
+  return requireFixtureCorpusPath(
+    OFFLINE_EVAL_GATE_CORPUS,
+    'run-offline-eval default input resolution',
+  );
 }
 
-const DEFAULT_INPUT = resolveDefaultCorpusPath();
 const DEFAULT_OUTPUT = resolveDataPath('data/eval-results.json');
 
 /**
@@ -101,12 +102,26 @@ const DEFAULT_OUTPUT = resolveDataPath('data/eval-results.json');
  * ADR-005 Workstream D: loaded from external fixture thresholds.json (offline_eval suite).
  * Falls back to hard-coded values when fixture repo is unavailable (CI compatibility).
  */
-async function loadOfflineEvalGates(): Promise<typeof RELEASE_GATES_FALLBACK> {
+async function loadOfflineEvalGates(args: {
+  readonly allowLocalThresholdFallback: boolean;
+}): Promise<typeof RELEASE_GATES_FALLBACK> {
   const loader = new FixtureLoader();
-  if (!loader.isAvailable()) return RELEASE_GATES_FALLBACK;
+  if (!loader.isAvailable()) {
+    if (args.allowLocalThresholdFallback) return RELEASE_GATES_FALLBACK;
+    throw new Error(
+      'run-offline-eval: external fixture thresholds are unavailable. ' +
+      'Pass --allow-local-threshold-fallback only for explicit non-gating local runs.',
+    );
+  }
   const allThresholds = await loader.loadThresholds();
   const suite = allThresholds['offline_eval'];
-  if (typeof suite !== 'object' || suite === null) return RELEASE_GATES_FALLBACK;
+  if (typeof suite !== 'object' || suite === null) {
+    if (args.allowLocalThresholdFallback) return RELEASE_GATES_FALLBACK;
+    throw new Error(
+      'run-offline-eval: offline_eval thresholds missing from fixture repo. ' +
+      'Pass --allow-local-threshold-fallback only for explicit non-gating local runs.',
+    );
+  }
   const s = suite as Record<string, unknown>;
   function val(key: string, fallback: number): number {
     const entry = s[key];
@@ -230,25 +245,37 @@ interface Args {
   input: string;
   output: string;
   tier: 'bronze' | 'silver' | 'gate';
+  fixtureCorpus?: 'silver' | 'val' | 'gate';
   baselineReport?: string;
   /** When true, run `verify-splits` logic before any search (fail-fast on leakage). */
   verifySplits: boolean;
   /** When true, persist per-query diagnostics arrays in the output report. */
   includeDiagnostics: boolean;
+  /** Explicit opt-in for non-gating local runs when fixture thresholds are unavailable. */
+  allowLocalThresholdFallback: boolean;
 }
 
 function parseArgs(argv: string[]): Args {
+  const defaultInput = resolveDefaultCorpusPath();
   const out: Args = {
-    input: DEFAULT_INPUT,
+    input: defaultInput,
     output: DEFAULT_OUTPUT,
     tier: 'bronze',
+    fixtureCorpus: undefined,
     baselineReport: undefined,
     verifySplits: false,
     includeDiagnostics: false,
+    allowLocalThresholdFallback: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
+    if (a === '--input' || a === '-i') out.input = argv[++i] ?? defaultInput;
+    else if (a === '--fixture-corpus') {
+      const corpus = argv[++i];
+      if (corpus === 'silver' || corpus === 'val' || corpus === 'gate') {
+        out.fixtureCorpus = corpus;
+      }
+    }
     else if (a === '--output' || a === '-o') out.output = argv[++i] ?? DEFAULT_OUTPUT;
     else if (a === '--baseline-report') out.baselineReport = argv[++i];
     else if (a === '--tier') {
@@ -258,7 +285,19 @@ function parseArgs(argv: string[]): Args {
       out.verifySplits = true;
     } else if (a === '--include-diagnostics') {
       out.includeDiagnostics = true;
+    } else if (a === '--allow-local-threshold-fallback') {
+      out.allowLocalThresholdFallback = true;
     }
+  }
+  if (out.fixtureCorpus !== undefined) {
+    out.input = requireFixtureCorpusPath(
+      out.fixtureCorpus === 'gate'
+        ? OFFLINE_EVAL_GATE_CORPUS
+        : out.fixtureCorpus === 'silver'
+          ? OFFLINE_EVAL_SILVER_CORPUS
+          : OFFLINE_EVAL_VAL_CORPUS,
+      `run-offline-eval fixture corpus "${out.fixtureCorpus}" resolution`,
+    );
   }
   return out;
 }
@@ -1828,7 +1867,9 @@ async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   // ADR-005 Workstream D: load release gate thresholds from fixture repo.
-  RELEASE_GATES = await loadOfflineEvalGates();
+  RELEASE_GATES = await loadOfflineEvalGates({
+    allowLocalThresholdFallback: args.allowLocalThresholdFallback,
+  });
 
   if (args.verifySplits) {
     console.log('Running split integrity check (RFC-017 §2.5) …');

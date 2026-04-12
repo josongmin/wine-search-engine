@@ -36,7 +36,8 @@ move_if_present "silver-phase1.ndjson"
 move_if_present "silver-phase1b.ndjson"
 move_if_present "silver-final.ndjson"
 move_if_present "hard-negatives.jsonl"
-move_if_present "golden-queries-bronze.jsonl"
+# Golden query corpora are no longer benchmark SSOT here; keep any local
+# snapshots in place instead of auto-promoting them into the shared data dir.
 move_if_present "eval-results.json"
 move_if_present "eval-with-reranker-bronze.json"
 move_if_present "noisy-entity-eval-smoke-results.json"

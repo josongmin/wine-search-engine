@@ -21,6 +21,7 @@ import { PgAliasRepository } from '../../src/infrastructure/adapter/pg-alias-rep
 import { Transliterator, type SourceLang } from '../../src/domain/alias/service/transliterator.js';
 import { createAlias } from '../../src/domain/alias/model/alias.js';
 import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { inferTransliterationSourceLang } from './transliteration-helpers.js';
 
 interface Args {
   readonly dryRun: boolean;
@@ -65,32 +66,6 @@ function readRegion(attributes: unknown): string | null {
   return typeof r === 'string' ? r : null;
 }
 
-/**
- * Rough heuristic: map catalog geography to a transliteration rule set.
- */
-function inferSourceLang(country: string | null, region: string | null): SourceLang {
-  const c = (country ?? '').toLowerCase();
-  const r = (region ?? '').toLowerCase();
-  if (c.includes('italy') || r.includes('tuscany') || r.includes('piemonte') || r.includes('barolo')) {
-    return 'it';
-  }
-  if (c.includes('spain') || r.includes('rioja') || r.includes('ribera')) {
-    return 'es';
-  }
-  if (
-    c.includes('united states')
-    || c === 'usa'
-    || c.includes('australia')
-    || c.includes('new zealand')
-    || c.includes('chile')
-    || c.includes('argentina')
-    || c.includes('canada')
-  ) {
-    return 'en';
-  }
-  return 'fr';
-}
-
 interface EntityRow {
   readonly entity_id: string;
   readonly canonical_label: string;
@@ -132,7 +107,7 @@ async function main(): Promise<void> {
 
     const country = readCountry(row.attributes);
     const region = readRegion(row.attributes);
-    const lang = inferSourceLang(country, region);
+    const lang: SourceLang = inferTransliterationSourceLang(country, region);
     const entityId = createEntityId(row.entity_id);
 
     const variants = transliterator.generateAliases(row.canonical_label, lang);

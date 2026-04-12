@@ -515,6 +515,79 @@ describe('HTTP debug mode (X-Debug-Key)', () => {
     }
   });
 
+  it('rejects /internal/benchmark/search without a valid debug key', async () => {
+    const deps = createHttpServerDeps();
+    const app = await createServer(deps, {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      httpDebugSecret: debugSecret,
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/benchmark/search',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ query: 'Opus One 2018' }),
+      });
+
+      expect(res.statusCode).toBe(403);
+      expect(deps.searchUseCase.execute).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('routes /internal/benchmark/search through benchmark_trusted execution principal', async () => {
+    const deps = createHttpServerDeps();
+    deps.searchUseCase.execute = vi.fn().mockResolvedValue({
+      queryType: 'search',
+      engineDecision: {
+        decisionStatus: 'resolved',
+        nextAction: 'return_result',
+        route: 'hybrid',
+        decisionConfidence: 0.9,
+        confidenceSemantics: 'calibrated_decision_confidence',
+        decisionTraceRef: authorityTraceRef,
+        authorityTraceRef,
+        decisionSnapshot: validDecisionSnapshot,
+      },
+      results: [],
+      clarification: null,
+      meta: {
+        queryTimeMs: 1,
+        route: 'hybrid',
+        version: '1.0.0',
+        engine_schema_version: 'search_response_v1',
+      },
+    });
+    const app = await createServer(deps, {
+      logLevel: 'silent',
+      nodeEnv: 'test',
+      httpDebugSecret: debugSecret,
+    });
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/internal/benchmark/search',
+        headers: {
+          'content-type': 'application/json',
+          'x-debug-key': debugSecret,
+        },
+        payload: JSON.stringify({ query: 'Opus One 2018' }),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-debug-active']).toBe('1');
+      expect(deps.searchUseCase.execute).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(deps.searchUseCase.execute).mock.calls[0]?.[2]).toMatchObject({
+        debugRequest: true,
+        executionPrincipal: 'benchmark_trusted',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('serializes typed abstain reason and audit traces through /v1/search contract', async () => {
     const deps = createHttpServerDeps();
     deps.searchUseCase.execute = vi.fn().mockResolvedValue({

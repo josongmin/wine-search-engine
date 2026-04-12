@@ -1,9 +1,14 @@
 #!/usr/bin/env tsx
 /**
- * Bridge: benchmark scenarios → LLM labeling input NDJSON.
+ * Bridge: fixture-native relevance corpus or exploratory benchmark scenarios
+ * → LLM labeling input NDJSON.
  *
- * For each scenario in `test/benchmark/agent/scenarios.ts`, emits one NDJSON
- * line shaped for `scripts/eval/generate-silver-labels.ts` InputLineSchema:
+ * Default mode (`--source fixture_corpus`) copies the external fixture repo's
+ * canonical relevance labeling input corpus directly.
+ *
+ * Exploratory mode (`--source agent_scenarios`) derives NDJSON lines from
+ * `test/benchmark/agent/scenarios.ts`, each shaped for
+ * `scripts/eval/generate-silver-labels.ts` InputLineSchema:
  *
  *   { queryId, query, candidates: [{entityId, canonicalLabel, ...}] }
  *
@@ -24,8 +29,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { bootstrapLogger } from '../../src/config/bootstrap-logger.js';
-import { AGENT_SCENARIOS } from '../../test/benchmark/agent/scenarios.js';
 import type { AgentBenchmarkScenario } from '../../test/benchmark/agent/scenario.js';
+import {
+  RELEVANCE_LABELING_INPUT_CORPUS,
+  requireFixtureCorpusPath,
+} from './fixture-corpus-paths.js';
+import { tokenize } from './tokenize-text.js';
 
 // ── Named constants ─────────────────────────────────────────────────────────
 
@@ -47,11 +56,8 @@ export const MIN_OVERLAP_SCORE = Number.EPSILON;
 /** Ontology snapshot path (deterministic catalog pool). */
 export const DEFAULT_ONTOLOGY_PATH = 'data/entity-ontology.json';
 
-/** Default output path. */
-const DEFAULT_OUTPUT = 'data/relevance/scenarios-labeling-input.jsonl';
-
-/** Minimum token length to be considered a content-bearing keyword. */
-const MIN_TOKEN_LENGTH = 2;
+/** Default output path (derived artifact, not benchmark truth). */
+const DEFAULT_OUTPUT = 'data/relevance/scenarios-labeling-input.snapshot.jsonl';
 
 // ── Ontology schema (permissive — we only read the fields we use) ──────────
 
@@ -77,6 +83,7 @@ interface CliArgs {
   readonly limit: number;
   readonly topK: number;
   readonly ontology: string;
+  readonly sourceMode: 'fixture_corpus' | 'agent_scenarios';
   readonly help: boolean;
 }
 
@@ -92,6 +99,7 @@ Options:
   --limit <n>          Max scenarios to emit. Default: ${DEFAULT_SCENARIO_LIMIT}
   --top-k <n>          Candidates per scenario. Default: ${DEFAULT_TOP_K_CANDIDATES}
   --ontology <path>    Catalog snapshot JSON. Default: ${DEFAULT_ONTOLOGY_PATH}
+  --source <mode>      fixture_corpus | agent_scenarios. Default: fixture_corpus
   --help, -h           Show this help and exit.
 `);
 }
@@ -101,6 +109,7 @@ function parseCliArgs(argv: readonly string[]): CliArgs {
   let limit = DEFAULT_SCENARIO_LIMIT;
   let topK = DEFAULT_TOP_K_CANDIDATES;
   let ontology = DEFAULT_ONTOLOGY_PATH;
+  let sourceMode: CliArgs['sourceMode'] = 'fixture_corpus';
   let help = false;
 
   for (let i = 0; i < argv.length; i++) {
@@ -123,6 +132,12 @@ function parseCliArgs(argv: readonly string[]): CliArgs {
       case '--ontology':
         if (next) { ontology = next; i++; }
         break;
+      case '--source':
+        if (next === 'fixture_corpus' || next === 'agent_scenarios') {
+          sourceMode = next;
+          i++;
+        }
+        break;
       default:
         break;
     }
@@ -131,21 +146,7 @@ function parseCliArgs(argv: readonly string[]): CliArgs {
   if (!Number.isFinite(limit) || limit < 1) limit = DEFAULT_SCENARIO_LIMIT;
   if (!Number.isFinite(topK) || topK < 1) topK = DEFAULT_TOP_K_CANDIDATES;
 
-  return { output, limit, topK, ontology, help };
-}
-
-// ── Tokenization ───────────────────────────────────────────────────────────
-
-/**
- * Split text into lowercased content tokens. We intentionally use a Unicode
- * property-class boundary (`\p{L}\p{N}` as a character class) so Korean and
- * accented Latin text are tokenised, not silently dropped. `\b` would be
- * ASCII-only here — see CLAUDE.md test discipline rule 8.
- */
-export function tokenize(text: string): readonly string[] {
-  const lowered = text.normalize('NFKC').toLowerCase();
-  const matches = lowered.match(/[\p{L}\p{N}]+/gu) ?? [];
-  return matches.filter((t) => t.length >= MIN_TOKEN_LENGTH);
+  return { output, limit, topK, ontology, sourceMode, help };
 }
 
 // ── Candidate scoring ──────────────────────────────────────────────────────
@@ -277,12 +278,28 @@ export interface BridgeResult {
 }
 
 export async function runBridge(args: CliArgs): Promise<BridgeResult> {
+  if (args.sourceMode === 'fixture_corpus') {
+    const fixtureInput = requireFixtureCorpusPath(
+      RELEVANCE_LABELING_INPUT_CORPUS,
+      'scenarios-to-labeling-input fixture export',
+    );
+    const payload = await fs.readFile(fixtureInput, 'utf8');
+    await fs.mkdir(path.dirname(args.output), { recursive: true });
+    await fs.writeFile(args.output, payload, 'utf8');
+    const linesWritten = payload
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .length;
+    return { linesWritten, outputPath: args.output };
+  }
+
   const nodes = await loadOntology(args.ontology);
 
   // Precompute keyword bags once — deterministic and O(|nodes|).
   const bags = new Map<string, ReadonlySet<string>>();
   for (const node of nodes) bags.set(node.id, nodeKeywordBag(node));
 
+  const { AGENT_SCENARIOS } = await import('../../test/benchmark/agent/scenarios.js');
   const scenarios = AGENT_SCENARIOS.slice(0, args.limit);
 
   await fs.mkdir(path.dirname(args.output), { recursive: true });
@@ -331,7 +348,7 @@ async function main(): Promise<void> {
   }
 
   process.stderr.write(
-    `scenarios-to-labeling-input: ontology=${args.ontology} limit=${args.limit} topK=${args.topK} output=${args.output}\n`,
+    `scenarios-to-labeling-input: source=${args.sourceMode} ontology=${args.ontology} limit=${args.limit} topK=${args.topK} output=${args.output}\n`,
   );
 
   const result = await runBridge(args);

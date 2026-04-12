@@ -1,4 +1,5 @@
 import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
+import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import type { ScoreDecomposition } from './score-decomposition.js';
 
@@ -204,6 +205,9 @@ export interface RankedResult {
 
   /** Price in USD (approximate, from Vivino or other data source). */
   readonly priceUsd?: number | undefined;
+
+  /** ADR-007 upstream source lineage (HTTP `EntitySummary.sourceRecordRefs`). */
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 
   /**
    * Set to `true` when the policy stage demoted this result from a higher rank

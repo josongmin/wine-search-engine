@@ -18,12 +18,15 @@ import fs from 'node:fs/promises';
 import { parseNdjson } from '../etl/ndjson.js';
 import type { GoldenQuery } from '../etl/types.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  requireFixtureCorpusPath,
+} from './fixture-corpus-paths.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = resolveDataPath('data/golden-queries-bronze.jsonl');
 const OUTPUT_TRAIN = resolveDataPath('data/splits/train.jsonl');
 const OUTPUT_VAL = resolveDataPath('data/splits/val.jsonl');
 const OUTPUT_GATE = resolveDataPath('data/splits/gate.jsonl');
@@ -38,9 +41,13 @@ const VAL_RATIO = 0.15;
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv: string[]): { input: string } {
-  let input = DEFAULT_INPUT;
+  const defaultInput = requireFixtureCorpusPath(
+    OFFLINE_EVAL_SILVER_CORPUS,
+    'build-splits default input resolution',
+  );
+  let input = defaultInput;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--input' || argv[i] === '-i') input = argv[++i] ?? DEFAULT_INPUT;
+    if (argv[i] === '--input' || argv[i] === '-i') input = argv[++i] ?? defaultInput;
   }
   return { input };
 }

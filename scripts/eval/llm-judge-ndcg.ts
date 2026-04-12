@@ -10,15 +10,24 @@
  *     --queries data/vivino-gold-queries.jsonl \
  *     --corpus /tmp/test300-v3.ndjson \
  *     --output /tmp/llm-judge-labels.jsonl \
- *     [--concurrency 10] [--dry-run]
+ *     [--concurrency 10] [--dry-run] [--fixture-repo ../wine-engine-fixture]
  *
- * Output (one line per query×wine pair):
- *   {"qid":"vv-001","entityId":"vivino-xxx","grade":3,"reason":"...","model":"gpt-5.4-mini"}
+ * Output (one line per query×wine pair) uses ADR-007 canonical `entityId` (never `sourceId`):
+ *   {"qid":"vv-001","entityId":"opus-one-2018","grade":3,"reason":"...","model":"gpt-5.4-mini"}
+ *
+ * Corpus NDJSON must include identity fields for each wine: sourceId, canonicalLabel,
+ * producer, country, region, vintageYear (Silver / enriched-silver shape).
  */
 
 import { createReadStream } from 'node:fs';
 import { glob, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
+import { z } from 'zod';
+
+import {
+  buildEntityIdBySourceId,
+  loadGoldCanonicalLookupForBuild,
+} from '../etl/snapshot-entity-identity.js';
 
 // ---------------------------------------------------------------------------
 // Config from env
@@ -51,15 +60,71 @@ const OUTPUT_FILE = getArg('--output', '/tmp/llm-judge-labels.jsonl');
 const CONCURRENCY = parseInt(getArg('--concurrency', '8'), 10);
 const DRY_RUN = args.includes('--dry-run');
 const SAMPLE_N = parseInt(getArg('--sample', '0'), 10); // 0 = all
+const FIXTURE_REPO = getArg('--fixture-repo', '');
 
 // ---------------------------------------------------------------------------
 // JSONL reader + corpus glob resolver
 // ---------------------------------------------------------------------------
-async function readJsonl<T>(filePath: string): Promise<T[]> {
-  const rows: T[] = [];
+
+const QueryRecordSchema = z.object({
+  qid: z.string().min(1),
+  query: z.string().min(1),
+  category: z.string().optional(),
+  difficulty: z.string().optional(),
+});
+
+const WineJudgeCorpusRowSchema = z
+  .object({
+    sourceId: z.string().min(1),
+    canonicalLabel: z.string().min(1),
+    producer: z.string().min(1),
+    country: z.string().min(1),
+    region: z.string().min(1),
+    vintageYear: z.union([z.number().int(), z.null()]),
+    priceUsd: z.union([z.string(), z.number(), z.null()]).optional(),
+    priceBand: z.string().optional(),
+    grapes: z.array(z.string()).optional(),
+    grapePrimary: z.string().optional(),
+    pairingTags: z.array(z.string()).optional(),
+    wineType: z.string().optional(),
+  })
+  .passthrough();
+
+type WineJudgeCorpusRow = z.infer<typeof WineJudgeCorpusRowSchema>;
+type QueryRecord = z.infer<typeof QueryRecordSchema>;
+
+async function readJsonlQueries(filePath: string): Promise<QueryRecord[]> {
+  const rows: QueryRecord[] = [];
   const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
+  let lineNo = 0;
   for await (const line of rl) {
-    if (line.trim()) rows.push(JSON.parse(line) as T);
+    lineNo++;
+    if (!line.trim()) continue;
+    const parsed: unknown = JSON.parse(line);
+    const result = QueryRecordSchema.safeParse(parsed);
+    if (!result.success) {
+      throw new Error(`Invalid query row ${filePath}:${lineNo}: ${result.error.message}`);
+    }
+    rows.push(result.data);
+  }
+  return rows;
+}
+
+async function readJsonlCorpus(filePath: string): Promise<WineJudgeCorpusRow[]> {
+  const rows: WineJudgeCorpusRow[] = [];
+  const rl = createInterface({ input: createReadStream(filePath), crlfDelay: Infinity });
+  let lineNo = 0;
+  for await (const line of rl) {
+    lineNo++;
+    if (!line.trim()) continue;
+    const parsed: unknown = JSON.parse(line);
+    const result = WineJudgeCorpusRowSchema.safeParse(parsed);
+    if (!result.success) {
+      throw new Error(
+        `Invalid corpus row ${filePath}:${lineNo} (need sourceId, canonicalLabel, producer, country, region, vintageYear): ${result.error.message}`,
+      );
+    }
+    rows.push(result.data);
   }
   return rows;
 }
@@ -101,7 +166,7 @@ const SYSTEM_PROMPT = `You are a wine search relevance expert. Rate the relevanc
 Reply with ONLY valid JSON: {"grade": <0|1|2|3>, "reason": "<one sentence>"}
 No extra text. No markdown. Just the JSON object.`;
 
-function buildUserMessage(query: string, wine: WineRecord): string {
+function buildUserMessage(query: string, wine: WineJudgeCorpusRow): string {
   const label = wine.canonicalLabel ?? '';
   const region = wine.region ?? '';
   const price = wine.priceUsd ? `$${parseFloat(String(wine.priceUsd)).toFixed(0)}` : 'unknown price';
@@ -169,25 +234,6 @@ async function callJudge(messages: ChatMessage[]): Promise<JudgeResult> {
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-interface QueryRecord {
-  qid: string;
-  query: string;
-  category?: string;
-  difficulty?: string;
-}
-
-interface WineRecord {
-  sourceId: string;
-  canonicalLabel?: string;
-  region?: string;
-  country?: string;
-  priceUsd?: string | number;
-  priceBand?: string;
-  grapes?: string[];
-  grapePrimary?: string;
-  pairingTags?: string[];
-  wineType?: string;
-}
 
 interface JudgmentRow {
   qid: string;
@@ -244,8 +290,13 @@ async function main(): Promise<void> {
   console.log(`  Concurrency: ${CONCURRENCY}`);
   if (DRY_RUN) console.log(`  DRY RUN — no API calls`);
 
-  const queries = await readJsonl<QueryRecord>(QUERIES_FILE);
-  const corpus = await readJsonl<WineRecord>(corpusFile);
+  const queries = await readJsonlQueries(QUERIES_FILE);
+  const corpus = await readJsonlCorpus(corpusFile);
+
+  const goldLookup = await loadGoldCanonicalLookupForBuild({
+    fixtureRepoRoot: FIXTURE_REPO.length > 0 ? FIXTURE_REPO : undefined,
+  });
+  const sourceToCanonical = buildEntityIdBySourceId(corpus, goldLookup);
 
   const activeQueries = SAMPLE_N > 0 ? queries.slice(0, SAMPLE_N) : queries;
   console.log(`\nQueries: ${activeQueries.length}  Corpus: ${corpus.length}`);
@@ -258,10 +309,14 @@ async function main(): Promise<void> {
   for (const q of activeQueries) {
     for (const wine of corpus) {
       tasks.push(async (): Promise<JudgmentRow> => {
+        const canonicalEntityId = sourceToCanonical.get(wine.sourceId);
+        if (canonicalEntityId === undefined) {
+          throw new Error(`Missing canonical entity id for corpus sourceId=${wine.sourceId}`);
+        }
         if (DRY_RUN) {
           return {
             qid: q.qid,
-            entityId: wine.sourceId,
+            entityId: canonicalEntityId,
             grade: 0,
             reason: 'dry-run',
             model: MODEL,
@@ -280,7 +335,7 @@ async function main(): Promise<void> {
             const result = await callJudge(messages);
             return {
               qid: q.qid,
-              entityId: wine.sourceId,
+              entityId: canonicalEntityId,
               grade: result.grade,
               reason: result.reason,
               model: MODEL,
@@ -289,10 +344,10 @@ async function main(): Promise<void> {
           } catch (err) {
             attempt++;
             if (attempt >= 3) {
-              console.error(`  FAILED qid=${q.qid} entityId=${wine.sourceId}: ${String(err).slice(0, 100)}`);
+              console.error(`  FAILED qid=${q.qid} entityId=${canonicalEntityId}: ${String(err).slice(0, 100)}`);
               return {
                 qid: q.qid,
-                entityId: wine.sourceId,
+                entityId: canonicalEntityId,
                 grade: 0,
                 reason: 'judge_error',
                 model: MODEL,
@@ -306,7 +361,7 @@ async function main(): Promise<void> {
         // Unreachable but TypeScript needs it
         return {
           qid: q.qid,
-          entityId: wine.sourceId,
+          entityId: canonicalEntityId,
           grade: 0,
           reason: 'judge_error',
           model: MODEL,

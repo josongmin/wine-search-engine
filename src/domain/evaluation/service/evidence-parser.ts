@@ -62,7 +62,7 @@ const MAX_OBSERVATION_LENGTH = 500_000; // 500KB safety cap
  * Three parsing strategies in order:
  *   1. JSON.parse — handles structured tool outputs
  *   2. Pipe-delimited line parser — handles agent-tools.ts summarizeSearchResults
- *      and summarizeComparison output (e.g. "1. Opus One | (id: vivino-abc) |
+ *      and summarizeComparison output (e.g. "1. Opus One | (id: opus-one-2018) |
  *      producer: Robert Mondavi | region: Napa | vintage: 2018 | drink: 2024-2038")
  *   3. Raw text fallback — opaque content for keyword-only verification
  */
@@ -97,7 +97,7 @@ function parseObservation(observation: string): EvidenceRecord[] {
 
 /**
  * Parse the pipe-delimited wine line format produced by agent-tools.ts:
- *   summarizeSearchResults: "1. Opus One | (id: vivino-abc) | producer: X | region: Y | vintage: 2018 | grapes: A, B | style: S | critic: 95/100 | alc: 14% | price: ₩300,000 | drink: 2024-2038"
+ *   summarizeSearchResults: "1. Opus One | (id: opus-one-2018) | producer: X | region: Y | vintage: 2018 | grapes: A, B | style: S | critic: 95/100 | alc: 14% | price: ₩300,000 | drink: 2024-2038"
  *   summarizeComparison:    "Side A: ...: <label> | entity_id: ... | producer: ... | ..."
  *   summarizeDrinkingWindow: "<label>: drinking window 2024-2030. As of 2026: currently drinkable (peak: 2024–2030)."
  *
@@ -141,13 +141,13 @@ function parsePipeDelimitedObservation(text: string): EvidenceRecord[] {
     // Remaining parts: "key: value" pairs
     for (let i = 1; i < parts.length; i++) {
       const part = parts[i]!.trim();
-      // (id: vivino-abc)
+      // (id: opus-one-2018)
       const idMatch = ENTITY_ID_PAREN_RE.exec(part);
       if (idMatch?.[1] !== undefined) {
         record['entity_id'] = idMatch[1].trim();
         continue;
       }
-      // entity_id: vivino-abc (compare format)
+      // entity_id: opus-one-2018 (compare format)
       const entityIdMatch = ENTITY_ID_COLON_RE.exec(part);
       if (entityIdMatch?.[1] !== undefined) {
         record['entity_id'] = entityIdMatch[1].trim();

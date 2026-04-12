@@ -2,6 +2,8 @@ import type { Pool } from 'pg';
 import type { AliasMatcher, AliasMatchResult } from '../../domain/query/service/anchor-extractor.js';
 import { createEntityId } from '../../domain/shared/types/index.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
+import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+import { readPgSqlState } from '../db/pg-sqlstate.js';
 
 interface AliasRow {
   entity_id: string;
@@ -257,7 +259,7 @@ export class PgAliasMatcher implements AliasMatcher {
     const transliteratedList = Array.from(transliteratedTokens).filter((token) => token.length > 0);
     const phoneticList = Array.from(phoneticTokens).filter((token) => token.length > 0);
 
-    const result = await this.pool.query<AliasRow>(
+    const result = await this.queryAliases(
       `SELECT entity_id, surface_form, normalized_value, confidence
        FROM aliases
        WHERE (
@@ -351,7 +353,7 @@ export class PgAliasMatcher implements AliasMatcher {
       new Set(fuzzyVariants.flatMap((variant) => charNgrams(variant.value))),
     ).map((gram) => gram.replace(/[%_\\]/g, '\\$&'));
 
-    const fuzzyCandidates = await this.pool.query<AliasRow>(
+    const fuzzyCandidates = await this.queryAliases(
       `SELECT entity_id, surface_form, normalized_value, confidence
        FROM aliases
        WHERE is_suppressed = FALSE
@@ -387,5 +389,23 @@ export class PgAliasMatcher implements AliasMatcher {
       .filter((row): row is FuzzyAliasRow => row !== null);
 
     return groupRows<FuzzyAliasRow>(fuzzyRows, (row) => row.lookupStrategy);
+  }
+
+  private async queryAliases(
+    sql: string,
+    params: readonly unknown[],
+  ): Promise<{ rows: AliasRow[] }> {
+    try {
+      return await this.pool.query<AliasRow>(sql, [...params]);
+    } catch (err: unknown) {
+      const code = readPgSqlState(err);
+      if (code !== '42P01') {
+        throw err;
+      }
+      bootstrapLogger.info(
+        '[PgAliasMatcher] aliases table does not exist yet — alias matching disabled for this request',
+      );
+      return { rows: [] };
+    }
   }
 }

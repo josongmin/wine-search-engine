@@ -22,6 +22,12 @@ import {
   readNumericThreshold,
 } from './external-fixture-benchmark.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  buildBenchmarkRequestHeaders,
+  resolveBenchmarkSearchEndpoint,
+  runLiveBenchmarkPreflight,
+  type BenchmarkExecutionLane,
+} from './live-benchmark-preflight.js';
 
 const SUITE_ID = 'performance_latency' as const;
 const DEFAULT_OUTPUT = resolveDataPath('data/performance-latency-fixture-eval-results.json');
@@ -41,6 +47,8 @@ interface CliArgs {
   readonly timeoutMs: number;
   readonly concurrency: number;
   readonly warmup: number;
+  readonly executionLane: BenchmarkExecutionLane;
+  readonly debugKey?: string;
   readonly useThresholds: boolean;
 }
 
@@ -92,6 +100,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let timeoutMs = 30_000;
   let concurrency = DEFAULT_CONCURRENCY;
   let warmup = DEFAULT_WARMUP;
+  let executionLane: BenchmarkExecutionLane = 'public';
+  let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
 
   for (let i = 0; i < argv.length; i++) {
@@ -109,12 +119,19 @@ function parseArgs(argv: readonly string[]): CliArgs {
     } else if (arg === '--warmup') {
       const v = Number.parseInt(argv[++i] ?? '', 10);
       if (Number.isFinite(v) && v >= 0) warmup = v;
+    } else if (arg === '--execution-lane') {
+      const value = argv[++i];
+      if (value === 'public' || value === 'trusted_benchmark') {
+        executionLane = value;
+      }
+    } else if (arg === '--debug-key') {
+      debugKey = argv[++i] ?? debugKey;
     } else if (arg === '--no-thresholds') {
       useThresholds = false;
     }
   }
 
-  return { output, apiUrl, timeoutMs, concurrency, warmup, useThresholds };
+  return { output, apiUrl, timeoutMs, concurrency, warmup, executionLane, debugKey, useThresholds };
 }
 
 // ─── Fixture case adapter ────────────────────────────────────────────────────
@@ -152,11 +169,13 @@ async function measureLatency(
   apiUrl: string,
   query: string,
   timeoutMs: number,
+  executionLane: BenchmarkExecutionLane,
+  debugKey?: string,
 ): Promise<number> {
   const start = performance.now();
-  const response = await fetch(`${apiUrl}/v1/search`, {
+  const response = await fetch(resolveBenchmarkSearchEndpoint(apiUrl, executionLane), {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: buildBenchmarkRequestHeaders(executionLane, debugKey),
     body: JSON.stringify({ query }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -165,10 +184,16 @@ async function measureLatency(
   return performance.now() - start;
 }
 
-async function warmUp(apiUrl: string, warmupCount: number, timeoutMs: number): Promise<void> {
+async function warmUp(
+  apiUrl: string,
+  warmupCount: number,
+  timeoutMs: number,
+  executionLane: BenchmarkExecutionLane,
+  debugKey?: string,
+): Promise<void> {
   for (let i = 0; i < warmupCount; i++) {
     try {
-      await measureLatency(apiUrl, 'Opus One', timeoutMs);
+      await measureLatency(apiUrl, 'Opus One', timeoutMs, executionLane, debugKey);
     } catch {
       // Warm-up failures are ignored — we just want JIT and connection pool warm.
     }
@@ -310,6 +335,11 @@ async function assertThresholds(report: PerformanceLatencyFixtureReport): Promis
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  await runLiveBenchmarkPreflight({
+    apiUrl: args.apiUrl,
+    executionLane: args.executionLane,
+    debugKey: args.debugKey,
+  });
 
   const rawCases = await loadFixtureCases([SUITE_ID]);
   const cases = rawCases.map(adaptCase);
@@ -318,11 +348,17 @@ async function run(): Promise<void> {
 
   if (args.warmup > 0) {
     process.stderr.write(`[perf-latency-fixture-eval] warming up (${args.warmup} requests)...\n`);
-    await warmUp(args.apiUrl, args.warmup, args.timeoutMs);
+    await warmUp(args.apiUrl, args.warmup, args.timeoutMs, args.executionLane, args.debugKey);
   }
 
   const caseResults = await mapPool(cases, args.concurrency, async (benchmarkCase) => {
-    const durationMs = await measureLatency(args.apiUrl, benchmarkCase.query, args.timeoutMs);
+    const durationMs = await measureLatency(
+      args.apiUrl,
+      benchmarkCase.query,
+      args.timeoutMs,
+      args.executionLane,
+      args.debugKey,
+    );
     return evaluateCase(benchmarkCase, durationMs);
   });
 
@@ -339,8 +375,10 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`[perf-latency-fixture-eval] fatal: ${message}\n`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  void run().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[perf-latency-fixture-eval] fatal: ${message}\n`);
+    process.exit(1);
+  });
+}

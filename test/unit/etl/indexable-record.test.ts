@@ -4,6 +4,7 @@ import {
   silverToIndexable,
   validateIndexableRecord,
 } from '../../../scripts/etl/index-to-vespa.js';
+import { silverGoldMatchKey } from '../../../scripts/etl/snapshot-entity-identity.js';
 
 function makeEnrichedRecord(
   overrides: Partial<EnrichedSilverRecord> = {},
@@ -58,11 +59,19 @@ function makeEnrichedRecord(
 // ---------------------------------------------------------------------------
 
 describe('silverToIndexable — hit projection fields', () => {
-  it('maps entityId from sourceId', () => {
+  it('uses identity-signature fallback entity id when no gold overlay matches', () => {
     const rec = makeEnrichedRecord();
-    const indexable = silverToIndexable(rec);
+    const indexable = silverToIndexable(rec, new Map());
     expect(typeof indexable.entityId).toBe('string');
-    expect(indexable.entityId.length).toBeGreaterThan(0);
+    expect(indexable.entityId.startsWith('wine-ce-')).toBe(true);
+    expect(indexable.entityId.length).toBeGreaterThan('wine-ce-'.length + 8);
+  });
+
+  it('uses benchmark gold slug when overlay matches canonical label + vintage', () => {
+    const rec = makeEnrichedRecord();
+    const gold = new Map<string, string>([[silverGoldMatchKey(rec), 'opus-one-2018']]);
+    const indexable = silverToIndexable(rec, gold);
+    expect(indexable.entityId).toBe('opus-one-2018');
   });
 
   it('maps canonicalLabel', () => {

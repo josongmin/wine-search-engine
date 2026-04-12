@@ -1,6 +1,10 @@
 import * as fs from 'fs/promises';
 import * as readline from 'readline';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  OFFLINE_EVAL_SILVER_CORPUS,
+  requireFixtureCorpusPath,
+} from '../eval/fixture-corpus-paths.js';
 
 /**
  * Tags golden query set with retrieval_mode field.
@@ -173,15 +177,17 @@ async function tagQueriesWithRetrievalMode(
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const inputPath = resolveDataPath('data/golden-queries-bronze.jsonl');
-  const outputPath = resolveDataPath('data/golden-queries-bronze-tagged.jsonl');
+  const inputPath = process.argv[2]
+    ?? requireFixtureCorpusPath(
+      OFFLINE_EVAL_SILVER_CORPUS,
+      'tag-queries-retrieval-mode default input resolution',
+    );
+  const outputPath = process.argv[3]
+    ?? resolveDataPath('data/golden-queries-silver-tagged.jsonl');
 
   console.log(`Tagging queries: ${inputPath} → ${outputPath}`);
   await tagQueriesWithRetrievalMode(inputPath, outputPath);
-
-  // Overwrite original
-  await fs.rename(outputPath, inputPath);
-  console.log(`✓ Updated ${inputPath}`);
+  console.log(`✓ Wrote derived tagged artifact to ${outputPath}`);
 }
 
 main().catch(console.error);

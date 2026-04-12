@@ -10,9 +10,9 @@
  *   - Grounding / fact-check / register / hallucination guards
  *   - Per-scenario dimension weight overrides
  *
- * v3 breaking change: `goldenEntityIds` removed — the field used slug-style IDs
- * (e.g. "opus-one-2018") but the real Vespa corpus stores vivino-hash IDs
- * (e.g. "vivino-36f895cf2938f29b"), making substring matching permanently 0%.
+ * v3 breaking change: `goldenEntityIds` removed — substring checks against
+ * `entity_id` in observations were brittle (ADR-007 now standardizes public
+ * `entity_id` as canonical slugs; source-record ids stay in lineage only).
  * Replaced by `goldenKeywords`: canonical-label fragments that DO appear verbatim
  * in observation strings (e.g. "opus one", "château margaux").
  */
@@ -291,8 +291,8 @@ export interface AgentBenchmarkScenario {
    * observation strings produced by summarizeSearchResults() — e.g. "opus one",
    * "château margaux". Case-insensitive, NFKC-normalized matching.
    *
-   * Replaces the v2 `goldenEntityIds` field which used slug-style IDs that
-   * never appeared in the actual Vespa corpus (corpus uses vivino-hash IDs).
+   * Replaces the v2 `goldenEntityIds` field which compared against opaque ids
+   * in observations instead of user-visible label tokens.
    * When absent, contextRecall is null (excluded from geo-mean).
    */
   readonly goldenKeywords?: readonly string[];

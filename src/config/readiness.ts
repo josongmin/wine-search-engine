@@ -5,6 +5,10 @@ import {
   isWatchlistEnabled,
 } from './watchlist.js';
 import { probeJsonPostEndpoint } from '../infrastructure/health/readiness-probes.js';
+import {
+  probeSearchSnapshotRuntimeState,
+  verifySearchSnapshotRuntimeStateLive,
+} from '../infrastructure/health/search-snapshot-readiness.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
@@ -138,6 +142,23 @@ export function buildHealthRouteOptions(
           probeJsonPostEndpoint(`${config.vespa.url}/search/`, {
             yql: 'select * from sources * where true limit 0;',
           }),
+      },
+      search_snapshot_runtime: {
+        required: config.nodeEnv === 'production',
+        check: async (): Promise<ReadinessStatus> => {
+          if (runtime.pool === undefined) {
+            return config.nodeEnv === 'production' ? 'down' : probeSearchSnapshotRuntimeState();
+          }
+          try {
+            await verifySearchSnapshotRuntimeStateLive({
+              pool: runtime.pool,
+              vespaUrl: config.vespa.url,
+            });
+            return 'up';
+          } catch {
+            return 'down';
+          }
+        },
       },
       ...(!config.killSwitch.denseRetrieval
         ? {

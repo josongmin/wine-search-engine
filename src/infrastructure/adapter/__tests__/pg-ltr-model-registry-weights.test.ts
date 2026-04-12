@@ -20,6 +20,11 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
     query_class: 'red_wine',
     model_version: 1,
     is_active: true,
+    search_snapshot_id: 'search-snapshot:v1:test',
+    eval_dataset_version: 'pg_gold_set_store.v1',
+    feature_schema_hash: '9f8a1573d430a37d',
+    copied_from_registry_id: null,
+    copied_from_snapshot_id: null,
     // node-postgres returns float[] as string[] at runtime:
     weights: ['0.5', '0.3', '-0.1', '0.7', '0.0', '0.2', '-0.4', '0.6'],
     bias: '0.01',
@@ -35,6 +40,17 @@ function makePool(rows: unknown[]): Pool {
   return {
     query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length }),
   } as unknown as Pool;
+}
+
+function makeClientSequence(responses: readonly unknown[]) {
+  const query = vi.fn();
+  for (const response of responses) {
+    query.mockResolvedValueOnce(response);
+  }
+  return {
+    query,
+    release: vi.fn(),
+  };
 }
 
 // ── getModel ─────────────────────────────────────────────────────────────────
@@ -144,5 +160,128 @@ describe('PgLtrModelRegistry.getAllModels — string[] weights from PG', () => {
 
     const models = await registry.getAllModels();
     expect(models.size).toBe(0);
+  });
+
+  it('passes snapshot id through the active-model query when provided', async () => {
+    const pool = makePool([makeRow({ search_snapshot_id: 'search-snapshot:v1:test' })]);
+    const registry = new PgLtrModelRegistry(pool);
+
+    await registry.getAllModels('search-snapshot:v1:test');
+
+    expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]).toEqual([
+      'search-snapshot:v1:test',
+    ]);
+  });
+});
+
+describe('PgLtrModelRegistry.activateSnapshot', () => {
+  it('deactivates prior actives and activates the latest model version per class for the snapshot', async () => {
+    const client = makeClientSequence([
+      undefined,
+      { rows: [{ query_class: 'red_wine' }, { query_class: 'white_wine' }] },
+      { rowCount: 2 },
+      { rowCount: 2 },
+      undefined,
+    ]);
+    const pool = {
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool;
+    const registry = new PgLtrModelRegistry(pool);
+
+    const activated = await registry.activateSnapshot('search-snapshot:v1:test');
+
+    expect(activated).toBe(2);
+    expect(client.query).toHaveBeenNthCalledWith(1, 'BEGIN');
+    expect(client.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('SELECT DISTINCT query_class'),
+      ['search-snapshot:v1:test'],
+    );
+    expect(client.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('UPDATE ltr_model_registry'),
+      [['red_wine', 'white_wine']],
+    );
+    expect(client.query).toHaveBeenNthCalledWith(
+      4,
+      expect.stringContaining('WITH latest_per_class AS'),
+      ['search-snapshot:v1:test'],
+    );
+    expect(client.query).toHaveBeenNthCalledWith(5, 'COMMIT');
+  });
+});
+
+describe('PgLtrModelRegistry.cloneActiveModelsToSnapshot', () => {
+  it('clones active models only when target snapshot is empty and feature schema matches', async () => {
+    const client = makeClientSequence([
+      undefined,
+      { rows: [{ count: '0' }] },
+      {
+        rows: [
+          makeRow({
+            registry_id: 'reg-red',
+            query_class: 'red_wine',
+            model_version: 3,
+            search_snapshot_id: 'search-snapshot:v1:source',
+          }),
+          makeRow({
+            registry_id: 'reg-white',
+            query_class: 'white_wine',
+            model_version: 2,
+            search_snapshot_id: 'search-snapshot:v1:source',
+          }),
+        ],
+      },
+      { rows: [{ next_version: 4 }] },
+      { rowCount: 1 },
+      { rows: [{ next_version: 3 }] },
+      { rowCount: 1 },
+      undefined,
+    ]);
+    const pool = {
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool;
+    const registry = new PgLtrModelRegistry(pool);
+
+    const cloned = await registry.cloneActiveModelsToSnapshot(
+      'search-snapshot:v1:source',
+      'search-snapshot:v1:target',
+      { featureSchemaHash: '9f8a1573d430a37d' },
+    );
+
+    expect(cloned).toBe(2);
+    expect(client.query).toHaveBeenNthCalledWith(1, 'BEGIN');
+    expect(client.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('FROM ltr_model_registry'),
+      ['search-snapshot:v1:target'],
+    );
+    expect(client.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('feature_schema_hash = $2'),
+      ['search-snapshot:v1:source', '9f8a1573d430a37d'],
+    );
+    expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+  });
+
+  it('returns zero when target snapshot already has rows', async () => {
+    const client = makeClientSequence([
+      undefined,
+      { rows: [{ count: '1' }] },
+      undefined,
+    ]);
+    const pool = {
+      connect: vi.fn().mockResolvedValue(client),
+    } as unknown as Pool;
+    const registry = new PgLtrModelRegistry(pool);
+
+    const cloned = await registry.cloneActiveModelsToSnapshot(
+      'search-snapshot:v1:source',
+      'search-snapshot:v1:target',
+      { featureSchemaHash: '9f8a1573d430a37d' },
+    );
+
+    expect(cloned).toBe(0);
+    expect(client.query).toHaveBeenNthCalledWith(3, 'ROLLBACK');
   });
 });

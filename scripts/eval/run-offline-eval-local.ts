@@ -3,7 +3,10 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 import { createTestServer, closeTestServer } from '../../test/e2e/helpers/test-server.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+import {
+  OFFLINE_EVAL_GATE_CORPUS,
+  requireFixtureCorpusPath,
+} from './fixture-corpus-paths.js';
 
 interface Args {
   input?: string;
@@ -29,16 +32,20 @@ function parseArgs(argv: readonly string[]): Args {
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const defaultInput = resolveDataPath('data/golden-queries-bronze.jsonl');
-  const selectedInput = args.input ?? defaultInput;
+  if (args.input == null) {
+    void requireFixtureCorpusPath(
+      OFFLINE_EVAL_GATE_CORPUS,
+      'run-offline-eval-local default input resolution',
+    );
+  }
 
-  if (selectedInput === defaultInput && !args.allowFullDataset) {
+  if (args.input == null && !args.allowFullDataset) {
     console.error(
       [
         'Refusing to run local full offline eval against the in-memory test server.',
-        'The local harness only contains a tiny fixture corpus, so the 500-query bronze set produces misleading near-zero metrics.',
+        'The local harness only contains a tiny fixture corpus, so the default fixture-native gate corpus produces misleading metrics here.',
         'Use `npm run eval:offline:smoke:local` for fixture-compatible local verification,',
-        'or rerun with `--allow-full-dataset` if you explicitly want mismatch diagnostics.',
+        'or rerun with `--allow-full-dataset` if you explicitly want mismatch diagnostics against the external gate corpus.',
       ].join(' '),
     );
     process.exitCode = 1;

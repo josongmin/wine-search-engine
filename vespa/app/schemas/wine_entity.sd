@@ -13,6 +13,10 @@ schema wine_entity {
       indexing: summary | attribute
     }
 
+    field search_snapshot_id type string {
+      indexing: summary | attribute
+    }
+
     field canonical_label type string {
       indexing: summary | attribute | index
       index: enable-bm25
@@ -319,6 +323,12 @@ schema wine_entity {
       indexing: summary | attribute
     }
 
+    # Canonical entity lineage: stable JSON array of { source_system, source_record_id }.
+    # Indexed for hit_summary / full summaries; not in default fieldset (non-lexical).
+    field source_record_refs_json type string {
+      indexing: summary
+    }
+
   }  # end document wine_entity
 
   # ---------------------------------------------------------------------------
@@ -379,6 +389,8 @@ schema wine_entity {
     summary grape_family {}
     summary region_hierarchy {}
     summary price_band_numeric {}
+    summary flavor_profiles {}
+    summary source_record_refs_json {}
   }
 
   # feature_summary — ranking / ML features only.
@@ -448,6 +460,7 @@ schema wine_entity {
     summary producer_aliases {}
     summary price_band_numeric {}
     summary flavor_profile_structured {}
+    summary source_record_refs_json {}
   }
 
   # ---------------------------------------------------------------------------

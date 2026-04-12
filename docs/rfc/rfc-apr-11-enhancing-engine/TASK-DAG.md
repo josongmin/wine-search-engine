@@ -11,9 +11,9 @@
 ```mermaid
 graph TD
   E1["EPIC-1 Deterministic Core"]
+  TA1["TRACK-A A1 Canonical Entity Graph / Truth Source"]
   TA2["TRACK-A A2 Shared Entity Candidate Generation"]
   TA3["TRACK-A A3 Corrective Retrieval Loop"]
-  TA1["TRACK-A A1 Canonical Entity Graph / Truth Source"]
   TA4["TRACK-A A4 Exact-first Dual Retrieval"]
   TA5["TRACK-A A5 Calibrated Decision"]
   E2["EPIC-2 Constraint Semantics"]
@@ -24,7 +24,8 @@ graph TD
   E8["EPIC-8 Audit Record"]
   E7["EPIC-7 Agent Contract Executor"]
 
-  E1 --> TA2
+  E1 --> TA1
+  TA1 --> TA2
   TA2 --> TA3
   TA3 --> TA4
   TA1 --> TA4
@@ -51,16 +52,17 @@ graph TD
 ## Critical Path
 
 1. `E1`
-2. `TA2`
-3. `TA3`
-4. `E2`
-5. `E5`
-6. `E6`
-7. `E8`
+2. `TA1`
+3. `TA2`
+4. `TA3`
+5. `E2`
+6. `E5`
+7. `E6`
+8. `E8`
 
 이 경로가 exact recovery + typed decision + auditability를 동시에 닫는 최소 경로다.
 
-`E3`, `E4`, `E7`, `TA1`, `TA4`, `TA5`는 중요하지만 일부 병렬화가 가능하다.
+`E3`, `E4`, `E7`, `TA4`, `TA5`는 중요하지만 일부 병렬화가 가능하다.
 
 ---
 
@@ -100,11 +102,18 @@ graph TD
 
 **목표**
 
+- canonical entity truth source를 먼저 고정해 exact recovery / benchmark / API가 같은
+  identity namespace를 보게 만들기
 - `anchor miss -> resolver 후보 0개` 병목 제거
 - exact entity recovery를 broad search와 분리된 독립 능력으로 승격
 
 **포함 태스크**
 
+- `TA1-T1`
+- `TA1-T2`
+- `TA1-T3`
+- `TA1-T4`
+- `TA1-T5`
 - `TA2-T1`
 - `TA2-T2`
 - `TA2-T3`
@@ -122,6 +131,9 @@ graph TD
 
 **Exit Criteria**
 
+- runtime `entity_id`와 benchmark fixture `target_entity_id`가 같은 canonical namespace를
+  사용
+- fixture gold catalog required canonical entity가 active snapshot에 포함
 - planner fuzzy hit가 entity hypothesis source로 승격됨
 - resolver candidate builder가 anchors-only 계약에서 분리됨
 - corrective retry가 요청당 최대 1회 규칙으로 동작
@@ -129,6 +141,7 @@ graph TD
 
 **병렬 가능 범위**
 
+- `TA1`은 `TA2/TA3`보다 앞선 선행조건
 - `TA2`와 `TA3`는 일부 병렬 가능
 - 단 `TA3`는 `TA2-T1~T4` 없이는 실효성이 낮음
 
@@ -255,11 +268,6 @@ graph TD
 - `E8-T4`
 - `E8-T5`
 - `E8-T6`
-- `TA1-T1`
-- `TA1-T2`
-- `TA1-T3`
-- `TA1-T4`
-- `TA1-T5`
 
 **선행조건**
 
@@ -270,12 +278,11 @@ graph TD
 
 - `determinism_fingerprint`가 meta에 안정적으로 포함
 - planner / retrieval / ranking / abstain / fallback trace가 explain/debug에서 조립 가능
-- truth-source / fixture / production drift audit 계약이 정리됨
+- truth-source / fixture / production drift audit export가 canonical identity 기준으로 정리됨
 
 **병렬 가능 범위**
 
-- `E8`과 `TA1`은 병렬 가능
-- 단 release gate 정의는 함께 맞춰야 함
+- `E8`은 identity cutover 이후 export semantics를 마감하는 단계
 
 ### Wave 6. Agent Contract Hardening
 
@@ -342,11 +349,11 @@ graph TD
 | Wave | 포함 work pack | 대표 태스크 |
 |------|----------------|------------|
 | `Wave 0` | `E1` | `E1-T1` ~ `E1-T6` |
-| `Wave 1` | `Pack A` 일부 | `TA2-T1` ~ `TA3-T5` |
+| `Wave 1` | `TA1` + `Pack A` 일부 | `TA1-T1` ~ `TA1-T5`, `TA2-T1` ~ `TA3-T5` |
 | `Wave 2` | `Pack B` 일부 | `E2-T1` ~ `E5-T6` |
 | `Wave 3` | `Pack C` 일부 | `E3-T1` ~ `E4-T5` |
 | `Wave 4` | `Pack B` + `Pack A` 후반 | `E6-T1` ~ `E6-T5`, `TA4-T1` ~ `TA5-T3` |
-| `Wave 5` | `Pack C` + `TA1` | `E8-T1` ~ `E8-T6`, `TA1-T1` ~ `TA1-T5` |
+| `Wave 5` | `Pack C` | `E8-T1` ~ `E8-T6` |
 | `Wave 6` | `Pack D` | `E7-T1` ~ `E7-T5` |
 
 ---
@@ -476,7 +483,7 @@ graph TD
 |----------|----------|
 | `E1` | `src/domain/retrieval/service/candidate-pool.ts`, `src/domain/ranking/service/ranker.ts`, `src/domain/shared/utils/stable-comparator.ts` |
 | `TA2/TA3` | `src/domain/query/service/planner.ts`, `src/application/search/search-usecase-resolver-candidates.ts`, `src/domain/resolver/service/resolver.ts`, `src/application/search/search.usecase.ts` |
-| `TA1` | external fixture repo + production alias/entity graph 경계 문서 |
+| `TA1` | `scripts/etl/vivino-to-silver.ts`, `scripts/etl/build-search-snapshot.ts`, `scripts/etl/build-alias-artifact.ts`, `scripts/etl/publish-runtime-substrates.ts`, canonical graph schema / source-link tables |
 | `E2` | `src/domain/query/service/constraint-compiler.ts`, `src/domain/query/service/constraint-sat.ts` |
 | `E3` | `src/domain/query/service/planner.ts`, `src/domain/query/service/execution-compiler.ts`, `src/domain/query/model/query-plan.ts` |
 | `E4` | `src/domain/retrieval/model/candidate-envelope.ts`, `src/domain/retrieval/service/evidence-accumulator.ts`, `src/domain/retrieval/service/candidate-assembly.ts` |

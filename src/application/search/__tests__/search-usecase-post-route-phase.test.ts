@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runSearchPostRoutePhase } from '../search-usecase-post-route-phase.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
+import type { EntityResolveResult } from '../../../domain/resolver/model/resolve-result.js';
+
+const minimalResolveResult: EntityResolveResult = {
+  status: 'ambiguous',
+  candidates: [],
+  conformalSetSize: 1,
+  decisionTrace: {
+    queryClass: 'short_entity',
+    top1CalibratedScore: 0,
+    top2CalibratedScore: 0,
+    calibratedGap: 0,
+    decisionConfidenceC: 0,
+    ambiguityDetected: false,
+    ambiguityTypes: [],
+    appliedThresholds: { resolveThreshold: 0.5, gapThreshold: 0.1 },
+    outcomeReasonCodes: [],
+  },
+};
 
 describe('runSearchPostRoutePhase', () => {
   it('stores entropy-abstain responses in the cache', async () => {
@@ -59,7 +77,7 @@ describe('runSearchPostRoutePhase', () => {
       request: { query: 'find bordeaux' },
       requestId: 'req-1',
       startTime: Date.now(),
-      resolveResult: {} as never,
+      resolveResult: minimalResolveResult,
       rankedResults: [],
       effectiveRoute: 'hybrid',
       plannerSuggestedMode: 'hybrid',

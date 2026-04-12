@@ -32,12 +32,15 @@ import type {
   RelevanceGrade,
   RelevanceJudgment,
 } from '../../src/domain/evaluation/model/relevance-judgment.js';
-import { tokenize } from './scenarios-to-labeling-input.js';
+import { tokenize } from './tokenize-text.js';
+import {
+  RELEVANCE_LABELING_INPUT_CORPUS,
+  requireFixtureCorpusPath,
+} from './fixture-corpus-paths.js';
 
 // ── Named constants ────────────────────────────────────────────────────────
 
-const DEFAULT_INPUT = 'data/relevance/scenarios-labeling-input.jsonl';
-const DEFAULT_OUTPUT = 'data/relevance/scenarios-silver-stub.ndjson';
+const DEFAULT_OUTPUT = 'data/relevance/scenarios-silver-stub.snapshot.ndjson';
 const STUB_MODEL_NAME = 'stub-labeler-v1';
 
 /** Confidence returned for "strong match" stub decisions (≥ 2 shared tokens). */
@@ -89,14 +92,17 @@ Usage:
   npx tsx scripts/eval/generate-silver-labels-stub.ts [options]
 
 Options:
-  --input <path>       Input NDJSON. Default: ${DEFAULT_INPUT}
+  --input <path>       Input NDJSON. Default: external fixture relevance labeling corpus
   --output <path>      Output NDJSON. Default: ${DEFAULT_OUTPUT}
   --help, -h           Show this help and exit.
 `);
 }
 
 function parseCliArgs(argv: readonly string[]): CliArgs {
-  let input = DEFAULT_INPUT;
+  let input = requireFixtureCorpusPath(
+    RELEVANCE_LABELING_INPUT_CORPUS,
+    'generate-silver-labels-stub default input resolution',
+  );
   let output = DEFAULT_OUTPUT;
   let help = false;
 
