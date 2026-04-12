@@ -13,6 +13,8 @@ import { getCurrentFeatureSchemaHash } from '../../src/domain/ranking/service/fe
 import { buildSearchSnapshot } from './build-search-snapshot.js';
 import { publishRuntimeSubstrates } from './publish-runtime-substrates.js';
 import { verifySearchSnapshotReadiness } from './verify-search-snapshot-readiness.js';
+import { verifyRuntimeGoldCatalogCoverage } from './verify-runtime-gold-catalog-coverage.js';
+import { resolveDefaultFixtureRepoRoot } from './snapshot-entity-identity.js';
 import { atomicWriteFile } from './etl-utils.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
@@ -410,6 +412,29 @@ async function run(): Promise<void> {
       runtimeStatePath: stagedRuntimeStatePath,
       manifestPath: built.manifestPath,
     });
+    const fixtureRoot = args.fixtureRepoRoot ?? resolveDefaultFixtureRepoRoot();
+    if (fixtureRoot != null) {
+      console.log('🎯 Verifying runtime gold catalog coverage');
+      const config = loadConfig();
+      if (!shouldUsePgPool(config.pg)) {
+        throw new Error('Postgres configuration is required for runtime gold coverage verification');
+      }
+      const coveragePool = createPgPool(config.pg);
+      try {
+        const coverage = await verifyRuntimeGoldCatalogCoverage({
+          pool: coveragePool,
+          snapshotId: built.manifest.snapshotId,
+          fixtureRepoRoot: fixtureRoot,
+        });
+        console.log(
+          `🎯 Runtime gold coverage passed: ${coverage.requiredCanonicalIds} canonical id(s) confirmed`,
+        );
+      } finally {
+        await coveragePool.end();
+      }
+    } else {
+      console.log('🎯 Runtime gold coverage skipped: no fixture repo resolved (set FIXTURE_REPO_PATH to enforce)');
+    }
     console.log('📌 Promoting staged runtime files');
     await promoteStagedFile(stagedRuntimeNlMappingsPath, args.runtimeNlMappingsPath);
     await rewriteRuntimeStateForActivePaths({

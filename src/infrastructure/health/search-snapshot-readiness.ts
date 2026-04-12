@@ -5,7 +5,10 @@ import { hashStableJson, hashText, stableJsonStringify } from '../../shared/util
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../shared/constants/search-snapshot.js';
 import type { ReadinessStatus } from '../../interface/http/routes/health.route.js';
 import { getCurrentFeatureSchemaHash } from '../../domain/ranking/service/feature-parity-hash.js';
-import { SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN } from '../../shared/constants/public-entity-id-namespace.js';
+import {
+  SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
+  SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
+} from '../../shared/constants/public-entity-id-namespace.js';
 
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 
@@ -179,6 +182,33 @@ async function loadNlMappingsRuntimeInfo(nlMappingsRuntimePath: string): Promise
     count: nlMappingsParsed.mappings.length,
     hash: hashText(`${stableJsonStringify(nlMappingsParsed)}\n`),
   };
+}
+
+/**
+ * ADR-007: Vespa documents must use canonical entity_id, never source-style ids.
+ * Counts documents whose attribute `entity_id` starts with the source-record prefix.
+ * Uses YQL `matches` against the anchored prefix pattern.
+ */
+async function fetchVespaNamespaceSealViolationCount(vespaUrl: string): Promise<number> {
+  const anchoredPrefix = `^${SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX}`;
+  const response = await fetch(`${vespaUrl.replace(/\/$/, '')}/search/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      yql: `select * from sources * where entity_id matches ${JSON.stringify(anchoredPrefix)} limit 0;`,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Vespa namespace seal query failed with status ${response.status}`);
+  }
+  const body = await response.json() as {
+    root?: { fields?: { totalCount?: unknown } };
+  };
+  const totalCount = body.root?.fields?.totalCount;
+  if (typeof totalCount !== 'number' || !Number.isFinite(totalCount)) {
+    throw new Error('Vespa namespace seal query returned no finite totalCount');
+  }
+  return totalCount;
 }
 
 async function fetchVespaSnapshotDocumentCount(vespaUrl: string, snapshotId: string): Promise<number> {
@@ -369,11 +399,37 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
        WHERE source_provenance->>'search_snapshot_id' = $1`,
       [runtimeState.snapshotId],
     ),
-    args.pool.query<{ c: string }>(
-      `SELECT (
-         (SELECT COUNT(*) FROM entities WHERE search_snapshot_id = $1 AND entity_id LIKE $2)
-         + (SELECT COUNT(*) FROM canonical_entities WHERE canonical_entity_id LIKE $2)
-       )::text AS c`,
+    args.pool.query<{
+      entities_violations: string;
+      canonical_entities_violations: string;
+      aliases_violations: string;
+      ambiguity_registry_violations: string;
+      canonical_ambiguity_violations: string;
+    }>(
+      `SELECT
+         (SELECT COUNT(*) FROM entities
+            WHERE search_snapshot_id = $1 AND entity_id LIKE $2)::text
+           AS entities_violations,
+         (SELECT COUNT(*) FROM canonical_entities
+            WHERE canonical_entity_id LIKE $2)::text
+           AS canonical_entities_violations,
+         (SELECT COUNT(*) FROM aliases
+            WHERE search_snapshot_id = $1 AND entity_id LIKE $2)::text
+           AS aliases_violations,
+         (SELECT COUNT(*) FROM ambiguity_registry
+            WHERE search_snapshot_id = $1
+              AND EXISTS (
+                SELECT 1 FROM unnest(entity_ids) AS eid
+                 WHERE eid LIKE $2
+              ))::text
+           AS ambiguity_registry_violations,
+         (SELECT COUNT(*) FROM canonical_ambiguity_registry
+            WHERE EXISTS (
+              SELECT 1
+                FROM jsonb_array_elements_text(canonical_entity_ids) AS eid
+               WHERE eid LIKE $2
+            ))::text
+           AS canonical_ambiguity_violations`,
       [runtimeState.snapshotId, SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN],
     ),
     args.pool.query<{ c: string }>(
@@ -405,10 +461,25 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
       `Canonical graph entity count mismatch: canonical_entities for snapshot=${canonicalGraphEntityCount}, runtime entities=${runtimeState.counts.entities}`,
     );
   }
-  const vivinoNamespaceViolations = parseSqlCountText(vivinoNamespaceSealResult.rows[0]?.c, 'vivino_namespace_seal');
-  if (vivinoNamespaceViolations > 0) {
+  const sealRow = vivinoNamespaceSealResult.rows[0];
+  const sealCounts = {
+    entities: parseSqlCountText(sealRow?.entities_violations, 'namespace_seal.entities'),
+    canonical_entities: parseSqlCountText(sealRow?.canonical_entities_violations, 'namespace_seal.canonical_entities'),
+    aliases: parseSqlCountText(sealRow?.aliases_violations, 'namespace_seal.aliases'),
+    ambiguity_registry: parseSqlCountText(sealRow?.ambiguity_registry_violations, 'namespace_seal.ambiguity_registry'),
+    canonical_ambiguity_registry: parseSqlCountText(sealRow?.canonical_ambiguity_violations, 'namespace_seal.canonical_ambiguity_registry'),
+  } as const;
+  const sealOffenders = Object.entries(sealCounts).filter(([, n]) => n > 0);
+  if (sealOffenders.length > 0) {
+    const detail = sealOffenders.map(([table, n]) => `${table}=${n}`).join(', ');
     throw new Error(
-      `ADR-007 namespace seal: ${vivinoNamespaceViolations} row(s) use entity_id LIKE '${SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN}' in entities or canonical_entities`,
+      `ADR-007 namespace seal: source-style id (LIKE '${SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN}') present in ${detail}`,
+    );
+  }
+  const vespaNamespaceViolations = await fetchVespaNamespaceSealViolationCount(args.vespaUrl);
+  if (vespaNamespaceViolations > 0) {
+    throw new Error(
+      `ADR-007 namespace seal: Vespa contains ${vespaNamespaceViolations} document(s) whose entity_id starts with '${SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX}'`,
     );
   }
 

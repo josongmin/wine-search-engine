@@ -861,3 +861,106 @@ CI에 추가할 명령:
 4. `/v1/search`, `/v1/entity/resolve`, `/v1/agent` responses expose canonical IDs only
 5. live benchmark preflight passes entity compatibility without adapter translation
 6. source record lineage remains queryable through explicit source-link surfaces
+
+## Appendix: Cutover runbook (operational)
+
+이 절차는 코드 머지가 끝난 뒤 실제 운영 환경에 ADR-007 컷오버를 적용하기 위한 단계다.
+모든 단계는 fail-closed로 설계돼 있어 중간에 실패하면 그 단계에서 멈추고 다음으로 넘어가지 않는다.
+
+### 0. Preconditions
+
+- `FIXTURE_REPO_PATH` (또는 sibling `wine-engine-fixture/`)가 존재하고 다음 두 파일이 있어야 한다:
+  - `goldens/canonical-entities.json`
+  - `goldens/target-entity-map.json`
+- `DATABASE_URL`이 운영 PG를 가리키고 ADR-007 마이그레이션(`009_canonical_entity_graph.sql`)이 적용 가능한 상태여야 한다.
+- Vespa endpoint(`config.vespa.url`)가 도달 가능해야 한다.
+
+### 1. Apply migrations
+
+```sh
+npm run migrate
+```
+
+`canonical_entities` / `canonical_aliases` / `canonical_ambiguity_registry` / `canonical_entity_source_links`가
+존재해야 다음 단계가 동작한다.
+
+### 2. Build & publish search snapshot
+
+```sh
+npm run etl:publish-search-snapshot -- --fixture-repo "$FIXTURE_REPO_PATH"
+```
+
+이 한 줄이 다음을 모두 수행한다 (각 단계 fail-closed):
+
+1. snapshot artifact build (fixture gold overlay 적용 — `vivino-` 절대 안 들어감)
+2. snapshot-bound LTR 준비
+3. Vespa 색인 (이전 snapshot의 stale 문서 정리 포함)
+4. PG 런타임 substrate publish (entities/aliases/ambiguity_registry)
+5. **readiness verify** — 다음을 모두 강제:
+   - PG count/hash mismatch
+   - canonical graph entity/alias/ambiguity projection mismatch
+   - **namespace seal**: `entities`, `canonical_entities`, `aliases`, `ambiguity_registry`, `canonical_ambiguity_registry`, **Vespa documents** 어디에도 `vivino-*` 없음
+6. **runtime gold catalog coverage** — fixture `target-entity-map.json`의 non-null target이 모두 활성 snapshot의 `entities` + `canonical_entities`에 존재
+7. staged runtime state 파일 promote
+
+여기까지 한 번에 통과하지 못하면 promote가 일어나지 않고 이전 snapshot이 그대로 유지된다.
+
+### 3. Audit (independent verification)
+
+publish가 끝난 뒤 운영 채널에서 한 번 더 직접 확인:
+
+```sh
+psql "$DATABASE_URL" -f scripts/ops/t3-runtime-namespace-audit.sql
+```
+
+기대 결과 — 다음 다섯 카운트는 모두 0:
+
+- `entities_vivino_prefix`
+- `canonical_entities_vivino_prefix`
+- `aliases_vivino_prefix`
+- `ambiguity_registry_vivino_prefix`
+- `canonical_ambiguity_vivino_prefix`
+
+그리고 다음 세 카운트는 0보다 커야 한다:
+
+- `canonical_entities_rows`
+- `canonical_aliases_rows`
+- `canonical_ambiguity_registry_rows`
+
+### 4. Verify readiness explicitly (out-of-band)
+
+publish가 promote까지 갔지만 외부 검증이 필요할 때:
+
+```sh
+npx tsx scripts/etl/verify-search-snapshot-readiness.ts
+```
+
+`search_snapshot_readiness=passed`가 출력되면 OK.
+
+### 5. Re-enable live benchmark
+
+```sh
+npm run eval:entity:fixtures:live
+npm run eval:noisy
+npm run eval:search-feature:fixtures:live
+```
+
+각 러너의 preflight는 fixture canonical id가 active snapshot에 존재하는지 다시 확인한다.
+한 줄이라도 실패하면 cutover가 부분적으로 적용된 것이며, 코드를 되돌리지 말고 readiness/audit으로
+원인을 좁혀라.
+
+### Rollback
+
+`publish-search-snapshot`은 verify 실패 시 자동으로 이전 snapshot으로 rollback한다 (Vespa 재색인 + 런타임 substrate 재publish + readiness 재확인). 수동 rollback이 필요한 상황은 보통:
+
+- migration 자체가 깨졌거나
+- fixture가 잘못 갱신돼 모든 snapshot이 cutover gate에서 막힐 때
+
+이 두 경우는 fixture를 먼저 고치고 step 2부터 다시 실행한다. 운영 DB를 손으로 건드리지 마라.
+
+### Do NOT
+
+- fixture canonical id를 runtime `vivino-*`에 매핑하는 임시 adapter를 추가하지 마라
+- preflight의 entity compatibility 체크를 끄지 마라
+- readiness fail-closed 분기를 optional로 낮추지 마라
+- legacy namespace를 허용하는 fallback을 추가하지 마라
