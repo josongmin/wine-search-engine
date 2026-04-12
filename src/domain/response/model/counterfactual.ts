@@ -1,5 +1,5 @@
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
-import type { EntityId, DecisionSnapshot } from '../../shared/types/index.js';
+import type { CanonicalEntityId, DecisionSnapshot } from '../../shared/types/index.js';
 import type { AuditExtension } from '../../audit/model/audit-extension.js';
 import type {
   SpecializedFallbackReason,
@@ -28,7 +28,7 @@ export type CounterfactualRejectionType =
  */
 export interface CounterfactualReject {
   /** Entity that was rejected. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Display label for the rejected entity (when available). */
   readonly canonicalLabel?: string | undefined;

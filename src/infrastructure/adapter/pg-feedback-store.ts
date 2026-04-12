@@ -5,8 +5,8 @@ import type {
   AggregatedFeedbackStats,
 } from '../../domain/learning/port/feedback-store.port.js';
 import type { FeedbackSignal, FeedbackType } from '../../domain/learning/model/feedback-signal.js';
-import type { EntityId, QueryClass } from '../../domain/shared/types/index.js';
-import { createEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId, QueryClass } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { parseDecisionSnapshotJsonb } from './jsonb-schemas.js';
@@ -47,7 +47,7 @@ function rowToSignal(row: FeedbackRow): FeedbackSignal {
     type: toFeedbackType(row.signal_type),
     query: row.query,
     queryClass: toQueryClass(row.query_class),
-    entityId: createEntityId(row.entity_id),
+    entityId: createCanonicalEntityId(row.entity_id),
     isPositive: row.is_positive,
     timestamp: row.created_at,
     sessionId: row.session_id,
@@ -128,7 +128,7 @@ export class PgFeedbackStore implements FeedbackStore {
     return parseInt(result.rows[0]?.count ?? '0', 10);
   }
 
-  async getAggregatedStats(entityId: EntityId): Promise<AggregatedFeedbackStats> {
+  async getAggregatedStats(entityId: CanonicalEntityId): Promise<AggregatedFeedbackStats> {
     const result = await this.pool.query<{
       clicks: string;
       purchases: string;

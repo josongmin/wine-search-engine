@@ -6,7 +6,7 @@ import type { EnrichedSilverRecord } from './types.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { ConflictResolver } from '../../src/domain/alias/service/conflict-resolver.js';
 import type { AliasConflict, AliasConflictEntry } from '../../src/domain/alias/model/alias-conflict.js';
-import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
 import {
   hashStableJson,
   serializeNdjson,
@@ -69,14 +69,14 @@ function chooseBestClaimPerEntity(claims: readonly AliasClaim[]): readonly Alias
     }
 
     const candidateScore = computeEntryScore({
-      entityId: createEntityId(claim.entityId),
+      entityId: createCanonicalEntityId(claim.entityId),
       aliasType: claim.type as AliasConflictEntry['aliasType'],
       confidencePrior: claim.confidencePrior,
       scope: claim.scope as AliasConflictEntry['scope'],
       sourceTrust: claim.sourceTrust,
     });
     const currentScore = computeEntryScore({
-      entityId: createEntityId(current.entityId),
+      entityId: createCanonicalEntityId(current.entityId),
       aliasType: current.type as AliasConflictEntry['aliasType'],
       confidencePrior: current.confidencePrior,
       scope: current.scope as AliasConflictEntry['scope'],
@@ -145,7 +145,7 @@ function inferSeverity(claims: readonly AliasClaim[]): 'low' | 'medium' | 'high'
 function buildConflict(normalizedValue: string, claims: readonly AliasClaim[]): AliasConflict {
   const perEntityBest = chooseBestClaimPerEntity(claims);
   const conflictingEntities: readonly AliasConflictEntry[] = perEntityBest.map((claim) => ({
-    entityId: createEntityId(claim.entityId),
+    entityId: createCanonicalEntityId(claim.entityId),
     aliasType: claim.type as AliasConflictEntry['aliasType'],
     confidencePrior: claim.confidencePrior,
     scope: claim.scope as AliasConflictEntry['scope'],

@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { AliasMatcher, AliasMatchResult } from '../../domain/query/service/anchor-extractor.js';
-import { createEntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
@@ -187,7 +187,7 @@ function groupRows<TRow extends AliasRow>(
     matches.push({
       surfaceForm: data.surfaceForm,
       normalizedForm: norm,
-      entityIds: Array.from(data.entityIds).map(createEntityId),
+      entityIds: Array.from(data.entityIds).map((id) => createCanonicalEntityId(id)),
       matchConfidence: data.confidence,
       lookupStrategy: Array.from(data.strategies).sort().join('+'),
     });

@@ -17,8 +17,8 @@
 import 'dotenv/config';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../../src/infrastructure/vespa/vespa-search-index.js';
-import type { EntityId } from '../../src/domain/shared/types/index.js';
-import { isEntityId } from '../../src/domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../src/domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,15 +55,15 @@ function fail(summary: string, field: string, reason: string): void {
  * Fetches the entity_id of the first available document from Vespa.
  * Uses a broad YQL query to find any indexed wine document.
  */
-async function findSampleEntityId(client: VespaClient): Promise<EntityId | null> {
+async function findSampleEntityId(client: VespaClient): Promise<CanonicalEntityId | null> {
   const response = await client.query(
     `select entity_id from ${DOC_TYPE} where true limit 1`,
   );
   const hit = response.root.children?.[0];
   if (hit === undefined) return null;
   const raw = hit.fields['entity_id'];
-  if (typeof raw === 'string' && isEntityId(raw)) return raw;
-  return null;
+  if (typeof raw !== 'string') return null;
+  return createCanonicalEntityId(raw);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ async function findSampleEntityId(client: VespaClient): Promise<EntityId | null>
  */
 async function checkHitSummary(
   searchIndex: VespaSearchIndex,
-  entityId: EntityId,
+  entityId: CanonicalEntityId,
 ): Promise<void> {
   const results = await searchIndex.fetchWithHitSummary([entityId]);
   const hit = results[0];
@@ -120,7 +120,7 @@ async function checkHitSummary(
  */
 async function checkFeatureSummary(
   searchIndex: VespaSearchIndex,
-  entityId: EntityId,
+  entityId: CanonicalEntityId,
 ): Promise<void> {
   const results = await searchIndex.fetchWithFeatureSummary([entityId]);
   const hit = results[0];

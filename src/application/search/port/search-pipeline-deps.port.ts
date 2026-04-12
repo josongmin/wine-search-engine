@@ -13,9 +13,9 @@ import type { RankingOutput } from '../../../domain/ranking/port/ranker.port.js'
 import type { DecisionInput } from '../../../domain/decision/model/decision-input.js';
 import type { DecisionOutput } from '../../../domain/decision/model/decision-output.js';
 import type {
+  CanonicalEntityId,
   ConstraintBundle,
   DecisionSnapshot,
-  EntityId,
 } from '../../../domain/shared/types/index.js';
 import type { ResponseBuildParams } from '../../../domain/response/service/response-builder.js';
 import type { SearchResponseV1 } from '../../../domain/response/model/search-response.js';
@@ -68,7 +68,7 @@ export interface CandidatePoolPort {
 }
 
 export interface EntityDocumentLookupPort {
-  getDocument(entityId: EntityId): Promise<RetrievalDocument | null>;
+  getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
 }
 
 export interface BrowseRetrieverPort {
@@ -87,7 +87,7 @@ export interface BrowseRetrieverPort {
 
 export interface CompareRetrieverPort {
   compareAgainstAnchor(
-    anchorEntityId: EntityId,
+    anchorEntityId: CanonicalEntityId,
     constraints: ConstraintBundle,
     limit: number,
   ): Promise<readonly HybridCandidate[]>;
@@ -138,5 +138,5 @@ export interface BlockingUseCasePort {
     query: string,
     normalizedQuery: string,
     options?: { readonly broader?: boolean },
-  ): Promise<readonly EntityId[]>;
+  ): Promise<readonly CanonicalEntityId[]>;
 }

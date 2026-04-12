@@ -1,4 +1,4 @@
-import type { EntityId, EvidenceItem } from '../../shared/types/index.js';
+import type { CanonicalEntityId, EvidenceItem } from '../../shared/types/index.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from '../../retrieval/model/candidate-envelope.js';
 import type { ScoreDecomposition } from './score-decomposition.js';
@@ -101,7 +101,7 @@ export interface ComponentScores {
  */
 export interface RankedResult {
   /** The entity this result refers to. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Canonical display label (e.g. "Opus One 2018"). */
   readonly canonicalLabel: string;

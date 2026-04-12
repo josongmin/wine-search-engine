@@ -2,7 +2,7 @@ import type { AliasType } from '../../domain/alias/model/alias.js';
 import type { AnchorCandidate } from '../../domain/query/model/anchor-candidate.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
 import type { MatchSignalSet } from '../../domain/resolver/model/match-signal-set.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { EntityDocumentLookupPort } from './port/search-pipeline-deps.port.js';
 import { DomainError } from '../../domain/shared/error/domain-error.js';
@@ -142,7 +142,7 @@ export async function buildResolverCandidatesFromGenerator(
   }
 
   // Collect all unique entity IDs: from anchors + blocker-only additions
-  const allEntityIds = new Set<EntityId>();
+  const allEntityIds = new Set<CanonicalEntityId>();
   for (const anchor of input.anchors) {
     for (const id of anchor.candidateEntityIds) {
       allEntityIds.add(id);
@@ -162,7 +162,7 @@ export async function buildResolverCandidatesFromGenerator(
   }
 
   // Resolve documents: use preloaded cache first, then fetch missing IDs.
-  const docMap = new Map<EntityId, RetrievalDocument>();
+  const docMap = new Map<CanonicalEntityId, RetrievalDocument>();
 
   // Populate from upstream prefetch cache
   if (input.preloadedDocs != null) {

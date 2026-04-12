@@ -1,4 +1,4 @@
-import type { DecisionStatus, EntityId, NextAction } from '../../shared/types/index.js';
+import type { CanonicalEntityId, DecisionStatus, NextAction } from '../../shared/types/index.js';
 import type { AmbiguityType } from './ambiguity-state.js';
 import type { ResolvedCandidate } from './resolved-candidate.js';
 import type { ResolverDecisionTrace } from './decision-trace.js';
@@ -25,7 +25,7 @@ export interface EntityResolveResult {
 
   /** The top-ranked entity, if one was identified. */
   readonly topEntity?: {
-    readonly entityId: EntityId;
+    readonly entityId: CanonicalEntityId;
     readonly canonicalLabel: string;
     readonly calibratedScore: number;
   };

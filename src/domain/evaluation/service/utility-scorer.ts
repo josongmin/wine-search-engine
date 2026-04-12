@@ -1,6 +1,6 @@
 import type { EvalCase } from '../model/eval-case.js';
 import type { EvalResult } from '../model/eval-result.js';
-import type { DecisionStatus, EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId, DecisionStatus } from '../../shared/types/index.js';
 
 /**
  * Decision Utility weights, per RFC-009 §2.
@@ -51,7 +51,7 @@ export class UtilityScorer {
    */
   score(
     predictedStatus: DecisionStatus,
-    predictedEntityId: EntityId | undefined,
+    predictedEntityId: CanonicalEntityId | undefined,
     evalCase: EvalCase,
   ): UtilityClassification {
     // Failed: system acknowledged it couldn't answer — neutral score
@@ -145,8 +145,8 @@ export class UtilityScorer {
    * Both must be defined and equal for a correct resolve.
    */
   private isEntityMatch(
-    predicted: EntityId | undefined,
-    expected: EntityId | undefined,
+    predicted: CanonicalEntityId | undefined,
+    expected: CanonicalEntityId | undefined,
   ): boolean {
     if (predicted === undefined || expected === undefined) return false;
     return predicted === expected;

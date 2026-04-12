@@ -13,14 +13,14 @@ import { describe, it, expect } from 'vitest';
 import { ConstraintFilter } from '../constraint-filter.js';
 import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import type { NormalizedConstraint } from '../../../shared/types/index.js';
-import type { EntityId } from '../../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../../shared/types/index.js';
 
 function makeCandidate(
   overrides: Partial<HybridCandidate> & { id?: string } = {},
 ): HybridCandidate {
   const { id = 'wine-001', ...rest } = overrides;
   return {
-    entityId: id as EntityId,
+    entityId: id as CanonicalEntityId,
     matchedConstraints: [],
     unmetHardConstraints: [],
     retrievalFusionScore: 0.5,

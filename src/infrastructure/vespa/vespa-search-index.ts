@@ -5,8 +5,8 @@
  * fetch, and document upsert / bulk-upsert operations.
  */
 
-import type { EntityId } from '../../domain/shared/types/index.js';
-import { isEntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import type {
   RetrievalDocument,
@@ -574,17 +574,17 @@ export class VespaSearchIndex implements SearchIndexPort {
    * @param entityId - The entity to fetch.
    * @returns The document, or `null` if not found.
    */
-  async getDocument(entityId: EntityId): Promise<RetrievalDocument | null> {
+  async getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null> {
     const fields = await this.client.get(entityId);
     if (fields === null) return null;
     return fromVespaFields(fields);
   }
 
   async getDocuments(
-    entityIds: readonly EntityId[],
-  ): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>> {
     if (entityIds.length === 0) {
-      return new Map<EntityId, RetrievalDocument>();
+      return new Map<CanonicalEntityId, RetrievalDocument>();
     }
     if (entityIds.length > MAX_BULK_FETCH_IDS) {
       throw new Error(`getDocuments: too many ids (${entityIds.length} > ${MAX_BULK_FETCH_IDS})`);
@@ -593,7 +593,7 @@ export class VespaSearchIndex implements SearchIndexPort {
       const doc = await this.getDocument(entityId);
       return doc === null ? null : [entityId, doc] as const;
     }));
-    const docs = new Map<EntityId, RetrievalDocument>();
+    const docs = new Map<CanonicalEntityId, RetrievalDocument>();
     for (const result of settled) {
       if (result.status === 'fulfilled' && result.value !== null) {
         docs.set(result.value[0], result.value[1]);
@@ -671,7 +671,7 @@ export class VespaSearchIndex implements SearchIndexPort {
    * @returns Hit projections in the same order as `entityIds` (absent docs omitted).
    */
   async fetchWithHitSummary(
-    entityIds: readonly EntityId[],
+    entityIds: readonly CanonicalEntityId[],
   ): Promise<readonly RetrievalHitProjection[]> {
     return this.batchFetchBySummary({
       entityIds,
@@ -701,7 +701,7 @@ export class VespaSearchIndex implements SearchIndexPort {
    * @returns Feature projections in the same order as `entityIds` (absent docs omitted).
    */
   async fetchWithFeatureSummary(
-    entityIds: readonly EntityId[],
+    entityIds: readonly CanonicalEntityId[],
   ): Promise<readonly RetrievalFeatureProjection[]> {
     return this.batchFetchBySummary({
       entityIds,
@@ -727,7 +727,7 @@ export class VespaSearchIndex implements SearchIndexPort {
    * emits in input order. A single batch failure does not discard the rest.
    */
   private async batchFetchBySummary<T>(opts: {
-    entityIds: readonly EntityId[];
+    entityIds: readonly CanonicalEntityId[];
     callerName: string;
     selectFields: string;
     summaryName: string;
@@ -742,7 +742,7 @@ export class VespaSearchIndex implements SearchIndexPort {
 
     // Batch large ID lists to avoid unbounded YQL IN-clause size.
     // Entity IDs are escaped via yqlEscapeString to prevent YQL injection.
-    const batches: EntityId[][] = [];
+    const batches: CanonicalEntityId[][] = [];
     for (let offset = 0; offset < entityIds.length; offset += FETCH_SUMMARY_BATCH_SIZE) {
       batches.push([...entityIds.slice(offset, offset + FETCH_SUMMARY_BATCH_SIZE)]);
     }
@@ -792,30 +792,31 @@ export class VespaSearchIndex implements SearchIndexPort {
   // -------------------------------------------------------------------------
 
   /**
-   * Extracts a validated {@link EntityId} from a Vespa hit's fields.
-   * Falls back to parsing the hit `id` URI as a last resort.
+   * Extracts a validated {@link CanonicalEntityId} from a Vespa hit's fields.
+   * Then parses the hit `id` URI document id segment (ADR-007: both must satisfy
+   * canonical public namespace rules — no source-record `vivino-` ids as public entity_id).
    *
    * @param hit - The Vespa search hit.
-   * @returns A valid entity ID.
-   * @throws {Error} If no usable entity ID can be found.
+   * @returns A valid canonical entity ID.
+   * @throws {Error} If no usable entity ID can be found or namespace rules are violated.
    */
-  private extractEntityId(hit: VespaHit): EntityId {
+  private extractEntityId(hit: VespaHit): CanonicalEntityId {
     // Prefer the indexed `entity_id` field.
     const fromField = hit.fields['entity_id'];
-    if (isString(fromField) && isEntityId(fromField)) {
-      return fromField;
+    if (isString(fromField) && fromField.length > 0) {
+      return createCanonicalEntityId(fromField);
     }
 
-    // Fall back to the document ID from the Vespa hit URI.
+    // Parse the document ID from the Vespa hit URI.
     // Format: "id:<namespace>:<doctype>::<docid>"
     const parts = hit.id.split('::');
     const docId = parts[parts.length - 1];
-    if (isString(docId) && isEntityId(docId)) {
-      return docId;
+    if (isString(docId) && docId.length > 0) {
+      return createCanonicalEntityId(docId);
     }
 
     throw new Error(
-      `Vespa: unable to extract EntityId from hit id="${hit.id}"`,
+      `Vespa: unable to extract CanonicalEntityId from hit id="${hit.id}"`,
     );
   }
 }

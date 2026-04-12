@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * A candidate anchor entity extracted from the query surface form.
@@ -15,7 +15,7 @@ export interface AnchorCandidate {
   readonly normalizedForm: string;
 
   /** Entity IDs that this surface form may refer to. */
-  readonly candidateEntityIds: readonly EntityId[];
+  readonly candidateEntityIds: readonly CanonicalEntityId[];
 
   /**
    * Query lookup variants that produced this anchor candidate.

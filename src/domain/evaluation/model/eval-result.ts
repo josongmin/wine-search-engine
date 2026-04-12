@@ -1,5 +1,5 @@
 import type {
-  EntityId,
+  CanonicalEntityId,
   DecisionStatus,
   EvidenceItem,
   DecisionSnapshot,
@@ -20,7 +20,7 @@ export interface EvalResult {
   readonly caseId: string;
 
   /** The entity ID predicted by the engine, if any. */
-  readonly predictedEntityId?: EntityId;
+  readonly predictedEntityId?: CanonicalEntityId;
 
   /** The decision status produced by the engine. */
   readonly predictedStatus: DecisionStatus;

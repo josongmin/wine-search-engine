@@ -304,12 +304,22 @@ npm run eval:noisy:validate
 **목적:** Agent의 답변 품질, 제약 조건 만족도, faithfulness 측정  
 **외부 서비스:** 실제 LLM (Anthropic/OpenAI) ✅ | 실제 검색 스택 ✅
 
+**릴리즈 게이트(픽스처 레포):** `npm run bench:agent:fixtures` — `AGENT_SCENARIOS`와 별개.
+
+**탐색용(`test/benchmark/agent/scenarios.ts`):**
+
 ```bash
-npm run benchmark:quick     # 20 시나리오, judge off, ~2분
-npm run benchmark:standard  # 80 시나리오, judge off
-npm run benchmark:nightly   # 233 시나리오, 3 samples, full judge, 3시간+
-npm run bench:agent         # default full profile
+npm run benchmark:quick       # --profile quick: 20개, judge off
+npm run benchmark:standard    # 80개, judge off (--no-judge)
+npm run bench:run             # 80개, judge on (표준 프로파일 + judge)
+npm run benchmark:nightly     # nightly 프로파일, judge on·3 samples (매우 김)
+npm run bench:agent           # --profile 없음 → 코퍼스 전체, judge on (비용 큼; 보통은 위 프로파일 사용)
+npm run bench:agent -- --profile quick   # CLI 플래그 전달 시 이 형태(직접 tsx 호출 스크립트)
 ```
+
+`npm run eval:fixtures:verify` / `npm run test:verification:fixtures:governance` / `npm run test:verification:fixtures` — **셋 다 동일**(픽스처 레포 구조·FixtureLoader·스위트 계약 검증).
+검색+에이전트+퍼포 픽스처 스모크 일괄은 `npm run test:verification:fixtures:full`.
+오프라인 게이트 + 거버넌스만은 `npm run eval:full` (= `eval:offline:gate` + `eval:fixtures:verify`).
 
 ---
 

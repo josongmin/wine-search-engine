@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { AliasRepository } from '../../domain/alias/port/alias-repository.port.js';
 import type { Alias, AliasScope, AliasType } from '../../domain/alias/model/alias.js';
-import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 
 function toAliasType(value: string): AliasType {
   if (
@@ -45,7 +45,7 @@ interface AliasRow {
 function rowToAlias(row: AliasRow): Alias {
   return {
     aliasId: row.alias_id,
-    entityId: createEntityId(row.entity_id),
+    entityId: createCanonicalEntityId(row.entity_id),
     value: row.surface_form,
     normalizedValue: row.normalized_value,
     type: toAliasType(row.alias_type),
@@ -79,7 +79,7 @@ export class PgAliasRepository implements AliasRepository {
     return result.rows.map(rowToAlias);
   }
 
-  async findByEntity(entityId: EntityId): Promise<readonly Alias[]> {
+  async findByEntity(entityId: CanonicalEntityId): Promise<readonly Alias[]> {
     const result = await this.pool.query<AliasRow>(
       `SELECT * FROM aliases WHERE entity_id = $1 ORDER BY confidence DESC`,
       [entityId],

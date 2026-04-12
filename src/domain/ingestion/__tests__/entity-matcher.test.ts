@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { SourceTrustProfile } from '../model/source-trust-profile.js';
 import type { CanonicalizationCandidate } from '../model/canonicalization-candidate.js';
 import { EntityMatcher, type EntityRepository, type MatchableEntity } from '../service/entity-matcher.js';
@@ -8,7 +8,7 @@ import { EntityMatcher, type EntityRepository, type MatchableEntity } from '../s
 // Helpers
 // ---------------------------------------------------------------------------
 
-const entityId = (id: string): EntityId => id as unknown as EntityId;
+const entityId = (id: string): CanonicalEntityId => id as unknown as CanonicalEntityId;
 
 const highTrust: SourceTrustProfile = {
   sourceSystem: 'test',

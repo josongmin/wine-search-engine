@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * An entry in the ambiguity registry tracking unresolved alias conflicts.
@@ -9,7 +9,7 @@ export interface AmbiguityRegistryEntry {
   /** The surface form that maps to multiple entities. */
   readonly surfaceForm: string;
   /** Entity IDs that compete for this surface form. */
-  readonly conflictingEntityIds: readonly EntityId[];
+  readonly conflictingEntityIds: readonly CanonicalEntityId[];
   /** Classification of the conflict (e.g. 'homonym', 'near_duplicate'). */
   readonly conflictType: string;
   /** When this entry was created. */
@@ -28,7 +28,7 @@ export interface AmbiguityRegistryEntry {
  */
 export function createAmbiguityEntry(
   surfaceForm: string,
-  conflictingEntityIds: readonly EntityId[],
+  conflictingEntityIds: readonly CanonicalEntityId[],
   conflictType: string,
 ): AmbiguityRegistryEntry {
   return {

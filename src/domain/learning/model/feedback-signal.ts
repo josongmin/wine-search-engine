@@ -1,4 +1,4 @@
-import type { EntityId, QueryClass, DecisionSnapshot } from '../../shared/types/index.js';
+import type { CanonicalEntityId, QueryClass, DecisionSnapshot } from '../../shared/types/index.js';
 
 /**
  * Types of user feedback signals that the learning loop collects.
@@ -36,7 +36,7 @@ export interface FeedbackSignal {
   readonly queryClass: QueryClass;
 
   /** The entity that the feedback relates to. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Whether this is a positive signal (e.g. click, purchase) or negative (e.g. bounce, dislike). */
   readonly isPositive: boolean;

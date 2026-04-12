@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 
 /**
@@ -31,7 +31,7 @@ export interface DocumentSparseVector {
  * use the explicit union form; matching it here avoids subtype incompatibility).
  */
 export interface RetrievalHitProjection {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   /** Lineage: upstream source keys (indexed for HTTP / agent exposure). */
   readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
   readonly canonicalLabel?: string | undefined;
@@ -57,7 +57,7 @@ export interface RetrievalHitProjection {
  * `exactOptionalPropertyTypes` usage in this codebase.
  */
 export interface RetrievalFeatureProjection {
-  readonly entityId?: EntityId | undefined;
+  readonly entityId?: CanonicalEntityId | undefined;
   readonly body?: number | undefined;
   readonly tannin?: number | undefined;
   readonly acidity?: number | undefined;
@@ -83,7 +83,7 @@ export interface RetrievalFeatureProjection {
  */
 export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeatureProjection {
   /** Unique entity identifier. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Entity type discriminator (e.g. "wine", "producer"). */
   readonly entityType: string;

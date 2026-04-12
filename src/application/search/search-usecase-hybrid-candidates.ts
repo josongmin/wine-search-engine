@@ -3,7 +3,7 @@ import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-q
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import type {
@@ -94,7 +94,7 @@ export interface HybridCandidateRetrievalResult {
 export function buildHybridRetrievalInputForPlan(
   plan: QueryPlanV1,
   route: HybridRetrievalInput['route'] = 'hybrid',
-  anchorEntityId?: EntityId,
+  anchorEntityId?: CanonicalEntityId,
   compiled?: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
 ): HybridRetrievalInput {
@@ -198,7 +198,7 @@ export async function retrieveHybridCandidatesForPlan(
   const effectiveMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
 
   const limit = SPECIALIZED_HYBRID_RETRIEVAL_LIMIT;
-  let fallbackAnchorEntityId: EntityId | undefined;
+  let fallbackAnchorEntityId: CanonicalEntityId | undefined;
   const degradationReasons = new Set<SpecializedFallbackReason>();
   const requestedRoute = (
     effectiveMode === 'producer_browse' ||

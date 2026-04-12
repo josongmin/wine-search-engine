@@ -123,6 +123,19 @@ build-python/
 .dead-letter*.ndjson
 
 # Large local/generated datasets & eval outputs (prefer ~/.wine-search-engine/data; see README)
+data/silver-ko.ndjson
+data/silver-aliases.ndjson
+data/ambiguity-registry.ndjson
+data/search-snapshots/
+data/runtime-search-snapshot.json
+data/golden-queries-bronze.snapshot.jsonl
+data/golden-queries-silver-tagged.jsonl
+data/triplets-train.jsonl
+data/eval-results-smoke.json
+data/agentic-*-fixture-eval-results.json
+data/search-feature-behavior-fixture-eval-results.json
+data/entity-retrieval-fixture-eval-results.json
+data/performance-*-fixture-eval-results.json
 data/silver-phase*.ndjson
 data/silver-final.ndjson
 data/eval-results.json
@@ -136,6 +149,9 @@ data/offline-eval-*.json
 data/calibration/threshold-profile*.json
 data/calibration/*.ndjson
 !data/calibration/sample-predictions.ndjson
+
+# Retrieval ceiling exploratory output (fixture SSOT remains dry-run-baseline.json)
+data/retrieval-ceiling/exploratory-dry-run-baseline.json
 
 # Model weights (keep docs / README; fetch or link binaries locally)
 models/**/*.onnx

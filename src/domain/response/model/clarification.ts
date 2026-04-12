@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { StructuredClarifyPayload } from '../../query/model/abstain-decision.js';
 
 /**
@@ -6,7 +6,7 @@ import type { StructuredClarifyPayload } from '../../query/model/abstain-decisio
  */
 export interface ClarificationCandidate {
   /** Entity identifier for this candidate. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Display label. */
   readonly label: string;

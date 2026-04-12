@@ -21,13 +21,16 @@ import type { EnrichedSilverRecord } from './types.js';
 import {
   createCanonicalEntityId,
   type CanonicalEntityId,
+  type SourceRecordId,
 } from '../../src/domain/shared/types/entity-id.js';
 
 /** Fields sufficient for ADR-007 wine canonical id (gold overlay + identity signature). */
 export type WineSnapshotIdentityRow = Pick<
   EnrichedSilverRecord,
-  'sourceId' | 'canonicalLabel' | 'producer' | 'country' | 'region' | 'vintageYear'
->;
+  'canonicalLabel' | 'producer' | 'country' | 'region' | 'vintageYear'
+> & {
+  readonly sourceId: SourceRecordId;
+};
 import { hashText } from './search-snapshot-schema.js';
 import {
   isSourceRecordStylePublicEntityId,
@@ -187,8 +190,8 @@ export function resolveWineSnapshotEntity(
 export function buildEntityIdBySourceId(
   records: readonly WineSnapshotIdentityRow[],
   goldLookup: ReadonlyMap<string, string>,
-): ReadonlyMap<string, CanonicalEntityId> {
-  const map = new Map<string, CanonicalEntityId>();
+): ReadonlyMap<SourceRecordId, CanonicalEntityId> {
+  const map = new Map<SourceRecordId, CanonicalEntityId>();
   for (const record of records) {
     map.set(record.sourceId, resolveWineSnapshotEntity(record, goldLookup).entityId);
   }

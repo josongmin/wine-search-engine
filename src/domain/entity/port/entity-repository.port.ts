@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Entity } from '../model/entity.js';
 import type { EntityType } from '../model/entity-type.js';
 
@@ -8,7 +8,7 @@ import type { EntityType } from '../model/entity-type.js';
  */
 export interface EntityRepository {
   /** Find an entity by its unique id. */
-  findById(id: EntityId): Promise<Entity | null>;
+  findById(id: CanonicalEntityId): Promise<Entity | null>;
 
   /** Find an entity by its deterministic identity signature. */
   findBySignature(signature: string): Promise<Entity | null>;
@@ -27,7 +27,7 @@ export interface EntityRepository {
   update(entity: Entity): Promise<void>;
 
   /** Delete an entity by id. */
-  delete(id: EntityId): Promise<void>;
+  delete(id: CanonicalEntityId): Promise<void>;
 
   /**
    * Create a named snapshot of the current entity store (RFC-001 §4.5).

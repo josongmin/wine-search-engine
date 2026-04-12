@@ -29,7 +29,7 @@ npm run verify:http-contracts
 npm run test:e2e:replay:fixtures:self-contained
 npm run test:e2e:replay:fixtures:runtime-required
 if [ "${SKIP_MIGRATE:-}" = "1" ]; then
-  echo "SKIP_MIGRATE=1 — skipping npm run migrate (set PG_* in .env for local full smoke)"
+  echo "SKIP_MIGRATE=1 — skipping npm run migrate (CI / no Docker Postgres)"
 else
   npm run migrate
 fi

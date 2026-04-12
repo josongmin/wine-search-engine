@@ -4,7 +4,7 @@ import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js'
 import type { AnchorProfile } from '../../retrieval/model/retrieval-input.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
 import type { RetrievalPlan } from '../../retrieval/service/retrieval-plan-builder.js';
-import type { ConstraintBundle, EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId, ConstraintBundle } from '../../shared/types/index.js';
 
 /**
  * Optional context about the current user session, used to inform
@@ -15,7 +15,7 @@ export interface UserContext {
   readonly sessionId: string;
 
   /** Entity IDs the user has interacted with previously in this session. */
-  readonly previousEntities: readonly EntityId[];
+  readonly previousEntities: readonly CanonicalEntityId[];
 
   /** Free-form user preferences extracted from session history. */
   readonly preferences: Readonly<Record<string, unknown>>;

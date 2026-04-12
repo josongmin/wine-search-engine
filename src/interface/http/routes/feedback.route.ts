@@ -10,7 +10,7 @@ import { FeedbackSubmitRouteContract } from './route-contracts.js';
 import { buildSearchErrorResponse } from '../errors/error-response.js';
 import type { FeedbackSignal, FeedbackType } from '../../../domain/learning/model/feedback-signal.js';
 import { isQueryClass, type QueryClass } from '../../../domain/shared/types/query-class.js';
-import { createEntityId } from '../../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../../domain/shared/types/index.js';
 import type { DecisionSnapshot } from '../../../domain/shared/types/decision-snapshot.js';
 import { getRequestId } from '../request-id.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from '../../../application/search/search-usecase-decision-snapshot.js';
@@ -109,7 +109,7 @@ export function registerFeedbackRoute(
         type,
         query: body.query,
         queryClass,
-        entityId: createEntityId(body.entity_id),
+        entityId: createCanonicalEntityId(body.entity_id),
         isPositive,
         timestamp: new Date(),
         sessionId: body.session_id,

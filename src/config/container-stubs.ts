@@ -11,7 +11,7 @@ import {
   type ThresholdProfileV1,
 } from '../domain/query/model/threshold-profile.js';
 import type {
-  EntityId,
+  CanonicalEntityId,
   QueryClass,
 } from '../domain/shared/types/index.js';
 import type {
@@ -29,7 +29,7 @@ export class StubBlockingPort implements BlockingPort {
     _query: string,
     _normalizedQuery: string,
     _limit?: number,
-  ): Promise<readonly EntityId[]> {
+  ): Promise<readonly CanonicalEntityId[]> {
     return Promise.resolve([]);
   }
 }

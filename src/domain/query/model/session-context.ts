@@ -10,7 +10,7 @@
  * Do NOT redesign the session persistence stack or add new signals without
  * an explicit Epic 6 amendment. SessionContext is a read-only policy input.
  */
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import type { DecisionStatus } from '../../shared/types/index.js';
 
@@ -24,7 +24,7 @@ export interface SessionContext {
   readonly sessionId: string;
 
   /** Entity IDs referenced in prior turns of this session. */
-  readonly previousEntities: readonly EntityId[];
+  readonly previousEntities: readonly CanonicalEntityId[];
 
   /** Constraints from the previous query, for inheritance / narrowing. */
   readonly previousConstraints?: ConstraintBundle | undefined;

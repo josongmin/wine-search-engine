@@ -1,4 +1,4 @@
-import { createEntityId, type EntityId } from '../../shared/types/index.js';
+import { createEntityId, type CanonicalEntityId } from '../../shared/types/index.js';
 import { DomainError } from '../../shared/error/domain-error.js';
 import type { EntityType } from './entity-type.js';
 import type { Relations } from './relations.js';
@@ -30,7 +30,7 @@ export interface EntityMetadata {
  * Immutable value object; mutations produce a new instance.
  */
 export interface Entity {
-  readonly id: EntityId;
+  readonly id: CanonicalEntityId;
   readonly type: EntityType;
   readonly canonicalLabel: string;
   readonly identitySignature: string;

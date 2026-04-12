@@ -3,8 +3,8 @@ import type {
   RerankCandidate,
   RerankResult,
 } from '../../domain/ranking/port/reranker.port.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
-import { isEntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
+import { isCanonicalPublicEntityId } from '../../domain/shared/types/index.js';
 import {
   createCircuitBreaker,
   type CircuitBreaker,
@@ -207,7 +207,7 @@ export class CohereReranker implements RerankerPort {
       'pipeline Cohere reranker HTTP',
     );
 
-    const scored: Array<{ entityId: EntityId; score: number }> = [];
+    const scored: Array<{ entityId: CanonicalEntityId; score: number }> = [];
     for (const item of data.results) {
       // Guard: Cohere index must be a non-negative integer within candidates bounds.
       // A negative or out-of-range index silently drops the result (candidates[N]
@@ -220,7 +220,12 @@ export class CohereReranker implements RerankerPort {
         continue;
       }
       const candidate = candidates[item.index];
-      if (candidate === undefined || !isEntityId(candidate.entityId)) continue;
+      if (candidate === undefined) continue;
+      if (!isCanonicalPublicEntityId(candidate.entityId)) {
+        throw new Error(
+          'ADR-007: Cohere reranker received a candidate whose entityId is empty or uses the forbidden source-record public namespace',
+        );
+      }
       if (!Number.isFinite(item.relevance_score)) continue;
       // clamp01: Cohere's spec implies [0,1] but does not guarantee it — a score
       // outside this range would corrupt downstream calibration and ranking.

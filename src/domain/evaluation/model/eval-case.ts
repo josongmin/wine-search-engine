@@ -1,4 +1,4 @@
-import type { EntityId, QueryClass, DecisionStatus } from '../../shared/types/index.js';
+import type { CanonicalEntityId, QueryClass, DecisionStatus } from '../../shared/types/index.js';
 
 /**
  * Label quality tier for an evaluation case, per RFC-009 §4.
@@ -27,7 +27,7 @@ export interface EvalCase {
   readonly queryClass: QueryClass;
 
   /** The expected entity ID for resolved cases. Absent when the expected outcome is ambiguous or failed. */
-  readonly expectedEntityId?: EntityId;
+  readonly expectedEntityId?: CanonicalEntityId;
 
   /** The expected decision status (resolved, ambiguous, or failed). */
   readonly expectedStatus: DecisionStatus;

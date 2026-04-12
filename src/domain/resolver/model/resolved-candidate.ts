@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AliasType } from '../../alias/model/alias.js';
 import type { MatchSignalSet } from './match-signal-set.js';
 import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
@@ -8,7 +8,7 @@ import type { EntityCandidateSource } from './entity-candidate-generator-input.j
  */
 export interface ResolvedCandidate {
   /** The entity this candidate represents. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** The canonical display name for the entity. */
   readonly canonicalLabel: string;
@@ -55,7 +55,7 @@ export interface ResolvedCandidate {
  */
 export interface ResolverCandidate {
   /** The entity this candidate represents. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** The type of entity (e.g. 'wine', 'producer', 'region'). */
   readonly entityType: string;

@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * The outcome status of an entity matching attempt.
@@ -18,7 +18,7 @@ export interface EntityMatchResult {
   /** Outcome of the matching attempt. */
   readonly status: EntityMatchStatus;
   /** Entity IDs that were matched (present when status is 'matched' or 'ambiguous'). */
-  readonly matchedEntityIds?: readonly EntityId[] | undefined;
+  readonly matchedEntityIds?: readonly CanonicalEntityId[] | undefined;
   /** Confidence of the match in [0, 1]. */
   readonly confidence: number;
   /** Human-readable reasons explaining the match decision. */

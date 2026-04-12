@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { CanonicalEntityId } from '../../../domain/shared/types/index.js';
 import { CohereReranker } from '../cohere-reranker.js';
 
 describe('CohereReranker', () => {
@@ -54,5 +55,31 @@ describe('CohereReranker', () => {
         signal: expect.any(AbortSignal),
       }),
     );
+  });
+
+  it('throws when a candidate entityId uses the forbidden source-record public namespace (ADR-007)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ results: [{ index: 0, relevance_score: 0.9 }] }), {
+          status: 200,
+        }),
+      ),
+    );
+
+    const reranker = new CohereReranker({
+      baseUrl: 'https://api.cohere.ai/v2',
+      apiKey: 'co-test',
+      model: 'rerank-v4.0-pro',
+      httpTimeoutMs: 5000,
+    });
+
+    await expect(
+      reranker.rerank(
+        'q',
+        [{ entityId: 'vivino-bad' as CanonicalEntityId, text: 'x' }],
+        1,
+      ),
+    ).rejects.toThrow(/ADR-007/);
   });
 });

@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AnchorProfile } from '../model/anchor-profile.js';
 import { clamp01 } from '../../shared/utils/clamp.js';
 
@@ -14,7 +14,7 @@ const ANCHOR_PROFILE_OPTIONAL_ATTRIBUTE_SLOTS = 4;
  */
 export interface AnchorEntityData {
   /** Entity identifier. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Canonical display label for the entity. */
   readonly canonicalLabel: string;

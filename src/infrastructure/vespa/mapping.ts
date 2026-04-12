@@ -16,7 +16,7 @@ import {
   type RetrievalHitSummary,
   type RetrievalHitSummaryKey,
 } from '../../domain/retrieval/port/search-index.port.js';
-import { createEntityId } from '../../domain/shared/types/entity-id.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/entity-id.js';
 import {
   MAX_PRODUCED_VINTAGE_YEAR,
   MIN_PRODUCED_VINTAGE_YEAR,
@@ -399,8 +399,8 @@ export function fromVespaFields(
   // Learned sparse weights
   const learnedSparseWeights = parseSparseWeightsTensor(fields['learned_sparse_weights']);
 
-  // Validate entity_id before calling createEntityId: a missing or
-  // non-string entity_id would produce createEntityId('') which throws
+  // Validate entity_id before calling createCanonicalEntityId: a missing or
+  // non-string entity_id would produce createCanonicalEntityId('') which throws
   // "EntityId cannot be an empty string" with no indication of which
   // document was malformed. Fail early. Field keys are NOT included in the
   // error message — they leak the internal schema to clients via 500
@@ -413,7 +413,7 @@ export function fromVespaFields(
   const lineageRefsFromFields = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);
 
   return {
-    entityId: createEntityId(rawEntityId),
+    entityId: createCanonicalEntityId(rawEntityId),
     entityType: getString(fields, 'entity_type'),
     ...(getOptionalString(fields, 'search_snapshot_id') !== undefined
       ? { searchSnapshotId: getOptionalString(fields, 'search_snapshot_id') }
@@ -575,7 +575,7 @@ export function parseHitSummary(raw: Record<string, unknown>): RetrievalHitProje
   const lineageRefs = parseSourceRecordRefsFromVespa(raw['source_record_refs_json']);
 
   return {
-    entityId: createEntityId(entityIdRaw),
+    entityId: createCanonicalEntityId(entityIdRaw),
     ...(canonicalLabel !== undefined ? { canonicalLabel } : {}),
     ...(producer !== undefined ? { producer } : {}),
     ...(region !== undefined ? { region } : {}),
@@ -610,7 +610,7 @@ export function parseFeatureSummary(raw: Record<string, unknown>): RetrievalFeat
 
   return {
     entityId: isString(entityIdRaw) && entityIdRaw.length > 0
-      ? createEntityId(entityIdRaw)
+      ? createCanonicalEntityId(entityIdRaw)
       : (() => { throw new Error('parseFeatureSummary: missing or empty entity_id'); })(),
     ...(body !== undefined ? { body } : {}),
     ...(tannin !== undefined ? { tannin } : {}),

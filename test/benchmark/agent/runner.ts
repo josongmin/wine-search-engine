@@ -5,7 +5,7 @@
  *   npx tsx test/benchmark/agent/smoke.ts
  *
  * Usage:
- *   npx tsx test/benchmark/agent/runner.ts                                    # full suite, real container
+ *   npx tsx test/benchmark/agent/runner.ts                                    # all scenarios (no --profile), real container, judge on
  *   npx tsx test/benchmark/agent/runner.ts --tier single_shot
  *   npx tsx test/benchmark/agent/runner.ts --id 1,2,3
  *   npx tsx test/benchmark/agent/runner.ts --concurrency 5

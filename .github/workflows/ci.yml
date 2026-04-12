@@ -67,6 +67,8 @@ jobs:
       - name: Verify target-entity-map is up to date
         working-directory: ${{ github.workspace }}/wine-engine-fixture
         run: npx tsx scripts/generate-target-entity-map.ts --verify
+      - name: Engine fixture governance (FixtureLoader + suite contracts)
+        run: npm run eval:fixtures:verify
       - run: npm run test:integration
 
   test-watchlist:

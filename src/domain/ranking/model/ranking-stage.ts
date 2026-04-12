@@ -11,7 +11,7 @@
  * observed, and replaced independently.
  */
 
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ComponentScores } from './ranked-result.js';
 
 // ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ export const RANKING_STAGES = [
  * Contains only what's needed for fast hard-filter decisions.
  */
 export interface CoarsePruneInput {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly hardConstraintPass: boolean;
   readonly fusedScore: number;
   /** Reason for pre-filtering (from retrieval phase). */
@@ -45,7 +45,7 @@ export interface CoarsePruneInput {
 
 /** Result of coarse pruning for one candidate. */
 export interface CoarsePruneResult {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly retained: boolean;
   /** Set when retained === false. */
   readonly pruneReason?: CoarsePruneReason;
@@ -63,7 +63,7 @@ export type CoarsePruneReason =
  * Carries provenance/channel features for channel-aware ranking (T5.3).
  */
 export interface PrimaryRankInput {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly fusedScore: number;
   readonly componentScores: ComponentScores;
   /**
@@ -80,7 +80,7 @@ export interface PrimaryRankInput {
 
 /** Result of primary ranking. */
 export interface PrimaryRankResult {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   /** Score after primary rank aggregation. */
   readonly primaryScore: number;
   readonly rank: number;
@@ -93,7 +93,7 @@ export interface PrimaryRankResult {
  * Only top-K from primary rank enter this stage.
  */
 export interface PrecisionRerankInput {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly primaryScore: number;
   readonly primaryRank: number;
   /** Passage text for cross-encoder or LTR reranking. */
@@ -102,7 +102,7 @@ export interface PrecisionRerankInput {
 
 /** Result of precision rerank. */
 export interface PrecisionRerankResult {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly rerankScore: number;
   readonly finalRank: number;
 }
@@ -114,7 +114,7 @@ export interface PrecisionRerankResult {
  * Relevance score is finalized; policy can only adjust, not override relevance.
  */
 export interface PolicyApplyInput {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly relevanceScore: number;
   readonly rank: number;
   /** Metadata that policy rules may read. */
@@ -123,7 +123,7 @@ export interface PolicyApplyInput {
 
 /** Result of policy application. */
 export interface PolicyApplyResult {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   /** Final score after policy adjustments. */
   readonly finalScore: number;
   readonly finalRank: number;

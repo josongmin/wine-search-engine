@@ -14,7 +14,7 @@
 
 import { VespaClient } from '../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../src/infrastructure/vespa/mapping.js';
-import { createEntityId } from '../src/domain/shared/types/entity-id.js';
+import { createCanonicalEntityId } from '../src/domain/shared/types/entity-id.js';
 import type { RetrievalDocument } from '../src/domain/retrieval/model/retrieval-document.js';
 
 // ── Configuration ─────────────────────────────────────────────────────────────
@@ -49,7 +49,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
   // ── Red wines (10) ─────────────────────────────────────────────────────────
 
   {
-    entityId: createEntityId('opus-one-2018'),
+    entityId: createCanonicalEntityId('opus-one-2018'),
     entityType: 'wine',
     canonicalLabel: 'Opus One 2018',
     aliasesIdentitySafe: ['Opus One 2018', 'opus one 2018'],
@@ -72,7 +72,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1001),
   },
   {
-    entityId: createEntityId('chateau-margaux-2015'),
+    entityId: createCanonicalEntityId('chateau-margaux-2015'),
     entityType: 'wine',
     canonicalLabel: 'Château Margaux 2015',
     aliasesIdentitySafe: ['Château Margaux 2015', 'chateau margaux 2015'],
@@ -95,7 +95,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1002),
   },
   {
-    entityId: createEntityId('romanee-conti-2019'),
+    entityId: createCanonicalEntityId('romanee-conti-2019'),
     entityType: 'wine',
     canonicalLabel: 'Romanée-Conti 2019',
     aliasesIdentitySafe: ['Romanée-Conti 2019', 'romanee-conti 2019'],
@@ -118,7 +118,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1003),
   },
   {
-    entityId: createEntityId('sassicaia-2018'),
+    entityId: createCanonicalEntityId('sassicaia-2018'),
     entityType: 'wine',
     canonicalLabel: 'Sassicaia 2018',
     aliasesIdentitySafe: ['Sassicaia 2018', 'sassicaia 2018'],
@@ -141,7 +141,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1004),
   },
   {
-    entityId: createEntityId('penfolds-grange-2017'),
+    entityId: createCanonicalEntityId('penfolds-grange-2017'),
     entityType: 'wine',
     canonicalLabel: 'Penfolds Grange 2017',
     aliasesIdentitySafe: ['Penfolds Grange 2017', 'penfolds grange 2017'],
@@ -164,7 +164,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1005),
   },
   {
-    entityId: createEntityId('barolo-giacomo'),
+    entityId: createCanonicalEntityId('barolo-giacomo'),
     entityType: 'wine',
     canonicalLabel: 'Giacomo Conterno Barolo Monfortino',
     aliasesIdentitySafe: ['Giacomo Conterno Barolo Monfortino', 'barolo monfortino'],
@@ -187,7 +187,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1006),
   },
   {
-    entityId: createEntityId('masi-amarone'),
+    entityId: createCanonicalEntityId('masi-amarone'),
     entityType: 'wine',
     canonicalLabel: 'Masi Amarone della Valpolicella Classico',
     aliasesIdentitySafe: ['Masi Amarone della Valpolicella Classico', 'masi amarone'],
@@ -210,7 +210,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1007),
   },
   {
-    entityId: createEntityId('caymus-cabernet-2020'),
+    entityId: createCanonicalEntityId('caymus-cabernet-2020'),
     entityType: 'wine',
     canonicalLabel: 'Caymus Cabernet Sauvignon 2020',
     aliasesIdentitySafe: ['Caymus Cabernet Sauvignon 2020', 'caymus 2020'],
@@ -233,7 +233,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1008),
   },
   {
-    entityId: createEntityId('silver-oak-cabernet-2018'),
+    entityId: createCanonicalEntityId('silver-oak-cabernet-2018'),
     entityType: 'wine',
     canonicalLabel: 'Silver Oak Cabernet Sauvignon Alexander Valley 2018',
     aliasesIdentitySafe: ['Silver Oak Alexander Valley 2018', 'silver oak 2018'],
@@ -256,7 +256,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1009),
   },
   {
-    entityId: createEntityId('chateau-petrus-2016'),
+    entityId: createCanonicalEntityId('chateau-petrus-2016'),
     entityType: 'wine',
     canonicalLabel: 'Château Pétrus 2016',
     aliasesIdentitySafe: ['Château Pétrus 2016', 'chateau petrus 2016'],
@@ -282,7 +282,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
   // ── White wines (3) ────────────────────────────────────────────────────────
 
   {
-    entityId: createEntityId('cloudy-bay-2022'),
+    entityId: createCanonicalEntityId('cloudy-bay-2022'),
     entityType: 'wine',
     canonicalLabel: 'Cloudy Bay Sauvignon Blanc 2022',
     aliasesIdentitySafe: ['Cloudy Bay Sauvignon Blanc 2022', 'cloudy bay 2022'],
@@ -305,7 +305,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(2001),
   },
   {
-    entityId: createEntityId('sauternes-2015'),
+    entityId: createCanonicalEntityId('sauternes-2015'),
     entityType: 'wine',
     canonicalLabel: "Château d'Yquem Sauternes 2015",
     aliasesIdentitySafe: ["Château d'Yquem Sauternes 2015", "chateau d'yquem 2015"],
@@ -328,7 +328,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(2002),
   },
   {
-    entityId: createEntityId('pouilly-fume-dagueneau-2019'),
+    entityId: createCanonicalEntityId('pouilly-fume-dagueneau-2019'),
     entityType: 'wine',
     canonicalLabel: 'Didier Dagueneau Pouilly-Fumé Silex 2019',
     aliasesIdentitySafe: ['Dagueneau Pouilly-Fumé Silex 2019', 'dagueneau silex 2019'],
@@ -354,7 +354,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
   // ── Sparkling wines (2) ────────────────────────────────────────────────────
 
   {
-    entityId: createEntityId('moet-brut'),
+    entityId: createCanonicalEntityId('moet-brut'),
     entityType: 'wine',
     canonicalLabel: 'Moët & Chandon Brut Impérial',
     aliasesIdentitySafe: ["Moët & Chandon Brut Impérial", 'moet & chandon brut imperial'],
@@ -377,7 +377,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(3001),
   },
   {
-    entityId: createEntityId('dom-perignon-2013'),
+    entityId: createCanonicalEntityId('dom-perignon-2013'),
     entityType: 'wine',
     canonicalLabel: 'Dom Pérignon 2013',
     aliasesIdentitySafe: ['Dom Pérignon 2013', 'dom perignon 2013'],
@@ -403,7 +403,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
   // ── Additional red wines to reach 20 total (5 more) ───────────────────────
 
   {
-    entityId: createEntityId('screaming-eagle-2019'),
+    entityId: createCanonicalEntityId('screaming-eagle-2019'),
     entityType: 'wine',
     canonicalLabel: 'Screaming Eagle Cabernet Sauvignon 2019',
     aliasesIdentitySafe: ['Screaming Eagle 2019', 'screaming eagle 2019'],
@@ -426,7 +426,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1011),
   },
   {
-    entityId: createEntityId('harlan-estate-2018'),
+    entityId: createCanonicalEntityId('harlan-estate-2018'),
     entityType: 'wine',
     canonicalLabel: 'Harlan Estate 2018',
     aliasesIdentitySafe: ['Harlan Estate 2018', 'harlan estate 2018'],
@@ -449,7 +449,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1012),
   },
   {
-    entityId: createEntityId('ridge-monte-bello-2017'),
+    entityId: createCanonicalEntityId('ridge-monte-bello-2017'),
     entityType: 'wine',
     canonicalLabel: 'Ridge Monte Bello 2017',
     aliasesIdentitySafe: ['Ridge Monte Bello 2017', 'ridge monte bello 2017'],
@@ -472,7 +472,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1013),
   },
   {
-    entityId: createEntityId('guado-al-tasso-2019'),
+    entityId: createCanonicalEntityId('guado-al-tasso-2019'),
     entityType: 'wine',
     canonicalLabel: 'Guado al Tasso 2019',
     aliasesIdentitySafe: ['Guado al Tasso 2019', 'guado al tasso 2019'],
@@ -495,7 +495,7 @@ const SEED_DOCUMENTS: readonly RetrievalDocument[] = [
     embedding: seededEmbedding(1014),
   },
   {
-    entityId: createEntityId('dominus-estate-2016'),
+    entityId: createCanonicalEntityId('dominus-estate-2016'),
     entityType: 'wine',
     canonicalLabel: 'Dominus Estate 2016',
     aliasesIdentitySafe: ['Dominus Estate 2016', 'dominus estate 2016'],

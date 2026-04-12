@@ -3,7 +3,7 @@ import type { ProposalStore } from '../../domain/learning/port/proposal-store.po
 import type { AliasProposal, AliasProposalStatus, AliasProposalEvidence } from '../../domain/learning/model/alias-proposal.js';
 import type { ProposedAliasType } from '../../domain/learning/model/alias-proposal.js';
 import type { ThresholdProposal, ThresholdProposalStatus, ThresholdSet, ThresholdProposalEvidence } from '../../domain/learning/model/threshold-proposal.js';
-import { createEntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
 
 function toProposedAliasType(value: string): ProposedAliasType {
@@ -72,7 +72,7 @@ function rowToAliasProposal(row: AliasProposalRow): AliasProposal {
   return {
     proposalId: row.proposal_id,
     surfaceForm: row.surface_form,
-    targetEntityId: createEntityId(row.target_entity_id),
+    targetEntityId: createCanonicalEntityId(row.target_entity_id),
     proposedType: toProposedAliasType(row.proposed_type),
     evidence: toAliasProposalEvidence(row.evidence),
     confidence: row.confidence,

@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AnchorCandidate } from '../model/anchor-candidate.js';
 import type { AnchorConditionedQuery } from '../model/relative-query.js';
 import type { NormalizedQueryViews } from '../model/query-views.js';
@@ -11,7 +11,7 @@ import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator
 export interface AliasMatchResult {
   readonly surfaceForm: string;
   readonly normalizedForm: string;
-  readonly entityIds: readonly EntityId[];
+  readonly entityIds: readonly CanonicalEntityId[];
   /** Match confidence in [0, 1]. This is an alias-match confidence, NOT a calibrated C. */
   readonly matchConfidence: number;
   /** Strategy label for noisy lookup provenance. */

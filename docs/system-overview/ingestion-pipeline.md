@@ -376,7 +376,7 @@ export { EntityMatcher } from './service/entity-matcher.js';
 |------|------|
 | `seed-wines-real.ts` | 대량 Vespa 시드 (E2E/품질) |
 | `seed-vespa-test-data.ts` | 소형 테스트 피드 |
-| `migrate.ts` | `npm run migrate` — PG 마이그레이션 |
+| `migrate-local-docker-pg.ts` / `migrate-from-env.ts` | `npm run migrate` (Docker Compose PG), `npm run migrate:from-env` (`.env` DB) |
 | `prune-feedback-ttl.ts` | `npm run feedback:prune-ttl` — RFC-010 TTL |
 
 **배포:** `scripts/deploy-vespa.sh` — 데이터 파이프라인과 별도.

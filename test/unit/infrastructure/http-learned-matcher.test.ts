@@ -107,6 +107,30 @@ describe('HttpLearnedMatcherAdapter', () => {
     );
   });
 
+  it('throws when the matcher service returns a source-record namespace entity_id (ADR-007)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          results: [
+            {
+              entity_id: 'vivino-deadbeef',
+              match_probability: 0.9,
+              model_id: 'matcher',
+              model_version: '1.0.0',
+            },
+          ],
+        }),
+      }),
+    );
+
+    const adapter = new HttpLearnedMatcherAdapter('http://matcher.local');
+    await expect(
+      adapter.match('q', [makeCandidate('entity-opus-one', 'Opus One 2018')]),
+    ).rejects.toThrow(/ADR-007/);
+  });
+
   it('throws when the HTTP request exceeds the configured timeout', async () => {
     vi.stubGlobal(
       'fetch',

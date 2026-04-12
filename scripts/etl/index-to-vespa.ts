@@ -21,7 +21,7 @@ import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../src/shared/constants/source-s
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
-import { createEntityId } from '../../src/domain/shared/types/entity-id.js';
+import { createCanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import {
@@ -558,7 +558,7 @@ export function silverToRetrievalDoc(
   const indexable = silverToIndexable(rec, lookup);
 
   const doc: RetrievalDocument = {
-    entityId: createEntityId(indexable.entityId),
+    entityId: createCanonicalEntityId(indexable.entityId),
     entityType: indexable.entityType,
     ...(searchSnapshotId !== undefined ? { searchSnapshotId } : {}),
     canonicalLabel: indexable.canonicalLabel,

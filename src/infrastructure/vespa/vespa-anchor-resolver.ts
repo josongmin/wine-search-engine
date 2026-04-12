@@ -1,4 +1,4 @@
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { AnchorResolverPort } from '../../domain/mixed/service/mixed-solver.js';
 import type { AnchorEntityData } from '../../domain/mixed/service/anchor-profiler.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
@@ -13,7 +13,7 @@ import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.p
 export class VespaAnchorResolver implements AnchorResolverPort {
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
-  async resolve(entityId: EntityId): Promise<AnchorEntityData | undefined> {
+  async resolve(entityId: CanonicalEntityId): Promise<AnchorEntityData | undefined> {
     const doc = await this.searchIndex.getDocument(entityId);
     if (doc === null) return undefined;
 

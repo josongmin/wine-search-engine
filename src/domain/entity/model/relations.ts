@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * Directed relations from one entity to another.
@@ -7,9 +7,9 @@ import type { EntityId } from '../../shared/types/index.js';
  */
 export interface Relations {
   /** vintage -> producer, wine -> producer */
-  readonly producedBy?: EntityId;
+  readonly producedBy?: CanonicalEntityId;
   /** vintage -> wine (parent) */
-  readonly variantOf?: EntityId;
+  readonly variantOf?: CanonicalEntityId;
   /** producer -> region, wine -> region */
-  readonly locatedIn?: EntityId;
+  readonly locatedIn?: CanonicalEntityId;
 }

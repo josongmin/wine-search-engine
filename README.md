@@ -25,13 +25,14 @@
 
 ```bash
 git clone <internal-remote> wine-search-engine && cd wine-search-engine
-npm ci && cp .env.example .env   # PG_*, REDIS_URL, VESPA_URL, 시크릿 편집
-npm run migrate
-npm run dev                       # http://localhost:3000 — GET /health 참고
+npm ci && cp .env.example .env   # REDIS_URL, VESPA_URL, 시크릿 등 편집
+npm run docker:db:up             # Postgres (docker-compose.yml)
+npm run migrate                  # Compose Postgres에 마이그레이션 (기본)
+npm run dev                      # http://localhost:3000 — GET /health 참고
 npm run lint && npm run typecheck && npm run test   # 푸시 전
 ```
 
-`npm run bootstrap:smoke`는 `.env.example`을 기준으로 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 한 번에 점검합니다. CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
+`npm run bootstrap:smoke`는 `.env.example`을 기준으로 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 한 번에 점검합니다. 마이그레이션 단계는 **`docker-compose.yml` Postgres가 떠 있어야** 합니다(`npm run docker:db:up`). CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
 
 현재 레포에는 `ingest` / `kill-switch` 전용 CLI 진입점이 없습니다. 문서와 `package.json`에서도 제거해 “있는 척” 하지 않도록 맞췄고, ETL/운영 작업은 개별 `scripts/etl/*.ts` 또는 기존 HTTP/설정 경로를 사용합니다.
 
@@ -537,13 +538,16 @@ docker compose -f docker-compose.test.yml up -d
 
 <h2 id="database-migrations">DB 마이그레이션</h2>
 
-SQL: `src/infrastructure/db/migrations/001_initial_schema.sql`.
+SQL: `src/infrastructure/db/migrations/*.sql` (실행 순서는 파일명 정렬).
 
-체크아웃에서 **`npm run migrate`**가 모듈 해석에 실패하면 **tsx** 사용:
+- **`npm run migrate`** — **`docker-compose.yml`의 Postgres**(`127.0.0.1:5432`, `wine` / `wine_dev`, DB `wine_engine`)에 적용. `.env`에 원격 `DATABASE_URL`이 있어도 이 경로는 로컬 Compose로 고정된다.
+- **`npm run migrate:from-env`** — `.env`의 `DATABASE_URL` / `PG_*` 그대로 사용 (RDS 등).
 
 ```bash
-npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; void runMigrations().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });"
+npm run docker:db:up && npm run migrate
 ```
+
+체크아웃에서 한 줄 실행이 필요하면 **tsx** 예시는 `scripts/migrate-from-env.ts` / `scripts/migrate-local-docker-pg.ts`를 참고.
 
 ---
 
@@ -555,7 +559,7 @@ npx tsx -e "import { runMigrations } from './src/infrastructure/db/migrate.ts'; 
 | HTTP 계약 | `npm run contracts:http`, `contracts:http:openapi-bridge` |
 | Eval | `npm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
 | ETL | `npm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
-| 운영 | `npm run bootstrap:smoke`, `npm run migrate`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
+| 운영 | `npm run bootstrap:smoke`, `npm run migrate` (Docker PG), `npm run migrate:from-env`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
 
 많은 ETL/eval 호출은 **`npx tsx --env-file=.env …`**를 씁니다.
 

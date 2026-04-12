@@ -1,4 +1,4 @@
-import { createEntityId } from '../../shared/types/index.js';
+import { createCanonicalEntityId } from '../../shared/types/index.js';
 import { rrfFuse, RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 import type {
   SparseHit,
@@ -196,7 +196,7 @@ export class FusionService {
       );
 
       candidates.push({
-        entityId: createEntityId(entityId),
+        entityId: createCanonicalEntityId(entityId),
         sparseRank,
         ...(sparseRawScore !== undefined ? { sparseRawScore } : {}),
         denseRank,

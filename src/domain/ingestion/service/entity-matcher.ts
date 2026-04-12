@@ -13,7 +13,7 @@
  * 5. Unresolved → new_entity_candidate
  */
 
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { CanonicalizationCandidate } from '../model/canonicalization-candidate.js';
 import type { EntityMatchResult } from '../model/entity-match-result.js';
 import type { SourceTrustProfile } from '../model/source-trust-profile.js';
@@ -28,7 +28,7 @@ const TRUST_BLEND_TRUST_WEIGHT = 0.3;
  * This avoids a hard dependency on the entity domain's full model.
  */
 export interface MatchableEntity {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly canonicalName: string;
   readonly producer?: string | undefined;
   readonly label?: string | undefined;

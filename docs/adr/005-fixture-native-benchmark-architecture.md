@@ -183,9 +183,8 @@ Rules:
 
 ## Current canonical implementation state
 
-> **As of 2026-04-12.** This section reflects the state at ADR acceptance.
-> For current implementation status, consult the Required follow-up tasks list
-> and the Workstream completion criteria below.
+> **Living section.** Keep in sync when adding runners or moving corpora.
+> Acceptance criteria and workstreams below remain the source for “done”.
 
 ### Already fixture-native
 
@@ -199,15 +198,22 @@ Rules:
   - exact / ambiguous / mixed suites
 - `run-agentic-tool-use-fixture-eval.ts`
 - `run-agentic-answer-quality-fixture-eval.ts`
+- `run-search-feature-behavior-fixture-eval.ts` (Workstream A)
+- `run-performance-latency-fixture-eval.ts` / `run-performance-load-fixture-eval.ts` (Workstreams B/C)
+- `run-offline-eval.ts` — default gate corpus and thresholds resolve from the
+  external fixture repo (`fixture-corpus-paths.ts`, `FixtureLoader`); local
+  smoke paths use explicit `--input` / `EVAL_CORPUS_PATH` / optional threshold
+  fallback flags (non-default for release gates).
 
-### Still internal / not yet fixture-native
+### Exploratory-only internal (by design, not release-gate truth)
 
-- `run-offline-eval.ts`
-- `data/golden-queries-*.jsonl`
-- `data/relevance/scenarios-*.ndjson`
-- `test/benchmark/agent/scenarios.ts`
-- `test/benchmark/agent/retrieval-runner.ts`
-- performance/load benchmark harnesses that are not yet external-suite driven
+- `test/benchmark/agent/scenarios.ts` (+ merged adversarial/coverage corpora)
+- `test/benchmark/agent/retrieval-runner.ts` (exploratory retrieval profile)
+
+### Legacy / local-only inputs (non-SSOT; do not use as competing gate truth)
+
+- `data/eval-smoke-queries.jsonl` and other small smoke inputs referenced by
+  smoke scripts — keep small; prefer fixture-backed corpora for gates.
 
 ## Decision details
 
@@ -761,6 +767,8 @@ At minimum, the engine repo MUST expose:
 - `eval:noisy:gate` ✓ (exists)
 - `eval:entity:fixtures` ✓ (exists)
 - `eval:search-feature:fixtures` ✓ (added — Workstream A)
+- `eval:fixtures:verify` ✓ (exists)
+- `test:verification:fixtures:governance` ✓ (alias of `eval:fixtures:verify`, explicit name)
 - `bench:agent:fixtures:tool-use` ✓ (exists)
 - `bench:agent:fixtures:answer-quality` ✓ (exists)
 - `eval:perf:latency:fixtures` ✓ (added — Workstream B)

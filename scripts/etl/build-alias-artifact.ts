@@ -2,7 +2,7 @@ import { normalizeForMatch } from '../../src/domain/alias/service/alias-matcher.
 import { Transliterator } from '../../src/domain/alias/service/transliterator.js';
 import type { EnrichedSilverRecord } from './types.js';
 import { inferTransliterationSourceLang } from './transliteration-helpers.js';
-import type { CanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
+import type { CanonicalEntityId, SourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 import { hashText, type AliasSnapshotRecord } from './search-snapshot-schema.js';
 
 export function hasHangul(text: string): boolean {
@@ -67,7 +67,7 @@ function buildBaseAliases(
 
 export function buildAliasArtifact(
   records: readonly EnrichedSilverRecord[],
-  entityIdBySourceId: ReadonlyMap<string, CanonicalEntityId>,
+  entityIdBySourceId: ReadonlyMap<SourceRecordId, CanonicalEntityId>,
 ): readonly AliasSnapshotRecord[] {
   const transliterator = new Transliterator();
   const aliases = new Map<string, AliasSnapshotRecord>();

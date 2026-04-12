@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { GoldSetStore, GoldSetFilter } from '../../domain/evaluation/port/gold-set-store.port.js';
 import type { EvalCase, LabelTier } from '../../domain/evaluation/model/eval-case.js';
-import { createEntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
 
@@ -41,7 +41,7 @@ function rowToEvalCase(row: EvalCaseRow): EvalCase {
     ? { ...base, annotatorAgreement: row.annotator_agreement }
     : base;
   if (row.expected_entity_id != null) {
-    return { ...withAgreement, expectedEntityId: createEntityId(row.expected_entity_id) };
+    return { ...withAgreement, expectedEntityId: createCanonicalEntityId(row.expected_entity_id) };
   }
   return withAgreement;
 }

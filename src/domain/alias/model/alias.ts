@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import { identityHash } from '../../shared/utils/hash.js';
 import { DomainError } from '../../shared/error/domain-error.js';
 import { MIN_ALIAS_LENGTH } from '../service/alias-filter.js';
@@ -42,7 +42,7 @@ export interface Alias {
   /** Deterministic ID derived from (entityId, normalizedValue, type, scope). */
   readonly aliasId: string;
   /** The entity this alias points to. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   /** Original surface form (preserves casing and diacritics). */
   readonly value: string;
   /** Lowercased, accent-stripped, whitespace-collapsed form used for matching. */
@@ -71,7 +71,7 @@ export interface Alias {
  * The factory auto-generates `aliasId` and `normalizedValue`.
  */
 export interface CreateAliasParams {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly value: string;
   readonly type: AliasType;
   /**

@@ -16,12 +16,12 @@ import {
 } from '../candidate-constraint-evidence.js';
 import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import type { ConstraintBundle, NormalizedConstraint } from '../../../shared/types/index.js';
-import type { EntityId } from '../../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../../shared/types/index.js';
 
 // Minimal HybridCandidate factory — only sets the fields under test.
 function makeCandidate(overrides: Partial<HybridCandidate> = {}): HybridCandidate {
   return {
-    entityId: 'wine-001' as EntityId,
+    entityId: 'wine-001' as CanonicalEntityId,
     matchedConstraints: [],
     retrievalFusionScore: 0.5,
     // geography
@@ -377,7 +377,7 @@ describe('grape_primary annotation — blend coverage (BUG-B regression)', () =>
 
 describe('annotateCandidateConstraintEvidenceBatch', () => {
   it('no-ops when all constraint lists are empty', () => {
-    const candidates = [makeCandidate(), makeCandidate({ entityId: 'wine-002' as EntityId })];
+    const candidates = [makeCandidate(), makeCandidate({ entityId: 'wine-002' as CanonicalEntityId })];
     const result = annotateCandidateConstraintEvidenceBatch(candidates, { hard: [], soft: [], inferred: [] });
     expect(result).toBe(candidates); // same reference — no work done
   });

@@ -4,7 +4,7 @@ import type { EntityRepository } from '../../domain/entity/port/entity-repositor
 import type { Entity, EntityMetadata } from '../../domain/entity/model/entity.js';
 import type { EntityType } from '../../domain/entity/model/entity-type.js';
 import { isEntityType } from '../../domain/entity/model/entity-type.js';
-import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
   EntityRowSnapshotJsonbSchema,
@@ -93,7 +93,7 @@ function rowToEntity(row: EntityRow): Entity {
   const attributes = parseEntityAttributesJsonb(row.attributes, ROW_TO_ENTITY_CALLER);
   const entityType = isEntityType(row.entity_type) ? row.entity_type : 'wine';
   return {
-    id: createEntityId(row.entity_id),
+    id: createCanonicalEntityId(row.entity_id),
     type: entityType,
     canonicalLabel: row.canonical_label,
     identitySignature: row.identity_signature,
@@ -106,7 +106,7 @@ function rowToEntity(row: EntityRow): Entity {
 export class PgEntityRepository implements EntityRepository {
   constructor(private readonly pool: Pool) {}
 
-  async findById(id: EntityId): Promise<Entity | null> {
+  async findById(id: CanonicalEntityId): Promise<Entity | null> {
     const result = await this.pool.query<EntityRow>(
       'SELECT * FROM entities WHERE entity_id = $1',
       [id],
@@ -210,7 +210,7 @@ export class PgEntityRepository implements EntityRepository {
     }
   }
 
-  async delete(id: EntityId): Promise<void> {
+  async delete(id: CanonicalEntityId): Promise<void> {
     const result = await this.pool.query(
       'DELETE FROM entities WHERE entity_id = $1',
       [id],

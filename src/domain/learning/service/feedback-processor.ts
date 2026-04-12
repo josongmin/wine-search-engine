@@ -1,4 +1,5 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
+import { createCanonicalEntityId } from '../../shared/types/index.js';
 import type { FeedbackSignal } from '../model/feedback-signal.js';
 import type { FeedbackStore } from '../port/feedback-store.port.js';
 import { MS_PER_DAY } from '../../shared/utils/time-units.js';
@@ -14,7 +15,7 @@ export interface QueryEntityAggregation {
   readonly query: string;
 
   /** The entity that received the feedback. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Total positive signals. */
   readonly positiveCount: number;
@@ -52,7 +53,7 @@ export interface FeedbackQualityIssue {
   readonly description: string;
 
   /** The affected entity, if applicable. */
-  readonly entityId?: EntityId;
+  readonly entityId?: CanonicalEntityId;
 
   /** The affected session, if applicable. */
   readonly sessionId?: string;
@@ -167,7 +168,7 @@ export class FeedbackProcessor {
         issues.push({
           type: 'click_spam',
           description: `Session ${sessionId} generated ${clicks.length} clicks on entity ${entityId}`,
-          entityId: entityId as EntityId,
+          entityId: createCanonicalEntityId(entityId),
           sessionId,
           signalCount: clicks.length,
         });
@@ -225,7 +226,7 @@ export class FeedbackProcessor {
           issues.push({
             type: 'contradictory_signals',
             description: `Session ${sessionId} sent ${counts.positive} positive and ${counts.negative} negative signals for entity ${eid}`,
-            entityId: eid as EntityId,
+            entityId: createCanonicalEntityId(eid),
             sessionId,
             signalCount: counts.positive + counts.negative,
           });
@@ -246,7 +247,7 @@ export class FeedbackProcessor {
       string,
       {
         query: string;
-        entityId: EntityId;
+        entityId: CanonicalEntityId;
         positiveCount: number;
         negativeCount: number;
         sessions: Set<string>;

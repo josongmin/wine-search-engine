@@ -1,5 +1,5 @@
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { BlockingPort } from '../port/blocking.port.js';
 
 const blockerLog = bootstrapLogger.child({ component: 'Blocker' });
@@ -31,7 +31,7 @@ export class Blocker {
     query: string,
     normalizedQuery: string,
     options?: { readonly limit?: number },
-  ): Promise<readonly EntityId[]> {
+  ): Promise<readonly CanonicalEntityId[]> {
     const limit = options?.limit ?? DEFAULT_BLOCKING_LIMIT;
     const startTime = Date.now();
 

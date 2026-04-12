@@ -1,11 +1,11 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * A candidate prepared for cross-encoder reranking.
  */
 export interface RerankCandidate {
   /** Entity identifier for this candidate. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Textual representation of the candidate used as passage input to the cross-encoder. */
   readonly text: string;
@@ -16,7 +16,7 @@ export interface RerankCandidate {
  */
 export interface RerankResult {
   /** Entity identifier for this candidate. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Cross-encoder relevance score (model-specific scale). */
   readonly score: number;

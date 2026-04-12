@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { CandidateAttributePort } from '../../domain/mixed/service/mixed-solver.js';
 import type { SimilarityCandidate } from '../../domain/mixed/service/similarity-scorer.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
@@ -42,7 +42,7 @@ const SCHEMA_FAIL_PREVIEW_KEY_LIMIT = 8;
  * so that a single malformed hit does not crash the entire request.
  */
 function validateAttributes(
-  entityId: EntityId,
+  entityId: CanonicalEntityId,
   raw: unknown,
 ): Readonly<Record<string, unknown>> {
   const result = VespaCandidateAttributesSchema.safeParse(raw);
@@ -73,13 +73,13 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
   constructor(private readonly searchIndex: SearchIndexPort) {}
 
   async loadAttributes(
-    entityIds: readonly EntityId[],
-  ): Promise<ReadonlyMap<EntityId, Readonly<Record<string, unknown>>>> {
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, Readonly<Record<string, unknown>>>> {
     if (entityIds.length === 0) {
       return new Map();
     }
 
-    const map = new Map<EntityId, Readonly<Record<string, unknown>>>();
+    const map = new Map<CanonicalEntityId, Readonly<Record<string, unknown>>>();
 
     // Epic-07 T07-2: prefer backend-native batch fetch over N single GETs.
     // Falls back to per-id concurrent fetches when the adapter doesn't
@@ -110,7 +110,7 @@ export class VespaCandidateAttributes implements CandidateAttributePort {
   }
 
   async loadSimilarityCandidate(
-    entityId: EntityId,
+    entityId: CanonicalEntityId,
   ): Promise<SimilarityCandidate | undefined> {
     const doc = await this.searchIndex.getDocument(entityId);
     if (doc === null) return undefined;

@@ -5,7 +5,7 @@ import type {
   LearnedMatcherOutput,
 } from '../../domain/resolver/port/learned-matcher.port.js';
 import type { ResolverCandidate } from '../../domain/resolver/model/resolved-candidate.js';
-import { isEntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import {
   fetchWithTimeout,
   isAbortError,
@@ -153,9 +153,8 @@ export class HttpLearnedMatcherAdapter implements LearnedMatcherPort {
 
     const outputs: LearnedMatcherOutput[] = [];
     for (const result of data.results) {
-      if (!isEntityId(result.entity_id)) continue;
       outputs.push({
-        entityId: result.entity_id,
+        entityId: createCanonicalEntityId(result.entity_id),
         matchProbability: result.match_probability,
         modelId: result.model_id,
         modelVersion: result.model_version,

@@ -1,5 +1,5 @@
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { SearchIndexPort } from '../../domain/retrieval/port/search-index.port.js';
 import type { WatchlistChangeEvent } from '../../domain/watchlist/model/watchlist-entry.js';
@@ -40,7 +40,9 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     return this.inner.getDocument(...args);
   }
 
-  async getDocuments(entityIds: readonly EntityId[]): Promise<ReadonlyMap<EntityId, RetrievalDocument>> {
+  async getDocuments(
+    entityIds: readonly CanonicalEntityId[],
+  ): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>> {
     if (this.inner.getDocuments !== undefined) {
       return this.inner.getDocuments(entityIds);
     }
@@ -49,7 +51,7 @@ export class WatchlistAwareSearchIndex implements SearchIndexPort {
     const settled = await Promise.allSettled(
       entityIds.map(async (entityId) => [entityId, await this.inner.getDocument(entityId)] as const),
     );
-    const docs = new Map<EntityId, RetrievalDocument>();
+    const docs = new Map<CanonicalEntityId, RetrievalDocument>();
     for (const result of settled) {
       if (result.status === 'fulfilled') {
         const [entityId, doc] = result.value;

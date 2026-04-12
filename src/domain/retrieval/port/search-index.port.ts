@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { RetrievalDocument, RetrievalHitProjection } from '../model/retrieval-document.js';
 
 /**
@@ -12,7 +12,7 @@ import type { RetrievalDocument, RetrievalHitProjection } from '../model/retriev
  * Includes wine attributes for Epic 15 (drinking window prediction).
  */
 export interface RetrievalHitSummary extends Omit<RetrievalHitProjection, 'entityId'> {
-  readonly entityId?: EntityId | undefined;
+  readonly entityId?: CanonicalEntityId | undefined;
   readonly canonicalLabel?: string;
   readonly producer?: string;
   readonly region?: string;
@@ -92,7 +92,7 @@ export const RETRIEVAL_HIT_SUMMARY_KEYS = [
 export type RetrievalHitSummaryKey = (typeof RETRIEVAL_HIT_SUMMARY_KEYS)[number];
 
 export interface RetrievalSummaryCarrier {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly summary?: RetrievalHitSummary;
 }
 
@@ -101,7 +101,7 @@ export interface RetrievalSummaryCarrier {
  */
 export interface SparseHit extends RetrievalSummaryCarrier {
   /** Entity identifier. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Raw BM25 or equivalent score. */
   readonly score: number;
@@ -121,7 +121,7 @@ export interface SparseHit extends RetrievalSummaryCarrier {
  */
 export interface DenseHit extends RetrievalSummaryCarrier {
   /** Entity identifier. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Raw score from the ANN index. */
   readonly score: number;
@@ -206,7 +206,7 @@ export interface SearchIndexPort {
    * @param entityId - The entity to fetch.
    * @returns The document, or `null` if not found.
    */
-  getDocument(entityId: EntityId): Promise<RetrievalDocument | null>;
+  getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
 
   /**
    * Retrieve multiple documents by entity IDs.
@@ -214,7 +214,7 @@ export interface SearchIndexPort {
    * Returned map contains only found documents; missing IDs are omitted.
    * Implementations should prefer backend-native batching over N single fetches.
    */
-  getDocuments?(entityIds: readonly EntityId[]): Promise<ReadonlyMap<EntityId, RetrievalDocument>>;
+  getDocuments?(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
 
   /**
    * Insert or update a single document in the index.

@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { LineageStore } from '../../domain/ingestion/port/lineage-store.port.js';
 import type { LineageRecord } from '../../domain/ingestion/model/lineage-record.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const log = bootstrapLogger.child({ component: 'PgLineageStore' });
@@ -74,13 +74,11 @@ function parseTimestampOrNull(value: unknown): Date | null {
 }
 
 /**
- * Validates that a value looks like an EntityId. Mirrors the domain
- * `isEntityId` (any non-empty string) and adds a safety upper-bound to reject
- * obviously malformed JSONB blobs (e.g. multi-MB strings from corruption).
- *
- * The previous regex `/^[A-Za-z0-9_:-]{1,256}$/` was wrong: real EntityIds can
- * contain arbitrary Unicode (Korean wine names, accented Latin), so it would
- * silently drop legitimate audit rows.
+ * Validates a JSONB string field before branding as lineage metadata.
+ * Permits any non-empty bounded string without control characters (audit rows
+ * may carry Unicode labels / ids). This is **not** ADR-007 canonical public
+ * `entity_id` validation — callers that hydrate {@link LineageRecord} public
+ * identity fields must still apply {@link createCanonicalEntityId} where required.
  */
 const MAX_ENTITY_ID_LENGTH = 1024;
 function isValidEntityId(value: unknown): value is string {
@@ -203,7 +201,7 @@ export class PgLineageStore implements LineageStore {
     return filterValidRecords(result.rows);
   }
 
-  async findByEntity(entityId: EntityId): Promise<readonly LineageRecord[]> {
+  async findByEntity(entityId: CanonicalEntityId): Promise<readonly LineageRecord[]> {
     const result = await this.pool.query<LineageRow>(
       `SELECT * FROM lineage_records WHERE entity_id = $1 ORDER BY created_at ASC`,
       [entityId],

@@ -171,6 +171,55 @@ describe('VespaSearchIndex', () => {
     });
   });
 
+  it('rejects Vespa hits whose indexed entity_id uses the forbidden source-record public namespace (ADR-007)', async () => {
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        root: {
+          id: 'root',
+          relevance: 1,
+          children: [
+            {
+              id: 'id:wine:wine_entity::wine-legit-fallback-id',
+              relevance: 0.9,
+              source: 'content',
+              fields: {
+                entity_id: 'vivino-deadbeefcafe',
+                canonical_label: 'Contaminated',
+              },
+            },
+          ],
+        },
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await expect(index.sparseSearch(['test'], [], 5)).rejects.toThrow(/ADR-007/);
+  });
+
+  it('rejects Vespa URI doc id segment when entity_id field is absent but doc id is source-record namespace', async () => {
+    const client = {
+      query: vi.fn().mockResolvedValue({
+        root: {
+          id: 'root',
+          relevance: 1,
+          children: [
+            {
+              id: 'id:wine:wine_entity::vivino-onlyfrom-uri-segment',
+              relevance: 0.88,
+              source: 'content',
+              fields: {
+                canonical_label: 'No entity_id field',
+              },
+            },
+          ],
+        },
+      }),
+    } as unknown as VespaClient;
+
+    const index = new VespaSearchIndex(client);
+    await expect(index.sparseSearch(['test'], [], 5)).rejects.toThrow(/ADR-007/);
+  });
+
   describe('YQL numeric-interpolation safety', () => {
     // Regression: the YQL `limit N`, `{targetHits: N}`, and
     // `hnsw.exploreAdditionalHits: N` clauses must never emit `NaN`,

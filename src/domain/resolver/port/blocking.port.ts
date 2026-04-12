@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * Port for the blocking stage of entity resolution, per RFC-006 §3.3.
@@ -19,5 +19,5 @@ export interface BlockingPort {
    * @param limit - Maximum number of candidates to return (default: implementation-defined).
    * @returns Entity IDs that are plausible matches, ordered by blocking score descending.
    */
-  block(query: string, normalizedQuery: string, limit?: number): Promise<readonly EntityId[]>;
+  block(query: string, normalizedQuery: string, limit?: number): Promise<readonly CanonicalEntityId[]>;
 }

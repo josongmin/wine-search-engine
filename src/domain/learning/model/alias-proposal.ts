@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * The type of alias being proposed by the learning loop.
@@ -45,7 +45,7 @@ export interface AliasProposal {
   readonly surfaceForm: string;
 
   /** The target entity this alias should resolve to. */
-  readonly targetEntityId: EntityId;
+  readonly targetEntityId: CanonicalEntityId;
 
   /** The type of alias being proposed. Always 'observed_query_alias' for learning-derived aliases. */
   readonly proposedType: ProposedAliasType;

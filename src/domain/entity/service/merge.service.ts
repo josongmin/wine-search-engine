@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Entity } from '../model/entity.js';
 import type { Relations } from '../model/relations.js';
 import type { EntityAttributes } from '../model/attributes.js';
@@ -141,9 +141,9 @@ export function canSplit(entity: Entity, reason: string): boolean {
 // ---------------------------------------------------------------------------
 
 function buildRelations(
-  producedBy: EntityId | undefined,
-  variantOf: EntityId | undefined,
-  locatedIn: EntityId | undefined,
+  producedBy: CanonicalEntityId | undefined,
+  variantOf: CanonicalEntityId | undefined,
+  locatedIn: CanonicalEntityId | undefined,
 ): Relations {
   return {
     ...(producedBy !== undefined ? { producedBy } : {}),

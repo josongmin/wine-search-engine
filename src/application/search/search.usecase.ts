@@ -1,6 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { AbstainPolicy } from '../../domain/query/service/abstain-policy.js';
 import { ConstraintSAT } from '../../domain/query/service/constraint-sat.js';
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
@@ -570,7 +570,7 @@ export class SearchUseCase {
   private async runBlockerForPlan(
     plan: QueryPlanV1,
     broader: boolean,
-  ): Promise<readonly EntityId[]> {
+  ): Promise<readonly CanonicalEntityId[]> {
     if (this.deps.blocker === undefined) {
       return [];
     }

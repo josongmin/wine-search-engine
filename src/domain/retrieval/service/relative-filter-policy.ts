@@ -8,7 +8,7 @@
  * record the relative_filter channel contribution.
  */
 
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import type { RetrievalDocument } from '../model/retrieval-document.js';
 
@@ -29,7 +29,7 @@ import type { RetrievalDocument } from '../model/retrieval-document.js';
  *                             HybridCandidate.
  */
 export interface RelativeFilterInput {
-  readonly anchorEntityId: EntityId;
+  readonly anchorEntityId: CanonicalEntityId;
   readonly constraints: readonly string[];
   readonly anchorDocument?: RetrievalDocument | undefined;
 }

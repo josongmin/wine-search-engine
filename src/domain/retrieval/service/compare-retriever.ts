@@ -1,5 +1,5 @@
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ConstraintBundle } from '../../shared/types/index.js';
 import type { SearchIndexPort, SparseHit } from '../port/search-index.port.js';
 import { hardConstraintsToSparseFilterTokens } from './constraint-to-sparse-filter-tokens.js';
@@ -79,7 +79,7 @@ export class CompareRetriever {
    * @param limit - Maximum candidates to retrieve.
    */
   async compareAgainstAnchor(
-    anchorEntityId: EntityId,
+    anchorEntityId: CanonicalEntityId,
     constraints: ConstraintBundle,
     limit: number,
   ): Promise<readonly HybridCandidate[]> {

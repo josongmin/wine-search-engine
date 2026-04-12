@@ -15,7 +15,7 @@ import type { SearchRequest } from '../../application/search/search-request.dto.
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
-import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { SearchResponseV2Machine } from '../../domain/response/model/result-item-v2.js';
@@ -115,7 +115,7 @@ export interface ToolExecutionV2Options {
  * Used by check_drinking_window to look up wine attributes by entity_id.
  */
 export interface EntityDocumentLookupPort {
-  getDocument(entityId: EntityId): Promise<RetrievalDocument | null>;
+  getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
 }
 
 export interface WineToolExecutorDeps {
@@ -292,7 +292,7 @@ export class WineToolExecutor {
       return { error: 'Entity lookup not available. Use search_wines first to get drinking window from results.' };
     }
 
-    const entityId = createEntityId(validated.entity_id);
+    const entityId = createCanonicalEntityId(validated.entity_id);
     const doc = await this.deps.entityLookup.getDocument(entityId);
 
     if (!doc) {

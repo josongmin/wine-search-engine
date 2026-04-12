@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Alias, AliasScope, AliasType } from '../model/alias.js';
 import type { AliasRepository } from '../port/alias-repository.port.js';
 import type { CharNgramIndex } from './char-ngram-index.js';
@@ -9,7 +9,7 @@ import { compareScoreWithTiebreaker } from '../../shared/utils/stable-comparator
  */
 export interface AliasMatchResult {
   /** The entity the matched alias points to. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   /** The alias that matched. */
   readonly alias: Alias;
   /** How the match was found. */

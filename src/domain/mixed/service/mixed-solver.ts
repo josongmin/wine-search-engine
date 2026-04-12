@@ -11,7 +11,7 @@
  * route (search-usecase-mixed-route.ts) with this solver as the inner strategy.
  * New substitute strategies extend this solver — they do NOT fork the path.
  */
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { RankedResult } from '../../ranking/model/ranked-result.js';
@@ -247,7 +247,7 @@ export class MixedSolver {
    */
   private applySetConstraintsForSimilarItems(
     candidates: readonly HybridCandidate[],
-    anchorEntityId: EntityId,
+    anchorEntityId: CanonicalEntityId,
   ): HybridCandidate[] {
     // Step 1: Exclude the anchor entity itself
     const excluded = candidates.filter((c) => c.entityId !== anchorEntityId);

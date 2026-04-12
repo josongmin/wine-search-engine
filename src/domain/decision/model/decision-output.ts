@@ -1,11 +1,11 @@
 import type {
+  CanonicalEntityId,
   DecisionStatus,
   NextAction,
   EvidenceItem,
   DecisionSnapshot,
   SignalSet,
 } from '../../shared/types/index.js';
-import type { EntityId } from '../../shared/types/index.js';
 import type { ResolvedCandidate } from '../../resolver/model/resolved-candidate.js';
 import type { DecisionTrace } from './decision-trace.js';
 import type { FailureReason } from './failure-reason.js';
@@ -36,7 +36,7 @@ export interface DecisionOutput {
 
   /** The selected entity, present only when status is 'resolved'. */
   readonly selectedEntity?: {
-    readonly entityId: EntityId;
+    readonly entityId: CanonicalEntityId;
     readonly canonicalLabel?: string;
     /**
      * Cryptographic identity seal (RFC-016 §3 EntityRef).
@@ -52,7 +52,7 @@ export interface DecisionOutput {
   };
 
   /** Primary entity chosen by the decision layer (absent when status is `failed`). */
-  readonly chosenEntityId?: EntityId | undefined;
+  readonly chosenEntityId?: CanonicalEntityId | undefined;
 
   /** Candidate list for downstream consumption (e.g. clarification UI). */
   readonly candidates?: readonly ResolvedCandidate[];

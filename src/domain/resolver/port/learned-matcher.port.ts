@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ResolverCandidate } from '../model/resolved-candidate.js';
 import type { QueryClass } from '../../shared/types/index.js';
 import type { NormalizedQueryViews } from '../../query/model/query-views.js';
@@ -9,7 +9,7 @@ import type { MatcherFeatureVector } from '../service/learned-matcher-features.j
  */
 export interface LearnedMatcherOutput {
   /** The entity that was scored. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Model's estimated probability that this entity matches the query, in [0, 1]. */
   readonly matchProbability: number;

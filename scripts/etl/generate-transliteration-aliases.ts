@@ -20,7 +20,7 @@ import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-po
 import { PgAliasRepository } from '../../src/infrastructure/adapter/pg-alias-repository.js';
 import { Transliterator, type SourceLang } from '../../src/domain/alias/service/transliterator.js';
 import { createAlias } from '../../src/domain/alias/model/alias.js';
-import { createEntityId } from '../../src/domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
 import { inferTransliterationSourceLang } from './transliteration-helpers.js';
 
 interface Args {
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
     const country = readCountry(row.attributes);
     const region = readRegion(row.attributes);
     const lang: SourceLang = inferTransliterationSourceLang(country, region);
-    const entityId = createEntityId(row.entity_id);
+    const entityId = createCanonicalEntityId(row.entity_id);
 
     const variants = transliterator.generateAliases(row.canonical_label, lang);
 

@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * The decision taken for a source record during ingestion.
@@ -29,9 +29,9 @@ export interface LineageRecord {
   /** The canonicalization candidate that was produced. */
   readonly candidateId: string;
   /** The entity ID that was matched or created (absent on rejection). */
-  readonly matchedEntityId?: EntityId | undefined;
+  readonly matchedEntityId?: CanonicalEntityId | undefined;
   /** Previous entity IDs before a split or re-merge. */
-  readonly previousEntityIds?: readonly EntityId[] | undefined;
+  readonly previousEntityIds?: readonly CanonicalEntityId[] | undefined;
   /** Names of normalization rules that were applied. */
   readonly normalizationRulesApplied: readonly string[];
   /** Semantic version of the extraction pipeline. */

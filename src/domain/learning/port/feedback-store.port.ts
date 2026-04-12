@@ -1,4 +1,4 @@
-import type { EntityId, QueryClass } from '../../shared/types/index.js';
+import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
 import type { FeedbackSignal, FeedbackType } from '../model/feedback-signal.js';
 
 /**
@@ -12,7 +12,7 @@ export interface FeedbackFilter {
   readonly queryClass?: QueryClass;
 
   /** Filter by entity ID. */
-  readonly entityId?: EntityId;
+  readonly entityId?: CanonicalEntityId;
 }
 
 /**
@@ -57,7 +57,7 @@ export interface FeedbackStore {
    * @param entityId - The entity to aggregate stats for.
    * @returns Aggregated click, purchase, and session-success counts.
    */
-  getAggregatedStats(entityId: EntityId): Promise<AggregatedFeedbackStats>;
+  getAggregatedStats(entityId: CanonicalEntityId): Promise<AggregatedFeedbackStats>;
 
   /**
    * Deletes feedback signals older than the given cutoff date (RFC-010 §8).

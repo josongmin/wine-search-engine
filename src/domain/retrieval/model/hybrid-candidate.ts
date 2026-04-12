@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 import type { CandidateProvenance } from './candidate-envelope.js';
 import type { RetrievalTrace } from './retrieval-trace.js';
@@ -39,7 +39,7 @@ import type { RetrievalTrace } from './retrieval-trace.js';
  */
 export interface HybridCandidate {
   /** Entity identifier for this candidate. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Canonical display label (e.g. "Opus One 2018"). Propagated from RetrievalDocument. */
   readonly canonicalLabel?: string | undefined;

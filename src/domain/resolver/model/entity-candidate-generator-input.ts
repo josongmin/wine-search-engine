@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AnchorCandidate } from '../../query/model/anchor-candidate.js';
 import type { RetrievalDocument } from '../../retrieval/model/retrieval-document.js';
 
@@ -56,12 +56,12 @@ export interface EntityCandidateGeneratorInput {
    * Undefined (not present) means the blocker has not been called yet.
    * An empty array means blocker was called and returned nothing beyond anchors.
    */
-  readonly blockerOnlyIds?: readonly EntityId[] | undefined;
+  readonly blockerOnlyIds?: readonly CanonicalEntityId[] | undefined;
 
   /**
    * Pre-loaded document map from an upstream prefetch step.
    * When present, `buildResolverCandidatesFromGenerator()` skips re-fetching
-   * these IDs. Keys are string-coerced EntityIds.
+   * these IDs. Keys are string-coerced canonical entity ids.
    *
    * This is an optimisation cache — absence does NOT break correctness, only
    * latency.

@@ -12,7 +12,7 @@
 import { VespaClient } from '../src/infrastructure/vespa/vespa-client.js';
 import { VespaSearchIndex } from '../src/infrastructure/vespa/vespa-search-index.js';
 import { HttpEmbeddingService } from '../src/infrastructure/vespa/embedding-service.js';
-import { createEntityId } from '../src/domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../src/domain/shared/types/index.js';
 import type { RetrievalDocument } from '../src/domain/retrieval/model/retrieval-document.js';
 import { pathToFileURL } from 'node:url';
 
@@ -112,7 +112,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 1. Château Margaux 2015 ──────────────────────────────────────────────
   {
-    entityId:         createEntityId('chateau-margaux-2015'),
+    entityId:         createCanonicalEntityId('chateau-margaux-2015'),
     entityType:       'wine',
     canonicalLabel:   'Château Margaux 2015',
     vintageYear:      2015,
@@ -156,7 +156,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 2. Pétrus 2010 ───────────────────────────────────────────────────────
   {
-    entityId:         createEntityId('petrus-2010'),
+    entityId:         createCanonicalEntityId('petrus-2010'),
     entityType:       'wine',
     canonicalLabel:   'Pétrus 2010',
     vintageYear:      2010,
@@ -200,7 +200,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 3. Château Lafite Rothschild 2016 ───────────────────────────────────
   {
-    entityId:         createEntityId('lafite-2016'),
+    entityId:         createCanonicalEntityId('lafite-2016'),
     entityType:       'wine',
     canonicalLabel:   'Château Lafite Rothschild 2016',
     vintageYear:      2016,
@@ -244,7 +244,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 4. Château Mouton Rothschild 2016 ───────────────────────────────────
   {
-    entityId:         createEntityId('mouton-2016'),
+    entityId:         createCanonicalEntityId('mouton-2016'),
     entityType:       'wine',
     canonicalLabel:   'Château Mouton Rothschild 2016',
     vintageYear:      2016,
@@ -292,7 +292,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 5. DRC Romanée-Conti 2015 ────────────────────────────────────────────
   {
-    entityId:         createEntityId('romanee-conti-2015'),
+    entityId:         createCanonicalEntityId('romanee-conti-2015'),
     entityType:       'wine',
     canonicalLabel:   'DRC Romanée-Conti 2015',
     vintageYear:      2015,
@@ -336,7 +336,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 6. Domaine Leroy Chambolle-Musigny 2017 ──────────────────────────────
   {
-    entityId:         createEntityId('leroy-chambolle-2017'),
+    entityId:         createCanonicalEntityId('leroy-chambolle-2017'),
     entityType:       'wine',
     canonicalLabel:   'Domaine Leroy Chambolle-Musigny 2017',
     vintageYear:      2017,
@@ -380,7 +380,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 7. Armand Rousseau Gevrey-Chambertin 2018 ───────────────────────────
   {
-    entityId:         createEntityId('rousseau-gevrey-2018'),
+    entityId:         createCanonicalEntityId('rousseau-gevrey-2018'),
     entityType:       'wine',
     canonicalLabel:   'Armand Rousseau Gevrey-Chambertin 2018',
     vintageYear:      2018,
@@ -424,7 +424,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 8. Louis Jadot Nuits-Saint-Georges Premier Cru 2019 ─────────────────
   {
-    entityId:         createEntityId('jadot-nsg-premier-cru-2019'),
+    entityId:         createCanonicalEntityId('jadot-nsg-premier-cru-2019'),
     entityType:       'wine',
     canonicalLabel:   'Louis Jadot Nuits-Saint-Georges Premier Cru 2019',
     vintageYear:      2019,
@@ -472,7 +472,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 9. DRC Montrachet 2019 ────────────────────────────────────────────────
   {
-    entityId:         createEntityId('drc-montrachet-2019'),
+    entityId:         createCanonicalEntityId('drc-montrachet-2019'),
     entityType:       'wine',
     canonicalLabel:   'DRC Montrachet 2019',
     vintageYear:      2019,
@@ -516,7 +516,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 10. Coche-Dury Meursault 2018 ────────────────────────────────────────
   {
-    entityId:         createEntityId('coche-dury-meursault-2018'),
+    entityId:         createCanonicalEntityId('coche-dury-meursault-2018'),
     entityType:       'wine',
     canonicalLabel:   'Coche-Dury Meursault 2018',
     vintageYear:      2018,
@@ -560,7 +560,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 11. Domaine Leflaive Puligny-Montrachet 2019 ─────────────────────────
   {
-    entityId:         createEntityId('leflaive-puligny-2019'),
+    entityId:         createCanonicalEntityId('leflaive-puligny-2019'),
     entityType:       'wine',
     canonicalLabel:   'Domaine Leflaive Puligny-Montrachet 2019',
     vintageYear:      2019,
@@ -604,7 +604,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 12. Raveneau Chablis Grand Cru 2019 ─────────────────────────────────
   {
-    entityId:         createEntityId('raveneau-chablis-2019'),
+    entityId:         createCanonicalEntityId('raveneau-chablis-2019'),
     entityType:       'wine',
     canonicalLabel:   'Raveneau Chablis Grand Cru 2019',
     vintageYear:      2019,
@@ -652,7 +652,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 13. Guigal Côte-Rôtie La Mouline 2017 ───────────────────────────────
   {
-    entityId:         createEntityId('guigal-la-mouline-2017'),
+    entityId:         createCanonicalEntityId('guigal-la-mouline-2017'),
     entityType:       'wine',
     canonicalLabel:   'E. Guigal Côte-Rôtie La Mouline 2017',
     vintageYear:      2017,
@@ -696,7 +696,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 14. Château Rayas Châteauneuf-du-Pape 2016 ──────────────────────────
   {
-    entityId:         createEntityId('rayas-chateauneuf-2016'),
+    entityId:         createCanonicalEntityId('rayas-chateauneuf-2016'),
     entityType:       'wine',
     canonicalLabel:   'Château Rayas Châteauneuf-du-Pape 2016',
     vintageYear:      2016,
@@ -740,7 +740,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 15. Jean-Louis Chave Hermitage 2016 ─────────────────────────────────
   {
-    entityId:         createEntityId('chave-hermitage-2016'),
+    entityId:         createCanonicalEntityId('chave-hermitage-2016'),
     entityType:       'wine',
     canonicalLabel:   'Jean-Louis Chave Hermitage 2016',
     vintageYear:      2016,
@@ -788,7 +788,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 16. Didier Dagueneau Pouilly-Fumé Silex 2020 ────────────────────────
   {
-    entityId:         createEntityId('dagueneau-silex-2020'),
+    entityId:         createCanonicalEntityId('dagueneau-silex-2020'),
     entityType:       'wine',
     canonicalLabel:   'Didier Dagueneau Pouilly-Fumé Silex 2020',
     vintageYear:      2020,
@@ -832,7 +832,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 17. Henri Bourgeois Sancerre La Bourgeoise 2021 ─────────────────────
   {
-    entityId:         createEntityId('bourgeois-sancerre-2021'),
+    entityId:         createCanonicalEntityId('bourgeois-sancerre-2021'),
     entityType:       'wine',
     canonicalLabel:   'Henri Bourgeois Sancerre La Bourgeoise 2021',
     vintageYear:      2021,
@@ -876,7 +876,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 18. Nicolas Joly Savennières Coulée de Serrant 2019 ─────────────────
   {
-    entityId:         createEntityId('joly-coulee-serrant-2019'),
+    entityId:         createCanonicalEntityId('joly-coulee-serrant-2019'),
     entityType:       'wine',
     canonicalLabel:   'Nicolas Joly Savennières Coulée de Serrant 2019',
     vintageYear:      2019,
@@ -924,7 +924,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 19. Zind-Humbrecht Riesling Grand Cru Rangen 2019 ───────────────────
   {
-    entityId:         createEntityId('zind-humbrecht-rangen-2019'),
+    entityId:         createCanonicalEntityId('zind-humbrecht-rangen-2019'),
     entityType:       'wine',
     canonicalLabel:   'Zind-Humbrecht Riesling Grand Cru Rangen 2019',
     vintageYear:      2019,
@@ -968,7 +968,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 20. Trimbach Riesling Clos Sainte-Hune 2017 ─────────────────────────
   {
-    entityId:         createEntityId('trimbach-clos-sainte-hune-2017'),
+    entityId:         createCanonicalEntityId('trimbach-clos-sainte-hune-2017'),
     entityType:       'wine',
     canonicalLabel:   'Trimbach Riesling Clos Sainte-Hune 2017',
     vintageYear:      2017,
@@ -1016,7 +1016,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 21. Moët & Chandon Brut Impérial NV ──────────────────────────────────
   {
-    entityId:         createEntityId('moet-brut-nv'),
+    entityId:         createCanonicalEntityId('moet-brut-nv'),
     entityType:       'wine',
     canonicalLabel:   'Moët & Chandon Brut Impérial NV',
     vintageYear:      0,
@@ -1060,7 +1060,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 22. Dom Pérignon 2012 ─────────────────────────────────────────────────
   {
-    entityId:         createEntityId('dom-perignon-2012'),
+    entityId:         createCanonicalEntityId('dom-perignon-2012'),
     entityType:       'wine',
     canonicalLabel:   'Dom Pérignon 2012',
     vintageYear:      2012,
@@ -1104,7 +1104,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 23. Krug Grande Cuvée ────────────────────────────────────────────────
   {
-    entityId:         createEntityId('krug-grande-cuvee'),
+    entityId:         createCanonicalEntityId('krug-grande-cuvee'),
     entityType:       'wine',
     canonicalLabel:   'Krug Grande Cuvée',
     vintageYear:      0,
@@ -1148,7 +1148,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 24. Billecart-Salmon Blanc de Blancs 2012 ────────────────────────────
   {
-    entityId:         createEntityId('billecart-blanc-de-blancs-2012'),
+    entityId:         createCanonicalEntityId('billecart-blanc-de-blancs-2012'),
     entityType:       'wine',
     canonicalLabel:   'Billecart-Salmon Blanc de Blancs 2012',
     vintageYear:      2012,
@@ -1196,7 +1196,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 25. Château d'Yquem 2015 ─────────────────────────────────────────────
   {
-    entityId:         createEntityId('yquem-2015'),
+    entityId:         createCanonicalEntityId('yquem-2015'),
     entityType:       'wine',
     canonicalLabel:   "Château d'Yquem 2015",
     vintageYear:      2015,
@@ -1244,7 +1244,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 26. Egon Müller Scharzhofberger Riesling Auslese 2019 ────────────────
   {
-    entityId:         createEntityId('egon-muller-auslese-2019'),
+    entityId:         createCanonicalEntityId('egon-muller-auslese-2019'),
     entityType:       'wine',
     canonicalLabel:   'Egon Müller Scharzhofberger Riesling Auslese 2019',
     vintageYear:      2019,
@@ -1288,7 +1288,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 27. Knoll Grüner Veltliner Smaragd 2020 (Austria) ────────────────────
   {
-    entityId:         createEntityId('knoll-gruner-2020'),
+    entityId:         createCanonicalEntityId('knoll-gruner-2020'),
     entityType:       'wine',
     canonicalLabel:   'Knoll Grüner Veltliner Smaragd 2020',
     vintageYear:      2020,
@@ -1332,7 +1332,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 28. Liquid Gold Riesling 2019 ────────────────────────────────────────
   {
-    entityId:         createEntityId('liquid-gold-riesling-2019'),
+    entityId:         createCanonicalEntityId('liquid-gold-riesling-2019'),
     entityType:       'wine',
     canonicalLabel:   'Weingut Thanisch Bernkasteler Doctor Riesling TBA 2019',
     vintageYear:      2019,
@@ -1380,7 +1380,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 29. Domaines Ott Rosé 2022 ────────────────────────────────────────────
   {
-    entityId:         createEntityId('domaines-ott-rose-2022'),
+    entityId:         createCanonicalEntityId('domaines-ott-rose-2022'),
     entityType:       'wine',
     canonicalLabel:   'Domaines Ott Rosé 2022',
     vintageYear:      2022,
@@ -1424,7 +1424,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 30. Whispering Angel 2022 ────────────────────────────────────────────
   {
-    entityId:         createEntityId('whispering-angel-2022'),
+    entityId:         createCanonicalEntityId('whispering-angel-2022'),
     entityType:       'wine',
     canonicalLabel:   "Château d'Esclans Whispering Angel Rosé 2022",
     vintageYear:      2022,
@@ -1472,7 +1472,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 31. Sassicaia 2018 ────────────────────────────────────────────────────
   {
-    entityId:         createEntityId('sassicaia-2018'),
+    entityId:         createCanonicalEntityId('sassicaia-2018'),
     entityType:       'wine',
     canonicalLabel:   'Sassicaia 2018',
     vintageYear:      2018,
@@ -1516,7 +1516,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 32. Ornellaia 2018 ────────────────────────────────────────────────────
   {
-    entityId:         createEntityId('ornellaia-2018'),
+    entityId:         createCanonicalEntityId('ornellaia-2018'),
     entityType:       'wine',
     canonicalLabel:   'Ornellaia 2018',
     vintageYear:      2018,
@@ -1560,7 +1560,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 33. Giacomo Conterno Barolo Monfortino 2015 ──────────────────────────
   {
-    entityId:         createEntityId('barolo-conterno-2015'),
+    entityId:         createCanonicalEntityId('barolo-conterno-2015'),
     entityType:       'wine',
     canonicalLabel:   'Giacomo Conterno Barolo Monfortino Riserva 2015',
     vintageYear:      2015,
@@ -1604,7 +1604,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 34. Masi Amarone della Valpolicella Costasera 2015 ───────────────────
   {
-    entityId:         createEntityId('masi-amarone-2015'),
+    entityId:         createCanonicalEntityId('masi-amarone-2015'),
     entityType:       'wine',
     canonicalLabel:   'Masi Amarone della Valpolicella Costasera 2015',
     vintageYear:      2015,
@@ -1648,7 +1648,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 35. Tignanello 2018 ───────────────────────────────────────────────────
   {
-    entityId:         createEntityId('tignanello-2018'),
+    entityId:         createCanonicalEntityId('tignanello-2018'),
     entityType:       'wine',
     canonicalLabel:   'Tignanello 2018',
     vintageYear:      2018,
@@ -1692,7 +1692,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 36. Biondi-Santi Brunello di Montalcino Riserva 2015 ─────────────────
   {
-    entityId:         createEntityId('biondi-santi-brunello-2015'),
+    entityId:         createCanonicalEntityId('biondi-santi-brunello-2015'),
     entityType:       'wine',
     canonicalLabel:   'Biondi-Santi Brunello di Montalcino Riserva 2015',
     vintageYear:      2015,
@@ -1740,7 +1740,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 37. Vega Sicilia Único 2011 ───────────────────────────────────────────
   {
-    entityId:         createEntityId('vega-sicilia-unico-2011'),
+    entityId:         createCanonicalEntityId('vega-sicilia-unico-2011'),
     entityType:       'wine',
     canonicalLabel:   'Vega Sicilia Único 2011',
     vintageYear:      2011,
@@ -1784,7 +1784,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 38. Álvaro Palacios L'Ermita 2018 ────────────────────────────────────
   {
-    entityId:         createEntityId('palacios-ermita-2018'),
+    entityId:         createCanonicalEntityId('palacios-ermita-2018'),
     entityType:       'wine',
     canonicalLabel:   "Álvaro Palacios L'Ermita 2018",
     vintageYear:      2018,
@@ -1828,7 +1828,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 39. La Rioja Alta Gran Reserva 904 2015 ──────────────────────────────
   {
-    entityId:         createEntityId('rioja-alta-904-2015'),
+    entityId:         createCanonicalEntityId('rioja-alta-904-2015'),
     entityType:       'wine',
     canonicalLabel:   'La Rioja Alta Gran Reserva 904 2015',
     vintageYear:      2015,
@@ -1876,7 +1876,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 40. Graham's Vintage Port 2011 ───────────────────────────────────────
   {
-    entityId:         createEntityId('graham-vintage-port-2011'),
+    entityId:         createCanonicalEntityId('graham-vintage-port-2011'),
     entityType:       'wine',
     canonicalLabel:   "Graham's Vintage Port 2011",
     vintageYear:      2011,
@@ -1920,7 +1920,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 41. Taylor Fladgate LBV Port 2016 ────────────────────────────────────
   {
-    entityId:         createEntityId('taylor-fladgate-2016'),
+    entityId:         createCanonicalEntityId('taylor-fladgate-2016'),
     entityType:       'wine',
     canonicalLabel:   'Taylor Fladgate Late Bottled Vintage Port 2016',
     vintageYear:      2016,
@@ -1968,7 +1968,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 42. Royal Tokaji Aszú 5 Puttonyos 2017 ───────────────────────────────
   {
-    entityId:         createEntityId('tokaji-royal-2017'),
+    entityId:         createCanonicalEntityId('tokaji-royal-2017'),
     entityType:       'wine',
     canonicalLabel:   'Royal Tokaji Aszú 5 Puttonyos 2017',
     vintageYear:      2017,
@@ -2016,7 +2016,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 43. Screaming Eagle 2018 ──────────────────────────────────────────────
   {
-    entityId:         createEntityId('screaming-eagle-2018'),
+    entityId:         createCanonicalEntityId('screaming-eagle-2018'),
     entityType:       'wine',
     canonicalLabel:   'Screaming Eagle Cabernet Sauvignon 2018',
     vintageYear:      2018,
@@ -2060,7 +2060,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 44. Opus One 2018 ─────────────────────────────────────────────────────
   {
-    entityId:         createEntityId('opus-one-2018'),
+    entityId:         createCanonicalEntityId('opus-one-2018'),
     entityType:       'wine',
     canonicalLabel:   'Opus One 2018',
     vintageYear:      2018,
@@ -2104,7 +2104,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 45. Opus One 2019 ─────────────────────────────────────────────────────
   {
-    entityId:         createEntityId('opus-one-2019'),
+    entityId:         createCanonicalEntityId('opus-one-2019'),
     entityType:       'wine',
     canonicalLabel:   'Opus One 2019',
     vintageYear:      2019,
@@ -2148,7 +2148,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 46. Harlan Estate 2017 ────────────────────────────────────────────────
   {
-    entityId:         createEntityId('harlan-estate-2017'),
+    entityId:         createCanonicalEntityId('harlan-estate-2017'),
     entityType:       'wine',
     canonicalLabel:   'Harlan Estate 2017',
     vintageYear:      2017,
@@ -2192,7 +2192,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 47. Ridge Monte Bello 2018 ────────────────────────────────────────────
   {
-    entityId:         createEntityId('ridge-monte-bello-2018'),
+    entityId:         createCanonicalEntityId('ridge-monte-bello-2018'),
     entityType:       'wine',
     canonicalLabel:   'Ridge Monte Bello 2018',
     vintageYear:      2018,
@@ -2236,7 +2236,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 48. Kosta Browne Pinot Noir 2021 ────────────────────────────────────
   {
-    entityId:         createEntityId('kosta-browne-pinot-2021'),
+    entityId:         createCanonicalEntityId('kosta-browne-pinot-2021'),
     entityType:       'wine',
     canonicalLabel:   'Kosta Browne Pinot Noir 2021',
     vintageYear:      2021,
@@ -2284,7 +2284,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 49. Domaine Drouhin Oregon Pinot Noir 2020 ───────────────────────────
   {
-    entityId:         createEntityId('drouhin-oregon-pinot-2020'),
+    entityId:         createCanonicalEntityId('drouhin-oregon-pinot-2020'),
     entityType:       'wine',
     canonicalLabel:   'Domaine Drouhin Oregon Pinot Noir 2020',
     vintageYear:      2020,
@@ -2328,7 +2328,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 50. Quilceda Creek Cabernet Sauvignon 2018 (Washington) ──────────────
   {
-    entityId:         createEntityId('quilceda-cabernet-2018'),
+    entityId:         createCanonicalEntityId('quilceda-cabernet-2018'),
     entityType:       'wine',
     canonicalLabel:   'Quilceda Creek Cabernet Sauvignon 2018',
     vintageYear:      2018,
@@ -2376,7 +2376,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 51. Penfolds Grange 2017 ──────────────────────────────────────────────
   {
-    entityId:         createEntityId('penfolds-grange-2017'),
+    entityId:         createCanonicalEntityId('penfolds-grange-2017'),
     entityType:       'wine',
     canonicalLabel:   'Penfolds Grange 2017',
     vintageYear:      2017,
@@ -2420,7 +2420,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 52. Henschke Hill of Grace 2018 ──────────────────────────────────────
   {
-    entityId:         createEntityId('henschke-hill-of-grace-2018'),
+    entityId:         createCanonicalEntityId('henschke-hill-of-grace-2018'),
     entityType:       'wine',
     canonicalLabel:   'Henschke Hill of Grace 2018',
     vintageYear:      2018,
@@ -2464,7 +2464,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 53. 19 Crimes Red 2022 ────────────────────────────────────────────────
   {
-    entityId:         createEntityId('19-crimes-red-2022'),
+    entityId:         createCanonicalEntityId('19-crimes-red-2022'),
     entityType:       'wine',
     canonicalLabel:   '19 Crimes Red 2022',
     vintageYear:      2022,
@@ -2512,7 +2512,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 54. Cloudy Bay Sauvignon Blanc 2022 ──────────────────────────────────
   {
-    entityId:         createEntityId('cloudy-bay-2022'),
+    entityId:         createCanonicalEntityId('cloudy-bay-2022'),
     entityType:       'wine',
     canonicalLabel:   'Cloudy Bay Sauvignon Blanc 2022',
     vintageYear:      2022,
@@ -2556,7 +2556,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 55. Felton Road Pinot Noir Block 5 2021 ──────────────────────────────
   {
-    entityId:         createEntityId('felton-road-pinot-2021'),
+    entityId:         createCanonicalEntityId('felton-road-pinot-2021'),
     entityType:       'wine',
     canonicalLabel:   'Felton Road Pinot Noir Block 5 2021',
     vintageYear:      2021,
@@ -2604,7 +2604,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 56. Catena Adrianna Vineyard White Bones Chardonnay 2020 ─────────────
   {
-    entityId:         createEntityId('catena-adrianna-chardonnay-2020'),
+    entityId:         createCanonicalEntityId('catena-adrianna-chardonnay-2020'),
     entityType:       'wine',
     canonicalLabel:   'Catena Adrianna Vineyard White Bones Chardonnay 2020',
     vintageYear:      2020,
@@ -2648,7 +2648,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 57. Zuccardi Valle de Uco Malbec Piedra Infinita 2019 ────────────────
   {
-    entityId:         createEntityId('zuccardi-piedra-infinita-2019'),
+    entityId:         createCanonicalEntityId('zuccardi-piedra-infinita-2019'),
     entityType:       'wine',
     canonicalLabel:   'Zuccardi Valle de Uco Malbec Piedra Infinita 2019',
     vintageYear:      2019,
@@ -2692,7 +2692,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 58. Catena Zapata Adrianna Malbec 2019 ───────────────────────────────
   {
-    entityId:         createEntityId('catena-adrianna-malbec-2019'),
+    entityId:         createCanonicalEntityId('catena-adrianna-malbec-2019'),
     entityType:       'wine',
     canonicalLabel:   'Catena Zapata Adrianna Vineyard Malbec 2019',
     vintageYear:      2019,
@@ -2740,7 +2740,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 59. Almaviva 2019 ─────────────────────────────────────────────────────
   {
-    entityId:         createEntityId('almaviva-2019'),
+    entityId:         createCanonicalEntityId('almaviva-2019'),
     entityType:       'wine',
     canonicalLabel:   'Almaviva 2019',
     vintageYear:      2019,
@@ -2784,7 +2784,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 60. Casillero del Diablo Cabernet Sauvignon 2021 ─────────────────────
   {
-    entityId:         createEntityId('casillero-diablo-cab-2021'),
+    entityId:         createCanonicalEntityId('casillero-diablo-cab-2021'),
     entityType:       'wine',
     canonicalLabel:   'Casillero del Diablo Cabernet Sauvignon 2021',
     vintageYear:      2021,
@@ -2832,7 +2832,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 61. Kanonkop Paul Sauer 2018 ─────────────────────────────────────────
   {
-    entityId:         createEntityId('kanonkop-paul-sauer-2018'),
+    entityId:         createCanonicalEntityId('kanonkop-paul-sauer-2018'),
     entityType:       'wine',
     canonicalLabel:   'Kanonkop Paul Sauer 2018',
     vintageYear:      2018,
@@ -2876,7 +2876,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 62. Hamilton Russell Pinot Noir 2021 ─────────────────────────────────
   {
-    entityId:         createEntityId('hamilton-russell-pinot-2021'),
+    entityId:         createCanonicalEntityId('hamilton-russell-pinot-2021'),
     entityType:       'wine',
     canonicalLabel:   'Hamilton Russell Pinot Noir 2021',
     vintageYear:      2021,
@@ -2924,7 +2924,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 63. Gravner Ribolla Gialla 2013 ──────────────────────────────────────
   {
-    entityId:         createEntityId('gravner-ribolla-2013'),
+    entityId:         createCanonicalEntityId('gravner-ribolla-2013'),
     entityType:       'wine',
     canonicalLabel:   'Gravner Ribolla Gialla 2013',
     vintageYear:      2013,
@@ -2968,7 +2968,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 64. Radikon Oslavje 2013 ─────────────────────────────────────────────
   {
-    entityId:         createEntityId('radikon-oslavje-2013'),
+    entityId:         createCanonicalEntityId('radikon-oslavje-2013'),
     entityType:       'wine',
     canonicalLabel:   'Radikon Oslavje 2013',
     vintageYear:      2013,
@@ -3016,7 +3016,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 65. Louis Jadot Mâcon-Villages Blanc 2022 ────────────────────────────
   {
-    entityId:         createEntityId('jadot-macon-blanc-2022'),
+    entityId:         createCanonicalEntityId('jadot-macon-blanc-2022'),
     entityType:       'wine',
     canonicalLabel:   'Louis Jadot Mâcon-Villages Blanc 2022',
     vintageYear:      2022,
@@ -3060,7 +3060,7 @@ export const WINES: readonly RetrievalDocument[] = [
 
   // ── 66. Santa Margherita Pinot Grigio 2022 ───────────────────────────────
   {
-    entityId:         createEntityId('santa-margherita-pinot-grigio-2022'),
+    entityId:         createCanonicalEntityId('santa-margherita-pinot-grigio-2022'),
     entityType:       'wine',
     canonicalLabel:   'Santa Margherita Pinot Grigio Alto Adige 2022',
     vintageYear:      2022,

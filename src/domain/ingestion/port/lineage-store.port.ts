@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { LineageRecord } from '../model/lineage-record.js';
 
 /**
@@ -29,5 +29,5 @@ export interface LineageStore {
    * @param entityId - The entity identifier.
    * @returns All lineage records for the given entity, ordered by timestamp.
    */
-  findByEntity(entityId: EntityId): Promise<readonly LineageRecord[]>;
+  findByEntity(entityId: CanonicalEntityId): Promise<readonly LineageRecord[]>;
 }

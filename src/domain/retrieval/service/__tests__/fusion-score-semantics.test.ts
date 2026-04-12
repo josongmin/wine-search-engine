@@ -14,16 +14,16 @@ import { extractLTRFeatures } from '../../../ranking/service/ltr-features.js';
 import type { SparseHit, DenseHit } from '../../port/search-index.port.js';
 import type { HybridCandidate } from '../../model/hybrid-candidate.js';
 import { createEntityId } from '../../../shared/types/index.js';
-import type { EntityId } from '../../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../../shared/types/index.js';
 
 // ── helpers ──────────────────────────────────────────────────────────
 
 function sparseHit(entityId: string, rank: number, score = 1.0): SparseHit {
-  return { entityId: entityId as EntityId, rank, score, matchedFields: [] };
+  return { entityId: entityId as CanonicalEntityId, rank, score, matchedFields: [] };
 }
 
 function denseHit(entityId: string, rank: number, score = 1.0): DenseHit {
-  return { entityId: entityId as EntityId, rank, score, similarity: score };
+  return { entityId: entityId as CanonicalEntityId, rank, score, similarity: score };
 }
 
 const noDegradation = { dense: false, sparse: false, anchor: false } as const;

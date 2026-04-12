@@ -6,13 +6,13 @@ import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
 import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
 
 export interface SearchRouteDecisionContext {
   readonly mixedAnchor?: {
-    readonly entityId: EntityId;
+    readonly entityId: CanonicalEntityId;
     readonly canonicalLabel: string;
     readonly confidence: number;
   } | undefined;

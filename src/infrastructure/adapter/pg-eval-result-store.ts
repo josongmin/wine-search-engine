@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import type { Pool } from 'pg';
 import type { EvalResultStore, EvalResultFilter } from '../../domain/evaluation/port/eval-result-store.port.js';
 import type { EvalResult } from '../../domain/evaluation/model/eval-result.js';
-import { createEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId, isCorruptedSnapshot } from '../../domain/shared/types/index.js';
 import type { DecisionStatus } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { parseDecisionSnapshotJsonb, parseEvidenceItemsJsonb } from './jsonb-schemas.js';
@@ -43,7 +43,7 @@ function rowToEvalResult(row: EvalResultRow): EvalResult {
     decisionSnapshot: parseDecisionSnapshotJsonb(row.decision_snapshot, 'PgEvalResultStore'),
   };
   if (row.predicted_entity_id != null) {
-    return { ...base, predictedEntityId: createEntityId(row.predicted_entity_id) };
+    return { ...base, predictedEntityId: createCanonicalEntityId(row.predicted_entity_id) };
   }
   return base;
 }

@@ -6,7 +6,8 @@ Engine repo as of this ADR revision:
 
 - **Phase 1 (partial):** `009_canonical_entity_graph.sql` plus `scripts/etl/canonical-entity-graph-sync.ts` populate `canonical_entities` / links / canonical aliases / canonical ambiguity from the active search snapshot.
 - **Phase 2 (partial):** `scripts/etl/build-search-snapshot.ts` resolves snapshot `entityId` via `snapshot-entity-identity.ts` (fixture gold overlay + deterministic `wine-ce-{identitySignature}` fallback — not raw `sourceId`); `source_record_refs` carries Vivino lineage separately.
-- **Phase 0 / Phase 3 (open):** Branded `CanonicalEntityId` vs `SourceRecordId` split is not fully enforced across `src/`; runtime `entities.entity_id` canonical reload and full HTTP surface audit remain.
+- **Phase 0 (partial):** `entity-id.ts` brands `CanonicalEntityId` / `SourceRecordId` / `DocumentId`; `scripts/etl/types.ts` now types Silver `sourceId` as `SourceRecordId` and indexable `entityId` as `CanonicalEntityId`; Vivino silver ETL wraps `sourceId` with `createSourceRecordId`; PG/Vespa/HTTP ingress paths that hydrate public ids use `createCanonicalEntityId` (fail-loud on `vivino-`). Full call-site migration across `src/` is not finished.
+- **Phase 3 (open):** Runtime `entities.entity_id` canonical reload and full HTTP surface audit remain.
 
 ## Context
 
@@ -388,7 +389,7 @@ DB 대상:
 작업 파일:
 
 - `src/infrastructure/db/migrations/009_canonical_entity_graph.sql`
-- `src/infrastructure/db/migrate.ts`
+- `src/infrastructure/db/migrate.ts` (`runMigrations`), `scripts/migrate-local-docker-pg.ts`, `scripts/migrate-from-env.ts`
 - `src/infrastructure/adapter/` 아래 canonical graph adapter 신설
 - `scripts/etl/` 아래 canonical graph build/publish 스크립트 신설
 
@@ -747,7 +748,7 @@ CI에 다음 검사를 추가한다.
 CI에 추가할 명령:
 
 1. `npm run typecheck`
-2. `npm run migrate`
+2. `npm run migrate` (로컬 기본: `docker-compose.yml` Postgres — 관리형 DB면 `npm run migrate:from-env`)
 3. `npm run etl:publish-search-snapshot`
 4. `npx tsx scripts/etl/verify-search-snapshot-readiness.ts --strict`
 5. `npx tsx scripts/etl/verify-gold-catalog-coverage.ts`
@@ -768,8 +769,10 @@ CI에 추가할 명령:
 - DB migrations:
   - `src/infrastructure/db/migrations/009_canonical_entity_graph.sql`
   - 이후 follow-up migrations under same folder
-- DB migrate entrypoint:
-  - `src/infrastructure/db/migrate.ts`
+- DB migrate runners (SQL은 `src/infrastructure/db/migrations/`):
+  - `npm run migrate` → `scripts/migrate-local-docker-pg.ts` (Compose Postgres)
+  - `npm run migrate:from-env` → `scripts/migrate-from-env.ts` (`.env` / `DATABASE_URL`)
+  - 러너: `src/infrastructure/db/migrate.ts` (`runMigrations`)
 
 ### ETL / snapshot
 

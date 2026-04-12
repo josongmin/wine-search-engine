@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Alias, AliasScope } from '../model/alias.js';
 
 /**
@@ -22,7 +22,7 @@ export interface AliasRepository {
    * @param entityId - The entity whose aliases to retrieve.
    * @returns All aliases for the entity, including suppressed ones.
    */
-  findByEntity(entityId: EntityId): Promise<readonly Alias[]>;
+  findByEntity(entityId: CanonicalEntityId): Promise<readonly Alias[]>;
 
   /**
    * Finds all active aliases matching a pre-normalized value.

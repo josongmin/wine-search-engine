@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AliasType, AliasScope } from './alias.js';
 
 /**
@@ -6,7 +6,7 @@ import type { AliasType, AliasScope } from './alias.js';
  */
 export interface AliasConflictEntry {
   /** The entity claiming this alias. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   /** How the alias was derived for this entity. */
   readonly aliasType: AliasType;
   /**
@@ -28,7 +28,7 @@ export interface AliasConflictEntry {
  */
 export interface AliasConflictResolution {
   /** The entity that retains the alias. */
-  readonly winnerId: EntityId;
+  readonly winnerId: CanonicalEntityId;
   /** The winning entity's computed score. */
   readonly score: number;
   /** Difference between winner and runner-up scores. */

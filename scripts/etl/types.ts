@@ -7,6 +7,7 @@
 
 import type { LearnedSparseVector } from './learned-sparse-spec.js';
 import type { SourceRecordRef } from '../../src/domain/entity/model/source-record-ref.js';
+import type { CanonicalEntityId, SourceRecordId } from '../../src/domain/shared/types/entity-id.js';
 
 // ---------------------------------------------------------------------------
 // Vivino Bronze payload shape (from wine_pdp_snapshot.payload JSONB)
@@ -170,8 +171,8 @@ export type PriceBand = 'value' | 'mid' | 'premium' | 'luxury';
  * All strings are trimmed and non-empty (or the field is omitted).
  */
 export interface SilverWineRecord {
-  /** Deterministic ID: hash of "vivino:{external_id}". */
-  readonly sourceId: string;
+  /** Deterministic Vivino row id (`vivino-…`); ADR-007: not public `entity_id`. */
+  readonly sourceId: SourceRecordId;
   /** Vivino external_id for provenance. */
   readonly externalId: string;
   /** Normalized canonical label (RFC-002: never raw display_name). */
@@ -341,8 +342,8 @@ export interface IndexableWineRecord {
   // RetrievalHitProjection fields — hit display + evidence fields
   // -------------------------------------------------------------------------
 
-  /** Required: unique entity identifier (non-empty). */
-  readonly entityId: string;
+  /** Required: canonical public entity id (ADR-007; never `vivino-` source namespace). */
+  readonly entityId: CanonicalEntityId;
   /** Required: canonical display label (non-empty). */
   readonly canonicalLabel: string;
   /** Producer / winery name. */

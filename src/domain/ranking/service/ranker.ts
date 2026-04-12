@@ -1,4 +1,4 @@
-import type { EntityId, QueryClass } from '../../shared/types/index.js';
+import type { CanonicalEntityId, QueryClass } from '../../shared/types/index.js';
 import { liftBundleToAtoms } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../../retrieval/model/hybrid-candidate.js';
 import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
@@ -89,7 +89,7 @@ function buildWineText(entry: ScoredEntry): string {
  * Exported for regression tests (E1-P03 tie-break suite).
  */
 export interface ScoredEntry {
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
   readonly canonicalLabel: string;
   readonly producer?: string;
   readonly region?: string;

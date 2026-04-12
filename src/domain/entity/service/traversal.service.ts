@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Entity } from '../model/entity.js';
 import type { EntityRepository } from '../port/entity-repository.port.js';
 
@@ -20,8 +20,8 @@ export interface TraversalOptions {
  * Represents a single edge discovered during traversal.
  */
 export interface TraversalEdge {
-  readonly fromId: EntityId;
-  readonly toId: EntityId;
+  readonly fromId: CanonicalEntityId;
+  readonly toId: CanonicalEntityId;
   readonly relationType: string;
   readonly hop: number;
 }
@@ -31,7 +31,7 @@ export interface TraversalEdge {
  */
 export interface TraversalResult {
   /** All entities discovered (including the start entity). */
-  readonly entities: ReadonlyMap<EntityId, Entity>;
+  readonly entities: ReadonlyMap<CanonicalEntityId, Entity>;
   /** All edges followed during traversal. */
   readonly edges: readonly TraversalEdge[];
   /** Whether the traversal was cut short by time or fan-out limits. */
@@ -60,7 +60,7 @@ export class TraversalService {
    * @param options - Optional traversal budget constraints.
    * @returns A TraversalResult containing discovered entities and edges.
    */
-  async traverse(startId: EntityId, options?: TraversalOptions): Promise<TraversalResult> {
+  async traverse(startId: CanonicalEntityId, options?: TraversalOptions): Promise<TraversalResult> {
     const maxHops = options?.maxHops ?? DEFAULT_MAX_HOPS;
     const maxFanOut = options?.maxFanOut ?? DEFAULT_MAX_FAN_OUT;
     const timeoutMs = options?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -69,12 +69,12 @@ export class TraversalService {
       : null;
 
     const deadline = Date.now() + timeoutMs;
-    const visited = new Map<EntityId, Entity>();
+    const visited = new Map<CanonicalEntityId, Entity>();
     const edges: TraversalEdge[] = [];
     let truncated = false;
 
     // BFS queue: [entityId, currentHop]
-    const queue: Array<[EntityId, number]> = [[startId, 0]];
+    const queue: Array<[CanonicalEntityId, number]> = [[startId, 0]];
 
     while (queue.length > 0) {
       if (Date.now() >= deadline) {
@@ -127,10 +127,10 @@ export class TraversalService {
   private extractNeighbours(
     entity: Entity,
     relationFilter: ReadonlySet<string> | null,
-  ): Array<{ id: EntityId; relationType: string }> {
-    const result: Array<{ id: EntityId; relationType: string }> = [];
+  ): Array<{ id: CanonicalEntityId; relationType: string }> {
+    const result: Array<{ id: CanonicalEntityId; relationType: string }> = [];
 
-    const relationEntries: Array<[string, EntityId | undefined]> = [
+    const relationEntries: Array<[string, CanonicalEntityId | undefined]> = [
       ['producedBy', entity.relations.producedBy],
       ['variantOf', entity.relations.variantOf],
       ['locatedIn', entity.relations.locatedIn],

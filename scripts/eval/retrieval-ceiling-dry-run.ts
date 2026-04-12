@@ -32,6 +32,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
+
 import {
   analyzeScenarioRetrieval,
   summarizeRetrievalAnalysis,
@@ -229,7 +231,7 @@ async function main(): Promise<void> {
     },
   };
 
-  const outputAbs = path.resolve(process.cwd(), OUTPUT_REL_PATH);
+  const outputAbs = resolveDataPath(OUTPUT_REL_PATH);
   await mkdir(path.dirname(outputAbs), { recursive: true });
   await writeFile(outputAbs, JSON.stringify(report, null, 2), 'utf8');
 

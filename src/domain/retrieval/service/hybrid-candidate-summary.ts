@@ -10,7 +10,7 @@ import {
   type RetrievalHitSummaryKey,
   type RetrievalSummaryCarrier,
 } from '../port/search-index.port.js';
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 export type HybridCandidateSummaryFields = Pick<
   HybridCandidate,
@@ -204,7 +204,7 @@ export function mergeRetrievalHitSummaries(
 
 export function findRetrievalHitSummaryForEntity(
   hits: readonly RetrievalSummaryCarrier[],
-  entityId: EntityId,
+  entityId: CanonicalEntityId,
 ): RetrievalHitSummary | undefined {
   for (const hit of hits) {
     if (hit.entityId === entityId) return normalizeRetrievalHitSummary(hit.summary);
@@ -213,7 +213,7 @@ export function findRetrievalHitSummaryForEntity(
 }
 
 export function mergeRetrievalHitSummariesForEntity(
-  entityId: EntityId,
+  entityId: CanonicalEntityId,
   ...hitLists: readonly (readonly RetrievalSummaryCarrier[])[]
 ): RetrievalHitSummary | undefined {
   return mergeRetrievalHitSummaries(

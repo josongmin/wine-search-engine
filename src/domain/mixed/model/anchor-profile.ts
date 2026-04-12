@@ -1,4 +1,4 @@
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 
 /**
  * Detailed profile of an anchor entity used for "wines like X" queries.
@@ -10,7 +10,7 @@ import type { EntityId } from '../../shared/types/index.js';
  */
 export interface AnchorProfile {
   /** The resolved entity this profile represents. */
-  readonly entityId: EntityId;
+  readonly entityId: CanonicalEntityId;
 
   /** Canonical display label (e.g. "Opus One 2018"). */
   readonly canonicalLabel: string;

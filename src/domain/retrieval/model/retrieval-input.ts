@@ -1,6 +1,6 @@
 import type { NormalizedConstraint } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
 import type { RetrievalPlan } from '../service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../shared/request-execution-context.js';
@@ -66,7 +66,7 @@ export interface HybridRetrievalInput {
    * CandidatePool may use this to build an anchor profile or apply
    * relative filtering without inventing a new public retrieval mode.
    */
-  readonly anchorEntityId?: EntityId | undefined;
+  readonly anchorEntityId?: CanonicalEntityId | undefined;
 
   /**
    * Optional request-scoped execution context. When present, retrieval

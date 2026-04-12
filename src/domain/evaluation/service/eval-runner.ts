@@ -20,7 +20,12 @@
  *
  * Do NOT accept promotion via human judgment alone — gate criteria must pass.
  */
-import type { DecisionStatus, EntityId, EvidenceItem, DecisionSnapshot } from '../../shared/types/index.js';
+import type {
+  CanonicalEntityId,
+  DecisionStatus,
+  EvidenceItem,
+  DecisionSnapshot,
+} from '../../shared/types/index.js';
 import type { LTRScoreComponents } from '../../ranking/service/ltr-feature-extractor.js';
 import type { FunnelMetrics } from '../../ranking/model/ranking-stage.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
@@ -71,7 +76,7 @@ import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
  */
 export interface SearchPipelineOutput {
   /** The predicted entity ID, if resolved. */
-  readonly predictedEntityId?: EntityId;
+  readonly predictedEntityId?: CanonicalEntityId;
 
   /** The decision status. */
   readonly predictedStatus: DecisionStatus;

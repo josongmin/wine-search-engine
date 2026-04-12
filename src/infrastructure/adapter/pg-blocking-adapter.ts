@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { BlockingPort } from '../../domain/resolver/port/blocking.port.js';
-import { createEntityId, type EntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId, type EntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { readPgSqlState } from '../db/pg-sqlstate.js';
 
@@ -88,6 +88,6 @@ export class PgBlockingAdapter implements BlockingPort {
       return [];
     }
 
-    return result.rows.map((row) => createEntityId(row.entity_id));
+    return result.rows.map((row) => createCanonicalEntityId(row.entity_id));
   }
 }

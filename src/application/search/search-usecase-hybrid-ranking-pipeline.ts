@@ -1,6 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { RankingInput } from '../../domain/ranking/model/ranking-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -79,7 +79,7 @@ export async function resolveEntityRouteForPlan(
   }
 
   // TA2-4: Invoke blocker to surface entity IDs not covered by alias anchors.
-  let blockerOnlyIds: readonly EntityId[] = [];
+  let blockerOnlyIds: readonly CanonicalEntityId[] = [];
   if (deps.blocker !== undefined) {
     const allBlockerIds = await deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
     const anchorCoveredIds = new Set(

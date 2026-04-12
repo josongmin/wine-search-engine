@@ -16,8 +16,8 @@ import type { SearchExecutorPort } from '../search/port/search-executor.port.js'
 import type { SearchResponseV1 } from '../../domain/response/model/search-response.js';
 import type { ComparisonSearchResponse } from '../../domain/response/model/comparison-response.js';
 import type { DrinkingWindowBlock } from '../../domain/response/model/result-item.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
-import { createEntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
+import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
 import { KRW_PER_USD_APPROXIMATE, MAX_QUERY_LENGTH, MIN_PRODUCED_VINTAGE_YEAR, MAX_PRODUCED_VINTAGE_YEAR } from '../../domain/shared/constants.js';
 import type { RetrievalDocument } from '../../domain/retrieval/model/retrieval-document.js';
 import { MAX_SOURCE_RECORD_REFS_PER_ENTITY } from '../../domain/entity/model/source-record-ref.js';
@@ -209,7 +209,7 @@ export interface AgentToolDeps {
   /** Direct entity lookup by ID — bypasses the full search pipeline.
    *  When provided, check_drinking_window resolves entities via this port
    *  instead of running a search-as-lookup through searchUseCase. */
-  readonly entityLookup?: ((id: EntityId) => Promise<RetrievalDocument | undefined>) | undefined;
+  readonly entityLookup?: ((id: CanonicalEntityId) => Promise<RetrievalDocument | undefined>) | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -823,7 +823,7 @@ async function executeAgentToolInner(
       // approach was fundamentally broken: it used the entity_id as a natural-language
       // query, which ran NL parsing, fuzzy matching, and ranking on an opaque ID.
       if (deps.entityLookup !== undefined) {
-        const entityId = createEntityId(parsed.entity_id);
+        const entityId = createCanonicalEntityId(parsed.entity_id);
         const doc = await deps.entityLookup(entityId);
         if (doc === undefined) {
           return { observation: `Wine ${parsed.entity_id} not found.`, rawResult: null };

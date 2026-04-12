@@ -9,7 +9,7 @@ import type {
   EntityResolverPort,
   QueryPlannerPort,
 } from './port/search-pipeline-deps.port.js';
-import type { EntityId } from '../../domain/shared/types/index.js';
+import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { ResolveRequest } from './resolve-request.dto.js';
 import type { ResolveResponse } from './resolve-response.dto.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
@@ -134,7 +134,7 @@ export class ResolveUseCase {
 
     // TA2-T5: Invoke blocker to surface entity IDs not covered by alias anchors.
     // Mirrors the pattern in resolveEntityRouteForPlan / executeEntityRoute.
-    let blockerOnlyIds: readonly EntityId[] = [];
+    let blockerOnlyIds: readonly CanonicalEntityId[] = [];
     if (this.deps.blocker !== undefined) {
       const allBlockerIds = await this.deps.blocker.block(plan.rawQuery, plan.normalizedQuery);
       const anchorCoveredIds = new Set(

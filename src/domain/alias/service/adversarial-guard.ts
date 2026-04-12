@@ -1,5 +1,5 @@
 import { HOMOGLYPH_MAP } from '../../shared/utils/unicode-normalize.js';
-import type { EntityId } from '../../shared/types/index.js';
+import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Alias, AliasType } from '../model/alias.js';
 
 /**
@@ -118,7 +118,7 @@ export class AdversarialGuard {
    * @returns Check result; fails if velocity threshold exceeded.
    */
   checkVelocity(
-    entityId: EntityId,
+    entityId: CanonicalEntityId,
     source: string,
     recentAliasCount: number,
   ): AdversarialCheckResult {
