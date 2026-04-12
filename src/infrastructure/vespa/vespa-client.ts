@@ -5,6 +5,8 @@
  * Uses native `fetch` — no external SDK dependency.
  */
 
+import fs from 'node:fs';
+import { Agent as UndiciAgent } from 'undici';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
@@ -286,16 +288,40 @@ async function withRetry<T>(
  * All methods use the native `fetch` API and throw descriptive errors that
  * include the HTTP status code on failure.
  */
+/** Vespa Cloud mTLS client certificate configuration. */
+export interface VespaMtlsConfig {
+  readonly certPath: string;
+  readonly keyPath: string;
+}
+
+/**
+ * Build an undici Agent with client certificate for Vespa Cloud mTLS.
+ * Returns undefined for plain HTTP (local dev without cloud).
+ */
+function buildMtlsDispatcher(mtls: VespaMtlsConfig | undefined): UndiciAgent | undefined {
+  if (mtls === undefined) return undefined;
+  return new UndiciAgent({
+    connect: {
+      cert: fs.readFileSync(mtls.certPath),
+      key: fs.readFileSync(mtls.keyPath),
+      rejectUnauthorized: true,
+    },
+  });
+}
+
 export class VespaClient {
   private readonly timeouts: VespaHttpTimeouts;
+  private readonly dispatcher: UndiciAgent | undefined;
 
   constructor(
     private readonly baseUrl: string,
     private readonly namespace: string,
     private readonly appName: string,
     timeouts?: Partial<VespaHttpTimeouts>,
+    mtls?: VespaMtlsConfig,
   ) {
     this.timeouts = { ...DEFAULT_VESPA_HTTP_TIMEOUTS, ...timeouts };
+    this.dispatcher = buildMtlsDispatcher(mtls);
   }
 
   // -------------------------------------------------------------------------
@@ -335,7 +361,11 @@ export class VespaClient {
     externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
     try {
-      return await fetch(url, { ...options, signal: controller.signal });
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal,
+        ...(this.dispatcher !== undefined ? { dispatcher: this.dispatcher } : {}),
+      } as RequestInit);
     } catch (err) {
       // `fetch` rejects with a TypeError (or DOMException for abort) when the
       // request cannot be sent at the network/transport layer — not for HTTP

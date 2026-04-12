@@ -127,6 +127,8 @@ function buildConfig(parsed: EnvVars) {
     /** Vespa search backend settings. */
     vespa: {
       url: parsed.VESPA_URL,
+      certPath: parsed.VESPA_CERT_PATH,
+      keyPath: parsed.VESPA_KEY_PATH,
       contentCluster: parsed.VESPA_CONTENT_CLUSTER,
       timeouts: {
         searchRequestMs: parsed.VESPA_SEARCH_REQUEST_TIMEOUT_MS,

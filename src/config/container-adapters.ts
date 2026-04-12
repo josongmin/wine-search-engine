@@ -111,11 +111,20 @@ export function buildCoreAdapterServices(
     );
   }
 
-  const vespaClient = new VespaClient(config.vespa.url, 'wine', 'wine_entity', {
-    searchRequestMs: config.vespa.timeouts.searchRequestMs,
-    documentMutationMs: config.vespa.timeouts.documentMutationMs,
-    documentGetDeleteMs: config.vespa.timeouts.documentGetDeleteMs,
-  });
+  const vespaMtls = config.vespa.certPath !== undefined && config.vespa.keyPath !== undefined
+    ? { certPath: config.vespa.certPath, keyPath: config.vespa.keyPath }
+    : undefined;
+  const vespaClient = new VespaClient(
+    config.vespa.url,
+    'wine',
+    'wine_entity',
+    {
+      searchRequestMs: config.vespa.timeouts.searchRequestMs,
+      documentMutationMs: config.vespa.timeouts.documentMutationMs,
+      documentGetDeleteMs: config.vespa.timeouts.documentGetDeleteMs,
+    },
+    vespaMtls,
+  );
   const baseSearchIndex: SearchIndexPort = new VespaSearchIndex(vespaClient);
   const searchIndex: SearchIndexPort = isWatchlistEnabled(config)
     ? new WatchlistAwareSearchIndex({

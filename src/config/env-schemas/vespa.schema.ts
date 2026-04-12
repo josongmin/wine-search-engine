@@ -13,6 +13,10 @@ const DEFAULT_VESPA_DOCUMENT_GET_DELETE_TIMEOUT_MS = 10_000;
 
 export const VespaEnvSchema = z.object({
   VESPA_URL: z.string().url().default('http://localhost:8080'),
+  /** PEM client certificate for Vespa Cloud mTLS data plane auth. */
+  VESPA_CERT_PATH: z.string().min(1).optional(),
+  /** PEM private key for Vespa Cloud mTLS data plane auth. */
+  VESPA_KEY_PATH: z.string().min(1).optional(),
   VESPA_CONTENT_CLUSTER: z.string().min(1).default('wine_content'),
   VESPA_SEARCH_REQUEST_TIMEOUT_MS: z.coerce
     .number()
