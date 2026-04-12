@@ -7,7 +7,7 @@ import {
 import type { QueryClass } from '../../shared/types/index.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
 import type { RetrievalChannel } from '../../retrieval/model/retrieval-channel.js';
-import { getModeWeights } from '../model/mode-weights.js';
+import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -292,36 +292,17 @@ function applyModeOverlayWithNorm(
   baseWeights: ScoringWeights,
   mode: Parameters<typeof getModeWeights>[0],
 ): ScoringWeights {
+  // Use the production SSoT (applyModeWeightOverlay + scaleOverlaidWeights)
+  // so this test cannot drift from ranker.ts. Previously this helper
+  // overlaid only 6 of 12 fields, computing normalisation against a
+  // different field set than production — false-positive validation.
   const modeProfile = getModeWeights(mode);
-  const overlaid: ScoringWeights = {
-    ...baseWeights,
-    semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
-    popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
-    attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
-    preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
-    producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
-    recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
-  };
+  const overlaid = applyModeWeightOverlay(baseWeights, modeProfile);
   const baseSum = NON_PENALTY_KEYS.reduce((s, k) => s + (baseWeights[k] ?? 0), 0);
   const overlaidSum = NON_PENALTY_KEYS.reduce((s, k) => s + (overlaid[k] ?? 0), 0);
   const normFactor =
     overlaidSum > 0 && baseSum > 0 && overlaidSum !== baseSum ? baseSum / overlaidSum : 1;
-  if (normFactor === 1) return overlaid;
-  return {
-    ...overlaid,
-    entityIntegrity: overlaid.entityIntegrity * normFactor,
-    anchorSimilarity: overlaid.anchorSimilarity * normFactor,
-    semantic: overlaid.semantic * normFactor,
-    softConstraint: overlaid.softConstraint * normFactor,
-    attributeAlignment: overlaid.attributeAlignment * normFactor,
-    preferenceAlignment: overlaid.preferenceAlignment * normFactor,
-    popularity: overlaid.popularity * normFactor,
-    availability: overlaid.availability * normFactor,
-    producerPrestige: overlaid.producerPrestige * normFactor,
-    recency: overlaid.recency * normFactor,
-    criticScore: overlaid.criticScore * normFactor,
-    multilingualScore: overlaid.multilingualScore * normFactor,
-  };
+  return scaleOverlaidWeights(overlaid, normFactor);
 }
 
 describe('mode-overlay normalization invariant', () => {

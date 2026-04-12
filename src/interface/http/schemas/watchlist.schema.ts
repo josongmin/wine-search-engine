@@ -408,18 +408,19 @@ export const ListDeliveriesResponseSchema = z.object({
 
 export type ListDeliveriesResponse = z.infer<typeof ListDeliveriesResponseSchema>;
 
-// RFC-014 error envelope. `request_id` is REQUIRED (clients need it for
-// support correlation). `failure_reason` and `retryable` are retained as
-// optional for now because existing watchlist handlers omit them; any new
-// 4xx/5xx branch SHOULD populate both to match `ErrorResponseSchema`.
+// RFC-014 error envelope. ALL FIVE fields (request_id, code, message,
+// failure_reason, retryable) are REQUIRED — failure_reason may be null,
+// but the key must be present. Aligned with the canonical
+// `ErrorResponseSchema` in search-response.schema.ts. Watchlist routes
+// only build this envelope for enumerated 4xx user-input failures; all
+// 5xx paths propagate to the central error-handler middleware.
 export const WatchlistErrorResponseSchema = z.object({
   error: z.object({
-    // Bounds aligned with canonical ErrorResponseSchema (RFC-014).
     code: z.string().min(1).max(MAX_ERROR_ENVELOPE_CODE_CHARS),
     message: z.string().max(MAX_ERROR_ENVELOPE_MESSAGE_CHARS),
     request_id: z.string().min(1),
-    failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable().optional(),
-    retryable: z.boolean().optional(),
+    failure_reason: z.string().max(MAX_ERROR_ENVELOPE_FAILURE_REASON_CHARS).nullable(),
+    retryable: z.boolean(),
   }).strict(),
 }).strict();
 

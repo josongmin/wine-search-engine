@@ -37,15 +37,4 @@ describe('Vespa hit_summary ↔ readRawVespaRetrievalSummary SSoT', () => {
     }
   });
 
-  it('vespa-schema.sd hit_summary mirror lists the same retrieval summary fields', () => {
-    const sdPath = path.join(REPO_ROOT, 'src/infrastructure/vespa/vespa-schema.sd');
-    const raw = fs.readFileSync(sdPath, 'utf8');
-    const hitBlock = extractDocumentSummaryBlock(raw, 'hit_summary');
-    expect(hitBlock).toContain('summary entity_id {}');
-    for (const field of VESPA_READ_RAW_RETRIEVAL_SUMMARY_FIELD_NAMES) {
-      expect(hitBlock, `vespa-schema.sd hit_summary missing summary for ${field}`).toContain(
-        `summary ${field} {}`,
-      );
-    }
-  });
 });

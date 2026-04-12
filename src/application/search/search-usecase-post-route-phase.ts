@@ -46,7 +46,7 @@ import {
 } from '../../domain/retrieval/service/per-class-fusion-config.js';
 import { RetrievalProfileService } from '../../domain/retrieval/service/retrieval-profile.js';
 import { retrievalPlanVersion } from '../../domain/retrieval/service/retrieval-plan-builder.js';
-import { getModeWeights } from '../../domain/ranking/model/mode-weights.js';
+import { getModeWeights, MODE_WEIGHT_OVERLAY_MAP } from '../../domain/ranking/model/mode-weights.js';
 import { RANKING_POLICY_VERSION } from '../../domain/ranking/service/ranker.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { logSearchEvent } from '../../observability/log-search-event.js';
@@ -328,25 +328,13 @@ function buildDeterminismFingerprintParams(
     String(retrievalProfile.fusionK),
     String(retrievalProfile.finalTopK),
   );
+  // Iterate the SSoT overlay map so a new mode-weights field automatically
+  // participates in the hash and a removed field cannot drift the cache key.
   const rankingConfigHash = deterministicHash(
     indexVersionsHash,
     RANKING_POLICY_VERSION,
     effectiveRetrievalMode,
-    String(modeWeights.lexicalWeight),
-    String(modeWeights.semanticWeight),
-    String(modeWeights.popularityWeight),
-    String(modeWeights.entityIntegrityWeight),
-    String(modeWeights.attributeAlignmentWeight),
-    String(modeWeights.diversityWeight),
-    String(modeWeights.recencyWeight),
-    String(modeWeights.producerPrestigeWeight),
-    String(modeWeights.geographicAlignmentWeight),
-    String(modeWeights.preferenceAlignmentWeight),
-    String(modeWeights.anchorSimilarityWeight),
-    String(modeWeights.softConstraintWeight),
-    String(modeWeights.availabilityWeight),
-    String(modeWeights.criticScoreWeight),
-    String(modeWeights.multilingualScoreWeight),
+    ...MODE_WEIGHT_OVERLAY_MAP.map(({ modeField }) => String(modeWeights[modeField])),
   );
 
   // E1-T5: extended fields — reranker model ID prefers the explicit rerankDecision

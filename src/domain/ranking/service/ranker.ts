@@ -18,7 +18,7 @@ import type { WineAttributeEncoderPort } from '../port/wine-attribute-encoder.po
 import type { QueryClassWeights } from '../index.js';
 import { resolveWeights, resolveChannelAwareWeights } from '../model/scoring-weights.js';
 import type { ScoringWeights } from '../model/scoring-weights.js';
-import { getModeWeights } from '../model/mode-weights.js';
+import { getModeWeights, applyModeWeightOverlay, scaleOverlaidWeights } from '../model/mode-weights.js';
 import { effectiveRerankBlendWeight } from './rerank-blend.js';
 import { type SignalComputer } from './signal-computer.js';
 import { type ScoreAggregator } from './score-aggregator.js';
@@ -754,33 +754,14 @@ export class Ranker {
     const effectiveRetrievalMode = input.compiled?.execution.effectiveRetrievalMode ?? queryPlan.retrievalMode;
     const baseWeights = resolveWeights(queryPlan.queryClass);
     const modeProfile = getModeWeights(effectiveRetrievalMode);
-    // Mode overlay: max(queryClass base, mode boost).
-    // DEFAULT_WEIGHTS are all 0.0 (no-op) so neutral/undefined modes preserve base.
-    // Explicit modes (producer_browse etc.) can only raise a signal, never suppress.
-    // After overlay, re-normalise so the non-penalty sum is preserved — otherwise
-    // Math.max can inflate the total (e.g. popularity 0.02→0.15 adds +0.13).
-    // RCA5-04 fix: apply Math.max overlay across ALL 12 non-penalty ScoringWeights
-    // fields, not just the 6 that were previously wired. Previously entityIntegrity,
-    // anchorSimilarity, softConstraint, availability, criticScore, multilingualScore
-    // were silently left at their query-class base values even when a mode profile
-    // defined a higher floor (e.g. compare_candidates sets anchorSimilarityWeight=0.20
-    // but the base anchored_similarity class already has 0.30, so max is a no-op there;
-    // but for short_entity base=0.0 the overlay correctly raises it).
-    const overlaid: ScoringWeights = {
-      ...baseWeights,
-      entityIntegrity: Math.max(baseWeights.entityIntegrity, modeProfile.entityIntegrityWeight),
-      anchorSimilarity: Math.max(baseWeights.anchorSimilarity, modeProfile.anchorSimilarityWeight),
-      semantic: Math.max(baseWeights.semantic, modeProfile.semanticWeight),
-      softConstraint: Math.max(baseWeights.softConstraint, modeProfile.softConstraintWeight),
-      attributeAlignment: Math.max(baseWeights.attributeAlignment, modeProfile.attributeAlignmentWeight),
-      preferenceAlignment: Math.max(baseWeights.preferenceAlignment, modeProfile.preferenceAlignmentWeight),
-      popularity: Math.max(baseWeights.popularity, modeProfile.popularityWeight),
-      availability: Math.max(baseWeights.availability, modeProfile.availabilityWeight),
-      producerPrestige: Math.max(baseWeights.producerPrestige, modeProfile.producerPrestigeWeight),
-      recency: Math.max(baseWeights.recency, modeProfile.recencyWeight),
-      criticScore: Math.max(baseWeights.criticScore, modeProfile.criticScoreWeight),
-      multilingualScore: Math.max(baseWeights.multilingualScore, modeProfile.multilingualScoreWeight),
-    };
+    // Mode overlay: max(queryClass base, mode boost). All 12 non-penalty
+    // ScoringWeights fields are overlaid via the SSoT MODE_WEIGHT_OVERLAY_MAP
+    // so a new field cannot drift between mode-weights.ts and ranker.ts
+    // (RCA5-04 history: hand-rolled overlay silently dropped 6 fields).
+    // After overlay, re-normalise so the non-penalty sum is preserved —
+    // otherwise Math.max can inflate the total (e.g. popularity 0.02→0.15
+    // adds +0.13).
+    const overlaid: ScoringWeights = applyModeWeightOverlay(baseWeights, modeProfile);
     const baseSum = sumNonPenaltyWeights(baseWeights);
     const overlaidSum = sumNonPenaltyWeights(overlaid);
     // Guard: avoid division by zero when overlaidSum === 0 (all weights zero).
@@ -791,21 +772,7 @@ export class Ranker {
       overlaidSum > 0 && baseSum > 0 && overlaidSum !== baseSum
         ? baseSum / overlaidSum
         : 1;
-    const weights: ScoringWeights = modeNormFactor === 1 ? overlaid : {
-      ...overlaid,
-      entityIntegrity: overlaid.entityIntegrity * modeNormFactor,
-      anchorSimilarity: overlaid.anchorSimilarity * modeNormFactor,
-      semantic: overlaid.semantic * modeNormFactor,
-      softConstraint: overlaid.softConstraint * modeNormFactor,
-      attributeAlignment: overlaid.attributeAlignment * modeNormFactor,
-      preferenceAlignment: overlaid.preferenceAlignment * modeNormFactor,
-      popularity: overlaid.popularity * modeNormFactor,
-      availability: overlaid.availability * modeNormFactor,
-      producerPrestige: overlaid.producerPrestige * modeNormFactor,
-      recency: overlaid.recency * modeNormFactor,
-      criticScore: overlaid.criticScore * modeNormFactor,
-      multilingualScore: overlaid.multilingualScore * modeNormFactor,
-    };
+    const weights: ScoringWeights = scaleOverlaidWeights(overlaid, modeNormFactor);
 
     // Pre-compute query-level signals shared across all candidates.
     const referenceYear = new Date().getFullYear();

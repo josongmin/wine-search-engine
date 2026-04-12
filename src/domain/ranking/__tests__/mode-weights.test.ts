@@ -1,23 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { getModeWeights, DEFAULT_WEIGHTS, type ModeWeightProfile } from '../model/mode-weights.js';
+import {
+  getModeWeights,
+  DEFAULT_WEIGHTS,
+  MODE_WEIGHT_OVERLAY_MAP,
+  applyModeWeightOverlay,
+  scaleOverlaidWeights,
+  type ModeWeightProfile,
+} from '../model/mode-weights.js';
 import { RETRIEVAL_MODES, type RetrievalMode } from '../../query/model/retrieval-mode.js';
+import { resolveWeights } from '../model/scoring-weights.js';
 
 /**
- * The 15 non-penalty weight fields a `ModeWeightProfile` must declare.
+ * The 12 non-penalty weight fields a `ModeWeightProfile` must declare.
  * Mirrored here so the test fails loud if a new field is added to the
  * interface but forgotten in one of the mode profiles (TypeScript enforces
  * this at compile time, the test enforces it at runtime against drift).
+ *
+ * Every entry MUST have a corresponding ScoringWeights field overlaid in
+ * ranker.ts — see the "no silent lying field" test below.
  */
 const REQUIRED_WEIGHT_FIELDS: ReadonlyArray<keyof ModeWeightProfile> = [
-  'lexicalWeight',
   'semanticWeight',
   'popularityWeight',
   'entityIntegrityWeight',
   'attributeAlignmentWeight',
-  'diversityWeight',
   'recencyWeight',
   'producerPrestigeWeight',
-  'geographicAlignmentWeight',
   'preferenceAlignmentWeight',
   'anchorSimilarityWeight',
   'softConstraintWeight',
@@ -29,7 +37,6 @@ const REQUIRED_WEIGHT_FIELDS: ReadonlyArray<keyof ModeWeightProfile> = [
 describe('getModeWeights', () => {
   it('returns a profile for every retrieval mode key', () => {
     const entityLookup = getModeWeights('entity_lookup');
-    expect(entityLookup.lexicalWeight).toBeGreaterThan(0);
     expect(entityLookup.semanticWeight).toBeGreaterThan(0);
   });
 
@@ -79,6 +86,67 @@ describe('ModeWeightProfile invariants (RFC-017 §8.3)', () => {
     for (const mode of RETRIEVAL_MODES) {
       const profile = getModeWeights(mode);
       expect(profile, `getModeWeights('${mode}') must not fall through to DEFAULT_WEIGHTS`).not.toBe(DEFAULT_WEIGHTS);
+    }
+  });
+});
+
+describe('MODE_WEIGHT_OVERLAY_MAP — SSoT parity (RCA5-04 prevention)', () => {
+  it('overlay map has exactly one entry per ModeWeightProfile field (no silent lying field)', () => {
+    const overlayModeFields = new Set(MODE_WEIGHT_OVERLAY_MAP.map((m) => m.modeField));
+    expect(overlayModeFields.size).toBe(MODE_WEIGHT_OVERLAY_MAP.length);
+    expect(overlayModeFields.size).toBe(REQUIRED_WEIGHT_FIELDS.length);
+    for (const field of REQUIRED_WEIGHT_FIELDS) {
+      expect(
+        overlayModeFields.has(field),
+        `${field} is declared on ModeWeightProfile but missing from MODE_WEIGHT_OVERLAY_MAP — silent lying field`,
+      ).toBe(true);
+    }
+  });
+
+  it('every overlay map ScoringWeights field actually exists on ScoringWeights', () => {
+    // Use a real ScoringWeights instance to verify field existence at runtime.
+    const baseline = resolveWeights('default');
+    for (const { scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
+      expect(
+        Object.prototype.hasOwnProperty.call(baseline, scoringField),
+        `scoringField "${scoringField}" referenced by overlay map but not present on ScoringWeights`,
+      ).toBe(true);
+      expect(typeof baseline[scoringField]).toBe('number');
+    }
+  });
+
+  it('applyModeWeightOverlay raises every base weight to mode floor and never lowers', () => {
+    const base = resolveWeights('default');
+    const profile = getModeWeights('compare_candidates');
+    const result = applyModeWeightOverlay(base, profile);
+    for (const { modeField, scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
+      expect(
+        result[scoringField],
+        `${scoringField} must be max(base, mode.${modeField})`,
+      ).toBe(Math.max(base[scoringField], profile[modeField]));
+    }
+  });
+
+  it('scaleOverlaidWeights factor=1 returns input unchanged', () => {
+    const base = resolveWeights('default');
+    const overlaid = applyModeWeightOverlay(base, getModeWeights('attribute_search'));
+    expect(scaleOverlaidWeights(overlaid, 1)).toBe(overlaid);
+  });
+
+  it('scaleOverlaidWeights scales every overlaid field by factor', () => {
+    const base = resolveWeights('default');
+    const overlaid = applyModeWeightOverlay(base, getModeWeights('producer_browse'));
+    const scaled = scaleOverlaidWeights(overlaid, 0.5);
+    for (const { scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
+      expect(scaled[scoringField]).toBeCloseTo(overlaid[scoringField] * 0.5, 10);
+    }
+  });
+
+  it('DEFAULT_WEIGHTS overlay is a no-op (every field unchanged from base)', () => {
+    const base = resolveWeights('default');
+    const noopOverlay = applyModeWeightOverlay(base, DEFAULT_WEIGHTS);
+    for (const { scoringField } of MODE_WEIGHT_OVERLAY_MAP) {
+      expect(noopOverlay[scoringField]).toBe(base[scoringField]);
     }
   });
 });

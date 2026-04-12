@@ -36,7 +36,6 @@ import { getRequestId } from '../request-id.js';
 import {
   HTTP_STATUS_BAD_REQUEST,
   HTTP_STATUS_CREATED,
-  HTTP_STATUS_INTERNAL_SERVER_ERROR,
   HTTP_STATUS_NOT_FOUND,
   HTTP_STATUS_NO_CONTENT,
   HTTP_STATUS_OK,
@@ -47,12 +46,25 @@ import {
   WATCHLIST_PAGE_MIN_LIMIT,
 } from '../constants.js';
 
-function createErrorResponse(requestId: string, code: string, message: string) {
+/**
+ * Build a 5-field RFC-014 error envelope. Only used for enumerated 4xx
+ * branches (validation, auth, user-input failures); 5xx paths must throw
+ * to the central error-handler instead of fabricating their own envelope.
+ */
+function createErrorResponse(
+  requestId: string,
+  code: string,
+  message: string,
+  failureReason: string | null,
+  retryable: boolean,
+) {
   return WatchlistErrorResponseSchema.parse({
     error: {
       code,
       message,
       request_id: requestId,
+      failure_reason: failureReason,
+      retryable,
     },
   });
 }
@@ -84,6 +96,8 @@ function requireSubject(
       getRequestId(request),
       'UNAUTHORIZED',
       'Missing authenticated subject header',
+      'missing_auth_subject',
+      false,
     ),
   );
   return null;
@@ -142,18 +156,11 @@ export function registerWatchlistRoute(
           response,
         );
       } catch (err: unknown) {
+        // CLAUDE.md: do NOT fabricate a 200/500 envelope from unexpected
+        // errors. Propagate to the central error-handler middleware which
+        // emits the canonical RFC-014 envelope.
         request.log.error({ err }, 'list_watchlist_failed');
-        sendRouteContractResponse(
-          request,
-          reply,
-          WatchlistListRouteContract,
-          HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          createErrorResponse(
-            getRequestId(request),
-            'INTERNAL_ERROR',
-            'Failed to list watchlists',
-          ),
-        );
+        throw err;
       }
     },
   });
@@ -181,7 +188,13 @@ export function registerWatchlistRoute(
             reply,
             WatchlistCreateRouteContract,
             HTTP_STATUS_BAD_REQUEST,
-            createErrorResponse(getRequestId(request), 'INVALID_CALLBACK_URL', 'Callback URL must use https'),
+            createErrorResponse(
+              getRequestId(request),
+              'INVALID_CALLBACK_URL',
+              'Callback URL must use https',
+              'callback_scheme_not_https',
+              false,
+            ),
           );
           return;
         }
@@ -193,7 +206,13 @@ export function registerWatchlistRoute(
               reply,
               WatchlistCreateRouteContract,
               HTTP_STATUS_BAD_REQUEST,
-              createErrorResponse(getRequestId(request), 'INVALID_CALLBACK_URL', 'Callback host resolves to private/reserved IP'),
+              createErrorResponse(
+                getRequestId(request),
+                'INVALID_CALLBACK_URL',
+                'Callback host resolves to private/reserved IP',
+                'callback_host_private_ip',
+                false,
+              ),
             );
             return;
           }
@@ -210,7 +229,13 @@ export function registerWatchlistRoute(
             reply,
             WatchlistCreateRouteContract,
             HTTP_STATUS_BAD_REQUEST,
-            createErrorResponse(getRequestId(request), 'INVALID_CALLBACK_URL', 'Callback hostname could not be resolved'),
+            createErrorResponse(
+              getRequestId(request),
+              'INVALID_CALLBACK_URL',
+              'Callback hostname could not be resolved',
+              'callback_host_unresolved',
+              false,
+            ),
           );
           return;
         }
@@ -240,17 +265,7 @@ export function registerWatchlistRoute(
         );
       } catch (err: unknown) {
         request.log.error({ err }, 'create_watchlist_failed');
-        sendRouteContractResponse(
-          request,
-          reply,
-          WatchlistCreateRouteContract,
-          HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          createErrorResponse(
-            getRequestId(request),
-            'INTERNAL_ERROR',
-            'Failed to create watchlist',
-          ),
-        );
+        throw err;
       }
     },
   });
@@ -276,6 +291,8 @@ export function registerWatchlistRoute(
             getRequestId(request),
             'VALIDATION_ERROR',
             'Invalid watchlist id',
+            'watchlist_id_invalid',
+            false,
           ),
         );
         return;
@@ -298,6 +315,8 @@ export function registerWatchlistRoute(
               getRequestId(request),
               'NOT_FOUND',
               'Watchlist entry not found',
+              null,
+              false,
             ),
           );
           return;
@@ -312,17 +331,7 @@ export function registerWatchlistRoute(
         );
       } catch (err: unknown) {
         request.log.error({ err }, 'get_watchlist_failed');
-        sendRouteContractResponse(
-          request,
-          reply,
-          WatchlistGetRouteContract,
-          HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          createErrorResponse(
-            getRequestId(request),
-            'INTERNAL_ERROR',
-            'Failed to retrieve watchlist',
-          ),
-        );
+        throw err;
       }
     },
   });
@@ -348,6 +357,8 @@ export function registerWatchlistRoute(
             getRequestId(request),
             'VALIDATION_ERROR',
             'Invalid watchlist id',
+            'watchlist_id_invalid',
+            false,
           ),
         );
         return;
@@ -370,6 +381,8 @@ export function registerWatchlistRoute(
               getRequestId(request),
               'NOT_FOUND',
               'Watchlist entry not found',
+              null,
+              false,
             ),
           );
           return;
@@ -383,17 +396,7 @@ export function registerWatchlistRoute(
         );
       } catch (err: unknown) {
         request.log.error({ err }, 'delete_watchlist_failed');
-        sendRouteContractResponse(
-          request,
-          reply,
-          WatchlistDeleteRouteContract,
-          HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          createErrorResponse(
-            getRequestId(request),
-            'INTERNAL_ERROR',
-            'Failed to delete watchlist',
-          ),
-        );
+        throw err;
       }
     },
   });
@@ -419,6 +422,8 @@ export function registerWatchlistRoute(
             getRequestId(request),
             'VALIDATION_ERROR',
             'Invalid watchlist id',
+            'watchlist_id_invalid',
+            false,
           ),
         );
         return;
@@ -441,6 +446,8 @@ export function registerWatchlistRoute(
               getRequestId(request),
               'NOT_FOUND',
               'Watchlist entry not found',
+              null,
+              false,
             ),
           );
           return;
@@ -476,17 +483,7 @@ export function registerWatchlistRoute(
         );
       } catch (err: unknown) {
         request.log.error({ err }, 'list_watchlist_deliveries_failed');
-        sendRouteContractResponse(
-          request,
-          reply,
-          WatchlistDeliveriesRouteContract,
-          HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          createErrorResponse(
-            getRequestId(request),
-            'INTERNAL_ERROR',
-            'Failed to list deliveries',
-          ),
-        );
+        throw err;
       }
     },
   });

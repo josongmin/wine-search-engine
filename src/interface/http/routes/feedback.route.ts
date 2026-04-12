@@ -16,7 +16,6 @@ import { getRequestId } from '../request-id.js';
 import { buildDecisionSnapshotFromRuntimeVersions } from '../../../application/search/search-usecase-decision-snapshot.js';
 import {
   HTTP_STATUS_CREATED,
-  HTTP_STATUS_INTERNAL_SERVER_ERROR,
   HTTP_STATUS_SERVICE_UNAVAILABLE,
 } from '../constants.js';
 
@@ -116,30 +115,11 @@ export function registerFeedbackRoute(
         decisionSnapshot: buildFeedbackDecisionSnapshot(),
       };
 
-      try {
-        await deps.feedbackStore.saveFeedback(signal);
-      } catch (err: unknown) {
-        // Redact the err object: pg driver errors can include parameterized
-        // SQL with values interpolated, leaking the user's query and entity_id
-        // into structured logs.
-        const errCode = (err as { code?: string } | undefined)?.code;
-        const errName = err instanceof Error ? err.name : 'Unknown';
-        request.log.error({ errCode, errName, requestId }, 'feedback_save_failed');
-        sendRouteContractResponse(
-          request,
-          reply,
-          FeedbackSubmitRouteContract,
-          HTTP_STATUS_INTERNAL_SERVER_ERROR,
-          buildSearchErrorResponse(
-            requestId,
-            'INTERNAL_ERROR',
-            'Failed to persist feedback signal.',
-            null,
-            true,
-          ),
-        );
-        return;
-      }
+      // CLAUDE.md: do NOT fabricate a 500 envelope from unexpected errors.
+      // Propagate to the central error-handler which builds the canonical
+      // RFC-014 envelope. The pino serializer redacts DB connection details
+      // from the error object logged by the handler.
+      await deps.feedbackStore.saveFeedback(signal);
 
       sendRouteContractResponse(request, reply, FeedbackSubmitRouteContract, HTTP_STATUS_CREATED, {
         signal_id: signal.signalId,
