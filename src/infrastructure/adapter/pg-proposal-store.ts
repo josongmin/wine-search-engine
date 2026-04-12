@@ -4,6 +4,7 @@ import type { AliasProposal, AliasProposalStatus, AliasProposalEvidence } from '
 import type { ProposedAliasType } from '../../domain/learning/model/alias-proposal.js';
 import type { ThresholdProposal, ThresholdProposalStatus, ThresholdSet, ThresholdProposalEvidence } from '../../domain/learning/model/threshold-proposal.js';
 import { createCanonicalEntityId } from '../../domain/shared/types/index.js';
+import type { QueryClass } from '../../domain/shared/types/index.js';
 import { isQueryClass } from '../../domain/shared/types/query-class.js';
 
 function toProposedAliasType(value: string): ProposedAliasType {
@@ -54,9 +55,9 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 function toAliasProposalEvidence(raw: unknown): AliasProposalEvidence {
   if (
     isRecord(raw) &&
-    typeof raw['queryCount'] === 'number' &&
-    typeof raw['clickThroughRate'] === 'number' &&
-    typeof raw['sessionSuccessRate'] === 'number'
+    typeof raw['queryCount'] === 'number' && Number.isFinite(raw['queryCount']) &&
+    typeof raw['clickThroughRate'] === 'number' && Number.isFinite(raw['clickThroughRate']) &&
+    typeof raw['sessionSuccessRate'] === 'number' && Number.isFinite(raw['sessionSuccessRate'])
   ) {
     return {
       queryCount: raw['queryCount'],
@@ -64,8 +65,13 @@ function toAliasProposalEvidence(raw: unknown): AliasProposalEvidence {
       sessionSuccessRate: raw['sessionSuccessRate'],
     };
   }
-  // Fallback: return safe defaults so the store doesn't crash on legacy/corrupted rows.
-  return { queryCount: 0, clickThroughRate: 0, sessionSuccessRate: 0 };
+  // Fail loud: a corrupted alias_proposals.evidence row must NOT silently
+  // become {0,0,0}. Downstream learning loops compute promotion decisions
+  // from these counts; zero defaults look like "no signal yet" and would
+  // freeze a real promotion behind a phantom cold-start.
+  throw new Error(
+    `PgProposalStore: malformed alias_proposals.evidence JSONB — schema drift or corrupted row (got ${JSON.stringify(raw)})`,
+  );
 }
 
 function rowToAliasProposal(row: AliasProposalRow): AliasProposal {
@@ -85,22 +91,27 @@ function rowToAliasProposal(row: AliasProposalRow): AliasProposal {
 function toThresholdSet(raw: unknown): ThresholdSet {
   if (
     isRecord(raw) &&
-    typeof raw['tResolve'] === 'number' &&
-    typeof raw['tGap'] === 'number' &&
-    typeof raw['tFail'] === 'number'
+    typeof raw['tResolve'] === 'number' && Number.isFinite(raw['tResolve']) &&
+    typeof raw['tGap'] === 'number' && Number.isFinite(raw['tGap']) &&
+    typeof raw['tFail'] === 'number' && Number.isFinite(raw['tFail'])
   ) {
     return { tResolve: raw['tResolve'], tGap: raw['tGap'], tFail: raw['tFail'] };
   }
-  return { tResolve: 0, tGap: 0, tFail: 0 };
+  // Fail loud: a corrupted threshold_proposals.proposed_thresholds row must
+  // NOT silently become {0,0,0}. tResolve=0 would auto-resolve every query;
+  // tFail=0 would fail none. Either default flips routing globally.
+  throw new Error(
+    `PgProposalStore: malformed threshold_proposals threshold JSONB — schema drift or corrupted row (got ${JSON.stringify(raw)})`,
+  );
 }
 
 /** Runtime guard for ThresholdProposalEvidence JSONB (Rule 11). */
 function toThresholdProposalEvidence(raw: unknown): ThresholdProposalEvidence {
   if (
     isRecord(raw) &&
-    typeof raw['evalCaseCount'] === 'number' &&
-    typeof raw['utilityBefore'] === 'number' &&
-    typeof raw['utilityAfter'] === 'number'
+    typeof raw['evalCaseCount'] === 'number' && Number.isFinite(raw['evalCaseCount']) &&
+    typeof raw['utilityBefore'] === 'number' && Number.isFinite(raw['utilityBefore']) &&
+    typeof raw['utilityAfter'] === 'number' && Number.isFinite(raw['utilityAfter'])
   ) {
     return {
       evalCaseCount: raw['evalCaseCount'],
@@ -108,13 +119,23 @@ function toThresholdProposalEvidence(raw: unknown): ThresholdProposalEvidence {
       utilityAfter: raw['utilityAfter'],
     };
   }
-  return { evalCaseCount: 0, utilityBefore: 0, utilityAfter: 0 };
+  // Fail loud: same reasoning as evidence — utility deltas of 0 read as
+  // "neutral / no improvement", which is the default a promotion gate
+  // looks for to reject. Corrupted rows would silently block promotions.
+  throw new Error(
+    `PgProposalStore: malformed threshold_proposals.evidence JSONB — schema drift or corrupted row (got ${JSON.stringify(raw)})`,
+  );
+}
+
+function toQueryClassStrict(value: string): QueryClass {
+  if (isQueryClass(value)) return value;
+  throw new Error(`PgProposalStore: unknown query_class "${value}" — schema drift or corrupted row`);
 }
 
 function rowToThresholdProposal(row: ThresholdProposalRow): ThresholdProposal {
   return {
     proposalId: row.proposal_id,
-    queryClass: isQueryClass(row.query_class) ? row.query_class : 'unknown',
+    queryClass: toQueryClassStrict(row.query_class),
     proposedThresholds: toThresholdSet(row.proposed_thresholds),
     currentThresholds: toThresholdSet(row.current_thresholds),
     expectedUtilityDelta: row.expected_utility_delta,

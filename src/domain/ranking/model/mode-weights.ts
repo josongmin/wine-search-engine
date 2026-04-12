@@ -11,11 +11,19 @@ import type { RetrievalMode } from '../../query/model/retrieval-mode.js';
 
 /**
  * Ranking weight profile for a retrieval mode.
- * Weights are relative (sum to 1.0 in typical cases) and influence
- * BM25, embedding, popularity, and domain-specific signals.
  *
- * All 12 non-penalty ScoringWeights fields have a corresponding entry here
- * so the mode overlay in ranker.ts can apply Math.max() across all fields
+ * **Invariants** (enforced by `mode-weights.test.ts`):
+ *   1. Every weight ∈ [0, 1].
+ *   2. Every `RetrievalMode` enum value has a profile in `MODE_WEIGHT_PROFILES`.
+ *   3. `DEFAULT_WEIGHTS` is all-zero so `Math.max(base, default) = base`.
+ *
+ * **Non-invariant**: profile fields do NOT sum to 1.0. Each weight is an
+ * independent overlay applied via `Math.max(baseWeight, modeWeight)` in
+ * `ranker.ts`, so they can collectively exceed 1.0 — that's intentional.
+ * Tuning a single weight changes only that signal's floor.
+ *
+ * All 15 non-penalty ScoringWeights fields have a corresponding entry so
+ * the mode overlay in ranker.ts can apply Math.max() across all fields
  * without silently leaving 6 fields unadjusted (RCA5-04).
  */
 export interface ModeWeightProfile {
