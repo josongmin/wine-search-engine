@@ -248,13 +248,13 @@ describe('taxonomy field ingest contract', () => {
     expect(fields['finish_length']).toBe(0.85);
   });
 
-  it('omits finish_length when finishLength is 0 or absent', () => {
+  it('preserves finish_length when finishLength is 0 (legitimate zero)', () => {
     const record = makeEnrichedRecord({ finishLength: 0 });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
     const fields = toVespaFields(doc);
 
-    expect(doc.finishLength).toBeUndefined();
-    expect(fields).not.toHaveProperty('finish_length');
+    expect(doc.finishLength).toBe(0);
+    expect(fields).toHaveProperty('finish_length', 0);
   });
 
   it('toVespaFields never writes an empty-string key', () => {

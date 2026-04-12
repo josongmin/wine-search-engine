@@ -28,7 +28,15 @@ const envSchema = CoreEnvSchema
   .merge(RetrievalEnvSchema)
   .merge(AiEnvSchema)
   .merge(AgentEnvSchema)
-  .merge(KillSwitchEnvSchema);
+  .merge(KillSwitchEnvSchema)
+  .refine(
+    (data) => {
+      const hasCert = data.VESPA_CERT_PATH !== undefined;
+      const hasKey = data.VESPA_KEY_PATH !== undefined;
+      return hasCert === hasKey;
+    },
+    { message: 'VESPA_CERT_PATH and VESPA_KEY_PATH must both be set or both be unset for mTLS' },
+  );
 
 type EnvVars = z.infer<typeof envSchema>;
 
@@ -114,6 +122,7 @@ function buildConfig(parsed: EnvVars) {
       user: parsed.PG_USER,
       password: parsed.PG_PASSWORD,
       ssl: parsed.PG_SSL,
+      sslRejectUnauthorized: parsed.PG_SSL_REJECT_UNAUTHORIZED,
       poolMax: parsed.PG_POOL_MAX,
       idleTimeoutMillis: parsed.PG_POOL_IDLE_TIMEOUT_MS,
       connectionTimeoutMillis: parsed.PG_POOL_CONNECTION_TIMEOUT_MS,

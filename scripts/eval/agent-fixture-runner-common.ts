@@ -1,4 +1,6 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local', override: true });
+dotenv.config();
 
 import { loadConfig } from '../../src/config/env.js';
 import { OpenAiChatLlm } from '../../src/infrastructure/ai/openai-chat-llm.js';

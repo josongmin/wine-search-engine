@@ -1,30 +1,9 @@
-# Local dev stack: API + Postgres + Redis.
-# Vespa runs on Vespa Cloud (p0-lab.wine-searcher) — set VESPA_URL in .env.
-# Project name isolates this from docker-compose.test.yml (`wine-search-test`).
+# Local dev stack: Postgres only.
+# Vespa runs on Vespa Cloud (p0-lab.wine-searcher) — set VESPA_URL in .env.local.
+# Redis is optional — app boots without it (in-memory cache fallback).
 name: wine-search-dev
 
 services:
-  app:
-    build: .
-    # Override host port when 3000 is taken: `APP_HOST_PORT=3001 docker compose up -d app`
-    ports: ["${APP_HOST_PORT:-3000}:3000"]
-    env_file: .env
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    environment:
-      NODE_ENV: development
-      # Override host-relative defaults from .env so the container reaches sibling services.
-      PG_HOST: postgres
-      PG_PORT: "5432"
-      PG_DATABASE: wine_engine
-      PG_USER: wine
-      PG_PASSWORD: wine_dev
-      REDIS_URL: redis://redis:6379
-      # VESPA_URL comes from .env (Vespa Cloud endpoint)
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
   postgres:
     image: postgres:16-alpine
     environment:
@@ -40,19 +19,5 @@ services:
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    # Cap RSS for dev; evict keys when full (query/embedding cache are safe to drop).
-    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
-    ports: ["6379:6379"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
 volumes:
   pg_data:
-  redis_data:

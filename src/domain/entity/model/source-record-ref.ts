@@ -33,7 +33,16 @@ export function parseSourceRecordRefsFromVespa(raw: unknown): readonly SourceRec
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return undefined;
-    const parsedUnknown: unknown = JSON.parse(trimmed);
+    let parsedUnknown: unknown;
+    try {
+      parsedUnknown = JSON.parse(trimmed);
+    } catch (err) {
+      // Malformed JSON in source_record_refs_json signals data corruption —
+      // log so it surfaces in monitoring rather than silently dropping lineage.
+      // eslint-disable-next-line no-console
+      console.warn('parseSourceRecordRefsFromVespa: malformed JSON in source_record_refs_json', err instanceof Error ? err.message : err);
+      return undefined;
+    }
     const parsed = SourceRecordRefListSchema.safeParse(parsedUnknown);
     return parsed.success ? parsed.data : undefined;
   }

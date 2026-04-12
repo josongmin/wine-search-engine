@@ -6,7 +6,7 @@
  */
 
 import fs from 'node:fs';
-import { Agent as UndiciAgent } from 'undici';
+import { Agent as UndiciAgent, fetch as undiciFetch } from 'undici';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
@@ -361,11 +361,12 @@ export class VespaClient {
     externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
     try {
-      return await fetch(url, {
+      const fetchFn = this.dispatcher !== undefined ? undiciFetch : fetch;
+      return await fetchFn(url, {
         ...options,
         signal: controller.signal,
         ...(this.dispatcher !== undefined ? { dispatcher: this.dispatcher } : {}),
-      } as RequestInit);
+      });
     } catch (err) {
       // `fetch` rejects with a TypeError (or DOMException for abort) when the
       // request cannot be sent at the network/transport layer — not for HTTP

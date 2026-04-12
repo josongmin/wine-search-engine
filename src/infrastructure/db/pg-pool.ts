@@ -17,7 +17,7 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
           user: pgConfig.user,
           password: pgConfig.password,
         }),
-    ...(pgConfig.ssl ? { ssl: { rejectUnauthorized: false } } : {}),
+    ...(pgConfig.ssl ? { ssl: { rejectUnauthorized: pgConfig.sslRejectUnauthorized } } : {}),
     max: pgConfig.poolMax,
     idleTimeoutMillis: pgConfig.idleTimeoutMillis,
     connectionTimeoutMillis: pgConfig.connectionTimeoutMillis,

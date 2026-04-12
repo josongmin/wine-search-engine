@@ -182,10 +182,10 @@ describe('silverToIndexable — feature projection fields', () => {
     expect(indexable.tannin).toBe(0.71);
   });
 
-  it('omits tannin when 0', () => {
+  it('preserves tannin when 0 (legitimate zero — e.g. white wine)', () => {
     const rec = makeEnrichedRecord({ tannin: 0 });
     const indexable = silverToIndexable(rec);
-    expect(indexable).not.toHaveProperty('tannin');
+    expect(indexable.tannin).toBe(0);
   });
 
   it('maps acidity when > 0', () => {
@@ -194,10 +194,10 @@ describe('silverToIndexable — feature projection fields', () => {
     expect(indexable.acidity).toBe(0.56);
   });
 
-  it('omits acidity when 0', () => {
+  it('preserves acidity when 0 (legitimate zero)', () => {
     const rec = makeEnrichedRecord({ acidity: 0 });
     const indexable = silverToIndexable(rec);
-    expect(indexable).not.toHaveProperty('acidity');
+    expect(indexable.acidity).toBe(0);
   });
 
   it('maps criticScoreNormalized from ratingAvg', () => {

@@ -16,6 +16,9 @@ let connectPromise: Promise<RedisClient> | null = null;
 const REDIS_CONNECT_TIMEOUT_MS = 5_000;
 
 export async function connectRedisClient(redisConfig: RedisConfig): Promise<RedisClient> {
+  if (redisConfig.url === undefined) {
+    throw new Error('Redis URL not configured — skip Redis connection');
+  }
   const nextClient = createClient({ url: redisConfig.url });
   nextClient.on('error', (err: Error) => {
     // Sanitize: redis client error objects may carry connection strings or

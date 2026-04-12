@@ -29,6 +29,8 @@ playwright-report
 .claude/settings.local.json
 
 # Heavy docs / datasets that rarely help editor indexing
+test/benchmark/agent/results/
+test/benchmark/agent/results/**
 docs/archive/
 docs/sessions/
 docs/plans/

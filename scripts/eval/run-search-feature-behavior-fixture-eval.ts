@@ -18,7 +18,9 @@
  *     --output data/sfb-results.json --api-url http://localhost:3000
  */
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local', override: true });
+dotenv.config();
 import fs from 'node:fs/promises';
 
 import {

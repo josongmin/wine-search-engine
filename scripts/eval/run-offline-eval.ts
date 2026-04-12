@@ -15,7 +15,9 @@
  *   npx tsx scripts/eval/run-offline-eval.ts --verify-splits   # run split integrity first (RFC-017 §2.5)
  */
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local', override: true });
+dotenv.config();
 import fs from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { parseNdjson } from '../etl/ndjson.js';

@@ -12,6 +12,7 @@ import {
   type SearchSnapshotManifest,
   type SearchSnapshotRuntimeState,
   hashStableJson,
+  parseManifest,
 } from './search-snapshot-schema.js';
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../src/shared/constants/search-snapshot.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
@@ -55,8 +56,7 @@ function parseArgs(argv: readonly string[]): Args {
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
   const raw = await fs.readFile(manifestPath, 'utf8');
-  const parsed = JSON.parse(raw) as SearchSnapshotManifest;
-  return parsed;
+  return parseManifest(raw, manifestPath);
 }
 
 async function loadAliases(manifest: SearchSnapshotManifest): Promise<readonly AliasSnapshotRecord[]> {
@@ -76,8 +76,11 @@ async function loadAmbiguityRows(manifest: SearchSnapshotManifest): Promise<read
 
 async function loadNlMappingsCount(runtimePath: string): Promise<number> {
   const raw = await fs.readFile(runtimePath, 'utf8');
-  const parsed = JSON.parse(raw) as { mappings?: unknown[] };
-  return Array.isArray(parsed.mappings) ? parsed.mappings.length : 0;
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as Record<string, unknown>)['mappings'])) {
+    return 0;
+  }
+  return ((parsed as Record<string, unknown>)['mappings'] as unknown[]).length;
 }
 
 async function readOptionalFile(filePath: string): Promise<string | undefined> {

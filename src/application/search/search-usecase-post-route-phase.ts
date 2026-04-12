@@ -175,7 +175,14 @@ function deriveAuditExtension(
       ? {
           // E4: Sample top-AUDIT_DROP_LOG_MAX drops by lastKnownScore desc to keep payload lean.
           hard_filter_drop_log: [...hardFilterDropLog]
-            .sort((a, b) => b.lastKnownScore - a.lastKnownScore)
+            .sort((a, b) => {
+              const aFinite = Number.isFinite(a.lastKnownScore);
+              const bFinite = Number.isFinite(b.lastKnownScore);
+              if (!aFinite && !bFinite) return 0;
+              if (!aFinite) return 1;
+              if (!bFinite) return -1;
+              return b.lastKnownScore - a.lastKnownScore;
+            })
             .slice(0, AUDIT_DROP_LOG_MAX),
         }
       : {}),

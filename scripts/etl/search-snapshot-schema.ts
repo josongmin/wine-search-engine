@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
   SEARCH_SNAPSHOT_STATE_VERSION,
@@ -90,6 +91,65 @@ export interface SearchSnapshotRuntimeState {
     readonly nlMappings: string;
     readonly activeLtrModels: string;
   };
+}
+
+export const SearchSnapshotManifestSchema = z.object({
+  schemaVersion: z.literal(SEARCH_SNAPSHOT_SCHEMA_VERSION),
+  snapshotId: z.string().min(1),
+  generatedAt: z.string().min(1),
+  contentHash: z.string().min(1),
+  sourceInputPath: z.string().min(1),
+  artifacts: z.object({
+    documentsNdjson: z.string().min(1),
+    entitiesNdjson: z.string().min(1),
+    aliasesNdjson: z.string().min(1),
+    ambiguityRegistryNdjson: z.string().min(1),
+    nlMappingsJson: z.string().min(1),
+    metadataJson: z.string().min(1),
+  }).strict(),
+  counts: z.object({
+    documents: z.number().int().nonnegative(),
+    entities: z.number().int().nonnegative(),
+    aliases: z.number().int().nonnegative(),
+    ambiguityRegistry: z.number().int().nonnegative(),
+    nlMappings: z.number().int().nonnegative(),
+  }).strict(),
+  hashes: z.object({
+    documents: z.string().min(1),
+    entities: z.string().min(1),
+    aliases: z.string().min(1),
+    ambiguityRegistry: z.string().min(1),
+    nlMappings: z.string().min(1),
+  }).strict(),
+}).strict();
+
+export const SearchSnapshotRuntimeStateSchema = z.object({
+  schemaVersion: z.literal(SEARCH_SNAPSHOT_STATE_VERSION),
+  snapshotId: z.string().min(1),
+  contentHash: z.string().min(1),
+  publishedAt: z.string().min(1),
+  manifestPath: z.string().min(1),
+  nlMappingsRuntimePath: z.string().min(1),
+  allowMissingLtr: z.boolean(),
+  counts: z.object({
+    entities: z.number().int().nonnegative(),
+    aliases: z.number().int().nonnegative(),
+    ambiguityRegistry: z.number().int().nonnegative(),
+    nlMappings: z.number().int().nonnegative(),
+    activeLtrModels: z.number().int().nonnegative(),
+  }).strict(),
+  hashes: z.object({
+    entities: z.string().min(1),
+    aliases: z.string().min(1),
+    ambiguityRegistry: z.string().min(1),
+    nlMappings: z.string().min(1),
+    activeLtrModels: z.string().min(1),
+  }).strict(),
+}).strict();
+
+export function parseManifest(raw: string, _filePath: string): SearchSnapshotManifest {
+  const parsed: unknown = JSON.parse(raw);
+  return SearchSnapshotManifestSchema.parse(parsed);
 }
 
 export { hashStableJson, hashText, stableJsonStringify };

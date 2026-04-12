@@ -19,7 +19,7 @@ import { atomicWriteFile } from './etl-utils.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
 import { hashStableJson } from '../../src/shared/utils/stable-json.js';
-import type { EntitySnapshotRecord, SearchSnapshotManifest } from './search-snapshot-schema.js';
+import { parseManifest, type EntitySnapshotRecord, type SearchSnapshotManifest } from './search-snapshot-schema.js';
 
 const execFile = promisify(execFileCb);
 const VESPA_NAMESPACE = 'wine';
@@ -34,6 +34,7 @@ interface Args {
   readonly runtimeStatePath: string;
   readonly runtimeNlMappingsPath: string;
   readonly allowMissingLtr: boolean;
+  readonly skipIndex: boolean;
   readonly fixtureRepoRoot?: string | undefined;
 }
 
@@ -44,6 +45,7 @@ function parseArgs(argv: readonly string[]): Args {
   let runtimeStatePath = resolveDataPath('data/runtime-search-snapshot.json');
   let runtimeNlMappingsPath = resolveDataPath('data/nl-mappings.json');
   let allowMissingLtr = false;
+  let skipIndex = false;
   let fixtureRepoRoot: string | undefined;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -64,6 +66,8 @@ function parseArgs(argv: readonly string[]): Args {
       i += 1;
     } else if (arg === '--allow-missing-ltr') {
       allowMissingLtr = true;
+    } else if (arg === '--skip-index') {
+      skipIndex = true;
     } else if (arg === '--fixture-repo') {
       fixtureRepoRoot = argv[i + 1];
       i += 1;
@@ -76,6 +80,7 @@ function parseArgs(argv: readonly string[]): Args {
     runtimeStatePath,
     runtimeNlMappingsPath,
     allowMissingLtr,
+    skipIndex,
     fixtureRepoRoot,
   };
 }
@@ -118,14 +123,16 @@ async function rewriteRuntimeStateForActivePaths(args: {
   readonly activeRuntimeNlMappingsPath: string;
 }): Promise<void> {
   const raw = await fs.readFile(args.stagedRuntimeStatePath, 'utf8');
-  const parsed = JSON.parse(raw) as {
-    readonly nlMappingsRuntimePath?: string;
-  } & Record<string, unknown>;
-  if (parsed.nlMappingsRuntimePath === args.activeRuntimeNlMappingsPath) {
+  const parsed: unknown = JSON.parse(raw);
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`Malformed runtime state at ${args.stagedRuntimeStatePath}`);
+  }
+  const state = parsed as Record<string, unknown>;
+  if (state.nlMappingsRuntimePath === args.activeRuntimeNlMappingsPath) {
     return;
   }
   const next = {
-    ...parsed,
+    ...state,
     nlMappingsRuntimePath: args.activeRuntimeNlMappingsPath,
   };
   await atomicWriteFile(args.stagedRuntimeStatePath, `${JSON.stringify(next, null, 2)}\n`);
@@ -146,7 +153,7 @@ async function loadPublishedRuntimeState(runtimeStatePath: string) {
 }
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
-  return JSON.parse(await fs.readFile(manifestPath, 'utf8')) as SearchSnapshotManifest;
+  return parseManifest(await fs.readFile(manifestPath, 'utf8'), manifestPath);
 }
 
 async function loadSnapshotEntityIds(entitiesPath: string): Promise<readonly string[]> {
@@ -181,7 +188,10 @@ async function deleteStaleVespaDocuments(docIds: readonly string[]): Promise<voi
     return;
   }
   const config = loadConfig();
-  const vespa = new VespaClient(config.vespa.url, VESPA_NAMESPACE, VESPA_DOC_TYPE);
+  const vespaMtls = config.vespa.certPath !== undefined && config.vespa.keyPath !== undefined
+    ? { certPath: config.vespa.certPath, keyPath: config.vespa.keyPath }
+    : undefined;
+  const vespa = new VespaClient(config.vespa.url, VESPA_NAMESPACE, VESPA_DOC_TYPE, undefined, vespaMtls);
   for (const docId of docIds) {
     await vespa.delete(docId);
   }
@@ -388,8 +398,12 @@ async function run(): Promise<void> {
       snapshotRootDir,
       allowMissingLtr: args.allowMissingLtr,
     });
-    console.log('📥 Indexing document plane into Vespa');
-    await runIndexer(built.manifest.artifacts.documentsNdjson, built.manifest.snapshotId, args.fixtureRepoRoot);
+    if (args.skipIndex) {
+      console.log('📥 Skipping Vespa indexing (--skip-index)');
+    } else {
+      console.log('📥 Indexing document plane into Vespa');
+      await runIndexer(built.manifest.artifacts.documentsNdjson, built.manifest.snapshotId, args.fixtureRepoRoot);
+    }
     if (
       previousRuntimeState !== undefined
       && previousRuntimeState.snapshotId !== built.manifest.snapshotId

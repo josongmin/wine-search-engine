@@ -13,7 +13,9 @@
  * Plus per-category and per-language slices for the benchmark.
  */
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '.env.local', override: true });
+dotenv.config();
 import fs from 'node:fs/promises';
 import { z } from 'zod';
 import { parseNdjson } from '../etl/ndjson.js';

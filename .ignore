@@ -31,6 +31,8 @@ test-results
 test-results/
 playwright-report
 playwright-report/
+test/benchmark/agent/results/
+test/benchmark/agent/results/**
 
 # Local AI tooling state and duplicated worktrees
 .claude/worktrees/

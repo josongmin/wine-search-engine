@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import type { Pool } from 'pg';
+import { z } from 'zod';
 import { resolveDataPath } from '../../shared/utils/data-paths.js';
 import { hashStableJson, hashText, stableJsonStringify } from '../../shared/utils/stable-json.js';
 import { SEARCH_SNAPSHOT_STATE_VERSION } from '../../shared/constants/search-snapshot.js';
@@ -9,6 +10,14 @@ import {
   SOURCE_RECORD_PUBLIC_ENTITY_ID_LIKE_PATTERN,
   SOURCE_RECORD_PUBLIC_ENTITY_ID_PREFIX,
 } from '../../shared/constants/public-entity-id-namespace.js';
+
+const VespaCountResponseSchema = z.object({
+  root: z.object({
+    fields: z.object({
+      totalCount: z.number().int().nonnegative(),
+    }),
+  }),
+});
 
 export const DEFAULT_RUNTIME_STATE_PATH = resolveDataPath('data/runtime-search-snapshot.json');
 
@@ -174,13 +183,16 @@ async function loadNlMappingsRuntimeInfo(nlMappingsRuntimePath: string): Promise
 }> {
   const nlMappingsRaw = await fs.readFile(nlMappingsRuntimePath, 'utf8');
   const nlMappingsParsedUnknown: unknown = JSON.parse(nlMappingsRaw);
-  const nlMappingsParsed = nlMappingsParsedUnknown as { mappings?: unknown[] };
-  if (!Array.isArray(nlMappingsParsed.mappings)) {
+  if (typeof nlMappingsParsedUnknown !== 'object' || nlMappingsParsedUnknown === null) {
+    throw new Error('Malformed runtime NL mappings');
+  }
+  const nlMappingsParsed = nlMappingsParsedUnknown as Record<string, unknown>;
+  if (!Array.isArray(nlMappingsParsed['mappings'])) {
     throw new Error('Malformed runtime NL mappings');
   }
   return {
-    count: nlMappingsParsed.mappings.length,
-    hash: hashText(`${stableJsonStringify(nlMappingsParsed)}\n`),
+    count: nlMappingsParsed['mappings'].length,
+    hash: hashText(`${stableJsonStringify(nlMappingsParsedUnknown)}\n`),
   };
 }
 
@@ -201,14 +213,12 @@ async function fetchVespaNamespaceSealViolationCount(vespaUrl: string): Promise<
   if (!response.ok) {
     throw new Error(`Vespa namespace seal query failed with status ${response.status}`);
   }
-  const body = await response.json() as {
-    root?: { fields?: { totalCount?: unknown } };
-  };
-  const totalCount = body.root?.fields?.totalCount;
-  if (typeof totalCount !== 'number' || !Number.isFinite(totalCount)) {
-    throw new Error('Vespa namespace seal query returned no finite totalCount');
+  const body: unknown = await response.json();
+  const parsed = VespaCountResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error(`Vespa namespace seal query returned unexpected response shape: ${parsed.error.message}`);
   }
-  return totalCount;
+  return parsed.data.root.fields.totalCount;
 }
 
 async function fetchVespaSnapshotDocumentCount(vespaUrl: string, snapshotId: string): Promise<number> {
@@ -224,14 +234,12 @@ async function fetchVespaSnapshotDocumentCount(vespaUrl: string, snapshotId: str
     throw new Error(`Vespa snapshot readiness query failed with status ${response.status}`);
   }
 
-  const body = await response.json() as {
-    root?: { fields?: { totalCount?: unknown } };
-  };
-  const totalCount = body.root?.fields?.totalCount;
-  if (typeof totalCount !== 'number' || !Number.isFinite(totalCount)) {
-    throw new Error('Vespa snapshot readiness query returned no finite totalCount');
+  const body: unknown = await response.json();
+  const parsed = VespaCountResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    throw new Error(`Vespa snapshot readiness query returned unexpected response shape: ${parsed.error.message}`);
   }
-  return totalCount;
+  return parsed.data.root.fields.totalCount;
 }
 
 export function canonicalizeEntityRuntimeRows(
@@ -245,15 +253,23 @@ export function canonicalizeEntityRuntimeRows(
     readonly metadata: unknown;
   }[],
 ): readonly CanonicalEntitySnapshotRecord[] {
-  return rows.map((row) => ({
-    entityId: row.entity_id,
-    entityType: row.entity_type as CanonicalEntitySnapshotRecord['entityType'],
-    canonicalLabel: row.canonical_label,
-    identitySignature: row.identity_signature,
-    relations: row.relations as Record<string, unknown>,
-    attributes: row.attributes as Record<string, unknown>,
-    metadata: row.metadata as Record<string, unknown>,
-  })).sort((left, right) => left.entityId.localeCompare(right.entityId));
+  const asRecord = (val: unknown): Record<string, unknown> =>
+    typeof val === 'object' && val !== null && !Array.isArray(val) ? val as Record<string, unknown> : {};
+
+  return rows.map((row) => {
+    if (row.entity_type !== 'wine') {
+      throw new Error(`canonicalizeEntityRuntimeRows: unexpected entity_type "${row.entity_type}"`);
+    }
+    return {
+      entityId: row.entity_id,
+      entityType: 'wine' as const,
+      canonicalLabel: row.canonical_label,
+      identitySignature: row.identity_signature,
+      relations: asRecord(row.relations),
+      attributes: asRecord(row.attributes),
+      metadata: asRecord(row.metadata),
+    };
+  }).sort((left, right) => left.entityId.localeCompare(right.entityId));
 }
 
 export function canonicalizeAliasRuntimeRows(

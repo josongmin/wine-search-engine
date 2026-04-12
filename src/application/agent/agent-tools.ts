@@ -162,7 +162,7 @@ const FoodPairingInputSchema = z.object({
   // min(1): SearchInputSchema와 동일 이유 — 0원은 price filter를 무력화함.
   max_price_krw: coerceNonNegativeInt.pipe(z.number().int().min(1).max(MAX_PRICE_KRW_BOUND)).optional(),
   /** Legacy USD price field — accepted for backwards compat but converted internally. */
-  max_price: coerceFiniteNumber.pipe(z.number().finite().min(0).max(MAX_PRICE_USD_BOUND)).optional(),
+  max_price: coerceFiniteNumber.pipe(z.number().finite().min(1).max(MAX_PRICE_USD_BOUND)).optional(),
   color: z.enum(['red', 'white', 'rosé', 'sparkling']).optional(),
 });
 

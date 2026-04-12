@@ -11,11 +11,12 @@ import fs from 'node:fs/promises';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { parseNdjson } from './ndjson.js';
-import type {
-  AliasSnapshotRecord,
-  AmbiguityRegistrySnapshotRow,
-  EntitySnapshotRecord,
-  SearchSnapshotManifest,
+import {
+  parseManifest,
+  type AliasSnapshotRecord,
+  type AmbiguityRegistrySnapshotRow,
+  type EntitySnapshotRecord,
+  type SearchSnapshotManifest,
 } from './search-snapshot-schema.js';
 import { applyFullCanonicalGraphSync } from './canonical-entity-graph-sync.js';
 
@@ -39,12 +40,7 @@ function parseArgs(argv: readonly string[]): Args {
 }
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
-  const raw = await fs.readFile(manifestPath, 'utf8');
-  const parsed: unknown = JSON.parse(raw);
-  if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error('manifest must be a JSON object');
-  }
-  return parsed as SearchSnapshotManifest;
+  return parseManifest(await fs.readFile(manifestPath, 'utf8'), manifestPath);
 }
 
 async function loadEntities(manifest: SearchSnapshotManifest): Promise<readonly EntitySnapshotRecord[]> {

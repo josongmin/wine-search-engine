@@ -8,8 +8,8 @@ import {
   loadSearchSnapshotRuntimeState,
   verifySearchSnapshotRuntimeStateLive,
 } from '../../src/infrastructure/health/search-snapshot-readiness.js';
-import type {
-  SearchSnapshotManifest,
+import {
+  parseManifest,
 } from './search-snapshot-schema.js';
 import {
   SEARCH_SNAPSHOT_SCHEMA_VERSION,
@@ -41,10 +41,6 @@ function parseArgs(argv: readonly string[]): Args {
     : { runtimeStatePath };
 }
 
-async function loadJsonFile<T>(filePath: string): Promise<T> {
-  return JSON.parse(await fs.readFile(filePath, 'utf8')) as T;
-}
-
 export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
   const config = loadConfig();
   if (!shouldUsePgPool(config.pg)) {
@@ -53,8 +49,8 @@ export async function verifySearchSnapshotReadiness(args: Args): Promise<void> {
 
   const runtimeState = await loadSearchSnapshotRuntimeState(args.runtimeStatePath);
   const manifest = args.manifestPath !== undefined
-    ? await loadJsonFile<SearchSnapshotManifest>(args.manifestPath)
-    : await loadJsonFile<SearchSnapshotManifest>(runtimeState.manifestPath);
+    ? parseManifest(await fs.readFile(args.manifestPath, 'utf8'), args.manifestPath)
+    : parseManifest(await fs.readFile(runtimeState.manifestPath, 'utf8'), runtimeState.manifestPath);
 
   if (runtimeState.schemaVersion !== SEARCH_SNAPSHOT_STATE_VERSION) {
     throw new Error(`Runtime state schema version ${runtimeState.schemaVersion} != expected ${SEARCH_SNAPSHOT_STATE_VERSION}`);

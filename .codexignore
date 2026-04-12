@@ -67,6 +67,8 @@ docs/sessions/
 docs/plans/
 
 # Large generated datasets / eval artifacts
+test/benchmark/agent/results/
+test/benchmark/agent/results/**
 data/**/*.ndjson
 data/**/*.jsonl
 data/**/*.json

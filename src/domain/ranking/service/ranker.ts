@@ -1151,6 +1151,11 @@ export class Ranker {
         });
         // Re-sort to interleave blocked (heuristic score) and non-blocked (LTR score)
         results.sort((a, b) => {
+          const aFinite = Number.isFinite(a.finalScore);
+          const bFinite = Number.isFinite(b.finalScore);
+          if (!aFinite && !bFinite) return String(a.entityId) < String(b.entityId) ? -1 : 1;
+          if (!aFinite) return 1;
+          if (!bFinite) return -1;
           const diff = b.finalScore - a.finalScore;
           if (Math.abs(diff) > FINAL_SCORE_SORT_TIE_EPSILON) return diff > 0 ? 1 : -1;
           return String(a.entityId) < String(b.entityId) ? -1 : 1;

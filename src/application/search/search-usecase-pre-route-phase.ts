@@ -21,6 +21,9 @@ import { planToObservabilitySlice } from '../../domain/query/model/query-observa
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 
+/** Hard timeout for decomposed (multi-sub-query) search execution. */
+const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
+
 export type SearchPreRouteEarlyResponse = SearchResponseV1 | ComparisonSearchResponse;
 
 export type SearchPreRoutePhaseResult =
@@ -55,7 +58,6 @@ export async function runSearchPreRoutePhase(
   if (ctx.decomposedSearch) {
     const decomposition = analyzeQueryDecomposition(sanitizedQuery);
     if (isValidDecomposition(decomposition.outcome)) {
-      const DECOMPOSED_SEARCH_TIMEOUT_MS = 15_000;
       const timeoutSignal = Symbol('timeout');
       const abortController = new AbortController();
       const decomposedAbortSignal =

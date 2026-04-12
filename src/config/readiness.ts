@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { Agent as UndiciAgent } from 'undici';
 import type { Config } from './env.js';
 import type { RuntimeHandles } from './runtime-handles.js';
 import {
@@ -138,10 +140,24 @@ export function buildHealthRouteOptions(
         : {}),
       vespa: {
         required: true,
-        check: async (): Promise<ReadinessStatus> =>
-          probeJsonPostEndpoint(`${config.vespa.url}/search/`, {
-            yql: 'select * from sources * where true limit 0;',
-          }),
+        check: async (): Promise<ReadinessStatus> => {
+          const dispatcher =
+            config.vespa.certPath !== undefined && config.vespa.keyPath !== undefined
+              ? new UndiciAgent({
+                  connect: {
+                    cert: fs.readFileSync(config.vespa.certPath),
+                    key: fs.readFileSync(config.vespa.keyPath),
+                    rejectUnauthorized: true,
+                  },
+                })
+              : undefined;
+          return probeJsonPostEndpoint(
+            `${config.vespa.url}/search/`,
+            { yql: 'select * from sources * where true limit 0;' },
+            undefined,
+            dispatcher,
+          );
+        },
       },
       search_snapshot_runtime: {
         required: config.nodeEnv === 'production',
