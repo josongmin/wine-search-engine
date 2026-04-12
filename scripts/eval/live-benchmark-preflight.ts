@@ -1,6 +1,9 @@
 import { URL } from 'node:url';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
+import { loadSearchSnapshotRuntimeState } from '../../src/infrastructure/health/search-snapshot-readiness.js';
+import { verifyRuntimeGoldCatalogCoverage } from '../etl/verify-runtime-gold-catalog-coverage.js';
+import { resolveDefaultFixtureRepoRoot } from '../etl/snapshot-entity-identity.js';
 
 export type BenchmarkExecutionLane = 'public' | 'trusted_benchmark';
 
@@ -58,6 +61,17 @@ export async function assertLiveBenchmarkReadiness(apiUrl: string): Promise<void
   }
 }
 
+/**
+ * ADR-007: verify the active snapshot's `entities` plane AND the
+ * `canonical_entities` graph plane both contain every fixture canonical id
+ * the bench requires. Both planes must agree — `entities` alone can drift
+ * across snapshots (stale rows), and `canonical_entities` alone does not
+ * imply the active snapshot indexed them. Errors are scoped to the active
+ * snapshot id so a wrong-snapshot run is diagnosed immediately.
+ *
+ * Falls back to the legacy explicit-id list path only when no fixture repo
+ * is resolvable; that path still scopes to the active snapshot id.
+ */
 export async function assertRuntimeEntityCompatibility(
   requiredEntityIds: readonly string[],
 ): Promise<void> {
@@ -73,19 +87,55 @@ export async function assertRuntimeEntityCompatibility(
     );
   }
 
+  const fixtureRoot = resolveDefaultFixtureRepoRoot();
+  let activeSnapshotId: string | undefined;
+  try {
+    const runtimeState = await loadSearchSnapshotRuntimeState();
+    activeSnapshotId = runtimeState.snapshotId;
+  } catch {
+    activeSnapshotId = undefined;
+  }
+
   const pool = createPgPool(config.pg);
   try {
+    if (fixtureRoot != null && activeSnapshotId != null) {
+      // SSoT path: same gate the publisher runs at promote-time, scoped to
+      // the currently active snapshot id. Diagnoses snapshot mismatch and
+      // graph-plane drift in one error message.
+      try {
+        await verifyRuntimeGoldCatalogCoverage({
+          pool,
+          snapshotId: activeSnapshotId,
+          fixtureRepoRoot: fixtureRoot,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        throw new Error(
+          `Live benchmark preflight failed (snapshot=${activeSnapshotId}): ${detail}`,
+        );
+      }
+      return;
+    }
+
+    // Legacy fallback: caller-supplied id list, but still scope to active
+    // snapshot id when we have one so a stale-row false-positive cannot
+    // mask the failure.
+    const snapshotClause = activeSnapshotId != null ? ' AND search_snapshot_id = $2' : '';
+    const params: readonly unknown[] = activeSnapshotId != null
+      ? [deduped, activeSnapshotId]
+      : [deduped];
     const result = await pool.query<{ entity_id: string }>(
       `SELECT entity_id
-       FROM entities
-       WHERE entity_id = ANY($1::text[])`,
-      [deduped],
+         FROM entities
+        WHERE entity_id = ANY($1::text[])${snapshotClause}`,
+      params,
     );
     const present = new Set(result.rows.map((row) => row.entity_id));
     const missing = deduped.filter((entityId) => !present.has(entityId));
     if (missing.length > 0) {
+      const scope = activeSnapshotId != null ? ` (snapshot=${activeSnapshotId})` : '';
       throw new Error(
-        `Live benchmark preflight failed: runtime entities missing ${missing.length} fixture canonical IDs (${missing.slice(0, 20).join(', ')})`,
+        `Live benchmark preflight failed${scope}: runtime entities missing ${missing.length} fixture canonical IDs (${missing.slice(0, 20).join(', ')})`,
       );
     }
   } finally {
