@@ -374,7 +374,7 @@ function applyLearnedLtrRerank(
   rankedResults: readonly RankedResult[],
   queryClass: QueryClass,
   ltrModels: ReadonlyMap<string, QueryClassWeights> | undefined,
-): { results: RankedResult[]; skipReason: LtrRerankSkipReason; modelId?: string } {
+): { results: RankedResult[]; skipReason: LtrRerankSkipReason; modelId?: string; ltrSaturated?: boolean } {
   const ltrModel = ltrModels?.get(queryClass);
   if (!ltrModel) {
     return { results: [...rankedResults], skipReason: 'no_model_for_query_class' };
@@ -459,7 +459,9 @@ function applyLearnedLtrRerank(
     };
   });
 
-  const rerankedDocs = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
+  const ltrResult = LTRRanker.rerank(rankableDocuments, queryClass, ltrModel);
+  const rerankedDocs = ltrResult.documents;
+  const ltrSaturated = ltrResult.saturated;
 
   // Build proposed LTR rank map for safety evaluation
   const proposedLtrRankMap = new Map<string, number>(
@@ -563,7 +565,7 @@ function applyLearnedLtrRerank(
     .filter((result) => result !== undefined) as RankedResult[];
   // P0-5: queryClass is the model identifier (key into ltrModels Map).
   // Returned so rank() can populate rerankDecision.modelId.
-  return { results, skipReason: 'not_skipped', modelId: ltrModel.queryClass };
+  return { results, skipReason: 'not_skipped', modelId: ltrModel.queryClass, ltrSaturated };
 }
 
 /**
@@ -744,6 +746,7 @@ export class Ranker {
     let localScoreDriftRecord: ScoreDriftRecord | undefined;
     let localLtrSkipReason: Exclude<LtrRerankSkipReason, 'not_skipped'> | undefined;
     let localRerankDecisionCode: RerankDecisionCode | undefined;
+    let localLtrSaturated = false;
 
     // Step 1: Compute all signals for each candidate
     const scored: ScoredEntry[] = [];
@@ -1103,6 +1106,9 @@ export class Ranker {
       const ltrOutcome = applyLearnedLtrRerank(results, queryPlan.queryClass, this.ltrModels);
       localRerankInputCount = localRerankInputCount ?? safetyDescriptors.length;
       localRerankOutputCount = localRerankOutputCount ?? ltrOutcome.results.length;
+      if (ltrOutcome.ltrSaturated === true) {
+        localLtrSaturated = true;
+      }
       if (ltrOutcome.skipReason === 'not_skipped') {
         localRerankExecuted = true;
         localRerankDecisionCode = 'applied';
@@ -1260,6 +1266,7 @@ export class Ranker {
       runtimeSignal: localRuntimeSignal,
       preRerankTop5: localPreRerankTop5,
       ...(localScoreDriftRecord !== undefined ? { scoreDriftRecord: localScoreDriftRecord } : {}),
+      ...(localLtrSaturated ? { ltrSaturated: true } : {}),
     };
 
     return { results, metadata };

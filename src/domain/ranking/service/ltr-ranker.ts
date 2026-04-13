@@ -26,6 +26,14 @@ export interface RankedDocument extends RankableDocument {
   readonly finalRank: number;
 }
 
+export interface LtrRerankResult {
+  readonly documents: readonly RankedDocument[];
+  /** True when LTR scores were saturated (all identical) and the ranker
+   *  fell back to heuristic retrieval scores. Downstream should treat
+   *  this as ltrAvailable=false for entropy gate purposes. */
+  readonly saturated: boolean;
+}
+
 /**
  * LTR Ranker: applies learned models to rerank documents.
  */
@@ -33,13 +41,16 @@ export function rerank(
   documents: readonly RankableDocument[],
   _queryClass: QueryClass,
   model?: QueryClassWeights,
-): readonly RankedDocument[] {
+): LtrRerankResult {
   if (!model) {
-    return documents.map((doc, idx) => ({
-      ...doc,
-      ltrScore: doc.retrievalScore,
-      finalRank: idx + 1,
-    }));
+    return {
+      documents: documents.map((doc, idx) => ({
+        ...doc,
+        ltrScore: doc.retrievalScore,
+        finalRank: idx + 1,
+      })),
+      saturated: false,
+    };
   }
 
   const scored = documents.map((doc) => ({
@@ -53,11 +64,14 @@ export function rerank(
   // to heuristic retrieval scores which at least preserve fusion rank order.
   const uniqueScores = new Set(scored.map((d) => d.ltrScore));
   if (uniqueScores.size <= 1 && scored.length > 1) {
-    return documents.map((doc, idx) => ({
-      ...doc,
-      ltrScore: doc.retrievalScore,
-      finalRank: idx + 1,
-    }));
+    return {
+      documents: documents.map((doc, idx) => ({
+        ...doc,
+        ltrScore: doc.retrievalScore,
+        finalRank: idx + 1,
+      })),
+      saturated: true,
+    };
   }
 
   const sorted = [...scored].sort((a, b) => {
@@ -67,10 +81,13 @@ export function rerank(
     return b.retrievalScore - a.retrievalScore;
   });
 
-  return sorted.map((doc, idx) => ({
-    ...doc,
-    finalRank: idx + 1,
-  }));
+  return {
+    documents: sorted.map((doc, idx) => ({
+      ...doc,
+      finalRank: idx + 1,
+    })),
+    saturated: false,
+  };
 }
 
 /**

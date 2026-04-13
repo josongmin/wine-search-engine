@@ -804,9 +804,14 @@ export async function runSearchPostRoutePhase(
     sparseZeroHits,
   };
 
-  // ltrAvailable is false in heuristic-only mode (no LTR model loaded). If
-  // the snapshot's killSwitchLearning flag is set, treat as ltr unavailable.
-  const ltrAvailable = snapshot.feature_flags['killSwitchLearning'] !== true;
+  // ltrAvailable is false when:
+  // - kill switch forces heuristic-only mode
+  // - LTR model loaded but saturated (all scores clamped to same value)
+  // Heuristic scores cluster in [0.2, 0.6] → entropy ≈ 0.999 always.
+  // Bypassing the entropy gate prevents 83%+ false-ambiguous rate.
+  const ltrAvailable =
+    snapshot.feature_flags['killSwitchLearning'] !== true
+    && ctx.rankingMetadata?.ltrSaturated !== true;
 
   const abstainDecision = ctx.abstainPolicy.evaluate(
     topScores,

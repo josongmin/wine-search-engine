@@ -109,6 +109,10 @@ export interface RankingMetadata {
    * Retained here for backward compatibility with existing callers.
    */
   readonly scoreDriftRecord?: ScoreDriftRecord | undefined;
+  /** True when LTR model was loaded but all scores saturated to the same
+   *  value, forcing a fallback to heuristic scores. Downstream should
+   *  treat this as ltrAvailable=false for entropy gate purposes. */
+  readonly ltrSaturated?: boolean | undefined;
 }
 
 /**
