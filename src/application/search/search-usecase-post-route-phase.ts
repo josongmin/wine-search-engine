@@ -784,7 +784,15 @@ export async function runSearchPostRoutePhase(
     ctx.resolveResult,
   );
 
-  const topScores = topKFinalScores(ctx.rankedResults);
+  // Entity route returns rankedResults=[] by design (resolver doesn't rank).
+  // Fall back to resolver candidate calibrated scores for abstain evaluation
+  // so entity-resolved results aren't falsely dropped as no_match.
+  const topScores = ctx.rankedResults.length > 0
+    ? topKFinalScores(ctx.rankedResults)
+    : ctx.resolveResult.candidates
+        .map((c) => c.calibratedScore)
+        .filter(Number.isFinite)
+        .sort((a, b) => b - a);
 
   // E6: Run ConstraintReasoner inline to detect soft_tension / contradiction for
   // the typed evaluate() gate. Pure CPU operation — no I/O, negligible overhead.

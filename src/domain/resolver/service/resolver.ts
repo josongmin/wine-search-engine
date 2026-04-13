@@ -1,4 +1,5 @@
 import type { DecisionStatus, NextAction, QueryClass } from '../../shared/types/index.js';
+import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
 import type { NormalizedQueryViews } from '../../query/model/query-views.js';
@@ -287,14 +288,28 @@ export class Resolver {
       input.queryClass,
     );
 
+    // Step 5.5: Singleton candidate invariant — if exactly one candidate
+    // survived scoring, ambiguity is impossible and the decision boundary
+    // should resolve unless hard integrity fails. This bypasses soft gates
+    // (noisy short form, gap threshold, ambiguity classifier) that are
+    // only meaningful with 2+ candidates.
+    const singletonBypass = blendedScored.length === 1
+      && calibrated.decisionConfidenceC > 0;
+
     // Step 6: Apply decision boundary
     const thresholds = this.getThresholds(input.queryClass);
-    const { status, nextAction, reasonCodes } = this.applyDecisionBoundary(
-      input,
-      calibrated,
-      ambiguityState,
-      thresholds,
-    );
+    const { status, nextAction, reasonCodes } = singletonBypass
+      ? {
+          status: 'resolved' as const,
+          nextAction: 'return_result' as const,
+          reasonCodes: ['SINGLETON_BYPASS_RESOLVED'],
+        }
+      : this.applyDecisionBoundary(
+          input,
+          calibrated,
+          ambiguityState,
+          thresholds,
+        );
 
     // Step 7: Build result
     const resolvedCandidates = this.buildResolvedCandidates(blendedScored, calibrated);
@@ -347,6 +362,23 @@ export class Resolver {
       decisionTrace: trace,
       conformalSetSize,
     };
+
+    // Invariant R1: singleton candidate must never be dropped.
+    // Invariant R3: ranked_count === 0 only if candidate_count === 0.
+    if (blendedScored.length > 0 && resolvedCandidates.length === 0) {
+      bootstrapLogger.error(
+        {
+          candidateCount: blendedScored.length,
+          rankedCount: resolvedCandidates.length,
+          status,
+          reasonCodes,
+          queryClass: input.queryClass,
+          topRawScore: blendedScored[0]?.rawScore,
+          calibratedC: calibrated.decisionConfidenceC,
+        },
+        '[Resolver] INVARIANT VIOLATION: candidates scored but none ranked — potential drop bug',
+      );
+    }
 
     return result;
   }
@@ -452,7 +484,13 @@ export class Resolver {
       return false;
     }
 
-    return ambiguity.detected || input.anchorCandidates.length !== 1;
+    // Use unique entity count, not anchor count. Multiple aliases for the
+    // same entity (e.g. "Kalaris" + "Kalaris Merlot" → same wine-ce-...)
+    // should NOT trigger conservative clarification.
+    const uniqueAnchorEntityCount = new Set(
+      input.anchorCandidates.flatMap((a) => a.candidateEntityIds),
+    ).size;
+    return ambiguity.detected || uniqueAnchorEntityCount !== 1;
   }
 
   /**

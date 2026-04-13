@@ -62,17 +62,48 @@ export async function dispatchSearchRouteExecution(
   switch (effectiveRoute) {
     case 'entity': {
       const { resolveResult, correctiveRetryCalibration } = await actions.executeEntity();
+      // Convert resolver candidates to minimal RankedResults so post-route
+      // phases (abstain, decision, response builder) see them. Without this,
+      // entity route always produced rankedResults=[] → no_match abstain
+      // even when the resolver successfully resolved.
+      const entityRankedResults: RankedResult[] = resolveResult.candidates.map((c, idx) => ({
+        entityId: c.entityId,
+        canonicalLabel: c.canonicalLabel,
+        finalScore: c.calibratedScore,
+        rank: idx + 1,
+        componentScores: {
+          entityIntegrity: 1,
+          semantic: c.calibratedScore,
+          hardConstraintPass: true,
+          softConstraint: 0,
+          attributeAlignment: 0,
+          preferenceAlignment: 0,
+          popularity: 0,
+          availability: 1,
+          uncertaintyPenalty: 0,
+        },
+        evidenceItems: [{
+          type: 'identity' as const,
+          source: 'entity_resolver' as const,
+          contribution: `+${c.calibratedScore.toFixed(2)}`,
+          strength: 'high' as const,
+          provenance: `Entity resolved via alias match (${String(c.entityId)})`,
+        }],
+        matchedConstraints: [],
+        unmetConstraints: [],
+        inferredConstraints: [],
+      }));
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_ENTITY_COMPLETE,
           resolve_status: resolveResult.status,
-          ranked_count: 0,
+          ranked_count: entityRankedResults.length,
         },
         'pipeline dispatch entity complete',
       );
       return {
         resolveResult,
-        rankedResults: [],
+        rankedResults: entityRankedResults,
         ...(resolveResult.degradation?.reasons.length
           ? {
               routeDegradation: {
