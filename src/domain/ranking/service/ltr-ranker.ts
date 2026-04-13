@@ -47,6 +47,19 @@ export function rerank(
     ltrScore: scoreDocument(doc.features, model),
   }));
 
+  // Saturation guard: if all LTR scores clamp to the same value (e.g. 1.0
+  // when untrained initial weights push raw score > 1 for every candidate),
+  // entropy is 1.0 and the resolver cannot distinguish candidates. Fall back
+  // to heuristic retrieval scores which at least preserve fusion rank order.
+  const uniqueScores = new Set(scored.map((d) => d.ltrScore));
+  if (uniqueScores.size <= 1 && scored.length > 1) {
+    return documents.map((doc, idx) => ({
+      ...doc,
+      ltrScore: doc.retrievalScore,
+      finalRank: idx + 1,
+    }));
+  }
+
   const sorted = [...scored].sort((a, b) => {
     if (b.ltrScore !== a.ltrScore) {
       return b.ltrScore - a.ltrScore;
