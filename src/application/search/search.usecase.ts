@@ -55,6 +55,7 @@ import {
   resolveCorrectiveRetryOutcome,
   computeCorrectiveRetryCalibration,
 } from './search-usecase-corrective-retry.js';
+import { buildEntityRouteRankedResults } from './search-usecase-entity-ranked-results.js';
 import { MixedRouteDegradationError } from '../../domain/mixed/model/mixed-degradation.js';
 import {
   rankedResultsToEvalProvenanceSlices,
@@ -450,17 +451,31 @@ export class SearchUseCase {
     const triggerRetry = shouldTriggerCorrectiveRetry(plan, firstResult);
 
     if (!triggerRetry) {
+      const rankedResults = buildEntityRouteRankedResults(plan, firstResult, candidateEntities);
+      const topRankedResult = rankedResults[0];
       pipelineDebug(
         {
           step: 'route.entity.only.done',
           resolve_status: firstResult.status,
           candidate_count: firstResult.candidates.length,
+          ranked_count: rankedResults.length,
           corrective_retry: false,
+          ...(firstResult.decisionTrace.outcomeReasonCodes.length > 0
+            ? { outcome_reason_codes: firstResult.decisionTrace.outcomeReasonCodes }
+            : {}),
+          ...(topRankedResult !== undefined
+            ? {
+                top_hard_constraint_pass: topRankedResult.componentScores.hardConstraintPass,
+                top_matched_constraints: topRankedResult.matchedConstraints,
+                top_unmet_constraints: topRankedResult.unmetConstraints,
+                top_evidence_item_count: topRankedResult.evidenceItems.length,
+              }
+            : {}),
           has_degradation: firstResult.degradation !== undefined,
         },
         'pipeline entity-only route',
       );
-      return { resolveResult: firstResult };
+      return { resolveResult: firstResult, rankedResults };
     }
 
     // TA3-2: Corrective retry — broader blocker recall + candidate re-hydration.
@@ -537,16 +552,30 @@ export class SearchUseCase {
     // Use retry result regardless of outcome — the outcome tag is for future
     // clarify/fail routing in the decision layer (post-route phase).
     const resolved = retryResult;
+    const rankedResults = buildEntityRouteRankedResults(plan, resolved, retryCandidateEntities);
+    const topRankedResult = rankedResults[0];
 
     pipelineDebug(
       {
         step: 'route.entity.only.done',
         resolve_status: resolved.status,
         candidate_count: resolved.candidates.length,
+        ranked_count: rankedResults.length,
         corrective_retry: true,
         corrective_retry_outcome: outcome,
         ...(retryCalibratedConfidence !== undefined
           ? { corrective_retry_calibrated_confidence: retryCalibratedConfidence }
+          : {}),
+        ...(resolved.decisionTrace.outcomeReasonCodes.length > 0
+          ? { outcome_reason_codes: resolved.decisionTrace.outcomeReasonCodes }
+          : {}),
+        ...(topRankedResult !== undefined
+          ? {
+              top_hard_constraint_pass: topRankedResult.componentScores.hardConstraintPass,
+              top_matched_constraints: topRankedResult.matchedConstraints,
+              top_unmet_constraints: topRankedResult.unmetConstraints,
+              top_evidence_item_count: topRankedResult.evidenceItems.length,
+            }
           : {}),
         has_degradation: resolved.degradation !== undefined,
       },
@@ -555,6 +584,7 @@ export class SearchUseCase {
 
     return {
       resolveResult: resolved,
+      rankedResults,
       ...(retryCalibratedConfidence !== undefined ? { correctiveRetryCalibration: retryCalibratedConfidence } : {}),
     };
   }

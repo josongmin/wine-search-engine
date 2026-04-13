@@ -112,6 +112,44 @@ function mergeSources(
   return [...merged].sort();
 }
 
+function buildAttributeHints(
+  doc: RetrievalDocument,
+): Readonly<Record<string, unknown>> | undefined {
+  const hints: Record<string, unknown> = {};
+
+  if (doc.producer.length > 0) hints['producer'] = doc.producer;
+  if (doc.region.length > 0) hints['region'] = doc.region;
+  if (doc.appellation !== undefined && doc.appellation.length > 0) hints['appellation'] = doc.appellation;
+  if (doc.country !== undefined && doc.country.length > 0) hints['country'] = doc.country;
+  if (doc.grapePrimary !== undefined && doc.grapePrimary.length > 0) hints['grape_primary'] = doc.grapePrimary;
+  if (doc.grapes.length > 0) hints['grapes'] = doc.grapes;
+  if (doc.style.length > 0) hints['style'] = doc.style;
+  if (doc.priceBand.length > 0) hints['price_band'] = doc.priceBand;
+  if (doc.pairing.length > 0) hints['pairing'] = doc.pairing;
+  if (doc.occasion.length > 0) hints['occasion'] = doc.occasion;
+  if (doc.vintageYear !== undefined) {
+    hints['vintage'] = doc.vintageYear;
+    hints['vintage_year'] = doc.vintageYear;
+  }
+  if (doc.body !== undefined) hints['body'] = doc.body;
+  if (doc.tannin !== undefined) hints['tannin'] = doc.tannin;
+  if (doc.acidity !== undefined) hints['acidity'] = doc.acidity;
+  if (doc.sweetness !== undefined) hints['sweetness'] = doc.sweetness;
+  if (doc.wineType !== undefined && doc.wineType.length > 0) hints['wine_type'] = doc.wineType;
+  if (doc.classification !== undefined && doc.classification.length > 0) hints['classification'] = doc.classification;
+  if (doc.alcoholPct !== undefined) hints['alcohol_pct'] = doc.alcoholPct;
+  if (doc.priceUsd !== undefined) hints['price_usd'] = doc.priceUsd;
+  if (doc.producerPrestige !== undefined) hints['producer_prestige'] = doc.producerPrestige;
+  if (doc.criticScoreNormalized !== undefined) hints['critic_score_normalized'] = doc.criticScoreNormalized;
+  if (doc.certifications !== undefined && doc.certifications.length > 0) hints['certifications'] = doc.certifications;
+  if (doc.soilType !== undefined && doc.soilType.length > 0) hints['soil_type'] = doc.soilType;
+  if (doc.producerType !== undefined && doc.producerType.length > 0) hints['producer_type'] = doc.producerType;
+  if (doc.grapeFamily !== undefined && doc.grapeFamily.length > 0) hints['grape_family'] = doc.grapeFamily;
+  if (doc.flavorProfiles !== undefined && doc.flavorProfiles.length > 0) hints['flavor_profiles'] = doc.flavorProfiles;
+
+  return Object.keys(hints).length > 0 ? hints : undefined;
+}
+
 /**
  * TA2-3: Build resolver candidates from the shared entity candidate generator
  * input contract (EntityCandidateGeneratorInput).
@@ -206,6 +244,7 @@ export async function buildResolverCandidatesFromGenerator(
       if (doc == null) {
         continue;
       }
+      const attributeHints = buildAttributeHints(doc);
       const key = String(entityId);
       const incomingAliasMatch = {
         aliasValue: anchor.surfaceForm,
@@ -220,6 +259,7 @@ export async function buildResolverCandidatesFromGenerator(
           entityType: doc.entityType,
           canonicalLabel: doc.canonicalLabel,
           aliasMatches: [incomingAliasMatch],
+          ...(attributeHints !== undefined ? { attributeHints } : {}),
           sourceSignals: incomingSignals,
           source: anchor.source,
           ...(mergeSources(undefined, anchor.source) !== undefined
@@ -260,11 +300,13 @@ export async function buildResolverCandidatesFromGenerator(
     if (doc == null) {
       continue;
     }
+    const attributeHints = buildAttributeHints(doc);
     candidatesById.set(key, {
       entityId,
       entityType: doc.entityType,
       canonicalLabel: doc.canonicalLabel,
       aliasMatches: [],
+      ...(attributeHints !== undefined ? { attributeHints } : {}),
       sourceSignals: ZERO_SIGNALS,
       source: 'blocker_seed',
       sources: ['blocker_seed'],

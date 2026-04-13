@@ -288,16 +288,16 @@ export class Resolver {
       input.queryClass,
     );
 
-    // Step 5.5: Singleton candidate invariant — if exactly one candidate
-    // survived scoring, ambiguity is impossible and the decision boundary
-    // should resolve unless hard integrity fails. This bypasses soft gates
-    // (noisy short form, gap threshold, ambiguity classifier) that are
-    // only meaningful with 2+ candidates.
+    // Step 5.5: Singleton candidate fast-path.
+    // Only bypass multi-candidate ambiguity/gap logic when the singleton
+    // already clears the calibrated resolve threshold. Low-confidence
+    // singletons must still flow through the normal boundary so TA3
+    // corrective retry can fire.
+    const thresholds = this.getThresholds(input.queryClass);
     const singletonBypass = blendedScored.length === 1
-      && calibrated.decisionConfidenceC > 0;
+      && calibrated.decisionConfidenceC >= thresholds.resolveTau;
 
     // Step 6: Apply decision boundary
-    const thresholds = this.getThresholds(input.queryClass);
     const { status, nextAction, reasonCodes } = singletonBypass
       ? {
           status: 'resolved' as const,

@@ -784,9 +784,10 @@ export async function runSearchPostRoutePhase(
     ctx.resolveResult,
   );
 
-  // Entity route returns rankedResults=[] by design (resolver doesn't rank).
-  // Fall back to resolver candidate calibrated scores for abstain evaluation
-  // so entity-resolved results aren't falsely dropped as no_match.
+  // Entity route now synthesizes RankedResults from resolver-backed entity
+  // documents, but keep the resolver-score fallback for legacy tests and any
+  // partial call sites that still pass rankedResults=[].
+  const topScoreSource = ctx.rankedResults.length > 0 ? 'ranked_results' : 'resolver_candidates';
   const topScores = ctx.rankedResults.length > 0
     ? topKFinalScores(ctx.rankedResults)
     : ctx.resolveResult.candidates
@@ -806,7 +807,11 @@ export async function runSearchPostRoutePhase(
   // sparseZeroHits: sparse channel executed normally (not degraded) but
   // returned zero lexical matches. Every candidate is dense-only.
   const sparseChannelHealthy = !degradationReasons.some((reason) => reason.startsWith('sparse_'));
-  const sparseZeroHits = sparseChannelHealthy
+  // Entity route doesn't use Vespa search (alias → resolver → PG), so
+  // sparseRank is never populated. sparseZeroHits only applies to hybrid/
+  // mixed routes where sparse BM25 was actually executed.
+  const sparseZeroHits = ctx.effectiveRoute !== 'entity'
+    && sparseChannelHealthy
     && ctx.rankedResults.length > 0
     && ctx.rankedResults.every((r) => r.sparseRank === undefined);
   const channelDegradation: ChannelDegradationSummary = {
@@ -875,6 +880,7 @@ export async function runSearchPostRoutePhase(
         abstain_reason: abstainDecision.reason,
         ...(abstainEntropy !== undefined ? { entropy: abstainEntropy } : {}),
         score_count: topScores.length,
+        top_score_source: topScoreSource,
       },
       'pipeline entropy abstain',
     );

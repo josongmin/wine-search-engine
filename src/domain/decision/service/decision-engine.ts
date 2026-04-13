@@ -257,6 +257,22 @@ export class DecisionEngine {
       }
     }
 
+    bootstrapLogger.info(
+      {
+        queryClass: input.queryPlan.queryClass,
+        resolverStatus: input.resolverResult.status,
+        finalStatus: finalState.status,
+        finalReason: finalState.finalReason,
+        rulesApplied,
+        C: input.resolverResult.decisionTrace.decisionConfidenceC,
+        gap: input.resolverResult.decisionTrace.calibratedGap,
+        A: input.resolverResult.decisionTrace.ambiguityDetected,
+        conformal: input.conformalSetSize,
+        ltrSaturated: input.ltrSaturated,
+        identityEvidencePresent: input.evidenceSummary?.identityEvidencePresent,
+      },
+      '[DecisionEngine] gate trace',
+    );
     return this.buildOutput(input, finalState, thresholds, snapshot, rulesApplied, undefined, undefined, dynamicGapThreshold);
   }
 

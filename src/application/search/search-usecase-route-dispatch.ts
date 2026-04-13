@@ -40,6 +40,8 @@ export interface SearchRouteExecutionResult {
  */
 export interface EntityRouteResult {
   readonly resolveResult: EntityResolveResult;
+  /** Entity route synthetic ranked results built from resolver output + entity docs. */
+  readonly rankedResults: readonly RankedResult[];
   /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
   readonly correctiveRetryCalibration?: number | undefined;
 }
@@ -61,49 +63,18 @@ export async function dispatchSearchRouteExecution(
   );
   switch (effectiveRoute) {
     case 'entity': {
-      const { resolveResult, correctiveRetryCalibration } = await actions.executeEntity();
-      // Convert resolver candidates to minimal RankedResults so post-route
-      // phases (abstain, decision, response builder) see them. Without this,
-      // entity route always produced rankedResults=[] → no_match abstain
-      // even when the resolver successfully resolved.
-      const entityRankedResults: RankedResult[] = resolveResult.candidates.map((c, idx) => ({
-        entityId: c.entityId,
-        canonicalLabel: c.canonicalLabel,
-        finalScore: c.calibratedScore,
-        rank: idx + 1,
-        componentScores: {
-          entityIntegrity: 1,
-          semantic: c.calibratedScore,
-          hardConstraintPass: true,
-          softConstraint: 0,
-          attributeAlignment: 0,
-          preferenceAlignment: 0,
-          popularity: 0,
-          availability: 1,
-          uncertaintyPenalty: 0,
-        },
-        evidenceItems: [{
-          type: 'identity' as const,
-          source: 'entity_resolver' as const,
-          contribution: `+${c.calibratedScore.toFixed(2)}`,
-          strength: 'high' as const,
-          provenance: `Entity resolved via alias match (${String(c.entityId)})`,
-        }],
-        matchedConstraints: [],
-        unmetConstraints: [],
-        inferredConstraints: [],
-      }));
+      const { resolveResult, rankedResults, correctiveRetryCalibration } = await actions.executeEntity();
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_ENTITY_COMPLETE,
           resolve_status: resolveResult.status,
-          ranked_count: entityRankedResults.length,
+          ranked_count: rankedResults.length,
         },
         'pipeline dispatch entity complete',
       );
       return {
         resolveResult,
-        rankedResults: entityRankedResults,
+        rankedResults,
         ...(resolveResult.degradation?.reasons.length
           ? {
               routeDegradation: {
