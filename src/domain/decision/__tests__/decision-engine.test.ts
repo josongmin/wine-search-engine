@@ -111,7 +111,7 @@ function makeQueryPlan(queryClass: QueryPlanV1['queryClass'] = 'short_entity'): 
     policy: {
       requireExact: false,
       allowApproximate: true,
-      requireClarification: false,
+      requireClarification: false, clarificationBias: 0,
       fallbackMode: 'clarify',
       policyReasonCodes: [],
     },
@@ -138,7 +138,7 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
     policy: {
       requireExact: false,
       allowApproximate: true,
-      requireClarification: false,
+      requireClarification: false, clarificationBias: 0,
       fallbackMode: 'clarify',
       policyReasonCodes: [],
     },
@@ -174,7 +174,7 @@ function makeClarifyPolicy(overrides: Partial<DecisionInput['policy']> = {}) {
   return {
     requireExact: false,
     allowApproximate: true,
-    requireClarification: false,
+    requireClarification: false, clarificationBias: 0,
     fallbackMode: 'clarify' as const,
     policyReasonCodes: [],
     ...overrides,
@@ -306,7 +306,7 @@ describe('DecisionEngine', () => {
         policy: {
           requireExact: false,
           allowApproximate: true,
-          requireClarification: false,
+          requireClarification: false, clarificationBias: 0,
           fallbackMode: 'fail',
           policyReasonCodes: [],
         },
@@ -512,7 +512,9 @@ describe('DecisionEngine', () => {
       }
     });
 
-    it('resolved with constraints but no constraint evidence → downgraded', async () => {
+    it('resolved with constraints but no constraint evidence → resolves (constraint evidence disabled)', async () => {
+      // SOTA++: constraint evidence globally disabled. Planner-inferred
+      // constraints don't block resolve. Identity evidence is sufficient.
       await expectDecisionStatus({
         resolverResult: makeResolverResult(0.85, 0.20, false),
         queryPlan: {
@@ -527,7 +529,7 @@ describe('DecisionEngine', () => {
           identityEvidencePresent: true,
           constraintEvidencePresent: false,
         },
-      }, 'ambiguous');
+      }, 'resolved');
     });
 
     it('resolved with anchor but no anchor evidence → downgraded', async () => {
@@ -554,21 +556,25 @@ describe('DecisionEngine', () => {
   });
 
   describe('policy overlay', () => {
-    it.each([
-      [
-        'requireClarification=true → force ambiguous even if numerics pass',
+    it('requireClarification=true → force ambiguous even if numerics pass', async () => {
+      const output = await engine.decide(
         makeInput({
           resolverResult: makeResolverResult(0.95, 0.40, false),
           policy: makeClarifyPolicy({
             requireClarification: true,
+            clarificationBias: 0,
             policyReasonCodes: ['forced_clarify'],
           }),
           evidenceSummary: makeStrongIdentityEvidence(),
         }),
-        'POLICY_REQUIRE_CLARIFICATION',
-      ],
-      [
-        'uncertainty.decisionEffect=force_clarify → force ambiguous',
+        TEST_SNAPSHOT,
+      );
+      expect(output.decisionTrace.rulesApplied).toContain('POLICY_REQUIRE_CLARIFICATION');
+      expect(output.decisionStatus).toBe('ambiguous');
+    });
+
+    it('uncertainty.decisionEffect=force_clarify → resolves with bias (soft gate)', async () => {
+      const output = await engine.decide(
         makeInput({
           resolverResult: makeResolverResult(0.95, 0.40, false),
           uncertainty: {
@@ -583,13 +589,12 @@ describe('DecisionEngine', () => {
           },
           evidenceSummary: makeStrongIdentityEvidence(),
         }),
-        'UNCERTAINTY_FORCE_CLARIFY',
-      ],
-    ])('%s', async (_label, input, rule) => {
-      const output = await engine.decide(input, TEST_SNAPSHOT);
-      expect(output.decisionStatus).toBe('ambiguous');
-      expect(output.nextAction).toBe('clarify');
-      expect(output.decisionTrace.rulesApplied).toContain(rule);
+        TEST_SNAPSHOT,
+      );
+      // force_clarify is a soft bias. Resolver trace ambiguityDetected is false
+      // (only uncertainty.ambiguityDetected is true). C=0.95 + bias 0.10 → resolved.
+      expect(output.decisionTrace.rulesApplied).toContain('UNCERTAINTY_FORCE_CLARIFY_AS_BIAS');
+      expect(output.decisionStatus).toBe('resolved');
     });
 
     it('requireExact=true and no exact evidence → downgrade to ambiguous even with a strong score', async () => {

@@ -66,7 +66,7 @@ function makeQueryPlan(): QueryPlanV1 {
     policy: {
       requireExact: false,
       allowApproximate: true,
-      requireClarification: false,
+      requireClarification: false, clarificationBias: 0,
       fallbackMode: 'hybrid',
       policyReasonCodes: [],
     },

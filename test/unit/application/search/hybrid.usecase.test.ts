@@ -19,7 +19,7 @@ function createPlan(
     policy: {
       requireExact: false,
       allowApproximate: true,
-      requireClarification: false,
+      requireClarification: false, clarificationBias: 0,
       fallbackMode: 'none',
       policyReasonCodes: [],
     },

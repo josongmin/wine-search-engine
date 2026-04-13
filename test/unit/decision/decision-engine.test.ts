@@ -94,7 +94,7 @@ function makePolicy(overrides?: Partial<QueryPolicy>): QueryPolicy {
   return {
     requireExact: false,
     allowApproximate: false,
-    requireClarification: false,
+    requireClarification: false, clarificationBias: 0,
     fallbackMode: 'hybrid',
     policyReasonCodes: ['default_policy'],
     ...overrides,
@@ -223,7 +223,7 @@ describe('DecisionEngine', () => {
   it('policy requireClarification=true → ambiguous even if numerics pass', async () => {
     const input = makeDecisionInput({
       resolverResult: makeResolverResult({ C: 0.95, gap: 0.30, ambiguityDetected: false }),
-      policy: makePolicy({ requireClarification: true }),
+      policy: makePolicy({ requireClarification: true, clarificationBias: 0 }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
@@ -257,7 +257,7 @@ describe('DecisionEngine', () => {
   it('nextAction=clarify when ambiguous with requireClarification=true', async () => {
     const input = makeDecisionInput({
       resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
-      policy: makePolicy({ requireClarification: true }),
+      policy: makePolicy({ requireClarification: true, clarificationBias: 0 }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.nextAction).toBe('clarify');
@@ -330,21 +330,22 @@ describe('DecisionEngine', () => {
   it('ambiguous output does NOT include selectedEntity', async () => {
     const input = makeDecisionInput({
       resolverResult: makeResolverResult({ C: 0.85, gap: 0.20, ambiguityDetected: false }),
-      policy: makePolicy({ requireClarification: true }),
+      policy: makePolicy({ requireClarification: true, clarificationBias: 0 }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
     expect(output.selectedEntity).toBeUndefined();
   });
 
-  it('uncertainty decisionEffect=force_clarify short-circuits to ambiguous', async () => {
+  it('uncertainty decisionEffect=force_clarify applies bias but does not short-circuit', async () => {
+    // SOTA++: force_clarify is a soft bias, not a hard gate. C=0.95 with
+    // bias 0.10 → effective resolveTau = 0.55. 0.95 >= 0.55 → resolved.
     const input = makeDecisionInput({
       resolverResult: makeResolverResult({ C: 0.95, gap: 0.30 }),
       uncertainty: makeUncertainty({ decisionEffect: 'force_clarify' }),
     });
     const output = await engine.decide(input, snapshot);
-    expect(output.decisionStatus).toBe('ambiguous');
-    expect(output.nextAction).toBe('clarify');
+    expect(output.decisionStatus).toBe('resolved');
   });
 
   it('uncertainty decisionEffect=block_resolve short-circuits to failed', async () => {

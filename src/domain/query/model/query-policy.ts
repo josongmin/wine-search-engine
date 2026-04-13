@@ -11,8 +11,20 @@ export interface QueryPolicy {
   /** When true, approximate (fuzzy / vector) matches are permitted. */
   readonly allowApproximate: boolean;
 
-  /** When true, the system should ask the user for clarification before resolving. */
+  /**
+   * @deprecated Use `clarificationBias` instead. Hard gate that blocks all
+   * resolution regardless of evidence. Retained for backward compatibility
+   * during migration — set to false and use clarificationBias.
+   */
   readonly requireClarification: boolean;
+
+  /**
+   * Soft clarification signal: raises the effective resolveTau by this amount.
+   * 0 = no bias (default). 0.15 = ambiguous_short_form caution.
+   * Unlike requireClarification (hard gate), this allows resolution when
+   * confidence is overwhelming (C >= resolveTau + bias).
+   */
+  readonly clarificationBias: number;
 
   /** The fallback strategy when the primary resolution path fails. */
   readonly fallbackMode: 'hybrid' | 'clarify' | 'fail';
@@ -22,4 +34,14 @@ export interface QueryPolicy {
    * Useful for debugging and audit trails.
    */
   readonly policyReasonCodes: readonly string[];
+}
+
+/**
+ * Legacy hard clarification gate (`requireClarification`).
+ * Call sites should use {@link QueryPolicy.clarificationBias} for new logic;
+ * this helper exists so the migration window does not scatter deprecated reads.
+ */
+export function isLegacyRequireClarificationHardGate(policy: QueryPolicy): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- TODO(cleanup): remove after requireClarification is dropped from all plans
+  return policy.requireClarification;
 }

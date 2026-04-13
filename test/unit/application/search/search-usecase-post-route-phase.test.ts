@@ -547,7 +547,7 @@ describe('runSearchPostRoutePhase', () => {
             policy: {
               requireExact: false,
               allowApproximate: true,
-              requireClarification: false,
+              requireClarification: false, clarificationBias: 0,
               fallbackMode: 'hybrid' as const,
             },
           },

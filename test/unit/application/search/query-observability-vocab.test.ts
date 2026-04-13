@@ -20,7 +20,7 @@ function makePlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
     policy: {
       requireExact: false,
       allowApproximate: true,
-      requireClarification: false,
+      requireClarification: false, clarificationBias: 0,
       fallbackMode: 'clarify',
       policyReasonCodes: [],
     },

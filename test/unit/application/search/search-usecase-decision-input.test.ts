@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { buildSearchDecisionInput } from '../../../../src/application/search/search-usecase-decision-input.js';
+import { buildEntityRouteRankedResults } from '../../../../src/application/search/search-usecase-entity-ranked-results.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { EntityResolveResult } from '../../../../src/domain/resolver/model/resolve-result.js';
+import type { ResolverCandidate } from '../../../../src/domain/resolver/model/resolved-candidate.js';
 import type { RankedResult } from '../../../../src/domain/ranking/model/ranked-result.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 
@@ -223,6 +225,83 @@ describe('buildSearchDecisionInput', () => {
     });
     const input = buildSearchDecisionInput(plan, resolverResult, undefined);
     expect(input.rankingSignals).toBeUndefined();
+  });
+
+  it('derives constraint evidence from entity-route synthetic ranked results', () => {
+    const eid = createEntityId('entity-kalaris');
+    const plan: QueryPlanV1 = {
+      ...minimalPlan('entity'),
+      intent: 'entity_exact',
+      retrievalMode: 'entity_lookup',
+      queryClass: 'short_entity',
+      constraints: {
+        hard: [{
+          attribute: 'grape_primary',
+          operator: '=',
+          value: 'Merlot',
+          source_phrase: 'Merlot',
+          confidence: 1,
+        }],
+        soft: [],
+        inferred: [],
+      },
+    };
+    const resolverResult = makeResolverResult({
+      topEntity: { entityId: eid, canonicalLabel: '2014 Kalaris Merlot', calibratedScore: 0.97 },
+      candidates: [{
+        entityId: eid,
+        canonicalLabel: '2014 Kalaris Merlot',
+        calibratedScore: 0.97,
+        rank: 1,
+        evidenceRefs: ['alias:kalaris-merlot'],
+      }],
+      decisionTrace: makeDecisionTrace({
+        queryClass: 'short_entity',
+        top1CalibratedScore: 0.97,
+        top2CalibratedScore: 0,
+        calibratedGap: 0.97,
+        decisionConfidenceC: 0.97,
+      }),
+    });
+    const rankedResults = buildEntityRouteRankedResults(
+      plan,
+      resolverResult,
+      [{
+        entityId: eid,
+        entityType: 'wine',
+        canonicalLabel: '2014 Kalaris Merlot',
+        aliasMatches: [],
+        attributeHints: {
+          grape_primary: 'Merlot',
+          producer: 'Kalaris',
+          vintage_year: 2014,
+        },
+        sourceSignals: {
+          canonicalExactMatch: 1,
+          canonicalNormalizedMatch: 1,
+          aliasExactMatch: 1,
+          aliasFuzzyMatch: 0,
+          aliasTypePrior: 1,
+          producerMatch: 0,
+          vintageMatch: 0,
+          regionMatch: 0,
+          grapeHintMatch: 0,
+          phoneticMatch: 0,
+          editDistanceScore: 0,
+          ambiguityPenalty: 0,
+        },
+        source: 'alias',
+        sources: ['alias'],
+      } satisfies ResolverCandidate],
+    );
+
+    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'entity');
+
+    expect(input.evidenceSummary.constraintEvidencePresent).toBe(true);
+    expect(input.evidenceSummary.constraintEvidence?.matchedRequiredAttributes).toEqual([
+      'grape_primary',
+    ]);
+    expect(input.evidenceSummary.constraintEvidence?.unmetRequiredAttributes).toEqual([]);
   });
 
   it('passes execution honesty signals into the decision input', () => {

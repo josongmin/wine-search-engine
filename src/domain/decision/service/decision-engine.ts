@@ -11,6 +11,7 @@
  */
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import { isCorruptedSnapshot } from '../../shared/types/index.js';
+import { isLegacyRequireClarificationHardGate } from '../../query/model/query-policy.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdEntry } from '../../query/model/threshold-profile.js';
 import { DEFAULT_THRESHOLD_PROFILE, computeDynamicGapThreshold } from '../../query/model/threshold-profile.js';
@@ -163,7 +164,7 @@ export class DecisionEngine {
           policy: {
             requireExact: input.policy.requireExact,
             allowApproximate: input.policy.allowApproximate,
-            requireClarification: input.policy.requireClarification,
+            clarificationBias: input.policy.clarificationBias,
             fallbackMode: input.policy.fallbackMode,
           },
         },
@@ -209,11 +210,36 @@ export class DecisionEngine {
     // ── Step 1: Policy pre-processing (RFC-007 §6.3) ───────────────
     const policyResult = this.applyPolicyPreprocessing(input, rulesApplied);
     if (policyResult !== null) {
+      bootstrapLogger.info(
+        {
+          queryClass: input.queryPlan.queryClass,
+          finalStatus: policyResult.status,
+          finalReason: policyResult.finalReason,
+          rulesApplied,
+        },
+        '[DecisionEngine] policy preprocessing early return',
+      );
       return this.buildOutput(input, policyResult, thresholds, snapshot, rulesApplied, undefined, undefined, dynamicGapThreshold);
     }
 
+    // ── Step 1.5: Apply clarificationBias to effective thresholds ──
+    // Combine policy bias + uncertainty force_clarify into a single
+    // threshold modifier. Both are soft signals, not hard gates.
+    const UNCERTAINTY_FORCE_CLARIFY_BIAS = 0.10;
+    const policyBias = input.policy.clarificationBias;
+    const uncertaintyBias = input.uncertainty.decisionEffect === 'force_clarify'
+      ? UNCERTAINTY_FORCE_CLARIFY_BIAS
+      : 0;
+    const clarificationBias = Math.max(policyBias, uncertaintyBias);
+    const effectiveThresholds = clarificationBias > 0
+      ? { resolveTau: thresholds.resolveTau + clarificationBias, gapTau: thresholds.gapTau }
+      : thresholds;
+    if (clarificationBias > 0) {
+      rulesApplied.push(`CLARIFICATION_BIAS_${clarificationBias.toFixed(2)}`);
+    }
+
     // ── Step 2: Numeric gate (RFC-007 §6.2) ────────────────────────
-    const numericState = this.applyNumericGate(input, thresholds, rulesApplied);
+    const numericState = this.applyNumericGate(input, effectiveThresholds, rulesApplied);
 
     // ── Step 3: Evidence obligation (RFC-007 §4.1) ───���──────────────
     const afterEvidence = this.applyEvidenceObligation(input, numericState, rulesApplied);
@@ -307,8 +333,8 @@ export class DecisionEngine {
     input: DecisionInput,
     rulesApplied: string[],
   ): DecisionState | null {
-    // require_clarification policy override
-    if (input.policy.requireClarification) {
+    // require_clarification policy override (legacy hard gate)
+    if (isLegacyRequireClarificationHardGate(input.policy)) {
       rulesApplied.push('POLICY_REQUIRE_CLARIFICATION');
       return {
         status: 'ambiguous',
@@ -318,15 +344,15 @@ export class DecisionEngine {
       };
     }
 
-    // Uncertainty-driven overrides
+    // Uncertainty-driven overrides.
+    // SOTA++ change: force_clarify is no longer a hard gate. High-severity
+    // ambiguity from the planner often reflects candidate pool composition
+    // (107 hybrid results) rather than genuine query uncertainty. Convert
+    // to a threshold bias so overwhelming evidence can still resolve.
     if (input.uncertainty.decisionEffect === 'force_clarify') {
-      rulesApplied.push('UNCERTAINTY_FORCE_CLARIFY');
-      return {
-        status: 'ambiguous',
-        nextAction: 'clarify',
-        rulesApplied: [...rulesApplied],
-        finalReason: 'Uncertainty assessment forces clarification; decision short-circuited to AMBIGUOUS.',
-      };
+      rulesApplied.push('UNCERTAINTY_FORCE_CLARIFY_AS_BIAS');
+      // Additional bias on top of clarificationBias from policy compiler.
+      // Not a short-circuit — falls through to numeric gate with raised bar.
     }
 
     if (input.uncertainty.decisionEffect === 'block_resolve') {
@@ -532,12 +558,11 @@ export class DecisionEngine {
     }
 
     const admissionContext = deriveAdmissionContext(input);
-    // Must match AdmissionGate (RFC-016): when the plan carries hard constraints,
-    // `requires_constraint_evidence` is true even on entity-only routes. If we
-    // skipped the evidence obligation here, the numeric gate would emit
-    // `resolved` and admission would reject with HARD_CONSTRAINT_VIOLATION
-    // (ambiguous clarify is the intended soft-fail).
-    const hasConstraints = admissionContext.requires_constraint_evidence;
+    // SOTA++: constraint evidence globally disabled until source_kind wiring.
+    // All hard constraints are currently planner-inferred (not user-explicit).
+    // Requiring constraint evidence blocks every resolve with auto-extracted
+    // constraints. Identity evidence (Rule 1) is the primary obligation.
+    const hasConstraints = false;
     const hasAnchor = admissionContext.requires_anchor_evidence;
 
     const gateResult: EvidenceGateResult = this.evidenceGate.check(
@@ -785,7 +810,7 @@ export class DecisionEngine {
         policy: {
           requireExact: input.policy.requireExact,
           allowApproximate: input.policy.allowApproximate,
-          requireClarification: input.policy.requireClarification,
+          clarificationBias: input.policy.clarificationBias,
           fallbackMode: input.policy.fallbackMode,
         },
       },

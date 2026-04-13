@@ -13,29 +13,30 @@ const HIGH_UNCERTAINTY_THRESHOLD = 0.7;
 /** Overall uncertainty threshold above which the threshold is raised. */
 const MEDIUM_UNCERTAINTY_THRESHOLD = 0.4;
 
+/** Bias applied to resolveTau for ambiguous_short_form queries. Raises the
+ *  bar so only high-confidence resolves pass, while still allowing resolution
+ *  when evidence is overwhelming (unlike the old hard requireClarification). */
+const AMBIGUOUS_SHORT_FORM_BIAS = 0.15;
+
+/** Bias applied for high-severity ambiguity (wine_vs_producer, etc.). */
+const HIGH_AMBIGUITY_BIAS = 0.20;
+
+/** Bias applied for high overall uncertainty. */
+const HIGH_UNCERTAINTY_BIAS = 0.15;
+
 /**
  * Compiles query policy directives from the plan's intent, class, anchors,
  * and uncertainty assessment.
  *
- * Implements the policy rules defined in RFC-005 section 7.3:
- * - Strong anchor + no constraints -> requireExact = true.
- * - Known ambiguous input -> requireClarification = true.
- * - Mixed query -> allowApproximate = true.
- * - High uncertainty -> requireClarification or fallback = clarify.
+ * Implements the policy rules defined in RFC-005 section 7.3.
+ *
+ * BREAKING CHANGE (SOTA++): `requireClarification` is always false.
+ * Replaced by `clarificationBias` — a soft threshold modifier that raises
+ * resolveTau instead of hard-blocking resolution. This allows the decision
+ * engine's numeric gate to resolve when confidence is overwhelming, even
+ * for ambiguous_short_form queries.
  */
 export class PolicyCompiler {
-  /**
-   * Compiles a {@link QueryPolicy} from the given plan components.
-   *
-   * The compilation is deterministic: identical inputs always produce
-   * identical policy output.
-   *
-   * @param intent - The detected query intent.
-   * @param queryClass - The query classification label.
-   * @param anchors - Extracted anchor candidates.
-   * @param uncertainty - The uncertainty assessment.
-   * @returns Compiled policy directives.
-   */
   compile(
     intent: QueryIntent,
     queryClass: QueryClass,
@@ -46,10 +47,10 @@ export class PolicyCompiler {
 
     let requireExact = false;
     let allowApproximate = false;
-    let requireClarification = false;
+    let clarificationBias = 0;
     let fallbackMode: QueryPolicy['fallbackMode'] = 'hybrid';
 
-    // Rule 1: Strong anchor with no mixed constraints -> require exact.
+    // Rule 1: Strong anchor with entity intent -> require exact.
     const hasStrongAnchor = anchors.some(
       (a) => a.confidence >= STRONG_ANCHOR_CONFIDENCE,
     );
@@ -61,18 +62,18 @@ export class PolicyCompiler {
       reasons.push('strong_anchor_entity_intent');
     }
 
-    // Rule 2: Known ambiguous surface form -> require clarification.
+    // Rule 2: Known ambiguous surface form -> bias (was: hard clarification).
     if (uncertainty.ambiguityDetected && uncertainty.ambiguitySeverity === 'high') {
-      requireClarification = true;
+      clarificationBias = Math.max(clarificationBias, HIGH_AMBIGUITY_BIAS);
       fallbackMode = 'clarify';
-      reasons.push('known_ambiguous_high_severity');
+      reasons.push('known_ambiguous_high_severity_bias');
     }
 
-    // Rule 3: Ambiguous short form class -> raise caution.
+    // Rule 3: Ambiguous short form class -> bias (was: hard clarification).
     if (queryClass === 'ambiguous_short_form') {
-      requireClarification = true;
+      clarificationBias = Math.max(clarificationBias, AMBIGUOUS_SHORT_FORM_BIAS);
       fallbackMode = 'clarify';
-      reasons.push('ambiguous_short_form_class');
+      reasons.push('ambiguous_short_form_class_bias');
     }
 
     // Rule 4: Mixed query -> allow approximate matching.
@@ -93,14 +94,13 @@ export class PolicyCompiler {
       reasons.push('non_entity_intent_allows_approximate');
     }
 
-    // Rule 6: High overall uncertainty -> force clarification.
+    // Rule 6: High overall uncertainty -> bias (was: hard clarification).
     if (uncertainty.overall >= HIGH_UNCERTAINTY_THRESHOLD) {
-      requireClarification = true;
+      clarificationBias = Math.max(clarificationBias, HIGH_UNCERTAINTY_BIAS);
       fallbackMode = 'clarify';
-      reasons.push('high_overall_uncertainty');
+      reasons.push('high_overall_uncertainty_bias');
     } else if (uncertainty.overall >= MEDIUM_UNCERTAINTY_THRESHOLD) {
-      // Medium uncertainty: raise threshold but do not force clarification.
-      if (!requireClarification) {
+      if (clarificationBias === 0) {
         fallbackMode = 'hybrid';
       }
       reasons.push('medium_uncertainty_raise_threshold');
@@ -109,9 +109,9 @@ export class PolicyCompiler {
     // Rule 7: Comparison queries require both entities resolved.
     if (intent === 'comparison_search') {
       if (anchors.length < 2) {
-        requireClarification = true;
+        clarificationBias = Math.max(clarificationBias, HIGH_AMBIGUITY_BIAS);
         fallbackMode = 'clarify';
-        reasons.push('comparison_insufficient_anchors');
+        reasons.push('comparison_insufficient_anchors_bias');
       }
     }
 
@@ -121,7 +121,6 @@ export class PolicyCompiler {
       reasons.push('unknown_query_class_conservative');
     }
 
-    // Ensure at least one reason code is present.
     if (reasons.length === 0) {
       reasons.push('default_policy');
     }
@@ -129,7 +128,9 @@ export class PolicyCompiler {
     return {
       requireExact,
       allowApproximate,
-      requireClarification,
+      // DEPRECATED: always false. Use clarificationBias instead.
+      requireClarification: false,
+      clarificationBias,
       fallbackMode,
       policyReasonCodes: reasons,
     };

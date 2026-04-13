@@ -15,7 +15,7 @@ export type DecisionQueryProvenance = QueryLookupProvenance;
  */
 export type DecisionTracePolicy = Pick<
   QueryPolicy,
-  'requireExact' | 'allowApproximate' | 'requireClarification' | 'fallbackMode'
+  'requireExact' | 'allowApproximate' | 'clarificationBias' | 'fallbackMode'
 > & {
   readonly policyReasonCodes?: readonly string[] | undefined;
 };

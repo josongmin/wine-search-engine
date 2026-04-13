@@ -51,7 +51,7 @@ function makeDecisionOutput(overrides?: Partial<DecisionOutput>): DecisionOutput
         policy: {
           requireExact: false,
           allowApproximate: true,
-          requireClarification: false,
+          requireClarification: false, clarificationBias: 0,
           fallbackMode: 'hybrid',
         },
       },

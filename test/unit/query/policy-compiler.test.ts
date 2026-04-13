@@ -68,38 +68,41 @@ describe('PolicyCompiler', () => {
     });
   });
 
-  describe('requireClarification', () => {
-    it('high uncertainty (overall >= 0.7) → requireClarification=true', () => {
+  describe('clarificationBias', () => {
+    it('high uncertainty (overall >= 0.7) → clarificationBias=0.15 and no hard clarification', () => {
       const policy = compiler.compile(
         'entity_exact',
         'short_entity',
         [],
         makeUncertainty({ overall: 0.8 }),
       );
-      expect(policy.requireClarification).toBe(true);
+      expect(policy.requireClarification).toBe(false);
+      expect(policy.clarificationBias).toBe(0.15);
     });
 
-    it('ambiguity detected with high severity → requireClarification=true', () => {
+    it('ambiguity detected with high severity → clarificationBias=0.20 and no hard clarification', () => {
       const policy = compiler.compile(
         'entity_exact',
         'short_entity',
         [],
         makeUncertainty({ ambiguityDetected: true, ambiguitySeverity: 'high' }),
       );
-      expect(policy.requireClarification).toBe(true);
+      expect(policy.requireClarification).toBe(false);
+      expect(policy.clarificationBias).toBe(0.20);
     });
 
-    it('ambiguous_short_form class → requireClarification=true', () => {
+    it('ambiguous_short_form class → clarificationBias=0.15 and no hard clarification', () => {
       const policy = compiler.compile(
         'entity_fuzzy',
         'ambiguous_short_form',
         [],
         makeUncertainty(),
       );
-      expect(policy.requireClarification).toBe(true);
+      expect(policy.requireClarification).toBe(false);
+      expect(policy.clarificationBias).toBe(0.15);
     });
 
-    it('low uncertainty with good anchor → requireClarification=false', () => {
+    it('low uncertainty with good anchor → clarificationBias=0', () => {
       const policy = compiler.compile(
         'entity_exact',
         'short_entity',
@@ -107,6 +110,7 @@ describe('PolicyCompiler', () => {
         makeUncertainty({ overall: 0.1 }),
       );
       expect(policy.requireClarification).toBe(false);
+      expect(policy.clarificationBias).toBe(0);
     });
   });
 
@@ -233,7 +237,7 @@ describe('PolicyCompiler', () => {
         [],
         makeUncertainty({ overall: 0.8 }),
       );
-      expect(policy.policyReasonCodes).toContain('high_overall_uncertainty');
+      expect(policy.policyReasonCodes).toContain('high_overall_uncertainty_bias');
     });
   });
 });
