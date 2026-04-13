@@ -789,12 +789,19 @@ export async function runSearchPostRoutePhase(
   // by the candidate-pool retrieval phase. The routeDegradation.degradationReasons
   // array is the authoritative signal set for channel health in this request.
   const degradationReasons = mergedRouteDegradation?.degradationReasons ?? [];
+  // sparseZeroHits: sparse channel executed normally (not degraded) but
+  // returned zero lexical matches. Every candidate is dense-only.
+  const sparseChannelHealthy = !degradationReasons.some((reason) => reason.startsWith('sparse_'));
+  const sparseZeroHits = sparseChannelHealthy
+    && ctx.rankedResults.length > 0
+    && ctx.rankedResults.every((r) => r.sparseRank === undefined);
   const channelDegradation: ChannelDegradationSummary = {
     denseDegraded: degradationReasons.includes('dense_retrieval_disabled'),
     anchorDegraded:
       degradationReasons.includes('entity_resolver_unavailable')
       || degradationReasons.some((reason) => reason.startsWith('anchor_')),
-    sparseDegraded: degradationReasons.some((reason) => reason.startsWith('sparse_')),
+    sparseDegraded: !sparseChannelHealthy,
+    sparseZeroHits,
   };
 
   // ltrAvailable is false in heuristic-only mode (no LTR model loaded). If

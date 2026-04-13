@@ -149,4 +149,8 @@ export interface ChannelDegradationSummary {
   readonly anchorDegraded: boolean;
   /** Whether the sparse BM25 channel is degraded. */
   readonly sparseDegraded: boolean;
+  /** True when sparse BM25 executed successfully but returned zero hits.
+   *  Combined with dense results > 0, this means the results have NO lexical
+   *  support — they are purely embedding-similar and likely wrong. */
+  readonly sparseZeroHits: boolean;
 }

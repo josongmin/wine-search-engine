@@ -201,6 +201,7 @@ function createRankedResult(
       availability: 1,
       uncertaintyPenalty: 0.02,
     },
+    sparseRank: rank,
     matchedConstraints: [],
     unmetConstraints: [],
     inferredConstraints: [],

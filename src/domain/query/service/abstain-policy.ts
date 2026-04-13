@@ -132,13 +132,32 @@ export class AbstainPolicy {
       };
     }
 
-    // Priority 3: both dense and anchor channels degraded — sparse-only result
+    // Priority 3a: both dense and anchor channels degraded — sparse-only result
     if (channelDegradation.denseDegraded && channelDegradation.anchorDegraded) {
       return {
         shouldAbstain: true,
         reason: 'insufficient_evidence',
         detail: 'Dense and anchor retrieval channels are both degraded; sparse-only results are insufficient for confident ranking.',
         recoverableBy: 'retry_with_dense',
+      };
+    }
+
+    // Priority 3b: sparse BM25 returned zero hits but dense returned results.
+    // Dense-only results have NO lexical (word-level) support — they are
+    // purely embedding-similar and almost certainly wrong when the query
+    // contains a specific term (grape, region, producer) that should match
+    // at least one document via BM25. Returning 100 wrong results is worse
+    // than returning 0.
+    if (
+      channelDegradation.sparseZeroHits
+      && !channelDegradation.sparseDegraded
+      && topKScores.length > 0
+    ) {
+      return {
+        shouldAbstain: true,
+        reason: 'insufficient_evidence',
+        detail: 'Sparse (BM25) channel returned zero hits; dense-only results lack lexical support.',
+        recoverableBy: 'relax_constraints',
       };
     }
 
