@@ -649,8 +649,9 @@ export async function runRankedRouteDecisionPhase(
   const obligation = getExplanationObligation(queryFamily);
   const shouldIncludeCounterfactuals =
     obligation.requiresCounterfactual || ctx.includeCounterfactuals !== false;
+  const MAX_COUNTERFACTUALS = 100;
   const counterfactuals = shouldIncludeCounterfactuals
-    ? buildSearchCounterfactuals(ctx.resolveResult, ctx.fullRankedResults)
+    ? buildSearchCounterfactuals(ctx.resolveResult, ctx.fullRankedResults).slice(0, MAX_COUNTERFACTUALS)
     : [];
 
   /**
