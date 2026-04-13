@@ -33,19 +33,23 @@ export async function probeJsonPostEndpoint(
   dispatcher?: Dispatcher,
 ): Promise<ReadinessStatus> {
   return withProbeTimeout(async (signal) => {
-    // Use undici fetch (not native) so the dispatcher option (mTLS certs)
-    // is honoured. Node native fetch silently ignores dispatcher.
-    const fetchFn = dispatcher !== undefined ? undiciFetch : fetch;
-    const response = await fetchFn(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...extraHeaders,
-      },
-      body: JSON.stringify(payload),
-      signal,
-      ...(dispatcher !== undefined ? { dispatcher } : {}),
-    });
+    let response: Response;
+    if (dispatcher !== undefined) {
+      response = await undiciFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...extraHeaders },
+        body: JSON.stringify(payload),
+        signal,
+        dispatcher,
+      }) as unknown as Response;
+    } else {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...extraHeaders },
+        body: JSON.stringify(payload),
+        signal,
+      });
+    }
 
     // Only 2xx counts as up. 401/403 (auth misconfig), 404 (wrong URL),
     // 429 (rate-limited), and 5xx all indicate the dependency cannot serve

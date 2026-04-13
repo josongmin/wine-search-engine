@@ -306,6 +306,12 @@ function buildMtlsDispatcher(mtls: VespaMtlsConfig | undefined): UndiciAgent | u
       key: fs.readFileSync(mtls.keyPath),
       rejectUnauthorized: true,
     },
+    // Vespa Cloud dev zone has limited concurrent capacity. Keep connection
+    // count low and disable pipelining to avoid pool exhaustion during bulk
+    // feed operations (7K+ document upserts).
+    connections: 4,
+    pipelining: 1,
+    keepAliveTimeout: 30_000,
   });
 }
 
@@ -361,12 +367,19 @@ export class VespaClient {
     externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
     try {
-      const fetchFn = this.dispatcher !== undefined ? undiciFetch : fetch;
-      return await fetchFn(url, {
-        ...options,
-        signal: controller.signal,
-        ...(this.dispatcher !== undefined ? { dispatcher: this.dispatcher } : {}),
-      });
+      if (this.dispatcher !== undefined) {
+        // undici fetch with mTLS dispatcher — build the init object
+        // conditionally to satisfy exactOptionalPropertyTypes.
+        const undiciInit: Record<string, unknown> = {
+          method: options.method,
+          headers: options.headers,
+          signal: controller.signal,
+          dispatcher: this.dispatcher,
+        };
+        if (options.body !== undefined) undiciInit['body'] = options.body;
+        return await undiciFetch(url, undiciInit as Parameters<typeof undiciFetch>[1]) as unknown as Response;
+      }
+      return await fetch(url, { ...options, signal: controller.signal });
     } catch (err) {
       // `fetch` rejects with a TypeError (or DOMException for abort) when the
       // request cannot be sent at the network/transport layer — not for HTTP

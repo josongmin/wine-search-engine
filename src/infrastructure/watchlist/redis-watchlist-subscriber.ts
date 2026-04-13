@@ -45,7 +45,7 @@ export class RedisWatchlistSubscriber implements WatchlistSubscriberPort {
   constructor(
     private readonly redisConfig: RedisConfig = config.redis,
     private readonly createSubscriber: RedisSubscriberFactory = (redisConfig) =>
-      createClient({ url: redisConfig.url }),
+      createClient(redisConfig.url !== undefined ? { url: redisConfig.url } : {}),
   ) {}
 
   /**

@@ -12,7 +12,7 @@
  */
 
 import dotenv from 'dotenv';
-dotenv.config({ path: '.env.local', override: true });
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 import fs from 'node:fs/promises';
 import {
@@ -102,6 +102,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
   let executionLane: BenchmarkExecutionLane = 'public';
   let debugKey = process.env['BENCHMARK_DEBUG_KEY'] ?? process.env['HTTP_DEBUG_SECRET'];
   let useThresholds = true;
+  let skipPreflight = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -135,6 +136,8 @@ function parseArgs(argv: readonly string[]): CliArgs {
       debugKey = argv[++i] ?? debugKey;
     } else if (arg === '--no-thresholds') {
       useThresholds = false;
+    } else if (arg === '--skip-preflight') {
+      skipPreflight = true;
     }
   }
 
@@ -150,6 +153,7 @@ function parseArgs(argv: readonly string[]): CliArgs {
     executionLane,
     debugKey,
     useThresholds,
+    skipPreflight,
   };
 }
 
@@ -341,7 +345,7 @@ export async function assertEntityRetrievalFixtureThresholds(
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const cases = await loadEntityRetrievalFixtureCases(args.suites);
-  if (!args.smokePredictions && args.predictions === null) {
+  if (!args.smokePredictions && args.predictions === null && !args.skipPreflight) {
     await runLiveBenchmarkPreflight({
       apiUrl: args.apiUrl,
       executionLane: args.executionLane,
@@ -392,6 +396,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   void run().catch((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`FATAL: ${message}`);
+    if (err instanceof Error) {
+      if (err.stack) console.error(err.stack);
+      if ('cause' in err && err.cause) console.error('CAUSE:', err.cause);
+    }
     process.exit(1);
   });
 }

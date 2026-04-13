@@ -28,14 +28,16 @@ export function createPgPool(pgConfig: PgPoolConfig): Pool {
     // dangling by an application crash.
     //
     // Timeout arithmetic (Rule 22):
-    //   statement_timeout  = 10s  (server kills query)
-    //   idle_in_transaction = 10s  (server kills idle txn)
-    //   query_timeout      = 12s  (client-side, 2s buffer above server timeout)
-    // The 2s client buffer ensures the server abort fires first (clean error
+    //   statement_timeout  = 30s  (server kills query — raised for Vespa Cloud
+    //     latency: publish-search-snapshot advisory lock + substrate INSERT can
+    //     take 15-20s when Vespa Cloud is cold)
+    //   idle_in_transaction = 30s  (server kills idle txn)
+    //   query_timeout      = 35s  (client-side, 5s buffer above server timeout)
+    // The 5s client buffer ensures the server abort fires first (clean error
     // code) before the client forcibly kills the socket (opaque error).
-    statement_timeout: 10_000,
-    idle_in_transaction_session_timeout: 10_000,
-    query_timeout: 12_000,
+    statement_timeout: 30_000,
+    idle_in_transaction_session_timeout: 30_000,
+    query_timeout: 35_000,
   });
   nextPool.on('error', (err) => {
     // Sanitize: pg client error objects sometimes carry full connection

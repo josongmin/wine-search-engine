@@ -5,7 +5,7 @@
 **범위:** 플래너·보안·캐시·SAT 이후, **`effectiveRoute === 'hybrid'`** 일 때 **후보(`HybridCandidate[]`)를 만드는 경로**와, 그 직후 **랭킹·합성 리졸브**까지.  
 **비범위:** `entity` 전용 리졸브, `mixed` 솔버, `DecisionEngine`·`ResponseBuilder` 전체, HTTP 라우트 등록 — 필요 시 아래 “전후 단계”만 참조.
 
-**Last updated:** 2026-04-11
+**Last updated:** 2026-04-13
 
 ---
 
@@ -197,6 +197,8 @@ export interface HybridCandidateRetrievalResult {
   readonly candidates: readonly HybridCandidate[];
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  readonly retrievalFusionTrace?: RrfFusionTrace | undefined;         // E4
+  readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;  // E4
 }
 
 export async function retrieveHybridCandidatesForPlan(
@@ -215,12 +217,15 @@ export async function retrieveHybridCandidatesForPlan(
 - **`compare_candidates`:** 이제 resolver가 검증한 `anchorResolution.topEntity?.entityId`만 anchor로 쓴다. 예전처럼 `plan.anchors[0]?.candidateEntityIds[0]`로 내려가지 않는다. resolver가 anchor를 못 주면 `compare_anchor_resolution_failed`로 기록하고 폴백한다.
 - **fallback 호출 대상:** `candidatePool.execute`가 있으면 그쪽을 우선 쓰고, 없을 때만 `generate()`를 쓴다. 즉 문서상 `generate()` 단일 경로라고 보면 안 된다.
 - **반환 부가정보:** 폴백이 발생하면 `routeDegradation`과 `specializedRouteObservability`를 함께 반환해, 후단에서 hybrid degradation과 specialized fallback reason을 합성할 수 있다.
+- **RRF Fusion Trace (E4):** `candidatePool.getLastFusionTrace()` / `.getLastDropLog()`를 호출해 `retrievalFusionTrace`와 `hardFilterDropLog`를 반환 구조에 포함한다. 이 trace는 post-route의 `deriveAuditExtension()`까지 전파된다.
+- **CircuitBreakerOpenError 구분:** Browse/compare 전문 경로에서 `CircuitBreakerOpenError`와 일반 에러를 구분해 처리한다. CB open은 별도 degradation reason으로 기록.
 
 `buildHybridRetrievalInputForPlan` 역시 현재는 단순 `(plan, 'hybrid')` 래퍼가 아니다.
 
 - `retrievalPlan`: `compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints)`
 - `lexicalQueries` / `semanticQueries`: 원문 쿼리 외에 hard/soft/inferred constraint에서 구조화 확장 쿼리를 합성
 - `anchorEntityId`: compare fallback에서 resolver가 검증한 anchor가 있으면 candidate pool에도 전달
+- `fuzzyEntityHypotheses` (TA4): 플래너의 fuzzy 앵커에서 추출한 가설 엔티티 용어를 sparse 채널에 전파
 - `compiledRetrievalMode`, `requestContext`: observability / request abort / stage timing에 사용
 
 ---
@@ -287,7 +292,27 @@ export async function runHybridRankingPipeline(
 - `runHybridRankingPipeline()`은 **LTR helper를 직접 호출하지 않는다.**
 - rerank gate, cross-encoder rerank, learned LTR(`applyLearnedLtrRerank`)는 모두 `Ranker.rank()` 내부에서 실행된다.
 - `ranker.rank()` 반환형은 단순 `RankedResult[]`가 아니라 `RankingOutput { results, metadata }`이며, hybrid pipeline은 여기서 `runtimeSignal.degradation`, `funnelMetrics`를 우선 읽고, 필요 시 `getLastRuntimeSignal()` / `getLastFunnelMetrics()` legacy getter로 폴백한다.
-- `executeHybridRouteRankingPipeline()`은 마지막으로 retrieval degradation + ranking degradation을 merge하고, 0건 + hard constraint 조합이면 `buildRelaxationLadder()` 기반으로 최대 4회 재시도한다.
+- `executeHybridRouteRankingPipeline()`은 마지막으로 retrieval degradation + ranking degradation을 merge하고, `rankingMetadata`(rerank decision, score decompositions, funnel metrics)도 결과에 포함한다.
+- 0건 + hard constraint 조합이면 `buildRelaxationLadder()` 기반으로 최대 `MAX_RELAXATION_STEPS=4`회 재시도한다.
+
+### Constraint Relaxation Ladder (EPIC-7)
+
+**파일:** `src/domain/query/service/constraint-relaxation.ts`
+
+제약 완화 순서 (`RELAXATION_PRIORITY`, 가장 좁은 것부터 제거):
+
+| 순서 | 속성 | 근거 |
+|------|------|------|
+| 1 | `appellation` | 가장 좁은 지리 |
+| 2 | `region` | 중간 지리 |
+| 3 | `country` | 가장 넓은 지리 |
+| 4 | `vintage_year` / `vintage` | 시간 |
+| 5 | `alcohol_pct` / `alcohol` | 물리 사양 |
+| 6 | `grape_primary` | 품종 |
+
+**절대 완화 불가:** `wine_type`, `color`, `classification`
+
+각 retry에서 abort signal 체크 후, `relaxOneStep(bundle)`으로 다음 완화 단계를 생성한다.
 - `specializedRouteObservability`는 normal path / relaxation success / relaxation exhausted path 모두에서 최대한 보존되어 post-route로 전달된다.
 - relaxation retry에서는 **의도적으로 `compiled`를 넘기지 않는다.** 기존 `compiled.query.retrievalPlan`을 재사용하면 완화 전 hard filter가 그대로 남아 retry가 무효화되기 때문이다.
 - `ranker.getLastFunnelMetrics`가 없는 bare ranker가 주입되면, hybrid pipeline은 결과는 계속 반환하되 stage-D funnel observability 부재를 debug warning으로 남긴다.

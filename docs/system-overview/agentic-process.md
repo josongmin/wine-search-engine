@@ -1,7 +1,7 @@
 # Wine Search Engine — Agentic Request Processing
 
 > 이 문서는 HTTP 요청이 들어온 시점부터 최종 응답이 반환될 때까지의 전 과정을 코드 수준으로 설명합니다.
-> 참조 파일의 라인 번호는 2026-04-11 기준 `main` 브랜치 커밋 `f8a2932` 근처입니다(리팩터 시 어긋날 수 있음).
+> 참조 파일의 라인 번호는 2026-04-13 기준 `main` 브랜치 커밋 `018f4ac` 근처입니다(리팩터 시 어긋날 수 있음).
 
 ---
 
@@ -73,6 +73,8 @@ HTTP 요청
 ```
 1. 보안 게이트 — securityGate.getSafeQueryOrThrow()
    실패 시 403 즉시 반환
+   ※ executionPrincipal === 'benchmark_trusted' 이면 보안 게이트 바이패스
+     (raw query 그대로 사용 — 벤치마크 전용 경로)
 
 2. 비교 쿼리 분해 시도 (Epic 14, decomposedSearch 있을 때만)
    analyzeQueryDecomposition() → isValidDecomposition()이면
@@ -103,10 +105,50 @@ HTTP 요청
 
 ```
 effectiveRoute 기준으로 세 경로 중 하나 실행:
-  'entity' → executeEntityRoute()   (EntityResolver 직접 조회)
+  'entity' → executeEntityRoute()   (EntityResolver 직접 조회 + TA3 Corrective Retry; 아래 상세)
   'hybrid' → executeHybridRoute()   (CandidatePool + Ranker; 학습 LTR은 게이트 통과 시 RankedResult 구성 이후 Step 6b)
   'mixed'  → executeMixedRoute()    (비교 쿼리 → 서브쿼리 분해 후 각각 실행)
 ```
+
+### Entity Route — Corrective Retry (TA3)
+
+**파일:** `src/application/search/search-usecase-corrective-retry.ts`
+
+Entity 라우트에서 1차 해소가 실패하거나 신뢰도가 낮을 때, **2-pass 재시도 + 후방 신뢰도 보정(TA5)**을 수행합니다.
+
+```
+Pass 1: EntityResolver 직접 조회 (기존 방식)
+  │
+  ├─ shouldTriggerCorrectiveRetry(plan, result) 평가
+  │    조건: (앵커 0개 OR 신뢰도 < CORRECTIVE_RETRY_CONFIDENCE_THRESHOLD)
+  │           AND 모호성/clarify/fail 권고 없음
+  │
+  └─ 트리거 시 → Pass 2: broader blocker 호출
+       blocker?.execute(plan, { broader: true })
+       앵커 제외 diff 로직으로 추가 시딩
+       │
+       ├─ resolveCorrectiveRetryOutcome(retryResult)
+       │    → 'accept': 재시도 결과 채택
+       │    → 'clarify': 모호성 유지 → clarify 응답
+       │    → 'fail': 후보 없음
+       │
+       └─ computeCorrectiveRetryCalibration(retryResult, outcome)  (TA5)
+            공식: calibratedConfidence = 0.5 + 0.4 × (1 − normalizedRank)
+            - Rank 1 of N → 0.9
+            - Rank N of N → 0.5
+            → correctiveRetryCalibration 필드로 Post-Route에 전달
+```
+
+> **주의:** Hybrid 라우트에서는 TA3 재시도를 수행하지 않습니다. Hybrid는 constraint relaxation(§5)으로 0건 복구를 처리합니다.
+
+### Blocker 통합 (TA2-4)
+
+**파일:** `src/application/search/search.usecase.ts`
+
+`SearchUseCase`에 `blocker?: BlockingUseCasePort` 의존성이 추가되었습니다. Entity route와 Hybrid route 양쪽에서 **앵커 기반 alias 매칭을 넘어선 후보 시딩**에 사용됩니다.
+
+- Entity route: TA3 corrective retry의 Pass 2에서 `runBlockerForPlan(plan, { broader: true })` 호출
+- Hybrid route: `resolveEntityRouteForPlan()`에 blocker를 주입하여 single-pass resolution에 시딩
 
 ### Post-Route Phase 실제 순서 (`runSearchPostRoutePhase`)
 
@@ -115,7 +157,10 @@ effectiveRoute 기준으로 세 경로 중 하나 실행:
 
 2. snapshot + degradation 계산 (두 경로가 공유)
 
-3. topKFinalScores() → abstainPolicy.shouldAbstain() 판단
+3. topKFinalScores() → abstainPolicy.evaluate() → TypedAbstainDecision 판단
+   AbstainReason: 'no_match' | 'low_confidence' | 'semantic_conflict' | 'insufficient_evidence'
+   RecoveryAction: 'relax_constraints' | 'clarify' | 'retry_with_dense' | 'split_query'
+   ClarifyKind: 'anchor_disambiguation' | 'constraint_conflict' | 'preference_gap' | 'budget_gap'
 
 4. result limit 적용 (request.limit, 유효하지 않으면 전체 사용)
    clamp: safeLimit = min(1000, floor(raw)); NaN/음수이면 전체
@@ -137,12 +182,25 @@ effectiveRoute 기준으로 세 경로 중 하나 실행:
         responseBuilder.build()
         logSearchEvent(...)   ← non-abstain만: runRankedRouteDecisionPhase 내부에서 먼저 기록
 
-5. 구조화 로그 기록 (두 경로 합류 후)
+5. AuditExtension 빌드 — deriveAuditExtension()  (NEW)
+   explain=true 또는 debug 헤더 활성 시 게이팅 조건별 구성:
+   ├─ planner_policy_trace       ← plannerTrace 존재 시 (explain OR debug)
+   ├─ constraint_resolution_trace ← ConstraintReasoner 출력 존재 시
+   ├─ retrieval_fusion_trace     ← RrfFusionTrace 존재 시 (explain OR debug)
+   ├─ ranking_delta_trace        ← scoreDriftRecord 존재 시 (LTR 적용 + explain)
+   │    preRerankTop5 / postRerankTop5 엔티티 스냅샷 (AUDIT_RERANK_SNAPSHOT_COUNT=5)
+   ├─ rerank_decision_trace      ← rerankDecision 존재 시
+   ├─ abstain_policy_trace       ← abstainDecision 존재 시 (항상)
+   ├─ hard_filter_drop_log       ← drop log 존재 시, top AUDIT_DROP_LOG_MAX=5 by score desc
+   ├─ resolver_provenance_trace  ← blocker seed 정보 존재 시 (TA3-1)
+   └─ corrective_retry_calibrated_confidence ← TA5 보정 값 존재 시 [0.5, 0.9]
+
+6. 구조화 로그 기록 (두 경로 합류 후)
    responseSnapshot !== undefined 일 때 logSearchEvent() 재호출
    → abstain 경로: 여기서 1회 기록
    → non-abstain 경로: 내부 1회 + 여기 1회 (총 2회)
 
-6. cacheService.setSearchResponse()
+7. cacheService.setSearchResponse()
    → 캐시 내부에서 abstain 여부 등 자격 검사 후 skip 가능
    → 두 경로 모두 시도함 (abstain이어도 캐시 write 시도)
 ```
@@ -387,6 +445,32 @@ finalBundle = applyCompositionalInference(expanded, { impliedWineType })
 - 온톨로지: "Pinot Noir" → 관련 지역 파생
 - 합성 추론: 비교 컨텍스트에서 암묵적 wine_type 추론
 
+### Constraint Reasoning (E2-T2)
+
+**파일:** `src/domain/query/service/constraint-reasoner.ts`
+
+온톨로지 확장 이후, 제약 간 **의미적 관계 분석**을 수행합니다.
+
+```
+reasonerOutput = constraintReasoner.reason(constraintBundle)
+```
+
+**ConstraintRelationType:**
+
+| 관계 타입 | 의미 | 처리 |
+|----------|------|------|
+| `contradiction` | 두 제약이 동시 충족 불가 | 낮은 authority 쪽 제거 |
+| `redundancy` | 두 제약이 동일 | 중복 제거 |
+| `overshadow` | 같은 operator, 다른 authority | 낮은 authority 쪽 제거 |
+| `soft_tension` | 소프트 제약이 반대 방향으로 당김 (배제는 아님) | 보존, abstain 판단에 활용 |
+| `subsumption` | 지역 제약 중 하나가 온톨로지 상위 | 상위 제거 (좁은 제약 유지) |
+| `implication` | X 제약이 Y 제약을 이미 내포 | 내포된 쪽 제거 |
+
+- O(n²) 쌍별 분석 (일반적으로 원자 < 20개)
+- 출력: `ConstraintReasonerOutput { relations, hasSoftTension, hasHardContradiction }`
+- `hasSoftTension`이면 abstain 판단에서 `AbstainReason='semantic_conflict'`로 활용 가능
+- 관계 trace는 `constraint_resolution_trace`로 AuditExtension에 포함 (§10)
+
 ### 리트리벌 플랜 빌드
 
 ```
@@ -511,7 +595,10 @@ CandidatePoolService.execute()
   ├─ RRF 융합 → fusionService.fuse(sparse, dense, anchor, k, learnedSparse)
   │    (k = 쿼리 클래스별 getFusionConfig() 반환값 — 아래 표 참조)
   │
-  ├─ 하드 제약 필터 → constraintFilter.applyHardFilters()
+  ├─ 하드 제약 필터 → constraintFilter.applyHardFiltersWithDropLog()
+  │    반환: 필터 통과 후보 + CandidateDropRecord[] (audit용)
+  │    보호 정책: sparse rank 1 또는 anchor-conditioned 후보는 절대 제거 안 됨
+  │              → 랭커의 coarse prune(Step 4)이 최종 처리
   │
   └─ 어셈블리 → candidateAssembler.assemble() (exact/anchor 보호 정책 포함)
 ```
@@ -560,16 +647,28 @@ CandidatePoolService.execute()
 ### 제약 → Vespa 필터 변환
 
 ```
-constraintToSparseFilterTokens(hardConstraints)
+hardConstraintsToSparseFilterTokens(hardConstraints)
   → YQL WHERE 절 토큰
   // 소프트 제약(acidity 등)은 여기서 제외 — 패널티 경로로 처리
+  // escapeVespaRegex(value) — LLM 발생 값의 Java regex 메타문자 이스케이프
+  // 파이프 구분자(|) 주입 방지 (multi-value IN 연산자)
+```
+
+### RRF Fusion Trace 전파 (E4)
+
+`CandidatePoolService.execute()` 이후 fusion trace와 drop log가 호출 체인을 따라 전파됩니다:
+```
+candidatePool.execute() → getLastFusionTrace() / getLastDropLog()
+  → HybridCandidateRetrievalResult { candidates, routeDegradation, retrievalFusionTrace, hardFilterDropLog }
+    → executeHybridRouteRankingPipeline() → SearchRouteExecutionResult
+      → runSearchPostRoutePhase() → deriveAuditExtension()
 ```
 
 ---
 
 ## 7. Ranking
 
-**핵심 파일:** `src/domain/ranking/service/ranker.ts` (서빙 랭킹), `src/domain/ranking/service/lambdamart-ranker.ts` (LTR 훈련)
+**핵심 파일:** `src/domain/ranking/service/ranker.ts` (서빙 랭킹), `src/domain/ranking/service/lambdamart-ranker.ts` (LTR 훈련), `src/domain/ranking/service/rerank-safety.ts` (재랭킹 안전 봉투)
 
 ### Ranker.rank() 실제 파이프라인 (`src/domain/ranking/service/ranker.ts` — `rank()`)
 
@@ -577,22 +676,31 @@ constraintToSparseFilterTokens(hardConstraints)
 
 ```
 [루프 전 — 코드 주석 Step 2] 가중치 결정
-  a. resolveWeights(queryClass)              → 쿼리 클래스별 기본 가중치
-  b. getModeWeights(effectiveRetrievalMode)  → compiled.execution.effectiveRetrievalMode 우선, 없으면 plan
-  c. max 오버레이 + modeNormFactor로 정규화   → 오버레이 총합 팽창 보정
+  a. resolveWeights(queryClass)                     → 쿼리 클래스별 기본 가중치
+  b. getModeWeights(effectiveRetrievalMode)          → compiled.execution.effectiveRetrievalMode 우선, 없으면 plan
+  c. applyModeWeightOverlay(baseWeights, modeProfile) → 모드별 가중치 오버레이 (softConstraintWeight 포함)
+  d. scaleOverlaidWeights(overlaid, normFactor)      → 정규화 (오버레이 총합 팽창 보정)
   (요청 공통) referenceYear, queryContainsHangul, queryConstraintCtx 선계산
 
 [후보별 for 루프]
   signalComputer.computeAll(...)     → componentScores
   buildConstraintState(...)          → matched / unmet / inferred
   resolveChannelAwareWeights(...)    → candidateWeights
-  scoreAggregator.aggregate(...)     → finalScore → scored[]
+  scoreAggregator.aggregate(...)     → finalScore
+  getEvidenceQualityTier(...)        → 0(exact/known-item) | 1(anchor) | 2(ordinary) | 3(weak)
+  getLexicalExactnessTier(...)       → 0(exact) | 1(transliterated) | 2(vintage) | 3(unknown)
+  → scored[]
 
 Step 4: Coarse Prune (T5.2)
   비유한 finalScore(-Infinity 등) 제거 → viable[]
 
-Step 5: 정렬
-  viable.sort(compareScoredEntriesByFinalScoreDesc)  (NaN 안전, entityId 타이브레이크)
+Step 5: 다단계 정렬
+  viable.sort(compareScoredEntriesByFinalScoreDesc) — 5단계 비교:
+    Stage 1: finalScore 내림차순 (NaN → last)
+    Stage 2: evidenceQualityTier 오름차순 (낮을수록 강한 증거)
+    Stage 3: lexicalExactnessTier 오름차순 (낮을수록 정확한 표면형 매칭)
+    Stage 4: sparseRank 오름차순 (낮은 BM25 rank = 더 나은 렉시컬 매칭; 없으면 last)
+    Stage 5: entityId 오름차순 (결정론적 타이브레이크)
   preRerankTop5 엔티티 스냅샷
 
 Step 6: 재랭킹 게이트 (evaluateRerankGate)
@@ -602,15 +710,53 @@ Step 6: 재랭킹 게이트 (evaluateRerankGate)
   └─ shouldRerank=true + ltrModels에 해당 queryClass 키 존재
        → shouldApplyLearnedRerank=true (실제 호출은 아래 Step 6b)
 
+Step 6a: Rerank Safety 평가 (E5-T2)  — Step 6b 적용 직전
+  evaluateRerankSafety(descriptor, listContext, hardConstraintAtoms)
+  3가지 안전 규칙:
+    Rule 1 (hard_constraint_violation):
+      하드 제약 실패 후보가 통과 후보 위로 승격 불가 — heuristicRank이 천장
+    Rule 2 (rank_invariant_breach):
+      LTR 후 하드 제약 실패 후보가 통과 후보보다 높은 순위 불가
+    Rule 3 (protected_candidate_eviction):
+      보호 후보(sparseRank=1 OR anchorSimilarity≥0.85)가 heuristicRank+2 이상 하락 불가
+  SafetyCandidateDescriptor 기반 → allow/block + reason 반환
+
 Step 7–8: RankedResult[] 구성 + 증거
   finalOrder → 각 entry에 evidenceMapper.mapToEvidence(componentScores)
 
 Step 6b (코드상 Step 7–8 직후): shouldApplyLearnedRerank이면
   applyLearnedLtrRerank(results, queryClass, ltrModels) — RankedResult 배열을 재정렬
-  차원 불일치 등 시 스킵·degradation 신호 기록
+  차원 불일치 등 시 스킵·degradation 신호 기록 (LtrRerankSkipReason)
+  ScoreDriftRecord 구성: pre/post top-5 엔티티, Kendall τ 거리, 평균 rerank delta
+  safety 차단된 후보 수 → blockedCount로 metadata에 기록
 
 반환: RankingOutput { results, metadata }
+  metadata 확장: RerankDecision { applied, decision, gateReason, blockedCount, deltaMetrics }
+                 scoreDecompositions: ScoreDecomposition[] (per-candidate heuristic/ltr/delta/safety)
 ```
+
+### Score Decomposition & Drift 추적 (E5)
+
+**파일:** `src/domain/ranking/model/score-decomposition.ts`
+
+LTR 재랭킹이 적용될 때, 각 후보의 점수 분해와 드리프트를 추적합니다:
+
+```typescript
+ScoreDecomposition {
+  entityId, heuristicScore, ltrScore,
+  rerankDelta, rerankDeltaNormalized,
+  safetyDecision: { allowed, blockedReason }
+}
+
+ScoreDriftRecord {
+  preRerankTop5, postRerankTop5,          // 엔티티 ID 스냅샷
+  kendallTauDistance,                      // 0(동일)–1(완전 역순)
+  averageRerankDelta,                      // 평균 절대 정규화 delta
+  safetyEnvelopeBlocks, protectedEvictions // 안전 규칙 차단 횟수
+}
+```
+
+`ScoreDriftRecord`는 `ranking_delta_trace`로 AuditExtension에 포함됩니다 (§10 참조).
 
 ### 가중치 구조 (ScoringWeights — ranker.ts)
 
@@ -681,10 +827,62 @@ Step 6b (코드상 Step 7–8 직후): shouldApplyLearnedRerank이면
 
 ## 9. Agentic Loop
 
-**파일:** `src/application/agent/agent-orchestrator.ts`  
+**파일:** `src/application/agent/agent-orchestrator.ts`, `tool-outcome.ts`, `tool-batch-policy.ts`  
 **진입:** `AgentOrchestrator.execute(query, requestId, overrides?, abortSignal?)`
 
 사용자가 `POST /v1/agent`를 통해 복잡한 다단계 쿼리를 보낼 때 실행됩니다.
+
+### Typed Tool Outcome (E7)
+
+**파일:** `src/application/agent/tool-outcome.ts`
+
+도구 실행 결과는 raw observation이 아니라 **typed outcome** 기반으로 처리됩니다:
+
+```typescript
+ToolOutcomeKind = 'success' | 'empty_result' | 'partial_result'
+               | 'tool_error' | 'timeout' | 'policy_violation'
+
+ToolOutcome {
+  stepId, tool: AgentToolName, kind: ToolOutcomeKind,
+  result, errorMessage?, postconditionViolations?, durationMs
+}
+
+SynthesisContext {
+  steps: ToolOutcome[],         // 전체 도구 실행 이력 (typed)
+  failedSteps: ToolOutcome[],   // kind !== 'success' 인 것들
+  reasoningFailure?: string,    // LLM 합성 실패 이유
+  fallbackApplied: boolean      // Layer 2+ 폴백 사용 여부
+}
+```
+
+`buildSynthesisContext(outcomes, fallbackState)` — 루프 종료 후 합성 단계에 전달되는 구조화 컨텍스트를 빌드합니다.
+
+### 선언적 배치 정책 (E7)
+
+**파일:** `src/application/agent/tool-batch-policy.ts`
+
+기존 ad-hoc if/else 대신 **선언적 정책 그래프**로 배치 제약을 관리합니다:
+
+```typescript
+TOOL_BATCH_POLICY = {
+  search_wines:        { canRunWith: ['get_food_pairings', 'search_wines'], mustRunAlone: false, maxPerBatch: 4 },
+  compare_wines:       { canRunWith: [],                                    mustRunAlone: true,  maxPerBatch: 1 },
+  check_drinking_window: { canRunWith: ['check_drinking_window'],           mustRunAlone: false, maxPerBatch: 4 },
+  get_food_pairings:   { canRunWith: ['search_wines'],                      mustRunAlone: false, maxPerBatch: 1 },
+}
+
+evaluateBatchPolicy(calls) → { allowed: true } | { allowed: false, reason, violatingTools }
+```
+
+### 도구 입력 변경사항
+
+**파일:** `src/application/agent/agent-tools.ts`
+
+- `style`, `certification`: Vespa 하드 필터에서 **소프트 텍스트 힌트**로 전환 (style 값이 compound(“medium red”)이고 certification은 boolean 필드이므로 exact-match 불가)
+- `max_price_krw` / `max_price`: `min(0)` → `min(1)` (0은 silent no-op 방지)
+- `MAX_ENRICHED_QUERY_LEN`: 700 → `MAX_QUERY_LENGTH`(500)으로 통일 (보안 게이트와 일치)
+- `FILTER_STRING_MAX_LEN = 100`, `EXCLUDE_FILTER_MAX_COUNT = 10`: 필터 입력 검증 바운드
+- `AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX = 3`: grounding JSON에 source_system:source_record_id lineage 포함 (상한 3개)
 
 ### 전체 루프 구조
 
@@ -725,19 +923,21 @@ execute()
        │    이번 스텝 토큰 누적 후 >= maxTotalTokens → 'budget' 종료
        │
        ├─ 응답 파싱 (parseLlmOutput)
-       │    ├─ {"thought":"…","answer":"…"} (비어있지 않은 answer) → 루프 종료
-       │    ├─ {"thought":"…","action":{tool,input}} → 단일 도구 실행
-       │    └─ {"thought":"…","actions":[…]} → 병렬 도구 배치 실행
+       │    ├─ {“thought”:”…”,”answer”:”…”} (비어있지 않은 answer) → 루프 종료
+       │    ├─ {“thought”:”…”,”action”:{tool,input}} → 단일 도구 실행
+       │    └─ {“thought”:”…”,”actions”:[…]} → 병렬 도구 배치 실행
        │
-       ├─ [배치 도구] 정책 검사 후 executeAgentToolsBatch(calls)
+       ├─ [배치 도구] evaluateBatchPolicy(calls) 선언적 검사 후 executeAgentToolsBatch
        │    batchCalls.length > MAX_TOOLS_PER_BATCH=4 → 'error' 종료
        │    unknown tool → 관찰 기록, MAX_UNKNOWN_TOOL_ATTEMPTS=2 초과 시 'error'
-       │    validateParallelBatchPolicy() 위반 → 관찰 기록, continue
+       │    evaluateBatchPolicy() 위반 → 관찰 기록, continue
        │    budget.recordParallelBatch(..., {skipNearDuplicate:true}) → 루프 감지
+       │    결과: ToolOutcome[] (typed)
        │
        ├─ [단일 도구] 정책 검사 후 executeAgentTool(tool, input)
        │    unknown tool → 관찰 기록, MAX_UNKNOWN_TOOL_ATTEMPTS=2 초과 시 'error'
        │    budget.recordStep(tool, input) → 루프 감지
+       │    결과: ToolOutcome (classifyToolOutcomeKind()로 분류)
        │
        └─ zero-results 감지 시 constraint-relaxation hint 주입 (1회)
             remainingSteps >= 3 + !hasInjectedRefinementHint → pendingRefinementHint 세팅
@@ -745,12 +945,12 @@ execute()
 
 ### 사용 가능한 도구 목록
 
-| 도구 | 설명 | 특이사항 |
-|------|------|---------|
-| `search_wines` | 와인 검색 (§3–8 전체 파이프라인) | `get_food_pairings`와 함께 배치 가능 |
-| `compare_wines` | 두 와인 상세 비교 (2-way) | **배치 내 단독 실행 강제** (`compare_wines must run alone in a step`) |
-| `check_drinking_window` | 음용 적기 예측 | 동종끼리만 배치 가능 — `search_wines`/`get_food_pairings`/`compare_wines`와 혼합 불가 |
-| `get_food_pairings` | 음식 페어링 조회 | `search_wines`와 함께 배치 가능; `compare_wines`/`check_drinking_window`와 혼합 불가 |
+| 도구 | 설명 | 배치 정책 (TOOL_BATCH_POLICY) |
+|------|------|------------------------------|
+| `search_wines` | 와인 검색 (§3–8 전체 파이프라인) | canRunWith: `get_food_pairings`, `search_wines`; maxPerBatch: 4 |
+| `compare_wines` | 두 와인 상세 비교 (2-way) | **mustRunAlone: true**; maxPerBatch: 1 |
+| `check_drinking_window` | 음용 적기 예측 | canRunWith: `check_drinking_window`만; maxPerBatch: 4 |
+| `get_food_pairings` | 음식 페어링 조회 | canRunWith: `search_wines`; maxPerBatch: 1 |
 
 ### 예산 구성
 
@@ -780,6 +980,10 @@ execute()
 | `blocked` | 보안 정책 또는 도메인 정책에 의해 강제 종료 |
 
 ### 루프 종료 후 합성 (실제 순서)
+
+합성 단계에서는 `buildSynthesisContext(outcomes, fallbackState)` (tool-outcome.ts)로 typed 컨텍스트를 구성하고,
+`SynthesisContext.failedSteps`와 `reasoningFailure`를 기반으로 합성 전략을 결정합니다.
+합성 결과는 `fallback_trace`로 AuditExtension에 포함됩니다 (§10 참조).
 
 ```
 [전제 조건] !policyBlocked && !llmCircuitOpen && answer==='' && terminationReason!=='answer'
@@ -846,7 +1050,9 @@ rankedResults[]
 [2] snapshot + degradation 계산 (두 경로 공유)
   │
   ▼
-[3] topKFinalScores() → abstainPolicy.shouldAbstain() 판단
+[3] topKFinalScores() → abstainPolicy.evaluate() → TypedAbstainDecision
+    AbstainReason: 'no_match' | 'low_confidence' | 'semantic_conflict' | 'insufficient_evidence'
+    → semantic_conflict는 ConstraintReasoner(§4)의 soft_tension 감지 시 발동
   │
   ▼
 [4] result limit 적용 — clamp: safeLimit = min(1000, floor(raw)); NaN/음수이면 전체
@@ -869,19 +1075,43 @@ rankedResults[]
        logSearchEvent(...)   ← non-abstain: 이 내부에서 먼저 1회 기록
   │
   ▼
-[5] 구조화 로그 기록 (두 경로 합류 후 공유)
+[5] AuditExtension 빌드 — deriveAuditExtension()
+    explain=true 또는 debug 헤더 활성 시 게이팅 조건별 audit 필드 구성
+    (상세는 §2 Post-Route Phase 참조)
+  │
+  ▼
+[6] 구조화 로그 기록 (두 경로 합류 후 공유)
     responseSnapshot !== undefined 일 때 logSearchEvent() 재호출
     → abstain 경로: 여기서 1회만 기록
     → non-abstain 경로: 내부 1회 + 여기 1회 (총 2회)
   │
   ▼
-[6] cacheService.setSearchResponse()
+[7] cacheService.setSearchResponse()
     → 두 경로 모두 캐시 write 시도 (abstain이어도 시도)
     → 캐시 내부에서 abstain 응답이 자격 미달이면 skip
 ```
 
 > **주의:** abstain 경로도 `cacheService.setSearchResponse()`를 호출합니다. 단 캐시 서비스 내부에서 자격 검사 후 skip될 수 있습니다.  
 > **주의:** `logSearchEvent`는 non-abstain 경로에서 `runRankedRouteDecisionPhase()` 내부와 공유 블록에서 총 2회 호출됩니다.
+
+### AuditExtension 필드 (E8)
+
+**파일:** `src/domain/audit/model/audit-extension.ts`
+
+| 필드 | 게이팅 조건 | 출처 |
+|------|-----------|------|
+| `planner_policy_trace` | plannerTrace 존재 (explain OR debug) | Planner §3 |
+| `constraint_resolution_trace` | ConstraintReasoner 출력 존재 | Compiler §4 |
+| `retrieval_fusion_trace` | RrfFusionTrace 존재 (explain OR debug) | Retrieval §6 |
+| `ranking_delta_trace` | scoreDriftRecord 존재 (LTR 적용 + explain) | Ranking §7 |
+| `rerank_decision_trace` | rerankDecision 존재 | Ranking §7 |
+| `abstain_policy_trace` | abstainDecision 존재 (항상) | Abstain §10 |
+| `hard_filter_drop_log` | drop log 존재, top 5 by score desc | Retrieval §6 |
+| `resolver_provenance_trace` | blocker seed 정보 존재 (TA3-1) | Entity §2 |
+| `corrective_retry_calibrated_confidence` | TA5 보정 값 존재 [0.5, 0.9] | Entity §2 |
+| `fallback_trace` | 에이전트 합성 시 (§9) | Agent §9 |
+
+**상수:** `AUDIT_RERANK_SNAPSHOT_COUNT = 5`, `AUDIT_DROP_LOG_MAX = 5`
 
 ---
 
@@ -1101,6 +1331,19 @@ HTTP 200 SearchResponseV1
 | `REGION_DIVERSITY_LIMIT_DIVISOR` | 5 | 위와 동일 | 지역 다양성: 생산자당 = ceil(limit ÷ 5) |
 | `BROWSE_SPARSE_FETCH_CEILING` | 240 | 위와 동일 | Sparse over-fetch 하드 상한 |
 | `BROWSE_SPARSE_OVERFETCH_FACTOR` | 8 | 위와 동일 (`export` 블록) | Over-fetch 배수 (limit × 8, 상한 240) |
+| `EVIDENCE_QUALITY_TIER_UNKNOWN` | 3 | `src/domain/ranking/service/ranker.ts` | 증거 품질 tier 기본값 (0=exact, 1=anchor, 2=ordinary, 3=weak) |
+| `LEXICAL_EXACTNESS_TIER_EXACT` | 0 | 위와 동일 | 표면형 정확도 tier (0=exact, 1=transliterated, 2=vintage, 3=unknown) |
+| `ANCHOR_PROTECTION_SIMILARITY_THRESHOLD` | 0.85 | `src/domain/ranking/service/rerank-safety.ts` | 보호 후보 anchorSimilarity 임계값 |
+| `PROTECTED_CANDIDATE_EVICTION_SLACK` | 2 | 위와 동일 | 보호 후보 최대 순위 하락 허용 |
+| `MAX_RELAXATION_STEPS` | 4 | `src/application/search/search-usecase-hybrid-ranking-pipeline.ts` | constraint relaxation 최대 재시도 |
+| `TA5_CALIBRATION_BASE` | 0.5 | `src/application/search/search-usecase-corrective-retry.ts` | TA5 보정 하한 |
+| `TA5_CALIBRATION_RANGE` | 0.4 | 위와 동일 | TA5 보정 범위 (base+range=0.9 최대) |
+| `AUDIT_RERANK_SNAPSHOT_COUNT` | 5 | `src/application/search/search-usecase-post-route-phase.ts` | rerank 전후 스냅샷 top-K |
+| `AUDIT_DROP_LOG_MAX` | 5 | 위와 동일 | drop log 샘플링 상한 |
+| `FILTER_STRING_MAX_LEN` | 100 | `src/application/agent/agent-tools.ts` | 에이전트 필터 문자열 최대 길이 |
+| `EXCLUDE_FILTER_MAX_COUNT` | 10 | 위와 동일 | 에이전트 제외 필터 최대 개수 |
+| `AGENT_OBSERVATION_SOURCE_RECORD_REFS_MAX` | 3 | 위와 동일 | grounding JSON source ref 상한 |
+| `MAX_ENRICHED_QUERY_LEN` | 500 | 위와 동일 | 에이전트 enriched query 길이 (= MAX_QUERY_LENGTH) |
 
 ---
 
@@ -1123,25 +1366,26 @@ HTTP 200 SearchResponseV1
 | R11 (10차 검증) | 2026-04-11 | a24b348 | `agent-orchestrator.ts` 전체, `search-usecase-post-route-phase.ts` 전체 | **E28**: §9 루프 구조 전면 재작성 — (1) 빈 쿼리 즉시 반환 누락 (2) 보안 pre-check(querySanitizer) 누락 (3) 토큰 예산 pre-flight 체크(LLM 호출 전)와 post-hoc 체크 모두 있음, 문서에는 post-hoc만 (4) isLastStep: remainingSteps=1 OR (=2 && hasToolHistory) 두 조건 (5) MAX_TOOLS_PER_BATCH=4, MAX_UNKNOWN_TOOL_ATTEMPTS=2 값 추가 (6) zero-results 후 constraint-relaxation hint 주입 누락 / **E29**: §9 합성 레이어 완전히 잘못됨 — "Layer 1-4" 설명이 코드와 불일치; 실제는 관찰 기반 LLM 합성(2회 시도, 512/256토큰) → Layer 2(fallback search, 도구 관찰 없을 때만) → Layer 3(observation slice 300자) → policyBlocked 템플릿 → Layer 4(빈 폴백) / **E30**: §9 `fallback` 종료 이유 설명 오기 / **E31**: §2 Post-Route abstain counterfactuals 조건 비대칭 누락 — abstain은 `=== true` strict, non-abstain은 `!== false`(기본 포함) / **E32**: §2 Post-Route `logSearchEvent` 호출 구조 — non-abstain은 `runRankedRouteDecisionPhase()` 내부 + 공유 블록 총 2회, abstain은 공유 블록 1회 |
 | R12 (11차 검증) | 2026-04-11 | f8a2932 | §2·§7·§9·§10·§14, 동기화 이력 정리 | **E33**: R11 **E31** 보완 — non-abstain counterfactual에 `EXPLANATION_OBLIGATION_MAP.requiresCounterfactual` OR 조건 반영 / **E34**: §7 `Ranker.rank()` 서술 순서를 코드와 일치(가중치 선계산 → 후보루프 → Step 6b LTR) / **E35**: §9 Abort — LLM 직전 `abortSignal.aborted` short-circuit은 `error` 가능, `AbortError`는 `aborted` / **E36**: §10 non-abstain counterfactual 한 줄을 §2와 동일하게 수정 / **E37**: 상수표 `MAX_TOOLS_PER_BATCH` 라인·`maxOutputTokens` 설명 정리 |
 | R13 (12차 검증) | 2026-04-11 | f8a2932 | §1 라우트 URL·V2 operationId, §2 hybrid 설명, §3 라인 주석, §9 agent URL, §14 상수 위치 | **E38**: `POST /search` 등 구 URL → `/v1/search`…; V2 `v2.search.*` → `search.v2.*`; V2 하이브리드·interpret 행 추가 / **E39**: `inferTargetEntityType` 라인 범위 648–700 → 662–712 / **E40**: `UNCERTAINTY_PARSER_CONFIDENCE_FLOOR` 잘못된 `planner.ts:522` 참조 제거 / **E41**: 상수표 경로를 `src/...` 기준으로 정리, Conformal·RRF·IPS 파일 위치 정정 |
+| R14 (코드 동기화) | 2026-04-13 | 018f4ac | f8a2932→018f4ac (24커밋, 283파일, +15.8K/-2.8K줄) 전체 갭 분석 및 반영 | **E42**: §2 Pre-Route benchmark 보안 바이패스 추가 (`executionPrincipal==='benchmark_trusted'`) / **E43**: §2 Route Dispatch에 Entity Route TA3 Corrective Retry (2-pass + TA5 calibration) 전체 추가 / **E44**: §2 Route Dispatch에 Blocker 통합(TA2-4) 추가 / **E45**: §2 Post-Route에 TypedAbstainDecision (AbstainReason·RecoveryAction·ClarifyKind) 반영 / **E46**: §2 Post-Route에 AuditExtension 빌드(deriveAuditExtension) 단계 추가 (10개 게이팅 필드) / **E47**: §4에 ConstraintReasoner(E2-T2) 섹션 추가 (6가지 관계 타입) / **E48**: §6 하드 제약 필터에 drop log + protected recall 정책 추가, Vespa regex escape + fusion trace 전파 경로 추가 / **E49**: §7 Ranking에 Rerank Safety(E5-T2, 3규칙) + Score Decomposition + Evidence/Lexical Tier 다단계 정렬(5-stage) + mode weight overlay 추가 / **E50**: §9에 Typed Tool Outcome(E7) + 선언적 배치 정책(TOOL_BATCH_POLICY) + 도구 입력 변경(style/cert→soft hint, price floor, query length 통일) 추가 / **E51**: §10에 AuditExtension 필드 표 + 상수 추가 / **E52**: §14 상수표에 13개 신규 상수 추가 (rerank safety, relaxation, TA5, audit, agent tools) / **E53**: retriever-pipeline.md §5에 fusion trace/drop log 전파 + TA4 fuzzy hypothesis + CB error 구분 추가, §6에 constraint relaxation ladder 상세 추가 |
 
 ### 검증 현황
 
 - [x] §1 HTTP 라우팅 & 스키마 — 계약 URL·operationId·`SearchRequestSchema` (R7, R13)
-- [x] §2 Pre-Route 실행 순서 — `runSearchPreRoutePhase()` 전체 파일 직접 확인 (R3, R10)
-- [x] §2 Post-Route 실행 순서 — `runSearchPostRoutePhase()` + `runRankedRouteDecisionPhase()` 전체 직접 확인 (R3, R8, R11, R12)
-- [x] §2 Route Dispatch — `entity`/`hybrid`/`mixed` 3개 경로, `dispatchSearchRouteExecution()` (R6)
+- [x] §2 Pre-Route 실행 순서 — benchmark 바이패스 포함 (R3, R10, R14)
+- [x] §2 Route Dispatch — entity(TA3 retry)/hybrid/mixed 3개 경로 + Blocker(TA2-4) (R6, R14)
+- [x] §2 Post-Route 실행 순서 — TypedAbstainDecision + AuditExtension 빌드 포함 (R3, R8, R11, R12, R14)
 - [x] §3 Intent Detection 12개 분기 — `planner-intent-detection.ts` 전체 파일 직접 확인 (R2, R10)
 - [x] §3 Stage 번호 + `QueryPlanV2` 출력 구조 (R9)
-- [x] §4 Constraint Compiler — Tier 6 항상 실행, `ConstraintExtractionTrace` 전체 필드 (R7)
-- [x] §6 Retrieval 채널 & RRF k값 (R2–R3)
-- [x] §7 Ranking — `Ranker.rank()` 가중치→루프→LTR Step 6b·`RankingOutput` (R4, R7, R9, R12)
+- [x] §4 Constraint Compiler — Tier 6 + ConstraintReasoner(E2-T2) (R7, R14)
+- [x] §6 Retrieval — 채널 & RRF k값 + drop log + protected recall + fusion trace 전파 (R2–R3, R14)
+- [x] §7 Ranking — Rerank Safety(E5-T2) + Evidence/Lexical Tier + Score Decomposition + mode weight overlay (R4, R7, R9, R12, R14)
 - [x] §8 Diversity — Producer/Region 점수식, product line key, over-fetch 상수 전체 (R6)
-- [x] §9 Agentic Loop — `POST /v1/agent`, `agent-orchestrator.ts` (합성·Abort 분기 포함) (R5, R6, R11, R12, R13)
-- [x] §10 Post-Route — abstain/비-abstain 분기 + 공유 log/cache (R3, R9, R12)
+- [x] §9 Agentic Loop — Typed Tool Outcome(E7) + 선언적 배치 정책 + 도구 입력 변경 (R5, R6, R11, R12, R13, R14)
+- [x] §10 Post-Route — AuditExtension 필드표 + abstain/비-abstain 분기 (R3, R9, R12, R14)
 - [x] §11 Response Schema 필드명 전체 (R5)
 - [x] §12 데이터 흐름 다이어그램 [7] (R9)
-- [x] §14 상수표 전체 — 에이전트·Diversity 상수·소스 경로 (R5–R6, R12, R13)
+- [x] §14 상수표 전체 — 에이전트·Diversity·Rerank Safety·Relaxation·TA5·Audit 상수 (R5–R6, R12, R13, R14)
 
 ---
 
-*최종 업데이트: 2026-04-11 | 코드 기준: `main` @ f8a2932 | 동기화 라운드: R13 | 이력 태그: E41까지*
+*최종 업데이트: 2026-04-13 | 코드 기준: `main` @ 018f4ac | 동기화 라운드: R14 | 이력 태그: E53까지*

@@ -38,9 +38,9 @@ const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
 /** Vespa Cloud dev zone has limited concurrent capacity; keep batches small
- *  to avoid connection-pool exhaustion (was 50, reduced after repeated
- *  network errors on batches 57-68). */
-const BATCH_SIZE = 10;
+ *  to avoid connection-pool exhaustion. Sequential feed (size=1) is safest
+ *  for mTLS cloud endpoints; bump to 5-10 for self-hosted Vespa. */
+const BATCH_SIZE = 5;
 
 function openAiBaseUrl(): string {
   return (process.env['OPENAI_BASE_URL'] ?? 'https://api.openai.com/v1').replace(/\/$/, '');
@@ -689,46 +689,20 @@ export async function run(): Promise<void> {
     : undefined;
   const vespa = new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE, undefined, vespaMtls);
 
-  const hasApiKey = openAiApiKey() !== undefined;
-  if (hasApiKey) {
-    console.log('  Will use OpenAI embeddings; on failure → deterministic');
-  } else {
-    console.log('  Using deterministic fallback embeddings (OPENAI_API_KEY unset)');
+  if (openAiApiKey() === undefined) {
+    throw new Error('OPENAI_API_KEY is required for embedding generation — deterministic fallback is disabled (fail-closed)');
   }
+  console.log('  Using OpenAI embeddings (fail-closed — no deterministic fallback)');
 
   const chunks = chunkArray(records, BATCH_SIZE);
   let indexed = 0;
   let failures = 0;
-  let httpEmbedFailures = 0;
-  const MAX_HTTP_FAILURES = 3; // switch to deterministic after N consecutive failures
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const chunk = chunks[ci]!;
 
-    // Generate embeddings — retry per-batch rather than giving up globally
-    let embeddings: readonly (readonly number[])[];
-    if (hasApiKey && httpEmbedFailures < MAX_HTTP_FAILURES) {
-      try {
-        const texts = chunk.map(buildEmbedText);
-        embeddings = await embedBatchHttp(texts);
-        httpEmbedFailures = 0; // reset on success
-      } catch (e) {
-        httpEmbedFailures++;
-        const msg = e instanceof Error ? e.message : String(e);
-        if (httpEmbedFailures >= MAX_HTTP_FAILURES) {
-          console.warn(`  Embedding HTTP failed ${httpEmbedFailures}x (${msg}) — switching to deterministic for remaining batches`);
-        } else {
-          console.warn(`  Embedding HTTP failed (${msg}) — using deterministic for this batch (failure ${httpEmbedFailures}/${MAX_HTTP_FAILURES})`);
-        }
-        embeddings = chunk.map((r) =>
-          deterministicEmbedding(r.body, r.sweetness, r.acidity, r.tannin),
-        );
-      }
-    } else {
-      embeddings = chunk.map((r) =>
-        deterministicEmbedding(r.body, r.sweetness, r.acidity, r.tannin),
-      );
-    }
+    const texts = chunk.map(buildEmbedText);
+    const embeddings = await embedBatchHttp(texts);
 
     // Convert to Vespa documents and feed; validate each record before converting
     const docs: { id: string; fields: Record<string, unknown> }[] = [];
@@ -743,7 +717,10 @@ export async function run(): Promise<void> {
         );
         continue;
       }
-      const embedding = embeddings[i] ?? deterministicEmbedding(rec.body, rec.sweetness, rec.acidity, rec.tannin);
+      const embedding = embeddings[i];
+      if (embedding === undefined) {
+        throw new Error(`Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`);
+      }
       const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, goldLookup);
       docs.push({
         id: String(retrievalDoc.entityId),

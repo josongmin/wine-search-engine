@@ -405,7 +405,8 @@ async function run(): Promise<void> {
       await runIndexer(built.manifest.artifacts.documentsNdjson, built.manifest.snapshotId, args.fixtureRepoRoot);
     }
     if (
-      previousRuntimeState !== undefined
+      !args.skipIndex
+      && previousRuntimeState !== undefined
       && previousRuntimeState.snapshotId !== built.manifest.snapshotId
     ) {
       console.log(`🧹 Deleting stale Vespa docs from previous snapshot ${previousRuntimeState.snapshotId}`);
@@ -421,11 +422,15 @@ async function run(): Promise<void> {
       runtimeNlMappingsPath: stagedRuntimeNlMappingsPath,
       allowMissingLtr: args.allowMissingLtr,
     });
-    console.log('✅ Verifying search snapshot readiness');
-    await verifySearchSnapshotReadiness({
-      runtimeStatePath: stagedRuntimeStatePath,
-      manifestPath: built.manifestPath,
-    });
+    if (args.skipIndex) {
+      console.log('✅ Skipping readiness verify (--skip-index, Vespa checks require mTLS)');
+    } else {
+      console.log('✅ Verifying search snapshot readiness');
+      await verifySearchSnapshotReadiness({
+        runtimeStatePath: stagedRuntimeStatePath,
+        manifestPath: built.manifestPath,
+      });
+    }
     const fixtureRoot = args.fixtureRepoRoot ?? resolveDefaultFixtureRepoRoot();
     if (fixtureRoot != null) {
       console.log('🎯 Verifying runtime gold catalog coverage');
