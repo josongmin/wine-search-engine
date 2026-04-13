@@ -58,7 +58,7 @@
 ### 인덱싱 (index-time, 한 번 실행)
 
 ```
-EnrichedSilverRecord  (silver-enriched-ko.ndjson)
+EnrichedSilverRecord  (silver-ko.ndjson)
     │
     ▼
 generate-doc-queries.ts (CLI)
@@ -146,7 +146,7 @@ SearchUseCase.execute()
 
 | Env | 기본값 | 효과 |
 |---|---|---|
-| `OPENAI_API_KEY` | (unset) | unset이면 Doc2Query 어댑터가 `StubDoc2QueryGenerator`로 fallback (dev/test boot 보장). production은 set 필수. |
+| `OPENAI_API_KEY` | (unset) | unset이면 `scripts/etl/generate-doc-queries.ts`가 즉시 fail-closed로 종료한다. Stub fallback은 없다. |
 | `OPENAI_CHAT_MODEL` | `gpt-5.4-mini` | 런타임 chat 어댑터 default. **Doc2Query에는 영향 없음.** |
 | `OPENAI_DOC2QUERY_MODEL` | `gpt-5.3-mini` | Doc2Query 어댑터가 per-call override로 사용. 모델 변경 시 fingerprint mismatch → 다음 ETL 실행 시 자동 재생성. |
 | `COHERE_API_KEY` | (unset) | set이면 `CohereReranker` primary. unset이면 self-host fallback. |
@@ -249,7 +249,7 @@ just vespa-deploy   # 또는 scripts/deploy-vespa.sh
 
 # 2. Doc2Query 백필 — 멱등이라 안전, 중간에 끊겨도 OK
 npx tsx --env-file=.env.local scripts/etl/generate-doc-queries.ts \
-  --input data/silver-enriched-ko.ndjson \
+  --input data/silver-ko.ndjson \
   --output data/silver-docquery.ndjson
 
 # 3. (필요 시) Track C 다시
@@ -257,7 +257,7 @@ npx tsx --env-file=.env.local scripts/etl/run-track-c.ts
 
 # 4. Vespa 재색인 — 새 ndjson 으로
 npx tsx --env-file=.env.local scripts/etl/index-to-vespa.ts \
-  --input data/silver-docquery.ndjson
+  --input data/silver-trackc.ndjson
 
 # 5. 서버 재기동 — Cohere primary 자동 적용 (COHERE_API_KEY 이미 set일 때)
 ```

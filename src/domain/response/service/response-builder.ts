@@ -26,13 +26,23 @@
 import type { DecisionOutput } from '../../decision/model/decision-output.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../query/model/compiled-wine-query.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
+import type { AdmissionClosureSummary } from '../../decision/model/decision-input.js';
+import type {
+  ExecutionProvenanceClosure,
+  ExecutionRetrievalMode,
+} from '../../query/model/engine-execution-contract.js';
 import type { AbstainReason } from '../../query/model/abstain-decision.js';
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { EngineDecision } from '../model/engine-decision.js';
 import type { ResultItem } from '../model/result-item.js';
 import type { ClarificationPayload } from '../model/clarification.js';
 import type { AuditExtension } from '../../audit/model/audit-extension.js';
-import type { CounterfactualReject, ResponseMeta } from '../model/counterfactual.js';
+import type {
+  CounterfactualReject,
+  ExecutionContractMeta,
+  ResponseMeta,
+} from '../model/counterfactual.js';
 import type { SearchResponseV1, ParsedConstraintsExtern } from '../model/search-response.js';
 import type { GroupedResult } from './result-grouper.js';
 import { ResultGrouper } from './result-grouper.js';
@@ -84,7 +94,7 @@ export interface ResponseBuildParams {
   readonly queryTimeMs: number;
 
   /** Execution route label. */
-  readonly route: string;
+  readonly route: QueryRoute;
 
   /**
    * E4-U6: Route/provenance vocabulary — aligned with compiled execution contract.
@@ -96,7 +106,7 @@ export interface ResponseBuildParams {
   readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
 
   /** The retrieval mode the planner originally suggested, before any API override. */
-  readonly plannerSuggestedMode?: string | undefined;
+  readonly plannerSuggestedMode?: ExecutionRetrievalMode | undefined;
 
   /** Response format version (defaults to "1.0.0"). */
   readonly version?: string | undefined;
@@ -110,6 +120,21 @@ export interface ResponseBuildParams {
 
   /** Optional specialized retrieval provenance surfaced by route execution. */
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+
+  /** Stable execution-contract projection for response meta. */
+  readonly executionContract?: {
+    readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+    readonly retrievalKind:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity';
+    readonly sparseExecuted: boolean;
+    readonly specializedRouteExecuted?: SpecializedRouteObservability['specializedRouteExecuted'] | undefined;
+    readonly usedCompiledExecution: boolean;
+    readonly provenanceClosure?: ExecutionProvenanceClosure | undefined;
+    readonly admissionClosure?: AdmissionClosureSummary | undefined;
+  } | undefined;
 
   /**
    * Optional audit payload to include in the response meta.
@@ -211,11 +236,21 @@ export class ResponseBuilder {
         ? { retrievalProvenanceSlices: params.retrievalProvenanceSlices }
         : {}),
       ...toSpecializedRouteMeta(params.specializedRouteObservability),
+      ...(params.executionContract !== undefined
+        ? {
+            executionContract: this.buildExecutionContractMeta(
+              params.executionContract,
+              params.retrievalModeSource ?? params.compiled?.execution.routeSource ?? 'planner',
+              params.plannerSuggestedMode,
+              params.compiled,
+            ),
+          }
+        : {}),
       ...(params.auditExtension !== undefined ? { auditExtension: params.auditExtension } : {}),
     };
 
     // Extract LLM envelope fields (Epic 9)
-    const retrievalMode = params.compiled?.execution.effectiveRetrievalMode ?? params.queryPlan?.retrievalMode;
+    const retrievalMode = params.compiled?.execution.effectiveRetrievalMode;
     const resultType = this.computeResultType(
       enrichedResults,
       params.decisionOutput.decisionStatus,
@@ -250,14 +285,14 @@ export class ResponseBuilder {
    */
   private mapDecision(
     output: DecisionOutput,
-    route: string,
+    route: QueryRoute,
     contract: {
       readonly executionMode: 'authoritative' | 'degraded' | 'heuristic' | 'advisory';
       readonly blockingEligible: boolean;
       readonly degradationReasons: readonly string[];
     },
     retrievalModeSource?: 'planner' | 'api_override',
-    plannerSuggestedMode?: string,
+    plannerSuggestedMode?: ExecutionRetrievalMode,
     requestId?: string,
   ): EngineDecision {
     return {
@@ -317,6 +352,33 @@ export class ResponseBuilder {
       executionMode,
       blockingEligible,
       degradationReasons: [...inferredReasons],
+    };
+  }
+
+  private buildExecutionContractMeta(
+    executionContract: NonNullable<ResponseBuildParams['executionContract']>,
+    retrievalModeSource: NonNullable<ResponseBuildParams['retrievalModeSource']>,
+    plannerSuggestedMode: ExecutionRetrievalMode | undefined,
+    compiled: CompiledWineQuery | undefined,
+  ): ExecutionContractMeta {
+    return {
+      effectiveRetrievalMode: executionContract.effectiveRetrievalMode,
+      retrievalModeSource,
+      plannerSuggestedMode: plannerSuggestedMode ?? executionContract.effectiveRetrievalMode,
+      retrievalKind: executionContract.retrievalKind,
+      sparseExecuted: executionContract.sparseExecuted,
+      ...(executionContract.specializedRouteExecuted !== undefined
+        ? { specializedRouteExecuted: executionContract.specializedRouteExecuted }
+        : {}),
+      usedCompiledExecution: executionContract.usedCompiledExecution,
+      ...(compiled !== undefined ? { budget: compiled.execution.budget } : {}),
+      ...(compiled !== undefined ? { provenancePolicy: compiled.execution.provenancePolicy } : {}),
+      ...(executionContract.provenanceClosure !== undefined
+        ? { provenanceClosure: executionContract.provenanceClosure }
+        : {}),
+      ...(executionContract.admissionClosure !== undefined
+        ? { admissionClosure: executionContract.admissionClosure }
+        : {}),
     };
   }
 

@@ -1,10 +1,8 @@
 /**
  * ADR-007: search snapshot `entityId` is canonical public identity — never `sourceId`.
  *
- * Gold overlay: `wine-engine-fixture/goldens/canonical-entities.json` provides
- * stable slugs keyed by normalized canonical label + vintage (exact join).
- * Rows without a gold hit use a deterministic `wine-ce-{identitySignature}` id
- * derived from the same RFC-001 wine identity signature (not Vivino/source ids).
+ * Public ids are always derived from the identity signature. Gold fixtures are
+ * benchmark linkages only and must not replace the runtime public id.
  */
 
 import { existsSync } from 'node:fs';
@@ -61,6 +59,7 @@ export interface WineSnapshotEntityResolution {
   readonly producerId: string;
   readonly regionId: string;
   readonly resolution: GoldCanonicalResolution;
+  readonly benchmarkEntityId?: CanonicalEntityId;
 }
 
 /**
@@ -157,6 +156,7 @@ export function resolveWineSnapshotEntity(
     producerId,
     regionId,
   });
+  const publicEntityId = createCanonicalEntityId(`${SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX}${identitySignature}`);
 
   const key = silverGoldMatchKey(record);
   const goldHit = goldLookup.get(key);
@@ -165,21 +165,21 @@ export function resolveWineSnapshotEntity(
       throw new Error(`Gold lookup returned forbidden source-style id for ${key}: ${goldHit}`);
     }
     return {
-      entityId: createCanonicalEntityId(goldHit),
+      entityId: publicEntityId,
       identitySignature,
       producerId,
       regionId,
       resolution: 'gold_overlay',
+      benchmarkEntityId: createCanonicalEntityId(goldHit),
     };
   }
 
-  const fallbackId = `${SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX}${identitySignature}`;
-  if (isSourceRecordStylePublicEntityId(fallbackId)) {
+  if (isSourceRecordStylePublicEntityId(publicEntityId)) {
     throw new Error('Invariant: fallback canonical entity id must not use vivino- prefix');
   }
 
   return {
-    entityId: createCanonicalEntityId(fallbackId),
+    entityId: publicEntityId,
     identitySignature,
     producerId,
     regionId,

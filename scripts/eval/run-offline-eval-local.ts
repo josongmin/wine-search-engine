@@ -44,7 +44,7 @@ async function run(): Promise<void> {
       [
         'Refusing to run local full offline eval against the in-memory test server.',
         'The local harness only contains a tiny fixture corpus, so the default fixture-native gate corpus produces misleading metrics here.',
-        'Use `npm run eval:offline:smoke:local` for fixture-compatible local verification,',
+        'Use `pnpm run eval:offline:smoke:local` for fixture-compatible local verification,',
         'or rerun with `--allow-full-dataset` if you explicitly want mismatch diagnostics against the external gate corpus.',
       ].join(' '),
     );

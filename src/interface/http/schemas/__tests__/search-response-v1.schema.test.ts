@@ -45,6 +45,75 @@ describe('SearchResponseSchema', () => {
     expect(parsed.success).toBe(true);
   });
 
+  it('accepts stable execution_contract metadata on the V1 search contract', () => {
+    const parsed = SearchResponseSchema.safeParse({
+      ...makeValidV1SearchResponse(),
+      meta: {
+        ...makeValidV1SearchResponse().meta,
+        execution_contract: {
+          effective_retrieval_mode: 'attribute_search',
+          retrieval_mode_source: 'planner',
+          planner_suggested_mode: 'attribute_search',
+          retrieval_kind: 'generic_hybrid',
+          sparse_executed: true,
+          specialized_route_executed: null,
+          used_compiled_execution: true,
+          budget: {
+            max_candidates: 120,
+            enable_precision_rerank: true,
+          },
+          provenance_policy: {
+            require_identity_seal: true,
+            require_constraint_evidence: false,
+            require_anchor_evidence: false,
+          },
+          provenance_closure: {
+            policy: {
+              require_identity_seal: true,
+              require_constraint_evidence: false,
+              require_anchor_evidence: false,
+            },
+            pre_rank: {
+              candidate_count: 20,
+              identity_evidence_satisfied: false,
+              constraint_evidence_satisfied: true,
+              anchor_evidence_satisfied: true,
+              matched_constraint_attributes: ['grape_primary'],
+              unmet_constraint_attributes: [],
+              anchor_signal_types: [],
+            },
+            post_rank: {
+              candidate_count: 5,
+              identity_evidence_satisfied: false,
+              constraint_evidence_satisfied: true,
+              anchor_evidence_satisfied: true,
+              matched_constraint_attributes: ['grape_primary'],
+              unmet_constraint_attributes: [],
+              anchor_signal_types: [],
+            },
+            missing: ['identity_evidence'],
+            satisfied: false,
+          },
+          admission_closure: {
+            required: {
+              identity_seal: true,
+              constraint_evidence: false,
+              anchor_evidence: false,
+            },
+            satisfied: {
+              identity_seal: true,
+              constraint_evidence: true,
+              anchor_evidence: true,
+            },
+            all_satisfied: true,
+          },
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
   it('rejects V2 human top-level fields on the V1 search contract', () => {
     const parsed = SearchResponseSchema.safeParse({
       ...makeValidV1SearchResponse(),

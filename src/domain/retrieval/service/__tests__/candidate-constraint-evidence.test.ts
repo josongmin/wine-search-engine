@@ -191,25 +191,20 @@ describe('unmetHardConstraints annotation', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('unknown attribute — silent-drop guard (Fix 4)', () => {
-  it('unknown attribute resolves to undefined → marked as unmet hard constraint', () => {
+  it('unknown hard attribute throws instead of silently evicting every candidate', () => {
     const candidate = makeCandidate();
     const bundle = makeBundle([makeConstraint('nonexistent_future_attr', '=', 'foo')]);
-    const result = annotateCandidateConstraintEvidence(candidate, bundle);
-    expect(result.unmetHardConstraints).toContain('nonexistent_future_attr');
+    expect(() => annotateCandidateConstraintEvidence(candidate, bundle)).toThrow(
+      /Unknown constraint attribute/,
+    );
   });
 
-  it('unknown attribute in soft bundle is treated as not-evaluable (no crash, added to matched)', () => {
-    // Bug 2 fix: soft constraints with no backing field (resolveCandidateValue → undefined)
-    // are added to matchedConstraints instead of being left unmatched. This prevents the
-    // ranker from accumulating totalWeight without a matching weightedSum contribution,
-    // which previously penalised every result uniformly (the bug).
+  it('unknown soft attribute also throws so contract drift is surfaced immediately', () => {
     const candidate = makeCandidate();
     const bundle = makeBundle([], [makeConstraint('nonexistent_soft_attr', '=', 'bar')]);
-    const result = annotateCandidateConstraintEvidence(candidate, bundle);
-    // no throw, soft constraints never affect unmetHardConstraints
-    expect(result.unmetHardConstraints).toBeUndefined();
-    // Added to matched (not-evaluable exemption prevents ranker penalty)
-    expect(result.matchedConstraints).toContain('nonexistent_soft_attr');
+    expect(() => annotateCandidateConstraintEvidence(candidate, bundle)).toThrow(
+      /Unknown constraint attribute/,
+    );
   });
 });
 

@@ -11,11 +11,12 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { parseNdjson } from './ndjson.js';
 import { normalizePairingsBatch } from './generate-pairings.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFileSync, appendDeadLetter } from './etl-utils.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 interface SilverRecord {
   readonly sourceId?: string;
@@ -32,7 +33,7 @@ interface EnrichedRecord extends SilverRecord {
   readonly _pairingsNormalized: boolean;
 }
 
-const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
+export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const DEAD_LETTER_FILE = resolveDataPath('.dead-letter-step3.ndjson');
 const BATCH_SIZE = 100;
 const FLUSH_INTERVAL = 5;
@@ -63,7 +64,7 @@ async function main() {
   let processed = 0;
   let failed = 0;
   let skippedIdempotent = 0;
-  const enrichedRecords: EnrichedRecord[] = [];
+  const enrichedRecords: SilverRecord[] = [];
 
   let highConfidence = 0;
   let mediumConfidence = 0;
@@ -115,11 +116,7 @@ async function main() {
         else lowConfidence++;
         processed++;
       } else {
-        enrichedRecords.push({
-          ...record,
-          pairingTags: record.pairingTags ?? [],
-          _pairingsNormalized: false,
-        });
+        enrichedRecords.push(record);
         failed++;
         const id = record.sourceId ?? record.canonicalLabel;
         await appendDeadLetter(DEAD_LETTER_FILE, {
@@ -142,6 +139,10 @@ async function main() {
     );
   }
 
+  if (failed > 0) {
+    console.error(`  Refusing final write: ${failed} record(s) failed step 3`);
+    process.exit(1);
+  }
   const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
   atomicWriteFileSync(DATA_FILE, output);
 

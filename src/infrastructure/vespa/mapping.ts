@@ -72,39 +72,28 @@ function isNumberArray(v: unknown): v is number[] {
   return Array.isArray(v) && v.every((x) => typeof x === 'number' && isFinite(x));
 }
 
-function getString(
-  fields: Record<string, unknown>,
-  key: string,
-  fallback = '',
-): string {
+function getRequiredString(fields: Record<string, unknown>, key: string): string {
   const v = fields[key];
-  return isString(v) ? v : fallback;
+  if (isString(v) && v.length > 0) return v;
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
 }
 
-function getNumber(
-  fields: Record<string, unknown>,
-  key: string,
-  fallback = 0,
-): number {
+function getRequiredNumber(fields: Record<string, unknown>, key: string): number {
   const v = fields[key];
-  return isNumber(v) ? v : fallback;
+  if (isNumber(v)) return v;
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
 }
 
-function getBoolean(
-  fields: Record<string, unknown>,
-  key: string,
-  fallback = false,
-): boolean {
+function getRequiredBoolean(fields: Record<string, unknown>, key: string): boolean {
   const v = fields[key];
-  return isBoolean(v) ? v : fallback;
+  if (isBoolean(v)) return v;
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
 }
 
-function getStringArray(
-  fields: Record<string, unknown>,
-  key: string,
-): readonly string[] {
+function getRequiredStringArray(fields: Record<string, unknown>, key: string): readonly string[] {
   const v = fields[key];
-  return isStringArray(v) ? v : [];
+  if (isStringArray(v)) return v;
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
 }
 
 /**
@@ -167,6 +156,48 @@ function getOptionalString(
 ): string | undefined {
   const v = fields[key];
   return isString(v) ? v : undefined;
+}
+
+function getOptionalStringStrict(
+  fields: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  if (!(key in fields) || fields[key] === undefined) {
+    return undefined;
+  }
+  const value = fields[key];
+  if (isString(value)) {
+    return value;
+  }
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+}
+
+function getOptionalNumberStrict(
+  fields: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  if (!(key in fields) || fields[key] === undefined) {
+    return undefined;
+  }
+  const value = fields[key];
+  if (isNumber(value)) {
+    return value;
+  }
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
+}
+
+function getOptionalStringArrayStrict(
+  fields: Record<string, unknown>,
+  key: string,
+): readonly string[] | undefined {
+  if (!(key in fields) || fields[key] === undefined) {
+    return undefined;
+  }
+  const value = fields[key];
+  if (isStringArray(value)) {
+    return value;
+  }
+  throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
 }
 
 type RetrievalSummaryFieldKind = 'string' | 'number' | 'string_array';
@@ -232,13 +263,11 @@ function readRawVespaRetrievalSummaryField(
 ): RetrievalHitSummary[RetrievalHitSummaryKey] | undefined {
   switch (spec.kind) {
     case 'string':
-      return getOptionalString(fields, spec.vespaField);
+      return getOptionalStringStrict(fields, spec.vespaField);
     case 'number':
-      return getOptionalNumber(fields, spec.vespaField);
-    case 'string_array': {
-      const value = fields[spec.vespaField];
-      return isStringArray(value) ? value : undefined;
-    }
+      return getOptionalNumberStrict(fields, spec.vespaField);
+    case 'string_array':
+      return getOptionalStringArrayStrict(fields, spec.vespaField);
   }
 }
 
@@ -304,7 +333,6 @@ export function toVespaFields(
     aliases_identity_safe: [...doc.aliasesIdentitySafe],
     aliases_noisy_recall: [...doc.aliasesNoisyRecall],
     grapes: [...doc.grapes],
-    search_text_ko: doc.searchTextKo,
     semantic_summary: doc.semanticSummary,
     availability: doc.availability,
     popularity_score: doc.popularityScore,
@@ -407,38 +435,37 @@ export function fromVespaFields(
   // responses. Operators can find the full key list in structured logs.
   const rawEntityId = fields['entity_id'];
   if (typeof rawEntityId !== 'string' || rawEntityId.length === 0) {
-    throw new Error('fromVespaFields: malformed Vespa document — missing entity_id');
+    throw new Error('fromVespaFields: malformed Vespa document — required retrieval payload missing or invalid');
   }
 
   const lineageRefsFromFields = parseSourceRecordRefsFromVespa(fields['source_record_refs_json']);
 
   return {
     entityId: createCanonicalEntityId(rawEntityId),
-    entityType: getString(fields, 'entity_type'),
+    entityType: getRequiredString(fields, 'entity_type'),
     ...(getOptionalString(fields, 'search_snapshot_id') !== undefined
       ? { searchSnapshotId: getOptionalString(fields, 'search_snapshot_id') }
       : {}),
-    canonicalLabel: summary.canonicalLabel ?? '',
-    aliasesIdentitySafe: getStringArray(fields, 'aliases_identity_safe'),
-    aliasesNoisyRecall: getStringArray(fields, 'aliases_noisy_recall'),
-    producer: summary.producer ?? '',
-    region: summary.region ?? '',
-    grapes: getStringArray(fields, 'grapes'),
-    searchTextKo: getString(fields, 'search_text_ko'),
-    searchTextEn: summary.searchTextEn ?? '',
-    semanticSummary: getString(fields, 'semantic_summary'),
+    canonicalLabel: getRequiredString(fields, 'canonical_label'),
+    aliasesIdentitySafe: getRequiredStringArray(fields, 'aliases_identity_safe'),
+    aliasesNoisyRecall: getRequiredStringArray(fields, 'aliases_noisy_recall'),
+    producer: getRequiredString(fields, 'producer'),
+    region: getRequiredString(fields, 'region'),
+    grapes: getRequiredStringArray(fields, 'grapes'),
+    searchTextKo: getRequiredString(fields, 'search_text_ko'),
+    searchTextEn: getRequiredString(fields, 'search_text_en'),
+    semanticSummary: getRequiredString(fields, 'semantic_summary'),
     // E1-P3-7: body/sweetness use conditional spread to distinguish "no data" (field absent)
-    // from "value is 0" (field present with value 0). The prior `?? 0` default conflated
-    // both cases, silently turning missing-data into a false "zero body/sweetness" score
-    // that corrupted similarity ranking. exactOptionalPropertyTypes: omit key when undefined.
-    ...(summary.body != null ? { body: summary.body } : {}),
-    ...(summary.sweetness != null ? { sweetness: summary.sweetness } : {}),
-    style: summary.style ?? '',
-    priceBand: summary.priceBand ?? '',
-    pairing: summary.pairing !== undefined ? [...summary.pairing] : [],
-    occasion: summary.occasion !== undefined ? [...summary.occasion] : [],
-    availability: getBoolean(fields, 'availability'),
-    popularityScore: getNumber(fields, 'popularity_score'),
+    // from "value is 0" (field present with value 0). exactOptionalPropertyTypes:
+    // omit key when undefined.
+    ...(summary.body !== undefined ? { body: summary.body } : {}),
+    ...(summary.sweetness !== undefined ? { sweetness: summary.sweetness } : {}),
+    style: getRequiredString(fields, 'style'),
+    priceBand: getRequiredString(fields, 'price_band'),
+    pairing: getRequiredStringArray(fields, 'pairing'),
+    ...(summary.occasion !== undefined ? { occasion: [...summary.occasion] } : {}),
+    availability: getRequiredBoolean(fields, 'availability'),
+    popularityScore: getRequiredNumber(fields, 'popularity_score'),
     ...(embedding !== undefined && { embedding }),
     // New wine-domain optional fields — key is omitted (not set to undefined)
     // when the value is absent, satisfying exactOptionalPropertyTypes.

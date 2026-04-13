@@ -43,12 +43,20 @@ describe('NLMapper', () => {
     expect(mapping!.value).toBe('gift');
   });
 
-  it('"입문용" → price_band = "low" constraint', async () => {
+  it('"입문용" → price_band = "budget" constraint', async () => {
     const mapping = await mapper.mapPhrase('입문용');
     expect(mapping).not.toBeNull();
     expect(mapping!.mappedAttribute).toBe('price_band');
     expect(mapping!.operator).toBe('=');
-    expect(mapping!.value).toBe('low');
+    expect(mapping!.value).toBe('budget');
+  });
+
+  it('"가성비" → price_band = "value" constraint', async () => {
+    const mapping = await mapper.mapPhrase('가성비');
+    expect(mapping).not.toBeNull();
+    expect(mapping!.mappedAttribute).toBe('price_band');
+    expect(mapping!.operator).toBe('=');
+    expect(mapping!.value).toBe('value');
   });
 
   it('"적당히 달달한" → sweetness range [0.3, 0.6] constraint', async () => {

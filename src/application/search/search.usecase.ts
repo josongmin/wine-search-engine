@@ -82,6 +82,11 @@ export interface SnapshotVersions {
  */
 export interface SearchUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
+  /**
+   * Explicit test / special-seam escape hatch for planners that only implement
+   * plan(). Production wiring must leave this unset.
+   */
+  readonly allowCompiledFallback?: boolean | undefined;
   readonly entityResolver: EntityResolverPort;
   readonly entityLookup?: EntityDocumentLookupPort | undefined;
   /**
@@ -249,6 +254,7 @@ export class SearchUseCase {
         this.deps.cacheLookupRuntimeStateProvider?.()
         ?? this.deps.cacheLookupRuntimeState,
       decomposedSearch: this.deps.decomposedSearch,
+      allowCompiledFallback: this.deps.allowCompiledFallback,
     });
 
     throwIfAborted(options?.abortSignal, 'Search execution aborted');
@@ -308,6 +314,11 @@ export class SearchUseCase {
       routeDegradation,
       funnelMetrics,
       rankingMetadata,
+      effectiveRetrievalMode,
+      retrievalKind,
+      sparseExecuted,
+      specializedRouteExecuted,
+      usedCompiledExecution,
       specializedRouteObservability,
       retrievalFusionTrace,
       hardFilterDropLog,
@@ -315,15 +326,15 @@ export class SearchUseCase {
     } = await dispatchSearchRouteExecution(
       effectiveRoute,
       {
-        executeEntity: () => this.executeEntityRoute(plan),
+        executeEntity: () => this.executeEntityRoute(plan, compiled),
         executeHybrid: () => this.executeHybridRoute(plan, compiled),
         executeMixed: async () => {
           try {
             const mixedResult = await this.deps.mixedSolver.solve(plan, compiled);
-            return mixedQueryResultToSearchRouteExecution(plan, mixedResult);
+            return mixedQueryResultToSearchRouteExecution(plan, mixedResult, compiled);
           } catch (error) {
             if (error instanceof MixedRouteDegradationError) {
-              return buildFailedMixedRouteExecution(plan, error.reason);
+              return buildFailedMixedRouteExecution(plan, error.reason, compiled);
             }
             throw error;
           }
@@ -354,6 +365,11 @@ export class SearchUseCase {
       cacheService: this.deps.cacheService,
       routeDegradation,
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
+      effectiveRetrievalMode,
+      retrievalKind,
+      sparseExecuted,
+      specializedRouteExecuted,
+      usedCompiledExecution,
       specializedRouteObservability,
       ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
       ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
@@ -404,14 +420,17 @@ export class SearchUseCase {
    * The retry is NOT a broad search fallback — it is an exact-recovery retry.
    * Ambiguous misses and 'clarify'/'fail' recommendations skip the retry.
    */
-  // NOTE: compiled (CompiledWineQuery) is intentionally not passed to the entity route.
-  // Entity resolution uses QueryPlanV1 policy fields directly (requireExact, allowApproximate).
-  // compiled.execution.budget and provenancePolicy are NOT applied to entity queries.
-  // To extend compiled-first semantics to entity route, thread compiled through EntityResolver.
-  private async executeEntityRoute(plan: QueryPlanV1): Promise<EntityRouteResult> {
+  private async executeEntityRoute(
+    plan: QueryPlanV1,
+    compiled?: CompiledWineQuery,
+  ): Promise<EntityRouteResult> {
     // TA2-4: Run blocker to surface entity IDs not covered by alias anchors.
     // blockerOnlyIds = blocker output minus IDs already in anchor candidateEntityIds.
-    const blockerOnlyIds = await this.runBlockerForPlan(plan, false);
+    const blockerOnlyIds = this.capBlockerSeedIds(
+      plan,
+      await this.runBlockerForPlan(plan, false),
+      compiled,
+    );
 
     const candidateEntities = await buildResolverCandidatesFromGenerator(
       {
@@ -475,7 +494,22 @@ export class SearchUseCase {
         },
         'pipeline entity-only route',
       );
-      return { resolveResult: firstResult, rankedResults };
+      return {
+        resolveResult: firstResult,
+        rankedResults,
+        ...(compiled !== undefined
+          ? {
+              effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
+              usedCompiledExecution: true,
+            }
+          : {
+              effectiveRetrievalMode: 'entity_lookup',
+              usedCompiledExecution: false,
+            }),
+        retrievalKind: 'entity_lookup',
+        sparseExecuted: false,
+        specializedRouteExecuted: null,
+      };
     }
 
     // TA3-2: Corrective retry — broader blocker recall + candidate re-hydration.
@@ -501,8 +535,13 @@ export class SearchUseCase {
       plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
     );
     const pass1BlockerSet = new Set(blockerOnlyIds.map(String));
-    const additionalIds = broaderBlockerIds.filter(
-      (id) => !anchorCoveredIds.has(String(id)) && !pass1BlockerSet.has(String(id)),
+    const additionalIds = this.capCorrectiveRetryAdditionalIds(
+      plan,
+      broaderBlockerIds.filter(
+        (id) => !anchorCoveredIds.has(String(id)) && !pass1BlockerSet.has(String(id)),
+      ),
+      blockerOnlyIds,
+      compiled,
     );
 
     // Rebuild candidates only when broader recall surfaced new IDs.
@@ -585,6 +624,18 @@ export class SearchUseCase {
     return {
       resolveResult: resolved,
       rankedResults,
+      ...(compiled !== undefined
+        ? {
+            effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
+            usedCompiledExecution: true,
+          }
+        : {
+            effectiveRetrievalMode: 'entity_lookup',
+            usedCompiledExecution: false,
+          }),
+      retrievalKind: 'entity_lookup',
+      sparseExecuted: false,
+      specializedRouteExecuted: null,
       ...(retryCalibratedConfidence !== undefined ? { correctiveRetryCalibration: retryCalibratedConfidence } : {}),
     };
   }
@@ -616,6 +667,44 @@ export class SearchUseCase {
     return allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id)));
   }
 
+  private capBlockerSeedIds(
+    plan: QueryPlanV1,
+    blockerOnlyIds: readonly CanonicalEntityId[],
+    compiled?: CompiledWineQuery,
+  ): readonly CanonicalEntityId[] {
+    const maxCandidates = compiled?.execution.budget.maxCandidates;
+    if (maxCandidates === undefined) {
+      return blockerOnlyIds;
+    }
+
+    const anchorCoveredIds = new Set(
+      plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
+    );
+    const remainingSlots = Math.max(0, maxCandidates - anchorCoveredIds.size);
+    return blockerOnlyIds.slice(0, remainingSlots);
+  }
+
+  private capCorrectiveRetryAdditionalIds(
+    plan: QueryPlanV1,
+    additionalIds: readonly CanonicalEntityId[],
+    pass1BlockerIds: readonly CanonicalEntityId[],
+    compiled?: CompiledWineQuery,
+  ): readonly CanonicalEntityId[] {
+    const maxCandidates = compiled?.execution.budget.maxCandidates;
+    if (maxCandidates === undefined) {
+      return additionalIds;
+    }
+
+    const anchorCoveredIds = new Set(
+      plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
+    );
+    const remainingSlots = Math.max(
+      0,
+      maxCandidates - anchorCoveredIds.size - new Set(pass1BlockerIds.map(String)).size,
+    );
+    return additionalIds.slice(0, remainingSlots);
+  }
+
   /**
    * Hybrid route: delegates to the shared pipeline used by HybridUseCase.
    *
@@ -626,7 +715,7 @@ export class SearchUseCase {
    */
   private async executeHybridRoute(
     plan: QueryPlanV1,
-    compiled?: CompiledWineQuery,
+    compiled: CompiledWineQuery,
   ): Promise<SearchRouteExecutionResult> {
     const entityResolutionDeps = {
       entityResolver: this.deps.entityResolver,
@@ -641,7 +730,7 @@ export class SearchUseCase {
         compareRetriever: this.deps.compareRetriever,
         ranker: this.deps.ranker,
       },
-      (p) => resolveEntityRouteForPlan(p, entityResolutionDeps),
+      (p) => resolveEntityRouteForPlan(p, entityResolutionDeps, compiled),
       compiled,
     );
   }

@@ -1,9 +1,7 @@
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import {
+  type AdmissionClosureSummary,
   type DecisionInput,
-  hasAnchorEvidence,
-  hasConstraintEvidence,
-  hasIdentityEvidence,
 } from '../model/decision-input.js';
 import type { FailureReason } from '../model/failure-reason.js';
 import type { ConfidenceRefusalPolicy } from './confidence-refusal.js';
@@ -25,6 +23,66 @@ export type AdmissionResult =
       readonly reason: FailureReason;
       readonly traceRef: string;
     };
+
+function deriveAdmissionContext(
+  input: DecisionInput,
+): {
+  readonly requires_identity_seal: boolean;
+  readonly requires_constraint_evidence: boolean;
+  readonly requires_anchor_evidence: boolean;
+} {
+  return {
+    requires_identity_seal: input.provenanceContract.policy.requireIdentitySeal,
+    requires_constraint_evidence: input.provenanceContract.policy.requireConstraintEvidence,
+    requires_anchor_evidence: input.provenanceContract.policy.requireAnchorEvidence,
+  };
+}
+
+function hasAnchorSignalEvidence(input: DecisionInput): boolean {
+  if (input.evidenceItems === undefined) {
+    return true;
+  }
+
+  return input.evidenceItems.some((item) => item.type === 'anchor_similarity');
+}
+
+export function evaluateAdmissionClosure(
+  input: DecisionInput,
+  snapshot: DecisionSnapshot,
+): AdmissionClosureSummary {
+  const admissionContext = deriveAdmissionContext(input);
+  const topEntity = input.resolverResult.topEntity;
+  const identitySealSatisfied =
+    topEntity !== undefined &&
+    String(topEntity.entityId).trim().length > 0 &&
+    snapshot.threshold_profile_id === input.queryPlan.thresholdProfileId &&
+    snapshot.policy_rule_version === input.queryPlan.policyRuleVersion &&
+    snapshot.planner_version === input.queryPlan.plannerVersion &&
+    input.provenanceContract.observed.identityEvidenceSatisfied;
+  const constraintEvidenceSatisfied =
+    !admissionContext.requires_constraint_evidence ||
+    input.provenanceContract.observed.constraintEvidenceSatisfied;
+  const anchorEvidenceSatisfied =
+    !admissionContext.requires_anchor_evidence ||
+    (input.provenanceContract.observed.anchorEvidenceSatisfied && hasAnchorSignalEvidence(input));
+
+  return {
+    required: {
+      identitySeal: true,
+      constraintEvidence: admissionContext.requires_constraint_evidence,
+      anchorEvidence: admissionContext.requires_anchor_evidence,
+    },
+    satisfied: {
+      identitySeal: identitySealSatisfied,
+      constraintEvidence: constraintEvidenceSatisfied,
+      anchorEvidence: anchorEvidenceSatisfied,
+    },
+    allSatisfied:
+      identitySealSatisfied &&
+      constraintEvidenceSatisfied &&
+      anchorEvidenceSatisfied,
+  };
+}
 
 /**
  * THE FINAL CLOSURE — the AdmissionGate, per RFC-016.
@@ -75,22 +133,10 @@ export class AdmissionGate {
    *   used for identity-signature consistency checks.
    * @returns An {@link AdmissionResult} indicating whether the decision is
    *   admitted or rejected with a specific {@link FailureReason}.
-   */
+  */
   check(input: DecisionInput, snapshot: DecisionSnapshot): AdmissionResult {
-    const admissionContext = input.admissionContext
-      ?? input.queryPlan.admission_context
-      ?? {
-        requires_identity_seal:
-          input.queryPlan.intent === 'entity_exact' ||
-          input.queryPlan.intent === 'entity_fuzzy' ||
-          input.queryPlan.intent === 'comparison_search' ||
-          input.queryPlan.intent === 'mixed_query' ||
-          (input.effectiveRoute ?? input.queryPlan.route) === 'mixed',
-        requires_constraint_evidence: input.queryPlan.constraints.hard.length > 0,
-        requires_anchor_evidence:
-          (input.effectiveRoute ?? input.queryPlan.route) === 'mixed' &&
-          input.queryPlan.anchors.length > 0,
-      };
+    const admissionContext = deriveAdmissionContext(input);
+    const admissionClosure = evaluateAdmissionClosure(input, snapshot);
 
     // ── (a) Identity-signature consistency ──────────────────────────────────
     //
@@ -133,7 +179,7 @@ export class AdmissionGate {
     // evidence detail is present, hasIdentityEvidence() evaluates that trail
     // instead of trusting the coarse boolean alone, so ranked-route drift
     // cannot silently admit a weak identity claim.
-    if (!hasIdentityEvidence(input.evidenceSummary)) {
+    if (!admissionClosure.satisfied.identitySeal) {
       return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
     }
 
@@ -143,7 +189,7 @@ export class AdmissionGate {
     // than raw plan shape alone. This keeps ranked-route and hybrid-route
     // flows aligned when orchestration explicitly relaxes or requires
     // constraint evidence for a specific execution path.
-    if (admissionContext.requires_constraint_evidence && !hasConstraintEvidence(input.evidenceSummary)) {
+    if (!admissionClosure.satisfied.constraintEvidence) {
       return this.reject('HARD_CONSTRAINT_VIOLATION', input, snapshot);
     }
 
@@ -157,23 +203,8 @@ export class AdmissionGate {
     //      or 'anchor_preserved') — the boolean flag alone is not sufficient;
     //      the trail must be substantiated (RFC-011 §11).
     if (admissionContext.requires_anchor_evidence) {
-      if (!hasAnchorEvidence(input.evidenceSummary)) {
+      if (!admissionClosure.satisfied.anchorEvidence) {
         return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
-      }
-
-      // When the full evidence trail is available (populated by the ranking
-      // stage), verify that at least one item is an anchor-type signal
-      // (RFC-011 §11).  When evidenceItems is absent (entity-only route or
-      // pre-ranking paths), the coarse anchorEvidencePresent flag above suffices.
-      if (input.evidenceItems !== undefined) {
-        // Only 'anchor_similarity' is produced by EvidenceMapper in production.
-        // 'anchor_match' and 'anchor_preserved' were dead code paths — removed.
-        const hasAnchorSignal = input.evidenceItems.some(
-          (item) => item.type === 'anchor_similarity',
-        );
-        if (!hasAnchorSignal) {
-          return this.reject('EVIDENCE_INSUFFICIENT', input, snapshot);
-        }
       }
     }
 
@@ -195,7 +226,7 @@ export class AdmissionGate {
 
     const policyOutcome = decideAdmission({
       confidence: input.resolverResult.decisionTrace.decisionConfidenceC,
-      evidenceSufficient: hasIdentityEvidence(input.evidenceSummary),
+      evidenceSufficient: input.provenanceContract.observed.identityEvidenceSatisfied,
       ambiguityHigh: input.ambiguitySummary?.severity === 'high',
       routeHealthy: input.routeHealthy ?? true,
       executionMode: input.executionMode ?? 'authoritative',
@@ -239,6 +270,9 @@ export class AdmissionGate {
         : {}),
       ...(input.effectiveRetrievalMode !== undefined
         ? { retrievalMode: input.effectiveRetrievalMode }
+        : {}),
+      ...(input.retrievalKind !== undefined
+        ? { retrievalKind: input.retrievalKind }
         : {}),
     });
     return { admitted: false, reason, traceRef };

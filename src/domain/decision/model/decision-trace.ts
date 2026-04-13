@@ -40,6 +40,15 @@ export interface DecisionTrace {
     readonly queryClass: string;
     /** The route that actually executed after API overrides. */
     readonly effectiveRoute?: string | undefined;
+    /** The retrieval mode that actually executed after compilation. */
+    readonly effectiveRetrievalMode?: string | undefined;
+    /** The coarse retrieval family that actually executed. */
+    readonly retrievalKind?:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity'
+      | undefined;
     /** Policy directives active during decision-making. */
     readonly policy: DecisionTracePolicy;
   };

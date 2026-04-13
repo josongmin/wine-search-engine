@@ -1,56 +1,19 @@
 /**
- * Regression: DecisionSnapshotJsonbSchema validation and CORRUPTED_SNAPSHOT_SENTINEL.
+ * Regression: DecisionSnapshotJsonbSchema validation — loud failure on corrupted JSONB.
  *
- * Guards against silent data corruption when JSONB snapshots in PostgreSQL
- * drift from the expected shape due to migrations, ETL bugs, or manual edits.
- *
- * The parseDecisionSnapshotJsonb function is not exported directly, so we
- * test via the rowToSignal pathway indirectly. Instead, we import the Zod
- * schema and sentinel from the module internals — but since they are
- * module-private, we replicate the validation logic faithfully here.
+ * T-E7-01: parseDecisionSnapshotJsonb now throws CorruptedJsonbError instead of
+ * returning a silent CORRUPTED_SNAPSHOT_SENTINEL. These tests verify the throw
+ * behavior and that valid input still parses correctly.
  */
 import { describe, it, expect } from 'vitest';
-import { z } from 'zod';
-import type { DecisionSnapshot } from '../../../domain/shared/types/index.js';
-
-// ── Replicate the schema exactly as defined in pg-feedback-store.ts ──────────
-// This is intentional: the test must fail if the source schema changes shape
-// without updating these expectations.
-
-const DecisionSnapshotJsonbSchema = z.object({
-  snapshot_id: z.string().min(1),
-  policy_rule_version: z.string().min(1),
-  threshold_profile_id: z.string().min(1),
-  planner_version: z.string().min(1),
-  response_contract_version: z.string().min(1),
-  model_versions: z.record(z.string()),
-  index_versions: z.record(z.string()),
-  feature_flags: z.record(z.boolean()),
-  nondeterminism_notes: z.string().optional(),
-}).passthrough();
-
-const CORRUPTED_SNAPSHOT_SENTINEL: DecisionSnapshot = Object.freeze({
-  snapshot_id: '__corrupted__',
-  model_versions: {},
-  index_versions: {},
-  policy_rule_version: '__corrupted__',
-  threshold_profile_id: '__corrupted__',
-  planner_version: '__corrupted__',
-  response_contract_version: '__corrupted__',
-  feature_flags: {},
-});
-
-function parseDecisionSnapshotJsonb(raw: unknown): DecisionSnapshot {
-  const result = DecisionSnapshotJsonbSchema.safeParse(raw);
-  if (result.success) {
-    return result.data as unknown as DecisionSnapshot;
-  }
-  return CORRUPTED_SNAPSHOT_SENTINEL;
-}
+import {
+  parseDecisionSnapshotJsonb,
+  CorruptedJsonbError,
+} from '../jsonb-schemas.js';
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe('DecisionSnapshotJsonbSchema validation', () => {
+describe('DecisionSnapshotJsonbSchema validation (loud failure)', () => {
   const validSnapshot = {
     snapshot_id: 'snap-abc-123',
     policy_rule_version: 'v2.1',
@@ -63,7 +26,7 @@ describe('DecisionSnapshotJsonbSchema validation', () => {
   };
 
   it('parses a valid JSONB snapshot correctly', () => {
-    const parsed = parseDecisionSnapshotJsonb(validSnapshot);
+    const parsed = parseDecisionSnapshotJsonb(validSnapshot, 'test');
     expect(parsed.snapshot_id).toBe('snap-abc-123');
     expect(parsed.policy_rule_version).toBe('v2.1');
     expect(parsed.model_versions).toEqual({ embedding: 'bge-m3-v1.2', reranker: 'cross-encoder-v2' });
@@ -72,7 +35,7 @@ describe('DecisionSnapshotJsonbSchema validation', () => {
     expect(parsed.response_contract_version).toBe('search_response_v1');
   });
 
-  it('returns CORRUPTED_SNAPSHOT_SENTINEL for malformed JSONB (missing required field)', () => {
+  it('throws CorruptedJsonbError for malformed JSONB (missing required field)', () => {
     const malformed = {
       // snapshot_id is missing
       policy_rule_version: 'v2.1',
@@ -84,34 +47,33 @@ describe('DecisionSnapshotJsonbSchema validation', () => {
       feature_flags: {},
     };
 
-    const parsed = parseDecisionSnapshotJsonb(malformed);
-    expect(parsed).toBe(CORRUPTED_SNAPSHOT_SENTINEL);
-    expect(parsed.snapshot_id).toBe('__corrupted__');
+    expect(() => parseDecisionSnapshotJsonb(malformed, 'test')).toThrow(CorruptedJsonbError);
+    expect(() => parseDecisionSnapshotJsonb(malformed, 'test')).toThrow(/decision_snapshot/);
   });
 
-  it('returns CORRUPTED_SNAPSHOT_SENTINEL for completely invalid input (null)', () => {
-    const parsed = parseDecisionSnapshotJsonb(null);
-    expect(parsed).toBe(CORRUPTED_SNAPSHOT_SENTINEL);
+  it('throws CorruptedJsonbError for completely invalid input (null)', () => {
+    expect(() => parseDecisionSnapshotJsonb(null, 'test')).toThrow(CorruptedJsonbError);
   });
 
-  it('returns CORRUPTED_SNAPSHOT_SENTINEL when snapshot_id is empty string', () => {
-    const parsed = parseDecisionSnapshotJsonb({
+  it('throws CorruptedJsonbError when snapshot_id is empty string', () => {
+    expect(() => parseDecisionSnapshotJsonb({
       ...validSnapshot,
       snapshot_id: '', // .min(1) rejects empty
-    });
-    expect(parsed).toBe(CORRUPTED_SNAPSHOT_SENTINEL);
+    }, 'test')).toThrow(CorruptedJsonbError);
   });
 
-  it('CORRUPTED_SNAPSHOT_SENTINEL has a detectable __corrupted__ marker in snapshot_id', () => {
-    expect(CORRUPTED_SNAPSHOT_SENTINEL.snapshot_id).toContain('__corrupted__');
-    expect(CORRUPTED_SNAPSHOT_SENTINEL.policy_rule_version).toContain('__corrupted__');
-    expect(CORRUPTED_SNAPSHOT_SENTINEL.threshold_profile_id).toContain('__corrupted__');
-    expect(CORRUPTED_SNAPSHOT_SENTINEL.planner_version).toContain('__corrupted__');
-    expect(CORRUPTED_SNAPSHOT_SENTINEL.response_contract_version).toContain('__corrupted__');
-  });
-
-  it('CORRUPTED_SNAPSHOT_SENTINEL is frozen (immutable)', () => {
-    expect(Object.isFrozen(CORRUPTED_SNAPSHOT_SENTINEL)).toBe(true);
+  it('CorruptedJsonbError carries column, caller, and issues metadata', () => {
+    try {
+      parseDecisionSnapshotJsonb(null, 'PgFeedbackStore');
+      expect.fail('Expected CorruptedJsonbError to be thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(CorruptedJsonbError);
+      const typed = err as CorruptedJsonbError;
+      expect(typed.column).toBe('decision_snapshot');
+      expect(typed.caller).toBe('PgFeedbackStore');
+      expect(typed.issues.length).toBeGreaterThan(0);
+      expect(typed.name).toBe('CorruptedJsonbError');
+    }
   });
 
   it('accepts extra passthrough fields without rejecting (passthrough mode)', () => {
@@ -119,7 +81,7 @@ describe('DecisionSnapshotJsonbSchema validation', () => {
       ...validSnapshot,
       extra_field: 'should not cause rejection',
     };
-    const parsed = parseDecisionSnapshotJsonb(withExtra);
+    const parsed = parseDecisionSnapshotJsonb(withExtra, 'test');
     expect(parsed.snapshot_id).toBe('snap-abc-123');
   });
 });

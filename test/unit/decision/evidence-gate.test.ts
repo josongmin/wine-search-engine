@@ -1,20 +1,63 @@
 import { describe, it, expect } from 'vitest';
 import { EvidenceGate } from '../../../src/domain/decision/service/evidence-gate.js';
-import type { EvidenceSummary } from '../../../src/domain/decision/model/decision-input.js';
+import type {
+  DecisionProvenanceContract,
+  EvidenceSummary,
+} from '../../../src/domain/decision/model/decision-input.js';
+import {
+  hasAnchorEvidence,
+  hasConstraintEvidence,
+  hasIdentityEvidence,
+} from '../../../src/domain/decision/model/decision-input.js';
 
 describe('EvidenceGate', () => {
   const gate = new EvidenceGate();
 
+  function makeContract(
+    evidence: EvidenceSummary | undefined,
+    overrides: Partial<DecisionProvenanceContract['policy']> = {},
+  ): DecisionProvenanceContract {
+    return {
+      policy: {
+        requireIdentitySeal: true,
+        requireConstraintEvidence: false,
+        requireAnchorEvidence: false,
+        ...overrides,
+      },
+      observed: {
+        identityEvidenceSatisfied: hasIdentityEvidence(evidence),
+        constraintEvidenceSatisfied: hasConstraintEvidence(evidence),
+        anchorEvidenceSatisfied: hasAnchorEvidence(evidence),
+        topEntityPresent: false,
+        rankedTopResultPresent: false,
+        matchedConstraintAttributes: [],
+        unmetConstraintAttributes: [],
+        anchorSignalTypes: [],
+      },
+      missing: [
+        ...(hasIdentityEvidence(evidence) ? [] : ['identity_evidence' as const]),
+        ...((overrides.requireConstraintEvidence ?? false) &&
+          !hasConstraintEvidence(evidence)
+          ? ['constraint_evidence' as const]
+          : []),
+        ...((overrides.requireAnchorEvidence ?? false) &&
+          !hasAnchorEvidence(evidence)
+          ? ['anchor_evidence' as const]
+          : []),
+      ],
+    };
+  }
+
   describe('resolved + identity evidence present → passes', () => {
     it('returns passed=true when identity evidence is present', () => {
       const evidence: EvidenceSummary = { identityEvidencePresent: true };
-      const result = gate.check('resolved', evidence, false, false);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(true);
     });
 
     it('does not set downgradeTo when passed', () => {
       const evidence: EvidenceSummary = { identityEvidencePresent: true };
-      const result = gate.check('resolved', evidence);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.downgradeTo).toBeUndefined();
     });
 
@@ -30,7 +73,7 @@ describe('EvidenceGate', () => {
           rankedEvidenceItemCount: 0,
         },
       };
-      const result = gate.check('resolved', evidence);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(true);
     });
   });
@@ -38,7 +81,7 @@ describe('EvidenceGate', () => {
   describe('resolved + NO identity evidence → downgrade to ambiguous', () => {
     it('fails when identityEvidencePresent is false', () => {
       const evidence: EvidenceSummary = { identityEvidencePresent: false };
-      const result = gate.check('resolved', evidence);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
       expect(result.downgradeAction).toBe('clarify');
@@ -53,7 +96,7 @@ describe('EvidenceGate', () => {
     it('provides a human-readable reason', () => {
       const result = gate.check('resolved', undefined);
       expect(result.reason).toBeDefined();
-      expect(result.reason).toContain('identity');
+      expect(result.reason?.toLowerCase()).toContain('identity');
     });
 
     it('fails when richer identity evidence shows ranked/resolver mismatch', () => {
@@ -68,7 +111,7 @@ describe('EvidenceGate', () => {
           rankedEvidenceItemCount: 2,
         },
       };
-      const result = gate.check('resolved', evidence);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
     });
@@ -80,7 +123,10 @@ describe('EvidenceGate', () => {
         identityEvidencePresent: true,
         constraintEvidencePresent: true,
       };
-      const result = gate.check('resolved', evidence, true, false);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireConstraintEvidence: true }),
+      );
       expect(result.passed).toBe(true);
     });
 
@@ -89,7 +135,10 @@ describe('EvidenceGate', () => {
         identityEvidencePresent: true,
         constraintEvidencePresent: false,
       };
-      const result = gate.check('resolved', evidence, true, false);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireConstraintEvidence: true }),
+      );
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
     });
@@ -99,16 +148,19 @@ describe('EvidenceGate', () => {
         identityEvidencePresent: true,
         // constraintEvidencePresent: not set
       };
-      const result = gate.check('resolved', evidence, true, false);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireConstraintEvidence: true }),
+      );
       expect(result.passed).toBe(false);
     });
 
-    it('passes when no constraints (hasConstraints=false) regardless of constraint evidence', () => {
+    it('passes when constraint evidence is not required regardless of constraint evidence', () => {
       const evidence: EvidenceSummary = {
         identityEvidencePresent: true,
         constraintEvidencePresent: false,
       };
-      const result = gate.check('resolved', evidence, false, false);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(true);
     });
   });
@@ -122,7 +174,13 @@ describe('EvidenceGate', () => {
 
     it('passes for ambiguous with no identity evidence', () => {
       const evidence: EvidenceSummary = { identityEvidencePresent: false };
-      const result = gate.check('ambiguous', evidence, true, true);
+      const result = gate.check(
+        'ambiguous',
+        makeContract(evidence, {
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: true,
+        }),
+      );
       expect(result.passed).toBe(true);
     });
   });
@@ -140,7 +198,10 @@ describe('EvidenceGate', () => {
         identityEvidencePresent: true,
         anchorEvidencePresent: false,
       };
-      const result = gate.check('resolved', evidence, false, true);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireAnchorEvidence: true }),
+      );
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
     });
@@ -150,7 +211,10 @@ describe('EvidenceGate', () => {
         identityEvidencePresent: true,
         anchorEvidencePresent: true,
       };
-      const result = gate.check('resolved', evidence, false, true);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireAnchorEvidence: true }),
+      );
       expect(result.passed).toBe(true);
     });
 
@@ -165,7 +229,10 @@ describe('EvidenceGate', () => {
           rankedSignalPresent: false,
         },
       };
-      const result = gate.check('resolved', evidence, false, true);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireAnchorEvidence: true }),
+      );
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
     });
@@ -184,17 +251,20 @@ describe('EvidenceGate', () => {
           rankedSignalPresent: true,
         },
       };
-      const result = gate.check('resolved', evidence, false, true);
+      const result = gate.check(
+        'resolved',
+        makeContract(evidence, { requireAnchorEvidence: true }),
+      );
       expect(result.passed).toBe(false);
       expect(result.downgradeTo).toBe('ambiguous');
     });
 
-    it('passes when no anchor (hasAnchor=false) regardless of anchor evidence', () => {
+    it('passes when anchor evidence is not required regardless of anchor evidence', () => {
       const evidence: EvidenceSummary = {
         identityEvidencePresent: true,
         anchorEvidencePresent: false,
       };
-      const result = gate.check('resolved', evidence, false, false);
+      const result = gate.check('resolved', makeContract(evidence));
       expect(result.passed).toBe(true);
     });
   });

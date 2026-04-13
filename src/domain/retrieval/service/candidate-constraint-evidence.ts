@@ -130,18 +130,9 @@ function resolveCandidateValue(
       // without a matching weightedSum contribution.
       return undefined;
     default: {
-      // Unknown attribute: return undefined so satisfiesConstraint() returns
-      // false and the attribute is added to unmetHardConstraints.
-      //
-      // IMPORTANT: if a new constraint attribute is added to the domain model,
-      // add a corresponding case here. Unknown attributes cause silent no-results
-      // when that attribute is used as a hard constraint — every candidate is
-      // marked as unmet, and applyHardFilters() / ranker coarse prune removes
-      // them all.
-      //
-      // Rule (CLAUDE.md §4): new attribute → add case → add test in
-      // candidate-constraint-evidence.test.ts asserting the value resolves.
-      return undefined;
+      throw new Error(
+        `Unknown constraint attribute "${attribute}" in candidate-constraint-evidence; add an explicit resolver mapping before using it at runtime.`,
+      );
     }
   }
 }

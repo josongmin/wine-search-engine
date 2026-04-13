@@ -32,6 +32,7 @@ const SourceRefSchema = z
 const GraphSyncMetadataSchema = z
   .object({
     identityResolution: z.enum(['gold_overlay', 'identity_signature']),
+    benchmarkEntityId: z.string().min(1).optional(),
     sourceRecordRefs: z.array(SourceRefSchema).min(1).max(32),
   })
   .passthrough();
@@ -185,6 +186,7 @@ export function buildCanonicalGraphSyncPayloads(
       source_provenance: {
         search_snapshot_id: searchSnapshotId,
         identity_resolution: meta.identityResolution,
+        ...(meta.benchmarkEntityId != null ? { benchmark_entity_id: meta.benchmarkEntityId } : {}),
         primary_source: {
           source_system: primaryRef.sourceSystem,
           source_record_id: primaryRef.sourceRecordId,

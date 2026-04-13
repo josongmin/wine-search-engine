@@ -3,9 +3,9 @@
 > **Audience:** 시스템·아키텍처 **리뷰** 전용. 키트 개요는 [`README.md`](./README.md).  
 > **런타임 검색(리트리버)** 는 [`retriever-pipeline.md`](./retriever-pipeline.md).
 
-**한 줄:** PostgreSQL Bronze → NDJSON Silver/Enriched → (선택 확장·Track C) → 품질 게이트 → Vespa 피드; 그 외 골든·평가·학습·시딩 스크립트는 **같은 문서에서 표로 끝**낸다.
+**한 줄:** PostgreSQL Bronze → NDJSON `silver.ndjson` → `silver-aliases.ndjson` → `silver-ko.ndjson` → `silver-docquery.ndjson` → `silver-trackc.ndjson` → 품질 게이트 → Vespa 피드; 그 외 골든·평가·학습·시딩 스크립트는 **같은 문서에서 표로 끝**낸다.
 
-**Last updated:** 2026-04-10
+**Last updated:** 2026-04-14
 
 ---
 
@@ -37,20 +37,22 @@
 |------|----------------|------|
 | **Bronze** | PostgreSQL `wine_pdp_snapshot` | 원천 스냅샷 + JSON `payload` |
 | **Silver** | NDJSON `SilverWineRecord` | `scripts/etl/types.ts` |
-| **Silver + alias** | NDJSON `EnrichedSilverRecord` | RFC-003 별칭 번들 |
-| **Silver + KO** | NDJSON | 한국어 alias (Anthropic Haiku) |
-| **Silver + Doc2Query** | NDJSON | typed `syntheticQueries` + `doc2queryFingerprint` (OpenAI gpt-5.x) |
-| **Silver + Track C** | NDJSON | critic proxy / certifications / pairings / drinking-window |
+| **Aliases** | NDJSON `silver-aliases.ndjson` | RFC-003 별칭 번들 |
+| **KO aliases** | NDJSON `silver-ko.ndjson` | 한국어 alias (Anthropic Haiku) |
+| **Doc2Query** | NDJSON `silver-docquery.ndjson` | typed `syntheticQueries` + `doc2queryFingerprint` (OpenAI gpt-5.x) |
+| **Track C** | NDJSON `silver-trackc.ndjson` | critic proxy / certifications / pairings / drinking-window |
 | **Index** | Vespa `wine_entity` | `RetrievalDocument` + 임베딩 + `synthetic_queries` BM25 필드 |
 
 ```mermaid
 flowchart TB
   PG[(PG wine_pdp_snapshot)]
   S[data/silver.ndjson]
-  E[data/silver-enriched.ndjson]
-  X[Optional: KO / doc-query / Track C]
+  A[data/silver-aliases.ndjson]
+  K[data/silver-ko.ndjson]
+  D[data/silver-docquery.ndjson]
+  T[data/silver-trackc.ndjson]
   V[Vespa]
-  PG --> S --> E --> X --> V
+  PG --> S --> A --> K --> D --> T --> V
 ```
 
 런타임 정규화 패키지: **§10** (`src/domain/ingestion`).
@@ -61,12 +63,13 @@ flowchart TB
 
 1. **Bronze 적재** (외부 스크래퍼 등) → `wine_pdp_snapshot`  
 2. **`vivino-to-silver.ts`** → 기본 `data/silver.ndjson`  
-3. **`generate-aliases.ts`** → 기본 `data/silver-enriched.ndjson`  
-4. (선택) **`generate-korean-aliases.ts`** → `silver-enriched-ko.ndjson` — 인덱서는 **`index-to-vespa --input`** 으로 맞출 것  
-5. **`generate-doc-queries.ts`** → `silver-docquery.ndjson` — Doc2Query (typed `syntheticQueries` 필드 + `doc2queryFingerprint` 멱등성). 기본 입력은 `silver-ko.ndjson`. 자세한 동작은 [§6.1](#61-doc2query-단계-신규-방식)
-6. **Track C** — `run-track-c.ts`는 코드상 **`data/silver-docquery.ndjson`** 전제 → 파일명·스키마를 오케스트레이터와 **반드시** 일치  
-7. **`validate-silver.ts`** — 인덱싱할 NDJSON과 **`--input` 동일** 권장  
-8. **`index-to-vespa.ts`** — 기본 `silver-enriched.ndjson` → Vespa  
+3. **`generate-aliases.ts`** → 기본 `data/silver-aliases.ndjson`  
+4. **`generate-korean-aliases.ts`** → `data/silver-ko.ndjson`  
+5. **`generate-doc-queries.ts`** → `data/silver-docquery.ndjson` — Doc2Query (typed `syntheticQueries` 필드 + `doc2queryFingerprint` 멱등성). 기본 입력은 `silver-ko.ndjson`. 자세한 동작은 [§6.1](#61-doc2query-단계-신규-방식)
+6. **`run-track-c.ts`** → `data/silver-trackc.ndjson` — `silver-docquery.ndjson`을 seed로 받아 Track C 필드를 여기에 기록
+7. **`validate-silver.ts`** → 기본 `silver-trackc.ndjson` 품질 게이트
+8. **`index-to-vespa.ts`** → 기본 `silver-trackc.ndjson` → Vespa
+9. **`build-search-snapshot.ts` / `publish-search-snapshot.ts`** → 기본 `silver-trackc.ndjson` 스냅샷·컷오버 입력
 
 **추가 도구:** `fetch-vivino-snapshots.ts` (Bronze만 export), `generate-transliteration-aliases.ts` (PG `aliases` 백필, NDJSON 트랙과 별도).
 
@@ -74,9 +77,9 @@ flowchart TB
 
 | 스크립트 | 경로 |
 |----------|------|
-| `npm run vivino:bronze` | `tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts` |
-| `npm run etl:transliteration` | `scripts/etl/generate-transliteration-aliases.ts` |
-| `npm run bootstrap:smoke` | `scripts/bootstrap-smoke.sh` |
+| `pnpm run vivino:bronze` | `tools/bronze-vivino-data-connector/fetch-vivino-snapshots.ts` |
+| `pnpm run etl:transliteration` | `scripts/etl/generate-transliteration-aliases.ts` |
+| `pnpm run bootstrap:smoke` | `scripts/bootstrap-smoke.sh` |
 
 `ingest` / `kill-switch` CLI 스크립트는 현재 레포에 존재하지 않으므로 `package.json`에서 제거되었다. 인입 관련 작업은 개별 `scripts/etl/*.ts`를 직접 사용한다.
 
@@ -89,16 +92,19 @@ flowchart TB
 | `types.ts` | Bronze/Silver/Enriched/Golden 타입 SSOT |
 | `ndjson.ts` | NDJSON 파싱 |
 | `vivino-to-silver.ts` | PG → Silver NDJSON |
-| `generate-aliases.ts` | Silver → Enriched |
-| `generate-korean-aliases.ts` | Enriched → KO (`ANTHROPIC_API_KEY`) |
+| `generate-aliases.ts` | Silver → `silver-aliases.ndjson` |
+| `generate-korean-aliases.ts` | `silver-aliases.ndjson` → `silver-ko.ndjson` (`ANTHROPIC_API_KEY`) |
 | `generate-doc-queries.ts` | Doc2Query (typed `syntheticQueries` field, OpenAI gpt-5.x via port, fingerprint idempotency) → §6.1 |
-| `validate-silver.ts` | 품질 게이트 |
-| `index-to-vespa.ts` | Enriched → Vespa |
-| `run-track-c.ts` | Track C 오케스트레이터 |
-| `run-track-c-step1.ts` | Critic proxy |
-| `run-track-c-step2.ts` | Certifications |
-| `run-track-c-step3.ts` | Pairings |
-| `drinking-window-backfill.ts` | 음용 시기 |
+| `build-ambiguity-registry.ts` | `silver-ko.ndjson` → ambiguity registry |
+| `run-track-c.ts` | `silver-docquery.ndjson` → `silver-trackc.ndjson` 오케스트레이터 |
+| `run-track-c-step1.ts` | Track C: critic proxy (`silver-trackc.ndjson`) |
+| `run-track-c-step2.ts` | Track C: certifications (`silver-trackc.ndjson`) |
+| `run-track-c-step3.ts` | Track C: pairings (`silver-trackc.ndjson`) |
+| `drinking-window-backfill.ts` | Track C: drinking window (`silver-trackc.ndjson`) |
+| `validate-silver.ts` | `silver-trackc.ndjson` 품질 게이트 |
+| `index-to-vespa.ts` | `silver-trackc.ndjson` → Vespa |
+| `build-search-snapshot.ts` | `silver-trackc.ndjson` → snapshot manifest |
+| `publish-search-snapshot.ts` | `silver-trackc.ndjson` → runtime cutover |
 | `generate-critic-proxy.ts` | 모듈 (step1) |
 | `enrich-certifications.ts` | 모듈 (step2) |
 | `generate-pairings.ts` | 모듈 (step3) |
@@ -142,7 +148,7 @@ export interface EnrichedSilverRecord extends SilverWineRecord {
 `scripts/etl/validate-silver.ts`
 
 ```19:33:scripts/etl/validate-silver.ts
-const DEFAULT_INPUT = 'data/silver-enriched.ndjson';
+const DEFAULT_INPUT = 'data/silver-trackc.ndjson';
 const REPORT_OUTPUT = 'data/silver-quality-report.json';
 
 /**
@@ -163,7 +169,7 @@ const GATES = {
 
 ## 6. Vespa 인덱싱
 
-`scripts/etl/index-to-vespa.ts` — `EnrichedSilverRecord` → `silverToRetrievalDoc` → `toVespaFields` (`src/infrastructure/vespa/mapping.ts`) → `VespaClient.bulkFeed`.
+`scripts/etl/index-to-vespa.ts` — `silver-trackc.ndjson` → `EnrichedSilverRecord` → `silverToRetrievalDoc` → `toVespaFields` (`src/infrastructure/vespa/mapping.ts`) → `VespaClient.bulkFeed`.
 
 ### 6.1 Doc2Query 단계 (신규 방식)
 
@@ -186,12 +192,12 @@ const GATES = {
 ```bash
 # Dry-run sample
 npx tsx --env-file=.env.local scripts/etl/generate-doc-queries.ts \
-  --input data/silver-enriched-ko.ndjson \
+  --input data/silver-ko.ndjson \
   --dry-run --limit 5
 
 # Real backfill (idempotent — safe to re-run)
 npx tsx --env-file=.env.local scripts/etl/generate-doc-queries.ts \
-  --input data/silver-enriched-ko.ndjson \
+  --input data/silver-ko.ndjson \
   --output data/silver-docquery.ndjson
 
 # Force regenerate (e.g. model bump)
@@ -216,7 +222,7 @@ function silverToRetrievalDoc(
   embedding: readonly number[],
 ): RetrievalDocument {
   const doc: RetrievalDocument = {
-    entityId: createEntityId(rec.sourceId),
+    entityId: createCanonicalEntityId(indexable.entityId),
     entityType: 'wine',
     canonicalLabel: rec.canonicalLabel,
     aliasesIdentitySafe: rec.aliases.identitySafeProjection,
@@ -227,12 +233,12 @@ function silverToRetrievalDoc(
     searchTextKo: buildSearchTextKo(rec),
     searchTextEn: rec.searchTextEn,
     semanticSummary: buildEmbedText(rec),
-    body: rec.body,
-    sweetness: rec.sweetness,
-    style: rec.body >= 0.7 ? 'bold red' : rec.body >= 0.4 ? 'medium body' : 'light',
+    ...(indexable.body != null ? { body: indexable.body } : {}),
+    ...(indexable.sweetness != null ? { sweetness: indexable.sweetness } : {}),
+    style: indexable.style,
     priceBand: rec.priceBand,
     pairing: rec.pairingTags,
-    occasion: [],
+    ...(indexable.occasion !== undefined ? { occasion: [...indexable.occasion] } : {}),
     availability: true,
     popularityScore: rec.popularityScore,
     embedding,
@@ -350,7 +356,7 @@ export { EntityMatcher } from './service/entity-matcher.js';
 
 | 경로 | 비고 |
 |------|------|
-| `scripts/fine-tune/prepare-finetuning-data.ts` | `npm run finetuning:prepare` |
+| `scripts/fine-tune/prepare-finetuning-data.ts` | `pnpm run finetuning:prepare` |
 | `scripts/fine-tune/bge-m3-finetune.py` | Python 보조 |
 | `scripts/embedding/finetune-bge-m3.ts` | 실험용 엔트리 |
 
@@ -376,8 +382,8 @@ export { EntityMatcher } from './service/entity-matcher.js';
 |------|------|
 | `seed-wines-real.ts` | 대량 Vespa 시드 (E2E/품질) |
 | `seed-vespa-test-data.ts` | 소형 테스트 피드 |
-| `migrate-local-docker-pg.ts` / `migrate-from-env.ts` | `npm run migrate` (Docker Compose PG), `npm run migrate:from-env` (`.env` DB) |
-| `prune-feedback-ttl.ts` | `npm run feedback:prune-ttl` — RFC-010 TTL |
+| `migrate-local-docker-pg.ts` / `migrate-from-env.ts` | `pnpm run migrate` (Docker Compose PG), `pnpm run migrate:from-env` (`.env` DB) |
+| `prune-feedback-ttl.ts` | `pnpm run feedback:prune-ttl` — RFC-010 TTL |
 
 **배포:** `scripts/deploy-vespa.sh` — 데이터 파이프라인과 별도.
 
@@ -390,7 +396,7 @@ export { EntityMatcher } from './service/entity-matcher.js';
 | 파일 | 역할 |
 |------|------|
 | `calibrate-confidence-threshold.ts` | 오프라인 eval NDJSON → 임계값 (RFC-016 / Epic 17.3) |
-| `verify-drinking-window-model.ts` | `npm run verify:drinking-window-model` — ONNX 존재 검증 |
+| `verify-drinking-window-model.ts` | `pnpm run verify:drinking-window-model` — ONNX 존재 검증 |
 
 ---
 
@@ -398,7 +404,7 @@ export { EntityMatcher } from './service/entity-matcher.js';
 
 | 파일 | 입·출력 요약 |
 |------|----------------|
-| `generate-golden-queries.ts` | `silver-enriched` → `golden-queries-bronze.jsonl` |
+| `generate-golden-queries.ts` | canonical ETL artifacts (`silver.ndjson` / snapshot-linked corpus) → `golden-queries-bronze.jsonl` |
 | `mine-hard-negatives.ts` | → `hard-negatives.jsonl` |
 | `build-splits.ts` | train/val/gate (RFC-017) |
 | `run-eval-and-train-ltr.ts` | PG 평가 + LambdaMART (`createContainer`) |

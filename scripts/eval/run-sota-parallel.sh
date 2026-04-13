@@ -2,7 +2,7 @@
 # SOTA++ parallel local gate — runs independent checks concurrently (Wave A / REMEDIATION-PLAN).
 # Does NOT start Docker or SEARCH_API_URL; smoke eval spawns its own in-memory server.
 #
-# Usage: npm run eval:sota:parallel
+# Usage: pnpm run eval:sota:parallel
 #   or:  bash scripts/eval/run-sota-parallel.sh
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -31,10 +31,10 @@ run_job() {
 echo "[SOTA++] Parallel gate — logs: $LOG_DIR"
 echo
 
-run_job "typecheck" npm run typecheck
+run_job "typecheck" pnpm run typecheck
 run_job "verify-splits" npx tsx scripts/eval/verify-splits.ts
-run_job "eval-offline-smoke" npm run eval:offline:smoke
-run_job "eval-noisy-validate" npm run eval:noisy:validate
+run_job "eval-offline-smoke" pnpm run eval:offline:smoke
+run_job "eval-noisy-validate" pnpm run eval:noisy:validate
 
 for pid in "${pids[@]}"; do
   if ! wait "$pid"; then

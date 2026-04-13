@@ -47,7 +47,7 @@ function makeNLMapper(attribute: string, value: string): NLMapper {
 }
 
 const SOFT_ATTRS_UNDER_TEST = [
-  { attribute: 'price_band', value: 'mid' },
+  { attribute: 'price_band', value: 'value' },
   { attribute: 'occasion', value: 'celebration' },
   { attribute: 'critic_score', value: '0.8' },
   { attribute: 'fruit_intensity', value: '0.7' },
@@ -174,5 +174,16 @@ describe('W2-01 + IDX-05: all SOFT_CONSTRAINT_ATTRIBUTES must be SOFT in Constra
 
     const inHard = result.bundle.hard.some((c) => c.attribute === 'vintage_year');
     expect(inHard).toBe(true);
+  });
+
+  it('NLMapper failure is surfaced instead of degrading to an empty bundle', async () => {
+    const nlMapper: NLMapper = {
+      mapConstraints: async () => {
+        throw new Error('mapper exploded');
+      },
+    } as unknown as NLMapper;
+    const compiler = new ConstraintCompiler(nlMapper);
+
+    await expect(compiler.compile('test query')).rejects.toThrow('mapper exploded');
   });
 });

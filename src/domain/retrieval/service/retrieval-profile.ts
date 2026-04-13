@@ -10,9 +10,9 @@
  */
 
 import type { QueryClass } from '../../shared/types/index.js';
+import { DomainError } from '../../shared/error/domain-error.js';
 import type { RetrievalChannel } from '../model/retrieval-channel.js';
 import { resolveChannelMix, type QueryFamily } from './channel-mix-policy.js';
-import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { RRF_DEFAULT_K } from '../../shared/utils/rrf.js';
 
 /**
@@ -219,6 +219,13 @@ function isLegacyHeuristicRetrievalMode(retrievalMode: string): boolean {
   return retrievalMode === 'semantic_hybrid' || retrievalMode === 'hybrid_search';
 }
 
+function throwUnknownRetrievalMode(retrievalMode: string): never {
+  throw new DomainError(
+    'INTERNAL_INCONSISTENCY',
+    `Unknown retrievalMode: ${retrievalMode}`,
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Profile service
 // ---------------------------------------------------------------------------
@@ -264,7 +271,7 @@ export class RetrievalProfileService {
    * Priority order (highest → lowest):
    *  1. retrievalMode override (explicit execution-contract signal)
    *  2. queryFamily policy (semantic classification from observability vocab)
-   *  3. route / queryClass heuristics (legacy fallback)
+   *  3. route / queryClass heuristics (only when retrievalMode is absent or legacy)
    *
    * Existing callers passing only queryClass+route get the same profile as before.
    *
@@ -304,45 +311,36 @@ export class RetrievalProfileService {
     // or runtime mode value — LEARNED_SPARSE_HYBRID is reached only via the
     // queryClass === 'semantic_preference' branch below, or via queryFamily policy.
     if (retrievalMode !== undefined) {
-      const useLegacyHeuristics = isLegacyHeuristicRetrievalMode(retrievalMode);
-      const normalizedRetrievalMode =
-        useLegacyHeuristics ? undefined : retrievalMode;
-      if (normalizedRetrievalMode === undefined) {
+      if (isLegacyHeuristicRetrievalMode(retrievalMode)) {
         // Legacy V1 aliases like semantic_hybrid/hybrid_search intentionally
         // fall through to the queryClass/route heuristics below.
-      } else
-      if (normalizedRetrievalMode === 'entity_anchor_first') {
+      } else if (retrievalMode === 'entity_anchor_first') {
         // TRACK-A A4: exact_entity / short_entity with resolved anchor — anchor leads.
         return ENTITY_ANCHOR_FIRST;
-      } else if (normalizedRetrievalMode === 'entity_lookup' || normalizedRetrievalMode === 'entity_resolution') {
+      } else if (retrievalMode === 'entity_lookup' || retrievalMode === 'entity_resolution') {
         return EXACT_SAFE_FALLBACK;
-      } else if (normalizedRetrievalMode === 'attribute_search' || normalizedRetrievalMode === 'constraint_filter') {
+      } else if (retrievalMode === 'attribute_search' || retrievalMode === 'constraint_filter') {
         return HYBRID_DEFAULT;
-      } else if (normalizedRetrievalMode === 'producer_browse') {
+      } else if (retrievalMode === 'producer_browse') {
         return BROWSE_DEFAULT;
-      } else if (normalizedRetrievalMode === 'region_browse') {
+      } else if (retrievalMode === 'region_browse') {
         return REGION_BROWSE;
-      } else if (normalizedRetrievalMode === 'compare_candidates') {
+      } else if (retrievalMode === 'compare_candidates') {
         return COMPARE_DEFAULT;
       // 'relative' is an internal runtime mode emitted by CandidatePoolService when
       // compare_candidates has an anchor entity; routes to the sparse-only post-filter path.
-      } else if (normalizedRetrievalMode === 'relative') {
+      } else if (retrievalMode === 'relative') {
         return RELATIVE_FILTER;
       // recommendation mode uses anchor_similarity channel (aligns with FAMILY_POLICY mapping)
-      } else if (normalizedRetrievalMode === 'recommendation') {
+      } else if (retrievalMode === 'recommendation') {
         return MIXED_ANCHOR;
-      } else if (normalizedRetrievalMode === 'similar_items') {
+      } else if (retrievalMode === 'similar_items') {
         return MIXED_ANCHOR;
-      } else if (normalizedRetrievalMode === 'no_match_detection') {
+      } else if (retrievalMode === 'no_match_detection') {
         return HYBRID_DEFAULT;
-      }
-
-      // If none of the above matched, log to catch unrecognized modes
-      if (!useLegacyHeuristics) {
-        bootstrapLogger.warn(
-          { retrievalMode },
-          '[RetrievalProfileService] Unrecognized retrievalMode; falling through to queryClass heuristics',
-        );
+      } else {
+        // Unknown retrieval modes are not coerced to a heuristic fallback.
+        throwUnknownRetrievalMode(retrievalMode);
       }
     }
 

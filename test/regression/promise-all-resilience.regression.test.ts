@@ -1,13 +1,9 @@
 /**
  * Regression: Promise.all → Promise.allSettled resilience.
  *
- * Verifies that parallel document fetches (resolver candidates, candidate
- * attributes, watchlist getDocuments) degrade gracefully when individual
- * lookups fail, instead of aborting the entire batch.
- *
- * Bug: Promise.all propagates the first rejection, causing N-1 successful
- * fetches to be discarded when a single Vespa/network error occurs.
- * Fix: Switch to Promise.allSettled and collect fulfilled results only.
+ * Verifies that parallel document fetches either complete fully or fail
+ * loudly when hydration is incomplete. Candidate generation no longer hides
+ * partial hydration, while other adapters still collect surviving records.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -69,7 +65,7 @@ function makeSearchIndexStub(
 
 describe('Promise.all → allSettled resilience (regression)', () => {
   describe('buildResolverCandidatesFromGenerator', () => {
-    it('returns surviving candidates when one getDocument rejects', async () => {
+    it('rejects when one getDocument rejects and hydration becomes incomplete', async () => {
       const goodId = 'entity-good';
       const failId = 'entity-fail';
       const doc = makeDoc(goodId);
@@ -84,12 +80,12 @@ describe('Promise.all → allSettled resilience (regression)', () => {
         }),
       };
 
-      const result = await buildResolverCandidatesFromGenerator(input, entityLookup);
-      expect(result.length).toBe(1);
-      expect(result[0]!.entityId).toBe(createEntityId(goodId));
+      await expect(buildResolverCandidatesFromGenerator(input, entityLookup)).rejects.toMatchObject({
+        code: 'INTERNAL_INCONSISTENCY',
+      });
     });
 
-    it('returns empty array when all getDocument calls reject', async () => {
+    it('rejects when all getDocument calls reject', async () => {
       const input = makeGeneratorInputWithAnchors(['a', 'b']);
       const entityLookup = {
         getDocument: vi.fn(async () => {
@@ -97,8 +93,9 @@ describe('Promise.all → allSettled resilience (regression)', () => {
         }),
       };
 
-      const result = await buildResolverCandidatesFromGenerator(input, entityLookup);
-      expect(result).toEqual([]);
+      await expect(buildResolverCandidatesFromGenerator(input, entityLookup)).rejects.toMatchObject({
+        code: 'INTERNAL_INCONSISTENCY',
+      });
     });
   });
 

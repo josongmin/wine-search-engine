@@ -1,6 +1,11 @@
 import type { SignalSet, EvidenceItem } from '../../shared/types/index.js';
 import type { QueryPlanV1 } from '../../query/model/query-plan.js';
 import type { QueryRoute } from '../../query/model/query-route.js';
+import type {
+  ExecutionRetrievalMode,
+  MissingProvenanceObligation,
+  ProvenancePolicy,
+} from '../../query/model/engine-execution-contract.js';
 import type { QueryPolicy } from '../../query/model/query-policy.js';
 import type { QueryUncertainty } from '../../query/model/query-uncertainty.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
@@ -154,6 +159,36 @@ export interface EvidenceSummary {
 
   /** Total count of evidence references across all candidates. */
   readonly evidenceRefCount?: number;
+}
+
+export interface AdmissionClosureSummary {
+  readonly required: {
+    readonly identitySeal: boolean;
+    readonly constraintEvidence: boolean;
+    readonly anchorEvidence: boolean;
+  };
+  readonly satisfied: {
+    readonly identitySeal: boolean;
+    readonly constraintEvidence: boolean;
+    readonly anchorEvidence: boolean;
+  };
+  readonly allSatisfied: boolean;
+}
+
+export interface DecisionProvenanceContract {
+  readonly policy: ProvenancePolicy;
+  readonly observed: {
+    readonly identityEvidenceSatisfied: boolean;
+    readonly constraintEvidenceSatisfied: boolean;
+    readonly anchorEvidenceSatisfied: boolean;
+    readonly topEntityPresent: boolean;
+    readonly rankedTopResultPresent: boolean;
+    readonly rankedTopResultMatchesTopEntity?: boolean | undefined;
+    readonly matchedConstraintAttributes: readonly string[];
+    readonly unmetConstraintAttributes: readonly string[];
+    readonly anchorSignalTypes: readonly string[];
+  };
+  readonly missing: readonly MissingProvenanceObligation[];
 }
 
 /**
@@ -315,7 +350,21 @@ export interface DecisionInput {
    * This can differ from `queryPlan.retrievalMode` when compiled execution
    * semantics override planner-era V1 compatibility fields.
    */
-  readonly effectiveRetrievalMode?: string | undefined;
+  readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+
+  /**
+   * Coarser execution-family contract for route-specific gate semantics.
+   *
+   * This is distinct from `effectiveRetrievalMode`:
+   * - `effectiveRetrievalMode` captures the precise compiled retrieval mode
+   * - `retrievalKind` captures the execution family actually run
+   */
+  readonly retrievalKind?:
+    | 'entity_lookup'
+    | 'generic_hybrid'
+    | 'specialized_hybrid'
+    | 'mixed_similarity'
+    | undefined;
 
   /** The resolver's result including its suggested status. */
   readonly resolverResult: EntityResolveResult;
@@ -329,12 +378,8 @@ export interface DecisionInput {
   /** Uncertainty assessment from the planner. */
   readonly uncertainty: QueryUncertainty;
 
-  /**
-   * Admission/evidence obligations that apply to the executed route.
-   *
-   * Defaults to `queryPlan.admission_context` when absent.
-   */
-  readonly admissionContext?: QueryPlanV1['admission_context'] | undefined;
+  /** Compiled-first provenance closure contract consumed by decision gates. */
+  readonly provenanceContract: DecisionProvenanceContract;
 
   /** Aggregated ambiguity summary from all pipeline stages. */
   readonly ambiguitySummary?: AmbiguitySummary;

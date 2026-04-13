@@ -59,6 +59,30 @@ function makeDocument(overrides: Partial<RetrievalDocument> = {}): RetrievalDocu
   };
 }
 
+function makeMinimalRequiredFields(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    entity_id: 'test-wine',
+    entity_type: 'wine',
+    canonical_label: 'Some Wine',
+    aliases_identity_safe: ['Some Wine'],
+    aliases_noisy_recall: ['Some'],
+    producer: 'Some Producer',
+    region: 'Some Region',
+    grapes: ['Cabernet Sauvignon'],
+    search_text_ko: '어떤 와인',
+    search_text_en: 'Some wine',
+    semantic_summary: 'summary',
+    price_band: 'mid',
+    pairing: ['cheese'],
+    availability: true,
+    popularity_score: 0.5,
+    style: 'red',
+    ...overrides,
+  };
+}
+
 describe('fromVespaFields entity_id validation', () => {
   it('throws a descriptive error when entity_id is missing from Vespa response', () => {
     // Previously, fromVespaFields called createEntityId(getString(fields, 'entity_id'))
@@ -96,6 +120,15 @@ describe('fromVespaFields entity_id validation', () => {
     expect(message).not.toContain('canonical_label');
     expect(message).not.toContain('vintage_year');
     expect(message).toMatch(/malformed Vespa document/);
+  });
+
+  it('throws when a required field such as search_text_ko is missing', () => {
+    expect(() =>
+      fromVespaFields({
+        ...makeMinimalRequiredFields(),
+        search_text_ko: undefined,
+      }),
+    ).toThrow(/malformed Vespa document/);
   });
 });
 
@@ -163,6 +196,7 @@ describe('vespa mapping retrieval summary SSOT', () => {
       certifications: undefined,
       soilType: undefined,
       producerType: undefined,
+      occasion: undefined,
     }));
 
     expect(fields).not.toHaveProperty('grape_primary');
@@ -171,6 +205,7 @@ describe('vespa mapping retrieval summary SSOT', () => {
     expect(fields).not.toHaveProperty('certifications');
     expect(fields).not.toHaveProperty('soil_type');
     expect(fields).not.toHaveProperty('producer_type');
+    expect(fields).not.toHaveProperty('occasion');
 
     const roundTripped = fromVespaFields(fields);
     expect(roundTripped.canonicalLabel).toBe('Mapping Wine');
@@ -181,57 +216,45 @@ describe('vespa mapping retrieval summary SSOT', () => {
     expect(roundTripped.certifications).toBeUndefined();
     expect(roundTripped.soilType).toBeUndefined();
     expect(roundTripped.producerType).toBeUndefined();
+    expect(roundTripped.occasion).toBeUndefined();
+  });
+
+  it('fails closed when an optional summary field is present with the wrong type', () => {
+    const fields = toVespaFields(makeDocument());
+    fields['occasion'] = 'celebration';
+
+    expect(() => fromVespaFields(fields)).toThrow(/malformed Vespa document/);
   });
 });
 
 // E1-P3-7: body/sweetness null vs 0 distinction
 describe('fromVespaFields — body/sweetness null vs 0 (E1-P3-7)', () => {
   it('body=0 in Vespa → field is present with value 0 in returned document', () => {
-    const doc = fromVespaFields({
-      entity_id: 'test-wine',
-      entity_type: 'wine',
-      body: 0,
-    });
+    const doc = fromVespaFields(makeMinimalRequiredFields({ body: 0 }));
     // body=0 is a legitimate "no body" value — must be preserved, not treated as absent
     expect('body' in doc).toBe(true);
     expect(doc.body).toBe(0);
   });
 
   it('sweetness=0 in Vespa → field is present with value 0 in returned document', () => {
-    const doc = fromVespaFields({
-      entity_id: 'test-wine',
-      entity_type: 'wine',
-      sweetness: 0,
-    });
+    const doc = fromVespaFields(makeMinimalRequiredFields({ sweetness: 0 }));
     expect('sweetness' in doc).toBe(true);
     expect(doc.sweetness).toBe(0);
   });
 
   it('body absent from Vespa → field is absent (undefined) in returned document', () => {
-    const doc = fromVespaFields({
-      entity_id: 'test-wine',
-      entity_type: 'wine',
-      // body field intentionally absent
-    });
+    const doc = fromVespaFields(makeMinimalRequiredFields());
     // "no data" → omit key entirely, not body: 0
     expect(doc.body).toBeUndefined();
   });
 
   it('sweetness absent from Vespa → field is absent (undefined) in returned document', () => {
-    const doc = fromVespaFields({
-      entity_id: 'test-wine',
-      entity_type: 'wine',
-      // sweetness field intentionally absent
-    });
+    const doc = fromVespaFields(makeMinimalRequiredFields());
     expect(doc.sweetness).toBeUndefined();
   });
 
   it('body=0.5 (non-zero) round-trips correctly', () => {
-    const doc = fromVespaFields({
-      entity_id: 'test-wine',
-      entity_type: 'wine',
-      body: 0.5,
-    });
+    const doc = fromVespaFields(makeMinimalRequiredFields({ body: 0.5 }));
     expect(doc.body).toBeCloseTo(0.5);
   });
 });

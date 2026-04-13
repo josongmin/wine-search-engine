@@ -19,15 +19,15 @@ import type {
   AliasBundle,
 } from './types.js';
 import { parseNdjson } from './ndjson.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFile } from './etl-utils.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = resolveDataPath('data/silver.ndjson');
-export const DEFAULT_OUTPUT = resolveDataPath('data/silver-aliases.ndjson');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.silver;
+export const DEFAULT_OUTPUT = ETL_ARTIFACT_FILES.aliases;
 
 /** Confidence thresholds for projection decisions. */
 const IDENTITY_SAFE_THRESHOLD = 0.80;

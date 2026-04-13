@@ -126,68 +126,26 @@ describe('buildSearchRouteResolutionContext – compiled-first path', () => {
   });
 });
 
-describe('buildSearchRouteResolutionContext – V1 fallback path (no compiled)', () => {
-  it('falls back to V1 plan route when compiled is absent', () => {
-    const plan = makeV1Plan({ route: 'entity' });
-    const request = makeRequest();
-
-    const ctx = buildSearchRouteResolutionContext(plan, request);
-
-    expect(ctx.effectiveRoute).toBe('entity');
-    expect(ctx.plannerSuggestedMode).toBe('entity');
-    expect(ctx.retrievalModeSource).toBe('planner');
-    expect(ctx.apiOverrideMode).toBeUndefined();
-  });
-
-  it('falls back to hybrid when V1 plan has a hybrid-forced retrievalMode', () => {
-    // compare_candidates triggers the hybrid-forced fallback in V1 path
-    const plan = makeV1Plan({ route: 'entity', retrievalMode: 'compare_candidates' });
-    const request = makeRequest();
-
-    const ctx = buildSearchRouteResolutionContext(plan, request);
-
-    expect(ctx.effectiveRoute).toBe('hybrid');
-    expect(ctx.retrievalModeSource).toBe('planner');
-  });
-
-  it('api override takes precedence over V1 plan route when compiled is absent', () => {
-    const plan = makeV1Plan({ route: 'entity' });
-    const request = makeRequest({ retrieval_mode: 'mixed' });
-
-    const ctx = buildSearchRouteResolutionContext(plan, request);
-
-    expect(ctx.effectiveRoute).toBe('mixed');
-    expect(ctx.apiOverrideMode).toBe('mixed');
-    expect(ctx.retrievalModeSource).toBe('api_override');
-  });
-});
-
 describe('resolveRouteFromPlanAndOptionMode', () => {
   it('uses compiled route when mode is auto and compiled is present', () => {
     const plan = makeV1Plan({ route: 'entity' });
     const compiled = makeCompiled('hybrid');
 
-    expect(resolveRouteFromPlanAndOptionMode(plan, 'auto', compiled)).toBe('hybrid');
+    expect(resolveRouteFromPlanAndOptionMode(plan, compiled, 'auto')).toBe('hybrid');
   });
 
   it('uses compiled route when mode is undefined and compiled is present', () => {
     const plan = makeV1Plan({ route: 'entity' });
     const compiled = makeCompiled('mixed');
 
-    expect(resolveRouteFromPlanAndOptionMode(plan, undefined, compiled)).toBe('mixed');
+    expect(resolveRouteFromPlanAndOptionMode(plan, compiled, undefined)).toBe('mixed');
   });
 
   it('returns the explicit mode when mode is not auto/undefined', () => {
     const plan = makeV1Plan({ route: 'entity' });
     const compiled = makeCompiled('hybrid');
 
-    expect(resolveRouteFromPlanAndOptionMode(plan, 'entity', compiled)).toBe('entity');
-    expect(resolveRouteFromPlanAndOptionMode(plan, 'mixed', compiled)).toBe('mixed');
-  });
-
-  it('falls back to V1 plan route when compiled is absent and mode is auto', () => {
-    const plan = makeV1Plan({ route: 'hybrid' });
-
-    expect(resolveRouteFromPlanAndOptionMode(plan, 'auto', undefined)).toBe('hybrid');
+    expect(resolveRouteFromPlanAndOptionMode(plan, compiled, 'entity')).toBe('entity');
+    expect(resolveRouteFromPlanAndOptionMode(plan, compiled, 'mixed')).toBe('mixed');
   });
 });

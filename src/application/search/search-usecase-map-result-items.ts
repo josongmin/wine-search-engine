@@ -12,6 +12,8 @@ import {
 } from './drinking-window-confidence.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import { clamp01 } from '../../domain/shared/utils/clamp.js';
+import type { EvidenceItem } from '../../domain/shared/types/index.js';
+import type { MatchDetail } from '../../domain/response/model/result-item.js';
 
 const drinkingWindowLogger = bootstrapLogger.child({
   component: 'search-result-drinking-window',
@@ -22,6 +24,85 @@ const DRINKING_WINDOW_CHECK_TIMEOUT_MS = 2_000;
 /** Neutral confidence when uncertaintyPenalty is NaN/unavailable.
  *  0.5 = "no opinion" in [0,1] confidence space. */
 const UNCERTAINTY_CONFIDENCE_NEUTRAL = 0.5;
+const EXACT_MATCH_TYPES = new Set<MatchDetail['matchType']>(['exact', 'alias_exact', 'alias_fuzzy']);
+
+function findIdentityEvidence(
+  evidenceItems: readonly EvidenceItem[],
+): EvidenceItem | undefined {
+  return evidenceItems.find((item) => item.type === 'identity');
+}
+
+function readIdentityMatchType(
+  evidence: EvidenceItem | undefined,
+): MatchDetail['matchType'] | undefined {
+  const candidate = evidence?.metadata?.matchType;
+  if (typeof candidate !== 'string') {
+    return undefined;
+  }
+  return EXACT_MATCH_TYPES.has(candidate as MatchDetail['matchType'])
+    ? candidate as MatchDetail['matchType']
+    : undefined;
+}
+
+function readMatchedAlias(
+  evidence: EvidenceItem | undefined,
+): string | undefined {
+  const matchedAlias = evidence?.metadata?.matchedAlias;
+  return typeof matchedAlias === 'string' && matchedAlias.length > 0
+    ? matchedAlias
+    : undefined;
+}
+
+function deriveMatchType(
+  result: RankedResult,
+): MatchDetail['matchType'] {
+  const identityEvidence = findIdentityEvidence(result.evidenceItems);
+  const identityMatchType = readIdentityMatchType(identityEvidence);
+  if (identityMatchType !== undefined) {
+    return identityMatchType;
+  }
+
+  const protectedReason = result.retrievalProvenance?.protectedInclusionReason;
+  if (protectedReason === 'exact_alias_match' || protectedReason === 'known_item_lookup') {
+    return 'alias_exact';
+  }
+
+  const channels = new Set(result.retrievalProvenance?.channels ?? []);
+  const hasLexicalChannel = channels.has('sparse_bm25') || channels.has('learned_sparse');
+  const hasSemanticChannel = channels.has('dense_semantic');
+
+  if (hasSemanticChannel && !hasLexicalChannel) {
+    return 'semantic';
+  }
+
+  if (hasLexicalChannel && !hasSemanticChannel) {
+    return 'alias_fuzzy';
+  }
+
+  return 'hybrid';
+}
+
+function deriveLexicalScore(
+  result: RankedResult,
+): number {
+  const lexicalContribution = result.scoreDecomposition?.lexicalContribution;
+  if (typeof lexicalContribution === 'number' && Number.isFinite(lexicalContribution)) {
+    return clamp01(lexicalContribution);
+  }
+
+  const identityEvidence = findIdentityEvidence(result.evidenceItems);
+  const aliasScore = identityEvidence?.metadata?.aliasScore;
+  if (typeof aliasScore === 'number' && Number.isFinite(aliasScore)) {
+    return clamp01(aliasScore);
+  }
+
+  const protectedReason = result.retrievalProvenance?.protectedInclusionReason;
+  if (protectedReason === 'exact_alias_match' || protectedReason === 'known_item_lookup') {
+    return 1;
+  }
+
+  return 0;
+}
 
 async function withDrinkingWindowTimeout(
   predictionPromise: Promise<DrinkingWindowBlock>,
@@ -76,6 +157,53 @@ function needsDrinkingWindowPrediction(r: RankedResult, priors?: QueryLevelSenso
   return hasTannin && hasAcidity;
 }
 
+function buildDrinkingWindowCheckInput(
+  r: RankedResult,
+  priors: QueryLevelSensoryPriors | undefined,
+  targetYear: number,
+): {
+  readonly request: Parameters<DrinkingWindowUseCasePort['check']>[0];
+  readonly missingInfo: readonly string[];
+  readonly approximationUsed: boolean;
+} {
+  const body = r.body ?? priors?.body;
+  const tannin = r.tannin ?? priors?.tannin;
+  const acidity = r.acidity ?? priors?.acidity;
+  const sweetness = r.sweetness ?? priors?.sweetness;
+  if (tannin === undefined || acidity === undefined) {
+    throw new Error(
+      `buildDrinkingWindowCheckInput: required sensory inputs missing for entity ${String(r.entityId)}`,
+    );
+  }
+
+  const missingInfo = [
+    ...(r.body === undefined ? ['body'] : []),
+    ...(r.sweetness === undefined ? ['sweetness'] : []),
+  ];
+
+  return {
+    request: {
+      vintage: r.vintageYear!,
+      grapePrimaryEnc: r.grapePrimaryEnc!,
+      regionEnc: r.regionEnc!,
+      countryEnc: r.countryEnc!,
+      ...(body !== undefined ? { body: body * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } : {}),
+      tannin: tannin * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+      acidity: acidity * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
+      ...(sweetness !== undefined ? { sweetness: sweetness * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE } : {}),
+      avgCriticProxyScore: r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
+      targetYear,
+    },
+    missingInfo,
+    approximationUsed:
+      missingInfo.length > 0
+      || body !== r.body
+      || tannin !== r.tannin
+      || acidity !== r.acidity
+      || sweetness !== r.sweetness,
+  };
+}
+
 /**
  * Maps ranked rows to API {@link ResultItem}s; enriches drinking window from cache or predictor.
  *
@@ -106,28 +234,16 @@ export async function mapRankedResultsToResultItems(
   const resultsPendingPrediction = rankedResults.filter(
     (r) => drinkingWindow !== undefined && needsDrinkingWindowPrediction(r, sensoryPriors),
   );
+  const drinkingWindowMissingInfo = new Map<string, readonly string[]>();
+  const drinkingWindowApproximationUsed = new Map<string, boolean>();
 
   const predictions = await Promise.allSettled(
-    resultsPendingPrediction.map((r) =>
-      withDrinkingWindowTimeout(
-        drinkingWindow!.check({
-          vintage: r.vintageYear!,
-          grapePrimaryEnc: r.grapePrimaryEnc!,
-          regionEnc: r.regionEnc!,
-          countryEnc: r.countryEnc!,
-          // Indexed sensory values take precedence; priors fill gaps.
-          // All values are [0,1] normalised floats from Vespa/priors; scale to
-          // [1–5 ordinal] that the predictor expects.
-          body: ((r.body ?? sensoryPriors?.body ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
-          tannin: ((r.tannin ?? sensoryPriors?.tannin ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
-          acidity: ((r.acidity ?? sensoryPriors?.acidity ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
-          sweetness: ((r.sweetness ?? sensoryPriors?.sweetness ?? UNCERTAINTY_CONFIDENCE_NEUTRAL)) * DRINKING_WINDOW_SENSORY_ORDINAL_SCALE,
-          avgCriticProxyScore:
-            r.avgCriticProxyScore ?? DEFAULT_DRINKING_WINDOW_CRITIC_PROXY_SCORE,
-          targetYear,
-        }),
-      ),
-    ),
+    resultsPendingPrediction.map((r) => {
+      const request = buildDrinkingWindowCheckInput(r, sensoryPriors, targetYear);
+      drinkingWindowMissingInfo.set(r.entityId, request.missingInfo);
+      drinkingWindowApproximationUsed.set(r.entityId, request.approximationUsed);
+      return withDrinkingWindowTimeout(drinkingWindow!.check(request.request));
+    }),
   );
 
   const predictionMap = new Map<string, DrinkingWindowBlock>();
@@ -138,6 +254,7 @@ export async function mapRankedResultsToResultItems(
       return;
     }
     if (settled?.status === 'rejected') {
+      drinkingWindowApproximationUsed.set(r.entityId, true);
       drinkingWindowLogger.warn(
         {
           entityId: r.entityId,
@@ -177,6 +294,11 @@ export async function mapRankedResultsToResultItems(
       }
     }
 
+    const matchType = deriveMatchType(r);
+    const identityEvidence = findIdentityEvidence(r.evidenceItems);
+    const matchedAlias = readMatchedAlias(identityEvidence);
+    const missingInfo = drinkingWindowMissingInfo.get(r.entityId) ?? [];
+    const approximationUsed = drinkingWindowApproximationUsed.get(r.entityId) ?? false;
     const baseItem: ResultItem = {
       entity: {
         entityId: r.entityId,
@@ -208,9 +330,10 @@ export async function mapRankedResultsToResultItems(
       },
       relevanceScore: r.finalScore,
       match: {
-        matchType: 'hybrid' as const,
+        matchType,
+        ...(matchedAlias !== undefined ? { matchedAlias } : {}),
         scoreComponents: {
-          lexical: 0,
+          lexical: deriveLexicalScore(r),
           semantic: r.componentScores.semantic,
           attribute: r.componentScores.attributeAlignment,
           popularity: r.componentScores.popularity,
@@ -228,8 +351,8 @@ export async function mapRankedResultsToResultItems(
         uncertaintyConfidence: Number.isFinite(r.componentScores.uncertaintyPenalty)
           ? clamp01(1 - r.componentScores.uncertaintyPenalty)
           : UNCERTAINTY_CONFIDENCE_NEUTRAL,
-        missingInfo: [],
-        approximationUsed: false,
+        missingInfo,
+        approximationUsed,
       },
       evidenceItems: r.evidenceItems,
     };

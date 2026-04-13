@@ -12,6 +12,7 @@ import type { RankedResult, CoarsePruneStageSummary } from '../model/ranked-resu
 import type { RankerRuntimeSignal } from '../model/ranking-runtime-signal.js';
 import type { FunnelMetrics } from '../model/ranking-stage.js';
 import type { ScoreDriftRecord } from '../model/score-decomposition.js';
+import type { ExecutionProvenanceClosure } from '../../query/model/engine-execution-contract.js';
 
 /**
  * E1-T4: Typed reranking decision contract.
@@ -113,6 +114,8 @@ export interface RankingMetadata {
    *  value, forcing a fallback to heuristic scores. Downstream should
    *  treat this as ltrAvailable=false for entropy gate purposes. */
   readonly ltrSaturated?: boolean | undefined;
+  /** Compiled-first provenance closure captured before decision evaluation. */
+  readonly provenanceClosure?: ExecutionProvenanceClosure | undefined;
 }
 
 /**

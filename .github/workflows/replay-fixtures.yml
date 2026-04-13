@@ -4,7 +4,8 @@ on:
   pull_request:
     paths:
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'config/vitest/e2e.config.ts'
       - 'config/vitest/e2e.replay.config.ts'
       - 'config/vitest/e2e.vespa.config.ts'
@@ -37,14 +38,14 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Self-contained replay fixture lane
-        run: npm run test:e2e:replay:fixtures:self-contained
+        run: pnpm run test:e2e:replay:fixtures:self-contained
       - name: Replay summary
         if: always()
         run: |
           {
             echo "## Replay Fixture Lane"
             echo ""
-            echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:self-contained\`"
+            echo "- Always-on lane: \`pnpm run test:e2e:replay:fixtures:self-contained\`"
             echo "- Fixture routing source of truth: \`test/replay-fixtures/search/run-search-fixture.ts\`"
             echo "- Selection rule: fixtures with \`execution_lane='self_contained'\`"
             echo "- Invariant: self-contained fixtures must not declare \`requires_runtime_capability\`"
@@ -56,14 +57,14 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Runtime-required replay execution lane
-        run: npm run test:e2e:replay:fixtures:runtime-required
+        run: pnpm run test:e2e:replay:fixtures:runtime-required
       - name: Runtime-required replay summary
         if: always()
         run: |
           {
             echo "## Runtime-Required Replay In-Memory Lane"
             echo ""
-            echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:runtime-required\`"
+            echo "- Always-on lane: \`pnpm run test:e2e:replay:fixtures:runtime-required\`"
             echo "- Scope: executes fixtures with \`execution_lane='runtime_required'\` and \`metadata.runtime_mode='inmemory'\` against capability-aware in-memory runtime wiring"
             echo "- Fixture count: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -l '\"runtime_mode\"\\s*:\\s*\"inmemory\"' | wc -l | tr -d ' ')"
             echo "- Invariant: runtime-required fixtures must declare at least one \`requires_runtime_capability\` tag"
@@ -77,14 +78,14 @@ jobs:
       - name: Runtime-required replay full-runtime lane
         env:
           REPLAY_FULL_RUNTIME_REPORT_PATH: /tmp/replay-fixtures-artifacts/full-runtime-report.json
-        run: npm run test:e2e:replay:fixtures:full-runtime
+        run: pnpm run test:e2e:replay:fixtures:full-runtime
       - name: Runtime-required replay full-runtime summary
         if: always()
         run: |
           {
             echo "## Runtime-Required Replay Full-Runtime Lane"
             echo ""
-            echo "- Always-on lane: \`npm run test:e2e:replay:fixtures:full-runtime\`"
+            echo "- Always-on lane: \`pnpm run test:e2e:replay:fixtures:full-runtime\`"
             echo "- Scope: executes fixtures with \`metadata.runtime_mode='full_runtime'\` against real Vespa + real HTTP ML adapters"
             echo "- Docker stack: \`docker-compose.test.yml\` via \`bash scripts/run-vespa-test-lane.sh\`"
             echo "- Fixture count: $(find test/replay-fixtures/search -name '*.json' -print0 | xargs -0 rg -l '\"runtime_mode\"\\s*:\\s*\"full_runtime\"' | wc -l | tr -d ' ')"

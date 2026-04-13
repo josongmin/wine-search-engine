@@ -2,6 +2,9 @@
 node_modules
 node_modules/
 web/node_modules
+# Package manager: pnpm (lockfile is pnpm-lock.yaml; avoid committing npm locks)
+package-lock.json
+web/package-lock.json
 dist
 dist/
 out/

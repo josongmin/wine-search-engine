@@ -6,6 +6,8 @@ import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
 import type { QueryPlannerPort } from '../../../../src/application/search/port/search-pipeline-deps.port.js';
 import type { ResponseBuilder } from '../../../../src/domain/response/service/response-builder.js';
+import type { NormalizedConstraint } from '../../../../src/domain/shared/types/index.js';
+import { buildRetrievalPlan } from '../../../../src/domain/retrieval/service/retrieval-plan-builder.js';
 import { logSearchEvent } from '../../../../src/observability/log-search-event.js';
 
 vi.mock('../../../../src/observability/log-search-event.js', () => ({
@@ -13,6 +15,17 @@ vi.mock('../../../../src/observability/log-search-event.js', () => ({
 }));
 
 const mockedLogSearchEvent = vi.mocked(logSearchEvent);
+
+function constraint(
+  partial: Omit<NormalizedConstraint, 'source_phrase' | 'confidence'> &
+    Partial<Pick<NormalizedConstraint, 'source_phrase' | 'confidence'>>,
+): NormalizedConstraint {
+  return {
+    source_phrase: 'test',
+    confidence: 0.9,
+    ...partial,
+  };
+}
 
 describe('runSearchPreRoutePhase', () => {
   beforeEach(() => {
@@ -23,7 +36,7 @@ describe('runSearchPreRoutePhase', () => {
     vi.useRealTimers();
   });
 
-  it('returns continue with plan when pipeline reaches main search', async () => {
+  it('returns continue with plan when pipeline reaches main search via explicit compiled-less seam', async () => {
     const plan = {
       rawQuery: 'red wine',
       normalizedQuery: 'red wine',
@@ -62,6 +75,7 @@ describe('runSearchPreRoutePhase', () => {
       constraintSAT: new ConstraintSAT(),
       cacheService: undefined,
       decomposedSearch: undefined,
+      allowCompiledFallback: true,
     });
 
     expect(result.outcome).toBe('continue');
@@ -69,6 +83,146 @@ describe('runSearchPreRoutePhase', () => {
       expect(result.plan).toBe(plan);
     }
     expect(queryPlanner.plan).toHaveBeenCalled();
+  });
+
+  it('rebuilds compiled and admission context after merging structured filters', async () => {
+    const plan = {
+      rawQuery: 'red wine',
+      normalizedQuery: 'red wine',
+      intent: 'facet_search' as const,
+      route: 'hybrid' as const,
+      retrievalMode: 'attribute_search' as const,
+      queryClass: 'unknown',
+      anchors: [],
+      constraints: {
+        hard: [
+          constraint({ attribute: 'wine_type', operator: '=', value: 'white' }),
+          constraint({ attribute: 'country', operator: '=', value: 'France' }),
+        ],
+        soft: [],
+        inferred: [],
+      },
+      expansions: { lexical: [], semantic: [] },
+      policy: {} as QueryPlanV1['policy'],
+      uncertainty: {} as QueryPlanV1['uncertainty'],
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      admission_context: {
+        requires_identity_seal: false,
+        requires_constraint_evidence: true,
+        requires_anchor_evidence: false,
+      },
+    } as QueryPlanV1;
+
+    const compiled = {
+      query: {
+        rawQuery: plan.rawQuery,
+        normalizedQuery: plan.normalizedQuery,
+        intent: plan.intent,
+        queryClass: plan.queryClass,
+        anchors: plan.anchors,
+        constraints: plan.constraints,
+        expansions: plan.expansions,
+        uncertainty: plan.uncertainty,
+        plannerVersion: plan.plannerVersion,
+        policyRuleVersion: plan.policyRuleVersion,
+        thresholdProfileId: plan.thresholdProfileId,
+        retrievalPlan: buildRetrievalPlan(plan.constraints),
+      },
+      execution: {
+        effectiveRoute: 'hybrid' as const,
+        effectiveRetrievalMode: 'attribute_search' as const,
+        routeSource: 'planner' as const,
+        budget: { maxCandidates: 20, enablePrecisionRerank: true },
+        provenancePolicy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: false,
+        },
+      },
+    };
+
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn(async () => plan),
+      planWithCompiled: vi.fn(async () => ({ v1: plan, compiled })),
+    };
+
+    const result = await runSearchPreRoutePhase({
+      request: {
+        query: 'red wine',
+        filters: [
+          constraint({ attribute: 'wine_type', operator: '=', value: 'red' }),
+        ],
+      },
+      requestId: 'r-filters',
+      startTime: Date.now(),
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner,
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch: undefined,
+    });
+
+    expect(result.outcome).toBe('continue');
+    if (result.outcome === 'continue') {
+      expect(result.plan.constraints.hard).toEqual([
+        constraint({ attribute: 'country', operator: '=', value: 'France' }),
+        constraint({ attribute: 'wine_type', operator: '=', value: 'red' }),
+      ]);
+      expect(result.plan.admission_context).toEqual({
+        requires_identity_seal: false,
+        requires_constraint_evidence: true,
+        requires_anchor_evidence: false,
+      });
+      expect(result.compiled.query.constraints.hard).toEqual(result.plan.constraints.hard);
+      expect(result.compiled.query.retrievalPlan).toEqual(
+        buildRetrievalPlan(result.plan.constraints),
+      );
+      expect(result.compiled.execution.provenancePolicy.requireConstraintEvidence).toBe(true);
+    }
+  });
+
+  it('rejects compiled-less fallback unless the explicit seam is enabled', async () => {
+    const plan = {
+      rawQuery: 'red wine',
+      normalizedQuery: 'red wine',
+      intent: 'facet_search' as const,
+      route: 'hybrid' as const,
+      retrievalMode: 'semantic_hybrid' as const,
+      queryClass: 'unknown',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {} as QueryPlanV1['policy'],
+      uncertainty: {} as QueryPlanV1['uncertainty'],
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    } as QueryPlanV1;
+
+    const queryPlanner: QueryPlannerPort = {
+      plan: vi.fn(async () => plan),
+    };
+
+    await expect(runSearchPreRoutePhase({
+      request: { query: 'red wine' },
+      requestId: 'r-legacy',
+      startTime: Date.now(),
+      snapshotVersions: undefined,
+      securityGateDeps: {
+        querySanitizer: new QuerySanitizer(),
+      },
+      queryPlanner,
+      responseBuilder: { build: vi.fn() } as unknown as ResponseBuilder,
+      constraintSAT: new ConstraintSAT(),
+      cacheService: undefined,
+      decomposedSearch: undefined,
+    })).rejects.toThrow('Search pre-route requires QueryPlanner.planWithCompiled()');
   });
 
   it('logs compiled execution route and mode when compiled planning is available', async () => {
@@ -259,6 +413,7 @@ describe('runSearchPreRoutePhase', () => {
       constraintSAT: new ConstraintSAT(),
       cacheService: undefined,
       decomposedSearch,
+      allowCompiledFallback: true,
     });
 
     await vi.advanceTimersByTimeAsync(15_000);

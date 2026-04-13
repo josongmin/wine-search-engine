@@ -120,7 +120,7 @@ function mockVespaResponses(args?: {
   readonly snapshotDocCount?: number;
   readonly namespaceSealViolations?: number;
 }) {
-  const docCount = args?.snapshotDocCount ?? 42;
+  const docCount = args?.snapshotDocCount ?? 10;
   const violations = args?.namespaceSealViolations ?? 0;
   return vi
     .spyOn(globalThis, 'fetch')
@@ -371,6 +371,53 @@ describe('verifySearchSnapshotRuntimeStateLive', () => {
           runtimeState,
         }),
       ).rejects.toThrow(/Canonical alias projection mismatch/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('throws when Vespa document count does not exactly match runtime entity count', async () => {
+    const dir = await makeTempDir();
+    const nlPath = path.join(dir, 'nl.json');
+    const nlPayload = { mappings: [{ key: 'a', canonical: 'b' }] };
+    await fs.writeFile(nlPath, JSON.stringify(nlPayload));
+
+    const activeLtrHash = activeLtrHashFromRows();
+    const runtimeState: LoadedSearchSnapshotRuntimeState = {
+      schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
+      snapshotId: 'snap-test-1',
+      contentHash: 'hash',
+      publishedAt: '2026-04-12T00:00:00.000Z',
+      manifestPath: '/tmp/m.json',
+      nlMappingsRuntimePath: nlPath,
+      allowMissingLtr: false,
+      counts: {
+        entities: 10,
+        aliases: 10,
+        ambiguityRegistry: 2,
+        nlMappings: 1,
+        activeLtrModels: 1,
+      },
+      hashes: {
+        entities: 'entities',
+        aliases: 'aliases',
+        ambiguityRegistry: 'ambiguity',
+        nlMappings: hashRuntimeNlMappings(nlPayload),
+        activeLtrModels: activeLtrHash,
+      },
+    };
+
+    const fetchSpy = mockVespaResponses({ snapshotDocCount: 9 });
+
+    try {
+      const pool = createPoolMock() as unknown as Pool;
+      await expect(
+        verifySearchSnapshotRuntimeStateLive({
+          pool,
+          vespaUrl: 'http://vespa.test:8080',
+          runtimeState,
+        }),
+      ).rejects.toThrow(/Vespa snapshot document count mismatch/);
     } finally {
       fetchSpy.mockRestore();
     }

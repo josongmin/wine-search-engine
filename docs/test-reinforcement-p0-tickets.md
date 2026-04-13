@@ -18,7 +18,7 @@ This document focuses only on `P0`:
 ## Baseline
 
 - Date: 2026-04-06
-- Current result: `npm run test:e2e` => `117 failed / 178 passed / 71 skipped`
+- Current result: `pnpm run test:e2e` => `117 failed / 178 passed / 71 skipped`
 - Main failure buckets:
   - snake_case transport drift in in-memory E2E
   - missing mixed-query harness data causing 500
@@ -316,7 +316,7 @@ Depends on:
 
 Title:
 
-- Make `npm run test:e2e` green and stable
+- Make `pnpm run test:e2e` green and stable
 
 Why:
 
@@ -328,14 +328,14 @@ Files:
 
 Tasks:
 
-- run `npm run test:e2e`
+- run `pnpm run test:e2e`
 - fix remaining fast-suite failures
 - keep fixes inside the intended scope and avoid drive-by refactors
 - summarize any intentionally deferred failures that belong to Vespa or P1
 
 Definition of done:
 
-- `npm run test:e2e` passes locally
+- `pnpm run test:e2e` passes locally
 
 ## Recommended Order
 
@@ -354,7 +354,7 @@ Definition of done:
 
 ## P0 Exit Criteria
 
-- `npm run test:e2e` passes
+- `pnpm run test:e2e` passes
 - every route in `src/interface/http/server.ts` has at least one end-to-end test
 - mixed queries do not unexpectedly 500 in fast E2E
 - in-memory E2E is focused on contract, protocol, and smoke behavior

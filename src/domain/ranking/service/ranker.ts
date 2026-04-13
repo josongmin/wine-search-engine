@@ -29,7 +29,10 @@ import { evaluateRerankGate } from './rerank-gate.js';
 import { LTRRanker } from './ltr-ranker.js';
 import { extractLTRFeatures } from './ltr-feature-extractor.js';
 import { MS_PER_DAY } from '../../shared/utils/time-units.js';
-import { clamp01 } from '../../shared/utils/clamp.js';
+import {
+  projectHybridCandidateToRankedResultAttributes,
+  projectRankedResultSourceAttributes,
+} from './ranked-result-attribute-projection.js';
 import {
   evaluateRerankSafety,
   buildRerankSafetyListContext,
@@ -153,6 +156,7 @@ export interface ScoredEntry {
   readonly tannin?: number | undefined;
   readonly acidity?: number | undefined;
   readonly sweetness?: number | undefined;
+  readonly avgCriticProxyScore?: number | undefined;
   readonly criticScoreNormalized?: number | undefined;
   readonly grapePrimaryEnc?: number | undefined;
   readonly regionEnc?: number | undefined;
@@ -184,24 +188,17 @@ const LTR_MODEL_FEATURE_DIMENSION = 8;
 /** Entity IDs captured after primary sort for funnel rerank telemetry. */
 const PRE_RERANK_TOP_ENTITY_SNAPSHOT_COUNT = 5;
 
-/** Maps normalized critic score to 80–100 “proxy points” display scale. */
-const CRITIC_PROXY_SCORE_DISPLAY_BASE = 80;
-const CRITIC_PROXY_SCORE_DISPLAY_SPAN = 20;
-
 /**
- * Treat reranker batch as degenerate when max-min below this (use neutral norm).
+ * Treat reranker batch as degenerate when max-min below this and keep the
+ * heuristic score instead of fabricating a midpoint blend.
  * Logit-scale scores can differ by ~1e-7 from floating-point noise; 1e-8 was
- * overly tight and collapsed distinct candidates to the neutral blend.
+ * overly tight and collapsed distinct candidates into the degraded path.
  */
 const RERANK_SCORE_MIN_MAX_RANGE_EPSILON = 1e-6;
-/** Neutral normalized rerank score when range is unusable (midpoint of [0,1]). */
-const RERANK_SCORE_NORMALIZED_NEUTRAL = 0.5;
-/**
- * Fallback rerank blend weight when effectiveRerankBlendWeight returns NaN/Infinity
- * (e.g. misconfigured rerankBlendScale env var). Midpoint = equal weight between
- * cross-encoder and heuristic score, preventing either from dominating.
- */
-const RERANK_BLEND_WEIGHT_FALLBACK = 0.5;
+/** Degradation reason emitted when rerank scores cannot be normalized safely. */
+const RERANK_SCORE_NORMALIZATION_FAILED_REASON = 'reranker_score_normalization_failed';
+/** Degradation reason emitted when the blend weight is not finite. */
+const RERANK_BLEND_WEIGHT_INVALID_REASON = 'reranker_blend_weight_invalid';
 
 /**
  * Final-score comparisons treat values within this epsilon as tied so ordering
@@ -816,58 +813,14 @@ export class Ranker {
       scored.push({
         entityId: candidate.entityId,
         canonicalLabel: candidate.canonicalLabel ?? '',
-        ...(candidate.producer !== undefined ? { producer: candidate.producer } : {}),
-        ...(candidate.region !== undefined ? { region: candidate.region } : {}),
         ...(candidate.searchTextEn !== undefined
           ? { searchTextEn: candidate.searchTextEn }
           : {}),
-        ...(candidate.grapePrimary !== undefined
-          ? { grapePrimary: candidate.grapePrimary }
-          : {}),
-        ...(candidate.drinkingWindowStart !== undefined ? { drinkingWindowStart: candidate.drinkingWindowStart } : {}),
-        ...(candidate.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: candidate.drinkingWindowEnd } : {}),
-        ...(candidate.drinkingWindowModelVersion !== undefined
-          ? { drinkingWindowModelVersion: candidate.drinkingWindowModelVersion }
-          : {}),
-        // Epic 15: Wine attributes with label encoding
-        ...(candidate.vintageYear !== undefined ? { vintageYear: candidate.vintageYear } : {}),
-        ...(candidate.body !== undefined ? { body: candidate.body } : {}),
-        ...(candidate.tannin !== undefined ? { tannin: candidate.tannin } : {}),
-        ...(candidate.acidity !== undefined ? { acidity: candidate.acidity } : {}),
-        ...(candidate.sweetness !== undefined ? { sweetness: candidate.sweetness } : {}),
-        ...(candidate.criticScoreNormalized !== undefined
-          ? { criticScoreNormalized: candidate.criticScoreNormalized }
-          : {}),
-        // Encode categorical attributes
-        ...(candidate.grapePrimary !== undefined
-          ? { grapePrimaryEnc: this.attributeEncoder.encodeGrape(candidate.grapePrimary) }
-          : {}),
-        ...(candidate.appellation !== undefined
-          ? { regionEnc: this.attributeEncoder.encodeRegion(candidate.appellation) }
-          : {}),
-        ...(candidate.country !== undefined
-          ? { countryEnc: this.attributeEncoder.encodeCountry(candidate.country) }
-          : {}),
-        ...(candidate.appellation !== undefined ? { appellation: candidate.appellation } : {}),
-        ...(candidate.producerPrestige !== undefined
-          ? { producerPrestige: candidate.producerPrestige }
-          : {}),
-        ...(candidate.retrievalProvenance !== undefined
-          ? { retrievalProvenance: candidate.retrievalProvenance }
-          : {}),
-        ...(candidate.style !== undefined ? { style: candidate.style } : {}),
-        ...(candidate.classification !== undefined ? { classification: candidate.classification } : {}),
-        ...(candidate.alcoholPct !== undefined ? { alcoholPct: candidate.alcoholPct } : {}),
-        ...(candidate.certifications !== undefined ? { certifications: candidate.certifications } : {}),
-        ...(candidate.pairing !== undefined ? { pairingTags: candidate.pairing } : {}),
-        ...(candidate.occasion !== undefined ? { occasion: candidate.occasion } : {}),
-        ...(candidate.priceBand !== undefined ? { priceBand: candidate.priceBand } : {}),
-        ...(candidate.priceUsd !== undefined ? { priceUsd: candidate.priceUsd } : {}),
-        ...(candidate.sourceRecordRefs !== undefined && candidate.sourceRecordRefs.length > 0
-          ? { sourceRecordRefs: candidate.sourceRecordRefs }
-          : {}),
+        ...(projectHybridCandidateToRankedResultAttributes(
+          candidate,
+          this.attributeEncoder,
+        ) as Partial<ScoredEntry>),
         // E1-T3: propagate deterministic tie-break tiers alongside channel ranks.
-        ...(candidate.sparseRank !== undefined ? { sparseRank: candidate.sparseRank } : {}),
         ...(candidate.denseRank !== undefined ? { denseRank: candidate.denseRank } : {}),
         ...(candidate.anchorRank !== undefined ? { anchorRank: candidate.anchorRank } : {}),
         evidenceQualityTier: buildEvidenceQualityTier(candidate),
@@ -962,17 +915,18 @@ export class Ranker {
         if (this.reranker !== undefined) {
           try {
             const preRerankCount = viable.length;
-            finalOrder = await this.applyReranking(
+            const rerankOutcome = await this.applyReranking(
               queryPlan.normalizedQuery,
               viable,
               queryPlan.queryClass,
               effectiveTopK,
             );
+            finalOrder = rerankOutcome.results;
             localRerankExecuted = true;
             localRerankDecisionCode = 'applied';
             localRerankInputCount = preRerankCount;
             localRerankOutputCount = finalOrder.length;
-            localRuntimeSignal = { rerankerStatus: 'executed' };
+            localRuntimeSignal = rerankOutcome.runtimeSignal ?? { rerankerStatus: 'executed' };
           } catch (err) {
             const rerankerFailureReason = classifyRerankerFailureReason(err);
             bootstrapLogger.warn(
@@ -1028,51 +982,7 @@ export class Ranker {
           hardConstraintPassed: entry.componentScores.hardConstraintPass,
           entityIntegrityPassed: true,
         },
-        ...(entry.producer !== undefined ? { producer: entry.producer } : {}),
-        ...(entry.region !== undefined ? { region: entry.region } : {}),
-        ...(entry.grapePrimary !== undefined ? { grapePrimary: entry.grapePrimary } : {}),
-        ...(entry.appellation !== undefined ? { appellation: entry.appellation } : {}),
-        ...(entry.producerPrestige !== undefined ? { producerPrestige: entry.producerPrestige } : {}),
-        ...(entry.retrievalProvenance !== undefined
-          ? { retrievalProvenance: entry.retrievalProvenance }
-          : {}),
-        ...(entry.drinkingWindowStart !== undefined ? { drinkingWindowStart: entry.drinkingWindowStart } : {}),
-        ...(entry.drinkingWindowEnd !== undefined ? { drinkingWindowEnd: entry.drinkingWindowEnd } : {}),
-        ...(entry.drinkingWindowModelVersion !== undefined
-          ? { drinkingWindowModelVersion: entry.drinkingWindowModelVersion }
-          : {}),
-        // Epic 15: Wine attributes for dynamic prediction
-        ...(entry.vintageYear !== undefined ? { vintageYear: entry.vintageYear } : {}),
-        ...(entry.body !== undefined ? { body: entry.body } : {}),
-        ...(entry.tannin !== undefined ? { tannin: entry.tannin } : {}),
-        ...(entry.acidity !== undefined ? { acidity: entry.acidity } : {}),
-        ...(entry.sweetness !== undefined ? { sweetness: entry.sweetness } : {}),
-        ...(entry.criticScoreNormalized !== undefined
-          ? {
-              // Clamp locally: upstream signal-computer normalizes to [0,1] via clamp01(),
-              // but a mutation or NaN upstream could leak >1.0, producing scores >100.
-              avgCriticProxyScore: Math.round(
-                CRITIC_PROXY_SCORE_DISPLAY_BASE + clamp01(entry.criticScoreNormalized) * CRITIC_PROXY_SCORE_DISPLAY_SPAN,
-              ),
-              criticScoreNormalized: entry.criticScoreNormalized,
-            }
-          : {}),
-        ...(entry.grapePrimaryEnc !== undefined ? { grapePrimaryEnc: entry.grapePrimaryEnc } : {}),
-        ...(entry.regionEnc !== undefined ? { regionEnc: entry.regionEnc } : {}),
-        ...(entry.countryEnc !== undefined ? { countryEnc: entry.countryEnc } : {}),
-        ...(entry.style !== undefined ? { style: entry.style } : {}),
-        ...(entry.classification !== undefined ? { classification: entry.classification } : {}),
-        ...(entry.alcoholPct !== undefined ? { alcoholPct: entry.alcoholPct } : {}),
-        ...(entry.certifications !== undefined ? { certifications: entry.certifications } : {}),
-        ...(entry.pairingTags !== undefined ? { pairingTags: entry.pairingTags } : {}),
-        ...(entry.occasion !== undefined ? { occasion: entry.occasion } : {}),
-        ...(entry.priceBand !== undefined ? { priceBand: entry.priceBand } : {}),
-        ...(entry.priceUsd !== undefined ? { priceUsd: entry.priceUsd } : {}),
-        ...(entry.sourceRecordRefs !== undefined && entry.sourceRecordRefs.length > 0
-          ? { sourceRecordRefs: entry.sourceRecordRefs }
-          : {}),
-        // E5-T3: propagate sparse BM25 rank for rerank-safety protected-candidate Rule 3
-        ...(entry.sparseRank !== undefined ? { sparseRank: entry.sparseRank } : {}),
+        ...(projectRankedResultSourceAttributes(entry) as Partial<RankedResult>),
       };
     });
 
@@ -1285,9 +1195,13 @@ export class Ranker {
     viable: readonly ScoredEntry[],
     queryClass: QueryClass,
     topKLimit: number = this.rerankTopK,
-  ): Promise<readonly ScoredEntry[]> {
+  ): Promise<{
+    readonly results: readonly ScoredEntry[];
+    readonly runtimeSignal?: RankerRuntimeSignal | undefined;
+  }> {
     const topK = viable.slice(0, topKLimit);
     const rest = viable.slice(topKLimit);
+    const degradationReasons: string[] = [];
 
     // Build wine-aware passage text for the cross-encoder (RFC-017 §5.2).
     const rerankCandidates: RerankCandidate[] = topK.map((entry) => ({
@@ -1315,13 +1229,10 @@ export class Ranker {
 
     // Normalise reranker scores to [0, 1] before blending.
     // Cross-encoder logits (e.g. BGE-reranker) are typically in [-10, +15];
-    // a sigmoid squashes them to a comparable [0, 1] range, and min-max
-    // within the batch preserves the relative ordering while ensuring scale
-    // compatibility with the original aggregated score (also [0, 1]).
-    // Filter non-finite scores BEFORE computing min/max — a single +/-Infinity
-    // would make rawRange Infinity, all scores fall to the 0.5 fallback, and a
-    // -Infinity min would propagate NaN through the entire normalization (NaN
-    // then poisons every blendedScore via 0.5*NaN + 0.5*orig = NaN).
+    // min-max within the batch preserves relative ordering while keeping the
+    // scale compatible with the original aggregated score (also [0, 1]).
+    // Non-finite or collapsed score batches are treated as a degraded rerank:
+    // we keep the heuristic score instead of fabricating a midpoint.
     let minRaw = Infinity;
     let maxRaw = -Infinity;
     for (const r of rerankResults) {
@@ -1333,12 +1244,17 @@ export class Ranker {
       ? maxRaw - minRaw
       : NaN;
 
-    function normalizeRerankScore(raw: number): number {
+    function normalizeRerankScore(raw: number, originalScore: number): number {
       if (
         !Number.isFinite(raw)
         || !Number.isFinite(rawRange)
         || rawRange < RERANK_SCORE_MIN_MAX_RANGE_EPSILON
-      ) return RERANK_SCORE_NORMALIZED_NEUTRAL;
+      ) {
+        if (!degradationReasons.includes(RERANK_SCORE_NORMALIZATION_FAILED_REASON)) {
+          degradationReasons.push(RERANK_SCORE_NORMALIZATION_FAILED_REASON);
+        }
+        return originalScore;
+      }
       // Min-max within batch: maps to [0, 1] preserving relative order.
       // Sigmoid compression is unnecessary when min-max already bounds the range.
       return (raw - minRaw) / rawRange;
@@ -1355,9 +1271,13 @@ export class Ranker {
       // Blend: query-class weight × optional global scale (RFC-017 §5.3)
       const rawW = effectiveRerankBlendWeight(queryClass, this.rerankBlendScale);
       // Guard against NaN/Infinity from a misconfigured rerankBlendScale (e.g. NaN env var).
-      // NaN * normScore = NaN which would propagate into finalScore and leak into API responses.
-      const w = Number.isFinite(rawW) ? rawW : RERANK_BLEND_WEIGHT_FALLBACK;
-      const normScore = normalizeRerankScore(r.score);
+      // A non-finite blend weight is a configuration failure, so fall back to
+      // the heuristic score path instead of fabricating a midpoint blend.
+      const w = Number.isFinite(rawW) ? rawW : 0;
+      if (!Number.isFinite(rawW) && !degradationReasons.includes(RERANK_BLEND_WEIGHT_INVALID_REASON)) {
+        degradationReasons.push(RERANK_BLEND_WEIGHT_INVALID_REASON);
+      }
+      const normScore = normalizeRerankScore(r.score, original.finalScore);
       const blendedScore = w * normScore + (1 - w) * original.finalScore;
       rerankedTopK.push({
         ...original,
@@ -1382,7 +1302,20 @@ export class Ranker {
     // spread pushes all elements onto the call stack (crashes at ~65K; Rule 9).
     const combined = rerankedTopK.concat(rest);
     combined.sort(compareScoredEntriesByFinalScoreDesc);
-    return combined;
+    return {
+      results: combined,
+      ...(degradationReasons.length > 0
+        ? {
+            runtimeSignal: {
+              rerankerStatus: 'executed',
+              degradation: {
+                executionMode: 'degraded',
+                degradationReasons,
+              },
+            } as RankerRuntimeSignal,
+          }
+        : {}),
+    };
   }
 }
 

@@ -1,8 +1,8 @@
 /**
- * E5-T1: W6-P1-2 — embedding readiness returns 'skipped' when no OpenAI key.
+ * E5-T1: W6-P1-2 — embedding readiness fails closed when no OpenAI key.
  *
- * Fix: API key 없음 = probe 불가 상태이므로 'down'(서비스 장애) 대신 'skipped'(probe 불가)가 정확.
- * 'down' + required:true 조합이 key 미설정 환경에서 허위 not-ready를 보고했던 버그 수정.
+ * Fix: required dense retrieval probe must not hide unavailable embedding support
+ * behind `skipped`; it must report `down` so `/ready` fails closed.
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { Config } from '../../../src/config/env.js';
@@ -54,13 +54,13 @@ function makeRuntime(): RuntimeHandles {
 }
 
 describe('E5-T1: embedding readiness when no OpenAI key', () => {
-  it('returns skipped when no openai.apiKey', async () => {
+  it('returns down when no openai.apiKey', async () => {
     const config = makeMinimalConfig();
     const options = buildHealthRouteOptions(config, makeRuntime());
     const embeddingCheck = options.readiness['embedding'];
     expect(embeddingCheck).toBeDefined();
     const status = await embeddingCheck!.check();
-    expect(status).toBe('skipped');
+    expect(status).toBe('down');
   });
 
   it('returns up when openai.apiKey is set (probe called, mocked as up)', async () => {

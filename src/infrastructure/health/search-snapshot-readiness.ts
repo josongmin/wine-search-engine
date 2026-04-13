@@ -515,7 +515,7 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   if (aliasCount !== runtimeState.counts.aliases || aliasCount <= 0 || aliasTotalCount !== aliasCount) {
     throw new Error(`Alias runtime count mismatch: runtime=${aliasCount}/${aliasTotalCount}, state=${runtimeState.counts.aliases}`);
   }
-  if (ambiguityCount !== runtimeState.counts.ambiguityRegistry || ambiguityCount <= 0 || ambiguityTotalCount !== ambiguityCount) {
+  if (ambiguityCount !== runtimeState.counts.ambiguityRegistry || ambiguityTotalCount !== ambiguityCount) {
     throw new Error(`Ambiguity runtime count mismatch: runtime=${ambiguityCount}/${ambiguityTotalCount}, state=${runtimeState.counts.ambiguityRegistry}`);
   }
   if (nlMappingsRuntime.count !== runtimeState.counts.nlMappings || nlMappingsRuntime.count <= 0) {
@@ -527,8 +527,10 @@ export async function verifySearchSnapshotRuntimeStateLive(args: {
   if (activeLtrCount <= 0 && !runtimeState.allowMissingLtr) {
     throw new Error('Active LTR runtime count is zero without explicit no-LTR mode');
   }
-  if (vespaDocumentCount <= 0) {
-    throw new Error(`Vespa snapshot document count is zero for ${runtimeState.snapshotId}`);
+  if (vespaDocumentCount !== runtimeState.counts.entities) {
+    throw new Error(
+      `Vespa snapshot document count mismatch: runtime=${vespaDocumentCount}, state=${runtimeState.counts.entities}`,
+    );
   }
   if (nlMappingsRuntime.hash !== runtimeState.hashes.nlMappings) {
     throw new Error(`NL mappings runtime hash mismatch: runtime=${nlMappingsRuntime.hash}, state=${runtimeState.hashes.nlMappings}`);
@@ -610,7 +612,6 @@ export async function probeSearchSnapshotRuntimeState(
     if (
       runtimeState.counts.entities <= 0
       || runtimeState.counts.aliases <= 0
-      || runtimeState.counts.ambiguityRegistry <= 0
       || nlMappingsRuntime.count !== runtimeState.counts.nlMappings
       || nlMappingsRuntime.count <= 0
       || nlMappingsRuntime.hash !== runtimeState.hashes.nlMappings

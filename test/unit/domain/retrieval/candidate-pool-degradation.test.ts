@@ -6,6 +6,7 @@ import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.
 import type { SearchIndexPort } from '../../../../src/domain/retrieval/port/search-index.port.js';
 import type { EmbeddingServicePort } from '../../../../src/domain/retrieval/port/embedding-service.port.js';
 import type { RetrievalDegradationObserver, RetrievalDegradationSignal } from '../../../../src/domain/retrieval/port/retrieval-degradation-observer.port.js';
+import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 
 function minimalPlan(overrides: Partial<QueryPlanV1> = {}): QueryPlanV1 {
   return {
@@ -149,6 +150,34 @@ describe('CandidatePoolService degradation observer', () => {
     expect(denseSignals[0]!.fallbackApplied).toBe('sparse-only retrieval');
   });
 
+  it('emits learned_sparse degradation when learned sparse search throws', async () => {
+    const { observer, signals } = createMockObserver();
+    const searchIndex = createSearchIndex({
+      searchLearnedSparse: vi.fn(async () => { throw new Error('splade offline'); }),
+    });
+
+    const pool = new CandidatePoolService(
+      searchIndex,
+      createEmbeddingService(),
+      new FusionService(),
+      undefined,
+      'bge-m3',
+      false,
+      observer,
+    );
+
+    await pool.generate(createInput({
+      queryPlan: minimalPlan({
+        queryClass: 'semantic_preference',
+      }),
+    }));
+
+    const learnedSignals = signals.filter((s) => s.component === 'learned_sparse');
+    expect(learnedSignals).toHaveLength(1);
+    expect(learnedSignals[0]!.severity).toBe('error');
+    expect(learnedSignals[0]!.fallbackApplied).toBe('continue without learned sparse');
+  });
+
   it('emits embedding_combiner degradation when all embeddings are null', async () => {
     const { observer, signals } = createMockObserver();
     const embeddingService = createEmbeddingService({
@@ -243,5 +272,51 @@ describe('CandidatePoolService degradation observer', () => {
 
     // Should not throw — observer is optional
     await expect(pool.generate(createInput())).resolves.toBeDefined();
+  });
+
+  it('fails closed on relative_filter anchor miss instead of returning unfiltered candidates', async () => {
+    const { observer, signals } = createMockObserver();
+    const searchIndex = createSearchIndex({
+      sparseSearch: vi.fn(async () => [{
+        entityId: createEntityId('wine-peer'),
+        canonicalLabel: 'Peer Wine',
+        retrievalFusionScore: 0.7,
+        fusionRrfTotal: 0.7,
+        matchedConstraints: [],
+        retrievalTrace: {
+          candidateSources: ['sparse_bm25'],
+          retrievalProfile: 'relative_filter',
+          lexicalQueriesUsed: [],
+          semanticQueriesUsed: [],
+          filtersApplied: [],
+        },
+      }] as unknown as never[]),
+      getDocument: vi.fn(async () => null),
+    });
+
+    const pool = new CandidatePoolService(
+      searchIndex,
+      createEmbeddingService(),
+      new FusionService(),
+      undefined,
+      'bge-m3',
+      false,
+      observer,
+    );
+
+    const out = await pool.generate(createInput({
+      queryPlan: minimalPlan({
+        queryClass: 'comparison_query',
+        retrievalMode: 'compare_candidates',
+      }),
+      anchorEntityId: createEntityId('wine-anchor'),
+      semanticQueries: [],
+    }));
+
+    expect(out).toEqual([]);
+    const relativeSignals = signals.filter((s) => s.component === 'relative_filter');
+    expect(relativeSignals).toHaveLength(1);
+    expect(relativeSignals[0]!.severity).toBe('error');
+    expect(relativeSignals[0]!.fallbackApplied).toBe('return no candidates');
   });
 });

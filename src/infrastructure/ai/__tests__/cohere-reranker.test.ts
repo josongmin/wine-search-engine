@@ -82,4 +82,34 @@ describe('CohereReranker', () => {
       ),
     ).rejects.toThrow(/ADR-007/);
   });
+
+  it('throws on malformed partial Cohere responses instead of dropping bad items', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({
+        results: [
+          { index: 0, relevance_score: 0.91 },
+          { index: 99, relevance_score: 0.73 },
+        ],
+      }), { status: 200 })),
+    );
+
+    const reranker = new CohereReranker({
+      baseUrl: 'https://api.cohere.ai/v2',
+      apiKey: 'co-test',
+      model: 'rerank-v4.0-pro',
+      httpTimeoutMs: 5000,
+    });
+
+    await expect(
+      reranker.rerank(
+        'bourgogne pinot noir',
+        [
+          { entityId: 'wine_1', text: 'wine one' },
+          { entityId: 'wine_2', text: 'wine two' },
+        ],
+        2,
+      ),
+    ).rejects.toThrow(/out of bounds/);
+  });
 });

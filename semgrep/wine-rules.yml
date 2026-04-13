@@ -1,5 +1,5 @@
 # Project-specific Semgrep rules (wine-search-engine).
-# Run via: npm run semgrep
+# Run via: pnpm run semgrep
 
 rules:
   - id: wine-no-ioredis

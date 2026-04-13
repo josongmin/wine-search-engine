@@ -21,14 +21,14 @@ export interface AnchorProfile {
   /** Grape varieties used in this wine. */
   readonly grapes: readonly string[];
 
-  /** Body level [0, 1] normalised (0 = light, 1 = full). Stored as float in Vespa. */
-  readonly body: number;
+  /** Body level [0, 1] normalised (0 = light, 1 = full). Omitted when unavailable. */
+  readonly body?: number | undefined;
 
-  /** Sweetness level [0, 1] normalised (0 = bone dry, 1 = sweet). Stored as float in Vespa. */
-  readonly sweetness: number;
+  /** Sweetness level [0, 1] normalised (0 = bone dry, 1 = sweet). Omitted when unavailable. */
+  readonly sweetness?: number | undefined;
 
-  /** Style descriptor (e.g. "bold red", "crisp white", "sparkling"). */
-  readonly style: string;
+  /** Style descriptor (e.g. "bold red", "crisp white", "sparkling"). Omitted when unavailable. */
+  readonly style?: string | undefined;
 
   /** Pre-computed embedding vector for nearest-neighbor similarity search. */
   readonly embedding?: readonly number[] | undefined;

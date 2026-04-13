@@ -49,8 +49,8 @@ describe('RetrievalChannel vocabulary', () => {
     expect(toRetrievalChannel('learned_sparse')).toBe('learned_sparse');
   });
 
-  it('toRetrievalChannel falls back to sparse_bm25 for truly unknown strings', () => {
-    expect(toRetrievalChannel('completely_unknown')).toBe('sparse_bm25');
+  it('toRetrievalChannel rejects truly unknown strings', () => {
+    expect(() => toRetrievalChannel('completely_unknown')).toThrow('Unknown retrieval channel');
   });
 
   it('preferCanonicalRetrievalChannelLabel preserves already-canonical channels', () => {

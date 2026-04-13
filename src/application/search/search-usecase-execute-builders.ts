@@ -1,5 +1,7 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
+import type { QueryRoute } from '../../domain/query/model/query-route.js';
 import type { DecisionOutput } from '../../domain/decision/model/decision-output.js';
 import type { StructuredClarifyPayload, TypedAbstainDecision } from '../../domain/query/model/abstain-decision.js';
 import type { DecisionSnapshot, EvidenceItem } from '../../domain/shared/types/index.js';
@@ -72,9 +74,9 @@ export function buildConstraintContradictionResponseParams(options: {
   readonly requestId: string;
   readonly startTime: number;
   readonly conflictDesc: string;
-  readonly effectiveRoute: string;
+  readonly effectiveRoute: QueryRoute;
   readonly retrievalModeSource: 'planner' | 'api_override';
-  readonly plannerSuggestedMode: string;
+  readonly plannerSuggestedMode: ExecutionRetrievalMode;
 }): ResponseBuildParams {
   const {
     plan,
@@ -166,9 +168,9 @@ export function buildEntropyAbstainResponseParams(options: {
   readonly snapshot: DecisionSnapshot;
   readonly requestId: string;
   readonly startTime: number;
-  readonly effectiveRoute: string;
+  readonly effectiveRoute: QueryRoute;
   readonly retrievalModeSource: 'planner' | 'api_override';
-  readonly plannerSuggestedMode: string;
+  readonly plannerSuggestedMode: ExecutionRetrievalMode;
   readonly abstainDecision: TypedAbstainDecision;
   readonly entropy: number;
   readonly results: readonly ResultItem[];

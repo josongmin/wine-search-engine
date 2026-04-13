@@ -767,9 +767,11 @@ export class VespaSearchIndex implements SearchIndexPort {
       if (result.status === 'rejected') {
         bootstrapLogger.warn(
           { err: result.reason instanceof Error ? result.reason.message : String(result.reason), callerName },
-          `[VespaSearchIndex] ${callerName}: batch query failed — results will be partial`,
+          `[VespaSearchIndex] ${callerName}: batch query failed — refusing partial results`,
         );
-        continue;
+        throw new Error(
+          `${callerName}: Vespa summary batch failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        );
       }
       for (const proj of result.value) {
         const eid = entityIdOf(proj);

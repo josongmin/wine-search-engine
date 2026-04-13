@@ -1,14 +1,14 @@
 #!/usr/bin/env tsx
 /**
- * Default `npm run migrate` target: Postgres from repo `docker-compose.yml` (service `postgres`).
+ * Default `pnpm run migrate` target: Postgres from repo `docker-compose.yml` (service `postgres`).
  *
  * Pins `DATABASE_URL` / `PG_*` to Compose defaults so a remote `DATABASE_URL` in `.env` does not
  * hijack local migrate (dotenv reload would otherwise re-apply it).
  *
  * Prerequisite:
- *   npm run docker:db:up
+ *   pnpm run docker:db:up
  *
- * Managed / non-Docker DB: `npm run migrate:from-env`
+ * Managed / non-Docker DB: `pnpm run migrate:from-env`
  */
 import dotenv from 'dotenv';
 

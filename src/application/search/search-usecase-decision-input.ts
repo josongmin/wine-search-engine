@@ -1,5 +1,9 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
+import type {
+  ExecutionRetrievalMode,
+  ProvenancePolicy,
+} from '../../domain/query/model/engine-execution-contract.js';
 import {
   type DecisionInput,
   type EvidenceSummary,
@@ -42,12 +46,21 @@ export function buildSearchDecisionInput(
   rankedResults?: readonly RankedResult[],
   effectiveRoute: QueryRoute = plan.route,
   decisionContext?: SearchRouteDecisionContext,
+  executionContext?: {
+    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+    readonly retrievalKind?:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity'
+      | undefined;
+    readonly provenancePolicy?: ProvenancePolicy | undefined;
+  },
   honestyContract?: {
     readonly executionMode?: 'authoritative' | 'degraded' | 'heuristic' | 'advisory' | undefined;
     readonly routeHealthy?: boolean | undefined;
     readonly blockingRequested?: boolean | undefined;
   },
-  effectiveRetrievalMode?: string,
 ): DecisionInput {
   const topResult = rankedResults?.[0];
   const topEntity = resolverResult.topEntity;
@@ -193,14 +206,17 @@ export function buildSearchDecisionInput(
       }
     : undefined;
 
-  const admissionContext = {
-    requires_identity_seal:
+  const provenancePolicy = executionContext?.provenancePolicy ?? {
+    requireIdentitySeal:
       plan.admission_context?.requires_identity_seal === true ||
       effectiveRoute === 'mixed',
-    requires_constraint_evidence: plan.constraints.hard.length > 0,
-    requires_anchor_evidence: anchorEvidenceRequired,
-  } as const;
-
+    requireConstraintEvidence:
+      plan.admission_context?.requires_constraint_evidence === true ||
+      plan.constraints.hard.length > 0,
+    requireAnchorEvidence:
+      plan.admission_context?.requires_anchor_evidence === true ||
+      anchorEvidenceRequired,
+  };
   const evidenceSummaryBase: EvidenceSummary = {
     identityEvidencePresent: false,
     identityEvidence,
@@ -220,26 +236,54 @@ export function buildSearchDecisionInput(
   const evidenceSummary: EvidenceSummary = {
     ...evidenceSummaryBase,
     identityEvidencePresent: hasIdentityEvidence(evidenceSummaryBase),
-    ...(constraintEvidence !== undefined && topResult !== undefined
-      ? {
-          constraintEvidencePresent:
-            topResult.componentScores.hardConstraintPass &&
-            hasConstraintEvidence(evidenceSummaryBase),
-        }
+    ...(constraintEvidence !== undefined
+      ? { constraintEvidencePresent: hasConstraintEvidence(evidenceSummaryBase) }
       : {}),
     ...(anchorEvidence !== undefined
       ? { anchorEvidencePresent: hasAnchorEvidence(evidenceSummaryBase) }
       : {}),
   };
+  const provenanceContract = {
+    policy: provenancePolicy,
+    observed: {
+      identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
+      constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
+      anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
+      topEntityPresent: topEntity !== undefined,
+      rankedTopResultPresent: topResult !== undefined,
+      ...(topResult !== undefined && topEntity !== undefined
+        ? { rankedTopResultMatchesTopEntity }
+        : {}),
+      matchedConstraintAttributes: matchedRequiredAttributes,
+      unmetConstraintAttributes: unmetRequiredAttributes,
+      anchorSignalTypes,
+    },
+    missing: [
+      ...(provenancePolicy.requireIdentitySeal && !hasIdentityEvidence(evidenceSummary)
+        ? ['identity_evidence' as const]
+        : []),
+      ...(provenancePolicy.requireConstraintEvidence && !hasConstraintEvidence(evidenceSummary)
+        ? ['constraint_evidence' as const]
+        : []),
+      ...(provenancePolicy.requireAnchorEvidence && !hasAnchorEvidence(evidenceSummary)
+        ? ['anchor_evidence' as const]
+        : []),
+    ],
+  } as const;
 
   return {
     queryPlan: plan,
     effectiveRoute,
-    ...(effectiveRetrievalMode !== undefined ? { effectiveRetrievalMode } : {}),
+    ...(executionContext?.effectiveRetrievalMode !== undefined
+      ? { effectiveRetrievalMode: executionContext.effectiveRetrievalMode }
+      : {}),
+    ...(executionContext?.retrievalKind !== undefined
+      ? { retrievalKind: executionContext.retrievalKind }
+      : {}),
     resolverResult,
     policy: plan.policy,
     uncertainty: plan.uncertainty,
-    admissionContext,
+    provenanceContract,
     ...(honestyContract?.executionMode !== undefined
       ? { executionMode: honestyContract.executionMode }
       : {}),

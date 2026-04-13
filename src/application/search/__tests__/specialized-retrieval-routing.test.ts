@@ -85,6 +85,7 @@ describe('SearchUseCase specialized retrieval routing', () => {
 
   beforeEach(() => {
     deps = {
+      allowCompiledFallback: true,
       queryPlanner: {
         plan: vi.fn(),
       },

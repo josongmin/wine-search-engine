@@ -2,6 +2,7 @@ import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { AliasType } from '../../alias/model/alias.js';
 import type { MatchSignalSet } from './match-signal-set.js';
 import type { EntityCandidateSource } from './entity-candidate-generator-input.js';
+import type { SourceRecordRef } from '../../entity/model/source-record-ref.js';
 
 /**
  * A candidate that has been scored, calibrated, and ranked by the resolver.
@@ -68,6 +69,9 @@ export interface ResolverCandidate {
 
   /** Optional attribute hints (vintage, region, grape, etc.). */
   readonly attributeHints?: Readonly<Record<string, unknown>>;
+
+  /** Indexed lineage references preserved for entity-route result synthesis. */
+  readonly sourceRecordRefs?: readonly SourceRecordRef[] | undefined;
 
   /** The full set of match signals for scoring. */
   readonly sourceSignals: MatchSignalSet;

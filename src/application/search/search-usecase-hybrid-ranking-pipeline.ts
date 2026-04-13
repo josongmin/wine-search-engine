@@ -16,14 +16,26 @@ import type {
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { buildHybridRouteResolveResult } from './search-usecase-hybrid-route.js';
-import { retrieveHybridCandidatesForPlan } from './search-usecase-hybrid-candidates.js';
+import {
+  retrieveHybridCandidatesForPlan,
+  type HybridCandidateRetrievalResult,
+} from './search-usecase-hybrid-candidates.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
 import { buildResolverCandidatesFromGenerator } from './search-usecase-resolver-candidates.js';
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { buildRelaxationLadder } from '../../domain/query/service/constraint-relaxation.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
+import type {
+  ExecutionProvenanceClosure,
+  ProvenanceCoverageStage,
+} from '../../domain/query/model/engine-execution-contract.js';
 import { throwIfAborted } from '../../domain/shared/cooperative-abort.js';
+import {
+  buildExecutionProvenanceClosureFromStages,
+  buildHybridCandidateCoverageStage,
+  buildRankedResultCoverageStage,
+} from './search-usecase-provenance-closure.js';
 
 export interface HybridRankingRouteDeps {
   readonly candidatePool: CandidatePoolPort;
@@ -41,6 +53,23 @@ export interface RankedRouteEntityResolutionDeps {
 
 export interface HybridRankedRoutePipelineDeps
   extends HybridRankingRouteDeps, RankedRouteEntityResolutionDeps {}
+
+function capAnchorResolverBlockerSeedIds(
+  plan: QueryPlanV1,
+  blockerOnlyIds: readonly CanonicalEntityId[],
+  compiled?: CompiledWineQuery,
+): readonly CanonicalEntityId[] {
+  const maxCandidates = compiled?.execution.budget.maxCandidates;
+  if (maxCandidates === undefined) {
+    return blockerOnlyIds;
+  }
+
+  const anchorCoveredIds = new Set(
+    plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
+  );
+  const remainingSlots = Math.max(0, maxCandidates - anchorCoveredIds.size);
+  return blockerOnlyIds.slice(0, remainingSlots);
+}
 
 function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResult {
   return {
@@ -62,6 +91,86 @@ function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResul
   };
 }
 
+function buildRelaxedCompiledQuery(
+  compiled: CompiledWineQuery,
+  relaxedPlan: QueryPlanV1,
+): CompiledWineQuery {
+  return {
+    ...compiled,
+    query: {
+      ...compiled.query,
+      constraints: relaxedPlan.constraints,
+      retrievalPlan: buildRetrievalPlan(relaxedPlan.constraints),
+    },
+  };
+}
+
+function buildHybridExecutionFacts(params: {
+  readonly plan: QueryPlanV1;
+  readonly compiled?: CompiledWineQuery | undefined;
+  readonly specializedRouteExecuted?: SearchRouteExecutionResult['specializedRouteExecuted'] | undefined;
+  readonly sparseExecuted?: boolean | undefined;
+}): Pick<SearchRouteExecutionResult,
+  'effectiveRetrievalMode'
+  | 'retrievalKind'
+  | 'sparseExecuted'
+  | 'specializedRouteExecuted'
+  | 'usedCompiledExecution'
+> {
+  const effectiveRetrievalMode = params.compiled?.execution.effectiveRetrievalMode ?? params.plan.retrievalMode;
+  const usedCompiledExecution = params.compiled !== undefined;
+  const specializedRouteExecuted = params.specializedRouteExecuted ?? null;
+  const sparseExecuted = params.sparseExecuted ?? true;
+  return {
+    effectiveRetrievalMode,
+    retrievalKind: specializedRouteExecuted !== null ? 'specialized_hybrid' : 'generic_hybrid',
+    sparseExecuted,
+    specializedRouteExecuted,
+    usedCompiledExecution,
+  };
+}
+
+function buildHybridExecutionFactsFromRetrieval(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery | undefined,
+  retrieval: HybridCandidateRetrievalResult,
+): Pick<SearchRouteExecutionResult,
+  'effectiveRetrievalMode'
+  | 'retrievalKind'
+  | 'sparseExecuted'
+  | 'specializedRouteExecuted'
+  | 'usedCompiledExecution'
+> {
+  return buildHybridExecutionFacts({
+    plan,
+    compiled,
+    specializedRouteExecuted: retrieval.specializedRouteObservability?.specializedRouteExecuted ?? null,
+    sparseExecuted: retrieval.sparseExecuted,
+  });
+}
+
+function mergeProvenanceShortfall(
+  routeDegradation: RankingDegradationSignal | undefined,
+  provenanceClosure: ExecutionProvenanceClosure | undefined,
+): RankingDegradationSignal | undefined {
+  if (provenanceClosure === undefined || provenanceClosure.missing.length === 0) {
+    return routeDegradation;
+  }
+
+  const provenanceDegradation: RankingDegradationSignal = {
+    executionMode: 'degraded',
+    degradationReasons: provenanceClosure.missing.map(
+      (obligation) => `provenance_shortfall:${obligation}`,
+    ),
+  };
+
+  if (routeDegradation === undefined) {
+    return provenanceDegradation;
+  }
+
+  return mergeRouteDegradation(routeDegradation, provenanceDegradation);
+}
+
 /**
  * Shared entity-route execution used by hybrid ranked-route fallbacks when a
  * specialized retriever needs an anchor entity first (for example compare mode).
@@ -69,6 +178,7 @@ function buildMissingEntityResolverResult(plan: QueryPlanV1): EntityResolveResul
 export async function resolveEntityRouteForPlan(
   plan: QueryPlanV1,
   deps: RankedRouteEntityResolutionDeps,
+  compiled?: CompiledWineQuery,
 ): Promise<EntityResolveResult> {
   if (deps.entityResolver === undefined) {
     pipelineDebug(
@@ -85,7 +195,11 @@ export async function resolveEntityRouteForPlan(
     const anchorCoveredIds = new Set(
       plan.anchors.flatMap((a) => a.candidateEntityIds.map(String)),
     );
-    blockerOnlyIds = allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id)));
+    blockerOnlyIds = capAnchorResolverBlockerSeedIds(
+      plan,
+      allBlockerIds.filter((id) => !anchorCoveredIds.has(String(id))),
+      compiled,
+    );
   }
 
   const candidateEntities = await buildResolverCandidatesFromGenerator(
@@ -139,8 +253,9 @@ export async function resolveEntityRouteForPlan(
  */
 export function createRankedRouteEntityResolver(
   deps: RankedRouteEntityResolutionDeps,
+  compiled?: CompiledWineQuery,
 ): (plan: QueryPlanV1) => Promise<EntityResolveResult> {
-  return (plan) => resolveEntityRouteForPlan(plan, deps);
+  return (plan) => resolveEntityRouteForPlan(plan, deps, compiled);
 }
 
 /**
@@ -150,22 +265,38 @@ export async function runHybridRankingPipeline(
   plan: QueryPlanV1,
   candidates: readonly HybridCandidate[],
   ranker: RankingPort,
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
+  retrievalProvenanceCoverage?: ProvenanceCoverageStage,
+  retrievalPlanOverride?: ReturnType<typeof buildRetrievalPlan>,
 ): Promise<SearchRouteExecutionResult> {
-  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
+  const retrievalPlan = retrievalPlanOverride ?? compiled.query.retrievalPlan;
   const rankingInput: RankingInput = {
     queryPlan: plan,
     candidates,
     constraints: plan.constraints,
     retrievalPlan,
-    ...(compiled !== undefined ? { compiled } : {}),
+    compiled,
   };
 
   const { results: rankedResults, metadata: rankingMetadata } = await ranker.rank(rankingInput);
-  const rankerDegradation = rankingMetadata.runtimeSignal?.degradation ?? ranker.getLastRuntimeSignal?.()?.degradation;
+  const provenanceClosure = compiled !== undefined
+    ? buildExecutionProvenanceClosureFromStages(
+        compiled.execution.provenancePolicy,
+        retrievalProvenanceCoverage
+          ?? buildHybridCandidateCoverageStage(plan, candidates, compiled.execution.provenancePolicy),
+        buildRankedResultCoverageStage(plan, rankedResults, compiled.execution.provenancePolicy),
+      )
+    : undefined;
+  const rankerDegradation = mergeProvenanceShortfall(
+    rankingMetadata.runtimeSignal?.degradation ?? ranker.getLastRuntimeSignal?.()?.degradation,
+    provenanceClosure,
+  );
+  const enrichedRankingMetadata = provenanceClosure === undefined
+    ? rankingMetadata
+    : { ...rankingMetadata, provenanceClosure };
   // Prefer metadata.funnelMetrics (per-call, concurrency-safe) over the legacy
   // getter (instance state, race-prone under concurrent rank() calls).
-  const funnelMetrics = rankingMetadata.funnelMetrics ?? ranker.getLastFunnelMetrics?.();
+  const funnelMetrics = enrichedRankingMetadata.funnelMetrics ?? ranker.getLastFunnelMetrics?.();
 
   if (ranker.getLastFunnelMetrics === undefined) {
     pipelineDebug(
@@ -185,6 +316,12 @@ export async function runHybridRankingPipeline(
       input_candidates: candidates.length,
       ranked_count: rankedResults.length,
       has_funnel_metrics: funnelMetrics !== undefined,
+      ...(provenanceClosure !== undefined
+        ? {
+            provenance_satisfied: provenanceClosure.satisfied,
+            provenance_missing: provenanceClosure.missing,
+          }
+        : {}),
     },
     'pipeline hybrid ranking',
   );
@@ -194,9 +331,14 @@ export async function runHybridRankingPipeline(
   return {
     resolveResult,
     rankedResults,
+    ...buildHybridExecutionFacts({
+      plan,
+      compiled,
+      sparseExecuted: true,
+    }),
     ...(rankerDegradation !== undefined ? { routeDegradation: rankerDegradation } : {}),
     ...(funnelMetrics !== undefined ? { funnelMetrics } : {}),
-    rankingMetadata,
+    rankingMetadata: enrichedRankingMetadata,
   };
 }
 
@@ -222,7 +364,7 @@ export async function executeHybridRouteRankingPipeline(
   plan: QueryPlanV1,
   deps: HybridRankingRouteDeps,
   resolveEntity: (plan: QueryPlanV1) => Promise<EntityResolveResult>,
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
 ): Promise<SearchRouteExecutionResult> {
   const retrieval = await retrieveHybridCandidatesForPlan(
@@ -236,7 +378,13 @@ export async function executeHybridRouteRankingPipeline(
     compiled,
     requestContext,
   );
-  const ranked = await runHybridRankingPipeline(plan, retrieval.candidates, deps.ranker, compiled);
+  const ranked = await runHybridRankingPipeline(
+    plan,
+    retrieval.candidates,
+    deps.ranker,
+    compiled,
+    retrieval.retrievalProvenanceCoverage,
+  );
 
   // No-result recovery: attempt progressive constraint relaxation.
   if (ranked.rankedResults.length === 0 && plan.constraints.hard.length > 0) {
@@ -272,17 +420,11 @@ export async function executeHybridRouteRankingPipeline(
         constraints: step.constraints,
       };
 
-      // Pass compiled=undefined for relaxation retries.
-      //
-      // compiled.query.retrievalPlan is built from the ORIGINAL constraints —
-      // if we pass it through, retrieveHybridCandidatesForPlan and
-      // runHybridRankingPipeline both prefer compiled.query.retrievalPlan over
-      // buildRetrievalPlan(relaxedPlan.constraints), so the Vespa YQL filter
-      // would still contain the un-relaxed constraints, making the retry
-      // identical to the first attempt and permanently returning zero results.
-      //
-      // Without compiled, both call sites fall back to
-      // buildRetrievalPlan(plan.constraints) using relaxedPlan — correct.
+      // Preserve compiled execution facts, but rebuild only the structured
+      // retrieval plan from the relaxed constraints. This keeps the retry on
+      // the same execution contract (route/mode/budget/provenance policy) while
+      // ensuring retrieval filters and boosts reflect the relaxed constraint set.
+      const relaxedCompiled = buildRelaxedCompiledQuery(compiled, relaxedPlan);
       const relaxedRetrieval = await retrieveHybridCandidatesForPlan(
         relaxedPlan,
         {
@@ -291,14 +433,15 @@ export async function executeHybridRouteRankingPipeline(
           compareRetriever: deps.compareRetriever,
         },
         resolveEntity,
-        undefined, // intentionally omitted — see comment above
+        relaxedCompiled,
         requestContext,
       );
       const relaxedRanked = await runHybridRankingPipeline(
         relaxedPlan,
         relaxedRetrieval.candidates,
         deps.ranker,
-        undefined, // intentionally omitted — see comment above
+        relaxedCompiled,
+        relaxedRetrieval.retrievalProvenanceCoverage,
       );
 
       if (relaxedRanked.rankedResults.length > 0) {
@@ -323,6 +466,7 @@ export async function executeHybridRouteRankingPipeline(
 
         return {
           ...relaxedRanked,
+          ...buildHybridExecutionFactsFromRetrieval(relaxedPlan, relaxedCompiled, relaxedRetrieval),
           routeDegradation: mergedDegradation,
           ...(relaxedRetrieval.specializedRouteObservability !== undefined
             ? { specializedRouteObservability: relaxedRetrieval.specializedRouteObservability }
@@ -363,6 +507,7 @@ export async function executeHybridRouteRankingPipeline(
       const mergedWithExhaustion = mergeRouteDegradation(ranked.routeDegradation, exhaustionDegradation);
       return {
         ...ranked,
+        ...buildHybridExecutionFactsFromRetrieval(plan, compiled, retrieval),
         routeDegradation: mergedWithExhaustion,
         ...(retrieval.specializedRouteObservability !== undefined
           ? { specializedRouteObservability: retrieval.specializedRouteObservability }
@@ -381,6 +526,7 @@ export async function executeHybridRouteRankingPipeline(
   if (retrieval.routeDegradation === undefined) {
     return {
       ...ranked,
+      ...buildHybridExecutionFactsFromRetrieval(plan, compiled, retrieval),
       ...(retrieval.specializedRouteObservability !== undefined
         ? { specializedRouteObservability: retrieval.specializedRouteObservability }
         : {}),
@@ -395,6 +541,7 @@ export async function executeHybridRouteRankingPipeline(
 
   return {
     ...ranked,
+    ...buildHybridExecutionFactsFromRetrieval(plan, compiled, retrieval),
     routeDegradation: mergeRouteDegradation(ranked.routeDegradation, retrieval.routeDegradation),
     ...(retrieval.specializedRouteObservability !== undefined
       ? { specializedRouteObservability: retrieval.specializedRouteObservability }
@@ -426,10 +573,12 @@ function mergeRouteDegradation(
 export async function executeHybridRankedRoutePlan(
   plan: QueryPlanV1,
   deps: HybridRankedRoutePipelineDeps,
+  compiled: CompiledWineQuery,
 ): Promise<SearchRouteExecutionResult> {
   return executeHybridRouteRankingPipeline(
     plan,
     deps,
     createRankedRouteEntityResolver(deps),
+    compiled,
   );
 }

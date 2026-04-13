@@ -14,6 +14,7 @@ alwaysApply: true
 
 ## Stack
 
+- **Package manager**: **pnpm only** — `npm install` / yarn are blocked by root and `web/` `preinstall` (`scripts/enforce-pnpm-install.mjs`). Use `corepack enable` then `pnpm install --frozen-lockfile`.
 - **Runtime**: Node.js ≥ 22, ESM (`"type": "module"`).
 - **Language**: TypeScript (strict, `exactOptionalPropertyTypes`, path aliases `@shared`, `@domain`, `@app`, `@infra`, `@interface`, `@config`).
 - **HTTP**: Fastify 5, Zod, Pino.
@@ -23,40 +24,40 @@ alwaysApply: true
 
 ## Commands (run from repo root)
 
-- `npm run dev` — dev server (watch).
-- `npm run build` — production compile (`tsconfig.build.json`, excludes tests).
-- `npm run start` — run compiled server.
-- `npm run lint` / `npm run lint:fix` — ESLint (flat config + `typescript-eslint` type-aware rules).
-- `npm run check:quick` — fastest local check: lightweight test lane only.
-- `npm run check:smart [changed-file...]` — smart local check that skips docs-only changes, skips typecheck for test-only changes, and runs typecheck before the narrowest useful lane for source/config changes.
-- `npm run lint:file -- <file...>` — lint only the given files, with a small local cache for repeated runs.
-- `npm run lint:smart [changed-file...]` — lint only changed lintable files; skip docs-only changes; fall back to full lint for large changed sets.
-- `npm run check:related -- <changed-file...>` — narrow changed-scope local check via Vitest `related` on the lightweight lane.
-- `npm run check:dev` — everyday local check: typecheck + lightweight test lane.
-- `npm run typecheck` — `tsc --noEmit` (default `tsconfig.json`: `src/`).
-- `npm run test` — lightweight everyday Vitest lane.
-- `npm run test:file -- <test-file...>` — explicit-file run inside the lightweight lane; forwards extra Vitest args.
-- `npm run test:related -- <changed-file...>` — related-test run inside the lightweight lane.
-- `npm run test:eval` — eval/reporting-focused unit lane.
-- `npm run test:meta` — meta/parity lane for workflow, fixture, route consistency, and response/schema contract checks.
-- `npm run test:unit` — fuller unit regression lane.
-- `npm run test:unit:file -- <test-file...>` — explicit-file run inside the fuller unit lane; forwards extra Vitest args.
-- `npm run test:unit:related -- <changed-file...>` — related-test run inside the fuller unit lane.
-- `npm run test:integration:file -- <test-file...>` — explicit-file run inside the integration lane; forwards extra Vitest args.
-- `npm run test:integration:related -- <changed-file...>` — related-test run inside the integration lane.
-- `npm run test:watchlist` — watchlist-only lane.
-- `npm run test:heavy` — expensive search regression lane.
-- `npm run test:e2e:file -- <test-file...>` — explicit-file run inside the in-memory e2e lane; forwards extra Vitest args.
-- `npm run test:e2e:related -- <changed-file...>` — related-test run inside the in-memory e2e lane.
-- `npm run verify:http-contracts` — OpenAPI/catalog parity (also in `git:prepush`).
-- `npm run git:prepush:quick` — typecheck + unit without contract check.
-- `npm run git:prepush:heavy` — typecheck + unit + HTTP contract check + heavy test lane.
+- `pnpm run dev` — dev server (watch).
+- `pnpm run build` — production compile (`tsconfig.build.json`, excludes tests).
+- `pnpm run start` — run compiled server.
+- `pnpm run lint` / `pnpm run lint:fix` — ESLint (flat config + `typescript-eslint` type-aware rules).
+- `pnpm run check:quick` — fastest local check: lightweight test lane only.
+- `pnpm run check:smart [changed-file...]` — smart local check that skips docs-only changes, skips typecheck for test-only changes, and runs typecheck before the narrowest useful lane for source/config changes.
+- `pnpm run lint:file -- <file...>` — lint only the given files, with a small local cache for repeated runs.
+- `pnpm run lint:smart [changed-file...]` — lint only changed lintable files; skip docs-only changes; fall back to full lint for large changed sets.
+- `pnpm run check:related -- <changed-file...>` — narrow changed-scope local check via Vitest `related` on the lightweight lane.
+- `pnpm run check:dev` — everyday local check: typecheck + lightweight test lane.
+- `pnpm run typecheck` — `tsc --noEmit` (default `tsconfig.json`: `src/`).
+- `pnpm run test` — lightweight everyday Vitest lane.
+- `pnpm run test:file -- <test-file...>` — explicit-file run inside the lightweight lane; forwards extra Vitest args.
+- `pnpm run test:related -- <changed-file...>` — related-test run inside the lightweight lane.
+- `pnpm run test:eval` — eval/reporting-focused unit lane.
+- `pnpm run test:meta` — meta/parity lane for workflow, fixture, route consistency, and response/schema contract checks.
+- `pnpm run test:unit` — fuller unit regression lane.
+- `pnpm run test:unit:file -- <test-file...>` — explicit-file run inside the fuller unit lane; forwards extra Vitest args.
+- `pnpm run test:unit:related -- <changed-file...>` — related-test run inside the fuller unit lane.
+- `pnpm run test:integration:file -- <test-file...>` — explicit-file run inside the integration lane; forwards extra Vitest args.
+- `pnpm run test:integration:related -- <changed-file...>` — related-test run inside the integration lane.
+- `pnpm run test:watchlist` — watchlist-only lane.
+- `pnpm run test:heavy` — expensive search regression lane.
+- `pnpm run test:e2e:file -- <test-file...>` — explicit-file run inside the in-memory e2e lane; forwards extra Vitest args.
+- `pnpm run test:e2e:related -- <changed-file...>` — related-test run inside the in-memory e2e lane.
+- `pnpm run verify:http-contracts` — OpenAPI/catalog parity (also in `git:prepush`).
+- `pnpm run git:prepush:quick` — typecheck + unit without contract check.
+- `pnpm run git:prepush:heavy` — typecheck + unit + HTTP contract check + heavy test lane.
 
 ## Conventions
 
 - Prefer **small, focused diffs**; match existing style and imports.
 - **No** drive-by refactors or unrelated file churn.
-- After substantive TS changes: run `npm run lint` and `npm run typecheck` (and `npm run test` when behavior changes).
+- After substantive TS changes: run `pnpm run lint` and `pnpm run typecheck` (and `pnpm run test` when behavior changes).
 - **Redis**: use `getRedisClient()` from `src/infrastructure/db/redis-client.js` (async); client is `redis` / `ReturnType<typeof createClient>`.
 - **Optional props** (`exactOptionalPropertyTypes`): do not assign `undefined` to optional keys — omit the property or build objects with conditional spreads.
 

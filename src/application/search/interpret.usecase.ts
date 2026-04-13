@@ -31,6 +31,11 @@ export interface InterpretUseCaseDeps {
   readonly injectionJudge?: InjectionJudgePort | undefined;
   readonly judgeFailureMode?: 'fail_open' | 'fail_closed' | undefined;
   readonly queryEntrySecurityObserver?: QueryEntrySecurityObserver | undefined;
+  /**
+   * Explicit test seam for legacy compiled fallback.
+   * Production callers must keep this false/undefined and provide planWithCompiled.
+   */
+  readonly allowCompiledFallbackForTests?: boolean | undefined;
 }
 
 /**
@@ -54,6 +59,16 @@ export interface InterpretResultWithV2 {
  */
 export class InterpretUseCase {
   constructor(private readonly deps: InterpretUseCaseDeps) {}
+
+  private requireCompiledForV2(plan: QueryPlanV1): CompiledWineQuery {
+    if (this.deps.allowCompiledFallbackForTests === true) {
+      return compileFromLegacyPlan(plan);
+    }
+
+    throw new Error(
+      'Interpret use case requires QueryPlanner.planWithCompiled() when buildV2 is requested',
+    );
+  }
 
   async execute(
     request: InterpretRequest & { readonly buildV2?: boolean | undefined; readonly requestId?: string | undefined },
@@ -100,9 +115,6 @@ export class InterpretUseCase {
       compiled = result.compiled;
     } else {
       plan = await this.deps.queryPlanner.plan(effectiveQuery, plannerContext);
-      if (request.buildV2 === true) {
-        compiled = compileFromLegacyPlan(plan);
-      }
     }
 
     throwIfAborted(options?.abortSignal, 'Interpret use case aborted');
@@ -129,7 +141,7 @@ export class InterpretUseCase {
       return plan;
     }
 
-    compiled ??= compileFromLegacyPlan(plan);
+    compiled ??= this.requireCompiledForV2(plan);
 
     // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- intentional: empty string after trim should fall through to generated ID
     const queryId = request.requestId?.trim() || `interpret-${Date.now()}`;

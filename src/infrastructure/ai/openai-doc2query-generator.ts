@@ -215,7 +215,10 @@ function describePriceKrw(priceUsd: number | null, priceBand: string): string {
   return `약 ${(krw / WON_PER_MAN).toFixed(0)}만원 (${priceBand})`;
 }
 
-function styleDescriptor(body: number, tannin: number): string {
+function styleDescriptor(body: number | null, tannin: number | null): string {
+  if (body === null || tannin === null) {
+    return 'body/tannin unavailable';
+  }
   const bodyLabel =
     body >= BODY_TANNIN_HIGH ? 'full' : body >= BODY_TANNIN_MID ? 'medium' : 'light';
   const tanninLabel =
@@ -244,7 +247,7 @@ function buildUserPrompt(input: Doc2QueryInput, angleIdx: number): string {
   if (input.country) lines.push(`country: ${input.country}`);
   if (input.grapePrimary !== null) lines.push(`grape: ${input.grapePrimary}`);
   else if (input.grapes.length > 0) lines.push(`grapes: ${input.grapes.join(', ')}`);
-  lines.push(`style: ${styleDescriptor(input.body, input.tannin)}`);
+  lines.push(`sensory: ${styleDescriptor(input.body, input.tannin)}`);
   lines.push(`price: $${input.priceUsd ?? 'unknown'} — ${describePriceKrw(input.priceUsd, input.priceBand)}`);
   if (input.vintageYear !== null) lines.push(`vintage: ${input.vintageYear}`);
   if (input.alcoholPct !== null) lines.push(`alcohol: ${input.alcoholPct}%`);

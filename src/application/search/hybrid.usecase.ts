@@ -45,6 +45,11 @@ export type { HybridExecutionOptions } from './port/search-route-usecases.port.j
  */
 export interface HybridUseCaseDeps {
   readonly queryPlanner: QueryPlannerPort;
+  /**
+   * Explicit test / special-seam escape hatch for planners that only implement
+   * plan(). Production wiring must leave this unset.
+   */
+  readonly allowCompiledFallback?: boolean | undefined;
   readonly candidatePool: CandidatePoolPort;
   readonly browseRetriever?: BrowseRetrieverPort | undefined;
   readonly compareRetriever?: CompareRetrieverPort | undefined;
@@ -126,6 +131,7 @@ export class HybridUseCase {
         this.deps.cacheLookupRuntimeStateProvider?.()
         ?? this.deps.cacheLookupRuntimeState,
       decomposedSearch: this.deps.decomposedSearch,
+      allowCompiledFallback: this.deps.allowCompiledFallback,
     });
 
     throwIfAborted(options?.abortSignal, 'Hybrid search execution aborted');
@@ -149,7 +155,7 @@ export class HybridUseCase {
         (resolverPlan) => resolveEntityRouteForPlan(resolverPlan, {
           entityResolver: this.deps.entityResolver,
           entityLookup: this.deps.entityLookup,
-        }),
+        }, compiled),
         compiled,
         {
           stageTimer,
@@ -180,6 +186,11 @@ export class HybridUseCase {
       decisionContext,
       routeDegradation,
       rankingMetadata,
+      effectiveRetrievalMode,
+      retrievalKind,
+      sparseExecuted,
+      specializedRouteExecuted,
+      usedCompiledExecution,
       specializedRouteObservability,
       retrievalFusionTrace,
       hardFilterDropLog,
@@ -226,6 +237,11 @@ export class HybridUseCase {
       responseBuilder: this.deps.responseBuilder,
       cacheService: this.deps.cacheService,
       routeDegradation,
+      effectiveRetrievalMode,
+      retrievalKind,
+      sparseExecuted,
+      specializedRouteExecuted,
+      usedCompiledExecution,
       ...(rankingMetadata !== undefined ? { rankingMetadata } : {}),
       specializedRouteObservability,
       ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),

@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:verification:core
+      - run: pnpm run test:verification:core
       - name: Nightly summary
         run: |
           {
@@ -31,7 +31,7 @@ jobs:
     needs: [verification-core]
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:e2e:inmemory
+      - run: pnpm run test:e2e:inmemory
 
   ingest-indexing:
     runs-on: ubuntu-latest
@@ -39,7 +39,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:ingest:indexing
+      - run: pnpm run test:ingest:indexing
 
   vespa-e2e:
     runs-on: ubuntu-latest
@@ -47,14 +47,14 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:verification:vespa
+      - run: pnpm run test:verification:vespa
       - name: Vespa verification summary
         if: always()
         run: |
           {
             echo "## Vespa Verification"
             echo ""
-            echo "- Gate: \`npm run test:verification:vespa\`"
+            echo "- Gate: \`pnpm run test:verification:vespa\`"
             echo "- Includes: Vespa e2e, network-services lane, Vespa quality lane"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -63,14 +63,14 @@ jobs:
     needs: [verification-core]
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:quality:nightly
+      - run: pnpm run test:quality:nightly
 
   offline-eval-regression:
     runs-on: ubuntu-latest
     needs: [verification-core]
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run eval:offline:smoke:assert-baseline
+      - run: pnpm run eval:offline:smoke:assert-baseline
 
   watchlist-pg:
     runs-on: ubuntu-latest
@@ -93,7 +93,7 @@ jobs:
       PG_TEST_URL: postgresql://wine:wine_test@localhost:5433/wine_engine_test
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:watchlist:pg
+      - run: pnpm run test:watchlist:pg
 
   vespa-quality:
     runs-on: ubuntu-latest

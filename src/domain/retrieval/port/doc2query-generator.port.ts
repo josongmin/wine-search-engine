@@ -35,10 +35,10 @@ export interface Doc2QueryInput {
   /** Primary grape variety when available (null in much of the corpus). */
   readonly grapePrimary: string | null;
   readonly grapes: readonly string[];
-  /** Body score in [0, 1]. Often 0.5 default in the current corpus. */
-  readonly body: number;
-  /** Tannin score in [0, 1]. Often 0.5 default. */
-  readonly tannin: number;
+  /** Body score in [0, 1], or null when the source corpus lacks a measurement. */
+  readonly body: number | null;
+  /** Tannin score in [0, 1], or null when the source corpus lacks a measurement. */
+  readonly tannin: number | null;
   readonly priceUsd: number | null;
   /** 'value' | 'mid' | 'premium' | 'luxury'. */
   readonly priceBand: string;

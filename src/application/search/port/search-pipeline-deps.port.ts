@@ -69,6 +69,7 @@ export interface CandidatePoolPort {
 
 export interface EntityDocumentLookupPort {
   getDocument(entityId: CanonicalEntityId): Promise<RetrievalDocument | null>;
+  getDocuments?(entityIds: readonly CanonicalEntityId[]): Promise<ReadonlyMap<CanonicalEntityId, RetrievalDocument>>;
 }
 
 export interface BrowseRetrieverPort {
@@ -113,7 +114,7 @@ export interface ResponseBuilderPort {
 }
 
 export interface MixedSolverPort {
-  solve(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): Promise<MixedQueryResult>;
+  solve(queryPlan: QueryPlanV1, compiled: CompiledWineQuery): Promise<MixedQueryResult>;
 }
 
 /**

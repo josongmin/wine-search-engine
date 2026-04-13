@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "preinstall": "node ../scripts/enforce-pnpm-install.mjs",
     "dev": "bash ../scripts/build/link-external-artifacts.sh && next dev",
     "build": "bash ../scripts/build/link-external-artifacts.sh && next build",
     "start": "next start",

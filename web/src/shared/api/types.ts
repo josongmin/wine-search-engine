@@ -189,6 +189,68 @@ export interface ResponseMeta {
   engine_schema_version: string;
   decision_snapshot?: DecisionSnapshot;
   execution_mode?: ExecutionMode;
+  execution_contract?: {
+    effective_retrieval_mode: string;
+    retrieval_mode_source: 'planner' | 'api_override';
+    planner_suggested_mode: string;
+    retrieval_kind:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity';
+    sparse_executed: boolean;
+    specialized_route_executed?: 'producer_browse' | 'region_browse' | 'compare_candidates' | null;
+    used_compiled_execution: boolean;
+    budget?: {
+      max_candidates: number;
+      enable_precision_rerank: boolean;
+    };
+    provenance_policy?: {
+      require_identity_seal: boolean;
+      require_constraint_evidence: boolean;
+      require_anchor_evidence: boolean;
+    };
+    provenance_closure?: {
+      policy: {
+        require_identity_seal: boolean;
+        require_constraint_evidence: boolean;
+        require_anchor_evidence: boolean;
+      };
+      pre_rank: {
+        candidate_count: number;
+        identity_evidence_satisfied: boolean;
+        constraint_evidence_satisfied: boolean;
+        anchor_evidence_satisfied: boolean;
+        matched_constraint_attributes: string[];
+        unmet_constraint_attributes: string[];
+        anchor_signal_types: string[];
+      };
+      post_rank: {
+        candidate_count: number;
+        identity_evidence_satisfied: boolean;
+        constraint_evidence_satisfied: boolean;
+        anchor_evidence_satisfied: boolean;
+        matched_constraint_attributes: string[];
+        unmet_constraint_attributes: string[];
+        anchor_signal_types: string[];
+      };
+      missing: Array<'identity_evidence' | 'constraint_evidence' | 'anchor_evidence'>;
+      satisfied: boolean;
+    };
+    admission_closure?: {
+      required: {
+        identity_seal: boolean;
+        constraint_evidence: boolean;
+        anchor_evidence: boolean;
+      };
+      satisfied: {
+        identity_seal: boolean;
+        constraint_evidence: boolean;
+        anchor_evidence: boolean;
+      };
+      all_satisfied: boolean;
+    };
+  };
 }
 
 export interface ParsedConstraints {

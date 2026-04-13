@@ -11,6 +11,7 @@
  *  - STRUCTURAL family: anchor_similarity, relative_filter
  *  - SPECIALIZED family: browse_producer, browse_region, compare_anchor
  */
+import { DomainError } from '../../shared/error/domain-error.js';
 import { bootstrapLogger } from '../../../config/bootstrap-logger.js';
 import { globalSilentSkipCounter } from '../../../observability/silent-skip-counters.js';
 
@@ -98,22 +99,23 @@ export const LEGACY_CHANNEL_ALIAS: Readonly<Record<string, RetrievalChannel>> = 
 export const PREFERRED_CHANNEL_ALIAS: Readonly<Record<string, string>> = {} as const;
 
 /**
- * Coerce a legacy/unknown channel string to canonical RetrievalChannel.
- * Falls back to 'sparse_bm25' for unrecognized strings.
+ * Coerce a legacy channel alias to canonical RetrievalChannel.
+ * Unknown strings are rejected instead of falling back.
  */
 export function toRetrievalChannel(raw: string): RetrievalChannel {
   if (isRetrievalChannel(raw)) return raw;
   const alias = LEGACY_CHANNEL_ALIAS[raw];
   if (alias !== undefined) return alias;
+
   globalSilentSkipCounter.increment('unknown_channel_fallback', {
     rawChannel: raw,
-    fallback: 'sparse_bm25',
+    outcome: 'rejected',
   });
   bootstrapLogger.warn(
-    { rawChannel: raw, fallback: 'sparse_bm25' },
-    '[toRetrievalChannel] unknown channel; falling back to sparse_bm25',
+    { rawChannel: raw },
+    '[toRetrievalChannel] unknown channel; rejecting',
   );
-  return 'sparse_bm25';
+  throw new DomainError('INTERNAL_INCONSISTENCY', `Unknown retrieval channel: ${raw}`);
 }
 
 /**

@@ -52,6 +52,7 @@ describe('SearchUseCase with Injection Defense', () => {
     };
 
     mockDeps = {
+      allowCompiledFallback: true,
       querySanitizer: sanitizer,
       injectionJudge: mockInjectionJudge as InjectionJudgePort | undefined,
       queryPlanner: {
@@ -205,6 +206,7 @@ describe('SearchUseCase with Injection Defense', () => {
   describe('LLM judge optional behavior', () => {
     it('skips Layer 2 when injectionJudge is undefined', async () => {
       const depsWithoutJudge: SearchUseCaseDeps = {
+        allowCompiledFallback: true,
         querySanitizer: mockDeps.querySanitizer as any,
         queryPlanner: mockDeps.queryPlanner as any,
         entityResolver: mockDeps.entityResolver as any,

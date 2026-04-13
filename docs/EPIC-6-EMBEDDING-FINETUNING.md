@@ -555,7 +555,7 @@ All queries failed. Is the search API running?
 **Solution:**
 ```bash
 # Ensure search API is running
-npm run dev &
+pnpm run dev &
 
 # Check API health
 curl http://localhost:3000/v1/health

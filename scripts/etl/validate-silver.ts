@@ -5,21 +5,22 @@
  *
  * Usage:
  *   npx tsx scripts/etl/validate-silver.ts
- *   npx tsx scripts/etl/validate-silver.ts --input data/silver-docquery.ndjson
+ *   npx tsx scripts/etl/validate-silver.ts --input data/silver-trackc.ndjson
+ *   npx tsx scripts/etl/validate-silver.ts --allow-partial
  */
 
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, SilverQualityReport } from './types.js';
 import { parseNdjson } from './ndjson.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFile } from './etl-utils.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
-export const REPORT_OUTPUT = resolveDataPath('data/silver-quality-report.json');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
+export const REPORT_OUTPUT = ETL_ARTIFACT_FILES.qualityReport;
 
 /**
  * Quality gate thresholds (Epic 1 + SOTA++ extension).
@@ -32,8 +33,8 @@ export const SILVER_QUALITY_GATES = {
   minAliasMeanCount: 3,
   bodyMinMean: 0.1,
   bodyMaxMean: 0.9,
-  // SOTA++ coverage gates — warn only (not blockers) so pipeline is not broken
-  // during a first run when these fields may not yet be 100% populated.
+  // SOTA++ coverage gates — blockers by default. Use --allow-partial only when
+  // explicitly running a partial coverage audit.
   minAlcoholPctCoverage: 0.50,       // ≥50% of records should have alcohol_pct
   minProducerPrestigeCoverage: 0.70, // ≥70% from winery_rating
   minDrinkingWindowCoverage: 0.60,   // ≥60% from Track C step 4
@@ -52,17 +53,25 @@ export interface SilverQualityGateThresholds {
   readonly minCriticProxyCoverage?: number;
 }
 
+export interface SilverQualityGateOptions {
+  readonly allowPartialCoverage?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
-function parseArgs(argv: string[]): { input: string } {
+function parseArgs(argv: string[]): { input: string; allowPartialCoverage: boolean } {
   let input = DEFAULT_INPUT;
+  let allowPartialCoverage = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--input' || a === '-i') input = argv[++i] ?? DEFAULT_INPUT;
+    if (a === '--allow-partial' || a === '--allow-partial-coverage') {
+      allowPartialCoverage = true;
+    }
   }
-  return { input };
+  return { input, allowPartialCoverage };
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +98,7 @@ function stdDev(values: readonly number[]): number {
 export function validateSilverRecords(
   records: readonly EnrichedSilverRecord[],
   gates: SilverQualityGateThresholds = SILVER_QUALITY_GATES,
+  options: SilverQualityGateOptions = {},
 ): SilverQualityReport {
   const n = records.length;
   const blockers: string[] = [];
@@ -123,8 +133,31 @@ export function validateSilverRecords(
     drinkingWindow: ratio(gold.filter((r) => r.drinkingWindow != null).length),
   };
 
+  const gateCoverage = (
+    field: keyof typeof fieldCoverage,
+    threshold: number | undefined,
+    label: string,
+    guidance: string,
+  ): void => {
+    if (threshold === undefined || threshold <= 0) {
+      return;
+    }
+    const coverage = fieldCoverage[field] ?? 0;
+    if (coverage >= threshold) {
+      return;
+    }
+    const message = `${label} ${(coverage * 100).toFixed(1)}% < target ${(threshold * 100).toFixed(0)}% — ${guidance}`;
+    if (options.allowPartialCoverage) {
+      warnings.push(`${message} (allowed via --allow-partial)`);
+      return;
+    }
+    blockers.push(message);
+  };
+
   // Distribution checks
-  const bodyValues = records.map((r) => r.body);
+  const bodyValues = records
+    .map((r) => r.body)
+    .filter((value): value is number => typeof value === 'number');
   const bodyMean = mean(bodyValues);
   const bodyStd = stdDev(bodyValues);
   const priceCoverage = fieldCoverage['priceUsd'] ?? 0;
@@ -164,38 +197,30 @@ export function validateSilverRecords(
     );
   }
 
-  // SOTA++ coverage warnings (non-blocking)
-  const alcoholCov = fieldCoverage['alcoholPct'] ?? 0;
-  const minAlc = gates.minAlcoholPctCoverage ?? 0;
-  if (minAlc > 0 && alcoholCov < minAlc) {
-    warnings.push(
-      `alcohol_pct coverage ${(alcoholCov * 100).toFixed(1)}% < target ${(minAlc * 100).toFixed(0)}% — many Vivino records lack ABV; acceptable for first run`,
-    );
-  }
-
-  const prestigeCov = fieldCoverage['producerPrestige'] ?? 0;
-  const minPres = gates.minProducerPrestigeCoverage ?? 0;
-  if (minPres > 0 && prestigeCov < minPres) {
-    warnings.push(
-      `producer_prestige coverage ${(prestigeCov * 100).toFixed(1)}% < target ${(minPres * 100).toFixed(0)}% — winery_rating absent for some records`,
-    );
-  }
-
-  const criticCov = fieldCoverage['criticProxy'] ?? 0;
-  const minCritic = gates.minCriticProxyCoverage ?? 0;
-  if (minCritic > 0 && criticCov < minCritic) {
-    warnings.push(
-      `criticProxy coverage ${(criticCov * 100).toFixed(1)}% < target ${(minCritic * 100).toFixed(0)}% — run Track C step 1 to generate LLM critic scores`,
-    );
-  }
-
-  const dwCov = fieldCoverage['drinkingWindow'] ?? 0;
-  const minDw = gates.minDrinkingWindowCoverage ?? 0;
-  if (minDw > 0 && dwCov < minDw) {
-    warnings.push(
-      `drinkingWindow coverage ${(dwCov * 100).toFixed(1)}% < target ${(minDw * 100).toFixed(0)}% — run Track C step 4 (drinking-window-backfill)`,
-    );
-  }
+  gateCoverage(
+    'alcoholPct',
+    gates.minAlcoholPctCoverage,
+    'alcohol_pct coverage',
+    'many Vivino records lack ABV; run with --allow-partial only if you explicitly accept that loss',
+  );
+  gateCoverage(
+    'producerPrestige',
+    gates.minProducerPrestigeCoverage,
+    'producer_prestige coverage',
+    'winery_rating absent for some records; run with --allow-partial only if you explicitly accept that loss',
+  );
+  gateCoverage(
+    'criticProxy',
+    gates.minCriticProxyCoverage,
+    'criticProxy coverage',
+    'run Track C step 1 to generate LLM critic scores',
+  );
+  gateCoverage(
+    'drinkingWindow',
+    gates.minDrinkingWindowCoverage,
+    'drinkingWindow coverage',
+    'run Track C step 4 (drinking-window-backfill)',
+  );
 
   const report: SilverQualityReport = {
     totalBronzeRows: n, // already deduped at this point
@@ -228,7 +253,9 @@ export async function run(): Promise<void> {
   const content = await fs.readFile(args.input, 'utf8');
   const { records } = parseNdjson<EnrichedSilverRecord>(content, args.input);
 
-  const report = validateSilverRecords(records);
+  const report = validateSilverRecords(records, SILVER_QUALITY_GATES, {
+    allowPartialCoverage: args.allowPartialCoverage,
+  });
 
   // Write report (atomic)
   await atomicWriteFile(

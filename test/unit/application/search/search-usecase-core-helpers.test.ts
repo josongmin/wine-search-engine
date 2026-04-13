@@ -5,6 +5,7 @@ import { buildHybridRetrievalInputForPlan } from '../../../../src/application/se
 import { tryGetCachedSearchResponse } from '../../../../src/application/search/search-usecase-cache-lookup.js';
 import { buildConstraintContradictionExitParams } from '../../../../src/application/search/search-usecase-constraint-early-exit.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import type { SearchRequest } from '../../../../src/application/search/search-request.dto.js';
 
 function minimalPlan(): QueryPlanV1 {
@@ -24,6 +25,42 @@ function minimalPlan(): QueryPlanV1 {
     policyRuleVersion: '1',
     thresholdProfileId: 'default',
   } as QueryPlanV1;
+}
+
+function minimalCompiled(): CompiledWineQuery {
+  return {
+    query: {
+      rawQuery: 'q',
+      normalizedQuery: 'q',
+      intent: 'semantic_discovery',
+      queryClass: 'unknown',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {} as never,
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      retrievalPlan: {
+        hardFilterTokens: [],
+        softBoosts: [],
+        inferredBoosts: [],
+        sensoryPriors: [],
+        planVersion: 'retrieval-plan-v1.0',
+      },
+    },
+    execution: {
+      effectiveRoute: 'hybrid',
+      effectiveRetrievalMode: 'attribute_search',
+      routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: {
+        requireIdentitySeal: false,
+        requireConstraintEvidence: false,
+        requireAnchorEvidence: false,
+      },
+    },
+  };
 }
 
 describe('topKFinalScores', () => {
@@ -133,6 +170,7 @@ describe('buildConstraintContradictionExitParams', () => {
           { attribute: 'color', operator: 'eq', value: 'white' },
         ],
       ],
+      minimalCompiled(),
     );
     expect(params.decisionOutput.decisionStatus).toBe('failed');
     expect(params.decisionOutput.failureReason).toBe('HARD_CONSTRAINT_VIOLATION');

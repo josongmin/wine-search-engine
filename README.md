@@ -19,20 +19,21 @@
 | 9 | [기능 요약](#what-this-codebase-implements-capabilities) |
 | 10 | [저장소 구조](#repository-structure) |
 | 11 | [전제·부트스트랩](#prerequisites) · [설정](#configuration-env) · [실행](#running-the-api) · [Docker](#docker-compose) · [마이그레이션](#database-migrations) |
-| 12 | [스크립트](#scripts--npm-commands-reference) · [CI](#ci-github-actions) · [추가 읽을거리](#further-reading) |
+| 12 | [스크립트](#scripts--pnpm-commands-reference) · [CI](#ci-github-actions) · [추가 읽을거리](#further-reading) |
 
 ### 빠른 시작
 
 ```bash
 git clone <internal-remote> wine-search-engine && cd wine-search-engine
-npm ci && cp .env.example .env   # REDIS_URL, VESPA_URL, 시크릿 등 편집
-npm run docker:db:up             # Postgres (docker-compose.yml)
-npm run migrate                  # Compose Postgres에 마이그레이션 (기본)
-npm run dev                      # http://localhost:3000 — GET /health 참고
-npm run lint && npm run typecheck && npm run test   # 푸시 전
+corepack enable   # once per machine — activates pnpm from package.json "packageManager"
+pnpm install && cp .env.example .env   # REDIS_URL, VESPA_URL, 시크릿 등 편집
+pnpm run docker:db:up             # Postgres (docker-compose.yml)
+pnpm run migrate                  # Compose Postgres에 마이그레이션 (기본)
+pnpm run dev                      # http://localhost:3000 — GET /health 참고
+pnpm run lint && pnpm run typecheck && pnpm run test   # 푸시 전
 ```
 
-`npm run bootstrap:smoke`는 `.env.example`을 기준으로 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 한 번에 점검합니다. 마이그레이션 단계는 **`docker-compose.yml` Postgres가 떠 있어야** 합니다(`npm run docker:db:up`). CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
+`pnpm run bootstrap:smoke`는 `.env.example`을 기준으로 `typecheck` → `build` → `verify:http-contracts` → 선택적 `migrate`까지 한 번에 점검합니다. 마이그레이션 단계는 **`docker-compose.yml` Postgres가 떠 있어야** 합니다(`pnpm run docker:db:up`). CI에서는 `SKIP_MIGRATE=1`로 DB 없이 실행합니다.
 
 현재 레포에는 `ingest` / `kill-switch` 전용 CLI 진입점이 없습니다. 문서와 `package.json`에서도 제거해 “있는 척” 하지 않도록 맞췄고, ETL/운영 작업은 개별 `scripts/etl/*.ts` 또는 기존 HTTP/설정 경로를 사용합니다.
 
@@ -240,18 +241,18 @@ flowchart TD
 | **resolution_match_rate** | 의사결정 상태가 `expected_resolution`과 일치하는 비율(설정 시). |
 | **false_exact_rate** | 벤치마크가 비 exact 경로를 기대할 때 “exact” 스타일 결과 비율(추적 시). |
 
-**CLI 품질 게이트**(선택): `--min-recall-at-3`, `--min-resolution-match-rate`, `--min-provenance-match-rate`, `--max-false-exact-rate`. **`npm run eval:noisy:gate`**는 스모크 예측 픽스처에 엄격한 스모크 임계값(예: recall@3 = 1)을 둡니다.
+**CLI 품질 게이트**(선택): `--min-recall-at-3`, `--min-resolution-match-rate`, `--min-provenance-match-rate`, `--max-false-exact-rate`. **`pnpm run eval:noisy:gate`**는 스모크 예측 픽스처에 엄격한 스모크 임계값(예: recall@3 = 1)을 둡니다.
 
-### CI·npm 단축
+### CI·pnpm 단축
 
 | 명령 | 확인 내용 |
 |------|-----------|
-| `npm run eval:noisy:assert-baseline` | 스모크 1회 실행 후 베이스라인 대비 (`eval:noisy:validate` + assert) |
-| `npm run eval:noisy:smoke` | `data/noisy-entity-eval-smoke-results.json` 생성(로컬·아티팩트용) |
-| `npm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
-| `npm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) |
-| `npm run test:verification:core` | 로컬/나이틀리용: `typecheck` + `e2e:contract` + `e2e:runtime` + `ingest:contract` + `test:verification:noisy` |
-| `npm run eval:offline:*` | 전체 오프라인 티어; 스모크 베이스라인: `eval:offline:smoke:assert-baseline` |
+| `pnpm run eval:noisy:assert-baseline` | 스모크 1회 실행 후 베이스라인 대비 (`eval:noisy:validate` + assert) |
+| `pnpm run eval:noisy:smoke` | `data/noisy-entity-eval-smoke-results.json` 생성(로컬·아티팩트용) |
+| `pnpm run eval:noisy:gate` | 스모크 실행 임계값 통과(파이프라인 무결성) |
+| `pnpm run test:verification:noisy` | `eval:noisy:gate` 1회 후 `eval:noisy:assert-baseline:current`(동일 `/tmp` 산출물) |
+| `pnpm run test:verification:core` | 로컬/나이틀리용: `typecheck` + `e2e:contract` + `e2e:runtime` + `ingest:contract` + `test:verification:noisy` |
+| `pnpm run eval:offline:*` | 전체 오프라인 티어; 스모크 베이스라인: `eval:offline:smoke:assert-baseline` |
 
 ---
 
@@ -262,13 +263,13 @@ flowchart TD
 - **설정:** `config/vitest/unit.config.ts`(루트 `vitest.config.ts`가 재export).
 - **제공:** `@vitest/coverage-v8`, **`coverage.include`** = `src/**/*.ts`, 제외 `**/*.test.ts`, `**/__tests__/**`, `src/main.ts`.
 - **산출:** `coverage/lcov.info` + 터미널(`coverage.reporter`: `text`, `lcov`).
-- **실행:** `npm run test:coverage`(단위 레인만 — 통합/e2e Vespa는 별도 설정).
+- **실행:** `pnpm run test:coverage`(단위 레인만 — 통합/e2e Vespa는 별도 설정).
 
 커버리지는 **`src/` 라인 기준**이며 `test/e2e/`의 HTTP e2e 파일은 자동 포함되지 않습니다(`inject()`로 앱을 돌리지만 Vitest 프로젝트가 다름).
 
 ### Vitest 레인(설정 → 목적)
 
-| 설정 | `npm run …` | 실행 내용 |
+| 설정 | `pnpm run …` | 실행 내용 |
 |------|-------------|-----------|
 | `config/vitest/unit.config.ts` | `test`, `test:unit` | `test/unit/**/*.test.ts` + `src/**/__tests__/**/*.test.ts` + 선택 `src/__tests__` |
 | `config/vitest/integration.config.ts` | `test:integration` | 명시 목록: HTTP 서버, 에러 핸들러, 공개 쿼리 보안, resolve 라우트, 계약 레지스트리, interpret 스키마 등 |
@@ -324,33 +325,33 @@ flowchart TD
 
 | 상황 | 명령 |
 |------|------|
-| 작업 중 기본 확인 | `npm run check:smart` |
-| source 파일 하나 기준으로 좁게 확인 | `npm run check:smart src/domain/foo.ts` |
-| 테스트 파일 하나만 바로 실행 | `npm run test:file -- test/unit/foo.test.ts` |
-| 변경 파일 관련 테스트만 실행 | `npm run test:related -- src/domain/foo.ts` |
-| changed-file lint만 빠르게 | `npm run lint:smart` |
-| 커밋 직전 staged 범위만 확인 | `npm run check:staged` |
-| 커밋 직전 staged lint만 확인 | `npm run lint:staged` |
-| push 직전 브랜치 diff 기준 스마트 게이트 | `npm run git:prepush:smart` |
+| 작업 중 기본 확인 | `pnpm run check:smart` |
+| source 파일 하나 기준으로 좁게 확인 | `pnpm run check:smart src/domain/foo.ts` |
+| 테스트 파일 하나만 바로 실행 | `pnpm run test:file -- test/unit/foo.test.ts` |
+| 변경 파일 관련 테스트만 실행 | `pnpm run test:related -- src/domain/foo.ts` |
+| changed-file lint만 빠르게 | `pnpm run lint:smart` |
+| 커밋 직전 staged 범위만 확인 | `pnpm run check:staged` |
+| 커밋 직전 staged lint만 확인 | `pnpm run lint:staged` |
+| push 직전 브랜치 diff 기준 스마트 게이트 | `pnpm run git:prepush:smart` |
 
 `check:smart` / `check:staged`는 현재 변경 범위를 보고 가능한 한 **가장 좁은 lane**으로 내려갑니다. docs-only 변경은 스킵하고, test-only 변경은 `typecheck`를 생략하며, source/config 변경은 필요한 `typecheck`와 changed-file lint를 먼저 실행합니다.
 
 | 목표 | 명령 |
 |------|------|
-| 기본 단위 | `npm run test` |
-| 스마트 기본 확인 | `npm run check:smart` |
-| 스마트 staged 확인 | `npm run check:staged` |
-| changed-file lint | `npm run lint:smart` |
-| CI에 가까운 단위 | `npm run test:unit` |
-| HTTP + 통합 | `npm run test:integration` |
-| 전체 인메모리 e2e | `npm run test:e2e:fast` |
-| 런타임/품질 e2e | `npm run test:e2e:runtime` |
-| 최소 계약 스모크 | `npm run test:e2e:contract` |
-| 워치리스트 슬라이스 | `npm run test:watchlist` |
-| 품질 + eval 단위 | `npm run test:quality` |
-| 커버리지 리포트 | `npm run test:coverage` |
-| Vespa(Docker 기동) | `npm run test:e2e:vespa` |
-| 스마트 pre-push 게이트 | `npm run git:prepush:smart` |
+| 기본 단위 | `pnpm run test` |
+| 스마트 기본 확인 | `pnpm run check:smart` |
+| 스마트 staged 확인 | `pnpm run check:staged` |
+| changed-file lint | `pnpm run lint:smart` |
+| CI에 가까운 단위 | `pnpm run test:unit` |
+| HTTP + 통합 | `pnpm run test:integration` |
+| 전체 인메모리 e2e | `pnpm run test:e2e:fast` |
+| 런타임/품질 e2e | `pnpm run test:e2e:runtime` |
+| 최소 계약 스모크 | `pnpm run test:e2e:contract` |
+| 워치리스트 슬라이스 | `pnpm run test:watchlist` |
+| 품질 + eval 단위 | `pnpm run test:quality` |
+| 커버리지 리포트 | `pnpm run test:coverage` |
+| Vespa(Docker 기동) | `pnpm run test:e2e:vespa` |
+| 스마트 pre-push 게이트 | `pnpm run git:prepush:smart` |
 
 ---
 
@@ -446,9 +447,9 @@ Vitest 레인, 커버리지 범위, 파일별 E2E 의도는 위 **테스트·커
 
 <h2 id="prerequisites">전제 조건</h2>
 
-- **Node.js ≥ 22** 및 **npm**
+- **Node.js ≥ 22** 및 **pnpm** (`corepack enable` — `package.json`의 `packageManager` 필드로 버전 고정)
 - **Docker** + Docker Compose v2(의존 서비스 권장)
-- 선택: **Semgrep**(`npm run semgrep`), Vespa/ML 로컬 도구
+- 선택: **Semgrep**(`pnpm run semgrep`), Vespa/ML 로컬 도구
 
 ---
 
@@ -457,12 +458,16 @@ Vitest 레인, 커버리지 범위, 파일별 E2E 의도는 위 **테스트·커
 ```bash
 git clone <internal-remote> wine-search-engine
 cd wine-search-engine
-npm ci
+corepack enable
+pnpm install --frozen-lockfile
+# npm/yarn/bun으로는 설치되지 않습니다(preinstall 가드). 예외 자동화만 SKIP_PNPM_ONLY_CHECK=1.
 cp .env.example .env
 # .env 편집 — PG_*, REDIS_URL, VESPA_URL, ML URL, 시크릿.
 ```
 
-실질적 변경을 머지하기 전: **`npm run lint`**, **`npm run typecheck`**, 담당 영역 테스트.
+실질적 변경을 머지하기 전: **`pnpm run lint`**, **`pnpm run typecheck`**, 담당 영역 테스트.
+
+로컬에서 빌드 산출물·`node_modules`를 비우려면 **`pnpm run clean:worktree`** 후 **`pnpm install --frozen-lockfile`**. pnpm 패키지 스토어는 **`.npmrc`의 `store-dir`**로 `~/.wine-search-engine/store/pnpm`에 두어 클론 밖에 유지합니다(일부 패키지 postinstall이 내부적으로 `npm`을 호출하면 `store-dir`에 대한 무해한 경고가 나올 수 있음).
 
 ---
 
@@ -491,7 +496,7 @@ bash scripts/deps/link-external-node-modules.sh
 bash scripts/build/link-external-artifacts.sh
 ```
 
-루트 `node_modules`는 외부 디렉터리로 빼도 되지만, `web/node_modules`는 Next/Turbopack 제약 때문에 저장소 내부 경로를 유지해야 합니다.
+루트 `node_modules`는 `link-external-node-modules.sh`로 **`WINE_DEPS_DIR`(기본 `~/.wine-search-engine/deps`)** 밖으로 옮길 수 있습니다. `web/node_modules`는 Next/Turbopack 제약 때문에 **저장소 안의 실제 디렉터리**로 두는 것이 안전합니다. `dist`/`.next`/coverage 등은 `link-external-artifacts.sh`가 **`WINE_BUILD_DIR`(기본 `~/.wine-search-engine/build`)** 쪽으로 옮기고 레포에는 심볼릭 링크만 둡니다.
 
 **Docker Compose (`docker-compose.yml`)**는 **`app`** 서비스 환경을 설정해 **`postgres`**, **`redis`**, **`vespa`**를 DNS으로 해석; 임베딩은 **`host.docker.internal`**로 호스트 서비스를 쓸 수 있음. 리랭커는 Cohere API(`COHERE_API_KEY`)를 사용합니다.
 
@@ -500,8 +505,8 @@ bash scripts/build/link-external-artifacts.sh
 <h2 id="running-the-api">API 실행</h2>
 
 ```bash
-npm run dev          # tsx watch src/main.ts
-npm run build && npm run start   # dist/main.js
+pnpm run dev          # tsx watch src/main.ts
+pnpm run build && pnpm run start   # dist/main.js
 ```
 
 ---
@@ -540,26 +545,26 @@ docker compose -f docker-compose.test.yml up -d
 
 SQL: `src/infrastructure/db/migrations/*.sql` (실행 순서는 파일명 정렬).
 
-- **`npm run migrate`** — **`docker-compose.yml`의 Postgres**(`127.0.0.1:5432`, `wine` / `wine_dev`, DB `wine_engine`)에 적용. `.env`에 원격 `DATABASE_URL`이 있어도 이 경로는 로컬 Compose로 고정된다.
-- **`npm run migrate:from-env`** — `.env`의 `DATABASE_URL` / `PG_*` 그대로 사용 (RDS 등).
+- **`pnpm run migrate`** — **`docker-compose.yml`의 Postgres**(`127.0.0.1:5432`, `wine` / `wine_dev`, DB `wine_engine`)에 적용. `.env`에 원격 `DATABASE_URL`이 있어도 이 경로는 로컬 Compose로 고정된다.
+- **`pnpm run migrate:from-env`** — `.env`의 `DATABASE_URL` / `PG_*` 그대로 사용 (RDS 등).
 
 ```bash
-npm run docker:db:up && npm run migrate
+pnpm run docker:db:up && pnpm run migrate
 ```
 
 체크아웃에서 한 줄 실행이 필요하면 **tsx** 예시는 `scripts/migrate-from-env.ts` / `scripts/migrate-local-docker-pg.ts`를 참고.
 
 ---
 
-<h2 id="scripts--npm-commands-reference">스크립트·npm 명령(참고)</h2>
+<h2 id="scripts--pnpm-commands-reference">스크립트·pnpm 명령(참고)</h2>
 
 | 영역 | 명령 |
 |------|------|
-| 품질 | `npm run lint`, `npm run typecheck`, `npm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:noisy`, `test:verification:core`, `test:verification:vespa` |
-| HTTP 계약 | `npm run contracts:http`, `contracts:http:openapi-bridge` |
-| Eval | `npm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
-| ETL | `npm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
-| 운영 | `npm run bootstrap:smoke`, `npm run migrate` (Docker PG), `npm run migrate:from-env`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
+| 품질 | `pnpm run lint`, `pnpm run typecheck`, `pnpm run test`, `test:coverage`, `test:unit`, `test:integration`, `test:watchlist`, `test:e2e:*`, `test:quality*`, `test:verification:noisy`, `test:verification:core`, `test:verification:vespa` |
+| HTTP 계약 | `pnpm run contracts:http`, `contracts:http:openapi-bridge` |
+| Eval | `pnpm run eval`, `eval:offline:*`, `eval:noisy*`, `eval:sota:parallel` |
+| ETL | `pnpm run etl:transliteration`, 추가 `scripts/etl/*.ts`(별칭, index-to-vespa, validate-silver, …) |
+| 운영 | `pnpm run bootstrap:smoke`, `pnpm run migrate` (Docker PG), `pnpm run migrate:from-env`, `verify:drinking-window-model`, `vivino:bronze`, `finetuning:prepare` |
 
 많은 ETL/eval 호출은 **`npx tsx --env-file=.env …`**를 씁니다.
 
@@ -567,7 +572,7 @@ npm run docker:db:up && npm run migrate
 
 <h2 id="ci-github-actions">CI (GitHub Actions)</h2>
 
-잡에 **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:noisy`: gate 1회 + 베이스라인 assert만), **verify-splits**, 이후 **build** + **Docker 이미지 빌드** 포함. 공통 단계는 **`.github/actions/setup-node-ci`**(checkout + Node 22 + `npm ci`). **수동 실행:** Actions에서 `workflow_dispatch`. 노이즈 스모크 JSON은 로컬 `eval:noisy:smoke`. **`.github/workflows/ci.yml`** 참고.
+잡에 **lint**, **typecheck**, **unit**, **integration**, **watchlist**, **e2e fast**, **verification-core** (`test:verification:noisy`: gate 1회 + 베이스라인 assert만), **verify-splits**, 이후 **build** + **Docker 이미지 빌드** 포함. 공통 단계는 **`.github/actions/setup-node-ci`**(checkout + Node 22 + `pnpm install --frozen-lockfile`). **수동 실행:** Actions에서 `workflow_dispatch`. 노이즈 스모크 JSON은 로컬 `eval:noisy:smoke`. **`.github/workflows/ci.yml`** 참고.
 
 ---
 

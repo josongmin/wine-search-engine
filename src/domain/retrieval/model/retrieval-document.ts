@@ -152,7 +152,7 @@ export interface RetrievalDocument extends RetrievalHitProjection, RetrievalFeat
   readonly pairing: readonly string[];
 
   /** Occasion tags (e.g. "celebration", "casual dinner"). */
-  readonly occasion: readonly string[];
+  readonly occasion?: readonly string[] | undefined;
 
   /** Whether the wine is currently available for purchase. */
   readonly availability: boolean;

@@ -167,7 +167,9 @@ export type PriceBand = 'value' | 'mid' | 'premium' | 'luxury';
  * Silver record: the normalized intermediate between raw Vivino data and the
  * final {@link RetrievalDocument} that gets indexed in Vespa.
  *
- * All numeric sensory scores are in [0, 1].
+ * All numeric sensory scores are in [0, 1] when present; missing sensory
+ * values are represented as `null` so downstream layers can omit them
+ * instead of injecting synthetic defaults.
  * All strings are trimmed and non-empty (or the field is omitted).
  */
 export interface SilverWineRecord {
@@ -193,16 +195,21 @@ export interface SilverWineRecord {
   readonly grapePrimary: string | null;
   /** All grape varieties. */
   readonly grapes: readonly string[];
-  /** Body in [0, 1], normalized from Vivino 1-5. */
-  readonly body: number;
-  /** Sweetness in [0, 1]. */
-  readonly sweetness: number;
-  /** Acidity in [0, 1]. */
-  readonly acidity: number;
-  /** Tannin in [0, 1]. */
-  readonly tannin: number;
+  /** Body in [0, 1], normalized from Vivino 1-5. Null when source data is absent. */
+  readonly body: number | null;
+  /** Sweetness in [0, 1]. Null when source data is absent. */
+  readonly sweetness: number | null;
+  /** Acidity in [0, 1]. Null when source data is absent. */
+  readonly acidity: number | null;
+  /** Tannin in [0, 1]. Null when source data is absent. */
+  readonly tannin: number | null;
   /** Food pairing tags. */
   readonly pairingTags: readonly string[];
+  /**
+   * Occasion tags when an authoritative source provides them.
+   * Omitted until a provenance-backed enrichment step populates the field.
+   */
+  readonly occasion?: readonly string[] | undefined;
   /** Flavor group tags (e.g. "black-fruit", "oak"). */
   readonly flavorProfiles: readonly string[];
   /** English tasting notes for full-text search + semantic embedding. */
@@ -239,6 +246,12 @@ export interface SilverWineRecord {
    */
   readonly isTopRated: boolean;
 
+  /** Authoritative grape family label, when present in upstream data. */
+  readonly grapeFamily?: string | undefined;
+
+  /** Authoritative region hierarchy, when present in upstream data. */
+  readonly regionHierarchy?: readonly string[] | undefined;
+
   /** Finish length in [0, 1] normalized ordinal. Added by LLM enrichment step. */
   readonly finishLength?: number | undefined;
 
@@ -254,6 +267,12 @@ export interface SilverWineRecord {
    * Extracted from Vivino payload oak_ageing field or inferred from tasting notes.
    */
   readonly oakTreatment?: string | null;
+
+  /** Authoritative soil type label when an upstream source provides it. */
+  readonly soilType?: string | undefined;
+
+  /** Authoritative producer archetype label when an upstream source provides it. */
+  readonly producerType?: string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -307,6 +326,30 @@ export interface Doc2QueryFingerprint {
   readonly generatedAt: string;
 }
 
+export interface OccasionClassificationFingerprint {
+  readonly modelId: string;
+  readonly contentHash: string;
+  readonly ontologyVersion: string;
+  readonly generatedAt: string;
+}
+
+export interface OccasionClassificationEvidence {
+  readonly snippet: string;
+  readonly rationale: string;
+}
+
+export interface OccasionClassificationProvenance {
+  readonly source: 'llm_ontology_classifier';
+  readonly promptVersion: string;
+  readonly evidence: readonly OccasionClassificationEvidence[];
+}
+
+export interface OccasionClassification {
+  readonly values: readonly string[];
+  readonly fingerprint: OccasionClassificationFingerprint;
+  readonly provenance: OccasionClassificationProvenance;
+}
+
 export interface EnrichedSilverRecord extends SilverWineRecord {
   readonly aliases: AliasBundle;
   /**
@@ -320,6 +363,8 @@ export interface EnrichedSilverRecord extends SilverWineRecord {
   readonly doc2queryFingerprint?: Doc2QueryFingerprint;
   /** SPLADE-style sparse weights when the learned-sparse ETL step has run. */
   readonly learnedSparseWeights?: LearnedSparseVector | undefined;
+  /** Provenance-backed occasion tags from the offline classifier. */
+  readonly occasionClassification?: OccasionClassification | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -415,7 +460,7 @@ export interface IndexableWineRecord {
   /** Food pairing suggestions. */
   readonly pairing: readonly string[];
   /** Occasion tags. */
-  readonly occasion: readonly string[];
+  readonly occasion?: readonly string[] | undefined;
   /** Whether the wine is available for purchase. */
   readonly availability: boolean;
   /** Popularity score in [0, 1]. */

@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { atomicWriteFile } from './etl-utils.js';
@@ -52,6 +53,24 @@ function parseArgs(argv: readonly string[]): Args {
     throw new Error('--manifest is required');
   }
   return { manifestPath, runtimeStatePath, runtimeNlMappingsPath, allowMissingLtr };
+}
+
+function buildSnapshotArtifactPath(basePath: string, snapshotId: string): string {
+  const ext = path.extname(basePath);
+  const stem = ext.length > 0 ? basePath.slice(0, -ext.length) : basePath;
+  return `${stem}.${snapshotId}${ext}`;
+}
+
+function buildStagingPath(activePath: string, snapshotId: string): string {
+  const ext = path.extname(activePath);
+  const base = ext.length > 0 ? activePath.slice(0, -ext.length) : activePath;
+  return `${base}.${snapshotId}.staging${ext}`;
+}
+
+async function promoteStagedFile(stagingPath: string, activePath: string): Promise<void> {
+  const raw = await fs.readFile(stagingPath, 'utf8');
+  await atomicWriteFile(activePath, raw);
+  await fs.rm(stagingPath, { force: true });
 }
 
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
@@ -197,6 +216,7 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
   if (!shouldUsePgPool(config.pg)) {
     throw new Error('Postgres configuration is required to publish runtime substrates');
   }
+  const runtimeNlMappingsPath = buildSnapshotArtifactPath(args.runtimeNlMappingsPath, manifest.snapshotId);
 
   const [entities, aliases, ambiguityRows, nlMappingsRaw] = await Promise.all([
     loadEntities(manifest),
@@ -204,16 +224,13 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
     loadAmbiguityRows(manifest),
     fs.readFile(manifest.artifacts.nlMappingsJson, 'utf8'),
   ]);
-  const previousRuntimeNlMappings = await readOptionalFile(args.runtimeNlMappingsPath);
+  const previousRuntimeNlMappings = await readOptionalFile(runtimeNlMappingsPath);
 
   if (entities.length === 0) {
     throw new Error('Refusing to publish runtime substrates with zero entities');
   }
   if (aliases.length === 0) {
     throw new Error('Refusing to publish runtime substrates with zero aliases');
-  }
-  if (ambiguityRows.length === 0) {
-    throw new Error('Refusing to publish runtime substrates with zero ambiguity rows');
   }
 
   const pool = createPgPool(config.pg);
@@ -390,15 +407,15 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
         })),
       );
 
-      await atomicWriteFile(args.runtimeNlMappingsPath, nlMappingsRaw);
-      const runtimeNlMappingsCount = await loadNlMappingsCount(args.runtimeNlMappingsPath);
+      await atomicWriteFile(runtimeNlMappingsPath, nlMappingsRaw);
+      const runtimeNlMappingsCount = await loadNlMappingsCount(runtimeNlMappingsPath);
       const state: SearchSnapshotRuntimeState = {
         schemaVersion: SEARCH_SNAPSHOT_STATE_VERSION,
         snapshotId: manifest.snapshotId,
         contentHash: manifest.contentHash,
         publishedAt: new Date().toISOString(),
         manifestPath: args.manifestPath,
-        nlMappingsRuntimePath: args.runtimeNlMappingsPath,
+        nlMappingsRuntimePath: runtimeNlMappingsPath,
         allowMissingLtr: args.allowMissingLtr,
         counts: {
           entities: entities.length,
@@ -422,7 +439,7 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
     } catch (error) {
       if (!committed) {
         await client.query('ROLLBACK');
-        await restoreRuntimeNlMappings(args.runtimeNlMappingsPath, previousRuntimeNlMappings);
+        await restoreRuntimeNlMappings(runtimeNlMappingsPath, previousRuntimeNlMappings);
       }
       throw error;
     } finally {
@@ -435,7 +452,16 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
 
 async function run(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  const state = await publishRuntimeSubstrates(args);
+  const manifest = await loadManifest(args.manifestPath);
+  const stagedRuntimeStatePath = buildStagingPath(args.runtimeStatePath, manifest.snapshotId);
+  const stagedRuntimeNlMappingsPath = buildStagingPath(args.runtimeNlMappingsPath, manifest.snapshotId);
+  const state = await publishRuntimeSubstrates({
+    ...args,
+    runtimeStatePath: stagedRuntimeStatePath,
+    runtimeNlMappingsPath: stagedRuntimeNlMappingsPath,
+  });
+  await promoteStagedFile(state.nlMappingsRuntimePath, args.runtimeNlMappingsPath);
+  await promoteStagedFile(stagedRuntimeStatePath, args.runtimeStatePath);
   console.log(`Published runtime substrates for ${state.snapshotId}`);
   console.log(`runtime_state=${args.runtimeStatePath}`);
   console.log(`runtime_nl_mappings=${args.runtimeNlMappingsPath}`);

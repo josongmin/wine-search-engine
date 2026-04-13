@@ -22,6 +22,7 @@ import dotenv from 'dotenv';
 dotenv.config({ path: '.env.local', override: true });
 dotenv.config();
 import fs from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 
 import {
   loadFixtureCases,
@@ -449,7 +450,7 @@ async function assertThresholds(report: SearchFeatureBehaviorFixtureReport): Pro
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
-async function run(): Promise<void> {
+export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
 
   const rawCases = await loadFixtureCases([SUITE_ID]);
@@ -495,8 +496,11 @@ async function run(): Promise<void> {
   }
 }
 
-void run().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`[sfb-fixture-eval] fatal: ${message}\n`);
-  process.exit(1);
-});
+const entrypoint = process.argv[1];
+if (entrypoint !== undefined && import.meta.url === pathToFileURL(entrypoint).href) {
+  void main().catch((err: unknown) => {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[sfb-fixture-eval] fatal: ${message}\n`);
+    process.exit(1);
+  });
+}

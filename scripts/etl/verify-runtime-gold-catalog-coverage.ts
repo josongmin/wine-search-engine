@@ -109,13 +109,13 @@ export async function verifyRuntimeGoldCatalogCoverage(
       `SELECT entity_id
          FROM entities
         WHERE search_snapshot_id = $1
-          AND entity_id = ANY($2::text[])`,
+          AND COALESCE(metadata->>'benchmarkEntityId', entity_id) = ANY($2::text[])`,
       [args.snapshotId, required],
     ),
     args.pool.query<{ canonical_entity_id: string }>(
-      `SELECT canonical_entity_id
+      `SELECT COALESCE(source_provenance->>'benchmark_entity_id', canonical_entity_id) AS canonical_entity_id
          FROM canonical_entities
-        WHERE canonical_entity_id = ANY($1::text[])`,
+        WHERE COALESCE(source_provenance->>'benchmark_entity_id', canonical_entity_id) = ANY($1::text[])`,
       [required],
     ),
   ]);

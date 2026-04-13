@@ -3,7 +3,12 @@ import { DecisionEngine } from '../service/decision-engine.js';
 import { DEFAULT_THRESHOLD_PROFILE } from '../../query/model/threshold-profile.js';
 import type { ThresholdStore } from '../../query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../query/model/threshold-profile.js';
-import type { DecisionInput } from '../model/decision-input.js';
+import {
+  hasAnchorEvidence,
+  hasConstraintEvidence,
+  hasIdentityEvidence,
+  type DecisionInput,
+} from '../model/decision-input.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
 import { computeConformalSetSize, DEFAULT_ALPHA } from '../../resolver/service/resolver.js';
@@ -131,10 +136,59 @@ function makeQueryPlan(queryClass: QueryPlanV1['queryClass'] = 'short_entity'): 
   };
 }
 
-function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
+function makeProvenanceContract(
+  input: {
+    readonly queryPlan?: QueryPlanV1 | undefined;
+    readonly evidenceSummary?: DecisionInput['evidenceSummary'] | undefined;
+    readonly provenancePolicy?: DecisionInput['provenanceContract']['policy'] | undefined;
+    readonly resolverResult?: EntityResolveResult | undefined;
+  } = {},
+): DecisionInput['provenanceContract'] {
+  const queryPlan = input.queryPlan ?? makeQueryPlan();
+  const evidenceSummary = input.evidenceSummary;
+  const policy = input.provenancePolicy ?? {
+    requireIdentitySeal: queryPlan.intent === 'entity_exact',
+    requireConstraintEvidence: queryPlan.constraints.hard.length > 0,
+    requireAnchorEvidence: queryPlan.route === 'mixed' && queryPlan.anchors.length > 0,
+  };
+
   return {
-    queryPlan: makeQueryPlan(),
-    resolverResult: makeResolverResult(0.9, 0.3),
+    policy,
+    observed: {
+      identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
+      constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
+      anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
+      topEntityPresent: input.resolverResult?.topEntity !== undefined,
+      rankedTopResultPresent: false,
+      matchedConstraintAttributes: [],
+      unmetConstraintAttributes: [],
+      anchorSignalTypes: [],
+    },
+    missing: [
+      ...(policy.requireIdentitySeal && !hasIdentityEvidence(evidenceSummary)
+        ? ['identity_evidence' as const]
+        : []),
+      ...(policy.requireConstraintEvidence && !hasConstraintEvidence(evidenceSummary)
+        ? ['constraint_evidence' as const]
+        : []),
+      ...(policy.requireAnchorEvidence && !hasAnchorEvidence(evidenceSummary)
+        ? ['anchor_evidence' as const]
+        : []),
+    ],
+  };
+}
+
+function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
+  const queryPlan = overrides.queryPlan ?? makeQueryPlan();
+  const resolverResult = overrides.resolverResult ?? makeResolverResult(0.9, 0.3);
+  const evidenceSummary = overrides.evidenceSummary ?? {
+    identityEvidencePresent: true,
+    constraintEvidencePresent: false,
+    anchorEvidencePresent: false,
+  };
+  return {
+    queryPlan,
+    resolverResult,
     policy: {
       requireExact: false,
       allowApproximate: true,
@@ -152,11 +206,13 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
       anchorConfidence: 0.9,
       constraintConfidence: 0.8,
     },
-    evidenceSummary: {
-      identityEvidencePresent: true,
-      constraintEvidencePresent: false,
-      anchorEvidencePresent: false,
-    },
+    evidenceSummary,
+    provenanceContract: makeProvenanceContract({
+      queryPlan,
+      evidenceSummary,
+      provenancePolicy: overrides.provenanceContract?.policy,
+      resolverResult,
+    }),
     ...overrides,
   };
 }
@@ -254,6 +310,24 @@ describe('DecisionEngine', () => {
       expect(output.selectedEntity).toBeDefined();
       expect(output.chosenEntityId).toBeDefined();
       expect(output.selectedEntity?.entityId).toBe(output.chosenEntityId);
+    });
+
+    it('captures compiled retrieval mode and retrieval kind in the decision trace', async () => {
+      const output = await expectDecisionStatus({
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'recommendation',
+        retrievalKind: 'specialized_hybrid',
+        resolverResult: makeResolverResult(0.9, 0.3, false),
+        evidenceSummary: { identityEvidencePresent: true },
+      }, 'resolved');
+
+      expect(output.decisionTrace.inputs).toEqual(
+        expect.objectContaining({
+          effectiveRoute: 'hybrid',
+          effectiveRetrievalMode: 'recommendation',
+          retrievalKind: 'specialized_hybrid',
+        }),
+      );
     });
   });
 
@@ -365,7 +439,7 @@ describe('DecisionEngine', () => {
       expect(output.admissionTraceRef).toBeDefined();
     });
 
-    it('keeps degraded blocking entity lookup backward compatible', async () => {
+    it('admits degraded entity lookup when admission obligations are satisfied', async () => {
       const output = await engine.decide(
         makeResolvedDecisionInput({
           effectiveRetrievalMode: 'entity_lookup',
@@ -378,6 +452,20 @@ describe('DecisionEngine', () => {
       expect(output.decisionStatus).toBe('resolved');
       expect(output.failureReason).toBeUndefined();
       expect(output.admissionTraceRef).toBeUndefined();
+    });
+
+    it('does not bypass admission gate for entity lookup when the executed route is unhealthy', async () => {
+      const output = await engine.decide(
+        makeResolvedDecisionInput({
+          effectiveRetrievalMode: 'entity_lookup',
+          routeHealthy: false,
+        }),
+        TEST_SNAPSHOT,
+      );
+
+      expect(output.decisionStatus).toBe('failed');
+      expect(output.failureReason).toBe('POLICY_BLOCKED');
+      expect(output.admissionTraceRef).toBeDefined();
     });
 
     it('mints the same admission trace for equivalent compiled-first policy blocks', async () => {
@@ -480,8 +568,9 @@ describe('DecisionEngine', () => {
           const full = makeInput({
             resolverResult: makeResolverResult(0.85, 0.20, false),
           });
-          const { evidenceSummary: _omit, ...input } = full;
+          const { evidenceSummary: _omit, provenanceContract: _omitContract, ...input } = full;
           void _omit;
+          void _omitContract;
           return input;
         })(),
         false,
@@ -512,10 +601,8 @@ describe('DecisionEngine', () => {
       }
     });
 
-    it('resolved with constraints but no constraint evidence → resolves (constraint evidence disabled)', async () => {
-      // SOTA++: constraint evidence globally disabled. Planner-inferred
-      // constraints don't block resolve. Identity evidence is sufficient.
-      await expectDecisionStatus({
+    it('resolved with constraints but no constraint evidence → downgraded', async () => {
+      const output = await expectDecisionStatus({
         resolverResult: makeResolverResult(0.85, 0.20, false),
         queryPlan: {
           ...makeQueryPlan(),
@@ -529,7 +616,8 @@ describe('DecisionEngine', () => {
           identityEvidencePresent: true,
           constraintEvidencePresent: false,
         },
-      }, 'resolved');
+      }, 'ambiguous');
+      expect(output.decisionTrace.rulesApplied).toContain('EVIDENCE_GATE_DOWNGRADE');
     });
 
     it('resolved with anchor but no anchor evidence → downgraded', async () => {

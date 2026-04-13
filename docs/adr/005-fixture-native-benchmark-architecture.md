@@ -535,7 +535,7 @@ For each fixture case:
 
 #### Acceptance
 
-- `npm run eval:search-feature:fixtures` exists
+- `pnpm run eval:search-feature:fixtures` exists
 - runner reads only external fixture suite definitions
 - thresholds come only from external threshold JSON
 

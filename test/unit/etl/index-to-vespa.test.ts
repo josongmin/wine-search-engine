@@ -3,6 +3,8 @@ import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
 import {
   buildSearchTextKo,
   deterministicEmbedding,
+  parsePreparedVespaFeedDocuments,
+  serializePreparedVespaFeedDocuments,
   silverToRetrievalDoc,
 } from '../../../scripts/etl/index-to-vespa.js';
 import { toVespaFields } from '../../../src/infrastructure/vespa/mapping.js';
@@ -157,21 +159,47 @@ describe('index-to-vespa bridge', () => {
     const norm = Math.sqrt(embedding.reduce((s, x) => s + x * x, 0));
     expect(norm).toBeCloseTo(1.0, 5);
   });
+
+  it('round-trips prepared Vespa feed artifacts as exact replay documents', () => {
+    const record = makeEnrichedRecord();
+    const doc = silverToRetrievalDoc(
+      record,
+      deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+      'search-snapshot:v1:test-1234',
+    );
+    const prepared = [
+      {
+        id: String(doc.entityId),
+        fields: toVespaFields(doc),
+      },
+    ] as const;
+
+    const raw = serializePreparedVespaFeedDocuments(prepared);
+
+    expect(parsePreparedVespaFeedDocuments(raw, 'prepared-feed.ndjson')).toEqual(prepared);
+  });
+
+  it('rejects legacy silver rows as prepared Vespa feed artifacts', () => {
+    const legacyRaw = `${JSON.stringify(makeEnrichedRecord())}\n`;
+
+    expect(() => parsePreparedVespaFeedDocuments(legacyRaw, 'legacy-feed.ndjson')).toThrow(
+      /prepared Vespa feed artifact/,
+    );
+  });
 });
 
 describe('taxonomy field ingest contract', () => {
-  it('derives grape_family from grapePrimary and writes it to Vespa', () => {
-    const record = makeEnrichedRecord({ grapePrimary: 'Cabernet Sauvignon' });
+  it('omits grape_family when no authoritative upstream value is present', () => {
+    const record = makeEnrichedRecord({ grapePrimary: 'Cabernet Sauvignon', grapeFamily: undefined });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
     const fields = toVespaFields(doc);
 
-    expect(doc.grapeFamily).toBe('Cabernet');
-    expect(fields['grape_family']).toBe('Cabernet');
+    expect(doc.grapeFamily).toBeUndefined();
+    expect(fields).not.toHaveProperty('grape_family');
   });
 
-  // ── Round 2 audit regression: grape family map for multi-word varieties ──
-  it('maps "Nero d\'Avola" → "Nero d\'Avola" (multi-word identity mapping)', () => {
-    const record = makeEnrichedRecord({ grapePrimary: "Nero d'Avola" });
+  it('preserves authoritative grape_family when provided upstream', () => {
+    const record = makeEnrichedRecord({ grapePrimary: "Nero d'Avola", grapeFamily: "Nero d'Avola" });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
     const fields = toVespaFields(doc);
 
@@ -179,27 +207,22 @@ describe('taxonomy field ingest contract', () => {
     expect(fields['grape_family']).toBe("Nero d'Avola");
   });
 
-  it('maps "Sauvignon Blanc" → "Sauvignon Blanc" (multi-word identity mapping)', () => {
-    const record = makeEnrichedRecord({ grapePrimary: 'Sauvignon Blanc' });
-    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
-    const fields = toVespaFields(doc);
+  it('fails closed when wineType is missing instead of synthesizing a default style', () => {
+    const record = makeEnrichedRecord({ wineType: undefined as unknown as EnrichedSilverRecord['wineType'] });
 
-    expect(doc.grapeFamily).toBe('Sauvignon Blanc');
-    expect(fields['grape_family']).toBe('Sauvignon Blanc');
+    expect(() =>
+      silverToRetrievalDoc(
+        record,
+        deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),
+      ),
+    ).toThrow(/wineType is required/);
   });
 
-  it('maps "Shiraz" → "Syrah" (synonym family mapping)', () => {
-    const record = makeEnrichedRecord({ grapePrimary: 'Shiraz' });
+  it('omits grape_family instead of heuristic synonym/fallback derivation', () => {
+    const record = makeEnrichedRecord({ grapePrimary: 'Shiraz', grapeFamily: undefined });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
 
-    expect(doc.grapeFamily).toBe('Syrah');
-  });
-
-  it('falls back to first word for unknown grape ("Tempranillo Roriz")', () => {
-    const record = makeEnrichedRecord({ grapePrimary: 'Tempranillo Roriz' });
-    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
-
-    expect(doc.grapeFamily).toBe('Tempranillo');
+    expect(doc.grapeFamily).toBeUndefined();
   });
 
   it('omits grape_family when grapePrimary is null', () => {
@@ -211,15 +234,40 @@ describe('taxonomy field ingest contract', () => {
     expect(fields).not.toHaveProperty('grape_family');
   });
 
-  it('parses region into region_hierarchy, deduplicating segments', () => {
+  it('preserves authoritative region_hierarchy when provided upstream', () => {
     const record = makeEnrichedRecord({
       region: 'Spain / Ribera del Duero / Spain / Castilla y León / Ribera del Duero',
+      regionHierarchy: ['Spain', 'Ribera del Duero', 'Castilla y León'],
     });
     const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
     const fields = toVespaFields(doc);
 
     expect(doc.regionHierarchy).toEqual(['Spain', 'Ribera del Duero', 'Castilla y León']);
     expect(fields['region_hierarchy']).toEqual(['Spain', 'Ribera del Duero', 'Castilla y León']);
+  });
+
+  it('omits soil_type and producer_type when ETL has no authoritative source', () => {
+    const record = makeEnrichedRecord();
+    Object.assign(record as Record<string, unknown>, { soilType: undefined, producerType: undefined });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.soilType).toBeUndefined();
+    expect(doc.producerType).toBeUndefined();
+    expect(fields).not.toHaveProperty('soil_type');
+    expect(fields).not.toHaveProperty('producer_type');
+  });
+
+  it('preserves authoritative soil_type and producer_type when provided upstream', () => {
+    const record = makeEnrichedRecord();
+    Object.assign(record as Record<string, unknown>, { soilType: 'limestone', producerType: 'estate' });
+    const doc = silverToRetrievalDoc(record, deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin));
+    const fields = toVespaFields(doc);
+
+    expect(doc.soilType).toBe('limestone');
+    expect(doc.producerType).toBe('estate');
+    expect(fields['soil_type']).toBe('limestone');
+    expect(fields['producer_type']).toBe('estate');
   });
 
   it('maps priceBand label to price_band_numeric ordinal', () => {

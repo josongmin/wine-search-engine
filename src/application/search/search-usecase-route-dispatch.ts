@@ -1,6 +1,7 @@
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
+import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
 import type { FunnelMetrics } from '../../domain/ranking/model/ranking-stage.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { RankingDegradationSignal } from '../../domain/ranking/model/ranking-runtime-signal.js';
@@ -8,7 +9,14 @@ import type { RankingMetadata } from '../../domain/ranking/port/ranker.port.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { CanonicalEntityId } from '../../domain/shared/types/index.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
+import type { SpecializedRouteName } from '../../domain/response/model/specialized-route.js';
 import type { SpecializedRouteObservability } from './specialized-route-observability.js';
+
+export type SearchRouteRetrievalKind =
+  | 'entity_lookup'
+  | 'generic_hybrid'
+  | 'specialized_hybrid'
+  | 'mixed_similarity';
 
 export interface SearchRouteDecisionContext {
   readonly mixedAnchor?: {
@@ -21,6 +29,11 @@ export interface SearchRouteDecisionContext {
 export interface SearchRouteExecutionResult {
   readonly resolveResult: EntityResolveResult;
   readonly rankedResults: readonly RankedResult[];
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalKind: SearchRouteRetrievalKind;
+  readonly sparseExecuted: boolean;
+  readonly specializedRouteExecuted: SpecializedRouteName | null;
+  readonly usedCompiledExecution: boolean;
   readonly decisionContext?: SearchRouteDecisionContext | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly fallbackReason?: string | undefined;
@@ -42,6 +55,11 @@ export interface EntityRouteResult {
   readonly resolveResult: EntityResolveResult;
   /** Entity route synthetic ranked results built from resolver output + entity docs. */
   readonly rankedResults: readonly RankedResult[];
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalKind: SearchRouteRetrievalKind;
+  readonly sparseExecuted: boolean;
+  readonly specializedRouteExecuted: SpecializedRouteName | null;
+  readonly usedCompiledExecution: boolean;
   /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
   readonly correctiveRetryCalibration?: number | undefined;
 }
@@ -64,7 +82,15 @@ export async function dispatchSearchRouteExecution(
   switch (effectiveRoute) {
     case 'entity': {
       const entityRoute = await actions.executeEntity();
-      const { resolveResult, correctiveRetryCalibration } = entityRoute;
+      const {
+        resolveResult,
+        correctiveRetryCalibration,
+        effectiveRetrievalMode,
+        retrievalKind,
+        sparseExecuted,
+        specializedRouteExecuted,
+        usedCompiledExecution,
+      } = entityRoute;
       const rankedResults = entityRoute.rankedResults;
       pipelineDebug(
         {
@@ -77,6 +103,11 @@ export async function dispatchSearchRouteExecution(
       return {
         resolveResult,
         rankedResults,
+        effectiveRetrievalMode,
+        retrievalKind,
+        sparseExecuted,
+        specializedRouteExecuted,
+        usedCompiledExecution,
         ...(resolveResult.degradation?.reasons.length
           ? {
               routeDegradation: {

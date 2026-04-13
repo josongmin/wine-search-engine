@@ -4,9 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseNdjson } from './ndjson.js';
 import type { EnrichedSilverRecord } from './types.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFile } from './etl-utils.js';
 import {
+  buildSearchSnapshotContentHash,
   buildSearchSnapshotId,
   hashStableJson,
   hashText,
@@ -19,15 +19,19 @@ import { resolveAliasClaimsAndBuildAmbiguityRegistry } from './build-ambiguity-r
 import { SEARCH_SNAPSHOT_SCHEMA_VERSION } from '../../src/shared/constants/search-snapshot.js';
 import { buildAliasArtifact } from './build-alias-artifact.js';
 import {
-  buildEntityIdBySourceId,
   loadGoldCanonicalLookupForBuild,
   resolveWineSnapshotEntity,
 } from './snapshot-entity-identity.js';
+import type {
+  CanonicalEntityId,
+  SourceRecordId,
+} from '../../src/domain/shared/types/entity-id.js';
 import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../src/shared/constants/source-systems.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
-const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
-const DEFAULT_OUTPUT_DIR = resolveDataPath('data/search-snapshots');
-const DEFAULT_NL_MAPPINGS = resolveDataPath('data/nl-mappings.json');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
+export const DEFAULT_OUTPUT_DIR = ETL_ARTIFACT_FILES.searchSnapshotsDir;
+export const DEFAULT_NL_MAPPINGS = ETL_ARTIFACT_FILES.nlMappings;
 
 export interface Args {
   readonly input: string;
@@ -58,48 +62,6 @@ function parseArgs(argv: readonly string[]): Args {
     }
   }
   return { input, outputDir, nlMappings, fixtureRepoRoot };
-}
-
-function buildEntityArtifact(
-  records: readonly EnrichedSilverRecord[],
-  goldLookup: ReadonlyMap<string, string>,
-): readonly EntitySnapshotRecord[] {
-  return records.map((record) => {
-    const resolved = resolveWineSnapshotEntity(record, goldLookup);
-    return {
-      entityId: resolved.entityId,
-      entityType: 'wine',
-      canonicalLabel: record.canonicalLabel,
-      identitySignature: resolved.identitySignature,
-      relations: {},
-      attributes: {
-        grapes: record.grapes,
-        style: record.wineType,
-        body: record.body,
-        sweetness: record.sweetness,
-        acidity: record.acidity,
-        tannin: record.tannin,
-        region: record.region,
-        priceBand: record.priceBand,
-        ...(record.vintageYear != null ? { vintage: record.vintageYear } : {}),
-        pairing: record.pairingTags,
-        occasion: [],
-      },
-      metadata: {
-        source: 'snapshot:silver_docquery_v1',
-        trustTier: 'high',
-        externalId: record.externalId,
-        producer: record.producer,
-        country: record.country,
-        region: record.region,
-        ...(record.appellation != null ? { appellation: record.appellation } : {}),
-        identityResolution: resolved.resolution,
-        sourceRecordRefs: [
-          { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: record.sourceId },
-        ],
-      },
-    } as const;
-  }).sort((left, right) => left.entityId.localeCompare(right.entityId));
 }
 
 function parseNlMappings(raw: string): { readonly mappingCount: number; readonly payload: unknown } {
@@ -133,13 +95,57 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   const parsed = parseNdjson<EnrichedSilverRecord>(recordContent, args.input);
   const records = [...parsed.records].sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
-  const entityArtifact = buildEntityArtifact(records, goldLookup);
-  const entityIdBySourceId = buildEntityIdBySourceId(records, goldLookup);
+  const entityArtifact: EntitySnapshotRecord[] = [];
+  const entityIdBySourceId = new Map<SourceRecordId, CanonicalEntityId>();
+
+  for (const record of records) {
+    const resolved = resolveWineSnapshotEntity(record, goldLookup);
+    const occasion = record.occasionClassification?.values ?? record.occasion;
+    entityArtifact.push({
+      entityId: resolved.entityId,
+      entityType: 'wine',
+      canonicalLabel: record.canonicalLabel,
+      identitySignature: resolved.identitySignature,
+      relations: {},
+      attributes: {
+        grapes: record.grapes,
+        style: record.wineType,
+        ...(record.body != null ? { body: record.body } : {}),
+        ...(record.sweetness != null ? { sweetness: record.sweetness } : {}),
+        ...(record.acidity != null ? { acidity: record.acidity } : {}),
+        ...(record.tannin != null ? { tannin: record.tannin } : {}),
+        region: record.region,
+        priceBand: record.priceBand,
+        ...(record.vintageYear != null ? { vintage: record.vintageYear } : {}),
+        pairing: record.pairingTags,
+        ...(occasion !== undefined && occasion.length > 0
+          ? { occasion: [...occasion] }
+          : {}),
+      },
+      metadata: {
+        source: 'snapshot:silver_trackc_v1',
+        trustTier: 'high',
+        externalId: record.externalId,
+        producer: record.producer,
+        country: record.country,
+        region: record.region,
+        ...(record.appellation != null ? { appellation: record.appellation } : {}),
+        identityResolution: resolved.resolution,
+        ...(resolved.benchmarkEntityId != null ? { benchmarkEntityId: resolved.benchmarkEntityId } : {}),
+        sourceRecordRefs: [
+          { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: record.sourceId },
+        ],
+      },
+    } as const);
+    entityIdBySourceId.set(record.sourceId, resolved.entityId);
+  }
+  entityArtifact.sort((left, right) => left.entityId.localeCompare(right.entityId));
   const aliasArtifact = buildAliasArtifact(records, entityIdBySourceId);
   const { resolvedAliases, ambiguityRows } = resolveAliasClaimsAndBuildAmbiguityRegistry(aliasArtifact);
   const nlMappings = parseNlMappings(nlMappingsRaw);
 
   const documentsNdjson = serializeNdjson(records);
+  const vespaFeedNdjson = recordContent;
   const entitiesNdjson = serializeNdjson(entityArtifact);
   const aliasesNdjson = serializeNdjson(resolvedAliases);
   const ambiguityNdjson = serializeNdjson(ambiguityRows);
@@ -147,13 +153,14 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
 
   const hashes = {
     documents: hashText(documentsNdjson),
+    vespaFeed: hashText(vespaFeedNdjson),
     entities: hashStableJson(entityArtifact),
     aliases: hashStableJson(resolvedAliases),
     ambiguityRegistry: hashStableJson(ambiguityRows),
     nlMappings: hashText(nlMappingsCanonical),
   } as const;
 
-  const contentHash = hashStableJson(hashes);
+  const contentHash = buildSearchSnapshotContentHash(hashes);
   const snapshotId = buildSearchSnapshotId(contentHash);
   const snapshotRoot = path.join(args.outputDir, snapshotId);
 
@@ -165,6 +172,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     sourceInputPath: args.input,
     artifacts: {
       documentsNdjson: path.join(snapshotRoot, 'documents.ndjson'),
+      vespaFeedNdjson: path.join(snapshotRoot, 'vespa-feed.ndjson'),
       entitiesNdjson: path.join(snapshotRoot, 'entities.ndjson'),
       aliasesNdjson: path.join(snapshotRoot, 'aliases.ndjson'),
       ambiguityRegistryNdjson: path.join(snapshotRoot, 'ambiguity-registry.ndjson'),
@@ -173,6 +181,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
     },
     counts: {
       documents: records.length,
+      vespaFeed: records.length,
       entities: entityArtifact.length,
       aliases: resolvedAliases.length,
       ambiguityRegistry: ambiguityRows.length,
@@ -192,6 +201,7 @@ export async function buildSearchSnapshot(args: Args): Promise<BuildSearchSnapsh
   await fs.mkdir(snapshotRoot, { recursive: true });
   await Promise.all([
     atomicWriteFile(manifest.artifacts.documentsNdjson, documentsNdjson),
+    fs.copyFile(args.input, manifest.artifacts.vespaFeedNdjson),
     atomicWriteFile(manifest.artifacts.entitiesNdjson, entitiesNdjson),
     atomicWriteFile(manifest.artifacts.aliasesNdjson, aliasesNdjson),
     atomicWriteFile(manifest.artifacts.ambiguityRegistryNdjson, ambiguityNdjson),

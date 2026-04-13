@@ -93,6 +93,75 @@ describe('buildResolverCandidatesFromGenerator', () => {
     );
     expect(candidates[0]?.aliasMatches).toHaveLength(2);
   });
+
+  it('prefers batch document hydration when getDocuments is available', async () => {
+    const entityId = createEntityId('opus-one-2018');
+    const getDocuments = vi.fn().mockResolvedValue(
+      new Map([
+        [entityId, {
+          entityId,
+          entityType: 'wine',
+          canonicalLabel: 'Opus One 2018',
+        }],
+      ]),
+    );
+    const getDocument = vi.fn();
+
+    const candidates = await buildResolverCandidatesFromGenerator(
+      makeGeneratorInput(),
+      { getDocuments, getDocument },
+    );
+
+    expect(getDocuments).toHaveBeenCalledWith([entityId]);
+    expect(getDocument).not.toHaveBeenCalled();
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.canonicalLabel).toBe('Opus One 2018');
+  });
+
+  it('rejects when hydration remains incomplete after batch and single fetches', async () => {
+    const missingId = createEntityId('missing-wine');
+    const presentId = createEntityId('present-wine');
+    const getDocuments = vi.fn().mockResolvedValue(
+      new Map([
+        [presentId, {
+          entityId: presentId,
+          entityType: 'wine',
+          canonicalLabel: 'Present Wine',
+        }],
+      ]),
+    );
+    const getDocument = vi.fn(async (id) => {
+      if (String(id) === String(presentId)) {
+        return {
+          entityId: presentId,
+          entityType: 'wine',
+          canonicalLabel: 'Present Wine',
+        };
+      }
+      return null;
+    });
+
+    const input = {
+      rawQuery: '오푸스원',
+      normalizedQuery: '오푸스원',
+      anchors: [
+        {
+          surfaceForm: '오푸스원',
+          normalizedForm: '오푸스원',
+          candidateEntityIds: [presentId, missingId],
+          lookupStrategies: ['transliterated_exact'] as const,
+          confidence: 0.93,
+          source: 'alias' as const,
+        },
+      ],
+    };
+
+    await expect(
+      buildResolverCandidatesFromGenerator(input, { getDocuments, getDocument }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL_INCONSISTENCY',
+    });
+  });
 });
 
 // ─── 수학적 완결성: mergeSignals 교환법칙 · 멱등법칙 · 3-anchor max() ──────────

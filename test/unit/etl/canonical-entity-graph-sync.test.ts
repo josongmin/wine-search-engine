@@ -18,6 +18,7 @@ function baseEntity(overrides: Partial<EntitySnapshotRecord> = {}): EntitySnapsh
     attributes: { vintage: 2018, style: 'red' },
     metadata: {
       identityResolution: 'gold_overlay',
+      benchmarkEntityId: 'opus-one-2018',
       producer: 'Opus One',
       country: 'United States',
       region: 'Napa Valley',
@@ -46,6 +47,9 @@ describe('canonical-entity-graph-sync', () => {
     });
     expect((canonicalRows[0]?.source_provenance as { search_snapshot_id?: string }).search_snapshot_id).toBe(
       'search-snapshot:v1:test',
+    );
+    expect((canonicalRows[0]?.source_provenance as { benchmark_entity_id?: string }).benchmark_entity_id).toBe(
+      'opus-one-2018',
     );
     expect(linkRows[0]).toMatchObject({
       canonical_entity_id: 'opus-one-2018',

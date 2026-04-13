@@ -1,5 +1,6 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type { ExecutionRetrievalMode } from '../../domain/query/model/engine-execution-contract.js';
 import type { AuditExtension, PolicyOutcome } from '../../domain/audit/model/audit-extension.js';
 import type { CandidateDropRecord } from '../../domain/retrieval/model/candidate-envelope.js';
 import type { QueryRoute } from '../../domain/query/model/query-route.js';
@@ -15,6 +16,7 @@ import type { SearchResponseCachePort } from '../../domain/performance/port/sear
 import type { DecisionEnginePort, ResponseBuilderPort } from './port/search-pipeline-deps.port.js';
 import type { SearchRequest } from './search-request.dto.js';
 import type { SearchRouteDecisionContext } from './search-usecase-route-dispatch.js';
+import type { SearchRouteRetrievalKind } from './search-usecase-route-dispatch.js';
 import { buildEntropyAbstainResponseParams } from './search-usecase-execute-builders.js';
 import { buildSearchCacheRequestContext } from './search-usecase-cache-context.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
@@ -23,6 +25,7 @@ import { ConstraintReasoner } from '../../domain/query/service/constraint-reason
 import type { ConstraintReasonerOutput } from '../../domain/query/service/constraint-reasoner.js';
 import type { ChannelDegradationSummary } from '../../domain/query/model/abstain-decision.js';
 import { buildAuthorityTraceRef } from '../../domain/decision/service/authority-trace.js';
+import { evaluateAdmissionClosure } from '../../domain/decision/service/admission-gate.js';
 import { DomainError, EvidenceObligationError } from '../../domain/shared/error/domain-error.js';
 import { buildSearchCounterfactuals } from './search-usecase-counterfactuals.js';
 import { getExplanationObligation } from '../../domain/response/service/explanation-obligation.js';
@@ -78,6 +81,7 @@ function deriveAuditExtension(
   compiled: CompiledWineQuery | undefined,
   rankingMetadata: RankingMetadata | undefined,
   rankedResults: readonly RankedResult[],
+  executionTrace: AuditExtension['execution_trace'] | undefined,
   retrievalFusionTrace?: RrfFusionTrace,
   constraintResolutionTrace?: AuditExtension['constraint_resolution_trace'],
   abstainDecision?: TypedAbstainDecision | false,
@@ -106,7 +110,8 @@ function deriveAuditExtension(
   const hasRetryCalibration = correctiveRetryCalibration !== undefined && Number.isFinite(correctiveRetryCalibration);
 
   if (
-    (plannerTrace == null || plannerTrace.length === 0)
+    executionTrace === undefined
+    && (plannerTrace == null || plannerTrace.length === 0)
     && scoreDriftRecord === undefined
     && !hasFusionTrace
     && constraintResolutionTrace === undefined
@@ -130,6 +135,9 @@ function deriveAuditExtension(
   })();
 
   return {
+    ...(executionTrace !== undefined
+      ? { execution_trace: executionTrace }
+      : {}),
     ...(plannerTrace != null && plannerTrace.length > 0
       ? { planner_policy_trace: plannerTrace }
       : {}),
@@ -191,6 +199,64 @@ function deriveAuditExtension(
       : {}),
     ...(resolverProvenanceTrace !== undefined
       ? { resolver_provenance_trace: resolverProvenanceTrace }
+      : {}),
+  };
+}
+
+function buildExecutionAuditTrace(
+  effectiveRoute: QueryRoute,
+  retrievalModeSource: 'planner' | 'api_override',
+  routeExecutionFacts: {
+    readonly effectiveRetrievalMode?: ExecutionRetrievalMode | undefined;
+    readonly retrievalKind?: SearchRouteRetrievalKind | undefined;
+    readonly sparseExecuted?: boolean | undefined;
+    readonly specializedRouteExecuted?: SpecializedRouteObservability['specializedRouteExecuted'] | undefined;
+    readonly usedCompiledExecution?: boolean | undefined;
+  },
+  rankingMetadata?: RankingMetadata,
+  compiled?: CompiledWineQuery,
+): NonNullable<AuditExtension['execution_trace']> {
+  const executionBudget = compiled?.execution.budget;
+  const provenancePolicy = compiled?.execution.provenancePolicy;
+  const provenanceClosure = rankingMetadata?.provenanceClosure;
+
+  return {
+    effective_route: effectiveRoute,
+    retrieval_mode_source: retrievalModeSource,
+    ...(routeExecutionFacts.effectiveRetrievalMode !== undefined
+      ? { effective_retrieval_mode: routeExecutionFacts.effectiveRetrievalMode }
+      : {}),
+    ...(routeExecutionFacts.retrievalKind !== undefined
+      ? { retrieval_kind: routeExecutionFacts.retrievalKind }
+      : {}),
+    ...(routeExecutionFacts.sparseExecuted !== undefined
+      ? { sparse_executed: routeExecutionFacts.sparseExecuted }
+      : {}),
+    ...(routeExecutionFacts.specializedRouteExecuted !== undefined
+      ? { specialized_route_executed: routeExecutionFacts.specializedRouteExecuted }
+      : {}),
+    ...(routeExecutionFacts.usedCompiledExecution !== undefined
+      ? { used_compiled_execution: routeExecutionFacts.usedCompiledExecution }
+      : {}),
+    ...(executionBudget !== undefined
+      ? {
+          compiled_budget: {
+            max_candidates: executionBudget.maxCandidates,
+            enable_precision_rerank: executionBudget.enablePrecisionRerank,
+          },
+        }
+      : {}),
+    ...(provenancePolicy !== undefined
+      ? {
+          provenance_policy: {
+            require_identity_seal: provenancePolicy.requireIdentitySeal,
+            require_constraint_evidence: provenancePolicy.requireConstraintEvidence,
+            require_anchor_evidence: provenancePolicy.requireAnchorEvidence,
+          },
+        }
+      : {}),
+    ...(provenanceClosure !== undefined
+      ? { provenance_closure: provenanceClosure }
       : {}),
   };
 }
@@ -306,8 +372,8 @@ function buildDeterminismFingerprintParams(
     ...Object.keys(indexVersions).sort().map((key) => `${key}:${indexVersions[key] ?? ''}`),
   );
   const queryFamily = deriveQueryFamily(plan, compiled);
-  const effectiveRetrievalMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
-  const effectiveRoute = compiled?.execution.effectiveRoute ?? 'hybrid';
+  const effectiveRetrievalMode = compiled.execution.effectiveRetrievalMode;
+  const effectiveRoute = compiled.execution.effectiveRoute;
   const fusionQueryClass = mapDomainQueryClassToFusionQueryClass(plan.queryClass, effectiveRetrievalMode);
   const fusionConfig = getFusionConfig(fusionQueryClass);
   const retrievalProfile = retrievalProfileService.getProfile(
@@ -444,7 +510,7 @@ export interface SearchPostRouteExecutionContext {
   readonly rankedResults: readonly RankedResult[];
   readonly decisionContext?: SearchRouteDecisionContext | undefined;
   readonly effectiveRoute: QueryRoute;
-  readonly plannerSuggestedMode: string;
+  readonly plannerSuggestedMode: ExecutionRetrievalMode;
   readonly retrievalModeSource: 'planner' | 'api_override';
   readonly abstainPolicy: AbstainPolicy;
   readonly snapshotVersions: SnapshotVersionInjection;
@@ -455,6 +521,12 @@ export interface SearchPostRouteExecutionContext {
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  /** Route-execution facts propagated from dispatch/ranking. */
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalKind: SearchRouteRetrievalKind;
+  readonly sparseExecuted: boolean;
+  readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'];
+  readonly usedCompiledExecution: boolean;
   /** E4: RRF fusion trace from CandidatePoolService, when hybrid path was used. */
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
@@ -503,17 +575,40 @@ export interface RankedRouteDecisionPhaseContext {
   readonly decisionEngine: DecisionEnginePort;
   readonly responseBuilder: ResponseBuilderPort;
   readonly retrievalModeSource?: 'planner' | 'api_override' | undefined;
-  readonly plannerSuggestedMode?: string | undefined;
+  readonly plannerSuggestedMode?: ExecutionRetrievalMode | undefined;
   readonly includeCounterfactuals?: boolean | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly rankingMetadata?: RankingMetadata | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalKind: SearchRouteRetrievalKind;
+  readonly sparseExecuted: boolean;
+  readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'];
+  readonly usedCompiledExecution: boolean;
   /** E4: RRF fusion trace from the candidate pool, forwarded from the calling context. */
   readonly retrievalFusionTrace?: RrfFusionTrace | undefined;
   /** E4: Hard-filter drop log from CandidatePoolService.getLastDropLog(). */
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
   /** TA5: Calibrated posterior confidence from corrective retry, when accepted. */
   readonly correctiveRetryCalibration?: number | undefined;
+}
+
+function assertSearchRouteExecutionFacts(
+  ctx: SearchPostRouteExecutionContext,
+): {
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalKind: SearchRouteRetrievalKind;
+  readonly sparseExecuted: boolean;
+  readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'];
+  readonly usedCompiledExecution: boolean;
+} {
+  return {
+    effectiveRetrievalMode: ctx.effectiveRetrievalMode,
+    retrievalKind: ctx.retrievalKind,
+    sparseExecuted: ctx.sparseExecuted,
+    specializedRouteExecuted: ctx.specializedRouteExecuted,
+    usedCompiledExecution: ctx.usedCompiledExecution,
+  };
 }
 
 /**
@@ -535,6 +630,16 @@ function resolveTargetYear(ctx: { readonly startTime: number; readonly nowYear?:
   return new Date(ctx.startTime).getFullYear();
 }
 
+function shouldIncludeCounterfactualsForRequest(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery | undefined,
+  includeCounterfactuals: boolean | undefined,
+): boolean {
+  const queryFamily = deriveQueryFamily(plan, compiled);
+  const obligation = getExplanationObligation(queryFamily);
+  return obligation.requiresCounterfactual || includeCounterfactuals !== false;
+}
+
 function toAdmissionHonestyContract(
   routeDegradation: RankingDegradationSignal | undefined,
 ): {
@@ -551,6 +656,30 @@ function toAdmissionHonestyContract(
   return {
     executionMode: routeDegradation.executionMode,
     routeHealthy: false,
+  };
+}
+
+function buildResponseExecutionContract(
+  routeExecutionFacts: {
+    readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+    readonly retrievalKind: SearchRouteRetrievalKind;
+    readonly sparseExecuted: boolean;
+    readonly specializedRouteExecuted: SpecializedRouteObservability['specializedRouteExecuted'];
+    readonly usedCompiledExecution: boolean;
+  },
+  rankingMetadata?: RankingMetadata,
+  admissionClosure?: import('../../domain/decision/model/decision-input.js').AdmissionClosureSummary,
+): NonNullable<ResponseBuilderPort['build'] extends (params: infer T) => unknown ? T : never>['executionContract'] {
+  return {
+    effectiveRetrievalMode: routeExecutionFacts.effectiveRetrievalMode,
+    retrievalKind: routeExecutionFacts.retrievalKind,
+    sparseExecuted: routeExecutionFacts.sparseExecuted,
+    specializedRouteExecuted: routeExecutionFacts.specializedRouteExecuted,
+    usedCompiledExecution: routeExecutionFacts.usedCompiledExecution,
+    ...(rankingMetadata?.provenanceClosure !== undefined
+      ? { provenanceClosure: rankingMetadata.provenanceClosure }
+      : {}),
+    ...(admissionClosure !== undefined ? { admissionClosure } : {}),
   };
 }
 
@@ -585,14 +714,21 @@ export async function runRankedRouteDecisionPhase(
     ctx.rankedResults,
     ctx.effectiveRoute,
     ctx.decisionContext,
+    {
+      effectiveRetrievalMode: ctx.effectiveRetrievalMode,
+      retrievalKind: ctx.retrievalKind,
+      ...(ctx.compiled !== undefined
+        ? { provenancePolicy: ctx.compiled.execution.provenancePolicy }
+        : {}),
+    },
     toAdmissionHonestyContract(mergedRouteDegradation),
-    ctx.compiled?.execution.effectiveRetrievalMode,
   );
   // Propagate LTR saturation to decision engine so it can bypass
   // conformal prediction gating (calibrated on LTR, meaningless for heuristic).
   const decisionInput = ctx.rankingMetadata?.ltrSaturated === true
     ? { ...decisionInputBase, ltrSaturated: true }
     : decisionInputBase;
+  const admissionClosure = evaluateAdmissionClosure(decisionInput, snapshot);
   pipelineDebug(
     {
       step: 'decision.engine.request',
@@ -650,10 +786,11 @@ export async function runRankedRouteDecisionPhase(
   //   backward-compatible; caller can explicitly suppress with `false`).
   // Symmetric across query families: the prior comparison-only `=== true`
   // special case was an undocumented asymmetry and has been removed.
-  const queryFamily = deriveQueryFamily(ctx.plan, ctx.compiled);
-  const obligation = getExplanationObligation(queryFamily);
-  const shouldIncludeCounterfactuals =
-    obligation.requiresCounterfactual || ctx.includeCounterfactuals !== false;
+  const shouldIncludeCounterfactuals = shouldIncludeCounterfactualsForRequest(
+    ctx.plan,
+    ctx.compiled,
+    ctx.includeCounterfactuals,
+  );
   const MAX_COUNTERFACTUALS = 100;
   const counterfactuals = shouldIncludeCounterfactuals
     ? buildSearchCounterfactuals(ctx.resolveResult, ctx.fullRankedResults).slice(0, MAX_COUNTERFACTUALS)
@@ -675,6 +812,19 @@ export async function runRankedRouteDecisionPhase(
     ctx.compiled,
     ctx.rankingMetadata,
     ctx.fullRankedResults,
+    buildExecutionAuditTrace(
+      ctx.effectiveRoute,
+      ctx.retrievalModeSource ?? 'planner',
+      {
+        effectiveRetrievalMode: ctx.effectiveRetrievalMode,
+        retrievalKind: ctx.retrievalKind,
+        sparseExecuted: ctx.sparseExecuted,
+        specializedRouteExecuted: ctx.specializedRouteExecuted,
+        usedCompiledExecution: ctx.usedCompiledExecution,
+      },
+      ctx.rankingMetadata,
+      ctx.compiled,
+    ),
     ctx.retrievalFusionTrace,
     shouldEmitConstraintResolutionTrace(ctx.compiled)
       ? buildConstraintResolutionTrace(constraintReasonerOutput)
@@ -707,6 +857,17 @@ export async function runRankedRouteDecisionPhase(
       ...(ctx.specializedRouteObservability !== undefined
         ? { specializedRouteObservability: ctx.specializedRouteObservability }
         : {}),
+      executionContract: buildResponseExecutionContract(
+        {
+          effectiveRetrievalMode: ctx.effectiveRetrievalMode,
+          retrievalKind: ctx.retrievalKind,
+          sparseExecuted: ctx.sparseExecuted,
+          specializedRouteExecuted: ctx.specializedRouteExecuted,
+          usedCompiledExecution: ctx.usedCompiledExecution,
+        },
+        ctx.rankingMetadata,
+        admissionClosure,
+      ),
       ...(auditExtension !== undefined ? { auditExtension } : {}),
       determinismFingerprintParams: buildDeterminismFingerprintParams(
         snapshot,
@@ -774,6 +935,14 @@ export async function runSearchPostRoutePhase(
   );
 
   const cacheRequestContext = buildSearchCacheRequestContext(ctx.request);
+  const routeExecutionFacts = assertSearchRouteExecutionFacts(ctx);
+  const executionAuditTrace = buildExecutionAuditTrace(
+    ctx.effectiveRoute,
+    ctx.retrievalModeSource,
+    routeExecutionFacts,
+    ctx.rankingMetadata,
+    ctx.compiled,
+  );
 
   // Compute snapshot and degradation once — shared by both abstain and ranked paths.
   const snapshot = buildDecisionSnapshotFromPlan(ctx.plan, ctx.snapshotVersions);
@@ -805,12 +974,11 @@ export async function runSearchPostRoutePhase(
   // array is the authoritative signal set for channel health in this request.
   const degradationReasons = mergedRouteDegradation?.degradationReasons ?? [];
   // sparseZeroHits: sparse channel executed normally (not degraded) but
-  // returned zero lexical matches. Every candidate is dense-only.
+  // returned zero lexical matches. Specialized browse/compare routes bypass
+  // sparse BM25 entirely, so they must not be interpreted as sparse-zero-hit.
   const sparseChannelHealthy = !degradationReasons.some((reason) => reason.startsWith('sparse_'));
-  // Entity route doesn't use Vespa search (alias → resolver → PG), so
-  // sparseRank is never populated. sparseZeroHits only applies to hybrid/
-  // mixed routes where sparse BM25 was actually executed.
-  const sparseZeroHits = ctx.effectiveRoute !== 'entity'
+  const sparseZeroHits = routeExecutionFacts.retrievalKind === 'generic_hybrid'
+    && routeExecutionFacts.sparseExecuted
     && sparseChannelHealthy
     && ctx.rankedResults.length > 0
     && ctx.rankedResults.every((r) => r.sparseRank === undefined);
@@ -847,6 +1015,7 @@ export async function runSearchPostRoutePhase(
     ctx.compiled,
     ctx.rankingMetadata,
     ctx.rankedResults,
+    executionAuditTrace,
     ctx.retrievalFusionTrace,
     shouldEmitConstraintResolutionTrace(ctx.compiled, ctx.request.options?.explain)
       ? buildConstraintResolutionTrace(reasonerOutput)
@@ -902,9 +1071,29 @@ export async function runSearchPostRoutePhase(
       ctx.requestId,
       ctx.rankedResults,
     );
-    const abstainCounterfactuals = ctx.includeCounterfactuals === true
+    const abstainCounterfactuals = shouldIncludeCounterfactualsForRequest(
+      ctx.plan,
+      ctx.compiled,
+      ctx.includeCounterfactuals,
+    )
       ? buildSearchCounterfactuals(ctx.resolveResult, ctx.rankedResults, { abstainContext: true })
       : [];
+    const abstainDecisionInput = buildSearchDecisionInput(
+      ctx.plan,
+      ctx.resolveResult,
+      limitedRankedResults,
+      ctx.effectiveRoute,
+      ctx.decisionContext,
+      {
+        effectiveRetrievalMode: ctx.effectiveRetrievalMode,
+        retrievalKind: ctx.retrievalKind,
+        ...(ctx.compiled !== undefined
+          ? { provenancePolicy: ctx.compiled.execution.provenancePolicy }
+          : {}),
+      },
+      toAdmissionHonestyContract(mergedRouteDegradation),
+    );
+    const abstainAdmissionClosure = evaluateAdmissionClosure(abstainDecisionInput, snapshot);
     try {
       // Fix D: buildEntropyAbstainResponseParams already includes compiled conditionally —
       // do not spread it again outside to avoid silent override if the builder ever transforms it.
@@ -933,6 +1122,11 @@ export async function runSearchPostRoutePhase(
           ...(ctx.specializedRouteObservability !== undefined
             ? { specializedRouteObservability: ctx.specializedRouteObservability }
             : {}),
+          executionContract: buildResponseExecutionContract(
+            routeExecutionFacts,
+            ctx.rankingMetadata,
+            abstainAdmissionClosure,
+          ),
           ...(auditExtension !== undefined ? { auditExtension } : {}),
           determinismFingerprintParams: buildDeterminismFingerprintParams(
             snapshot,
@@ -1010,6 +1204,11 @@ export async function runSearchPostRoutePhase(
       routeDegradation: mergedRouteDegradation,
       ...(ctx.rankingMetadata !== undefined ? { rankingMetadata: ctx.rankingMetadata } : {}),
       specializedRouteObservability: ctx.specializedRouteObservability,
+      effectiveRetrievalMode: ctx.effectiveRetrievalMode,
+      retrievalKind: ctx.retrievalKind,
+      sparseExecuted: ctx.sparseExecuted,
+      specializedRouteExecuted: ctx.specializedRouteExecuted,
+      usedCompiledExecution: ctx.usedCompiledExecution,
       ...(ctx.retrievalFusionTrace !== undefined ? { retrievalFusionTrace: ctx.retrievalFusionTrace } : {}),
       ...(ctx.hardFilterDropLog !== undefined && ctx.hardFilterDropLog.length > 0
         ? { hardFilterDropLog: ctx.hardFilterDropLog }

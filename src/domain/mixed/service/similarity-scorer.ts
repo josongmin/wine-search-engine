@@ -5,9 +5,6 @@ import { clamp01 } from '../../shared/utils/clamp.js';
 const REGION_ADJACENCY_MATCH_SCORE = 0.6;
 /** Same continent but not adjacent region score. */
 const SAME_CONTINENT_MATCH_SCORE = 0.3;
-/** Neutral cosine fallback when embeddings missing or length-mismatched. */
-const EMBEDDING_UNAVAILABLE_NEUTRAL_SCORE = 0.5;
-
 /**
  * Minimal candidate attributes needed for similarity scoring.
  *
@@ -139,39 +136,41 @@ export class SimilarityScorer {
       anchor.embedding,
     );
 
-    // Weighted combination
-    let combined =
-      regionScore * SIMILARITY_WEIGHTS.region +
-      grapeScore * SIMILARITY_WEIGHTS.grapeOverlap +
-      styleScore * SIMILARITY_WEIGHTS.styleDistance +
-      bodySweet * SIMILARITY_WEIGHTS.bodySweetness +
-      embeddingScore * SIMILARITY_WEIGHTS.embedding;
+    const totalWeight =
+      SIMILARITY_WEIGHTS.region +
+      SIMILARITY_WEIGHTS.grapeOverlap +
+      SIMILARITY_WEIGHTS.styleDistance +
+      SIMILARITY_WEIGHTS.bodySweetness +
+      SIMILARITY_WEIGHTS.embedding;
 
-    // If no embeddings available, redistribute embedding weight proportionally
-    if (
-      candidate.embedding === undefined ||
-      anchor.embedding === undefined
-    ) {
-      const nonEmbeddingTotal = 1 - SIMILARITY_WEIGHTS.embedding;
-      combined =
-        (regionScore * SIMILARITY_WEIGHTS.region +
-          grapeScore * SIMILARITY_WEIGHTS.grapeOverlap +
-          styleScore * SIMILARITY_WEIGHTS.styleDistance +
-          bodySweet * SIMILARITY_WEIGHTS.bodySweetness) /
-        nonEmbeddingTotal;
+    let weightedSum = 0;
+
+    weightedSum += regionScore !== undefined ? regionScore * SIMILARITY_WEIGHTS.region : 0;
+    weightedSum += grapeScore !== undefined ? grapeScore * SIMILARITY_WEIGHTS.grapeOverlap : 0;
+    weightedSum += styleScore !== undefined ? styleScore * SIMILARITY_WEIGHTS.styleDistance : 0;
+    weightedSum += bodySweet !== undefined ? bodySweet * SIMILARITY_WEIGHTS.bodySweetness : 0;
+    weightedSum += embeddingScore !== undefined ? embeddingScore * SIMILARITY_WEIGHTS.embedding : 0;
+
+    if (totalWeight === 0) {
+      return 0;
     }
 
-    return clamp01(combined);
+    return clamp01(weightedSum / totalWeight);
   }
 
   /**
    * Computes region distance using adjacency tiers.
    *
    * Same region → 1.0, adjacent → 0.6, same continent → 0.3, else → 0.0.
+   * Returns `undefined` when either region is blank.
    */
-  computeRegionDistance(candidateRegion: string, anchorRegion: string): number {
+  computeRegionDistance(candidateRegion: string, anchorRegion: string): number | undefined {
     const cNorm = candidateRegion.toLowerCase().trim();
     const aNorm = anchorRegion.toLowerCase().trim();
+
+    if (cNorm.length === 0 || aNorm.length === 0) {
+      return undefined;
+    }
 
     // Same region
     if (cNorm === aNorm) {
@@ -203,20 +202,25 @@ export class SimilarityScorer {
    * Computes Jaccard similarity between grape sets.
    *
    * Jaccard = |A ∩ B| / |A ∪ B|
+   * Returns `undefined` when either side has no grape signal.
    */
   computeGrapeOverlap(
     candidateGrapes: readonly string[],
     anchorGrapes: readonly string[],
-  ): number {
-    if (candidateGrapes.length === 0 && anchorGrapes.length === 0) {
-      return 1.0; // Both empty → trivially similar
-    }
-    if (candidateGrapes.length === 0 || anchorGrapes.length === 0) {
-      return 0.0;
+  ): number | undefined {
+    const normalizedCandidateGrapes = candidateGrapes
+      .map((g) => g.toLowerCase().trim())
+      .filter(Boolean);
+    const normalizedAnchorGrapes = anchorGrapes
+      .map((g) => g.toLowerCase().trim())
+      .filter(Boolean);
+
+    if (normalizedCandidateGrapes.length === 0 || normalizedAnchorGrapes.length === 0) {
+      return undefined;
     }
 
-    const aSet = new Set(anchorGrapes.map((g) => g.toLowerCase().trim()));
-    const cSet = new Set(candidateGrapes.map((g) => g.toLowerCase().trim()));
+    const aSet = new Set(normalizedAnchorGrapes);
+    const cSet = new Set(normalizedCandidateGrapes);
 
     let intersection = 0;
     for (const g of cSet) {
@@ -233,16 +237,20 @@ export class SimilarityScorer {
    * Computes style distance as a simple normalized string match.
    *
    * Exact match → 1.0, partial token overlap → proportional, no overlap → 0.0.
+   * Returns `undefined` when either style is missing/blank.
    */
-  computeStyleDistance(candidateStyle: string, anchorStyle: string): number {
+  computeStyleDistance(candidateStyle: string | undefined, anchorStyle: string | undefined): number | undefined {
+    if (candidateStyle === undefined || anchorStyle === undefined) {
+      return undefined;
+    }
     // `"".split(/\s+/)` returns `[""]` (length 1), not `[]`. Filter empty tokens
-    // so two empty/whitespace-only styles correctly return 0.0 (no data) instead
-    // of incorrectly computing 1.0 (perfect match of empty-vs-empty).
+    // so two empty/whitespace-only styles are treated as missing rather than
+    // incorrectly computing 1.0 (perfect match of empty-vs-empty).
     const cTokens = candidateStyle.toLowerCase().trim().split(/\s+/).filter(Boolean);
     const aTokens = new Set(anchorStyle.toLowerCase().trim().split(/\s+/).filter(Boolean));
 
     if (cTokens.length === 0 || aTokens.size === 0) {
-      return 0.0;
+      return undefined;
     }
 
     let matchCount = 0;
@@ -268,14 +276,13 @@ export class SimilarityScorer {
     candidateSweetness: number | undefined,
     anchorBody: number | undefined,
     anchorSweetness: number | undefined,
-  ): number {
-    // When either value is absent, return neutral (0.5) rather than 0 or 1,
-    // consistent with how computeEmbeddingSimilarity handles missing data.
+  ): number | undefined {
+    // Missing sensory values are treated as absent evidence rather than
+    // neutral similarity. The scorer will keep the signal out of the weighted
+    // sum instead of fabricating a midpoint.
     if (candidateBody === undefined || anchorBody === undefined
         || candidateSweetness === undefined || anchorSweetness === undefined) {
-      // 0.5 = neutral similarity when data is absent (neither similar nor dissimilar)
-      // eslint-disable-next-line no-magic-numbers -- 0.5 is the neutral midpoint of [0,1] similarity scale
-      return 0.5;
+      return undefined;
     }
     const bodyDist = Math.abs(candidateBody - anchorBody);
     const sweetDist = Math.abs(candidateSweetness - anchorSweetness);
@@ -286,12 +293,12 @@ export class SimilarityScorer {
   /**
    * Computes cosine similarity between two embedding vectors.
    *
-   * Returns 0.5 (neutral) if either embedding is missing.
+   * Returns `undefined` if either embedding is missing or unusable.
    */
   computeEmbeddingSimilarity(
     candidateEmb: readonly number[] | undefined,
     anchorEmb: readonly number[] | undefined,
-  ): number {
+  ): number | undefined {
     if (
       candidateEmb === undefined ||
       anchorEmb === undefined ||
@@ -299,7 +306,7 @@ export class SimilarityScorer {
       anchorEmb.length === 0 ||
       candidateEmb.length !== anchorEmb.length
     ) {
-      return EMBEDDING_UNAVAILABLE_NEUTRAL_SCORE; // Neutral when embeddings are unavailable
+      return undefined;
     }
 
     let dot = 0;
@@ -316,7 +323,7 @@ export class SimilarityScorer {
 
     const denom = Math.sqrt(normA) * Math.sqrt(normB);
     if (denom === 0) {
-      return 0;
+      return undefined;
     }
 
     // Cosine similarity is in [-1, 1]; map to [0, 1]

@@ -18,18 +18,18 @@ trap cleanup EXIT
 
 cp -f .env.example .env
 
-npm ci
-npm run typecheck
-npm run build
-npm run verify:http-contracts
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run build
+pnpm run verify:http-contracts
 # Replay lane contract:
 # - executable subset is selected by execution_lane='self_contained'
 # - self-contained fixtures must not declare requires_runtime_capability
 # - runtime-required fixtures execute in the dedicated capability-aware lane
-npm run test:e2e:replay:fixtures:self-contained
-npm run test:e2e:replay:fixtures:runtime-required
+pnpm run test:e2e:replay:fixtures:self-contained
+pnpm run test:e2e:replay:fixtures:runtime-required
 if [ "${SKIP_MIGRATE:-}" = "1" ]; then
-  echo "SKIP_MIGRATE=1 — skipping npm run migrate (CI / no Docker Postgres)"
+  echo "SKIP_MIGRATE=1 — skipping pnpm run migrate (CI / no Docker Postgres)"
 else
-  npm run migrate
+  pnpm run migrate
 fi

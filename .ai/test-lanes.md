@@ -10,37 +10,37 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 
 ## Smart inner-loop rules
 
-- Prefer `npm run check:smart` as the default local verifier.
-- Prefer `npm run check:staged` right before commit when the staged set is much smaller than the worktree.
-- Prefer `npm run lint:smart` when you only want lint feedback on changed files.
-- Prefer `npm run lint:staged` right before commit when you want lint only for staged files.
-- Prefer `npm run test:file` when you already know the exact test file.
-- Prefer `npm run test:related` when you changed a source file and want the narrowest useful regression set.
+- Prefer `pnpm run check:smart` as the default local verifier.
+- Prefer `pnpm run check:staged` right before commit when the staged set is much smaller than the worktree.
+- Prefer `pnpm run lint:smart` when you only want lint feedback on changed files.
+- Prefer `pnpm run lint:staged` right before commit when you want lint only for staged files.
+- Prefer `pnpm run test:file` when you already know the exact test file.
+- Prefer `pnpm run test:related` when you changed a source file and want the narrowest useful regression set.
 - Only jump to `check:dev`, `test:unit`, `test:integration`, `test:e2e`, or `test:heavy` when the change actually needs broader coverage.
-- Do **not** default to broad `npm run test` / `npm run test:unit` / `npm run lint` when a smart or file-scoped command will do.
+- Do **not** default to broad `pnpm run test` / `pnpm run test:unit` / `pnpm run lint` when a smart or file-scoped command will do.
 
 ## Lane map
 
 ### Fast/default lanes
 
-- `npm run test`
+- `pnpm run test`
   - Lightweight everyday lane.
   - Uses `config/vitest/dev.config.ts`.
   - Keeps normal local iteration focused on the fastest useful coverage.
 
-- `npm run test:watch`
+- `pnpm run test:watch`
   - Watch-mode version of the same lightweight everyday lane.
 
-- `npm run check:dev`
+- `pnpm run check:dev`
   - Recommended everyday check before or during local iteration.
-  - Runs `typecheck + npm test`.
+  - Runs `typecheck + pnpm test`.
 
-- `npm run check:quick`
+- `pnpm run check:quick`
   - Fastest default local check.
   - Runs the lightweight everyday lane only.
   - Use this for tight edit-test loops when full typecheck is unnecessary.
 
-- `npm run check:smart [changed-file...]`
+- `pnpm run check:smart [changed-file...]`
   - Smart local check for everyday development.
   - If you pass files, it chooses the narrowest useful lane automatically.
   - If you pass nothing, it inspects the current worktree:
@@ -55,70 +55,70 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
     - search-pipeline-sensitive source changes also run `test:heavy`
   - Treat this as the default agent command unless a broader lane is clearly required.
 
-- `npm run check:staged`
+- `pnpm run check:staged`
   - Smart staged-only variant of `check:smart`.
   - Uses only staged files to choose the narrowest useful checks.
   - If nothing is staged, it skips instead of falling back to a broad test run.
 
-- `npm run lint:file -- <file...>`
+- `pnpm run lint:file -- <file...>`
   - Runs ESLint only on the given files.
   - Uses a small local cache for repeated inner-loop runs.
 
-- `npm run lint:smart [changed-file...]`
+- `pnpm run lint:smart [changed-file...]`
   - Lints only changed lintable files.
   - Docs-only changes are skipped.
-  - Large changed sets fall back to full `npm run lint`.
-  - Prefer this over full `npm run lint` during normal iteration.
+  - Large changed sets fall back to full `pnpm run lint`.
+  - Prefer this over full `pnpm run lint` during normal iteration.
 
-- `npm run lint:staged`
+- `pnpm run lint:staged`
   - Lints only staged lintable files.
   - If nothing is staged, it skips.
   - Prefer this right before commit when the worktree is noisy but the staged set is small.
 
-- `npm run check:related -- <changed-file...>`
+- `pnpm run check:related -- <changed-file...>`
   - Fastest changed-scope check when you know which files you touched.
   - Runs Vitest `related` against the lightweight everyday lane.
   - Good for tight loops before escalating to `check:quick` or `check:dev`.
 
-- `npm run test:file -- <test-file...>`
+- `pnpm run test:file -- <test-file...>`
   - Runs one or more explicit files inside the lightweight everyday lane.
   - Use this when you already know the exact test file you want.
   - Also supports extra Vitest args like `--testNamePattern`.
 
-- `npm run test:related -- <changed-file...>`
+- `pnpm run test:related -- <changed-file...>`
   - Runs tests related to the given source or test files in the lightweight everyday lane.
-  - Preferred over broad `npm test` when iterating on a narrow change.
+  - Preferred over broad `pnpm test` when iterating on a narrow change.
 
-- `npm run test:unit`
+- `pnpm run test:unit`
   - Fuller unit regression lane.
   - Uses `config/vitest/unit.config.ts`.
   - Excludes heavy search regression coverage on purpose.
   - Also excludes watchlist/search-specific suites that already have dedicated lanes.
 
-- `npm run test:unit:file -- <test-file...>`
+- `pnpm run test:unit:file -- <test-file...>`
   - Explicit-file entrypoint for the fuller unit lane.
   - Also supports extra Vitest args like `--testNamePattern`.
 
-- `npm run test:unit:related -- <changed-file...>`
+- `pnpm run test:unit:related -- <changed-file...>`
   - Related-test entrypoint for the fuller unit lane.
 
-- `npm run test:integration`
+- `pnpm run test:integration`
   - General integration lane from `test/integration/**/*.test.ts`.
   - Excludes `test/integration/search-pipeline.test.ts`, which is treated as heavy.
   - Also includes `src/__tests__/integration/**/*.integration.test.ts`.
 
-- `npm run test:integration:file -- <test-file...>`
+- `pnpm run test:integration:file -- <test-file...>`
   - Explicit-file entrypoint for integration-only checks.
   - Also supports extra Vitest args like `--testNamePattern`.
 
-- `npm run test:integration:related -- <changed-file...>`
+- `pnpm run test:integration:related -- <changed-file...>`
   - Related-test entrypoint for integration work.
 
-- `npm run test:watchlist`
+- `pnpm run test:watchlist`
   - Watchlist-focused lane only.
   - Owns the watchlist-specific `src/__tests__` files so they do not slow down the default unit lane.
 
-- `npm run test:meta`
+- `pnpm run test:meta`
   - Meta/parity lane for workflow, fixture-lane, and route-contract consistency checks.
   - Kept out of the everyday dev lane because these are important but not part of the core inner loop.
   - Also owns response/schema contract tests like:
@@ -127,14 +127,14 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
     - `src/interface/http/routes/__tests__/http-contract-manifest-script.test.ts`
     - `src/interface/http/routes/__tests__/http-contract-openapi-bridge.test.ts`
 
-- `npm run test:eval`
+- `pnpm run test:eval`
   - Eval/reporting-focused unit lane.
   - Includes offline/noisy eval reporting tests that are useful but not part of the normal inner loop.
-  - Kept out of `npm test` so everyday development spends less time on evaluation-only coverage.
+  - Kept out of `pnpm test` so everyday development spends less time on evaluation-only coverage.
 
 ### Heavy lane
 
-- `npm run test:heavy`
+- `pnpm run test:heavy`
   - Uses `config/vitest/heavy.config.ts`.
   - Single-fork lane for the expensive search regression tests that are still worth keeping:
     - `test/integration/search-pipeline.test.ts`
@@ -147,48 +147,48 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 
 ### Other specialized lanes
 
-- `npm run test:e2e:contract`
+- `pnpm run test:e2e:contract`
   - HTTP contract lane.
 
-- `npm run test:e2e`
+- `pnpm run test:e2e`
   - Default lightweight e2e entrypoint.
   - Uses the contract/smoke lane by default.
   - Prefer this as the pyramid-friendly baseline e2e check.
 
-- `npm run test:e2e:file -- <test-file...>`
+- `pnpm run test:e2e:file -- <test-file...>`
   - Explicit-file entrypoint for the in-memory e2e lane.
   - Also supports extra Vitest args like `--testNamePattern`.
 
-- `npm run test:e2e:related -- <changed-file...>`
+- `pnpm run test:e2e:related -- <changed-file...>`
   - Related-test entrypoint for the in-memory e2e lane.
 
-- `npm run test:e2e:runtime`
+- `pnpm run test:e2e:runtime`
   - Runtime/quality-heavy e2e lane.
 
-- `npm run test:e2e:replay:fixtures:runtime-required`
+- `pnpm run test:e2e:replay:fixtures:runtime-required`
   - Replay fixtures that require runtime behavior but not the full external-runtime lane.
 
-- `npm run test:e2e:replay:fixtures:full-runtime`
+- `pnpm run test:e2e:replay:fixtures:full-runtime`
   - Full-runtime replay lane. Expensive. Do not run casually.
 
-- `npm run test:quality`
+- `pnpm run test:quality`
   - Quality regression lane.
 
-- `npm run test:all`
+- `pnpm run test:all`
   - Project-wide non-runtime aggregate lane.
   - Includes `unit + integration + watchlist + meta + e2e:contract + ingest:contract + quality`.
 
-- `npm run test:all:full`
+- `pnpm run test:all:full`
   - Expanded aggregate lane.
   - Adds `test:heavy` and `test:e2e:runtime` on top of `test:all`.
 
 ## Pre-push profiles
 
-- `npm run git:prepush:quick`
+- `pnpm run git:prepush:quick`
   - `typecheck + test:unit`
   - Use for quick local iteration.
 
-- `npm run git:prepush:smart`
+- `pnpm run git:prepush:smart`
   - Smart branch-diff pre-push gate.
   - Uses `git diff <upstream>...HEAD` to find changed files.
   - Runs `check:smart` on that branch diff, then adds:
@@ -201,18 +201,18 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
     - if the changed set touches search-pipeline-sensitive code, it falls back to `git:prepush:heavy`
     - otherwise it falls back to `git:prepush`
 
-- `npm run git:prepush`
+- `pnpm run git:prepush`
   - `typecheck + test:unit + verify:http-contracts`
   - Main default pre-push gate.
 
-- `npm run git:prepush:heavy`
+- `pnpm run git:prepush:heavy`
   - `git:prepush + test:heavy`
   - Use before pushing changes that touch search pipeline logic or replay/snapshot behavior.
 
 ## Pre-commit note
 
 - Husky `pre-commit` uses `lint-staged`.
-- `lint-staged` now routes staged `*.ts(x)` files through `npm run lint:file:fix --`.
+- `lint-staged` now routes staged `*.ts(x)` files through `pnpm run lint:file:fix --`.
 - That means pre-commit fix/lint now uses the same cached ESLint wrapper as the manual smart/file commands.
 
 ## Keep / remove guidance
@@ -242,9 +242,9 @@ Repo-local rules for choosing test lanes. This file is for agents and operators.
 **외부 서비스:** 없음 (Vespa in-memory stub, embedding hash stub, Cohere 없음)
 
 ```bash
-npm run test:quality          # golden-set + user-journeys + specialized-modes
-npm run test:e2e:runtime      # full in-memory e2e
-npm run eval:offline:local    # in-memory로 NDCG/MRR 계산 (stub 기반이라 숫자 무의미)
+pnpm run test:quality          # golden-set + user-journeys + specialized-modes
+pnpm run test:e2e:runtime      # full in-memory e2e
+pnpm run eval:offline:local    # in-memory로 NDCG/MRR 계산 (stub 기반이라 숫자 무의미)
 ```
 
 > ⚠️ 여기서 나오는 NDCG/MRR 수치는 stub embedding 기반이라 실제 품질과 무관. 회귀 방지용.
@@ -258,9 +258,9 @@ npm run eval:offline:local    # in-memory로 NDCG/MRR 계산 (stub 기반이라 
 **외부 서비스:** 실제 Vespa ✅ | Embedding: fake ML service ❌ | Cohere rerank: 없음 ❌
 
 ```bash
-npm run test:quality:vespa    # search-quality.test.ts + search-correctness.test.ts
-npm run test:e2e:vespa        # full vespa e2e suite
-npm run test:e2e:vespa:smoke  # quick availability smoke
+pnpm run test:quality:vespa    # search-quality.test.ts + search-correctness.test.ts
+pnpm run test:e2e:vespa        # full vespa e2e suite
+pnpm run test:e2e:vespa:smoke  # quick availability smoke
 ```
 
 > ⚠️ Cohere rerank이 켜지지 않음 → `pure_constraint` / `semantic_preference` 쿼리 품질 측정 불가.  
@@ -277,11 +277,11 @@ npm run test:e2e:vespa:smoke  # quick availability smoke
 
 ```bash
 # 1. dev 서버 켜기 (별도 터미널)
-npm run dev
+pnpm run dev
 
 # 2. 오프라인 eval (bronze 500-query set, NDCG/MRR/Recall)
-npm run eval:offline:bronze           # → data/eval-results.json
-npm run eval:offline:assert-baseline  # 베이스라인 대비 회귀 확인
+pnpm run eval:offline:bronze           # → data/eval-results.json
+pnpm run eval:offline:assert-baseline  # 베이스라인 대비 회귀 확인
 
 # 3. LLM judge 기반 NDCG (40 Korean queries × 300 wines)
 npx tsx --env-file=.env.local scripts/eval/llm-judge-ndcg.ts \
@@ -290,7 +290,7 @@ npx tsx --env-file=.env.local scripts/eval/llm-judge-ndcg.ts \
   --output /tmp/llm-judge-labels.jsonl
 
 # 4. noisy entity eval
-npm run eval:noisy:validate
+pnpm run eval:noisy:validate
 ```
 
 > ✅ 이 시나리오만 Cohere rerank 품질을 측정할 수 있다.  
@@ -304,22 +304,22 @@ npm run eval:noisy:validate
 **목적:** Agent의 답변 품질, 제약 조건 만족도, faithfulness 측정  
 **외부 서비스:** 실제 LLM (Anthropic/OpenAI) ✅ | 실제 검색 스택 ✅
 
-**릴리즈 게이트(픽스처 레포):** `npm run bench:agent:fixtures` — `AGENT_SCENARIOS`와 별개.
+**릴리즈 게이트(픽스처 레포):** `pnpm run bench:agent:fixtures` — `AGENT_SCENARIOS`와 별개.
 
 **탐색용(`test/benchmark/agent/scenarios.ts`):**
 
 ```bash
-npm run benchmark:quick       # --profile quick: 20개, judge off
-npm run benchmark:standard    # 80개, judge off (--no-judge)
-npm run bench:run             # 80개, judge on (표준 프로파일 + judge)
-npm run benchmark:nightly     # nightly 프로파일, judge on·3 samples (매우 김)
-npm run bench:agent           # --profile 없음 → 코퍼스 전체, judge on (비용 큼; 보통은 위 프로파일 사용)
-npm run bench:agent -- --profile quick   # CLI 플래그 전달 시 이 형태(직접 tsx 호출 스크립트)
+pnpm run benchmark:quick       # --profile quick: 20개, judge off
+pnpm run benchmark:standard    # 80개, judge off (--no-judge)
+pnpm run bench:run             # 80개, judge on (표준 프로파일 + judge)
+pnpm run benchmark:nightly     # nightly 프로파일, judge on·3 samples (매우 김)
+pnpm run bench:agent           # --profile 없음 → 코퍼스 전체, judge on (비용 큼; 보통은 위 프로파일 사용)
+pnpm run bench:agent -- --profile quick   # CLI 플래그 전달 시 이 형태(직접 tsx 호출 스크립트)
 ```
 
-`npm run eval:fixtures:verify` / `npm run test:verification:fixtures:governance` / `npm run test:verification:fixtures` — **셋 다 동일**(픽스처 레포 구조·FixtureLoader·스위트 계약 검증).
-검색+에이전트+퍼포 픽스처 스모크 일괄은 `npm run test:verification:fixtures:full`.
-오프라인 게이트 + 거버넌스만은 `npm run eval:full` (= `eval:offline:gate` + `eval:fixtures:verify`).
+`pnpm run eval:fixtures:verify` / `pnpm run test:verification:fixtures:governance` / `pnpm run test:verification:fixtures` — **셋 다 동일**(픽스처 레포 구조·FixtureLoader·스위트 계약 검증).
+검색+에이전트+퍼포 픽스처 스모크 일괄은 `pnpm run test:verification:fixtures:full`.
+오프라인 게이트 + 거버넌스만은 `pnpm run eval:full` (= `eval:offline:gate` + `eval:fixtures:verify`).
 
 ---
 
@@ -350,25 +350,25 @@ npm run bench:agent -- --profile quick   # CLI 플래그 전달 시 이 형태(�
 ## Recommended inner loop
 
 - Smart default:
-  - `npm run check:smart`
-  - `npm run check:smart src/domain/foo.ts`
-  - `npm run check:staged`
-  - `npm run lint:smart`
-  - `npm run lint:smart src/domain/foo.ts`
-  - `npm run lint:staged`
-  - `npm run git:prepush:smart`
+  - `pnpm run check:smart`
+  - `pnpm run check:smart src/domain/foo.ts`
+  - `pnpm run check:staged`
+  - `pnpm run lint:smart`
+  - `pnpm run lint:smart src/domain/foo.ts`
+  - `pnpm run lint:staged`
+  - `pnpm run git:prepush:smart`
 
 - Narrowest possible:
-  - `npm run test:file -- test/unit/foo.test.ts`
-  - `npm run test:related -- src/domain/foo.ts`
-  - `npm run test:e2e:file -- test/e2e/infrastructure.invariants.test.ts --testNamePattern "Group 1: Rate Limiting"`
-  - `npm run test:e2e:file -- test/e2e/infrastructure.contracts.test.ts --testNamePattern "Group 5: Content-Type Edge Cases"`
+  - `pnpm run test:file -- test/unit/foo.test.ts`
+  - `pnpm run test:related -- src/domain/foo.ts`
+  - `pnpm run test:e2e:file -- test/e2e/infrastructure.invariants.test.ts --testNamePattern "Group 1: Rate Limiting"`
+  - `pnpm run test:e2e:file -- test/e2e/infrastructure.contracts.test.ts --testNamePattern "Group 5: Content-Type Edge Cases"`
 - Fast local sweep:
-  - `npm run check:related -- src/domain/foo.ts`
-  - `npm run check:quick`
+  - `pnpm run check:related -- src/domain/foo.ts`
+  - `pnpm run check:quick`
 - Broader confidence only when needed:
-  - `npm run check:dev`
+  - `pnpm run check:dev`
   - Then the dedicated lane that matches the area you touched
-- `npm run test:e2e:inmemory`
+- `pnpm run test:e2e:inmemory`
   - Broader in-memory e2e lane.
   - Includes infrastructure/edge-case/hard-scenario coverage that is still lighter than runtime e2e, but heavier than contract/smoke.

@@ -82,20 +82,6 @@ const UNCERTAINTY_UNMATCHED_RATIO_SCALE = 0.5;
  */
 const PREFERENCE_ALIGNMENT_NEUTRAL = 0.5;
 /**
- * Neutral value when producer prestige data is absent (not zero, not rated).
- *
- * Domain rationale: prestige data coverage is ~40% of the catalog. Returning 0
- * for absent data would systematically suppress 60% of wines (including all new
- * producers). Returning 1.0 would artificially boost unknown producers. 0.5
- * keeps the prestige signal at the sigmoid inflection point so it contributes
- * neither positive nor negative ranking pressure — the remaining 9 signals
- * decide ordering. This is a deliberate policy choice, not a tuned weight.
- *
- * Alternative (deferred): emit a feature-missing flag so the LTR model can
- * learn a separate absent-prestige coefficient (Epic-10 LTR phase).
- */
-const PRODUCER_PRESTIGE_NEUTRAL_WHEN_ABSENT = 0.5;
-/**
  * Vintage recency half-life in years.
  *
  * Domain rationale: wine aging curves peak at ~5-15 years for most fine
@@ -471,18 +457,17 @@ export class SignalComputer {
    * Computes producer prestige signal from the candidate's indexed prestige score.
    *
    * Producer prestige is stored in Vespa as [0, 1] (winery_rating / 5).
-   * When absent we return a neutral mid-point (0.5) rather than 0 so that
-   * wines without prestige data are not systematically suppressed.
+   * When absent we return undefined so downstream stages can preserve
+   * missingness instead of fabricating a neutral producer.
    *
    * @param candidate - The hybrid candidate to evaluate.
-   * @returns Producer prestige in [0, 1].
+   * @returns Producer prestige in [0, 1], or undefined when absent.
    */
-  computeProducerPrestige(candidate: HybridCandidate): number {
+  computeProducerPrestige(candidate: HybridCandidate): number | undefined {
     if (candidate.producerPrestige !== undefined) {
       return clamp01(candidate.producerPrestige);
     }
-    // Neutral when prestige data is absent — don't penalise missing data.
-    return PRODUCER_PRESTIGE_NEUTRAL_WHEN_ABSENT;
+    return undefined;
   }
 
   /**
@@ -575,6 +560,7 @@ export class SignalComputer {
     const matchedConstraintSet = new Set(candidate.matchedConstraints);
     const recency = this.computeRecency(candidate, referenceYear);
     const criticScore = this.computeCriticScore(candidate);
+    const producerPrestige = this.computeProducerPrestige(candidate);
     return {
       entityIntegrity: this.computeEntityIntegrity(candidate, queryPlan),
       anchorSimilarity: anchorProfile !== undefined
@@ -588,7 +574,9 @@ export class SignalComputer {
       popularity: this.computePopularity(candidate),
       availability: this.computeAvailability(candidate),
       uncertaintyPenalty: this.computeUncertaintyPenalty(candidate, queryPlan),
-      producerPrestige: this.computeProducerPrestige(candidate),
+      ...(producerPrestige !== undefined
+        ? { producerPrestige }
+        : {}),
       ...(recency !== undefined ? { recency } : {}),
       ...(criticScore !== undefined ? { criticScore } : {}),
       multilingualScore: this.computeMultilingualScore(candidate, queryContainsHangul),

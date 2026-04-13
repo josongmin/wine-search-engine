@@ -3,7 +3,6 @@
 import fs from 'node:fs/promises';
 import { parseNdjson } from './ndjson.js';
 import type { EnrichedSilverRecord } from './types.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { ConflictResolver } from '../../src/domain/alias/service/conflict-resolver.js';
 import type { AliasConflict, AliasConflictEntry } from '../../src/domain/alias/model/alias-conflict.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
@@ -16,9 +15,10 @@ import {
 import { atomicWriteFile } from './etl-utils.js';
 import { buildAliasArtifact } from './build-alias-artifact.js';
 import { buildEntityIdBySourceId, loadGoldCanonicalLookupForBuild } from './snapshot-entity-identity.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
-const DEFAULT_INPUT = resolveDataPath('data/silver-ko.ndjson');
-const DEFAULT_OUTPUT = resolveDataPath('data/ambiguity-registry.ndjson');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.ko;
+export const DEFAULT_OUTPUT = ETL_ARTIFACT_FILES.ambiguityRegistry;
 
 const TYPE_PRIORITY_WEIGHTS: Readonly<Record<string, number>> = {
   canonical: 1.0,

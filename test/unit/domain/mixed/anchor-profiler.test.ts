@@ -52,17 +52,16 @@ describe('AnchorProfiler — IDX-03: body/sweetness [0,1] normalised scale', () 
     expect(profile.body).toBeCloseTo(0.5);
   });
 
-  it('missing body → defaults to 0.5 ([0,1] midpoint, was wrongly 3 on 1-5 scale)', () => {
+  it('missing body → omitted rather than fabricated midpoint', () => {
     const profiler = makeProfiler();
     const profile = profiler.buildProfile({ ...BASE_ENTITY }, 1.0);
-    // Exact value assertion — range-only check would pass even if default regressed to 0.3
-    expect(profile.body).toBe(0.5);
+    expect(profile.body).toBeUndefined();
   });
 
-  it('missing sweetness → defaults to 0.1 (dry-wine baseline, was wrongly 1 on 1-5 scale)', () => {
+  it('missing sweetness → omitted rather than fabricated dry baseline', () => {
     const profiler = makeProfiler();
     const profile = profiler.buildProfile({ ...BASE_ENTITY }, 1.0);
-    expect(profile.sweetness).toBe(0.1);
+    expect(profile.sweetness).toBeUndefined();
   });
 });
 

@@ -5,6 +5,7 @@ import {
 } from '../../../../src/application/search/search-usecase-mixed-route.js';
 import type { MixedQueryResult } from '../../../../src/domain/mixed/model/mixed-query-result.js';
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../../../src/domain/query/model/compiled-wine-query.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
 import { MIXED_FALLBACK_REASONS } from '../../../../src/domain/mixed/model/mixed-degradation.js';
 
@@ -25,6 +26,42 @@ function minimalPlan(): QueryPlanV1 {
     policyRuleVersion: '1',
     thresholdProfileId: 'default',
   } as QueryPlanV1;
+}
+
+function minimalCompiled(): CompiledWineQuery {
+  return {
+    query: {
+      rawQuery: 'q',
+      normalizedQuery: 'q',
+      intent: 'mixed_query',
+      queryClass: 'unknown',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      uncertainty: {} as never,
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+      retrievalPlan: {
+        hardFilterTokens: [],
+        softBoosts: [],
+        inferredBoosts: [],
+        sensoryPriors: [],
+        planVersion: 'retrieval-plan-v1.0',
+      },
+    },
+    execution: {
+      effectiveRoute: 'mixed',
+      effectiveRetrievalMode: 'similar_items',
+      routeSource: 'planner',
+      budget: { maxCandidates: 20, enablePrecisionRerank: true },
+      provenancePolicy: {
+        requireIdentitySeal: true,
+        requireConstraintEvidence: false,
+        requireAnchorEvidence: true,
+      },
+    },
+  };
 }
 
 describe('mixedQueryResultToSearchRouteExecution', () => {
@@ -74,7 +111,7 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
       },
       fallbackReason: 'mixed_similar_retrieval_fallback',
     };
-    const out = mixedQueryResultToSearchRouteExecution(plan, mixedResult);
+    const out = mixedQueryResultToSearchRouteExecution(plan, mixedResult, minimalCompiled());
     expect(out.rankedResults).toHaveLength(1);
     expect(out.resolveResult.decisionConfidenceC).toBe(0.64);
     expect(out.resolveResult.topEntity).toEqual({
@@ -102,6 +139,7 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
         "mixed_similar_retrieval_unavailable",
         "mixed_similar_retrieval_fallback",
         "mixed_ranker_unavailable",
+        "mixed_constraint_overlay_failed",
       ]
     `);
   });
@@ -110,6 +148,7 @@ describe('mixedQueryResultToSearchRouteExecution', () => {
     const out = buildFailedMixedRouteExecution(
       minimalPlan(),
       'mixed_anchor_resolution_failed',
+      minimalCompiled(),
     );
 
     expect(out.rankedResults).toEqual([]);

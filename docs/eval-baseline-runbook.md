@@ -16,18 +16,18 @@ This runbook defines how we refresh and validate the lightweight regression base
 
 ## Offline Smoke Workflow
 
-1. Run `npm run eval:offline:smoke:assert-baseline`.
+1. Run `pnpm run eval:offline:smoke:assert-baseline`.
 2. Review the output in `/tmp/offline-eval-smoke-results.json`.
-3. If the new metrics are intentionally better and stable, run `npm run eval:offline:smoke:refresh-baseline`.
-4. Re-run `npm run eval:offline:smoke:assert-baseline` and confirm it passes.
+3. If the new metrics are intentionally better and stable, run `pnpm run eval:offline:smoke:refresh-baseline`.
+4. Re-run `pnpm run eval:offline:smoke:assert-baseline` and confirm it passes.
 
 The smoke dataset lives at [`data/eval-smoke-queries.jsonl`](../data/eval-smoke-queries.jsonl). It should stay small, deterministic, and fixture-backed.
 
 ## Noisy Benchmark Workflow
 
-1. Run `npm run eval:noisy:assert-baseline` (runs `eval:noisy:validate` once, then compares `/tmp/noisy-entity-eval-results.json` to the baseline).
-2. If the improvement is intentional and stable, run `npm run eval:noisy:refresh-baseline`.
-3. Re-run `npm run eval:noisy:assert-baseline` and confirm it passes.
+1. Run `pnpm run eval:noisy:assert-baseline` (runs `eval:noisy:validate` once, then compares `/tmp/noisy-entity-eval-results.json` to the baseline).
+2. If the improvement is intentional and stable, run `pnpm run eval:noisy:refresh-baseline`.
+3. Re-run `pnpm run eval:noisy:assert-baseline` and confirm it passes.
 
 CI uses `eval:noisy:gate` followed by `eval:noisy:assert-baseline:current` so the benchmark is not executed twice.
 

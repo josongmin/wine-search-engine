@@ -11,7 +11,7 @@ Execution companion:
 ## Baseline
 
 - Date: 2026-04-06
-- `npm run test:e2e` currently fails with `117 failed / 178 passed / 71 skipped`.
+- `pnpm run test:e2e` currently fails with `117 failed / 178 passed / 71 skipped`.
 - The main fast-suite failure mode is response-shape drift: the server serializes response bodies to `snake_case`, but several in-memory E2E files still assert `camelCase`.
 - The current in-memory E2E server loads aliases, retrieval docs, and blocking IDs, but it does not seed mixed-route dependencies such as `anchorResolver`, `similarRetrieval`, and `candidateAttributes`. Mixed queries therefore cannot be treated as production-faithful quality signals in the current harness.
 
@@ -58,7 +58,7 @@ Routes registered by the server:
 ### Track A: Stabilize the fast in-memory E2E suite
 
 Purpose:
-Make `npm run test:e2e` a trustworthy PR gate.
+Make `pnpm run test:e2e` a trustworthy PR gate.
 
 Actions:
 
@@ -199,7 +199,7 @@ Suggested owner:
 
 Exit:
 
-- `npm run test:e2e` is green
+- `pnpm run test:e2e` is green
 - no failing fast E2E depends on camelCase transport assumptions
 - no registered HTTP route is missing E2E coverage
 
@@ -293,8 +293,8 @@ Add:
 
 Run on every pull request:
 
-- `npm run lint`
-- `npm run typecheck`
+- `pnpm run lint`
+- `pnpm run typecheck`
 - unit/domain/application tests
 - integration HTTP route tests
 - fast in-memory E2E only
@@ -308,14 +308,14 @@ Target:
 
 Run on `main` or as an optional required workflow if infra permits:
 
-- `npm run test:e2e`
+- `pnpm run test:e2e`
 - focused DB/Redis integration suites
 
 ### Nightly / scheduled / manual deep regression
 
 Run separately:
 
-- `npm run test:e2e:vespa`
+- `pnpm run test:e2e:vespa`
 - full golden regression
 - quality benchmarks and larger multilingual sets
 
@@ -327,7 +327,7 @@ Recommended split in `.github/workflows/ci.yml`:
 
 - `test-unit`: keep
 - `test-integration-http`: keep or rename from current integration job
-- `test-e2e-fast`: add `npm run test:e2e`
+- `test-e2e-fast`: add `pnpm run test:e2e`
 - `build`: depend on `lint`, `typecheck`, `test-unit`, `test-integration-http`, `test-e2e-fast`
 - `test-e2e-vespa`: separate workflow, scheduled and manual dispatch
 
@@ -335,7 +335,7 @@ Recommended split in `.github/workflows/ci.yml`:
 
 Phase 1 complete when:
 
-- `npm run test:e2e` is green
+- `pnpm run test:e2e` is green
 - every server-registered route has at least one full-server E2E
 - fast E2E no longer encodes unrealistic quality expectations for in-memory backends
 

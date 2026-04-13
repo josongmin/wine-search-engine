@@ -25,36 +25,18 @@ export interface AnchorEntityData {
   /** Grape varieties. */
   readonly grapes: readonly string[];
 
-  /** Body level [0, 1] normalised (Vespa float). Defaults to 0.5 (midpoint) if missing. */
+  /** Body level [0, 1] normalised (Vespa float). */
   readonly body?: number | undefined;
 
-  /** Sweetness level [0, 1] normalised (Vespa float). Defaults to 0.1 (dry baseline) if missing. */
+  /** Sweetness level [0, 1] normalised (Vespa float). */
   readonly sweetness?: number | undefined;
 
-  /** Style descriptor (e.g. "bold red"). Defaults to "unknown" if missing. */
+  /** Style descriptor (e.g. "bold red"). */
   readonly style?: string | undefined;
 
   /** Pre-computed embedding vector. */
   readonly embedding?: readonly number[] | undefined;
 }
-
-/**
- * Default body when entity data does not specify body.
- * 0.5 = midpoint of [0, 1] normalised scale — neutral assumption when absent.
- */
-const DEFAULT_BODY = 0.5;
-
-/**
- * Default sweetness when entity data does not specify sweetness.
- * 0.1 = near-dry baseline; most red wines are low-sweetness, so this is a
- * conservative prior that avoids over-penalising dry-wine queries.
- */
-const DEFAULT_SWEETNESS = 0.1;
-
-/**
- * Default style when entity data does not specify style.
- */
-const DEFAULT_STYLE = 'unknown';
 
 /**
  * Builds an {@link AnchorProfile} from resolved entity data.
@@ -81,9 +63,9 @@ export class AnchorProfiler {
     // delivers out-of-range values (e.g. body=1.5 from a unit mismatch).
     // Without clamping, computeBodySweetnessProximity's maxDist=2 assumption
     // breaks and can return proximity < 0, corrupting combined similarity scores.
-    const body = clamp01(entityData.body ?? DEFAULT_BODY);
-    const sweetness = clamp01(entityData.sweetness ?? DEFAULT_SWEETNESS);
-    const style = entityData.style ?? DEFAULT_STYLE;
+    const body = entityData.body !== undefined ? clamp01(entityData.body) : undefined;
+    const sweetness = entityData.sweetness !== undefined ? clamp01(entityData.sweetness) : undefined;
+    const style = entityData.style;
 
     // Anchor confidence is derived from resolution confidence with
     // a penalty for missing attributes that reduce profile quality
@@ -95,9 +77,9 @@ export class AnchorProfiler {
       canonicalLabel: entityData.canonicalLabel,
       region: entityData.region,
       grapes: [...entityData.grapes],
-      body,
-      sweetness,
-      style,
+      ...(body !== undefined ? { body } : {}),
+      ...(sweetness !== undefined ? { sweetness } : {}),
+      ...(style !== undefined ? { style } : {}),
       embedding: entityData.embedding,
       anchorConfidence,
     };

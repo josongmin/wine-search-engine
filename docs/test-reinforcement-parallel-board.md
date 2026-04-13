@@ -181,7 +181,7 @@ The true critical path is:
 2. mixed-query 500 is eliminated or intentionally downgraded
 3. unrealistic in-memory quality suites are reduced or moved
 4. missing route-surface E2E lands
-5. full `npm run test:e2e` goes green
+5. full `pnpm run test:e2e` goes green
 
 ## Merge-Conflict Risk Map
 
@@ -220,7 +220,7 @@ Rule:
 Run:
 
 - targeted helper-adopting tests
-- `npm run test:e2e -- test/e2e/schema-contract.test.ts`
+- `pnpm run test:e2e -- test/e2e/schema-contract.test.ts`
 
 Expected:
 
@@ -231,7 +231,7 @@ Expected:
 
 Run:
 
-- `npm run test:e2e`
+- `pnpm run test:e2e`
 
 Expected:
 
@@ -242,7 +242,7 @@ Expected:
 Run:
 
 - targeted new E2E files
-- one broad `npm run test:e2e` smoke after rebasing
+- one broad `pnpm run test:e2e` smoke after rebasing
 
 Expected:
 
@@ -285,7 +285,7 @@ Each squad should report:
 
 ## Definition of P0 Success
 
-- `npm run test:e2e` is green
+- `pnpm run test:e2e` is green
 - all routes registered in the server have true E2E coverage
 - mixed-query fast E2E is fallback-safe and non-500
 - in-memory E2E is contract-first, not quality-heavy

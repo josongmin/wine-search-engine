@@ -556,7 +556,7 @@ const structuredHardChecks = [
   - 각 phase가 이전 지표를 regress 시키지 않는지 검증
 
 ### 9.3 End-to-end benchmark
-- `npm run bench:agent -- --profile quick` 전후 비교
+- `pnpm run bench:agent -- --profile quick` 전후 비교
 - **stderr 신규 섹션**이 출력되는지
 - **JSON report**에 신규 필드가 포함되는지
 

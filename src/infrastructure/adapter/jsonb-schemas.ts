@@ -2,15 +2,40 @@
  * Shared Zod schemas for validating JSONB columns read from PostgreSQL.
  *
  * Rule 11 (CLAUDE.md): NEVER cast JSONB directly with `as DomainType`.
- * Use these schemas with `.safeParse()` and fall back to sentinels on failure.
+ * Use these schemas with `.safeParse()` and throw on validation failure.
+ *
+ * T-E7-01: All parse functions throw CorruptedJsonbError on validation failure
+ * instead of returning silent sentinels/empty fallbacks. This makes data
+ * corruption loud and forces callers to handle it explicitly.
  */
 import { z } from 'zod';
 import type { DecisionSnapshot } from '../../domain/shared/types/index.js';
 import type { EvidenceItem } from '../../domain/shared/types/index.js';
 import type { Relations } from '../../domain/entity/model/relations.js';
 import type { EntityAttributes } from '../../domain/entity/model/attributes.js';
-import { CORRUPTED_SNAPSHOT_ID } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
+
+// ---------------------------------------------------------------------------
+// CorruptedJsonbError — loud failure for JSONB validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when a JSONB column read from PostgreSQL fails Zod validation.
+ * Callers must handle this explicitly — silent degradation is prohibited.
+ */
+export class CorruptedJsonbError extends Error {
+  readonly column: string;
+  readonly caller: string;
+  readonly issues: unknown[];
+
+  constructor(column: string, caller: string, issues: unknown[]) {
+    super(`Corrupted JSONB in column '${column}' (caller: ${caller}): ${issues.length} validation issue(s)`);
+    this.name = 'CorruptedJsonbError';
+    this.column = column;
+    this.caller = caller;
+    this.issues = issues;
+  }
+}
 
 /** Domain ceiling: a wine rarely has more than ~15 primary grapes; 50 is a safe cap. */
 const MAX_GRAPE_ARRAY_LENGTH = 50;
@@ -45,37 +70,20 @@ export const DecisionSnapshotJsonbSchema = z.object({
 }).passthrough();
 
 /**
- * Sentinel snapshot returned when JSONB validation fails.
- * All fields use explicit "corrupted" markers so downstream code
- * never silently treats invalid data as a real snapshot.
- */
-export const CORRUPTED_SNAPSHOT_SENTINEL: DecisionSnapshot = Object.freeze({
-  snapshot_id: CORRUPTED_SNAPSHOT_ID,
-  model_versions: {},
-  index_versions: {},
-  policy_rule_version: CORRUPTED_SNAPSHOT_ID,
-  threshold_profile_id: CORRUPTED_SNAPSHOT_ID,
-  planner_version: CORRUPTED_SNAPSHOT_ID,
-  response_contract_version: CORRUPTED_SNAPSHOT_ID,
-  feature_flags: {},
-});
-
-/**
  * Validate JSONB decision_snapshot column at read time.
- * Returns a sentinel snapshot on validation failure (graceful degradation)
- * because the domain model requires a non-null DecisionSnapshot.
+ * Throws CorruptedJsonbError on validation failure — callers must handle explicitly.
  */
 export function parseDecisionSnapshotJsonb(raw: unknown, caller: string): DecisionSnapshot {
   const result = DecisionSnapshotJsonbSchema.safeParse(raw);
   if (result.success) {
-     
+
     return result.data as unknown as DecisionSnapshot;
   }
   jsonbLog.warn(
     { issues: result.error.issues.slice(0, 3), caller },
-    'decision_snapshot JSONB failed validation; using sentinel snapshot',
+    'decision_snapshot JSONB failed validation — throwing CorruptedJsonbError',
   );
-  return CORRUPTED_SNAPSHOT_SENTINEL;
+  throw new CorruptedJsonbError('decision_snapshot', caller, result.error.issues);
 }
 
 // ---------------------------------------------------------------------------
@@ -95,32 +103,38 @@ export const EvidenceItemJsonbSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 }).passthrough();
 
-/** Empty evidence array sentinel for validation failures. */
-const EMPTY_EVIDENCE: readonly EvidenceItem[] = Object.freeze([]);
-
 /**
  * Validate JSONB evidence_items column at read time.
- * Returns an empty array on failure (graceful degradation).
+ *
+ * - null/undefined → empty array (legitimate: new entity with no evidence yet)
+ * - non-array (string, object, etc.) → throws CorruptedJsonbError
+ * - array with ANY invalid element → throws CorruptedJsonbError (no silent item skipping)
  */
 export function parseEvidenceItemsJsonb(raw: unknown, caller: string): readonly EvidenceItem[] {
+  if (raw == null) {
+    return [];
+  }
   if (!Array.isArray(raw)) {
-    if (raw != null) {
-      jsonbLog.warn({ caller, rawType: typeof raw }, 'evidence_items JSONB is not an array; returning empty');
-    }
-    return EMPTY_EVIDENCE;
+    jsonbLog.warn({ caller, rawType: typeof raw }, 'evidence_items JSONB is not an array — throwing CorruptedJsonbError');
+    throw new CorruptedJsonbError('evidence_items', caller, [{ message: `expected array, got ${typeof raw}` }]);
   }
   const validated: EvidenceItem[] = [];
+  const failures: unknown[] = [];
   for (const item of raw) {
     const result = EvidenceItemJsonbSchema.safeParse(item);
     if (result.success) {
-       
+
       validated.push(result.data as unknown as EvidenceItem);
     } else {
-      jsonbLog.warn(
-        { issues: result.error.issues.slice(0, 3), caller },
-        'evidence_items element failed validation; skipping item',
-      );
+      failures.push(...result.error.issues);
     }
+  }
+  if (failures.length > 0) {
+    jsonbLog.warn(
+      { issueCount: failures.length, caller },
+      'evidence_items contains invalid element(s) — throwing CorruptedJsonbError',
+    );
+    throw new CorruptedJsonbError('evidence_items', caller, failures);
   }
   return validated;
 }
@@ -164,13 +178,9 @@ export const RelationsJsonbSchema = z.object({
   locatedIn: z.string().min(1).optional(),
 }).passthrough();
 
-/** Empty Relations fallback returned on parse failure. */
-const EMPTY_RELATIONS: Relations = Object.freeze({});
-
 /**
  * Validate a Relations JSONB value at read time.
- * Returns an empty Relations object on validation failure so downstream code
- * never iterates a corrupted payload.
+ * Throws CorruptedJsonbError on validation failure — callers must handle explicitly.
  */
 export function parseRelationsJsonb(raw: unknown, caller: string): Relations {
   const result = RelationsJsonbSchema.safeParse(raw);
@@ -180,9 +190,9 @@ export function parseRelationsJsonb(raw: unknown, caller: string): Relations {
   }
   jsonbLog.warn(
     { issues: result.error.issues.slice(0, 3), caller, rawType: typeof raw },
-    `${JSONB_WARN_PREFIX}: relations JSONB; using empty Relations`,
+    `${JSONB_WARN_PREFIX}: relations JSONB — throwing CorruptedJsonbError`,
   );
-  return EMPTY_RELATIONS;
+  throw new CorruptedJsonbError('relations', caller, result.error.issues);
 }
 
 // ---------------------------------------------------------------------------
@@ -210,13 +220,9 @@ export const EntityAttributesJsonbSchema = z.object({
   occasion: z.array(z.string()).max(MAX_OCCASION_ARRAY_LENGTH).optional(),
 }).passthrough();
 
-/** Empty EntityAttributes fallback returned on parse failure. */
-const EMPTY_ENTITY_ATTRIBUTES: EntityAttributes = Object.freeze({});
-
 /**
  * Validate an EntityAttributes JSONB value at read time.
- * Returns an empty attributes object on failure so Entity consumers do not
- * crash on wrong-typed or corrupted payloads.
+ * Throws CorruptedJsonbError on validation failure — callers must handle explicitly.
  */
 export function parseEntityAttributesJsonb(raw: unknown, caller: string): EntityAttributes {
   const result = EntityAttributesJsonbSchema.safeParse(raw);
@@ -226,7 +232,7 @@ export function parseEntityAttributesJsonb(raw: unknown, caller: string): Entity
   }
   jsonbLog.warn(
     { issues: result.error.issues.slice(0, 3), caller, rawType: typeof raw },
-    `${JSONB_WARN_PREFIX}: attributes JSONB; using empty EntityAttributes`,
+    `${JSONB_WARN_PREFIX}: attributes JSONB — throwing CorruptedJsonbError`,
   );
-  return EMPTY_ENTITY_ATTRIBUTES;
+  throw new CorruptedJsonbError('attributes', caller, result.error.issues);
 }

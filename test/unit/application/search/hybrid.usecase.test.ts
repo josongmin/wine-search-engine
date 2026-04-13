@@ -252,6 +252,7 @@ function createKnownItemLtrModel() {
 
 function makeHybridUseCase(overrides: Record<string, unknown> = {}) {
   return new HybridUseCase({
+    allowCompiledFallback: true,
     queryPlanner: { plan: vi.fn().mockResolvedValue(createPlan()) } as never,
     candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
     ranker: { rank: vi.fn().mockResolvedValue({ results: [], metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] } }) } as never,

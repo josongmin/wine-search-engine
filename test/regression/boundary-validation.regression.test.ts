@@ -385,6 +385,7 @@ import {
   EntityAttributesJsonbSchema,
   parseRelationsJsonb,
   parseEntityAttributesJsonb,
+  CorruptedJsonbError,
 } from '../../src/infrastructure/adapter/jsonb-schemas.js';
 
 describe('RelationsJsonbSchema / parseRelationsJsonb', () => {
@@ -400,16 +401,16 @@ describe('RelationsJsonbSchema / parseRelationsJsonb', () => {
     expect(parsed).toEqual(raw);
   });
 
-  it('rejects non-object input and parser returns safe empty default', () => {
+  it('rejects non-object input and parser throws CorruptedJsonbError', () => {
     expect(RelationsJsonbSchema.safeParse('not-an-object').success).toBe(false);
     expect(RelationsJsonbSchema.safeParse(42).success).toBe(false);
     expect(RelationsJsonbSchema.safeParse(null).success).toBe(false);
 
-    // Parser must log a warning and return an empty Relations object rather
-    // than crashing downstream code that iterates the relations payload.
-    expect(parseRelationsJsonb('garbage', 'test')).toEqual({});
-    expect(parseRelationsJsonb(42, 'test')).toEqual({});
-    expect(parseRelationsJsonb(null, 'test')).toEqual({});
+    // T-E7-01: Parser must throw CorruptedJsonbError on corrupted data
+    // instead of silently returning an empty object.
+    expect(() => parseRelationsJsonb('garbage', 'test')).toThrow(CorruptedJsonbError);
+    expect(() => parseRelationsJsonb(42, 'test')).toThrow(CorruptedJsonbError);
+    expect(() => parseRelationsJsonb(null, 'test')).toThrow(CorruptedJsonbError);
   });
 });
 
@@ -436,18 +437,17 @@ describe('EntityAttributesJsonbSchema / parseEntityAttributesJsonb', () => {
     expect(parsed.vintage).toBe(2018);
   });
 
-  it('with wrong-type field returns empty safe default', () => {
+  it('with wrong-type field throws CorruptedJsonbError', () => {
     // body must be a number; a string should fail validation and the parser
-    // should fall back to an empty attributes object (logs a warning).
+    // must throw CorruptedJsonbError (T-E7-01: no silent empty fallback).
     const raw = { body: 'not-a-number', style: 'red' };
     expect(EntityAttributesJsonbSchema.safeParse(raw).success).toBe(false);
-    const parsed = parseEntityAttributesJsonb(raw, 'test');
-    expect(parsed).toEqual({});
+    expect(() => parseEntityAttributesJsonb(raw, 'test')).toThrow(CorruptedJsonbError);
 
     // NaN / Infinity in a numeric field must also be rejected (finite guard).
     const rawNaN = { body: NaN };
     expect(EntityAttributesJsonbSchema.safeParse(rawNaN).success).toBe(false);
-    expect(parseEntityAttributesJsonb(rawNaN, 'test')).toEqual({});
+    expect(() => parseEntityAttributesJsonb(rawNaN, 'test')).toThrow(CorruptedJsonbError);
   });
 });
 

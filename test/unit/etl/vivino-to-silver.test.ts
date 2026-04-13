@@ -263,12 +263,40 @@ describe('vivino-to-silver helpers', () => {
       expect(result).toBeNull();
     });
 
-    it('body defaults to fallback when taste.structure absent', () => {
+    it('leaves body null when taste.structure is absent', () => {
       const result = transformRow(baseRow);
       expect(result).not.toBeNull();
-      // Without payload.taste.structure, falls back to taste_profile or 0.5
-      expect(result!.body).toBeGreaterThanOrEqual(0);
-      expect(result!.body).toBeLessThanOrEqual(1);
+      expect(result!.body).toBeNull();
+    });
+
+    it('drops rows that would require a synthetic wine type', () => {
+      const row: BronzeRow = {
+        ...baseRow,
+        wine_style: 'Mystery Cuvée',
+        payload: {
+          taste: {
+            structure: {
+              fizziness: 0,
+              acidity: 3,
+              tannin: 2,
+              sweetness: 1,
+              intensity: 3,
+            },
+          },
+        },
+      };
+      const result = transformRow(row);
+      expect(result).toBeNull();
+    });
+
+    it('drops rows that would require a synthetic price band', () => {
+      const row: BronzeRow = {
+        ...baseRow,
+        price: null,
+        currency: null,
+      };
+      const result = transformRow(row);
+      expect(result).toBeNull();
     });
 
     // ── Bug fix regression: fizziness threshold scale (Bug 1) ─────────────────

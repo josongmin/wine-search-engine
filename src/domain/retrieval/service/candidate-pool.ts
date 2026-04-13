@@ -358,10 +358,10 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
         );
         return {
           hits: [],
-          degraded: false,
+          degraded: true,
           degradation: {
             component: 'learned_sparse',
-            severity: 'warning',
+            severity: 'error',
             reason: learnedErr instanceof Error ? learnedErr.message : 'learned sparse search failed',
             fallbackApplied: 'continue without learned sparse',
           },
@@ -564,10 +564,10 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
     };
     const learnedSparseFallback: DenseLikeResult = {
       hits: [],
-      degraded: false,
+      degraded: true,
       degradation: {
         component: 'learned_sparse',
-        severity: 'warning',
+        severity: 'error',
         reason: 'learned sparse task threw uncaught error',
         fallbackApplied: 'continue without learned sparse',
       },
@@ -700,10 +700,11 @@ export class CandidatePoolService implements RetrievalExecutorV2Port {
       ) {
         this.degradationObserver?.onDegradation({
           component: 'relative_filter',
-          severity: 'warning',
+          severity: 'error',
           reason: 'anchor entity not found in candidate pool or document store',
-          fallbackApplied: 'unfiltered candidate list',
+          fallbackApplied: 'return no candidates',
         });
+        candidates = [];
       }
     }
 

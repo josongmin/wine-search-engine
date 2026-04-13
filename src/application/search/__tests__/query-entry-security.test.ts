@@ -276,6 +276,7 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
       }),
     };
     const useCase = new HybridUseCase({
+      allowCompiledFallback: true,
       queryPlanner: queryPlanner as never,
       candidatePool: { generate: vi.fn().mockResolvedValue([]) } as never,
       ranker: { rank: vi.fn().mockResolvedValue({ results: [], metadata: { coarsePruneSummary: undefined, rerankExecuted: false, rerankGateReason: undefined, runtimeSignal: undefined, preRerankTop5: [] } }) } as never,
@@ -354,6 +355,7 @@ describe('public query entry use cases enforce Layer 1 security consistently', (
       judge: vi.fn().mockResolvedValue(true),
     };
     const useCase = new HybridUseCase({
+      allowCompiledFallback: true,
       queryPlanner: queryPlanner as never,
       candidatePool: { generate: vi.fn() } as never,
       ranker: { rank: vi.fn() } as never,

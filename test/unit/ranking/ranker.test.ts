@@ -835,6 +835,35 @@ describe('Ranker', () => {
       // blended = 0.18 * 1.0 + 0.82 * 0.8 = 0.836
       expect(firstResult!.finalScore).toBeCloseTo(0.836, 10);
     });
+
+    it('collapsed reranker scores keep heuristic ordering and emit a degraded runtime signal', async () => {
+      const candidates = makeCandidates(6, 'wine-0');
+      const aggregatorScores = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4];
+      const reranker: RerankerPort = {
+        rerank: async (_query, rerankCandidates) =>
+          rerankCandidates.map((c, index) => ({
+            entityId: c.entityId,
+            score: 1.0,
+            rank: index + 1,
+          })),
+      };
+
+      const ranker = makeRanker(makeScoreAggregatorSequence(aggregatorScores), { reranker });
+
+      const { results, metadata } = await ranker.rank(makeInput(candidates, true));
+
+      expect(results).toHaveLength(aggregatorScores.length);
+      results.forEach((result, index) => {
+        expect(result.finalScore).toBeCloseTo(aggregatorScores[index]!, 12);
+      });
+      expect(metadata.runtimeSignal).toEqual({
+        rerankerStatus: 'executed',
+        degradation: {
+          executionMode: 'degraded',
+          degradationReasons: ['reranker_score_normalization_failed'],
+        },
+      });
+    });
   });
 
   describe('rerankTopK', () => {

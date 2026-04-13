@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
+  assertDrinkingWindowBackfillComplete,
+  backfillDrinkingWindowRecords,
   predictDrinkingWindow,
   extractFeatures,
+  assertHeuristicBackfillAllowed,
 } from '../../../scripts/etl/drinking-window-backfill.js';
 
 describe('predictDrinkingWindow', () => {
@@ -241,5 +244,51 @@ describe('extractFeatures', () => {
   it('returns null when vintageYear is null', () => {
     const record = { ...validRecord, vintageYear: null };
     expect(extractFeatures(record)).toBeNull();
+  });
+});
+
+describe('heuristic backfill guard', () => {
+  it('refuses to run without an explicit opt-in', () => {
+    expect(() => assertHeuristicBackfillAllowed({} as NodeJS.ProcessEnv)).toThrow(
+      /ALLOW_HEURISTIC_DRINKING_WINDOW_BACKFILL=1/,
+    );
+  });
+
+  it('allows explicit opt-in only', () => {
+    expect(
+      assertHeuristicBackfillAllowed({
+        ALLOW_HEURISTIC_DRINKING_WINDOW_BACKFILL: '1',
+      } as NodeJS.ProcessEnv),
+    ).toBeUndefined();
+  });
+});
+
+describe('backfill output guard', () => {
+  it('refuses to write partial outputs when any record lacks required features', () => {
+    const result = backfillDrinkingWindowRecords([
+      {
+        sourceId: 'wine-1',
+        vintageYear: 2020,
+        body: 0.6,
+        tannin: 0.5,
+        acidity: 0.4,
+        sweetness: 0.2,
+        criticProxy: { proxyScore: 88 },
+      },
+      {
+        sourceId: 'wine-2',
+        vintageYear: 2020,
+        body: null,
+        tannin: 0.5,
+        acidity: 0.4,
+        sweetness: 0.2,
+        criticProxy: { proxyScore: 88 },
+      },
+    ]);
+
+    expect(result.failed).toBe(1);
+    expect(() => assertDrinkingWindowBackfillComplete(result)).toThrow(
+      /refused to write partial output/,
+    );
   });
 });

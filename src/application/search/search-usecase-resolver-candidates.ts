@@ -10,6 +10,7 @@ import type {
   EntityCandidateGeneratorInput,
   EntityCandidateSource,
 } from '../../domain/resolver/model/entity-candidate-generator-input.js';
+import { buildResolverCandidateAttributeHints } from './search-usecase-entity-attribute-projection.js';
 
 const ZERO_SIGNALS: MatchSignalSet = {
   canonicalExactMatch: 0,
@@ -112,42 +113,8 @@ function mergeSources(
   return [...merged].sort();
 }
 
-function buildAttributeHints(
-  doc: RetrievalDocument,
-): Readonly<Record<string, unknown>> | undefined {
-  const hints: Record<string, unknown> = {};
-
-  if (typeof doc.producer === 'string' && doc.producer.length > 0) hints['producer'] = doc.producer;
-  if (typeof doc.region === 'string' && doc.region.length > 0) hints['region'] = doc.region;
-  if (typeof doc.appellation === 'string' && doc.appellation.length > 0) hints['appellation'] = doc.appellation;
-  if (typeof doc.country === 'string' && doc.country.length > 0) hints['country'] = doc.country;
-  if (typeof doc.grapePrimary === 'string' && doc.grapePrimary.length > 0) hints['grape_primary'] = doc.grapePrimary;
-  if (Array.isArray(doc.grapes) && doc.grapes.length > 0) hints['grapes'] = doc.grapes;
-  if (typeof doc.style === 'string' && doc.style.length > 0) hints['style'] = doc.style;
-  if (typeof doc.priceBand === 'string' && doc.priceBand.length > 0) hints['price_band'] = doc.priceBand;
-  if (Array.isArray(doc.pairing) && doc.pairing.length > 0) hints['pairing'] = doc.pairing;
-  if (Array.isArray(doc.occasion) && doc.occasion.length > 0) hints['occasion'] = doc.occasion;
-  if (doc.vintageYear !== undefined) {
-    hints['vintage'] = doc.vintageYear;
-    hints['vintage_year'] = doc.vintageYear;
-  }
-  if (doc.body !== undefined) hints['body'] = doc.body;
-  if (doc.tannin !== undefined) hints['tannin'] = doc.tannin;
-  if (doc.acidity !== undefined) hints['acidity'] = doc.acidity;
-  if (doc.sweetness !== undefined) hints['sweetness'] = doc.sweetness;
-  if (typeof doc.wineType === 'string' && doc.wineType.length > 0) hints['wine_type'] = doc.wineType;
-  if (typeof doc.classification === 'string' && doc.classification.length > 0) hints['classification'] = doc.classification;
-  if (doc.alcoholPct !== undefined) hints['alcohol_pct'] = doc.alcoholPct;
-  if (doc.priceUsd !== undefined) hints['price_usd'] = doc.priceUsd;
-  if (doc.producerPrestige !== undefined) hints['producer_prestige'] = doc.producerPrestige;
-  if (doc.criticScoreNormalized !== undefined) hints['critic_score_normalized'] = doc.criticScoreNormalized;
-  if (Array.isArray(doc.certifications) && doc.certifications.length > 0) hints['certifications'] = doc.certifications;
-  if (typeof doc.soilType === 'string' && doc.soilType.length > 0) hints['soil_type'] = doc.soilType;
-  if (typeof doc.producerType === 'string' && doc.producerType.length > 0) hints['producer_type'] = doc.producerType;
-  if (typeof doc.grapeFamily === 'string' && doc.grapeFamily.length > 0) hints['grape_family'] = doc.grapeFamily;
-  if (Array.isArray(doc.flavorProfiles) && doc.flavorProfiles.length > 0) hints['flavor_profiles'] = doc.flavorProfiles;
-
-  return Object.keys(hints).length > 0 ? hints : undefined;
+function describeEntityIds(ids: readonly CanonicalEntityId[]): string {
+  return ids.map((id) => String(id)).join(', ');
 }
 
 /**
@@ -191,14 +158,6 @@ export async function buildResolverCandidatesFromGenerator(
     allEntityIds.add(id);
   }
 
-  // Build set of IDs covered by anchors (used to tag blocker-only seeds)
-  const anchorCoveredIds = new Set<string>();
-  for (const anchor of input.anchors) {
-    for (const id of anchor.candidateEntityIds) {
-      anchorCoveredIds.add(String(id));
-    }
-  }
-
   // Resolve documents: use preloaded cache first, then fetch missing IDs.
   const docMap = new Map<CanonicalEntityId, RetrievalDocument>();
 
@@ -214,23 +173,59 @@ export async function buildResolverCandidatesFromGenerator(
     }
   }
 
-  // Fetch IDs not covered by the prefetch cache
+  // Fetch IDs not covered by the prefetch cache. Returning a partial set is
+  // not acceptable in production, so any unresolved IDs become a loud error.
   const missingIds = [...allEntityIds].filter((id) => !docMap.has(id));
   if (missingIds.length > 0) {
-    const settled = await Promise.allSettled(
-      missingIds.map(async (id) => {
-        const doc = await entityLookup.getDocument(id);
-        return [id, doc] as const;
-      }),
-    );
-    for (const result of settled) {
-      if (result.status === 'fulfilled') {
-        const [id, doc] = result.value;
-        if (doc != null) {
+    let batchLookupError: unknown;
+    if (entityLookup.getDocuments !== undefined) {
+      try {
+        const docs = await entityLookup.getDocuments(missingIds);
+        for (const [id, doc] of docs) {
           docMap.set(id, doc);
         }
+      } catch (error: unknown) {
+        batchLookupError = error;
       }
-      // rejected results are silently skipped — correct degradation behaviour.
+    }
+
+    const stillMissingIds = missingIds.filter((id) => !docMap.has(id));
+    if (stillMissingIds.length > 0) {
+      const settled = await Promise.allSettled(
+        stillMissingIds.map(async (id) => {
+          const doc = await entityLookup.getDocument(id);
+          return { id, doc } as const;
+        }),
+      );
+      const rejectedIds: CanonicalEntityId[] = [];
+      for (const [index, result] of settled.entries()) {
+        const id = stillMissingIds[index];
+        if (id === undefined) {
+          continue;
+        }
+        if (result.status === 'fulfilled') {
+          const { doc } = result.value;
+          if (doc != null) {
+            docMap.set(id, doc);
+          }
+        } else {
+          rejectedIds.push(id);
+        }
+      }
+
+      const unresolvedIds = [...allEntityIds].filter((id) => !docMap.has(id));
+      if (unresolvedIds.length > 0) {
+        const details = [
+          `Entity candidate hydration incomplete: requested=${allEntityIds.size}`,
+          `resolved=${docMap.size}`,
+          `missing=[${describeEntityIds(unresolvedIds)}]`,
+          batchLookupError !== undefined
+            ? `batchError=${batchLookupError instanceof Error ? batchLookupError.message : String(batchLookupError)}`
+            : undefined,
+          rejectedIds.length > 0 ? `singleFetchRejected=[${describeEntityIds(rejectedIds)}]` : undefined,
+        ].filter((part): part is string => part !== undefined);
+        throw new DomainError('INTERNAL_INCONSISTENCY', details.join(' | '));
+      }
     }
   }
 
@@ -244,7 +239,7 @@ export async function buildResolverCandidatesFromGenerator(
       if (doc == null) {
         continue;
       }
-      const attributeHints = buildAttributeHints(doc);
+      const attributeHints = buildResolverCandidateAttributeHints(doc);
       const key = String(entityId);
       const incomingAliasMatch = {
         aliasValue: anchor.surfaceForm,
@@ -260,6 +255,9 @@ export async function buildResolverCandidatesFromGenerator(
           canonicalLabel: doc.canonicalLabel,
           aliasMatches: [incomingAliasMatch],
           ...(attributeHints !== undefined ? { attributeHints } : {}),
+          ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
+            ? { sourceRecordRefs: doc.sourceRecordRefs }
+            : {}),
           sourceSignals: incomingSignals,
           source: anchor.source,
           ...(mergeSources(undefined, anchor.source) !== undefined
@@ -300,13 +298,16 @@ export async function buildResolverCandidatesFromGenerator(
     if (doc == null) {
       continue;
     }
-    const attributeHints = buildAttributeHints(doc);
+    const attributeHints = buildResolverCandidateAttributeHints(doc);
     candidatesById.set(key, {
       entityId,
       entityType: doc.entityType,
       canonicalLabel: doc.canonicalLabel,
       aliasMatches: [],
       ...(attributeHints !== undefined ? { attributeHints } : {}),
+      ...(doc.sourceRecordRefs !== undefined && doc.sourceRecordRefs.length > 0
+        ? { sourceRecordRefs: doc.sourceRecordRefs }
+        : {}),
       sourceSignals: ZERO_SIGNALS,
       source: 'blocker_seed',
       sources: ['blocker_seed'],

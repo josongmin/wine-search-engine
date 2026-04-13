@@ -7,11 +7,11 @@
  * - BGE-M3 instruction prefix (document side: no prefix)
  * - Batch embedding generation
  * - Deterministic entity_id → Vespa upsert (idempotent)
- * - Real embedding or deterministic fallback
+ * - Real embedding only (fail closed; no deterministic fallback)
  *
  * Usage:
  *   npx tsx --env-file=.env scripts/etl/index-to-vespa.ts
- *   npx tsx --env-file=.env scripts/etl/index-to-vespa.ts --input data/silver-docquery.ndjson --dry-run
+ *   npx tsx --env-file=.env scripts/etl/index-to-vespa.ts --input data/silver-trackc.ndjson --dry-run
  */
 
 import 'dotenv/config';
@@ -24,17 +24,18 @@ import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/entity-id.js';
 import type { RetrievalDocument } from '../../src/domain/retrieval/model/retrieval-document.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import {
   loadGoldCanonicalLookupForBuild,
   resolveWineSnapshotEntity,
 } from './snapshot-entity-identity.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import { hashStableJson } from '../../src/shared/utils/stable-json.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 const VESPA_URL = process.env['VESPA_URL'] ?? 'http://localhost:8080';
 const NAMESPACE = 'wine';
 const DOC_TYPE = 'wine_entity';
@@ -125,6 +126,7 @@ interface Args {
   limit: number;
   snapshotId?: string;
   fixtureRepoRoot?: string;
+  preparedFeed?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -132,6 +134,10 @@ function parseArgs(argv: string[]): Args {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--input' || a === '-i') out.input = argv[++i] ?? DEFAULT_INPUT;
+    else if (a === '--prepared-feed') {
+      const v = argv[++i];
+      if (v !== undefined) out.preparedFeed = v;
+    }
     else if (a === '--dry-run') out.dryRun = true;
     else if (a === '--limit') out.limit = Math.max(1, Number(argv[++i] ?? '0'));
     else if (a === '--snapshot-id') {
@@ -143,7 +149,7 @@ function parseArgs(argv: string[]): Args {
     }
     else if (a === '--help' || a === '-h') {
       console.log(
-        'Usage: index-to-vespa.ts [--input PATH] [--dry-run] [--limit N] [--snapshot-id ID] [--fixture-repo PATH]',
+        'Usage: index-to-vespa.ts [--input PATH] [--prepared-feed PATH] [--dry-run] [--limit N] [--snapshot-id ID] [--fixture-repo PATH]',
       );
       process.exit(0);
     }
@@ -157,6 +163,52 @@ function parseArgs(argv: string[]): Args {
 
 /** Embedding dimension — must match Vespa schema tensor<float>(x[DIM]). */
 const EMBEDDING_DIM = 1024;
+
+export interface PreparedVespaFeedDocument {
+  readonly id: string;
+  readonly fields: Record<string, unknown>;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function serializePreparedVespaFeedDocuments(
+  docs: readonly PreparedVespaFeedDocument[],
+): string {
+  return docs.map((doc) => JSON.stringify(doc)).join('\n') + '\n';
+}
+
+export function parsePreparedVespaFeedDocuments(
+  raw: string,
+  filePath: string,
+): readonly PreparedVespaFeedDocument[] {
+  const lines = raw
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const docs: PreparedVespaFeedDocument[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(lines[index] ?? '');
+    } catch {
+      throw new Error(
+        `Invalid prepared Vespa feed artifact at ${filePath}:${index + 1} — expected JSON object`,
+      );
+    }
+    if (!isRecord(parsed) || typeof parsed['id'] !== 'string' || parsed['id'].length === 0 || !isRecord(parsed['fields'])) {
+      throw new Error(
+        `Invalid prepared Vespa feed artifact at ${filePath}:${index + 1} — expected {id, fields} record`,
+      );
+    }
+    docs.push({
+      id: parsed['id'],
+      fields: parsed['fields'],
+    });
+  }
+  return docs;
+}
 
 export function deterministicEmbedding(
   body: number,
@@ -211,10 +263,6 @@ const HANGUL_RE = /[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F]/;
  * Returns empty string when no Korean aliases exist for this record.
  */
 export function buildSearchTextKo(rec: EnrichedSilverRecord): string {
-  // Prefer pre-built Korean text from Phase-1 enrichment (stored in the NDJSON)
-  const prebuilt = (rec as unknown as Record<string, unknown>)['searchTextKo'];
-  if (typeof prebuilt === 'string' && prebuilt.length > 0) return prebuilt;
-
   const koAliases = rec.aliases.noisyRecallProjection.filter((a) =>
     HANGUL_RE.test(a),
   );
@@ -279,19 +327,40 @@ function buildCertificationTags(cert: CertificationResult): readonly string[] {
   return tags;
 }
 
+function trimNonEmpty(value: string | null | undefined): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeStringArray(values: readonly string[] | undefined): readonly string[] | undefined {
+  if (values === undefined) return undefined;
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const trimmed = trimNonEmpty(value);
+    if (trimmed === undefined || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 /**
  * Derives a style label from body, sweetness, and wine type.
- * More granular than the old 3-bucket approach.
+ * When the sensory inputs are absent, the field is omitted instead of
+ * synthesizing a midpoint label.
  */
 function deriveStyle(rec: GoldRecord): string {
   const wt = rec.wineType;
   if (wt === undefined) {
-    throw new Error(`deriveStyle: missing wineType for record — cannot derive style without wine type classification`);
+    throw new Error('deriveStyle: wineType is required');
   }
   if (wt === 'sparkling') return 'sparkling';
   if (wt === 'dessert') return 'sweet';
   if (wt === 'fortified') return 'fortified';
   if (wt === 'rosé') return 'rosé';
+  if (rec.body == null || rec.sweetness == null) return wt;
   // Only override to 'sweet' for clearly sweet wines (threshold raised from 0.6 to 0.75)
   if (rec.sweetness >= 0.75) return 'sweet';
   if (wt === 'white') {
@@ -320,62 +389,6 @@ function computePopularity(rec: GoldRecord): number {
 export interface IndexableValidationResult {
   readonly valid: boolean;
   readonly errors: string[];
-}
-
-/** Grape family lookup — mirrors GRAPE_FAMILY_MAP in enrich-rules.py. */
-const GRAPE_FAMILY_MAP: ReadonlyMap<string, string> = new Map([
-  ['Pinot Noir', 'Pinot'], ['Pinot Gris', 'Pinot'], ['Pinot Grigio', 'Pinot'],
-  ['Pinot Blanc', 'Pinot'], ['Pinot Meunier', 'Pinot'],
-  ['Cabernet Sauvignon', 'Cabernet'], ['Cabernet Franc', 'Cabernet'],
-  ['Sauvignon Blanc', 'Sauvignon Blanc'],
-  ['Chenin Blanc', 'Chenin Blanc'],
-  ['Nero d\'Avola', 'Nero d\'Avola'],
-  ['Grüner Veltliner', 'Grüner Veltliner'],
-  ['Touriga Nacional', 'Touriga'],
-  ['Nerello Mascalese', 'Nerello'],
-  ['Petite Sirah', 'Petite Sirah'],
-  ['Petit Verdot', 'Petit Verdot'],
-  ['Syrah', 'Syrah'], ['Shiraz', 'Syrah'],
-  ['Grenache', 'Grenache'], ['Garnacha', 'Grenache'],
-  ['Zinfandel', 'Zinfandel'], ['Primitivo', 'Zinfandel'],
-  ['Mourvèdre', 'Mourvèdre'],
-  ['Muscat', 'Muscat'], ['Moscato', 'Muscat'],
-  ['Sémillon', 'Sémillon'],
-  ['Blaufränkisch', 'Blaufränkisch'],
-]);
-
-/**
- * Derives a grape family shortname from a primary grape variety.
- * Uses {@link GRAPE_FAMILY_MAP} for known multi-word varieties, then
- * falls back to first-word extraction for unknown grapes.
- */
-function deriveGrapeFamily(grapePrimary: string | null | undefined): string | undefined {
-  if (!grapePrimary) return undefined;
-  const mapped = GRAPE_FAMILY_MAP.get(grapePrimary);
-  if (mapped) return mapped;
-  return grapePrimary.split(/[\s/,]/)[0] ?? undefined;
-}
-
-/**
- * Parses a region string into a breadcrumb hierarchy.
- * Handles " / "-separated strings, deduplicates, and trims.
- */
-function deriveRegionHierarchy(region: string | null | undefined): readonly string[] | undefined {
-  if (!region) return undefined;
-  const parts = region
-    .split(' / ')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  // Deduplicate while preserving order
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const part of parts) {
-    if (!seen.has(part)) {
-      seen.add(part);
-      unique.push(part);
-    }
-  }
-  return unique.length > 0 ? unique : undefined;
 }
 
 /** Maps price band label to ordinal: value=1, mid=2, premium=3, luxury=4. */
@@ -415,6 +428,14 @@ export function silverToIndexable(
 
   const certTags: readonly string[] | undefined =
     gold.certifications != null ? buildCertificationTags(gold.certifications) : undefined;
+  const style = deriveStyle(gold);
+  const soilType = trimNonEmpty(rec.soilType);
+  const producerType = trimNonEmpty(rec.producerType);
+  const grapeFamily = trimNonEmpty(rec.grapeFamily);
+  const regionHierarchy = normalizeStringArray(rec.regionHierarchy);
+  const occasion = normalizeStringArray(
+    rec.occasionClassification?.values ?? rec.occasion,
+  );
 
   return {
     // RetrievalHitProjection fields
@@ -423,19 +444,19 @@ export function silverToIndexable(
       { sourceSystem: SOURCE_SYSTEM_VIVINO_SILVER, sourceRecordId: rec.sourceId },
     ],
     canonicalLabel: rec.canonicalLabel,
-    producer: rec.producer || undefined,
-    region: rec.region || undefined,
+    ...(rec.producer.length > 0 ? { producer: rec.producer } : {}),
+    ...(rec.region.length > 0 ? { region: rec.region } : {}),
     ...(rec.appellation ? { appellation: rec.appellation } : {}),
     ...(rec.grapePrimary ? { grapePrimary: rec.grapePrimary } : {}),
     ...(rec.vintageYear !== null ? { vintageYear: rec.vintageYear } : {}),
-    searchTextEn: rec.searchTextEn || undefined,
+    ...(rec.searchTextEn.length > 0 ? { searchTextEn: rec.searchTextEn } : {}),
     ...(gold.producerPrestige != null ? { producerPrestige: gold.producerPrestige } : {}),
     // avgCriticProxyScore mirrors criticScoreNormalized for the hit-projection summary.
     ...(criticScoreNormalized !== undefined ? { avgCriticProxyScore: criticScoreNormalized } : {}),
 
     // RetrievalFeatureProjection fields
-    body: rec.body,
-    sweetness: rec.sweetness,
+    ...(rec.body != null ? { body: rec.body } : {}),
+    ...(rec.sweetness != null ? { sweetness: rec.sweetness } : {}),
     ...(rec.acidity != null ? { acidity: rec.acidity } : {}),
     ...(rec.tannin != null ? { tannin: rec.tannin } : {}),
     ...(criticScoreNormalized !== undefined ? { criticScoreNormalized } : {}),
@@ -454,17 +475,17 @@ export function silverToIndexable(
     grapes: rec.grapes,
     searchTextKo: buildSearchTextKo(rec),
     semanticSummary: buildEmbedText(rec),
-    style: deriveStyle(gold),
+    style,
     priceBand: rec.priceBand,
     pairing: rec.pairingTags,
-    occasion: [],
+    ...(occasion !== undefined ? { occasion: [...occasion] } : {}),
     availability: true,
     popularityScore: computePopularity(gold),
     ...(rec.wineType ? { wineType: rec.wineType } : {}),
     ...(rec.country ? { country: rec.country } : {}),
     ...(rec.priceUsd !== null ? { priceUsd: rec.priceUsd } : {}),
-    grapeFamily: deriveGrapeFamily(rec.grapePrimary),
-    regionHierarchy: deriveRegionHierarchy(rec.region),
+    ...(grapeFamily !== undefined ? { grapeFamily } : {}),
+    ...(regionHierarchy !== undefined ? { regionHierarchy: [...regionHierarchy] } : {}),
     priceBandNumeric: priceBandToNumeric(rec.priceBand),
     ...(rec.finishLength != null ? { finishLength: rec.finishLength } : {}),
     ...(rec.flavorProfiles.length > 0 ? { flavorProfiles: rec.flavorProfiles } : {}),
@@ -478,6 +499,8 @@ export function silverToIndexable(
         : {}),
     ...(rec.oakTreatment != null ? { oakTreatment: rec.oakTreatment } : {}),
     ...(certTags !== undefined && certTags.length > 0 ? { certifications: [...certTags] } : {}),
+    ...(soilType !== undefined ? { soilType } : {}),
+    ...(producerType !== undefined ? { producerType } : {}),
     ...(rec.learnedSparseWeights !== undefined
       ? { learnedSparseWeights: rec.learnedSparseWeights }
       : {}),
@@ -588,12 +611,12 @@ export function silverToRetrievalDoc(
     searchTextKo: indexable.searchTextKo,
     searchTextEn: rec.searchTextEn,
     semanticSummary: indexable.semanticSummary,
-    body: rec.body,
-    sweetness: rec.sweetness,
+    ...(indexable.body != null ? { body: indexable.body } : {}),
+    ...(indexable.sweetness != null ? { sweetness: indexable.sweetness } : {}),
     style: indexable.style,
     priceBand: indexable.priceBand,
     pairing: indexable.pairing,
-    occasion: indexable.occasion,
+    ...(indexable.occasion !== undefined ? { occasion: [...indexable.occasion] } : {}),
     availability: indexable.availability,
     popularityScore: indexable.popularityScore,
     embedding,
@@ -645,67 +668,20 @@ export function silverToRetrievalDoc(
   return doc;
 }
 
-// ---------------------------------------------------------------------------
-// Batch indexing
-// ---------------------------------------------------------------------------
-
-function chunkArray<T>(arr: readonly T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) {
-    chunks.push(arr.slice(i, i + size) as T[]);
-  }
-  return chunks;
-}
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-export async function run(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
-  const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
-
-  console.log(`Reading enriched Silver from ${args.input} …`);
-  const content = await fs.readFile(args.input, 'utf8');
-  let records = parseNdjson<EnrichedSilverRecord>(content, args.input).records;
-
-  if (args.limit > 0) {
-    records = records.slice(0, args.limit);
-  }
-  console.log(`  Records to index: ${records.length}`);
-
-  if (args.dryRun) {
-    console.log('  DRY RUN — skipping Vespa feed and embeddings');
-    const sample = records[0];
-    if (sample) {
-      const emb = deterministicEmbedding(sample.body, sample.sweetness, sample.acidity, sample.tannin);
-      const doc = silverToRetrievalDoc(sample, emb, args.snapshotId, goldLookup);
-      console.log('  Sample RetrievalDocument:');
-      console.log(JSON.stringify(doc, null, 2).slice(0, 2000));
-    }
-    return;
-  }
-
-  // Vespa client — pass mTLS cert/key for Vespa Cloud when configured.
-  const vespaCertPath = process.env['VESPA_CERT_PATH']?.trim();
-  const vespaKeyPath = process.env['VESPA_KEY_PATH']?.trim();
-  const vespaMtls = vespaCertPath && vespaKeyPath
-    ? { certPath: vespaCertPath, keyPath: vespaKeyPath }
-    : undefined;
-  const vespa = new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE, undefined, vespaMtls);
-
+export async function preparePreparedVespaFeedDocuments(args: {
+  readonly records: readonly EnrichedSilverRecord[];
+  readonly snapshotId?: string;
+  readonly goldCanonicalLookup?: ReadonlyMap<string, string>;
+}): Promise<readonly PreparedVespaFeedDocument[]> {
   if (openAiApiKey() === undefined) {
     throw new Error('OPENAI_API_KEY is required for embedding generation — deterministic fallback is disabled (fail-closed)');
   }
-  console.log('  Using OpenAI embeddings (fail-closed — no deterministic fallback)');
-
-  const chunks = chunkArray(records, BATCH_SIZE);
-  let indexed = 0;
-  let failures = 0;
+  const lookup = args.goldCanonicalLookup ?? new Map();
+  const chunks = chunkArray(args.records, BATCH_SIZE);
+  const docs: PreparedVespaFeedDocument[] = [];
 
   for (let ci = 0; ci < chunks.length; ci++) {
     const chunk = chunks[ci]!;
-
     const texts = chunk.map(buildEmbedText);
     let embeddings: readonly (readonly number[])[];
     const EMBED_MAX_RETRIES = 3;
@@ -722,31 +698,56 @@ export async function run(): Promise<void> {
       }
     }
 
-    // Convert to Vespa documents and feed; validate each record before converting
-    const docs: { id: string; fields: Record<string, unknown> }[] = [];
     for (let i = 0; i < chunk.length; i++) {
       const rec = chunk[i]!;
-      const indexable = silverToIndexable(rec, goldLookup);
+      const indexable = silverToIndexable(rec, lookup);
       const validation = validateIndexableRecord(indexable);
       if (!validation.valid) {
-        failures += 1;
-        console.error(
-          `  Validation failed for ${rec.sourceId}: ${validation.errors.join('; ')}`,
+        throw new Error(
+          `Validation failed for ${rec.sourceId}: ${validation.errors.join('; ')}`,
         );
-        continue;
       }
       const embedding = embeddings[i];
       if (embedding === undefined) {
         throw new Error(`Embedding missing for record ${rec.sourceId} at index ${i} — OpenAI returned fewer vectors than inputs`);
       }
-      const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, goldLookup);
+      const retrievalDoc = silverToRetrievalDoc(rec, embedding, args.snapshotId, lookup);
       docs.push({
         id: String(retrievalDoc.entityId),
         fields: toVespaFields(retrievalDoc),
       });
     }
+  }
 
-    const result = await vespa.bulkFeed(docs);
+  return docs;
+}
+
+async function createVespaClient(): Promise<VespaClient> {
+  const vespaCertPath = process.env['VESPA_CERT_PATH']?.trim();
+  const vespaKeyPath = process.env['VESPA_KEY_PATH']?.trim();
+  const vespaMtls = vespaCertPath && vespaKeyPath
+    ? { certPath: vespaCertPath, keyPath: vespaKeyPath }
+    : undefined;
+  return new VespaClient(VESPA_URL, NAMESPACE, DOC_TYPE, undefined, vespaMtls);
+}
+
+async function feedPreparedVespaDocuments(
+  vespa: VespaClient,
+  docs: readonly PreparedVespaFeedDocument[],
+  options?: {
+    readonly maxFailureRate?: number;
+  },
+): Promise<void> {
+  const chunks = chunkArray(docs, BATCH_SIZE);
+  let indexed = 0;
+  let failures = 0;
+
+  for (let ci = 0; ci < chunks.length; ci++) {
+    const chunk = chunks[ci]!;
+    const result = await vespa.bulkFeed(chunk.map((doc) => ({
+      id: doc.id,
+      fields: doc.fields,
+    })));
     indexed += result.successCount;
     failures += result.failureCount;
 
@@ -766,17 +767,108 @@ export async function run(): Promise<void> {
 
   const totalRecords = indexed + failures;
   const failureRate = totalRecords > 0 ? failures / totalRecords : 0;
-  /** Tolerate up to 2% network failures on cloud endpoints (dev zone
-   *  connection pool exhaustion). Above that threshold the feed is broken. */
-  const MAX_FAILURE_RATE = 0.02;
+  const maxFailureRate = options?.maxFailureRate ?? 0;
   console.log(`\n  Done: ${indexed} indexed, ${failures} failed (${(failureRate * 100).toFixed(1)}%)`);
-  if (failureRate > MAX_FAILURE_RATE) {
-    console.error(`  Failure rate ${(failureRate * 100).toFixed(1)}% exceeds ${MAX_FAILURE_RATE * 100}% threshold`);
+  if (failureRate > maxFailureRate) {
+    console.error(`  Failure rate ${(failureRate * 100).toFixed(1)}% exceeds ${maxFailureRate * 100}% threshold`);
     process.exit(1);
   }
-  if (failures > 0) {
+  if (failures > 0 && maxFailureRate > 0) {
     console.warn(`  ${failures} documents failed but within tolerance — proceeding`);
   }
+}
+
+export async function materializePreparedVespaFeedArtifact(args: {
+  readonly inputPath: string;
+  readonly outputPath: string;
+  readonly snapshotId: string;
+  readonly fixtureRepoRoot?: string;
+}): Promise<{
+  readonly count: number;
+  readonly hash: string;
+}> {
+  const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
+  const raw = await fs.readFile(args.inputPath, 'utf8');
+  const records = parseNdjson<EnrichedSilverRecord>(raw, args.inputPath).records;
+  const docs = await preparePreparedVespaFeedDocuments({
+    records,
+    snapshotId: args.snapshotId,
+    goldCanonicalLookup: goldLookup,
+  });
+  const serialized = serializePreparedVespaFeedDocuments(docs);
+  await fs.writeFile(args.outputPath, serialized, 'utf8');
+  return {
+    count: docs.length,
+    hash: hashStableJson(docs),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Batch indexing
+// ---------------------------------------------------------------------------
+
+function chunkArray<T>(arr: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size) as T[]);
+  }
+  return chunks;
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+export async function run(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2));
+  if (args.preparedFeed !== undefined) {
+    console.log(`Reading prepared Vespa feed from ${args.preparedFeed} …`);
+    const raw = await fs.readFile(args.preparedFeed, 'utf8');
+    const docs = parsePreparedVespaFeedDocuments(raw, args.preparedFeed);
+    console.log(`  Prepared documents to index: ${docs.length}`);
+    if (args.dryRun) {
+      console.log('  DRY RUN — skipping Vespa feed');
+      return;
+    }
+    const vespa = await createVespaClient();
+    await feedPreparedVespaDocuments(vespa, docs, { maxFailureRate: 0 });
+    return;
+  }
+
+  const goldLookup = await loadGoldCanonicalLookupForBuild({ fixtureRepoRoot: args.fixtureRepoRoot });
+
+  console.log(`Reading enriched Silver from ${args.input} …`);
+  const content = await fs.readFile(args.input, 'utf8');
+  let records = parseNdjson<EnrichedSilverRecord>(content, args.input).records;
+
+  if (args.limit > 0) {
+    records = records.slice(0, args.limit);
+  }
+  console.log(`  Records to index: ${records.length}`);
+
+  if (args.dryRun) {
+    console.log('  DRY RUN — skipping Vespa feed and embeddings');
+    const sample = records[0];
+    if (sample) {
+      const indexable = silverToIndexable(sample, goldLookup);
+      const validation = validateIndexableRecord(indexable);
+      console.log('  Sample IndexableWineRecord:');
+      console.log(JSON.stringify(indexable, null, 2).slice(0, 2000));
+      if (!validation.valid) {
+        console.log(`  Validation errors: ${validation.errors.join('; ')}`);
+      }
+    }
+    return;
+  }
+
+  console.log('  Using OpenAI embeddings (fail-closed — no deterministic fallback)');
+  const docs = await preparePreparedVespaFeedDocuments({
+    records,
+    ...(args.snapshotId !== undefined ? { snapshotId: args.snapshotId } : {}),
+    goldCanonicalLookup: goldLookup,
+  });
+  const vespa = await createVespaClient();
+  await feedPreparedVespaDocuments(vespa, docs);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

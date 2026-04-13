@@ -1,10 +1,10 @@
 #!/usr/bin/env tsx
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
-const DEFAULT_INPUT = resolveDataPath('data/silver-docquery.ndjson');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
 const DEFAULT_OUTPUT = resolve(process.cwd(), 'src/domain/evaluation/service/region-parents.generated.ts');
 
 interface Args {

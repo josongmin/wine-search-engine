@@ -1,13 +1,14 @@
 /**
  * Regression: CORRUPTED_SNAPSHOT_SENTINEL downstream propagation.
  *
- * When pg-feedback-store JSONB validation fails, the sentinel snapshot
- * (snapshot_id = '__corrupted__') must not reach:
- *   1. Cache key generation (would pollute cache under a nonsense key)
- *   2. Decision engine comparisons (would produce identity hashes from garbage)
- *   3. Response serialization (would expose sentinel markers in API output)
- *
- * These tests verify the type guard and key guard points.
+ * T-E7-01: parseDecisionSnapshotJsonb now throws CorruptedJsonbError instead
+ * of returning the sentinel. The isCorruptedSnapshot guard and CORRUPTED_SNAPSHOT_ID
+ * remain in the domain layer for any code that previously stored or cached
+ * sentinel snapshots (backward compat for reads from old data). These tests
+ * verify:
+ *   1. The type guard still works (for migration-period reads)
+ *   2. The sentinel constant is still recognized
+ *   3. CorruptedJsonbError is thrown on corrupted JSONB input
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -15,6 +16,10 @@ import {
   isCorruptedSnapshot,
   type DecisionSnapshot,
 } from '../../src/domain/shared/types/decision-snapshot.js';
+import {
+  parseDecisionSnapshotJsonb,
+  CorruptedJsonbError,
+} from '../../src/infrastructure/adapter/jsonb-schemas.js';
 
 const CORRUPTED_SENTINEL: DecisionSnapshot = Object.freeze({
   snapshot_id: CORRUPTED_SNAPSHOT_ID,
@@ -43,7 +48,7 @@ describe('corrupted snapshot sentinel propagation guard', () => {
     expect(CORRUPTED_SNAPSHOT_ID).toBe('__corrupted__');
   });
 
-  it('isCorruptedSnapshot detects sentinel', () => {
+  it('isCorruptedSnapshot detects sentinel (backward compat for old stored data)', () => {
     expect(isCorruptedSnapshot(CORRUPTED_SENTINEL)).toBe(true);
   });
 
@@ -75,5 +80,33 @@ describe('corrupted snapshot sentinel propagation guard', () => {
     expect(isCorruptedSnapshot(0)).toBe(false);
     expect(isCorruptedSnapshot([])).toBe(false);
     expect(isCorruptedSnapshot({ snapshot_id: 123 })).toBe(false);
+  });
+});
+
+describe('T-E7-01: parseDecisionSnapshotJsonb throws on corrupted input', () => {
+  it('throws CorruptedJsonbError for null input instead of returning sentinel', () => {
+    expect(() => parseDecisionSnapshotJsonb(null, 'test')).toThrow(CorruptedJsonbError);
+  });
+
+  it('throws CorruptedJsonbError for missing required fields', () => {
+    expect(() => parseDecisionSnapshotJsonb({ snapshot_id: 'ok' }, 'test')).toThrow(CorruptedJsonbError);
+  });
+
+  it('returns valid snapshot for well-formed input', () => {
+    const result = parseDecisionSnapshotJsonb(VALID_SNAPSHOT, 'test');
+    expect(result.snapshot_id).toBe(VALID_SNAPSHOT.snapshot_id);
+  });
+
+  it('CorruptedJsonbError has correct metadata', () => {
+    try {
+      parseDecisionSnapshotJsonb({}, 'TestCaller');
+      expect.fail('Expected CorruptedJsonbError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(CorruptedJsonbError);
+      const typed = err as CorruptedJsonbError;
+      expect(typed.column).toBe('decision_snapshot');
+      expect(typed.caller).toBe('TestCaller');
+      expect(typed.issues.length).toBeGreaterThan(0);
+    }
   });
 });

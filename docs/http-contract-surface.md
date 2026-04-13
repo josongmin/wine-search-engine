@@ -17,8 +17,8 @@ not OpenAPI.
 Use:
 
 ```bash
-npm run contracts:http -- data/http-contract-manifest.json
-npm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json
+pnpm run contracts:http -- data/http-contract-manifest.json
+pnpm run contracts:http:openapi-bridge -- data/http-openapi-bridge.json
 ```
 
 The script writes a stable JSON manifest of declared methods, URLs,
@@ -27,7 +27,7 @@ operation IDs, and response status codes.
 Recommended committed artifact path:
 
 ```bash
-npm run contracts:http -- data/http-contract-manifest.json
+pnpm run contracts:http -- data/http-contract-manifest.json
 ```
 
 That file is lightweight enough to diff in PRs when the public route surface changes.

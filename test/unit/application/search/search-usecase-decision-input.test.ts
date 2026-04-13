@@ -130,7 +130,7 @@ describe('buildSearchDecisionInput', () => {
       anchorEntityPresent: false,
     });
     expect(input.evidenceSummary.anchorEvidencePresent).toBe(false);
-    expect(input.admissionContext?.requires_anchor_evidence).toBe(true);
+    expect(input.provenanceContract.policy.requireAnchorEvidence).toBe(true);
   });
 
   it('carries effectiveRetrievalMode when compiled execution mode is provided', () => {
@@ -140,12 +140,20 @@ describe('buildSearchDecisionInput', () => {
       [],
       'hybrid',
       undefined,
-      undefined,
-      'recommendation',
+      {
+        effectiveRetrievalMode: 'recommendation',
+        retrievalKind: 'generic_hybrid',
+      },
     );
 
     expect(input.effectiveRoute).toBe('hybrid');
     expect(input.effectiveRetrievalMode).toBe('recommendation');
+    expect(input.retrievalKind).toBe('generic_hybrid');
+    expect(input.provenanceContract.policy).toEqual({
+      requireIdentitySeal: false,
+      requireConstraintEvidence: false,
+      requireAnchorEvidence: false,
+    });
   });
 
   it('requires explicit mixed-anchor resolution when mixed route context is present', () => {
@@ -304,6 +312,44 @@ describe('buildSearchDecisionInput', () => {
     expect(input.evidenceSummary.constraintEvidence?.unmetRequiredAttributes).toEqual([]);
   });
 
+  it('does not gate rich constraint evidence on hardConstraintPass scalar', () => {
+    const plan: QueryPlanV1 = {
+      ...minimalPlan('hybrid'),
+      constraints: {
+        hard: [{
+          attribute: 'region',
+          operator: '=',
+          value: 'Bordeaux',
+          source_phrase: 'Bordeaux',
+          confidence: 1,
+        }],
+        soft: [],
+        inferred: [],
+      },
+    };
+    const resolverResult = makeResolverResult();
+    const rankedResults: RankedResult[] = [makeRankedResult({
+      matchedConstraints: ['region'],
+      unmetConstraints: [],
+      componentScores: {
+        entityIntegrity: 1,
+        semantic: 0.7,
+        hardConstraintPass: false,
+        softConstraint: 0,
+        attributeAlignment: 0,
+        preferenceAlignment: 0,
+        popularity: 0,
+        availability: 1,
+        uncertaintyPenalty: 0,
+      },
+    })];
+
+    const input = buildSearchDecisionInput(plan, resolverResult, rankedResults, 'hybrid');
+
+    expect(input.evidenceSummary.constraintEvidencePresent).toBe(true);
+    expect(input.provenanceContract.observed.constraintEvidenceSatisfied).toBe(true);
+  });
+
   it('passes execution honesty signals into the decision input', () => {
     const plan = minimalPlan('hybrid');
     const resolverResult = makeResolverResult({
@@ -320,6 +366,7 @@ describe('buildSearchDecisionInput', () => {
       resolverResult,
       undefined,
       'hybrid',
+      undefined,
       undefined,
       {
         executionMode: 'degraded',
@@ -381,6 +428,36 @@ describe('buildSearchDecisionInput', () => {
     expect(input.evidenceSummary.identityEvidence?.rankedTopResultMatchesTopEntity).toBe(false);
     expect(input.evidenceSummary.identityEvidence?.rankedCorroborationTypes).toBeUndefined();
     expect(input.evidenceSummary.identityEvidence?.exactMatchCandidatePresent).toBeUndefined();
+  });
+
+  it('derives admission context from compiled provenance policy', () => {
+    const plan = minimalPlan('entity');
+    const resolverResult = makeResolverResult();
+
+    const input = buildSearchDecisionInput(
+      plan,
+      resolverResult,
+      undefined,
+      'entity',
+      undefined,
+      {
+        effectiveRetrievalMode: 'entity_lookup',
+        retrievalKind: 'entity_lookup',
+        provenancePolicy: {
+          requireIdentitySeal: true,
+          requireConstraintEvidence: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    );
+
+    expect(input.effectiveRetrievalMode).toBe('entity_lookup');
+    expect(input.retrievalKind).toBe('entity_lookup');
+    expect(input.provenanceContract.policy).toEqual({
+      requireIdentitySeal: true,
+      requireConstraintEvidence: false,
+      requireAnchorEvidence: false,
+    });
   });
 
   it('keeps exact-match identity on aligned ranked routes even when ranked evidence items are empty', () => {

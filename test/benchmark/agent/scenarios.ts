@@ -3,12 +3,12 @@
  *
  * ADR-005 Workstream F: AGENT_SCENARIOS is NOT the release-gate source for
  * agent correctness. Release gates use fixture-native runners:
- *   - npm run bench:agent:fixtures:tool-use
- *   - npm run bench:agent:fixtures:answer-quality
+ *   - pnpm run bench:agent:fixtures:tool-use
+ *   - pnpm run bench:agent:fixtures:answer-quality
  *
  * Canonical exploratory entrypoints are explicitly named:
- *   - npm run bench:agent:exploratory
- *   - npm run benchmark:exploratory:quick|standard|nightly|retrieval
+ *   - pnpm run bench:agent:exploratory
+ *   - pnpm run benchmark:exploratory:quick|standard|nightly|retrieval
  *
  * AGENT_SCENARIOS is retained for broad regression exploration and nightly
  * runs only. Do NOT add new release-gate logic that depends solely on this

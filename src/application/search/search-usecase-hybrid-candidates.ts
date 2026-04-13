@@ -1,5 +1,9 @@
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
 import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
+import type {
+  ExecutionRetrievalMode,
+  ProvenanceCoverageStage,
+} from '../../domain/query/model/engine-execution-contract.js';
 import type { HybridCandidate } from '../../domain/retrieval/model/hybrid-candidate.js';
 import type { HybridRetrievalInput } from '../../domain/retrieval/model/retrieval-input.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
@@ -17,6 +21,10 @@ import type { SpecializedRouteObservability } from './specialized-route-observab
 import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 import { CircuitBreakerOpenError } from '../../domain/shared/error/circuit-breaker-open-error.js';
+import {
+  buildHybridCandidateCoverageStage,
+  buildMissingProvenanceObligations,
+} from './search-usecase-provenance-closure.js';
 
 /** Cap for producer/region/compare specialized hybrid retrieval. */
 export const SPECIALIZED_HYBRID_RETRIEVAL_LIMIT = 20;
@@ -81,6 +89,11 @@ export interface HybridCandidateRetrievalPorts {
 
 export interface HybridCandidateRetrievalResult {
   readonly candidates: readonly HybridCandidate[];
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalKind: 'generic_hybrid' | 'specialized_hybrid';
+  readonly sparseExecuted: boolean;
+  readonly usedCompiledExecution: boolean;
+  readonly retrievalProvenanceCoverage?: ProvenanceCoverageStage | undefined;
   readonly routeDegradation?: RankingDegradationSignal | undefined;
   readonly specializedRouteObservability?: SpecializedRouteObservability | undefined;
   /** E4: RRF fusion trace from CandidatePoolService.getLastFusionTrace(). Present only
@@ -91,6 +104,35 @@ export interface HybridCandidateRetrievalResult {
   readonly hardFilterDropLog?: readonly CandidateDropRecord[] | undefined;
 }
 
+function mergeRetrievalDegradation(
+  reasons: ReadonlySet<SpecializedFallbackReason>,
+  provenanceShortfall: readonly string[],
+): RankingDegradationSignal | undefined {
+  const degradationReasons = [
+    ...reasons,
+    ...provenanceShortfall.map((obligation) => `retrieval_provenance_shortfall:${obligation}`),
+  ];
+  if (degradationReasons.length === 0) {
+    return undefined;
+  }
+  return {
+    executionMode: 'degraded',
+    degradationReasons,
+  };
+}
+
+function buildRetrievalCoverage(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+  candidates: readonly HybridCandidate[],
+): ProvenanceCoverageStage {
+  return buildHybridCandidateCoverageStage(
+    plan,
+    candidates,
+    compiled.execution.provenancePolicy,
+  );
+}
+
 export function buildHybridRetrievalInputForPlan(
   plan: QueryPlanV1,
   route: HybridRetrievalInput['route'] = 'hybrid',
@@ -98,7 +140,7 @@ export function buildHybridRetrievalInputForPlan(
   compiled?: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
 ): HybridRetrievalInput {
-  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints);
+  const retrievalPlan = compiled?.query.retrievalPlan ?? buildRetrievalPlan(plan.constraints); // TODO(T-E2-01): compiled optional for test seam; production callers always pass compiled
   const structuredQueries = buildStructuredQueryExpansions(plan, retrievalPlan);
   // TA4: Propagate fuzzy entity hypothesis terms from the planner into the retrieval
   // input. When the planner's fuzzy matcher fires on an anchor-miss query, these terms
@@ -191,11 +233,11 @@ export async function retrieveHybridCandidatesForPlan(
   plan: QueryPlanV1,
   ports: HybridCandidateRetrievalPorts,
   resolveEntity: (p: QueryPlanV1) => Promise<EntityResolveResult>,
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
   requestContext?: RequestExecutionContext,
 ): Promise<HybridCandidateRetrievalResult> {
-  // E2-U4: compiled-first mode for specialised path dispatch
-  const effectiveMode = compiled?.execution.effectiveRetrievalMode ?? plan.retrievalMode;
+  const effectiveMode = compiled.execution.effectiveRetrievalMode;
+  const usedCompiledExecution = true;
 
   const limit = SPECIALIZED_HYBRID_RETRIEVAL_LIMIT;
   let fallbackAnchorEntityId: CanonicalEntityId | undefined;
@@ -232,15 +274,38 @@ export async function retrieveHybridCandidatesForPlan(
             limit,
           );
           if (candidates.length > 0) {
+            const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
+            const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
+              ? buildMissingProvenanceObligations(
+                  compiled.execution.provenancePolicy,
+                  retrievalProvenanceCoverage,
+                )
+              : [];
             pipelineDebug(
               {
                 step: 'retrieval.producer_browse',
                 candidate_count: candidates.length,
+                ...(retrievalProvenanceCoverage !== undefined
+                  ? {
+                      retrieval_provenance_satisfied: provenanceShortfall.length === 0,
+                      retrieval_provenance_missing: provenanceShortfall,
+                    }
+                  : {}),
               },
               'pipeline specialized retrieval',
             );
             return {
               candidates,
+              effectiveRetrievalMode: effectiveMode,
+              retrievalKind: 'specialized_hybrid',
+              sparseExecuted: false,
+              usedCompiledExecution,
+              ...(retrievalProvenanceCoverage !== undefined
+                ? { retrievalProvenanceCoverage }
+                : {}),
+              ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
+                ? { routeDegradation: mergeRetrievalDegradation(degradationReasons, provenanceShortfall) }
+                : {}),
               specializedRouteObservability: {
                 specializedRouteRequested: 'producer_browse',
                 specializedRouteExecuted: 'producer_browse',
@@ -280,15 +345,38 @@ export async function retrieveHybridCandidatesForPlan(
             limit,
           );
           if (candidates.length > 0) {
+            const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
+            const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
+              ? buildMissingProvenanceObligations(
+                  compiled.execution.provenancePolicy,
+                  retrievalProvenanceCoverage,
+                )
+              : [];
             pipelineDebug(
               {
                 step: 'retrieval.region_browse',
                 candidate_count: candidates.length,
+                ...(retrievalProvenanceCoverage !== undefined
+                  ? {
+                      retrieval_provenance_satisfied: provenanceShortfall.length === 0,
+                      retrieval_provenance_missing: provenanceShortfall,
+                    }
+                  : {}),
               },
               'pipeline specialized retrieval',
             );
             return {
               candidates,
+              effectiveRetrievalMode: effectiveMode,
+              retrievalKind: 'specialized_hybrid',
+              sparseExecuted: false,
+              usedCompiledExecution,
+              ...(retrievalProvenanceCoverage !== undefined
+                ? { retrievalProvenanceCoverage }
+                : {}),
+              ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
+                ? { routeDegradation: mergeRetrievalDegradation(degradationReasons, provenanceShortfall) }
+                : {}),
               specializedRouteObservability: {
                 specializedRouteRequested: 'region_browse',
                 specializedRouteExecuted: 'region_browse',
@@ -329,15 +417,38 @@ export async function retrieveHybridCandidatesForPlan(
               limit,
             );
             if (candidates.length > 0) {
+              const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
+              const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
+                ? buildMissingProvenanceObligations(
+                    compiled.execution.provenancePolicy,
+                    retrievalProvenanceCoverage,
+                  )
+                : [];
               pipelineDebug(
                 {
                   step: 'retrieval.compare_candidates',
                   candidate_count: candidates.length,
+                  ...(retrievalProvenanceCoverage !== undefined
+                    ? {
+                        retrieval_provenance_satisfied: provenanceShortfall.length === 0,
+                        retrieval_provenance_missing: provenanceShortfall,
+                      }
+                    : {}),
                 },
                 'pipeline specialized retrieval',
               );
               return {
                 candidates,
+                effectiveRetrievalMode: effectiveMode,
+                retrievalKind: 'specialized_hybrid',
+                sparseExecuted: false,
+                usedCompiledExecution,
+                ...(retrievalProvenanceCoverage !== undefined
+                  ? { retrievalProvenanceCoverage }
+                  : {}),
+                ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
+                  ? { routeDegradation: mergeRetrievalDegradation(degradationReasons, provenanceShortfall) }
+                  : {}),
                 specializedRouteObservability: {
                   specializedRouteRequested: 'compare_candidates',
                   specializedRouteExecuted: 'compare_candidates',
@@ -387,18 +498,30 @@ export async function retrieveHybridCandidatesForPlan(
   // (they bypass the RRF fusion step entirely), so these are intentionally absent there.
   const retrievalFusionTrace = ports.candidatePool.getLastFusionTrace?.();
   const hardFilterDropLog = ports.candidatePool.getLastDropLog?.();
+  const retrievalProvenanceCoverage = buildRetrievalCoverage(plan, compiled, candidates);
+  const provenanceShortfall = compiled !== undefined && retrievalProvenanceCoverage !== undefined
+    ? buildMissingProvenanceObligations(
+        compiled.execution.provenancePolicy,
+        retrievalProvenanceCoverage,
+      )
+    : [];
   return {
     candidates,
+    effectiveRetrievalMode: effectiveMode,
+    retrievalKind: 'generic_hybrid',
+    sparseExecuted: true,
+    usedCompiledExecution,
+    ...(retrievalProvenanceCoverage !== undefined ? { retrievalProvenanceCoverage } : {}),
     ...(retrievalFusionTrace !== undefined ? { retrievalFusionTrace } : {}),
     ...(hardFilterDropLog !== undefined && hardFilterDropLog.length > 0
       ? { hardFilterDropLog }
       : {}),
-    ...(degradationReasons.size > 0
+    ...(mergeRetrievalDegradation(degradationReasons, provenanceShortfall) !== undefined
       ? {
-          routeDegradation: {
-            executionMode: 'degraded',
-            degradationReasons: [...degradationReasons],
-          },
+          routeDegradation: mergeRetrievalDegradation(
+            degradationReasons,
+            provenanceShortfall,
+          ),
         }
       : {}),
     ...(requestedRoute !== null

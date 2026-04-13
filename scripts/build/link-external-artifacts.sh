@@ -7,17 +7,8 @@ build_root="${WINE_BUILD_DIR:-${HOME}/.wine-search-engine/build}"
 
 mkdir -p "${build_root}/root" "${build_root}/web"
 
-link_support_path() {
-  local target_path="$1"
-  local source_path="$2"
-
-  mkdir -p "$(dirname "${target_path}")"
-  if [ -L "${target_path}" ]; then
-    return 0
-  fi
-  rm -rf "${target_path}"
-  ln -s "${source_path}" "${target_path}"
-}
+# Root node_modules: use scripts/deps/link-external-node-modules.sh (moves + symlink).
+# web/node_modules must stay a real directory under the repo (Next/Turbopack).
 
 link_artifact() {
   local repo_rel="$1"
@@ -56,8 +47,6 @@ link_artifact "test-results" "root/test-results" "dir"
 link_artifact "playwright-report" "root/playwright-report" "dir"
 link_artifact "web/.next" "web/.next" "dir"
 link_artifact "web/next-env.d.ts" "web/next-env.d.ts"
-link_support_path "${build_root}/root/node_modules" "${repo_root}/node_modules"
-link_support_path "${build_root}/web/node_modules" "${repo_root}/web/node_modules"
 
 echo
 echo "Repo build artifacts now link to: ${build_root}"

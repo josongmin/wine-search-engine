@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import type { EntityRepository } from '../../domain/entity/port/entity-repository.port.js';
 import type { Entity, EntityMetadata } from '../../domain/entity/model/entity.js';
 import type { EntityType } from '../../domain/entity/model/entity-type.js';
-import { isEntityType } from '../../domain/entity/model/entity-type.js';
+import { isEntityType, ENTITY_TYPES } from '../../domain/entity/model/entity-type.js';
 import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
 import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 import {
@@ -87,11 +87,16 @@ function rowToEntity(row: EntityRow): Entity {
   // characters / array indices.
   const metadata = isPlainObject(row.metadata) ? row.metadata : {};
   // Rule 11: JSONB columns are validated via Zod safeParse — on failure the
-  // parser logs a warning and returns a safe empty default so downstream code
-  // never iterates a corrupted payload.
+  // parser throws CorruptedJsonbError so data corruption is never silent.
   const relations = parseRelationsJsonb(row.relations, ROW_TO_ENTITY_CALLER);
   const attributes = parseEntityAttributesJsonb(row.attributes, ROW_TO_ENTITY_CALLER);
-  const entityType = isEntityType(row.entity_type) ? row.entity_type : 'wine';
+  if (!isEntityType(row.entity_type)) {
+    throw new Error(
+      `PgEntityRepository: invalid entity_type "${row.entity_type}" for entity_id="${row.entity_id}". ` +
+      `Expected one of: ${ENTITY_TYPES.join(', ')}`,
+    );
+  }
+  const entityType: EntityType = row.entity_type;
   return {
     id: createCanonicalEntityId(row.entity_id),
     type: entityType,

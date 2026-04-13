@@ -11,7 +11,8 @@ on:
   pull_request:
     paths:
       - 'package.json'
-      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - 'config/vitest/e2e.vespa.config.ts'
       - 'config/vitest/e2e.vespa.smoke.config.ts'
       - 'config/vitest/ingest.contract.config.ts'
@@ -47,21 +48,21 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
       - name: Search quality gate
-        run: npm run test:quality
+        run: pnpm run test:quality
       - name: Offline eval smoke baseline
-        run: npm run eval:offline:smoke:assert-baseline
+        run: pnpm run eval:offline:smoke:assert-baseline
       - name: Search-heavy summary
         if: always()
         run: |
           {
             echo "## Search-Heavy Verification"
             echo ""
-            echo "- Typecheck: \`npm run typecheck\`"
-            echo "- Quality gate: \`npm run test:quality\`"
-            echo "- Offline eval smoke: \`npm run eval:offline:smoke:assert-baseline\`"
-            echo "- Vespa smoke lane: \`npm run test:e2e:vespa:smoke\`"
+            echo "- Typecheck: \`pnpm run typecheck\`"
+            echo "- Quality gate: \`pnpm run test:quality\`"
+            echo "- Offline eval smoke: \`pnpm run eval:offline:smoke:assert-baseline\`"
+            echo "- Vespa smoke lane: \`pnpm run test:e2e:vespa:smoke\`"
             echo "- Optional Vespa-heavy lane: manual dispatch with \`run_vespa_verification=true\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -73,14 +74,14 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Vespa smoke lane
-        run: npm run test:e2e:vespa:smoke
+        run: pnpm run test:e2e:vespa:smoke
       - name: Vespa smoke summary
         if: always()
         run: |
           {
             echo "## Vespa Smoke"
             echo ""
-            echo "- Lane: \`npm run test:e2e:vespa:smoke\`"
+            echo "- Lane: \`pnpm run test:e2e:vespa:smoke\`"
             echo "- Covers: direct Vespa sparse search, hybrid HTTP path, learned matcher HTTP path"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -92,16 +93,16 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Vespa-heavy verification
-        run: npm run test:verification:vespa
+        run: pnpm run test:verification:vespa
       - name: Ingest indexing smoke
-        run: npm run test:ingest:indexing
+        run: pnpm run test:ingest:indexing
       - name: Vespa summary
         if: always()
         run: |
           {
             echo "## Vespa-Heavy Verification"
             echo ""
-            echo "- Vespa verification: \`npm run test:verification:vespa\`"
-            echo "- Ingest indexing smoke: \`npm run test:ingest:indexing\`"
+            echo "- Vespa verification: \`pnpm run test:verification:vespa\`"
+            echo "- Ingest indexing smoke: \`pnpm run test:ingest:indexing\`"
             echo "- Includes: Vespa e2e, network-services lane, Vespa quality lane"
           } >> "$GITHUB_STEP_SUMMARY"

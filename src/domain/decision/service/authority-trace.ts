@@ -12,12 +12,14 @@ export function buildAuthorityTraceRef(input: {
   nextAction: string;
   failureReason?: FailureReason;
   retrievalMode?: string;
+  retrievalKind?: string;
   route?: string;
 }): string {
   const digest = deterministicHash({
     queryClass: input.queryPlan.queryClass,
     route: input.route ?? input.queryPlan.route,
     retrievalMode: input.retrievalMode ?? input.queryPlan.retrievalMode,
+    retrievalKind: input.retrievalKind ?? '',
     threshold_profile_id: input.snapshot.threshold_profile_id,
     planner_version: input.snapshot.planner_version,
     policy_rule_version: input.snapshot.policy_rule_version,
@@ -35,12 +37,14 @@ export function buildAdmissionAuthorityTraceRef(input: {
   snapshot: DecisionSnapshot;
   reason: FailureReason;
   retrievalMode?: string;
+  retrievalKind?: string;
   route?: string;
 }): string {
   const digest = deterministicHash({
     queryClass: input.queryPlan.queryClass,
     route: input.route ?? input.queryPlan.route,
     retrievalMode: input.retrievalMode ?? input.queryPlan.retrievalMode,
+    retrievalKind: input.retrievalKind ?? '',
     threshold_profile_id: input.snapshot.threshold_profile_id,
     planner_version: input.snapshot.planner_version,
     policy_rule_version: input.snapshot.policy_rule_version,

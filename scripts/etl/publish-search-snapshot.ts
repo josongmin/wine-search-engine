@@ -20,12 +20,19 @@ import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
 import { hashStableJson } from '../../src/shared/utils/stable-json.js';
 import { parseManifest, type EntitySnapshotRecord, type SearchSnapshotManifest } from './search-snapshot-schema.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
+import {
+  materializePreparedVespaFeedArtifact,
+  parsePreparedVespaFeedDocuments,
+} from './index-to-vespa.js';
 
 const execFile = promisify(execFileCb);
 const VESPA_NAMESPACE = 'wine';
 const VESPA_DOC_TYPE = 'wine_entity';
 const SNAPSHOT_PUBLISH_LOCK_A = 93721;
 const SNAPSHOT_PUBLISH_LOCK_B = 6006;
+export const FIXTURE_REPO_REQUIRED_ERROR =
+  'Fixture repo not found: set FIXTURE_REPO_PATH or --fixture-repo, or clone wine-engine-fixture as a sibling.';
 
 interface Args {
   readonly input: string;
@@ -38,12 +45,14 @@ interface Args {
   readonly fixtureRepoRoot?: string | undefined;
 }
 
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.trackc;
+
 function parseArgs(argv: readonly string[]): Args {
-  let input = resolveDataPath('data/silver-docquery.ndjson');
-  let outputDir = resolveDataPath('data/search-snapshots');
-  let nlMappings = resolveDataPath('data/nl-mappings.json');
+  let input = DEFAULT_INPUT;
+  let outputDir = ETL_ARTIFACT_FILES.searchSnapshotsDir;
+  let nlMappings = ETL_ARTIFACT_FILES.nlMappings;
   let runtimeStatePath = resolveDataPath('data/runtime-search-snapshot.json');
-  let runtimeNlMappingsPath = resolveDataPath('data/nl-mappings.json');
+  let runtimeNlMappingsPath = ETL_ARTIFACT_FILES.nlMappings;
   let allowMissingLtr = false;
   let skipIndex = false;
   let fixtureRepoRoot: string | undefined;
@@ -85,19 +94,27 @@ function parseArgs(argv: readonly string[]): Args {
   };
 }
 
+type IndexerMode = 'input' | 'prepared-feed';
+
 async function runIndexer(
   documentsPath: string,
   snapshotId: string,
+  mode: IndexerMode,
   fixtureRepoRoot?: string | undefined,
 ): Promise<void> {
   const scriptPath = path.resolve(process.cwd(), 'scripts/etl/index-to-vespa.ts');
-  const tail =
-    fixtureRepoRoot != null && fixtureRepoRoot.length > 0
-      ? ['--fixture-repo', fixtureRepoRoot]
-      : [];
+  const tail: string[] = [];
+  if (mode === 'prepared-feed') {
+    tail.push('--prepared-feed', documentsPath);
+  } else {
+    tail.push('--input', documentsPath, '--snapshot-id', snapshotId);
+  }
+  if (fixtureRepoRoot != null && fixtureRepoRoot.length > 0) {
+    tail.push('--fixture-repo', fixtureRepoRoot);
+  }
   await execFile(
     'npx',
-    ['tsx', scriptPath, '--input', documentsPath, '--snapshot-id', snapshotId, ...tail],
+    ['tsx', scriptPath, ...tail],
     {
       cwd: process.cwd(),
       env: process.env,
@@ -118,42 +135,89 @@ async function promoteStagedFile(stagingPath: string, activePath: string): Promi
   await fs.rm(stagingPath, { force: true });
 }
 
-async function rewriteRuntimeStateForActivePaths(args: {
-  readonly stagedRuntimeStatePath: string;
-  readonly activeRuntimeNlMappingsPath: string;
-}): Promise<void> {
-  const raw = await fs.readFile(args.stagedRuntimeStatePath, 'utf8');
-  const parsed: unknown = JSON.parse(raw);
-  if (typeof parsed !== 'object' || parsed === null) {
-    throw new Error(`Malformed runtime state at ${args.stagedRuntimeStatePath}`);
-  }
-  const state = parsed as Record<string, unknown>;
-  if (state.nlMappingsRuntimePath === args.activeRuntimeNlMappingsPath) {
-    return;
-  }
-  const next = {
-    ...state,
-    nlMappingsRuntimePath: args.activeRuntimeNlMappingsPath,
-  };
-  await atomicWriteFile(args.stagedRuntimeStatePath, `${JSON.stringify(next, null, 2)}\n`);
-}
-
-async function loadPublishedRuntimeState(runtimeStatePath: string) {
+export async function loadPublishedRuntimeState(runtimeStatePath: string) {
   try {
     return await loadSearchSnapshotRuntimeState(runtimeStatePath);
   } catch (error) {
-    if (
-      (error as NodeJS.ErrnoException).code === 'ENOENT'
-      || (error instanceof Error && error.message === 'Malformed runtime search snapshot state')
-    ) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return undefined;
     }
     throw error;
   }
 }
 
+export function resolvePublishFixtureRepoRoot(
+  explicit: string | undefined,
+  fallback: string | undefined = resolveDefaultFixtureRepoRoot(),
+): string {
+  if (explicit != null && explicit.length > 0) {
+    return explicit;
+  }
+  if (fallback == null || fallback.length === 0) {
+    throw new Error(FIXTURE_REPO_REQUIRED_ERROR);
+  }
+  return fallback;
+}
+
 async function loadManifest(manifestPath: string): Promise<SearchSnapshotManifest> {
   return parseManifest(await fs.readFile(manifestPath, 'utf8'), manifestPath);
+}
+
+async function rewriteSnapshotManifest(
+  manifestPath: string,
+  mutate: (manifest: SearchSnapshotManifest) => SearchSnapshotManifest,
+): Promise<SearchSnapshotManifest> {
+  const current = await loadManifest(manifestPath);
+  const next = mutate(current);
+  await atomicWriteFile(manifestPath, `${JSON.stringify(next, null, 2)}\n`);
+  return next;
+}
+
+export async function assertPreparedRollbackFeedAvailable(
+  manifest: Pick<SearchSnapshotManifest, 'snapshotId' | 'artifacts'>,
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(manifest.artifacts.vespaFeedNdjson, 'utf8');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Previous snapshot ${manifest.snapshotId} is missing an exact rollback artifact: ${message}`,
+    );
+  }
+
+  try {
+    parsePreparedVespaFeedDocuments(raw, manifest.artifacts.vespaFeedNdjson);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Previous snapshot ${manifest.snapshotId} does not have an exact rollback artifact: ${message}`,
+    );
+  }
+}
+
+async function materializeExactVespaFeedForSnapshot(args: {
+  readonly manifest: SearchSnapshotManifest;
+  readonly manifestPath: string;
+  readonly fixtureRepoRoot?: string | undefined;
+}): Promise<SearchSnapshotManifest> {
+  const exactFeed = await materializePreparedVespaFeedArtifact({
+    inputPath: args.manifest.artifacts.documentsNdjson,
+    outputPath: args.manifest.artifacts.vespaFeedNdjson,
+    snapshotId: args.manifest.snapshotId,
+    ...(args.fixtureRepoRoot !== undefined ? { fixtureRepoRoot: args.fixtureRepoRoot } : {}),
+  });
+  return rewriteSnapshotManifest(args.manifestPath, (manifest) => ({
+    ...manifest,
+    counts: {
+      ...manifest.counts,
+      vespaFeed: exactFeed.count,
+    },
+    hashes: {
+      ...manifest.hashes,
+      vespaFeed: exactFeed.hash,
+    },
+  }));
 }
 
 async function loadSnapshotEntityIds(entitiesPath: string): Promise<readonly string[]> {
@@ -221,7 +285,6 @@ async function rollbackToPreviousSnapshot(args: {
   readonly previousRuntimeState: Awaited<ReturnType<typeof loadPublishedRuntimeState>>;
   readonly previousManifest?: SearchSnapshotManifest | undefined;
   readonly runtimeStatePath: string;
-  readonly runtimeNlMappingsPath: string;
   readonly newSnapshotEntityIds: readonly string[];
   readonly fixtureRepoRoot?: string | undefined;
 }): Promise<void> {
@@ -232,23 +295,14 @@ async function rollbackToPreviousSnapshot(args: {
   }
   const previousEntityIds = await loadSnapshotEntityIds(args.previousManifest.artifacts.entitiesNdjson);
   await runIndexer(
-    args.previousManifest.artifacts.documentsNdjson,
+    args.previousManifest.artifacts.vespaFeedNdjson,
     args.previousManifest.snapshotId,
+    'prepared-feed',
     args.fixtureRepoRoot,
   );
   const previousEntityIdSet = new Set(previousEntityIds);
   const staleDocIds = args.newSnapshotEntityIds.filter((entityId) => !previousEntityIdSet.has(entityId));
   await deleteStaleVespaDocuments(staleDocIds);
-  await publishRuntimeSubstrates({
-    manifestPath: previousState.manifestPath,
-    runtimeStatePath: args.runtimeStatePath,
-    runtimeNlMappingsPath: args.runtimeNlMappingsPath,
-    allowMissingLtr: previousState.allowMissingLtr,
-  });
-  await verifySearchSnapshotReadiness({
-    runtimeStatePath: args.runtimeStatePath,
-    manifestPath: previousState.manifestPath,
-  });
 }
 
 async function computeCanonicalEntityArtifactHash(manifest: SearchSnapshotManifest): Promise<string> {
@@ -373,12 +427,15 @@ async function run(): Promise<void> {
   });
   console.log(`🧱 Built search snapshot ${built.manifest.snapshotId}`);
 
+  if (args.skipIndex) {
+    console.log('📥 Skipping Vespa indexing and runtime cutover (--skip-index)');
+    console.log(`Built search snapshot ${built.manifest.snapshotId} without cutover`);
+    return;
+  }
+
+  const fixtureRoot = resolvePublishFixtureRepoRoot(args.fixtureRepoRoot);
   const stagedRuntimeStatePath = buildStagingPath(args.runtimeStatePath, built.manifest.snapshotId);
-  const stagedRuntimeNlMappingsPath = buildStagingPath(
-    args.runtimeNlMappingsPath,
-    built.manifest.snapshotId,
-  );
-  const snapshotRootDir = path.dirname(path.dirname(built.manifest.artifacts.documentsNdjson));
+  const snapshotRootDir = path.dirname(path.dirname(built.manifest.artifacts.vespaFeedNdjson));
   const [previousRuntimeState, newSnapshotEntityIds] = await Promise.all([
     loadPublishedRuntimeState(args.runtimeStatePath),
     loadSnapshotEntityIds(built.manifest.artifacts.entitiesNdjson),
@@ -386,28 +443,39 @@ async function run(): Promise<void> {
   const previousManifest = previousRuntimeState !== undefined
     ? await loadManifest(previousRuntimeState.manifestPath)
     : undefined;
+
+  if (previousManifest !== undefined) {
+    await assertPreparedRollbackFeedAvailable(previousManifest);
+  }
+
   const publishLock = await acquireSnapshotPublishLock();
 
   let runtimeState;
   try {
+    console.log('🧾 Materializing exact Vespa replay artifact');
+    const manifestWithExactFeed = await materializeExactVespaFeedForSnapshot({
+      manifest: built.manifest,
+      manifestPath: built.manifestPath,
+      fixtureRepoRoot: fixtureRoot,
+    });
     console.log('🚦 Ensuring snapshot-bound LTR readiness');
     await ensureSnapshotBoundLtrModels({
       previousRuntimeState,
       previousManifest,
-      nextManifest: built.manifest,
+      nextManifest: manifestWithExactFeed,
       snapshotRootDir,
       allowMissingLtr: args.allowMissingLtr,
     });
-    if (args.skipIndex) {
-      console.log('📥 Skipping Vespa indexing (--skip-index)');
-    } else {
-      console.log('📥 Indexing document plane into Vespa');
-      await runIndexer(built.manifest.artifacts.documentsNdjson, built.manifest.snapshotId, args.fixtureRepoRoot);
-    }
+    console.log('📥 Indexing document plane into Vespa');
+    await runIndexer(
+      manifestWithExactFeed.artifacts.vespaFeedNdjson,
+      manifestWithExactFeed.snapshotId,
+      'prepared-feed',
+      fixtureRoot,
+    );
     if (
-      !args.skipIndex
-      && previousRuntimeState !== undefined
-      && previousRuntimeState.snapshotId !== built.manifest.snapshotId
+      previousRuntimeState !== undefined
+      && previousRuntimeState.snapshotId !== manifestWithExactFeed.snapshotId
     ) {
       console.log(`🧹 Deleting stale Vespa docs from previous snapshot ${previousRuntimeState.snapshotId}`);
       const currentRuntimeEntityIds = await loadCurrentRuntimeEntityIds(previousRuntimeState.snapshotId);
@@ -419,62 +487,46 @@ async function run(): Promise<void> {
     runtimeState = await publishRuntimeSubstrates({
       manifestPath: built.manifestPath,
       runtimeStatePath: stagedRuntimeStatePath,
-      runtimeNlMappingsPath: stagedRuntimeNlMappingsPath,
+      runtimeNlMappingsPath: args.runtimeNlMappingsPath,
       allowMissingLtr: args.allowMissingLtr,
     });
-    if (args.skipIndex) {
-      console.log('✅ Skipping readiness verify (--skip-index, Vespa checks require mTLS)');
-    } else {
-      console.log('✅ Verifying search snapshot readiness');
-      await verifySearchSnapshotReadiness({
-        runtimeStatePath: stagedRuntimeStatePath,
-        manifestPath: built.manifestPath,
-      });
-    }
-    const fixtureRoot = args.fixtureRepoRoot ?? resolveDefaultFixtureRepoRoot();
-    if (fixtureRoot != null) {
-      console.log('🎯 Verifying runtime gold catalog coverage');
-      const config = loadConfig();
-      if (!shouldUsePgPool(config.pg)) {
-        throw new Error('Postgres configuration is required for runtime gold coverage verification');
-      }
-      const coveragePool = createPgPool(config.pg);
-      try {
-        const coverage = await verifyRuntimeGoldCatalogCoverage({
-          pool: coveragePool,
-          snapshotId: built.manifest.snapshotId,
-          fixtureRepoRoot: fixtureRoot,
-        });
-        console.log(
-          `🎯 Runtime gold coverage passed: ${coverage.requiredCanonicalIds} canonical id(s) confirmed`,
-        );
-      } finally {
-        await coveragePool.end();
-      }
-    } else {
-      console.log('🎯 Runtime gold coverage skipped: no fixture repo resolved (set FIXTURE_REPO_PATH to enforce)');
-    }
-    console.log('📌 Promoting staged runtime files');
-    await promoteStagedFile(stagedRuntimeNlMappingsPath, args.runtimeNlMappingsPath);
-    await rewriteRuntimeStateForActivePaths({
-      stagedRuntimeStatePath,
-      activeRuntimeNlMappingsPath: args.runtimeNlMappingsPath,
+    console.log('✅ Verifying search snapshot readiness');
+    await verifySearchSnapshotReadiness({
+      runtimeStatePath: stagedRuntimeStatePath,
+      manifestPath: built.manifestPath,
     });
+    console.log('🎯 Verifying runtime gold catalog coverage');
+    const config = loadConfig();
+    if (!shouldUsePgPool(config.pg)) {
+      throw new Error('Postgres configuration is required for runtime gold coverage verification');
+    }
+    const coveragePool = createPgPool(config.pg);
+    try {
+      const coverage = await verifyRuntimeGoldCatalogCoverage({
+        pool: coveragePool,
+        snapshotId: manifestWithExactFeed.snapshotId,
+        fixtureRepoRoot: fixtureRoot,
+      });
+      console.log(
+        `🎯 Runtime gold coverage passed: ${coverage.requiredCanonicalIds} canonical id(s) confirmed`,
+      );
+    } finally {
+      await coveragePool.end();
+    }
+    console.log('📌 Promoting staged runtime state');
     await promoteStagedFile(stagedRuntimeStatePath, args.runtimeStatePath);
   } catch (error) {
     console.error('↩️ Publish failed; attempting rollback');
     await Promise.all([
       fs.rm(stagedRuntimeStatePath, { force: true }),
-      fs.rm(stagedRuntimeNlMappingsPath, { force: true }),
     ]);
     try {
       await rollbackToPreviousSnapshot({
         previousRuntimeState,
         previousManifest,
         runtimeStatePath: args.runtimeStatePath,
-        runtimeNlMappingsPath: args.runtimeNlMappingsPath,
         newSnapshotEntityIds,
-        fixtureRepoRoot: args.fixtureRepoRoot,
+        fixtureRepoRoot: fixtureRoot,
       });
     } catch (rollbackError) {
       const publishMessage = error instanceof Error ? error.message : String(error);

@@ -47,6 +47,7 @@ export interface SearchSnapshotManifest {
   readonly sourceInputPath: string;
   readonly artifacts: {
     readonly documentsNdjson: string;
+    readonly vespaFeedNdjson: string;
     readonly entitiesNdjson: string;
     readonly aliasesNdjson: string;
     readonly ambiguityRegistryNdjson: string;
@@ -55,6 +56,7 @@ export interface SearchSnapshotManifest {
   };
   readonly counts: {
     readonly documents: number;
+    readonly vespaFeed: number;
     readonly entities: number;
     readonly aliases: number;
     readonly ambiguityRegistry: number;
@@ -62,11 +64,21 @@ export interface SearchSnapshotManifest {
   };
   readonly hashes: {
     readonly documents: string;
+    readonly vespaFeed: string;
     readonly entities: string;
     readonly aliases: string;
     readonly ambiguityRegistry: string;
     readonly nlMappings: string;
   };
+}
+
+export interface SearchSnapshotArtifactHashes {
+  readonly documents: string;
+  readonly vespaFeed: string;
+  readonly entities: string;
+  readonly aliases: string;
+  readonly ambiguityRegistry: string;
+  readonly nlMappings: string;
 }
 
 export interface SearchSnapshotRuntimeState {
@@ -101,6 +113,7 @@ export const SearchSnapshotManifestSchema = z.object({
   sourceInputPath: z.string().min(1),
   artifacts: z.object({
     documentsNdjson: z.string().min(1),
+    vespaFeedNdjson: z.string().min(1),
     entitiesNdjson: z.string().min(1),
     aliasesNdjson: z.string().min(1),
     ambiguityRegistryNdjson: z.string().min(1),
@@ -109,6 +122,7 @@ export const SearchSnapshotManifestSchema = z.object({
   }).strict(),
   counts: z.object({
     documents: z.number().int().nonnegative(),
+    vespaFeed: z.number().int().nonnegative(),
     entities: z.number().int().nonnegative(),
     aliases: z.number().int().nonnegative(),
     ambiguityRegistry: z.number().int().nonnegative(),
@@ -116,6 +130,7 @@ export const SearchSnapshotManifestSchema = z.object({
   }).strict(),
   hashes: z.object({
     documents: z.string().min(1),
+    vespaFeed: z.string().min(1),
     entities: z.string().min(1),
     aliases: z.string().min(1),
     ambiguityRegistry: z.string().min(1),
@@ -153,6 +168,22 @@ export function parseManifest(raw: string, _filePath: string): SearchSnapshotMan
 }
 
 export { hashStableJson, hashText, stableJsonStringify };
+
+/**
+ * Snapshot identity is anchored to the logical runtime substrates and source
+ * documents, not the operational exact-replay feed artifact. The exact Vespa
+ * feed is materialized later during publish and may be rewritten without
+ * changing the canonical snapshot id.
+ */
+export function buildSearchSnapshotContentHash(hashes: SearchSnapshotArtifactHashes): string {
+  return hashStableJson({
+    documents: hashes.documents,
+    entities: hashes.entities,
+    aliases: hashes.aliases,
+    ambiguityRegistry: hashes.ambiguityRegistry,
+    nlMappings: hashes.nlMappings,
+  });
+}
 
 export function buildSearchSnapshotId(contentHash: string): string {
   return `search-snapshot:v1:${contentHash.slice(0, 16)}`;

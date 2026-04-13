@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { ConfidenceRefusalPolicy } from '../service/confidence-refusal.js';
 import { AdmissionGate } from '../service/admission-gate.js';
-import type { DecisionInput } from '../model/decision-input.js';
+import {
+  hasAnchorEvidence,
+  hasConstraintEvidence,
+  hasIdentityEvidence,
+  type DecisionInput,
+} from '../model/decision-input.js';
 import type { DecisionSnapshot } from '../../shared/types/index.js';
 import type { EntityResolveResult } from '../../resolver/model/resolve-result.js';
 import { computeConformalSetSize, DEFAULT_ALPHA } from '../../resolver/service/resolver.js';
@@ -149,10 +154,57 @@ function makeQueryPlan(): QueryPlanV1 {
   };
 }
 
-function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
+function makeProvenanceContract(
+  input: {
+    readonly queryPlan?: QueryPlanV1 | undefined;
+    readonly evidenceSummary?: DecisionInput['evidenceSummary'] | undefined;
+    readonly provenancePolicy?: DecisionInput['provenanceContract']['policy'] | undefined;
+    readonly resolverResult?: EntityResolveResult | undefined;
+  } = {},
+): DecisionInput['provenanceContract'] {
+  const queryPlan = input.queryPlan ?? makeQueryPlan();
+  const evidenceSummary = input.evidenceSummary;
+  const policy = input.provenancePolicy ?? {
+    requireIdentitySeal: queryPlan.intent === 'entity_exact',
+    requireConstraintEvidence: queryPlan.constraints.hard.length > 0,
+    requireAnchorEvidence: queryPlan.route === 'mixed' && queryPlan.anchors.length > 0,
+  };
+
   return {
-    queryPlan: makeQueryPlan(),
-    resolverResult: makeResolverResult(0.9, 0.3),
+    policy,
+    observed: {
+      identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
+      constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
+      anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
+      topEntityPresent: input.resolverResult?.topEntity !== undefined,
+      rankedTopResultPresent: false,
+      matchedConstraintAttributes: [],
+      unmetConstraintAttributes: [],
+      anchorSignalTypes: [],
+    },
+    missing: [
+      ...(policy.requireIdentitySeal && !hasIdentityEvidence(evidenceSummary)
+        ? ['identity_evidence' as const]
+        : []),
+      ...(policy.requireConstraintEvidence && !hasConstraintEvidence(evidenceSummary)
+        ? ['constraint_evidence' as const]
+        : []),
+      ...(policy.requireAnchorEvidence && !hasAnchorEvidence(evidenceSummary)
+        ? ['anchor_evidence' as const]
+        : []),
+    ],
+  };
+}
+
+function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
+  const queryPlan = overrides.queryPlan ?? makeQueryPlan();
+  const resolverResult = overrides.resolverResult ?? makeResolverResult(0.9, 0.3);
+  const evidenceSummary = overrides.evidenceSummary ?? {
+    identityEvidencePresent: true,
+  };
+  return {
+    queryPlan,
+    resolverResult,
     policy: {
       requireExact: false,
       allowApproximate: true,
@@ -170,9 +222,13 @@ function makeInput(overrides: Partial<DecisionInput> = {}): DecisionInput {
       anchorConfidence: 0.9,
       constraintConfidence: 0.8,
     },
-    evidenceSummary: {
-      identityEvidencePresent: true,
-    },
+    evidenceSummary,
+    provenanceContract: makeProvenanceContract({
+      queryPlan,
+      evidenceSummary,
+      provenancePolicy: overrides.provenanceContract?.policy,
+      resolverResult,
+    }),
     ...overrides,
   };
 }
@@ -277,7 +333,7 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
     const policy = new ConfidenceRefusalPolicy(0.45);
     const gate = new AdmissionGate(policy);
 
-    it('uses admissionContext instead of raw hard-constraint presence for constraint evidence obligations', () => {
+    it('uses provenance policy instead of raw hard-constraint presence for constraint evidence obligations', () => {
       const input = makeInput({
         queryPlan: {
           ...makeQueryPlan(),
@@ -293,11 +349,31 @@ describe('AdmissionGate + ConfidenceRefusalPolicy Integration', () => {
             inferred: [],
           },
         },
-        admissionContext: {
-          requires_identity_seal: true,
-          requires_constraint_evidence: false,
-          requires_anchor_evidence: false,
-        },
+        provenanceContract: makeProvenanceContract({
+          queryPlan: {
+            ...makeQueryPlan(),
+            constraints: {
+              hard: [{
+                attribute: 'country',
+                operator: '=',
+                value: 'france',
+                source_phrase: 'france',
+                confidence: 0.9,
+              }],
+              soft: [],
+              inferred: [],
+            },
+          },
+          evidenceSummary: {
+            identityEvidencePresent: true,
+          },
+          provenancePolicy: {
+            requireIdentitySeal: true,
+            requireConstraintEvidence: false,
+            requireAnchorEvidence: false,
+          },
+          resolverResult: makeResolverResult(0.9, 0.3),
+        }),
         evidenceSummary: {
           identityEvidencePresent: true,
         },

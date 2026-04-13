@@ -1,14 +1,17 @@
 name: Setup Node (CI)
-description: Checkout, Node 22 + npm cache, npm ci — shared by PR CI and nightly workflows.
+description: Checkout, Node 22 + pnpm store cache, pnpm install — shared by PR CI and nightly workflows.
 
 runs:
   using: composite
   steps:
     - uses: actions/checkout@v4
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 9
     - uses: actions/setup-node@v4
       with:
         node-version: '22'
-        cache: 'npm'
-    - name: npm ci
-      run: npm ci
+        cache: 'pnpm'
+    - name: pnpm install
+      run: pnpm install --frozen-lockfile
       shell: bash

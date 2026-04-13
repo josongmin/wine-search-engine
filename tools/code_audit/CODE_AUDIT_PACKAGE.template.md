@@ -24,9 +24,9 @@
 ## How to build & test (no secrets)
 
 - **Node.js:** version `________________________` (see `package.json` `engines`)
-- **Install:** `npm ci`
-- **Typecheck:** `npm run typecheck`
-- **Tests (pick one):** `npm run test` / `npm run test:unit` / …  
+- **Install:** `corepack enable && pnpm install --frozen-lockfile`
+- **Typecheck:** `pnpm run typecheck`
+- **Tests (pick one):** `pnpm run test` / `pnpm run test:unit` / …  
   **Note:** some integration or e2e tests may require local Vespa/DB; document what fails without them.
 
 ## Known limitations

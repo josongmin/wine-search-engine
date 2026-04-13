@@ -18,12 +18,18 @@
  */
 
 import type { PolicyDecisionRecord } from '../../query/model/policy-decision-record.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
+import type {
+  ExecutionProvenanceClosure,
+  ExecutionRetrievalMode,
+} from '../../query/model/engine-execution-contract.js';
 import type { ConstraintAtom } from '../../shared/types/constraint-atom.js';
 import type { ConstraintRelation } from '../../query/service/constraint-reasoner.js';
 import type { RrfFusionTrace, CandidateDropRecord } from '../../retrieval/model/candidate-envelope.js';
 import type { ScoreDriftRecord } from '../../ranking/model/score-decomposition.js';
 import type { RerankDecisionCode } from '../../ranking/port/ranker.port.js';
 import type { TypedAbstainDecision, ChannelDegradationSummary } from '../../query/model/abstain-decision.js';
+import type { SpecializedRouteName } from '../../response/model/specialized-route.js';
 
 // ─── Supporting sub-types ─────────────────────────────────────────────────────
 
@@ -53,6 +59,36 @@ export type RerankGateDecision = RerankDecisionCode;
  * Fields are populated lazily based on execution path and gating policy.
  */
 export interface AuditExtension {
+  /**
+   * Request-level execution contract facts emitted in debug/explain traces.
+   * Lets operators inspect route/mode/budget/provenance without correlating
+   * multiple pipeline log lines.
+   */
+  readonly execution_trace?: {
+    readonly effective_route: QueryRoute;
+    readonly retrieval_mode_source?: 'planner' | 'api_override' | undefined;
+    readonly effective_retrieval_mode?: ExecutionRetrievalMode | undefined;
+    readonly retrieval_kind?:
+      | 'entity_lookup'
+      | 'generic_hybrid'
+      | 'specialized_hybrid'
+      | 'mixed_similarity'
+      | undefined;
+    readonly sparse_executed?: boolean | undefined;
+    readonly specialized_route_executed?: SpecializedRouteName | null | undefined;
+    readonly used_compiled_execution?: boolean | undefined;
+    readonly compiled_budget?: {
+      readonly max_candidates: number;
+      readonly enable_precision_rerank: boolean;
+    } | undefined;
+    readonly provenance_policy?: {
+      readonly require_identity_seal: boolean;
+      readonly require_constraint_evidence: boolean;
+      readonly require_anchor_evidence: boolean;
+    } | undefined;
+    readonly provenance_closure?: ExecutionProvenanceClosure | undefined;
+  } | undefined;
+
   /**
    * E3: Planner policy trace — one record per decision stage.
    * Gated: explain=true or debug header.

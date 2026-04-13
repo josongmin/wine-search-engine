@@ -11,10 +11,11 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { parseNdjson } from './ndjson.js';
 import { enrichWineCertificationsBatch } from './enrich-certifications.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFileSync, appendDeadLetter } from './etl-utils.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 interface SilverRecord {
   readonly sourceId?: string;
@@ -37,7 +38,7 @@ interface EnrichedRecord extends SilverRecord {
   readonly certifications?: CertificationResult;
 }
 
-const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
+export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const DEAD_LETTER_FILE = resolveDataPath('.dead-letter-step2.ndjson');
 const BATCH_SIZE = 100;
 const FLUSH_INTERVAL = 5;
@@ -144,6 +145,10 @@ async function main() {
     );
   }
 
+  if (failed > 0) {
+    console.error(`  Refusing final write: ${failed} record(s) failed step 2`);
+    process.exit(1);
+  }
   const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
   atomicWriteFileSync(DATA_FILE, output);
 

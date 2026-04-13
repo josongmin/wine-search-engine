@@ -11,6 +11,30 @@ import type { RankingMetadata } from '../../../../src/domain/ranking/port/ranker
 import { AbstainPolicy } from '../../../../src/domain/query/service/abstain-policy.js';
 import { buildDeterminismFingerprint } from '../../../../src/domain/shared/utils/determinism-fingerprint.js';
 
+const GENERIC_HYBRID_EXECUTION_FACTS = {
+  effectiveRetrievalMode: 'attribute_search',
+  retrievalKind: 'generic_hybrid',
+  sparseExecuted: true,
+  specializedRouteExecuted: null,
+  usedCompiledExecution: false,
+} as const;
+
+const ENTITY_ROUTE_EXECUTION_FACTS = {
+  effectiveRetrievalMode: 'entity_lookup',
+  retrievalKind: 'entity_lookup',
+  sparseExecuted: false,
+  specializedRouteExecuted: null,
+  usedCompiledExecution: false,
+} as const;
+
+const SPECIALIZED_HYBRID_EXECUTION_FACTS = {
+  effectiveRetrievalMode: 'region_browse',
+  retrievalKind: 'specialized_hybrid',
+  sparseExecuted: false,
+  specializedRouteExecuted: 'region_browse',
+  usedCompiledExecution: false,
+} as const;
+
 function minimalPlan(): QueryPlanV1 {
   return {
     rawQuery: 'q',
@@ -212,6 +236,7 @@ async function runRankedPhaseForContract(
     ) as never,
     responseBuilder: responseBuilder as never,
     routeDegradation: options.routeDegradation,
+    ...GENERIC_HYBRID_EXECUTION_FACTS,
   });
 }
 
@@ -273,7 +298,8 @@ describe('runSearchPostRoutePhase', () => {
       },
       rankedResults,
       effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'attribute_search',
       retrievalModeSource: 'planner',
       abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
       snapshotVersions: undefined,
@@ -295,191 +321,273 @@ describe('runSearchPostRoutePhase', () => {
     expect(decisionEngine.decide).not.toHaveBeenCalled();
   });
 
-  it('entropy-abstain path honors includeCounterfactuals=true (explain mode)', async () => {
-    const built = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
-    const responseBuilder = makeResponseBuilder(built);
-    const decisionEngine = makeDecisionEngine();
-    const abstainPolicy = makeAbstainPolicy(true, 0.95);
-    const plan = minimalPlan();
-    const request: SearchRequest = { query: 'x' };
-    const rankedResults = [
-      makeRankedResult({
-        entityId: createEntityId('e-abstain-cf-top'),
-        canonicalLabel: 'TopWine',
-        finalScore: 0.6,
-        componentScores: {
-          entityIntegrity: 1,
-          semantic: 0.5,
-          hardConstraintPass: true,
-          softConstraint: 0,
-          attributeAlignment: 0,
-          preferenceAlignment: 0,
-          popularity: 0,
-          availability: 1,
-          uncertaintyPenalty: 0,
-        },
-        evidenceItems: [{
-          type: 'semantic_relevance',
-          source: 'ranker',
-          contribution: '+0.50',
-          strength: 'medium' as const,
-          provenance: 'top',
-        }],
-      }),
-      makeRankedResult({
-        entityId: createEntityId('e-abstain-cf-tail'),
-        canonicalLabel: 'TailWine',
-        finalScore: 0.4,
-        componentScores: {
-          entityIntegrity: 1,
-          semantic: 0.4,
-          hardConstraintPass: true,
-          softConstraint: 0,
-          attributeAlignment: 0,
-          preferenceAlignment: 0,
-          popularity: 0,
-          availability: 1,
-          uncertaintyPenalty: 0,
-        },
-        evidenceItems: [{
-          type: 'semantic_relevance',
-          source: 'ranker',
-          contribution: '+0.40',
-          strength: 'medium' as const,
-          provenance: 'tail',
-        }],
-      }),
-    ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
-
-    await runSearchPostRoutePhase({
-      plan,
-      request,
-      requestId: 'r-explain-abstain',
-      startTime: Date.now() - 10,
-      resolveResult: {
-        status: 'resolved',
-        topEntity: { entityId: createEntityId('e-abstain-cf-top'), confidence: 0.6 },
-        candidates: [
-          {
-            entityId: createEntityId('e-abstain-cf-top'),
-            canonicalLabel: 'TopWine',
-            calibratedScore: 0.6,
-            rank: 1,
-            evidenceRefs: [],
+  it.each([false, undefined])(
+    'entropy-abstain path includes counterfactuals when queryFamily requires them even if includeCounterfactuals=%s',
+    async (includeCounterfactuals) => {
+      const built = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
+      const responseBuilder = makeResponseBuilder(built);
+      const decisionEngine = makeDecisionEngine();
+      const abstainPolicy = makeAbstainPolicy(true, 0.95);
+      const plan = minimalPlan();
+      const request: SearchRequest = { query: 'x' };
+      const rankedResults = [
+        makeRankedResult({
+          entityId: createEntityId('e-abstain-cf-top'),
+          canonicalLabel: 'TopWine',
+          finalScore: 0.6,
+          componentScores: {
+            entityIntegrity: 1,
+            semantic: 0.5,
+            hardConstraintPass: true,
+            softConstraint: 0,
+            attributeAlignment: 0,
+            preferenceAlignment: 0,
+            popularity: 0,
+            availability: 1,
+            uncertaintyPenalty: 0,
           },
-          {
-            entityId: createEntityId('e-abstain-cf-tail'),
-            canonicalLabel: 'TailWine',
-            calibratedScore: 0.4,
-            rank: 2,
-            evidenceRefs: [],
+          evidenceItems: [{
+            type: 'semantic_relevance',
+            source: 'ranker',
+            contribution: '+0.50',
+            strength: 'medium' as const,
+            provenance: 'top',
+          }],
+        }),
+        makeRankedResult({
+          entityId: createEntityId('e-abstain-cf-tail'),
+          canonicalLabel: 'TailWine',
+          finalScore: 0.4,
+          componentScores: {
+            entityIntegrity: 1,
+            semantic: 0.4,
+            hardConstraintPass: true,
+            softConstraint: 0,
+            attributeAlignment: 0,
+            preferenceAlignment: 0,
+            popularity: 0,
+            availability: 1,
+            uncertaintyPenalty: 0,
           },
-        ],
-        decisionTrace: {
-          queryClass: 'unknown',
-          top1CalibratedScore: 0.6,
-          top2CalibratedScore: 0.4,
-          calibratedGap: 0.2,
-          decisionConfidenceC: 0.5,
-          ambiguityDetected: true,
-          ambiguityTypes: [],
-          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-          outcomeReasonCodes: [],
+          evidenceItems: [{
+            type: 'semantic_relevance',
+            source: 'ranker',
+            contribution: '+0.40',
+            strength: 'medium' as const,
+            provenance: 'tail',
+          }],
+        }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+
+      await runSearchPostRoutePhase({
+        plan,
+        compiled: {
+          query: {
+            rawQuery: plan.rawQuery,
+            normalizedQuery: plan.normalizedQuery,
+            intent: plan.intent,
+            queryClass: plan.queryClass,
+            anchors: plan.anchors,
+            constraints: plan.constraints,
+            expansions: plan.expansions,
+            uncertainty: plan.uncertainty,
+            plannerVersion: plan.plannerVersion,
+            policyRuleVersion: plan.policyRuleVersion,
+            thresholdProfileId: plan.thresholdProfileId,
+          },
+          execution: {
+            effectiveRoute: 'hybrid',
+            effectiveRetrievalMode: 'recommendation',
+            routeSource: 'planner',
+            budget: { maxCandidates: 20, enablePrecisionRerank: true },
+            provenancePolicy: {
+              requireIdentitySeal: true,
+              requireConstraintEvidence: false,
+              requireAnchorEvidence: false,
+            },
+          },
         },
-        conformalSetSize: 2,
-      } as never,
-      rankedResults,
-      effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
-      retrievalModeSource: 'planner',
-      abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
-      snapshotVersions: undefined,
-      drinkingWindow: undefined,
-      decisionEngine,
-      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
-      cacheService: undefined,
-      includeCounterfactuals: true,
-    });
+        request,
+        requestId: `r-explain-abstain-${String(includeCounterfactuals)}`,
+        startTime: Date.now() - 10,
+        resolveResult: {
+          status: 'resolved',
+          topEntity: { entityId: createEntityId('e-abstain-cf-top'), confidence: 0.6 },
+          candidates: [
+            {
+              entityId: createEntityId('e-abstain-cf-top'),
+              canonicalLabel: 'TopWine',
+              calibratedScore: 0.6,
+              rank: 1,
+              evidenceRefs: [],
+            },
+            {
+              entityId: createEntityId('e-abstain-cf-tail'),
+              canonicalLabel: 'TailWine',
+              calibratedScore: 0.4,
+              rank: 2,
+              evidenceRefs: [],
+            },
+          ],
+          decisionTrace: {
+            queryClass: 'unknown',
+            top1CalibratedScore: 0.6,
+            top2CalibratedScore: 0.4,
+            calibratedGap: 0.2,
+            decisionConfidenceC: 0.5,
+            ambiguityDetected: true,
+            ambiguityTypes: [],
+            appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+            outcomeReasonCodes: [],
+          },
+          conformalSetSize: 2,
+        } as never,
+        rankedResults,
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'recommendation',
+        retrievalKind: 'generic_hybrid',
+        sparseExecuted: true,
+        specializedRouteExecuted: null,
+        usedCompiledExecution: true,
+        plannerSuggestedMode: 'recommendation',
+        retrievalModeSource: 'planner',
+        abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+        snapshotVersions: undefined,
+        drinkingWindow: undefined,
+        decisionEngine,
+        responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+        cacheService: undefined,
+        includeCounterfactuals,
+      });
 
-    // The builder should have been invoked with a non-empty counterfactuals
-    // array — explain=true must surface them even on the abstain path.
-    expect(responseBuilder.build).toHaveBeenCalledOnce();
-    const callArg = (responseBuilder.build as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { counterfactuals?: unknown[] };
-    expect(callArg?.counterfactuals).toBeDefined();
-    expect(Array.isArray(callArg?.counterfactuals)).toBe(true);
-    expect((callArg?.counterfactuals ?? []).length).toBeGreaterThan(0);
-  });
+      expect(responseBuilder.build).toHaveBeenCalledOnce();
+      const callArg = (responseBuilder.build as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { counterfactuals?: unknown[] };
+      expect(callArg?.counterfactuals).toBeDefined();
+      expect(Array.isArray(callArg?.counterfactuals)).toBe(true);
+      expect((callArg?.counterfactuals ?? []).length).toBeGreaterThan(0);
+    },
+  );
 
-  it('entropy-abstain path omits counterfactuals by default (explain not set)', async () => {
-    const built = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
-    const responseBuilder = makeResponseBuilder(built);
-    const decisionEngine = makeDecisionEngine();
-    const abstainPolicy = makeAbstainPolicy(true, 0.95);
-    const plan = minimalPlan();
-    const request: SearchRequest = { query: 'x' };
-    const rankedResults = [
-      makeRankedResult({
-        entityId: createEntityId('e-noexplain'),
-        canonicalLabel: 'W',
-        finalScore: 0.5,
-        componentScores: {
-          entityIntegrity: 1,
-          semantic: 0.5,
-          hardConstraintPass: true,
-          softConstraint: 0,
-          attributeAlignment: 0,
-          preferenceAlignment: 0,
-          popularity: 0,
-          availability: 1,
-          uncertaintyPenalty: 0,
-        },
-        evidenceItems: [{
-          type: 'semantic_relevance',
-          source: 'ranker',
-          contribution: '+0.50',
-          strength: 'medium' as const,
-          provenance: 'p',
-        }],
-      }),
-    ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
+  it.each([false, undefined, true])(
+    'entropy-abstain path mirrors ranked-path counterfactual policy for non-required query families when includeCounterfactuals=%s',
+    async (includeCounterfactuals) => {
+      const built = { queryType: 'search' as const, meta: {} } as import('../../../../src/domain/response/model/search-response.js').SearchResponseV1;
+      const responseBuilder = makeResponseBuilder(built);
+      const decisionEngine = makeDecisionEngine();
+      const abstainPolicy = makeAbstainPolicy(true, 0.95);
+      const plan = minimalPlan();
+      const request: SearchRequest = { query: 'x' };
+      const rankedResults = [
+        makeRankedResult({
+          entityId: createEntityId('e-noexplain-top'),
+          canonicalLabel: 'TopWine',
+          finalScore: 0.6,
+          componentScores: {
+            entityIntegrity: 1,
+            semantic: 0.5,
+            hardConstraintPass: true,
+            softConstraint: 0,
+            attributeAlignment: 0,
+            preferenceAlignment: 0,
+            popularity: 0,
+            availability: 1,
+            uncertaintyPenalty: 0,
+          },
+          evidenceItems: [{
+            type: 'semantic_relevance',
+            source: 'ranker',
+            contribution: '+0.50',
+            strength: 'medium' as const,
+            provenance: 'top',
+          }],
+        }),
+        makeRankedResult({
+          entityId: createEntityId('e-noexplain-tail'),
+          canonicalLabel: 'TailWine',
+          finalScore: 0.4,
+          componentScores: {
+            entityIntegrity: 1,
+            semantic: 0.4,
+            hardConstraintPass: true,
+            softConstraint: 0,
+            attributeAlignment: 0,
+            preferenceAlignment: 0,
+            popularity: 0,
+            availability: 1,
+            uncertaintyPenalty: 0,
+          },
+          evidenceItems: [{
+            type: 'semantic_relevance',
+            source: 'ranker',
+            contribution: '+0.40',
+            strength: 'medium' as const,
+            provenance: 'tail',
+          }],
+        }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[];
 
-    await runSearchPostRoutePhase({
-      plan,
-      request,
-      requestId: 'r-no-explain',
-      startTime: Date.now() - 10,
-      resolveResult: {
-        status: 'resolved',
-        candidates: [],
-        decisionTrace: {
-          queryClass: 'unknown',
-          top1CalibratedScore: 0.5,
-          top2CalibratedScore: 0.5,
-          calibratedGap: 0,
-          decisionConfidenceC: 0.5,
-          ambiguityDetected: true,
-          ambiguityTypes: [],
-          appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
-          outcomeReasonCodes: [],
-        },
-        conformalSetSize: 2,
-      },
-      rankedResults,
-      effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
-      retrievalModeSource: 'planner',
-      abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
-      snapshotVersions: undefined,
-      drinkingWindow: undefined,
-      decisionEngine,
-      responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
-      cacheService: undefined,
-    });
+      await runSearchPostRoutePhase({
+        plan,
+        request,
+        requestId: `r-no-explain-${String(includeCounterfactuals)}`,
+        startTime: Date.now() - 10,
+        resolveResult: {
+          status: 'resolved',
+          topEntity: { entityId: createEntityId('e-noexplain-top'), confidence: 0.6 },
+          candidates: [
+            {
+              entityId: createEntityId('e-noexplain-top'),
+              canonicalLabel: 'TopWine',
+              calibratedScore: 0.6,
+              rank: 1,
+              evidenceRefs: [],
+            },
+            {
+              entityId: createEntityId('e-noexplain-tail'),
+              canonicalLabel: 'TailWine',
+              calibratedScore: 0.4,
+              rank: 2,
+              evidenceRefs: [],
+            },
+          ],
+          decisionTrace: {
+            queryClass: 'unknown',
+            top1CalibratedScore: 0.6,
+            top2CalibratedScore: 0.4,
+            calibratedGap: 0.2,
+            decisionConfidenceC: 0.5,
+            ambiguityDetected: true,
+            ambiguityTypes: [],
+            appliedThresholds: { resolveThreshold: 0, gapThreshold: 0 },
+            outcomeReasonCodes: [],
+          },
+          conformalSetSize: 2,
+        } as never,
+        rankedResults,
+        effectiveRoute: 'hybrid',
+        ...GENERIC_HYBRID_EXECUTION_FACTS,
+        plannerSuggestedMode: 'attribute_search',
+        retrievalModeSource: 'planner',
+        abstainPolicy: abstainPolicy as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
+        snapshotVersions: undefined,
+        drinkingWindow: undefined,
+        decisionEngine,
+        responseBuilder: responseBuilder as import('../../../../src/domain/response/service/response-builder.js').ResponseBuilder,
+        cacheService: undefined,
+        includeCounterfactuals,
+      });
 
-    const callArg = (responseBuilder.build as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { counterfactuals?: unknown };
-    // counterfactuals key must NOT be present when explain not requested
-    expect(callArg?.counterfactuals).toBeUndefined();
-  });
+      expect(responseBuilder.build).toHaveBeenCalledOnce();
+      const callArg = (responseBuilder.build as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { counterfactuals?: unknown[] };
+      if (includeCounterfactuals === false) {
+        expect(callArg?.counterfactuals).toBeUndefined();
+      } else {
+        expect(callArg?.counterfactuals).toBeDefined();
+        expect(Array.isArray(callArg?.counterfactuals)).toBe(true);
+        expect((callArg?.counterfactuals ?? []).length).toBeGreaterThan(0);
+      }
+    },
+  );
 
   it('passes richer identity evidence into the shared decision input for ranked routes', async () => {
     const eid = createEntityId('entity-top');
@@ -602,7 +710,8 @@ describe('runSearchPostRoutePhase', () => {
       },
       rankedResults,
       effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'attribute_search',
       retrievalModeSource: 'planner',
       abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
       snapshotVersions: undefined,
@@ -619,7 +728,7 @@ describe('runSearchPostRoutePhase', () => {
       false,
     );
     expect(responseParams?.retrievalModeSource).toBe('planner');
-    expect(responseParams?.plannerSuggestedMode).toBe('hybrid');
+    expect(responseParams?.plannerSuggestedMode).toBe('attribute_search');
   });
 
   it('forwards compiled retrieval mode into decision input and response building', async () => {
@@ -663,7 +772,12 @@ describe('runSearchPostRoutePhase', () => {
       resolveResult: makeResolveResult(),
       rankedResults,
       effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
+      effectiveRetrievalMode: 'recommendation',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      plannerSuggestedMode: 'recommendation',
       retrievalModeSource: 'planner',
       abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
       snapshotVersions: undefined,
@@ -716,6 +830,9 @@ describe('runSearchPostRoutePhase', () => {
       responseBuilder: responseBuilder as never,
       drinkingWindow: undefined,
       includeCounterfactuals: false,
+      plannerSuggestedMode: 'attribute_search',
+      retrievalModeSource: 'planner',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
     });
 
     const mainRouteResponse = await runSearchPostRoutePhase({
@@ -726,7 +843,8 @@ describe('runSearchPostRoutePhase', () => {
       resolveResult,
       rankedResults,
       effectiveRoute: 'hybrid',
-      plannerSuggestedMode: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'attribute_search',
       retrievalModeSource: 'planner',
       abstainPolicy: abstainPolicy as never,
       snapshotVersions: {
@@ -743,13 +861,19 @@ describe('runSearchPostRoutePhase', () => {
     nowSpy.mockRestore();
 
     const {
+      retrievalModeSource: _rankedRetrievalModeSource,
+      plannerSuggestedMode: _rankedPlannerSuggestedMode,
+      ...sharedRankedRouteResponse
+    } = rankedRouteResponse as Record<string, unknown>;
+
+    const {
       retrievalModeSource: _retrievalModeSource,
       plannerSuggestedMode: _plannerSuggestedMode,
       counterfactuals: _counterfactuals,
       ...sharedMainRouteResponse
     } = mainRouteResponse as Record<string, unknown>;
 
-    expect(rankedRouteResponse).toEqual(sharedMainRouteResponse);
+    expect(sharedRankedRouteResponse).toEqual(sharedMainRouteResponse);
     expect(responseBuilder.build).toHaveBeenCalledTimes(2);
     expect(decisionEngine.decide).toHaveBeenCalledTimes(2);
   });
@@ -861,6 +985,162 @@ describe('runSearchPostRoutePhase', () => {
     expect(auditExtension?.rerank_decision_trace).toEqual({
       gateDecision: 'applied',
       scoreContract: 'bounded_normalized_0_1',
+    });
+  });
+
+  it('emits execution trace in auditExtension from compiled execution facts', async () => {
+    const responseBuilder = { build: vi.fn((params: Record<string, unknown>) => params) };
+
+    await runRankedRouteDecisionPhase({
+      plan: minimalPlan(),
+      compiled: {
+        execution: {
+          effectiveRoute: 'hybrid',
+          effectiveRetrievalMode: 'recommendation',
+          routeSource: 'planner',
+          budget: {
+            maxCandidates: 24,
+            enablePrecisionRerank: true,
+          },
+          provenancePolicy: {
+            requireIdentitySeal: false,
+            requireConstraintEvidence: true,
+            requireAnchorEvidence: false,
+          },
+        },
+        query: {
+          retrievalPlan: {
+            mode: 'recommendation',
+            sensoryPriors: [],
+          },
+        },
+      } as never,
+      requestId: 'req-execution-trace',
+      startTime: Date.now() - 10,
+      resolveResult: makeResolveResult(),
+      rankedResults: [
+        makeRankedResult({ entityId: createEntityId('wine:2') }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      fullRankedResults: [
+        makeRankedResult({ entityId: createEntityId('wine:2') }),
+      ] as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult[],
+      effectiveRoute: 'hybrid',
+      retrievalModeSource: 'planner',
+      plannerSuggestedMode: 'recommendation',
+      effectiveRetrievalMode: 'recommendation',
+      retrievalKind: 'generic_hybrid',
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: true,
+      rankingMetadata: {
+        coarsePruneSummary: undefined,
+        rerankExecuted: false,
+        rerankGateReason: undefined,
+        runtimeSignal: undefined,
+        preRerankTop5: [],
+        provenanceClosure: {
+          policy: {
+            requireIdentitySeal: false,
+            requireConstraintEvidence: true,
+            requireAnchorEvidence: false,
+          },
+          preRank: {
+            candidateCount: 12,
+            identityEvidenceSatisfied: true,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            matchedConstraintAttributes: ['region'],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+          postRank: {
+            candidateCount: 1,
+            identityEvidenceSatisfied: false,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            matchedConstraintAttributes: ['region'],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+          missing: [],
+          satisfied: true,
+        },
+      },
+      decisionEngine: makeDecisionEngine() as never,
+      responseBuilder: responseBuilder as never,
+    });
+
+    const buildParams = responseBuilder.build.mock.calls[0]?.[0] as { auditExtension?: Record<string, unknown> };
+    const auditExtension = buildParams.auditExtension as {
+      execution_trace?: {
+        effective_route?: string;
+        retrieval_mode_source?: string;
+        effective_retrieval_mode?: string;
+        retrieval_kind?: string;
+        sparse_executed?: boolean;
+        used_compiled_execution?: boolean;
+        compiled_budget?: {
+          max_candidates?: number;
+          enable_precision_rerank?: boolean;
+        };
+        provenance_policy?: {
+          require_identity_seal?: boolean;
+          require_constraint_evidence?: boolean;
+          require_anchor_evidence?: boolean;
+        };
+        provenance_closure?: {
+          satisfied?: boolean;
+          post_rank?: {
+            candidate_count?: number;
+          };
+        };
+      };
+    } | undefined;
+
+    expect(auditExtension?.execution_trace).toEqual({
+      effective_route: 'hybrid',
+      retrieval_mode_source: 'planner',
+      effective_retrieval_mode: 'recommendation',
+      retrieval_kind: 'generic_hybrid',
+      sparse_executed: true,
+      specialized_route_executed: null,
+      used_compiled_execution: true,
+      compiled_budget: {
+        max_candidates: 24,
+        enable_precision_rerank: true,
+      },
+      provenance_policy: {
+        require_identity_seal: false,
+        require_constraint_evidence: true,
+        require_anchor_evidence: false,
+      },
+      provenance_closure: {
+        policy: {
+          requireIdentitySeal: false,
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: false,
+        },
+        preRank: {
+          candidateCount: 12,
+          identityEvidenceSatisfied: true,
+          constraintEvidenceSatisfied: true,
+          anchorEvidenceSatisfied: true,
+          matchedConstraintAttributes: ['region'],
+          unmetConstraintAttributes: [],
+          anchorSignalTypes: [],
+        },
+        postRank: {
+          candidateCount: 1,
+          identityEvidenceSatisfied: false,
+          constraintEvidenceSatisfied: true,
+          anchorEvidenceSatisfied: true,
+          matchedConstraintAttributes: ['region'],
+          unmetConstraintAttributes: [],
+          anchorSignalTypes: [],
+        },
+        missing: [],
+        satisfied: true,
+      },
     });
   });
 
@@ -1036,7 +1316,8 @@ describe('runSearchPostRoutePhase', () => {
         executionMode: 'degraded',
         degradationReasons: ['dense_retrieval_disabled'],
       },
-      plannerSuggestedMode: 'hybrid',
+      ...GENERIC_HYBRID_EXECUTION_FACTS,
+      plannerSuggestedMode: 'attribute_search',
       retrievalModeSource: 'planner',
       abstainPolicy: new AbstainPolicy(0.95, 3),
       snapshotVersions: {
@@ -1157,7 +1438,12 @@ describe('runSearchPostRoutePhase', () => {
         resolveResult: makeResolveResult(),
         rankedResults,
         effectiveRoute: 'hybrid',
-        plannerSuggestedMode: 'hybrid',
+        effectiveRetrievalMode: 'recommendation',
+        retrievalKind: 'generic_hybrid',
+        sparseExecuted: true,
+        specializedRouteExecuted: null,
+        usedCompiledExecution: true,
+        plannerSuggestedMode: 'recommendation',
         retrievalModeSource: 'planner',
         abstainPolicy: makeAbstainPolicy() as import('../../../../src/domain/query/service/abstain-policy.js').AbstainPolicy,
         snapshotVersions: undefined,

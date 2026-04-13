@@ -262,7 +262,7 @@ describe('Schema parity — target-entity-map completeness', () => {
   it('every exact_entity_top1/topk case has a non-null entry in target-entity-map.json', () => {
     const mapPath = join(FIXTURE_ROOT, 'goldens', 'target-entity-map.json');
     if (!existsSync(mapPath)) {
-      throw new Error('goldens/target-entity-map.json is missing — run: npm run generate:entity-map');
+      throw new Error('goldens/target-entity-map.json is missing — run: pnpm run generate:entity-map');
     }
 
     const mapFile = readJson(mapPath) as Record<string, unknown>;
@@ -293,7 +293,7 @@ describe('Schema parity — target-entity-map completeness', () => {
       throw new Error(
         `${failures.length} entity-recovery case(s) missing from target-entity-map.json:\n` +
         failures.map((f) => `  • ${f}`).join('\n') +
-        '\nRun: npm run generate:entity-map (in wine-engine-fixture) to regenerate.',
+        '\nRun: pnpm run generate:entity-map (in wine-engine-fixture) to regenerate.',
       );
     }
   });
@@ -320,7 +320,7 @@ describe('Schema parity — target-entity-map completeness', () => {
       throw new Error(
         `target-entity-map.json has ${orphans.length} orphaned entry(ies) with no case file:\n` +
         orphans.map((id) => `  • ${id}`).join('\n') +
-        '\nRun: npm run generate:entity-map (in wine-engine-fixture) to regenerate.',
+        '\nRun: pnpm run generate:entity-map (in wine-engine-fixture) to regenerate.',
       );
     }
   });

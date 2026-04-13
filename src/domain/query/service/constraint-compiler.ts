@@ -48,35 +48,18 @@ export class ConstraintCompiler {
     const spans = parseSpans(normalizedQuery);
     const candidatePhrases = spans.map((s) => s.text);
 
-    let mapped: Awaited<ReturnType<NLMapper['mapConstraints']>>;
-    try {
-      mapped = await this.nlMapper.mapConstraints(
-        candidatePhrases,
-        abortSignal !== undefined ? { abortSignal } : undefined,
+    const mapped = await this.nlMapper.mapConstraints(
+      candidatePhrases,
+      abortSignal !== undefined ? { abortSignal } : undefined,
+    ).catch((err: unknown) => {
+      // NLMapper failure must fail closed. A silent empty bundle would let the
+      // query continue with broad-recall fallback, hiding extraction failures.
+      bootstrapLogger.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        '[constraint-compiler] NLMapper.mapConstraints failed — rethrowing',
       );
-    } catch (err: unknown) {
-      // NLMapper failure must not crash the query. Degrade to empty mapping
-      // so entity resolver, ontology expansion, and regex fallback still fire.
-      bootstrapLogger.warn({ err: err instanceof Error ? err.message : String(err) }, '[constraint-compiler] NLMapper.mapConstraints failed — degrading to empty mapping');
-      mapped = {
-        constraints: [],
-        constraintExtraction: {
-          candidatePhraseCount: candidatePhrases.length,
-          candidateSpanCount: spans.length,
-          ruleTableHitCount: 0,
-          llmHitCount: 0,
-          llmSkippedCount: 0,
-          fallbackTriggered: true,
-          source: 'fallback' as const,
-          fallbackReason: 'nlmapper_exception',
-          llmLatencyMs: null,
-          phraseCacheHits: 0,
-          phraseCacheNegativeSkipped: 0,
-          phraseCacheMisses: 0,
-          missedPhrases: candidatePhrases,
-        },
-      };
-    }
+      throw err instanceof Error ? err : new Error(String(err));
+    });
     const matched = mapped.constraints;
     const mapperTrace = mapped.constraintExtraction;
 

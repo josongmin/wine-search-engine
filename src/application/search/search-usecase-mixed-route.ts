@@ -1,6 +1,7 @@
 import type { MixedQueryResult } from '../../domain/mixed/model/mixed-query-result.js';
 import type { MixedFallbackReason } from '../../domain/mixed/model/mixed-degradation.js';
 import type { QueryPlanV1 } from '../../domain/query/model/query-plan.js';
+import type { CompiledWineQuery } from '../../domain/query/model/compiled-wine-query.js';
 import type { RankedResult } from '../../domain/ranking/model/ranked-result.js';
 import type { EntityResolveResult } from '../../domain/resolver/model/resolve-result.js';
 import type { SearchRouteExecutionResult } from './search-usecase-route-dispatch.js';
@@ -33,11 +34,17 @@ export function buildMixedRouteResolveResult(
 export function mixedQueryResultToSearchRouteExecution(
   plan: QueryPlanV1,
   mixedResult: MixedQueryResult,
+  compiled: CompiledWineQuery,
 ): SearchRouteExecutionResult {
   const rankedResults = mixedResult.rankedResults;
   return {
     resolveResult: buildMixedRouteResolveResult(plan, rankedResults, mixedResult),
     rankedResults,
+    effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
+    retrievalKind: 'mixed_similarity',
+    sparseExecuted: false,
+    specializedRouteExecuted: null,
+    usedCompiledExecution: true,
     decisionContext: {
       mixedAnchor: {
         entityId: mixedResult.anchor.entityId,
@@ -60,6 +67,7 @@ export function mixedQueryResultToSearchRouteExecution(
 export function buildFailedMixedRouteExecution(
   plan: QueryPlanV1,
   reason: MixedFallbackReason,
+  compiled: CompiledWineQuery,
 ): SearchRouteExecutionResult {
   const resolveResult: EntityResolveResult = {
     status: 'failed',
@@ -82,7 +90,12 @@ export function buildFailedMixedRouteExecution(
   return {
     resolveResult,
     rankedResults: [],
-    routeDegradation: {
+    effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
+    retrievalKind: 'mixed_similarity',
+    sparseExecuted: false,
+    specializedRouteExecuted: null,
+    usedCompiledExecution: true,
+  routeDegradation: {
       executionMode: 'degraded',
       degradationReasons: [reason],
     },

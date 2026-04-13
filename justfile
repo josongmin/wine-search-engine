@@ -16,11 +16,11 @@ api:
 
 # Legacy alias: plain dev (uses whatever .env says)
 dev:
-    npm run dev
+    pnpm run dev
 
 # Next.js frontend — points at local API
 web:
-    cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
+    cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev
 
 # Kill any process listening on a given port
 _kill port:
@@ -33,7 +33,7 @@ full:
     @just _kill 3000
     @sleep 1
     @echo "Starting backend (4000) + frontend (3000)..."
-    @env {{_test_env}} npx tsx watch --ignore './src/interface/http/routes/register-contract-route.ts' src/main.ts & cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 npm run dev
+    @env {{_test_env}} npx tsx watch --ignore './src/interface/http/routes/register-contract-route.ts' src/main.ts & cd web && NEXT_PUBLIC_API_URL=http://localhost:4000 pnpm run dev
 
 # ── Docker infra ─────────────────────────────────────────────────────────────
 
@@ -58,47 +58,47 @@ smoke query="보르도 레드 와인":
       -d "{\"query\":\"{{query}}\"}" | python3 -m json.tool
 
 build:
-    npm run build
+    pnpm run build
 
 start:
-    npm run start
+    pnpm run start
 
 typecheck:
-    npm run typecheck
+    pnpm run typecheck
 
 lint:
-    npm run lint
+    pnpm run lint
 
 lint-fix:
-    npm run lint:fix
+    pnpm run lint:fix
 
 test:
-    npm run test
+    pnpm run test
 
 test-watch:
-    npm run test:watch
+    pnpm run test:watch
 
 test-integration:
-    npm run test:integration
+    pnpm run test:integration
 
 test-e2e-contract:
-    npm run test:e2e:contract
+    pnpm run test:e2e:contract
 
 test-e2e-runtime:
-    npm run test:e2e:runtime
+    pnpm run test:e2e:runtime
 
 verify-http-contracts:
-    npm run verify:http-contracts
+    pnpm run verify:http-contracts
 
 # Husky pre-push gate (typecheck + unit + HTTP contract parity)
 prepush:
-    npm run git:prepush
+    pnpm run git:prepush
 
 prepush-smart:
-    npm run git:prepush:smart
+    pnpm run git:prepush:smart
 
 prepush-quick:
-    npm run git:prepush:quick
+    pnpm run git:prepush:quick
 
 migrate:
-    npm run migrate
+    pnpm run migrate

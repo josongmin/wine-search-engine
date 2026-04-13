@@ -525,13 +525,13 @@ describe('Wave 3 Integration', () => {
 
 ### TypeScript ✅
 ```bash
-npm run typecheck
+pnpm run typecheck
 # No errors in Wave 3 files
 ```
 
 ### Linting ✅
 ```bash
-npm run lint
+pnpm run lint
 # No new violations in src/domain/, src/application/, src/config/
 # (other files have pre-existing issues outside Wave 3 scope)
 ```

@@ -6,6 +6,7 @@ export const MIXED_FALLBACK_REASONS = [
   'mixed_similar_retrieval_unavailable',
   'mixed_similar_retrieval_fallback',
   'mixed_ranker_unavailable',
+  'mixed_constraint_overlay_failed',
 ] as const;
 
 export type MixedFallbackReason = typeof MIXED_FALLBACK_REASONS[number];

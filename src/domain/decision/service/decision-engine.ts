@@ -68,28 +68,6 @@ function isExploratoryRetrievalMode(mode: string | undefined): boolean {
   return mode !== undefined && EXPLORATORY_RETRIEVAL_MODES.has(mode);
 }
 
-function deriveAdmissionContext(
-  input: DecisionInput,
-): NonNullable<DecisionInput['admissionContext']> {
-  if (input.admissionContext !== undefined) {
-    return input.admissionContext;
-  }
-  if (input.queryPlan.admission_context !== undefined) {
-    return input.queryPlan.admission_context;
-  }
-  const effectiveRoute = input.effectiveRoute ?? input.queryPlan.route;
-  return {
-    requires_identity_seal:
-      input.queryPlan.intent === 'entity_exact' ||
-      input.queryPlan.intent === 'entity_fuzzy' ||
-      input.queryPlan.intent === 'comparison_search' ||
-      input.queryPlan.intent === 'mixed_query' ||
-      effectiveRoute === 'mixed',
-    requires_constraint_evidence: input.queryPlan.constraints.hard.length > 0,
-    requires_anchor_evidence: effectiveRoute === 'mixed' && input.queryPlan.anchors.length > 0,
-  };
-}
-
 /**
  * THE FINAL AUTHORITY — the Decision Engine, per RFC-007.
  *
@@ -161,6 +139,12 @@ export class DecisionEngine {
         inputs: {
           queryClass: input.queryPlan.queryClass,
           effectiveRoute: input.effectiveRoute ?? input.queryPlan.route,
+          ...(input.effectiveRetrievalMode !== undefined
+            ? { effectiveRetrievalMode: input.effectiveRetrievalMode }
+            : {}),
+          ...(input.retrievalKind !== undefined
+            ? { retrievalKind: input.retrievalKind }
+            : {}),
           policy: {
             requireExact: input.policy.requireExact,
             allowApproximate: input.policy.allowApproximate,
@@ -259,15 +243,7 @@ export class DecisionEngine {
     // The gate is the final closure before a resolved status is emitted.
     // Non-resolved decisions bypass the gate so that clarification/failure
     // outcomes are never blocked.
-    const effectiveRoute = input.effectiveRoute ?? input.queryPlan.route;
-    const effectiveRetrievalMode = input.effectiveRetrievalMode ?? input.queryPlan.retrievalMode;
-    // Keep the legacy entity_lookup path backward compatible, but do not let
-    // the broader `entity` route label suppress admission for exploratory or
-    // degraded executions that still require final closure.
-    const skipAdmissionGate =
-      effectiveRoute === 'entity' &&
-      effectiveRetrievalMode === 'entity_lookup';
-    if (finalState.status === 'resolved' && !skipAdmissionGate) {
+    if (finalState.status === 'resolved') {
       const admissionResult = this.admissionGate.check(input, snapshot);
       if (!admissionResult.admitted) {
         bootstrapLogger.warn(
@@ -557,19 +533,9 @@ export class DecisionEngine {
       return state;
     }
 
-    const admissionContext = deriveAdmissionContext(input);
-    // SOTA++: constraint evidence globally disabled until source_kind wiring.
-    // All hard constraints are currently planner-inferred (not user-explicit).
-    // Requiring constraint evidence blocks every resolve with auto-extracted
-    // constraints. Identity evidence (Rule 1) is the primary obligation.
-    const hasConstraints = false;
-    const hasAnchor = admissionContext.requires_anchor_evidence;
-
     const gateResult: EvidenceGateResult = this.evidenceGate.check(
       state.status,
-      input.evidenceSummary,
-      hasConstraints,
-      hasAnchor,
+      input.provenanceContract,
     );
 
     if (!gateResult.passed) {
@@ -807,6 +773,12 @@ export class DecisionEngine {
       inputs: {
         queryClass: input.queryPlan.queryClass,
         effectiveRoute: input.effectiveRoute ?? input.queryPlan.route,
+        ...(input.effectiveRetrievalMode !== undefined
+          ? { effectiveRetrievalMode: input.effectiveRetrievalMode }
+          : {}),
+        ...(input.retrievalKind !== undefined
+          ? { retrievalKind: input.retrievalKind }
+          : {}),
         policy: {
           requireExact: input.policy.requireExact,
           allowApproximate: input.policy.allowApproximate,
@@ -882,6 +854,9 @@ export class DecisionEngine {
           : {}),
         ...(input.effectiveRetrievalMode !== undefined
           ? { retrievalMode: input.effectiveRetrievalMode }
+          : {}),
+        ...(input.retrievalKind !== undefined
+          ? { retrievalKind: input.retrievalKind }
           : {}),
         ...(topCandidate !== undefined ? { chosenEntityId: topCandidate.entityId } : {}),
         decisionStatus: state.status,

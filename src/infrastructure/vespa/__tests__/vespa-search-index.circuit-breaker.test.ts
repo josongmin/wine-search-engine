@@ -51,8 +51,7 @@ describe('VespaSearchIndex circuit breaker (E3-T2)', () => {
 // Before the fix, batchFetchBySummary called this.client.query() directly,
 // bypassing the circuit breaker.  After the fix, failures from individual
 // batch Vespa calls are routed through queryUnderBreaker → circuitBreaker.execute(),
-// so the breaker failure counter is incremented even though batchFetchBySummary
-// itself uses Promise.allSettled and does NOT re-throw (it returns [] after logging).
+// so the breaker failure counter is incremented and the fetch now fails closed.
 
 describe('batchFetchBySummary routes through circuit breaker (Bug 2 regression)', () => {
   afterEach(() => {
@@ -73,10 +72,9 @@ describe('batchFetchBySummary routes through circuit breaker (Bug 2 regression)'
     expect(breakerBefore?.metrics.failureCount).toBe(0);
 
     const { createEntityId } = await import('../../../domain/shared/types/index.js');
-    // batchFetchBySummary uses Promise.allSettled — it returns [] on batch failure
-    // rather than throwing, so the call resolves (but with an empty result).
-    const result = await index.fetchWithHitSummary([createEntityId('wine-entity-001')]);
-    expect(result).toEqual([]);
+    await expect(
+      index.fetchWithHitSummary([createEntityId('wine-entity-001')]),
+    ).rejects.toThrow(/Vespa summary batch failed/);
 
     const snapshot1 = globalCircuitBreakerRegistry.snapshot();
     const breakerAfter = snapshot1.find((s) => s.name === 'vespa-search');
@@ -92,8 +90,9 @@ describe('batchFetchBySummary routes through circuit breaker (Bug 2 regression)'
     const index = newIndex();
     const { createEntityId } = await import('../../../domain/shared/types/index.js');
 
-    const result = await index.fetchWithFeatureSummary([createEntityId('wine-entity-002')]);
-    expect(result).toEqual([]);
+    await expect(
+      index.fetchWithFeatureSummary([createEntityId('wine-entity-002')]),
+    ).rejects.toThrow(/Vespa summary batch failed/);
 
     const snapshot = globalCircuitBreakerRegistry.snapshot();
     const breaker = snapshot.find((s) => s.name === 'vespa-search');

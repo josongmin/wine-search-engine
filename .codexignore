@@ -5,6 +5,10 @@ node_modules
 node_modules/
 web/node_modules
 web/node_modules/
+# npm lockfiles (pnpm-lock.yaml is canonical; these are noise if present locally)
+package-lock.json
+web/package-lock.json
+.pnpm-debug.log*
 dist
 dist/
 coverage

@@ -19,12 +19,12 @@ export function buildConstraintContradictionExitParams(
   startTime: number,
   snapshotVersions: SnapshotVersionInjection,
   conflictPairs: ReadonlyArray<readonly [NormalizedConstraint, NormalizedConstraint]>,
-  compiled?: CompiledWineQuery,
+  compiled: CompiledWineQuery,
 ): ResponseBuildParams {
   const routeCtx = buildSearchRouteResolutionContext(plan, request, compiled);
   return buildConstraintContradictionResponseParams({
     plan,
-    ...(compiled !== undefined ? { compiled } : {}),
+    compiled,
     snapshot: buildDecisionSnapshotFromPlan(plan, snapshotVersions),
     requestId,
     startTime,

@@ -29,6 +29,7 @@
 import 'dotenv/config';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 import type {
   Doc2QueryGeneratorPort,
@@ -38,17 +39,17 @@ import { OpenAiChatLlm } from '../../src/infrastructure/ai/openai-chat-llm.js';
 import { OpenAiDoc2QueryGenerator } from '../../src/infrastructure/ai/openai-doc2query-generator.js';
 import { OpenAiEmbeddingService } from '../../src/infrastructure/ai/openai-embedding-service.js';
 import { loadConfig } from '../../src/config/env.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import type { EnrichedSilverRecord, Doc2QueryFingerprint } from './types.js';
 import { parseNdjson } from './ndjson.js';
 import { atomicWriteFile } from './etl-utils.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_INPUT = resolveDataPath('data/silver-ko.ndjson');
-const DEFAULT_OUTPUT = resolveDataPath('data/silver-docquery.ndjson');
+export const DEFAULT_INPUT = ETL_ARTIFACT_FILES.ko;
+export const DEFAULT_OUTPUT = ETL_ARTIFACT_FILES.docquery;
 
 /**
  * Synthetic queries per wine — 15 slots (SOTA++ contract).
@@ -203,8 +204,8 @@ function fingerprintMaterial(input: Doc2QueryInput): string {
     input.country,
     input.grapePrimary ?? '',
     input.grapes.join(','),
-    input.body.toFixed(3),
-    input.tannin.toFixed(3),
+    input.body !== null ? input.body.toFixed(3) : 'null',
+    input.tannin !== null ? input.tannin.toFixed(3) : 'null',
     input.priceUsd !== null ? input.priceUsd.toFixed(2) : '',
     input.priceBand,
     input.vintageYear !== null ? String(input.vintageYear) : '',
@@ -258,6 +259,14 @@ interface RunStats {
   readonly totalQueries: number;
 }
 
+export function assertDocQueryRunSucceeded(stats: RunStats): void {
+  if (stats.failed > 0) {
+    throw new Error(
+      `generate-doc-queries: ${stats.failed} record(s) failed — refusing to promote partial output`,
+    );
+  }
+}
+
 /**
  * Process one record: skip if fingerprint fresh, otherwise call the LLM.
  * Always returns a valid record — on error/empty, returns the prior record
@@ -307,7 +316,7 @@ async function generateForBatch(
   records: readonly EnrichedSilverRecord[],
   generator: Doc2QueryGeneratorPort,
   force: boolean,
-  outputPath: string,
+  checkpointPath: string,
   checkpointEvery: number,
   concurrency: number,
 ): Promise<{ updated: EnrichedSilverRecord[]; stats: RunStats }> {
@@ -354,11 +363,11 @@ async function generateForBatch(
         lastCheckpoint = completed;
         try {
           const lines = updated.map((r) => JSON.stringify(r)).join('\n');
-          await atomicWriteFile(outputPath, lines + '\n');
-          console.log(`  Checkpoint: ${completed}/${total} → ${outputPath}`);
+          await atomicWriteFile(checkpointPath, lines + '\n');
+          console.log(`  Checkpoint: ${completed}/${total} → ${checkpointPath}`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.warn(`  Checkpoint write failed (continuing): ${msg}`);
+          throw new Error(`generate-doc-queries: checkpoint write failed: ${msg}`);
         }
       }
     }
@@ -431,17 +440,23 @@ async function run(): Promise<void> {
   }
 
   const startedAt = Date.now();
+  const checkpointPath = `${args.output}.checkpoint`;
   const { updated, stats } = await generateForBatch(
     records,
     generator,
     args.force,
-    args.output,
+    checkpointPath,
     CHECKPOINT_EVERY,
     args.concurrency,
   );
   const elapsedMs = Date.now() - startedAt;
   const llmCalls = stats.generated + stats.failed;
   const throughput = llmCalls > 0 ? (llmCalls / (elapsedMs / 1000)).toFixed(2) : '0';
+  if (stats.failed > 0) {
+    const message = `generate-doc-queries: ${stats.failed} record(s) failed — refusing to promote partial output`;
+    console.error(`  ${message}`);
+    throw new Error(message);
+  }
   console.log(
     `  Done: total=${stats.total} generated=${stats.generated} skipped=${stats.skipped} failed=${stats.failed} totalQueries=${stats.totalQueries}`,
   );
@@ -454,8 +469,14 @@ async function run(): Promise<void> {
   console.log(`  Written to: ${args.output}`);
 }
 
-void run().catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
-  console.error(`FATAL: ${msg}`);
-  process.exit(1);
-});
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isEntrypoint) {
+  void run().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`FATAL: ${msg}`);
+    process.exit(1);
+  });
+}

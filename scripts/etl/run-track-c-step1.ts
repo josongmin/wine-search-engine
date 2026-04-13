@@ -3,7 +3,7 @@
 /**
  * Track C Step 1: Generate Critic Proxy Scores
  *
- * Reads silver-docquery.ndjson, generates LLM-based critic proxy scores,
+ * Reads silver-trackc.ndjson, generates LLM-based critic proxy scores,
  * and writes back enriched records with `criticProxy` field.
  *
  * SOTA++ improvements:
@@ -17,11 +17,12 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
+import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { Anthropic } from '@anthropic-ai/sdk';
 import { parseNdjson } from './ndjson.js';
 import { generateCriticProxiesBatch } from './generate-critic-proxy.js';
-import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFileSync, appendDeadLetter } from './etl-utils.js';
+import { ETL_ARTIFACT_FILES } from './artifact-contract.js';
 
 interface SilverRecord {
   readonly sourceId?: string;
@@ -48,7 +49,7 @@ interface EnrichedRecord extends SilverRecord {
   readonly criticProxy?: CriticProxyResult;
 }
 
-const DATA_FILE = resolveDataPath('data/silver-docquery.ndjson');
+export const DATA_FILE = ETL_ARTIFACT_FILES.trackc;
 const DEAD_LETTER_FILE = resolveDataPath('.dead-letter-step1.ndjson');
 const BATCH_SIZE = 100;
 const FLUSH_INTERVAL = 5; // flush every N batches
@@ -178,6 +179,10 @@ async function main() {
   }
 
   // Final write (atomic)
+  if (failed > 0) {
+    console.error(`  Refusing final write: ${failed} record(s) failed step 1`);
+    process.exit(1);
+  }
   const output = enrichedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
   atomicWriteFileSync(DATA_FILE, output);
 

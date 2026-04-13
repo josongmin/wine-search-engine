@@ -120,9 +120,6 @@ export interface ExtendedLTRFeatures extends RankingFeatures {
   readonly isTargetStyle: 0 | 1;
 }
 
-/** Neutral producer prestige feature when component missing. */
-const LTR_PRODUCER_PRESTIGE_FEATURE_DEFAULT = 0.5;
-
 /**
  * Encodes QueryTargetType as 4 binary 1-hot features.
  * 'unknown' maps to all-zeros (neutral — no target type signal).
@@ -145,7 +142,9 @@ export function extractExtendedLTRFeatures(
   return {
     ...extractLTRFeatures(scores),
     criticScoreFeature: scores.criticScore ?? 0.0,
-    producerPrestigeFeature: scores.producerPrestige ?? LTR_PRODUCER_PRESTIGE_FEATURE_DEFAULT,
+    // Missing producer prestige stays absent-like (0.0) instead of being
+    // fabricated as a neutral 0.5 producer.
+    producerPrestigeFeature: scores.producerPrestige ?? 0.0,
     ...encodeQueryTargetType(targetType),
   };
 }

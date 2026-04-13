@@ -42,7 +42,7 @@ flowchart LR
 
 ## 읽기 순서 (권장)
 
-1. **`CLAUDE.md`** — 스택, 디렉터리, `npm run typecheck|test|lint` 게이트  
+1. **`CLAUDE.md`** — 스택, 디렉터리, `pnpm run typecheck|test|lint` 게이트  
 2. **`retriever-pipeline.md`** — 질의가 인덱스에 닿는 **런타임** 경로  
 3. **`ingestion-pipeline.md`** — 카탈로그가 쌓이는 **오프라인** 경로  
 4. **`wine-query-scenarios.md`** — 사용자 질문 유형·강점·약점·비지원 (제품 관점)  

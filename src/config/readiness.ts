@@ -169,6 +169,7 @@ export function buildHealthRouteOptions(
             await verifySearchSnapshotRuntimeStateLive({
               pool: runtime.pool,
               vespaUrl: config.vespa.url,
+              strictHashes: true,
             });
             return 'up';
           } catch {
@@ -188,9 +189,9 @@ export function buildHealthRouteOptions(
                     input: '__healthcheck__',
                   }, { Authorization: `Bearer ${config.openai.apiKey}` });
                 }
-                // No OpenAI key → embedding unavailable.
-                log.warn('embedding readiness: no OPENAI_API_KEY — embedding probe skipped');
-                return 'skipped';
+                // No OpenAI key → embedding unavailable; required probe must fail closed.
+                log.warn('embedding readiness: no OPENAI_API_KEY — embedding probe down');
+                return 'down';
               },
             },
           }

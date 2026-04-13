@@ -228,9 +228,9 @@ function normalizeScale(score: number | undefined | null, max = 5): number | nul
   return Math.max(0, Math.min(1, score / max));
 }
 
-/** Price USD → price band. */
-function priceBand(priceUsd: number | null): PriceBand {
-  if (priceUsd === null) return 'mid'; // unknown → neutral
+/** Price USD → price band. Unknown price fails closed. */
+function priceBand(priceUsd: number | null): PriceBand | null {
+  if (priceUsd === null) return null;
   if (priceUsd >= 500) return 'luxury';
   if (priceUsd >= 100) return 'premium';
   if (priceUsd >= 30) return 'mid';
@@ -256,7 +256,7 @@ const WHITE_GRAPES: ReadonlySet<string> = new Set([
 ]);
 
 /** Infer wine type from primary grape when style string is unrecognized.
- *  Returns null if grape is unknown — caller falls back to 'red' as last resort. */
+ *  Returns null if grape is unknown. */
 function inferTypeFromGrape(grapePrimary: string | null): WineType | null {
   if (!grapePrimary) return null;
   const lower = grapePrimary.toLowerCase().trim();
@@ -272,7 +272,11 @@ function inferTypeFromGrape(grapePrimary: string | null): WineType | null {
  *  v4 fix: previously returned 'red' on no match, silently corrupting wine type
  *  for any wine whose Vivino style was missing or used an unrecognized vocabulary.
  *  Whites, rosés, sparkling, dessert, and fortified wines were all silently
- *  indexed as 'red', breaking type-filtered search and corrupting facets. */
+ *  indexed as 'red', breaking type-filtered search and corrupting facets.
+ *
+ *  Current contract: unknown wine type fails closed so we never synthesize a
+ *  taxon for records that have no authoritative classification.
+ */
 // Unicode-aware word boundary for ETL wine-style keyword matching.
 // CLAUDE.md rule 8: \b is ASCII-only and fails on accented chars like 'é'. Use [\p{L}\p{N}] instead.
 const ROSE_WORD_BOUNDARY_RE = /(?:^|[^\p{L}\p{N}])ros[eé](?=$|[^\p{L}\p{N}])/iu;
@@ -667,8 +671,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
 
   // SOTA++: fizziness signal — if fizziness > 0.3, override to sparkling.
   // v4 fix: detectWineType now returns null on no match. Cascade through grape-based
-  // inference (most reliable secondary signal) before falling back to 'red' as a last
-  // resort, with explicit logging when the fallback fires.
+  // inference (most reliable secondary signal); if we still cannot classify the
+  // wine, fail closed instead of synthesizing a default taxon.
   //
   // Scale note: Vivino taste.structure fields (acidity, tannin, sweetness, fizziness)
   // are returned on a 0–5 integer scale by the API.  The normalized (0–1) threshold
@@ -685,9 +689,7 @@ export function transformRow(row: BronzeRow): PreSilver | null {
       base = inferTypeFromGrape(grapePrimary);
     }
     if (base === null) {
-      // Last resort: 'red' as the most common wine type. Logged for visibility.
-      // ETL validators should track this fallback rate as a data quality metric.
-      base = 'red';
+      return null;
     }
     if (
       base !== 'sparkling' &&
@@ -699,27 +701,8 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     return base;
   })();
 
-  // SOTA++: body fallback from taste_profile.light_bold when structure absent
-  const bodyFallback = (() => {
-    const lb = payload?.taste_profile?.light_bold?.toLowerCase();
-    if (!lb) return 0.5;
-    if (lb.includes('bold') || lb.includes('full')) return 0.8;
-    if (lb.includes('medium')) return 0.55;
-    if (lb.includes('light')) return 0.3;
-    return 0.5;
-  })();
-
-  // SOTA++: sweetness fallback from taste_profile.dry_sweet when structure absent
-  const sweetnessFallback = (() => {
-    const ds = payload?.taste_profile?.dry_sweet?.toLowerCase();
-    if (!ds) return 0.1;
-    if (ds.includes('sweet')) return 0.8;
-    if (ds.includes('off')) return 0.35;
-    return 0.1; // dry
-  })();
-
-  // Use taste_profile fallback only when structure fields are truly absent.
-  // Note: normalizeScale returns null for missing data, 0 is a valid score.
+  // Keep missing sensory values as null so downstream contracts can omit the
+  // field instead of injecting a synthetic midpoint.
   const rawBody = taste?.intensity !== undefined
     ? normalizeScale(taste.intensity, 5)
     : null;
@@ -737,6 +720,11 @@ export function transformRow(row: BronzeRow): PreSilver | null {
 
   // SOTA++: best price from merchant_prices (with FX conversion)
   const priceUsd = extractPriceUsd(rowPrice, row.currency, payload?.merchant_prices, payload?.bottle_ml);
+  const priceBandValue = priceBand(priceUsd);
+
+  if (detectedWineType === null || priceBandValue === null) {
+    return null;
+  }
 
   // SOTA++: producer_prestige from winery_rating (1–5 → 0–1)
   const producerPrestige =
@@ -765,17 +753,10 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     wineType: detectedWineType,
     grapePrimary,
     grapes,
-    // v4 KNOWN ISSUE: body/sweetness/acidity/tannin default to 0.5 when Vivino's
-    // taste.structure data is absent. This silently masks data coverage gaps —
-    // wines with missing taste data are indexed as "medium everything" and pollute
-    // both LTR feature space and facet filters. Proper fix requires migrating the
-    // Silver schema to allow `number | null` for these fields and downstream
-    // ranker/Vespa changes. Tracked for v5. For now, the fallbacks at least produce
-    // valid [0,1] values that don't crash the indexer; downstream is unaware of imputation.
-    body: rawBody ?? bodyFallback,
-    sweetness: rawSweetness ?? sweetnessFallback,
-    acidity: normalizeScale(taste?.acidity, 5) ?? 0.5,
-    tannin: normalizeScale(taste?.tannin, 5) ?? 0.5,
+    body: rawBody,
+    sweetness: rawSweetness,
+    acidity: normalizeScale(taste?.acidity, 5),
+    tannin: normalizeScale(taste?.tannin, 5),
     pairingTags: extractPairings(payload),
     flavorProfiles: extractFlavorProfiles(payload),
     searchTextEn: buildSearchText(row, payload),
@@ -789,7 +770,7 @@ export function transformRow(row: BronzeRow): PreSilver | null {
     })(),
     ratingsCount,
     priceUsd,
-    priceBand: priceBand(priceUsd),
+    priceBand: priceBandValue,
     scrapedAt: row.scraped_at,
     // SOTA++ new fields
     alcoholPct: parseAlcohol(payload?.alcohol),

@@ -163,7 +163,7 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
       phrase: '입문용',
       mappedAttribute: 'price_band',
       operator: '=',
-      value: 'low',
+      value: 'budget',
       mappingConfidence: 0.85,
       mappingVersion: DEFAULT_MAPPING_VERSION,
       source: DEFAULT_SOURCE,
@@ -175,7 +175,7 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
       phrase: '데일리 와인',
       mappedAttribute: 'price_band',
       operator: '=',
-      value: 'low',
+      value: 'budget',
       mappingConfidence: 0.8,
       mappingVersion: DEFAULT_MAPPING_VERSION,
       source: DEFAULT_SOURCE,
@@ -285,7 +285,7 @@ const DEFAULT_MAPPINGS: ReadonlyMap<string, NLMapping> = new Map<string, NLMappi
   ['비싸', { phrase: '비싸', mappedAttribute: 'price_band', operator: '=', value: 'luxury', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['저렴한', { phrase: '저렴한', mappedAttribute: 'price_band', operator: '=', value: 'budget', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['싼', { phrase: '싼', mappedAttribute: 'price_band', operator: '=', value: 'budget', mappingConfidence: 0.75, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
-  ['가성비', { phrase: '가성비', mappedAttribute: 'price_band', operator: '=', value: 'mid', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
+  ['가성비', { phrase: '가성비', mappedAttribute: 'price_band', operator: '=', value: 'value', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
   ['고급', { phrase: '고급', mappedAttribute: 'price_band', operator: '=', value: 'premium', mappingConfidence: 0.8, mappingVersion: DEFAULT_MAPPING_VERSION, source: DEFAULT_SOURCE }],
 
   // Critic score / rating

@@ -13,12 +13,35 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { globSync } from 'glob';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 const KOREAN_RANGE = /[\uAC00-\uD7AF]/;
 const SRC_ROOT = resolve(import.meta.dirname, '../../src');
+
+function collectSourceTypeScriptFiles(root: string): readonly string[] {
+  const files: string[] = [];
+
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const fullPath = join(root, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === '__tests__') {
+        continue;
+      }
+      files.push(...collectSourceTypeScriptFiles(fullPath));
+      continue;
+    }
+    if (!entry.isFile()) {
+      continue;
+    }
+    if (!entry.name.endsWith('.ts') || entry.name.endsWith('.test.ts')) {
+      continue;
+    }
+    files.push(fullPath);
+  }
+
+  return files;
+}
 
 /**
  * Scans a TypeScript source file for regex literals containing \\b + Korean.
@@ -54,11 +77,7 @@ function findViolations(filePath: string): { line: number; text: string }[] {
 
 describe('Structural invariant: no \\b with Korean in production regex', () => {
   it('zero violations across all src/**/*.ts files', () => {
-    const files = globSync('**/*.ts', {
-      cwd: SRC_ROOT,
-      ignore: ['**/__tests__/**', '**/*.test.ts'],
-      absolute: true,
-    });
+    const files = collectSourceTypeScriptFiles(SRC_ROOT);
 
     const allViolations: { file: string; line: number; text: string }[] = [];
     for (const file of files) {

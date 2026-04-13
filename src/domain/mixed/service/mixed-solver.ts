@@ -101,7 +101,7 @@ export class MixedSolver {
    * @returns The mixed query result with ranked wines and diagnostics.
    * @throws {Error} If the anchor entity cannot be resolved.
    */
-  async solve(queryPlan: QueryPlanV1, compiled?: CompiledWineQuery): Promise<MixedQueryResult> {
+  async solve(queryPlan: QueryPlanV1, compiled: CompiledWineQuery): Promise<MixedQueryResult> {
     // Step 1: Resolve anchor entity
     const anchorCandidate = queryPlan.anchors[0];
     if (anchorCandidate === undefined) {
@@ -153,7 +153,11 @@ export class MixedSolver {
 
     // Step 4: Build the retrieval-layer anchor profile for the ranking pipeline
     const retrievalAnchorProfile = {
-      semanticSummary: `${anchorProfile.canonicalLabel} ${anchorProfile.region} ${anchorProfile.style}`,
+      semanticSummary: [
+        anchorProfile.canonicalLabel,
+        anchorProfile.region,
+        anchorProfile.style,
+      ].filter((part): part is string => typeof part === 'string' && part.length > 0).join(' '),
       embedding: anchorProfile.embedding,
       anchorConfidence: anchorProfile.anchorConfidence,
     };
@@ -167,9 +171,7 @@ export class MixedSolver {
         candidates,
         anchorProfile: retrievalAnchorProfile,
         constraints: queryPlan.constraints,
-        // compiled-first: thread V2 execution contract so getModeWeights and
-        // rerank gate use compiled.effectiveRoute/effectiveRetrievalMode (E6-U4)
-        ...(compiled !== undefined ? { compiled } : {}),
+        compiled,
       });
       rankedResults = rankOutput.results;
       rankingRuntimeSignal = rankOutput.metadata.runtimeSignal;
@@ -198,9 +200,12 @@ export class MixedSolver {
     } catch (err) {
       bootstrapLogger.warn(
         { err: err instanceof Error ? err.message : String(err) },
-        '[MixedSolver] constraintOverlay.apply() failed; returning candidates without overlay',
+        '[MixedSolver] constraintOverlay.apply() failed; degrading gracefully',
       );
-      overlayedResults = rankedResults;
+      throw new MixedRouteDegradationError(
+        'mixed_constraint_overlay_failed',
+        err instanceof Error ? err.message : String(err),
+      );
     }
 
     // Step 7: Compute anchor preservation rate

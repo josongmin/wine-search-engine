@@ -8,13 +8,13 @@ Place the production model bundle here when available:
 Example verification:
 
 ```bash
-npm run verify:drinking-window-model -- models/drinking-window
+pnpm run verify:drinking-window-model -- models/drinking-window
 ```
 
 Example startup:
 
 ```bash
-DRINKING_WINDOW_MODEL_DIR=models/drinking-window npm run dev
+DRINKING_WINDOW_MODEL_DIR=models/drinking-window pnpm run dev
 ```
 
-**Production policy:** without ONNX, `NODE_ENV=production` refuses startup unless `ALLOW_HEURISTIC_DRINKING_WINDOW=true`. At runtime, `DrinkingWindowPredictor` uses ONNX when loaded; with `allowHeuristicFallback=false` (production + heuristic not opted-in), `predict()` throws instead of silently using the rule-based path.
+**Production policy:** without ONNX, `NODE_ENV=production` refuses startup unless `ALLOW_HEURISTIC_DRINKING_WINDOW=true`. The legacy `scripts/etl/drinking-window-backfill.ts` heuristic stub is opt-in only via `ALLOW_HEURISTIC_DRINKING_WINDOW_BACKFILL=1`; otherwise it fails closed and does not write an operational artifact. At runtime, `DrinkingWindowPredictor` uses ONNX when loaded; with `allowHeuristicFallback=false` (production + heuristic not opted-in), `predict()` throws instead of silently using the rule-based path.

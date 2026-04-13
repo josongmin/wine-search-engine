@@ -18,7 +18,6 @@ import { clamp01 } from '../../domain/shared/utils/clamp.js';
 import { PipelineDebugStep } from '../../observability/pipeline-debug-steps.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { runUnderLlmBreaker } from './llm-circuit-breaker-classifier.js';
-import { bootstrapLogger } from '../../config/bootstrap-logger.js';
 
 const COHERE_RERANKER_HTTP_ERROR_PREVIEW_CHARS = 200;
 
@@ -209,26 +208,25 @@ export class CohereReranker implements RerankerPort {
 
     const scored: Array<{ entityId: CanonicalEntityId; score: number }> = [];
     for (const item of data.results) {
-      // Guard: Cohere index must be a non-negative integer within candidates bounds.
-      // A negative or out-of-range index silently drops the result (candidates[N]
-      // is undefined). Log so operators can detect a misbehaving proxy or model.
       if (!Number.isInteger(item.index) || item.index < 0 || item.index >= candidates.length) {
-        bootstrapLogger.warn(
-          { index: item.index, candidatesLength: candidates.length },
-          '[CohereReranker] result index out of bounds — dropping item',
+        throw new Error(
+          `Cohere reranker: response item index ${String(item.index)} is out of bounds for ${candidates.length} candidates`,
         );
-        continue;
       }
       const candidate = candidates[item.index];
-      if (candidate === undefined) continue;
+      if (candidate === undefined) {
+        throw new Error(`Cohere reranker: missing candidate for response index ${String(item.index)}`);
+      }
       if (!isCanonicalPublicEntityId(candidate.entityId)) {
         throw new Error(
           'ADR-007: Cohere reranker received a candidate whose entityId is empty or uses the forbidden source-record public namespace',
         );
       }
-      if (!Number.isFinite(item.relevance_score)) continue;
-      // clamp01: Cohere's spec implies [0,1] but does not guarantee it — a score
-      // outside this range would corrupt downstream calibration and ranking.
+      if (!Number.isFinite(item.relevance_score) || item.relevance_score < 0 || item.relevance_score > 1) {
+        throw new Error(
+          `Cohere reranker: response item relevance_score ${String(item.relevance_score)} is outside [0,1]`,
+        );
+      }
       scored.push({ entityId: candidate.entityId, score: clamp01(item.relevance_score) });
     }
 

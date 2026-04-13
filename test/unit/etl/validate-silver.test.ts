@@ -6,9 +6,16 @@ import {
   type SilverQualityGateThresholds,
 } from '../../../scripts/etl/validate-silver.js';
 
+type TestEnrichedSilverRecord = EnrichedSilverRecord & {
+  readonly alcoholPct?: number | null;
+  readonly producerPrestige?: number | null;
+  readonly criticProxy?: { readonly proxyScore?: number } | null;
+  readonly drinkingWindow?: unknown;
+};
+
 function makeEnrichedRecord(
-  overrides: Partial<EnrichedSilverRecord> = {},
-): EnrichedSilverRecord {
+  overrides: Partial<TestEnrichedSilverRecord> = {},
+): TestEnrichedSilverRecord {
   return {
     sourceId: 'vivino:test-record',
     externalId: 'fixture-1',
@@ -34,6 +41,16 @@ function makeEnrichedRecord(
     priceBand: 'premium',
     popularityScore: 0.65,
     scrapedAt: '2026-04-06T00:00:00.000Z',
+    alcoholPct: 13.5,
+    producerPrestige: 0.82,
+    criticProxy: { proxyScore: 88 },
+    drinkingWindow: {
+      drinkingWindowStart: 2026,
+      drinkingWindowEnd: 2032,
+      peakYear: 2029,
+      confidence: 'medium',
+      modelVersion: 'dw-v1',
+    },
     aliases: {
       proposed: [
         {
@@ -86,6 +103,75 @@ describe('validateSilverRecords', () => {
     expect(report.blockers).toEqual([]);
     expect(report.fieldCoverage.searchTextEn).toBe(1);
     expect(report.distributionChecks.aliasMeanCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('fails closed on missing core coverage by default', () => {
+    const sparse = [
+      makeEnrichedRecord({
+        sourceId: 'vivino:sparse-1',
+        externalId: 'sparse-1',
+        alcoholPct: null,
+        producerPrestige: null,
+        criticProxy: null,
+        drinkingWindow: null,
+      }),
+      makeEnrichedRecord({
+        sourceId: 'vivino:sparse-2',
+        externalId: 'sparse-2',
+        alcoholPct: null,
+        producerPrestige: null,
+        criticProxy: null,
+        drinkingWindow: null,
+      }),
+    ];
+
+    const report = validateSilverRecords(sparse, SMALL_GATES);
+
+    expect(report.passed).toBe(false);
+    expect(report.blockers).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('alcohol_pct coverage 0.0%'),
+        expect.stringContaining('producer_prestige coverage 0.0%'),
+        expect.stringContaining('criticProxy coverage 0.0%'),
+        expect.stringContaining('drinkingWindow coverage 0.0%'),
+      ]),
+    );
+  });
+
+  it('allows partial core coverage only when explicitly opted in', () => {
+    const sparse = [
+      makeEnrichedRecord({
+        sourceId: 'vivino:sparse-1',
+        externalId: 'sparse-1',
+        alcoholPct: null,
+        producerPrestige: null,
+        criticProxy: null,
+        drinkingWindow: null,
+      }),
+      makeEnrichedRecord({
+        sourceId: 'vivino:sparse-2',
+        externalId: 'sparse-2',
+        alcoholPct: null,
+        producerPrestige: null,
+        criticProxy: null,
+        drinkingWindow: null,
+      }),
+    ];
+
+    const report = validateSilverRecords(sparse, SMALL_GATES, {
+      allowPartialCoverage: true,
+    });
+
+    expect(report.passed).toBe(true);
+    expect(report.blockers).toEqual([]);
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('alcohol_pct coverage 0.0%'),
+        expect.stringContaining('producer_prestige coverage 0.0%'),
+        expect.stringContaining('criticProxy coverage 0.0%'),
+        expect.stringContaining('drinkingWindow coverage 0.0%'),
+      ]),
+    );
   });
 
   it('reports blockers for undersized, under-aliased fixtures', () => {

@@ -395,10 +395,12 @@ DB 대상:
 
 입력 소스:
 
-- silver/enriched/docquery artifacts
+- canonical ETL artifacts
   - `data/silver.ndjson`
-  - `data/silver-enriched.ndjson`
+  - `data/silver-aliases.ndjson`
+  - `data/silver-ko.ndjson`
   - `data/silver-docquery.ndjson`
+  - `data/silver-trackc.ndjson`
 - external fixture goldens
   - `/Users/songmin/Documents/code-wine/wine-engine-fixture/goldens/canonical-entities.json`
   - `/Users/songmin/Documents/code-wine/wine-engine-fixture/goldens/target-entity-map.json`
@@ -474,7 +476,7 @@ runtime state 영향:
 
 - snapshot artifact `entities.ndjson`에서 `entityId`가 `vivino-` prefix면 fail
 - `aliases.ndjson` / `ambiguity-registry.ndjson`도 canonical ID 참조만 허용
-- `npm run etl:publish-search-snapshot` 후 active snapshot manifest의 entity namespace 검사
+- `pnpm run etl:publish-search-snapshot` 후 active snapshot manifest의 entity namespace 검사
 
 ### Phase 3. Runtime / API / Resolver Rebinding
 
@@ -747,9 +749,9 @@ CI에 다음 검사를 추가한다.
 
 CI에 추가할 명령:
 
-1. `npm run typecheck`
-2. `npm run migrate` (로컬 기본: `docker-compose.yml` Postgres — 관리형 DB면 `npm run migrate:from-env`)
-3. `npm run etl:publish-search-snapshot`
+1. `pnpm run typecheck`
+2. `pnpm run migrate` (로컬 기본: `docker-compose.yml` Postgres — 관리형 DB면 `pnpm run migrate:from-env`)
+3. `pnpm run etl:publish-search-snapshot`
 4. `npx tsx scripts/etl/verify-search-snapshot-readiness.ts --strict`
 5. `npx tsx scripts/etl/verify-gold-catalog-coverage.ts`
 6. `npx vitest run --config config/vitest/integration.config.ts`
@@ -770,8 +772,8 @@ CI에 추가할 명령:
   - `src/infrastructure/db/migrations/009_canonical_entity_graph.sql`
   - 이후 follow-up migrations under same folder
 - DB migrate runners (SQL은 `src/infrastructure/db/migrations/`):
-  - `npm run migrate` → `scripts/migrate-local-docker-pg.ts` (Compose Postgres)
-  - `npm run migrate:from-env` → `scripts/migrate-from-env.ts` (`.env` / `DATABASE_URL`)
+  - `pnpm run migrate` → `scripts/migrate-local-docker-pg.ts` (Compose Postgres)
+  - `pnpm run migrate:from-env` → `scripts/migrate-from-env.ts` (`.env` / `DATABASE_URL`)
   - 러너: `src/infrastructure/db/migrate.ts` (`runMigrations`)
 
 ### ETL / snapshot
@@ -878,7 +880,7 @@ CI에 추가할 명령:
 ### 1. Apply migrations
 
 ```sh
-npm run migrate
+pnpm run migrate
 ```
 
 `canonical_entities` / `canonical_aliases` / `canonical_ambiguity_registry` / `canonical_entity_source_links`가
@@ -887,7 +889,7 @@ npm run migrate
 ### 2. Build & publish search snapshot
 
 ```sh
-npm run etl:publish-search-snapshot -- --fixture-repo "$FIXTURE_REPO_PATH"
+pnpm run etl:publish-search-snapshot -- --fixture-repo "$FIXTURE_REPO_PATH"
 ```
 
 이 한 줄이 다음을 모두 수행한다 (각 단계 fail-closed):
@@ -940,9 +942,9 @@ npx tsx scripts/etl/verify-search-snapshot-readiness.ts
 ### 5. Re-enable live benchmark
 
 ```sh
-npm run eval:entity:fixtures:live
-npm run eval:noisy
-npm run eval:search-feature:fixtures:live
+pnpm run eval:entity:fixtures:live
+pnpm run eval:noisy
+pnpm run eval:search-feature:fixtures:live
 ```
 
 각 러너의 preflight는 fixture canonical id가 active snapshot에 존재하는지 다시 확인한다.

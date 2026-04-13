@@ -1,9 +1,23 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseEnv } from '../../../src/config/env.js';
 import { buildHealthRouteOptions } from '../../../src/config/readiness.js';
+const { mockVerifySearchSnapshotRuntimeStateLive } = vi.hoisted(() => ({
+  mockVerifySearchSnapshotRuntimeStateLive: vi.fn(),
+}));
+
+vi.mock('../../../src/infrastructure/health/search-snapshot-readiness.js', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/infrastructure/health/search-snapshot-readiness.js')>(
+    '../../../src/infrastructure/health/search-snapshot-readiness.js',
+  );
+  return {
+    ...actual,
+    verifySearchSnapshotRuntimeStateLive: mockVerifySearchSnapshotRuntimeStateLive,
+  };
+});
+
 import {
   canonicalizeAliasRuntimeRows,
   canonicalizeAmbiguityRuntimeRows,
@@ -21,7 +35,12 @@ async function makeTempDir(): Promise<string> {
 }
 
 describe('search snapshot runtime readiness', () => {
-  it('returns up for a coherent runtime state with populated NL mappings', async () => {
+  beforeEach(() => {
+    mockVerifySearchSnapshotRuntimeStateLive.mockReset();
+    mockVerifySearchSnapshotRuntimeStateLive.mockResolvedValue(undefined);
+  });
+
+  it('returns up for a coherent runtime state with zero ambiguity rows', async () => {
     const dir = await makeTempDir();
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
     const runtimeStatePath = path.join(dir, 'runtime-search-snapshot.json');
@@ -39,7 +58,7 @@ describe('search snapshot runtime readiness', () => {
       counts: {
         entities: 10,
         aliases: 10,
-        ambiguityRegistry: 2,
+        ambiguityRegistry: 0,
         nlMappings: 1,
         activeLtrModels: 1,
       },
@@ -73,7 +92,7 @@ describe('search snapshot runtime readiness', () => {
       counts: {
         entities: 10,
         aliases: 10,
-        ambiguityRegistry: 2,
+        ambiguityRegistry: 0,
         nlMappings: 1,
         activeLtrModels: 0,
       },
@@ -108,7 +127,7 @@ describe('search snapshot runtime readiness', () => {
       counts: {
         entities: 10,
         aliases: 10,
-        ambiguityRegistry: 2,
+        ambiguityRegistry: 0,
         nlMappings: 1,
         activeLtrModels: 1,
       },
@@ -141,6 +160,28 @@ describe('search snapshot runtime readiness', () => {
     expect(prodHealth.readiness?.search_snapshot_runtime?.required).toBe(true);
     expect(testHealth.readiness?.search_snapshot_runtime).toBeDefined();
     expect(testHealth.readiness?.search_snapshot_runtime?.required).toBe(false);
+  });
+
+  it('uses strict hash verification when the runtime readiness probe runs with a pool', async () => {
+    const config = parseEnv({
+      NODE_ENV: 'test',
+      WEBHOOK_SECRET: 'watchlist-secret-1234',
+      KILL_SWITCH_INJECTION_JUDGE: 'true',
+    });
+
+    const health = buildHealthRouteOptions(config, {
+      pool: { query: async () => ({ rows: [] }) } as never,
+    });
+
+    await expect(health.readiness?.search_snapshot_runtime?.check?.()).resolves.toBe('up');
+    expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledTimes(1);
+    expect(mockVerifySearchSnapshotRuntimeStateLive).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pool: expect.anything(),
+        vespaUrl: config.vespa.url,
+        strictHashes: true,
+      }),
+    );
   });
 
   it('canonicalizes runtime entity/alias/ambiguity rows into snapshot hash space', () => {

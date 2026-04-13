@@ -58,7 +58,15 @@ describe('dispatchSearchRouteExecution', () => {
   });
 
   it('entity route returns empty ranked results', async () => {
-    const entity = vi.fn(async () => ({ resolveResult: minimalResolve(), rankedResults: [] }));
+    const entity = vi.fn(async () => ({
+      resolveResult: minimalResolve(),
+      rankedResults: [],
+      effectiveRetrievalMode: 'entity_lookup',
+      retrievalKind: 'entity_lookup',
+      sparseExecuted: false,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: false,
+    }));
     const out = await dispatchSearchRouteExecution('entity', {
       executeEntity: entity,
       executeHybrid: async () => {
@@ -70,6 +78,11 @@ describe('dispatchSearchRouteExecution', () => {
     });
     expect(entity).toHaveBeenCalledOnce();
     expect(out.rankedResults).toEqual([]);
+    expect(out.effectiveRetrievalMode).toBe('entity_lookup');
+    expect(out.retrievalKind).toBe('entity_lookup');
+    expect(out.sparseExecuted).toBe(false);
+    expect(out.specializedRouteExecuted).toBeNull();
+    expect(out.usedCompiledExecution).toBe(false);
   });
 
   it('delegates hybrid and mixed', async () => {
@@ -77,10 +90,23 @@ describe('dispatchSearchRouteExecution', () => {
     const hybridOut = {
       resolveResult: minimalResolve(),
       rankedResults: [{ entityId: eid } as import('../../../../src/domain/ranking/model/ranked-result.js').RankedResult],
+      effectiveRetrievalMode: 'attribute_search' as const,
+      retrievalKind: 'generic_hybrid' as const,
+      sparseExecuted: true,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: false,
     };
     const hybrid = vi.fn(async () => hybridOut);
     const mixed = vi.fn(async () => hybridOut);
-    const ent = vi.fn(async () => ({ resolveResult: minimalResolve(), rankedResults: [] }));
+    const ent = vi.fn(async () => ({
+      resolveResult: minimalResolve(),
+      rankedResults: [],
+      effectiveRetrievalMode: 'entity_lookup',
+      retrievalKind: 'entity_lookup',
+      sparseExecuted: false,
+      specializedRouteExecuted: null,
+      usedCompiledExecution: false,
+    }));
 
     await expect(
       dispatchSearchRouteExecution('hybrid', {

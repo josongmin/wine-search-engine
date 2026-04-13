@@ -36,6 +36,16 @@ export interface OntologyNormalization {
   readonly source: 'exact' | 'fuzzy' | 'rule' | 'nlp';
 }
 
+export const OCCASION_ONTOLOGY_VERSION = 'occasion-v1-20260414' as const;
+
+export const OCCASION_ONTOLOGY_VALUES = [
+  'gift',
+  'party',
+  'anniversary',
+  'wedding',
+  'date_night',
+] as const;
+
 // ── Internal map entry type ───────────────────────────────────────────────────
 
 interface MappingEntry {

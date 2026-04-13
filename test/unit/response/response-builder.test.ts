@@ -184,12 +184,12 @@ describe('ResponseBuilder', () => {
       const response = builder.build(
         makeBaseParams({
           retrievalModeSource: 'api_override',
-          plannerSuggestedMode: 'entity',
+          plannerSuggestedMode: 'entity_lookup',
         }),
       );
 
       expect(response.engineDecision.retrievalModeSource).toBe('api_override');
-      expect(response.engineDecision.plannerSuggestedMode).toBe('entity');
+      expect(response.engineDecision.plannerSuggestedMode).toBe('entity_lookup');
     });
 
     it('does not expose funnel metrics on the public engineDecision contract', () => {
@@ -365,6 +365,137 @@ describe('ResponseBuilder', () => {
       expect(response.meta.degradationReasons).toEqual(['reranker_timeout']);
       expect(response.engineDecision.executionMode).toBe('degraded');
       expect(response.engineDecision.blockingEligible).toBe(false);
+    });
+
+    it('surfaces stable executionContract metadata when provided', () => {
+      const response = builder.build(
+        makeBaseParams({
+          retrievalModeSource: 'planner',
+          plannerSuggestedMode: 'attribute_search',
+          compiled: {
+            execution: {
+              effectiveRoute: 'hybrid',
+              effectiveRetrievalMode: 'attribute_search',
+              routeSource: 'planner',
+              budget: {
+                maxCandidates: 120,
+                enablePrecisionRerank: true,
+              },
+              provenancePolicy: {
+                requireIdentitySeal: true,
+                requireConstraintEvidence: true,
+                requireAnchorEvidence: false,
+              },
+            },
+          } as never,
+          executionContract: {
+            effectiveRetrievalMode: 'attribute_search',
+            retrievalKind: 'generic_hybrid',
+            sparseExecuted: true,
+            specializedRouteExecuted: null,
+            usedCompiledExecution: true,
+            provenanceClosure: {
+              policy: {
+                requireIdentitySeal: true,
+                requireConstraintEvidence: true,
+                requireAnchorEvidence: false,
+              },
+              preRank: {
+                candidateCount: 12,
+                identityEvidenceSatisfied: false,
+                constraintEvidenceSatisfied: true,
+                anchorEvidenceSatisfied: true,
+                matchedConstraintAttributes: ['grape_primary'],
+                unmetConstraintAttributes: [],
+                anchorSignalTypes: [],
+              },
+              postRank: {
+                candidateCount: 5,
+                identityEvidenceSatisfied: false,
+                constraintEvidenceSatisfied: true,
+                anchorEvidenceSatisfied: true,
+                matchedConstraintAttributes: ['grape_primary'],
+                unmetConstraintAttributes: [],
+                anchorSignalTypes: [],
+              },
+              missing: ['identity_evidence'],
+              satisfied: false,
+            },
+            admissionClosure: {
+              required: {
+                identitySeal: true,
+                constraintEvidence: true,
+                anchorEvidence: false,
+              },
+              satisfied: {
+                identitySeal: true,
+                constraintEvidence: true,
+                anchorEvidence: true,
+              },
+              allSatisfied: true,
+            },
+          },
+        }),
+      );
+
+      expect(response.meta.executionContract).toEqual({
+        effectiveRetrievalMode: 'attribute_search',
+        retrievalModeSource: 'planner',
+        plannerSuggestedMode: 'attribute_search',
+        retrievalKind: 'generic_hybrid',
+        sparseExecuted: true,
+        specializedRouteExecuted: null,
+        usedCompiledExecution: true,
+        budget: {
+          maxCandidates: 120,
+          enablePrecisionRerank: true,
+        },
+        provenancePolicy: {
+          requireIdentitySeal: true,
+          requireConstraintEvidence: true,
+          requireAnchorEvidence: false,
+        },
+        provenanceClosure: {
+          policy: {
+            requireIdentitySeal: true,
+            requireConstraintEvidence: true,
+            requireAnchorEvidence: false,
+          },
+          preRank: {
+            candidateCount: 12,
+            identityEvidenceSatisfied: false,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            matchedConstraintAttributes: ['grape_primary'],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+          postRank: {
+            candidateCount: 5,
+            identityEvidenceSatisfied: false,
+            constraintEvidenceSatisfied: true,
+            anchorEvidenceSatisfied: true,
+            matchedConstraintAttributes: ['grape_primary'],
+            unmetConstraintAttributes: [],
+            anchorSignalTypes: [],
+          },
+          missing: ['identity_evidence'],
+          satisfied: false,
+        },
+        admissionClosure: {
+          required: {
+            identitySeal: true,
+            constraintEvidence: true,
+            anchorEvidence: false,
+          },
+          satisfied: {
+            identitySeal: true,
+            constraintEvidence: true,
+            anchorEvidence: true,
+          },
+          allSatisfied: true,
+        },
+      });
     });
   });
 

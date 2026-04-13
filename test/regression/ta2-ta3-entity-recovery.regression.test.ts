@@ -170,8 +170,8 @@ describe("AnchorCandidate.source union (TA2-2)", () => {
 // ─── TA2-3: buildResolverCandidatesFromGenerator module exports ───────────────
 
 describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
-  it('anchor entityId가 getDocument에서 null 반환 시 해당 candidate 조용히 스킵', async () => {
-    // 실질 검증: getDocument가 null을 반환하면 그 ID는 출력에서 빠져야 함
+  it('anchor entityId가 getDocument에서 null 반환 시 hydration 불완전이면 reject', async () => {
+    // 실질 검증: 일부 ID만 복원되면 조용히 축소된 후보를 내지 말고 실패해야 함
     const { buildResolverCandidatesFromGenerator } = await import(
       '../../src/application/search/search-usecase-resolver-candidates.js'
     );
@@ -182,15 +182,14 @@ describe('buildResolverCandidatesFromGenerator module (TA2-3)', () => {
       normalizedQuery: 'test',
       anchors: [makeAnchor({ candidateEntityIds: [existingId, missingId] })],
     };
-    const result = await buildResolverCandidatesFromGenerator(input, {
+    await expect(buildResolverCandidatesFromGenerator(input, {
       getDocument: async (id) =>
         String(id) === String(existingId)
           ? { entityId: id, entityType: 'wine', canonicalLabel: 'Exists' }
           : null,
+    })).rejects.toMatchObject({
+      code: 'INTERNAL_INCONSISTENCY',
     });
-    // missingId는 스킵, existingId만 살아남아야 함
-    expect(result).toHaveLength(1);
-    expect(String(result[0]?.entityId)).toBe(String(existingId));
   });
 
   it('legacy buildResolverCandidatesFromPlan API 제거 확인 — 마이그레이션 퇴행 방지', async () => {
@@ -1063,9 +1062,9 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
     }
   });
 
-  it('P0-2-M: missing entity from lookup is silently skipped (no throw, no ghost candidate)', async () => {
+  it('P0-2-M: missing entity from lookup now fails closed instead of skipping silently', async () => {
     // Some IDs from anchors may not exist in the index (deleted wine, ETL gap).
-    // buildResolverCandidatesFromGenerator must skip them silently.
+    // The production path must fail loudly instead of returning a partial set.
     const lookup = makeEntityLookup([['real-wine', 'Real Wine']]); // ghost-wine not in lookup
     const input: EntityCandidateGeneratorInput = {
       rawQuery: 'test',
@@ -1076,10 +1075,9 @@ describe('P0-2 (TA2-T2): noisy evidence formalization — source provenance end-
       ],
     };
 
-    const candidates = await buildResolverCandidatesFromGenerator(input, lookup);
-
-    expect(candidates).toHaveLength(1);
-    expect(String(candidates[0]?.entityId)).toBe('real-wine');
+    await expect(buildResolverCandidatesFromGenerator(input, lookup)).rejects.toMatchObject({
+      code: 'INTERNAL_INCONSISTENCY',
+    });
   });
 
   it('P0-2-N: preloadedDocs cache — entity lookup not called for cached IDs', async () => {

@@ -19,6 +19,7 @@ import { logSearchEvent } from '../../observability/log-search-event.js';
 import { pipelineDebug } from '../../observability/request-pipeline-debug.js';
 import { planToObservabilitySlice } from '../../domain/query/model/query-observability-vocab.js';
 import { compileFromLegacyPlan } from './search-usecase-compiled-fallback.js';
+import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
 import type { RequestExecutionContext } from '../../domain/shared/request-execution-context.js';
 
 /** Hard timeout for decomposed (multi-sub-query) search execution. */
@@ -43,6 +44,11 @@ export interface SearchPreRoutePhaseContext extends RequestExecutionContext {
   readonly cacheService?: SearchResponseCachePort | undefined;
   readonly cacheLookupRuntimeState?: CacheLookupRuntimeState | undefined;
   readonly decomposedSearch?: DecomposedSearchUseCasePort | undefined;
+  /**
+   * Explicit test / special-seam escape hatch for plan-only planners.
+   * Production search paths must provide planWithCompiled and should not rely on this.
+   */
+  readonly allowCompiledFallback?: boolean | undefined;
 }
 
 /**
@@ -148,22 +154,27 @@ export async function runSearchPreRoutePhase(
     ...(ctx.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
   });
   let plan: QueryPlanV1;
-  let compiled: CompiledWineQuery;
+  let compiled: CompiledWineQuery | undefined;
   if (ctx.queryPlanner.planWithCompiled !== undefined) {
     const result = await ctx.queryPlanner.planWithCompiled(sanitizedQuery, plannerContext);
     plan = result.v1;
-    compiled = result.compiled;
-  } else {
+    if (result.compiled !== undefined) {
+      compiled = result.compiled;
+    } else if (ctx.allowCompiledFallback === true) {
+      compiled = compileFromLegacyPlan(plan);
+    } else {
+      throw new Error(
+        'Search pre-route requires QueryPlanner.planWithCompiled() to return a CompiledWineQuery; ' +
+        'set allowCompiledFallback=true only for tests or explicit special seams.',
+      );
+    }
+  } else if (ctx.allowCompiledFallback === true) {
     plan = await ctx.queryPlanner.plan(sanitizedQuery, plannerContext);
     compiled = compileFromLegacyPlan(plan);
-    pipelineDebug(
-      {
-        step: 'pre_route.plan_compiled_fallback',
-        note: 'planWithCompiled unavailable — using V1→V2 reconstruction',
-        plan_route: plan.route,
-        compiled_route: compiled.execution.effectiveRoute,
-      },
-      'pipeline pre_route compiled fallback',
+  } else {
+    throw new Error(
+      'Search pre-route requires QueryPlanner.planWithCompiled(); ' +
+      'set allowCompiledFallback=true only for tests or explicit special seams.',
     );
   }
 
@@ -182,6 +193,7 @@ export async function runSearchPreRoutePhase(
   //   Override applies per (attribute, operator) pair — so agent's exclude_grapes
   //   replaces any NL-extracted exclude for the same attribute, but does NOT
   //   override a different attribute like wine_type.
+  let structuredFiltersMerged = false;
   if (ctx.request.filters !== undefined && ctx.request.filters.length > 0) {
     // Attributes covered by structured agent filters (operator-aware override).
     // For 'exclude'/'not_in' operators, override only same-operator NL constraints.
@@ -201,6 +213,36 @@ export async function runSearchPreRoutePhase(
         hard: [...nonOverridden, ...ctx.request.filters],
       },
     };
+    structuredFiltersMerged = true;
+  }
+
+  if (structuredFiltersMerged) {
+    const admissionContext = {
+      requires_identity_seal: plan.admission_context?.requires_identity_seal ?? false,
+      requires_constraint_evidence: plan.constraints.hard.length > 0,
+      requires_anchor_evidence: plan.admission_context?.requires_anchor_evidence ?? false,
+    } as const;
+    plan = {
+      ...plan,
+      admission_context: admissionContext,
+    };
+    if (compiled !== undefined) {
+      compiled = {
+        ...compiled,
+        query: {
+          ...compiled.query,
+          constraints: plan.constraints,
+          retrievalPlan: buildRetrievalPlan(plan.constraints),
+        },
+        execution: {
+          ...compiled.execution,
+          provenancePolicy: {
+            ...compiled.execution.provenancePolicy,
+            requireConstraintEvidence: admissionContext.requires_constraint_evidence,
+          },
+        },
+      };
+    }
   }
 
   logSearchEvent({

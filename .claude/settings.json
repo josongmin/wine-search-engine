@@ -1,8 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm run *)",
-      "Bash(npm ci)",
+      "Bash(pnpm run *)",
+      "Bash(pnpm install*)",
+      "Bash(pnpm exec *)",
       "Bash(npx *)",
       "Bash(node *)",
       "Bash(git status)",

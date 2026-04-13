@@ -12,6 +12,7 @@ import type { RankerPort } from '../../../../src/domain/ranking/port/ranker.port
 import type { QueryPlanV1 } from '../../../../src/domain/query/model/query-plan.js';
 import type { RankerRuntimeSignal } from '../../../../src/domain/ranking/model/ranking-runtime-signal.js';
 import { createEntityId } from '../../../../src/domain/shared/types/index.js';
+import { MixedRouteDegradationError } from '../../../../src/domain/mixed/model/mixed-degradation.js';
 
 function minimalPlan(): QueryPlanV1 {
   return {
@@ -140,5 +141,84 @@ describe('MixedSolver', () => {
     });
     expect(result.fallbackReason).toBe('mixed_similar_retrieval_fallback');
     expect(result.rankedResults).toHaveLength(0);
+  });
+
+  it('fails closed when constraint overlay throws', async () => {
+    const anchorResolver: AnchorResolverPort = {
+      resolve: async () => ({
+        entityId: createEntityId('anchor-1'),
+        canonicalLabel: 'Opus One',
+        region: 'Napa Valley',
+        grapes: ['Cabernet Sauvignon'],
+      }),
+    };
+    const anchorProfiler: AnchorProfiler = {
+      buildProfile: (entity, confidence) => ({
+        ...entity,
+        anchorConfidence: confidence,
+      }),
+    } as AnchorProfiler;
+    const similarRetrieval: SimilarRetrievalPort = {
+      retrieveSimilar: async () => [{ entityId: createEntityId('candidate-1') } as never],
+    };
+    const candidateAttributes: CandidateAttributePort = {
+      loadAttributes: async () => new Map(),
+      loadSimilarityCandidate: async () => undefined,
+    };
+    const similarityScorer: SimilarityScorer = {
+      score: () => 0.5,
+    } as SimilarityScorer;
+    const constraintOverlay: ConstraintOverlay = {
+      apply: () => {
+        throw new Error('overlay exploded');
+      },
+    } as ConstraintOverlay;
+    const ranker: RankerPort = {
+      rank: async () => ({
+        results: [{
+          entityId: createEntityId('candidate-1'),
+          canonicalLabel: 'Candidate',
+          finalScore: 0.7,
+          rank: 1,
+          matchedConstraints: [],
+          unmetConstraints: [],
+          inferredConstraints: [],
+          evidenceItems: [],
+          componentScores: {
+            entityIntegrity: 1,
+            semantic: 0.5,
+            hardConstraintPass: true,
+            softConstraint: 0.5,
+            attributeAlignment: 0.5,
+            preferenceAlignment: 0.5,
+            popularity: 0.5,
+            availability: 1,
+            uncertaintyPenalty: 0,
+          },
+        } as never],
+        metadata: {
+          coarsePruneSummary: undefined,
+          rerankExecuted: false,
+          rerankGateReason: undefined,
+          runtimeSignal: undefined,
+          preRerankTop5: [],
+        },
+      }),
+      getLastFunnelMetrics: () => undefined,
+    };
+
+    const solver = new MixedSolver(
+      anchorResolver,
+      anchorProfiler,
+      similarRetrieval,
+      candidateAttributes,
+      similarityScorer,
+      constraintOverlay,
+      ranker,
+    );
+
+    await expect(solver.solve(minimalPlan(), {} as never)).rejects.toMatchObject<Partial<MixedRouteDegradationError>>({
+      reason: 'mixed_constraint_overlay_failed',
+    });
   });
 });

@@ -1,6 +1,8 @@
 import type { DecisionStatus, NextAction, DecisionSnapshot } from '../../shared/types/index.js';
 import type { FailureReason } from '../../decision/model/failure-reason.js';
 import type { AbstainReason } from '../../query/model/abstain-decision.js';
+import type { ExecutionRetrievalMode } from '../../query/model/engine-execution-contract.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 
 /**
  * The external-facing decision record included in every {@link SearchResponseV1}.
@@ -16,8 +18,8 @@ export interface EngineDecision {
   /** Prescribed next action for the caller. */
   readonly nextAction: NextAction;
 
-  /** The execution route that handled this query (e.g. "hybrid", "exact"). */
-  readonly route: string;
+  /** The execution route that handled this query. */
+  readonly route: QueryRoute;
 
   /**
    * Calibrated decision confidence in [0, 1].
@@ -81,6 +83,6 @@ export interface EngineDecision {
    * The retrieval mode the planner originally suggested, before any
    * API-level override was applied.
    */
-  readonly plannerSuggestedMode?: string | undefined;
+  readonly plannerSuggestedMode?: ExecutionRetrievalMode | undefined;
 
 }

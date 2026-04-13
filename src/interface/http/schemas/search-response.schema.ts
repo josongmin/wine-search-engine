@@ -288,6 +288,76 @@ export const SearchResponseMetaSchema = z.object({
     ])
     .nullable()
     .optional(),
+  execution_contract: z.object({
+    effective_retrieval_mode: z.enum(RETRIEVAL_MODES),
+    retrieval_mode_source: z.enum(['planner', 'api_override']),
+    planner_suggested_mode: z.enum(RETRIEVAL_MODES),
+    retrieval_kind: z.enum([
+      'entity_lookup',
+      'generic_hybrid',
+      'specialized_hybrid',
+      'mixed_similarity',
+    ]),
+    sparse_executed: z.boolean(),
+    specialized_route_executed: z
+      .enum(['producer_browse', 'region_browse', 'compare_candidates'])
+      .nullable()
+      .optional(),
+    used_compiled_execution: z.boolean(),
+    budget: z.object({
+      max_candidates: z.number().int().nonnegative().max(MAX_QUERY_BUDGET_CANDIDATES),
+      enable_precision_rerank: z.boolean(),
+    }).strict().optional(),
+    provenance_policy: z.object({
+      require_identity_seal: z.boolean(),
+      require_constraint_evidence: z.boolean(),
+      require_anchor_evidence: z.boolean(),
+    }).strict().optional(),
+    provenance_closure: z.object({
+      policy: z.object({
+        require_identity_seal: z.boolean(),
+        require_constraint_evidence: z.boolean(),
+        require_anchor_evidence: z.boolean(),
+      }).strict(),
+      pre_rank: z.object({
+        candidate_count: z.number().int().nonnegative(),
+        identity_evidence_satisfied: z.boolean(),
+        constraint_evidence_satisfied: z.boolean(),
+        anchor_evidence_satisfied: z.boolean(),
+        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+      }).strict(),
+      post_rank: z.object({
+        candidate_count: z.number().int().nonnegative(),
+        identity_evidence_satisfied: z.boolean(),
+        constraint_evidence_satisfied: z.boolean(),
+        anchor_evidence_satisfied: z.boolean(),
+        matched_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        unmet_constraint_attributes: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+        anchor_signal_types: z.array(z.string()).max(MAX_SEARCH_SHORT_STRING_LIST),
+      }).strict(),
+      missing: z.array(z.enum([
+        'identity_evidence',
+        'constraint_evidence',
+        'anchor_evidence',
+      ])),
+      satisfied: z.boolean(),
+    }).strict().optional(),
+    admission_closure: z.object({
+      required: z.object({
+        identity_seal: z.boolean(),
+        constraint_evidence: z.boolean(),
+        anchor_evidence: z.boolean(),
+      }).strict(),
+      satisfied: z.object({
+        identity_seal: z.boolean(),
+        constraint_evidence: z.boolean(),
+        anchor_evidence: z.boolean(),
+      }).strict(),
+      all_satisfied: z.boolean(),
+    }).strict().optional(),
+  }).strict().optional(),
   retrieval_provenance_slices: z.array(z.object({
     query_id: z.string().min(1),
     candidate_entity_id: z.string().min(1),

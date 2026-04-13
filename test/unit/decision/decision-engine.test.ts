@@ -3,7 +3,12 @@ import { DecisionEngine } from '../../../src/domain/decision/service/decision-en
 import { DEFAULT_THRESHOLD_PROFILE } from '../../../src/domain/query/model/threshold-profile.js';
 import type { ThresholdStore } from '../../../src/domain/query/port/threshold-store.port.js';
 import type { ThresholdProfileV1 } from '../../../src/domain/query/model/threshold-profile.js';
-import type { DecisionInput } from '../../../src/domain/decision/model/decision-input.js';
+import {
+  hasAnchorEvidence,
+  hasConstraintEvidence,
+  hasIdentityEvidence,
+  type DecisionInput,
+} from '../../../src/domain/decision/model/decision-input.js';
 import type { DecisionSnapshot } from '../../../src/domain/shared/types/index.js';
 import type { QueryPlanV1 } from '../../../src/domain/query/model/query-plan.js';
 import type { EntityResolveResult } from '../../../src/domain/resolver/model/resolve-result.js';
@@ -141,19 +146,69 @@ function makeQueryPlan(overrides?: {
   };
 }
 
+function makeProvenanceContract(
+  input: {
+    readonly queryPlan?: QueryPlanV1 | undefined;
+    readonly evidenceSummary?: DecisionInput['evidenceSummary'] | undefined;
+    readonly provenancePolicy?: DecisionInput['provenanceContract']['policy'] | undefined;
+    readonly resolverResult?: EntityResolveResult | undefined;
+  } = {},
+): DecisionInput['provenanceContract'] {
+  const queryPlan = input.queryPlan ?? makeQueryPlan();
+  const evidenceSummary = input.evidenceSummary;
+  const policy = input.provenancePolicy ?? {
+    requireIdentitySeal: queryPlan.intent === 'entity_exact',
+    requireConstraintEvidence: queryPlan.constraints.hard.length > 0,
+    requireAnchorEvidence: queryPlan.route === 'mixed' && queryPlan.anchors.length > 0,
+  };
+
+  return {
+    policy,
+    observed: {
+      identityEvidenceSatisfied: hasIdentityEvidence(evidenceSummary),
+      constraintEvidenceSatisfied: hasConstraintEvidence(evidenceSummary),
+      anchorEvidenceSatisfied: hasAnchorEvidence(evidenceSummary),
+      topEntityPresent: input.resolverResult?.topEntity !== undefined,
+      rankedTopResultPresent: false,
+      matchedConstraintAttributes: [],
+      unmetConstraintAttributes: [],
+      anchorSignalTypes: [],
+    },
+    missing: [
+      ...(policy.requireIdentitySeal && !hasIdentityEvidence(evidenceSummary)
+        ? ['identity_evidence' as const]
+        : []),
+      ...(policy.requireConstraintEvidence && !hasConstraintEvidence(evidenceSummary)
+        ? ['constraint_evidence' as const]
+        : []),
+      ...(policy.requireAnchorEvidence && !hasAnchorEvidence(evidenceSummary)
+        ? ['anchor_evidence' as const]
+        : []),
+    ],
+  };
+}
+
 // ── Base DecisionInput factory ────────────────────────────────────────────────
 function makeDecisionInput(overrides?: Partial<DecisionInput>): DecisionInput {
+  const queryPlan = overrides?.queryPlan ?? makeQueryPlan();
   const resolverResult = overrides?.resolverResult ?? makeResolverResult();
+  const evidenceSummary = overrides?.evidenceSummary ?? {
+    identityEvidencePresent: true,
+    constraintEvidencePresent: true,
+    anchorEvidencePresent: false,
+  };
   return {
-    queryPlan: makeQueryPlan(),
+    queryPlan,
     resolverResult,
     policy: makePolicy(),
     uncertainty: makeUncertainty(),
-    evidenceSummary: {
-      identityEvidencePresent: true,
-      constraintEvidencePresent: true,
-      anchorEvidencePresent: false,
-    },
+    evidenceSummary,
+    provenanceContract: makeProvenanceContract({
+      queryPlan,
+      evidenceSummary,
+      provenancePolicy: overrides?.provenanceContract?.policy,
+      resolverResult,
+    }),
     ...(resolverResult.conformalSetSize !== undefined
       ? { conformalSetSize: resolverResult.conformalSetSize }
       : {}),

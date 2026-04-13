@@ -58,6 +58,7 @@ function makeBaseContext(
     constraintSAT: {
       check: vi.fn().mockReturnValue({ contradicted: false }),
     } as never,
+    allowCompiledFallback: true,
     ...overrides,
   };
 }

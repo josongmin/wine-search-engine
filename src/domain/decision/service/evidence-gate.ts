@@ -2,11 +2,8 @@
  * E6-U2: Quality Gate Input Contract (lock)
  *
  * EvidenceGate is the SINGLE quality gate owner. Input fields it reads:
- *   - EvidenceSummary.hasIdentityEvidence — entity identity signal present
- *   - EvidenceSummary.hasConstraintEvidence — constraint coverage present
- *   - EvidenceSummary.hasAnchorEvidence — anchor similarity present
- *   - DecisionInput.queryPlan.queryClass — route family for obligation check
- *   - DecisionInput.evidenceObligation — route-level admission obligations
+ *   - DecisionInput.provenanceContract.policy — compiled execution obligations
+ *   - DecisionInput.provenanceContract.observed — observed evidence satisfaction
  *
  * Do NOT combine explanation policy (explanation-obligation.ts) with this
  * quality gate — they are separate concerns:
@@ -17,10 +14,7 @@
  */
 import type { DecisionStatus, NextAction } from '../../shared/types/index.js';
 import {
-  type EvidenceSummary,
-  hasAnchorEvidence,
-  hasConstraintEvidence,
-  hasIdentityEvidence,
+  type DecisionProvenanceContract,
 } from '../model/decision-input.js';
 
 /**
@@ -70,24 +64,29 @@ export class EvidenceGate {
    * Checks whether the evidence obligations are met for a given decision status.
    *
    * @param decisionStatus - The proposed decision status to validate.
-   * @param evidenceSummary - Summary of available evidence. If absent, all obligations fail.
-   * @param hasConstraints - Whether the query has constraints that need evidence.
-   * @param hasAnchor - Whether the query has an anchor entity that needs evidence.
+   * @param provenanceContract - Compiled-first evidence closure contract.
    * @returns The gate result, including any downgrade directive.
    */
   check(
     decisionStatus: DecisionStatus,
-    evidenceSummary?: EvidenceSummary,
-    hasConstraints?: boolean,
-    hasAnchor?: boolean,
+    provenanceContract?: DecisionProvenanceContract,
   ): EvidenceGateResult {
     // Only resolved decisions are subject to evidence obligations.
     if (decisionStatus !== 'resolved') {
       return { passed: true };
     }
 
+    if (provenanceContract === undefined) {
+      return {
+        passed: false,
+        downgradeTo: 'ambiguous',
+        downgradeAction: 'clarify',
+        reason: 'EVIDENCE_GATE_NO_IDENTITY: resolved without provenance contract',
+      };
+    }
+
     // Rule 1: resolved + no identity evidence → downgrade
-    if (!hasIdentityEvidence(evidenceSummary)) {
+    if (provenanceContract.observed.identityEvidenceSatisfied !== true) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',
@@ -97,7 +96,10 @@ export class EvidenceGate {
     }
 
     // Rule 2: resolved + constraints present but no constraint evidence → downgrade
-    if (hasConstraints === true && !hasConstraintEvidence(evidenceSummary)) {
+    if (
+      provenanceContract.policy.requireConstraintEvidence &&
+      provenanceContract.observed.constraintEvidenceSatisfied !== true
+    ) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',
@@ -107,7 +109,10 @@ export class EvidenceGate {
     }
 
     // Rule 3: anchor present but no anchor evidence → downgrade
-    if (hasAnchor === true && !hasAnchorEvidence(evidenceSummary)) {
+    if (
+      provenanceContract.policy.requireAnchorEvidence &&
+      provenanceContract.observed.anchorEvidenceSatisfied !== true
+    ) {
       return {
         passed: false,
         downgradeTo: 'ambiguous',

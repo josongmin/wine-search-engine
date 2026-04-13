@@ -6,6 +6,7 @@ import { buildSearchSnapshot } from '../../../scripts/etl/build-search-snapshot.
 import { parseNdjson } from '../../../scripts/etl/ndjson.js';
 import type { EntitySnapshotRecord } from '../../../scripts/etl/search-snapshot-schema.js';
 import type { EnrichedSilverRecord } from '../../../scripts/etl/types.js';
+import { SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX } from '../../../scripts/etl/snapshot-entity-identity.js';
 
 async function makeTempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'build-search-snapshot-'));
@@ -51,7 +52,7 @@ function makeRecord(): EnrichedSilverRecord {
 describe('buildSearchSnapshot', () => {
   it('emits entity artifact and manifest counts for runtime entity plane', async () => {
     const dir = await makeTempDir();
-    const inputPath = path.join(dir, 'silver-docquery.ndjson');
+    const inputPath = path.join(dir, 'silver-trackc.ndjson');
     const outputDir = path.join(dir, 'search-snapshots');
     const nlMappingsPath = path.join(dir, 'nl-mappings.json');
 
@@ -84,8 +85,10 @@ describe('buildSearchSnapshot', () => {
     });
 
     expect(result.manifest.counts.documents).toBe(1);
+    expect(result.manifest.counts.vespaFeed).toBe(1);
     expect(result.manifest.counts.entities).toBe(1);
     expect(result.manifest.hashes.entities).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.manifest.artifacts.vespaFeedNdjson).toMatch(/vespa-feed\.ndjson$/);
 
     const entitiesRaw = await fs.readFile(result.manifest.artifacts.entitiesNdjson, 'utf8');
     const entityRows = parseNdjson<EntitySnapshotRecord>(
@@ -94,14 +97,15 @@ describe('buildSearchSnapshot', () => {
     ).records;
 
     expect(entityRows).toHaveLength(1);
+    expect(entityRows[0]?.entityId.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
     expect(entityRows[0]).toMatchObject({
-      entityId: 'opus-one-2018',
       entityType: 'wine',
       canonicalLabel: 'Opus One 2018',
     });
     expect(entityRows[0]?.identitySignature).toMatch(/^[a-f0-9]{64}$/);
     expect(entityRows[0]?.metadata).toMatchObject({
       identityResolution: 'gold_overlay',
+      benchmarkEntityId: 'opus-one-2018',
       region: 'Napa Valley',
       sourceRecordRefs: [{ sourceSystem: 'vivino-silver', sourceRecordId: 'wine-opus-one' }],
     });

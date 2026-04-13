@@ -9,75 +9,33 @@ Task 5 and Task 6 improve wine entity matching and embedding quality through sch
 
 ## Task 5: Schema Structuring Improvements (wine_entity.sd)
 
-### Changes
+### Current Contract
 
-#### 1. Grape Variety Hierarchy
+이 문서의 초기 초안은 `grape_hierarchy`, `producer_aliases`, `flavor_profile_structured` 같은 실험 스키마를 전제로 썼지만, 현재 운영 계약은 그 대신 retrieval contract와 Vespa mapping SSOT에 맞춘 아래 필드를 사용합니다.
 
-Added fields for hierarchical grape matching to enable queries like "Pinot" to match Pinot Noir, Pinot Grigio, Pinot Blanc:
+#### 1. Retrieval Summary / Attribute Fields
 
-```sd
-field grape_family type string {
-  indexing: summary | attribute | index
-  index: enable-bm25
-}
+현재 검색 계약에서 운영하는 구조화 필드는 다음 축입니다.
 
-field grape_hierarchy type array<string> {
-  indexing: summary | attribute | index
-  index: enable-bm25
-}
-```
+- `grape_family`
+- `region_hierarchy`
+- `soil_type`
+- `producer_type`
+- `price_band_numeric`
+- `flavor_profiles`
 
-**Synonyms defined in `search {}` block:**
-- pinot-family: "pinot noir", "pinot grigio", "pinot gris", "pinot blanc", "pinot"
-- cabernet-family: "cabernet sauvignon", "cabernet franc", "cabernet"
-- merlot-family, tempranillo-family, etc.
+도메인 계약은 camelCase (`grapeFamily`, `regionHierarchy`, `soilType`, `producerType`)를 쓰고, Vespa field mapping에서 snake_case로 변환합니다.
 
-#### 2. Region Hierarchical Matching
+#### 2. No Heuristic Synthetic Population
 
-Added fields and synonyms for regional matching:
+- `grape_family` / `region_hierarchy`는 authoritative upstream 값이 있을 때만 기록합니다.
+- `soil_type` / `producer_type`도 synthetic default를 만들지 않고, upstream 값이 없으면 omit가 정식 동작입니다.
+- 과거 문서에 있던 heuristic synonym expansion이나 first-token fallback은 현재 기준 계약이 아닙니다.
 
-```sd
-field region_hierarchy type array<string> {
-  indexing: summary | attribute | index
-  index: enable-bm25
-}
-```
+#### 3. Price / Flavor Fields
 
-**Region synonyms:**
-- france-regions: Bordeaux, Burgundy, Loire Valley, Alsace, Rhone, Provence, Champagne
-- italy-regions: Tuscany, Piedmont, Veneto, Umbria, Sicily
-- spain-regions: Rioja, Ribera del Duero, Priorat, Penedes
-- usa-regions: Napa Valley, Sonoma, Paso Robles, Santa Barbara
-
-#### 3. Producer Synonyms
-
-Added standardized producer name mappings:
-
-```sd
-field producer_aliases type array<string> {
-  indexing: summary | attribute | index
-  index: enable-bm25
-}
-```
-
-**Producer honorific synonyms:**
-- Château = Domaine = Bodega = Cantina = Azienda = Estate
-
-#### 4. Explicit Price Band & Flavor Profile Fields
-
-Added numeric and structured fields for better filtering and matching:
-
-```sd
-# Price band numeric field for range queries
-field price_band_numeric type int {
-  indexing: summary | attribute
-}
-
-# Flavor profile categories — structured format
-field flavor_profile_structured type string {
-  indexing: summary | attribute
-}
-```
+- `price_band_numeric`는 `value=1`, `mid=2`, `premium=3`, `luxury=4` ordinal encoding입니다.
+- flavor 쪽은 `flavor_profile_structured` 단일 문자열이 아니라 `flavor_profiles` 배열 계약을 사용합니다.
 
 ### Deployment
 
@@ -88,7 +46,7 @@ After updating `wine_entity.sd`, Vespa must be re-deployed:
 vespa deploy vespa/app
 
 # Re-index wine documents with new fields
-npm run ingest  # Or appropriate re-indexing command
+pnpm run ingest  # Or appropriate re-indexing command
 ```
 
 ### Impact
@@ -109,7 +67,7 @@ Fine-tuning BGE-M3 embeddings on the wine domain improves retrieval quality by a
 #### 1. Load Golden Queries & Wine Documents
 
 ```bash
-npm run finetuning:prepare
+pnpm run finetuning:prepare
 ```
 
 This script:
@@ -234,12 +192,12 @@ After fine-tuning:
 3. **Re-index Wine Embeddings**
 
    ```bash
-   npm run ingest  # Generate new embeddings with fine-tuned model
+   pnpm run ingest  # Generate new embeddings with fine-tuned model
    ```
 
 ### Next Steps
 
-1. Run data preparation: `npm run finetuning:prepare`
+1. Run data preparation: `pnpm run finetuning:prepare`
 2. Verify generated JSONL files in `data/fine-tune-dataset/`
 3. Install Python dependencies and run fine-tuning script
 4. Deploy fine-tuned model to embedding service

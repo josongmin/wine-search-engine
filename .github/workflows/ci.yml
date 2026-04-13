@@ -22,10 +22,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .eslintcache
-          key: ${{ runner.os }}-eslint-${{ hashFiles('package-lock.json','eslint.config.js') }}
+          key: ${{ runner.os }}-eslint-${{ hashFiles('pnpm-lock.yaml','eslint.config.js') }}
           restore-keys: |
             ${{ runner.os }}-eslint-
-      - run: npm run lint
+      - run: pnpm run lint
 
   typecheck:
     runs-on: ubuntu-latest
@@ -35,10 +35,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .tsbuildinfo
-          key: ${{ runner.os }}-tsc-noemit-${{ hashFiles('tsconfig.json','tsconfig.build.json','package-lock.json') }}
+          key: ${{ runner.os }}-tsc-noemit-${{ hashFiles('tsconfig.json','tsconfig.build.json','pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-tsc-noemit-
-      - run: npm run typecheck
+      - run: pnpm run typecheck
 
   test-unit:
     runs-on: ubuntu-latest
@@ -46,7 +46,7 @@ jobs:
       VITEST_MAX_THREADS: 4
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:coverage
+      - run: pnpm run test:coverage
 
   test-integration:
     runs-on: ubuntu-latest
@@ -68,8 +68,8 @@ jobs:
         working-directory: ${{ github.workspace }}/wine-engine-fixture
         run: npx tsx scripts/generate-target-entity-map.ts --verify
       - name: Engine fixture governance (FixtureLoader + suite contracts)
-        run: npm run eval:fixtures:verify
-      - run: npm run test:integration
+        run: pnpm run eval:fixtures:verify
+      - run: pnpm run test:integration
 
   test-watchlist:
     runs-on: ubuntu-latest
@@ -77,7 +77,7 @@ jobs:
       VITEST_MAX_THREADS: 4
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:watchlist
+      - run: pnpm run test:watchlist
 
   test-e2e-contract:
     runs-on: ubuntu-latest
@@ -85,7 +85,7 @@ jobs:
       VITEST_MAX_FORKS: 4
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:e2e:contract
+      - run: pnpm run test:e2e:contract
 
   test-e2e-runtime:
     runs-on: ubuntu-latest
@@ -93,13 +93,13 @@ jobs:
       VITEST_MAX_FORKS: 4
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:e2e:runtime
+      - run: pnpm run test:e2e:runtime
 
   test-ingest-contract:
     runs-on: ubuntu-latest
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:ingest:contract
+      - run: pnpm run test:ingest:contract
 
   security-semgrep:
     runs-on: ubuntu-latest
@@ -113,7 +113,7 @@ jobs:
       - name: Install Semgrep CLI
         run: python -m pip install --upgrade pip semgrep
       - name: Run Semgrep security scan
-        run: npm run semgrep
+        run: pnpm run semgrep
 
   verification-core:
     runs-on: ubuntu-latest
@@ -122,22 +122,22 @@ jobs:
     steps:
       - uses: ./.github/actions/setup-node-ci
       - name: Noisy entity gate + baseline (no duplicate typecheck/e2e)
-        run: npm run test:verification:noisy
+        run: pnpm run test:verification:noisy
       - name: CI summary
         run: |
           {
             echo "## Noisy verification (CI)"
             echo ""
-            echo "- Gate: \`npm run test:verification:noisy\` (= \`eval:noisy:gate\` + assert on same /tmp artifact; after contract/runtime/ingest core lanes)"
-            echo "- Local full gate: \`npm run test:verification:core\` (= typecheck + contract + runtime + ingest-contract + noisy)"
-            echo "- Standalone smoke JSON: \`npm run eval:noisy:smoke\`"
+            echo "- Gate: \`pnpm run test:verification:noisy\` (= \`eval:noisy:gate\` + assert on same /tmp artifact; after contract/runtime/ingest core lanes)"
+            echo "- Local full gate: \`pnpm run test:verification:core\` (= typecheck + contract + runtime + ingest-contract + noisy)"
+            echo "- Standalone smoke JSON: \`pnpm run eval:noisy:smoke\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   verify-http-contracts:
     runs-on: ubuntu-latest
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run verify:http-contracts
+      - run: pnpm run verify:http-contracts
 
   verify-splits:
     runs-on: ubuntu-latest
@@ -151,14 +151,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run test:quality
+      - run: pnpm run test:quality
 
   offline-eval-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: ./.github/actions/setup-node-ci
-      - run: npm run eval:offline:smoke:assert-baseline
+      - run: pnpm run eval:offline:smoke:assert-baseline
 
   build:
     runs-on: ubuntu-latest
@@ -170,8 +170,8 @@ jobs:
         with:
           path: |
             .tsbuildinfo.build
-          key: ${{ runner.os }}-tsc-build-${{ hashFiles('tsconfig.build.json','tsconfig.json','package-lock.json') }}
+          key: ${{ runner.os }}-tsc-build-${{ hashFiles('tsconfig.build.json','tsconfig.json','pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-tsc-build-
-      - run: npm run build
+      - run: pnpm run build
       - run: docker build -t wine-search-engine .

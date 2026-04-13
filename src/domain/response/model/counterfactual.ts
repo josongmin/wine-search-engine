@@ -1,6 +1,14 @@
 import type { EvalProvenanceSlice } from '../../retrieval/model/provenance.js';
 import type { CanonicalEntityId, DecisionSnapshot } from '../../shared/types/index.js';
 import type { AuditExtension } from '../../audit/model/audit-extension.js';
+import type { AdmissionClosureSummary } from '../../decision/model/decision-input.js';
+import type {
+  ExecutionBudget,
+  ExecutionProvenanceClosure,
+  ExecutionRetrievalMode,
+  ProvenancePolicy,
+} from '../../query/model/engine-execution-contract.js';
+import type { QueryRoute } from '../../query/model/query-route.js';
 import type {
   SpecializedFallbackReason,
   SpecializedRouteName,
@@ -46,6 +54,24 @@ export interface CounterfactualReject {
   readonly evidenceRef?: string | undefined;
 }
 
+export interface ExecutionContractMeta {
+  readonly effectiveRetrievalMode: ExecutionRetrievalMode;
+  readonly retrievalModeSource: 'planner' | 'api_override';
+  readonly plannerSuggestedMode: ExecutionRetrievalMode;
+  readonly retrievalKind:
+    | 'entity_lookup'
+    | 'generic_hybrid'
+    | 'specialized_hybrid'
+    | 'mixed_similarity';
+  readonly sparseExecuted: boolean;
+  readonly specializedRouteExecuted?: SpecializedRouteName | null | undefined;
+  readonly usedCompiledExecution: boolean;
+  readonly budget?: ExecutionBudget | undefined;
+  readonly provenancePolicy?: ProvenancePolicy | undefined;
+  readonly provenanceClosure?: ExecutionProvenanceClosure | undefined;
+  readonly admissionClosure?: AdmissionClosureSummary | undefined;
+}
+
 /**
  * Top-level metadata attached to every {@link SearchResponseV1}.
  */
@@ -56,8 +82,8 @@ export interface ResponseMeta {
   /** Wall-clock time (ms) from query receipt to response assembly. */
   readonly queryTimeMs: number;
 
-  /** Execution route label (e.g. "hybrid", "exact"). */
-  readonly route: string;
+  /** Execution route label. */
+  readonly route: QueryRoute;
 
   /** Semantic version of the response format. */
   readonly version: string;
@@ -111,6 +137,9 @@ export interface ResponseMeta {
   readonly fallbackApplied?: boolean | undefined;
 
   readonly fallbackReason?: SpecializedFallbackReason | null | undefined;
+
+  /** Stable execution-contract projection for downstream observability/debugging. */
+  readonly executionContract?: ExecutionContractMeta | undefined;
 
   /**
    * Optional audit payload populated when `options.explain = true` on the request.

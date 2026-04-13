@@ -95,6 +95,78 @@ describe('InterpretUseCase', () => {
         policyRuleVersion: '1',
         thresholdProfileId: 'default',
       }),
+      planWithCompiled: vi.fn().mockResolvedValue({
+        v1: {
+          rawQuery: 'wines like Sassicaia',
+          normalizedQuery: 'wines like sassicaia',
+          intent: 'semantic_discovery',
+          route: 'mixed',
+          retrievalMode: 'recommendation',
+          queryClass: 'anchored_similarity',
+          anchors: [{
+            entityId: createEntityId('sassicaia'),
+            label: 'Sassicaia',
+            confidence: 0.97,
+            type: 'wine',
+          }],
+          constraints: { hard: [], soft: [], inferred: [] },
+          expansions: { lexical: [], semantic: [] },
+          policy: {},
+          uncertainty: {
+            overall: 0.2,
+            ambiguityDetected: false,
+            ambiguityTypes: [],
+            ambiguitySeverity: 'low',
+            decisionEffect: 'trace_only',
+            parserConfidence: 0.92,
+            anchorConfidence: 0.97,
+            constraintConfidence: 0.9,
+          },
+          plannerVersion: '1',
+          policyRuleVersion: '1',
+          thresholdProfileId: 'default',
+        },
+        compiled: {
+          query: {
+            rawQuery: 'wines like Sassicaia',
+            normalizedQuery: 'wines like sassicaia',
+            intent: 'semantic_discovery',
+            queryClass: 'anchored_similarity',
+            anchors: [{
+              entityId: createEntityId('sassicaia'),
+              label: 'Sassicaia',
+              confidence: 0.97,
+              type: 'wine',
+            }],
+            constraints: { hard: [], soft: [], inferred: [] },
+            expansions: { lexical: [], semantic: [] },
+            uncertainty: {
+              overall: 0.2,
+              ambiguityDetected: false,
+              ambiguityTypes: [],
+              ambiguitySeverity: 'low',
+              decisionEffect: 'trace_only',
+              parserConfidence: 0.92,
+              anchorConfidence: 0.97,
+              constraintConfidence: 0.9,
+            },
+            plannerVersion: '1',
+            policyRuleVersion: '1',
+            thresholdProfileId: 'default',
+          },
+          execution: {
+            effectiveRoute: 'hybrid' as const,
+            effectiveRetrievalMode: 'recommendation' as const,
+            routeSource: 'planner' as const,
+            budget: { maxCandidates: 12, enablePrecisionRerank: true },
+            provenancePolicy: {
+              requireIdentitySeal: true,
+              requireConstraintEvidence: false,
+              requireAnchorEvidence: false,
+            },
+          },
+        },
+      }),
     };
 
     const useCase = new InterpretUseCase({
@@ -253,6 +325,122 @@ describe('InterpretUseCase', () => {
         policyRuleVersion: '1',
         thresholdProfileId: 'default',
       }),
+      planWithCompiled: vi.fn().mockResolvedValue({
+        v1: {
+          rawQuery: 'French red wine under $50',
+          normalizedQuery: 'french red wine under $50',
+          intent: 'semantic_discovery',
+          route: 'hybrid',
+          retrievalMode: 'attribute_search',
+          queryClass: 'attribute_constrained',
+          anchors: [],
+          constraints: {
+            hard: [
+              {
+                attribute: 'country',
+                operator: '=',
+                value: 'france',
+                source_phrase: 'French',
+                confidence: 0.94,
+              },
+              {
+                attribute: 'color',
+                operator: '=',
+                value: 'red',
+                source_phrase: 'red',
+                confidence: 0.93,
+              },
+            ],
+            soft: [
+              {
+                attribute: 'price_max',
+                operator: '<=',
+                value: '50',
+                source_phrase: 'under $50',
+                confidence: 0.88,
+              },
+            ],
+            inferred: [],
+          },
+          expansions: { lexical: [], semantic: [] },
+          policy: {},
+          uncertainty: {
+            overall: 0.18,
+            ambiguityDetected: false,
+            ambiguityTypes: [],
+            ambiguitySeverity: 'low',
+            decisionEffect: 'trace_only',
+            parserConfidence: 0.9,
+            anchorConfidence: 0.9,
+            constraintConfidence: 0.94,
+          },
+          plannerVersion: '1',
+          policyRuleVersion: '1',
+          thresholdProfileId: 'default',
+        },
+        compiled: {
+          query: {
+            rawQuery: 'French red wine under $50',
+            normalizedQuery: 'french red wine under $50',
+            intent: 'semantic_discovery',
+            queryClass: 'attribute_constrained',
+            anchors: [],
+            constraints: {
+              hard: [
+                {
+                  attribute: 'country',
+                  operator: '=',
+                  value: 'france',
+                  source_phrase: 'French',
+                  confidence: 0.94,
+                },
+                {
+                  attribute: 'color',
+                  operator: '=',
+                  value: 'red',
+                  source_phrase: 'red',
+                  confidence: 0.93,
+                },
+              ],
+              soft: [
+                {
+                  attribute: 'price_max',
+                  operator: '<=',
+                  value: '50',
+                  source_phrase: 'under $50',
+                  confidence: 0.88,
+                },
+              ],
+              inferred: [],
+            },
+            expansions: { lexical: [], semantic: [] },
+            uncertainty: {
+              overall: 0.18,
+              ambiguityDetected: false,
+              ambiguityTypes: [],
+              ambiguitySeverity: 'low',
+              decisionEffect: 'trace_only',
+              parserConfidence: 0.9,
+              anchorConfidence: 0.9,
+              constraintConfidence: 0.94,
+            },
+            plannerVersion: '1',
+            policyRuleVersion: '1',
+            thresholdProfileId: 'default',
+          },
+          execution: {
+            effectiveRoute: 'hybrid' as const,
+            effectiveRetrievalMode: 'attribute_search' as const,
+            routeSource: 'planner' as const,
+            budget: { maxCandidates: 12, enablePrecisionRerank: true },
+            provenancePolicy: {
+              requireIdentitySeal: true,
+              requireConstraintEvidence: true,
+              requireAnchorEvidence: false,
+            },
+          },
+        },
+      }),
     };
 
     const useCase = new InterpretUseCase({
@@ -353,5 +541,101 @@ describe('InterpretUseCase', () => {
     });
 
     expect(result.v2Explain.queryId).toBe('req-interpret-123');
+  });
+
+  it('rejects V2 explain when compiled execution is unavailable and the test seam is disabled', async () => {
+    const plan = {
+      rawQuery: 'Barolo',
+      normalizedQuery: 'barolo',
+      intent: 'semantic_discovery',
+      route: 'hybrid',
+      retrievalMode: 'recommendation',
+      queryClass: 'known_item',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {},
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.95,
+        anchorConfidence: 0.95,
+        constraintConfidence: 0.95,
+      },
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner: {
+        plan: vi.fn().mockResolvedValue(plan),
+      },
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'Barolo',
+        }),
+      },
+    });
+
+    await expect(
+      useCase.execute({
+        query: 'Barolo',
+        buildV2: true,
+      }),
+    ).rejects.toThrow('Interpret use case requires QueryPlanner.planWithCompiled() when buildV2 is requested');
+  });
+
+  it('allows an explicit test seam to reconstruct compiled execution for V2 explain', async () => {
+    const plan = {
+      rawQuery: 'Barolo',
+      normalizedQuery: 'barolo',
+      intent: 'semantic_discovery',
+      route: 'hybrid',
+      retrievalMode: 'recommendation',
+      queryClass: 'known_item',
+      anchors: [],
+      constraints: { hard: [], soft: [], inferred: [] },
+      expansions: { lexical: [], semantic: [] },
+      policy: {},
+      uncertainty: {
+        overall: 0.1,
+        ambiguityDetected: false,
+        ambiguityTypes: [],
+        ambiguitySeverity: 'low',
+        decisionEffect: 'trace_only',
+        parserConfidence: 0.95,
+        anchorConfidence: 0.95,
+        constraintConfidence: 0.95,
+      },
+      plannerVersion: '1',
+      policyRuleVersion: '1',
+      thresholdProfileId: 'default',
+    };
+
+    const useCase = new InterpretUseCase({
+      queryPlanner: {
+        plan: vi.fn().mockResolvedValue(plan),
+      },
+      querySanitizer: {
+        sanitize: vi.fn().mockReturnValue({
+          safe: true,
+          sanitizedQuery: 'Barolo',
+        }),
+      },
+      allowCompiledFallbackForTests: true,
+    });
+
+    const result = await useCase.execute({
+      query: 'Barolo',
+      buildV2: true,
+    });
+
+    expect(result.compiled.execution.effectiveRoute).toBe('hybrid');
+    expect(result.v2Explain.queryId).toMatch(/^interpret-/);
   });
 });

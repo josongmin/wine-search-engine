@@ -259,6 +259,14 @@ async function run(): Promise<void> {
     }
 
     const docs = parsedEnriched.map((record) => {
+      if (
+        record.body == null
+        || record.sweetness == null
+        || record.acidity == null
+        || record.tannin == null
+      ) {
+        throw new Error(`Synthetic ingest smoke requires complete sensory fields for ${record.sourceId}`);
+      }
       const doc = silverToRetrievalDoc(
         record,
         deterministicEmbedding(record.body, record.sweetness, record.acidity, record.tannin),

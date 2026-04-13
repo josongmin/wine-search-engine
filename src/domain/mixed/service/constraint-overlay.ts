@@ -106,9 +106,7 @@ export class ConstraintOverlay {
     return results.filter((result) => {
       const attrs = candidateAttributes.get(result.entityId);
       if (attrs === undefined) {
-        // No attribute data → cannot verify → fail safe by keeping
-        // (the ranking pipeline already did hard constraint gating)
-        return true;
+        return false;
       }
 
       return hardConstraints.every((constraint) =>
@@ -137,7 +135,7 @@ export class ConstraintOverlay {
     return results.filter((result) => {
       const attrs = candidateAttributes.get(result.entityId);
       if (attrs === undefined) {
-        return true; // No data → keep
+        return false;
       }
 
       // If ANY exclude constraint matches, remove the candidate

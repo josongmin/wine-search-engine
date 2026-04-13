@@ -101,8 +101,9 @@ describe('snapshot-entity-identity', () => {
     );
     const lookup = await loadGoldCanonicalLookup(dir);
     const resolved = resolveWineSnapshotEntity(opusRecord(), lookup);
-    expect(resolved.entityId).toBe('opus-one-2018');
+    expect(resolved.entityId.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
     expect(resolved.resolution).toBe('gold_overlay');
+    expect(resolved.benchmarkEntityId).toBe('opus-one-2018');
   });
 
   it('resolveWineSnapshotEntity uses deterministic wine-ce signature fallback', () => {
@@ -145,7 +146,7 @@ describe('snapshot-entity-identity', () => {
       vintageYear: 2020,
     };
     const map = buildEntityIdBySourceId([opusRecord(), other], lookup);
-    expect(map.get('vivino-test-opus')).toBe('opus-one-2018');
+    expect(map.get('vivino-test-opus')?.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
     const otherId = map.get('vivino-other');
     expect(otherId).toBeDefined();
     expect(otherId!.startsWith(SNAPSHOT_CANONICAL_ENTITY_FALLBACK_PREFIX)).toBe(true);
