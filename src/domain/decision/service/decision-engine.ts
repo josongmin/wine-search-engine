@@ -233,9 +233,26 @@ export class DecisionEngine {
     // The gate is the final closure before a resolved status is emitted.
     // Non-resolved decisions bypass the gate so that clarification/failure
     // outcomes are never blocked.
-    if (finalState.status === 'resolved') {
+    const effectiveRoute = input.effectiveRoute ?? input.queryPlan.route;
+    const effectiveRetrievalMode = input.effectiveRetrievalMode ?? input.queryPlan.retrievalMode;
+    // Keep the legacy entity_lookup path backward compatible, but do not let
+    // the broader `entity` route label suppress admission for exploratory or
+    // degraded executions that still require final closure.
+    const skipAdmissionGate =
+      effectiveRoute === 'entity' &&
+      effectiveRetrievalMode === 'entity_lookup';
+    if (finalState.status === 'resolved' && !skipAdmissionGate) {
       const admissionResult = this.admissionGate.check(input, snapshot);
       if (!admissionResult.admitted) {
+        bootstrapLogger.warn(
+          {
+            reason: admissionResult.reason,
+            rulesApplied,
+            queryClass: input.queryPlan.queryClass,
+            C: input.resolverResult.decisionTrace.decisionConfidenceC,
+          },
+          '[DecisionEngine] ADMISSION_GATE_REJECTED',
+        );
         rulesApplied.push('ADMISSION_GATE_REJECTED');
         rulesApplied.push(admissionResult.reason);
         const rejectedState: DecisionState = {
@@ -515,6 +532,11 @@ export class DecisionEngine {
     }
 
     const admissionContext = deriveAdmissionContext(input);
+    // Must match AdmissionGate (RFC-016): when the plan carries hard constraints,
+    // `requires_constraint_evidence` is true even on entity-only routes. If we
+    // skipped the evidence obligation here, the numeric gate would emit
+    // `resolved` and admission would reject with HARD_CONSTRAINT_VIOLATION
+    // (ambiguous clarify is the intended soft-fail).
     const hasConstraints = admissionContext.requires_constraint_evidence;
     const hasAnchor = admissionContext.requires_anchor_evidence;
 

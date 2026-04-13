@@ -16,6 +16,7 @@
 
 import 'dotenv/config';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseNdjson } from './ndjson.js';
 import { resolveDataPath } from '../../src/shared/utils/data-paths.js';
 import { atomicWriteFileSync } from './etl-utils.js';
@@ -139,7 +140,7 @@ export function extractFeatures(record: SilverRecord): DrinkingWindowInput | nul
   };
 }
 
-async function main() {
+export async function main() {
   console.log('Track C Step 4: Drinking Window Backfill');
   console.log(`  Input: ${DATA_FILE}`);
 
@@ -224,7 +225,13 @@ async function main() {
   console.log(`Output: ${DATA_FILE}`);
 }
 
-main().catch((error) => {
-  console.error('Error:', error);
-  process.exit(1);
-});
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isEntrypoint) {
+  main().catch((error) => {
+    console.error('Error:', error);
+    process.exit(1);
+  });
+}

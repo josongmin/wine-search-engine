@@ -63,7 +63,9 @@ export async function dispatchSearchRouteExecution(
   );
   switch (effectiveRoute) {
     case 'entity': {
-      const { resolveResult, rankedResults, correctiveRetryCalibration } = await actions.executeEntity();
+      const entityRoute = await actions.executeEntity();
+      const { resolveResult, correctiveRetryCalibration } = entityRoute;
+      const rankedResults = entityRoute.rankedResults;
       pipelineDebug(
         {
           step: PipelineDebugStep.DISPATCH_ENTITY_COMPLETE,
