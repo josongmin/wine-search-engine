@@ -137,12 +137,16 @@ export interface ThresholdProfileV1 {
  * These values are tuned via AURC (RFC-009 §5.3) on the gate eval set.
  * See computeDynamicGapThreshold() for query-class-specific logic.
  */
-export const DEFAULT_THRESHOLD_PROFILE: ThresholdProfileV1 = {
-  id: 'default-v2.1',
+/**
+ * LTR-calibrated thresholds (original). Designed for LTR logit scores with
+ * wide spread (~2-10 range, sigmoid to [0,1]).
+ *
+ * NOT ACTIVE — retained for reference when LTR is trained.
+ */
+export const LTR_THRESHOLD_PROFILE: ThresholdProfileV1 = {
+  id: 'ltr-v2.1',
   version: '2.1.0',
   perQueryClass: {
-    // gapTau static values are fallback; dynamic values are preferred
-    // exact_entity: tighter than short_entity — fully-specified lookup expects one clear winner.
     exact_entity: { resolveTau: 0.55, gapTau: 0.03 },
     short_entity: { resolveTau: 0.60, gapTau: 0.03 },
     ambiguous_short_form: { resolveTau: 0.75, gapTau: 0.08 },
@@ -151,6 +155,32 @@ export const DEFAULT_THRESHOLD_PROFILE: ThresholdProfileV1 = {
     semantic_preference: { resolveTau: 0.45, gapTau: 0.015 },
     comparison_query: { resolveTau: 0.65, gapTau: 0.10 },
     unknown: { resolveTau: 0.65, gapTau: 0.10 },
+  },
+  ambiguityPenaltyDefault: 0.10,
+} as const;
+
+/**
+ * Heuristic-mode thresholds. Heuristic scores (clamp01 weighted sum) cluster
+ * in [0.3, 0.7] with small gaps (~0.02-0.04). Thresholds are lowered so
+ * that a clear top-1 winner resolves instead of every query being ambiguous.
+ *
+ * Calibrated against live search results (2026-04-13):
+ *   Opus One → 0.66 (should resolve)
+ *   Merlot   → 0.66 (category search, ambiguous OK)
+ *   Barolo   → 0.50 (region search, ambiguous OK)
+ */
+export const DEFAULT_THRESHOLD_PROFILE: ThresholdProfileV1 = {
+  id: 'heuristic-v1.0',
+  version: '1.0.0',
+  perQueryClass: {
+    exact_entity: { resolveTau: 0.40, gapTau: 0.02 },
+    short_entity: { resolveTau: 0.45, gapTau: 0.02 },
+    ambiguous_short_form: { resolveTau: 0.50, gapTau: 0.03 },
+    anchored_similarity: { resolveTau: 0.40, gapTau: 0.02 },
+    pure_constraint: { resolveTau: 0.35, gapTau: 0.02 },
+    semantic_preference: { resolveTau: 0.35, gapTau: 0.01 },
+    comparison_query: { resolveTau: 0.50, gapTau: 0.05 },
+    unknown: { resolveTau: 0.50, gapTau: 0.05 },
   },
   ambiguityPenaltyDefault: 0.10,
 } as const;

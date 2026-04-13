@@ -579,7 +579,7 @@ export async function runRankedRouteDecisionPhase(
     ctx.routeDegradation,
     ctx.resolveResult,
   );
-  const decisionInput = buildSearchDecisionInput(
+  const decisionInputBase = buildSearchDecisionInput(
     ctx.plan,
     ctx.resolveResult,
     ctx.rankedResults,
@@ -588,6 +588,11 @@ export async function runRankedRouteDecisionPhase(
     toAdmissionHonestyContract(mergedRouteDegradation),
     ctx.compiled?.execution.effectiveRetrievalMode,
   );
+  // Propagate LTR saturation to decision engine so it can bypass
+  // conformal prediction gating (calibrated on LTR, meaningless for heuristic).
+  const decisionInput = ctx.rankingMetadata?.ltrSaturated === true
+    ? { ...decisionInputBase, ltrSaturated: true }
+    : decisionInputBase;
   pipelineDebug(
     {
       step: 'decision.engine.request',

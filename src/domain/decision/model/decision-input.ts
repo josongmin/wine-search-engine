@@ -349,6 +349,11 @@ export interface DecisionInput {
    */
   readonly conformalSetSize?: number;
 
+  /** When true, LTR model was loaded but saturated — heuristic fallback is
+   *  in effect. The decision engine uses this to bypass conformal set gating
+   *  (which is calibrated on LTR scores and meaningless for heuristic). */
+  readonly ltrSaturated?: boolean;
+
   /**
    * Pre-computed evidence items for the top candidate, populated by the
    * ranking stage (RFC-007 §4). The DecisionEngine includes these verbatim

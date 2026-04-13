@@ -355,7 +355,13 @@ export class DecisionEngine {
     const C = resolverTrace.decisionConfidenceC;
     const delta = resolverTrace.calibratedGap;
     const A = resolverTrace.ambiguityDetected;
-    const conformalSetSize = input.conformalSetSize ?? 1;
+    // Conformal prediction set is calibrated on LTR logit scores. When LTR
+    // is saturated (heuristic fallback), conformal set is meaningless (narrow
+    // heuristic score range makes conformalSetSize ≥ 2 for virtually every
+    // query). Bypass by forcing size=1 so the resolve gate can fire.
+    const conformalSetSize = input.ltrSaturated === true
+      ? 1
+      : (input.conformalSetSize ?? 1);
 
     // Guard against non-finite confidence/delta from upstream resolver bugs.
     // Without this, NaN flows through gates (NaN >= x is false), the response

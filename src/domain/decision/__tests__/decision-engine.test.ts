@@ -89,7 +89,7 @@ function makeResolverResult(
       decisionConfidenceC: C,
       ambiguityDetected,
       ambiguityTypes: [],
-      appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
+      appliedThresholds: { resolveThreshold: 0.50, gapThreshold: 0.03 },
       outcomeReasonCodes: [],
       ...(queryProvenance !== undefined ? { queryProvenance } : {}),
     },
@@ -237,7 +237,7 @@ describe('DecisionEngine', () => {
   describe('resolved status', () => {
     it.each([
       ['resolves when C >= T_resolve AND gap >= T_gap AND no ambiguity AND identity evidence present', 0.85, 0.20],
-      ['resolves exactly at threshold boundary (C=0.75, gap=0.15)', 0.75, 0.15],
+      ['resolves exactly at threshold boundary (C=0.50, gap=0.03)', 0.50, 0.03],
     ])('%s', async (_label, C, gap) => {
       const output = await expectDecisionStatus({
         resolverResult: makeResolverResult(C, gap, false),
@@ -259,7 +259,7 @@ describe('DecisionEngine', () => {
 
   describe('ambiguous status', () => {
     it.each([
-      ['ambiguous when C < T_resolve (with clarify fallback)', 0.5, 0.20, false],
+      ['ambiguous when C < T_resolve (with clarify fallback)', 0.3, 0.20, false],
       ['ambiguous when ambiguityDetected=true even though C and gap pass', 0.85, 0.20, true],
       // Wave 3: short_entity now has dynamic gap_tau=0.03 (was 0.10)
       // To test gap failure, use gap < 0.03
@@ -302,7 +302,7 @@ describe('DecisionEngine', () => {
   describe('failed status', () => {
     it('failed when C < T_resolve with fallbackMode=fail', async () => {
       const output = await expectDecisionStatus({
-        resolverResult: makeResolverResult(0.5, 0.20, false),
+        resolverResult: makeResolverResult(0.3, 0.20, false),
         policy: {
           requireExact: false,
           allowApproximate: true,
@@ -647,7 +647,7 @@ describe('DecisionEngine', () => {
 
     it('allowApproximate=false switches nextAction from hybrid_search to clarify', async () => {
       const input = makeInput({
-        resolverResult: makeResolverResult(0.5, 0.20, false),
+        resolverResult: makeResolverResult(0.3, 0.20, false),
         policy: makeClarifyPolicy({
           allowApproximate: false,
           fallbackMode: 'hybrid',
@@ -688,7 +688,7 @@ describe('DecisionEngine', () => {
           decisionConfidenceC: 0.95,
           ambiguityDetected: false,
           ambiguityTypes: [],
-          appliedThresholds: { resolveThreshold: 0.75, gapThreshold: 0.15 },
+          appliedThresholds: { resolveThreshold: 0.50, gapThreshold: 0.03 },
           outcomeReasonCodes: [],
         },
         conformalSetSize: computeConformalSetSize(0.95, DEFAULT_ALPHA, 1),
@@ -784,10 +784,10 @@ describe('DecisionEngine', () => {
   describe('query class thresholds', () => {
     it.each([
       [
-        'ambiguous_short_form class uses higher T_resolve=0.75',
+        'ambiguous_short_form class uses higher T_resolve=0.50',
         {
           queryPlan: makeQueryPlan('ambiguous_short_form'),
-          resolverResult: makeResolverResult(0.70, 0.20, false),
+          resolverResult: makeResolverResult(0.40, 0.20, false),
           policy: makeClarifyPolicy(),
           uncertainty: {
             overall: 0.2,

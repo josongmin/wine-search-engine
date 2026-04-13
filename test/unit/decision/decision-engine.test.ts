@@ -68,7 +68,7 @@ function makeResolverResult(overrides?: {
       decisionConfidenceC: C,
       ambiguityDetected,
       ambiguityTypes: [],
-      appliedThresholds: { resolveThreshold: 0.60, gapThreshold: 0.10 },
+      appliedThresholds: { resolveThreshold: 0.45, gapThreshold: 0.02 },
       outcomeReasonCodes: [],
       queryProvenance: {
         normalizedQueryViews: {
@@ -167,7 +167,7 @@ describe('DecisionEngine', () => {
   const engine = new DecisionEngine(store);
   const snapshot = makeSnapshot();
 
-  // short_entity thresholds: resolveTau=0.75, gapTau=0.15
+  // short_entity thresholds: resolveTau=0.50, gapTau=0.02
 
   it('C >= T_resolve AND gap >= T_gap AND no ambiguity → resolved', async () => {
     const input = makeDecisionInput({
@@ -179,10 +179,10 @@ describe('DecisionEngine', () => {
 
   it('C < T_fail (well below resolve threshold) → failed', async () => {
     // Gate 3 requires: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2
-    // short_entity from DEFAULT_THRESHOLD_PROFILE: resolveTau=0.60, gapTau=0.10
-    // C=0.55 < 0.60, gap=0.12 >= 0.10, no ambiguity, conformal=1 → Gate 3 with fallbackMode='fail'
+    // short_entity from DEFAULT_THRESHOLD_PROFILE: resolveTau=0.45, gapTau=0.02
+    // C=0.40 < 0.45, gap=0.03 >= 0.02, no ambiguity, conformal=1 → Gate 3 with fallbackMode='fail'
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.55, gap: 0.12, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -190,9 +190,9 @@ describe('DecisionEngine', () => {
   });
 
   it('T_fail <= C < T_resolve with conformal set size >= 2 → ambiguous', async () => {
-    // C below resolveTau=0.60 but conformal set indicates ambiguity
+    // C below resolveTau=0.45 but conformal set indicates ambiguity
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.55, gap: 0.05, ambiguityDetected: true }),
+      resolverResult: makeResolverResult({ C: 0.40, gap: 0.05, ambiguityDetected: true }),
       conformalSetSize: 2,
     });
     const output = await engine.decide(input, snapshot);
@@ -200,10 +200,10 @@ describe('DecisionEngine', () => {
   });
 
   it('C >= T_resolve but gap < T_gap → ambiguous (insufficient separation)', async () => {
-    // Wave 3: short_entity: resolveTau=0.60, dynamic gapTau=0.03
+    // Wave 3: short_entity: resolveTau=0.45, dynamic gapTau=0.03
     // To test gap failure, use gap < 0.03
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.65, gap: 0.01, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.50, gap: 0.01, ambiguityDetected: false }),
     });
     const output = await engine.decide(input, snapshot);
     expect(output.decisionStatus).toBe('ambiguous');
@@ -265,10 +265,10 @@ describe('DecisionEngine', () => {
 
   it('nextAction=hybrid_search when C < resolveTau, gap >= gapTau, no ambiguity, fallbackMode=hybrid', async () => {
     // Gate 3 path: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2
-    // short_entity: resolveTau=0.60, gapTau=0.10
-    // C=0.55 < 0.60, gap=0.12 >= 0.10, no ambiguity → Gate 3 → hybrid_search
+    // short_entity: resolveTau=0.45, gapTau=0.02
+    // C=0.40 < 0.45, gap=0.03 >= 0.02, no ambiguity → Gate 3 → hybrid_search
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.55, gap: 0.12, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'hybrid', allowApproximate: true }),
     });
     const output = await engine.decide(input, snapshot);
@@ -277,9 +277,9 @@ describe('DecisionEngine', () => {
 
   it('nextAction=fail when failed (Gate 3 with fallbackMode=fail)', async () => {
     // Gate 3: C < resolveTau AND gap >= gapTau AND no ambiguity AND conformal<2 → fallbackMode='fail'
-    // short_entity: resolveTau=0.60, gapTau=0.10
+    // short_entity: resolveTau=0.45, gapTau=0.02
     const input = makeDecisionInput({
-      resolverResult: makeResolverResult({ C: 0.55, gap: 0.12, ambiguityDetected: false }),
+      resolverResult: makeResolverResult({ C: 0.40, gap: 0.03, ambiguityDetected: false }),
       policy: makePolicy({ fallbackMode: 'fail' }),
     });
     const output = await engine.decide(input, snapshot);
@@ -301,7 +301,7 @@ describe('DecisionEngine', () => {
     const input = makeDecisionInput();
     const output = await engine.decide(input, snapshot);
     // short_entity from DEFAULT_THRESHOLD_PROFILE v2.1.0 with dynamic gap
-    expect(output.decisionTrace.thresholds.resolveThreshold).toBe(0.60);
+    expect(output.decisionTrace.thresholds.resolveThreshold).toBe(0.45);
     // Wave 3: dynamic gap threshold for short_entity is 0.03 (was 0.10)
     expect(output.decisionTrace.thresholds.gapThreshold).toBe(0.03);
   });
