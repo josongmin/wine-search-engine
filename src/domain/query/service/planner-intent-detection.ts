@@ -104,6 +104,20 @@ export function detectQueryIntent(
   }
 
   if (hasStrongAnchor && !hasConstraintKeyword && !hasPriceKeyword) {
+    // A single strong anchor pointing to exactly ONE entity → genuine
+    // entity lookup. But if anchors span MULTIPLE distinct entities (e.g.
+    // "Barolo" matching 2+ wines from different producers), the query is a
+    // category/region/grape term, not a specific wine — route via hybrid
+    // search instead of the entity route which applies hard constraints
+    // and drops everything.
+    const uniqueAnchorEntities = new Set(
+      anchors
+        .filter((a) => a.confidence >= EXACT_ANCHOR_CONFIDENCE)
+        .flatMap((a) => a.candidateEntityIds),
+    );
+    if (uniqueAnchorEntities.size > 1) {
+      return 'facet_search';
+    }
     return 'entity_exact';
   }
 

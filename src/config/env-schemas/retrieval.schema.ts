@@ -3,6 +3,10 @@ import {
   EMBEDDING_TIMEOUT_MS,
   RERANKER_TIMEOUT_MS,
 } from '../../infrastructure/vespa/per-channel-timeouts.js';
+import {
+  EMBEDDING_MODEL as EMBEDDING_MODEL_DEFAULT,
+  EMBEDDING_DIMENSION as EMBEDDING_DIMENSION_DEFAULT,
+} from '../../shared/constants/embedding.js';
 
 /**
  * Retrieval-side external services: embedding, Cohere reranker,
@@ -22,9 +26,9 @@ const MAX_EMBEDDING_DIMENSION = 8192;
 
 export const RetrievalEnvSchema = z.object({
   // Embedding model label (telemetry / debug). Actual model is set by OPENAI_EMBEDDING_MODEL.
-  EMBEDDING_MODEL: z.string().min(1).default('text-embedding-3-small'),
-  /** Expected embedding vector dimension. When set, vectors with mismatched dimensions are rejected. */
-  EMBEDDING_DIMENSION: z.coerce.number().int().positive().max(MAX_EMBEDDING_DIMENSION).optional(),
+  EMBEDDING_MODEL: z.string().min(1).default(EMBEDDING_MODEL_DEFAULT),
+  /** Expected embedding vector dimension. Defaults to SSoT in shared/constants/embedding.ts. */
+  EMBEDDING_DIMENSION: z.coerce.number().int().positive().max(MAX_EMBEDDING_DIMENSION).default(EMBEDDING_DIMENSION_DEFAULT),
   /** Per-request HTTP timeout for embedding API calls (AbortSignal). */
   EMBEDDING_HTTP_TIMEOUT_MS: z.coerce
     .number()

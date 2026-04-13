@@ -6,6 +6,7 @@ describe('buildHealthRouteOptions', () => {
   it('marks redis as required when startup features need it, even without watchlist delivery', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
+      REDIS_URL: 'redis://localhost:6379',
       KILL_SWITCH_QUERY_CACHE: 'false',
       KILL_SWITCH_INJECTION_JUDGE: 'true',
     });
@@ -20,6 +21,7 @@ describe('buildHealthRouteOptions', () => {
   it('marks redis as required when watchlist delivery is enabled', () => {
     const config = parseEnv({
       NODE_ENV: 'test',
+      REDIS_URL: 'redis://localhost:6379',
       WATCHLIST_ENABLED: 'true',
       WEBHOOK_SECRET: 'watchlist-secret-1234',
     });
@@ -121,6 +123,7 @@ describe('buildHealthRouteOptions', () => {
   it('marks redis down when the client is open but ping fails', async () => {
     const config = parseEnv({
       NODE_ENV: 'test',
+      REDIS_URL: 'redis://localhost:6379',
       KILL_SWITCH_QUERY_CACHE: 'false',
       KILL_SWITCH_INJECTION_JUDGE: 'true',
     });

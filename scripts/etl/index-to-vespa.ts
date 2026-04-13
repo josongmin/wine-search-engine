@@ -18,6 +18,7 @@ import 'dotenv/config';
 import fs from 'node:fs/promises';
 import type { EnrichedSilverRecord, IndexableWineRecord } from './types.js';
 import { SOURCE_SYSTEM_VIVINO_SILVER } from '../../src/shared/constants/source-systems.js';
+import { EMBEDDING_MODEL, EMBEDDING_DIMENSION } from '../../src/shared/constants/embedding.js';
 import { parseNdjson } from './ndjson.js';
 import { VespaClient } from '../../src/infrastructure/vespa/vespa-client.js';
 import { toVespaFields } from '../../src/infrastructure/vespa/mapping.js';
@@ -66,14 +67,18 @@ async function embedBatchHttp(
   if (!apiKey) {
     throw new Error('embedBatchHttp: OPENAI_API_KEY is required');
   }
-  const model = process.env['OPENAI_EMBEDDING_MODEL'] ?? 'text-embedding-3-small';
+  const model = process.env['OPENAI_EMBEDDING_MODEL'] ?? EMBEDDING_MODEL;
   const response = await fetch(`${openAiBaseUrl()}/embeddings`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ model, input: [...texts] }),
+    body: JSON.stringify({
+      model,
+      input: [...texts],
+      dimensions: EMBEDDING_DIMENSION,
+    }),
   });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
@@ -702,7 +707,20 @@ export async function run(): Promise<void> {
     const chunk = chunks[ci]!;
 
     const texts = chunk.map(buildEmbedText);
-    const embeddings = await embedBatchHttp(texts);
+    let embeddings: readonly (readonly number[])[];
+    const EMBED_MAX_RETRIES = 3;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        embeddings = await embedBatchHttp(texts);
+        break;
+      } catch (e) {
+        if (attempt >= EMBED_MAX_RETRIES) throw e;
+        const msg = e instanceof Error ? e.message : String(e);
+        const delayMs = attempt * 2000;
+        console.warn(`  Embedding batch ${ci + 1} attempt ${attempt} failed (${msg}) — retrying in ${delayMs}ms`);
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
 
     // Convert to Vespa documents and feed; validate each record before converting
     const docs: { id: string; fields: Record<string, unknown> }[] = [];
