@@ -62,3 +62,33 @@ a richly annotated hand-authored API spec.
 used by live-snapshot fixture lanes so replay cannot surface a more optimistic
 `execution_mode` / `degradation_reasons` contract than the preflight
 `/v1/search` response that produced the snapshot.
+
+## `GET /ready` Snapshot Health Block
+
+`GET /ready` now serializes an optional `snapshot_health` block when the
+server is wired with a Postgres pool. The block reflects runtime plane
+composite-PK migration (016) observability:
+
+```jsonc
+{
+  "ready": true,
+  "timestamp": "2026-04-14T00:00:00.000Z",
+  "checks": { "postgres": { "status": "up", "required": true } },
+  "snapshot_health": {
+    "active_snapshot_id": "search-snapshot:v1:abcdef",
+    "previous_snapshot_id": "search-snapshot:v1:012345",  // nullable on first publish
+    "stale_row_count": 42,             // rows waiting for the reaper, capped at 100M
+    "pointer_age_seconds": 3600        // seconds since active_search_snapshot.promoted_at
+  }
+}
+```
+
+- The field is declared optional on `ReadyResponseSchema`, so clients that
+  do not know about it pass validation unchanged. Contract is backwards
+  compatible.
+- When `PG` is down or the reader throws, the handler omits the block and
+  logs a warning at `debug` level — `/ready` never 503s over the auxiliary
+  observability gauge.
+- Feeds the snapshot reaper alerting loop; see
+  [docs/runbook-etl-operator-acks.md](runbook-etl-operator-acks.md) for
+  operator procedures.

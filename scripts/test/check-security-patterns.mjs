@@ -12,12 +12,31 @@
  * - z.object() without .strict() (2+ schema bugs)
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve, relative } from 'node:path';
-import { globSync } from 'glob';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve, relative, join } from 'node:path';
 
 const SRC_ROOT = resolve(process.cwd(), 'src');
 const KOREAN_RANGE = /[\uAC00-\uD7AF]/;
+
+/**
+ * Recursive .ts walker — avoids pulling `glob` as a direct dependency.
+ * Skips `__tests__` directories and `*.test.ts` files (same filter as the
+ * previous globSync call).
+ */
+function listTsFiles(dir) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    if (name === '__tests__') continue;
+    const abs = join(dir, name);
+    const s = statSync(abs);
+    if (s.isDirectory()) {
+      out.push(...listTsFiles(abs));
+    } else if (name.endsWith('.ts') && !name.endsWith('.test.ts')) {
+      out.push(abs);
+    }
+  }
+  return out;
+}
 
 /** @typedef {{ name: string; severity: 'error' | 'warn'; test: (line: string, filePath: string) => boolean }} Pattern */
 
@@ -70,11 +89,7 @@ const PATTERNS = [
 let errorCount = 0;
 let warnCount = 0;
 
-const files = globSync('**/*.ts', {
-  cwd: SRC_ROOT,
-  ignore: ['**/__tests__/**', '**/*.test.ts'],
-  absolute: true,
-});
+const files = listTsFiles(SRC_ROOT);
 
 for (const filePath of files) {
   const relPath = relative(SRC_ROOT, filePath);
