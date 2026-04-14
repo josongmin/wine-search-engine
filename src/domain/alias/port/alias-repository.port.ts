@@ -2,8 +2,16 @@ import type { CanonicalEntityId } from '../../shared/types/index.js';
 import type { Alias, AliasScope } from '../model/alias.js';
 
 /**
- * Repository port for alias persistence.
- * Implementations may be backed by a relational DB, search index, or in-memory store.
+ * Read-only repository port for alias lookups.
+ *
+ * Runtime plane snapshot-scoped PK migration (mig 016): the runtime write path
+ * is collapsed to a single authority — the ETL publisher in
+ * `scripts/etl/publish-runtime-substrates.ts`. Mutating methods (save /
+ * suppress / bulkSave) were removed because composite PK (search_snapshot_id,
+ * alias_id) broke their single-column `ON CONFLICT (alias_id)` semantics and
+ * their INSERT column lists did not include `search_snapshot_id`. Writers that
+ * previously produced aliases directly (`scripts/etl/generate-transliteration-aliases.ts`)
+ * now emit NDJSON artifacts consumed by the snapshot builder.
  */
 export interface AliasRepository {
   /**
@@ -40,37 +48,9 @@ export interface AliasRepository {
    * caller can apply edit-distance filtering. The result set trades precision
    * for recall: false positives are expected and filtered by the caller.
    *
-   * A minimal implementation may return aliases that share the first
-   * `Math.ceil(normalized.length / 2)` characters of their normalizedValue,
-   * or use a trigram index. Returning an empty array is a valid (if degraded)
-   * implementation — fuzzy matching simply produces no results in that case.
-   *
    * @param normalized - The normalized query form.
    * @param scope - Optional scope filter.
    * @returns Candidate aliases for edit-distance filtering.
    */
   findFuzzyCandidates(normalized: string, scope?: AliasScope): Promise<readonly Alias[]>;
-
-  /**
-   * Persists a single alias.
-   * If an alias with the same aliasId exists, it is replaced.
-   *
-   * @param alias - The alias to save.
-   */
-  save(alias: Alias): Promise<void>;
-
-  /**
-   * Soft-deletes an alias by marking it as suppressed.
-   *
-   * @param aliasId - The alias to suppress.
-   * @param reason - Human-readable reason for suppression.
-   */
-  suppress(aliasId: string, reason: string): Promise<void>;
-
-  /**
-   * Persists multiple aliases in a single batch operation.
-   *
-   * @param aliases - The aliases to save.
-   */
-  bulkSave(aliases: readonly Alias[]): Promise<void>;
 }

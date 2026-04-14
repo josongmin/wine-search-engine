@@ -84,6 +84,13 @@ export interface HealthRouteOptions {
    * metrics behind the X-Debug-Key header in production.
    */
   readonly metricsDebugSecret?: string | undefined;
+  /**
+   * Runtime plane composite-PK migration (016): optional reader that returns
+   * the `snapshot_health` block for /ready. Must not be required so tests and
+   * dev environments without PG still boot cleanly. When provided and it
+   * returns a value, the handler embeds it in the response body.
+   */
+  readonly snapshotHealthReader?: () => Promise<SnapshotHealth | undefined>;
 }
 
 /**
@@ -98,29 +105,72 @@ interface HealthResponse {
 /**
  * Readiness check response shape.
  */
+interface SnapshotHealth {
+  readonly active_snapshot_id: string;
+  readonly previous_snapshot_id: string | null;
+  readonly stale_row_count: number;
+  readonly pointer_age_seconds: number;
+}
+
 interface ReadyResponse {
   readonly ready: boolean;
   readonly timestamp: string;
   readonly checks: Readonly<Record<string, {
     readonly status: ReadinessStatus;
     readonly required: boolean;
+    // Wave 3 / H13 fail-loud: structured failure attribution per probe.
+    // Wire contract uses snake_case `error_class` (ReadyResponseSchema).
+    readonly reason?: string;
+    readonly error_class?: string;
   }>>;
+  // Runtime plane composite-PK migration (016): optional observability block
+  // surfacing cross-snapshot row count + pointer age. Omitted when the reader
+  // is not wired or PG is down.
+  readonly snapshot_health?: SnapshotHealth;
 }
 
 const DEFAULT_READINESS_CHECKS = ['postgres', 'redis'] as const;
 
-async function resolveStatus(readinessCheck?: ReadinessCheck): Promise<ReadinessStatus> {
-  if (readinessCheck === undefined) {
-    return 'skipped';
-  }
+/**
+ * Wave 3 (fail-loud): structured probe outcome. The /ready endpoint
+ * surfaces `reason` and `errorClass` so ops can immediately see WHICH
+ * probe died and HOW, rather than just an opaque 'down'.
+ */
+interface ProbeOutcome {
+  readonly status: ReadinessStatus;
+  readonly reason?: string;
+  readonly errorClass?: string;
+}
 
-  try {
-    return await readinessCheck.check();
-  } catch {
-    // intentional: individual probe implementations log their own failures;
-    // this is a last-resort guard so a throwing check() degrades to 'down'.
-    return 'down';
+async function resolveProbeOutcome(
+  name: string,
+  readinessCheck?: ReadinessCheck,
+): Promise<ProbeOutcome> {
+  if (readinessCheck === undefined) {
+    return { status: 'skipped' };
   }
+  try {
+    const status = await readinessCheck.check();
+    return { status };
+  } catch (err) {
+    const errorClass = err instanceof Error ? err.constructor.name : typeof err;
+    const reason = err instanceof Error ? err.message : String(err);
+    bootstrapLogger.error(
+      { probe: name, errorClass, err },
+      `[health] readiness probe '${name}' threw — reporting 'down' with structured reason`,
+    );
+    return { status: 'down', reason, errorClass };
+  }
+}
+
+/**
+ * Backwards-compatible wrapper. Retained (exported) for future callers; the
+ * /ready route handler in this file uses resolveProbeOutcome directly to
+ * preserve reason/errorClass.
+ */
+export async function resolveStatus(readinessCheck?: ReadinessCheck): Promise<ReadinessStatus> {
+  const outcome = await resolveProbeOutcome('legacy', readinessCheck);
+  return outcome.status;
 }
 
 function isValidMetricsSecret(secret: string | undefined): secret is string {
@@ -191,22 +241,21 @@ export function registerHealthRoutes(
           ...Object.keys(readinessChecks),
         ]),
       );
-      // Use Promise.allSettled so that an unexpected throw from any single
-      // probe never collapses the entire readiness response. resolveStatus
-      // already catches its own errors and returns 'down'; the allSettled
-      // here is defense-in-depth against future probes that may not.
+      // Wave 3 / H13 fail-loud: call resolveProbeOutcome directly to get
+      // { status, reason?, errorClass? } per probe. Using Promise.allSettled
+      // as defense-in-depth for future probes that bypass resolveProbeOutcome.
       const settled = await Promise.allSettled(
         checkNames.map(async (checkName) => {
           const readinessCheck = readinessChecks[checkName];
-          const status = await resolveStatus(readinessCheck);
-          // Default-required checks (postgres, redis) are required unless the
-          // caller explicitly opts them out via required:false in the readiness map.
+          const outcome = await resolveProbeOutcome(checkName, readinessCheck);
           const isDefaultCheck = (DEFAULT_READINESS_CHECKS as readonly string[]).includes(checkName);
           return [
             checkName,
             {
-              status,
+              status: outcome.status,
               required: readinessCheck?.required ?? isDefaultCheck,
+              ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+              ...(outcome.errorClass !== undefined ? { error_class: outcome.errorClass } : {}),
             },
           ] as const;
         }),
@@ -214,15 +263,22 @@ export function registerHealthRoutes(
       const checks = Object.fromEntries(
         settled.map((result, index) => {
           if (result.status === 'fulfilled') return result.value;
-          // Probe threw despite resolveStatus's catch — surface as 'down'.
+          // Last-resort: probe threw AFTER resolveProbeOutcome's catch (should
+          // be impossible but defend against future refactors). Surface a
+          // synthetic reason so ops see that this bucket is unreachable.
           const checkName = checkNames[index] ?? 'unknown';
           const readinessCheck = readinessChecks[checkName];
           const isDefaultCheck = (DEFAULT_READINESS_CHECKS as readonly string[]).includes(checkName);
+          const rej = result.reason as unknown;
+          const errorClass = rej instanceof Error ? rej.constructor.name : typeof rej;
+          const reason = rej instanceof Error ? rej.message : String(rej);
           return [
             checkName,
             {
               status: 'down' as const,
               required: readinessCheck?.required ?? isDefaultCheck,
+              reason,
+              error_class: errorClass,
             },
           ] as const;
         }),
@@ -233,10 +289,25 @@ export function registerHealthRoutes(
       // don't fail readiness unnecessarily.
       const ready = Object.values(checks).every((check) => !check.required || check.status !== 'down');
 
+      let snapshotHealth: SnapshotHealth | undefined;
+      if (options?.snapshotHealthReader !== undefined) {
+        try {
+          snapshotHealth = await options.snapshotHealthReader();
+        } catch (err: unknown) {
+          // Reader failure must not crash /ready. Observability is best-effort.
+          bootstrapLogger.warn(
+            { err },
+            '[health] snapshot_health reader threw — omitting from response',
+          );
+          snapshotHealth = undefined;
+        }
+      }
+
       const body: ReadyResponse = {
         ready,
         timestamp: new Date().toISOString(),
         checks,
+        ...(snapshotHealth !== undefined ? { snapshot_health: snapshotHealth } : {}),
       };
 
       sendRouteContractResponse(

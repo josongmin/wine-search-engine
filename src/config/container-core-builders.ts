@@ -35,6 +35,8 @@ import type { Config } from './env.js';
 import type { CoreAdapterServices } from './container-adapters.js';
 import type { RuntimeSupportServices } from './container-runtime-support.js';
 import { bootstrapLogger } from './bootstrap-logger.js';
+import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
+import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
 import { getRetrievalDegradationCollector } from '../infrastructure/observability/retrieval-degradation-metrics.js';
 import type {
   BlockingUseCasePort,
@@ -77,8 +79,18 @@ export async function buildQueryPlanner(
 
   if (pool !== undefined) {
     try {
+      // Migration 016: snapshot-scoped read. Warmup must not blend surface
+      // forms across snapshots — reaped or stale snapshot aliases would
+      // poison the fuzzy-matcher corpus otherwise. `resolveActiveSnapshot`
+      // returns the authoritative pointer; if the pointer table itself is
+      // missing we degrade cleanly below.
+      const { activeSnapshotId } = await resolveActiveSnapshot(pool);
       const { rows } = await pool.query<{ surface_form: string }>(
-        'SELECT DISTINCT surface_form FROM aliases WHERE is_suppressed = FALSE LIMIT 100000',
+        `SELECT DISTINCT surface_form
+         FROM aliases
+         WHERE search_snapshot_id = $1 AND is_suppressed = FALSE
+         LIMIT 100000`,
+        [activeSnapshotId],
       );
       const terms = rows.map((r) => r.surface_form);
       if (terms.length > 0) {
@@ -87,16 +99,18 @@ export async function buildQueryPlanner(
         fuzzyMatcher = fm;
       }
     } catch (err: unknown) {
-      // Catch ONLY "relation does not exist" (PG SQLSTATE 42P01).
-      // Any other error — pool exhaustion, auth failure, network flap —
-      // must propagate so the operator notices instead of silently
-      // running production with no fuzzy matching.
       const code = (err as { code?: string } | undefined)?.code;
       if (code !== '42P01') {
         throw err;
       }
-      // Alias table may not exist yet; proceed without fuzzy matching.
-      bootstrapLogger.info('[Planner] aliases table does not exist yet — fuzzy matching disabled');
+      // Snapshot pointer or aliases table does not exist yet (fresh DB before
+      // first publish). Learning-side warmup is a bootstrap enhancement, not
+      // a required dependency — degrade cleanly and count the skip.
+      globalSilentSkipCounter.increment(
+        'learning_warmup_disabled_snapshot_pointer_missing',
+        { surface: 'container-core-builders' },
+      );
+      bootstrapLogger.info('[Planner] snapshot pointer / aliases table missing — fuzzy matching disabled');
     }
   }
 

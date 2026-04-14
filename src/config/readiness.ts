@@ -11,6 +11,7 @@ import {
   probeSearchSnapshotRuntimeState,
   verifySearchSnapshotRuntimeStateLive,
 } from '../infrastructure/health/search-snapshot-readiness.js';
+import { createSnapshotHealthReader } from '../infrastructure/health/snapshot-health-reader.js';
 import type { WatchlistRuntimePort } from '../infrastructure/watchlist/watchlist-delivery-runtime.js';
 import type { DrinkingWindowPredictorPort } from '../domain/drinking-window/port/drinking-window-predictor.port.js';
 import type { CalibrationStore } from '../domain/resolver/port/calibration-store.port.js';
@@ -106,6 +107,12 @@ export function buildHealthRouteOptions(
   const redisRequired = expectsRedis;
 
   return {
+    // Runtime plane composite-PK migration (016): attach the snapshot_health
+    // observability reader when a PG pool is available. Absent in test and
+    // dev environments without PG, where /ready simply omits the block.
+    ...(runtime.pool !== undefined
+      ? { snapshotHealthReader: createSnapshotHealthReader(runtime.pool) }
+      : {}),
     readiness: {
       ...(runtime.pool
         ? {
@@ -160,16 +167,20 @@ export function buildHealthRouteOptions(
         },
       },
       search_snapshot_runtime: {
-        required: config.nodeEnv === 'production',
+        required: true, // T-E7-02: strict fail-closed regardless of NODE_ENV
         check: async (): Promise<ReadinessStatus> => {
           if (runtime.pool === undefined) {
-            return config.nodeEnv === 'production' ? 'down' : probeSearchSnapshotRuntimeState();
+            return probeSearchSnapshotRuntimeState();
           }
           try {
             await verifySearchSnapshotRuntimeStateLive({
               pool: runtime.pool,
               vespaUrl: config.vespa.url,
               strictHashes: true,
+              // T-010/W2: pointer parity is the authoritative "we are serving this snapshot"
+              // signal. A drift between pointer and runtime-state file means ops sees one
+              // id, the read path serves another.
+              requirePointerParity: true,
             });
             return 'up';
           } catch {

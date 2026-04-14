@@ -2,6 +2,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import type { PoolClient } from 'pg';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
 import { atomicWriteFile } from './etl-utils.js';
@@ -140,6 +141,99 @@ function buildEntityRowsJson(
   })));
 }
 
+interface EntityIdentityRow {
+  readonly entity_id: string;
+  readonly identity_signature: string;
+}
+
+export async function assertEntityIdentitySignatureConsistency(
+  client: Pick<PoolClient, 'query'>,
+  entities: readonly EntitySnapshotRecord[],
+): Promise<void> {
+  if (entities.length === 0) {
+    return;
+  }
+
+  const signatureByEntityId = new Map<string, string>();
+  const entityIdBySignature = new Map<string, string>();
+  for (const entity of entities) {
+    const existingSignature = signatureByEntityId.get(entity.entityId);
+    if (existingSignature !== undefined && existingSignature !== entity.identitySignature) {
+      throw new Error(
+        `entity_id ${entity.entityId} already maps to identity_signature ${existingSignature}; refusing to remap to ${entity.identitySignature}`,
+      );
+    }
+    const existingEntityId = entityIdBySignature.get(entity.identitySignature);
+    if (existingEntityId !== undefined && existingEntityId !== entity.entityId) {
+      throw new Error(
+        `identity_signature ${entity.identitySignature} already belongs to entity_id ${existingEntityId}; refusing to remap to ${entity.entityId}`,
+      );
+    }
+    signatureByEntityId.set(entity.entityId, entity.identitySignature);
+    entityIdBySignature.set(entity.identitySignature, entity.entityId);
+  }
+
+  const entityIds = [...signatureByEntityId.keys()];
+  const identitySignatures = [...entityIdBySignature.keys()];
+  const existing = await client.query<EntityIdentityRow>(
+    `SELECT entity_id, identity_signature
+     FROM entities
+     WHERE entity_id = ANY($1::text[])
+        OR identity_signature = ANY($2::text[])`,
+    [entityIds, identitySignatures],
+  );
+
+  for (const row of existing.rows) {
+    const expectedSignature = signatureByEntityId.get(row.entity_id);
+    if (expectedSignature !== undefined && expectedSignature !== row.identity_signature) {
+      throw new Error(
+        `entity_id ${row.entity_id} already exists with identity_signature ${row.identity_signature}; refusing to remap to ${expectedSignature}`,
+      );
+    }
+
+    const expectedEntityId = entityIdBySignature.get(row.identity_signature);
+    if (expectedEntityId !== undefined && expectedEntityId !== row.entity_id) {
+      throw new Error(
+        `identity_signature ${row.identity_signature} already belongs to entity_id ${row.entity_id}; refusing to remap to ${expectedEntityId}`,
+      );
+    }
+  }
+}
+
+/**
+ * T-010/W1: Refuse to re-publish the same snapshot_id.
+ *
+ * Snapshot ids are immutable once the active pointer has been flipped to
+ * them. A second publish run with the same snapshot_id would silently no-op
+ * every INSERT (due to ON CONFLICT DO NOTHING) and the operator would
+ * mistake "nothing happened" for success. Fail loudly instead.
+ *
+ * An idempotent re-run of a FAILED publish (pointer not yet promoted) must
+ * use a fresh snapshot_id. The cheapest way is to re-run the manifest
+ * pipeline which re-generates snapshot_id from content hash.
+ */
+export async function assertSnapshotNotAlreadyPublished(
+  client: Pick<PoolClient, 'query'>,
+  snapshotId: string,
+): Promise<void> {
+  const res = await client.query<{ active_snapshot_id: string; previous_snapshot_id: string | null }>(
+    `SELECT active_snapshot_id, previous_snapshot_id FROM active_search_snapshot WHERE id = 1`,
+  );
+  const row = res.rows[0];
+  if (row === undefined) {
+    // First publish — pointer row does not exist yet. publish-search-snapshot
+    // will INSERT the row as part of the atomic promote step.
+    return;
+  }
+  if (row.active_snapshot_id === snapshotId) {
+    throw new Error(
+      `Snapshot ${snapshotId} is already the active snapshot; refusing to re-publish. ` +
+      `Use a fresh snapshot_id (re-run manifest) or rollback first.`,
+    );
+  }
+  // Previous snapshot can re-appear (rollback → re-publish). No error there.
+}
+
 function buildEntitySnapshotRowsJson(
   entities: readonly EntitySnapshotRecord[],
   snapshotId: string,
@@ -249,8 +343,13 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
       const entityIds = entities.map((entity) => entity.entityId);
 
       await client.query('BEGIN');
-      await client.query('TRUNCATE TABLE aliases');
-      await client.query('TRUNCATE TABLE ambiguity_registry');
+      await assertEntityIdentitySignatureConsistency(client, entities);
+      // T-010/W1: Snapshot-bound append-only publish.
+      // No TRUNCATE/DELETE — old snapshot rows stay in place so rollback is
+      // a pointer-swap only (see active_search_snapshot). Read path filters
+      // by the active snapshot_id. Old snapshots are reaped by a separate
+      // GC step after the pointer has been promoted off of them.
+      await assertSnapshotNotAlreadyPublished(client, manifest.snapshotId);
       await client.query(
         `WITH input AS (
            SELECT *
@@ -273,15 +372,10 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
            entity_id, search_snapshot_id, entity_type, canonical_label, identity_signature,
            relations, attributes, metadata
          FROM input
-         ON CONFLICT (entity_id) DO UPDATE SET
-           search_snapshot_id = EXCLUDED.search_snapshot_id,
-           entity_type = EXCLUDED.entity_type,
-           canonical_label = EXCLUDED.canonical_label,
-           identity_signature = EXCLUDED.identity_signature,
-           relations = EXCLUDED.relations,
-           attributes = EXCLUDED.attributes,
-           metadata = EXCLUDED.metadata,
-           updated_at = NOW()`,
+         -- Composite PK conflict target (migration 016). Re-publishing the same
+         -- snapshot is idempotent; cross-snapshot writes append new rows without
+         -- touching other snapshots' data.
+         ON CONFLICT (search_snapshot_id, entity_id) DO NOTHING`,
         [entityRowsJson],
       );
       await client.query(
@@ -296,21 +390,17 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
          INSERT INTO entity_snapshots (snapshot_id, entity_id, snapshot_data)
          SELECT snapshot_id, entity_id, snapshot_data
          FROM input
-         ON CONFLICT (snapshot_id) DO UPDATE SET
-           entity_id = EXCLUDED.entity_id,
-           snapshot_data = EXCLUDED.snapshot_data`,
+         -- Archive is append-only. Rewriting an existing archive row indicates
+         -- a publisher bug, not an idempotent retry. If this path starts throwing
+         -- in production, debug the publisher — don't re-enable DO UPDATE.
+         ON CONFLICT (snapshot_id) DO NOTHING`,
         [entitySnapshotRowsJson],
       );
-      await client.query(
-        `DELETE FROM entity_snapshots
-         WHERE NOT (entity_id = ANY($1::text[]))`,
-        [entityIds],
-      );
-      await client.query(
-        `DELETE FROM entities
-         WHERE NOT (entity_id = ANY($1::text[]))`,
-        [entityIds],
-      );
+      // T-010/W1: No cleanup DELETE. Old-snapshot rows remain in place for
+      // rollback. A separate GC step (ops: reap-snapshots) removes rows whose
+      // search_snapshot_id is older than active+previous after the pointer
+      // swap has been green for a grace period.
+      void entityIds; // retained for readability; no longer used as a cleanup filter
       await client.query(
         `WITH input AS (
            SELECT *
@@ -334,7 +424,9 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
          SELECT
            alias_id, search_snapshot_id, entity_id, alias_type, alias_scope, surface_form,
            normalized_value, source, source_trust, confidence, FALSE
-         FROM input`,
+         FROM input
+         -- Composite PK conflict target (migration 016).
+         ON CONFLICT (search_snapshot_id, alias_id) DO NOTHING`,
         [aliasRowsJson],
       );
       await client.query(
@@ -359,7 +451,9 @@ export async function publishRuntimeSubstrates(args: Args): Promise<SearchSnapsh
            ARRAY(SELECT jsonb_array_elements_text(entity_ids)),
            ARRAY(SELECT jsonb_array_elements_text(ambiguity_types)),
            severity
-         FROM input`,
+         FROM input
+         -- Composite PK conflict target (migration 016).
+         ON CONFLICT (search_snapshot_id, registry_id) DO NOTHING`,
         [ambiguityRowsJson],
       );
 

@@ -13,6 +13,9 @@ import { PgProposalStore } from '../infrastructure/adapter/pg-proposal-store.js'
 import type { FeedbackStore } from '../domain/learning/port/feedback-store.port.js';
 import type { ProposalStore } from '../domain/learning/port/proposal-store.port.js';
 import type { RuntimeHandles } from './runtime-handles.js';
+import { resolveActiveSnapshot } from '../infrastructure/db/active-snapshot-resolver.js';
+import { readPgSqlState } from '../infrastructure/db/pg-sqlstate.js';
+import { globalSilentSkipCounter } from '../observability/silent-skip-counters.js';
 
 export interface LearningContainerServices {
   readonly feedbackStore: FeedbackStore | null;
@@ -28,13 +31,30 @@ export interface LearningContainerServices {
 function buildPgAliasChecker(pool: Pool): ExistingAliasChecker {
   return {
     async aliasExists(surfaceForm: string): Promise<boolean> {
-      const result = await pool.query(
-        `SELECT 1 FROM aliases
-         WHERE surface_form = $1 AND is_suppressed = FALSE
-         LIMIT 1`,
-        [surfaceForm],
-      );
-      return (result.rowCount ?? 0) > 0;
+      try {
+        const { activeSnapshotId } = await resolveActiveSnapshot(pool);
+        const result = await pool.query(
+          `SELECT 1 FROM aliases
+           WHERE surface_form = $1
+             AND search_snapshot_id = $2
+             AND is_suppressed = FALSE
+           LIMIT 1`,
+          [surfaceForm, activeSnapshotId],
+        );
+        return (result.rowCount ?? 0) > 0;
+      } catch (err: unknown) {
+        if (readPgSqlState(err) === '42P01') {
+          // Snapshot pointer or aliases table missing (fresh DB, pre-publish).
+          // Learning-side alias existence check is advisory — degrade cleanly
+          // rather than fail the request.
+          globalSilentSkipCounter.increment(
+            'alias_checker_disabled_snapshot_pointer_missing',
+            { surface: 'container-learning.buildPgAliasChecker' },
+          );
+          return false;
+        }
+        throw err;
+      }
     },
   };
 }

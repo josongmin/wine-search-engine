@@ -140,29 +140,10 @@ export function parseEvidenceItemsJsonb(raw: unknown, caller: string): readonly 
 }
 
 // ---------------------------------------------------------------------------
-// EntityRow (for snapshot rollback in pg-entity-repository)
-// ---------------------------------------------------------------------------
-
-/**
- * Runtime schema for an EntityRow persisted as JSONB in entity_snapshots.
- * Only validates the structural fields needed for rollback restoration.
- * Uses `.passthrough()` so JSONB columns (relations, attributes, metadata)
- * are forwarded as-is to the INSERT statement.
- */
-export const EntityRowSnapshotJsonbSchema = z.object({
-  entity_id: z.string().min(1),
-  entity_type: z.string().min(1),
-  canonical_label: z.string(),
-  identity_signature: z.string(),
-  relations: z.unknown(),
-  attributes: z.unknown(),
-  metadata: z.unknown(),
-  created_at: z.unknown(), // Date or ISO string depending on serialization
-  updated_at: z.unknown(),
-}).passthrough();
-
-export type ValidatedEntityRowSnapshot = z.infer<typeof EntityRowSnapshotJsonbSchema>;
-
+// EntityRowSnapshotJsonbSchema removed — migration 016 makes runtime write
+// path single-authority (ETL publisher). Row-level rollback is replaced by
+// pointer-based rollback via active_search_snapshot. Re-introducing a
+// row-level rollback schema would invite secondary writers to runtime tables.
 // ---------------------------------------------------------------------------
 // Relations (entity.relations JSONB column)
 // ---------------------------------------------------------------------------

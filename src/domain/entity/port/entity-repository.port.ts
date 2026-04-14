@@ -3,42 +3,33 @@ import type { Entity } from '../model/entity.js';
 import type { EntityType } from '../model/entity-type.js';
 
 /**
- * Repository port for Entity persistence.
+ * Read-only repository port for Entity lookups.
+ *
+ * Runtime plane snapshot-scoped PK migration (mig 016): the runtime write path
+ * is collapsed to a single authority — the ETL publisher in
+ * `scripts/etl/publish-runtime-substrates.ts`. Mutating methods previously
+ * exposed by this port (save/update/delete/createSnapshot/rollbackToSnapshot)
+ * were removed because:
+ *  1. No production composition root constructed a PgEntityRepository with
+ *     write intent (verified by grep).
+ *  2. rollbackToSnapshot's row-level semantics contradicts the pointer-based
+ *     rollback declared in migration 010.
+ *  3. Multiple runtime writers multiply the surface where the append-only
+ *     invariant can be broken. Collapse to one authoritative writer is safer.
+ *
  * Implementations live in the infrastructure layer.
  */
 export interface EntityRepository {
-  /** Find an entity by its unique id. */
+  /** Find an entity by its unique id, scoped to the active snapshot. */
   findById(id: CanonicalEntityId): Promise<Entity | null>;
 
-  /** Find an entity by its deterministic identity signature. */
+  /** Find an entity by its deterministic identity signature, scoped to the active snapshot. */
   findBySignature(signature: string): Promise<Entity | null>;
 
   /**
-   * Find entities by type.
+   * Find entities by type within the active snapshot.
    * @param type - The entity type to filter on.
    * @param limit - Maximum number of results (default implementation-defined).
    */
   findByType(type: EntityType, limit?: number): Promise<readonly Entity[]>;
-
-  /** Persist a new entity. */
-  save(entity: Entity): Promise<void>;
-
-  /** Update an existing entity. */
-  update(entity: Entity): Promise<void>;
-
-  /** Delete an entity by id. */
-  delete(id: CanonicalEntityId): Promise<void>;
-
-  /**
-   * Create a named snapshot of the current entity store (RFC-001 §4.5).
-   * @param label - Human-readable label for the snapshot.
-   * @returns The snapshot identifier.
-   */
-  createSnapshot(label: string): Promise<string>;
-
-  /**
-   * Roll back the entity store to a previously created snapshot (RFC-001 §4.5).
-   * @param snapshotId - The snapshot to restore.
-   */
-  rollbackToSnapshot(snapshotId: string): Promise<void>;
 }

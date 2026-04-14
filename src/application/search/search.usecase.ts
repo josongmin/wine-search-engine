@@ -44,6 +44,7 @@ import {
   resolveEntityRouteForPlan,
 } from './search-usecase-hybrid-ranking-pipeline.js';
 import {
+  buildMixedRouteResolveResult,
   buildFailedMixedRouteExecution,
   mixedQueryResultToSearchRouteExecution,
 } from './search-usecase-mixed-route.js';
@@ -61,8 +62,12 @@ import {
   rankedResultsToEvalProvenanceSlices,
   searchResponseToEvalProvenanceSlices,
 } from './search-usecase-eval-provenance.js';
+import { buildRetrievalPlan } from '../../domain/retrieval/service/retrieval-plan-builder.js';
+import { buildNormalizedQueryViews } from '../../domain/query/service/query-normalizer.js';
 
 export type { SearchRequest } from './search-request.dto.js';
+
+const MIXED_EMPTY_RESULTS_FALLBACK_REASON = 'mixed_constraint_guided_hybrid_fallback';
 
 /**
  * Version info injected into the SearchUseCase for snapshot population.
@@ -331,6 +336,14 @@ export class SearchUseCase {
         executeMixed: async () => {
           try {
             const mixedResult = await this.deps.mixedSolver.solve(plan, compiled);
+            if (mixedResult.rankedResults.length === 0 && plan.constraints.hard.length > 0) {
+              const fallbackExecution = buildMixedConstraintFallbackExecution(plan, compiled);
+              const hybridFallback = await this.executeHybridRoute(
+                fallbackExecution.plan,
+                fallbackExecution.compiled,
+              );
+              return buildMixedHybridFallbackExecution(plan, mixedResult, hybridFallback);
+            }
             return mixedQueryResultToSearchRouteExecution(plan, mixedResult, compiled);
           } catch (error) {
             if (error instanceof MixedRouteDegradationError) {
@@ -422,7 +435,7 @@ export class SearchUseCase {
    */
   private async executeEntityRoute(
     plan: QueryPlanV1,
-    compiled?: CompiledWineQuery,
+    compiled: CompiledWineQuery,
   ): Promise<EntityRouteResult> {
     // TA2-4: Run blocker to surface entity IDs not covered by alias anchors.
     // blockerOnlyIds = blocker output minus IDs already in anchor candidateEntityIds.
@@ -497,15 +510,8 @@ export class SearchUseCase {
       return {
         resolveResult: firstResult,
         rankedResults,
-        ...(compiled !== undefined
-          ? {
-              effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
-              usedCompiledExecution: true,
-            }
-          : {
-              effectiveRetrievalMode: 'entity_lookup',
-              usedCompiledExecution: false,
-            }),
+        effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
+        usedCompiledExecution: true,
         retrievalKind: 'entity_lookup',
         sparseExecuted: false,
         specializedRouteExecuted: null,
@@ -624,15 +630,8 @@ export class SearchUseCase {
     return {
       resolveResult: resolved,
       rankedResults,
-      ...(compiled !== undefined
-        ? {
-            effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
-            usedCompiledExecution: true,
-          }
-        : {
-            effectiveRetrievalMode: 'entity_lookup',
-            usedCompiledExecution: false,
-          }),
+      effectiveRetrievalMode: compiled.execution.effectiveRetrievalMode,
+      usedCompiledExecution: true,
       retrievalKind: 'entity_lookup',
       sparseExecuted: false,
       specializedRouteExecuted: null,
@@ -670,12 +669,9 @@ export class SearchUseCase {
   private capBlockerSeedIds(
     plan: QueryPlanV1,
     blockerOnlyIds: readonly CanonicalEntityId[],
-    compiled?: CompiledWineQuery,
+    compiled: CompiledWineQuery,
   ): readonly CanonicalEntityId[] {
-    const maxCandidates = compiled?.execution.budget.maxCandidates;
-    if (maxCandidates === undefined) {
-      return blockerOnlyIds;
-    }
+    const maxCandidates = compiled.execution.budget.maxCandidates;
 
     const anchorCoveredIds = new Set(
       plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
@@ -688,12 +684,9 @@ export class SearchUseCase {
     plan: QueryPlanV1,
     additionalIds: readonly CanonicalEntityId[],
     pass1BlockerIds: readonly CanonicalEntityId[],
-    compiled?: CompiledWineQuery,
+    compiled: CompiledWineQuery,
   ): readonly CanonicalEntityId[] {
-    const maxCandidates = compiled?.execution.budget.maxCandidates;
-    if (maxCandidates === undefined) {
-      return additionalIds;
-    }
+    const maxCandidates = compiled.execution.budget.maxCandidates;
 
     const anchorCoveredIds = new Set(
       plan.anchors.flatMap((anchor) => anchor.candidateEntityIds.map(String)),
@@ -716,6 +709,7 @@ export class SearchUseCase {
   private async executeHybridRoute(
     plan: QueryPlanV1,
     compiled: CompiledWineQuery,
+    anchorEntityId?: CanonicalEntityId,
   ): Promise<SearchRouteExecutionResult> {
     const entityResolutionDeps = {
       entityResolver: this.deps.entityResolver,
@@ -732,6 +726,134 @@ export class SearchUseCase {
       },
       (p) => resolveEntityRouteForPlan(p, entityResolutionDeps, compiled),
       compiled,
+      undefined,
+      anchorEntityId,
     );
   }
+}
+
+function buildMixedHybridFallbackExecution(
+  plan: QueryPlanV1,
+  mixedResult: Awaited<ReturnType<MixedSolverPort['solve']>>,
+  hybridFallback: SearchRouteExecutionResult,
+): SearchRouteExecutionResult {
+  const filteredRankedResults = hybridFallback.rankedResults.filter(
+    (result) => result.entityId !== mixedResult.anchor.entityId,
+  );
+  const degradationReasons = new Set<string>([
+    ...(mixedResult.routeDegradation?.degradationReasons ?? []),
+    ...(hybridFallback.routeDegradation?.degradationReasons ?? []),
+    MIXED_EMPTY_RESULTS_FALLBACK_REASON,
+  ]);
+
+  return {
+    ...hybridFallback,
+    resolveResult: buildMixedRouteResolveResult(plan, filteredRankedResults, mixedResult),
+    rankedResults: filteredRankedResults,
+    decisionContext: {
+      ...(hybridFallback.decisionContext ?? {}),
+      mixedAnchor: {
+        entityId: mixedResult.anchor.entityId,
+        canonicalLabel: mixedResult.anchor.canonicalLabel,
+        confidence: mixedResult.anchor.anchorConfidence,
+      },
+    },
+    routeDegradation: {
+      executionMode: 'degraded',
+      degradationReasons: [...degradationReasons],
+    },
+    fallbackReason: hybridFallback.fallbackReason ?? mixedResult.fallbackReason ?? MIXED_EMPTY_RESULTS_FALLBACK_REASON,
+  };
+}
+
+function buildMixedConstraintFallbackExecution(
+  plan: QueryPlanV1,
+  compiled: CompiledWineQuery,
+): { readonly plan: QueryPlanV1; readonly compiled: CompiledWineQuery } {
+  const fallbackQuery = buildMixedConstraintFallbackQuery(plan);
+  const fallbackQueryViews = buildNormalizedQueryViews(fallbackQuery);
+  const fallbackPlan: QueryPlanV1 = {
+    ...plan,
+    rawQuery: fallbackQuery,
+    normalizedQuery: fallbackQueryViews.strict,
+    normalizedQueryViews: fallbackQueryViews,
+    intent: 'facet_search',
+    route: 'hybrid',
+    retrievalMode: 'constraint_filter',
+    queryClass: 'pure_constraint',
+    anchors: [],
+    admission_context: {
+      requires_identity_seal: false,
+      requires_constraint_evidence: plan.constraints.hard.length > 0,
+      requires_anchor_evidence: false,
+    },
+  };
+
+  return {
+    plan: fallbackPlan,
+    compiled: {
+      ...compiled,
+      query: {
+        ...compiled.query,
+        rawQuery: fallbackPlan.rawQuery,
+        normalizedQuery: fallbackPlan.normalizedQuery,
+        ...(fallbackPlan.normalizedQueryViews !== undefined
+          ? { normalizedQueryViews: fallbackPlan.normalizedQueryViews }
+          : {}),
+        intent: fallbackPlan.intent,
+        anchors: [],
+        queryClass: fallbackPlan.queryClass,
+        constraints: fallbackPlan.constraints,
+        retrievalPlan: buildRetrievalPlan(fallbackPlan.constraints),
+      },
+      execution: {
+        ...compiled.execution,
+        effectiveRoute: 'hybrid',
+        effectiveRetrievalMode: 'constraint_filter',
+        provenancePolicy: {
+          ...compiled.execution.provenancePolicy,
+          requireIdentitySeal: false,
+          requireAnchorEvidence: false,
+        },
+      },
+    },
+  };
+}
+
+function buildMixedConstraintFallbackQuery(plan: QueryPlanV1): string {
+  const phrases = new Set<string>();
+  for (const constraint of plan.constraints.hard) {
+    if (constraint.operator === 'exclude') {
+      continue;
+    }
+    const canonicalPhrase = toConstraintFallbackPhrase(constraint.attribute, constraint.value);
+    if (canonicalPhrase !== undefined) {
+      phrases.add(canonicalPhrase);
+      continue;
+    }
+    const sourcePhrase = constraint.source_phrase.trim();
+    if (sourcePhrase.length > 0) {
+      phrases.add(sourcePhrase);
+    }
+  }
+
+  const fallback = [...phrases].join(' ').trim();
+  return fallback.length > 0 ? fallback : plan.normalizedQuery;
+}
+
+function toConstraintFallbackPhrase(attribute: string, value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  if (attribute === 'wine_type') {
+    return `${trimmed} wine`;
+  }
+
+  return trimmed;
 }

@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { AliasRepository } from '../../domain/alias/port/alias-repository.port.js';
 import type { Alias, AliasScope, AliasType } from '../../domain/alias/model/alias.js';
 import { createCanonicalEntityId, type CanonicalEntityId } from '../../domain/shared/types/index.js';
+import { resolveActiveSnapshot } from '../db/active-snapshot-resolver.js';
 
 function toAliasType(value: string): AliasType {
   if (
@@ -28,18 +29,24 @@ function toAliasScope(value: string): AliasScope {
   throw new Error(`PgAliasRepository: unknown alias_scope "${value}" — schema drift or corrupted row`);
 }
 
-interface AliasRow {
-  alias_id: string;
-  entity_id: string;
-  alias_type: string;
-  alias_scope: string;
-  surface_form: string;
-  normalized_value: string;
-  source: string;
-  source_trust: number;
-  confidence: number;
-  is_suppressed: boolean;
-  created_at: Date;
+/**
+ * Row shape returned by a wildcard read from the aliases table. Exported so
+ * regression tests can assert `search_snapshot_id` is declared — mandatory for
+ * any snapshot-scoped query to type-check against the composite-PK table.
+ */
+export interface AliasRow {
+  readonly alias_id: string;
+  readonly search_snapshot_id: string;
+  readonly entity_id: string;
+  readonly alias_type: string;
+  readonly alias_scope: string;
+  readonly surface_form: string;
+  readonly normalized_value: string;
+  readonly source: string;
+  readonly source_trust: number;
+  readonly confidence: number;
+  readonly is_suppressed: boolean;
+  readonly created_at: Date;
 }
 
 function rowToAlias(row: AliasRow): Alias {
@@ -60,19 +67,20 @@ export class PgAliasRepository implements AliasRepository {
   constructor(private readonly pool: Pool) {}
 
   async findByValue(value: string, scope?: AliasScope): Promise<readonly Alias[]> {
+    const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
     let query: string;
     let params: unknown[];
 
     if (scope != null) {
       query = `SELECT * FROM aliases
-               WHERE surface_form = $1 AND alias_scope = $2 AND is_suppressed = FALSE
+               WHERE surface_form = $1 AND alias_scope = $2 AND search_snapshot_id = $3 AND is_suppressed = FALSE
                ORDER BY confidence DESC`;
-      params = [value, scope];
+      params = [value, scope, activeSnapshotId];
     } else {
       query = `SELECT * FROM aliases
-               WHERE surface_form = $1 AND is_suppressed = FALSE
+               WHERE surface_form = $1 AND search_snapshot_id = $2 AND is_suppressed = FALSE
                ORDER BY confidence DESC`;
-      params = [value];
+      params = [value, activeSnapshotId];
     }
 
     const result = await this.pool.query<AliasRow>(query, params);
@@ -80,19 +88,21 @@ export class PgAliasRepository implements AliasRepository {
   }
 
   async findByEntity(entityId: CanonicalEntityId): Promise<readonly Alias[]> {
+    const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
     const result = await this.pool.query<AliasRow>(
-      `SELECT * FROM aliases WHERE entity_id = $1 ORDER BY confidence DESC`,
-      [entityId],
+      `SELECT * FROM aliases WHERE entity_id = $1 AND search_snapshot_id = $2 ORDER BY confidence DESC`,
+      [entityId, activeSnapshotId],
     );
     return result.rows.map(rowToAlias);
   }
 
   async findByNormalizedValue(normalized: string): Promise<readonly Alias[]> {
+    const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
     const result = await this.pool.query<AliasRow>(
       `SELECT * FROM aliases
-       WHERE normalized_value = $1 AND is_suppressed = FALSE
+       WHERE normalized_value = $1 AND search_snapshot_id = $2 AND is_suppressed = FALSE
        ORDER BY confidence DESC`,
-      [normalized],
+      [normalized, activeSnapshotId],
     );
     return result.rows.map(rowToAlias);
   }
@@ -103,13 +113,14 @@ export class PgAliasRepository implements AliasRepository {
   ) => {
     const prefixLength = Math.max(1, Math.ceil(normalized.length / 2));
     const prefix = normalized.slice(0, prefixLength);
+    const { activeSnapshotId } = await resolveActiveSnapshot(this.pool);
 
     let query = `SELECT * FROM aliases
-                 WHERE normalized_value LIKE $1 AND is_suppressed = FALSE`;
-    const params: unknown[] = [`${prefix}%`];
+                 WHERE normalized_value LIKE $1 AND search_snapshot_id = $2 AND is_suppressed = FALSE`;
+    const params: unknown[] = [`${prefix}%`, activeSnapshotId];
 
     if (scope != null) {
-      query += ' AND alias_scope = $2';
+      query += ' AND alias_scope = $3';
       params.push(scope);
     }
 
@@ -118,83 +129,4 @@ export class PgAliasRepository implements AliasRepository {
     const result = await this.pool.query<AliasRow>(query, params);
     return result.rows.map(rowToAlias);
   };
-
-  async save(alias: Alias): Promise<void> {
-    await this.pool.query(
-      `INSERT INTO aliases (
-        alias_id, entity_id, alias_type, alias_scope,
-        surface_form, normalized_value, source, confidence, is_suppressed
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (alias_id) DO UPDATE SET
-        entity_id = EXCLUDED.entity_id,
-        alias_type = EXCLUDED.alias_type,
-        alias_scope = EXCLUDED.alias_scope,
-        surface_form = EXCLUDED.surface_form,
-        normalized_value = EXCLUDED.normalized_value,
-        source = EXCLUDED.source,
-        confidence = EXCLUDED.confidence,
-        is_suppressed = EXCLUDED.is_suppressed`,
-      [
-        alias.aliasId,
-        alias.entityId,
-        alias.type,
-        alias.scope,
-        alias.value,
-        alias.normalizedValue,
-        alias.source,
-        alias.confidencePrior,
-        alias.suppressed,
-      ],
-    );
-  }
-
-  async suppress(aliasId: string, _reason: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE aliases SET is_suppressed = TRUE WHERE alias_id = $1`,
-      [aliasId],
-    );
-  }
-
-  async bulkSave(aliases: readonly Alias[]): Promise<void> {
-    if (aliases.length === 0) return;
-
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-      for (const alias of aliases) {
-        await client.query(
-          `INSERT INTO aliases (
-            alias_id, entity_id, alias_type, alias_scope,
-            surface_form, normalized_value, source, confidence, is_suppressed
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-          ON CONFLICT (alias_id) DO UPDATE SET
-            entity_id = EXCLUDED.entity_id,
-            alias_type = EXCLUDED.alias_type,
-            alias_scope = EXCLUDED.alias_scope,
-            surface_form = EXCLUDED.surface_form,
-            normalized_value = EXCLUDED.normalized_value,
-            source = EXCLUDED.source,
-            confidence = EXCLUDED.confidence,
-            is_suppressed = EXCLUDED.is_suppressed`,
-          [
-            alias.aliasId,
-            alias.entityId,
-            alias.type,
-            alias.scope,
-            alias.value,
-            alias.normalizedValue,
-            alias.source,
-            alias.confidencePrior,
-            alias.suppressed,
-          ],
-        );
-      }
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
 }

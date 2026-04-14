@@ -5,6 +5,7 @@ import type {
 } from '../../shared/types/index.js';
 import type { HybridCandidate } from '../model/hybrid-candidate.js';
 import { GEOGRAPHY_ATTRIBUTES } from '../../shared/constants/constraint-attributes.js';
+import { KRW_PER_USD_APPROXIMATE } from '../../shared/constants.js';
 
 type CandidateValue = string | number | readonly string[] | undefined;
 
@@ -18,9 +19,9 @@ function deriveWineType(candidate: HybridCandidate): string | undefined {
     return undefined;
   }
   if (style.includes('sparkling')) return 'sparkling';
+  if (style.includes('white')) return 'white';
   if (style.includes('dessert') || style.includes('sweet')) return 'dessert';
   if (style.includes('rose') || style.includes('ros')) return 'rose';
-  if (style.includes('white')) return 'white';
   return 'red';
 }
 
@@ -56,6 +57,13 @@ function geographyContains(attrValue: string, constraintValue: string): boolean 
 function geographyExcludesAll(attrValue: string, constraintValues: readonly string[]): boolean {
   const norm = normalizeString(attrValue);
   return constraintValues.every((cv) => !norm.includes(normalizeString(cv)));
+}
+
+function priceUsdToApproxKrw(priceUsd: number | undefined): number | undefined {
+  if (priceUsd === undefined || !Number.isFinite(priceUsd)) {
+    return undefined;
+  }
+  return Math.round(priceUsd * KRW_PER_USD_APPROXIMATE);
 }
 
 function resolveCandidateValue(
@@ -104,6 +112,9 @@ function resolveCandidateValue(
     case 'price':
     case 'price_usd':
       return candidate.priceUsd;
+    case 'max_price_krw':
+    case 'min_price_krw':
+      return priceUsdToApproxKrw(candidate.priceUsd);
     case 'classification':
       return candidate.classification;
     case 'alcohol':

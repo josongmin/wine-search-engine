@@ -1,45 +1,61 @@
 #!/usr/bin/env tsx
 /**
- * Batch transliteration aliases (RFC-003): reads `entities`, runs the rule-based
- * {@link Transliterator}, and upserts Korean surface forms into `aliases`.
+ * Batch transliteration aliases (RFC-003): reads `entities` from the ACTIVE
+ * snapshot, runs the rule-based {@link Transliterator}, and **emits NDJSON**
+ * of AliasSnapshotRecord rows for the next snapshot build to consume.
  *
- * Intended for data ingestion / backfill — not query-time (that path uses
- * QueryNormalizer inline rules).
+ * This script used to write directly into the runtime `aliases` table via
+ * PgAliasRepository.save(). Migration 016 collapses runtime writes to a single
+ * authority (publish-runtime-substrates.ts), so this script now produces a
+ * snapshot-build artifact instead. The next snapshot build merges the
+ * emitted NDJSON into `aliases.ndjson`; publish-runtime-substrates writes it
+ * into the composite-PK runtime plane.
  *
  * Usage:
- *   npx tsx --env-file=.env scripts/etl/generate-transliteration-aliases.ts
- *   npx tsx --env-file=.env scripts/etl/generate-transliteration-aliases.ts --dry-run --limit 50
- *   npx tsx --env-file=.env scripts/etl/generate-transliteration-aliases.ts --entity-id chateau-margaux-2015
+ *   pnpm exec tsx scripts/etl/generate-transliteration-aliases.ts --out data/transliteration-aliases.ndjson
+ *   pnpm exec tsx scripts/etl/generate-transliteration-aliases.ts --dry-run --limit 50
+ *   pnpm exec tsx scripts/etl/generate-transliteration-aliases.ts --entity-id chateau-margaux-2015
  *
- * Requires: PG_PASSWORD (and other PG_* vars) for a live database.
+ * Output format: one JSON object per line matching AliasSnapshotRecord.
+ *
+ * Requires: PG_PASSWORD (and other PG_* vars) for a live database + active
+ * snapshot pointer row.
  */
 
 import 'dotenv/config';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { loadConfig } from '../../src/config/env.js';
 import { createPgPool, shouldUsePgPool } from '../../src/infrastructure/db/pg-pool.js';
-import { PgAliasRepository } from '../../src/infrastructure/adapter/pg-alias-repository.js';
 import { Transliterator, type SourceLang } from '../../src/domain/alias/service/transliterator.js';
 import { createAlias } from '../../src/domain/alias/model/alias.js';
 import { createCanonicalEntityId } from '../../src/domain/shared/types/index.js';
+import { resolveActiveSnapshot } from '../../src/infrastructure/db/active-snapshot-resolver.js';
 import { inferTransliterationSourceLang } from './transliteration-helpers.js';
+import type { AliasSnapshotRecord } from './search-snapshot-schema.js';
+
+const DEFAULT_OUT_PATH = 'data/transliteration-aliases.ndjson';
 
 interface Args {
   readonly dryRun: boolean;
   readonly limit: number;
   readonly entityId: string | null;
+  readonly outPath: string;
 }
 
 function parseArgs(argv: string[]): Args {
   let dryRun = false;
   let limit = 0;
   let entityId: string | null = null;
+  let outPath = DEFAULT_OUT_PATH;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dry-run') dryRun = true;
     else if (a === '--limit') limit = Math.max(0, Number(argv[++i] ?? '0'));
     else if (a === '--entity-id') entityId = argv[++i] ?? null;
+    else if (a === '--out' || a === '-o') outPath = argv[++i] ?? DEFAULT_OUT_PATH;
   }
-  return { dryRun, limit, entityId };
+  return { dryRun, limit, entityId, outPath };
 }
 
 function readCountry(attributes: unknown): string | null {
@@ -77,18 +93,24 @@ async function main(): Promise<void> {
   const config = loadConfig();
 
   if (!shouldUsePgPool(config.pg)) {
+     
     console.error('PG_PASSWORD is required to connect to Postgres.');
     process.exit(1);
   }
 
   const pool = createPgPool(config.pg);
-  const repo = new PgAliasRepository(pool);
   const transliterator = new Transliterator();
 
-  let query = `SELECT entity_id, canonical_label, attributes FROM entities`;
-  const params: unknown[] = [];
+  // Snapshot-scoped read (migration 016): reading across all snapshots would
+  // produce aliases for stale entity states.
+  const { activeSnapshotId } = await resolveActiveSnapshot(pool);
+
+  let query = `SELECT entity_id, canonical_label, attributes
+               FROM entities
+               WHERE search_snapshot_id = $1`;
+  const params: unknown[] = [activeSnapshotId];
   if (args.entityId !== null) {
-    query += ` WHERE entity_id = $1`;
+    query += ` AND entity_id = $2`;
     params.push(args.entityId);
   }
   query += ` ORDER BY entity_id`;
@@ -96,8 +118,8 @@ async function main(): Promise<void> {
   const result = await pool.query<EntityRow>(query, params);
   const rows = result.rows;
 
+  const emittedRecords: AliasSnapshotRecord[] = [];
   let processed = 0;
-  let inserted = 0;
 
   for (const row of rows) {
     if (args.limit > 0 && processed >= args.limit) {
@@ -123,24 +145,58 @@ async function main(): Promise<void> {
       });
 
       if (args.dryRun) {
+         
         console.log(`[dry-run] ${row.entity_id} (${lang}) → ${v.value} [${v.type}]`);
-        inserted += 1;
+        emittedRecords.push(toAliasSnapshotRecord(alias));
         continue;
       }
 
-      await repo.save(alias);
-      inserted += 1;
+      emittedRecords.push(toAliasSnapshotRecord(alias));
     }
   }
 
   await pool.end();
 
+  if (!args.dryRun) {
+    const absOut = path.isAbsolute(args.outPath)
+      ? args.outPath
+      : path.resolve(process.cwd(), args.outPath);
+    await fs.mkdir(path.dirname(absOut), { recursive: true });
+    const body = emittedRecords.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    await fs.writeFile(absOut, body, 'utf-8');
+  }
+
+   
   console.log(
-    `Done. Entities processed: ${processed}, alias rows ${args.dryRun ? 'would write' : 'written'}: ${inserted}.`,
+    `Done. Entities processed: ${processed}, alias records ${args.dryRun ? 'would emit' : `emitted to ${args.outPath}`}: ${emittedRecords.length}.`,
   );
 }
 
+function toAliasSnapshotRecord(alias: {
+  readonly aliasId: string;
+  readonly entityId: string;
+  readonly value: string;
+  readonly normalizedValue: string;
+  readonly type: string;
+  readonly scope: string;
+  readonly source: string;
+  readonly confidencePrior: number;
+}): AliasSnapshotRecord {
+  return {
+    aliasId: alias.aliasId,
+    entityId: alias.entityId,
+    value: alias.value,
+    normalizedValue: alias.normalizedValue,
+    type: alias.type,
+    scope: alias.scope,
+    source: alias.source,
+    sourceTrust: 1.0,
+    confidencePrior: alias.confidencePrior,
+  };
+}
+
 void main().catch((err: unknown) => {
+   
   console.error(err);
   process.exit(1);
 });

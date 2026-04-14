@@ -66,6 +66,10 @@ type SearchRouteCapability =
   | 'resolver_only';
 
 const AGENT_METRICS_ALERTS_MAX = 20;
+/** Upper bound on probe `reason` text surfaced in /ready response (H13). */
+const READINESS_REASON_MAX_LEN = 512;
+/** Upper bound on probe `errorClass` (typically `Error.constructor.name`). */
+const READINESS_ERROR_CLASS_MAX_LEN = 128;
 const RETRIEVAL_DEGRADATION_ALERTS_MAX = 20;
 /** Upper bound for Claude tools list. Currently 4 tools; 100 prevents unbounded growth from misconfigured servers. */
 const CLAUDE_TOOLS_LIST_MAX = 100;
@@ -105,16 +109,39 @@ const HealthResponseSchema = z.object({
   uptime: z.number().finite(),
 }).strict();
 
+/** Hard ceiling for snapshot_health.stale_row_count. Reaper keeps this near
+ *  zero in steady state; a runaway lag would still serialize below this cap. */
+const SNAPSHOT_HEALTH_STALE_ROWS_MAX = 100_000_000;
+
+const SnapshotHealthSchema = z.object({
+  active_snapshot_id: z.string().min(1),
+  previous_snapshot_id: z.string().min(1).nullable(),
+  /** Sum of rows in entities + aliases + ambiguity_registry whose
+   *  search_snapshot_id is neither active nor previous — waiting for the reaper. */
+  stale_row_count: z.number().int().nonnegative().max(SNAPSHOT_HEALTH_STALE_ROWS_MAX),
+  /** Seconds since active_search_snapshot.promoted_at. Enables alerts on
+   *  stuck pointers (no publish in N hours) and on reaper lag. */
+  pointer_age_seconds: z.number().int().nonnegative(),
+}).strict();
+
 const ReadyResponseSchema = z.object({
   ready: z.boolean(),
   timestamp: z.string(),
   checks: z.record(z.object({
     status: z.enum(['up', 'down', 'skipped']),
     required: z.boolean(),
+    // Wave 3 / H13 fail-loud: when a probe throws, surface the structured
+    // reason + error class so ops can immediately see WHICH probe died and
+    // HOW — not just an opaque 'down'.
+    reason: z.string().max(READINESS_REASON_MAX_LEN).optional(),
+    error_class: z.string().max(READINESS_ERROR_CLASS_MAX_LEN).optional(),
   }).strict()).refine(
     (rec) => Object.keys(rec).length <= READINESS_CHECKS_MAX,
     { message: `checks record must not exceed ${READINESS_CHECKS_MAX} entries` },
   ),
+  // Optional snapshot-plane observability block. Optional so the field is
+  // allowed to be absent when PG is down or the reader is not wired.
+  snapshot_health: SnapshotHealthSchema.optional(),
 }).strict();
 
 const AgentMetricsResponseSchema = z.object({
