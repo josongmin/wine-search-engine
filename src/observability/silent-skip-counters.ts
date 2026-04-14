@@ -48,7 +48,6 @@ export type SilentSkipKind =
   // must be scoped to the active snapshot; when the snapshot pointer table
   // is absent (fresh DB, pre-publish) these features degrade cleanly.
   | 'learning_warmup_disabled_snapshot_pointer_missing'
-  | 'learning_adapter_disabled_snapshot_pointer_missing'
   | 'alias_checker_disabled_snapshot_pointer_missing';
 
 export type LtrInferenceComponentScoreField =
@@ -101,7 +100,6 @@ const SILENT_SKIP_KINDS: readonly SilentSkipKind[] = [
   'blocker_snapshot_resolve_failure',
   'blocker_alias_query_failure',
   'learning_warmup_disabled_snapshot_pointer_missing',
-  'learning_adapter_disabled_snapshot_pointer_missing',
   'alias_checker_disabled_snapshot_pointer_missing',
 ] as const;
 

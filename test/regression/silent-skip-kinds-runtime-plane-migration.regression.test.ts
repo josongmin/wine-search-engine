@@ -17,7 +17,6 @@ const FILE_PATH = fileURLToPath(
 
 const REQUIRED_KINDS = [
   'learning_warmup_disabled_snapshot_pointer_missing',
-  'learning_adapter_disabled_snapshot_pointer_missing',
   'alias_checker_disabled_snapshot_pointer_missing',
 ] as const;
 
