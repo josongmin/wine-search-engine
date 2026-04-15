@@ -181,3 +181,68 @@ export function classifyCourseHits(query: string): readonly ClassifiedCourseHit[
     .filter((c) => present.has(c))
     .map((purpose) => ({ purpose }));
 }
+
+// ─── Shared-budget patterns (Wave H) ─────────────────────────────────────────
+
+/**
+ * Korean shared-budget markers. "총 X원" / "합산 예산" / "도합" —
+ * any of these AND a course/subquery split present means the user's
+ * budget is a cross-subquery resource (`shares_budget` edge). Whole-
+ * syllable `.includes()` is safe for the same reasons as the XOR
+ * lexicon.
+ */
+export const TOPOLOGY_SHARES_BUDGET_KEYWORDS_KO: readonly string[] = [
+  '총',
+  '합산',
+  '도합',
+  '합계',
+  '합쳐',
+  '전체',
+];
+
+/**
+ * English shared-budget regex. Matches `total`, `combined`, `altogether`,
+ * `all together`, `under $X`, `under N KRW` and similar phrases that
+ * signal a cross-subquery budget envelope. Unicode-safe lookaround pair;
+ * no `/g` on the export.
+ */
+export const TOPOLOGY_SHARES_BUDGET_REGEX_EN: RegExp =
+  /(?:^|[^\p{L}\p{N}])(?:total(?:ly)?|combined|altogether|all\s+together|overall\s+budget)(?=$|[^\p{L}\p{N}])/iu;
+
+/**
+ * KRW / USD numeric budget pattern, e.g. `15만원`, `150,000 KRW`,
+ * `$300`, `300 usd`. Positive match means a numeric money amount is
+ * present — used in conjunction with a course/subquery signal to
+ * promote the budget to `shares_budget` semantics.
+ */
+export const TOPOLOGY_BUDGET_AMOUNT_REGEX: RegExp =
+  /(?:[0-9][0-9.,]*\s*(?:만원|원|krw|usd|달러)|[$₩]\s*[0-9][0-9.,]*)/iu;
+
+/**
+ * Returns true iff the query carries a shared-budget signal AND either
+ * a numeric amount OR a multi-course/XOR decomposition hint. The hint
+ * is caller-supplied — the detector passes it through from the
+ * planner-level decomposition analyser.
+ *
+ * Contract: false-positive discipline — a bare "총" without any
+ * numeric amount or multi-course evidence is NOT enough; typical
+ * Korean phrasing uses "총" in many contexts.
+ */
+export function matchesSharedBudgetHint(input: {
+  readonly query: string;
+  readonly hasMultiSubquery: boolean;
+}): boolean {
+  const { query, hasMultiSubquery } = input;
+  // Keyword presence (cheap).
+  let keywordHit = false;
+  for (const kw of TOPOLOGY_SHARES_BUDGET_KEYWORDS_KO) {
+    if (query.includes(kw)) { keywordHit = true; break; }
+  }
+  if (!keywordHit && !TOPOLOGY_SHARES_BUDGET_REGEX_EN.test(query)) {
+    return false;
+  }
+  // Must co-occur with a monetary amount OR a multi-subquery decomposition.
+  // Either signal alone is too noisy ("총" appears in non-budget Korean).
+  if (TOPOLOGY_BUDGET_AMOUNT_REGEX.test(query)) return true;
+  return hasMultiSubquery;
+}

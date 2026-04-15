@@ -42,8 +42,13 @@ import type { QueryDecompositionHint } from '../model/query-decomposition.js';
 import {
   classifyCourseHits,
   matchesCourseKeywords,
+  matchesSharedBudgetHint,
   matchesXorLexicon,
 } from './topology-pattern-lexicon.js';
+import type {
+  ConstraintGraphEdge,
+  SharesBudgetEdge,
+} from '../model/constraint-graph.js';
 
 const TOPOLOGY_NODE_ID_PREFIX = 'topology/';
 /** XOR wrap-root id — stable so identical input → identical output. */
@@ -168,12 +173,41 @@ export class DeterministicTopologyDetector {
       children: subqueryNodes.map((n) => n.nodeId),
     };
 
+    // Wave H — shared-budget edge emission. When a multi-course query
+    // ALSO carries a shared-budget phrase ("총 X원" / "total" / "altogether")
+    // AND either a numeric amount OR the multi-subquery decomposition
+    // signal (always true here since we're in the ≥2-course branch),
+    // emit a `shares_budget:price_total` edge between every pair of
+    // subqueries. BundleSelector (Phase 1c) consumes this edge to enforce
+    // an aggregate price ceiling across the winning assignment.
+    const edges: ConstraintGraphEdge[] = [];
+    if (
+      matchesSharedBudgetHint({
+        query: normalizedQuery,
+        hasMultiSubquery: true,
+      })
+    ) {
+      for (let i = 0; i < subqueryNodes.length; i++) {
+        for (let j = i + 1; j < subqueryNodes.length; j++) {
+          const a = subqueryNodes[i]!.nodeId;
+          const b = subqueryNodes[j]!.nodeId;
+          const edge: SharesBudgetEdge = {
+            kind: 'shares_budget',
+            from: a,
+            to: b,
+            resource: 'price_total',
+          };
+          edges.push(edge);
+        }
+      }
+    }
+
     return {
       graphSchemaVersion: CONSTRAINT_GRAPH_SCHEMA_VERSION,
       origin: 'planner_emitted',
       rootNodeId: TOPOLOGY_COURSE_ROOT_ID,
       nodes: [rootNode, ...subqueryNodes],
-      edges: [],
+      edges,
       globalBudgets: {},
     };
   }
