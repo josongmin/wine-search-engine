@@ -108,9 +108,15 @@ export function mergeTopologyIntoTrivial(
     ...preservedTrivialNodes,
   ];
 
+  // Preserve the source topology's origin. Wave F1 deterministic
+  // detector emits `'planner_emitted'`; the LLM planner emits
+  // `'planner_emitted'` or `'hybrid'`. Merging with the trivial graph
+  // does NOT re-label — downstream telemetry needs the distinction
+  // between deterministic ('planner_emitted') and LLM-sourced
+  // ('hybrid') topology so bench summaries can split them.
   return {
     graphSchemaVersion: CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1,
-    origin: 'hybrid',
+    origin: topology.origin,
     rootNodeId: topology.rootNodeId,
     nodes: mergedNodes,
     edges: topology.edges,

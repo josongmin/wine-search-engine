@@ -21,6 +21,7 @@ import type { ConstraintGraph } from '../model/constraint-graph.js';
 import type { ConstraintTopologyPlanner } from './constraint-topology-planner.js';
 import { isTopologyIntentGateOpen } from './constraint-topology-planner.js';
 import { mergeTopologyIntoTrivial } from './merge-topology-into-trivial.js';
+import { DeterministicTopologyDetector } from './deterministic-topology-detector.js';
 import type { QueryDecompositionHint } from '../model/query-decomposition.js';
 
 export interface ConstraintCompilerResult {
@@ -61,16 +62,27 @@ export interface ConstraintCompilerResult {
  * ADR-012 Phase 1b.2 feature flag. Default OFF; set to literal 'true' to
  * enable LLM topology planner. When off (or when the planner is not
  * injected, e.g. no `ChatLlmPort` at composition root), the compiler
- * falls through to the deterministic trivial graph.
+ * falls through to the deterministic detector (F1) or the trivial graph.
  */
 function isConstraintGraphTopologyLlmEnabled(): boolean {
   return process.env['CONSTRAINT_GRAPH_TOPOLOGY_LLM'] === 'true';
+}
+
+/**
+ * Wave F1 feature flag. Default ON; set to literal 'false' to disable
+ * the deterministic pattern-based topology detector. Priority chain:
+ * LLM (if enabled) > deterministic (this flag, default on) > trivial.
+ */
+function isConstraintGraphTopologyDeterministicEnabled(): boolean {
+  return process.env['CONSTRAINT_GRAPH_TOPOLOGY_DETERMINISTIC'] !== 'false';
 }
 
 // SOFT_CONSTRAINT_ATTRIBUTES is imported from SSoT: ../../shared/constants/constraint-attributes.js
 const MAX_UNRESOLVED_SPAN_SAMPLE_COUNT = 5;
 
 const CONSTRAINT_REASONER = new ConstraintReasoner();
+/** Wave F1: single shared deterministic detector — stateless, safe to reuse. */
+const DETERMINISTIC_TOPOLOGY_DETECTOR = new DeterministicTopologyDetector();
 
 export class ConstraintCompiler {
   constructor(
@@ -272,6 +284,13 @@ export class ConstraintCompiler {
       const trivial = buildTrivialGraphFromAtoms(reasonerOutput.survivingAtoms);
       constraintGraph = trivial;
 
+      // Priority chain: LLM (if enabled + planner injected + intent gate) >
+      // deterministic (F1, default on) > trivial (already assigned above).
+      const slotIds = trivial.nodes
+        .filter((n) => n.kind === 'slot')
+        .map((n) => n.nodeId);
+
+      let topologyHandled = false;
       if (
         isConstraintGraphTopologyLlmEnabled() &&
         this.topologyPlanner !== undefined &&
@@ -280,9 +299,6 @@ export class ConstraintCompiler {
           ...(decompositionHint !== undefined ? { decompositionHint } : {}),
         })
       ) {
-        const slotIds = trivial.nodes
-          .filter((n) => n.kind === 'slot')
-          .map((n) => n.nodeId);
         const topology = await this.topologyPlanner.plan({
           atoms: reasonerOutput.survivingAtoms,
           normalizedQuery,
@@ -292,6 +308,26 @@ export class ConstraintCompiler {
         });
         if (topology !== null) {
           const merged = mergeTopologyIntoTrivial(trivial, topology);
+          if (merged !== null) {
+            constraintGraph = merged;
+            topologyHandled = true;
+          }
+        }
+      }
+
+      // Wave F1: deterministic pattern-based topology detector. Runs when
+      // the LLM path did not produce a usable graph (either disabled, not
+      // injected, intent gate closed, LLM returned null, or merge failed).
+      // Stateless + pure — safe to call on every compile.
+      if (!topologyHandled && isConstraintGraphTopologyDeterministicEnabled()) {
+        const detected = DETERMINISTIC_TOPOLOGY_DETECTOR.detect({
+          atoms: reasonerOutput.survivingAtoms,
+          normalizedQuery,
+          slotIds,
+          ...(decompositionHint !== undefined ? { decompositionHint } : {}),
+        });
+        if (detected !== null) {
+          const merged = mergeTopologyIntoTrivial(trivial, detected);
           if (merged !== null) {
             constraintGraph = merged;
           }

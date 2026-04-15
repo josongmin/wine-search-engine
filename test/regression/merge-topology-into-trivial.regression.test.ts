@@ -75,14 +75,26 @@ describe('mergeTopologyIntoTrivial', () => {
     expect(merged.nodes.find((n) => n.nodeId === trivialRootId)).toBeUndefined();
   });
 
-  it('sets origin to hybrid and schema version v1.1', () => {
+  it('preserves topology origin (deterministic → planner_emitted, LLM → hybrid) + schema v1.1', () => {
+    // Wave F1 contract: merge does NOT re-label origin. Deterministic
+    // detector emits `'planner_emitted'`; LLM planner emits `'hybrid'`.
+    // Downstream telemetry depends on this distinction.
     const trivial = trivialGraph();
     const slotIds = trivial.nodes.filter((n) => n.kind === 'slot').map((n) => n.nodeId);
-    const merged = mergeTopologyIntoTrivial(trivial, xorTopology(slotIds));
-    expect(merged).not.toBeNull();
-    if (merged === null) return;
-    expect(merged.origin).toBe('hybrid');
-    expect(merged.graphSchemaVersion).toBe(CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1);
+
+    const detMerged = mergeTopologyIntoTrivial(
+      trivial,
+      { ...xorTopology(slotIds), origin: 'planner_emitted' },
+    );
+    expect(detMerged?.origin).toBe('planner_emitted');
+    expect(detMerged?.graphSchemaVersion).toBe(CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1);
+
+    const llmMerged = mergeTopologyIntoTrivial(
+      trivial,
+      { ...xorTopology(slotIds), origin: 'hybrid' },
+    );
+    expect(llmMerged?.origin).toBe('hybrid');
+    expect(llmMerged?.graphSchemaVersion).toBe(CONSTRAINT_GRAPH_SCHEMA_VERSION_V1_1);
   });
 
   it('returns null when topology node id collides with a slot id', () => {

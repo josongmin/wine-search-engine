@@ -106,6 +106,11 @@ const PHASE_1A_ALLOWLIST: readonly RegExp[] = [
   /src\/domain\/query\/service\/merge-topology-into-trivial\.ts$/,
   /src\/domain\/query\/service\/prompts\/constraint-graph-topology\.prompt\.ts$/,
   /src\/config\/container-core-builders\.ts$/,
+  // Wave F1: deterministic pattern-based topology detector (LLM-free path).
+  /src\/domain\/query\/service\/deterministic-topology-detector\.ts$/,
+  /src\/domain\/query\/service\/topology-pattern-lexicon\.ts$/,
+  // Wave F4: unified graph-path-decision telemetry across 6 readers.
+  /src\/observability\/graph-path-telemetry\.ts$/,
   // Phase 1b.3b (ADR-014 PR5): ranker + retrieval annotator graph-native.
   /src\/domain\/query\/service\/graph-tier-projection\.ts$/,
   /src\/domain\/query\/service\/graph-slot-constraints\.ts$/,
