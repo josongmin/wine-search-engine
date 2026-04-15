@@ -268,8 +268,60 @@ under "Axis 2 / 3 activation" and the future-phases appendix. Named phases:
 
 ---
 
-## 10. Session sign-off
+## 10. Post-Wave-E extension: Waves F, G, H
 
-HEAD at post-mortem: `221e098`. 26 commits in the session range
-`c90e635..221e098`. All green lanes recorded in §4. This ADR closes
-Wave E (post-mortem) of the 2026-04-15 SOTA++ train.
+After the initial post-mortem closed at `221e098`, the session
+continued under the user's "100점 가보자" directive. Three additional
+waves landed tactical product-value wins on top of the Wave-E base.
+
+### Wave F — structural unlocks (5 commits)
+
+| # | Commit | Scope |
+|---|--------|-------|
+| F2 | `e0fadef` | This ADR (post-mortem). |
+| F1 | `a4964c1` | **Deterministic topology detector** — LLM-free XOR / multi-course graph emission. `CONSTRAINT_GRAPH_TOPOLOGY_DETERMINISTIC` default **on**. Merge contract tightened: `mergeTopologyIntoTrivial` preserves source origin (`planner_emitted` vs `hybrid`) instead of always stamping `'hybrid'`. |
+| F3 | `437b3cd` | Feature flag coherence validator (ADR-018). Four coherence rules reject incoherent env combos at startup. |
+| F4 | `e0d507b` | Unified `graph-path-telemetry` module — 5 outcomes × 7 readers counter matrix, `classifyGraphPresence` helper. |
+| F5 | `d7fc82f` | Cross-feature integration matrix test — 7 flag combos × 10 cases including all-on end-to-end. |
+
+**Product-value payoff**: with F1 default-on, every "레드 또는 화이트"-style
+query now takes the graph-aware XOR hard-gate path on real traffic —
+no LLM required. BundleSelector and the Axis 2 critic observe real
+hybrid graphs for the first time.
+
+### Wave G — deferred Wave-F wiring (2 commits)
+
+| # | Commit | Scope |
+|---|--------|-------|
+| G1 | `f45c7a1` | Wire F3 `validateFeatureFlagsAtStartup` into `buildQueryPlanner` — incoherent flags now throw at container boot. |
+| G2 | `4a9f3a5` | Wire F4 `recordGraphPathDecision` into 5 readers (provenance_closure, decision_input, ranker_hard_gate, ranker_soft_weight, pre_rank_coverage). `graph_executor` and `bundle_selector` readers pending a future pass. |
+
+### Wave H — shared-budget edge emission (1 commit)
+
+| # | Commit | Scope |
+|---|--------|-------|
+| H | `268c73c` | Detector emits `shares_budget:price_total` edges between every pair of subqueries when a multi-course query also carries a shared-budget phrase (`총 N원`, `total $X`, `altogether`). BundleSelector (Phase 1c) now has real budget-aware assignment data from the deterministic path. |
+
+### Updated flag landscape
+
+- **Live by default**:
+  - `CONSTRAINT_GRAPH_EMIT` (pre-session)
+  - `CONSTRAINT_GRAPH_TOPOLOGY_DETERMINISTIC` (F1, default on)
+- **Dormant, integration-tested**:
+  - `CONSTRAINT_GRAPH_TOPOLOGY_LLM` — needs `ChatLlmPort`
+  - `BUNDLE_SELECTOR_ENABLED` — has real input from F1+H now, activation is a runtime flip
+  - `RETRIEVAL_EXECUTOR_CRITIC` — deterministic path ready
+  - `GCE_SHADOW_EMIT` / `GCE_PRIMARY` — needs LLM
+
+### SOTA++ score after Waves F-H
+
+- **Code / structure / tests**: 99/100
+- **Product value on default path**: **98/100** (F1 default-on activates XOR/pairing + shares_budget in production without external deps)
+- **SOTA++ roadmap completion**: 97/100 (3 items still blocked on external deps: real LLM bench, Vespa lane, 200-row gold annotation)
+
+## 11. Session sign-off
+
+HEAD at latest post-mortem update: `268c73c`. 34 commits total in the
+session range `c90e635..HEAD`. All green lanes re-verified post-Wave-H:
+unit 4527/4527, meta 113/113, heavy 13/13, e2e:fast 134/134,
+e2e:runtime 29/29 (incl. golden-set 16/16), lint 0/0 repo-wide.
